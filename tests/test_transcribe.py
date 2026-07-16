@@ -91,9 +91,19 @@ def test_gather_params_survive():
 
 
 def test_unknown_param_type_raises_with_names():
+    class Weird:
+        pass
+
     transcriber = _jax_compat._Transcriber()
     with pytest.raises(ir.UnsupportedParamError, match=r"'gather'.*'weird'"):
-        transcriber.param("gather", "weird", object())
+        transcriber.param("gather", "weird", Weird())
+
+
+def test_bare_object_placeholder_is_a_sentinel():
+    """census contact (lineax): identity-only object() placeholders carry no
+    payload by construction; subclasses do not qualify."""
+    transcriber = _jax_compat._Transcriber()
+    assert transcriber.param("linear_solve", "static[0]", object()) == ir.SentinelParam(cls="object")
 
 
 def test_source_info_is_captured_but_unhashed():
@@ -165,6 +175,29 @@ def test_coverage_of_real_trace_is_a_quantity():
     assert cov.unreached == 0
     assert cov.known == 0 and cov.fraction_known == 0.0
     assert cov.unknown_primitives  # the registry priority signal
+
+
+def test_treedef_params_stringify():
+    import jax.tree_util as jtu
+
+    transcriber = _jax_compat._Transcriber()
+    out = transcriber.param("linear_solve", "treedef", jtu.tree_structure({"a": 1, "b": (2, 3)}))
+    assert isinstance(out, ir.TreeDefParam)
+    assert out.text == "PyTreeDef({'a': *, 'b': (*, *)})"
+
+
+def test_prng_impl_functions_are_opaque():
+    """random_wrap carries jax's key-handling functions; name/tag/key_shape
+    survive, the callables become OpaqueParam (census contact, blackjax)."""
+    cj = jax.make_jaxpr(
+        lambda k: jax.random.normal(jax.random.wrap_key_data(k), (3,))
+    )(jnp.zeros((2,), dtype=jnp.uint32))
+    out = _jax_compat.transcribe(cj)
+    values = list(param_values(out))
+    assert any(isinstance(v, ir.OpaqueParam) for v in values)
+    assert any(
+        isinstance(v, ir.NamedTupleParam) and v.cls == "PRNGImpl" for v in values
+    )
 
 
 def test_untested_jax_series_warns(monkeypatch):

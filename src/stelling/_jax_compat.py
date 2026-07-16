@@ -21,6 +21,7 @@ import warnings
 import jax
 import jax.extend.core as jex_core
 import jax.sharding
+import jax.tree_util
 import numpy as np
 
 from stelling import ir
@@ -62,6 +63,20 @@ _OPAQUE_PARAMS = frozenset(
         ("custom_vjp_call", "bwd"),
         ("custom_vjp_call", "out_trees"),
         ("remat2", "policy"),
+        # PRNGImpl carries jax's own key-handling functions; the impl's
+        # identity survives in its name/tag/key_shape fields, which
+        # transcribe normally. Found by census contact (blackjax, 0.10.2).
+        ("random_wrap", "impl.seed"),
+        ("random_wrap", "impl.split"),
+        ("random_wrap", "impl.random_bits"),
+        ("random_wrap", "impl.fold_in"),
+        # a host callback is an arbitrary Python function: ⊤ at the param
+        # level by definition, for every analysis stelling will ever run.
+        # Found by census contact (diffrax/equinox error paths, 0.10.2).
+        ("pure_callback", "callback"),
+        # lineax's `linear_solve` is an equinox-defined primitive; `flatten`
+        # is equinox flattening plumbing (census contact, lineax 0.1.1).
+        ("linear_solve", "flatten"),
     }
 )
 
@@ -185,6 +200,27 @@ class _Transcriber:
                 f"primitive {prim!r}: param {name!r} is a non-empty mesh "
                 f"({v!r}); sharded programs are not supported yet."
             )
+        if isinstance(v, jax.tree_util.PyTreeDef):
+            return ir.TreeDefParam(text=str(v))
+        if type(v).__name__ == "ShapedArray" and type(v).__module__.startswith("jax"):
+            # avals appear as params on callback primitives (result_avals);
+            # mirror them exactly like any other aval (census contact, 0.10.2)
+            return self.aval(v)
+        if isinstance(v, jax.sharding.NamedSharding):
+            # trivial = empty mesh, nothing partitioned: zero semantic payload
+            # (found by census contact: numpyro on 0.10.2 attaches one to
+            # convert_element_type). Anything non-trivial is a sharded program.
+            if getattr(v.mesh, "empty", False) and all(p is None for p in tuple(v.spec)):
+                return ir.SentinelParam(cls="NamedSharding.trivial")
+            raise ir.UnsupportedParamError(
+                f"primitive {prim!r}: param {name!r} is a non-trivial sharding "
+                f"({v!r}); sharded programs are not supported yet."
+            )
+        if type(v) is object:
+            # a bare object() is an identity-only placeholder: it cannot
+            # carry payload by construction (census contact: lineax's
+            # `linear_solve.static`, 0.10.2)
+            return ir.SentinelParam(cls="object")
         if (prim, name) in _OPAQUE_PARAMS:
             return ir.OpaqueParam(cls=type(v).__qualname__)
         raise ir.UnsupportedParamError(

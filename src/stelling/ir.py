@@ -37,6 +37,17 @@ Nothing here licenses more: stability entails exactly this much
 canonicalization and nothing further. The rule for everything else stands:
 transcribe.
 
+One dividend of that rule, recorded because it keeps recurring: the mirror
+recurses into every sub-jaxpr *regardless of whether anything can analyse
+it*. That completeness is what makes the ⊤-coverage denominator
+(:mod:`stelling.coverage`) computable at all — an IR that had been clever
+and elided subtrees behind unknown primitives, on the grounds that nothing
+could look inside them anyway, would report near-total coverage while
+having examined almost nothing: the exact confound the instrument exists
+to detect. This is the second time *transcribe, don't design* has paid in
+a way nobody argued for. The case for it is empirical now, not aesthetic;
+stop relitigating it.
+
 This module must never import jax (or anything outside the standard
 library): ``stelling._jax_compat`` is the only module allowed to touch jax,
 and everything else consumes these types.
@@ -133,6 +144,20 @@ class SentinelParam:
     """
 
     cls: str
+
+
+@dataclass(frozen=True)
+class TreeDefParam:
+    """A param that was a ``PyTreeDef``: structural plumbing recorded as its
+    canonical string form (e.g. ``PyTreeDef({'a': *, 'b': (*, *)})``).
+
+    Mechanically stringified, deliberately not reconstructible — treedefs
+    with equal text are treated as identical. The semantic content of the
+    primitives that carry them lives in their sub-jaxprs, which are
+    transcribed in full.
+    """
+
+    text: str
 
 
 @dataclass(frozen=True)
@@ -261,6 +286,8 @@ def _encode(obj: object, meta: bool) -> object:
         return {"k": "sentinel", "cls": obj.cls}
     if isinstance(obj, OpaqueParam):
         return {"k": "opaque", "cls": obj.cls}
+    if isinstance(obj, TreeDefParam):
+        return {"k": "treedef", "text": obj.text}
     if isinstance(obj, NamedTupleParam):
         return {
             "k": "ntuple",
@@ -340,6 +367,8 @@ def _decode(obj: object) -> object:
         return SentinelParam(cls=obj["cls"])
     if k == "opaque":
         return OpaqueParam(cls=obj["cls"])
+    if k == "treedef":
+        return TreeDefParam(text=obj["text"])
     if k == "ntuple":
         return NamedTupleParam(
             cls=obj["cls"],

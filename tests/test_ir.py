@@ -88,6 +88,7 @@ def test_param_value_types_round_trip():
         ir.NamedTupleParam(cls="GatherDimensionNumbers", fields=(("offset_dims", (0,)),)),
         ir.SentinelParam(cls="UnspecifiedValue"),
         ir.OpaqueParam(cls="WrappedFun"),
+        ir.TreeDefParam(text="PyTreeDef({'a': *, 'b': (*, *)})"),
     )
     eqn = ir.JaxprEqn(
         primitive="p",
