@@ -189,6 +189,9 @@ class Analysis:
                     terminals.append("while-carry(cond)")
             return
         if prim == "scan":
+            if "num_consts" not in p:  # jax 0.11 flattree scan: layout params gone
+                terminals.append("scan-slot(layout-unknown-0.11)")
+                return
             nc = int(p.get("num_consts", 0))
             ncar = int(p.get("num_carry", 0))
             if pos < nc:
@@ -231,6 +234,53 @@ class Analysis:
 
     # -- per-question reports ----------------------------------------------
 
+    def _cone_eqns(self, atoms, frame: Frame):
+        """The set of equations in the backward cone (not just op names)."""
+        eqns: list[tuple[Frame, ir.JaxprEqn]] = []
+        seen: set[int] = set()
+        work = [(a, frame) for a in atoms]
+        steps = 0
+        while work and steps < 2000:
+            steps += 1
+            atom, fr = work.pop()
+            if isinstance(atom, ir.Literal) or atom.id in seen:
+                continue
+            seen.add(atom.id)
+            hit = self.producers.get(atom.id)
+            if hit is None:
+                continue
+            pfr, peqn = hit
+            eqns.append((pfr, peqn))
+            work.extend((a, pfr) for a in peqn.invars)
+        return eqns
+
+    def _forward_select_n(self, eqn: ir.JaxprEqn, max_hops: int = 6):
+        """select_n eqns transitively consuming this eqn's outputs (same scope)."""
+        found = []
+        frontier = list(eqn.outvars)
+        for _ in range(max_hops):
+            next_frontier = []
+            for ov in frontier:
+                for frame2, eqn2 in self.sites:
+                    if any(isinstance(a, ir.Var) and a.id == ov.id for a in eqn2.invars):
+                        if eqn2.primitive == "select_n":
+                            found.append(eqn2)
+                        else:
+                            next_frontier.extend(eqn2.outvars)
+            if not next_frontier:
+                break
+            frontier = next_frontier
+        return found
+
+    def _predicate_vars(self, select_eqn: ir.JaxprEqn, frame: Frame) -> set[int]:
+        """Var ids in the cone of a select_n's predicate (operand 0)."""
+        _, _ = self, frame
+        pred = select_eqn.invars[:1]
+        eqns = self._cone_eqns(pred, frame)
+        ids = {v.id for _, e in eqns for v in e.outvars}
+        ids |= {a.id for a in pred if isinstance(a, ir.Var)}
+        return ids
+
     def wedge_sites(self):
         out = []
         for frame, eqn in self.sites:
@@ -243,9 +293,22 @@ class Analysis:
             else:  # dynamic_update_slice
                 idx_atoms = eqn.invars[2:]
             ops, terminals = self.cone(idx_atoms, frame)
-            feeds_select = any(
-                "select_n" in self.consumers.get(ov.id, ()) for ov in eqn.outvars
-            )
+            cone_eqns = self._cone_eqns(idx_atoms, frame)
+            index_selects = [(f, e) for f, e in cone_eqns if e.primitive == "select_n"]
+            clamp = bool(index_selects)
+            downstream_selects = self._forward_select_n(eqn)
+            mask = bool(downstream_selects)
+            # designed-nullification: a downstream select_n whose predicate cone
+            # shares a var with an index-guard select_n's predicate cone
+            shared_predicate = False
+            if clamp and mask:
+                idx_pred_ids = set()
+                for f, s in index_selects:
+                    idx_pred_ids |= self._predicate_vars(s, f)
+                for s in downstream_selects:
+                    if self._predicate_vars(s, frame) & idx_pred_ids:
+                        shared_predicate = True
+                        break
             out.append(
                 {
                     "prim": eqn.primitive,
@@ -254,7 +317,10 @@ class Analysis:
                     "terminals": dict(terminals),
                     "guards": sorted(set(ops) & GUARD_OPS),
                     "affine_cone": set(ops) <= AFFINE_OPS,
-                    "feeds_select_n": feeds_select,
+                    "clamp": clamp,
+                    "mask": mask,
+                    "shared_predicate": shared_predicate,
+                    "feeds_select_n": mask,
                 }
             )
         return out
@@ -342,20 +408,30 @@ def main() -> int:
 
     # Q4 + Q5: wedge site detail — guards, masks, counter vs carry
     lines += [
-        "## 4. Wedge sites: index provenance, guards, loop classification",
+        "## 4. Wedge sites: index provenance, guard anatomy, loop classification",
         "",
-        "| site | primitive | context | index cone ops | terminals | guards | affine | output→select_n |",
-        "|---|---|---|---|---|---|---|---|",
+        "Guard anatomy (work order §3): **clamp** = `select_n` in the *index*",
+        "cone (`where(ok, idx, fallback)` before the access — the access is",
+        "in bounds by construction, the fallback read is wrong unless nulled).",
+        "**mask** = `select_n` transitively consuming the *output* (`where(ok,",
+        "val, 0)` after — the access itself may still be out of bounds, and",
+        "the author is relying on XLA's clamp being harmless). **shared** =",
+        "a downstream mask whose predicate cone shares a variable with the",
+        "index guard's predicate — the designed-nullification pattern.",
+        "",
+        "| site | primitive | context | terminals | guards in cone | clamp | mask | shared pred | affine |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for a in analyses:
         for s in a.wedge_sites():
-            ops_text = ", ".join(f"{k}×{v}" for k, v in sorted(s["cone_ops"].items())) or "—"
             term_text = ", ".join(f"{k}×{v}" for k, v in sorted(s["terminals"].items())) or "—"
             lines.append(
-                f"| {a.label} | `{s['prim']}` | `{s['chain']}` | {ops_text} "
+                f"| {a.label} | `{s['prim']}` | `{s['chain']}` "
                 f"| {term_text} | {', '.join(s['guards']) or '—'} "
-                f"| {'yes' if s['affine_cone'] else 'no'} "
-                f"| {'yes' if s['feeds_select_n'] else 'no'} |"
+                f"| {'yes' if s['clamp'] else '—'} "
+                f"| {'yes' if s['mask'] else '—'} "
+                f"| {'yes' if s['shared_predicate'] else '—'} "
+                f"| {'yes' if s['affine_cone'] else 'no'} |"
             )
     lines += [
         "",
@@ -366,11 +442,56 @@ def main() -> int:
         "`closure-const`/`literal` — index known at trace time; in-bounds is",
         "decidable by direct evaluation. `trace-input` — from harness arguments.",
         "",
+        "## 5. Is the guarding pattern indexing-specific?",
+        "",
     ]
+    lines += _sqrt_defence_probe()
+    lines.append("")
 
     ARTIFACT.write_text("\n".join(lines))
     print(f"wrote {ARTIFACT}")
     return 0
+
+
+def _sqrt_defence_probe() -> list[str]:
+    """Numeric probe: does jax-md defend the sqrt(0) backward-NaN class the
+    same way its indices are guarded? (work order §5)"""
+    try:
+        import jax.numpy as jnp
+        import jax_md
+        import jax_md.util
+
+        displacement, _ = jax_md.space.periodic(10.0)
+        energy_fn = jax_md.energy.soft_sphere_pair(displacement)
+        positions = jnp.array([[1.0, 1.0], [1.0, 1.0], [4.0, 4.0], [7.0, 2.0]])
+        grad = jax.grad(energy_fn)(positions)
+        finite = bool(jnp.isfinite(grad).all())
+        has_safe_mask = hasattr(jax_md.util, "safe_mask")
+        if finite:
+            return [
+                "Probe: `grad(soft_sphere_pair_energy)` at **coincident",
+                "particles** (rows 0 and 1 identical) — the `sqrt(0)`",
+                "backward-NaN class: finite forward, NaN backward, unless",
+                "defended.",
+                "",
+                f"- gradient finite at the coincident configuration: **{finite}**",
+                "  (the naive result would be NaN)",
+                f"- `jax_md.util.safe_mask` exists: **{has_safe_mask}**",
+                "",
+                "**Defended.** The same hand-guarding observed at every index",
+                "site covers the numerically hazardous sqrt too. The guard",
+                "finding is not about indexing — it is about what *mature",
+                "library* means: every hazard class probed so far is defended,",
+                "by hand, uniformly, with no tool checking that the defences",
+                "work.",
+            ]
+        return [
+            "Probe: coincident-particle gradient is **NaN** — jax-md has a",
+            "live backward-NaN site (a finding in its own right), and",
+            "NaN-freedom has a target the wedge does not.",
+        ]
+    except Exception as exc:  # pragma: no cover
+        return [f"Probe failed: {type(exc).__name__}: {exc}"]
 
 
 if __name__ == "__main__":

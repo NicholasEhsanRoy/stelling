@@ -30,29 +30,38 @@
 - **jax-md#1** at `jit[remainder]` → consumed by: `add`, `lt`, `ne`, `select_n`
 - **jax-md#1** at `jit[remainder]` → consumed by: `add`, `lt`, `ne`, `select_n`
 
-## 4. Wedge sites: index provenance, guards, loop classification
+## 4. Wedge sites: index provenance, guard anatomy, loop classification
 
-| site | primitive | context | index cone ops | terminals | guards | affine | output→select_n |
-|---|---|---|---|---|---|---|---|
-| diffrax | `dynamic_slice` | `jit[diffeqsolve]` | add×2, and×1, broadcast_in_dim×3, convert_element_type×7, copy×27, custom_jvp_call×103, custom_vjp_call×20, jit×2, lt×3, min×1, mul×4, select_n×1, stop_gradient×2 | closure-const×7, literal×65, trace-input×1 | and, min, select_n | no | no |
-| diffrax | `dynamic_update_slice` | `jit[diffeqsolve]` | add×2, and×1, broadcast_in_dim×3, convert_element_type×7, copy×27, custom_jvp_call×103, custom_vjp_call×20, jit×2, lt×3, min×1, mul×4, select_n×1, stop_gradient×2 | closure-const×7, literal×65, trace-input×1 | and, min, select_n | no | no |
-| diffrax | `dynamic_update_slice` | `jit[diffeqsolve]` | add×2, and×1, broadcast_in_dim×3, convert_element_type×7, copy×27, custom_jvp_call×103, custom_vjp_call×20, jit×2, lt×3, min×1, mul×4, select_n×1, stop_gradient×2 | closure-const×7, literal×66, trace-input×1 | and, min, select_n | no | no |
-| diffrax | `dynamic_slice` | `jit[diffeqsolve] > cond[0]` | add×3, and×1, broadcast_in_dim×3, convert_element_type×7, copy×27, custom_jvp_call×103, custom_vjp_call×20, jit×2, lt×4, min×1, mul×4, select_n×2, stop_gradient×2 | closure-const×7, literal×70, trace-input×1 | and, min, select_n | no | no |
-| diffrax | `scatter` | `jit[diffeqsolve] > custom_vjp_call > while[body]` | broadcast_in_dim×1 | literal×1 | — | yes | no |
-| diffrax | `dynamic_slice` | `jit[diffeqsolve] > custom_vjp_call > while[body] > custom_vjp_call > while[body]` | add×2, convert_element_type×1, lt×2, select_n×2 | literal×7, while-carry×1 | select_n | no | no |
-| diffrax | `dynamic_slice` | `jit[diffeqsolve] > custom_vjp_call > while[body] > custom_vjp_call > while[body]` | add×1, convert_element_type×1, lt×1, select_n×1 | literal×2, while-carry×1 | select_n | no | no |
-| jax-md#1 | `gather` | `top` | add×1, broadcast_in_dim×1, lt×1, select_n×1, slice×1, squeeze×1 | closure-const×1, literal×2 | select_n | no | no |
-| jax-md#1 | `gather` | `top` | add×1, broadcast_in_dim×1, lt×1, select_n×1, slice×1, squeeze×1 | closure-const×1, literal×2 | select_n | no | no |
-| jax-md#1 | `gather` | `cond[1]` | add×1, broadcast_in_dim×1, convert_element_type×1, copy×1, div×1, jit×2, lt×1, mul×1, reduce_sum×1, select_n×1 | closure-const×1, literal×4, trace-input×1 | select_n | no | no |
-| jax-md#1 | `gather` | `cond[1]` | add×1, broadcast_in_dim×1, convert_element_type×1, copy×1, div×1, jit×2, lt×1, mul×1, reduce_sum×1, select_n×1 | closure-const×1, literal×4, trace-input×1 | select_n | no | no |
-| jax-md#1 | `gather` | `cond[1]` | add×1, broadcast_in_dim×1, convert_element_type×1, copy×1, div×1, jit×2, lt×1, mul×1, reduce_sum×1, select_n×1 | closure-const×1, literal×4, trace-input×1 | select_n | no | no |
-| jax-md#1 | `scatter` | `cond[1]` | add×3, broadcast_in_dim×2, convert_element_type×1, copy×1, div×1, gather×1, iota×1, jit×3, lt×2, mul×2, reduce_sum×1, select_n×2 | closure-const×1, literal×8, trace-input×1 | select_n | no | no |
-| jax-md#1 | `scatter` | `cond[1]` | add×3, broadcast_in_dim×2, convert_element_type×1, copy×1, div×1, gather×1, iota×1, jit×3, lt×2, mul×2, reduce_sum×1, select_n×2 | closure-const×1, literal×8, trace-input×1 | select_n | no | no |
-| jax-md#1 | `scatter-add` | `cond[1]` | broadcast_in_dim×1, convert_element_type×1, copy×1, div×1, jit×1, mul×1, reduce_sum×1 | closure-const×1, literal×2, trace-input×1 | — | no | no |
-| jax-md#1 | `scatter` | `cond[1] > jit[prune_cell_list_sparse]` | add×7, and×1, broadcast_in_dim×10, convert_element_type×1, copy×1, div×1, gather×3, iota×3, jit×7, lt×8, mul×3, reduce_sum×1, reshape×5, scatter×2, select_n×6, sub×1 | closure-const×1, literal×22, trace-input×1 | and, select_n | no | no |
-| jax-md#1 | `scatter` | `cond[1] > jit[prune_cell_list_sparse]` | add×7, and×1, broadcast_in_dim×10, convert_element_type×1, copy×1, div×1, gather×3, iota×3, jit×7, lt×8, mul×3, reduce_sum×1, reshape×5, scatter×2, select_n×6, sub×1 | closure-const×1, literal×22, trace-input×1 | and, select_n | no | no |
-| jax-md#1 | `gather` | `cond[1] > jit[cell_list_candidate_fn]` | add×2, broadcast_in_dim×5, convert_element_type×1, copy×1, div×1, jit×3, lt×1, mul×1, reduce_sum×1, reshape×1, select_n×1 | closure-const×2, literal×4, trace-input×1 | select_n | no | no |
-| jax-md#1 | `gather` | `cond[1] > jit[cell_list_candidate_fn]` | add×2, broadcast_in_dim×5, convert_element_type×1, copy×1, div×1, jit×3, lt×1, mul×1, reduce_sum×1, reshape×1, select_n×1 | closure-const×2, literal×4, trace-input×1 | select_n | no | no |
+Guard anatomy (work order §3): **clamp** = `select_n` in the *index*
+cone (`where(ok, idx, fallback)` before the access — the access is
+in bounds by construction, the fallback read is wrong unless nulled).
+**mask** = `select_n` transitively consuming the *output* (`where(ok,
+val, 0)` after — the access itself may still be out of bounds, and
+the author is relying on XLA's clamp being harmless). **shared** =
+a downstream mask whose predicate cone shares a variable with the
+index guard's predicate — the designed-nullification pattern.
+
+| site | primitive | context | terminals | guards in cone | clamp | mask | shared pred | affine |
+|---|---|---|---|---|---|---|---|---|
+| diffrax | `dynamic_slice` | `jit[diffeqsolve]` | closure-const×7, literal×65, trace-input×1 | and, min, select_n | yes | — | — | no |
+| diffrax | `dynamic_update_slice` | `jit[diffeqsolve]` | closure-const×7, literal×65, trace-input×1 | and, min, select_n | yes | — | — | no |
+| diffrax | `dynamic_update_slice` | `jit[diffeqsolve]` | closure-const×7, literal×66, trace-input×1 | and, min, select_n | yes | — | — | no |
+| diffrax | `dynamic_slice` | `jit[diffeqsolve] > cond[0]` | closure-const×7, literal×70, trace-input×1 | and, min, select_n | yes | — | — | no |
+| diffrax | `scatter` | `jit[diffeqsolve] > custom_vjp_call > while[body]` | literal×1 | — | — | — | — | yes |
+| diffrax | `dynamic_slice` | `jit[diffeqsolve] > custom_vjp_call > while[body] > custom_vjp_call > while[body]` | literal×7, while-carry×1 | select_n | yes | — | — | no |
+| diffrax | `dynamic_slice` | `jit[diffeqsolve] > custom_vjp_call > while[body] > custom_vjp_call > while[body]` | literal×2, while-carry×1 | select_n | yes | — | — | no |
+| jax-md#1 | `gather` | `top` | closure-const×1, literal×2 | select_n | yes | — | — | no |
+| jax-md#1 | `gather` | `top` | closure-const×1, literal×2 | select_n | yes | — | — | no |
+| jax-md#1 | `gather` | `cond[1]` | closure-const×1, literal×4, trace-input×1 | select_n | yes | — | — | no |
+| jax-md#1 | `gather` | `cond[1]` | closure-const×1, literal×4, trace-input×1 | select_n | yes | yes | yes | no |
+| jax-md#1 | `gather` | `cond[1]` | closure-const×1, literal×4, trace-input×1 | select_n | yes | — | — | no |
+| jax-md#1 | `scatter` | `cond[1]` | closure-const×1, literal×8, trace-input×1 | select_n | yes | — | — | no |
+| jax-md#1 | `scatter` | `cond[1]` | closure-const×1, literal×8, trace-input×1 | select_n | yes | — | — | no |
+| jax-md#1 | `scatter-add` | `cond[1]` | closure-const×1, literal×2, trace-input×1 | — | — | — | — | no |
+| jax-md#1 | `scatter` | `cond[1] > jit[prune_cell_list_sparse]` | closure-const×1, literal×22, trace-input×1 | and, select_n | yes | — | — | no |
+| jax-md#1 | `scatter` | `cond[1] > jit[prune_cell_list_sparse]` | closure-const×1, literal×22, trace-input×1 | and, select_n | yes | — | — | no |
+| jax-md#1 | `gather` | `cond[1] > jit[cell_list_candidate_fn]` | closure-const×2, literal×4, trace-input×1 | select_n | yes | — | — | no |
+| jax-md#1 | `gather` | `cond[1] > jit[cell_list_candidate_fn]` | closure-const×2, literal×4, trace-input×1 | select_n | yes | — | — | no |
 
 Terminal legend: `while-counter`/`scan-counter` — the index depends on a
 loop-carried slot whose update is `slot ± literal` (one quantified LIA
@@ -60,3 +69,21 @@ query: `∀i ∈ [0,N). idx(i) ∈ bounds` — no unrolling, no invariants).
 `while-carry`/`scan-carry` — genuinely state-dependent (the hard case).
 `closure-const`/`literal` — index known at trace time; in-bounds is
 decidable by direct evaluation. `trace-input` — from harness arguments.
+
+## 5. Is the guarding pattern indexing-specific?
+
+Probe: `grad(soft_sphere_pair_energy)` at **coincident
+particles** (rows 0 and 1 identical) — the `sqrt(0)`
+backward-NaN class: finite forward, NaN backward, unless
+defended.
+
+- gradient finite at the coincident configuration: **True**
+  (the naive result would be NaN)
+- `jax_md.util.safe_mask` exists: **True**
+
+**Defended.** The same hand-guarding observed at every index
+site covers the numerically hazardous sqrt too. The guard
+finding is not about indexing — it is about what *mature
+library* means: every hazard class probed so far is defended,
+by hand, uniformly, with no tool checking that the defences
+work.

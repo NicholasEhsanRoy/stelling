@@ -1,7 +1,7 @@
 # Primitive census — scientific JAX corpus
 
 **Status:** evidence artifact, run 2026-07-17.
-jax 0.10.2, stelling 0.1.0, harness method:
+jax 0.11.0, stelling 0.1.0, harness method:
 hand-written minimal harnesses per library, each targeting the core
 computational path (solver loop / sampler step / stencil kernel), traced
 whole with `jax.make_jaxpr` and counted at every depth by
@@ -24,7 +24,7 @@ this one will go stale and says when it was taken.**
 | optimistix | 0.1.0 | BFGS minimisation of 4-D Rosenbrock via optx.minimise | 240 |
 | lineax | 0.1.1 | dense LU linear solve via lx.linear_solve | 10 |
 | numpyro | 0.21.0 | gradient of Bayesian-regression log density (the HMC core computation) | 61 |
-| blackjax | 1.6.2 | one HMC step (init + leapfrog + accept) on a Gaussian target | 97 |
+| blackjax | 1.6.2 | one HMC step (init + leapfrog + accept) on a Gaussian target | 94 |
 | jax-md | 0.2.29 | soft-sphere pair energy over periodic space (pairwise kernel) | 69 |
 | jax-md | 0.2.29 | soft-sphere energy via neighbor list + neighbor update (indexing path) | 279 |
 | jax-cfd | 0.2.1 | van Leer advection of a scalar on a 16x16 staggered grid | 147 |
@@ -78,7 +78,7 @@ Criterion: add targets until the top-10 ranking stops reordering. Status: **NOT 
 
 Ranked by **cost**, not count. Tiers 0–1 — transparency (already
 done), structural/identity ops, elementwise one-liners, and
-fixed-shape folds — cover **1590/1823 equations
+fixed-shape folds — cover **1586/1820 equations
 (87%)** with a registry of
 near-one-liners. They do not depend on saturation and will not
 reorder out of the top: build them first. The hard decisions live in
@@ -87,7 +87,7 @@ tiers 3–4; the census informs *which* of them matter, not *when*.
 | tier | eqns | % | primitives present in this corpus |
 |---|---|---|---|
 | 0 — transparent (already done) | 333 | 18% | `custom_jvp_call`, `custom_vjp_call`, `jit` |
-| 1a — free: structural/identity | 377 | 21% | `broadcast_in_dim`, `concatenate`, `copy`, `iota`, `pad`, `reshape`, `slice`, `split`, `squeeze`, `stack`, `stop_gradient` |
+| 1a — free: structural/identity | 373 | 20% | `broadcast_in_dim`, `concatenate`, `copy`, `iota`, `pad`, `reshape`, `slice`, `split`, `squeeze`, `stack`, `stop_gradient` |
 | 1b — free: elementwise/compare/join one-liners | 855 | 47% | `abs`, `add`, `add_any`, `and`, `convert_element_type`, `div`, `eq`, `gt`, `integer_pow`, `le`, `lt`, `max`, `min`, `mul`, `ne`, `neg`, `not`, `or`, `rem`, `select_n`, `sign`, `sqrt`, `sub` |
 | 1c — free: fixed-shape reduction folds | 25 | 1% | `cumsum`, `reduce_and`, `reduce_max`, `reduce_or`, `reduce_sum` |
 | 2 — medium: bilinear/permutation | 22 | 1% | `dot_general`, `pow`, `sort` |
@@ -98,6 +98,7 @@ tiers 3–4; the census informs *which* of them matter, not *when*.
 | 7 — library-defined (open primitive set — design/open-primitive-set.md) | 59 | 3% | `linear_solve`, `maybe_set`, `nonbatchable`, `nondifferentiable_backward`, `select_if_vmap`, `unvmap_any`, `unvmap_max` |
 | 8 — escape hatches (⊤ forever) | 2 | 0% | `pure_callback` |
 | 9 — dense linear algebra (contract-level treatment later) | 1 | 0% | `lu` |
+| **unclassified — assign a tier** | — | — | `unstack` |
 
 ## Notes
 
@@ -128,13 +129,19 @@ more target."
 |---|---|---|---|---|---|---|
 | maddening | 0.3.1 | one coupled multi-physics graph step (table→ball contact + 32-cell heat stencil) via the compiled scheduler | 54 | 17 | 54/54 (100%) | none |
 
-MADDENING pins `jax<0.6`; this harness ran it on jax 0.10.2
-without issue, so the cap is over-tight for this path (and, during
-collection, installing it silently downgraded a shared environment
-— the exact resolver behaviour stelling's own packaging refuses to
-inflict).
+MADDENING pins `jax<0.6`. **The census demonstrated only that the
+*trace* succeeds on newer jax** — `make_jaxpr` never invokes XLA,
+and the cap was placed against slow *compilation* on other
+versions, which the census is silent about. The general lesson:
+the cap encodes a real observation (a performance measurement)
+through a mechanism that cannot express it (a correctness-shaped
+version bound), exporting a constraint consumers never opted into
+— demonstrated live when installing it downgraded a shared
+environment and broke every other library in it. The fix is the
+pattern stelling ships: no cap, a documented tested range, and a
+*measurement* where the concern is a measurement.
 
-## Full table — 1823 equations, 73 distinct primitives, 7 targets
+## Full table — 1820 equations, 74 distinct primitives, 7 targets
 
 | primitive | breadth | count | top | transparent | nested | wedge |
 |---|---|---|---|---|---|---|
@@ -145,11 +152,11 @@ inflict).
 | `broadcast_in_dim` | 6/7 | 65 | 8 | 23 | 34 |  |
 | `sub` | 6/7 | 50 | 22 | 6 | 22 |  |
 | `select_n` | 5/7 | 188 | 2 | 130 | 56 |  |
-| `slice` | 5/7 | 48 | 27 | 14 | 7 |  |
 | `div` | 5/7 | 24 | 13 | 2 | 9 |  |
 | `neg` | 5/7 | 16 | 7 | 2 | 7 |  |
 | `gt` | 5/7 | 14 | 10 | 0 | 4 |  |
 | `lt` | 4/7 | 54 | 5 | 13 | 36 |  |
+| `slice` | 4/7 | 46 | 25 | 14 | 7 |  |
 | `dot_general` | 4/7 | 18 | 4 | 0 | 14 |  |
 | `reduce_sum` | 4/7 | 17 | 12 | 0 | 5 |  |
 | `integer_pow` | 4/7 | 13 | 7 | 0 | 6 |  |
@@ -162,11 +169,11 @@ inflict).
 | `ne` | 3/7 | 18 | 1 | 7 | 10 |  |
 | `reshape` | 3/7 | 18 | 2 | 1 | 15 |  |
 | `abs` | 3/7 | 17 | 8 | 0 | 9 |  |
-| `squeeze` | 3/7 | 12 | 5 | 1 | 6 |  |
 | `sqrt` | 3/7 | 6 | 3 | 2 | 1 |  |
 | `add_any` | 3/7 | 5 | 2 | 0 | 3 |  |
 | `select_if_vmap` | 2/7 | 34 | 0 | 0 | 34 |  |
 | `iota` | 2/7 | 11 | 2 | 2 | 7 |  |
+| `squeeze` | 2/7 | 10 | 3 | 1 | 6 |  |
 | `stop_gradient` | 2/7 | 7 | 0 | 5 | 2 |  |
 | `unvmap_any` | 2/7 | 6 | 0 | 2 | 4 |  |
 | `not` | 2/7 | 5 | 0 | 3 | 2 |  |
@@ -210,4 +217,5 @@ inflict).
 | `scatter-add` | 1/7 | 1 | 0 | 0 | 1 | ✓ |
 | `sort` | 1/7 | 1 | 0 | 0 | 1 |  |
 | `split` | 1/7 | 1 | 1 | 0 | 0 |  |
+| `unstack` | 1/7 | 1 | 1 | 0 | 0 |  |
 | `unvmap_max` | 1/7 | 1 | 0 | 1 | 0 |  |

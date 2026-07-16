@@ -493,11 +493,17 @@ def main() -> int:
             )
         lines += [
             "",
-            "MADDENING pins `jax<0.6`; this harness ran it on jax 0.10.2",
-            "without issue, so the cap is over-tight for this path (and, during",
-            "collection, installing it silently downgraded a shared environment",
-            "— the exact resolver behaviour stelling's own packaging refuses to",
-            "inflict).",
+            "MADDENING pins `jax<0.6`. **The census demonstrated only that the",
+            "*trace* succeeds on newer jax** — `make_jaxpr` never invokes XLA,",
+            "and the cap was placed against slow *compilation* on other",
+            "versions, which the census is silent about. The general lesson:",
+            "the cap encodes a real observation (a performance measurement)",
+            "through a mechanism that cannot express it (a correctness-shaped",
+            "version bound), exporting a constraint consumers never opted into",
+            "— demonstrated live when installing it downgraded a shared",
+            "environment and broke every other library in it. The fix is the",
+            "pattern stelling ships: no cap, a documented tested range, and a",
+            "*measurement* where the concern is a measurement.",
             "",
         ]
 
