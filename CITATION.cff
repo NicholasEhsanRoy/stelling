@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use stelling in your research, please cite it as below."
+title: "stelling"
+type: software
+authors:
+  - family-names: "Roy"
+    given-names: "Nicholas Ehsan"
+    email: "nicholas.ehsan.roy@gmail.com"
+repository-code: "https://github.com/NicholasEhsanRoy/stelling"
+license: Apache-2.0
+abstract: >-
+  Harness-driven verification for JAX scientific computing, with jaxpr as
+  the verification IR.
+keywords:
+  - jax
+  - verification
+  - formal-methods
+  - smt
+  - scientific-computing
