@@ -30,13 +30,18 @@ this one will go stale and says when it was taken.**
 | jax-cfd | 0.2.1 | van Leer advection of a scalar on a 16x16 staggered grid | 147 |
 
 Corpus scope: mature maintained libraries only. The research-code arm
-(`design/value-model.md`'s range criterion) is **not represented** —
-ordinary research scripts are not pip-installable, and tracing them
-needs the interception harness method. Recorded as a gap, not solved.
+is **not represented** — and growth is re-aimed accordingly: since the
+schedule below is ordered by cost rather than count, saturation no
+longer drives corpus growth. The reason to grow is that **the research
+arm is the unprimed arm**: every current target is a mature library
+written by people who know exactly where the gather clamps, and every
+harness was written by someone who knew what he hoped to find.
+Interception on research code is the only sample with neither
+property — a value-model instrument, not a ranking refinement.
 
 ## Saturation
 
-Criterion: add targets until the top-10 ranking stops reordering. Status: **NOT saturated — the ranking was still reordering as targets were added; the registry priority order below is provisional and the corpus must grow**.
+Criterion: add targets until the top-10 ranking stops reordering. Status: **NOT saturated — the ranking was still reordering as targets were added; the per-primitive ordering is provisional** (which constrains the *inventory*, not the schedule — see below).
 
 - after `diffrax`: first entry
 - after `optimistix`: reordered
@@ -55,12 +60,79 @@ Criterion: add targets until the top-10 ranking stops reordering. Status: **NOT 
 > A low count here is a fact about this corpus and these harnesses. It
 > cannot support "the bug class is rare" — the same way no number in
 > this file may support "stelling is useful."
+>
+> **The symmetry cuts both ways.** The high counts are harness-shaped
+> too, and in a worse way: `gather` ×7 exists because we went looking
+> for it, knowing the neighbor list was the value model's canonical
+> suspect. A census can launder a prior about where bugs live into
+> apparent evidence; these rows are where that would happen. Read them
+> as *where we looked*, never as *where bugs are*. Interrogation of
+> these rows: `design/census-interrogation.md`.
 
 - `scatter`: 5 eqns across 2/7 targets
 - `gather`: 7 eqns across 1/7 targets
 - `dynamic_slice`: 4 eqns across 1/7 targets
 - `dynamic_update_slice`: 2 eqns across 1/7 targets
 - `scatter-add`: 1 eqns across 1/7 targets
+## Schedule — the inventory is not the build order
+
+Ranked by **cost**, not count. Tiers 0–1 — transparency (already
+done), structural/identity ops, elementwise one-liners, and
+fixed-shape folds — cover **1590/1823 equations
+(87%)** with a registry of
+near-one-liners. They do not depend on saturation and will not
+reorder out of the top: build them first. The hard decisions live in
+tiers 3–4; the census informs *which* of them matter, not *when*.
+
+| tier | eqns | % | primitives present in this corpus |
+|---|---|---|---|
+| 0 — transparent (already done) | 333 | 18% | `custom_jvp_call`, `custom_vjp_call`, `jit` |
+| 1a — free: structural/identity | 377 | 21% | `broadcast_in_dim`, `concatenate`, `copy`, `iota`, `pad`, `reshape`, `slice`, `split`, `squeeze`, `stack`, `stop_gradient` |
+| 1b — free: elementwise/compare/join one-liners | 855 | 47% | `abs`, `add`, `add_any`, `and`, `convert_element_type`, `div`, `eq`, `gt`, `integer_pow`, `le`, `lt`, `max`, `min`, `mul`, `ne`, `neg`, `not`, `or`, `rem`, `select_n`, `sign`, `sqrt`, `sub` |
+| 1c — free: fixed-shape reduction folds | 25 | 1% | `cumsum`, `reduce_and`, `reduce_max`, `reduce_or`, `reduce_sum` |
+| 2 — medium: bilinear/permutation | 22 | 1% | `dot_general`, `pow`, `sort` |
+| 3 — wedge targets (the Stage-1 work itself) | 19 | 1% | `dynamic_slice`, `dynamic_update_slice`, `gather`, `scatter`, `scatter-add` |
+| 4 — control flow (few eqns gate hundreds nested) | 12 | 1% | `cond`, `scan`, `while` |
+| 5 — float-boundary (see the nextafter note) | 109 | 6% | `bitcast_convert_type`, `erf_inv`, `exp`, `is_finite`, `log`, `nextafter` |
+| 6 — PRNG / bit-level (bounded-adversary story) | 9 | 0% | `random_bits`, `random_split`, `random_unwrap`, `random_wrap`, `shift_right_logical` |
+| 7 — library-defined (open primitive set — design/open-primitive-set.md) | 59 | 3% | `linear_solve`, `maybe_set`, `nonbatchable`, `nondifferentiable_backward`, `select_if_vmap`, `unvmap_any`, `unvmap_max` |
+| 8 — escape hatches (⊤ forever) | 2 | 0% | `pure_callback` |
+| 9 — dense linear algebra (contract-level treatment later) | 1 | 0% | `lu` |
+
+## Notes
+
+**`nextafter` ×100 — the float boundary is on page one.** In ℝ,
+`nextafter(x, y)` *is* `x`: the primitive has no real-arithmetic
+content, and the first census of the ecosystem's best ODE library put
+it at rank six by count (diffrax's step-size controller works in
+ulps). Its transfer function must be float-aware even under the
+ℝ-with-margin semantics — bound it as x ± ulp(x), monotone, easy —
+and robust invariants with slack ≫ ulp absorb it, so this vindicates
+design commitment 2 rather than threatening it. But the founding doc
+framed ℝ-vs-IEEE as a Stage-2 decision, and the swamp showed up in
+the first inventory. Noticed deliberately, here.
+
+## Held-out arm — censused, compared, never voting
+
+The priority order above is set by the public corpus **only**. The
+arms below are the maintainer's own code: included in the ranking
+they would train the registry on its author's test set, so they
+are held out and asked a different question — *is their profile
+covered by the order the public corpus produced?* Covered →
+evidence the registry generalises past its sources. Not covered →
+evidence about the mature-vs-research gap, from the only sample of
+it available. Do not fold these into the corpus later as "one
+more target."
+
+| arm | version | harness | eqns | distinct | covered by public set | novel primitives |
+|---|---|---|---|---|---|---|
+| maddening | 0.3.1 | one coupled multi-physics graph step (table→ball contact + 32-cell heat stencil) via the compiled scheduler | 54 | 17 | 54/54 (100%) | none |
+
+MADDENING pins `jax<0.6`; this harness ran it on jax 0.10.2
+without issue, so the cap is over-tight for this path (and, during
+collection, installing it silently downgraded a shared environment
+— the exact resolver behaviour stelling's own packaging refuses to
+inflict).
 
 ## Full table — 1823 equations, 73 distinct primitives, 7 targets
 

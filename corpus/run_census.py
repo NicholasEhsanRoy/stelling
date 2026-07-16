@@ -216,6 +216,67 @@ HARNESSES = {
 }
 
 
+def harness_maddening():
+    import warnings as _warnings
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore")  # disconnected-node warnings
+        from maddening.core.graph_manager import GraphManager
+        from maddening.nodes.ball import BallNode
+        from maddening.nodes.heat import HeatNode
+        from maddening.nodes.table import TableNode
+
+        gm = GraphManager()
+        gm.add_node(TableNode(name="table", timestep=0.01, position=0.0))
+        gm.add_node(BallNode(name="ball", timestep=0.01, initial_position=5.0, elasticity=0.7))
+        gm.add_node(HeatNode(name="rod", timestep=0.01, n_cells=32, thermal_diffusivity=0.05))
+        gm.add_edge("table", "ball", "position", "table_position")
+        gm.compile()
+        external = gm._default_external_inputs()
+        state = gm._state
+    return (
+        "one coupled multi-physics graph step (table→ball contact + 32-cell "
+        "heat stencil) via the compiled scheduler",
+        jax.make_jaxpr(lambda s: gm._compiled_step(s, external))(state),
+    )
+
+
+# Held-out arms are censused separately and NEVER vote on the priority
+# order: a registry partly ordered by its author's own code is a registry
+# built for one user. See the held-out section of the artifact for framing.
+HELD_OUT = {"maddening": [harness_maddening]}
+
+# Cost tiers for the schedule section. Membership is a judgement, recorded
+# as data so it is auditable; primitives outside every tier are reported
+# loudly rather than absorbed.
+SCHEDULE_TIERS = [
+    ("0 — transparent (already done)", frozenset({"jit", "custom_jvp_call", "custom_vjp_call", "remat2"})),
+    ("1a — free: structural/identity", frozenset({
+        "copy", "stop_gradient", "broadcast_in_dim", "reshape", "squeeze",
+        "slice", "concatenate", "iota", "pad", "stack", "split", "transpose", "rev"})),
+    ("1b — free: elementwise/compare/join one-liners", frozenset({
+        "add", "add_any", "sub", "mul", "div", "neg", "abs", "min", "max",
+        "select_n", "eq", "ne", "lt", "le", "gt", "and", "or", "not", "sign",
+        "integer_pow", "sqrt", "rem", "convert_element_type"})),
+    ("1c — free: fixed-shape reduction folds", frozenset({
+        "reduce_sum", "reduce_max", "reduce_min", "reduce_and", "reduce_or", "cumsum"})),
+    ("2 — medium: bilinear/permutation", frozenset({"dot_general", "sort", "pow"})),
+    ("3 — wedge targets (the Stage-1 work itself)", frozenset({
+        "gather", "scatter", "scatter-add", "dynamic_slice", "dynamic_update_slice"})),
+    ("4 — control flow (few eqns gate hundreds nested)", frozenset({"cond", "while", "scan"})),
+    ("5 — float-boundary (see the nextafter note)", frozenset({
+        "nextafter", "is_finite", "bitcast_convert_type", "exp", "log", "erf_inv"})),
+    ("6 — PRNG / bit-level (bounded-adversary story)", frozenset({
+        "random_wrap", "random_unwrap", "random_bits", "random_seed",
+        "random_split", "random_fold_in", "shift_right_logical"})),
+    ("7 — library-defined (open primitive set — design/open-primitive-set.md)", frozenset({
+        "select_if_vmap", "unvmap_any", "unvmap_max", "nonbatchable",
+        "nondifferentiable_backward", "maybe_set", "linear_solve"})),
+    ("8 — escape hatches (⊤ forever)", frozenset({"pure_callback"})),
+    ("9 — dense linear algebra (contract-level treatment later)", frozenset({"lu"})),
+]
+
+
 def _version(dist_name: str) -> str:
     try:
         return importlib.metadata.version(dist_name)
@@ -252,6 +313,22 @@ def main() -> int:
                 traceback.print_exc()
 
     result = accumulator.freeze()
+
+    held_rows = []  # (arm, version, description, Census | None)
+    for arm, harnesses in HELD_OUT.items():
+        arm_version = _version(arm)
+        for harness in harnesses:
+            try:
+                description, closed_jaxpr = harness()
+                arm_acc = census.CensusAccumulator()
+                arm_acc.add(arm, _jax_compat.transcribe(closed_jaxpr))
+                held_rows.append((arm, arm_version, description, arm_acc.freeze()))
+                print(f"[held-out ok]   {arm:<11} {arm_acc.freeze().total} eqns")
+            except Exception as exc:
+                reason = f"FAILED — {type(exc).__name__}: {str(exc).splitlines()[0][:140]}"
+                held_rows.append((arm, arm_version, reason, None))
+                print(f"[held-out fail] {arm:<11} {reason[:120]}")
+
     reorderings = [
         f"after `{t}`: {'reordered' if b and b != a[: len(b)] else 'stable' if b else 'first entry'}"
         for t, b, a in saturation
@@ -290,14 +367,20 @@ def main() -> int:
     lines += [
         "",
         "Corpus scope: mature maintained libraries only. The research-code arm",
-        "(`design/value-model.md`'s range criterion) is **not represented** —",
-        "ordinary research scripts are not pip-installable, and tracing them",
-        "needs the interception harness method. Recorded as a gap, not solved.",
+        "is **not represented** — and growth is re-aimed accordingly: since the",
+        "schedule below is ordered by cost rather than count, saturation no",
+        "longer drives corpus growth. The reason to grow is that **the research",
+        "arm is the unprimed arm**: every current target is a mature library",
+        "written by people who know exactly where the gather clamps, and every",
+        "harness was written by someone who knew what he hoped to find.",
+        "Interception on research code is the only sample with neither",
+        "property — a value-model instrument, not a ranking refinement.",
         "",
         "## Saturation",
         "",
         f"Criterion: add targets until the top-10 ranking stops reordering. "
-        f"Status: **{'saturated at this corpus size' if saturated else 'NOT saturated — the ranking was still reordering as targets were added; the registry priority order below is provisional and the corpus must grow'}**.",
+        f"Status: **{'saturated at this corpus size' if saturated else 'NOT saturated — the ranking was still reordering as targets were added; the per-primitive ordering is provisional'}** "
+        f"(which constrains the *inventory*, not the schedule — see below).",
         "",
     ]
     lines += [f"- {r}" for r in reorderings]
@@ -312,6 +395,14 @@ def main() -> int:
         "> A low count here is a fact about this corpus and these harnesses. It",
         "> cannot support \"the bug class is rare\" — the same way no number in",
         "> this file may support \"stelling is useful.\"",
+        ">",
+        "> **The symmetry cuts both ways.** The high counts are harness-shaped",
+        "> too, and in a worse way: `gather` ×7 exists because we went looking",
+        "> for it, knowing the neighbor list was the value model's canonical",
+        "> suspect. A census can launder a prior about where bugs live into",
+        "> apparent evidence; these rows are where that would happen. Read them",
+        "> as *where we looked*, never as *where bugs are*. Interrogation of",
+        "> these rows: `design/census-interrogation.md`.",
         "",
     ]
     if wedge_rows:
@@ -322,8 +413,95 @@ def main() -> int:
             )
     else:
         lines.append("- none observed in this corpus")
+    # -- schedule: cost, not count, orders the work -------------------------
+    prim_count = {p.name: p.count for p in result.primitives}
+    tier_rows, classified = [], set()
+    for title, names in SCHEDULE_TIERS:
+        eqns = sum(prim_count.get(x, 0) for x in names)
+        present = sorted(x for x in names if x in prim_count)
+        tier_rows.append((title, eqns, present))
+        classified |= names
+    unclassified = sorted(set(prim_count) - classified)
+    free_eqns = sum(e for t, e, _ in tier_rows if t.startswith(("0", "1")))
+    lines += [
+        "## Schedule — the inventory is not the build order",
+        "",
+        f"Ranked by **cost**, not count. Tiers 0–1 — transparency (already",
+        f"done), structural/identity ops, elementwise one-liners, and",
+        f"fixed-shape folds — cover **{free_eqns}/{result.total} equations",
+        f"({free_eqns / max(result.total, 1):.0%})** with a registry of",
+        "near-one-liners. They do not depend on saturation and will not",
+        "reorder out of the top: build them first. The hard decisions live in",
+        "tiers 3–4; the census informs *which* of them matter, not *when*.",
+        "",
+        "| tier | eqns | % | primitives present in this corpus |",
+        "|---|---|---|---|",
+    ]
+    for title, eqns, present in tier_rows:
+        pct = f"{eqns / max(result.total, 1):.0%}"
+        lines.append(f"| {title} | {eqns} | {pct} | {', '.join(f'`{p}`' for p in present) or '—'} |")
+    if unclassified:
+        lines.append(f"| **unclassified — assign a tier** | — | — | {', '.join(f'`{p}`' for p in unclassified)} |")
     lines += [
         "",
+        "## Notes",
+        "",
+        "**`nextafter` ×100 — the float boundary is on page one.** In ℝ,",
+        "`nextafter(x, y)` *is* `x`: the primitive has no real-arithmetic",
+        "content, and the first census of the ecosystem's best ODE library put",
+        "it at rank six by count (diffrax's step-size controller works in",
+        "ulps). Its transfer function must be float-aware even under the",
+        "ℝ-with-margin semantics — bound it as x ± ulp(x), monotone, easy —",
+        "and robust invariants with slack ≫ ulp absorb it, so this vindicates",
+        "design commitment 2 rather than threatening it. But the founding doc",
+        "framed ℝ-vs-IEEE as a Stage-2 decision, and the swamp showed up in",
+        "the first inventory. Noticed deliberately, here.",
+        "",
+    ]
+
+    # -- held-out arms: censused, compared, never voting --------------------
+    if held_rows:
+        lines += [
+            "## Held-out arm — censused, compared, never voting",
+            "",
+            "The priority order above is set by the public corpus **only**. The",
+            "arms below are the maintainer's own code: included in the ranking",
+            "they would train the registry on its author's test set, so they",
+            "are held out and asked a different question — *is their profile",
+            "covered by the order the public corpus produced?* Covered →",
+            "evidence the registry generalises past its sources. Not covered →",
+            "evidence about the mature-vs-research gap, from the only sample of",
+            "it available. Do not fold these into the corpus later as \"one",
+            "more target.\"",
+            "",
+            "| arm | version | harness | eqns | distinct | covered by public set | novel primitives |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for arm, version, desc, held_result in held_rows:
+            if held_result is None:
+                lines.append(f"| {arm} | {version} | {desc} | — | — | — | — |")
+                continue
+            novel = [(p.name, p.count) for p in held_result.primitives if p.name not in prim_count]
+            novel_eqns = sum(c for _, c in novel)
+            covered = held_result.total - novel_eqns
+            novel_text = ", ".join(f"`{n}` ×{c}" for n, c in novel) or "none"
+            lines.append(
+                f"| {arm} | {version} | {desc} | {held_result.total} "
+                f"| {len(held_result.primitives)} "
+                f"| {covered}/{held_result.total} ({covered / max(held_result.total, 1):.0%}) "
+                f"| {novel_text} |"
+            )
+        lines += [
+            "",
+            "MADDENING pins `jax<0.6`; this harness ran it on jax 0.10.2",
+            "without issue, so the cap is over-tight for this path (and, during",
+            "collection, installing it silently downgraded a shared environment",
+            "— the exact resolver behaviour stelling's own packaging refuses to",
+            "inflict).",
+            "",
+        ]
+
+    lines += [
         f"## Full table — {result.total} equations, {len(result.primitives)} distinct primitives, {len(result.targets)} targets",
         "",
         result.markdown_table(),
