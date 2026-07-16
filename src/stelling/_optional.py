@@ -40,7 +40,10 @@ _OPTIONAL: dict[str, _Optional] = {
 # deliberately NOT derived from the [jax] extra floor in pyproject.toml: the
 # floor is loose bootstrap metadata, while this constant is the honest runtime
 # claim. Update it only when CI actually verifies a new series.
-TESTED_JAX_SERIES = ("0.10",)
+# 0.11 verified 2026-07-17: full suite + census re-run; the series bump
+# changed scan's params (ft_in/ft_out flattree metadata, layout params gone)
+# and merged Jaxpr/ClosedJaxpr — see design/maintenance-treadmill.md.
+TESTED_JAX_SERIES = ("0.10", "0.11")
 
 
 def jax_series_tested(version_str: str) -> bool:

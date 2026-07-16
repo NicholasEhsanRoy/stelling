@@ -202,6 +202,11 @@ class _Transcriber:
             )
         if isinstance(v, jax.tree_util.PyTreeDef):
             return ir.TreeDefParam(text=str(v))
+        if type(v).__name__ == "FTTuple" and "flattree" in type(v).__module__:
+            # jax 0.11's flat-tree structure metadata (scan ft_in/ft_out):
+            # same epistemic category as PyTreeDef — structural text only.
+            # Matched by name (private module). Verified against jax 0.11.0.
+            return ir.TreeDefParam(text=str(v))
         if type(v).__name__ == "ShapedArray" and type(v).__module__.startswith("jax"):
             # avals appear as params on callback primitives (result_avals);
             # mirror them exactly like any other aval (census contact, 0.10.2)

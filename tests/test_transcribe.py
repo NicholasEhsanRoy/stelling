@@ -155,13 +155,17 @@ def test_custom_vjp_transcribes_forward_and_under_grad():
     assert "cos" in {e.primitive for e in grad.jaxpr.eqns}
 
 
-def test_remat_open_jaxpr_param_transcribes():
+def test_remat_jaxpr_param_transcribes():
     out = _jax_compat.transcribe(
         jax.make_jaxpr(jax.checkpoint(lambda x: jnp.sin(x) * 2.0))(jnp.zeros(4))
     )
-    assert any(isinstance(v, ir.Jaxpr) for v in param_values(out)), (
-        "remat holds an open Jaxpr (not ClosedJaxpr) in params"
-    )
+    remat = next(e for e in out.jaxpr.eqns if e.primitive == "remat2")
+    sub = remat.params_dict()["jaxpr"]
+    # jax 0.10 stores an open Jaxpr here; 0.11 merged Jaxpr/ClosedJaxpr into
+    # one class, which transcribes as ir.ClosedJaxpr. Either is intact.
+    assert isinstance(sub, (ir.Jaxpr, ir.ClosedJaxpr))
+    inner = sub if isinstance(sub, ir.Jaxpr) else sub.jaxpr
+    assert inner.eqns, "the remat body must arrive intact"
 
 
 def test_coverage_of_real_trace_is_a_quantity():
@@ -201,6 +205,7 @@ def test_prng_impl_functions_are_opaque():
 
 
 def test_untested_jax_series_warns(monkeypatch):
+    _jax_compat._warn_untested_jax.cache_clear()  # warn-once must not hide the fence
     cj = jax.make_jaxpr(lambda x: x + 1.0)(jnp.zeros(2))
     monkeypatch.setattr(jax, "__version__", "0.99.0")
     with pytest.warns(RuntimeWarning, match="0.99.0"):
@@ -208,7 +213,13 @@ def test_untested_jax_series_warns(monkeypatch):
 
 
 def test_tested_jax_series_is_silent():
-    """Fails when CI's jax outruns TESTED_JAX_SERIES — bump it deliberately."""
+    """Fails when CI's jax outruns TESTED_JAX_SERIES — bump it deliberately.
+
+    cache_clear matters: the runtime warning is once-per-version, so without
+    it this test passes whenever any earlier test already consumed the
+    warning — a test-order-dependent fence, discovered live on the 0.11 bump.
+    """
+    _jax_compat._warn_untested_jax.cache_clear()
     cj = jax.make_jaxpr(lambda x: x + 1.0)(jnp.zeros(2))
     with warnings.catch_warnings():
         warnings.simplefilter("error")
