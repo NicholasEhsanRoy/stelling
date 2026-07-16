@@ -102,8 +102,16 @@ Every obligation the wedge cannot discharge lands in exactly one bucket:
 | **Spurious** | The wedge cannot prove in-bounds, but no witness exists. Our imprecision, a work item, not a finding |
 | **Guarded** | Out-of-bounds is prevented by something outside the traced region — a caller's check, a config invariant. A finding about the *harness*, not the code |
 | **Unknown** | ⊤ in the chain, or timeout. Reported as coverage, claimed as nothing |
+| **Intentional** | Out-of-range *by design inside the traced region*: sentinel padding or clamp-then-discard, where the author relies on the clamp being harmless. Identified by dataflow — shared-predicate nullification or sentinel provenance (`design/census-interrogation.md` §4). A checked witness at such a site is neither Real nor Spurious |
 
 Only **Real** counts. The classification is done before the count is looked at.
+
+*(The **Intentional** bucket was added 2026-07-17 — before any wedge run —
+from the census interrogation's guard anatomy: the census corpus showed
+zero pure-mask sites, but the pattern exists (jax-md's neighbor padding
+generates out-of-range indices deliberately), and a witness there would
+otherwise misclassify as Real. Adding it later, after a run, would be the
+renegotiation this document forbids.)*
 
 ## The falsifier
 
@@ -209,3 +217,7 @@ clause above forbids discovering "the bugs are in user code" after a zero;
 this section, dated before any run, is the one legitimate window in which
 that re-registration can happen. The choice is the maintainer's; the census
 only says the window is now.
+
+A separately-registered second experiment over the guard sites now exists:
+`design/guard-experiment.md`. It is an **input** to this decision, not a
+resolution of it, and it runs nothing until the decision is made.
