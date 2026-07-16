@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+
+# One-time setup per clone: `pre-commit install`
+repos:
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.6
+    hooks:
+      - id: insert-license
+        name: insert SPDX headers
+        files: \.(py|pyi|sh|toml|ya?ml)$
+        args:
+          - --license-filepath
+          - .license-header.txt
+          - --comment-style
+          - "#"
+  - repo: https://github.com/fsfe/reuse-tool
+    rev: v6.2.0
+    hooks:
+      - id: reuse
+  - repo: local
+    hooks:
+      - id: jax-import-hygiene
+        name: jax only in _jax_compat; private jax modules banned
+        language: system
+        entry: >-
+          bash -c 'set -e;
+          ! grep -rnE "^[[:space:]]*(import jax\b|from jax\b)" src --include="*.py" | grep -v _jax_compat.py;
+          ! grep -rn "jax\._src" src --include="*.py"'
+        pass_filenames: false
+        always_run: true

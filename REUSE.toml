@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+
+version = 1
+SPDX-PackageName = "stelling"
+SPDX-PackageSupplier = "Nicholas Ehsan Roy <nicholas.ehsan.roy@gmail.com>"
+SPDX-PackageDownloadLocation = "https://github.com/NicholasEhsanRoy/stelling"
+
+# Files that cannot (or should not) carry inline SPDX headers.
+
+[[annotations]]
+path = [
+  "*.md",
+  "design/**",
+  ".gitignore",
+  ".license-header.txt",
+  "CITATION.cff",
+  "src/stelling/py.typed",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Nicholas Ehsan Roy"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["DCO"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2004, 2006 The Linux Foundation and its contributors"
+SPDX-License-Identifier = "LicenseRef-DCO"
