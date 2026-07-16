@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from stelling._optional import OptionalDependencyError, available, require
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0"
 
 __all__ = [
     "OptionalDependencyError",
