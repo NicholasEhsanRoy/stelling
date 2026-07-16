@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stelling"
+dynamic = ["version"]
+description = "Harness-driven verification for JAX scientific computing, with jaxpr as the verification IR."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Nicholas Ehsan Roy", email = "nicholas.ehsan.roy@gmail.com" },
+]
+keywords = ["jax", "verification", "formal-methods", "smt", "scientific-computing"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Software Development :: Quality Assurance",
+]
+
+# The core must stay importable in a bare environment: jax and the solver
+# wheels are heavyweight and often already managed by the user's environment,
+# so they are extras, imported lazily via stelling._optional.
+dependencies = []
+
+[project.optional-dependencies]
+# [jax] is bootstrap-only, for environments with no jax at all. If you already
+# have jax, do not install this extra — stelling must stay out of your resolver.
+jax = ["jax>=0.5"]
+z3 = ["z3-solver>=4.13"]
+cvc5 = ["cvc5>=1.2"]
+solvers = ["stelling[z3,cvc5]"]
+# `all` deliberately equals `solvers`: the extra people type reflexively must
+# never pull jax into an environment that already manages it (a resolver bump
+# can desync CUDA plugin wheels).
+all = ["stelling[z3,cvc5]"]
+
+[project.urls]
+Homepage = "https://github.com/NicholasEhsanRoy/stelling"
+Repository = "https://github.com/NicholasEhsanRoy/stelling"
+Issues = "https://github.com/NicholasEhsanRoy/stelling/issues"
+
+[dependency-groups]
+dev = [
+  "pre-commit>=4.0",
+  "pytest>=8.0",
+  "reuse>=5.0",
+]
+
+[tool.hatch.version]
+path = "src/stelling/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stelling"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
