@@ -50,7 +50,13 @@ Every verdict object stamps, at minimum:
   hash covers semantic content and excludes source locations, so identical
   programs traced from different files share verdicts),
 - once the transfer registry exists: the assumption tier of every transfer
-  function involved (design commitment 5).
+  function involved (design commitment 5),
+- once transfer rules can come from outside the core registry: the
+  **provenance of every transfer in the chain** — core vs. contrib vs.
+  plugin, with the contributing registry's own version. A verdict that
+  leaned on a contrib rule without saying so acquires the
+  `TESTED_JAX_SERIES` problem with no fence and no test
+  (`design/open-primitive-set.md`).
 
 Solver options are not cosmetic. Observed on cvc5 1.3.4 (PyPI wheel): a goal
 containing `exp` solves **unsat** under default options — cvc5 quietly routes

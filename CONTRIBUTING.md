@@ -45,6 +45,11 @@ Pending instances, recorded now so they land with the features they bind:
   missing field rather than defaulting it. Lands with the first verdict.
   The contract grows over time (it just gained a precision field), and a
   stamp that silently omits a field is worse than one that doesn't exist.
+- **Contrib-backed verdicts stamp their provenance** — a test that any
+  verdict whose chain used a contrib/plugin transfer names the
+  contributing registry and its version, plus the `TESTED_*_SERIES`
+  literal-and-fence pair for each bundled contrib registry. Lands with
+  the contrib registry (`design/open-primitive-set.md`).
 
 ## Ground rules
 
