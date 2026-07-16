@@ -39,7 +39,13 @@ Every verdict object stamps, at minimum:
   precision contract, so a jaxpr's f32 matmul is not a determinate
   computation until the device is known: **one jaxpr, three devices, three
   numerics** — precision configuration is part of what a verdict claims,
-  exactly as solver options are,
+  exactly as solver options are. The division of labor with the hash is
+  exact and checkable: because `precision` travels in the jaxpr, a pinned
+  query and an unpinned one already **hash differently** — the cache can
+  never serve one for the other — while two *unpinned* queries on
+  different devices **hash identically** with different numerics. The hash
+  is half-right by construction; the device stamp closes exactly the other
+  half,
 - the query's content hash (`stelling.ir.ClosedJaxpr.content_hash()`; the
   hash covers semantic content and excludes source locations, so identical
   programs traced from different files share verdicts),
@@ -55,7 +61,15 @@ it solves again. **Three configs, three engines, one version string.**
 "cvc5 1.3.4 said unsat" is not a reproducible claim; "cvc5 1.3.4, wheel,
 options {…}, query `<hash>` said unsat" is.
 
-Two further commitments bind every implementation of the stamp:
+Three further commitments bind every implementation of the stamp:
+
+- **The verdict is portable; its discharge is not.** An ℝ-with-margin
+  proof is device-independent, but whether margin M absorbs the actual
+  rounding is decided by the numerics the device selects — the same proof
+  with the same margin can be discharged on one device and not on another,
+  without the proof changing. "Verified in ℝ with margin" is a bill that
+  comes due per-deployment, not a finished claim, and every artifact
+  recording the deferred margin obligation must say so.
 
 - **Never invoke a solver on defaults.** stelling always emits the complete
   option set explicitly — including options whose emitted value currently
