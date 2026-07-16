@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-no-jax:
+    name: tests (solvers only, jax uninstalled)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      - run: uv pip install -e ".[solvers]" pytest
+      - name: assert jax is absent
+        run: .venv/bin/python -c "import importlib.util, sys; sys.exit(1 if importlib.util.find_spec('jax') else 0)"
+      - run: .venv/bin/python -m pytest -q
+      - run: .venv/bin/python -m stelling
+
+  test-jax:
+    name: tests (solvers + jax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      - run: uv pip install -e ".[solvers,jax]" pytest
+      - run: .venv/bin/python -m pytest -q
+
+  reuse:
+    name: reuse lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: fsfe/reuse-action@v5
+
+  dco:
+    name: DCO sign-offs
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: check sign-offs
+        run: pipx run dco-check --verbose
