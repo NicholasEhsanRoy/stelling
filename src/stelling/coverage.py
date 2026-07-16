@@ -103,7 +103,8 @@ class CoverageCounter:
         )
 
 
-def _sub_jaxprs(eqn: ir.JaxprEqn) -> Iterable[ir.Jaxpr]:
+def sub_jaxprs(eqn: ir.JaxprEqn) -> Iterable[ir.Jaxpr]:
+    """Yield every sub-jaxpr held in this equation's params, however nested."""
     pending = [v for _, v in eqn.params]
     while pending:
         item = pending.pop()
@@ -141,6 +142,6 @@ def measure(
             else:
                 counter.record_unknown(eqn.primitive)
                 descend_reached = False
-            for sub in _sub_jaxprs(eqn):
+            for sub in sub_jaxprs(eqn):
                 stack.append((sub, descend_reached))
     return counter.freeze()
