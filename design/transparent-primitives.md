@@ -116,6 +116,14 @@ The evidence. Probe: a `custom_vjp` whose `fwd` deliberately returns
 got `fwd`'s — and the grad-traced jaxpr contains only `cos`: `f`'s
 computation is absent entirely.
 
+The same probe against `custom_jvp` (2026-07-17): **identical result.** A
+jvp rule whose primal output deliberately returns `cos(x)` while `f`
+returns `sin(x)` raises nothing; `jax.value_and_grad` and `jax.jvp` both
+return the lie as the value. The class is not custom_vjp-specific — and by
+census population it is mostly a *custom_jvp* problem: `custom_jvp_call`
+×117 at 3/7 targets (diffrax, optimistix — the ecosystem's best-regarded
+libraries) versus `custom_vjp_call` ×2 at 1/7.
+
 The commitment this entails is broader than gradients:
 
 > **Everything inside a grad trace comes from the grad trace — primal
