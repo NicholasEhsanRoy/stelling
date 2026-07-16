@@ -1,0 +1,378 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+
+"""stelling's jax-free IR: a 1:1 mechanical mirror of ``jax.extend.core`` jaxprs.
+
+This module transcribes rather than designs: beyond the commitments named
+below, no normalization, no canonical form, no renaming, no derived fields.
+If a jaxpr has it, it is mirrored; if a jaxpr doesn't, it is not invented.
+Any redesign is Stage 1 work, after the analyses have said what they need.
+
+Two commitments, made deliberately and named as such, plus one hash-scope
+decision:
+
+* **The IR is canonical up to alpha-renaming — entailed by hash stability,
+  not chosen alongside it.** The commitment is cross-process hash
+  stability. A jax ``Var`` carries no serializable identity (historically
+  there was ``Var.count``; on current jax the only handle is the object
+  itself), so any stable naming must be derived from structure — and
+  structure-derived names necessarily collapse alpha-equivalent jaxprs
+  (same structure, different tracer-generated identities) into equal IR
+  with equal hashes. The collapse is what stability entails, and it is
+  also exactly the identity relation verification wants on queries. The
+  only free choice left is *which* structure-derived naming —
+  first-encounter order over De Bruijn indices, picked for readability,
+  with no semantic consequence either way.
+* **Hashes are order-independent where jax is orderless — sorting is a
+  commitment, not a serialization convenience.** Eqn params (a dict in jax)
+  and effects (a set) are stored sorted, so the content hash cannot depend
+  on dict/set iteration order.
+* **The content hash covers semantics only.** ``source_info`` and
+  ``debug_info`` are excluded from :meth:`ClosedJaxpr.content_hash` (and
+  kept in :meth:`to_dict`): textually identical programs traced from
+  different files must hash alike, or proof caching and the z3-vs-cvc5
+  "did both solvers see the same query" check break for no semantic reason.
+
+Nothing here licenses more: stability entails exactly this much
+canonicalization and nothing further. The rule for everything else stands:
+transcribe.
+
+This module must never import jax (or anything outside the standard
+library): ``stelling._jax_compat`` is the only module allowed to touch jax,
+and everything else consumes these types.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+from dataclasses import dataclass, field
+
+
+class TranscriptionError(TypeError):
+    """A jaxpr contains something transcription refuses to guess about."""
+
+
+class UnsupportedParamError(TranscriptionError):
+    """An eqn param has a type outside the whitelist.
+
+    Unknown *primitives* are fine (the transfer registry treats them as ⊤
+    later); unknown *params* are not — silently dropping one would change
+    the semantics of the equation it configures.
+    """
+
+
+@dataclass(frozen=True)
+class Aval:
+    """Mirror of an abstract value (``ShapedArray`` and friends)."""
+
+    kind: str  # class name of the jax aval, e.g. "ShapedArray"
+    shape: tuple[int, ...]
+    dtype: str | None  # e.g. "float32"; None for dtype-less avals (tokens)
+    weak_type: bool = False
+
+
+@dataclass(frozen=True)
+class Array:
+    """An inert ndarray: enough bytes to rehydrate, no numpy needed to hold it."""
+
+    dtype: str  # numpy dtype ``.str`` including byte order, e.g. "<f4"
+    shape: tuple[int, ...]
+    data: bytes
+
+    def to_numpy(self):
+        import numpy as np  # lazy: numpy is not a stelling dependency
+
+        return np.frombuffer(self.data, dtype=np.dtype(self.dtype)).reshape(self.shape).copy()
+
+
+@dataclass(frozen=True)
+class Var:
+    id: int  # assigned in first-encounter order at transcription
+    aval: Aval
+
+
+@dataclass(frozen=True)
+class Literal:
+    val: bool | int | float | complex | str | Array
+    aval: Aval
+
+
+Atom = Var | Literal
+
+
+@dataclass(frozen=True)
+class EnumParam:
+    """A param that was an ``enum.Enum`` member (e.g. GatherScatterMode)."""
+
+    cls: str
+    member: str
+
+
+@dataclass(frozen=True)
+class NamedTupleParam:
+    """A param that was a namedtuple (e.g. GatherDimensionNumbers).
+
+    Field order is the namedtuple's own ``_fields`` order — semantic, so
+    never sorted.
+    """
+
+    cls: str
+    fields: tuple[tuple[str, object], ...]
+
+
+@dataclass(frozen=True)
+class SentinelParam:
+    """A param that was a known zero-payload jax sentinel (e.g. the
+    ``UnspecifiedValue`` filling ``jit`` sharding params).
+
+    Recording the type name is lossless because these types carry no
+    semantic payload; only sentinels explicitly listed in the transcriber
+    qualify — anything with actual content still raises.
+    """
+
+    cls: str
+
+
+@dataclass(frozen=True)
+class OpaqueParam:
+    """A param recorded as present but untranscribable, by explicit registry.
+
+    Reserved for transform-time thunks — the callables jax stores in
+    ``custom_jvp_call`` / ``custom_vjp_call`` / ``remat`` params for *its
+    own* later transforms of the jaxpr. stelling never re-runs jax
+    transforms on transcribed IR, so their content is unreachable by
+    construction for every analysis stelling performs. Unlike
+    :class:`SentinelParam` this is lossy and says so: an analysis whose
+    semantics depend on the param's content must refuse when it meets one,
+    and the content hash cannot distinguish programs that differ only here
+    (see ``design/transparent-primitives.md``). Only (primitive, param)
+    pairs listed in the transcriber qualify; unlisted types still raise.
+    """
+
+    cls: str
+
+
+@dataclass(frozen=True)
+class JaxprEqn:
+    primitive: str
+    invars: tuple[Atom, ...]
+    outvars: tuple[Var, ...]
+    params: tuple[tuple[str, object], ...] = ()
+    effects: tuple[str, ...] = ()
+    source_info: tuple[str, ...] = ()  # "file:line (function)" frames, as jax recorded them
+
+    def __post_init__(self) -> None:
+        # a commitment, not a convenience (see module docstring): the content
+        # hash must not depend on dict/set iteration order, so params (a dict
+        # in jax) and effects (a set) are stored sorted.
+        object.__setattr__(self, "params", tuple(sorted(self.params, key=lambda kv: kv[0])))
+        object.__setattr__(self, "effects", tuple(sorted(self.effects)))
+
+    def params_dict(self) -> dict[str, object]:
+        return dict(self.params)
+
+
+@dataclass(frozen=True)
+class DebugInfo:
+    func: str = ""
+    arg_names: tuple[str, ...] = ()
+    result_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Jaxpr:
+    constvars: tuple[Var, ...]
+    invars: tuple[Var, ...]
+    outvars: tuple[Atom, ...]  # outputs may be literals, not only vars
+    eqns: tuple[JaxprEqn, ...]
+    effects: tuple[str, ...] = ()
+    debug_info: DebugInfo | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "effects", tuple(sorted(self.effects)))
+
+
+@dataclass(frozen=True)
+class ClosedJaxpr:
+    jaxpr: Jaxpr
+    consts: tuple[bool | int | float | complex | str | Array, ...] = field(default=())
+
+    def to_dict(self, *, include_metadata: bool = True) -> dict:
+        return _encode(self, include_metadata)
+
+    @staticmethod
+    def from_dict(d: dict) -> "ClosedJaxpr":
+        obj = _decode(d)
+        if not isinstance(obj, ClosedJaxpr):
+            raise ValueError(f"expected a serialized ClosedJaxpr, got {type(obj).__name__}")
+        return obj
+
+    def content_hash(self) -> str:
+        """sha256 over the canonical serialization of the semantic content.
+
+        Stable across processes and machines (no reliance on builtin
+        ``hash``). Excludes ``source_info``/``debug_info`` — see the module
+        docstring.
+        """
+        canonical = json.dumps(
+            self.to_dict(include_metadata=False), sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+# --- serialization ---------------------------------------------------------
+#
+# Tagged, recursive, and closed over exactly the types above. ``to_dict`` /
+# ``from_dict`` must round-trip losslessly: that is tested, and the content
+# hash is defined over this encoding.
+
+
+def _encode(obj: object, meta: bool) -> object:
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, complex):
+        return {"k": "complex", "re": obj.real, "im": obj.imag}
+    if isinstance(obj, tuple):
+        return {"k": "tuple", "items": [_encode(x, meta) for x in obj]}
+    if isinstance(obj, Aval):
+        return {
+            "k": "aval",
+            "kind": obj.kind,
+            "shape": list(obj.shape),
+            "dtype": obj.dtype,
+            "weak_type": obj.weak_type,
+        }
+    if isinstance(obj, Array):
+        return {
+            "k": "array",
+            "dtype": obj.dtype,
+            "shape": list(obj.shape),
+            "data": base64.b64encode(obj.data).decode("ascii"),
+        }
+    if isinstance(obj, Var):
+        return {"k": "var", "id": obj.id, "aval": _encode(obj.aval, meta)}
+    if isinstance(obj, Literal):
+        return {"k": "lit", "val": _encode(obj.val, meta), "aval": _encode(obj.aval, meta)}
+    if isinstance(obj, EnumParam):
+        return {"k": "enum", "cls": obj.cls, "member": obj.member}
+    if isinstance(obj, SentinelParam):
+        return {"k": "sentinel", "cls": obj.cls}
+    if isinstance(obj, OpaqueParam):
+        return {"k": "opaque", "cls": obj.cls}
+    if isinstance(obj, NamedTupleParam):
+        return {
+            "k": "ntuple",
+            "cls": obj.cls,
+            "fields": [[name, _encode(v, meta)] for name, v in obj.fields],
+        }
+    if isinstance(obj, JaxprEqn):
+        d = {
+            "k": "eqn",
+            "primitive": obj.primitive,
+            "invars": [_encode(a, meta) for a in obj.invars],
+            "outvars": [_encode(v, meta) for v in obj.outvars],
+            "params": [[key, _encode(v, meta)] for key, v in obj.params],
+            "effects": list(obj.effects),
+        }
+        if meta:
+            d["source_info"] = list(obj.source_info)
+        return d
+    if isinstance(obj, DebugInfo):
+        return {
+            "k": "dbg",
+            "func": obj.func,
+            "arg_names": list(obj.arg_names),
+            "result_paths": list(obj.result_paths),
+        }
+    if isinstance(obj, Jaxpr):
+        d = {
+            "k": "jaxpr",
+            "constvars": [_encode(v, meta) for v in obj.constvars],
+            "invars": [_encode(v, meta) for v in obj.invars],
+            "outvars": [_encode(a, meta) for a in obj.outvars],
+            "eqns": [_encode(e, meta) for e in obj.eqns],
+            "effects": list(obj.effects),
+        }
+        if meta:
+            d["debug_info"] = _encode(obj.debug_info, meta) if obj.debug_info else None
+        return d
+    if isinstance(obj, ClosedJaxpr):
+        return {
+            "k": "closed",
+            "jaxpr": _encode(obj.jaxpr, meta),
+            "consts": [_encode(c, meta) for c in obj.consts],
+        }
+    raise TypeError(f"stelling.ir cannot encode {type(obj).__name__}")
+
+
+def _decode(obj: object) -> object:
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if not isinstance(obj, dict):
+        raise ValueError(f"malformed IR serialization: unexpected {type(obj).__name__}")
+    k = obj.get("k")
+    if k == "complex":
+        return complex(obj["re"], obj["im"])
+    if k == "tuple":
+        return tuple(_decode(x) for x in obj["items"])
+    if k == "aval":
+        return Aval(
+            kind=obj["kind"],
+            shape=tuple(obj["shape"]),
+            dtype=obj["dtype"],
+            weak_type=obj["weak_type"],
+        )
+    if k == "array":
+        return Array(
+            dtype=obj["dtype"],
+            shape=tuple(obj["shape"]),
+            data=base64.b64decode(obj["data"]),
+        )
+    if k == "var":
+        return Var(id=obj["id"], aval=_decode(obj["aval"]))
+    if k == "lit":
+        return Literal(val=_decode(obj["val"]), aval=_decode(obj["aval"]))
+    if k == "enum":
+        return EnumParam(cls=obj["cls"], member=obj["member"])
+    if k == "sentinel":
+        return SentinelParam(cls=obj["cls"])
+    if k == "opaque":
+        return OpaqueParam(cls=obj["cls"])
+    if k == "ntuple":
+        return NamedTupleParam(
+            cls=obj["cls"],
+            fields=tuple((name, _decode(v)) for name, v in obj["fields"]),
+        )
+    if k == "eqn":
+        return JaxprEqn(
+            primitive=obj["primitive"],
+            invars=tuple(_decode(a) for a in obj["invars"]),
+            outvars=tuple(_decode(v) for v in obj["outvars"]),
+            params=tuple((key, _decode(v)) for key, v in obj["params"]),
+            effects=tuple(obj["effects"]),
+            source_info=tuple(obj.get("source_info", ())),
+        )
+    if k == "dbg":
+        return DebugInfo(
+            func=obj["func"],
+            arg_names=tuple(obj["arg_names"]),
+            result_paths=tuple(obj["result_paths"]),
+        )
+    if k == "jaxpr":
+        dbg = obj.get("debug_info")
+        return Jaxpr(
+            constvars=tuple(_decode(v) for v in obj["constvars"]),
+            invars=tuple(_decode(v) for v in obj["invars"]),
+            outvars=tuple(_decode(a) for a in obj["outvars"]),
+            eqns=tuple(_decode(e) for e in obj["eqns"]),
+            effects=tuple(obj["effects"]),
+            debug_info=_decode(dbg) if dbg else None,
+        )
+    if k == "closed":
+        return ClosedJaxpr(
+            jaxpr=_decode(obj["jaxpr"]),
+            consts=tuple(_decode(c) for c in obj["consts"]),
+        )
+    raise ValueError(f"malformed IR serialization: unknown tag {k!r}")
