@@ -159,3 +159,53 @@ written, it just pointed the wrong way.
 
 The number is 0, the corpus is those five, and both were fixed on 2026-07-16,
 before the wedge ran on anything.
+
+## What the census says about this experiment (recorded 2026-07-17, before any wedge run)
+
+The primitive census (`design/primitive-census.md`) and its interrogation
+(`design/census-interrogation.md`) were read against this experiment's
+assumptions. **The falsifier above stands as written.** This section exists
+so that what was known *before* the experiment cannot later be presented as
+discovered *after* it — in either direction.
+
+Facts, from traced IR of the census corpus:
+
+- **jax-cfd's canonical stencil path contains zero wedge primitives.** Its
+  periodic halos are built by `jnp.pad` — fourteen `concatenate` equations
+  and static `slice`s, all shape-checked at trace time. An out-of-bounds
+  shift in this style is a trace-time error, not a silent runtime clamp:
+  **the style structurally cannot have the bug the wedge detects.**
+- **`rem` is coordinate wraparound, not index wraparound.** All seven
+  occurrences are jax-md's periodic-space float mod, consumed by
+  `add`/`lt`/`ne`/`select_n`; none feeds anything indexable.
+- **The wedge's target surface in this corpus is 19 of 1823 equations
+  (1%), in 2 of 7 targets** — diffrax's step-history buffers and jax-md's
+  neighbor path — and **16 of the 17 non-trivial sites carry explicit
+  guards (`select_n`, usually with `lt`, sometimes `min`) in the index
+  cone.** Library authors mask their indices by hand, everywhere we
+  looked.
+- **Guarding converts the failure mode out of the wedge's class.** Where a
+  guard clamps an index into range, in-bounds holds by construction; the
+  residual bug (a *wrong guard bound*, silently reading the wrong element)
+  is in-bounds and therefore outside the property the wedge proves. Whether
+  each observed guard is a clamp or a mask was not verified — but a green
+  wedge verdict on defended code largely confirms the guard exists, not
+  that the physics indexes correctly.
+- Symmetry: the gather counts exist because the harness aimed at the value
+  model's canonical suspect. Where we looked, not where bugs are.
+
+**The constraint:** this experiment's pre-registered corpus is drawn from
+exactly the population the census shows to be style-protected and
+hand-guarded. A zero would kill the claim as registered — legitimately,
+since the claim is about maintained public JAX — but part of that zero
+would be attributable to *style*, a mechanism this document did not
+anticipate when the corpus was fixed.
+
+**The decision this forces, and its deadline:** either proceed on the
+registered corpus accepting that reading, or re-register the experiment
+toward the arm the census cannot see — research code, via the interception
+harness — **before the wedge runs on anything**. The anti-rationalisation
+clause above forbids discovering "the bugs are in user code" after a zero;
+this section, dated before any run, is the one legitimate window in which
+that re-registration can happen. The choice is the maintainer's; the census
+only says the window is now.
