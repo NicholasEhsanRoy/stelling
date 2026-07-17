@@ -91,3 +91,29 @@ Denominator provenance now has three subtractions plus the control:
 **13 addressable → 9 reconstructible → 7 in-semantics**, and hit386 the
 control that was never a member. Any count is "N of 7" only with that
 chain attached.
+
+## The dfx#632 exhibit — the false-VERIFIED that did not fire (measured)
+
+`corpus/supply/exhibit_632.py`. The expectation was VERIFIED on
+`t + dt > t`, demonstrating a false green the semantics stamp disclaims.
+**Measured: UNKNOWN, for two reasons, and the correction is the finding.**
+
+- **Outward rounding is float-conservative on this shape.** With `t` a
+  point at `1.0` and `dt = 1e-20 < ulp(t)`, the interval `+` transfer
+  brackets `fl(1.0 + 1e-20)` to `[0.999…9, 1.000…2]` — it **straddles
+  1.0**, so `1.0 + 1e-20 > 1.0` is UNKNOWN. The endpoints already encode
+  that the IEEE sum may equal `t`; the domain does not produce the false
+  VERIFIED even though its reasoning is labeled ℝ.
+- **The dependency problem** yields UNKNOWN on the ∀-`t` box
+  independently (`t` on both sides).
+
+The classification (ℝ-vacuous) and the exclusion **stand unchanged** —
+excluding is conservative policy regardless, and this shows it is
+belt-and-suspenders on straight-line arithmetic. What is corrected is the
+premise that `t + dt > t` would false-VERIFY: it does not, in the MVP.
+The `semantics: real` field remains load-bearing, but for the cases it
+was really always about — **branch/clip omissions** (dfx#632's actual bug
+is the endpoint clip `t_next ← t1`, not the addition) and **XLA
+reassociation** of the deployed program versus the traced jaxpr — not for
+monotone arithmetic, which outward rounding guards. This is additive and
+count-neutral: no bucket, no exclusion, no band moved.
