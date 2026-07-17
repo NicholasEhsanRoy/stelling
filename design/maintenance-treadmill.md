@@ -53,11 +53,30 @@ text), two test adjustments, one interrogation guard; under an hour
 wall-clock including re-verification of both series. `TESTED_JAX_SERIES`
 is now `("0.10", "0.11")`.
 
-## The rate
+## The rates — two, not one
 
-| bump | new prims | removed | param changes needing rules | class-identity changes | compat LOC | ecosystem lag |
-|---|---|---|---|---|---|---|
-| 0.10 → 0.11 | 1 | 0 | 1 (`FTTuple`) | 1 (Jaxpr merge) | ~4 | none observed |
+**Name-level churn** — additive; one registry entry each; genuinely cheap.
+Scales with the registry:
 
-One point is a weak slope; it replaces a guess. Carry it into the value
-model's cost side, and extend it at every bump.
+| bump | new prims | removed | lowering shifts |
+|---|---|---|---|
+| 0.10 → 0.11 | 1 (`unstack`) | 0 | `slice`+`squeeze` → `unstack` |
+
+**Structural churn** — costs no registry entries and **invalidates
+analyses**. Scales with the number of analyses stelling owns, so the
+denominator is part of the measurement:
+
+| bump | changes | analyses broken / owned |
+|---|---|---|
+| 0.10 → 0.11 | scan layout params removed; `Jaxpr`/`ClosedJaxpr` merged | **1 / ~2** — the counter-vs-carry classifier now reports `layout-unknown` on 0.11; the census/coverage counting survived |
+
+The denominator is the honest part: "~4 lines, under an hour" was measured
+at the single moment in this project's life when there is almost nothing
+to break — and one of roughly two owned analyses broke anyway. Merged into
+one number, this slope would lie at Stage 2, when twenty analyses exist
+and the same structural bump costs a week. Track the ratio, not the LOC.
+
+**Ecosystem lag of zero is the best news in this file** — seven mature
+libraries traced on a day-old jax release. It is the only quantitative
+evidence anyone has bearing on the no-upper-caps rule, and it points the
+right way.
