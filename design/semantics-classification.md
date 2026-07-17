@@ -55,3 +55,39 @@ If the two pre-commits hold, R drops **9 → 7**. The band is **≥ 4
 absolute across ≥ 2 libraries**, so the threshold does not move and the
 bar rises — conservative. The ≥ 2-libraries clause is re-checked against
 the survivors in the reading.
+
+---
+
+# Reading (2026-07-18 — the nine reconstructible hits, on their registered properties)
+
+| hit | registered property | bucket | grounds (judged on the incident's mechanism) |
+|---|---|---|---|
+| **dfx#632** | `t_{n+1} > t_n` | **ℝ-vacuous** | pre-committed; `t + dt > t` for `dt > 0` is trivially true in ℝ, entire content is float creep |
+| **dfx#657** | realized step times = requested grid | **ℝ-vacuous** | pre-committed; equal in ℝ by construction, entire content is StepTo's f32 clipping |
+| **npy#249** | `isfinite(step_size) ∧ step_size > 0` throughout warmup | **ℝ-partial** | incident was `step_size → nan` (float); `isfinite` has no ℝ content, and the ℝ half (`> 0`) does not discharge the nan |
+| **jmd#339** | neighbor list ⊇ all pairs within cutoff | **ℝ-partial** | real geometric content, but the incident is float rounding in the PBC coordinate wrap (`99.999995` at cell `100`) — the ℝ version is true by construction; the bug is the wrap |
+| **bjx#969** | non-finite proposal ⇒ `step_size_max` shrinks | **ℝ-partial** | the antecedent "non-finite" is float-only (vacuous in ℝ); incident is a dead detector. *Also lands `blocked` — implication, inert `assume` — so it counts 0 for that reason first* |
+| **bjx#D416** | adapted `step_size ≥ ε` | **ℝ-faithful** | a real-valued invariant with margin ε; the incident's mechanism (RNG key reuse) is not float — it is a killed category (PRNG reuse), out of E2a's scope |
+| **dfx#207** | accepted `dt ≥ dt_min` | **ℝ-faithful** | real invariant; incident is genuine stiffness, not float |
+| **dfx#417** | `|y_n| ≤ B` over horizon | **ℝ-faithful** | a real bound with margin; incident is solver instability in the real dynamics |
+| **npy#1133** | sampler state stays in support | **ℝ-faithful** | a real region invariant; incident is low-density init, not float |
+
+## Counts
+
+**ℝ-vacuous: 2** (dfx#632, dfx#657) — both pre-committed, both confirmed.
+**ℝ-partial: 3** (npy#249, jmd#339, bjx#969). **ℝ-faithful: 4** (bjx#D416,
+dfx#207, dfx#417, npy#1133).
+
+**Denominator: 9 → 7.** The two ℝ-vacuous hits are excluded before the
+run; the seven survivors are the four ℝ-faithful plus the three
+ℝ-partial (which run with the semantics gap named in their relation).
+
+**≥ 2-libraries, re-checked on the seven survivors:** diffrax (dfx#207,
+dfx#417), blackjax (bjx#D416, bjx#969), jax-md (jmd#339), numpyro
+(npy#249, npy#1133) — **four libraries**, so the clause remains
+reachable.
+
+Denominator provenance now has three subtractions plus the control:
+**13 addressable → 9 reconstructible → 7 in-semantics**, and hit386 the
+control that was never a member. Any count is "N of 7" only with that
+chain attached.
