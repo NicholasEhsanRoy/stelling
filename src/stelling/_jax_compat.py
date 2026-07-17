@@ -27,7 +27,7 @@ import numpy as np
 from stelling import ir
 from stelling._optional import TESTED_JAX_SERIES, jax_series_tested
 
-__all__ = ["jax_version", "transcribe"]
+__all__ = ["jax_version", "transcribe", "any_array", "assume", "assert_", "trace"]
 
 # jax types that are pure zero-payload sentinels: recording the type name is
 # lossless. Matched by name because isinstance would require importing the
@@ -94,6 +94,76 @@ def _warn_untested_jax(version: str) -> None:
 
 def jax_version() -> str:
     return jax.__version__
+
+
+# -- harness primitives -------------------------------------------------------
+#
+# The harness API (any_array / assume / assert_) binds real jax primitives so
+# that the declarations land in the traced jaxpr itself: the query's content
+# hash then covers the bounds and the obligations, not just the computation —
+# a stamp that hashed the program but not what was assumed about its inputs
+# would under-hash the claim.
+
+_any_p = jex_core.Primitive("stelling_any")
+_assume_p = jex_core.Primitive("stelling_assume")
+_assert_p = jex_core.Primitive("stelling_assert")
+
+
+@_any_p.def_abstract_eval
+def _any_abstract(*, shape, dtype, lo, hi):
+    return jax.core.ShapedArray(shape, np.dtype(dtype))
+
+
+@_any_p.def_impl
+def _any_impl(*, shape, dtype, lo, hi):
+    raise RuntimeError(
+        "stelling.harness.any_array is a tracing-time declaration; it has no "
+        "concrete value. Call the harness under stelling.harness.trace (or "
+        "jax.make_jaxpr), not eagerly."
+    )
+
+
+def _identity_abstract(aval):
+    return aval
+
+
+_assume_p.def_abstract_eval(_identity_abstract)
+_assert_p.def_abstract_eval(_identity_abstract)
+_assume_p.def_impl(lambda x: x)
+_assert_p.def_impl(lambda x: x)
+
+
+def any_array(shape, dtype, bounds):
+    """Declare a harness input: an arbitrary array of ``shape``/``dtype``
+    with every element in ``bounds = (lo, hi)``. Traces to a
+    ``stelling_any`` equation carrying the bounds as params."""
+    lo, hi = bounds
+    return _any_p.bind(
+        shape=tuple(int(d) for d in shape),
+        dtype=str(np.dtype(dtype)),
+        lo=float(lo),
+        hi=float(hi),
+    )
+
+
+def assume(pred):
+    """Record an assumption in the trace. The MVP interval propagation does
+    **not** refine by assumptions (they are inert, conservative); bounds
+    belong in :func:`any_array`."""
+    return _assume_p.bind(pred)
+
+
+def assert_(pred):
+    """State an obligation: ``pred`` must hold for every input admitted by
+    the ``any_array`` declarations. Returns ``pred`` — harnesses should
+    return their asserts so no obligation can be dropped as dead code."""
+    return _assert_p.bind(pred)
+
+
+def trace(harness) -> ir.ClosedJaxpr:
+    """Trace a nullary harness (inputs declared via :func:`any_array`) and
+    transcribe it. The caller owns jax config (e.g. ``jax_enable_x64``)."""
+    return transcribe(jax.make_jaxpr(harness)())
 
 
 def transcribe(closed_jaxpr) -> ir.ClosedJaxpr:
