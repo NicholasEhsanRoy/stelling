@@ -52,7 +52,8 @@ the candidate set is the deduplicated union. Classification uses title,
 body, labels, state, and thread metadata, with targeted comment reads
 where needed. **If a term worth adding occurs mid-read, it is recorded
 here and not used — it belongs to the next registration:**
-*(none yet)*
+`stuck`, `hang`, `explosion`/`exploded`, `wrong results` (noticed while
+reading diffrax threads; not searched).
 
 ## Taxonomy — every candidate lands in exactly one bucket
 
@@ -116,3 +117,101 @@ count and matters as much.
 - **A zero is a stop, not a re-aim.** If the loud class is absent from the
   loud instrument, that is the answer, and no fifth hypothesis gets
   written in the same breath as the fourth's obituary.
+
+---
+
+# Reading (2026-07-17 — separate commit, after the registration)
+
+Retrieval per registration: 60 issue searches + 12 discussion searches,
+per-(repo, term) totals recorded pre-filter (largest: diffrax
+`after steps` 53, numpyro `nan` 42, diffrax `drift` 39; jax-cfd is nearly
+silent — 1 hit total). **299 unique candidates**: diffrax 129, numpyro
+109, blackjax 40 (incl. discussions), jax-md 20, jax-cfd 1. Every
+candidate classified — full per-candidate appendix in
+`design/tracker-probe-classification.md`:
+
+| bucket | count |
+|---|---|
+| Long-horizon, property writable (**counted**) | **20** |
+| Long-horizon, property test failed (not counted) | 2 |
+| Point-detectable | 89 |
+| Performance | 33 |
+| User error | 5 |
+| Feature request / question / docs / infra | 125 |
+| Unclear (coverage, claimed as nothing) | 25 |
+
+Authorship was checked on the two blackjax MCLMC hits because their style
+raised the possibility of self-filed issues (the instrument must not count
+its maker): both are third-party (`ssage0520`, `junpenglao`). Neither
+excluded.
+
+## The hits — 20, each with its constructive property
+
+| site | failure | property (one line) | shape | cost signals |
+|---|---|---|---|---|
+| diffrax#194 | solver stuck after training epochs | ∀ params on training path: backward-solve state finite, steps bounded | safety | open, c3 |
+| diffrax#207 | step collapse on stiff chemistry, `max_steps` irrelevant | ∀ y0, params in region: accepted dt ≥ dt_min | safety | 46d, c5, Fortran comparison done by user |
+| diffrax#223 | states → inf mid-solve (port of working code) | isfinite(y(t)) ∀ t, ∀ params in region | safety | open, c6 |
+| diffrax#368 | integration failures inside NN-ODE training | ∀ (x,p,k) in training region: solve completes finite | safety | **c16, 23d, training pipeline blocked** |
+| diffrax#386 | step explosion at specific parameter values | ∀ (a,b) in region: num_steps ≤ N | safety | **c12, "large sets of solves", user narrowed it themselves** |
+| diffrax#417 | ReversibleHeun instability | ∀ dt in region: \|y_n\| ≤ B over horizon | safety | open, c1 |
+| diffrax#507 | event intermittently missed under PID | ∀ trajectories in region: cond sign-change ⇒ event fires | safety | open, c3 |
+| diffrax#632 | error creep at small dt | ∀ dt in region: t_{n+1} > t_n (time strictly progresses) | accuracy/float | **258d, c10** |
+| diffrax#657 | StepTo at small dt: silently wrong result in f32 | realized step times = requested grid, ∀ grids in region | accuracy/float | 2d, c4, silent wrongness |
+| diffrax#752 | nonlinear max-steps error instead of step rejection | nonlinear failure ⇒ step rejected (never an error), ∀ states | safety | 6d, c4 |
+| diffrax#756 | infinite final-step rejection loop (clipping × rejection) | controller progress: clipped endpoint step never re-rejected indefinitely | safety | 14d, c5, **found via downstream dynamiqs investigation** |
+| jax-md#92 | jit vs no-jit trajectories diverge after ~1000 steps (similar at 1–10) | \|stat_jit(t) − stat_nojit(t)\| ≤ tol over init region, N=1000 | accuracy | open, c9 |
+| jax-md#339 | neighbor list silently wrong near PBC boundary → occasional explosions | ∀ positions in box: neighbor list ⊇ all pairs within cutoff | safety | **487d to close; user did the narrowing** |
+| blackjax#D416 | some seeds: adaptation emits near-zero step_size kernels | ∀ seeds/inits in region: adapted step_size ≥ ε | safety | open, c6 |
+| blackjax#969 | NaN detector in MCLMC tuning provably never fires | ∀ tuning states: non-finite proposal ⇒ step_size_max shrinks | safety | fixed same day; **a dead detective defence** |
+| blackjax#973 | MCLMC divergence response has no equilibrium in NaN regime | adaptation map keeps step_size in [lo, hi] ∀ states in region | safety | open, filed by core maintainer |
+| numpyro#249 | warmup stuck, step_size → nan | isfinite(step_size) ∧ step_size > 0 throughout warmup, ∀ inits | safety | fixed same day |
+| numpyro#552 | init fails once data size exceeds threshold | isfinite(potential(init)) ∀ init region × N | safety | 2d, c9 |
+| numpyro#1133 | `init_to_uniform` sometimes yields mangled chains | ∀ inits in U-region: sampler state stays in support | safety | 30d, c1 |
+| numpyro#1360 | seed-dependent non-convergence (2–3 in 10 seeds) | ∀ seeds/inits in region: zero divergent transitions | safety | 1d, **c20** |
+
+Excluded by the property test (long-horizon, no non-circular constructive
+property): numpyro#154 (wrong posterior vs Stan — the only property is
+statistical equality with a reference), numpyro#1786 (long-run acceptance
+statistic drifts from target — an expectation property, supermartingale
+territory).
+
+## Landing (against the pre-fixed bands)
+
+**20 hits, in 4 of 5 trackers, with strong cost signals on well over 3
+(jax-md#339: 487 days; diffrax#632: 258 days; diffrax#368: 16 comments in a
+blocked training pipeline; diffrax#386: explicit narrowing labor;
+diffrax#756: a downstream library's stability investigation) → the
+Supported band.** Robustness: dropping the three weakest hits
+(diffrax#417, diffrax#194, blackjax#D416) leaves 17 in 4 trackers — the
+band does not move. jax-cfd contributed zero candidates of any kind; the
+distribution requirement is carried by the other four.
+
+Per the registration: this **licenses writing a value model** with its own
+corpus, experiment, and pre-registered falsifier — nothing more. It does
+not validate the inductive-invariant approach; whether an invariant
+catches these specific failures is a separate experiment.
+
+## The product split
+
+**Safety-shaped 17 : accuracy-shaped 3** (jax-md#92 trajectory
+divergence; diffrax#632/#657 float creep). The trackers are full of
+*NaN/inf/stuck/step-explosion/missed-event over a region*, not "energy
+drifted" — the product this points at is push-button: finite-state,
+bounded-steps, progress, and guard-liveness properties over a
+user-supplied region, no bespoke physics spec required.
+
+Two observations recorded without a reading:
+
+- **Half the hits are properties of solver infrastructure, not user
+  physics** — step controllers, adaptation loops, event detection,
+  endpoint clipping (diffrax#507/#632/#657/#752/#756, blackjax#D416/#969/#973,
+  numpyro#249/#1838-adjacent). The region method's natural first customer
+  may be the library's own control loops: universal, library-owned
+  invariants, the same audience the guard experiment names.
+- **Detective defences themselves appear as defects and as user labor**:
+  blackjax#969 is a provably-dead NaN detector (the guard experiment's
+  Dead bucket, in the wild, in a tracker); diffrax#290 and numpyro#956
+  are users hand-building NaN-termination machinery. The class defends
+  itself badly, which is consistent with the preventive/detective split
+  this probe was designed to test.
