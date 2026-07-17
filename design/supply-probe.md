@@ -112,16 +112,27 @@ test produced constructive properties; it did not check them against the
 incident they came from. Any future registration using one-line properties
 inherits this correction.
 
-## Band assessment — the distribution, not the mean
+## Band assessment — corrected 2026-07-18: the bands are void, not borderline
 
-Where proving happened: 2 rounds each, box-shaped, edge checks reducing to
-monotone-rewrite sign facts — nominally the **borderline** band's cheap
-end, and the boxes are exactly the shape forward propagation with widening
-plausibly infers. But the registration's technique-gap row dominates:
+> **Zero of three incidents discharged.** #386's termination half — the
+> property the hit filed — unproven. #368's proved invariant explicitly
+> does not discharge its incident. #1360's property was false over its own
+> region. Where proving happened, it was cheap — **and it was proving
+> something other than what the hit filed.** The registered bands
+> presupposed property = incident; that premise is what the probe
+> falsified, so the band assessment is **void**, not "borderline." A
+> green-shaped round count in front of a 0/3 is this project's own
+> false-VERIFIED shape, in its own reporting.
+
+The round counts stand as facts about the **provable layer** only: 2
+rounds each, box-shaped, edge checks reducing to monotone-rewrite sign
+facts — exactly the shape forward propagation with widening plausibly
+infers. And the technique-gap row dominates what remains:
 **four distinct gaps across three hits** — controller/ranking,
 learned-component contract, solver-internal iterates,
 trajectory/expectation tier — and none of the four is in the Stage-2
-plan.
+plan. Whether the 0/3 is a targeting error or a fact about induction is
+the layer probe's question (`design/layer-probe.md`).
 
 **The headline: the provable layer and the incident layer are different
 layers.** Induction on the step map reaches state-space boxes cheaply
