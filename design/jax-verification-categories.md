@@ -48,6 +48,7 @@ kind, and trackers):
 | detective or protocol only | any | **alive** — noticed, not dischargeable locally |
 | absent | present | **alive** — not noticed (`t + dt` announces nothing) |
 | absent | absent | **no obligation — or silent and unnoticed.** Trackers cannot tell these apart (incidents require loud failures); only a defence census or a region instrument can. The wedge's original motivation lived exactly here |
+| **noticed, declined** | present | **cell 5 (added 2026-07-18, one instance).** Every available defence costs more than the failure — a runtime check is detective and costly; clamping silently changes the physics — so nothing is written, and it bites anyway. The instance: MADDENING's `MADD-ANO-002` (CFL documented correctly in March, hit in May, still unenforced). Note what the cell implies, on N=1 and written as such: it is the cell where a **static** check is the only defence that is not worse than the bug — the strongest cell the tool has, resting on one instance in the author's own code |
 
 Three amendments earned by measurement: **notice aggregates per
 ecosystem, not per author** (diffrax carries 11 `nextafter` sites while
@@ -498,6 +499,31 @@ why it will feel like evidence that contracts are natural. It is evidence
 that they are natural **here**. The node graph as first client was flagged
 as a trap in this project's first conversation; the MADDENING passes are
 the ones most likely to walk into it.
+
+**Elimination mode — a hypothesis, not adopted (2026-07-18).** The supply
+probe's 0/3 on discharge is **3/3 on attribution**: #386's proof says the
+explosion *is not in the flow* (it's the controller); #368's says the flow
+is fine over the whole family (the NaN is in Newton); #1360's one
+calculation (curvature 1.1e3, ε 37× over the stability limit) diagnoses a
+20-comment thread. Green is diagnostically valuable when aimed at a
+**hypothesis** rather than at the incident — elimination is what debugging
+is — and the architecture's taxonomy ("red is a fact, green is a claim,"
+DOCUMENTATION_ARCHITECTURE §2.2) has no third mode. The asymmetry claimed:
+a false green in safety mode ships a bug (catastrophic, irrecoverable); a
+false green in elimination mode sends the search to the wrong layer for a
+while (graceful, recoverable) — which would let an elimination tool ship
+at a lower soundness bar than the entire §2.3 trust chain is calibrated
+for. **Attacks, recorded with it:** the recoverability depends on the
+hypothesis space being small enough that "come back when the others fail"
+is bounded — a long layer-walk after a false elimination can cost more
+than the attribution it saved; and elimination value presumes the user
+holds competing hypotheses and trusts green enough to redirect — trust
+that a lowered soundness bar itself erodes. **The hazard that is worse
+than the one removed: mode confusion** — an elimination tool used as a
+safety tool yields the catastrophic failure at the graceful tool's
+soundness. Adoption would therefore require the mode to live **in the
+verdict stamp** (no such field exists), not in documentation. Three data
+points and one reading of them; nothing is built on this.
 
 **Publishable regardless of whether stelling ships** (recorded 2026-07-18;
 one list, no work): the primitive census (`design/primitive-census.md`),

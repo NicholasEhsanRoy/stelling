@@ -163,3 +163,17 @@ work order's thesis in one data point and no more than that.
 natural target is recorded: `cdd.py`'s outer loop — an iteration-cap
 termination obligation identical in shape to diffrax#386's, on the
 author's own code.
+
+## Inversion (2026-07-18): the core is the finding, not the nodes
+
+The reading above filed the core as "separately labeled." Inverted: the
+coupling fixed-point loop, the Aitken/IQN accelerators, the IFT implicit
+solver, and the multi-GPU iterative solver **are MADDENING's library
+internals, and the author is their maintainer** — the 17-of-20 customer
+(*a maintainer verifying control loops*) instantiated in his own repo.
+Every node, evaluate-shaped or not, inherits the core: the
+maintainer-inheritance argument arriving at home instead of in diffrax.
+The natural supply-probe target is corrected accordingly: **the core's
+coupling fixed-point loop**, not `cdd.py` — its termination is the same
+obligation shape as diffrax#386's, and it is the thing every node depends
+on.

@@ -192,6 +192,22 @@ corpus, experiment, and pre-registered falsifier — nothing more. It does
 not validate the inductive-invariant approach; whether an invariant
 catches these specific failures is a separate experiment.
 
+## Scope note and cost-signal correction (added 2026-07-18, derived from this registration)
+
+**This corpus is post-detection by construction.** The registered search
+terms are detection words — `nan`, `diverge`, `blow up` — so no hit can be
+a failure nobody noticed: detection cost ≈ 0 across all 20, *by
+selection*. This corpus can never speak to detection value; whatever the
+487 days and 258 days were spent on, it was not noticing.
+
+**And the cost signals above are calendar proxies, not effort.** A thread
+open 258 days may hold four hours of work across eight months of neglect.
+The demand band's cost evidence is therefore **weaker than reported** —
+comment counts and explicit cost statements ("took me three days to narrow
+this down") are the effort-grade signals, and their *wording* (narrowing
+vs implementing) is data. The phase decomposition lives in
+`design/attribution-probe.md`.
+
 ## The product split
 
 **Safety-shaped 17 : accuracy-shaped 3** (jax-md#92 trajectory
