@@ -81,3 +81,25 @@ So the honest form of the E2a re-read: **3 of 7, on two sound anchors and
 one defective one.** The re-check strengthened two of the three
 mechanized results (their anchors reach their incidents) and confirmed the
 third's known gap — the symmetric outcome the bias declaration promised.
+
+## Cause reconciliation for bjx#D416 (the report named two)
+
+An earlier draft named **two different causes** for bjx#D416 — "no floor
+clamp" (in the control-flow run reading) and "RNG key reuse" (here).
+Resolved from the thread: the reporter self-found and fixed the bug —
+*"the error was a RNG_KEY being used twice… `keys[6]` repeated… fixed it
+while posting"*. **The incident's actual cause is RNG key reuse.** The
+"no floor clamp" was *my harness's modelling choice* (a clamp-less
+dual-averaging body, built to demonstrate non-mechanization), not the
+incident's cause, and the control-flow reading is corrected to say so.
+
+The property `step_size ≥ ε` therefore **anchors to the RNG cause and is
+defective (conflates layers)** — the classification above stands: it
+captures the *symptom* (near-zero step_size) while the cause is PRNG
+plumbing, a different layer E2a does not model. This also bounds what the
+D416 UNKNOWN found: a partial violation of *the modelled clamp-less
+property*, which is a generic fact about clamp-less adaptation, **not** a
+verified statement about blackjax's real code (I did not inspect whether
+blackjax clamps) and **not** the incident's bug (which is the reused key).
+The negative result's value is "this property is not an invariant," not
+"found blackjax's defect."

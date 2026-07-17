@@ -69,7 +69,7 @@ is preserved).
 | **dfx#207** | **VERIFIED** | **discharges** the registered property — the `dtmin` clamp (`max`) makes `dt ≥ dt_min` a loop-body invariant; 94% coverage. *Property-incident gap:* the `max_steps` collapse is a step-COUNT bound the property does not reach |
 | **npy#249** | **VERIFIED** | **precondition** — `step_size = exp(·) > 0` is a loop-body invariant; the `isfinite` conjunct is float-specific (ℝ-partial) and out of the registered semantics |
 | **bjx#969** | UNKNOWN | does not mechanize: the shrink `0.8·s_max < s_max` is **dependency-shaped** (interval loses that `s_new` came from `s_max` — the dfx#632 exhibit's shape) → an **affine-forms** case, not the search-shaped the prior predicted |
-| **bjx#D416** | UNKNOWN | does not mechanize: `step_size ≥ ε` is **not preserved without a floor clamp** — which is the incident's own cause; counts 0 (and the incident mechanism, RNG key reuse, is a killed category out of scope) |
+| **bjx#D416** | UNKNOWN | does not mechanize: `step_size ≥ ε` is **not preserved by the clamp-less adaptation body I modelled** (a modelling choice, *not* the incident's cause — see the cause reconciliation below); counts 0. The incident's actual cause is RNG key reuse, a killed category out of scope |
 
 ## Band: 2 of 4, across 2 libraries → **SUPPORTED**
 
@@ -128,9 +128,12 @@ counting attempts is **1**:
   `log_eps = log ε, h_stat = +5`, `step_size = exp(log ε − 0.5) ≈
   6.07×10⁻⁴ < ε = 10⁻³`. The property is **genuinely false** on part of
   the box (no repeated variable in `log_eps − 0.1·h_stat`) — a straddle
-  from real non-invariance, which is the incident's own cause (no floor
-  clamp). **Affine cannot fix a real violation.** Counting it as
-  dependency-shaped is the miscount.
+  from real non-invariance. **Affine cannot fix a real violation.**
+  Counting it as dependency-shaped is the miscount. (The missing floor
+  clamp is *my harness's* modelling choice, not the incident's cause; the
+  incident's actual cause is RNG key reuse — see
+  `design/property-recheck.md`. The two were conflated in an earlier draft
+  of this line.)
 - **dfx#632 — out of the denominator.** Dependency-shaped, but the exhibit
   "never counts" by its own label; not a corpus case.
 
