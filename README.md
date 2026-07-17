@@ -1,9 +1,54 @@
 <img src="assets/stelling_logo.png" alt="the stelling logo: three cubes arranged as ∴, therefore" width="140" align="right">
 
 # Stelling
-Inspired by Kani, Stelling is an assertion-based verifier for JAX array programs. It lowers jaxpr to SMT queries to mathematically prove invariants, index safety, and robust bounds over infinite horizons, ensuring that scientific code is strictly verified against silent failures.
+Inspired by Kani, Stelling is an assertion-based verifier for JAX array
+programs. Today it checks stated box invariants of continuous flows by
+forward interval propagation over the traced jaxpr — outward-rounded,
+solver-free, with a stamp on every verdict naming its own assumptions.
+The roadmap (`design/founding.md`) aims it further: SMT-backed
+invariants, index safety, and bounds over horizons no test can reach.
 
 *stelling is not affiliated with or endorsed by the JAX project.*
+
+## What it does — and what it doesn't, measured
+
+**Does:**
+
+- Checks **stated box invariants on continuous flows** (edge-flux
+  inductiveness): the harness declares bounded inputs
+  (`any_array`), obligations (`assert_`), and membership of known data in
+  the declared set (`nonvacuity`) — all as traced primitives, so the
+  query's content hash covers the declarations, not just the program.
+- **Forward interval propagation** over the jax-free IR
+  (`stelling.ir`), outward-rounded (one deliberate ulp per operation),
+  with three-valued verdicts: **VERIFIED**, **REFUTED** (set-level: the
+  stated box is not invariant — not a witness), **UNKNOWN** (our
+  imprecision, never guessed away).
+- **Every verdict carries a full stamp**: stelling and jax versions,
+  query content hash, arithmetic representation *and* semantics,
+  precision configuration, solver (today: recorded absence), nonvacuity,
+  the tier and provenance of every transfer used, its assumptions, and
+  ⊤-coverage — including constraints that were *dropped*, which are
+  counted and named, never hidden.
+
+**Doesn't (yet, and the stamp or the docs say so in each case):**
+
+- **Derive invariants.** Check mode only: you state the box, stelling
+  judges it. Derive mode is designed and deliberately unbuilt.
+- **Handle `cond` / `scan` / `while`.** Control flow falls to ⊤ and is
+  counted as such in coverage.
+- **Say anything about discrete steps.** Every verdict so far is about
+  the continuous flow; a solver's stepped trajectory is a different
+  object, and no artifact here blurs them.
+- **Model IEEE float semantics.** The stamp says `real`: obligations are
+  judged in exact real arithmetic, and a predicate can hold in ℝ while
+  failing in floats — that gap held a 258-day bug upstream, which is why
+  the stamp names its semantics per verdict.
+- **Discharge the recorded incidents.** Against the 20 long-horizon
+  failures this project mined from public trackers, hand proofs
+  discharged **0 of 3** attempted; the box invariants it checks are
+  preconditions of arguments, not incident closures
+  (`design/supply-probe.md`, `design/layer-probe.md`).
 
 ## Installation
 
@@ -22,7 +67,7 @@ extras, imported lazily on first use, so a bare install never touches the JAX
 |---|---|---|
 | `stelling[z3]` | `z3-solver` (MIT) | Z3 backend |
 | `stelling[cvc5]` | `cvc5` (BSD-3-Clause) | cvc5 backend, official PyPI wheels |
-| `stelling[solvers]` | both solvers | the recommended install |
+| `stelling[solvers]` | both solvers | future backends — **no verdict uses a solver yet** (`design/unknown-triage.md` registers when one gets built) |
 | `stelling[jax]` | `jax` (CPU) | bootstrap **only** — never use it if jax is already installed |
 | `stelling[all]` | = `[solvers]` | deliberately excludes jax |
 
@@ -94,6 +139,14 @@ Nominative use — referring to stelling by name or logo — is fine and
 expected. This is the same source-open/marks-reserved split Ferrocene
 ships, not an open-core arrangement, and it is consistent with Apache-2.0,
 whose §6 grants no trademark rights anyway.
+
+**No solver is a required dependency, and none is linked or vendored.**
+The SMT backends are optional extras — separate wheels you opt into — and
+an external cvc5 binary is driven as a separate process over SMT-LIB2
+text. Nothing solver-shaped is compiled into, vendored into, or derived
+into stelling. Today this is true by measurement, not just policy: every
+verdict the tool has produced involved **no solver at all**, and each
+stamp records that absence explicitly rather than omitting it.
 
 Provenance is machine-verifiable: the repo is REUSE-compliant
 ([reuse.software](https://reuse.software); `LICENSES/`, `REUSE.toml`,
