@@ -155,3 +155,77 @@ that uses it.
 layer on the one case with a known answer; the E2a bands
 (`design/value-model-v2.md`) stay open until the other 12
 reconstructions run — future passes, not this one.
+
+---
+
+# Amendments (2026-07-18, after the first verdict, before the twelve)
+
+## The amendment rule — stated before it is used
+
+Editing a registration is the move this project forbids; an amendment is
+the narrow exception, and it needs a rule written when nothing is at
+stake:
+
+> **An amendment to a live registration is permissible iff all three
+> hold: (a) it is additive; (b) it cannot move a count in either
+> direction; (c) the defect it corrects was found by the registration's
+> own control, not by a result anyone wanted.** It is recorded as an
+> amendment, with its justification, never silently.
+
+## Amendment 1: REFUTED enters the verdict vocabulary
+
+The registered sentence *"E2a's checker never emits a refutation"* is
+superseded — **its stated reason never covered the rule it wrote**. The
+reason was about straddles ("an interval straddling zero is our
+imprecision, not their counterexample"), and straddle → UNKNOWN remains
+correct. Definite-false is not a straddle: the propagated set contains
+the reachable one, so *definitely false over the declared box* is a
+**sound set-level refutation of the stated box** — the box is not
+inductive as stated. It is not a witness (no concrete input; the wedge's
+discipline is untouched) and not a counterexample to the program; it is
+the claim the mutation control earns, and it shipped under "no
+information".
+
+Verdict semantics, as amended: **VERIFIED** (all obligations definitely
+true) / **REFUTED** (at least one obligation definitely false over the
+declared set) / **UNKNOWN** (everything else, straddles included).
+
+Against the rule: (a) additive — a third status, no existing meaning
+changed; (b) count-neutral — REFUTED is not VERIFIED, so an E2a case
+returning it still counts 0 and the band arithmetic is untouched;
+(c) found by the registration's own §10.8 mutation control, whose red
+went out labeled "no information". The mutation harness now renders
+REFUTED, with the failing face named.
+
+## Amendment 2: inert `assume`, registered before it bites
+
+`assume` is inert in the MVP propagation — sound (propagation runs over a
+superset of the declared set) and, until this amendment, **silent**: the
+dropped constraint hid inside a 100% coverage line, because the counter
+measured primitive coverage, not semantic fidelity. Two of the remaining
+twelve are implications and will hit this (dfx#752: *nonlinear failure ⇒
+step rejected*; bjx#969: *non-finite proposal ⇒ step_size_max shrinks*).
+Fixed before they run:
+
+- **The coverage line now counts dropped constraints as their own
+  category** (`inert`), named, outside the "known" fraction — a drop can
+  never hide inside 100% again.
+- **A VERIFIED with dropped constraints stands** — more was proved than
+  asked — with the drop disclosed in the stamp's coverage line and a
+  rendered note.
+- **An UNKNOWN with dropped constraints is recorded as `blocked (inert
+  assume)`**: it counts 0 toward the mechanized number (conservative),
+  and it **cannot be cited as a mechanization failure** — wherever an E2a
+  count is reported, blocked cases are named in the same sentence. "The
+  harness was wrong is a work item, not a band adjustment" stands; this
+  defines which item the work is.
+- The implication workaround (`¬P ∨ Q`) needs `not`/`or`, which are not
+  in the census list — **they arrive by census when their targets run**,
+  never by guessing.
+
+Against the rule: (a) additive — reporting vocabulary and a coverage
+category; the mechanized criterion is untouched; (b) count-neutral — the
+only existing result (case 1, no assumes) is unaffected, and future
+blocked cases still count 0; (c) the defect is the tool's own
+instrumentation gap, found by inspection of the control surface before
+any of the twelve produced a result anyone could want.
