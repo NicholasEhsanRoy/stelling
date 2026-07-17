@@ -382,9 +382,18 @@ stencil code before anything leans on it.
 5. **L5a — custom-rule region agreement.** New, small, near-reach: two
    named lineax rules, property registered, primal surface zero.
 6. **L5b — transform/compile equivalence.** Real, evidenced, distant.
-7. **L6 — contracts.** Conditional, now *measured*: the capacity
-   consolidation failed its registered criterion; one demand instance is
-   not a customer.
+7. **L6 — contracts.** Reclassified 2026-07-18: **evidenced from the
+   supply side, unforced.** The capacity consolidation failed its
+   registered criterion (one demand instance is not a customer) — but
+   #368's proof then **could not close without** `|f(x,p)| ≤ M`, and the
+   layer probe minted a second (`|∂f/∂x| ≤ L`), a dt-condition coupling
+   Newton to the controller, and an error-model contract: the first
+   evidence for contracts was produced by a probe that wasn't looking for
+   them, and every layer descended minted more. Demand remains unsampled;
+   the blocking-obligation evidence is a different and stronger kind. The
+   learned-component contracts are CROWN-tier, and the dependency check
+   says: jax_verify archived, auto_LiRPA active-but-PyTorch — reachable
+   only across a process boundary (the `STELLING_CVC5` pattern).
 
 Six kills by construction, five by measurement, one honest "unmeasured" —
 plus one kill *inside a survival* (primal agreement: zero wild surface;
@@ -459,6 +468,13 @@ under a pre-registered taxonomy and are **not** re-read for this pattern
 terms stay banked. Testing it needs new data under a new registration.
 The value model aiming at this ranking should know the hypothesis exists
 and know it is untested.
+
+**Publishable regardless of whether stelling ships** (recorded 2026-07-18;
+one list, no work): the primitive census (`design/primitive-census.md`),
+this taxonomy, the semantics-drift rate (~3.6/yr floor,
+`design/semantics-drift-probe.md`), and the archaeology receipts
+(`design/archaeology-probe.md`). Nobody has these numbers for JAX;
+their value does not depend on the build decision.
 
 The frame held and got sharper: 4/4 retrodicted, four predictions
 confirmed (three strong, one soft disjunction — recorded), and the
