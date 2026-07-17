@@ -22,6 +22,11 @@ Counting semantics, matched to what an interpreter would traverse:
   are **unreached**: the analysis never looked at them, and counting the
   wrapper as one ⊤ out of N would understate exactly the confound the
   falsifier guards against.
+* **inert** equations have a known primitive whose *semantics were not
+  honored* — a constraint dropped rather than applied (the MVP's
+  ``stelling_assume``). The counter measures semantic fidelity, not just
+  primitive coverage: a no-op transfer must never count as known, or a
+  dropped constraint hides inside 100%.
 
 Two entry points: :func:`measure` walks a finished :class:`stelling.ir`
 query (usable today, on transcribed code); :class:`CoverageCounter` is the
@@ -50,6 +55,8 @@ class Coverage:
     unknown: int  # equations reached but fallen to ⊤
     unreached: int  # equations inside sub-jaxprs of unknown primitives
     unknown_primitives: tuple[tuple[str, int], ...]  # (name, ⊤ count), most frequent first
+    inert: int = 0  # known primitive, semantics NOT honored (dropped constraint)
+    inert_primitives: tuple[tuple[str, int], ...] = ()
 
     @property
     def fraction_known(self) -> float:
@@ -65,6 +72,9 @@ class Coverage:
             parts.append(f"{self.unknown} ⊤ across {len(self.unknown_primitives)} primitives ({names})")
         if self.unreached:
             parts.append(f"{self.unreached} unreached")
+        if self.inert:
+            names = ", ".join(f"{n} ×{c}" for n, c in self.inert_primitives)
+            parts.append(f"{self.inert} constraint(s) DROPPED ({names})")
         return "; ".join(parts)
 
 
@@ -76,6 +86,7 @@ class CoverageCounter:
         self._transparent = 0
         self._unreached = 0
         self._unknown: Counter[str] = Counter()
+        self._inert: Counter[str] = Counter()
 
     def record_known(self, primitive: str) -> None:
         self._known += 1
@@ -89,16 +100,28 @@ class CoverageCounter:
     def record_unreached(self, primitive: str) -> None:
         self._unreached += 1
 
+    def record_inert(self, primitive: str) -> None:
+        self._inert[primitive] += 1
+
     def freeze(self) -> Coverage:
         unknown_total = sum(self._unknown.values())
+        inert_total = sum(self._inert.values())
         return Coverage(
-            total=self._known + self._transparent + unknown_total + self._unreached,
+            total=self._known
+            + self._transparent
+            + unknown_total
+            + self._unreached
+            + inert_total,
             known=self._known,
             transparent=self._transparent,
             unknown=unknown_total,
             unreached=self._unreached,
             unknown_primitives=tuple(
                 sorted(self._unknown.items(), key=lambda kv: (-kv[1], kv[0]))
+            ),
+            inert=inert_total,
+            inert_primitives=tuple(
+                sorted(self._inert.items(), key=lambda kv: (-kv[1], kv[0]))
             ),
         )
 

@@ -3,9 +3,13 @@
 
 """Verdicts and their stamps, per SOUNDNESS.md's contract.
 
-A verdict is ``VERIFIED`` or ``UNKNOWN`` — nothing else. This checker
-never refutes: a definitely-false obligation is reported inside an
-UNKNOWN verdict (see :mod:`stelling.propagate`).
+A verdict is ``VERIFIED``, ``REFUTED``, or ``UNKNOWN``. REFUTED
+(`design/e2a-registration.md`, amendment 1) is a **set-level refutation
+of the stated box**: at least one obligation is definitely false over
+the propagated superset of the declared set, so the box is not invariant
+*as stated*. It is not a witness — no concrete input is produced — and
+not a counterexample to the program. Straddles stay UNKNOWN: *our*
+imprecision, never their counterexample.
 
 The stamp is the contract from SOUNDNESS.md ("What every verdict must
 carry"), enforced structurally:
@@ -35,6 +39,27 @@ from stelling.propagate import ObligationReport, Propagation
 __all__ = ["SolverStamp", "Stamp", "StampError", "Verdict", "make_verdict"]
 
 ARITHMETIC_MODE_INTERVAL = "interval/f64/outward-1ulp (stelling.interval)"
+
+# The representation names how brackets are computed; the SEMANTICS names
+# which arithmetic the verdict is *about*. They are different fields because
+# the gap between them is where false-VERIFIED lives: `t + dt > t` is
+# trivially true in ℝ and was a 258-day float bug (diffrax#632). Today's
+# only value — the founding doc's ℝ-with-margin/IEEE-exact dial, position
+# recorded per verdict:
+SEMANTICS_REAL = (
+    "real (ℝ): obligations judged in exact real arithmetic over the declared "
+    "sets; the traced program's IEEE float behaviour is NOT modeled — a "
+    "predicate can hold in ℝ and fail in floats"
+)
+
+# A consequence of ℝ semantics, carried as an assumption because it is one:
+# under IEEE, inf is a value and 0*inf is NaN; the closed-real-interval
+# convention 0·∞ = 0 is sound only because half-infinite intervals here mean
+# "unbounded above but finite", which is the ℝ reading.
+REAL_CONVENTION_ASSUMPTION = (
+    "closed-real-interval endpoint convention 0*inf = 0 — a consequence of "
+    "'real' semantics; unsound under IEEE semantics, where inf is a value"
+)
 
 
 class StampError(ValueError):
@@ -88,7 +113,8 @@ class Stamp:
     stelling_version: str
     jax_version: str  # the jax that traced the harness
     query_content_hash: str  # ir.ClosedJaxpr.content_hash()
-    arithmetic_mode: str
+    arithmetic_mode: str  # endpoint representation (how brackets are computed)
+    semantics: str  # which arithmetic the verdict is about (ℝ vs IEEE)
     precision_config: str  # e.g. "jax_enable_x64=True"
     device_class: str  # of any concrete execution the verdict relies on
     solver: SolverStamp
@@ -115,6 +141,7 @@ class Stamp:
             f"stelling {self.stelling_version} | jax {self.jax_version}",
             f"query {self.query_content_hash}",
             f"arithmetic: {self.arithmetic_mode}",
+            f"semantics: {self.semantics}",
             f"precision: {self.precision_config} | device: {self.device_class}",
             f"solver: {solver}",
             "transfers: "
@@ -130,12 +157,19 @@ class Stamp:
 
 @dataclass(frozen=True)
 class Verdict:
-    status: str  # "VERIFIED" | "UNKNOWN"
+    status: str  # "VERIFIED" | "REFUTED" | "UNKNOWN"
     obligations: tuple[ObligationReport, ...]
     stamp: Stamp
+    notes: tuple[str, ...]  # the addresses: where and why anything degraded
 
     def render(self) -> str:
         lines = [f"== {self.status}"]
+        if self.status == "REFUTED":
+            lines.append(
+                "  (set-level: at least one obligation is definitely false over "
+                "the declared set — the stated box is not invariant as stated. "
+                "Not a witness; not a counterexample to the program.)"
+            )
         for o in self.obligations:
             lines.append(f"  assert #{o.index}: {o.status} — {o.detail}")
             # location re-derived from the *current* query's source_info,
@@ -144,6 +178,8 @@ class Verdict:
             if o.source_info:
                 lines.append(f"    at {o.source_info[-1]}")
         lines.append(self.stamp.render())
+        for n in self.notes:  # under the coverage line: the actionable half
+            lines.append(f"note: {n}")
         return "\n".join(lines)
 
 
@@ -157,12 +193,18 @@ def make_verdict(
     device_class: str = "none: no concrete execution in this verdict",
 ) -> Verdict:
     """Assemble the verdict for an interval-propagated harness query."""
-    status = "VERIFIED" if propagation.all_discharged else "UNKNOWN"
+    if propagation.any_violated:
+        status = "REFUTED"
+    elif propagation.all_discharged:
+        status = "VERIFIED"
+    else:
+        status = "UNKNOWN"
     stamp = Stamp(
         stelling_version=stelling_version,
         jax_version=jax_version,
         query_content_hash=closed.content_hash(),
         arithmetic_mode=ARITHMETIC_MODE_INTERVAL,
+        semantics=SEMANTICS_REAL,
         precision_config=precision_config,
         device_class=device_class,
         solver=solver_absent(
@@ -171,7 +213,14 @@ def make_verdict(
         ),
         transfer_tiers=propagation.transfers_used,
         transfer_provenance=tuple((p, "core") for p, _ in propagation.transfers_used),
-        assumptions=propagation.assumptions,
+        assumptions=tuple(
+            sorted({*propagation.assumptions, REAL_CONVENTION_ASSUMPTION})
+        ),
         coverage=propagation.coverage.summary(),
     )
-    return Verdict(status=status, obligations=propagation.obligations, stamp=stamp)
+    return Verdict(
+        status=status,
+        obligations=propagation.obligations,
+        stamp=stamp,
+        notes=propagation.notes,
+    )

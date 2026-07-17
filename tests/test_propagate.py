@@ -108,6 +108,79 @@ def test_no_obligations_is_not_discharged():
     assert not p.all_discharged  # a harness with no asserts verifies nothing
 
 
+def test_mixed_violated_and_unknown_reports_violation():
+    # one face definitely false + one undecided: the violation is definite
+    # regardless of the other face — any_violated drives a REFUTED verdict
+    x, e1, p1, o1, p2, o2 = var(0), var(1), var(2, BOOL), var(3, BOOL), var(4, BOOL), var(5, BOOL)
+    q = close(
+        [
+            any_eqn(x, 1.0, 2.0),
+            ir.JaxprEqn(primitive="exp", invars=(x,), outvars=(e1,)),
+            ir.JaxprEqn(
+                primitive="lt",
+                invars=(e1, ir.Literal(val=2.0, aval=F64)),  # e^1 > 2: false
+                outvars=(p1,),
+            ),
+            assert_eqn(p1, o1),
+            ir.JaxprEqn(
+                primitive="lt",
+                invars=(e1, ir.Literal(val=7.0, aval=F64)),  # straddles
+                outvars=(p2,),
+            ),
+            assert_eqn(p2, o2),
+        ],
+        (o1, o2),
+    )
+    p = propagate(q)
+    assert p.any_violated
+    assert [o.status for o in p.obligations] == ["violated-over-set", "unknown"]
+
+
+def test_inert_assume_is_counted_named_and_noted_never_hidden():
+    x, pred, apred, ex, p2, out = var(0), var(1, BOOL), var(2, BOOL), var(3), var(4, BOOL), var(5, BOOL)
+    q = close(
+        [
+            any_eqn(x, 1.0, 2.0),
+            ir.JaxprEqn(
+                primitive="gt",
+                invars=(x, ir.Literal(val=1.5, aval=F64)),
+                outvars=(pred,),
+            ),
+            ir.JaxprEqn(primitive="stelling_assume", invars=(pred,), outvars=(apred,)),
+            ir.JaxprEqn(primitive="exp", invars=(x,), outvars=(ex,)),
+            ir.JaxprEqn(
+                primitive="lt",
+                invars=(ex, ir.Literal(val=8.0, aval=F64)),
+                outvars=(p2,),
+            ),
+            assert_eqn(p2, out),
+        ],
+        (out,),
+    )
+    p = propagate(q)
+    assert p.coverage.inert == 1
+    assert p.coverage.inert_primitives == (("stelling_assume", 1),)
+    assert p.dropped_constraints == 1
+    assert "DROPPED" in p.coverage.summary()
+    assert p.coverage.fraction_known < 1.0  # a drop cannot hide inside 100%
+    assert any("DROPPED" in n for n in p.notes)
+    assert p.all_discharged  # VERIFIED-with-drops stands (superset proved)
+    assert "stelling_assume" not in dict(p.transfers_used)  # no tier claimed
+
+
+def test_unbound_var_raises_instead_of_widening():
+    x, y, out = var(0), var(7), var(8, BOOL)  # var 7 is never bound
+    q = close(
+        [
+            any_eqn(x, 1.0, 2.0),
+            ir.JaxprEqn(primitive="exp", invars=(y,), outvars=(out,)),
+        ],
+        (out,),
+    )
+    with pytest.raises(ir.TranscriptionError):
+        propagate(q)
+
+
 def test_free_invars_are_refused():
     x = var(0)
     q = ir.ClosedJaxpr(

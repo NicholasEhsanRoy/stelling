@@ -35,6 +35,7 @@ def full_stamp_kwargs():
         jax_version="0.11.0",
         query_content_hash="deadbeef",
         arithmetic_mode="interval/f64/outward-1ulp",
+        semantics="real (ℝ)",
         precision_config="jax_enable_x64=True",
         device_class="none: no concrete execution in this verdict",
         solver=solver_absent("interval arithmetic discharged everything"),
@@ -59,6 +60,7 @@ def test_empty_fields_fail_loudly_instead_of_defaulting():
         "jax_version",
         "query_content_hash",
         "arithmetic_mode",
+        "semantics",
         "precision_config",
         "device_class",
         "coverage",
@@ -101,15 +103,24 @@ def test_first_verdict_carries_the_full_stamp():
     assert ("exp", "sound-libm") in v.stamp.transfer_tiers
     assert all(origin == "core" for _, origin in v.stamp.transfer_provenance)
     rendered = v.render()
-    for needle in ("VERIFIED", "solver: none", "assumes:", "coverage:", "query "):
+    for needle in (
+        "VERIFIED",
+        "solver: none",
+        "assumes:",
+        "coverage:",
+        "query ",
+        "semantics: real",
+    ):
         assert needle in rendered
+    # the ℝ-semantics consequence rides as a stamped assumption, always
+    assert any("0*inf = 0" in a for a in v.stamp.assumptions)
     # the stamp is frozen: no post-hoc field surgery
     with pytest.raises(dataclasses.FrozenInstanceError):
         object.__delattr__  # placate linters; the real check:
         v.stamp.jax_version = "other"  # type: ignore[misc]
 
 
-def test_undischarged_obligations_never_verify():
+def test_definite_violation_is_refuted_set_level():
     closed = exp_lt_harness(2.0)
     v = make_verdict(
         closed,
@@ -118,6 +129,21 @@ def test_undischarged_obligations_never_verify():
         jax_version="0.11.0",
         precision_config="jax_enable_x64=True",
     )
-    assert v.status == "UNKNOWN"  # definite violation reports, never refutes
+    assert v.status == "REFUTED"  # red is a fact, and now it has a verdict
     assert isinstance(v, Verdict)
     assert v.obligations[0].status == "violated-over-set"
+    rendered = v.render()
+    assert "not invariant as stated" in rendered
+    assert "Not a witness" in rendered
+
+
+def test_straddle_stays_unknown_not_refuted():
+    closed = exp_lt_harness(7.0)  # e^2 ≈ 7.389 > 7 > e: undecided, not false
+    v = make_verdict(
+        closed,
+        propagate(closed),
+        stelling_version="0.1.0",
+        jax_version="0.11.0",
+        precision_config="jax_enable_x64=True",
+    )
+    assert v.status == "UNKNOWN"  # our imprecision, never their counterexample

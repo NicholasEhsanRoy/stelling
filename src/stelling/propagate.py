@@ -24,10 +24,15 @@ transfer *used* ride into the verdict stamp.
 Obligations are ``stelling_assert`` equations. Their statuses:
 ``discharged`` (predicate definitely true over the declared box),
 ``unknown`` (interval too wide to decide — *our* imprecision), or
-``violated-over-set`` (definitely false somewhere in the box — still
-reported under an UNKNOWN verdict, never as a refutation: the checker's
-job is VERIFIED-or-not, and a witness discipline is the wedge's, not
-ours).
+``violated-over-set`` (definitely false over the propagated superset of
+the declared box — a **sound set-level refutation of the stated box**,
+rendered as a REFUTED verdict per `design/e2a-registration.md` amendment
+1; not a witness, not a counterexample to the program).
+
+``stelling_assume`` is **inert** in this MVP: the constraint is dropped,
+which is sound (propagation runs over a superset) and must never be
+silent — each drop is counted in coverage as ``inert`` (outside the
+"known" fraction) and noted with its source address (amendment 2).
 """
 
 from __future__ import annotations
@@ -72,6 +77,14 @@ class Propagation:
         return bool(self.obligations) and all(
             o.status == "discharged" for o in self.obligations
         )
+
+    @property
+    def any_violated(self) -> bool:
+        return any(o.status == "violated-over-set" for o in self.obligations)
+
+    @property
+    def dropped_constraints(self) -> int:
+        return self.coverage.inert
 
 
 # -- literals and consts ------------------------------------------------------
@@ -170,7 +183,6 @@ TRANSFERS = {
         ],
         TIER_EXACT,
     ),
-    "stelling_assume": (lambda eqn, p, ins: [ins[0]], TIER_EXACT),
     "stelling_assert": (lambda eqn, p, ins: [ins[0]], TIER_EXACT),
 }
 
@@ -202,9 +214,16 @@ class _Propagator:
         if isinstance(atom, ir.Literal):
             return _value_to_interval(atom.val, atom.aval.shape)
         got = self.env.get(atom.id)
-        if got is None:  # a var never bound: soundness demands ⊤, loudly noted
-            self.notes.append(f"unbound var {atom.id}; treated as ⊤")
-            return iv.top(atom.aval.shape)
+        if got is None:
+            # not a coverage gap: an equation reading a never-bound var is a
+            # transcription/traversal defect, and ⊤-ing it would soundly hide
+            # a bug in the one module that must not have bugs. Same discipline
+            # as the params whitelist: unknown primitives are fine, unknown
+            # *structure* is not.
+            raise ir.TranscriptionError(
+                f"equation reads var {atom.id} before any binding — "
+                f"transcription defect, refusing to widen it away"
+            )
         return got
 
     def top_out(self, eqn: ir.JaxprEqn) -> None:
@@ -249,6 +268,20 @@ class _Propagator:
             self.counter.record_unknown(eqn.primitive)
             self.mark_unreached(eqn)
             self.top_out(eqn)
+            return
+
+        if eqn.primitive == "stelling_assume":
+            # inert by design (amendment 2): sound, counted, addressed —
+            # never silent, never "known".
+            ins = [self.read(a) for a in eqn.invars]
+            self.counter.record_inert(eqn.primitive)
+            where = eqn.source_info[-1] if eqn.source_info else "unknown location"
+            self.notes.append(
+                f"assume constraint DROPPED (inert in MVP propagation) at {where}: "
+                f"VERIFIED proves a superset; UNKNOWN may be confounded by this drop"
+            )
+            for out, val in zip(eqn.outvars, ins):
+                self.env[out.id] = val
             return
 
         entry = TRANSFERS.get(eqn.primitive)

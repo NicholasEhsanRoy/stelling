@@ -73,15 +73,26 @@ def test_content_hash_covers_the_bounds():
     ).content_hash()
 
 
-def test_assume_lands_and_is_inert():
+def test_assume_lands_and_its_drop_is_disclosed():
     def h():
         x = any_array((), "float64", (1.0, 2.0))
-        assume(x > 1.5)  # MVP: recorded, not refining
+        assume(x > 1.5)  # MVP: recorded, dropped, and SAID to be dropped
         return assert_(jnp.exp(x) < 8.0)
 
     cj = trace(h)
     assert "stelling_assume" in primitives(cj)
-    assert propagate(cj).all_discharged
+    p = propagate(cj)
+    assert p.all_discharged  # VERIFIED-with-drops stands: superset proved
+    assert p.coverage.inert == 1 and "DROPPED" in p.coverage.summary()
+    v = make_verdict(
+        cj,
+        p,
+        stelling_version="test",
+        jax_version=jax.__version__,
+        precision_config="jax_enable_x64=True",
+    )
+    assert v.status == "VERIFIED"
+    assert any("DROPPED" in n for n in v.notes) and "DROPPED" in v.render()
 
 
 def test_end_to_end_verified():
@@ -106,7 +117,7 @@ def test_positive_control_mutation_comes_back_red():
         jax_version=jax.__version__,
         precision_config="jax_enable_x64=True",
     )
-    assert v.status == "UNKNOWN"
+    assert v.status == "REFUTED"  # red is a fact, with a verdict of its own
     assert v.obligations[0].status == "violated-over-set"
 
 

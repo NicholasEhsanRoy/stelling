@@ -46,6 +46,16 @@ Every verdict object stamps, at minimum:
   different devices **hash identically** with different numerics. The hash
   is half-right by construction; the device stamp closes exactly the other
   half,
+- **the arithmetic semantics the verdict speaks** — ℝ vs IEEE float —
+  separate from the endpoint representation. `interval/f64/outward-1ulp`
+  names how brackets are *computed*, not what the verdict is *about*: the
+  first verdict's interval propagation judges obligations in exact real
+  arithmetic while the traced program runs in floats, and the gap between
+  those is where false-VERIFIED lives — `t + dt > t` is trivially true in
+  ℝ and was a 258-day float bug (diffrax#632, a hit in this project's own
+  corpus). Conventions consequent on the declared semantics (the
+  closed-real-interval `0·∞ = 0` endpoint rule, unsound under IEEE where
+  `inf` is a value) are stamped as assumptions, which they are,
 - the query's content hash (`stelling.ir.ClosedJaxpr.content_hash()`; the
   hash covers semantic content and excludes source locations, so identical
   programs traced from different files share verdicts),
@@ -92,4 +102,13 @@ Three further commitments bind every implementation of the stamp:
 
 ## Log
 
-*(empty — no releases yet)*
+- **2026-07-18 (pre-release): the stamp contract gained the semantics
+  field.** The first verdict (E2a case 1, unreleased) shipped silently ℝ:
+  its stamp named the endpoint representation but not which arithmetic
+  the verdict was about, and the `0·∞ = 0` interval convention was an
+  undeclared commitment to ℝ semantics. No verdict flipped; the field and
+  the stamped assumption close a disclosure gap, found before any
+  release. Third field the contract has grown (solver options, precision
+  config, semantics) — each because something was true and unsaid.
+
+*(no releases yet)*
