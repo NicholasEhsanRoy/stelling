@@ -573,6 +573,23 @@ soundness. Adoption would therefore require the mode to live **in the
 verdict stamp** (no such field exists), not in documentation. Three data
 points and one reading of them; nothing is built on this.
 
+**Third sighting (2026-07-18, bjx#D416 — still unadopted).** The D416
+UNKNOWN carries a **true negative** E2a structurally cannot count, because
+E2a counts VERIFIED: the modelled `step_size ≥ ε` property is *false* at
+`h_stat = +5` (`design/property-recheck.md`). That is a second data point
+of the same shape as the five attribution-probe layer errors, and the
+third occasion a *negative* result carried value E2a's counting misses.
+**Three sightings, one shape — recorded, count noted, nothing changed.**
+Two precisions from the cause reconciliation (`design/property-recheck.md`)
+so the sighting is not oversold: the true negative is about the *modelled
+clamp-less property*, a generic fact, **not** a verified statement about
+blackjax's code and **not** the incident's bug (RNG key reuse); the value
+is "this property is not an invariant," not "found the defect." The number
+is worth having *because* it accumulates without being acted on — an
+honest open question keeps a count, not a commitment. If it ever enters,
+it enters with its own corpus and its own falsifier, before it runs on
+anything — the guard-experiment discipline, unchanged.
+
 **Publishable regardless of whether stelling ships** (recorded 2026-07-18;
 one list, no work): the primitive census (`design/primitive-census.md`),
 this taxonomy, the semantics-drift rate (~3.6/yr floor,
