@@ -62,6 +62,33 @@ Bucket assignments are recorded per-case in the E2a readings, with the
 face expression quoted for dependency-shaped claims (the multiple
 occurrence must be pointable-at, not asserted).
 
+## Defect and forward fix: triggers need a ≥2-sources clause (2026-07-18)
+
+Every band in this project carries a **≥ 2-sources clause** — concentration
+in one project is a fact about that project, load-bearing in the tracker,
+provenance, and E2a bands. **The solver trigger above omits it** ("≥ 2 of
+the twelve" counts cases, not libraries), and the affine ordering note
+mirrored the omission. This is a real registration defect, found by review.
+
+**It is not repaired retroactively.** Against the amendment rule
+(`design/e2a-registration.md`): (a) it is *restrictive*, not additive;
+(b) it would *un-fire* a trigger, not stay count-neutral; (c) it was found
+by review, not by the registration's own control. Fails all three.
+Tightening a threshold after the fact is exactly the move the rule stops,
+and it stays true when the author is the one who wrote the omission. **The
+solver and affine triggers stand as written** (both are unfired anyway, so
+nothing turns on it here).
+
+**Forward fix, binding the next trigger, not this one:** every future
+trigger carries a **≥ 2-sources clause by default** — search/dependency-
+shaped UNKNOWNs across ≥ 2 *distinct libraries*, not merely ≥ 2 cases.
+Same shape as the property-test corrections: forward-looking. And any
+trigger result is reported with its source spread in the same sentence,
+the relation-breakdown move applied to a build decision. (Recorded fact:
+the one dependency-shaped counting sighting is bjx#969, blackjax; adding
+the out-of-denominator dfx#632 exhibit makes the two sightings span
+blackjax + diffrax — so no single-source concentration obtains.)
+
 ## Reading (2026-07-18, after the E2a run — `design/e2a-run.md`)
 
 **The trigger had almost no data.** Zero search-shaped UNKNOWNs, so the

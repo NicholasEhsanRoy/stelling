@@ -112,3 +112,32 @@ residual wall is elsewhere.
 The solver's registered trigger is unchanged and still has almost no data;
 what the run added is evidence about *which* upgrade the corpus wants, and
 it is not the solver.
+
+## The affine trigger did NOT fire — the recount, held against a miscount
+
+A later review proposed that the affine trigger *fired* on "two
+dependency-shaped UNKNOWNs, both blackjax." **It did not, and the recount
+confirms the reading above.** The trigger is *dependency-shaped UNKNOWNs
+across ≥ 2 of the corpus cases* (`design/unknown-triage.md`). The count in
+counting attempts is **1**:
+
+- **bjx#969 — dependency-shaped.** `0.8·s_max < s_max` is true for every
+  `s_max > 0`; the tool returns UNKNOWN only because interval arithmetic
+  loses that `s_new` came from `s_max`. Affine fixes exactly this.
+- **bjx#D416 — NOT dependency-shaped.** Verified: at the corner
+  `log_eps = log ε, h_stat = +5`, `step_size = exp(log ε − 0.5) ≈
+  6.07×10⁻⁴ < ε = 10⁻³`. The property is **genuinely false** on part of
+  the box (no repeated variable in `log_eps − 0.1·h_stat`) — a straddle
+  from real non-invariance, which is the incident's own cause (no floor
+  clamp). **Affine cannot fix a real violation.** Counting it as
+  dependency-shaped is the miscount.
+- **dfx#632 — out of the denominator.** Dependency-shaped, but the exhibit
+  "never counts" by its own label; not a corpus case.
+
+So: **1 dependency-shaped UNKNOWN (bjx#969, blackjax), not 2. The affine
+trigger stays unfired, and affine stays out of tree.** The two
+dependency-shaped *sightings* overall (bjx#969 + the dfx#632 exhibit) are
+even across two libraries (blackjax + diffrax), so the "both blackjax"
+concentration does not obtain either. The registered ordering still holds
+— affine is the *likeliest* next build when it fires — but it has **not**
+fired, and nothing here licenses building it.
