@@ -427,6 +427,25 @@ one arc nobody ordered: **the #632 fix's guard is the cause of #756's
 infinite rejection loop** — defences composing into new failure modes,
 dated, in one repo. A fact about the kills; it reopens none of them.
 
+**The product split, corrected (2026-07-18).** The tracker probe's
+`17 safety : 3 accuracy` split classified **who writes the spec**
+(universal region vs bespoke invariant). It says **nothing about proof
+difficulty**, and this file's earlier "push-button" phrasing over-read it:
+a safety-shaped property can still demand inductive strengthening, and
+strengthening is the user writing more spec. Push-button rests entirely on
+**invariant inference**, which was untested against any hit until the
+supply probe (`design/supply-probe.md`). First measurement, three
+cost-ranked hits: the **state-space layer** is genuinely cheap — 2-round
+box invariants, edge checks reducing to sign facts, exactly the shape
+widening-based inference plausibly finds — but it is **contract-gated**
+(a learned-component bound; a controller model), and the **incident
+layer** those hits came from is **technique-gapped four ways**
+(controller/ranking, learned-component contracts, solver-internal
+iterates, trajectory/expectation tier — none in the Stage-2 plan). One
+property of three was false over its own region; another conflated flow
+state with solver-internal state. This paragraph supersedes the tracker
+reading's "push-button" sentence wherever the two disagree.
+
 **A hypothesis about this ranking — generated, not tested (2026-07-18).**
 The archaeology arc (#632's ULP guard caused #756's infinite rejection
 loop) is an **L3 artifact causing an L2 failure**. If that generalises,
