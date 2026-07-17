@@ -1,0 +1,22 @@
+stelling marks license
+
+The "stelling" name and the stelling logo (the ∴ cube mark and the
+favicon renderings of it, in assets/) are marks of Nicholas Ehsan Roy,
+identifying this project and its maintainer.
+
+Permitted, and expected: nominative use. Use the name and logo to refer
+to the stelling project — in articles, talks, package metadata,
+comparisons, dependency lists, links, screenshots, and similar.
+
+Not permitted: using the name or logo to brand a fork, a derivative, or
+an unaffiliated product or service, or in any way that implies
+affiliation with or endorsement by the project or its maintainer.
+
+For clarity: this covers the marks only. The stelling source code is
+licensed under Apache-2.0, whose Section 6 grants no trademark rights —
+reserving the marks is consistent with the code license, not an
+exception to it. This is not an open-core arrangement: all code is open;
+only the identifying marks are reserved, so that a fork cannot be
+mistaken for the project.
+
+stelling is not affiliated with or endorsed by the JAX project.

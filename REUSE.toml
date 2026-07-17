@@ -26,3 +26,11 @@ path = ["DCO"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2004, 2006 The Linux Foundation and its contributors"
 SPDX-License-Identifier = "LicenseRef-DCO"
+
+# The marks (name, logo, favicons) are reserved — code open, marks not
+# (the Ferrocene split). See LICENSES/LicenseRef-stelling-marks.txt.
+[[annotations]]
+path = ["assets/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Nicholas Ehsan Roy"
+SPDX-License-Identifier = "LicenseRef-stelling-marks"

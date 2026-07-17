@@ -1,5 +1,9 @@
+<img src="assets/stelling_logo.png" alt="the stelling logo: three cubes arranged as ∴, therefore" width="140" align="right">
+
 # Stelling
 Inspired by Kani, Stelling is an assertion-based verifier for JAX array programs. It lowers jaxpr to SMT queries to mathematically prove invariants, index safety, and robust bounds over infinite horizons, ensuring that scientific code is strictly verified against silent failures.
+
+*stelling is not affiliated with or endorsed by the JAX project.*
 
 ## Installation
 
@@ -79,9 +83,17 @@ and tests.
 
 ## License
 
-Apache-2.0. Deliberately no NOTICE file: nothing is vendored, so there is no
-attribution to propagate. One gets added the day third-party code actually
-lands in-tree.
+**Apache-2.0 for the code; marks reserved.** All source is Apache-2.0 —
+deliberately no NOTICE file: nothing is vendored, so there is no
+attribution to propagate (one gets added the day third-party code actually
+lands in-tree). The stelling name and logo (`assets/`) are **not** under
+the code license: they are marks of the maintainer, reserved so a fork
+cannot be mistaken for the project
+([`LICENSES/LicenseRef-stelling-marks.txt`](LICENSES/LicenseRef-stelling-marks.txt)).
+Nominative use — referring to stelling by name or logo — is fine and
+expected. This is the same source-open/marks-reserved split Ferrocene
+ships, not an open-core arrangement, and it is consistent with Apache-2.0,
+whose §6 grants no trademark rights anyway.
 
 Provenance is machine-verifiable: the repo is REUSE-compliant
 ([reuse.software](https://reuse.software); `LICENSES/`, `REUSE.toml`,
