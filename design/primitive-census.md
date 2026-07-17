@@ -219,3 +219,31 @@ pattern stelling ships: no cap, a documented tested range, and a
 | `split` | 1/7 | 1 | 1 | 0 | 0 |  |
 | `unstack` | 1/7 | 1 | 1 | 0 | 0 |  |
 | `unvmap_max` | 1/7 | 1 | 0 | 1 | 0 |  |
+
+## The target census: hit386's reconstruction (2026-07-18, jax 0.11.0)
+
+The same instrument aimed at the E2a build target instead of the
+ecosystem (`corpus/supply/census_hit386.py`: the faithful vector-field
+transcription — parameters as arguments, so their `exp` traces — plus the
+three face-flux obligation functions of the hand-proved box). **The tier
+assignment is not the build order for this target.** The returned set,
+exactly, is the MVP's transfer list:
+
+| primitive | tier | count |
+|---|---|---|
+| `slice`, `squeeze` | 1a | 32 + 32 |
+| **`exp`** | **5** | **25** |
+| `mul` | 1b | 16 |
+| `broadcast_in_dim` | 1a | 14 |
+| `sub` | 1b | 13 |
+| `concatenate` | 1a | 7 |
+| `convert_element_type` | 1b | 7 |
+| `add`, `div` | 1b | 4 + 4 |
+| `lt`, `gt` | 1b | 2 + 1 |
+
+Twelve primitives; **nothing outside tiers 0–1 and `exp`** — so no new
+schedule finding beyond the one already visible: `exp` sits in tier 5
+(float-boundary) by category, and is the third most frequent primitive in
+the first real target, while most of tier 1 is not needed at all. The
+by-category schedule and the by-target schedule are different orders; the
+target census is the one that answers "what do I write tonight."
