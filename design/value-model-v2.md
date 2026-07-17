@@ -24,6 +24,26 @@ and what would show it.** Two pages; links, not summaries.
 That is the whole claim. This model prices one layer and abandons the
 other, by name.
 
+> **First evidence (2026-07-18, E2a run — `design/e2a-run.md`): the claim
+> lands WEAK, and narrower than written.** Of 7 in-semantics
+> reconstructible hits, **1 mechanized** (dfx#417) — and it is a
+> *precondition* with a discrete-step gap named, not a discharge; **0
+> discharge a registered property**. The measured reason is sharper than
+> the band: the MVP mechanizes **ODE flow-box invariants** cleanly (the
+> control and dfx#417, 100% coverage, no solver), but **6 of 7 registered
+> properties are a layer away** — controller/sampler adaptation state or
+> constructions, unposeable without control-flow transfers and a
+> discrete-step model. So "machine-checked qualitative state predicates
+> on solver state" is true for the *flow-invariant* sub-shape and not yet
+> reachable for the *controller/sampler* sub-shape that dominates the
+> corpus. The clause "**bear on real recorded incidents**" is the part
+> the run does not support: the one mechanized case bears on a
+> *precondition*, and the incident itself (a discrete solver instability)
+> is out of frame. The claim is not falsified (≥1, not 0) and not
+> supported (< 4); it is Weak, and the honest form going forward prices
+> the flow-invariant sub-shape and names the controller/sampler shape as
+> the frontier that control-flow + discrete-step machinery would open.
+
 ## What it prices, and what it abandons
 
 **Priced: the state-predicate layer.** Both supply-probe invariants were
