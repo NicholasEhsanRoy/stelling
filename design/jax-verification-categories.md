@@ -183,6 +183,22 @@ customer → output shape → falsifier.
 - **Output shape.** **Artifact-shaped**: "this controller terminates
   within N steps for all inputs in R" is a bound nobody today can produce.
 - **Falsifier.** Same template as L1, over the 7 recorded instances.
+- **Precision (2026-07-18, measured — `design/precision-probe.md`).**
+  **Precision is not a nice-to-have, it is viability**: a proof whose
+  output is 10⁴× loose has the same value as no proof and costs more. On
+  the one instance measured (#386's PID bound, N ≈ 1.3×10⁹ vs a filed
+  10⁵), the entire gap sits in the error-model contract `C = L⁶` — not in
+  the domain (interval evaluation over the box is *exact*, Z3-proved
+  corner-attained: affine/zonotope forms buy nothing here) and not in the
+  set (the reachable tube **fills** the proved box; every sampled
+  trajectory converges to the stiff boundary layer; the unsound
+  single-trajectory optimum is still 1.3×10⁹). The quantitative bound of
+  this category is dead on that instance without a stiffness-aware
+  local-error contract (solution derivatives, not flow-map derivatives) —
+  machinery further out of plan than trajectory tubes. The ranking that
+  favours artifact-shaped bounds isn't wrong — it's incomplete: an
+  envelope's value is a function of its tightness, and tightness had
+  never been measured before this probe.
 
 ### L3 — Guard and detector obligations
 
@@ -369,7 +385,11 @@ stencil code before anything leans on it.
    incidents, solver-state-first, the envelope rendering with no
    incumbent.
 2. **L2 — termination/progress of adaptive loops.** Unmoved: 5/20 + the
-   `stuck`×31 surface, absent from every existing plan, artifact-shaped.
+   `stuck`×31 surface, absent from every existing plan, artifact-shaped —
+   now **precision-gated**: the quantitative bound was measured 10⁴
+   vacuous on its own instance (`design/precision-probe.md`); the
+   qualitative forms (ranking-condition existence, guard liveness on the
+   abnormal path) are what survive.
 3. **L3 — guard/detector obligations.** **Strengthened by both
    readings**: the completeness sub-form now has four wild
    silent-construction instances (#165, #191, #339, #507) plus three

@@ -81,3 +81,72 @@ filed `N_box = 1.3×10⁹` evaluated `L` at the boundary-layer point
 interval-over-the-box value is expected slightly *worse* (~1.7×10⁹). The
 filed number was already tube-grade in its `L`. Reported in the reading
 either way.
+
+---
+
+# Reading (2026-07-18 — `corpus/supply/precision_decompose.py`)
+
+## The three numbers, against N_filed = 10⁵
+
+| number | L | N | grounds |
+|---|---|---|---|
+| **N_box** (as filed) | 1.200×10⁵ | **1.29×10⁹** | `layer_pid.py`, boundary-layer point |
+| **N_affine** (sound floor for ALL same-box machinery) | 1.581×10⁵ | **1.70×10⁹** | Z3 **PROVED** the sup of `L` over the box is attained at the corner → interval evaluation is *exact*; no affine/zonotope form over the same box can be tighter |
+| **N_tube** (incident's own trajectory, unsound) | 1.236×10⁵ | **1.33×10⁹** | RK4 at dt = 5×10⁻⁶, scipy BDF cross-check agrees to 4 digits |
+| **N_tube** (best trajectory over an 82-IC box grid) | 1.236×10⁵ | **1.33×10⁹** | identical to the incident's — see below |
+
+**Band: N_tube > 10⁵ → dead for this hit.** No machinery helps — not
+zonotopes, not tubes. The looseness is in the method, not the domain.
+
+## The decomposition — where the 10⁴ actually is
+
+- **Domain imprecision: factor 1.0, exactly.** The dependency problem is
+  absent: `L` is separately monotone with single variable occurrences, the
+  corner is a real box point, and Z3 proved corner domination over
+  directed-rounding brackets. Affine/zonotope forms are worth *nothing on
+  this instance*. The in-plan "biggest single precision jump" does not
+  move this number.
+- **Set over-approximation: factor ≈ 1.3, total.** The registered premise
+  ("the invariant box is far larger than the reachable tube; x1 ∈ [6.8,
+  415] is a factor of 61") is **false on this instance**: the tube fills
+  the box. Occupied x1 = [6.83, 414.44] against a box of [6.8, 415]; c
+  descends to 0.0292 against an edge of 0.019. Every one of 82 sampled
+  trajectories converges to the equilibrium boundary layer (c* = 0.0292,
+  x1* = 414.4) — per-trajectory sup L is 1.2355×10⁵ for the incident's
+  y0, and for the *best* IC in the grid, identically. The supply probe's
+  2-round box was nearly tight. Tubes were never the missing machinery.
+- **The error-model contract: the entire 10⁴ (and more).** Annotation,
+  measured: scipy BDF on the same system at the issue's own tolerance
+  finishes in **294 accepted steps**. The filed 10⁵ had 340× headroom;
+  the `C = L⁶` bound overshoots *reality* by ~4.5×10⁶. The contract
+  conflates flow-map stiffness with solution regularity: the trajectory
+  converges to the stiff boundary layer, where the solution is nearly
+  constant and an L-stable integrator takes its *largest* steps (mean
+  accepted dt ≈ 0.34 vs the model's dt* ≈ 3.8×10⁻⁷). A bound faithful to
+  the incident needs local error in terms of *solution* derivatives along
+  the trajectory — stiff local-error theory (B-convergence tier), which
+  is yet another **contract layer**, not a set representation, and is
+  further out of plan than tubes. Contracts all the way down, one level
+  deeper than the layer probe left it.
+
+## Fidelity demotions
+
+RK4/BDF numerics are unsound by design (registered; N_tube is a bound on
+the achievable only). The `C = L⁶` proxy was held fixed as the isolating
+control — the decomposition allocates the gap *given* that model; the
+294-step annotation is what bounds the model term itself. The c-sampling
+cap (`c < e^{a1}`) and the 82-IC grid are choices; the invariance of the
+per-trajectory sup across the entire grid is why they don't bind.
+
+## What this changes
+
+The dead band's registered reading stands with one sharpening: "the
+method" is specifically the **error-constant contract**, and the two
+in-plan/near-plan precision upgrades (affine forms, trajectory tubes)
+were measured at 1.0× and 1.3× against a 10⁴ gap. Into the categories
+artifact (done, this commit): precision is viability; L2's quantitative
+form is precision-gated; an envelope's value is a function of its
+tightness, and tightness had never been measured until now. The
+qualitative exports of the same box — c ≥ 0.019 discharges the
+log-singularity guard obligation regardless of tightness — are untouched
+by this result.
