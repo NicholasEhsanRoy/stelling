@@ -261,3 +261,45 @@ membership conditions (`c(y0) > 0.019`, `y0₁ > 6.8`, `y0₁ < 415`):
 **VERIFIED, nonvacuity checked — 3 membership conditions definitely
 true**, coverage 100%, query hash updated (the query grew; the box did
 not move). Case 1's count of 1 now rests on the mechanized criterion.
+
+---
+
+# New registration (2026-07-18, before the twelve): criterion (ii) is anchored
+
+Filed as a registration — (ii) as registered ("discharges the hit's
+load-bearing qualitative obligation") was **silent on where the
+obligation comes from**, and the silence is a hole: the obligation was
+chosen per hit, by the harness author, after seeing what the box implies.
+Nothing stopped it being picked to fit — for hit386, `box ⟹ c > 0` is
+degenerate, since the box *says* `c ≥ 0.019`. Twelve judgements, each
+worth a whole count.
+
+**The anchor already exists and predates all of this**: each hit's
+one-line property in `design/tracker-probe.md`, registered before the
+supply probe ran. Criterion (ii) is now stated as a **relation to the
+hit's registered property**, and the relation is named wherever the case
+is counted:
+
+- **discharges it** — the box implies the registered one-line property;
+  or
+- **discharges a stated precondition of an argument for it** — with the
+  gap named in the same sentence, exactly as substitute boxes already
+  are.
+
+A box bearing no stated relation to the registered property counts 0,
+whatever it verifies.
+
+## Case 1 re-certification under (ii) (same day)
+
+hit386's registered property: **`∀ (a,b) in region: num_steps ≤ N`**
+(tracker-probe.md). The verified box does **not** discharge it. Case 1
+counts 1 as the second relation: the box discharges a **stated
+precondition of an argument for it** — the trajectory stays in a region
+where the vector field is smooth and bounded away from the
+`log`-singularity (`c ≥ 0.019`), which is what a step-count argument
+needs before it can begin. The gap, named in the same sentence: the
+argument's remaining machinery — the accept/reject ranking and its error
+constant — exists (`corpus/supply/layer_pid.py`, pillars Z3-proved) and
+its bound was **measured 10⁴× vacuous** against the filed `N = 10⁵`
+(`design/precision-probe.md`); the box is a precondition of a currently
+vacuous argument. That is what case 1's count of 1 bought, said plainly.
