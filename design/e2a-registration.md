@@ -289,6 +289,18 @@ is counted:
 A box bearing no stated relation to the registered property counts 0,
 whatever it verifies.
 
+**Reporting rule, registered with it (same shape as substitutes and
+blocked cases, both of which already work this way): wherever an E2a
+count is reported, its relation breakdown is reported in the same
+sentence.** "4 mechanized: 1 discharges the registered property; 3 are
+preconditions of arguments, 2 of whose bounds are measured vacuous" —
+never "4 mechanized, supported." This is **not** a band change and must
+not become one: "mechanized" is defined by (i) + (ii), (ii) permits both
+relations, and the band is ≥4 across ≥2 libraries. Re-weighting the
+relations after seeing case 1's would be exactly the renegotiation the
+registrations forbid. The breakdown lets a reader see what the count
+bought; it does not change the count.
+
 ## Case 1 re-certification under (ii) (same day)
 
 hit386's registered property: **`∀ (a,b) in region: num_steps ≤ N`**

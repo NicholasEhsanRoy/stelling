@@ -99,6 +99,17 @@ derives counts 0; "the harness was wrong" is a work item, never a band
 adjustment; the corpus (the 13, as listed in `design/layer-probe.md`) does
 not change after a run.
 
+*Disclosure (2026-07-18, before any of the 13 has run):* criterion (ii)
+permits two relations to the hit's registered property — discharges it,
+or discharges a stated precondition of an argument for it — and the
+positive control's relation is the second, with the argument it
+preconditions measured vacuous. **A "supported" band with an
+all-precondition breakdown is a weaker result than the word suggests.**
+The relation breakdown is therefore reported in the same sentence as any
+count (`design/e2a-registration.md`, reporting rule); the band itself is
+unchanged. Stated now, before data exists, so it is disclosure rather
+than excuse.
+
 ## The corrections this model inherits — all of them, none quietly
 
 - The 20-hit corpus is **post-detection by construction**
