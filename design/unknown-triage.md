@@ -43,6 +43,34 @@ Ordering note, stated in advance so the outcome can't redraw it:
 same trigger discipline applies to them: dependency-shaped UNKNOWNs
 across ≥ 2 of the twelve, else they stay in plan and out of tree.
 
+**Precondition on the affine trigger — IEEE semantics first
+(2026-07-18, from the dfx#632 exhibit).** On an ℝ-vacuous property a
+*looser* interval domain is *more* protective: the tool did not
+false-green `t + dt > t` only because its brackets (~2 ulp wide) straddle
+exactly where float (~0.5 ulp) cannot distinguish
+(`corpus/supply/exhibit_632.py`). That is not float-awareness — it is the
+tool's imprecision coinciding with float's, by accident, and the
+protection is undeclared. **Affine forms are tighter; tightening closes
+the straddle and the false green appears.** So affine forms and a working
+IEEE/FP-exact semantics are **coupled**: if the affine trigger ever
+fires, it fires with the precondition attached — **IEEE-exact semantics
+(or a per-obligation FP-exact fragment) ships first, or not at all.**
+Shipping affine over ℝ-only arithmetic converts accidental UNKNOWNs into
+false VERIFIEDs.
+
 Bucket assignments are recorded per-case in the E2a readings, with the
 face expression quoted for dependency-shaped claims (the multiple
 occurrence must be pointable-at, not asserted).
+
+## Reading (2026-07-18, after the E2a run — `design/e2a-run.md`)
+
+**The trigger had almost no data.** Zero search-shaped UNKNOWNs, so the
+solver did not fire — but 6 of 7 hits were **unposeable** and never
+reached an UNKNOWN, so this is not "the solver is moot," it is "the
+failure was upstream of the triage." The one clean survivor (dfx#417)
+verified. What stands: the dominant bottleneck was **unposeability**, not
+decidability, and no solver/domain/proof-format addresses that. The
+Z3-vs-cvc5 architecture is untested, not refuted. If control flow lands
+(`design/control-flow-hypothesis.md`), the prediction is that accept/
+reject `cond` predicates straddle and the search-shaped UNKNOWNs finally
+appear — the solver's first *real* evidence, in either direction.

@@ -199,6 +199,18 @@ customer → output shape → falsifier.
   favours artifact-shaped bounds isn't wrong — it's incomplete: an
   envelope's value is a function of its tightness, and tightness had
   never been measured before this probe.
+- **Caveat this now carries (2026-07-18, product risk):** *precision is
+  viability* held one direction — too loose is worthless. The dfx#632
+  exhibit added the other: on ℝ-vacuous properties, too loose is
+  **protective**, because a wide bracket straddles exactly where float
+  can't distinguish, and tightening removes a protection nobody chose
+  (`corpus/supply/exhibit_632.py`, `design/unknown-triage.md`). The
+  experiment is safe — ℝ-vacuous hits are excluded from E2a's denominator
+  — but **a user who never runs the classification has only the accident**,
+  and the roadmap's precision upgrade deletes it. This is a product risk,
+  not an experiment risk: precision is viability *and* precision can make
+  it less safe, and the two are reconciled only by IEEE semantics landing
+  with the tightening, never after it.
 
 ### L3 — Guard and detector obligations
 

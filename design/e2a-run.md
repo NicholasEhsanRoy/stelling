@@ -53,10 +53,15 @@ the corpus mostly sits outside it.
 ## Triggers (`design/unknown-triage.md`)
 
 - **Search-shaped UNKNOWNs across the run: 0.** The **solver trigger does
-  not fire** (needs ≥ 2). On this evidence the Z3-vs-cvc5 question is moot
-  for this product — a finding, as registered, worth more than the
-  integration: nothing in the reachable subclass needed a decision
-  procedure; the barrier was posability, not proof power.
+  not fire** (needs ≥ 2) — but "moot on this evidence" **overstates it**:
+  6 of 7 were unposeable and never reached an UNKNOWN at all, so the
+  trigger's evidence base is essentially one case. The correct statement
+  is *the trigger has almost no data, because the failure was upstream of
+  the triage*. What survives is the kill: the dominant failure was
+  **unposeability**, which no solver, domain, or proof format
+  addresses — you cannot state the property in this frame. The Z3-vs-cvc5
+  architecture is not refuted; it is untested here, killed upstream by a
+  bottleneck that is not decidability.
 - **Dependency-shaped UNKNOWNs in a counting attempt: 0.** The **affine
   trigger does not fire** either. (A dependency-shaped UNKNOWN did appear
   in the dfx#632 *exhibit* — `t + dt > t` — but that is out of the
