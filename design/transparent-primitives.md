@@ -119,10 +119,19 @@ computation is absent entirely.
 The same probe against `custom_jvp` (2026-07-17): **identical result.** A
 jvp rule whose primal output deliberately returns `cos(x)` while `f`
 returns `sin(x)` raises nothing; `jax.value_and_grad` and `jax.jvp` both
-return the lie as the value. The class is not custom_vjp-specific — and by
-census population it is mostly a *custom_jvp* problem: `custom_jvp_call`
-×117 at 3/7 targets (diffrax, optimistix — the ecosystem's best-regarded
-libraries) versus `custom_vjp_call` ×2 at 1/7.
+return the lie as the value. The class is not custom_vjp-specific.
+
+Population, correctly counted (equation counts are not populations — one
+rule called a hundred times is one opportunity for the bug): the corpus's
+117 `custom_jvp_call` equations decompose into **7 distinct rules, all
+library-authored** (equinox ×3, lineax ×3, optimistix ×1; equinox's
+`_nextafter` rule alone is 100 of the 117 equations), plus one equinox
+`custom_vjp` rule — see `design/rule-provenance.md`. Two qualifiers from
+the same probe: `jax.test_util.check_grads` **does** catch lying primals,
+so the live hazard is rules that are never run through it; and rule
+provenance is recoverable from transcribed IR alone (the primal
+`call_jaxpr`'s `debug_info`), so a future checker can attribute findings
+to the rule's author, not the caller.
 
 The commitment this entails is broader than gradients:
 
