@@ -81,3 +81,61 @@ better at the algebra and worse at knowing which conjunct is physically
 natural. The round count measures **the problem, not the user** — the
 right thing for deciding the product, and the artifact must not read as a
 measurement of user effort.
+
+---
+
+# Reading (2026-07-18 — proofs in `corpus/supply/`, Z3-checked)
+
+## Per-hit outcomes
+
+| hit | outcome | rounds | invariant shape | technique gaps |
+|---|---|---|---|---|
+| **diffrax#386** (termination) | state-space half **proved for the continuous flow**: `x1 ∈ [6.8, 415] ∧ exp(a1)−x0 ≥ 0.019` — the log-singularity boundary *repels*, all four edge-flux obligations Z3-PROVED over directed-rounding brackets of the exp constants. Termination half: **not provable by induction on the step map** | 2 | **box** | controller/error-model contract + ranking argument (the L2 "different machinery" claim, now measured at its own selected hit) |
+| **diffrax#368** (invariant) | **proved for the continuous flow over the entire parameter family** (k ∈ [−3,3]⁴): box `x0 ∈ [−8.1, 8.1], x1 ∈ [−3.1, 3.1]`, every edge reducing to a linear sign fact after the monotone-exp rewrite, Z3-PROVED — **conditional on the contract `|f(x,p)| ≤ M`** for the pretrained NN. And the proved invariant **does not discharge the incident**: the failure was NaN inside Kvaerno5's Newton iteration, and Newton trial iterates are not flow states | 2 (+1 forced contract) | **box** | (1) learned-component contract — CROWN-tier, the roadmap's "learned nodes" item; (2) obligations over **solver-internal iterates** — no roadmap item covers them |
+| **numpyro#1360** (invariant) | **property was wrong** — false over its own registered region, necessarily: the incident (2–3 of 10 seeds diverge) is its counterexample. Computed at a region corner: curvature `n/σ² ≈ 1.1e3`, adapted-to-bulk ε exceeds the leapfrog stability limit **~37×** → geometric energy-error growth → divergence. The supply object is the *envelope* (which inits hold?), which is nonlinear in state **and coupled to the adaptation trajectory** | n/a | not box | trajectory/expectation-tier machinery — the founding doc's supermartingale bullet, its farthest item |
+
+**Fidelity demotions, as registered:** both proofs are for the
+**continuous flow**; discrete-step preservation (Kvaerno5's implicit step
+can transiently exit the box) is unproven and would cost further rounds or
+a dt-condition. The #386 box also has a trivially-inward `x0 ≥ 0` face by
+sign inspection (omitted from the script, noted here).
+
+## The loud finding about the tracker probe
+
+Two of three one-line properties did not survive contact, in two
+different ways: #1360's is **false over its own region** (the incident is
+the counterexample — the tracker's property test wrote the *desired*
+invariant over the *incident's* region), and #368's **conflates layers**
+(flow state vs solver-internal state; "solve completes finite" is a
+property of Newton iterates the flow invariant cannot reach). The property
+test produced constructive properties; it did not check them against the
+incident they came from. Any future registration using one-line properties
+inherits this correction.
+
+## Band assessment — the distribution, not the mean
+
+Where proving happened: 2 rounds each, box-shaped, edge checks reducing to
+monotone-rewrite sign facts — nominally the **borderline** band's cheap
+end, and the boxes are exactly the shape forward propagation with widening
+plausibly infers. But the registration's technique-gap row dominates:
+**four distinct gaps across three hits** — controller/ranking,
+learned-component contract, solver-internal iterates,
+trajectory/expectation tier — and none of the four is in the Stage-2
+plan.
+
+**The headline: the provable layer and the incident layer are different
+layers.** Induction on the step map reaches state-space boxes cheaply
+(tool-shaped, inference-plausible, contract-gated). The incidents live in
+solver internals, controller dynamics, and adaptation coupling —
+technique-gapped, methodology-shaped where reachable at all. One sample of
+three, cost-ranked (the expensive end of demand, as the selection rule
+biases and the registration says); but on this sample, **"push-button
+verdicts about the incidents that motivated the demand" is not what
+induction on the step function sells.** What it sells cheaply is the
+state-space envelope — which is also precisely the artifact shape (bounds,
+envelopes) the categories ranking already favored.
+
+Prover-is-not-a-user limit restated: these round counts measure the
+problem. A scientist would not have found the c-boundary repulsion
+argument in four hours or might have found it in one; neither fact is in
+this data.
