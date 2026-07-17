@@ -390,6 +390,43 @@ Six kills by construction, five by measurement, one honest "unmeasured" —
 plus one kill *inside a survival* (primal agreement: zero wild surface;
 every author discharges it by construction).
 
+## The byproduct policy
+
+**Dead killed the proposition, not the feature.** L3 is the wedge's 17
+sites under a different quantifier — same gather transfer function, same
+index cone, same integer SMT. Building L3 builds everything the wedge
+needed, so in-bounds ships as a **free byproduct**: same query, different
+obligation, zero marginal code. The honest limit, recorded: shared
+machinery always, shared obligation sometimes — `isfinite(x[i])` holds
+whether or not `i` is in bounds (clamping still reads a finite element);
+in-bounds matters where the bound is index-dependent (completeness,
+geometry, #339's neighbour-list superset). Do not overclaim the
+subsumption.
+
+And the escape hatch this section exists to close: *"but it's valuable
+for new projects"* is **structurally unfalsifiable by every instrument
+this project has built** — trackers measure incidents, censuses measure
+code, and neither can measure the bug never written because a tool made
+it unthinkable. Every dead category can be resurrected by that sentence,
+forever, without evidence, and it will be available on the worst possible
+day. So, as policy:
+
+> **Dead categories ship as byproducts of live ones, and never appear in
+> a pitch. Changelog, not proposition.** If someone gets value from one,
+> that is data arriving from outside — the only way it could be trusted.
+
+The one legitimate exception is history, because history is measurable:
+the archaeology probe (`design/archaeology-probe.md`) ran under its own
+registration and returned the **scar-tissue band** — three defence
+classes with receipts across two libraries (jax-md's `safe_mask`: "Fixed
+NaNs due to a JAX change in the behavior of np.sqrt at 0"; diffrax's ULP
+endpoint guard fixing the 258-day #632; jax-md's boundary sentinel fixing
+#378) — plus the measured transfer mechanism (the `safe_*` idiom, minted
+in the 2020 fix, applied proactively in 2022/2025/2026 feature work) and
+one arc nobody ordered: **the #632 fix's guard is the cause of #756's
+infinite rejection loop** — defences composing into new failure modes,
+dated, in one repo. A fact about the kills; it reopens none of them.
+
 The frame held and got sharper: 4/4 retrodicted, four predictions
 confirmed (three strong, one soft disjunction — recorded), and the
 judgement-shaped clause replaced by the notice/discharge/pervasiveness
