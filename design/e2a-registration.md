@@ -151,10 +151,12 @@ that uses it.
 
 ## E2a status
 
-**1 of 13, on the positive control.** Mechanization is real at the priced
-layer on the one case with a known answer; the E2a bands
-(`design/value-model-v2.md`) stay open until the other 12
-reconstructions run — future passes, not this one.
+**Positive control passed; 0 of 9 mechanized** (corpus denominator
+corrected by `design/mwe-census.md` — hit386 is the control, never a
+corpus member; the reconstructible corpus is 9 of the 13 state-predicate
+hits). Mechanization is real at the priced layer on the one case with a
+known answer; the E2a bands (`design/value-model-v2.md`) stay open until
+the nine reconstructions run — future passes, not this one.
 
 ---
 

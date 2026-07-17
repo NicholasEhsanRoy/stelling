@@ -86,20 +86,29 @@ them apart isn't one.
   will not be guessed**: they get registered when E2b is reachable, not
   before.
 
-E2a's bands, fixed now:
+E2a's bands, fixed now (thresholds unchanged; denominator corrected by
+the MWE census — see below):
 
-| mechanized predicates (of 13) | reading |
+| mechanized predicates | reading |
 |---|---|
-| **0** — including failure to re-derive the already-hand-proved box | **Falsified.** The cheap layer is not cheap when mechanized; the model dies, reported in the same sentence as the number |
+| **0** — including failure to re-derive the already-hand-proved control box | **Falsified.** The cheap layer is not cheap when mechanized; the model dies, reported in the same sentence as the number |
 | 1–3 | Weak. Publish, re-aim; not grounds to build further |
 | **≥4, across ≥2 libraries** | Supported. The ≥2-libraries clause is load-bearing, as in v0.1 |
 
+*Denominator (2026-07-18, `design/mwe-census.md`): the corpus is the 13
+state-predicate hits of `design/layer-probe.md` §3 — hit386 is the
+**positive control**, never a corpus member, so the corrected standing is
+"0 of 9 mechanized, control passed", not "1 of 13". Of the 13, **9 are
+reconstructible** (full MWE in-thread); the other 4 are excluded before
+the run with published reasons. The **thresholds do not move** — this is
+a denominator fact, and excluding raises the bar (≥4 of 9) conservatively.*
+
 Anti-rationalizations, v0.1's in spirit: a predicate the tool *almost*
 derives counts 0; "the harness was wrong" is a work item, never a band
-adjustment; the corpus (the 13, as listed in `design/layer-probe.md`) does
-not change after a run.
+adjustment; the corpus does not change after a run (it was fixed, and
+narrowed to the reconstructible 9, **before** it).
 
-*Disclosure (2026-07-18, before any of the 13 has run):* criterion (ii)
+*Disclosure (2026-07-18, before any of the reconstructible 9 has run):* criterion (ii)
 permits two relations to the hit's registered property — discharges it,
 or discharges a stated precondition of an argument for it — and the
 positive control's relation is the second, with the argument it
