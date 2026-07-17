@@ -263,6 +263,22 @@ customer → output shape → falsifier.
   physics.
 - **Output shape.** Verdict-shaped; artifact-shaped as "safe dt range for
   this controller at f32".
+- **Corpus measurement (2026-07-18, `design/semantics-classification.md`).**
+  The E2a semantics classification put a hard number on the ℝ blind spot:
+  **2 of the 9 reconstructible hits are ℝ-vacuous** — dfx#632 and dfx#657,
+  properties whose *entire* content is float — i.e. **~22% of the
+  addressable corpus is out of the registered ℝ semantics**, measured, not
+  argued. This lines up with the census (a float-only primitive at rank
+  six) and the founding doc's ℝ-vs-IEEE dial, which framed IEEE-exact as a
+  *later* decision: the corpus says it is a fifth of the addressable
+  surface. **Recorded, not a trigger** — same discipline as the solver and
+  affine forms; IEEE-exact is not built on this number. One nuance the
+  exhibit added (`corpus/supply/exhibit_632.py`): outward-rounded interval
+  arithmetic is *float-conservative* on monotone shapes like `t + dt > t`
+  (it returns UNKNOWN, not a false VERIFIED), so the blind spot's real
+  bite is branch/clip omission and XLA reassociation, not scalar
+  arithmetic — which narrows where the FP-exact fragment is actually
+  needed.
 - **Falsifier.** The FP fragment, pointed at reconstructed #632/#657/#343,
   fails to distinguish the buggy from the fixed versions.
 
