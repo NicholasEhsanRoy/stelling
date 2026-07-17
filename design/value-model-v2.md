@@ -67,12 +67,26 @@ Two experiments, neither needing user contact.
 17 clamp sites (`design/guard-experiment.md`); its bands and falsifier
 stand as written there.
 
-**E2 — the mechanization test, registered here.** The priced layer's
-"cheap" is evidenced only by hand proofs. Once tier-0/1 transfers and
-interval propagation exist, stelling must mechanically derive the
-load-bearing state predicate on the 13 addressable hits' reconstructions —
-beginning with re-deriving hit386's own box with no hand assistance beyond
-harness setup. Bands, fixed now:
+**E2 — the mechanization test — split (2026-07-18), because "mechanize"
+was hiding two products.** The priced layer's "cheap" is evidenced only by
+hand proofs; but *checking* a stated predicate and *deriving* one are
+different claims with different markets, and a falsifier that can't tell
+them apart isn't one.
+
+- **E2a — check mode.** The harness states the box; stelling verifies its
+  inductiveness. Tests whether **checking** is mechanizable — the user
+  writes the invariant; the product is a methodology. **E2a carries the
+  bands below** (they were written for it), beginning with re-deriving
+  hit386's own box with no hand assistance beyond harness setup
+  (operational definitions: `design/e2a-registration.md`).
+- **E2b — derive mode.** Forward propagation with widening; stelling
+  infers the box. Tests **push-button** — the tool. E2b is E2a plus a
+  fixpoint (the widening loop's inner step *is* an inductiveness check),
+  so it cannot be built first. **Its bands are not registered here and
+  will not be guessed**: they get registered when E2b is reachable, not
+  before.
+
+E2a's bands, fixed now:
 
 | mechanized predicates (of 13) | reading |
 |---|---|
@@ -122,5 +136,7 @@ not change after a run.
    contract exist for Kvaerno-class solvers, and who supplies it?
    (minted by `design/precision-probe.md`).
 4. Elimination mode, if ever — its own corpus and falsifier first.
-5. E2's operational definition of "no hand assistance" — fixed before E2
-   runs.
+5. ~~E2's operational definition of "no hand assistance" — fixed before
+   E2 runs~~ — resolved for E2a by `design/e2a-registration.md`
+   (2026-07-18); still open for E2b, whose registration happens when E2b
+   is reachable.
