@@ -27,7 +27,7 @@ jax.config.update("jax_enable_x64", True)
 
 import stelling
 from stelling._jax_compat import jax_version, trace
-from stelling.harness import any_array, assert_
+from stelling.harness import any_array, assert_, nonvacuity
 from stelling.propagate import propagate
 from stelling.verdict import make_verdict
 
@@ -35,6 +35,7 @@ from stelling.verdict import make_verdict
 A = [6.026932645397832, 4.41195014234956, 5.884199824299863,
      3.673504195449191, 4.17957753821087]
 B = -2.823760940491063
+Y0 = (4.1154706432848185, 6.831774897154676)  # the incident's own y0
 
 X1_LO, X1_HI, C_MIN = 6.8, 415.0, 0.019
 
@@ -70,7 +71,16 @@ def box_harness(x1_hi):
         # face c = C_MIN (x1 free): the singularity boundary must repel
         y_c = jnp.array([jnp.exp(a[1]) - C_MIN, x1f])
         o3 = assert_(field(y_c, a, b)[0] < 0.0)
-        return o1, o2, o3
+        # nonvacuity (criterion (i), mechanized): the incident's y0 lies in
+        # the declared box, computed through the box's own traced transform
+        # (c(y0) via the tool-bracketed exp, never a hand-computed constant)
+        y00 = any_array((), "float64", (Y0[0], Y0[0]))
+        y01 = any_array((), "float64", (Y0[1], Y0[1]))
+        c0 = jnp.exp(a[1]) - y00
+        n1 = nonvacuity(c0 > C_MIN)
+        n2 = nonvacuity(y01 > X1_LO)
+        n3 = nonvacuity(y01 < x1_hi * 1.0)
+        return o1, o2, o3, n1, n2, n3
 
     return h
 

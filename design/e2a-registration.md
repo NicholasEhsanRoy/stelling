@@ -220,3 +220,44 @@ result, the softer version of what (c) exists to catch. The rule is
 decorative. The amendment mechanism remains for one thing only:
 superseding registered text that exists and is wrong, as amendment 1
 did.
+
+---
+
+# New registration (2026-07-18, before the twelve): criterion (i) is mechanized
+
+Filed as a registration, not an amendment — the mechanized criterion
+("contains the incident's own initial data") stands unchanged; it was
+**silent on how (i) is established**, and until now it was established by
+eyeball. An inverted or empty declared box verifies everything vacuously,
+and the mutation control cannot catch it: that control proves the
+*checker* isn't vacuous, not that any individual *harness* is. Twelve
+hand-written boxes are about to count 1 or 0 each.
+
+Registered, before any of them runs:
+
+- **`any_array` refuses empty sets at declaration time** (`lo > hi`, or
+  NaN bounds); the interval domain independently refuses empty intervals
+  at construction. Unconditional — a bug regardless of E2a.
+- **The harness declares membership in traced code**: `nonvacuity(pred)`
+  states a conjunct of "the incident's `y0` lies in the declared box",
+  computed through the same traced transforms the box is stated in (for
+  hit386: `c(y0) = exp(a1) − y0₀`, traced, tool-bracketed — never a
+  hand-computed constant).
+- **The stamp carries it** — `checked` / `UNCHECKED` / `FAILED` — as its
+  fourth field (SOUNDNESS.md, logged). A VERIFIED with unchecked
+  nonvacuity additionally carries a rendered may-be-vacuous note.
+- **Counting rule: an E2a case counts 1 only if VERIFIED *and* nonvacuity
+  is `checked`.** Anything else — unchecked, failed, undecided — counts
+  0, with the nonvacuity status named wherever the count is reported.
+  This tightens what a 1 means for all twelve, before any of them exists.
+- **Case 1 is re-certified under the tightened rule** rather than
+  grandfathered: the hit386 harness gains its three membership
+  conditions and re-runs; the result is recorded below.
+
+## Case 1 re-certification (same day)
+
+With `y0 = (4.1155, 6.8318)` declared as point inputs and three traced
+membership conditions (`c(y0) > 0.019`, `y0₁ > 6.8`, `y0₁ < 415`):
+**VERIFIED, nonvacuity checked — 3 membership conditions definitely
+true**, coverage 100%, query hash updated (the query grew; the box did
+not move). Case 1's count of 1 now rests on the mechanized criterion.

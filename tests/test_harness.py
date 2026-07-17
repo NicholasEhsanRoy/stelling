@@ -124,3 +124,47 @@ def test_positive_control_mutation_comes_back_red():
 def test_eager_any_array_refuses():
     with pytest.raises(RuntimeError):
         any_array((), "float64", (0.0, 1.0))
+
+
+def test_empty_declared_set_refused_at_declaration():
+    import math
+
+    for bounds in ((5.0, 3.0), (math.nan, 1.0), (0.0, math.nan)):
+        with pytest.raises(ValueError):
+            any_array((), "float64", bounds)
+
+
+def test_nonvacuity_checked_and_failed_paths():
+    from stelling.harness import nonvacuity
+
+    def h(y0):
+        def inner():
+            x = any_array((), "float64", (1.0, 2.0))
+            p = any_array((), "float64", (y0, y0))  # the "incident" point
+            m = nonvacuity(p > 1.0)
+            m2 = nonvacuity(p < 2.0)
+            return assert_(jnp.exp(x) < 8.0), m, m2
+
+        return inner
+
+    v_in = make_verdict(
+        trace(h(1.5)),
+        propagate(trace(h(1.5))),
+        stelling_version="test",
+        jax_version=jax.__version__,
+        precision_config="jax_enable_x64=True",
+    )
+    assert v_in.status == "VERIFIED"
+    assert v_in.stamp.nonvacuity.startswith("checked")
+    assert not any("vacuous" in n for n in v_in.notes)
+
+    v_out = make_verdict(
+        trace(h(9.0)),  # the point is outside the declared box
+        propagate(trace(h(9.0))),
+        stelling_version="test",
+        jax_version=jax.__version__,
+        precision_config="jax_enable_x64=True",
+    )
+    assert v_out.status == "VERIFIED"  # the box claim itself still holds
+    assert v_out.stamp.nonvacuity.startswith("FAILED")
+    assert any("vacuous" in n for n in v_out.notes)

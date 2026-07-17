@@ -168,6 +168,33 @@ def test_inert_assume_is_counted_named_and_noted_never_hidden():
     assert "stelling_assume" not in dict(p.transfers_used)  # no tier claimed
 
 
+def test_nonvacuity_checks_are_collected_separately():
+    x, m, pred, om, out = var(0), var(1, BOOL), var(2, BOOL), var(3, BOOL), var(4, BOOL)
+    q = close(
+        [
+            any_eqn(x, 1.0, 2.0),
+            ir.JaxprEqn(
+                primitive="gt",
+                invars=(x, ir.Literal(val=0.0, aval=F64)),
+                outvars=(m,),
+            ),
+            ir.JaxprEqn(primitive="stelling_nonvacuity", invars=(m,), outvars=(om,)),
+            ir.JaxprEqn(
+                primitive="lt",
+                invars=(x, ir.Literal(val=3.0, aval=F64)),
+                outvars=(pred,),
+            ),
+            assert_eqn(pred, out),
+        ],
+        (out, om),
+    )
+    p = propagate(q)
+    assert len(p.nonvacuity_checks) == 1
+    assert p.nonvacuity_checks[0].status == "discharged"
+    assert len(p.obligations) == 1  # membership conditions are not obligations
+    assert p.all_discharged
+
+
 def test_unbound_var_raises_instead_of_widening():
     x, y, out = var(0), var(7), var(8, BOOL)  # var 7 is never bound
     q = close(

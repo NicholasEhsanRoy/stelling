@@ -56,6 +56,13 @@ Every verdict object stamps, at minimum:
   corpus). Conventions consequent on the declared semantics (the
   closed-real-interval `0·∞ = 0` endpoint rule, unsound under IEEE where
   `inf` is a value) are stamped as assumptions, which they are,
+- **nonvacuity** — whether the declared input set was mechanically tied to
+  known concrete data (membership conditions computed in traced code
+  through the same transforms the set is stated in): `checked` /
+  `UNCHECKED` / `FAILED`. An inverted or empty declared set verifies
+  everything; the checker-level mutation control cannot catch a vacuous
+  *harness*, and a VERIFIED with unchecked nonvacuity is a different claim
+  from one with it checked — the stamp's job is saying which,
 - the query's content hash (`stelling.ir.ClosedJaxpr.content_hash()`; the
   hash covers semantic content and excludes source locations, so identical
   programs traced from different files share verdicts),
@@ -110,5 +117,11 @@ Three further commitments bind every implementation of the stamp:
   the stamped assumption close a disclosure gap, found before any
   release. Third field the contract has grown (solver options, precision
   config, semantics) — each because something was true and unsaid.
+
+- **2026-07-18 (pre-release, same day): the stamp contract gained the
+  nonvacuity field.** An empty or untethered declared set verifies
+  everything vacuously, and no existing control catches it: the mutation
+  control proves the *checker* isn't vacuous, not that any *harness*
+  isn't. Fourth growth, same reason: true and unsaid.
 
 *(no releases yet)*

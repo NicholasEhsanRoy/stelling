@@ -39,6 +39,7 @@ def full_stamp_kwargs():
         precision_config="jax_enable_x64=True",
         device_class="none: no concrete execution in this verdict",
         solver=solver_absent("interval arithmetic discharged everything"),
+        nonvacuity="checked — 1 membership condition(s) definitely true",
         transfer_tiers=(("exp", "sound-libm"),),
         transfer_provenance=(("exp", "core"),),
         assumptions=("libm exp faithful",),
@@ -63,6 +64,7 @@ def test_empty_fields_fail_loudly_instead_of_defaulting():
         "semantics",
         "precision_config",
         "device_class",
+        "nonvacuity",
         "coverage",
     ):
         kwargs = full_stamp_kwargs()
@@ -110,10 +112,13 @@ def test_first_verdict_carries_the_full_stamp():
         "coverage:",
         "query ",
         "semantics: real",
+        "nonvacuity: UNCHECKED",
     ):
         assert needle in rendered
     # the ℝ-semantics consequence rides as a stamped assumption, always
     assert any("0*inf = 0" in a for a in v.stamp.assumptions)
+    # a VERIFIED without checked nonvacuity says it may be vacuous
+    assert any("vacuous" in n for n in v.notes)
     # the stamp is frozen: no post-hoc field surgery
     with pytest.raises(dataclasses.FrozenInstanceError):
         object.__delattr__  # placate linters; the real check:

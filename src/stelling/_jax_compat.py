@@ -27,7 +27,15 @@ import numpy as np
 from stelling import ir
 from stelling._optional import TESTED_JAX_SERIES, jax_series_tested
 
-__all__ = ["jax_version", "transcribe", "any_array", "assume", "assert_", "trace"]
+__all__ = [
+    "jax_version",
+    "transcribe",
+    "any_array",
+    "assume",
+    "assert_",
+    "nonvacuity",
+    "trace",
+]
 
 # jax types that are pure zero-payload sentinels: recording the type name is
 # lossless. Matched by name because isinstance would require importing the
@@ -107,6 +115,7 @@ def jax_version() -> str:
 _any_p = jex_core.Primitive("stelling_any")
 _assume_p = jex_core.Primitive("stelling_assume")
 _assert_p = jex_core.Primitive("stelling_assert")
+_nonvacuity_p = jex_core.Primitive("stelling_nonvacuity")
 
 
 @_any_p.def_abstract_eval
@@ -129,20 +138,27 @@ def _identity_abstract(aval):
 
 _assume_p.def_abstract_eval(_identity_abstract)
 _assert_p.def_abstract_eval(_identity_abstract)
+_nonvacuity_p.def_abstract_eval(_identity_abstract)
 _assume_p.def_impl(lambda x: x)
 _assert_p.def_impl(lambda x: x)
+_nonvacuity_p.def_impl(lambda x: x)
 
 
 def any_array(shape, dtype, bounds):
     """Declare a harness input: an arbitrary array of ``shape``/``dtype``
     with every element in ``bounds = (lo, hi)``. Traces to a
     ``stelling_any`` equation carrying the bounds as params."""
-    lo, hi = bounds
+    lo, hi = float(bounds[0]), float(bounds[1])
+    if not lo <= hi:  # also rejects NaN: an empty declared set verifies
+        raise ValueError(  # everything vacuously, and is never what anyone meant
+            f"any_array bounds ({bounds[0]!r}, {bounds[1]!r}) declare an empty "
+            f"set; refusing at declaration time"
+        )
     return _any_p.bind(
         shape=tuple(int(d) for d in shape),
         dtype=str(np.dtype(dtype)),
-        lo=float(lo),
-        hi=float(hi),
+        lo=lo,
+        hi=hi,
     )
 
 
@@ -158,6 +174,17 @@ def assert_(pred):
     the ``any_array`` declarations. Returns ``pred`` — harnesses should
     return their asserts so no obligation can be dropped as dead code."""
     return _assert_p.bind(pred)
+
+
+def nonvacuity(pred):
+    """Declare a membership condition tying the declared set to the
+    incident's own data: ``pred`` states (a conjunct of) "the known point
+    lies in the declared box", computed in traced code through the same
+    transforms the box is stated in. The stamp reports whether all
+    declared conditions hold — a VERIFIED with unchecked nonvacuity is a
+    different claim from one with it checked. Returns ``pred``; return it
+    from the harness alongside the asserts."""
+    return _nonvacuity_p.bind(pred)
 
 
 def trace(harness) -> ir.ClosedJaxpr:

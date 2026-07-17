@@ -98,6 +98,13 @@ def test_nan_raises_never_propagates():
         scalar(math.nan, 1.0)
 
 
+def test_empty_interval_refused_at_construction():
+    # an inverted declared set verifies everything vacuously; the domain
+    # refuses it unconditionally, independent of the harness-level check
+    with pytest.raises(iv.IntervalError):
+        iv.from_bounds((), 5.0, 3.0)
+
+
 def test_comparisons_three_valued():
     assert iv.lt(scalar(1.0, 2.0), scalar(3.0, 4.0)).los[0] == 1.0  # definite
     assert iv.lt(scalar(3.0, 4.0), scalar(1.0, 2.0)).his[0] == 0.0  # definite no

@@ -118,6 +118,7 @@ class Stamp:
     precision_config: str  # e.g. "jax_enable_x64=True"
     device_class: str  # of any concrete execution the verdict relies on
     solver: SolverStamp
+    nonvacuity: str  # is the declared set tied to the incident's own data?
     transfer_tiers: tuple[tuple[str, str], ...]  # (primitive, tier) actually used
     transfer_provenance: tuple[tuple[str, str], ...]  # (primitive, origin)
     assumptions: tuple[str, ...]
@@ -144,6 +145,7 @@ class Stamp:
             f"semantics: {self.semantics}",
             f"precision: {self.precision_config} | device: {self.device_class}",
             f"solver: {solver}",
+            f"nonvacuity: {self.nonvacuity}",
             "transfers: "
             + ", ".join(f"{p} [{t}]" for p, t in self.transfer_tiers),
             "provenance: "
@@ -199,6 +201,29 @@ def make_verdict(
         status = "VERIFIED"
     else:
         status = "UNKNOWN"
+
+    checks = propagation.nonvacuity_checks
+    if not checks:
+        nonvacuity = "UNCHECKED — no membership conditions declared"
+    elif all(c.status == "discharged" for c in checks):
+        nonvacuity = (
+            f"checked — {len(checks)} membership condition(s) definitely true "
+            f"(the declared set contains the stated point)"
+        )
+    elif any(c.status == "violated-over-set" for c in checks):
+        nonvacuity = (
+            "FAILED — a membership condition is definitely false: the stated "
+            "point is NOT in the declared set (harness defect, not a box fact)"
+        )
+    else:
+        nonvacuity = "undecided — a membership condition could not be decided"
+
+    notes = propagation.notes
+    if status == "VERIFIED" and not nonvacuity.startswith("checked"):
+        notes = notes + (
+            f"nonvacuity {nonvacuity.split(' — ')[0]}: this VERIFIED may be "
+            f"vacuous — the declared set is not tied to the incident's data",
+        )
     stamp = Stamp(
         stelling_version=stelling_version,
         jax_version=jax_version,
@@ -211,6 +236,7 @@ def make_verdict(
             "no solver invoked: every obligation was judged by outward-rounded "
             "interval arithmetic alone"
         ),
+        nonvacuity=nonvacuity,
         transfer_tiers=propagation.transfers_used,
         transfer_provenance=tuple((p, "core") for p, _ in propagation.transfers_used),
         assumptions=tuple(
@@ -222,5 +248,5 @@ def make_verdict(
         status=status,
         obligations=propagation.obligations,
         stamp=stamp,
-        notes=propagation.notes,
+        notes=notes,
     )

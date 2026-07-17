@@ -67,6 +67,7 @@ class ObligationReport:
 @dataclass(frozen=True)
 class Propagation:
     obligations: tuple[ObligationReport, ...]
+    nonvacuity_checks: tuple[ObligationReport, ...]  # y0-membership conditions
     coverage: Coverage
     transfers_used: tuple[tuple[str, str], ...]  # (primitive, tier), sorted
     assumptions: tuple[str, ...]
@@ -184,6 +185,7 @@ TRANSFERS = {
         TIER_EXACT,
     ),
     "stelling_assert": (lambda eqn, p, ins: [ins[0]], TIER_EXACT),
+    "stelling_nonvacuity": (lambda eqn, p, ins: [ins[0]], TIER_EXACT),
 }
 
 
@@ -206,6 +208,7 @@ class _Propagator:
         self.env: dict[int, iv.IntervalArray] = {}
         self.counter = CoverageCounter()
         self.obligations: list[ObligationReport] = []
+        self.nonvacuity_checks: list[ObligationReport] = []
         self.used: dict[str, str] = {}
         self.assumptions: set[str] = set()
         self.notes: list[str] = []
@@ -316,6 +319,16 @@ class _Propagator:
                     source_info=eqn.source_info,
                 )
             )
+        if eqn.primitive == "stelling_nonvacuity":
+            status, detail = _bool_status(ins[0])
+            self.nonvacuity_checks.append(
+                ObligationReport(
+                    index=len(self.nonvacuity_checks),
+                    status=status,
+                    detail=detail,
+                    source_info=eqn.source_info,
+                )
+            )
         for out, val in zip(eqn.outvars, outs):
             self.env[out.id] = val
 
@@ -332,6 +345,7 @@ def propagate(closed: ir.ClosedJaxpr) -> Propagation:
     p.run(closed.jaxpr, list(closed.consts), [])
     return Propagation(
         obligations=tuple(p.obligations),
+        nonvacuity_checks=tuple(p.nonvacuity_checks),
         coverage=p.counter.freeze(),
         transfers_used=tuple(sorted(p.used.items())),
         assumptions=tuple(sorted(p.assumptions)),

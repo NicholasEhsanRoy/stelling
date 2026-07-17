@@ -19,6 +19,6 @@ time but keeps the import-hygiene boundary intact.
 
 from __future__ import annotations
 
-from stelling._jax_compat import any_array, assert_, assume, trace
+from stelling._jax_compat import any_array, assert_, assume, nonvacuity, trace
 
-__all__ = ["any_array", "assert_", "assume", "trace"]
+__all__ = ["any_array", "assert_", "assume", "nonvacuity", "trace"]
