@@ -76,3 +76,62 @@ detector added, logic fix, docs, won't-fix, user-side resolution} — read
 from closing comments/PRs of the closed hits. This measures the frame's
 cell 2 from the other side (are the alive classes' defences really
 detective-only). Secondary: it does not eat the pass.
+
+---
+
+# Reading (2026-07-18 — after the registration commit)
+
+## Precondition results
+
+diffrax and equinox: **legible** (organic roots, 429/479 lines,
+2021-07). jax-md: root is a 4,441-line OSS import (2019) — per-site rule
+applied: sites present in the root are illegible, sites among the 1,003
+open commits since are readable; **every site that mattered postdates the
+root**. lineax: root is a 6,544-line dump (2023) — its norm rules are
+present at the dump and **illegible there**; the trail crosses repos
+("Moved norms into Lineax", 2023-12) back into diffrax, where the string
+arrives in an infra commit (2022-11, "Upgraded to eqx.internal") —
+ambiguous, cross-repo.
+
+## The digs
+
+| site | introduced | signals | bucket |
+|---|---|---|---|
+| jax-md `safe_mask` | `cea93ab` 2020-03-26, **not in root** | commit message: **"Fixed NaNs due to a JAX change in the behavior of np.sqrt at 0"** — the exact killed class, and the trigger was an upstream jax behaviour change | **RECEIPT** (NaN-at-zero) |
+| jax-md `safe_sqrt`/`safe_norm`/`safe_acos`/`safe_atan2`… | 2022 (reaxff), 2025 (OPLS-AA), 2026 (UMA) — each with new feature work | first-commit-of-those-lines, no failure story | **foresight — downstream of the 2020 receipt**: the idiom, once minted in a fix, is applied proactively thereafter. The population-transfer mechanism, visible inside one repo |
+| diffrax `nextafter` machinery | `8808098` 2021-08-01 (feature commit), then `0a8b1bf` 2021-08-17 **"Crash fixes"** touching the controller's nextafter lines (9 hits in the diff) | added-then-hardened, 16 days apart; message names the failure class; pre-release, no issue tracker yet | **RECEIPT, message-grade** (float-boundary) |
+| diffrax `t1_clip_floor` | `4e8d745` 2025-08-02 **"Use 100 ULP's to clip timesteps close to t1 (#660)"** | PR-linked; and dfx#632's closing comment reads "Fixed in #660 and released in 0.7.1" — the full chain: 258-day incident → ULP guard added → release | **RECEIPT, full-grade** (float-boundary) |
+| jax-md sentinel guard `where(dR < cutoff_sq, result, N)` | `8d97f31` 2026-06-09 **"cell list overflow bug fix at boundaries (#378)"** | PR-linked boundary fix — the guard-anatomy sentinel is itself the record of a boundary bug | **RECEIPT** (boundary completeness/indexing) |
+| jax-md `PartitionError` detector | `511eb19` 2022-11-26 "Initial pass at neighbor list safety improvements" | post-root, intent-shaped message, no failure story | ambiguous-hardening |
+| equinox `_nextafter.py` DAZ guard | not in the file's first version; `-S` first lands on a tooling commit (2023-03) | the failure narrative lives in the **code comment** ("JAX uses DAZ… check to fail near zero"), not the commit message | ambiguous-hardening (strict bucket), comment noted |
+| lineax zero-grad norm rules | present at lineax's root dump; earlier diffrax introduction rides an infra commit | cross-repo, no failure story recoverable | ambiguous / illegible at origin |
+
+## Band: **scar tissue — met**
+
+**Three defence classes with receipts across two libraries**: NaN-at-zero
+(jax-md, 2020), float-boundary (diffrax, 2021 message-grade and 2025
+full-grade), boundary-completeness (jax-md, 2026, PR-linked). The
+proposer's prior on `safe_mask` lands exactly. Per the registration this
+is a fact *about* the kills — mature code has paid; the observed foresight
+is measurably downstream of payments — and it licenses nothing beyond the
+byproduct policy. No kill reopens.
+
+## The arc nobody ordered
+
+`4e8d745` fixed #632 by adding the ULP endpoint-clipping guard — and
+**#756 is an infinite rejection loop caused by that guard's interaction
+with adaptive step rejection.** The defence added for one incident
+created the composition failure of the next: scar tissue generating scar
+tissue at a seam, dated, in one repo. Recorded as evidence for the
+interaction/composition row (L6) and for the frame — defences are
+site-local; their interactions are global.
+
+## Secondary probe (sampled, not exhaustive)
+
+Fix shapes among closed hits: #632 → **guard added** (ULP clip, #660);
+#378/#339 family → **logic fix + sentinel guard added**; #969 →
+**detector-logic fix**; #756 → endpoint-handling fix in the same
+machinery; #249 → same-day logic fix. Guards and detector repairs
+dominate the sample — consistent with cell 2 (defences arrive after the
+fact, and the preventable classes get preventive fixes while the global
+classes get better detectors). Five sampled; marked as a sample.
