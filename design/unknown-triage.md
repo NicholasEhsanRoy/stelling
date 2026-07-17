@@ -26,10 +26,29 @@ it.**
 | **search-shaped** | the obligation needs case analysis or a nonlinear decision procedure | **a solver** — the only bucket that justifies one |
 | **harness** | the box is wrong or too loose | work item |
 | **coverage** | something fell to ⊤ | registry item, **by census** — never by guessing |
-| **false** | the property doesn't hold over the declared set | must surface as **REFUTED**, not UNKNOWN — an entry here is a checker defect, filed as such |
+| **totally-false** | the property is definitely false over the **whole** propagated set | surfaces as **REFUTED**; an UNKNOWN here would be a checker defect |
+| **partially-false** | the property is false on **part** of the declared box and true elsewhere | surfaces as **UNKNOWN, correctly** — the straddle is the honest answer; the *property* is false somewhere, the checker is **not** defective. A real finding: the box is not invariant. (bjx#D416) |
 
 An UNKNOWN does not mean a solver would help. It means intervals were too
 coarse, and the bucket says why.
+
+**Amendment (2026-07-18): the `false` row is split.** It read "the property
+doesn't hold → REFUTED not UNKNOWN; an entry here is a checker defect."
+That was the same double-duty error that produced REFUTED, one level down,
+and worse: a **partial** violation (false on part of the box, true
+elsewhere) correctly straddles to UNKNOWN — the checker is fine, the
+property is false somewhere. bjx#D416 is exactly this and would have read
+as a checker defect under the old row. Against the amendment rule
+(`design/e2a-registration.md`): **(a) additive** — adds the total/partial
+distinction, amendment 1's shape, no existing meaning lost (totally-false
+→ REFUTED unchanged); **(b) count-neutral** — D416 was never bucketed
+dependency-shaped, the count stays 1, no trigger moves; **(c) found by the
+registration's own control** — the face-expression rule ("the multiple
+occurrence must be pointable-at, not asserted") is what showed
+`log_eps − 0.1·h_stat` has no repeated variable, so the UNKNOWN is a real
+violation, not imprecision. First amendment since amendment 1 to satisfy
+(c) cleanly, and the first time one of these procedural controls caught an
+**error** rather than a result.
 
 ## The registered trigger
 
