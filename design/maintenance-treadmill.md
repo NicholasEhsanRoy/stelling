@@ -76,6 +76,21 @@ to break — and one of roughly two owned analyses broke anyway. Merged into
 one number, this slope would lie at Stage 2, when twenty analyses exist
 and the same structural bump costs a week. Track the ratio, not the LOC.
 
+**There is a third speed, and no instrument here reaches it (recorded
+2026-07-18).** The census measures *structural* churn — primitives
+appearing, params changing shape. A **semantics** change produces the
+same jaxpr with a different meaning: `sqrt` is still `sqrt`, the count
+does not move, the census sees nothing — and the archaeology probe's
+headline receipt (`safe_mask`: "Fixed NaNs due to a JAX change in the
+behavior of np.sqrt at 0") is a dated instance of exactly this class
+invalidating downstream correctness silently. Whether the class has real
+volume is what `design/semantics-drift-probe.md` measures; that this file
+was blind to it is true today and is recorded today. If that probe
+returns supported, the treadmill's cost acquires a second face: the same
+versioned-transfer discipline it charges for is the only instrument that
+can *detect* semantic drift downstream (in differential form — the
+circularity limit in the probe's registration).
+
 **Ecosystem lag of zero is the best news in this file** — seven mature
 libraries traced on a day-old jax release. It is the only quantitative
 evidence anyone has bearing on the no-upper-caps rule, and it points the

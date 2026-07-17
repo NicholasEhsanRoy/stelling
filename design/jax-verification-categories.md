@@ -427,6 +427,20 @@ one arc nobody ordered: **the #632 fix's guard is the cause of #756's
 infinite rejection loop** — defences composing into new failure modes,
 dated, in one repo. A fact about the kills; it reopens none of them.
 
+**A hypothesis about this ranking — generated, not tested (2026-07-18).**
+The archaeology arc (#632's ULP guard caused #756's infinite rejection
+loop) is an **L3 artifact causing an L2 failure**. If that generalises,
+the two top-ranked live categories are not independent — the guards
+generate the termination hazards — and the natural first result is not L3
+in isolation but **L2 on guarded control loops**: *does the guard
+terminate?* One dated instance with a traced causal chain, in one repo,
+is all the evidence this has. The 20 probe-1 hits were classified once
+under a pre-registered taxonomy and are **not** re-read for this pattern
+(asking a new question of old data generates, it cannot test); the banked
+terms stay banked. Testing it needs new data under a new registration.
+The value model aiming at this ranking should know the hypothesis exists
+and know it is untested.
+
 The frame held and got sharper: 4/4 retrodicted, four predictions
 confirmed (three strong, one soft disjunction — recorded), and the
 judgement-shaped clause replaced by the notice/discharge/pervasiveness
