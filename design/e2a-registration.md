@@ -87,3 +87,71 @@ never had. Both directions ship:
   outward rounding discharges all face obligations, the solver layer
   defers entirely — the first verdict then involves no solver, and the
   stamp records the solver fields as absent rather than omitting them.
+
+---
+
+# Reading (2026-07-18 — `corpus/supply/e2a_hit386.py`, the first verdict)
+
+## Case 1: **VERIFIED, on the exact hand-proved box** — count: 1, no substitute
+
+One traced query, three face obligations, one verdict:
+
+```
+== VERIFIED
+  assert #0 (x1 = 415 face):  discharged
+  assert #1 (x1 = 6.8 face):  discharged
+  assert #2 (c  = 0.019 face): discharged
+query f694ca39…604f19cd2b | stelling 0.1.0 | jax 0.11.0
+arithmetic: interval/f64/outward-1ulp | solver: none — every obligation
+  judged by outward-rounded interval arithmetic alone
+coverage: 143 eqns: 143 known (100%)
+```
+
+- **Candidate #1 verified as stated** — `x1 ∈ [6.8, 415]`, `c ≥ 0.019`
+  with the c-side genuinely unbounded (half-infinite intervals; the
+  `0·∞ = 0` closed-interval convention carries the x1-faces). No weaker
+  substitute was needed; the substitute clause goes unused.
+- **The solver deferral is real**: the registered scope fact fired — all
+  three faces discharged by interval arithmetic; the stamp records solver
+  absence explicitly. The Z3 layer of the hand proof was never needed for
+  this shape, exactly as §3 of the work order suspected.
+- **No hand assistance beyond the permitted list**: the parameters enter
+  as point `any_array`s so `exp` is traced and bracketed by the tool
+  (`sound-libm` tier, assumption in the stamp); the box is stated in its
+  own `(x1, c)` coordinates; every face substitution is traced code.
+
+## The mutation came back red — with face precision
+
+The x1-ceiling-at-300 harness (below `x1* ≈ 414.5`) returns **UNKNOWN**
+with assert #0 reported *"definitely false over the declared box"* while
+the other two faces still discharge. The checker is not vacuous, and its
+red names the failing face. Per the registered verdict semantics this is
+never rendered as a refutation.
+
+## The first run was UNKNOWN — and that is the instrument working
+
+The harness's first version assembled the parameter vector with
+`jnp.stack`; on jax 0.11 `stack` is its own primitive, **outside the §2
+census list** (the censused field *received* the array). Coverage came
+back `143 eqns: 137 known (99%); 1 ⊤ (stack ×1)` and the verdict
+correctly degraded to UNKNOWN — a one-equation scope deviation, caught by
+name, by the ⊤-coverage line the falsifier discipline demanded. The fix
+conformed the harness to the censused form (`jnp.array` →
+broadcast+concatenate) rather than growing the registry past §2's list.
+Recorded because it is the first live instance of "a null at low coverage
+is not a null" — here inverted: an UNKNOWN at 99% coverage, with the 1%
+named, is a work item with an address.
+
+## Fidelity demotions, inherited as registered
+
+Continuous-flow box, not a solver invariant — this verdict re-derives the
+hand proof's object, nothing more. `exp` at libm fidelity, 1-ulp outward —
+the hand proof's own standard, now printed in the stamp of every verdict
+that uses it.
+
+## E2a status
+
+**1 of 13, on the positive control.** Mechanization is real at the priced
+layer on the one case with a known answer; the E2a bands
+(`design/value-model-v2.md`) stay open until the other 12
+reconstructions run — future passes, not this one.
