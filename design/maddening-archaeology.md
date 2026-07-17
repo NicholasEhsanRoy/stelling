@@ -91,3 +91,75 @@ one exists. Not barred by the self-containment rule: that rule exists
 because a *bug-finding* null on one's own code is uninterpretable —
 **provability is not contaminated by authorship**. The classification is
 the deliverable; the follow-up is not.
+
+---
+
+# Reading (2026-07-18 — git only, as registered)
+
+## Precondition
+
+Root is organic (2 files, 663 insertions, 2025-02-27 — not a dump). The
+middle is **sprint-shaped**, as the registered confound predicted: an
+88-file "MADDENING v1: Complete modular simulation framework" commit and a
+175-file compliance-infrastructure commit anchor the distribution. Rule
+applied per-site: guards born inside sprint commits read as
+foresight-shaped and may hide narratives — the comment-grade bucket is why
+this arm can still see them.
+
+## Arm A — the digs (169 guard-pattern hits enumerated across ~14 files)
+
+| site | introduced | bucket |
+|---|---|---|
+| **`cdd.py` high-contrast regression guard + `MAX_OUTER=200`** | `c0953ad` 2026-07-16, modifying an existing file; message names the guard, the in-diff comments narrate the failure mode ("*unsafe at high coefficient contrast… the budget fills*"), and a 100-line regression test lands with it | **RECEIPT** (message+diff grade — the same grade as diffrax's "Crash fixes") |
+| the May CFL episode | docs-only: "FVM failures resolved — **CFL not dtype was the load-bearing fix**" + "adopt peer agent's **float32 diagnosis**" (2026-05-19) — a failure hit, first misdiagnosed, resolved by parameter change; **no code guard added** | **comment-grade** (narrative in docs, not a defence change) |
+| heat.py `MADD-ANO-002` metadata ("CFL stability **not enforced at runtime** — unstable timesteps silently produce incorrect results") | `7ee6cff` 2026-03-12 — the compliance sprint, **two months before the failure it describes was hit** | foresight-shaped |
+| `safe_denom` (Aitken accelerator) | with its feature (2026-03-14); site comment describes mechanism, not incident | foresight-shaped |
+| `safe_error` | inside the v1 sprint dump | foresight-shaped (sprint caveat) |
+| `qn_finite` isfinite gate (IQN-IMVJ) | with its feature (2026-05-30) | foresight-shaped |
+| lbm/lbm_pipe wall masks; `health_check` node | inside the 175-file compliance sprint | foresight-shaped (sprint caveat) |
+
+**Band: 1 receipt → weak; the site is reported, not a rate.** Comparison,
+with sample sizes in the same sentence: the library arm found 3 receipts
+across two libraries' examined defence classes; this arm found 1 receipt
+in 1 repo — both samples are tiny and the comparison is a gesture, not a
+statistic. And plainly, as registered: N=1, the author's own code, the
+author wanted a particular answer — the weakest sample drawn, and the
+only one available.
+
+**The observation the buckets don't capture (recorded, not counted):** the
+CFL arc — *documented as an unenforced obligation in March, hit in May,
+misdiagnosed as dtype, fixed by parameter, still unenforced today* — is a
+named anomaly (`MADD-ANO-002`) that cost a debugging episode **after**
+being written down. Documentation-as-defence did not defend. The
+obligation is the founding document's own Stage-0 demo property (CFL ⇒
+stability), sitting unenforced in the author's own heat node.
+
+## Arm B — the evaluate/iterate classification
+
+Rule as registered (data-dependent inner iteration = solver-shaped):
+
+| class | nodes | grounds |
+|---|---|---|
+| **solver-shaped** | **the adaptive wavelet family**: `WaveletEllipticNode` + its stack (`cdd.py` — `lax.while_loop`, `MAX_OUTER=200`, Dörfler budget; `wavelet.py`, `hierarchical_hat.py`, `topk.py`, `matrixfree.py`) | data-dependent outer iteration with a convergence test and an iteration cap |
+| **evaluate-shaped** | ball, table, heat, spring, rigid_body, rigid_body_2d, lbm, lbm_pipe, heart_pump, health_check | fixed dataflow per external step; no data-dependent continuation |
+
+**Core machinery (separately labeled, as registered):** heavily
+solver-shaped — the coupling fixed-point loop (`group.py`,
+`lax.while_loop`), the Aitken/IQN-IMVJ accelerators (`acceleration.py`),
+the IFT implicit solver (`implicit.py`), `graph_manager`'s loop, the
+multi-GPU `iterative_solver.py`, and `simulation/adaptive.py`.
+
+**The falsifier does not fire** — a genuinely solver-shaped node exists —
+and the majority finding is reported at equal volume: **most nodes are
+vector-field-shaped**, the supply probe's cheap-and-useless case; the
+solver-shaped surface is one node family plus the framework core.
+
+**The coincidence that matters:** the one receipt sits **on the
+solver-shaped node** — the iteration-budget guard of the wavelet solver.
+The author pays where the code iterates, on an N=1 sample, which is the
+work order's thesis in one data point and no more than that.
+
+**Follow-up not run** (budget; the classification is the deliverable). The
+natural target is recorded: `cdd.py`'s outer loop — an iteration-cap
+termination obligation identical in shape to diffrax#386's, on the
+author's own code.
