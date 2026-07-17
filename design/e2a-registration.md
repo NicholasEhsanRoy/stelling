@@ -197,35 +197,26 @@ returning it still counts 0 and the band arithmetic is untouched;
 went out labeled "no information". The mutation harness now renders
 REFUTED, with the failing face named.
 
-## Amendment 2: inert `assume`, registered before it bites
+## Amendment 2: withdrawn as an amendment, re-filed as a registration
 
-`assume` is inert in the MVP propagation — sound (propagation runs over a
-superset of the declared set) and, until this amendment, **silent**: the
-dropped constraint hid inside a 100% coverage line, because the counter
-measured primitive coverage, not semantic fidelity. Two of the remaining
-twelve are implications and will hit this (dfx#752: *nonlinear failure ⇒
-step rejected*; bjx#969: *non-finite proposal ⇒ step_size_max shrinks*).
-Fixed before they run:
+*(2026-07-18, same day, content unchanged — now
+`design/assume-registration.md`.)*
 
-- **The coverage line now counts dropped constraints as their own
-  category** (`inert`), named, outside the "known" fraction — a drop can
-  never hide inside 100% again.
-- **A VERIFIED with dropped constraints stands** — more was proved than
-  asked — with the drop disclosed in the stamp's coverage line and a
-  rendered note.
-- **An UNKNOWN with dropped constraints is recorded as `blocked (inert
-  assume)`**: it counts 0 toward the mechanized number (conservative),
-  and it **cannot be cited as a mechanization failure** — wherever an E2a
-  count is reported, blocked cases are named in the same sentence. "The
-  harness was wrong is a work item, not a band adjustment" stands; this
-  defines which item the work is.
-- The implication workaround (`¬P ∨ Q`) needs `not`/`or`, which are not
-  in the census list — **they arrive by census when their targets run**,
-  never by guessing.
+The reclassification, recorded because reclassifications are never
+silent: this registration was **silent** on `assume`'s propagation
+semantics. The closest it comes is the permitted-list enumeration
+("bounds via `any_array` / `assume` / `assert_`"), which is an API
+listing, not a semantic commitment — it lists `assert_` in the same
+breath, and nobody reads `assert_` as bounds-declaring; the registered
+verdict semantics spoke only to `assert` obligations. **Filling a
+silence before the run is a new registration, not an amendment**, and
+new registrations have never been restricted.
 
-Against the rule: (a) additive — reporting vocabulary and a coverage
-category; the mechanized criterion is untouched; (b) count-neutral — the
-only existing result (case 1, no assumes) is unaffected, and future
-blocked cases still count 0; (c) the defect is the tool's own
-instrumentation gap, found by inspection of the control surface before
-any of the twelve produced a result anyone could want.
+Had it been an amendment, it would have failed clause (c): the fix was
+proposed while explicitly predicting it would bite dfx#752 and bjx#969
+in the direction that helps them count — motivation by an anticipated
+result, the softer version of what (c) exists to catch. The rule is
+**not** widened to accommodate it; a rule loosened when it binds is
+decorative. The amendment mechanism remains for one thing only:
+superseding registered text that exists and is wrong, as amendment 1
+did.
