@@ -29,14 +29,36 @@ The calibration set (four hypotheses tested in this repository):
 | custom-rule primal agreement | dead | `check_grads` catches it (probed, with controls) |
 | long-horizon failures | survived | 20 hits, 4/5 trackers, 487d/258d costs; detective defences only |
 
-The frame that retrodicts all four and predicted tonight's measurements:
+The frame, as sharpened after the 2026-07-18 readings (the original
+clause-2 wording — "arithmetic no reviewer can eyeball" — was a judgement
+call that could absorb anything; this version is decided by grep, defence
+kind, and trackers):
 
-> **A hazard class is dead when the hazard and its defence are both
-> site-local and the defence's correctness is checkable at the site — by
-> inspection or by a single test. A class is alive when its property
-> quantifies globally — over trajectories, input regions, seeds, or
-> component compositions — or when the site-local defence's own
-> correctness requires arithmetic no reviewer can eyeball.**
+> **Two questions about one author. A hazard class is dead iff the author
+> can both *notice* the obligation and *discharge* it locally — and the
+> resulting preventive defence idiom is ecosystem-pervasive. It is alive
+> iff the obligation out-scopes its site (quantifying over regions,
+> trajectories, batches, seeds, or compositions), or only detective
+> defences exist (noticed, undischargeable), or the defence exists but has
+> not spread (noticed by some authors, silently absent elsewhere).**
+
+| defence at the site | incidents | reading |
+|---|---|---|
+| preventive, local, pervasive | — | **dead** — noticed and discharged |
+| detective or protocol only | any | **alive** — noticed, not dischargeable locally |
+| absent | present | **alive** — not noticed (`t + dt` announces nothing) |
+| absent | absent | **no obligation — or silent and unnoticed.** Trackers cannot tell these apart (incidents require loud failures); only a defence census or a region instrument can. The wedge's original motivation lived exactly here |
+
+Three amendments earned by measurement: **notice aggregates per
+ecosystem, not per author** (diffrax carries 11 `nextafter` sites while
+jax-md#343 falls to the same class undefended — the *class* stays alive
+until the idiom is pervasive, the way clamps at 17/19 sites and `safe_*`
+across every probed library are); **mixed defences classify by their
+strongest preventive component** (capacity's allocation heuristic is
+preventive but per-configuration; the regional obligation has only the
+flag — cell 2, and reading B showed *why*: the obligation out-scopes the
+site on the quantifier, not the arithmetic); and **cell 4 carries its
+silence caveat** or it becomes the frame's escape hatch.
 
 Local hazards get cheap local defences because the defence is writable at
 the site of the hazard; ecosystems converge on them (measured below).
@@ -60,6 +82,12 @@ Predictions this frame made that tonight's measurements then confirmed:
   projects: **zero field incidents of arithmetic overflow**. Dead.
 - *Termination and interaction properties are global → should be alive.*
   The registered `stuck`/`hang` reads produced them on cue (below).
+
+Calibration note, recorded as ordered: three of the four were strong
+predictions; the overflow one was a disjunction
+(*defended-or-incident-bearing*) that could only have failed on
+undefended-and-silent — not vacuous (that is the wedge's shape), but the
+soft one of the four.
 
 Where the frame earns its second clause: diffrax#632's bug is one
 expression — `t + dt` — and it took **258 days**, because `fl(t+dt) = t`
@@ -221,7 +249,28 @@ customer → output shape → falsifier.
 - **Falsifier.** The FP fragment, pointed at reconstructed #632/#657/#343,
   fails to distinguish the buggy from the fixed versions.
 
-### L5 — Transform and compilation equivalence over regions
+### L5 — Equivalence over regions (two reaches, split 2026-07-18)
+
+**L5a — custom-rule region agreement (near reach, registered and read).**
+The point kill stands: `check_grads` catches lying primals at points. The
+region property is a new candidate, registered before reading
+(`design/registration-rules-and-capacity.md`) — and the reading returned
+a narrow survival with a kill inside it. All six concrete corpus rules
+return their own primal verbatim: **the primal-agreement obligation has
+zero surface in the wild** — every author discharges it by construction,
+and the Stage-2 "primal consistency" flagship is reshaped accordingly.
+What survives is precise: two lineax norm rules whose tangents are
+*intended* to equal the true Jacobian away from a stated excluded set
+(`∀ x, ‖x‖ ≥ ε: tangent_out = ⟨x, tx⟩/‖x‖`) — writable, non-circular,
+non-Intentional on the region, with the Intentional set handled by the
+guard experiment's bucket discipline. Corpus: 2 rules (+ 2 wrapper hosts
+whose wrapped populations are unresolved — a measurement-granularity
+gap). Small, cheap, reachable; and it settled the check_grads-coverage
+question for a second better reason — point tests applied to `nextafter`
+would fail its *Intentional* tangent correctly, so testing cannot even be
+aimed at the defence layer without the bucket.
+
+### L5b — Transform and compilation equivalence over regions
 
 - **Property.** `jit(f) ≈ f`, `vmap(f) ≈ stack∘f`, same-device ≈
   cross-device, within tolerance over a region — link 7's family.
@@ -261,11 +310,21 @@ customer → output shape → falsifier.
   input-dependent, and not writable as a region property; the statable
   subset (finiteness, positivity, bounds, Lipschitz-via-intervals) is
   real but thin. (2) No maintainer has asked for it; zero demand sampled.
-  (3) It inherits every burden of L1–L3 plus an adoption story. Verdict:
-  **conditionally live — as the delivery mechanism for L1–L3 verdicts
-  across the maintainer/downstream boundary, not as a standalone
-  category.** It gets no value model until an L1/L2/L3 result exists to
-  compose.
+  (3) It inherits every burden of L1–L3 plus an adoption story.
+- **The capacity consolidation was tested and failed (2026-07-18).** The
+  ten jax-md capacity threads — the highest term concentration measured
+  anywhere (5.6% of that tracker) — were read in full against a
+  registered criterion: they decompose into 1 bound-wanted, 2
+  protocol-burden, 1 detector-defect, 2 silent construction-correctness
+  bugs, and 4 unrelated. The capacity certificate has exactly **one**
+  measured demand instance (jmd#192, where even the maintainer says no
+  optimal policy is known) — not a first customer. The weight of that
+  cluster lands in L3's completeness sub-form instead (#165 and #191 join
+  #339 and #507: four wild silent-construction instances across two
+  libraries). Verdict unchanged and now measured:
+  **conditionally live — the delivery mechanism for L1–L3 verdicts
+  across the maintainer/downstream boundary, not a standalone category.**
+  No value model until an L1/L2/L3 result exists to compose.
 
 ---
 
@@ -303,21 +362,42 @@ stencil code before anything leans on it.
 
 ---
 
-## What the morning holds
+## The ranking, after the 2026-07-18 re-rank
 
-Two large live categories (**trajectory invariants**, **termination of
-adaptive loops** — the second absent from every existing plan), one
-meta-category with its experiment already registered (**guard/detector
-obligations**, now carrying three wild instances of defences failing as
-defences), one small sharp category that the project's own arithmetic
-stance currently proves falsely green (**float-exact control
-arithmetic**), one real-but-distant (**transform equivalence**), and one
-conditional delivery mechanism (**contracts**). Six kills by
-construction, five by measurement, one honest "unmeasured."
+1. **L1 — trajectory invariants.** Unmoved at the top: 9/20 measured
+   incidents, solver-state-first, the envelope rendering with no
+   incumbent.
+2. **L2 — termination/progress of adaptive loops.** Unmoved: 5/20 + the
+   `stuck`×31 surface, absent from every existing plan, artifact-shaped.
+3. **L3 — guard/detector obligations.** **Strengthened by both
+   readings**: the completeness sub-form now has four wild
+   silent-construction instances (#165, #191, #339, #507) plus three
+   defences-failing-as-defences (#969, #141, #925); its experiment is
+   already registered and remains the cheapest first result.
+4. **L4 — float-exact control arithmetic.** Aliveness reason sharpened by
+   the frame: the defence exists and has not spread (diffrax's 11
+   `nextafter` sites vs jmd#343 undefended) — and the defence's own AD
+   behaviour is an Intentional lie, so even point-testing the defence
+   layer needs the bucket discipline.
+5. **L5a — custom-rule region agreement.** New, small, near-reach: two
+   named lineax rules, property registered, primal surface zero.
+6. **L5b — transform/compile equivalence.** Real, evidenced, distant.
+7. **L6 — contracts.** Conditional, now *measured*: the capacity
+   consolidation failed its registered criterion; one demand instance is
+   not a customer.
 
-The frame held: 4/4 retrodicted, four predictions confirmed tonight, one
-refinement earned (uneyeballable local defences stay alive). Nothing here
-licenses a build; the strongest claim on offer is that the next value
-model, if one is written, should be aimed at L1+L2 with L3's experiment
-as the cheapest first result — and that claim is an argument, ranked
-below every measurement in this file.
+Six kills by construction, five by measurement, one honest "unmeasured" —
+plus one kill *inside a survival* (primal agreement: zero wild surface;
+every author discharges it by construction).
+
+The frame held and got sharper: 4/4 retrodicted, four predictions
+confirmed (three strong, one soft disjunction — recorded), and the
+judgement-shaped clause replaced by the notice/discharge/pervasiveness
+form whose cells are decided by grep, defence kind, and trackers, with
+cell 4's silence caveat keeping it honest. Nothing here licenses a build.
+The strongest claim on offer: the next value model, if one is written,
+should be aimed at **L1+L2, with L3's registered experiment as the
+cheapest first result and L5a as a two-rule add-on corpus** — and that
+claim is an argument, ranked below every measurement in this file. The
+value model itself is deliberately not written here; two of its inputs
+arrived tonight and it deserves its own registration-first pass.
