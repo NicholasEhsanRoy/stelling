@@ -120,3 +120,37 @@ Z3-vs-cvc5 architecture is untested, not refuted. If control flow lands
 (`design/control-flow-hypothesis.md`), the prediction is that accept/
 reject `cond` predicates straddle and the search-shaped UNKNOWNs finally
 appear — the solver's first *real* evidence, in either direction.
+
+## The triage has no instrument — sampling is it (trigger registered, not built)
+
+bjx#D416 was bucketed **by hand**: someone found `h_stat = +5` and showed
+the violation. It worked, but a hand-bucketed triage is bucketed by
+someone with a stake in the answer. Every other control here got an
+instrument — the census got the coverage counter, the tracker got
+registered terms, E2a got criterion (i) mechanized. The triage got buckets
+and an analyst.
+
+The instrument is on the founding feature list, unbuilt: the **fuzzer
+fallback** — on UNKNOWN, sample the declared region (it knows the `assume`
+constraints, which is why it beats a naïve fuzzer). A violating draw turns
+"I can't tell" into **"your property is false, here"** with a concrete
+point — the **witness** discipline, in check mode. The asymmetry is
+already the project's: a violation is definitive, its absence is not, so
+sampling can move UNKNOWN → **partially-false with a witness**, and can
+**never** move UNKNOWN → VERIFIED. Cheap: the harness is a jax function;
+sampling is `any_array` returning a concrete draw instead of a symbolic
+declaration, then evaluating — no new transfers, you call the program
+rather than propagate over it.
+
+**Registered trigger (carries the §-above ≥ 2-sources clause — the class
+fix binding its first trigger):**
+
+> **Sampling is built iff ≥ 2 UNKNOWNs cannot be bucketed without hand
+> analysis, across ≥ 2 distinct libraries.**
+
+**Current count: 1 (bjx#D416). It does not fire.**
+
+**Bias, declared:** I want this built — cheap, on the list, produces
+witnesses, removes the analyst from the bucketing. Four good reasons, and
+**none of them is a trigger.** The discipline that kept affine out of tree
+keeps this out of tree; the trigger exists so it can't be argued in later.
