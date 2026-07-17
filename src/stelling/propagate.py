@@ -37,6 +37,7 @@ silent — each drop is counted in coverage as ``inert`` (outside the
 
 from __future__ import annotations
 
+import math
 import struct
 from dataclasses import dataclass
 
@@ -133,10 +134,20 @@ def _value_to_interval(v, shape: tuple[int, ...]) -> iv.IntervalArray:
 
 def _t_convert(eqn, params, ins):
     (a,) = ins
-    new = str(params.get("new_dtype"))
-    if new in ("float64", "bool"):
-        return [a]  # every endpoint is already a double; widening is exact
-    return None  # unhandled conversion target -> caller widens to ⊤, noted
+    src = eqn.invars[0].aval.dtype or "" if eqn.invars else ""
+    dst = str(params.get("new_dtype"))
+    if "float" in src and ("int" in dst) and dst != "bool":
+        # float -> integer cast truncates toward zero; trunc is monotone
+        # non-decreasing, so [trunc(lo), trunc(hi)] is a sound bracket
+        def tr(x):
+            return x if x in (math.inf, -math.inf) else float(math.trunc(x))
+
+        return [iv.IntervalArray(shape=a.shape,
+                                 los=tuple(tr(x) for x in a.los),
+                                 his=tuple(tr(x) for x in a.his))]
+    # every endpoint is already a double; bool<->int<->float that preserves
+    # the numeric value (incl. bool->int32 for a `cond` index) passes through
+    return [a]
 
 
 TRANSFERS = {
@@ -145,6 +156,11 @@ TRANSFERS = {
     "mul": (lambda eqn, p, ins: [iv.mul(*ins)], TIER_SOUND),
     "div": (lambda eqn, p, ins: [iv.div(*ins)], TIER_SOUND),
     "neg": (lambda eqn, p, ins: [iv.neg(ins[0])], TIER_EXACT),
+    "max": (lambda eqn, p, ins: [iv.maximum(*ins)], TIER_EXACT),
+    "min": (lambda eqn, p, ins: [iv.minimum(*ins)], TIER_EXACT),
+    # select_n(which, *cases): the masked case-split. Exact where `which` is
+    # definite; a sound join where it straddles (design/control-flow-*).
+    "select_n": (lambda eqn, p, ins: [iv.select_n(ins[0], ins[1:])], TIER_EXACT),
     "exp": (lambda eqn, p, ins: [iv.exp(ins[0])], TIER_SOUND_LIBM),
     "lt": (lambda eqn, p, ins: [iv.lt(*ins)], TIER_EXACT),
     "gt": (lambda eqn, p, ins: [iv.gt(*ins)], TIER_EXACT),
@@ -271,6 +287,34 @@ class _Propagator:
             self.counter.record_unknown(eqn.primitive)
             self.mark_unreached(eqn)
             self.top_out(eqn)
+            return
+
+        if eqn.primitive == "cond":
+            # cond(index, *operands)[branches=(jaxpr, ...)]: run the branch
+            # selected by `index`; where `index` straddles, run every
+            # possible branch and JOIN outputs (sound over-approximation —
+            # a branch whose taken case is undetermined). Control-flow
+            # transfer (design/control-flow-hypothesis.md).
+            branches = next(
+                (v for k, v in eqn.params if k == "branches"), None
+            )
+            ins = [self.read(a) for a in eqn.invars]
+            if branches is None or not ins:
+                self.notes.append("cond without branches/operands; ⊤")
+                self.counter.record_unknown(eqn.primitive)
+                self.mark_unreached(eqn)
+                self.top_out(eqn)
+                return
+            index, operands = ins[0], ins[1:]
+            last = len(branches) - 1
+            lo = 0 if index.los[0] == -math.inf else max(0, int(math.floor(index.los[0])))
+            hi = last if index.his[0] == math.inf else min(last, int(math.floor(index.his[0])))
+            taken = [b for i, b in enumerate(branches) if lo <= i <= hi] or [branches[-1]]
+            self.counter.record_known(eqn.primitive)
+            self.used[eqn.primitive] = TIER_EXACT
+            results = [self.run(b.jaxpr, list(b.consts), operands) for b in taken]
+            for j, out in enumerate(eqn.outvars):
+                self.env[out.id] = iv.join([r[j] for r in results])
             return
 
         if eqn.primitive == "stelling_assume":

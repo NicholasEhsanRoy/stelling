@@ -214,6 +214,44 @@ def div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     return _binary(a, b, f)
 
 
+def maximum(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    # max is monotone in both args: no rounding, endpoints are real values
+    return _binary(a, b, lambda alo, ahi, blo, bhi: (max(alo, blo), max(ahi, bhi)))
+
+
+def minimum(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    return _binary(a, b, lambda alo, ahi, blo, bhi: (min(alo, blo), min(ahi, bhi)))
+
+
+def join(cases: list[IntervalArray]) -> IntervalArray:
+    """Interval hull (union) of same-shape boxes — the sound over-approximation
+    of a branch whose taken case is not determined."""
+    shape = cases[0].shape
+    los = tuple(min(c.los[i] for c in cases) for i in range(cases[0].size))
+    his = tuple(max(c.his[i] for c in cases) for i in range(cases[0].size))
+    return IntervalArray(shape=shape, los=los, his=his)
+
+
+def select_n(which: IntervalArray, cases: list[IntervalArray]) -> IntervalArray:
+    """`select_n(which, *cases)`: elementwise pick of ``cases[which]``.
+
+    ``which`` is a predicate/index interval on {0, 1, …}. Where it is
+    **definite** (a single integer at that element) the exact case is
+    taken; where it **straddles** (the branch is undetermined) the possible
+    cases are joined — sound, and the source of branch imprecision that a
+    solver would resolve."""
+    n = which.size
+    los, his = [], []
+    for i in range(n):
+        w_lo, w_hi = which.los[i], which.his[i]
+        lo_idx, hi_idx = int(math.floor(w_lo)), int(math.floor(w_hi))
+        possible = range(max(0, lo_idx), min(len(cases) - 1, hi_idx) + 1)
+        picks = [cases[k] for k in possible] or [cases[-1]]
+        los.append(min(c.los[i] for c in picks))
+        his.append(max(c.his[i] for c in picks))
+    return IntervalArray(shape=which.shape, los=tuple(los), his=tuple(his))
+
+
 def exp(a: IntervalArray) -> IntervalArray:
     def e(x: float, up_side: bool) -> float:
         if x == -_INF:

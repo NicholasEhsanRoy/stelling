@@ -127,3 +127,29 @@ def test_structural_ops_are_exact():
 def test_scalar_literal_broadcasts_against_array():
     r = iv.mul(iv.from_values((2,), [2.0, 3.0]), iv.point(10.0))
     assert r.los[0] < 20.0 < r.his[0] and r.los[1] < 30.0 < r.his[1]
+
+
+def test_maximum_minimum_are_exact_monotone():
+    m = iv.maximum(scalar(1.0, 3.0), scalar(2.0, 2.0))
+    assert (m.los[0], m.his[0]) == (2.0, 3.0)  # max endpointwise
+    n = iv.minimum(scalar(1.0, 3.0), scalar(2.0, 2.0))
+    assert (n.los[0], n.his[0]) == (1.0, 2.0)
+    # a clamp: max(x, floor) >= floor for any x
+    clamp = iv.maximum(scalar(-INF, 5.0), scalar(0.5, 0.5))
+    assert clamp.los[0] == 0.5  # floored
+
+
+def test_join_is_the_hull():
+    h = iv.join([scalar(1.0, 2.0), scalar(5.0, 7.0)])
+    assert (h.los[0], h.his[0]) == (1.0, 7.0)
+
+
+def test_select_n_definite_picks_straddle_joins():
+    x, y = scalar(10.0, 10.0), scalar(20.0, 20.0)
+    # which definitely 0 -> case 0
+    assert iv.select_n(scalar(0.0, 0.0), [x, y]).los[0] == 10.0
+    # which definitely 1 -> case 1
+    assert iv.select_n(scalar(1.0, 1.0), [x, y]).los[0] == 20.0
+    # which straddles {0,1} -> join
+    j = iv.select_n(scalar(0.0, 1.0), [x, y])
+    assert (j.los[0], j.his[0]) == (10.0, 20.0)
