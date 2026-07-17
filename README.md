@@ -5,8 +5,10 @@ Inspired by Kani, Stelling is an assertion-based verifier for JAX array
 programs. Today it checks stated box invariants of continuous flows by
 forward interval propagation over the traced jaxpr — outward-rounded,
 solver-free, with a stamp on every verdict naming its own assumptions.
+<!-- capability-exempt: roadmap -->
 The roadmap (`design/founding.md`) aims it further: SMT-backed
 invariants, index safety, and bounds over horizons no test can reach.
+<!-- /capability-exempt -->
 
 *stelling is not affiliated with or endorsed by the JAX project.*
 
@@ -33,6 +35,7 @@ invariants, index safety, and bounds over horizons no test can reach.
 
 **Doesn't (yet, and the stamp or the docs say so in each case):**
 
+<!-- capability-exempt: disclaimer (this is the measured "doesn't" list) -->
 - **Derive invariants.** Check mode only: you state the box, stelling
   judges it. Derive mode is designed and deliberately unbuilt.
 - **Handle `cond` / `scan` / `while`.** Control flow falls to ⊤ and is
@@ -49,6 +52,7 @@ invariants, index safety, and bounds over horizons no test can reach.
   discharged **0 of 3** attempted; the box invariants it checks are
   preconditions of arguments, not incident closures
   (`design/supply-probe.md`, `design/layer-probe.md`).
+<!-- /capability-exempt -->
 
 ## Installation
 

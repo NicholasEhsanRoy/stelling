@@ -33,7 +33,24 @@ be imported only in `_jax_compat.py` (enforced by a pre-commit grep *and* a
 test, not a comment), and `TESTED_JAX_SERIES` must be a hardcoded literal
 independent of packaging metadata (an AST assertion), with a companion test
 that fails the moment CI's jax outruns it — so bumping the tested series is
-a conscious act, never a drift.
+a conscious act, never a drift. And the README's capability claims are now
+under the same discipline: `tests/test_readme_claims.py` maps each
+capability token (SMT/solver, derive, `cond`/`scan`/`while`, discrete
+step) to a witness in the code, and fails if the README claims one without
+it — with roadmap and disclaimer prose exempted only by an explicit
+`<!-- capability-exempt -->` fence. It exists because the README claimed
+SMT proving for as long as it stood and a convention ("someone will
+notice") didn't catch it; the artifact about the tool now gets the
+instrument the artifact about the world always had.
+
+**Smaller instance, not worth a test — a convention, stated so it's at
+least conscious:** module docstrings that make scope claims (e.g.
+`propagate.py`: *no widening, no fixpoints, no cond/scan descent, no
+solver*) are the same failure mode with a smaller blast radius. When you
+change what a module does, its scope-claim docstring is part of the
+change; a reviewer should treat a stale scope claim as a defect. The
+README earned a test because it is public and mechanically checkable;
+these earn a line here.
 
 Pending instances, recorded now so they land with the features they bind:
 
