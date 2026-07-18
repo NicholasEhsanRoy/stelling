@@ -148,6 +148,34 @@ def test_empty_declared_set_refused_at_declaration():
             any_array((), "float64", bounds)
 
 
+def test_infinite_point_bounds_refused_as_empty_real_set():
+    # (inf, inf) slipped the lo<=hi check and yielded vacuous definite
+    # verdicts over an empty ℝ-set (audit-gate finding 3)
+    import math
+
+    for bounds in ((math.inf, math.inf), (-math.inf, -math.inf)):
+        with pytest.raises(ValueError):
+            any_array((), "float64", bounds)
+
+    def h():  # half-infinite and full-⊤ declarations stay legal
+        a = any_array((), "float64", (-math.inf, math.inf))
+        b = any_array((), "float64", (0.0, math.inf))
+        return assert_(b >= 0.0), a
+
+    assert propagate(trace(h)).obligations[0].status == "discharged"
+
+
+def test_nan_sentinel_where_survives_end_to_end():
+    # the real-trace flavor of audit-gate finding 1
+    def h():
+        x = any_array((), "float64", (0.0, 1.0))
+        y = jnp.where(x > 0.5, x, jnp.nan)
+        return assert_(y <= 1.0)
+
+    p = propagate(trace(h))  # must not raise
+    assert p.obligations[0].status == "unknown"
+
+
 def test_nonvacuity_checked_and_failed_paths():
     from stelling.harness import nonvacuity
 

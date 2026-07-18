@@ -15,7 +15,9 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   and are bumped one ulp outward — the *same* fidelity demotion the
   supply probe's hand brackets carried (``np.nextafter`` around
   ``np.exp``); it is recorded in every verdict that uses this transfer
-  (:data:`EXP_LIBM_ASSUMPTION`).
+  (:data:`EXP_LIBM_ASSUMPTION`). ``pow`` (strictly positive base only)
+  makes the same demotion around ``math.pow`` at the monotone corners
+  (:data:`POW_LIBM_ASSUMPTION`).
 * Endpoints may be ``±inf`` (overflow saturates outward; half-infinite
   sets are representable). Interval multiplication uses the ``0·±inf = 0``
   endpoint convention (sound for closed real intervals, as in IEEE 1788).
@@ -33,6 +35,7 @@ unknown one is reported as such, never guessed.
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass
 
@@ -42,6 +45,12 @@ EXP_LIBM_ASSUMPTION = (
     "exp endpoints assume a faithfully-rounded libm exp (error <= 1 ulp), "
     "bumped 1 ulp outward — the same demotion as the hand proofs' "
     "np.nextafter brackets"
+)
+
+POW_LIBM_ASSUMPTION = (
+    "pow endpoints assume a faithfully-rounded libm pow (error <= 1 ulp), "
+    "evaluated at the four monotone (base, exponent) corners and bumped "
+    "1 ulp outward — the same fidelity demotion as exp's"
 )
 
 
@@ -145,9 +154,50 @@ BOOL_UNKNOWN = (0.0, 1.0)
 # -- elementwise plumbing -----------------------------------------------------
 
 
+def _broadcast_shape(sa: tuple[int, ...], sb: tuple[int, ...]) -> tuple[int, ...]:
+    """numpy-style broadcast of two shapes: trailing axes aligned, size-1
+    axes replicate, missing leading axes replicate. Incompatible shapes
+    raise :class:`IntervalError` (the transfer declines; never a crash)."""
+    out: list[int] = []
+    for da, db in itertools.zip_longest(reversed(sa), reversed(sb), fillvalue=1):
+        if da == db or db == 1:
+            out.append(da)
+        elif da == 1:
+            out.append(db)
+        else:
+            raise IntervalError(
+                f"shapes {sa} and {sb} do not broadcast "
+                f"(axis sizes {da} vs {db})"
+            )
+    return tuple(reversed(out))
+
+
+def _bcast_elements(x: IntervalArray, out_shape: tuple[int, ...]):
+    """Element (lo, hi) pairs of ``x`` replicated to ``out_shape`` (which
+    must be a broadcast target of ``x.shape``), flat C-order."""
+    n = 1
+    for d in out_shape:
+        n *= d
+    if n == 0:
+        return []
+    k, r = len(x.shape), len(out_shape)
+    elems = []
+    for coord in _coords(out_shape):
+        src = tuple(
+            0 if x.shape[j] == 1 else coord[r - k + j] for j in range(k)
+        )
+        i = _flat_index(src, x.shape)
+        elems.append((x.los[i], x.his[i]))
+    return elems
+
+
 def _pair_elements(a: IntervalArray, b: IntervalArray):
-    """Zip two operands elementwise, allowing a scalar against any shape
-    (jaxprs carry scalar literals as rank-0 operands of elementwise eqns)."""
+    """Zip two operands elementwise: equal shapes, the scalar-vs-any fast
+    path (jaxprs carry scalar literals as rank-0 operands of elementwise
+    eqns), and general numpy-style shape broadcasting (size-1 axes and
+    missing leading axes replicate). Incompatible shapes raise
+    :class:`IntervalError`, which the propagator converts to a noted
+    ⊤-decline."""
     if a.shape == b.shape:
         return a.shape, list(zip(a.los, a.his)), list(zip(b.los, b.his))
     if a.is_scalar():
@@ -156,7 +206,8 @@ def _pair_elements(a: IntervalArray, b: IntervalArray):
     if b.is_scalar():
         n = a.size
         return a.shape, list(zip(a.los, a.his)), [(b.los[0], b.his[0])] * n
-    raise IntervalError(f"shape mismatch {a.shape} vs {b.shape}")
+    out_shape = _broadcast_shape(a.shape, b.shape)
+    return out_shape, _bcast_elements(a, out_shape), _bcast_elements(b, out_shape)
 
 
 def _binary(a: IntervalArray, b: IntervalArray, f) -> IntervalArray:
@@ -186,6 +237,23 @@ def neg(a: IntervalArray) -> IntervalArray:
         los=tuple(-h for h in a.his),
         his=tuple(-l for l in a.los),
     )
+
+
+def abs_(a: IntervalArray) -> IntervalArray:
+    """Piecewise-exact |·|: negation and max of doubles are exact, so the
+    endpoints are the true image endpoints — no rounding bump."""
+    los, his = [], []
+    for lo, hi in zip(a.los, a.his):
+        if lo >= 0.0:
+            los.append(lo)
+            his.append(hi)
+        elif hi <= 0.0:
+            los.append(-hi)
+            his.append(-lo)
+        else:  # straddles zero: image is [0, max(|lo|, hi)]
+            los.append(0.0)
+            his.append(max(-lo, hi))
+    return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
 
 
 def mul(a: IntervalArray, b: IntervalArray) -> IntervalArray:
@@ -252,16 +320,32 @@ def select_n(which: IntervalArray, cases: list[IntervalArray]) -> IntervalArray:
     semantics (0.11, eager and jit agree: index −1 → case 0), which is NOT
     ``cond``'s convention (measured: index −1 → last branch). Second
     audit, finding 3: the earlier last-case fallback here selected the
-    wrong end of that asymmetry."""
-    if any(c.shape != which.shape for c in cases):
+    wrong end of that asymmetry.
+
+    Shapes: all cases must agree; ``which`` is either case-shaped
+    (elementwise selection) or a **scalar** broadcast across the cases'
+    elements (jax permits exactly these two forms). Anything else raises
+    :class:`IntervalError` — a decline the propagator notes, not a
+    crash."""
+    if not cases:
+        raise IntervalError("select_n with no cases")
+    if any(c.shape != cases[0].shape for c in cases[1:]):
         raise IntervalError(
-            f"select_n case shapes {[c.shape for c in cases]} != which {which.shape}"
+            f"select_n cases disagree on shape: {[c.shape for c in cases]}"
         )
-    n = which.size
+    scalar_which = which.is_scalar() and not cases[0].is_scalar()
+    if which.shape != cases[0].shape and not scalar_which:
+        raise IntervalError(
+            f"select_n case shapes {[c.shape for c in cases]} != which "
+            f"{which.shape} (equal shapes or a scalar selector are the only "
+            f"supported forms)"
+        )
+    n = cases[0].size
     last = len(cases) - 1
     los, his = [], []
     for i in range(n):
-        w_lo, w_hi = which.los[i], which.his[i]
+        wi = 0 if scalar_which else i
+        w_lo, w_hi = which.los[wi], which.his[wi]
         if w_lo == -_INF or w_hi == _INF:
             picks = cases  # ⊤ selector: any case possible
         else:
@@ -274,7 +358,7 @@ def select_n(which: IntervalArray, cases: list[IntervalArray]) -> IntervalArray:
             picks = [cases[k] for k in sorted(possible)]
         los.append(min(c.los[i] for c in picks))
         his.append(max(c.his[i] for c in picks))
-    return IntervalArray(shape=which.shape, los=tuple(los), his=tuple(his))
+    return IntervalArray(shape=cases[0].shape, los=tuple(los), his=tuple(his))
 
 
 def exp(a: IntervalArray) -> IntervalArray:
@@ -294,6 +378,57 @@ def exp(a: IntervalArray) -> IntervalArray:
         los=tuple(e(l, False) for l in a.los),
         his=tuple(e(h, True) for h in a.his),
     )
+
+
+def pow_(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    """``base ** exponent`` for a **strictly positive** base interval.
+
+    For base > 0, ``x**y = exp(y·ln x)`` is monotone in ``x`` for every
+    fixed ``y`` and monotone in ``y`` for every fixed ``x``, so the
+    extremum over the (base, exponent) box lies at one of the four
+    corners. Corners are evaluated with ``math.pow`` under the
+    faithfully-rounded-libm assumption (:data:`POW_LIBM_ASSUMPTION`) and
+    bumped one ulp outward; ``x > 0`` also gives ``x**y > 0``, so lower
+    endpoints are floored at 0.
+
+    A base interval reaching 0 or below has no sound rule here
+    (``0**negative`` diverges, negative bases alternate sign with the
+    exponent's parity): :class:`IntervalError` — the propagator turns it
+    into a noted ⊤-decline, never a crash.
+    """
+    if any(lo <= 0.0 for lo in a.los):
+        raise IntervalError(
+            f"pow has a sound corner rule only for strictly positive bases; "
+            f"base lower bound {min(a.los)} <= 0"
+        )
+
+    def f(alo, ahi, blo, bhi):
+        lo_bounds, hi_bounds = [], []
+        for x in (alo, ahi):
+            for y in (blo, bhi):
+                try:
+                    v = math.pow(x, y)
+                except OverflowError:
+                    # the true corner value exceeds the double range:
+                    # finite but > maxfloat — saturate outward, keeping
+                    # maxfloat as a sound finite lower witness (the exp
+                    # overflow treatment).
+                    lo_bounds.append(math.nextafter(_INF, 0.0))
+                    hi_bounds.append(_INF)
+                    continue
+                except ValueError as e:  # unreachable for x > 0; degrade anyway
+                    raise IntervalError(f"math.pow({x}, {y}): {e}") from None
+                # v == inf without OverflowError only happens at a corner
+                # with an infinite operand endpoint (IEEE pow limits, e.g.
+                # pow(inf, 2), pow(0.5, -inf)): the corner's true value is
+                # inf itself, not a rounded finite — keep it exact.
+                # (CPython math.pow raises OverflowError for finite
+                # operands that overflow; it never returns inf silently.)
+                lo_bounds.append(v if v == _INF else max(0.0, _down(v)))
+                hi_bounds.append(v if v == _INF else _up(v))
+        return min(lo_bounds), max(hi_bounds)
+
+    return _binary(a, b, f)
 
 
 # -- comparisons (three-valued) ----------------------------------------------
@@ -334,6 +469,98 @@ def ge(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     return le(b, a)
 
 
+def eq(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    """Three-valued equality. Definitely true **only** when both operands
+    are the same single point (a point interval guarantees the true value
+    exactly, so the two true values coincide); definitely false when the
+    intervals are disjoint (supersets that never meet contain no equal
+    pair); everything else — including identical non-point intervals — is
+    unknown, never guessed."""
+    return _compare(
+        a, b,
+        definite_true=lambda alo, ahi, blo, bhi: alo == ahi == blo == bhi,
+        definite_false=lambda alo, ahi, blo, bhi: ahi < blo or bhi < alo,
+    )
+
+
+def ne(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    """Three-valued inequality: the negation of :func:`eq`'s logic —
+    definitely true where eq is definitely false (disjoint), definitely
+    false where eq is definitely true (same single point), else unknown."""
+    return _compare(
+        a, b,
+        definite_true=lambda alo, ahi, blo, bhi: ahi < blo or bhi < alo,
+        definite_false=lambda alo, ahi, blo, bhi: alo == ahi == blo == bhi,
+    )
+
+
+# -- three-valued logic on {0,1}-encoded bool intervals -----------------------
+
+
+def _bool3(lo: float, hi: float) -> tuple[float, float]:
+    """Canonicalize one {0,1}-encoded three-valued element. Anything that
+    is not exactly the definite-true or definite-false encoding (including
+    a ⊤ interval flowing in from an unregistered producer) reads as
+    unknown — sound whenever the true values are booleans, which the
+    transfers' bool-dtype guard establishes."""
+    if lo == 1.0 and hi == 1.0:
+        return BOOL_TRUE
+    if lo == 0.0 and hi == 0.0:
+        return BOOL_FALSE
+    return BOOL_UNKNOWN
+
+
+def logical_and(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    """Kleene AND: false ∧ anything = false; true ∧ true = true; else
+    unknown. On the {0,1} encoding that is endpoint-wise min of the
+    canonicalized operands."""
+
+    def f(alo, ahi, blo, bhi):
+        (alo, ahi), (blo, bhi) = _bool3(alo, ahi), _bool3(blo, bhi)
+        return min(alo, blo), min(ahi, bhi)
+
+    return _binary(a, b, f)
+
+
+def logical_or(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    """Kleene OR: true ∨ anything = true; false ∨ false = false; else
+    unknown — endpoint-wise max of the canonicalized operands."""
+
+    def f(alo, ahi, blo, bhi):
+        (alo, ahi), (blo, bhi) = _bool3(alo, ahi), _bool3(blo, bhi)
+        return max(alo, blo), max(ahi, bhi)
+
+    return _binary(a, b, f)
+
+
+def reduce_or(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
+    """Three-valued OR-fold over ``axes``: output shape is the input shape
+    with those axes removed. The fold identity is definite-false (an OR
+    over an empty reduction range is false), so empty-range axes reduce to
+    ``[0, 0]`` exactly as jax's ``reduce_or`` does."""
+    ax = set(axes)
+    if any(not (isinstance(d, int) and 0 <= d < len(a.shape)) for d in ax):
+        raise IntervalError(
+            f"reduce_or axes {axes} out of range for shape {a.shape}"
+        )
+    out_shape = tuple(d for i, d in enumerate(a.shape) if i not in ax)
+    out_n = 1
+    for d in out_shape:
+        out_n *= d
+    los = [0.0] * out_n  # OR identity: definitely false
+    his = [0.0] * out_n
+    if a.size:
+        for coord in _coords(a.shape):
+            i = _flat_index(coord, a.shape)
+            j = _flat_index(
+                tuple(c for k, c in enumerate(coord) if k not in ax), out_shape
+            )
+            lo, hi = _bool3(a.los[i], a.his[i])
+            los[j] = max(los[j], lo)
+            his[j] = max(his[j], hi)
+    return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
+
+
 # -- structural ops (exact: no arithmetic, no bump) ---------------------------
 
 
@@ -353,6 +580,9 @@ def _coords(shape: tuple[int, ...]):
     if shape == ():
         yield ()
         return
+    if 0 in shape:  # a zero-size array has no elements — no coordinates
+        return  # (audit-gate finding 2: the phantom first coordinate
+        # produced an IndexError that bypassed the decline channel)
     idx = [0] * len(shape)
     while True:
         yield tuple(idx)
@@ -382,6 +612,21 @@ def slice_(
         los.append(a.los[i])
         his.append(a.his[i])
     return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
+
+
+def reshape(a: IntervalArray, new_sizes: tuple[int, ...]) -> IntervalArray:
+    """Data-preserving shape change: element storage is already flat
+    C-order, so a C-order reshape is the identity on the element tuples.
+    (Reshapes with a ``dimensions`` permutation are not this function —
+    the transfer declines them before calling here.)"""
+    n = 1
+    for d in new_sizes:
+        n *= d
+    if n != a.size:
+        raise IntervalError(
+            f"reshape {a.shape} -> {tuple(new_sizes)} changes element count"
+        )
+    return IntervalArray(shape=tuple(new_sizes), los=a.los, his=a.his)
 
 
 def squeeze(a: IntervalArray, dimensions: tuple[int, ...]) -> IntervalArray:

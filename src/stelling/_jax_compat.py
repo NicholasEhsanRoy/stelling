@@ -31,6 +31,7 @@ __all__ = [
     "jax_version",
     "transcribe",
     "any_array",
+    "any_pytree",
     "assume",
     "assert_",
     "nonvacuity",
@@ -154,12 +155,132 @@ def any_array(shape, dtype, bounds):
             f"any_array bounds ({bounds[0]!r}, {bounds[1]!r}) declare an empty "
             f"set; refusing at declaration time"
         )
+    if lo == hi and (lo == float("inf") or lo == float("-inf")):
+        # under the stamped ℝ semantics an infinite endpoint means
+        # "unbounded", so (inf, inf) contains no real — an empty set that
+        # slipped the check above and yielded vacuous definite verdicts
+        # (audit-gate finding 3)
+        raise ValueError(
+            f"any_array bounds ({bounds[0]!r}, {bounds[1]!r}) declare an "
+            f"empty real set (an infinite point has no members under ℝ "
+            f"semantics); refusing at declaration time"
+        )
     return _any_p.bind(
         shape=tuple(int(d) for d in shape),
         dtype=str(np.dtype(dtype)),
         lo=lo,
         hi=hi,
     )
+
+
+def _is_array_prototype(x) -> bool:
+    """An array-shaped leaf: anything carrying shape+dtype (np.ndarray,
+    np.generic, jax.Array, tracers). Only shape and dtype are ever read —
+    prototype *values* never enter the trace."""
+    return hasattr(x, "shape") and hasattr(x, "dtype")
+
+
+def _is_bounds_pair(b) -> bool:
+    return (
+        isinstance(b, (tuple, list))
+        and len(b) == 2
+        and all(isinstance(v, (int, float, np.integer, np.floating)) for v in b)
+    )
+
+
+def any_pytree(tree, bounds):
+    """Declare a pytree of harness inputs: tracing-time sugar over
+    :func:`any_array`, one call per array leaf, tree rebuilt around the
+    traced values (``jax.tree_util``). No new primitive, no new tracing
+    machinery — a harness declared through this helper traces to the very
+    same equations as the equivalent hand declaration, so the query
+    content hash is identical.
+
+    ``tree`` is a *prototype* pytree:
+
+    * **array leaves** (anything with ``shape`` and ``dtype``: numpy or
+      jax arrays, scalars of either) contribute shape+dtype to one
+      ``any_array`` declaration each; their values never enter the trace;
+    * **non-array static leaves** (python numbers, strings, ...) and the
+      tree structure itself (including ``None``) pass through verbatim;
+    * **aliasing is object identity**: the same array object at two tree
+      positions is declared ONCE and the traced value is shared between
+      the positions; two distinct objects are never merged into one
+      declaration, however equal their content;
+    * a leaf whose dtype is a **jax PRNG key type is refused** — a key has
+      no bounds representation here. Declare the raw key bits and build
+      the key explicitly, e.g. ``jax.random.wrap_key_data(any_array((2,),
+      "uint32", (0, 2**32 - 1)))``.
+
+    ``bounds`` is either a single ``(lo, hi)`` pair of numbers, broadcast
+    to every array leaf, or a pytree matching ``tree`` with a ``(lo, hi)``
+    pair at each array-leaf position and ``None`` at each static-leaf
+    position.
+
+    Errors here are harness-AUTHORING errors (the caller's setup), so they
+    raise; analysis-time guards, by contrast, never do.
+    """
+    leaves_with_paths, treedef = jax.tree_util.tree_flatten_with_path(tree)
+    broadcast = _is_bounds_pair(bounds)
+    if broadcast:
+        per_leaf = [bounds] * len(leaves_with_paths)
+    else:
+        try:
+            per_leaf = treedef.flatten_up_to(bounds)
+        except (ValueError, TypeError) as e:
+            raise ValueError(
+                f"any_pytree: bounds must be a single (lo, hi) pair or a "
+                f"pytree matching the declared tree's structure; got neither "
+                f"({e})"
+            ) from e
+
+    def canon(pair, where):
+        if not _is_bounds_pair(pair):
+            raise ValueError(
+                f"any_pytree: bounds for array leaf at {where} must be a "
+                f"(lo, hi) pair of numbers, got {pair!r}"
+            )
+        return float(pair[0]), float(pair[1])
+
+    declared: dict[int, object] = {}  # id(prototype) -> traced value
+    declared_bounds: dict[int, tuple[float, float]] = {}
+    out_leaves = []
+    for (path, leaf), b in zip(leaves_with_paths, per_leaf):
+        where = jax.tree_util.keystr(path) or "<root>"
+        if not _is_array_prototype(leaf):
+            if not broadcast and b is not None:
+                raise ValueError(
+                    f"any_pytree: leaf at {where} is a non-array static value "
+                    f"({type(leaf).__name__}); it passes through verbatim and "
+                    f"takes no bounds — put None at its position"
+                )
+            out_leaves.append(leaf)
+            continue
+        if jax.dtypes.issubdtype(leaf.dtype, jax.dtypes.prng_key):
+            raise TypeError(
+                f"any_pytree: leaf at {where} has PRNG key dtype "
+                f"{leaf.dtype}: a key has no bounds representation, and "
+                f"inventing one would mis-declare the input set. Declare the "
+                f"raw key bits instead and construct the key explicitly — "
+                f"e.g. jax.random.wrap_key_data(any_array((2,), 'uint32', "
+                f"(0, 2**32 - 1)))."
+            )
+        if id(leaf) in declared:  # same object, same declaration, same value
+            if canon(b, where) != declared_bounds[id(leaf)]:
+                raise ValueError(
+                    f"any_pytree: array leaf at {where} aliases an earlier "
+                    f"leaf (same object) but with different bounds "
+                    f"{canon(b, where)} vs {declared_bounds[id(leaf)]}; one "
+                    f"object is one declaration — give it one bounds pair"
+                )
+            out_leaves.append(declared[id(leaf)])
+            continue
+        pair = canon(b, where)
+        val = any_array(tuple(leaf.shape), leaf.dtype, pair)
+        declared[id(leaf)] = val
+        declared_bounds[id(leaf)] = pair
+        out_leaves.append(val)
+    return treedef.unflatten(out_leaves)
 
 
 def assume(pred):

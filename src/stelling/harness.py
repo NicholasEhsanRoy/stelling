@@ -4,12 +4,14 @@
 """The harness API: declare inputs and obligations inside a traced function.
 
 ``any_array(shape, dtype, (lo, hi))`` declares an arbitrary bounded input;
-``assume(pred)`` records an assumption (inert in the MVP propagation);
-``assert_(pred)`` states an obligation. All three bind real jax primitives
-(``stelling_any`` / ``stelling_assume`` / ``stelling_assert``) so the
-declarations land in the traced jaxpr — the query's content hash covers
-them. ``trace(harness)`` returns the transcribed :class:`stelling.ir`
-query.
+``any_pytree(tree, bounds)`` is tracing-time sugar declaring one bounded
+input per array leaf of a prototype pytree (identical trace, hence
+identical content hash, to the hand declaration); ``assume(pred)`` records
+an assumption (inert in the MVP propagation); ``assert_(pred)`` states an
+obligation. The declarations bind real jax primitives (``stelling_any`` /
+``stelling_assume`` / ``stelling_assert``) so they land in the traced
+jaxpr — the query's content hash covers them. ``trace(harness)`` returns
+the transcribed :class:`stelling.ir` query.
 
 This module is a jax-free façade: the primitives live in
 ``stelling._jax_compat`` (the only module allowed to import jax), so
@@ -19,6 +21,13 @@ time but keeps the import-hygiene boundary intact.
 
 from __future__ import annotations
 
-from stelling._jax_compat import any_array, assert_, assume, nonvacuity, trace
+from stelling._jax_compat import (
+    any_array,
+    any_pytree,
+    assert_,
+    assume,
+    nonvacuity,
+    trace,
+)
 
-__all__ = ["any_array", "assert_", "assume", "nonvacuity", "trace"]
+__all__ = ["any_array", "any_pytree", "assert_", "assume", "nonvacuity", "trace"]

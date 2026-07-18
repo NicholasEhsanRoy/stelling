@@ -321,40 +321,95 @@ def test_join_and_select_n_refuse_shape_mismatch():
         iv.select_n(iv.point(0.0), [a, b])
 
 
-def test_unhandled_transfer_form_degrades_to_top_not_crash():
-    # a legal jax form the domain doesn't cover (scalar which, array cases)
-    # must DECLINE — ⊤ with the reason noted — never kill the analysis
-    # (degrade-don't-crash; the guards above still refuse, but the refusal
-    # is caught at the propagation layer)
-    w, c0, c1, y, pred, out = (
-        var(0, BOOL), var(1), var(2), var(3), var(4, BOOL), var(5, BOOL),
-    )
-    arr = ir.Aval(kind="ShapedArray", shape=(1,), dtype="float64")
+# --- audit-gate findings (any_pytree build): posture escapes, fixed ----------
+
+
+def test_nan_literal_degrades_to_top_not_crash():
+    # the ubiquitous NaN-sentinel pattern: a legal constant outside the ℝ
+    # domain must bind ⊤ with a note, never kill the analysis
+    x, s, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
     q = close(
         [
-            any_eqn(w, 0.0, 1.0, "bool"),
+            any_eqn(x, 0.0, 1.0),
             ir.JaxprEqn(
-                primitive="stelling_any", invars=(), outvars=(var(1, arr),),
-                params=(("shape", (1,)), ("dtype", "float64"), ("lo", 1.0), ("hi", 2.0)),
+                primitive="add",
+                invars=(x, ir.Literal(val=math.nan, aval=F64)),
+                outvars=(s,),
             ),
             ir.JaxprEqn(
-                primitive="stelling_any", invars=(), outvars=(var(2, arr),),
-                params=(("shape", (1,)), ("dtype", "float64"), ("lo", 3.0), ("hi", 4.0)),
+                primitive="lt",
+                invars=(s, ir.Literal(val=1.0, aval=F64)),
+                outvars=(pred,),
+            ),
+            ir.JaxprEqn(primitive="stelling_assert", invars=(pred,), outvars=(out,)),
+        ],
+        (out,),
+    )
+    p = propagate(q)  # must not raise
+    assert p.obligations[0].status == "unknown"
+    assert any("outside the domain" in n for n in p.notes)
+
+
+def test_undecodable_dtype_const_degrades_to_top_not_crash():
+    f16 = ir.Aval(kind="ShapedArray", shape=(), dtype="float16")
+    arr = ir.Array(dtype="<f2", shape=(), data=b"\x00\x3c")  # f16 1.0
+    x, s, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
+    q = close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            ir.JaxprEqn(
+                primitive="add",
+                invars=(x, ir.Literal(val=arr, aval=f16)),
+                outvars=(s,),
             ),
             ir.JaxprEqn(
-                primitive="select_n",
-                invars=(w, var(1, arr), var(2, arr)),
-                outvars=(var(3, arr),),
+                primitive="lt",
+                invars=(s, ir.Literal(val=10.0, aval=F64)),
+                outvars=(pred,),
             ),
+            ir.JaxprEqn(primitive="stelling_assert", invars=(pred,), outvars=(out,)),
+        ],
+        (out,),
+    )
+    p = propagate(q)  # must not raise
+    assert p.obligations[0].status == "unknown"
+    assert any("outside the domain" in n for n in p.notes)
+
+
+def test_zero_size_structural_ops_run_without_phantom_elements():
+    # _coords yielded a phantom coordinate for zero-size shapes; the
+    # IndexError bypassed the decline channel (audit-gate finding 2)
+    z = iv.from_values((0,), [])
+    b = iv.broadcast_in_dim(z, (2, 0), (1,))
+    assert b.shape == (2, 0) and b.los == ()
+    s = iv.slice_(iv.from_values((3,), [1.0, 2.0, 3.0]), (3,), (3,), None)
+    assert s.shape == (0,) and s.los == ()
+
+
+def test_unhandled_transfer_form_degrades_to_top_not_crash():
+    # a legal jax form the domain doesn't cover must DECLINE — ⊤ with the
+    # reason noted — never kill the analysis (degrade-don't-crash: the
+    # refusal is caught at the propagation layer). The audit's original
+    # vehicle (scalar which, array cases) became a *registered* select_n
+    # form in the pytree-probe round, so the vehicle here is now bitwise
+    # integer `and`, which the bool-only logic transfer declines; the
+    # property under test — IntervalError from a transfer becomes a noted
+    # ⊤, never a crash — is unchanged.
+    x, y, z, pred, out = (
+        var(0, I32), var(1, I32), var(2, I32), var(3, BOOL), var(4, BOOL),
+    )
+    q = close(
+        [
+            any_eqn(x, 0.0, 7.0, "int32"),
+            any_eqn(y, 0.0, 7.0, "int32"),
+            ir.JaxprEqn(primitive="and", invars=(x, y), outvars=(z,)),
             ir.JaxprEqn(
                 primitive="le",
-                invars=(var(3, arr), ir.Literal(val=10.0, aval=F64)),
-                outvars=(var(4, ir.Aval(kind="ShapedArray", shape=(1,), dtype="bool")),),
+                invars=(z, ir.Literal(val=10.0, aval=F64)),
+                outvars=(pred,),
             ),
             ir.JaxprEqn(
-                primitive="stelling_assert",
-                invars=(var(4, ir.Aval(kind="ShapedArray", shape=(1,), dtype="bool")),),
-                outvars=(out,),
+                primitive="stelling_assert", invars=(pred,), outvars=(out,)
             ),
         ],
         (out,),

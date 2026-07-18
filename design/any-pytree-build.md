@@ -102,6 +102,38 @@ plumbing — would need a bitset/congruence domain); and the h_hard
 residual registry list (`reduce_sum`, `sqrt`, `split`, `log`, …) — all
 census-recorded for any future round, none built.
 
+## The audit gate, closed (2026-07-18)
+
+**No unsound verdict path.** All nine mandated constructions passed:
+aliasing both directions (one declaration per shared object — the traced
+`x − x` is the *same var twice*; equal-but-distinct never merged); the
+convert whitelist verified **exhaustively value-preserving** (all 65536
+float16 patterns, ±2³¹ edges, 400k randomized draws) and byte-identical
+to the carve-out; all four mandated declines degrade with quoted reasons;
+both content-hash equalities reproduced independently; the new uint
+decoders bracket above 2⁵³ (the finding-3 shape checked on the new
+formats, Fraction-verified); broadcast index arithmetic matches
+numpy/jax ground truth including 3-D and zero-size; pow corners contained
+with the assumption riding into the stamp; Kleene tables and
+definite-FALSE directions exact; scalar-selector `select_n` matches a
+fresh jit measurement of the primitive at every index.
+
+**Three FRAGILE findings — posture escapes, all fixed at adjudication
+with the auditor's constructions as regression tests** (details in the
+SOUNDNESS log): NaN/undecodable constants now bind ⊤ with a note instead
+of killing the analysis (the NaN-sentinel `where` pattern is the reachable
+case); zero-size shapes have no phantom coordinates; `(inf, inf)`
+declarations are refused as empty ℝ-sets. Post-fix: **195 green (jax),
+138+5 (jax-free), hash acceptance intact, and every recorded harness
+reproduces its recorded status — no verdict flipped.**
+
+The pattern held for the third audit in a row: the findings clustered in
+the *newest* surfaces (the decoders the builder added under the guard
+rule; the structural ops' edge cases), the core survived, and the
+predicted fourth guard instance did not occur — the builder's guards all
+declined correctly, because the rule was in the spec before the build
+instead of in a fix after it.
+
 ## What this pass does not do
 
 No count (`any_pytree` posing a case is not a mechanized case — that

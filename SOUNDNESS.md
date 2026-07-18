@@ -181,4 +181,26 @@ Three further commitments bind every implementation of the stamp:
   coverage. No verdict semantics changed — a crash produced no verdict
   before; regression test added.
 
+- **2026-07-18 (pre-release, same day): the `any_pytree` build passed its
+  registered audit gate; three posture escapes fixed before landing.**
+  The build (fresh-context builder, closed list, counts withheld) was
+  audited by a second fresh context before any commit
+  (`design/any-pytree-build.md`). **No unsound verdict path found** — all
+  nine mandated constructions passed, including exhaustive
+  value-preservation verification of the convert whitelist (every float16
+  bit pattern; ±2³¹ edges) and independent reproduction of the
+  hand-vs-sugar content-hash equalities. Three FRAGILE escapes from the
+  degrade-don't-crash posture, fixed with the auditor's constructions as
+  regression tests: (1) literal/const decoding ran outside the decline
+  guard — a NaN-sentinel constant (`where(pred, x, nan)`, ubiquitous in
+  real code), an undecodable dtype, or a complex literal killed the whole
+  analysis; such constants now bind ⊤ with a note (the unbound-var raise
+  is untouched — that one is a defect, not a value). (2) `_coords`
+  yielded a phantom coordinate for zero-size shapes; the `IndexError`
+  bypassed the decline channel. (3) `any_array((inf, inf))` slipped the
+  empty-set refusal — an infinite point contains no real under the
+  stamped ℝ semantics and yielded vacuous definite verdicts; refused at
+  declaration now. No verdict flipped — every recorded harness re-run
+  reproduces its status; 195 tests green.
+
 *(no releases yet)*

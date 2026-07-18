@@ -11,8 +11,10 @@ Scope, held deliberately (design/e2a-registration.md): no widening, no
 fixpoints, no cond/scan descent, no solver. The transfer registry contains
 exactly the primitives the target census returned
 (`design/primitive-census.md`, "The target census") plus the three harness
-primitives. Everything else falls to ⊤ — soundly, with coverage recording
-exactly how much fell.
+primitives, plus the closed pytree-probe registration round (abs, eq, ne,
+and, or, stop_gradient, reshape, pow, reduce_or, and the scalar-selector /
+rank-broadcast forms of already-registered transfers). Everything else
+falls to ⊤ — soundly, with coverage recording exactly how much fell.
 
 Every transfer declares an assumption tier (design commitment 5):
 ``exact`` (no arithmetic, or arithmetic with no rounding), ``sound``
@@ -90,8 +92,19 @@ class Propagation:
 
 
 # -- literals and consts ------------------------------------------------------
-
-_STRUCT_FMT = {"<f8": "d", "<f4": "f", "<i8": "q", "<i4": "i", "|b1": "?"}
+#
+# The unsigned formats joined with the pytree-probe registration round:
+# registering `and`/`or`/`eq`/`ne` made the propagator *read* the uint mask
+# literals of RNG plumbing (threefry constants and friends) that previously
+# sat behind unknown primitives — without decoders the read raised and the
+# whole analysis died on a legal trace (h_hard), the exact failure the
+# guard rule forbids. Unsigned ints decode to python ints, which
+# `_int_bracket` already brackets soundly above 2**53.
+_STRUCT_FMT = {
+    "<f8": "d", "<f4": "f", "<i8": "q", "<i4": "i", "|b1": "?",
+    "|u1": "B", "<u2": "H", "<u4": "I", "<u8": "Q",
+    "|i1": "b", "<i2": "h",
+}
 
 
 def _int_bracket(v: int) -> tuple[float, float]:
@@ -150,7 +163,10 @@ def _value_to_interval(v, shape: tuple[int, ...]) -> iv.IntervalArray:
 
 # -- the transfer registry ----------------------------------------------------
 #
-# Exactly the target census list + the harness primitives. Signature:
+# Exactly the target census list + the harness primitives, plus the closed
+# pytree-probe registration round (abs, eq, ne, and, or, stop_gradient,
+# reshape, pow, reduce_or — the primitives the probe's own ⊤ list named).
+# Signature:
 # transfer(eqn, params: dict, ins: list[IntervalArray]) -> list[IntervalArray]
 
 
@@ -202,14 +218,56 @@ def _t_convert(eqn, params, ins):
     return None  # value-changing or unrecognized conversion -> ⊤, noted
 
 
+def _t_reshape(eqn, params, ins):
+    if params.get("dimensions") is not None:
+        # a dimensions= reshape permutes before reshaping — not the C-order
+        # flat identity; no rule yet, so decline (⊤ with the params noted).
+        return None
+    return [iv.reshape(ins[0], tuple(params["new_sizes"]))]
+
+
+def _t_bool_logic(name, op):
+    """jax's ``and``/``or`` are *bitwise*: on bool operands they are the
+    logical connectives our three-valued encoding models; on integers they
+    are bit arithmetic, which no interval rule here covers — decline."""
+
+    def t(eqn, params, ins):
+        dtypes = [v.aval.dtype for v in eqn.invars]
+        if any(d != "bool" for d in dtypes):
+            raise iv.IntervalError(
+                f"{name!r} transfer covers bool operands only (three-valued "
+                f"logic); got dtypes {dtypes} — bitwise integer {name} has "
+                f"no interval rule"
+            )
+        return [op(*ins)]
+
+    return t
+
+
+def _t_reduce_or(eqn, params, ins):
+    dtypes = [v.aval.dtype for v in eqn.invars]
+    if any(d != "bool" for d in dtypes):
+        raise iv.IntervalError(
+            f"'reduce_or' transfer covers bool operands only; got dtypes "
+            f"{dtypes}"
+        )
+    return [iv.reduce_or(ins[0], tuple(params["axes"]))]
+
+
 TRANSFERS = {
     "add": (lambda eqn, p, ins: [iv.add(*ins)], TIER_SOUND),
     "sub": (lambda eqn, p, ins: [iv.sub(*ins)], TIER_SOUND),
     "mul": (lambda eqn, p, ins: [iv.mul(*ins)], TIER_SOUND),
     "div": (lambda eqn, p, ins: [iv.div(*ins)], TIER_SOUND),
     "neg": (lambda eqn, p, ins: [iv.neg(ins[0])], TIER_EXACT),
+    "abs": (lambda eqn, p, ins: [iv.abs_(ins[0])], TIER_EXACT),
     "max": (lambda eqn, p, ins: [iv.maximum(*ins)], TIER_EXACT),
     "min": (lambda eqn, p, ins: [iv.minimum(*ins)], TIER_EXACT),
+    # pow's corner rule holds for strictly positive bases only; anything
+    # else declines inside iv.pow_ (IntervalError -> noted ⊤).
+    "pow": (lambda eqn, p, ins: [iv.pow_(*ins)], TIER_SOUND_LIBM),
+    "stop_gradient": (lambda eqn, p, ins: [ins[0]], TIER_EXACT),
+    "reshape": (_t_reshape, TIER_EXACT),
     # select_n(which, *cases): the masked case-split. Exact where `which` is
     # definite; a sound join where it straddles (design/control-flow-*).
     "select_n": (lambda eqn, p, ins: [iv.select_n(ins[0], ins[1:])], TIER_EXACT),
@@ -218,6 +276,11 @@ TRANSFERS = {
     "gt": (lambda eqn, p, ins: [iv.gt(*ins)], TIER_EXACT),
     "le": (lambda eqn, p, ins: [iv.le(*ins)], TIER_EXACT),
     "ge": (lambda eqn, p, ins: [iv.ge(*ins)], TIER_EXACT),
+    "eq": (lambda eqn, p, ins: [iv.eq(*ins)], TIER_EXACT),
+    "ne": (lambda eqn, p, ins: [iv.ne(*ins)], TIER_EXACT),
+    "and": (_t_bool_logic("and", iv.logical_and), TIER_EXACT),
+    "or": (_t_bool_logic("or", iv.logical_or), TIER_EXACT),
+    "reduce_or": (_t_reduce_or, TIER_EXACT),
     "squeeze": (
         lambda eqn, p, ins: [iv.squeeze(ins[0], tuple(p.get("dimensions", ())))],
         TIER_EXACT,
@@ -257,6 +320,16 @@ TRANSFERS = {
 }
 
 
+# Every sound-libm transfer names the exact libm-fidelity assumption it
+# rides on; the tier check below stamps it into the verdict. A transfer at
+# that tier without an entry still stamps a (generic) assumption — the
+# demotion is never silent.
+_LIBM_ASSUMPTIONS = {
+    "exp": iv.EXP_LIBM_ASSUMPTION,
+    "pow": iv.POW_LIBM_ASSUMPTION,
+}
+
+
 def _bool_status(b: iv.IntervalArray) -> tuple[str, str]:
     n_true = sum(1 for lo, hi in zip(b.los, b.his) if (lo, hi) == iv.BOOL_TRUE)
     n_false = sum(1 for lo, hi in zip(b.los, b.his) if (lo, hi) == iv.BOOL_FALSE)
@@ -283,7 +356,18 @@ class _Propagator:
 
     def read(self, atom: ir.Atom) -> iv.IntervalArray:
         if isinstance(atom, ir.Literal):
-            return _value_to_interval(atom.val, atom.aval.shape)
+            # a constant the domain cannot represent (a NaN sentinel — the
+            # ubiquitous `where(pred, x, nan)` pattern — an undecodable
+            # dtype, a complex literal) is a LEGAL program value outside the
+            # ℝ model: it degrades to ⊤ with a note, it does not kill the
+            # analysis (audit-gate finding 1). The unbound-var raise below
+            # is untouched — that one is a transcription defect, not a
+            # value.
+            try:
+                return _value_to_interval(atom.val, atom.aval.shape)
+            except (iv.IntervalError, ir.TranscriptionError) as e:
+                self.notes.append(f"literal outside the domain ({e}); ⊤")
+                return iv.top(atom.aval.shape)
         got = self.env.get(atom.id)
         if got is None:
             # not a coverage gap: an equation reading a never-bound var is a
@@ -311,9 +395,16 @@ class _Propagator:
 
     def run(self, jaxpr: ir.Jaxpr, consts, args) -> list[iv.IntervalArray]:
         for var, c in zip(jaxpr.constvars, consts):
-            self.env[var.id] = (
-                c if isinstance(c, iv.IntervalArray) else _value_to_interval(c, var.aval.shape)
-            )
+            if isinstance(c, iv.IntervalArray):
+                self.env[var.id] = c
+                continue
+            try:
+                self.env[var.id] = _value_to_interval(c, var.aval.shape)
+            except (iv.IntervalError, ir.TranscriptionError) as e:
+                # same posture as literals: an unrepresentable const binds ⊤
+                # (audit-gate finding 1 — a NaN closure const killed the run)
+                self.notes.append(f"const outside the domain ({e}); ⊤")
+                self.env[var.id] = iv.top(var.aval.shape)
         for var, a in zip(jaxpr.invars, args):
             self.env[var.id] = a
         for eqn in jaxpr.eqns:
@@ -448,7 +539,13 @@ class _Propagator:
         self.counter.record_known(eqn.primitive)
         self.used[eqn.primitive] = tier
         if tier == TIER_SOUND_LIBM:
-            self.assumptions.add(iv.EXP_LIBM_ASSUMPTION)
+            self.assumptions.add(
+                _LIBM_ASSUMPTIONS.get(
+                    eqn.primitive,
+                    f"{eqn.primitive} endpoints assume a faithfully-rounded "
+                    f"libm (error <= 1 ulp), bumped 1 ulp outward",
+                )
+            )
         if eqn.primitive == "stelling_assert":
             status, detail = _bool_status(ins[0])
             self.obligations.append(

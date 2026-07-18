@@ -153,3 +153,206 @@ def test_select_n_definite_picks_straddle_joins():
     # which straddles {0,1} -> join
     j = iv.select_n(scalar(0.0, 1.0), [x, y])
     assert (j.los[0], j.his[0]) == (10.0, 20.0)
+
+
+# --- pytree-probe registration round: new domain ops -------------------------
+
+
+def test_abs_piecewise_exact():
+    r = iv.abs_(iv.from_values((3,), [-2.0, 3.0, 0.0]))
+    assert r.los == (2.0, 3.0, 0.0) and r.his == (2.0, 3.0, 0.0)  # no bump
+    s = iv.abs_(scalar(-3.0, 2.0))  # straddles zero
+    assert (s.los[0], s.his[0]) == (0.0, 3.0)
+    n = iv.abs_(scalar(-5.0, -1.0))  # all negative: exact flip
+    assert (n.los[0], n.his[0]) == (1.0, 5.0)
+    p = iv.abs_(scalar(1.0, 4.0))  # all positive: identity
+    assert (p.los[0], p.his[0]) == (1.0, 4.0)
+    half = iv.abs_(scalar(-INF, 5.0))  # infinite endpoint
+    assert (half.los[0], half.his[0]) == (0.0, INF)
+
+
+def test_eq_three_valued():
+    # definitely true ONLY when both operands are the same single point
+    assert iv.eq(scalar(2.0, 2.0), scalar(2.0, 2.0)).los[0] == 1.0
+    # disjoint: definitely false
+    assert iv.eq(scalar(1.0, 2.0), scalar(3.0, 4.0)).his[0] == 0.0
+    # identical *intervals* are not a point: unknown, never guessed
+    r = iv.eq(scalar(1.0, 2.0), scalar(1.0, 2.0))
+    assert (r.los[0], r.his[0]) == (0.0, 1.0)
+    # a point inside a wider interval: unknown
+    r2 = iv.eq(scalar(1.0, 1.0), scalar(0.0, 2.0))
+    assert (r2.los[0], r2.his[0]) == (0.0, 1.0)
+    # touching endpoints may or may not be equal: unknown
+    r3 = iv.eq(scalar(1.0, 2.0), scalar(2.0, 3.0))
+    assert (r3.los[0], r3.his[0]) == (0.0, 1.0)
+
+
+def test_ne_is_the_negation_of_eq():
+    assert iv.ne(scalar(1.0, 2.0), scalar(3.0, 4.0)).los[0] == 1.0  # disjoint
+    assert iv.ne(scalar(2.0, 2.0), scalar(2.0, 2.0)).his[0] == 0.0  # same point
+    r = iv.ne(scalar(1.0, 2.0), scalar(1.0, 2.0))
+    assert (r.los[0], r.his[0]) == (0.0, 1.0)
+
+
+T3, F3, U3 = (1.0, 1.0), (0.0, 0.0), (0.0, 1.0)
+
+
+def test_logical_and_kleene_table():
+    table = {
+        (T3, T3): T3, (T3, F3): F3, (T3, U3): U3,
+        (F3, T3): F3, (F3, F3): F3, (F3, U3): F3,
+        (U3, T3): U3, (U3, F3): F3, (U3, U3): U3,
+    }
+    for (x, y), want in table.items():
+        r = iv.logical_and(scalar(*x), scalar(*y))
+        assert (r.los[0], r.his[0]) == want, (x, y)
+
+
+def test_logical_or_kleene_table():
+    table = {
+        (T3, T3): T3, (T3, F3): T3, (T3, U3): T3,
+        (F3, T3): T3, (F3, F3): F3, (F3, U3): U3,
+        (U3, T3): T3, (U3, F3): U3, (U3, U3): U3,
+    }
+    for (x, y), want in table.items():
+        r = iv.logical_or(scalar(*x), scalar(*y))
+        assert (r.los[0], r.his[0]) == want, (x, y)
+
+
+def test_logical_ops_read_top_as_unknown():
+    # ⊤ flowing in from an unregistered producer canonicalizes to unknown —
+    # sound while the true values are booleans (the transfer's dtype guard)
+    top = scalar(-INF, INF)
+    r = iv.logical_and(top, scalar(*T3))
+    assert (r.los[0], r.his[0]) == U3
+    r2 = iv.logical_or(top, scalar(*T3))
+    assert (r2.los[0], r2.his[0]) == T3  # true ∨ anything = true
+
+
+def test_reduce_or_folds_three_valued_over_axes():
+    # rows: (F, T, U) and (F, F, F)
+    a = iv.IntervalArray(
+        shape=(2, 3),
+        los=(0.0, 1.0, 0.0, 0.0, 0.0, 0.0),
+        his=(0.0, 1.0, 1.0, 0.0, 0.0, 0.0),
+    )
+    rows = iv.reduce_or(a, (1,))
+    assert rows.shape == (2,)
+    assert (rows.los, rows.his) == ((1.0, 0.0), (1.0, 0.0))  # T; F
+    cols = iv.reduce_or(a, (0,))
+    assert cols.shape == (3,)
+    assert (cols.los, cols.his) == ((0.0, 1.0, 0.0), (0.0, 1.0, 1.0))  # F T U
+    both = iv.reduce_or(a, (0, 1))
+    assert both.shape == () and (both.los[0], both.his[0]) == T3
+
+
+def test_reduce_or_empty_range_axes_are_definitely_false():
+    empty = iv.IntervalArray(shape=(0,), los=(), his=())
+    r = iv.reduce_or(empty, (0,))
+    assert r.shape == () and (r.los[0], r.his[0]) == F3  # OR over nothing
+    twoby0 = iv.IntervalArray(shape=(2, 0), los=(), his=())
+    r2 = iv.reduce_or(twoby0, (1,))
+    assert r2.shape == (2,) and r2.los == (0.0, 0.0) and r2.his == (0.0, 0.0)
+
+
+def test_reduce_or_bad_axes_raise_interval_error():
+    with pytest.raises(iv.IntervalError):
+        iv.reduce_or(iv.from_values((2,), [0.0, 1.0]), (1,))
+
+
+def test_reshape_is_flat_c_order_identity():
+    a = iv.from_values((2, 3), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    r = iv.reshape(a, (3, 2))
+    assert r.shape == (3, 2) and r.los == a.los and r.his == a.his
+    flat = iv.reshape(a, (6,))
+    assert flat.shape == (6,) and flat.los == a.los
+    with pytest.raises(iv.IntervalError):
+        iv.reshape(a, (4,))  # element count changes: refuse
+
+
+def test_pow_brackets_positive_base_corners():
+    from fractions import Fraction
+
+    r = iv.pow_(scalar(3.0, 3.0), scalar(3.0, 3.0))
+    assert Fraction(r.los[0]) < 27 < Fraction(r.his[0])  # bumped outward
+    # decreasing in the exponent for base < 1
+    r2 = iv.pow_(scalar(0.5, 0.5), scalar(1.0, 2.0))
+    assert r2.los[0] < 0.25 and r2.his[0] > 0.5
+    # negative exponents (monotone decreasing in the base)
+    r3 = iv.pow_(scalar(2.0, 4.0), scalar(-1.0, -1.0))
+    assert r3.los[0] < 0.25 and r3.his[0] > 0.5
+    assert r3.los[0] > 0.0  # x > 0 gives x**y > 0: floored at 0, never below
+
+
+def test_pow_overflow_saturates_outward_never_inf_inf():
+    r = iv.pow_(scalar(10.0, 10.0), scalar(400.0, 400.0))
+    assert r.his[0] == INF
+    assert r.los[0] == math.nextafter(INF, 0.0)  # maxfloat: sound, finite
+
+
+def test_pow_infinite_endpoints():
+    r = iv.pow_(scalar(1.0, INF), scalar(2.0, 2.0))
+    assert r.los[0] < 1.0 and r.his[0] == INF
+    # base straddling 1 with an unbounded exponent covers [0, inf]
+    r2 = iv.pow_(scalar(0.5, 2.0), scalar(-INF, INF))
+    assert (r2.los[0], r2.his[0]) == (0.0, INF)
+
+
+def test_pow_nonpositive_base_raises_interval_error():
+    for lo, hi in [(-1.0, 2.0), (0.0, 2.0), (-3.0, -1.0)]:
+        with pytest.raises(iv.IntervalError):
+            iv.pow_(scalar(lo, hi), scalar(2.0, 2.0))
+
+
+def test_select_n_scalar_selector_broadcasts_over_cases():
+    lo_case = iv.from_values((2,), [1.0, 2.0])
+    hi_case = iv.from_values((2,), [10.0, 20.0])
+    take0 = iv.select_n(iv.point(0.0), [lo_case, hi_case])
+    assert take0.shape == (2,) and take0.los == (1.0, 2.0)
+    take1 = iv.select_n(iv.point(1.0), [lo_case, hi_case])
+    assert take1.los == (10.0, 20.0)
+    joined = iv.select_n(scalar(0.0, 1.0), [lo_case, hi_case])
+    assert joined.los == (1.0, 2.0) and joined.his == (10.0, 20.0)
+
+
+def test_select_n_other_shape_combos_still_refuse():
+    a2 = iv.from_values((2,), [1.0, 2.0])
+    a3 = iv.from_values((3,), [1.0, 2.0, 3.0])
+    with pytest.raises(iv.IntervalError):
+        iv.select_n(iv.from_values((2,), [0.0, 1.0]), [a2, a3])  # cases disagree
+    with pytest.raises(iv.IntervalError):
+        iv.select_n(iv.from_values((3,), [0.0, 0.0, 0.0]), [a2, a2])  # non-scalar mismatch
+
+
+def test_rank_broadcasting_size1_and_missing_leading_dims():
+    col = iv.IntervalArray(shape=(2, 1), los=(1.0, 10.0), his=(1.0, 10.0))
+    row = iv.from_values((3,), [1.0, 2.0, 3.0])
+    r = iv.add(col, row)
+    assert r.shape == (2, 3)
+    for got_lo, got_hi, want in zip(
+        r.los, r.his, [2.0, 3.0, 4.0, 11.0, 12.0, 13.0]
+    ):
+        assert got_lo < want < got_hi  # outward bracket around the true sum
+
+
+def test_rank_broadcasting_applies_to_comparisons():
+    col = iv.IntervalArray(shape=(2, 1), los=(0.0, 10.0), his=(0.0, 10.0))
+    row = iv.from_values((3,), [1.0, 2.0, 3.0])
+    r = iv.lt(col, row)
+    assert r.shape == (2, 3)
+    assert (r.los[:3], r.his[:3]) == ((1.0, 1.0, 1.0), (1.0, 1.0, 1.0))  # 0 < all
+    assert (r.los[3:], r.his[3:]) == ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))  # 10 > all
+
+
+def test_rank_broadcasting_zero_size_dimension():
+    empty = iv.IntervalArray(shape=(0,), los=(), his=())
+    one = iv.IntervalArray(shape=(1,), los=(5.0,), his=(5.0,))
+    r = iv.add(empty, one)
+    assert r.shape == (0,) and r.los == () and r.his == ()
+
+
+def test_incompatible_shapes_raise_interval_error():
+    with pytest.raises(iv.IntervalError):
+        iv.add(
+            iv.from_values((2,), [1.0, 2.0]), iv.from_values((3,), [1.0, 2.0, 3.0])
+        )
