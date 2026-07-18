@@ -75,3 +75,55 @@ fails. **Control-flow-only: 4 → 3 of 6. The gate passes at exactly 3 of
 The census's own rubric was applied to an unverified model of the code —
 the same defect the fidelity census exists to catch, one document
 upstream.
+
+## Gate re-adjudication (2026-07-18): the bjx#D416 row, against quoted code
+
+The #969 correction raised the dispositive question: **D416's row was
+also classified against a hand-model** (the invented DA body). If it also
+over-classified, control-flow-only is 2 of 6 and the gate fails
+retroactively, unlicensing the machinery. Adjudicated against the pinned
+source (blackjax `e53f46b`), same standard as #969 — quoted lines, not a
+mental model:
+
+- **The real adaptation loop body has no key and is branch-shaped.**
+  `window_adaptation.py:234–239`: `update(adaptation_state,
+  adaptation_stage, position, acceptance_rate)` — the rng key is consumed
+  by the *kernel* step, a separate function in the warmup loop; the
+  adaptation update never sees it. `:261–274`: the body is
+  `jax.lax.switch(stage, (fast_update, slow_update), …)` then
+  `jax.lax.cond(is_middle_window_end, slow_final, identity, …)` — the
+  branching the bucket is named for, in the library's own code.
+- **No semantic gap of #969's kind.** The step-size slice
+  (`dual_averaging.py:117–123` + `window_adaptation.py:278`
+  `step_size = jnp.exp(…log_step_size_avg)`) is straight-line arithmetic;
+  its inputs are the DA carry (scalars, declarable), `acceptance_rate` (a
+  probability — a library-interface bound, quotable), and the stage flags.
+  No relational coupling between separately-declared carries is required
+  to *state* the invariant. What it needs beyond the branch transfers:
+  registry rows (`sqrt`, `pow` — coverage, by census) and per-leaf
+  declaration plumbing (tedious, not semantic).
+- **Granularity, addressed rather than assumed** — the one place the
+  rubric was ambiguous. Judged at the *full warmup body* (kernel
+  included), every row in this census, including the two that mechanized,
+  would fall out (kernels consume keys; solver states are pytrees) — a
+  standard under which the gate was unpassable a priori, so it was never
+  the census's standard. The standard the rubric's own registered example
+  fixes ("`step_size ∈ [lo,hi]` through an adaptation loop is a
+  `while`-body invariant") is the **property-relevant slice**, and the
+  quoted code shows that for D416 the slice boundary is the *library's
+  own function boundary* (`update` is a distinct function with no key) —
+  not an abstraction carved by the analyst. #969 fell under the same
+  standard: its *slice itself* needs the relational assume.
+
+**Verdict: the row survives. Control-flow-only stays 3 of 6; the gate
+holds — at margin zero, on an adjudicated row, with the granularity
+ambiguity now resolved in writing rather than by silence.** The machinery
+remains licensed.
+
+**The composition caveat, so the gate is not over-read:** of the three
+in-bucket cases, only **dfx#207**'s mechanized harness actually used the
+branch machinery; **npy#249**'s used none of it (the loop-body-invariant
+*framing* was its unlock — straight-line exp); **D416**'s faithful posing
+would use cond/switch plus registry rows plus per-leaf declaration
+plumbing, and has not been attempted. "Control flow is the bottleneck"
+was true, cleanly, for one case of three.
