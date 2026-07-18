@@ -55,3 +55,79 @@ poses and its obligation does not route through a discarded correlation,
 the walled half is smaller than "all samplers"; if it hits a wall, name
 **which** — key-decorrelation, partial dependency, or registry — with the
 blocking structure quoted.
+
+---
+
+# Reading (2026-07-18 — `corpus/supply/second_bill.py`)
+
+## §1: the clean case's 19 ⊤, classified from extracted facts
+
+Every ⊤ equation's operands/params were printed mechanically; the
+assignments below cite them.
+
+| primitive (⊤ eqns) | facts | bucket |
+|---|---|---|
+| `abs` ×4 | `float64[1]`/`float64[]` | **trivial** (monotone-piecewise) |
+| `eq` ×3, `ne` ×1 | scalar float vs literal | **trivial** (three-valued, the lt/le machinery) |
+| `or` ×2, `and` ×1 | `bool[]` | **trivial** (three-valued logic) |
+| `stop_gradient` ×2 | identity | **trivial** |
+| `reshape` ×1 | `[1] → ()`, `dimensions=None` | **trivial** (structural, data-preserving) |
+| `pow` ×1 | scalar base, **literal exponent** (the PID coefficient) | **trivial** with a base-sign decline guard |
+| `convert_element_type` ×2 | `new_dtype=float64`, weak-type flip / literal src | **trivial** (value-preserving forms the rule doesn't yet name) |
+| `select_n` ×1 | scalar `which`, `(1,)` cases (declined) | **array-semantics** (batched/scalar selectors) |
+| `reduce_or` ×1 | `bool[1]`, `axes=(0,)` | **array-semantics** (axis reductions — degenerate here, but the class is shape-dependent) |
+
+> **Tally: trivial 17 of 19 equations (89%); 9 of 11 primitives.
+> Array-semantics: 2 of 19. Out-of-ℝ: 0.**
+
+**Reading, per the registered criterion: MOSTLY TRIVIAL → the build is
+bounded.** `any_pytree` + a finite registry list reaches diffrax; the
+fork does **not** reopen. The fresh-context builder's list, finite and
+closed: the nine trivial rows above, plus three array-semantics items —
+batched/scalar `select_n`, axis reductions, and (from the hard case's
+declines) rank broadcasting. The array-semantics items inherit the §3
+guard rule below and land in the builder's audit scope: they are the
+class that produced false-VERIFIEDs twice.
+
+## §2: the boundary probe — the candidate escapes the key wall and lands on the partial-dependency wall
+
+The momentum-norm harness **POSED** (392 eqns, 56% known, obligation
+unknown). Attribution, walls in the order the obligation meets them:
+
+1. **Registry** (`reduce_sum ×18`, `integer_pow ×7`, `sqrt ×15` — the
+   norm pipeline itself): the second bill, ordinary.
+2. **Partial dependency**: behind the registry sits the structure that
+   *makes* the invariant true — blackjax `integrators.py:466`,
+   `new_momentum_normalized, _ = _normalized_flatten_array(new_momentum_raw)`
+   — an explicit per-step renormalization, i.e. `p/‖p‖`, a
+   self-correlation intervals discard. Carrying `‖p‖ = 1` through the
+   update needs exactly the correlation the domain forgets — **bjx#969's
+   shape, in the invariant's own maintenance**.
+3. The **key cone** is upstream of the momentum's *values* but **not of
+   the property's truth** — the invariant holds for any bits, which is
+   what made it the right probe.
+
+**So the principle is confirmed by instance, and the boundary is
+relabeled:** the corpus splits by **whether the property's content
+survives interval abstraction** — keys are the 100%-dependency form,
+normalizations/ratchets the partial form — not by library. The sampler
+half is *not uniformly key-walled*: this property's wall is partial
+dependency (relational/affine territory, its own registered trigger,
+never a patch) behind ordinary registry rows. The
+"`any_pytree`-reachable / key-blocked" split from the target probe is a
+**rough proxy** for the real boundary and is so marked there.
+
+## §4, the decision inputs, assembled
+
+- §1: **bounded** — mostly-trivial, finite list. The fork stays closed.
+- §2: the reachable half does **not** grow today (the escape-candidate
+  lands on the partial-dependency wall), but the walled half's *reason*
+  is now named per-case rather than per-library — which the corpus
+  expansion inherits: sampler hits get attributed to key / partial /
+  registry walls individually, not written off as a bloc.
+
+Per the fixed readings: **build `any_pytree` — fresh-context builder, the
+finite list, §3's guard rule, the registered audit gate, scoped to the
+array-state half.** The decision to exercise the license is the
+maintainer's; this document's job was the two numbers, and they are 89%
+and one-named-wall.

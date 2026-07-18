@@ -47,6 +47,17 @@ pose *and verify* will be maximal. Therefore, registered in advance:
 > applied *before* a band depends on it rather than after one already
 > did.
 
+**Builder's standing instruction (2026-07-18, from the
+guards-generate-hazards pattern — three witnesses,
+`design/jax-verification-categories.md`):** every guard the build writes
+**degrades to ⊤ with a quoted reason; it never raises.** Structural
+declaration needs shape/type/arity guards, they will be written under the
+safety motivation, and that motivation has over-fired three times —
+`any_pytree`'s guards are the predicted fourth instance, pre-empted here.
+The builder also receives the **finite transfer list** from
+`design/second-bill.md` (nine trivial rows + three array-semantics items)
+and not the counts.
+
 ## Finding 2: this corpus cannot fire any trigger — the meta-finding
 
 The counts, at threshold ≥ 2 each: **solver 0** (two experiments).

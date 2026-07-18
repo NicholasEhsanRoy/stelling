@@ -489,6 +489,38 @@ one arc nobody ordered: **the #632 fix's guard is the cause of #756's
 infinite rejection loop** — defences composing into new failure modes,
 dated, in one repo. A fact about the kills; it reopens none of them.
 
+**Guards-generate-hazards: a pattern with three witnesses (2026-07-18 —
+upgraded from a one-instance hypothesis).** (1) diffrax#632's ULP guard →
+#756's rejection loop. (2) stelling's first-audit fix (the float→int
+range guard) → the ±2³¹ false VERIFIED it was meant to prevent
+(`design/soundness-audit.md`, finding 4-B). (3) stelling's mis-join shape
+guards → analysis-killing crashes on legal jax forms (the FRAGILE-5
+completion). One shape: **every guard is a small program written under
+the motivation to be safe, and that motivation over-fires** — into a new
+bug or into killing the thing it protects. Forward consequence, stated
+because it is the reason to name the pattern: **`any_pytree`'s own
+guards are the predicted fourth instance** — structural declaration needs
+shape/type/arity guards, written under the same motivation. The
+fresh-context builder's standing instruction (`design/corpus-limits.md`,
+the build gate): **guards degrade to ⊤ with a quoted reason, never
+raise** — the FRAGILE-5 fix applied in advance rather than after the
+crash.
+
+**The abstraction boundary, relabeled (2026-07-18,
+`design/second-bill.md`).** The corpus splits by **whether the property's
+content survives interval abstraction, not by library.** A `PRNGKeyArray`
+is unposeable because its entire semantic content is correlations
+(uniformity, independence) that interval abstraction discards — the
+dependency problem at 100%; normalizations and ratchets are the partial
+form of the same thing. Tested on the strongest key-independent sampler
+property (MCLMC's isokinetic `‖p‖ = 1`, true for any bits): it poses,
+escapes the key wall, and lands on the **partial-dependency** wall — the
+invariant is maintained by an explicit per-step renormalization
+(`blackjax integrators.py:466`), a self-correlation. So sampler hits are
+walled per-case (key / partial-dependency / registry), not as a bloc;
+relational-affine domains are the registered answer to the partial form,
+never a patch.
+
 **The product split, corrected (2026-07-18).** The tracker probe's
 `17 safety : 3 accuracy` split classified **who writes the spec**
 (universal region vs bespoke invariant). It says **nothing about proof

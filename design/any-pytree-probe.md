@@ -126,7 +126,12 @@ key-derived.
   `any_pytree`-reachable half and a key-blocked half** — bounding the
   corpus expansion before it runs: sampler hits (blackjax, numpyro
   warmup) can be posed only up to their key cones, which is UNKNOWN by
-  construction for state-dependent properties.
+  construction for state-dependent properties. *(Relabeled 2026-07-18:
+  this split is a **rough proxy**. The real boundary is whether the
+  property's content survives interval abstraction — keys are the
+  100%-dependency form, normalizations/ratchets the partial form; sampler
+  hits wall per-case, not as a bloc. `design/second-bill.md`,
+  `design/jax-verification-categories.md`.)*
 - **The addition the rows didn't anticipate:** between structure and
   mechanization sits a **prerequisite neither wall named** —
   array-semantics completeness of the interval domain (rank broadcasting,
