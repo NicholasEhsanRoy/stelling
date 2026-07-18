@@ -101,3 +101,63 @@ what LA costs, whether the solver has a customer. Together: the build
 order becomes a decision. If the hypothesis breaks, affine stands alone
 on its stencil/Mach demand and the next pass is affine-or-publish.
 Either outcome is a decision the probes earn; **neither is a build.**
+
+---
+
+# Reading, part 1 (2026-07-18 — §2 and §4; §1's census pending)
+
+## §2 — the contract probe landed the registered fourth row, with demonstrations
+
+`corpus/supply/la_contract_probe.py` (the supply-probe instrument):
+
+- **Q1 — dependency-shaped, demonstrated.** The same conditioning
+  obligation Z3 proves (below) straddles for intervals over the same
+  region: `tr²/det ∈ [1.00, 21.33]` against the threshold 10.125 — `a`
+  and `c` are shared between `tr` and `det`, and `det` itself is
+  Cauchy–Schwarz slack in the underlying `d`-vectors. Quadratic past
+  plain affine.
+- **Q2 — the solver's first demonstrated customer.** The conditioning
+  bound reduces exactly (`tr²/det = κ + 1/κ + 2` at the ratio bound) to
+  a 3-variable degree-2 **QF_NRA validity**, and **Z3 decides it both
+  ways on the real obligation**: PROVED (unsat) over the well-shaped
+  region (`b ∈ ±0.5`); a concrete violating witness (`a=3/2, b=5/4,
+  c=3/2`) over the sliver-reaching region. Thirty-five passes of zero
+  search-shaped UNKNOWNs end here: an obligation intervals straddle and
+  a solver closes, from a real job. (The designed-and-idle solver
+  architecture now has its test case; integration remains a later, gated
+  pass.)
+- **Q3 — the registered middle row confirmed.** Residual-only `ensures`
+  does not bound the gradient (the gradient *is* the solution). The
+  needed `ensures` is norm-sensitivity `‖x‖ ≤ κ·‖b‖/‖A‖` — derived from
+  the *same* conditioning data as the `requires`. One clean layer;
+  backward error enters only if the ℝ-semantics dial moves.
+- **The grounding fact:** F3's own per-cell normal matrix is rank-1 plus
+  the `reg=1e-30` diagonal — **cond ≈ 2.5×10²⁹ on the probe's own
+  mesh**. The `requires` is not hypothetical; boundary-starved and
+  sliver stencils are the real failure geometry. (Also a small honest
+  lesson en route: the naive `(tr−disc)/2` eigenvalue cancels to 0.0 in
+  float here — the stable `det/λ_max` form was needed to *compute the
+  conditioning number* of a matrix about conditioning.)
+
+**§2 reading: the stack is real** — the precondition is
+dependency-shaped and its closure is solver-shaped; the ensures is
+κ-derived; **LA is one contract layer, priced as requires(QF_NRA) +
+ensures(sensitivity), sitting on relational/affine substrate with the
+solver as the closure instrument.**
+
+## §4 — the LBM Mach check: affine's independent customer, confirmed
+
+Ring-clean (LBM solver files only, no validation docs): the constraint
+is the node's own `ValidatedRegime("Ma", 0.0, 0.1)` — *"Lattice Mach
+number (max over all nodes, incl. fin tips) must be < 0.1"*
+(`fluid_node.py:182–185`; the input clamp `u_max_lattice = 0.0577 =
+0.1/√3`, `:959, :968`). The bounded quantity: `rho = jnp.sum(f, axis=-1)`
+(`pallas_lbm.py:124`), `momentum = jnp.matmul(f, e)` (`:129`),
+`u = momentum/rho` — **a ratio of correlated moment sums** (`Σfᵢeᵢ/Σfᵢ`,
+whose true range is the convex hull of the lattice velocities — exactly
+the correlation intervals discard), and **LA-free**: no factorization,
+no solve, anywhere in the path. Affine has a second real-solver
+customer independent of the entire LA thread. (Adjacent scar noted in
+passing, not this check's subject: the momentum's near-cancellation is
+TF32-fragile — `pallas_lbm.py:125–128` — a float-precision scar in the
+Mach path's neighborhood, of the ℝ-gap's kind.)
