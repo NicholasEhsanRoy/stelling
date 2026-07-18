@@ -579,16 +579,22 @@ E2a counts VERIFIED: the modelled `step_size ≥ ε` property is *false* at
 `h_stat = +5` (`design/property-recheck.md`). That is a second data point
 of the same shape as the five attribution-probe layer errors, and the
 third occasion a *negative* result carried value E2a's counting misses.
-**Three sightings, one shape — recorded, count noted, nothing changed.**
-Two precisions from the cause reconciliation (`design/property-recheck.md`)
-so the sighting is not oversold: the true negative is about the *modelled
-clamp-less property*, a generic fact, **not** a verified statement about
-blackjax's code and **not** the incident's bug (RNG key reuse); the value
-is "this property is not an invariant," not "found the defect." The number
-is worth having *because* it accumulates without being acted on — an
-honest open question keeps a count, not a commitment. If it ever enters,
-it enters with its own corpus and its own falsifier, before it runs on
-anything — the guard-experiment discipline, unchanged.
+**Count, corrected (2026-07-18, same day): two-plus-one-vacuous, not
+three.** The third sighting's information concerns a **hand-modelled**
+body (`design/harness-fidelity.md`) — a program nobody runs — so it is a
+sighting of the *shape*, not of the *value*: a true negative about a
+model eliminates nothing about blackjax. The precisions from the cause
+reconciliation (`design/property-recheck.md`) already bounded it (not a
+verified statement about blackjax's code, not the incident's bug); the
+fidelity census finishes the job. **Standing count: 2 valid sightings
+(the supply probe's 3/3 attribution; the attribution probe's five layer
+errors) + 1 vacuous (bjx#D416, labeled).** An open question that
+accumulates without being acted on is only worth having if the
+accumulation is honest — the vacuous entry stays visible *as* vacuous
+rather than dropped, so the shape-frequency is not quietly lost either.
+If elimination mode ever enters, it enters with its own corpus and its
+own falsifier, before it runs on anything — the guard-experiment
+discipline, unchanged.
 
 **Publishable regardless of whether stelling ships** (recorded 2026-07-18;
 one list, no work): the primitive census (`design/primitive-census.md`),
