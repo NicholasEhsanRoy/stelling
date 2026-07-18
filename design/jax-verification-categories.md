@@ -506,6 +506,18 @@ the build gate): **guards degrade to ⊤ with a quoted reason, never
 raise** — the FRAGILE-5 fix applied in advance rather than after the
 crash.
 
+**The prediction did not happen — and that is the record (2026-07-18,
+the any_pytree build).** Three witnesses, a registered prediction of a
+fourth, the control written into the builder's spec *before* the build —
+and the fourth instance **did not occur**: every guard the builder wrote
+declined correctly on first contact (`design/any-pytree-build.md`; the
+audit gate found posture escapes only in surfaces the rule had not yet
+reached — literal decoding, zero-size coordinates — not in the builder's
+guards). This is the first controlled test of the project's own
+discipline, and the discipline won: **the spec carried the discipline,
+not the main agent's vigilance** — which is the justification for the
+subagent-orchestration model going forward.
+
 **The abstraction boundary, relabeled (2026-07-18,
 `design/second-bill.md`).** The corpus splits by **whether the property's
 content survives interval abstraction, not by library.** A `PRNGKeyArray`
