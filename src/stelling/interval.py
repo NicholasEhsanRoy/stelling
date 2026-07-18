@@ -246,12 +246,19 @@ def select_n(which: IntervalArray, cases: list[IntervalArray]) -> IntervalArray:
     solver would resolve. An infinite (⊤) selector element joins every
     case rather than crashing on the int conversion (audit finding 5 —
     reachable from any trace whose predicate involves an unregistered
-    primitive)."""
+    primitive).
+
+    Out-of-range selectors **clamp** — jax's measured ``lax.select_n``
+    semantics (0.11, eager and jit agree: index −1 → case 0), which is NOT
+    ``cond``'s convention (measured: index −1 → last branch). Second
+    audit, finding 3: the earlier last-case fallback here selected the
+    wrong end of that asymmetry."""
     if any(c.shape != which.shape for c in cases):
         raise IntervalError(
             f"select_n case shapes {[c.shape for c in cases]} != which {which.shape}"
         )
     n = which.size
+    last = len(cases) - 1
     los, his = [], []
     for i in range(n):
         w_lo, w_hi = which.los[i], which.his[i]
@@ -259,8 +266,12 @@ def select_n(which: IntervalArray, cases: list[IntervalArray]) -> IntervalArray:
             picks = cases  # ⊤ selector: any case possible
         else:
             lo_idx, hi_idx = int(math.floor(w_lo)), int(math.floor(w_hi))
-            possible = range(max(0, lo_idx), min(len(cases) - 1, hi_idx) + 1)
-            picks = [cases[k] for k in possible] or [cases[-1]]
+            possible = set(range(max(0, lo_idx), min(last, hi_idx) + 1))
+            if lo_idx < 0:
+                possible.add(0)  # below-range mass clamps to the first case
+            if hi_idx > last:
+                possible.add(last)  # above-range mass clamps to the last case
+            picks = [cases[k] for k in sorted(possible)]
         los.append(min(c.los[i] for c in picks))
         his.append(max(c.his[i] for c in picks))
     return IntervalArray(shape=which.shape, los=tuple(los), his=tuple(his))

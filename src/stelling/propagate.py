@@ -185,9 +185,14 @@ def _t_convert(eqn, params, ins):
     if "float" in src and dst in _INT_RANGE:
         # float -> integer truncates toward zero; trunc is monotone, so
         # [trunc(lo), trunc(hi)] brackets — but only while the values fit the
-        # target's range (outside it jax wraps, which trunc does not model)
+        # target's range (outside it jax clamps/wraps, which trunc does not
+        # model). The upper check is STRICT: +2**n-1 itself is not
+        # representable (intN max is 2**(n-1) - 1), and for int64 the float
+        # `bound - 1` rounds back to `bound` — second audit, finding 4-B: the
+        # inclusive check admitted exactly ±2**31 and claimed a value int32
+        # cannot hold.
         bound = _INT_RANGE[dst]
-        if any(not (-bound <= x <= bound) for x in (*a.los, *a.his)):
+        if any(not (-bound <= x < bound) for x in (*a.los, *a.his)):
             return None
         return [iv.IntervalArray(
             shape=a.shape,

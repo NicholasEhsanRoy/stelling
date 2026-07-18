@@ -319,3 +319,135 @@ def test_join_and_select_n_refuse_shape_mismatch():
         iv.join([a, b])
     with pytest.raises(iv.IntervalError):
         iv.select_n(iv.point(0.0), [a, b])
+
+
+# --- second audit, finding 4-B: float->int guard is strict at +2**(n-1) ------
+
+
+def test_float_to_int_boundary_value_falls_to_top():
+    # exactly 2**31 passed the old inclusive guard, but int32 cannot hold it
+    # (jax clamps to 2**31-1; numpy wraps) — a false VERIFIED at the boundary
+    x, y, pred, out = var(0), var(1, I32), var(2, BOOL), var(3, BOOL)
+    q = close(
+        [
+            any_eqn(x, 2147483648.0, 2147483648.0),
+            ir.JaxprEqn(
+                primitive="convert_element_type",
+                invars=(x,),
+                outvars=(y,),
+                params=(("new_dtype", "int32"),),
+            ),
+            ir.JaxprEqn(
+                primitive="ge",
+                invars=(y, ir.Literal(val=2147483648.0, aval=F64)),
+                outvars=(pred,),
+            ),
+            ir.JaxprEqn(primitive="stelling_assert", invars=(pred,), outvars=(out,)),
+        ],
+        (out,),
+    )
+    assert propagate(q).obligations[0].status == "unknown"  # was: discharged
+
+
+def test_float_to_int64_boundary_also_strict():
+    # for int64 the float `bound - 1` rounds back to `bound`, so only a
+    # strict upper check is sound at 2**63
+    x, y, pred, out = var(0), var(1, I64), var(2, BOOL), var(3, BOOL)
+    q = close(
+        [
+            any_eqn(x, 2.0**63, 2.0**63),
+            ir.JaxprEqn(
+                primitive="convert_element_type",
+                invars=(x,),
+                outvars=(y,),
+                params=(("new_dtype", "int64"),),
+            ),
+            ir.JaxprEqn(
+                primitive="ge",
+                invars=(y, ir.Literal(val=0.0, aval=F64)),
+                outvars=(pred,),
+            ),
+            ir.JaxprEqn(primitive="stelling_assert", invars=(pred,), outvars=(out,)),
+        ],
+        (out,),
+    )
+    assert propagate(q).obligations[0].status == "unknown"
+
+
+# --- second audit, finding 3: select_n clamps out-of-range (unlike cond) -----
+
+
+def test_select_n_negative_selector_clamps_to_first_case():
+    cases = [iv.point(10.0), iv.point(20.0), iv.point(30.0)]
+    # definite -1: jax's measured lax.select_n clamps to case 0 (NOT cond's
+    # default-last); the old fallback picked 30.0 — a false VERIFIED
+    r = iv.select_n(iv.from_bounds((), -1.0, -1.0), cases)
+    assert (r.los[0], r.his[0]) == (10.0, 10.0)
+    # entirely below range: still case 0
+    r2 = iv.select_n(iv.from_bounds((), -2.0, -1.0), cases)
+    assert (r2.los[0], r2.his[0]) == (10.0, 10.0)
+    # straddling below and in-range: clamp target already included
+    r3 = iv.select_n(iv.from_bounds((), -1.0, 0.0), cases)
+    assert (r3.los[0], r3.his[0]) == (10.0, 10.0)
+    # above range clamps to the last case
+    r4 = iv.select_n(iv.from_bounds((), 5.0, 5.0), cases)
+    assert (r4.los[0], r4.his[0]) == (30.0, 30.0)
+    # the asymmetry with cond is real, measured, and deliberate: cond's
+    # out-of-range convention (default-last) is tested in cond_query above
+
+
+# --- second audit, findings 4-A and 1/2: the registered ℝ-semantics gap ------
+#
+# These two constructions are CORRECT under the registered `semantics: real`
+# dial (the stamp's own disclaimer: a predicate can hold in ℝ and fail in
+# floats) and are pinned here as MARKERS of the gap: over ℝ, (x+x)*0 = 0 and
+# any real is ≤ +∞, so both discharge; in IEEE both are NaN and false. The
+# day the semantics dial moves toward FP-exact, these tests flip and must be
+# consciously rewritten — that is their job. The ⊤-widening vacuity guard
+# already fences the r ≤ ∞ shape out of any count (it discharges under ⊤,
+# hence tautological).
+
+
+def test_R_gap_marker_overflow_times_zero_discharges_in_R():
+    x, s, z, pred, out = var(0), var(1), var(2), var(3, BOOL), var(4, BOOL)
+    q = close(
+        [
+            any_eqn(x, 1e308, 1.7e308),
+            ir.JaxprEqn(primitive="add", invars=(x, x), outvars=(s,)),
+            ir.JaxprEqn(
+                primitive="mul",
+                invars=(s, ir.Literal(val=0.0, aval=F64)),
+                outvars=(z,),
+            ),
+            ir.JaxprEqn(
+                primitive="lt",
+                invars=(z, ir.Literal(val=1.0, aval=F64)),
+                outvars=(pred,),
+            ),
+            ir.JaxprEqn(primitive="stelling_assert", invars=(pred,), outvars=(out,)),
+        ],
+        (out,),
+    )
+    # ℝ: (x+x)·0 = 0 < 1 — true. IEEE: inf·0 = NaN, NaN < 1 — false.
+    assert propagate(q).obligations[0].status == "discharged"
+
+
+def test_R_gap_marker_top_output_leq_inf_discharges_and_is_tautological():
+    x, r, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
+    q = close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            ir.JaxprEqn(primitive="mystery_loop", invars=(x,), outvars=(r,)),
+            ir.JaxprEqn(
+                primitive="le",
+                invars=(r, ir.Literal(val=math.inf, aval=F64)),
+                outvars=(pred,),
+            ),
+            ir.JaxprEqn(primitive="stelling_assert", invars=(pred,), outvars=(out,)),
+        ],
+        (out,),
+    )
+    # ⊤ = [−∞, ∞] contains every REAL; r ≤ +∞ is an ℝ-tautology, and it
+    # discharges even though r fell to ⊤ — which also means it survives
+    # ⊤-widening, so the vacuity guard voids any count that leaned on it.
+    assert propagate(q).obligations[0].status == "discharged"

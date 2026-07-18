@@ -117,3 +117,18 @@ is the endpoint clip `t_next ← t1`, not the addition) and **XLA
 reassociation** of the deployed program versus the traced jaxpr — not for
 monotone arithmetic, which outward rounding guards. This is additive and
 count-neutral: no bucket, no exclusion, no band moved.
+
+**Correction to the scope claim (2026-07-18, second soundness audit):**
+"monotone arithmetic is guarded by outward rounding" is **too broad**.
+The second audit's finding 4-A (`design/soundness-audit.md`) exhibits
+straight-line arithmetic on a *finite* declared box — `(x+x)·0` with
+`x ∈ [1e308, 1.7e308]` — where the ℝ verdict (discharged: the product is
+0 < 1) is false in IEEE for *every* declared input (`x+x` overflows,
+`inf·0 = NaN`). Outward rounding guards *rounding* divergence; it does
+not guard **overflow→NaN** divergence, where ℝ and IEEE disagree about
+whether a value exists at all. The `semantics: real` field's bite is
+therefore: branch/clip omissions, XLA reassociation, **and
+overflow/NaN-producing arithmetic**. The buckets and exclusions above are
+unchanged (they classify properties, not dynamics); the corpus-expansion
+registration inherits this: an ℝ-faithful *property* on an
+overflow-reaching *program* is ℝ-partial in effect.

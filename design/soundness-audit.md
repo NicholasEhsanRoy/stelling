@@ -63,3 +63,47 @@ f32 case in `tests/test_harness.py`).
   `measure` on the same query. None of that requires project context —
   all of it is harder with a stake in the verdicts. Disagreement as a
   bug oracle, now with a precedent in-repo.
+
+---
+
+# Second pass (2026-07-18): the transfers the first pass's gradient skipped
+
+**The general form, recorded before the results:** *an audit inherits the
+auditor's attention gradient, and a single audit pass is not uniform
+coverage.* The first pass scrutinized `cond` hardest — where the builder's
+attention had gone — and declared `mul`'s 0·∞ products, `le`/`ge`, and
+`select_n` clean. The second pass, aimed deliberately at the boring
+primitives with one executed construction per area, found real issues in
+exactly those areas. A clean pass on the interesting primitive says little
+about the boring ones.
+
+## Findings and dispositions
+
+| # | severity | finding | disposition |
+|---|---|---|---|
+| 4-B | UNSOUND | the float→int range guard admitted exactly ±2³¹ (int32 max is 2³¹−1; jax clamps, numpy wraps — no outcome equals 2³¹). **Introduced by the first audit's own fix** — the exact-conversions rewrite added the guard with an inclusive bound, and for int64 the float `bound−1` rounds back to `bound`, so only a strict check is sound | **fixed** (strict upper bound); both boundary constructions are regression tests. The guards-generate-hazards arc (#632-fix→#756), previously an upstream observation, now has an in-repo instance: the fix to finding 1 introduced finding 4-B |
+| 3 | UNSOUND | `select_n`'s empty-picks fallback selected the **last** case; measured jax `lax.select_n` **clamps** (index −1 → case 0, eager and jit agree) — verified false VERIFIED (tool said 30.0, jax computes 10.0). The asymmetry with `cond` (default-last, re-verified same build) is real and now documented in both transfers | **fixed** (clamp convention, below-range → first case, above-range → last); regression tests cover definite, entirely-below, straddling, and above-range selectors |
+| 4-A | correct-under-ℝ | `(x+x)·0` over a finite box: the analysis's overflow saturation gives `[maxfloat, ∞]`, the 0·∞ convention gives 0, `z < 1` discharges — **true in ℝ, false in IEEE for every declared input** (`inf·0 = NaN`). End-to-end through `cond` and `select_n`: a concretely-always-false predicate reached the index position as definite | **not a code defect under the registered `semantics: real` dial** — it is the *strongest exhibit of the registered gap yet*: an ℝ-true definite discharge, false in floats, from **straight-line arithmetic on a finite box**. It **refutes** the earlier scope claim that outward rounding makes monotone arithmetic float-conservative (`design/semantics-classification.md`, amended): overflow→NaN paths are not guarded. Pinned as a marker test that flips the day the dial moves |
+| 1/2 | correct-under-ℝ | ⊤ = [−∞, ∞] contains every *real* but not NaN; `r ≤ +∞` over a ⊤ loop output discharges while the concrete run yields NaN | same dial; same marker treatment — **and the ⊤-widening vacuity guard already fences this shape out of every count** (an obligation that discharges under ⊤ is tautological by registration). Composition verified: the guard built for dfx#207 catches the ∞-bound shape too |
+
+## PASSes — the first audit's assertion, now witnessed
+
+The "no silent truncation anywhere" claim is no longer an assertion:
+executed witnesses show a 1000-iteration `while` yields `unknown` for both
+a concretely-true and a concretely-false obligation with body equations
+counted unreached; a concretely-zero-trip `while` is not exploited; an
+obligation *inside* a loop body is never judged (counted unreached, never
+silently VERIFIED); a doubling `scan` leaks no partial unrolling in either
+direction; a length-0 `scan` keeps the carry/ys distinction under ⊤. The
+comparison→bool→convert→index chain emits exactly {0.0, 1.0} endpoints,
+bool arithmetic that gets outward-bumped floors back to a **widening**
+join (never index −1/2, never a narrowing), and a genuinely-straddling
+predicate never reaches an index as definite.
+
+## No verdict flipped — re-verified after the second round of fixes
+
+hit386 VERIFIED / mutation REFUTED; dfx#417 VERIFIED / mutation UNKNOWN;
+cf_run statuses unchanged; ⊤-widening results unchanged (the counting
+queries contain no out-of-range selectors, no float→int boundaries, no
+overflow-reaching arithmetic on asserted paths, no ∞-bound obligations).
+119 tests green.

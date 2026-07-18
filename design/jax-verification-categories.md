@@ -290,7 +290,11 @@ customer → output shape → falsifier.
   (it returns UNKNOWN, not a false VERIFIED), so the blind spot's real
   bite is branch/clip omission and XLA reassociation, not scalar
   arithmetic — which narrows where the FP-exact fragment is actually
-  needed.
+  needed. *(Corrected 2026-07-18, second soundness audit: the narrowing
+  was too aggressive — **overflow→NaN arithmetic is a third bite**:
+  `(x+x)·0` on a finite box discharges in ℝ and is NaN in IEEE for every
+  input; outward rounding guards rounding divergence, not
+  existence divergence. `design/soundness-audit.md`, finding 4-A.)*
 - **Falsifier.** The FP fragment, pointed at reconstructed #632/#657/#343,
   fails to distinguish the buggy from the fixed versions.
 

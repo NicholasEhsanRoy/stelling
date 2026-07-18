@@ -146,4 +146,29 @@ Three further commitments bind every implementation of the stamp:
   before this entry was written. Every audit construction is a permanent
   regression test (`tests/test_audit_findings.py`).
 
+- **2026-07-18 (pre-release, same day): second audit pass — two more
+  defects fixed, one introduced by the first audit's own fix.** A second
+  fresh-context audit aimed at the transfers the first pass's attention
+  gradient skipped (`design/soundness-audit.md`, second pass): (1) the
+  float→int range guard — added by the previous entry's fix — admitted
+  exactly ±2³¹ (int32 max is 2³¹−1; verified false VERIFIED at the
+  boundary; for int64 only a strict check is sound because `2⁶³−1`
+  rounds back to `2⁶³` in float). Fixed strict. The guard that fixed a
+  soundness bug introduced a soundness bug: the guards-generate-hazards
+  arc, now with an in-repo instance. (2) `select_n` out-of-range
+  selectors **clamp** in measured jax (index −1 → case 0) while `cond`
+  defaults to the *last* branch — the two conventions differ on the same
+  build, both verified by binding the primitives; the transfer used
+  cond's convention for select_n (verified false VERIFIED). Fixed to the
+  measured clamp. Two further constructions — `(x+x)·0` on a finite box
+  and `r ≤ +∞` over a ⊤ loop output — discharge correctly **under the
+  registered ℝ semantics** and are false in IEEE (overflow→NaN); they are
+  not code defects under the declared dial, are pinned as marker tests
+  that must flip if the dial ever moves, and the ⊤-widening vacuity
+  guard already excludes the second shape from every count. The
+  "monotone arithmetic is float-conservative" scope claim is corrected:
+  outward rounding guards rounding divergence, not overflow→NaN
+  existence divergence. No shipped verdict flipped — re-verified by
+  re-running every recorded harness after the fixes. 119 tests green.
+
 *(no releases yet)*
