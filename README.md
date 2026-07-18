@@ -1,4 +1,4 @@
-<img src="assets/stelling_logo.png" alt="the stelling logo: three cubes arranged as ∴, therefore" width="140" align="right">
+<img src="assets/stelling_logo.png" alt="the stelling wordmark: three cubes arranged as ∴, therefore, beside the name" width="100%">
 
 # Stelling
 Inspired by Kani, Stelling is an assertion-based verifier for JAX array
