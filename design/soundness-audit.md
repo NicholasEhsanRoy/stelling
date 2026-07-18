@@ -47,6 +47,15 @@ f32 case in `tests/test_harness.py`).
   fastest, under a hypothesis, in one commit. The MVP core (arithmetic,
   comparisons, classifier), built under the paranoia budget, survived
   every attack. Speed of construction predicted defect density exactly.
+  *Attribution sharpened (2026-07-18, follow-on):* speed was a variable —
+  **so was stake**. The core was built before there was a hypothesis to
+  confirm; the control-flow machinery was built *to make the six
+  posable*, with an outcome it needed to reach, and dfx#207 (a
+  tautological pass that counted) is the fingerprint. Motivated building
+  reads like motivated analysis. Forward consequence registered where the
+  finding lives: `design/corpus-limits.md` — `any_pytree` carries a
+  fresh-context audit as a build gate, before any newly-enabled case
+  counts.
 - **The auditor's blindness was the method.** It bound `cond_p` directly
   to learn what jax actually does instead of trusting the transfer's
   comment; it attacked the definite-FALSE direction nobody had reason to

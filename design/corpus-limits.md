@@ -27,6 +27,26 @@ library code. More control flow does not fix that. Input declaration —
 Not built. See the decision below for why not even a trigger is
 registered today.
 
+**The motivation control, registered now while it costs nothing
+(2026-07-18, after the soundness audit):** the audit's clustering finding
+has a build-time reading — every defect landed in the machinery built *to
+make cases posable*, none in the core built before there was a hypothesis
+to confirm. Speed was a variable; **so was stake** — dfx#207 is the
+proof: a tautological pass that counted, built by someone who needed a
+case to count. Motivated *building* leaves the same fingerprint as
+motivated analysis, and it clustered exactly where the motivation was.
+`any_pytree` (or whatever fills the input-declaration role), if ever
+built, will be built under the strongest build-time motivation in the
+project: it is the upgrade with the most evidence and the one that
+unblocks the most cases, and the pull toward a version that makes cases
+pose *and verify* will be maximal. Therefore, registered in advance:
+
+> **`any_pytree` requires a fresh-context soundness audit as a build
+> gate: the audit fires before any case it newly enables counts toward
+> any band.** The same standard the control-flow machinery received —
+> applied *before* a band depends on it rather than after one already
+> did.
+
 ## Finding 2: this corpus cannot fire any trigger — the meta-finding
 
 The counts, at threshold ≥ 2 each: **solver 0** (two experiments).
