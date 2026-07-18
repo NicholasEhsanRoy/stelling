@@ -149,3 +149,18 @@ sound anchor, bounds-load-bearing in the full sense (the face fluxes go ⊤
 when `u, v` widen, finitely). npy#249 — sound anchor, passes the
 registered test, **and its obligation is a finite-ℝ range-theorem**, said
 here so the count's meaning travels with the count.
+
+## The standing figure carries both numbers (2026-07-18, follow-on)
+
+The count was being carried as "2 of 7" alone — true only under the test
+this project has already decided to supersede. The honest standing
+figure, wherever it travels:
+
+> **Control-flow E2a: 2 of 7 under the registered (extended-ℝ) test;
+> 1 of 7 — dfx#417 alone — under the finite-⊤ criterion the
+> corpus-expansion registration carries** (`design/corpus-expansion.md`,
+> which re-scores the inherited cases under its own criterion in its
+> opening section). Not a re-score of the registered result: the
+> registered count stands as registered, the successor criterion's count
+> rides beside it, and the pre-supersession number does not travel as
+> "the result."

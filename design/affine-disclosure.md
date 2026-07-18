@@ -74,7 +74,10 @@ dfx#207's count voided as tautological (`design/obligation-vacuity.md`),
 so the E2a-with-control-flow arithmetic is now **2 of 7** (dfx#417,
 npy#249) — deeper in Weak. Affine still moves it by zero (below). The
 band-crossing coincidence this document was written to disclose is now
-two corrections dead.
+two corrections dead. *(Dual number, 2026-07-18: under the finite-⊤
+criterion the corpus expansion carries, npy#249 also voids — **1 of 7,
+dfx#417 alone**. Both numbers travel together;
+`design/obligation-vacuity.md`.)*
 
 ## Deflation addendum (2026-07-18, from the fidelity census)
 
