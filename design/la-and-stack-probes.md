@@ -104,6 +104,80 @@ Either outcome is a decision the probes earn; **neither is a build.**
 
 ---
 
+# Reading, part 2 (2026-07-18 — §1's census and the §3 joint decision)
+
+## §1 — the answer, in the registered words
+
+**Affine was prioritised on a real signal; LA was de-prioritised on a
+sampling artifact.** The census (`corpus/la_census.py`: 14 solve paths,
+1225 equations, optimistix 0.1.0 / lineax 0.1.1, jax pinned):
+
+- **LA is always-core when present, zero incidental**: 28 LA equations,
+  every one on the core computational path of its solve, with quoted
+  functions (`LU.init` `lu.py:53`, `QR.compute` `qr.py:89–92`,
+  `Cholesky.compute` `cholesky.py:74`, `SVD.init` `svd.py:51`, …).
+  Breadth: `linear_solve` 9/14, `lu` and `geqrf` 4/14 each,
+  `cholesky`/`triangular_solve` 3/14, `svd` 2/14.
+- **And thin by equation count**: 2.3% of all equations; 11–21% density
+  inside lineax's surface traces, 0.6–0.8% inside optimistix's real
+  solver loops — a couple of factorization equations at the heart of
+  hundreds of housekeeping ones, every Newton/GN/LM iteration passing
+  through them.
+- **And structurally hidden — the original undercount, mechanically
+  mapped**: lineax's `linear_solve` is its own equinox primitive with
+  **no sub-jaxpr**; `solver.init` (the factorization) traces *before*
+  the bind, `solver.compute` (the back-substitution) is invisible to any
+  trace walk. Surface traces see `lu`/`geqrf`/`cholesky` and never the
+  `triangular_solve`/`ormqr` behind the boundary — the deep harnesses
+  had to trace the concrete solvers' `init`/`compute` directly. (lineax
+  does not use jax's `custom_linear_solve` at all — MIME's F3 and the
+  ecosystem route through *different* mechanisms to the same tier.)
+- Two census facts for the record: BFGS's zero-LA is real
+  (`use_inverse=True` takes the inverse-Hessian matvec branch; the
+  configured Cholesky is unreachable), and the QR family lowers to
+  `geqrf`/`ormqr` on jax 0.11 (the composite `qr` never appears —
+  counting rule recorded). One transcription finding, recorded not
+  built: optimistix's function-operator paths leak
+  `DynamicJaxprTracer`s inside equinox static metadata; stock
+  transcription correctly refuses, and the census used a local
+  subclassed transcriber (sentinel-recorded, stelling core untouched).
+
+**Reading, per the registered table:** the first row's condition is met
+(core path, at breadth) *and* the third row's hiding is confirmed and
+mapped. The tier-9 "defer on one equation" was a **selection artifact**
+— but the corrected weight has a precise shape: **few, always-central,
+boundary-hidden** — which is not a transfer-registry shape at all. It is
+**exactly the contract shape**: one assume-guarantee boundary at the
+solve, not thirty transfer rows. The ecosystem's own opaque
+`linear_solve` boundary is the natural contract attachment point. LA
+rises — as a contract layer, and as a general-tool frontier (lineax and
+optimistix are ecosystem libraries, not the author's).
+
+## §3 — the joint decision, and the one correction the probes earned
+
+The keystone hypothesis is **confirmed with a sharpening**:
+
+- **Affine is the keystone for linear-correlation obligations** — two
+  independent real-solver customers (FVM's stencil, LBM's Mach ratio),
+  both linear-in-the-correlated-quantities. Confirmed.
+- **The correction: LA-as-contract sits on the *solver*, not on
+  affine.** §2 showed the `requires` (conditioning) is *quadratic past
+  plain affine* and closes as QF_NRA — the solver's demonstrated first
+  customer — while the `ensures` is κ-derived arithmetic. The original
+  "LA on affine" is amended: **affine and the solver are sibling
+  escalations for different obligation shapes** (linear correlations vs
+  polynomial feasibility), and the LA contract needs the solver leg.
+- **Build order, as decided by the probes:** affine (independent demand,
+  two customers, linear shape) and solver-integration (the LA
+  `requires`, plus any future QF_NRA obligation) are both licensed *in
+  demand terms*; LA-as-contract follows the solver leg; each build
+  remains gated (fresh-context builder, audit gate, no counts) as
+  registered. The next pass is a **choice among affine / solver /
+  publish** — a decision, not a drift, which is what the probes were
+  for.
+
+---
+
 # Reading, part 1 (2026-07-18 — §2 and §4; §1's census pending)
 
 ## §2 — the contract probe landed the registered fourth row, with demonstrations
