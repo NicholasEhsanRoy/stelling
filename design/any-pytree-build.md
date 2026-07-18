@@ -53,6 +53,55 @@ to engineer around.
    gets its own witnessed construction before it is called done (the 4-B
    lesson: a fix is itself un-audited code).
 
+## The build, returned (2026-07-18) — verified independently, adjudicated
+
+The builder delivered against the closed list; verified from the gating
+side before the audit: **190 tests green (jax venv), 135+5 (jax-free —
+the builder recreated the destroyed venv), hooks pass (zero-dep and
+jax-hygiene held), and the probe re-runs POSED with h_clean at 79% known
+(3 ⊤: exactly the two carved-out convert forms + the mandated pow
+decline) and h_hard at 64% (the key cone intact).** The acceptance bar
+was met: **content-hash equality** between the `any_pytree` variants and
+both hand-declared worked examples, from the builder's run (independent
+re-verification is audit item 4).
+
+**The builder's eight judgement flags, adjudicated:**
+
+1. `_STRUCT_FMT` unsigned/small-int decoders — **accepted with audit
+   coverage**: forced by the guard rule (the acceptance target crashed on
+   an undecodable uint literal once `and`/`or` made the propagator read
+   RNG mask constants); it is a literal-decoder change, not a transfer or
+   whitelist change — but it touches the surface where audit finding 3
+   lived, so the auditor is explicitly pointed at the new formats above
+   2⁵³ (item 5).
+2. Rank broadcasting in the shared `_pair_elements` (wider than item 11's
+   letter) — **accepted**: uniform and sound in direction; audit item 6
+   covers the index arithmetic.
+3. The FRAGILE-5 regression test's vehicle swap (its old vehicle became a
+   registered form) — **accepted**: the audited property is preserved on
+   a new vehicle, with the swap recorded in-file.
+4. `select_n` output shape now `cases[0].shape` — **accepted**
+   (behavior-identical where previously supported; audit item 9 checks
+   the new form against jax).
+5. `any_pytree` API choices (TypeError for key refusal; `None` at static
+   bound positions; alias bounds must agree) — **accepted** as within the
+   spec's authoring-error latitude.
+6. `_LIBM_ASSUMPTIONS` generic never-silent fallback — **accepted**.
+7. Recreating the jax-free venv — **accepted** (it had been destroyed;
+   both suites now run).
+8. Docstring/scope-claim updates — **accepted**; this is the CONTRIBUTING
+   convention, followed without being told it.
+
+**Coverage findings reported by the builder (recorded, not built):** the
+two carved-out `convert` forms now have observed instances (int64→float64
+weak/strong in `adapt_step_size`'s promotion paths — the whitelist
+correctly declines them; they remain widening candidates needing
+witnesses); `pow` with base reaching ≤ 0 (the mandated decline);
+`integer_pow` (a distinct primitive); bitwise integer `or` (threefry
+plumbing — would need a bitset/congruence domain); and the h_hard
+residual registry list (`reduce_sum`, `sqrt`, `split`, `log`, …) — all
+census-recorded for any future round, none built.
+
 ## What this pass does not do
 
 No count (`any_pytree` posing a case is not a mechanized case — that
