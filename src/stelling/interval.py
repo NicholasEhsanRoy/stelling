@@ -304,6 +304,40 @@ def join(cases: list[IntervalArray]) -> IntervalArray:
     return IntervalArray(shape=shape, los=los, his=his)
 
 
+def meet(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    """Exact intersection (meet) of two same-shape boxes: elementwise
+    ``[max(lo_a, lo_b), min(hi_a, hi_b)]``.
+
+    **No outward rounding, deliberately.** ``max``/``min`` perform no
+    arithmetic — each result endpoint *is* one of the operands' own
+    endpoints — so the intersection of exact endpoints is exact. An
+    outward bump would readmit values both operands exclude (a needless
+    precision loss, though sound); an inward bump would shrink the set,
+    which for the constraining-assume path is the false-VERIFIED
+    direction. The soundness algebra this serves: the meet of two
+    supersets of a set S is itself a superset of S.
+
+    An elementwise-empty intersection raises :class:`IntervalError` — the
+    caller decides what emptiness means (for an assume it is an
+    unsatisfiable precondition, a harness defect). Mismatched shapes also
+    raise :class:`IntervalError`: broadcasting is the caller's business,
+    never guessed here.
+    """
+    if a.shape != b.shape:
+        raise IntervalError(
+            f"meet over mismatched shapes {a.shape} vs {b.shape}"
+        )
+    los = tuple(max(x, y) for x, y in zip(a.los, b.los))
+    his = tuple(min(x, y) for x, y in zip(a.his, b.his))
+    for lo, hi in zip(los, his):
+        if lo > hi:
+            raise IntervalError(
+                f"empty meet: intersection element [{lo}, {hi}] contains "
+                f"no real"
+            )
+    return IntervalArray(shape=a.shape, los=los, his=his)
+
+
 def select_n(which: IntervalArray, cases: list[IntervalArray]) -> IntervalArray:
     """`select_n(which, *cases)`: elementwise pick of ``cases[which]``.
 

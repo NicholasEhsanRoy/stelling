@@ -25,9 +25,11 @@ import pytest
 from stelling import _optional, solvers
 from stelling.propagate import propagate
 from stelling.solvers import (
+    CONSTRAINED_ASSUME_REFUSAL,
     INSTALL_HINT,
     TRANSPORT_CVC5_BINARY,
     EmissionInfidelityError,
+    MispairedEscalationError,
     SolverConfig,
     SolverDisagreement,
     _Backend,
@@ -368,6 +370,158 @@ def test_declined_obligation_travels_into_verdict_notes(monkeypatch, tmp_path):
     assert v.status == "UNKNOWN"
     assert v.stamp.solver.invoked is False  # no invocation to stamp
     assert any("'exp'" in n for n in v.notes)
+
+
+# --- the constrained-assume v1 refusal ----------------------------------------
+
+
+def constrained_square_query():
+    """square_query plus a constrainable assume: x ∈ [1, 2] narrowed to
+    [1.2, 2]; x² ≤ 2 stays interval-unknown on the narrowed box."""
+    x, ap, aout, sq, pred, out = (
+        var(0), var(1, BOOL), var(2, BOOL), var(3), var(4, BOOL), var(5, BOOL),
+    )
+    return close(
+        [
+            any_eqn(x, 1.0, 2.0),
+            eqn("ge", [x, lit(1.2)], ap),
+            eqn("stelling_assume", [ap], aout),
+            eqn("mul", [x, x], sq),
+            eqn("le", [sq, lit(2.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+
+
+def test_constrained_assume_refuses_escalation_with_zero_invocations(
+    monkeypatch, tmp_path
+):
+    # a fake solver that WOULD answer unsat is installed and eager: if the
+    # refusal failed to fire, the obligation would come back discharged.
+    fake = fake_solver(tmp_path, 'print("unsat")', "cvc5-unsat")
+    monkeypatch.setenv("STELLING_CVC5", fake)
+    q = constrained_square_query()
+    p = propagate(q)  # constrain default
+    assert p.coverage.constrained == 1
+    assert [o.status for o in p.obligations] == ["unknown"]
+    esc = escalate(q, p, SolverConfig(timeout_ms=2000, only=("cvc5",)))
+    (record,) = esc.records
+    assert record.outcome == "unknown"  # never discharged: nothing ran
+    assert record.invocations == ()
+    assert CONSTRAINED_ASSUME_REFUSAL in record.detail
+    assert esc.notes == (CONSTRAINED_ASSUME_REFUSAL,)  # the reason, once
+    assert esc.ledger.stamps == [] and esc.ledger.spawns == 0
+    v = make_solver_verdict(q, p, esc, **VERSIONS)
+    assert v.status == "UNKNOWN"
+    assert v.stamp.solver.invoked is False  # absence derived from the empty ledger
+    assert "no solver invoked" in v.stamp.solver.reason
+    assert list(v.notes).count(CONSTRAINED_ASSUME_REFUSAL) == 1
+    assert v.obligations[0].status == "unknown"
+    assert "constrained assume present" in v.obligations[0].detail
+
+
+def test_inert_relational_assume_escalates_normally(monkeypatch, tmp_path):
+    # relational assume: inert (coverage.constrained == 0) — the drop
+    # over-approximates, so emission over the declared box stays faithful
+    # and escalation proceeds exactly as without the assume.
+    fake = fake_solver(tmp_path, 'print("unsat")', "cvc5-unsat")
+    monkeypatch.setenv("STELLING_CVC5", fake)
+    x, sq, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
+    u, w, rp, raout = var(4), var(5), var(6, BOOL), var(7, BOOL)
+    q = close(
+        [
+            any_eqn(x, 1.0, 2.0),
+            any_eqn(u, 0.0, 1.0),
+            any_eqn(w, 0.0, 2.0),
+            eqn("ge", [u, w], rp),
+            eqn("stelling_assume", [rp], raout),
+            eqn("mul", [x, x], sq),
+            eqn("le", [sq, lit(2.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(q)  # constrain default; the relational assume stays inert
+    assert p.coverage.constrained == 0 and p.coverage.inert == 1
+    esc = escalate(q, p, SolverConfig(timeout_ms=2000, only=("cvc5",)))
+    (record,) = esc.records
+    assert record.outcome == "discharged"  # the fake unsat WAS consulted
+    assert len(record.invocations) == 1 and record.invocations[0].invoked
+    assert CONSTRAINED_ASSUME_REFUSAL not in esc.notes
+    v = make_solver_verdict(q, p, esc, **VERSIONS)
+    assert v.status == "VERIFIED"
+
+
+def test_mode_mixed_pairing_raises_instead_of_minting_a_refuted(
+    monkeypatch, tmp_path
+):
+    # audit F3 (UNSOUND): the auditor's bypass — escalate on the INERT
+    # propagation (the refusal is silent: coverage.constrained == 0),
+    # then assemble the verdict against the CONSTRAINED propagation. The
+    # solver's witness is drawn from the un-assumed declared box and can
+    # violate the stamped precondition; before the fix this minted a
+    # REFUTED-with-witness against a true conditional claim. The second,
+    # anti-correlated mechanism at verdict assembly must refuse to emit.
+    fake = fake_solver(
+        tmp_path,
+        'print("sat")\nprint("(")\nprint("  (define-fun x0 () Real 0.0)")\nprint(")")',
+        "cvc5-sat",
+    )
+    monkeypatch.setenv("STELLING_CVC5", fake)
+    # the auditor's harness: x ∈ [0,4], assume(x >= 2), assert(x + x >= 4)
+    # — interval-unknown under BOTH modes (outward rounding), true as a
+    # conditional claim in ℝ; the model x0 = 0 replays (in box, violates
+    # the obligation) while violating the assumed precondition x >= 2.
+    x, ap, aout, s, pred, out = (
+        var(0), var(1, BOOL), var(2, BOOL), var(3), var(4, BOOL), var(5, BOOL),
+    )
+    q = close(
+        [
+            any_eqn(x, 0.0, 4.0),
+            eqn("ge", [x, lit(2.0)], ap),
+            eqn("stelling_assume", [ap], aout),
+            eqn("add", [x, x], s),
+            eqn("ge", [s, lit(4.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p_constrain = propagate(q)
+    p_inert = propagate(q, assume_mode="inert")
+    assert p_constrain.coverage.constrained == 1
+    assert p_inert.coverage.constrained == 0
+    cfg = SolverConfig(timeout_ms=2000, only=("cvc5",))
+    esc = escalate(q, p_inert, cfg)  # refusal silent; real invocation happens
+    (record,) = esc.records
+    assert record.witness is not None  # the precondition-violating witness
+    with pytest.raises(MispairedEscalationError) as exc:
+        make_solver_verdict(q, p_constrain, esc, **VERSIONS)
+    msg = str(exc.value)
+    assert "mispaired escalation" in msg
+    assert "refusing to emit" in msg
+    # the honest pairings still emit:
+    # (1) constrained propagation + its own refusal-shaped escalation
+    esc_refused = escalate(q, p_constrain, cfg)
+    v = make_solver_verdict(q, p_constrain, esc_refused, **VERSIONS)
+    assert v.status == "UNKNOWN" and v.stamp.solver.invoked is False
+    # (2) inert propagation + the escalation it produced (witness REFUTED
+    # of the unconditional claim, drop disclosed — sound)
+    v2 = make_solver_verdict(q, p_inert, esc, **VERSIONS)
+    assert v2.status == "REFUTED" and v2.witnesses
+
+
+def test_no_assume_escalation_never_mentions_the_refusal(monkeypatch, tmp_path):
+    # §-integrity: assume-free harnesses are byte-identical — no refusal
+    # note anywhere (the acceptance harnesses are the real-solver control)
+    fake = fake_solver(tmp_path, 'print("unsat")', "cvc5-unsat")
+    q, p, esc = escalate_square(monkeypatch, fake)
+    assert p.coverage.constrained == 0
+    assert CONSTRAINED_ASSUME_REFUSAL not in esc.notes
+    assert all(
+        CONSTRAINED_ASSUME_REFUSAL not in r.detail for r in esc.records
+    )
+    assert esc.records[0].outcome == "discharged"
 
 
 def test_escalation_with_nothing_unknown_is_a_noop_with_absence_stamp(monkeypatch, tmp_path):

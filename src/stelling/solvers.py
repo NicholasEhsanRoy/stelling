@@ -78,6 +78,7 @@ from stelling.verdict import (
 __all__ = [
     "EmissionInfidelityError",
     "Escalation",
+    "MispairedEscalationError",
     "ObligationEscalation",
     "ProvenanceError",
     "SolverConfig",
@@ -94,6 +95,24 @@ TRANSPORT_CVC5_BINARY = "external-binary subprocess"
 INSTALL_HINT = (
     'no SMT solver is installed — pip install "stelling[solvers]" (or set '
     "STELLING_CVC5 / put cvc5 on PATH) to enable escalation"
+)
+
+# The v1 refusal for constrained-assume propagations, quoted verbatim in
+# the escalation note and every declined obligation's detail. The emitted
+# SMT problem carries the DECLARED box bounds and never the assume
+# constraints, and the witness validator checks membership in the declared
+# box — so while `unsat` over the wider box would be sound a-fortiori,
+# `sat` is not: a model violating the assumed precondition would pass the
+# membership∧violation conjunction and mint a REFUTED-with-witness that
+# does not refute the conditional claim the propagation stamped. Full
+# refusal is the sound v1; faithful narrowed-bounds emission is a later,
+# separately-audited build.
+CONSTRAINED_ASSUME_REFUSAL = (
+    "constrained assume present: solver escalation emits over the declared "
+    "box, which does not respect the assumed precondition — a sat witness "
+    "could violate the precondition while the verdict claims "
+    "conditionality; escalation declines until constrained bounds can be "
+    "emitted faithfully"
 )
 
 OB_DISCHARGED = "discharged"
@@ -164,6 +183,25 @@ class EmissionInfidelityError(RuntimeError):
             f"{solver} reported sat with model ({witness}) but {detail}. "
             f"The emitted SMT problem does not mean the obligation."
         )
+
+
+class MispairedEscalationError(RuntimeError):
+    """A constrained propagation was paired with an escalation that
+    performed solver work.
+
+    The escalation-refusal invariant ("a constrained propagation never
+    reaches a solver") is enforced twice, anti-correlated
+    (SOUNDNESS.md: one invariant, two mechanisms): once in
+    :func:`escalate` against the propagation it receives, and once here
+    at verdict assembly against the propagation being STAMPED. The
+    second mechanism catches the mode-mixed caller bypass (escalate on
+    an inert propagation, assemble against a constrained one — audit
+    F3), where a witness violating the stamped precondition would mint
+    a REFUTED that does not refute the conditional claim. A constrained
+    propagation may only ever pair with a refusal-shaped escalation:
+    zero invocations, zero spawns, zero witnesses, every record
+    UNKNOWN.
+    """
 
 
 class ProvenanceError(RuntimeError):
@@ -1059,10 +1097,38 @@ def escalate(
     Returns per-obligation records with every invocation stamped. Declines
     and solver failures degrade to UNKNOWN with quoted reasons; only
     :exc:`SolverDisagreement` and :exc:`EmissionInfidelityError` raise.
+
+    A propagation that CONSTRAINED any assume declines escalation wholly
+    (:data:`CONSTRAINED_ASSUME_REFUSAL` — the v1 refusal): the emitted
+    problem would not respect the assumed precondition, and a sat witness
+    outside the assumed region would falsely refute the conditional claim.
+    Inert assumes (``coverage.constrained == 0``) escalate exactly as
+    before — a drop over-approximates, so emission over the declared box
+    remains faithful to the propagated semantics.
     """
     unknown = [o for o in propagation.obligations if o.status == "unknown"]
     if not unknown:
         return Escalation(records=(), notes=())
+    if propagation.coverage.constrained:
+        # checked before solver availability: the refusal is semantic and
+        # holds whether or not anything is installed, so the disclosed
+        # reason is the constrained one, never the install hint. No
+        # invocation occurs; the fresh (empty) ledger IS the record of
+        # absence, exactly as for the other pre-invocation declines.
+        return Escalation(
+            records=tuple(
+                ObligationEscalation(
+                    index=o.index,
+                    outcome=OB_UNKNOWN,
+                    detail=f"escalation declined: {CONSTRAINED_ASSUME_REFUSAL}",
+                    invocations=(),
+                    witness=None,
+                    notes=(),
+                )
+                for o in unknown
+            ),
+            notes=(CONSTRAINED_ASSUME_REFUSAL,),
+        )
     backends, missing = _backends_for(config)
     if not backends:
         # backends filtered out before any invocation never reach the
@@ -1171,12 +1237,47 @@ def make_solver_verdict(
     number of ``invoked=True`` stamps in the append-only ledger — checked
     unconditionally, on every escalated verdict; mismatch raises
     :exc:`ProvenanceError` instead of a verdict.
+
+    Nor over a mispaired escalation: a propagation that constrained any
+    assume may only pair with a refusal-shaped escalation (zero
+    invocations, zero witnesses) — anything else raises
+    :exc:`MispairedEscalationError` (the refusal invariant's second,
+    anti-correlated mechanism; audit F3).
     """
     # -- the provenance gate (runs before anything else, unconditionally)
     ledger_stamps = tuple(escalation.ledger.stamps)
     stamped = sum(1 for s in ledger_stamps if s.invoked)
     if escalation.ledger.spawns != stamped:
         raise ProvenanceError(escalation.ledger.spawns, stamped, ledger_stamps)
+
+    # -- the mispairing gate: the second, anti-correlated mechanism of the
+    # constrained-assume refusal (audit F3). escalate() refuses against
+    # the propagation IT receives; this gate refuses against the
+    # propagation being STAMPED. A constrained propagation may only pair
+    # with a refusal-shaped escalation — zero spawns, zero stamps, zero
+    # witnesses, every record UNKNOWN with no invocations.
+    if propagation.coverage.constrained and (
+        escalation.ledger.spawns
+        or ledger_stamps
+        or any(
+            r.invocations or r.witness is not None or r.outcome != OB_UNKNOWN
+            for r in escalation.records
+        )
+    ):
+        n_wit = sum(1 for r in escalation.records if r.witness is not None)
+        raise MispairedEscalationError(
+            f"mispaired escalation: the propagation being stamped "
+            f"constrained {propagation.coverage.constrained} assume(s), but "
+            f"the supplied escalation carries solver work "
+            f"({escalation.ledger.spawns} spawn(s), {len(ledger_stamps)} "
+            f"ledger stamp(s), {n_wit} witness(es)) — it cannot have been "
+            f"produced from this propagation, whose escalation is refused "
+            f"outright. Solver outcomes over the un-assumed declared box "
+            f"must not be stamped against the conditional claim (a sat "
+            f"witness may violate the stamped precondition); refusing to "
+            f"emit. Assemble the verdict from the propagation the "
+            f"escalation was actually produced from."
+        )
 
     by_index = {r.index: r for r in escalation.records}
     final: list[ObligationReport] = []

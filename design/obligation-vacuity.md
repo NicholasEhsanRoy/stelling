@@ -164,3 +164,36 @@ figure, wherever it travels:
 > registered count stands as registered, the successor criterion's count
 > rides beside it, and the pre-supersession number does not travel as
 > "the result."
+
+## The constrained-vacuity variant (2026-07-18, registered with the constraining-assume build, before any constrained verdict exists)
+
+Constraining assumes (`design/constraining-assume.md`) introduce a new
+way a verdict can pass: the *constraint*, not the *box*, did the work.
+The instrument family extends, registered before any constrained verdict
+has been read:
+
+- **The control is the mode switch**: re-run the identical query under
+  `propagate(..., assume_mode="inert")` — mechanically the pre-build
+  behavior, byte-identical, no hand rewriting.
+- **Readings, fixed now:** still discharges under inert → the constraint
+  was not load-bearing; the claim is unconditional and must be reported
+  as such (the constrained stamp lines overstate conditionality — drop
+  them by re-running, or say "constraint not load-bearing" wherever the
+  verdict travels). Discharges only under constrain → the constraint is
+  load-bearing; the verdict's content IS the conditional claim ("holds
+  where the precondition holds"), carried by the stamped
+  constrained-assume lines; this is a *different, weaker claim* than an
+  unconditional VERIFIED and never travels without its condition.
+- **Composition with the inputs-only ⊤-widening** (the registered box
+  instrument): the two instruments separate what did the work — the box
+  (widening flips it), the precondition (inert-mode flips it), both, or
+  neither (tautology; cannot count, as registered).
+- **The empty-region refusals** (`UnsatisfiableAssumptionError`: empty
+  meet, definitely-false constant precondition) are the mechanical
+  guard for the vacuous-precondition case; the known limit — a
+  strict-at-boundary assume narrowing to a closed point whose true
+  region is empty — is visible through this instrument (the inert-mode
+  control flips such a verdict) and through the stamped point region.
+- **Counting rule inherited**: any future counted case that used a
+  constraining assume runs this variant in the same breath as the
+  ⊤-widening, and the count carries the outcome in-sentence.

@@ -299,4 +299,43 @@ verdicts:
   unaffected. 313 tests green with both solvers; 305 with jax and no
   solver; 241 zero-dep.
 
+- **2026-07-18 (pre-release, same day): constraining assume landed
+  through its gate — a semantics addition, with the sound direction
+  audited through five rounds.** `stelling_assume` now narrows the
+  propagated domain for a censused class (comparisons against
+  finite-point bounds, either operand order, elementwise, conjunction
+  recursion; exact closed-half-space meets; forward-only; scope-local),
+  and stays inert — DROPPED, disclosed, with the reason quoted — for
+  everything else (relational both-sides-vary above all). Verdicts on
+  assume-carrying harnesses may move blocked→posed **by design**;
+  `assume_mode="inert"` reproduces the prior behavior byte-identically
+  and is the registered comparability/vacuity control
+  (`design/obligation-vacuity.md`, constrained-vacuity variant). **No
+  recorded verdict flipped** — every recorded harness re-run identical,
+  including the MIME F-set (F1 VERIFIED unchanged; F2 still UNKNOWN,
+  its DROPPED note now naming the relational block precisely). The
+  audit (`design/constraining-assume.md`): round 1 found 2 UNSOUND
+  (an empty strict-at-boundary precondition minting a REFUTED; the
+  escalation-seam refusal being single-mechanism and bypassable by
+  caller mispairing) + 1 FRAGILE + 3 COSMETIC; the standing
+  UNSOUND-fixes-are-re-attacked rule then found, on its **first
+  application**, an UNSOUND escape in the first fix (box-nonemptiness
+  certifies region-nonemptiness only for exact boxes — over-approximated
+  intermediates could still mint empty-precondition REFUTEDs), closed
+  by the exactness split: definite REFUTEDs under an uncertified
+  precondition are withheld to UNKNOWN with the reason disclosed,
+  uncertified VERIFIEDs carry a stamped may-be-vacuous line, and scope
+  invars never inherit exactness (selector correlation would reopen the
+  hole; pinned). A second re-attack returned 0 UNSOUND / 0 FRAGILE.
+  New refusals: `UnsatisfiableAssumptionError` (empty meet,
+  definitely-false constant, strict-boundary collapse — harness-defect
+  class, never VERIFIED) and `MispairedEscalationError` (a constrained
+  propagation may only pair with a refusal-shaped escalation — the
+  second, independent mechanism per the one-invariant-two-mechanisms
+  commitment). Solver escalation declines under constrained assumes
+  (emission covers the declared box; `sat` there could witness outside
+  the precondition) until narrowed-bounds emission ships as its own
+  audited build. 431 tests green with both solvers; 423 with jax and no
+  solver; 354 zero-dep.
+
 *(no releases yet)*

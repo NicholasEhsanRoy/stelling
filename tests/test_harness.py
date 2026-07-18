@@ -73,17 +73,44 @@ def test_content_hash_covers_the_bounds():
     ).content_hash()
 
 
-def test_assume_lands_and_its_drop_is_disclosed():
+def test_assume_lands_and_constrains_by_default():
     def h():
         x = any_array((), "float64", (1.0, 2.0))
-        assume(x > 1.5)  # MVP: recorded, dropped, and SAID to be dropped
+        assume(x > 1.5)  # constrainable: x narrows to [1.5, 2.0]
         return assert_(jnp.exp(x) < 8.0)
 
     cj = trace(h)
     assert "stelling_assume" in primitives(cj)
     p = propagate(cj)
+    assert p.all_discharged
+    assert p.coverage.constrained == 1 and p.coverage.inert == 0
+    assert "CONSTRAINED" in p.coverage.summary()
+    v = make_verdict(
+        cj,
+        p,
+        stelling_version="test",
+        jax_version=jax.__version__,
+        precision_config="jax_enable_x64=True",
+    )
+    assert v.status == "VERIFIED"
+    assert any(
+        "the verdict holds where the precondition holds" in a
+        for a in v.stamp.assumptions
+    )
+    assert "CONSTRAINED" in v.render()
+
+
+def test_assume_inert_mode_reproduces_the_dropped_disclosure():
+    def h():
+        x = any_array((), "float64", (1.0, 2.0))
+        assume(x > 1.5)  # inert mode: recorded, dropped, and SAID to be dropped
+        return assert_(jnp.exp(x) < 8.0)
+
+    cj = trace(h)
+    p = propagate(cj, assume_mode="inert")
     assert p.all_discharged  # VERIFIED-with-drops stands: superset proved
     assert p.coverage.inert == 1 and "DROPPED" in p.coverage.summary()
+    assert p.coverage.constrained == 0
     v = make_verdict(
         cj,
         p,
@@ -93,6 +120,106 @@ def test_assume_lands_and_its_drop_is_disclosed():
     )
     assert v.status == "VERIFIED"
     assert any("DROPPED" in n for n in v.notes) and "DROPPED" in v.render()
+
+
+def test_strict_boundary_assume_raises_instead_of_refuting():
+    # audit F1 (UNSOUND), the auditor's exact construction: the true
+    # assumed region of x > 1 over [0, 1] is EMPTY; before the fix the
+    # closed stand-in [1, 1] judged `x <= 0.5` definitely false and
+    # minted REFUTED — a false refutation of a vacuously-true conditional
+    # claim. The emptiness is decidable at the assume site and refused.
+    from stelling.propagate import UnsatisfiableAssumptionError
+
+    def h():
+        x = any_array((), "float64", (0.0, 1.0))
+        assume(x > 1.0)
+        return assert_(x <= 0.5)
+
+    cj = trace(h)
+    with pytest.raises(UnsatisfiableAssumptionError) as exc:
+        propagate(cj)
+    assert "strict" in str(exc.value)
+    # inert control: a normal verdict exists, obligation undecided
+    assert propagate(cj, assume_mode="inert").obligations[0].status == "unknown"
+
+
+def test_branch_scoped_unsatisfiable_assume_gets_a_verdict_with_the_note():
+    # audit F2 (FRAGILE), the auditor's exact construction: a
+    # jax.lax.cond branch guards an assume that is empty over the box;
+    # before the fix the whole analysis died with a whole-domain
+    # misdiagnosis. Branch-scoped unsatisfiability now degrades with the
+    # branch-vacuity note and the query gets its verdict.
+    from jax import lax
+
+    def h():
+        x = any_array((), "float64", (0.0, 1.0))
+
+        def ta(x):
+            assume(x >= 5.0)  # empty over [0,1] — this branch's precondition
+            return x + 1.0
+
+        def fa(x):
+            return x - 1.0
+
+        r = lax.cond(x < 0.5, ta, fa, x)
+        return assert_(r < 10.0)
+
+    cj = trace(h)
+    p = propagate(cj)  # must not raise
+    assert p.obligations[0].status == "discharged"
+    note = next(
+        n for n in p.notes if "assume unsatisfiable within this cond branch" in n
+    )
+    assert "may be vacuous under the branch's precondition" in note
+    assert p.coverage.constrained == 0  # no narrowing was applied
+    # inert control agrees on the obligation status
+    assert propagate(cj, assume_mode="inert").obligations[0].status == "discharged"
+
+
+def test_image_gap_assume_never_refutes_the_theorem():
+    # audit F7 (UNSOUND), the auditor's traced channel A: x ∈ [-1,1],
+    # w = x·x has true image [0,1] but a correlation-blind box ⊇ [-1,1];
+    # assume(w <= -0.5) is unsatisfiable in ℝ yet meets the box, and
+    # before the fix the THEOREM w >= 0 came back REFUTED. The target is
+    # a transfer output — precondition satisfiability uncertified — so
+    # the definite violation is withheld: UNKNOWN, never REFUTED.
+    def h():
+        x = any_array((), "float64", (-1.0, 1.0))
+        w = x * x
+        assume(w <= -0.5)
+        return assert_(w >= 0.0)
+
+    cj = trace(h)
+    p = propagate(cj)  # no raise; the narrowing is sound and applied
+    assert p.obligations[0].status == "unknown"
+    assert any("violation WITHHELD from REFUTED" in n for n in p.notes)
+    v = make_verdict(
+        cj,
+        p,
+        stelling_version="test",
+        jax_version=jax.__version__,
+        precision_config="jax_enable_x64=True",
+    )
+    assert v.status == "UNKNOWN"
+    assert any(
+        "precondition satisfiability uncertified" in a
+        for a in v.stamp.assumptions
+    )
+
+
+def test_assume_narrowing_flips_unknown_to_verified_and_inert_mode_measures_it():
+    # the vacuity instrument's two arms on one harness: exp(x) > 4.9 is
+    # undecidable over x ∈ [1, 2] but definite over the assumed [1.6, 2]
+    def h():
+        x = any_array((), "float64", (1.0, 2.0))
+        assume(x >= 1.6)
+        return assert_(jnp.exp(x) > 4.9)  # exp(1.6) ≈ 4.953
+
+    cj = trace(h)
+    p_constrain = propagate(cj)
+    assert p_constrain.obligations[0].status == "discharged"
+    p_inert = propagate(cj, assume_mode="inert")
+    assert p_inert.obligations[0].status == "unknown"
 
 
 def test_end_to_end_verified():

@@ -242,11 +242,31 @@ class Verdict:
             # renders the witness instead — a concrete counterexample, a
             # strictly stronger refutation than the set-level one.
             if any(o.status == "violated-over-set" for o in self.obligations):
-                lines.append(
-                    "  (set-level: at least one obligation is definitely false over "
-                    "the declared set — the stated box is not invariant as stated. "
-                    "Not a witness; not a counterexample to the program.)"
-                )
+                # Wording honesty, second axis (audit F4): under a
+                # constraining assume the judgment ran over the
+                # precondition-narrowed set, and "the stated box is not
+                # invariant as stated" is a claim about the declared box
+                # this verdict did not check. Render-only derivation: the
+                # stamped constrained-assume assumption line is the
+                # semantic carrier of conditionality.
+                if any(
+                    "the verdict holds where the precondition holds" in a
+                    for a in self.stamp.assumptions
+                ):
+                    lines.append(
+                        "  (set-level, conditional: at least one obligation is "
+                        "definitely false where the assumed precondition holds "
+                        "— judged over the propagated superset of the "
+                        "precondition-narrowed set, not over the full declared "
+                        "box. Not a witness; not a counterexample to the "
+                        "program.)"
+                    )
+                else:
+                    lines.append(
+                        "  (set-level: at least one obligation is definitely false over "
+                        "the declared set — the stated box is not invariant as stated. "
+                        "Not a witness; not a counterexample to the program.)"
+                    )
             for w in self.witnesses:
                 lines.append(
                     f"  witness for assert #{w.obligation_index} — a concrete "

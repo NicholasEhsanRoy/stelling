@@ -188,7 +188,11 @@ def test_sharing_is_preserved_one_input_one_constant():
 
 def test_assume_constraint_is_never_emitted():
     # x > 0.9 is assumed; emitting it would silently strengthen the
-    # hypothesis relative to the propagated (assume-inert) semantics.
+    # hypothesis relative to the propagated semantics. Pinned under the
+    # inert comparability mode: under the constrain default this obligation
+    # never reaches emission (the narrowed interval refutes it outright),
+    # and constraint semantics ride in the narrowed intervals — never in
+    # the script.
     x, apred, ap2, pred, out = var(0), var(1, BOOL), var(2, BOOL), var(3, BOOL), var(4, BOOL)
     q = close(
         [
@@ -200,7 +204,10 @@ def test_assume_constraint_is_never_emitted():
         ],
         [out],
     )
-    text = emit(sole_slice(q), "z3", 100).text
+    p = propagate(q, assume_mode="inert")
+    items = slice_unknown_obligations(q, p, interval_env(q, assume_mode="inert"))
+    assert len(items) == 1 and isinstance(items[0], ObligationSlice)
+    text = emit(items[0], "z3", 100).text
     assert "0.9" not in text and str(Fraction(0.9).numerator) not in text
     # exactly two asserts: the two box bounds; plus the negated predicate
     assert text.count("(assert ") == 3

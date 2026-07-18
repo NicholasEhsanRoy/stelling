@@ -23,10 +23,17 @@ Counting semantics, matched to what an interpreter would traverse:
   wrapper as one ⊤ out of N would understate exactly the confound the
   falsifier guards against.
 * **inert** equations have a known primitive whose *semantics were not
-  honored* — a constraint dropped rather than applied (the MVP's
-  ``stelling_assume``). The counter measures semantic fidelity, not just
-  primitive coverage: a no-op transfer must never count as known, or a
-  dropped constraint hides inside 100%.
+  honored* — a constraint dropped rather than applied (an
+  ``stelling_assume`` whose shape admits no sound narrowing). The counter
+  measures semantic fidelity, not just primitive coverage: a no-op
+  transfer must never count as known, or a dropped constraint hides
+  inside 100%.
+* **constrained** equations are assumes whose constraint *was* honored by
+  narrowing the propagated domain (a superset of the true assumed
+  region). Counted alongside ``inert`` — its own category, deliberately
+  outside ``known``: a constrained assume makes the verdict *conditional*
+  on the precondition, and conditionality must not hide inside the
+  fully-unconditional fraction any more than a drop may.
 
 Two entry points: :func:`measure` walks a finished :class:`stelling.ir`
 query (usable today, on transcribed code); :class:`CoverageCounter` is the
@@ -57,6 +64,14 @@ class Coverage:
     unknown_primitives: tuple[tuple[str, int], ...]  # (name, ⊤ count), most frequent first
     inert: int = 0  # known primitive, semantics NOT honored (dropped constraint)
     inert_primitives: tuple[tuple[str, int], ...] = ()
+    constrained: int = 0  # assumes honored by narrowing (verdict conditional)
+    constrained_primitives: tuple[tuple[str, int], ...] = ()
+    # conjuncts NOT applied inside assumes counted constrained (a mixed
+    # conjunction's relational/unsupported/branch-vacuous half). Counted
+    # per conjunct, NOT part of `total` (the equation is already counted
+    # once, as constrained) — but rendered in the summary, so a partial
+    # drop cannot hide inside "CONSTRAINED" (audit F5).
+    dropped_conjuncts: int = 0
 
     @property
     def fraction_known(self) -> float:
@@ -75,6 +90,14 @@ class Coverage:
         if self.inert:
             names = ", ".join(f"{n} ×{c}" for n, c in self.inert_primitives)
             parts.append(f"{self.inert} constraint(s) DROPPED ({names})")
+        if self.constrained:
+            names = ", ".join(f"{n} ×{c}" for n, c in self.constrained_primitives)
+            parts.append(f"{self.constrained} assume(s) CONSTRAINED ({names})")
+        if self.dropped_conjuncts:
+            parts.append(
+                f"{self.dropped_conjuncts} conjunct(s) DROPPED inside "
+                f"constrained assume(s)"
+            )
         return "; ".join(parts)
 
 
@@ -87,6 +110,8 @@ class CoverageCounter:
         self._unreached = 0
         self._unknown: Counter[str] = Counter()
         self._inert: Counter[str] = Counter()
+        self._constrained: Counter[str] = Counter()
+        self._dropped_conjuncts = 0
 
     def record_known(self, primitive: str) -> None:
         self._known += 1
@@ -103,15 +128,26 @@ class CoverageCounter:
     def record_inert(self, primitive: str) -> None:
         self._inert[primitive] += 1
 
+    def record_constrained(self, primitive: str) -> None:
+        self._constrained[primitive] += 1
+
+    def record_dropped_conjunct(self) -> None:
+        """One conjunct of a constrained assume that was NOT applied
+        (relational/unsupported/branch-vacuous) — summary-visible, outside
+        the equation total (audit F5)."""
+        self._dropped_conjuncts += 1
+
     def freeze(self) -> Coverage:
         unknown_total = sum(self._unknown.values())
         inert_total = sum(self._inert.values())
+        constrained_total = sum(self._constrained.values())
         return Coverage(
             total=self._known
             + self._transparent
             + unknown_total
             + self._unreached
-            + inert_total,
+            + inert_total
+            + constrained_total,
             known=self._known,
             transparent=self._transparent,
             unknown=unknown_total,
@@ -123,6 +159,11 @@ class CoverageCounter:
             inert_primitives=tuple(
                 sorted(self._inert.items(), key=lambda kv: (-kv[1], kv[0]))
             ),
+            constrained=constrained_total,
+            constrained_primitives=tuple(
+                sorted(self._constrained.items(), key=lambda kv: (-kv[1], kv[0]))
+            ),
+            dropped_conjuncts=self._dropped_conjuncts,
         )
 
 

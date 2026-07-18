@@ -136,9 +136,9 @@ def test_mixed_violated_and_unknown_reports_violation():
     assert [o.status for o in p.obligations] == ["violated-over-set", "unknown"]
 
 
-def test_inert_assume_is_counted_named_and_noted_never_hidden():
+def _assume_harness():
     x, pred, apred, ex, p2, out = var(0), var(1, BOOL), var(2, BOOL), var(3), var(4, BOOL), var(5, BOOL)
-    q = close(
+    return close(
         [
             any_eqn(x, 1.0, 2.0),
             ir.JaxprEqn(
@@ -157,15 +157,33 @@ def test_inert_assume_is_counted_named_and_noted_never_hidden():
         ],
         (out,),
     )
-    p = propagate(q)
+
+
+def test_inert_assume_is_counted_named_and_noted_never_hidden():
+    # assume_mode="inert": the comparability control — drops every assume
+    # exactly as the MVP did, and says so.
+    p = propagate(_assume_harness(), assume_mode="inert")
     assert p.coverage.inert == 1
     assert p.coverage.inert_primitives == (("stelling_assume", 1),)
+    assert p.coverage.constrained == 0
     assert p.dropped_constraints == 1
     assert "DROPPED" in p.coverage.summary()
     assert p.coverage.fraction_known < 1.0  # a drop cannot hide inside 100%
     assert any("DROPPED" in n for n in p.notes)
     assert p.all_discharged  # VERIFIED-with-drops stands (superset proved)
     assert "stelling_assume" not in dict(p.transfers_used)  # no tier claimed
+
+
+def test_constrainable_assume_narrows_and_discloses_by_default():
+    p = propagate(_assume_harness())  # assume_mode="constrain" is the default
+    assert p.coverage.constrained == 1
+    assert p.coverage.constrained_primitives == (("stelling_assume", 1),)
+    assert p.coverage.inert == 0 and p.dropped_constraints == 0
+    assert "CONSTRAINED" in p.coverage.summary()
+    assert any("assume CONSTRAINED" in n for n in p.notes)
+    assert any("the verdict holds where the precondition holds" in a for a in p.assumptions)
+    assert p.all_discharged
+    assert "stelling_assume" not in dict(p.transfers_used)  # still no tier claimed
 
 
 def test_nonvacuity_checks_are_collected_separately():
