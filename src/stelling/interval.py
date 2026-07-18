@@ -227,6 +227,10 @@ def join(cases: list[IntervalArray]) -> IntervalArray:
     """Interval hull (union) of same-shape boxes — the sound over-approximation
     of a branch whose taken case is not determined."""
     shape = cases[0].shape
+    if any(c.shape != shape for c in cases):
+        # a larger case would be silently truncated to case 0's element
+        # count — refuse rather than mis-join (audit finding 7)
+        raise IntervalError(f"join over mismatched shapes {[c.shape for c in cases]}")
     los = tuple(min(c.los[i] for c in cases) for i in range(cases[0].size))
     his = tuple(max(c.his[i] for c in cases) for i in range(cases[0].size))
     return IntervalArray(shape=shape, los=los, his=his)
@@ -239,14 +243,24 @@ def select_n(which: IntervalArray, cases: list[IntervalArray]) -> IntervalArray:
     **definite** (a single integer at that element) the exact case is
     taken; where it **straddles** (the branch is undetermined) the possible
     cases are joined — sound, and the source of branch imprecision that a
-    solver would resolve."""
+    solver would resolve. An infinite (⊤) selector element joins every
+    case rather than crashing on the int conversion (audit finding 5 —
+    reachable from any trace whose predicate involves an unregistered
+    primitive)."""
+    if any(c.shape != which.shape for c in cases):
+        raise IntervalError(
+            f"select_n case shapes {[c.shape for c in cases]} != which {which.shape}"
+        )
     n = which.size
     los, his = [], []
     for i in range(n):
         w_lo, w_hi = which.los[i], which.his[i]
-        lo_idx, hi_idx = int(math.floor(w_lo)), int(math.floor(w_hi))
-        possible = range(max(0, lo_idx), min(len(cases) - 1, hi_idx) + 1)
-        picks = [cases[k] for k in possible] or [cases[-1]]
+        if w_lo == -_INF or w_hi == _INF:
+            picks = cases  # ⊤ selector: any case possible
+        else:
+            lo_idx, hi_idx = int(math.floor(w_lo)), int(math.floor(w_hi))
+            possible = range(max(0, lo_idx), min(len(cases) - 1, hi_idx) + 1)
+            picks = [cases[k] for k in possible] or [cases[-1]]
         los.append(min(c.los[i] for c in picks))
         his.append(max(c.his[i] for c in picks))
     return IntervalArray(shape=which.shape, los=tuple(los), his=tuple(his))

@@ -126,6 +126,20 @@ def test_eager_any_array_refuses():
         any_array((), "float64", (0.0, 1.0))
 
 
+def test_f32_roundtrip_does_not_false_verify():
+    """Audit finding 1, the real-trace construction: float32(0.1) rounds UP,
+    so `roundtrip(x) <= 0.1` is false for the only declared value — the old
+    pass-through discharged it."""
+
+    def h():
+        x = any_array((), "float64", (0.1, 0.1))
+        y = x.astype(jnp.float32)
+        return assert_(y.astype(jnp.float64) <= 0.1)
+
+    p = propagate(trace(h))
+    assert p.obligations[0].status == "unknown"  # ⊤, never a false VERIFIED
+
+
 def test_empty_declared_set_refused_at_declaration():
     import math
 

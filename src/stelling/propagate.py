@@ -94,7 +94,22 @@ class Propagation:
 _STRUCT_FMT = {"<f8": "d", "<f4": "f", "<i8": "q", "<i4": "i", "|b1": "?"}
 
 
-def _decode_array(a: ir.Array) -> list[float]:
+def _int_bracket(v: int) -> tuple[float, float]:
+    """A sound double bracket of an arbitrary python int (audit findings 3/5:
+    int64 above 2**53 must widen; ints beyond the double range must saturate
+    rather than crash on float())."""
+    if abs(v) <= _EXACT_INT:
+        x = float(v)
+        return x, x
+    try:
+        x = float(v)
+    except OverflowError:
+        maxf = math.nextafter(math.inf, 0.0)
+        return (maxf, math.inf) if v > 0 else (-math.inf, -maxf)
+    return iv._down(x), iv._up(x)
+
+
+def _decode_array(a: ir.Array) -> iv.IntervalArray:
     fmt = _STRUCT_FMT.get(a.dtype)
     if fmt is None:
         raise ir.TranscriptionError(
@@ -104,21 +119,28 @@ def _decode_array(a: ir.Array) -> list[float]:
     n = 1
     for d in a.shape:
         n *= d
-    return [float(v) for v in struct.unpack(f"<{n}{fmt}", a.data)]
+    los, his = [], []
+    for v in struct.unpack(f"<{n}{fmt}", a.data):
+        if isinstance(v, int):
+            lo, hi = _int_bracket(v)
+        else:
+            lo = hi = float(v)
+        los.append(lo)
+        his.append(hi)
+    return iv.IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
 
 
 def _value_to_interval(v, shape: tuple[int, ...]) -> iv.IntervalArray:
     if isinstance(v, ir.Array):
-        return iv.from_values(v.shape, _decode_array(v))
+        return _decode_array(v)
     if isinstance(v, bool):
         return iv.point(1.0 if v else 0.0, shape)
     if isinstance(v, int):
-        if abs(v) > _EXACT_INT:
-            x = float(v)
-            return iv.IntervalArray(
-                shape=shape, los=(iv._down(x),), his=(iv._up(x),)
-            )
-        return iv.point(float(v), shape)
+        lo, hi = _int_bracket(v)
+        n = 1
+        for d in shape:
+            n *= d
+        return iv.IntervalArray(shape=shape, los=(lo,) * n, his=(hi,) * n)
     if isinstance(v, float):
         return iv.point(v, shape)
     raise ir.TranscriptionError(
@@ -132,22 +154,47 @@ def _value_to_interval(v, shape: tuple[int, ...]) -> iv.IntervalArray:
 # transfer(eqn, params: dict, ins: list[IntervalArray]) -> list[IntervalArray]
 
 
+# Conversions that are exact for EVERY representable source value — the only
+# ones the pass-through is sound for (audit finding 1: f64->f32 rounds,
+# int64->int32 wraps, int->bool collapses; passing those through produced a
+# verified false VERIFIED on a real f32 round-trip trace).
+_EXACT_CONVERSIONS = frozenset(
+    {
+        ("float32", "float64"),
+        ("float16", "float32"),
+        ("float16", "float64"),
+        ("int8", "int16"), ("int8", "int32"), ("int8", "int64"),
+        ("int16", "int32"), ("int16", "int64"),
+        ("int32", "int64"),
+        ("int8", "float32"), ("int16", "float32"),
+        ("int8", "float64"), ("int16", "float64"), ("int32", "float64"),
+        ("bool", "int8"), ("bool", "int16"), ("bool", "int32"),
+        ("bool", "int64"), ("bool", "float32"), ("bool", "float64"),
+    }
+)
+
+_INT_RANGE = {"int32": 2.0**31, "int64": 2.0**63}
+
+
 def _t_convert(eqn, params, ins):
     (a,) = ins
-    src = eqn.invars[0].aval.dtype or "" if eqn.invars else ""
+    src = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
     dst = str(params.get("new_dtype"))
-    if "float" in src and ("int" in dst) and dst != "bool":
-        # float -> integer cast truncates toward zero; trunc is monotone
-        # non-decreasing, so [trunc(lo), trunc(hi)] is a sound bracket
-        def tr(x):
-            return x if x in (math.inf, -math.inf) else float(math.trunc(x))
-
-        return [iv.IntervalArray(shape=a.shape,
-                                 los=tuple(tr(x) for x in a.los),
-                                 his=tuple(tr(x) for x in a.his))]
-    # every endpoint is already a double; bool<->int<->float that preserves
-    # the numeric value (incl. bool->int32 for a `cond` index) passes through
-    return [a]
+    if src == dst or (src, dst) in _EXACT_CONVERSIONS:
+        return [a]
+    if "float" in src and dst in _INT_RANGE:
+        # float -> integer truncates toward zero; trunc is monotone, so
+        # [trunc(lo), trunc(hi)] brackets — but only while the values fit the
+        # target's range (outside it jax wraps, which trunc does not model)
+        bound = _INT_RANGE[dst]
+        if any(not (-bound <= x <= bound) for x in (*a.los, *a.his)):
+            return None
+        return [iv.IntervalArray(
+            shape=a.shape,
+            los=tuple(float(math.trunc(x)) for x in a.los),
+            his=tuple(float(math.trunc(x)) for x in a.his),
+        )]
+    return None  # value-changing or unrecognized conversion -> ⊤, noted
 
 
 TRANSFERS = {
@@ -277,7 +324,10 @@ class _Propagator:
             ins = [self.read(a) for a in eqn.invars]
             if inner is not None and len(inner.jaxpr.invars) == len(ins):
                 self.counter.record_transparent(eqn.primitive)
+                outer_env = self.env  # isolated scope, as for cond branches
+                self.env = {}
                 outs = self.run(inner.jaxpr, inner.consts, ins)
+                self.env = outer_env
                 for out, val in zip(eqn.outvars, outs):
                     self.env[out.id] = val
                 return
@@ -290,11 +340,13 @@ class _Propagator:
             return
 
         if eqn.primitive == "cond":
-            # cond(index, *operands)[branches=(jaxpr, ...)]: run the branch
-            # selected by `index`; where `index` straddles, run every
-            # possible branch and JOIN outputs (sound over-approximation —
-            # a branch whose taken case is undetermined). Control-flow
-            # transfer (design/control-flow-hypothesis.md).
+            # cond(index, *operands)[branches=(jaxpr, ...)]: run every branch
+            # the index interval can select and JOIN outputs (sound
+            # over-approximation of an undetermined branch). Out-of-range
+            # indices select the FINAL branch — the jax convention, verified
+            # by binding cond_p directly (index -1 -> last, index 5 -> last;
+            # audit finding 2: clamping negative indices to branch 0 produced
+            # a verified false VERIFIED at the [-1, 0] boundary).
             branches = next(
                 (v for k, v in eqn.params if k == "branches"), None
             )
@@ -307,12 +359,40 @@ class _Propagator:
                 return
             index, operands = ins[0], ins[1:]
             last = len(branches) - 1
-            lo = 0 if index.los[0] == -math.inf else max(0, int(math.floor(index.los[0])))
-            hi = last if index.his[0] == math.inf else min(last, int(math.floor(index.his[0])))
-            taken = [b for i, b in enumerate(branches) if lo <= i <= hi] or [branches[-1]]
+            w_lo, w_hi = index.los[0], index.his[0]
+            if w_lo == -math.inf or w_hi == math.inf:
+                possible = set(range(last + 1))  # ⊤ index: any branch
+            else:
+                lo_i, hi_i = int(math.floor(w_lo)), int(math.floor(w_hi))
+                possible = {i for i in range(last + 1) if lo_i <= i <= hi_i}
+                if lo_i < 0 or hi_i > last:
+                    possible.add(last)  # out-of-range mass -> the final branch
+            if not possible:
+                possible = {last}
             self.counter.record_known(eqn.primitive)
             self.used[eqn.primitive] = TIER_EXACT
-            results = [self.run(b.jaxpr, list(b.consts), operands) for b in taken]
+            # untaken branches are still part of the query: their equations
+            # count as unreached, or the coverage denominator lies (audit
+            # finding 4)
+            for i, b in enumerate(branches):
+                if i not in possible:
+                    stack = [b.jaxpr]
+                    while stack:
+                        jx = stack.pop()
+                        for e in jx.eqns:
+                            self.counter.record_unreached(e.primitive)
+                            stack.extend(sub_jaxprs(e))
+            # each branch runs in an isolated scope: branch jaxprs are closed
+            # (invars + consts only), and a shared flat env would let one
+            # branch read another's internals, defeating the unbound-var
+            # check (audit finding 6)
+            outer_env = self.env
+            results = []
+            for i in sorted(possible):
+                b = branches[i]
+                self.env = {}
+                results.append(self.run(b.jaxpr, list(b.consts), operands))
+            self.env = outer_env
             for j, out in enumerate(eqn.outvars):
                 self.env[out.id] = iv.join([r[j] for r in results])
             return

@@ -124,4 +124,26 @@ Three further commitments bind every implementation of the stamp:
   control proves the *checker* isn't vacuous, not that any *harness*
   isn't. Fourth growth, same reason: true and unsaid.
 
+- **2026-07-18 (pre-release, same day): four soundness defects fixed,
+  found by an adversarial fresh-context audit** (`design/soundness-audit.md`
+  — the portfolio-dispatch discipline applied to review: the transfers'
+  author cannot be their auditor). (1) `convert_element_type` passed
+  value-changing casts through (verified false VERIFIED on a real
+  float32 round-trip trace) — now an exact-conversions whitelist,
+  everything else ⊤. (2) `cond` clamped negative indices to branch 0;
+  jax's verified convention is default-LAST (index −1 → last branch) —
+  verified false VERIFIED at the `[-1, 0]` boundary; fixed to the
+  verified convention. (3) int64 array constants above 2⁵³ decoded to
+  point intervals excluding the true value — now bracketed. (4) untaken
+  `cond` branch equations vanished from the coverage denominator — now
+  counted unreached. Also: ⊤ selectors/indices and out-of-double-range
+  int literals now degrade instead of crashing; branch and call scopes
+  are isolated (the unbound-var check is now effective across scopes);
+  `join`/`select_n` refuse shape mismatches. **No shipped verdict
+  flipped** — every recorded harness re-run reproduces its recorded
+  status exactly (the counting queries used only exact conversions,
+  definite in-range indices, and f64 constants); verified empirically
+  before this entry was written. Every audit construction is a permanent
+  regression test (`tests/test_audit_findings.py`).
+
 *(no releases yet)*
