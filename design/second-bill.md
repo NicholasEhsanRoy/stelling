@@ -131,3 +131,30 @@ finite list, §3's guard rule, the registered audit gate, scoped to the
 array-state half.** The decision to exercise the license is the
 maintainer's; this document's job was the two numbers, and they are 89%
 and one-named-wall.
+
+## Carve-out (2026-07-18, before the build): the convert forms are not trivial
+
+The two `convert_element_type` declines were bucketed trivial. **Wrong
+bucket, corrected before the builder exists:** they are additions to the
+`_t_convert` whitelist — the exact artifact the first audit built
+*because value-changing casts were the most reachable false-VERIFIED*
+(finding 1), and whose widening under fix pressure produced finding 4-B
+at ±2³¹. Widening a soundness boundary is not a registry row.
+
+- **The two forms leave the trivial bucket and the builder's list
+  entirely.** Corrected tally: **trivial 15/19 (79%), array-semantics
+  2/19, whitelist-widening 2/19, out-of-ℝ 0** — still mostly-trivial by
+  the registered criterion; **the bounded reading and the closed fork
+  stand.**
+- **The whitelist rule, registered:** a `convert` form enters the
+  whitelist **only with a witnessed regression test — a real jax trace
+  showing the cast changes no value on the declared domain** — and each
+  entry goes through the audit gate **flagged as a whitelist widening**,
+  never folded into a general review. Weak-type flips need the witness
+  like anything else: "weak type" is a jax concept, not a soundness
+  guarantee.
+- **The builder's list is therefore: eight trivial rows** (`abs`,
+  `eq`/`ne`, `and`/`or`, `stop_gradient`, `reshape`, `pow` with a
+  base-sign decline guard) **+ three array-semantics items**
+  (batched/scalar `select_n`, axis reductions — `reduce_or` as observed —
+  and rank broadcasting). Convert stays exactly as audited.

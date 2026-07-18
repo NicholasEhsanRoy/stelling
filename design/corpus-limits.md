@@ -55,8 +55,10 @@ declaration needs shape/type/arity guards, they will be written under the
 safety motivation, and that motivation has over-fired three times —
 `any_pytree`'s guards are the predicted fourth instance, pre-empted here.
 The builder also receives the **finite transfer list** from
-`design/second-bill.md` (nine trivial rows + three array-semantics items)
-and not the counts.
+`design/second-bill.md` (eight trivial rows + three array-semantics
+items; the two `convert_element_type` forms are **carved out** — whitelist
+widenings need their own witnessed tests through the audit gate, and are
+not part of any build) and not the counts.
 
 ## Finding 2: this corpus cannot fire any trigger — the meta-finding
 
