@@ -144,3 +144,18 @@ even across two libraries (blackjax + diffrax), so the "both blackjax"
 concentration does not obtain either. The registered ordering still holds
 — affine is the *likeliest* next build when it fires — but it has **not**
 fired, and nothing here licenses building it.
+
+## Fidelity addendum (2026-07-18, `design/harness-fidelity.md`)
+
+The band stands and now carries its fidelity sentence: **"Supported, 2 of
+4 — 0 imported, 2 hand-transcribed (dfx#207: diffrax's opt-in `dtmin`
+clamp, quoted; npy#249: numpyro's `exp`, quoted), 0 hand-modelled
+counting. Both non-mechanizing attempts (bjx#969, bjx#D416) were
+hand-modelled, so this experiment's negative evidence is about models."**
+The subset also re-reads 4 → 3 (bjx#969 is not control-flow-only — its
+faithful obligation needs a relational `assume`); the band is satisfied
+under either subset reading (2/4 and 2/3 both meet ≥ half). And the
+dependency-shaped sighting above is a **model artifact**: the faithful
+bjx#969 obligation is relational and lands **blocked (inert assume)** —
+where the original E2a run had already classified it. The affine trigger's
+valid counting evidence is therefore **0**, not 1.

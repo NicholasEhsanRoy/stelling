@@ -60,3 +60,18 @@ four control-flow-only properties (bjx#D416, npy#249) are bounds that are
 happened (no floor). They are *posable* with control-flow transfers (the
 gate's question), but whether they *mechanize* (VERIFY) is §4's question,
 and the honest prior is that clamp-less bounds will not.
+
+## Correction (2026-07-18, from the fidelity census)
+
+**bjx#969 is not control-flow-only.** Its row above judged the response as
+`where(non_finite, shrink, keep)` — a claim about a mental model, not the
+code. The real code (`mclmc_adaptation.py:438–442`, quoted in
+`design/harness-fidelity.md`) sets the cap from a *different variable*
+(`step_size_max ← step_size × 0.8`), so the faithful obligation is
+**relational** and needs the coupling `step_size ≤ step_size_max` — an
+`assume`, inert — on top of the branch transfer. The "nothing more" clause
+fails. **Control-flow-only: 4 → 3 of 6. The gate passes at exactly 3 of
+6** — the outcome is unchanged and the margin is now zero, said plainly.
+The census's own rubric was applied to an unverified model of the code —
+the same defect the fidelity census exists to catch, one document
+upstream.

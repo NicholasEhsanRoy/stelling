@@ -67,3 +67,18 @@ kept 6 of 7 hits from ever reaching a checkable obligation (control flow
 removed some of it — and the E2a count rose as a result). Each is a place
 where making the tool *better* along one axis could make a verdict *less*
 safe along another, unless the coupling is written down first.
+
+## Deflation addendum (2026-07-18, from the fidelity census)
+
+The band-crossing arithmetic above rested on affine reaching bjx#969 —
+and bjx#969's dependency shape is a **model artifact**
+(`design/harness-fidelity.md`): the faithful obligation is relational
+(`step_size × 0.8 < step_size_max`) and lands **blocked (inert assume)**,
+which affine does not touch — reaching it needs a *constraining* `assume`
+transfer, a different upgrade. So on current evidence **affine moves E2a
+by zero cases**, the 3/7 → 4/7 crossing dissolves, and the affine
+trigger's valid counting evidence is 0. The dangerous coincidence this
+document exists to disclose was defused by the fidelity census before any
+build — the third control in a row to catch a motivated path upstream of
+the work. The disclosure above stays, for whenever the trigger genuinely
+fires.

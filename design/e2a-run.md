@@ -22,7 +22,7 @@ positive control that was never a corpus member. Any count below is "N of
 | **npy#1133** | ℝ-faithful | sampler state stays in support | 0 — unposeable | **NUTS state** over a correlated MVN; "support" is a static constraint region, and the dynamics are the sampler, not an ODE flow |
 | **npy#249** | ℝ-partial | `isfinite(step_size) ∧ step_size>0` | 0 — unposeable + gap | HMC **adaptation-state**; and `isfinite` is float-specific (ℝ-partial), so even the poseable half would carry the semantics gap |
 | **jmd#339** | ℝ-partial | neighbor list ⊇ pairs within cutoff | 0 — unposeable + gap | a **construction postcondition**, not flow inductiveness; and the incident is a PBC float-wrap (ℝ-partial) |
-| **bjx#969** | ℝ-partial | non-finite ⇒ `step_size_max` shrinks | 0 — **blocked** | an implication; needs `not`/`or` (not in the census set) → inert `assume` → `blocked (inert assume)`, counts 0 and is not a mechanization failure |
+| **bjx#969** | ℝ-partial | non-finite ⇒ `step_size_max` shrinks | 0 — **blocked** | an implication; needs `not`/`or` (not in the census set) → inert `assume` → `blocked (inert assume)`, counts 0 and is not a mechanization failure. *(2026-07-18: the fidelity census confirmed this classification is right for the faithful code — the real obligation is also relational, `step_size × 0.8 < step_size_max`; the later control-flow harness "unblocked" it only by modelling the coupling away — `design/harness-fidelity.md`)* |
 
 ## Count and band
 
