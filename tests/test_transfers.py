@@ -662,3 +662,184 @@ def test_scatter_windowed_form_declines_not_crashes():
     )  # must not raise
     assert p.obligations[0].status == "unknown"
     assert any("scatter" in n and "no sound rule" in n for n in p.notes)
+
+
+# --- gather / transpose: static structural forms (MIME fvm round) ------------
+#
+# The two allowed-by-census structural additions from the MIME fvm
+# laplacian trace: gather in its static-index leading-axis row form
+# (phi[mesh.owner] with const topology indices) and transpose (reached
+# inside the transparent jnp.linalg.inv jit). Exact forms only;
+# everything else declines to a noted ⊤.
+
+import struct  # noqa: E402  (zero-dep literal-array payloads)
+
+
+def _arr_lit(values, shape):
+    n = 1
+    for d in shape:
+        n *= d
+    return lit(
+        ir.Array(dtype="<f8", shape=shape, data=struct.pack(f"<{n}d", *values)),
+        aval(shape),
+    )
+
+
+def _gather_row_params(operand_rank, trailing, **dim_overrides):
+    fields = {
+        "offset_dims": tuple(range(1, operand_rank)),
+        "collapsed_slice_dims": (0,),
+        "start_index_map": (0,),
+        "operand_batching_dims": (),
+        "start_indices_batching_dims": (),
+    }
+    fields.update(dim_overrides)
+    return (
+        (
+            "dimension_numbers",
+            ir.NamedTupleParam(
+                cls="GatherDimensionNumbers", fields=tuple(fields.items())
+            ),
+        ),
+        ("fill_value", None),
+        ("indices_are_sorted", False),
+        ("mode", ir.EnumParam(cls="GatherScatterMode", member="PROMISE_IN_BOUNDS")),
+        ("slice_sizes", (1,) + trailing),
+        ("unique_indices", False),
+    )
+
+
+def _gather_query(idx_bounds, threshold, dim_overrides=None):
+    """y = [1.0, 5.0, 2.0][idx]; assert y <= threshold."""
+    idx = var(0, aval((1, 1), "int32"))
+    y = var(1, aval((1,)))
+    pred, out = var(2, aval((1,), "bool")), var(3, aval((1,), "bool"))
+    return close(
+        [
+            any_eqn(idx, *idx_bounds),
+            eqn(
+                "gather",
+                [_arr_lit([1.0, 5.0, 2.0], (3,)), idx],
+                y,
+                _gather_row_params(1, (), **(dim_overrides or {})),
+            ),
+            eqn("le", [y, lit(threshold)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+
+
+def test_gather_static_row_discharges_with_tier():
+    # idx = 1 selects the 5.0 element exactly: [5,5] <= 6
+    p = propagate(_gather_query((1.0, 1.0), 6.0))
+    assert p.obligations[0].status == "discharged"
+    assert ("gather", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_gather_static_row_definite_false_direction():
+    # the selected element [5,5] <= 2 is definitely false; rows 0/2 would
+    # pass — the 1/1 refutation proves the take landed on exactly row 1
+    p = propagate(_gather_query((1.0, 1.0), 2.0))
+    assert p.obligations[0].status == "violated-over-set"
+    assert "1/1" in p.obligations[0].detail
+
+
+def test_gather_rank2_row_form_lands_whole_row():
+    # grad[mesh.owner] shape: rank-2 operand, full trailing block per row
+    idx = var(0, aval((1, 1), "int32"))
+    y = var(1, aval((1, 2)))
+    pred, out = var(2, aval((1, 2), "bool")), var(3, aval((1, 2), "bool"))
+    q = close(
+        [
+            any_eqn(idx, 1.0, 1.0),
+            eqn(
+                "gather",
+                [_arr_lit([1.0, 2.0, 9.0, 9.0], (2, 2)), idx],
+                y,
+                _gather_row_params(2, (2,)),
+            ),
+            eqn("le", [y, lit(3.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(q)
+    assert p.obligations[0].status == "violated-over-set"
+    assert "2/2" in p.obligations[0].detail  # both elements of row 1 are 9.0
+
+
+def test_gather_dynamic_index_declines_not_crashes():
+    # a non-point index interval has no exact rule: noted ⊤, never a guess
+    p = propagate(_gather_query((0.0, 2.0), 6.0))  # must not raise
+    assert p.obligations[0].status == "unknown"
+    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+    assert "gather" not in dict(p.transfers_used)
+
+
+def test_gather_out_of_range_index_declines_not_crashes():
+    # CLIP clamps, FILL_OR_DROP fills — the wedge bug class; refuse to guess
+    p = propagate(_gather_query((7.0, 7.0), 6.0))  # must not raise
+    assert p.obligations[0].status == "unknown"
+    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+
+
+def test_gather_batched_form_declines_not_crashes():
+    # the batched form (jax 0.11's lu_solve pivots gather) is not covered
+    p = propagate(
+        _gather_query((1.0, 1.0), 6.0, {"operand_batching_dims": (0,)})
+    )  # must not raise
+    assert p.obligations[0].status == "unknown"
+    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+
+
+def _transpose_query(perm, threshold):
+    """y = transpose([[1,1,1],[9,9,9]], perm); assert y <= threshold."""
+    y = var(0, aval((3, 2)))
+    pred, out = var(1, aval((3, 2), "bool")), var(2, aval((3, 2), "bool"))
+    return close(
+        [
+            eqn(
+                "transpose",
+                [_arr_lit([1.0, 1.0, 1.0, 9.0, 9.0, 9.0], (2, 3))],
+                y,
+                (("permutation", perm),),
+            ),
+            eqn("le", [y, lit(threshold)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+
+
+def test_transpose_discharges_and_refutes():
+    p = propagate(_transpose_query((1, 0), 10.0))
+    assert p.obligations[0].status == "discharged"
+    assert ("transpose", "exact") in p.transfers_used
+    # definite-FALSE direction: the second source row's three 9.0s land in
+    # column 1 of the transpose — 3/6 refutation proves exact placement
+    p2 = propagate(_transpose_query((1, 0), 3.0))
+    assert p2.obligations[0].status == "violated-over-set"
+    assert "3/6" in p2.obligations[0].detail
+
+
+def test_transpose_malformed_permutation_declines_not_crashes():
+    y = var(0, aval((3, 2)))
+    pred, out = var(1, aval((3, 2), "bool")), var(2, aval((3, 2), "bool"))
+    q = close(
+        [
+            eqn(
+                "transpose",
+                [_arr_lit([1.0] * 6, (2, 3))],
+                y,
+                (("permutation", (0, 0)),),
+            ),
+            eqn("le", [y, lit(10.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(q)  # must not raise
+    assert p.obligations[0].status == "unknown"
+    assert any("transpose" in n and "declined" in n for n in p.notes)

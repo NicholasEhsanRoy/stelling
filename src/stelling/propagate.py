@@ -15,7 +15,10 @@ primitives, plus the closed pytree-probe registration round (abs, eq, ne,
 and, or, stop_gradient, reshape, pow, reduce_or, and the scalar-selector /
 rank-broadcast forms of already-registered transfers), plus one
 allowed-by-census structural addition from the maddening HeatNode trace
-(``scatter`` in its static-index ``x.at[k].set(v)`` form only). Everything
+(``scatter`` in its static-index ``x.at[k].set(v)`` form only), plus two
+allowed-by-census structural additions from the MIME fvm laplacian trace
+(``gather`` in its static-index leading-axis row form only, and
+``transpose`` — both pure data movement with exact semantics). Everything
 else falls to ⊤ — soundly, with coverage recording exactly how much fell.
 
 Every transfer declares an assumption tier (design commitment 5):
@@ -169,7 +172,9 @@ def _value_to_interval(v, shape: tuple[int, ...]) -> iv.IntervalArray:
 # pytree-probe registration round (abs, eq, ne, and, or, stop_gradient,
 # reshape, pow, reduce_or — the primitives the probe's own ⊤ list named),
 # plus the maddening heat-node round's one allowed structural addition
-# (scatter, static-index set form only).
+# (scatter, static-index set form only), plus the MIME fvm round's two
+# allowed structural additions (gather, static-index row form only;
+# transpose).
 # Signature:
 # transfer(eqn, params: dict, ins: list[IntervalArray]) -> list[IntervalArray]
 
@@ -310,6 +315,61 @@ def _t_scatter(eqn, params, ins):
     return [iv.IntervalArray(shape=operand.shape, los=tuple(los), his=tuple(his))]
 
 
+def _t_gather(eqn, params, ins):
+    """``x[idx]`` in its static-index leading-axis row form — the
+    allowed-by-census structural addition from the MIME fvm laplacian
+    trace (the gather half of the operators' gather→compute→scatter
+    pattern: ``phi[mesh.owner]`` / ``phi[mesh.neighbour]`` on rank-1
+    fields and ``grad[mesh.owner]`` on rank-2, with the mesh topology
+    entering as definite const indices).
+
+    Covered form, exactly: operand of rank r >= 1; indices ``(N, 1)``
+    holding definite integral in-range points; dimension numbers that
+    collapse exactly the leading axis (``offset_dims = (1, …, r-1)``,
+    ``collapsed_slice_dims = (0,)``, ``start_index_map = (0,)``, every
+    batching field empty); ``slice_sizes = (1, *operand.shape[1:])``.
+    The output stacks the selected rows: ``out[i] = operand[k_i]`` —
+    pure data movement, no arithmetic, no rounding. All
+    ``GatherScatterMode``\\ s agree on definitely-in-range indices, so
+    the mode is not constrained here.
+
+    Everything else declines to a noted ⊤: dynamic (non-point) or
+    out-of-range indices (mode-dependent clamp/drop/fill is the census's
+    wedge bug class, never guessed), batching dims, window offsets not
+    covering the full trailing block, multi-column index vectors.
+    """
+    if len(ins) != 2:
+        return None
+    operand, indices = ins
+    r = len(operand.shape)
+    if r < 1 or len(indices.shape) != 2 or indices.shape[1] != 1:
+        return None
+    dn = params.get("dimension_numbers")
+    if not isinstance(dn, ir.NamedTupleParam):
+        return None
+    fields = dict(dn.fields)
+    want = {
+        "offset_dims": tuple(range(1, r)),
+        "collapsed_slice_dims": (0,),
+        "start_index_map": (0,),
+    }
+    if any(fields.get(k) != v for k, v in want.items()):
+        return None
+    if any(v != () for k, v in fields.items() if k not in want):
+        return None
+    if tuple(params.get("slice_sizes", ())) != (1,) + operand.shape[1:]:
+        return None
+    ks = []
+    for lo, hi in zip(indices.los, indices.his):
+        if lo != hi or not math.isfinite(lo) or lo != math.floor(lo):
+            return None  # dynamic or non-integral index: no exact rule
+        k = int(lo)
+        if not 0 <= k < operand.shape[0]:
+            return None  # out of range: clamp/drop/fill is mode-dependent
+        ks.append(k)
+    return [iv.take_rows(operand, ks)]
+
+
 TRANSFERS = {
     "add": (lambda eqn, p, ins: [iv.add(*ins)], TIER_SOUND),
     "sub": (lambda eqn, p, ins: [iv.sub(*ins)], TIER_SOUND),
@@ -356,6 +416,19 @@ TRANSFERS = {
     # HeatNode trace; every other scatter configuration declines (see
     # _t_scatter).
     "scatter": (_t_scatter, TIER_EXACT),
+    # x[idx], static-index leading-axis row form only — census addition from
+    # the MIME fvm laplacian trace; every other gather configuration
+    # declines (see _t_gather).
+    "gather": (_t_gather, TIER_EXACT),
+    # axis permutation: pure data movement (MIME fvm round, reached inside
+    # the transparent jnp.linalg.inv jit); malformed permutations decline
+    # inside iv.transpose (IntervalError -> noted ⊤).
+    "transpose": (
+        lambda eqn, p, ins: [
+            iv.transpose(ins[0], tuple(p.get("permutation", ()) or ()))
+        ],
+        TIER_EXACT,
+    ),
     "broadcast_in_dim": (
         lambda eqn, p, ins: [
             iv.broadcast_in_dim(

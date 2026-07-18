@@ -651,6 +651,58 @@ def broadcast_in_dim(
     return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
 
 
+def transpose(a: IntervalArray, permutation: tuple[int, ...]) -> IntervalArray:
+    """Axis permutation: ``out.shape[j] = a.shape[permutation[j]]`` and
+    ``out[coord]`` reads ``a`` at ``src`` with ``src[permutation[j]] =
+    coord[j]`` — numpy/XLA transpose semantics, pure data movement, no
+    arithmetic. A malformed ``permutation`` (not a permutation of the
+    axes) raises :class:`IntervalError` — a decline the propagator notes,
+    not a crash."""
+    perm = tuple(permutation)
+    if sorted(perm) != list(range(len(a.shape))):
+        raise IntervalError(
+            f"transpose permutation {perm} is not a permutation of the "
+            f"{len(a.shape)} axes of shape {a.shape}"
+        )
+    out_shape = tuple(a.shape[p] for p in perm)
+    los, his = [], []
+    for coord in _coords(out_shape):
+        src = [0] * len(perm)
+        for j, p in enumerate(perm):
+            src[p] = coord[j]
+        i = _flat_index(tuple(src), a.shape)
+        los.append(a.los[i])
+        his.append(a.his[i])
+    return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
+
+
+def take_rows(a: IntervalArray, ks: list[int]) -> IntervalArray:
+    """Leading-axis row take: ``out[i] = a[ks[i]]`` with each row's
+    trailing block copied whole — the interval meaning of a static-index
+    gather along axis 0. Pure data movement (rows are contiguous in the
+    flat C-order layout), no arithmetic. Rank-0 input or an out-of-range
+    row raises :class:`IntervalError` (the transfer's decline channel;
+    the registered gather transfer checks ranges before calling here)."""
+    if not a.shape:
+        raise IntervalError("take_rows needs a leading axis; got rank-0 input")
+    rowsz = 1
+    for d in a.shape[1:]:
+        rowsz *= d
+    los: list[float] = []
+    his: list[float] = []
+    for k in ks:
+        if not 0 <= k < a.shape[0]:
+            raise IntervalError(
+                f"take_rows row {k} out of range for leading axis "
+                f"{a.shape[0]}"
+            )
+        los.extend(a.los[k * rowsz:(k + 1) * rowsz])
+        his.extend(a.his[k * rowsz:(k + 1) * rowsz])
+    return IntervalArray(
+        shape=(len(ks),) + a.shape[1:], los=tuple(los), his=tuple(his)
+    )
+
+
 def concatenate(parts: list[IntervalArray], dimension: int) -> IntervalArray:
     base = parts[0].shape
     out_shape = tuple(

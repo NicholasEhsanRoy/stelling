@@ -195,3 +195,67 @@ def test_at_set_dynamic_index_declines_traced():
     p = run(h)
     assert p.obligations[0].status == "unknown"
     assert p.coverage.unknown >= 1
+
+
+def test_fvm_gather_static_row_traced():
+    # the MIME fvm round's census addition must bind the real name jax
+    # emits for x[const_idx] — gather — or it never fires
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        y = x.at[1].set(5.0)
+        # int32 index, as mesh topology arrays carry it — the int64 default
+        # would route through a narrowing convert_element_type that soundly
+        # ⊤s the indices before the gather ever sees them
+        z = y[jnp.array([1], dtype=jnp.int32)]
+        return assert_(z <= 5.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "discharged"
+    assert ("gather", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_fvm_gather_static_row_definite_false_traced():
+    # the gathered element is definitely above the bound: sound refutation
+    # proving the take landed on exactly the written element
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        y = x.at[1].set(5.0)
+        z = y[jnp.array([1], dtype=jnp.int32)]
+        return assert_(z <= 2.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "violated-over-set"
+
+
+def test_fvm_gather_dynamic_index_declines_traced():
+    # a traced (non-point) index reaches the transfer as a real interval:
+    # decline to a noted ⊤ — clamp/drop/fill is mode-dependent, never guessed
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        i = any_array((1,), "int32", (0.0, 2.0))
+        return assert_(x[i] <= 1.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "unknown"
+    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+    assert "gather" not in dict(p.transfers_used)
+
+
+def test_fvm_transpose_traced():
+    # transpose must bind the real primitive name; the point row's values
+    # land in exactly the transposed positions
+    def h():
+        top = any_array((1, 2), "float64", (0.0, 1.0))
+        bottom = any_array((1, 2), "float64", (5.0, 5.0))
+        xt = jnp.transpose(jnp.concatenate([top, bottom], axis=0))
+        return assert_(xt <= 5.0), assert_(xt <= 2.0)
+
+    p = run(h)
+    assert [o.status for o in p.obligations] == [
+        "discharged",
+        "violated-over-set",
+    ]
+    assert ("transpose", "exact") in p.transfers_used
+    # the bottom row's two 5.0s occupy column 1 of the (2, 2) transpose
+    assert "2/4" in p.obligations[1].detail
