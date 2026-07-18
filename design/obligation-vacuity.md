@@ -91,3 +91,61 @@ All four predictions confirmed exactly:
 - Both survivors sit on **sound anchors** (property re-check) with
   **bounds-load-bearing obligations** — the two cases the whole pipeline
   now stands on are the two that pass every guard built so far.
+
+---
+
+# npy#249, pinned (2026-07-18, follow-on work order)
+
+## The consequence, registered before the quote
+
+> **A mechanized count of 1 is below any band.** One case is an anecdote
+> about one system — the ≥2-sources principle that governs every
+> threshold here, applied to the numerator. Wherever a count stands at 1,
+> it is reported as *"one case — an anecdote, below any band,"* not as a
+> band result. No band text changes; this is reporting vocabulary.
+
+## The result, quoted — it was run and committed before this question was asked
+
+The ⊤-widening runner covered **all four** counted cases in one pass
+(`corpus/supply/tautology_test.py`, committed with the reading above):
+
+> `npy#249 (counted 1): ['unknown'] -> no obligation survives ⊤ — the
+> declared bounds are load-bearing`
+
+And the prediction, pre-committed in the registration above **before the
+run**:
+
+> *"npy#249 → NOT tautological: under ⊤, `exp([−inf, inf]) = [0, inf]`
+> and `> 0` straddles at the 0 endpoint — the declared `log_eps ≥ −20`
+> floor is load-bearing."*
+
+**By the registered test, npy#249 stands. The control-flow count is 2**
+(dfx#417, npy#249), and the below-any-band consequence stays dormant.
+
+## The instrument gap this exposes — recorded, not acted on
+
+The question was sharper than the test. The registered test measures
+bounds-dependence **over the extended reals**: ⊤ includes −∞, and
+npy#249's obligation fails under ⊤ *only at the −∞ endpoint* (`exp(−∞) =
+0` in the domain's closure). Over **finite** ℝ, `exp(x) > 0` is a theorem
+— true for every finite input, no box needed — which is the same *shape*
+as dfx#207's `max`-definition, one domain-subtlety away. The declared
+`−20` floor is "load-bearing" only in that it excludes −∞ itself.
+
+**The registered test governs and the count stands** — refining the test
+now to catch finite-ℝ range-theorems would void a counted case, and that
+amendment fails the rule on every clause: it is restrictive, it moves a
+count, and the gap was found by review, not by the registration's own
+control. The refinement binds **forward**: any future vacuity test — in
+particular the one the corpus-expansion registration must carry for its
+own cases — should test against *finite*-⊤ (or equivalently: an
+obligation that is a theorem of a primitive's range over finite inputs is
+tautological), registered before the cases it could void exist. Same
+pattern as the ≥2-sources class fix: the instance is grandfathered
+because the rule forbids retroactive tightening; the class is fixed.
+
+Both survivors' standing, restated with everything now known: dfx#417 —
+sound anchor, bounds-load-bearing in the full sense (the face fluxes go ⊤
+when `u, v` widen, finitely). npy#249 — sound anchor, passes the
+registered test, **and its obligation is a finite-ℝ range-theorem**, said
+here so the count's meaning travels with the count.
