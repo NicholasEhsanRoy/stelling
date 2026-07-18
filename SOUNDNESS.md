@@ -203,4 +203,41 @@ Three further commitments bind every implementation of the stamp:
   declaration now. No verdict flipped — every recorded harness re-run
   reproduces its status; 195 tests green.
 
+- **2026-07-18 (pre-release, same day): the solver escalation layer
+  landed through its gate; one unsound path and six lesser defects
+  fixed before landing.** First `SolverStamp(invoked=True)` in the
+  project's history: obligations interval propagation leaves unknown
+  can now escalate to an SMT portfolio (cvc5 primary for QF_NRA with
+  coverings, z3 cross-check; SMT-LIB2 text over stamped transports;
+  disagreement raises; timeout is never a VERIFIED; `sat` becomes
+  REFUTED only after independent exact-rational replay). The build was
+  audited pre-commit by a distinct fresh-context auditor under a
+  transport/emission/stamp mandate (`design/solver-integration-build.md`):
+  the emission core survived every constructed attack (strictness,
+  closed bounds, exact dyadic literals, variable sharing, negation
+  polarity, inert-assume non-emission, stamp==wire by recomputed
+  script hash), and seven findings were fixed at adjudication —
+  (UNSOUND) the witness replay checked predicate violation but not
+  **box membership**, so a model escaping the declared box could mint
+  a wrong REFUTED-with-witness (found independently by the
+  adjudicator's reading and the auditor's construction; replay now
+  checks the whole claim and an out-of-box model raises
+  emission-infidelity); (FRAGILE ×4) sat-with-no-usable-model
+  misattributed emission infidelity and killed the analysis; malformed
+  models (conflicting duplicates, undeclared names) were silently
+  laundered; the external binary's unsat tolerance converted a crashed
+  run (segfault banner, exit 134) into an undisclosed VERIFIED; a
+  constants-only refutation degraded through an internal StampError,
+  dropped both real invocation stamps, and stamped "no solver invoked"
+  after two real invocations; (COSMETIC ×2) stamp-tuple and `only=()`
+  validation gaps. Every finding is a permanent regression test
+  (`tests/test_solver_audit_findings.py`). **No recorded verdict
+  flipped** — every recorded harness runnable in the rebuilt
+  environment reproduces its status exactly (hit386, e2a_417,
+  exhibit_632, cf_run; verified before this entry); the no-solver path
+  is byte-identical and its full pre-existing test baseline passes
+  unmodified, including in a jax-present-no-solver environment (291
+  passed) and the zero-dep environment (227 passed). 299 tests green
+  with both solvers installed.
+
 *(no releases yet)*

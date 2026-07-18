@@ -36,7 +36,15 @@ from dataclasses import dataclass, fields
 
 from stelling.propagate import ObligationReport, Propagation
 
-__all__ = ["SolverStamp", "Stamp", "StampError", "Verdict", "make_verdict"]
+__all__ = [
+    "SolverStamp",
+    "Stamp",
+    "StampError",
+    "Verdict",
+    "Witness",
+    "make_verdict",
+    "solver_absent",
+]
 
 ARITHMETIC_MODE_INTERVAL = "interval/f64/outward-1ulp (stelling.interval)"
 
@@ -109,6 +117,36 @@ def solver_absent(reason: str) -> SolverStamp:
 
 
 @dataclass(frozen=True)
+class Witness:
+    """A concrete violating input, independently confirmed by replay.
+
+    Constructed only by the escalation layer, and only after the exact
+    rational replay confirmed the violation — a witness that failed replay
+    is an emission-infidelity bug and raises there instead of ever
+    becoming one of these.
+    """
+
+    obligation_index: int
+    values: tuple[tuple[str, str], ...]  # (input name, exact rational)
+    produced_by: str  # solver name/version/transport that returned the model
+    replay: str  # how the confirmation was performed
+
+    def __post_init__(self) -> None:
+        if not self.values:
+            raise StampError("Witness.values must be populated")
+        if not self.produced_by or not self.replay:
+            raise StampError("Witness provenance fields must be populated")
+
+
+def _render_one_solver(s: SolverStamp) -> str:
+    return (
+        f"{s.name} {s.version} ({s.transport}) options={dict(s.options or ())}"
+        if s.invoked
+        else f"none — {s.reason}"
+    )
+
+
+@dataclass(frozen=True)
 class Stamp:
     stelling_version: str
     jax_version: str  # the jax that traced the harness
@@ -117,7 +155,7 @@ class Stamp:
     semantics: str  # which arithmetic the verdict is about (ℝ vs IEEE)
     precision_config: str  # e.g. "jax_enable_x64=True"
     device_class: str  # of any concrete execution the verdict relies on
-    solver: SolverStamp
+    solver: SolverStamp | tuple[SolverStamp, ...]  # every invocation relied on
     nonvacuity: str  # is the declared set tied to the incident's own data?
     transfer_tiers: tuple[tuple[str, str], ...]  # (primitive, tier) actually used
     transfer_provenance: tuple[tuple[str, str], ...]  # (primitive, origin)
@@ -130,14 +168,45 @@ class Stamp:
             if isinstance(v, str) and not v:
                 raise StampError(f"stamp field {f.name!r} is empty; every field "
                                  f"in the contract must be populated")
+        # A portfolio verdict relied on several invocations: the solver field
+        # then carries every one of them. The no-defaults/no-empty discipline
+        # extends to the tuple — non-empty, each element a validated
+        # SolverStamp with invoked=True (absence is only ever the bare
+        # SolverStamp(invoked=False): an absence element rendered among the
+        # invocations would misstate what happened).
+        if isinstance(self.solver, tuple):
+            if not self.solver:
+                raise StampError(
+                    "stamp field 'solver' is an empty tuple; absence must be "
+                    "recorded as a SolverStamp(invoked=False), not as nothing"
+                )
+            for s in self.solver:
+                if not isinstance(s, SolverStamp):
+                    raise StampError(
+                        f"stamp field 'solver' tuple contains "
+                        f"{type(s).__name__}, expected SolverStamp"
+                    )
+                if not s.invoked:
+                    raise StampError(
+                        "stamp field 'solver' tuple contains a "
+                        "SolverStamp(invoked=False); a non-invocation must "
+                        "never be recorded among the invocations — absence "
+                        "is a single bare SolverStamp"
+                    )
+        elif not isinstance(self.solver, SolverStamp):
+            raise StampError(
+                f"stamp field 'solver' is {type(self.solver).__name__}, "
+                f"expected SolverStamp or tuple of SolverStamp"
+            )
 
     def render(self) -> str:
-        solver = (
-            f"{self.solver.name} {self.solver.version} ({self.solver.transport}) "
-            f"options={dict(self.solver.options or ())}"
-            if self.solver.invoked
-            else f"none — {self.solver.reason}"
-        )
+        if isinstance(self.solver, tuple):
+            solver = f"{len(self.solver)} invocation(s):" + "".join(
+                f"\n  [{i}] {_render_one_solver(s)} — {s.reason}"
+                for i, s in enumerate(self.solver)
+            )
+        else:
+            solver = _render_one_solver(self.solver)
         lines = [
             f"stelling {self.stelling_version} | jax {self.jax_version}",
             f"query {self.query_content_hash}",
@@ -163,15 +232,32 @@ class Verdict:
     obligations: tuple[ObligationReport, ...]
     stamp: Stamp
     notes: tuple[str, ...]  # the addresses: where and why anything degraded
+    witnesses: tuple[Witness, ...] = ()  # replay-confirmed counterexamples
 
     def render(self) -> str:
         lines = [f"== {self.status}"]
         if self.status == "REFUTED":
-            lines.append(
-                "  (set-level: at least one obligation is definitely false over "
-                "the declared set — the stated box is not invariant as stated. "
-                "Not a witness; not a counterexample to the program.)"
-            )
+            # Rendering honesty: the set-level wording ("not a witness")
+            # belongs ONLY to interval refutations. A witness-backed REFUTED
+            # renders the witness instead — a concrete counterexample, a
+            # strictly stronger refutation than the set-level one.
+            if any(o.status == "violated-over-set" for o in self.obligations):
+                lines.append(
+                    "  (set-level: at least one obligation is definitely false over "
+                    "the declared set — the stated box is not invariant as stated. "
+                    "Not a witness; not a counterexample to the program.)"
+                )
+            for w in self.witnesses:
+                lines.append(
+                    f"  witness for assert #{w.obligation_index} — a concrete "
+                    f"violating input (strictly stronger than a set-level "
+                    f"refutation):"
+                )
+                for name, value in w.values:
+                    approx = _approx(value)
+                    lines.append(f"    {name} = {value}{approx}")
+                lines.append(f"    produced by: {w.produced_by}")
+                lines.append(f"    replay: {w.replay}")
         for o in self.obligations:
             lines.append(f"  assert #{o.index}: {o.status} — {o.detail}")
             # location re-derived from the *current* query's source_info,
@@ -183,6 +269,20 @@ class Verdict:
         for n in self.notes:  # under the coverage line: the actionable half
             lines.append(f"note: {n}")
         return "\n".join(lines)
+
+
+def _approx(exact: str) -> str:
+    """A human decimal approximation of an exact rational string, for the
+    witness rendering only; the exact value is always shown first."""
+    try:
+        from fractions import Fraction
+
+        fr = Fraction(exact)
+    except (ValueError, ZeroDivisionError):
+        return ""
+    if fr.denominator == 1:
+        return ""
+    return f" (≈ {float(fr):.6g})"
 
 
 def make_verdict(

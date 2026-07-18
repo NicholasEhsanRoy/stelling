@@ -52,7 +52,7 @@ from stelling import interval as iv
 from stelling import ir
 from stelling.coverage import DEFAULT_TRANSPARENT, Coverage, CoverageCounter, sub_jaxprs
 
-__all__ = ["ObligationReport", "Propagation", "propagate"]
+__all__ = ["ObligationReport", "Propagation", "interval_env", "propagate"]
 
 TIER_EXACT = "exact"
 TIER_SOUND = "sound"
@@ -701,6 +701,26 @@ class _Propagator:
             )
         for out, val in zip(eqn.outvars, outs):
             self.env[out.id] = val
+
+
+def interval_env(closed: ir.ClosedJaxpr) -> dict[int, iv.IntervalArray]:
+    """Read-only accessor: the top-level ``var id -> interval`` environment
+    after the same forward walk :func:`propagate` performs.
+
+    Exists for the escalation layer, whose division guard needs the
+    propagated interval of a divisor ("emit ``div`` only if the divisor's
+    interval definitely excludes 0"). Pure: it re-runs the identical
+    traversal on a fresh propagator and returns a copy of the resulting
+    environment; nothing observable by :func:`propagate` changes.
+    """
+    p = _Propagator()
+    if closed.jaxpr.invars:
+        raise ir.TranscriptionError(
+            "propagate expects a self-contained harness query (inputs declared "
+            f"via any_array), got {len(closed.jaxpr.invars)} free invar(s)"
+        )
+    p.run(closed.jaxpr, list(closed.consts), [])
+    return dict(p.env)
 
 
 def propagate(closed: ir.ClosedJaxpr) -> Propagation:

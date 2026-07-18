@@ -3,11 +3,13 @@
 # Stelling
 Inspired by Kani, Stelling is an assertion-based verifier for JAX array
 programs. Today it checks stated box invariants of continuous flows by
-forward interval propagation over the traced jaxpr — outward-rounded,
-solver-free, with a stamp on every verdict naming its own assumptions.
+forward interval propagation over the traced jaxpr — outward-rounded —
+escalating obligations the intervals cannot decide to an SMT portfolio
+(cvc5/Z3, opt-in extras), with a stamp on every verdict naming its own
+assumptions.
 <!-- capability-exempt: roadmap -->
-The roadmap (`design/founding.md`) aims it further: SMT-backed
-invariants, index safety, and bounds over horizons no test can reach.
+The roadmap (`design/founding.md`) aims it further: index safety, and
+bounds over horizons no test can reach.
 <!-- /capability-exempt -->
 
 *stelling is not affiliated with or endorsed by the JAX project.*
@@ -26,9 +28,21 @@ invariants, index safety, and bounds over horizons no test can reach.
   with three-valued verdicts: **VERIFIED**, **REFUTED** (set-level: the
   stated box is not invariant — not a witness), **UNKNOWN** (our
   imprecision, never guessed away).
+- **Escalates undecided obligations to SMT solvers** (optional extras,
+  never required): scalar linear/polynomial obligations emit as
+  SMT-LIB2 text — exact dyadic rationals, the closed declared box, the
+  negated predicate — routed by fragment through a portfolio (cvc5 with
+  coverings for nonlinear, Z3 as cross-check). Agreement decides;
+  disagreement is a loud error, never a silent pick. `sat` becomes
+  **REFUTED with a concrete witness**, checked for box membership and
+  predicate violation by exact-rational replay before it is believed;
+  timeout or `unknown` stays UNKNOWN — a timeout is never a VERIFIED;
+  unsupported fragments stay UNKNOWN with the reason quoted.
 - **Every verdict carries a full stamp**: stelling and jax versions,
   query content hash, arithmetic representation *and* semantics,
-  precision configuration, solver (today: recorded absence), nonvacuity,
+  precision configuration, solver — recorded absence when intervals
+  decided alone, or every invocation (name, version, transport, exact
+  option set) when escalation ran — nonvacuity,
   the tier and provenance of every transfer used, its assumptions, and
   ⊤-coverage — including constraints that were *dropped*, which are
   counted and named, never hidden.
@@ -71,7 +85,7 @@ extras, imported lazily on first use, so a bare install never touches the JAX
 |---|---|---|
 | `stelling[z3]` | `z3-solver` (MIT) | Z3 backend |
 | `stelling[cvc5]` | `cvc5` (BSD-3-Clause) | cvc5 backend, official PyPI wheels |
-| `stelling[solvers]` | both solvers | future backends — **no verdict uses a solver yet** (`design/unknown-triage.md` registers when one gets built) |
+| `stelling[solvers]` | both solvers | the escalation portfolio uses whichever is installed; absence just means UNKNOWNs stay UNKNOWN (`design/solver-integration-build.md`) |
 | `stelling[jax]` | `jax` (CPU) | bootstrap **only** — never use it if jax is already installed |
 | `stelling[all]` | = `[solvers]` | deliberately excludes jax |
 
@@ -148,9 +162,11 @@ whose §6 grants no trademark rights anyway.
 The SMT backends are optional extras — separate wheels you opt into — and
 an external cvc5 binary is driven as a separate process over SMT-LIB2
 text. Nothing solver-shaped is compiled into, vendored into, or derived
-into stelling. Today this is true by measurement, not just policy: every
-verdict the tool has produced involved **no solver at all**, and each
-stamp records that absence explicitly rather than omitting it.
+into stelling. This is true by measurement, not just policy: the full
+test surface passes in an environment with no solver installed at all;
+verdicts that used no solver stamp that absence explicitly, and verdicts
+that escalated stamp every invocation — solver, version, transport, and
+the exact emitted option set.
 
 Provenance is machine-verifiable: the repo is REUSE-compliant
 ([reuse.software](https://reuse.software); `LICENSES/`, `REUSE.toml`,

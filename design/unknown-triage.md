@@ -57,6 +57,17 @@ violation, not imprecision. First amendment since amendment 1 to satisfy
 > Z3-vs-cvc5 question is moot for this product — a finding worth more
 > than the integration, and reported as one.
 
+**Status note (2026-07-18, additive — the trigger text above stands as
+registered): this trigger never fired** — zero search-shaped UNKNOWNs
+across every counting attempt to date. The solver integration was
+nevertheless built on this date as an **owner decision at the registered
+fork** (`design/la-and-stack-probes.md` §3): the conditioning obligation
+gave the solver its first demonstrated customer (intervals straddle it;
+Z3 decides it both ways), and the owner chose the solver leg. Recorded in
+`design/solver-integration-build.md`; no count moved; the acceptance case
+is a worked example, never a corpus member. The trigger remains the
+registered self-initiation criterion for corpus-driven escalation.
+
 Ordering note, stated in advance so the outcome can't redraw it:
 **affine forms are likelier to be the next build than a solver.** The
 same trigger discipline applies to them: dependency-shaped UNKNOWNs

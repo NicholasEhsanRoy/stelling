@@ -18,11 +18,13 @@ import dataclasses
 import pytest
 
 from stelling import ir
-from stelling.propagate import propagate
+from stelling.propagate import ObligationReport, propagate
 from stelling.verdict import (
+    SolverStamp,
     Stamp,
     StampError,
     Verdict,
+    Witness,
     make_verdict,
     solver_absent,
 )
@@ -152,3 +154,102 @@ def test_straddle_stays_unknown_not_refuted():
         precision_config="jax_enable_x64=True",
     )
     assert v.status == "UNKNOWN"  # our imprecision, never their counterexample
+
+
+# --- the portfolio extension of the solver field ------------------------------
+
+
+def invoked_stamp(name="z3", reason="portfolio member: answered unsat"):
+    return SolverStamp(
+        invoked=True,
+        reason=reason,
+        name=name,
+        version="9.9",
+        transport="wheel-bindings (smt2 text)",
+        options=((":produce-models", "true"), (":timeout", "1000"),
+                 ("set-logic", "QF_LRA"), ("smt2_sha256", "ab" * 32)),
+    )
+
+
+def test_portfolio_stamp_tuple_is_validated_not_defaulted():
+    kwargs = full_stamp_kwargs()
+    kwargs["solver"] = ()  # an empty tuple is not recorded absence
+    with pytest.raises(StampError):
+        Stamp(**kwargs)
+    kwargs["solver"] = (invoked_stamp(), "not a stamp")
+    with pytest.raises(StampError):
+        Stamp(**kwargs)
+    kwargs["solver"] = "z3 said so"  # a string is not a stamp either
+    with pytest.raises(StampError):
+        Stamp(**kwargs)
+
+
+def test_portfolio_stamp_tuple_renders_every_invocation():
+    kwargs = full_stamp_kwargs()
+    kwargs["solver"] = (invoked_stamp("cvc5"), invoked_stamp("z3"))
+    rendered = Stamp(**kwargs).render()
+    assert "cvc5 9.9" in rendered and "z3 9.9" in rendered
+    assert "2 invocation(s)" in rendered
+    assert "smt2_sha256" in rendered
+
+
+def test_single_invoked_stamp_still_renders_inline():
+    kwargs = full_stamp_kwargs()
+    kwargs["solver"] = invoked_stamp("z3")
+    rendered = Stamp(**kwargs).render()
+    assert "solver: z3 9.9 (wheel-bindings (smt2 text))" in rendered
+
+
+def test_witness_requires_populated_fields():
+    with pytest.raises(StampError):
+        Witness(obligation_index=0, values=(), produced_by="z3", replay="ok")
+    with pytest.raises(StampError):
+        Witness(
+            obligation_index=0, values=(("x0", "1/2"),), produced_by="", replay="ok"
+        )
+
+
+def test_witness_backed_refuted_renders_witness_not_the_set_level_text():
+    kwargs = full_stamp_kwargs()
+    kwargs["solver"] = (invoked_stamp("cvc5"),)
+    v = Verdict(
+        status="REFUTED",
+        obligations=(
+            ObligationReport(
+                index=0,
+                status="violated-witness",
+                detail="violated at a concrete witness found by cvc5",
+                source_info=(),
+            ),
+        ),
+        stamp=Stamp(**kwargs),
+        notes=(),
+        witnesses=(
+            Witness(
+                obligation_index=0,
+                values=(("x0", "3/2"), ("x1", "-11/8")),
+                produced_by="cvc5 9.9 (wheel-bindings (smt2 text))",
+                replay="confirmed by exact-rational replay",
+            ),
+        ),
+    )
+    rendered = v.render()
+    assert "x0 = 3/2" in rendered
+    assert "x1 = -11/8" in rendered and "-1.375" in rendered
+    assert "produced by: cvc5" in rendered
+    assert "replay: confirmed" in rendered
+    assert "strictly stronger" in rendered
+    assert "Not a witness" not in rendered  # interval-only wording
+
+
+def test_interval_refuted_render_keeps_the_set_level_text():
+    # unchanged contract, now conditional on an actual set-level violation
+    closed = exp_lt_harness(2.0)
+    v = make_verdict(
+        closed,
+        propagate(closed),
+        stelling_version="0.1.0",
+        jax_version="0.11.0",
+        precision_config="jax_enable_x64=True",
+    )
+    assert "Not a witness" in v.render()

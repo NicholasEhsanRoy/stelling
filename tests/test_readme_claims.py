@@ -126,14 +126,29 @@ def test_readme_makes_no_unwitnessed_capability_claim():
     )
 
 
-def test_the_test_actually_bites():
+def test_the_test_actually_bites(monkeypatch):
     """The positive control for this control: the exact drift that shipped
-    must fail if it reappears unfenced."""
+    must fail against a src corpus with no solver witness — checked against
+    a synthetic corpus, so the control keeps biting now that the real src
+    HAS earned the witness (the escalation layer constructs
+    SolverStamp(invoked=True, …))."""
     old_drift = "Stelling lowers jaxpr to SMT queries to mathematically prove invariants."
     m = re.search(r"\b(SMT|Z3|cvc5|solver)\b", old_drift, re.I)
     assert m is not None
     assert not _negated(old_drift, m.start(), m.end())  # no negation cue
-    assert not _witness_solver()  # and today there is no witness -> would fail
+    # the real src now witnesses the capability (the drift line would pass
+    # today, correctly) …
+    assert _witness_solver()
+    # … so the control replays history: against a corpus WITHOUT the
+    # construction, the witness is absent and the drift line would fail.
+    synthetic_src = (
+        "def make_verdict():\n"
+        "    return solver_absent('no solver invoked')\n"
+    )
+    import sys
+
+    monkeypatch.setattr(sys.modules[__name__], "_src_text", lambda: synthetic_src)
+    assert not _witness_solver()
 
 
 def test_control_flow_witness_tracks_transfers():
