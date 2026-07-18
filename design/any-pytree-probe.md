@@ -65,3 +65,75 @@ the blocker.
 plumbing primitives (transcription) and registry gaps (coverage — fine);
 the hard case's key cone should swallow the obligation into ⊤ by
 construction.
+
+---
+
+# Reading (2026-07-18 — `corpus/supply/pytree_probe.py`, diffrax 0.7.2 / blackjax 1.6.2 / jax 0.11.0)
+
+## The probe caught the tool before it caught the libraries
+
+First contact with real library traces crashed **both** cases at
+propagation — not on structure, not on keys, but on the tool's own shape
+guards raising on **legal jax forms** (scalar-`which` `select_n`; rank
+broadcasts like `(2,) vs (1,)`). That is the second audit's FRAGILE-5
+posture incompletely repaired: the guards added to prevent silent
+mis-joins killed the analysis instead of degrading. Fixed within the
+probe's rules (a posture repair adds no capability): transfers now
+**decline** unhandled forms — ⊤, reason quoted in the notes — and the
+regression test pins it. Then the probe re-ran.
+
+## Clean case — POSED. Row 1: `any_pytree` is sugar over a real capability
+
+`PIDController.adapt_step_size`, real `_PidState` hand-declared leaf by
+leaf, dfx#207's property stated on the real code: **traced, transcribed
+with zero `UnsupportedParamError` (the whitelist and opaque registry
+survived diffrax 0.7.2 on first contact), propagated end-to-end.**
+Obligation: unknown. Coverage: `70 eqns: 39 known (56%); 19 ⊤ across 11
+primitives (abs, eq, convert_element_type[weak-type forms], or,
+stop_gradient, and, ne, pow, reduce_or, reshape, select_n[scalar-which])`.
+
+**Structure was never the wall.** Every blocker between *posed* and
+*mechanized* is ordinary, censusable transfer work: ~11 registry rows
+plus two array-semantics domain gaps (rank broadcasting; scalar-`which`
+select). The ⊤ list **is** the target census for this case — the
+census-by-census rule producing the build list, again.
+
+## Hard case — POSED, and the key wall is exactly as predicted
+
+MCLMC kernel, state built by the real `init` from declared position
+leaves, ∀-key via declared `uint32` bits through the library's own
+`wrap_key_data`: traced, transcribed (blackjax's PRNG plumbing passed
+through the registered opaque impl params), propagated. Obligation:
+unknown. Coverage: `393 eqns: 220 known (56%); 139 ⊤ across 25
+primitives` — of which the **key cone is structural and irreducible**:
+`random_wrap ×2, random_split ×2, random_bits ×5, bitcast_convert_type
+×5, shift_right_logical ×5, erf_inv ×5` — the bits-to-Gaussian pipeline
+has no interval meaning, fell to ⊤ without a crash and without an
+invented representation, and everything downstream of the sampled
+momentum inherits it. Registry rows (`reduce_sum, sqrt, log, dot_general,
+…`) are ordinary; **the key cone is not** — completing every registry row
+would still leave the obligation unknown, because the state itself is
+key-derived.
+
+## Outcome: row 1 + row 3 — the registered third-row reading, with one addition
+
+- **Clean poses by hand → build is licensed** per the fixed table: with
+  its registered audit gate, by a fresh-context builder that does not
+  know the counts (`design/corpus-limits.md`).
+- **Keys blocked → the split is confirmed**: `any_pytree` reaches
+  array-state libraries (diffrax/optimistix-shape hits), **not
+  samplers**. **The demand corpus splits, predictably and now, into an
+  `any_pytree`-reachable half and a key-blocked half** — bounding the
+  corpus expansion before it runs: sampler hits (blackjax, numpyro
+  warmup) can be posed only up to their key cones, which is UNKNOWN by
+  construction for state-dependent properties.
+- **The addition the rows didn't anticipate:** between structure and
+  mechanization sits a **prerequisite neither wall named** —
+  array-semantics completeness of the interval domain (rank broadcasting,
+  batched/scalar selectors) plus the per-target registry rows. Ordinary
+  work, censusable by the existing method, and `any_pytree`'s value is
+  gated on it exactly as much as on the sugar itself.
+
+No count moved; nothing here poses toward any band. The build decision is
+the maintainer's, now with its target established, its scope bounded, and
+its prerequisite named.

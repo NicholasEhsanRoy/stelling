@@ -425,7 +425,18 @@ class _Propagator:
 
         transfer, tier = entry
         ins = [self.read(a) for a in eqn.invars]
-        outs = transfer(eqn, params, ins)
+        try:
+            outs = transfer(eqn, params, ins)
+        except iv.IntervalError as e:
+            # a transfer whose domain doesn't cover this legal form (rank
+            # broadcasting, batched selectors, …) DECLINES: sound ⊤
+            # degradation with the reason quoted — the registered
+            # degrade-don't-crash posture (second audit, FRAGILE 5; the
+            # shape guards previously killed the whole analysis here)
+            self.notes.append(f"{eqn.primitive!r} declined this form: {e}; ⊤")
+            self.counter.record_unknown(eqn.primitive)
+            self.top_out(eqn)
+            return
         if outs is None:  # a known transfer declining this configuration
             self.notes.append(
                 f"{eqn.primitive!r} has no sound rule for params "

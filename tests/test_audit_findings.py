@@ -321,6 +321,50 @@ def test_join_and_select_n_refuse_shape_mismatch():
         iv.select_n(iv.point(0.0), [a, b])
 
 
+def test_unhandled_transfer_form_degrades_to_top_not_crash():
+    # a legal jax form the domain doesn't cover (scalar which, array cases)
+    # must DECLINE — ⊤ with the reason noted — never kill the analysis
+    # (degrade-don't-crash; the guards above still refuse, but the refusal
+    # is caught at the propagation layer)
+    w, c0, c1, y, pred, out = (
+        var(0, BOOL), var(1), var(2), var(3), var(4, BOOL), var(5, BOOL),
+    )
+    arr = ir.Aval(kind="ShapedArray", shape=(1,), dtype="float64")
+    q = close(
+        [
+            any_eqn(w, 0.0, 1.0, "bool"),
+            ir.JaxprEqn(
+                primitive="stelling_any", invars=(), outvars=(var(1, arr),),
+                params=(("shape", (1,)), ("dtype", "float64"), ("lo", 1.0), ("hi", 2.0)),
+            ),
+            ir.JaxprEqn(
+                primitive="stelling_any", invars=(), outvars=(var(2, arr),),
+                params=(("shape", (1,)), ("dtype", "float64"), ("lo", 3.0), ("hi", 4.0)),
+            ),
+            ir.JaxprEqn(
+                primitive="select_n",
+                invars=(w, var(1, arr), var(2, arr)),
+                outvars=(var(3, arr),),
+            ),
+            ir.JaxprEqn(
+                primitive="le",
+                invars=(var(3, arr), ir.Literal(val=10.0, aval=F64)),
+                outvars=(var(4, ir.Aval(kind="ShapedArray", shape=(1,), dtype="bool")),),
+            ),
+            ir.JaxprEqn(
+                primitive="stelling_assert",
+                invars=(var(4, ir.Aval(kind="ShapedArray", shape=(1,), dtype="bool")),),
+                outvars=(out,),
+            ),
+        ],
+        (out,),
+    )
+    p = propagate(q)  # must not raise
+    assert p.obligations[0].status == "unknown"  # ⊤ decays the verdict soundly
+    assert any("declined" in n for n in p.notes)
+    assert p.coverage.unknown >= 1
+
+
 # --- second audit, finding 4-B: float->int guard is strict at +2**(n-1) ------
 
 

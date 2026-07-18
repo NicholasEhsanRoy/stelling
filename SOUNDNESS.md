@@ -171,4 +171,14 @@ Three further commitments bind every implementation of the stamp:
   existence divergence. No shipped verdict flipped — re-verified by
   re-running every recorded harness after the fixes. 119 tests green.
 
+- **2026-07-18 (pre-release, same day): degrade-don't-crash completed for
+  transfer shape guards.** The guards added against silent mis-joins
+  (second-audit entry above) still *crashed* the analysis on legal jax
+  forms their domain doesn't implement (scalar-`which` `select_n`, rank
+  broadcasts) — found by the `any_pytree` target probe's first contact
+  with real diffrax/blackjax traces. Transfers now **decline** such forms:
+  ⊤ outputs, reason quoted in the verdict notes, counted as unknown in
+  coverage. No verdict semantics changed — a crash produced no verdict
+  before; regression test added.
+
 *(no releases yet)*
