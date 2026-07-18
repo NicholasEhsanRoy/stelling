@@ -120,3 +120,98 @@ stays 0.11.0; CALMS out of scope.
 semantics classification (predicted ℝ-faithful — geometric real
 arithmetic; finalized post-run); verdict adjudication against the scar;
 whether a dependency-shaped F3 constitutes real affine demand.
+
+---
+
+# Reading (2026-07-18 — `corpus/supply/mime_fvm.py`, adjudicated)
+
+## The ring discipline held, verifiably
+
+The transcriber's opened-files list is two entries: `operators.py` and
+`mesh.py` (its one fvm-internal import). No docs, no tests, no
+anomalies file, no git history beyond the ref check; the thresholds
+travelled as bare numbers. The blindness was real, so the verdicts below
+were not transcribed toward.
+
+## F1 — VERIFIED, and it survives every guard this project has built
+
+The bounded-correction lemma discharged over the alignment-floor region:
+nonvacuity **6/6 checked**, coverage **22/22 (100%)**, and under the
+**inputs-only ⊤-widening — its first use as the fixed procedure** —
+the obligation is unknown: the declared region is load-bearing, the
+lemma is not `max`'s-definition tautology. Semantics, finalized:
+**ℝ-faithful with ~42% margin** (corner 5.63 vs 8.0; geometric real
+arithmetic in f64; slack ≫ ulp).
+
+**The usefulness adjudication, said precisely.** This is a true
+positive on a *real solver's real scarred condition*: the discharged
+lemma is the conditional-stability content of the 0.71 floor — the
+coefficient whose blow-up *is* the divergence in commit `91e95e6`'s own
+message, bounded over the safe region, checked statically. It is the
+first verdict in this project's history that is about code the author
+relies on and a failure he actually paid for. **The formulation caveat
+rides with it:** F1 is the hand-derived polar form (two disclosed
+derivations); the code's own raw form is F2, and F2 is *blocked* — so
+the CI-shaped check exists today at the lemma level, not at the
+trace-the-code level. A CI job asserting this lemma (mesh-quality floor
+⇒ bounded correction) would be honest and useful; wiring it is a
+separate decision, and closing the lemma-to-code gap needs the
+relational machinery below.
+
+## F2 — the relational wall, first sighting on real solver geometry
+
+Exactly as predicted: the alignment floor is a **relation** between
+`Sf` and `d`, expressible only as `assume`, which is inert — the single
+propagation note is the DROPPED disclosure, and the obligation is
+unknown (the raw dot straddles 0 over independent boxes). **The
+constraining-assume class now has demand from a real job**, joining
+bjx#969's corpus-side sighting: mesh-quality conditions are relations,
+and checking them *as the code writes them* needs a constraining
+`assume` (a relational-domain step, registered territory, still
+unbuilt, still untriggered — this sighting is recorded as demand
+evidence, not a trigger).
+
+## F3 — imported, posed, and the wall behind the wall
+
+The real `laplacian_orthogonal(non_orthogonal=True)` traced end-to-end
+on the smallest real mesh — no crash, no posture escape, nonvacuity
+checked. The obligation is unknown at 58% coverage, and the attribution
+is the reading's sharpest content:
+
+- **The bucket is coverage-shaped, at the census's tier-9 frontier.**
+  The LSQ gradient routes through `jnp.linalg.inv` → `lu`,
+  `custom_linear_solve`, `triangular_solve`, `sort` — the dense-LA tier
+  the ecosystem census filed as "contract-level treatment later" on one
+  equation of evidence. **A real job just demanded it.** Behind it:
+  `scatter-add` (segment_sum), `reduce_sum`, `dot_general` —
+  array-semantics rows.
+- **The dependency wall (heat's stencil sighting) is *predicted behind*
+  the coverage wall, not yet reached** — with the gradient ⊤, the
+  stencil correlation question never gets asked. The affine-demand
+  claim therefore **does not advance** on this run: it stays at heat's
+  one clean sighting plus structural prediction. Recorded exactly so —
+  no overclaim.
+- **The gather resonance:** `phi[mesh.owner]` demanded `gather` — the
+  primitive the founding value model was originally aimed at — and it
+  entered the registry in its *safe* static-index form while the
+  dynamic/out-of-range forms (the actual wedge bug class) decline. The
+  wedge's primitive arrived; the wedge's bug class stayed out.
+
+## The second second-bill datum
+
+Heat cost **one** structural row. FVM cost **two** (gather, transpose —
+both structural-exact, form-guarded, 12 tests) and exposed a tail whose
+hard core is not more elementwise rows: **the per-solver cost curve
+bends at array-semantics reductions (segment_sum, reduce_sum,
+dot_general) and the dense-LA contract tier.** That is what "supporting
+a MIME solver" costs, measured twice.
+
+## What this licenses
+
+The usefulness datum exists: **F1, VERIFIED, non-vacuous,
+non-tautological, ℝ-faithful, on a scarred condition of a solver the
+author relies on — with its formulation caveat attached.** What it does
+not license: CI wiring (a separate decision), the relational/affine
+builds (demand recorded, triggers unchanged), the dense-LA tier
+(demanded once, censused, not built). Held out from E2a throughout — a
+usefulness result, never a count.
