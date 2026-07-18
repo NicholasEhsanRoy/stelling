@@ -195,7 +195,12 @@ def test_fake_sleeper_hits_the_wall_clock_guard_unknown_never_verified(monkeypat
     assert record.outcome == "unknown"
     assert "never a VERIFIED" in record.detail
     (stamp,) = record.invocations
-    assert stamp.invoked is True and "timeout" in stamp.reason
+    # the stamp records the ask, appended before any result existed: the
+    # reason carries invocation context only; the outcome (timeout) lives
+    # in the notes, where results are recorded after the run
+    assert stamp.invoked is True
+    assert "assert #0" in stamp.reason and "timeout" not in stamp.reason
+    assert any("timeout" in n for n in record.notes)
     v = make_solver_verdict(q, p, esc, **VERSIONS)
     assert v.status == "UNKNOWN"
 
@@ -223,11 +228,15 @@ def two_fake_backends(tmp_path, body_a: str, body_b: str):
     path_b = fake_solver(tmp_path, body_b, "member-b")
     a = _Backend(
         name="cvc5", flavor="cvc5", label="cvc5 (fake a)",
-        transport=TRANSPORT_CVC5_BINARY, run=_make_run_cvc5_binary(path_a),
+        transport=TRANSPORT_CVC5_BINARY,
+        transport_fn=_make_run_cvc5_binary(path_a),
+        version_fn=lambda: "9.9.9-fake",
     )
     b = _Backend(
         name="z3", flavor="z3", label="z3 (fake b)",
-        transport=TRANSPORT_CVC5_BINARY, run=_make_run_cvc5_binary(path_b),
+        transport=TRANSPORT_CVC5_BINARY,
+        transport_fn=_make_run_cvc5_binary(path_b),
+        version_fn=lambda: "9.9.9-fake",
     )
     return (a, b)
 

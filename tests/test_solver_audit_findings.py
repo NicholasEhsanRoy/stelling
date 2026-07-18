@@ -317,8 +317,13 @@ def test_f5_internal_error_degrade_keeps_invocation_stamps(monkeypatch, tmp_path
         tmp_path, MODEL.format('"  (define-fun x0 () Real (/ 7 4))"'), "cvc5-ok"
     )
     monkeypatch.setenv("STELLING_CVC5", fake)
+    # the replay engine now lives behind the single validator in
+    # stelling.obligation; a plain RuntimeError from it is not a
+    # ReplayError, so it escapes the validator as an internal error
+    from stelling import obligation
+
     monkeypatch.setattr(
-        solvers, "evaluate_predicate",
+        obligation, "evaluate_predicate",
         lambda sl, values: (_ for _ in ()).throw(RuntimeError("boom-internal")),
     )
     q = square_query()

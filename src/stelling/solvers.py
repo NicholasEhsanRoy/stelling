@@ -17,19 +17,26 @@ Dispatch is a portfolio: every fragment here (QF_LRA, QF_NRA) runs every
 installed solver — cvc5 primary for nonlinear, z3 primary for linear.
 Agreement on a definitive answer decides; a sat/unsat **disagreement
 raises** :exc:`SolverDisagreement` (a bug oracle, never a tiebreak); a
-``sat`` becomes REFUTED only after the model replays as an exact-rational
-violation (:func:`stelling.obligation.evaluate_predicate`) — a replay
-failure raises :exc:`EmissionInfidelityError`, and a non-rational model
-leaves the obligation UNKNOWN by policy. ``unknown``/timeout is UNKNOWN,
-never VERIFIED. Every invocation the verdict relied on is stamped, with
-the exact emitted option set and the script hash; solvers are never
-invoked on defaults, and the dispatch config's time limit is required.
+``sat`` becomes REFUTED only through :func:`make_validated_witness`, the
+dispatch path's only witness-construction site, whose single validator
+(:func:`stelling.obligation.witness_is_valid`) checks box membership AND
+the exact-rational violation as one conjunction — a failing conjunct
+raises :exc:`EmissionInfidelityError`, and a non-rational model leaves
+the obligation UNKNOWN by policy. ``unknown``/timeout is UNKNOWN, never
+VERIFIED. Every invocation is stamped **at the moment of invocation**:
+the fully-populated :class:`SolverStamp` is appended to an append-only
+ledger BEFORE the transport runs, so the record of the ask can never be
+narrated from a result, and absence is derived from the empty ledger,
+never written. A spawn counter incremented at the transport-entry
+boundary is checked against the ledger before any escalated verdict
+emits (:exc:`ProvenanceError` on divergence). Solvers are never invoked
+on defaults, and the dispatch config's time limit is required.
 
 Guard rule: every decline and every solver failure (crash, garbage
 output, missing binary, unsupported fragment) degrades the obligation to
 UNKNOWN with the reason quoted in the verdict notes. Raising is reserved
-for stamp-contract violations, :exc:`SolverDisagreement`, and
-:exc:`EmissionInfidelityError`.
+for stamp-contract violations, :exc:`SolverDisagreement`,
+:exc:`EmissionInfidelityError`, and :exc:`ProvenanceError`.
 
 Zero-dep at import time; solver wheels are reached only through
 ``stelling._optional`` inside call paths.
@@ -52,9 +59,8 @@ from stelling import ir
 from stelling.obligation import (
     DeclinedObligation,
     ObligationSlice,
-    ReplayError,
-    evaluate_predicate,
     slice_unknown_obligations,
+    witness_is_valid,
 )
 from stelling.propagate import ObligationReport, Propagation, interval_env
 from stelling.smt import Script, emit
@@ -73,10 +79,12 @@ __all__ = [
     "EmissionInfidelityError",
     "Escalation",
     "ObligationEscalation",
+    "ProvenanceError",
     "SolverConfig",
     "SolverDisagreement",
     "escalate",
     "make_solver_verdict",
+    "make_validated_witness",
 ]
 
 TRANSPORT_Z3_WHEEL = "wheel-bindings (smt2 text)"
@@ -158,6 +166,30 @@ class EmissionInfidelityError(RuntimeError):
         )
 
 
+class ProvenanceError(RuntimeError):
+    """The spawn counter and the invocation ledger diverged.
+
+    The counter increments at the transport-entry boundary; the stamp is
+    appended at the dispatch site — two mechanically disjoint records of
+    the same events, deliberately anti-correlated so one bug cannot
+    silently satisfy both. On any escalated verdict they must agree; on
+    mismatch the verdict does not emit, ever. Carries both counts and the
+    stamps.
+    """
+
+    def __init__(
+        self, spawns: int, stamped: int, stamps: tuple[SolverStamp, ...]
+    ) -> None:
+        self.spawns = spawns
+        self.stamped = stamped
+        self.stamps = stamps
+        super().__init__(
+            f"provenance divergence: {spawns} transport spawn(s) but "
+            f"{stamped} invoked=True stamp(s) in the ledger; refusing to "
+            f"emit a verdict over divergent provenance. Stamps: {stamps!r}"
+        )
+
+
 @dataclass(frozen=True)
 class SolverConfig:
     """Escalation configuration. The time limit is required — this layer
@@ -189,6 +221,24 @@ class SolverConfig:
                 )
 
 
+@dataclass
+class _Ledger:
+    """The escalation-scoped, append-only record of solver invocations.
+
+    ``stamps`` receives each invocation's fully-populated
+    :class:`SolverStamp` at the dispatch site, immediately BEFORE the
+    transport runs; ``spawns`` increments at the transport-entry boundary
+    (:meth:`_Backend.run`). The two fields are updated from different code
+    sites with no shared helper — deliberately anti-correlated, checked
+    for agreement before any escalated verdict emits. Appends are
+    irreversible: no code path pops, filters, rebuilds, or conditionally
+    drops entries.
+    """
+
+    stamps: list[SolverStamp] = field(default_factory=list)
+    spawns: int = 0
+
+
 @dataclass(frozen=True)
 class ObligationEscalation:
     """The escalation outcome for one obligation."""
@@ -203,10 +253,12 @@ class ObligationEscalation:
 
 @dataclass(frozen=True)
 class Escalation:
-    """All escalation outcomes for one propagated query."""
+    """All escalation outcomes for one propagated query, plus the ledger
+    the invocations were recorded in as they happened."""
 
     records: tuple[ObligationEscalation, ...]
     notes: tuple[str, ...] = ()
+    ledger: _Ledger = field(default_factory=_Ledger)
 
     @property
     def invocations(self) -> tuple[SolverStamp, ...]:
@@ -231,7 +283,28 @@ class _Backend:
     flavor: str  # which script flavor to emit: "z3" | "cvc5"
     label: str  # human label for notes: "z3", "cvc5 (wheel)", "cvc5 (binary …)"
     transport: str
-    run: Callable[[str, float], _RawResult] = field(compare=False)
+    transport_fn: Callable[[str, float], _RawResult] = field(compare=False)
+    version_fn: Callable[[], str] = field(compare=False)
+    _version_cache: list = field(default_factory=list, compare=False, repr=False)
+
+    def version(self) -> str:
+        """The backend's version, obtainable before any run and cached per
+        backend, so the invocation stamp is fully populated at append time
+        — nothing about the stamp waits for a result."""
+        if not self._version_cache:
+            try:
+                v = str(self.version_fn())
+            except Exception:  # noqa: BLE001 — a version probe never blocks a run
+                v = "unknown"
+            self._version_cache.append(v or "unknown")
+        return self._version_cache[0]
+
+    def run(self, ledger: _Ledger, script_text: str, wall_s: float) -> _RawResult:
+        """The transport-entry boundary: counts the spawn as its first
+        act, then calls the transport. Mechanically disjoint from the
+        stamp-append site — no shared helper updates both records."""
+        ledger.spawns += 1
+        return self.transport_fn(script_text, wall_s)
 
 
 def _wall_seconds(timeout_ms: int) -> float:
@@ -244,6 +317,13 @@ def _wall_seconds(timeout_ms: int) -> float:
 def _quote(text: str, limit: int = 300) -> str:
     text = " ".join(text.split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _z3_version() -> str:
+    try:
+        return str(_optional.require("z3").get_version_string()) or "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
 
 
 def _run_z3(script_text: str, wall_s: float) -> _RawResult:
@@ -561,7 +641,8 @@ def _backends_for(config: SolverConfig) -> tuple[tuple[_Backend, ...], tuple[str
                         flavor="z3",
                         label="z3 (wheel)",
                         transport=TRANSPORT_Z3_WHEEL,
-                        run=_run_z3,
+                        transport_fn=_run_z3,
+                        version_fn=_z3_version,
                     )
                 )
             else:
@@ -575,7 +656,8 @@ def _backends_for(config: SolverConfig) -> tuple[tuple[_Backend, ...], tuple[str
                     flavor="cvc5",
                     label=f"cvc5 (external binary {env_path})",
                     transport=TRANSPORT_CVC5_BINARY,
-                    run=_make_run_cvc5_binary(env_path),
+                    transport_fn=_make_run_cvc5_binary(env_path),
+                    version_fn=lambda path=env_path: _cvc5_binary_version(path),
                 )
             )
         elif _optional.available("cvc5"):
@@ -585,7 +667,8 @@ def _backends_for(config: SolverConfig) -> tuple[tuple[_Backend, ...], tuple[str
                     flavor="cvc5",
                     label="cvc5 (wheel)",
                     transport=TRANSPORT_CVC5_WHEEL,
-                    run=_run_cvc5_wheel,
+                    transport_fn=_run_cvc5_wheel,
+                    version_fn=_cvc5_wheel_version,
                 )
             )
         else:
@@ -597,7 +680,8 @@ def _backends_for(config: SolverConfig) -> tuple[tuple[_Backend, ...], tuple[str
                         flavor="cvc5",
                         label=f"cvc5 (external binary {path})",
                         transport=TRANSPORT_CVC5_BINARY,
-                        run=_make_run_cvc5_binary(path),
+                        transport_fn=_make_run_cvc5_binary(path),
+                        version_fn=lambda path=path: _cvc5_binary_version(path),
                     )
                 )
             else:
@@ -692,28 +776,51 @@ def _complete_values(
     return values
 
 
-def _box_escape(
-    sl: ObligationSlice, values: dict[str, Fraction]
-) -> str | None:
-    """The first witness value outside its input's declared closed box, as
-    an exact-rational comparison (finite sides only; a half-infinite bound
-    checks its finite side; a (-inf, inf) input is unconstrained) — or None
-    if every value is a member. The box constraints are part of the emitted
-    problem, so an escaping model means the emitted problem does not mean
-    the obligation (audit F1)."""
-    for inp in sl.inputs:
-        v = values[inp.name]
-        if inp.lo != float("-inf") and v < Fraction(inp.lo):
-            return (
-                f"{inp.name} = {v} is below its declared lower bound "
-                f"{Fraction(inp.lo)}"
-            )
-        if inp.hi != float("inf") and v > Fraction(inp.hi):
-            return (
-                f"{inp.name} = {v} is above its declared upper bound "
-                f"{Fraction(inp.hi)}"
-            )
-    return None
+def _require_valid_refutation(
+    sl: ObligationSlice,
+    values: dict[str, Fraction],
+    *,
+    solver_label: str,
+    script_text: str,
+) -> None:
+    """The one gate deciding "this refutation is real", for both shapes
+    (witnessed and constants-only): routes the whole claim through the
+    single validator (:func:`stelling.obligation.witness_is_valid` — box
+    membership AND exact-rational violation as one conjunction) and raises
+    :exc:`EmissionInfidelityError` naming the failing conjunct (audit F1:
+    an out-of-box or non-violating model must never mint a REFUTED)."""
+    problem = witness_is_valid(sl, values)
+    if problem is not None:
+        raise EmissionInfidelityError(
+            obligation_index=sl.index,
+            solver=solver_label,
+            values=tuple((inp.name, str(values[inp.name])) for inp in sl.inputs),
+            script_text=script_text,
+            detail=problem,
+        )
+
+
+def make_validated_witness(
+    sl: ObligationSlice,
+    values: dict[str, Fraction],
+    produced_by: str,
+    *,
+    solver_label: str,
+    script_text: str,
+) -> Witness:
+    """Validate then construct — the dispatch path's ONLY ``Witness``
+    construction site. The REFUTED-with-witness outcome is built
+    exclusively around this factory's return value, so no witness can
+    exist that did not pass the single validator's conjunction."""
+    _require_valid_refutation(
+        sl, values, solver_label=solver_label, script_text=script_text
+    )
+    return Witness(
+        obligation_index=sl.index,
+        values=tuple((inp.name, str(values[inp.name])) for inp in sl.inputs),
+        produced_by=produced_by,
+        replay=_REPLAY_SENTENCE,
+    )
 
 
 def _dispatch_obligation(
@@ -721,7 +828,7 @@ def _dispatch_obligation(
     config: SolverConfig,
     backends: tuple[_Backend, ...],
     missing: tuple[str, ...],
-    stamp_sink: list[SolverStamp],
+    ledger: _Ledger,
 ) -> ObligationEscalation:
     ordered = tuple(
         sorted(
@@ -741,35 +848,53 @@ def _dispatch_obligation(
             f"ran ({', '.join(missing) or 'the other solver'} not installed)"
         )
 
-    runs: list[tuple[_Backend, Script, _RawResult, SolverStamp | None]] = []
+    ledger_start = len(ledger.stamps)
+
+    def invocations() -> tuple[SolverStamp, ...]:
+        # this obligation's slice of the append-only ledger — a read, never
+        # a rebuild; the ledger itself is untouched
+        return tuple(ledger.stamps[ledger_start:])
+
+    runs: list[tuple[_Backend, Script, _RawResult, SolverStamp]] = []
     for position, backend in enumerate(ordered):
         script = scripts[backend.flavor]
-        started = time.monotonic()
-        raw = backend.run(script.text, wall_s)
-        elapsed_ms = int((time.monotonic() - started) * 1000)
-        if raw.answer == "not-run":
-            notes.append(
-                f"assert #{sl.index}: {backend.label} could not be invoked "
-                f"({_quote(raw.detail)})"
-            )
-            runs.append((backend, script, raw, None))
-            continue
         role = "primary" if position == 0 else "secondary"
         if len(ordered) == 1:
             role = "alone (degraded portfolio)"
+        # The stamp is the record of the ask, fully populated from the
+        # invocation itself and appended BEFORE the transport runs: no
+        # result exists yet, so no result can ever be narrated into it,
+        # and a failure after this point leaves the stamp standing with
+        # the failure disclosed in the notes (audit F5, structuralized).
+        # The reason carries invocation context only — never the answer.
         stamp = SolverStamp(
             invoked=True,
             reason=(
-                f"{sl.fragment} portfolio {role} on assert #{sl.index}: "
-                f"answered {raw.answer} in {elapsed_ms}ms"
+                f"{sl.fragment} portfolio {role} on assert #{sl.index}"
             ),
             name=backend.name,
-            version=raw.version or "unknown",
+            version=backend.version(),
             transport=backend.transport,
             options=script.stamp_options(),
         )
-        stamp_sink.append(stamp)  # survives even an internal error (audit F5)
+        ledger.stamps.append(stamp)
+        started = time.monotonic()
+        raw = backend.run(ledger, script.text, wall_s)
+        elapsed_ms = int((time.monotonic() - started) * 1000)
         runs.append((backend, script, raw, stamp))
+        if raw.answer == "not-run":
+            notes.append(
+                f"assert #{sl.index}: {backend.label} was invoked but its "
+                f"transport failed before the solver could run "
+                f"({_quote(raw.detail)})"
+            )
+            continue
+        # outcome and latency are recorded here, additively, after the
+        # run — never in the stamp, which predates the result
+        notes.append(
+            f"assert #{sl.index}: {backend.label} answered {raw.answer} "
+            f"in {elapsed_ms}ms"
+        )
         if raw.answer in ("unknown", "timeout", "failed"):
             notes.append(
                 f"assert #{sl.index}: {backend.label} returned {raw.answer}"
@@ -781,7 +906,6 @@ def _dispatch_obligation(
             # notes — a verdict must never rest on it silently (audit F4)
             notes.append(f"assert #{sl.index}: {backend.label}: {raw.detail}")
 
-    invocations = tuple(stamp for _, _, _, stamp in runs if stamp is not None)
     answers = {raw.answer for _, _, raw, _ in runs}
 
     if "sat" in answers and "unsat" in answers:
@@ -805,14 +929,14 @@ def _dispatch_obligation(
                 f"discharged by solver escalation ({sl.fragment}): the box "
                 f"with the negated predicate is unsat per {' and '.join(agreed)}"
             ),
-            invocations=invocations,
+            invocations=invocations(),
             witness=None,
             notes=tuple(notes),
         )
 
     if "sat" in answers:
         sat_problems: list[str] = []
-        for backend, script, raw, _stamp in runs:
+        for backend, script, raw, stamp in runs:
             if raw.answer != "sat":
                 continue
             got, problem, disclosures = _screen_model(sl, raw.values)
@@ -849,49 +973,16 @@ def _dispatch_obligation(
                 )
                 continue
             values = _complete_values(sl, got, notes)
-            witness_values = tuple(
-                (inp.name, str(values[inp.name])) for inp in sl.inputs
-            )
-            # audit F1: membership BEFORE replay — every value, solver-given
-            # and completed alike, must lie inside its declared closed box.
-            escape = _box_escape(sl, values)
-            if escape is not None:
-                raise EmissionInfidelityError(
-                    obligation_index=sl.index,
-                    solver=backend.label,
-                    values=witness_values,
-                    script_text=script.text,
-                    detail=(
-                        f"the model escapes the declared box ({escape}); the "
-                        f"box constraints were part of the emitted problem"
-                    ),
-                )
-            try:
-                holds = evaluate_predicate(sl, values)
-            except ReplayError as e:
-                raise EmissionInfidelityError(
-                    obligation_index=sl.index,
-                    solver=backend.label,
-                    values=witness_values,
-                    script_text=script.text,
-                    detail=f"the replay could not evaluate it ({e})",
-                ) from e
-            if holds:
-                raise EmissionInfidelityError(
-                    obligation_index=sl.index,
-                    solver=backend.label,
-                    values=witness_values,
-                    script_text=script.text,
-                    detail=(
-                        "the exact-rational replay found the predicate TRUE "
-                        "at that point"
-                    ),
-                )
             if not sl.inputs:
                 # audit F5: a constants-only obligation has no witness
-                # values to render; the replay of the closed formula proved
-                # the violation outright — an honest REFUTED, no fabricated
-                # witness.
+                # values to render; the SAME validator decides the
+                # refutation is real (membership vacuously true; violation
+                # via the empty-environment replay of the closed formula)
+                # — an honest REFUTED, no fabricated witness.
+                _require_valid_refutation(
+                    sl, values, solver_label=backend.label,
+                    script_text=script.text,
+                )
                 return ObligationEscalation(
                     index=sl.index,
                     outcome=OB_VIOLATED_CONSTANT,
@@ -901,17 +992,18 @@ def _dispatch_obligation(
                         f"{_REPLAY_SENTENCE}; {backend.label} ({sl.fragment}) "
                         f"answered sat in agreement"
                     ),
-                    invocations=invocations,
+                    invocations=invocations(),
                     witness=None,
                     notes=tuple(notes),
                 )
-            witness = Witness(
-                obligation_index=sl.index,
-                values=witness_values,
+            witness = make_validated_witness(
+                sl,
+                values,
                 produced_by=(
-                    f"{backend.name} {raw.version} ({backend.transport})"
+                    f"{backend.name} {stamp.version} ({backend.transport})"
                 ),
-                replay=_REPLAY_SENTENCE,
+                solver_label=backend.label,
+                script_text=script.text,
             )
             return ObligationEscalation(
                 index=sl.index,
@@ -920,7 +1012,7 @@ def _dispatch_obligation(
                     f"violated at a concrete witness found by {backend.label} "
                     f"({sl.fragment}); {_REPLAY_SENTENCE}"
                 ),
-                invocations=invocations,
+                invocations=invocations(),
                 witness=witness,
                 notes=tuple(notes),
             )
@@ -933,7 +1025,7 @@ def _dispatch_obligation(
             index=sl.index,
             outcome=OB_UNKNOWN,
             detail=f"solver reported sat; {detail_tail} — UNKNOWN by policy",
-            invocations=invocations,
+            invocations=invocations(),
             witness=None,
             notes=tuple(notes),
         )
@@ -942,13 +1034,13 @@ def _dispatch_obligation(
         "; ".join(
             f"{b.label}: {raw.answer}" for b, _, raw, _ in runs if raw.answer != "not-run"
         )
-        or "no solver could be invoked"
+        or "every invocation's transport failed before its solver could run"
     )
     return ObligationEscalation(
         index=sl.index,
         outcome=OB_UNKNOWN,
         detail=f"solver escalation did not decide ({reasons}); a timeout is never a VERIFIED",
-        invocations=invocations,
+        invocations=invocations(),
         witness=None,
         notes=tuple(notes),
     )
@@ -973,6 +1065,8 @@ def escalate(
         return Escalation(records=(), notes=())
     backends, missing = _backends_for(config)
     if not backends:
+        # backends filtered out before any invocation never reach the
+        # ledger's append site; the empty ledger IS the record of absence
         return Escalation(
             records=tuple(
                 ObligationEscalation(
@@ -988,6 +1082,7 @@ def escalate(
             notes=(INSTALL_HINT,),
         )
     env = interval_env(closed)
+    ledger = _Ledger()
     records: list[ObligationEscalation] = []
     for item in slice_unknown_obligations(closed, propagation, env):
         if isinstance(item, DeclinedObligation):
@@ -1002,28 +1097,29 @@ def escalate(
                 )
             )
             continue
-        stamp_sink: list[SolverStamp] = []
+        ledger_start = len(ledger.stamps)
         try:
-            record = _dispatch_obligation(item, config, backends, missing, stamp_sink)
+            record = _dispatch_obligation(item, config, backends, missing, ledger)
         except (SolverDisagreement, EmissionInfidelityError):
             raise  # loud by design
         except Exception as e:  # noqa: BLE001 — guard rule: degrade, quoted
             # defensive: a failure on a validated slice is a bug, but
             # mid-analysis the guard rule still applies — UNKNOWN, quoted.
-            # Invocations that completed before the error still happened and
-            # still ride into the record (audit F5: the verdict must never
-            # claim "no solver invoked" over dropped stamps).
+            # Invocations recorded before the error are in the append-only
+            # ledger and still ride into the record (audit F5,
+            # structuralized: the stamps predate the error and cannot be
+            # dropped by it).
             reason = f"escalation attempted; internal error: {type(e).__name__}: {e}"
             record = ObligationEscalation(
                 index=item.index,
                 outcome=OB_UNKNOWN,
                 detail=reason,
-                invocations=tuple(stamp_sink),
+                invocations=tuple(ledger.stamps[ledger_start:]),
                 witness=None,
                 notes=(f"assert #{item.index}: {reason}",),
             )
         records.append(record)
-    return Escalation(records=tuple(records), notes=())
+    return Escalation(records=tuple(records), notes=(), ledger=ledger)
 
 
 # -- solver-assisted verdict assembly -----------------------------------------
@@ -1069,7 +1165,19 @@ def make_solver_verdict(
     if any obligation is violated (set-level interval) or solver-refuted
     with a replayed witness; VERIFIED only if every obligation is
     discharged (by interval or by solver); else UNKNOWN.
+
+    No escalated verdict emits over divergent provenance: the spawn
+    counter (incremented at the transport-entry boundary) must equal the
+    number of ``invoked=True`` stamps in the append-only ledger — checked
+    unconditionally, on every escalated verdict; mismatch raises
+    :exc:`ProvenanceError` instead of a verdict.
     """
+    # -- the provenance gate (runs before anything else, unconditionally)
+    ledger_stamps = tuple(escalation.ledger.stamps)
+    stamped = sum(1 for s in ledger_stamps if s.invoked)
+    if escalation.ledger.spawns != stamped:
+        raise ProvenanceError(escalation.ledger.spawns, stamped, ledger_stamps)
+
     by_index = {r.index: r for r in escalation.records}
     final: list[ObligationReport] = []
     for ob in propagation.obligations:
@@ -1115,23 +1223,28 @@ def make_solver_verdict(
             f"vacuous — the declared set is not tied to the incident's data",
         )
 
-    invocations = escalation.invocations
-    if invocations:
-        solver: SolverStamp | tuple[SolverStamp, ...] = invocations
-    elif not [o for o in propagation.obligations if o.status == "unknown"]:
-        solver = solver_absent(
-            "no solver invoked: every obligation was decided by outward-rounded "
-            "interval arithmetic alone; escalation had nothing to do"
-        )
+    # -- the single derivation point for the stamp's solver field --------
+    # Assembled from the ledger alone: a non-empty ledger IS the tuple of
+    # appended stamps; an empty ledger IS absence, with the reason derived
+    # (nothing was unknown / nothing installed or every unknown obligation
+    # declined pre-invocation). Absence is never written by a degradation
+    # branch — an appended stamp cannot be talked out of the record.
+    solver: SolverStamp | tuple[SolverStamp, ...]
+    if ledger_stamps:
+        solver = ledger_stamps
     else:
-        # reachable only when zero invocations happened anywhere — records
-        # carrying stamps route through the tuple branch above, so this
-        # wording can never mask an actual invocation (audit F5).
-        solver = solver_absent(
-            "no solver invoked: escalation completed no invocation (solver "
-            "unavailable, every unknown obligation declined, or a failure "
-            "before any invocation; the notes carry the reasons)"
-        )
+        if not any(o.status == "unknown" for o in propagation.obligations):
+            reason = (
+                "no solver invoked: every obligation was decided by outward-rounded "
+                "interval arithmetic alone; escalation had nothing to do"
+            )
+        else:
+            reason = (
+                "no solver invoked: escalation completed no invocation (solver "
+                "unavailable, every unknown obligation declined, or a failure "
+                "before any invocation; the notes carry the reasons)"
+            )
+        solver = solver_absent(reason)
 
     stamp = Stamp(
         stelling_version=stelling_version,

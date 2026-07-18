@@ -50,6 +50,7 @@ __all__ = [
     "evaluate_predicate",
     "slice_obligation",
     "slice_unknown_obligations",
+    "witness_is_valid",
 ]
 
 QF_LRA = "QF_LRA"
@@ -604,3 +605,64 @@ def evaluate_predicate(
             f"expected bool"
         )
     return result
+
+
+# -- the witness validator -----------------------------------------------------
+
+
+def witness_is_valid(
+    sl: ObligationSlice, values: Mapping[str, Fraction]
+) -> str | None:
+    """The single validator of the whole refutation claim, both conjuncts.
+
+    A REFUTED-with-witness means "∃w: in_box(w) ∧ violates(w)". This
+    function is the ONLY place either conjunct is computed for witness
+    purposes — membership and violation live as one conjunction here, so a
+    refactor cannot separate them again:
+
+    * **membership**: every value is a member of its input's declared
+      closed box, compared as exact rationals on finite sides only (a
+      half-infinite bound checks its finite side; a ``(-inf, inf)`` input
+      is unconstrained). The box constraints are part of the emitted
+      problem, so an escaping model means the emitted problem does not
+      mean the obligation.
+    * **violation**: the predicate is false at the point, by the exact
+      :class:`fractions.Fraction` replay (:func:`evaluate_predicate`, the
+      shared replay engine this validator calls — dispatch code never
+      calls it directly for witness acceptance).
+
+    A constants-only refutation routes through here too, with an empty
+    ``values`` mapping: membership is vacuously true and the violation is
+    the empty-environment replay of the closed formula.
+
+    Returns None when the refutation is real, else a human-readable
+    string naming the failing conjunct (for the loud
+    emission-infidelity error).
+    """
+    for inp in sl.inputs:
+        v = values.get(inp.name)
+        if not isinstance(v, Fraction):
+            # a missing or inexact value: the replay conjunct below names
+            # it precisely (ReplayError), so membership defers
+            continue
+        if inp.lo != float("-inf") and v < Fraction(inp.lo):
+            return (
+                f"the model escapes the declared box ({inp.name} = {v} is "
+                f"below its declared lower bound {Fraction(inp.lo)}); the "
+                f"box constraints were part of the emitted problem"
+            )
+        if inp.hi != float("inf") and v > Fraction(inp.hi):
+            return (
+                f"the model escapes the declared box ({inp.name} = {v} is "
+                f"above its declared upper bound {Fraction(inp.hi)}); the "
+                f"box constraints were part of the emitted problem"
+            )
+    try:
+        holds = evaluate_predicate(sl, values)
+    except ReplayError as e:
+        return f"the replay could not evaluate it ({e})"
+    if holds:
+        return (
+            "the exact-rational replay found the predicate TRUE at that point"
+        )
+    return None

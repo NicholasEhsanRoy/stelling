@@ -84,7 +84,8 @@ it solves again. **Three configs, three engines, one version string.**
 "cvc5 1.3.4 said unsat" is not a reproducible claim; "cvc5 1.3.4, wheel,
 options {…}, query `<hash>` said unsat" is.
 
-Three further commitments bind every implementation of the stamp:
+Six further commitments bind every implementation of the stamp and its
+verdicts:
 
 - **The verdict is portable; its discharge is not.** An ℝ-with-margin
   proof is device-independent, but whether margin M absorbs the actual
@@ -106,6 +107,37 @@ Three further commitments bind every implementation of the stamp:
   file/line pointers from the *current* jaxpr's `source_info`; location
   data is never stored in or restored from the cache. The first violation
   of this reports a line number from someone else's file.
+
+- **A conjunctive verdict gets a conjunctive validator.** When a
+  verdict's meaning is a conjunction — a REFUTED-with-witness means
+  "there exists w such that w is in the declared box AND the predicate is
+  false at w" — its validator is the conjunction: one mechanized check in
+  one place, never two checks in two functions a refactor can separate.
+  The witness-membership defect (2026-07-18 audit) was exactly a
+  separated conjunct: violation checked, membership assumed. The witness
+  path is now a single validator behind the dispatch path's sole witness
+  factory, and the same shape already governs E2a counting (criteria (i)
+  and (ii) mechanized together, never satisfiable by halves).
+
+- **Provenance is recorded as it happens, never narrated after.**
+  Anything that assembles a description of an event separately from the
+  event can diverge from it — the stamp that said "no solver invoked"
+  after two real invocations (2026-07-18 audit) was narrated by a
+  degradation path. The stamp accumulates: every solver invocation
+  appends its full record (name, version, transport, exact options) at
+  the moment of invocation, before any result exists; nothing mutates or
+  removes an appended record; absence is the derived fact of zero
+  appends, never writable text.
+
+- **One invariant, two anti-correlated mechanisms.** The stamp's central
+  claim — records equal real invocations — is guarded twice,
+  independently: by construction (the append-only ledger above) and by a
+  runtime cross-check (a spawn counter incremented at a mechanically
+  disjoint code site, asserted equal to the invoked-record count before
+  any escalated verdict emits; divergence raises `ProvenanceError` and
+  the verdict does not emit). A verdict whose provenance cannot be
+  trusted is worse than no verdict — the differential principle, applied
+  to the tool's own provenance.
 
 ## Log
 
@@ -239,5 +271,32 @@ Three further commitments bind every implementation of the stamp:
   unmodified, including in a jax-present-no-solver environment (291
   passed) and the zero-dep environment (227 passed). 299 tests green
   with both solvers installed.
+
+- **2026-07-18 (pre-release, same day): two audited invariants made
+  structural — the hardening pass, no behavior change.** The prior
+  entry's UNSOUND and its stamp-integrity FRAGILE shared a shape:
+  invariants maintained by convention where they should be enforced by
+  construction. Both are now unconstructable: the witness conjunction
+  (box membership ∧ predicate violation) is computed by a single
+  validator (`obligation.witness_is_valid`) behind the dispatch path's
+  sole `Witness` factory, with the constants-only refutation routed
+  through the same gate; the stamp is append-only — invocation records
+  append fully populated at the moment of invocation, before any result
+  exists, absence is derived from zero appends, and a runtime provenance
+  gate (spawn counter at a mechanically disjoint site) refuses to emit
+  any escalated verdict whose stamp count diverges from actual transport
+  spawns (`ProvenanceError`, checked unconditionally). Three new
+  commitments above; standing audit-process rules registered in
+  `design/soundness-audit.md`. **No verdict status changed anywhere** —
+  every recorded harness re-run identical, and both acceptance queries
+  produce byte-identical content hashes and byte-identical emitted
+  scripts (all four smt2 hashes unchanged); constructed provenance
+  divergence in both directions verified to raise, independently of the
+  implementer. One stamp-semantics change, disclosed: a transport that
+  fails after the invocation is issued (e.g. an exec failure) now stamps
+  the invocation with the failure quoted in notes, where it previously
+  stamped absence — the ask was real and is fully described; statuses
+  unaffected. 313 tests green with both solvers; 305 with jax and no
+  solver; 241 zero-dep.
 
 *(no releases yet)*

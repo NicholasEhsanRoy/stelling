@@ -107,3 +107,38 @@ cf_run statuses unchanged; ⊤-widening results unchanged (the counting
 queries contain no out-of-range selectors, no float→int boundaries, no
 overflow-reaching arithmetic on asserted paths, no ∞-bound obligations).
 119 tests green.
+
+# Standing audit-process rules (2026-07-18, registered after the solver-layer audit)
+
+The deeper lesson of the audits so far: **a finding reveals two things —
+the bug, and the fact that the bug was *possible***, i.e. that some
+invariant was maintained by care rather than construction. The project
+already turns findings into regression tests; these rules bind the
+second half. Three rules, standing, for every future audit:
+
+1. **The structuralization question is mandatory.** Every UNSOUND or
+   FRAGILE finding triggers, alongside its regression test: *does this
+   finding reveal an invariant that should be structural rather than
+   checked?* If yes, the structural fix ships with the regression test —
+   the test catches *this* instance; the structure closes the *class*. A
+   regression test alone leaves the class open to the next variant.
+   First application: the solver layer's witness-conjunction validator
+   and append-only stamp (`design/solver-hardening.md`), both
+   structuralized from findings that had been regression-tested first.
+
+2. **UNSOUND fixes are re-attacked by the auditor, not just
+   regression-tested by the builder.** Fixes are the least-audited
+   code — written under "make the finding go away" pressure, by a warmed
+   context with a stake in the fix closing. Finding 4-B is the in-repo
+   witness: the first audit's fix introduced the second audit's defect.
+   The two-context split exists to break exactly this pressure, and it
+   applies to fixes as much as to builds. (The solver build's fix round
+   predates this rule: it was main-agent re-verified but not
+   auditor-re-attacked — recorded here, not repaired retroactively.)
+
+3. **Acceptance and audit must be anti-correlated in coverage.** After
+   each audit, name what the acceptance case did NOT exercise, and
+   confirm the auditor's mandate covered exactly that gap. A bug on both
+   paths gets caught twice (the witness-membership UNSOUND was); the
+   dangerous bug is the one on *neither* path. The auditor aims where
+   the acceptance case cannot see, not where it already looks.
