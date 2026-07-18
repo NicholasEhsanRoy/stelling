@@ -145,6 +145,15 @@ concentration does not obtain either. The registered ordering still holds
 — affine is the *likeliest* next build when it fires — but it has **not**
 fired, and nothing here licenses building it.
 
+## Vacuity addendum (2026-07-18, `design/obligation-vacuity.md`): Supported → Weak
+
+The ⊤-widening test voided dfx#207 — its obligation is tautological
+(`max`'s definition; discharges with every declared bound gone). **The
+band drops: 2 of 4 → 1 of 4 → Weak.** The surviving count (npy#249) used
+no branch transfers; the machinery's mechanization evidence is now zero
+cases, while it remains gate-licensed and built. The registered
+consequence moved the count; nothing was renegotiated.
+
 ## Fidelity addendum (2026-07-18, `design/harness-fidelity.md`)
 
 The band stands and now carries its fidelity sentence: **"Supported, 2 of

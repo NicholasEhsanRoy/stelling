@@ -51,3 +51,43 @@ silently escape widening).
 
 If the predictions are wrong, the registered consequence still governs —
 that is what pre-committing it is for.
+
+---
+
+# Reading (2026-07-18 — `corpus/supply/tautology_test.py`)
+
+All four predictions confirmed exactly:
+
+| case | obligations under ⊤ | verdict |
+|---|---|---|
+| hit386 (control) | unknown ×3 | bounds load-bearing — stands |
+| dfx#417 (counted 1) | unknown ×4 | bounds load-bearing — **stands** |
+| **dfx#207 (counted 1)** | **discharged** | **TAUTOLOGICAL — voided** |
+| npy#249 (counted 1) | unknown | bounds load-bearing — **stands** (the `−20` floor is what the proof uses, via `exp`'s 0 endpoint) |
+
+## Consequences, per the registered rule
+
+- **dfx#207's count of 1 is void.** Its single obligation is `max`'s
+  definition; the proof used no system, no box, no region. The chain the
+  registration named is instantiated empirically: dfx#207 is *exactly* the
+  case the property re-check filed as defective-anchor — **defective
+  property → tautological obligation → VERIFIED → counted**, now caught by
+  the third guard. (Fidelity was not its defect — it was honestly
+  hand-transcribed; vacuity was.)
+- **Control-flow hypothesis: 2 of 4 → 1 of 4 → the band drops from
+  Supported to Weak** ("anything between — publish, don't build on it").
+  Relation and fidelity sentence: *"1 mechanized (npy#249): 0 imported, 1
+  hand-transcribed, precondition-with-ℝ-partial-gap, sound anchor."*
+- **The machinery-attribution fact, said plainly:** the one surviving
+  count (npy#249) used **no branch transfers** — its unlock was the
+  loop-body-invariant framing. The control-flow machinery now has **zero
+  surviving counting cases that used it.** It remains gate-licensed
+  (3-of-6, re-adjudicated) and built and sound-pending-audit, with its
+  mechanization evidence gone.
+- **E2a with the expanded frame: 3 of 7 → 2 of 7** (dfx#417, npy#249) —
+  Weak it was and Weak it stays; the denominator chain gains a fourth
+  subtraction step (13 addressable → 9 reconstructible → 7 in-semantics →
+  counts judged under fidelity + vacuity guards).
+- Both survivors sit on **sound anchors** (property re-check) with
+  **bounds-load-bearing obligations** — the two cases the whole pipeline
+  now stands on are the two that pass every guard built so far.

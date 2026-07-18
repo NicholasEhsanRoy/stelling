@@ -68,6 +68,14 @@ removed some of it — and the E2a count rose as a result). Each is a place
 where making the tool *better* along one axis could make a verdict *less*
 safe along another, unless the coupling is written down first.
 
+## Second arithmetic update (2026-07-18, from the ⊤-widening test)
+
+dfx#207's count voided as tautological (`design/obligation-vacuity.md`),
+so the E2a-with-control-flow arithmetic is now **2 of 7** (dfx#417,
+npy#249) — deeper in Weak. Affine still moves it by zero (below). The
+band-crossing coincidence this document was written to disclose is now
+two corrections dead.
+
 ## Deflation addendum (2026-07-18, from the fidelity census)
 
 The band-crossing arithmetic above rested on affine reaching bjx#969 —

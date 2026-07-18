@@ -103,3 +103,13 @@ verified statement about blackjax's real code (I did not inspect whether
 blackjax clamps) and **not** the incident's bug (which is the reused key).
 The negative result's value is "this property is not an invariant," not
 "found blackjax's defect."
+
+## Chain confirmation (2026-07-18, `design/obligation-vacuity.md`)
+
+The one defective-anchor case that mechanized — dfx#207 — is the one the
+⊤-widening test voided as tautological. The chain *defective property →
+tautological obligation → VERIFIED → counted* ran end-to-end through the
+pipeline and was caught by the third guard, not the first two: criterion
+(ii) named its gap, fidelity passed it (honestly hand-transcribed), and
+only obligation-vacuity voided it. The three guards measure different
+failures, on evidence.
