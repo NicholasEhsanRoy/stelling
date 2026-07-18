@@ -143,3 +143,82 @@ requires. CALMS is out of scope entirely.
 **Main agent:** the properties above; the ⊤-widening run; the semantics
 classification; verdict adjudication against the incident; what the
 outcome licenses.
+
+---
+
+# Reading (2026-07-18 — `corpus/supply/maddening_cfl.py`, adjudicated under the mid-run reframing)
+
+## The verdicts, with every discipline attached
+
+**(A1) VERIFIED — and non-tautological, mechanically shown.** The
+obligation `dt·α/dx² < 0.5` discharged over the ±10% drift envelope at
+the shipped config; nonvacuity checked 4/4; coverage 25/25; and under
+⊤-widening the obligation is **unknown** — the declared bounds are
+load-bearing. Semantics, finalized: **ℝ-faithful with ~2× margin**
+(CFL ≈ 0.25 vs 0.5; slack ≫ ulp; the check's arithmetic runs in declared
+f64 points even though the node is f32 — the obligation is meta-level
+real arithmetic). The May misdiagnosis is now closed from two sides: the
+archaeology showed CFL-not-dtype was the fix, and the semantics
+classification finds no float mechanism in the obligation — **the
+float32 diagnosis pointed at nothing real for this property.**
+
+**(A2) — the control refused, as designed.** Over the node's *own*
+validated α-regime, the same predicate is **unknown** (a straddle:
+CFL ∈ [2.5×10⁻⁵, 25] over the region). Analytic triage: **partially
+false** — the property genuinely fails for α > 0.02 at the demo dt,
+which is the May class exactly (regime-legal, CFL-violating). Together
+A1+A2 are the mechanism demonstration in full: the check discharges on
+the safe envelope, refuses on the violating regime, and is neither
+vacuous nor tautological. **Labeled per the reframing: mechanism
+demonstrated on a proof-of-concept node; usefulness untested pending a
+real solver.**
+
+**(B) — the capability milestone, and the cleanest dependency sighting
+on record.** The real `HeatNode.update` — imported, traced,
+transcribed (the transcription layer survived its first `scatter`:
+`ScatterDimensionNumbers`, `GatherScatterMode`, all by existing rules),
+propagated at **100% coverage** after one censused row. Both obligations
+**unknown, undecided for exactly the 18 interior cells** — the two
+scatter-written Dirichlet cells are definitely in-box — with the
+interior at ≈[−50, 150] against [0, 100]. This is the registered
+prediction confirmed at full coverage: the property is true
+(CFL = 0.25 → the update's T-coefficient 1−2c = 0.5 ≥ 0, the discrete
+maximum principle holds), and the UNKNOWN is **purely dependency-shaped**
+— no registry residue, no key cone, nothing but the stencil correlation
+intervals discard. **Affine's first real sighting: imported code, full
+coverage, a true linear-correlation invariant.** Riders, in the same
+sentence: MADDENING is held out, so this sighting counts toward **no
+trigger** (the corpus trigger's valid count remains 0); it is evidence
+about what affine would buy, recorded where the affine ordering lives.
+
+## The second-bill datum — the first supporting-a-codebase cost number
+
+heat.py's registry tail was **one structural row** (static-index
+`scatter`, tier exact, definite-FALSE + three decline paths tested) plus
+one dead `copy` avoided by the prototype-outside-trace pattern. The
+FVM inheritance: the scatter row, that pattern, the
+f64-point-constants technique (which keeps a check's arithmetic f64 over
+an f32 node and makes `dx = L/n` a genuine traced `div`), and the
+expectation — stated now — that FVM's tail is larger.
+
+## Instrument note, recorded for the next vacuity registration
+
+The run's ⊤-widening widened *every* declaration, including the
+transcribed-constant points (n, L, 0.5) — a *stronger* widening than
+region-inputs-only, so A1's non-tautology conclusion holds a fortiori
+(verified analytically: widening only dt, α still straddles). But the
+two variants differ in general: widening a *threshold* constant makes
+almost any comparison straddle, weakening the test as a tautology
+detector. A future vacuity registration should fix **which declarations
+widen** (region inputs vs transcribed constants). Recorded, not
+retrofitted.
+
+## What this licenses
+
+Per the reframed table: the mechanism works end-to-end on a live target
+— declaration, tracing, transcription, propagation, stamps, controls —
+and the capability milestone stands. **No usefulness claim. No count.**
+The next pass is FVM (in MIME), and its prerequisites are now in hand:
+the census method, the inherited rows and patterns, and the requirement
+that its condition carry real provenance — a scarred, validated
+constraint, not a manufactured one.
