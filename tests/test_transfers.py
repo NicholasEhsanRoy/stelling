@@ -556,3 +556,109 @@ def test_incompatible_shapes_decline_not_crash():
     assert p.obligations[0].status == "unknown"
     assert any("add" in n and "declined" in n for n in p.notes)
     assert p.coverage.unknown == 1
+
+
+# --- scatter: static-index x.at[k].set(v) (maddening heat-node round) --------
+#
+# The one allowed-by-census structural addition from the maddening HeatNode
+# trace (the Dirichlet boundary writes). Exact form only; everything else
+# declines to a noted ⊤.
+
+
+def _scatter_set_params(**dim_overrides):
+    fields = {
+        "update_window_dims": (),
+        "inserted_window_dims": (0,),
+        "scatter_dims_to_operand_dims": (0,),
+        "operand_batching_dims": (),
+        "scatter_indices_batching_dims": (),
+    }
+    fields.update(dim_overrides)
+    return (
+        (
+            "dimension_numbers",
+            ir.NamedTupleParam(
+                cls="ScatterDimensionNumbers", fields=tuple(fields.items())
+            ),
+        ),
+        ("indices_are_sorted", True),
+        ("mode", ir.EnumParam(cls="GatherScatterMode", member="FILL_OR_DROP")),
+        ("unique_indices", True),
+        ("update_consts", ()),
+        ("update_jaxpr", None),
+    )
+
+
+def _scatter_query(idx_bounds, threshold, dim_overrides=None):
+    """out = ([0,1]^3).at[idx].set(5.0); assert out <= threshold."""
+    f3, i1, b3 = aval((3,)), aval((1,), "int32"), aval((3,), "bool")
+    x, idx, y = var(0, f3), var(1, i1), var(2, f3)
+    pred, out = var(3, b3), var(4, b3)
+    idx_eqn = ir.JaxprEqn(
+        primitive="stelling_any",
+        invars=(),
+        outvars=(idx,),
+        params=(
+            ("shape", (1,)),
+            ("dtype", "int32"),
+            ("lo", idx_bounds[0]),
+            ("hi", idx_bounds[1]),
+        ),
+    )
+    return close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            idx_eqn,
+            eqn(
+                "scatter",
+                [x, idx, lit(5.0)],
+                y,
+                _scatter_set_params(**(dim_overrides or {})),
+            ),
+            eqn("le", [y, lit(threshold)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+
+
+def test_scatter_static_set_discharges_with_tier():
+    # written element becomes [5,5], untouched keep [0,1]: all <= 5
+    p = propagate(_scatter_query((1.0, 1.0), 5.0))
+    assert p.obligations[0].status == "discharged"
+    assert ("scatter", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_scatter_static_set_definite_false_direction():
+    # the written element [5,5] <= 2 is definitely false; the untouched
+    # elements [0,1] <= 2 are definitely true — a sound 1/3 refutation,
+    # which also proves the write landed on exactly the indexed element
+    p = propagate(_scatter_query((1.0, 1.0), 2.0))
+    assert p.obligations[0].status == "violated-over-set"
+    assert "1/3" in p.obligations[0].detail
+
+
+def test_scatter_dynamic_index_declines_not_crashes():
+    # a non-point index interval has no exact rule: noted ⊤, never a guess
+    p = propagate(_scatter_query((0.0, 1.0), 5.0))  # must not raise
+    assert p.obligations[0].status == "unknown"
+    assert any("scatter" in n and "no sound rule" in n for n in p.notes)
+    assert p.coverage.unknown == 1
+    assert "scatter" not in dict(p.transfers_used)
+
+
+def test_scatter_out_of_range_index_declines_not_crashes():
+    # FILL_OR_DROP drops, CLIP clamps — the wedge bug class; refuse to guess
+    p = propagate(_scatter_query((7.0, 7.0), 5.0))  # must not raise
+    assert p.obligations[0].status == "unknown"
+    assert any("scatter" in n and "no sound rule" in n for n in p.notes)
+
+
+def test_scatter_windowed_form_declines_not_crashes():
+    # anything but the canonical single-element dimension numbers declines
+    p = propagate(
+        _scatter_query((1.0, 1.0), 5.0, {"update_window_dims": (0,)})
+    )  # must not raise
+    assert p.obligations[0].status == "unknown"
+    assert any("scatter" in n and "no sound rule" in n for n in p.notes)

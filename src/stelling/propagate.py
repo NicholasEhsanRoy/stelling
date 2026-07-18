@@ -13,8 +13,10 @@ exactly the primitives the target census returned
 (`design/primitive-census.md`, "The target census") plus the three harness
 primitives, plus the closed pytree-probe registration round (abs, eq, ne,
 and, or, stop_gradient, reshape, pow, reduce_or, and the scalar-selector /
-rank-broadcast forms of already-registered transfers). Everything else
-falls to ⊤ — soundly, with coverage recording exactly how much fell.
+rank-broadcast forms of already-registered transfers), plus one
+allowed-by-census structural addition from the maddening HeatNode trace
+(``scatter`` in its static-index ``x.at[k].set(v)`` form only). Everything
+else falls to ⊤ — soundly, with coverage recording exactly how much fell.
 
 Every transfer declares an assumption tier (design commitment 5):
 ``exact`` (no arithmetic, or arithmetic with no rounding), ``sound``
@@ -165,7 +167,9 @@ def _value_to_interval(v, shape: tuple[int, ...]) -> iv.IntervalArray:
 #
 # Exactly the target census list + the harness primitives, plus the closed
 # pytree-probe registration round (abs, eq, ne, and, or, stop_gradient,
-# reshape, pow, reduce_or — the primitives the probe's own ⊤ list named).
+# reshape, pow, reduce_or — the primitives the probe's own ⊤ list named),
+# plus the maddening heat-node round's one allowed structural addition
+# (scatter, static-index set form only).
 # Signature:
 # transfer(eqn, params: dict, ins: list[IntervalArray]) -> list[IntervalArray]
 
@@ -254,6 +258,58 @@ def _t_reduce_or(eqn, params, ins):
     return [iv.reduce_or(ins[0], tuple(params["axes"]))]
 
 
+# The single-element scatter dimension_numbers of ``x.at[k].set(v)`` on a
+# rank-1 operand; any OTHER field a jax version adds (batching dims today)
+# must be empty or the transfer declines.
+_SCATTER_SET_CORE = {
+    "update_window_dims": (),
+    "inserted_window_dims": (0,),
+    "scatter_dims_to_operand_dims": (0,),
+}
+
+
+def _t_scatter(eqn, params, ins):
+    """``x.at[k].set(v)`` in its static-index form — the allowed-by-census
+    structural addition from the maddening HeatNode trace (the Dirichlet
+    boundary writes ``T_new.at[0].set(T_left)`` / ``.at[-1].set(T_right)``).
+
+    Covered form, exactly: rank-1 operand, one index row holding one
+    definite in-range integer, scalar update, no update computation
+    (``update_jaxpr=None``), canonical single-element dimension numbers.
+    The output is the operand's box with element ``k``'s interval replaced
+    by the update's — pure data movement, no arithmetic, no rounding.
+
+    Everything else declines to a noted ⊤: dynamic (non-point) or
+    out-of-range indices (mode-dependent clamp/drop is the census's wedge
+    bug class, never guessed), update windows, batching dims, higher
+    ranks, computed updates.
+    """
+    if len(ins) != 3 or params.get("update_jaxpr") is not None:
+        return None
+    operand, indices, updates = ins
+    dn = params.get("dimension_numbers")
+    if not isinstance(dn, ir.NamedTupleParam):
+        return None
+    fields = dict(dn.fields)
+    if any(fields.get(k) != v for k, v in _SCATTER_SET_CORE.items()):
+        return None
+    if any(v != () for k, v in fields.items() if k not in _SCATTER_SET_CORE):
+        return None
+    if len(operand.shape) != 1 or indices.shape != (1,) or updates.shape != ():
+        return None
+    lo, hi = indices.los[0], indices.his[0]
+    if lo != hi or not math.isfinite(lo) or lo != math.floor(lo):
+        return None  # dynamic or non-integral index: no exact rule
+    k = int(lo)
+    if not 0 <= k < operand.shape[0]:
+        return None  # out of range: FILL_OR_DROP drops, CLIP clamps — decline
+    los = list(operand.los)
+    his = list(operand.his)
+    los[k] = updates.los[0]
+    his[k] = updates.his[0]
+    return [iv.IntervalArray(shape=operand.shape, los=tuple(los), his=tuple(his))]
+
+
 TRANSFERS = {
     "add": (lambda eqn, p, ins: [iv.add(*ins)], TIER_SOUND),
     "sub": (lambda eqn, p, ins: [iv.sub(*ins)], TIER_SOUND),
@@ -296,6 +352,10 @@ TRANSFERS = {
         ],
         TIER_EXACT,
     ),
+    # x.at[k].set(v), static index only — census addition from the maddening
+    # HeatNode trace; every other scatter configuration declines (see
+    # _t_scatter).
+    "scatter": (_t_scatter, TIER_EXACT),
     "broadcast_in_dim": (
         lambda eqn, p, ins: [
             iv.broadcast_in_dim(

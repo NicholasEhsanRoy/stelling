@@ -156,3 +156,42 @@ def test_vmap_batched_mul_rank_broadcasts():
     assert p.obligations[0].status == "discharged"
     assert p.coverage.unknown == 0
     assert not any("declined" in n for n in p.notes)
+
+
+def test_at_set_scatter_traced():
+    # the maddening heat-node round's census addition must bind the real
+    # name jax emits for x.at[k].set(v) — scatter — or it never fires
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        y = x.at[1].set(5.0)
+        return assert_(y <= 5.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "discharged"
+    assert ("scatter", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_at_set_scatter_definite_false_traced():
+    # the written element is definitely above the bound: sound refutation
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        y = x.at[1].set(5.0)
+        return assert_(y <= 2.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "violated-over-set"
+
+
+def test_at_set_dynamic_index_declines_traced():
+    # a traced (non-point) index reaches the transfer as a real interval:
+    # it must decline to a noted ⊤, not guess a landing site
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        i = any_array((), "int32", (0.0, 2.0))
+        y = x.at[i].set(5.0)
+        return assert_(y <= 5.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "unknown"
+    assert p.coverage.unknown >= 1
