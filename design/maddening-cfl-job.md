@@ -3,16 +3,40 @@
 **Status:** REGISTRATION, 2026-07-18. MADDENING ref pinned:
 `849c39126724` (untracked `spikes/` present, irrelevant).
 
-## Framing, corrected
+## Framing, corrected — then corrected again (2026-07-18, mid-run, before any result)
 
-This is **not** a generalisation check — one more corpus row confirming
-the instrument generalises. Every number for thirty-four passes came from
-reading code, trackers, or the tool's own output. **This is the first
-time the tool does a job**, and the bar is different and higher: not
-*does it pose and mechanize* but *does a real invariant the author
-actually cares about get checked over a region, and would it earn a place
-in CI*. True-positive-or-bust: the one piece of evidence the project has
-never had — **useful, or only sound**.
+*First correction (at registration):* this is not a generalisation check —
+the instrument-generalises framing was rejected.
+
+*Second correction (owner-supplied fact, recorded while the run is in
+flight and no result exists — the one window where a reframing cannot be
+result-motivated):* **heat is a proof-of-concept node** — written to
+demonstrate the MADDENING API, never hardened. Its CFL hole bit
+*because* it is a demo, not because CFL-checking is where the real risk
+lives. So this run is **not the usefulness test** either. What it is:
+**the first imported-grade harness** — a capability first, not a
+usefulness first. A clean VERIFIED here answers "can the tool check a
+toy," which was never the question.
+
+**The usefulness first is FVM** — the real solvers (FVM, LBM, BEM) live
+in MIME; FVM's stability and mesh-skewness conditions are real,
+validated, and scarred. FVM is the actual first job, a separate pass,
+and it needs two inputs this run produces: the B-harness ⊤-census (the
+registry-tail estimate for MADDENING-shaped code) and the FRAGILE
+escapes the imported trace shakes out. It also needs what this pass must
+not manufacture: **a chosen FVM condition with a real failure behind
+it** — the provenance that made CFL a legitimate target.
+
+**Reading discipline for this run's results, fixed before they exist:**
+(A1)/(A2) verdicts report as *"mechanism demonstrated on a
+proof-of-concept node; usefulness untested pending a real solver"* — the
+⊤-widening discipline and the §10.8 control working on a live target,
+**no usefulness claim attached**. (B) reports its two deliverables in
+full — the census and the escapes — as the capability milestone and
+FVM's inheritance. The outcome table below stays for mechanism
+adjudication; its row-1 "first true positive / milestone" language is
+**superseded by this section**: a VERIFIED (A1) is a mechanism check on
+a toy, said exactly so wherever it appears.
 
 **Held out, not counted:** MADDENING never enters E2a's denominator —
 author's own code, a mechanized count there is uninterpretable (the
