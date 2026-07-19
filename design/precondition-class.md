@@ -130,3 +130,125 @@ finding reported, not built past.
 Sweep the existing machinery for things coded to a specific property
 where the class-level shape recurs; list candidate generalisations with
 costs; **refactor nothing**. Nick decides with the list in hand.
+
+---
+
+# Reading (2026-07-19 — registration `b5c28b9` preceded every number below)
+
+`corpus/supply/maddening_preconditions.py` (blind transcriber; ring
+verified against the harness text — no characterization terms, no
+conclusions, no history; the quoted source lines re-checked against my
+own read). Every verdict below independently re-run by the main agent;
+the D witness and the fallback witness replayed in my own `Fraction`
+arithmetic.
+
+## The four posings
+
+| posing | interval | escalated | diagnosis |
+|---|---|---|---|
+| **A** — code path (incl. face averaging), θ ∈ [1e-6, 1e2] | **VERIFIED** (both face arrays, 4/4 elements) | — | coverage 89% + 2 transparent (`jnp.roll`'s jit sub-jaxprs; innards propagated) |
+| **B** — identical, θ ∈ [−2, 1e2] | UNKNOWN (honest straddle) | **UNKNOWN — declined**: `assert operand has shape (4,) (v1 emission is scalar-only)` | the code path is irreducibly an array (roll couples neighbours) |
+| **C** — mass = 1.0 (the default, quoted from `wavelet_elliptic.py:125`) | **VERIFIED** | — | 100% coverage |
+| **D** — mass ∈ [0, 1] | UNKNOWN | **REFUTED, witness `mass = 0`** (cvc5, QF_LRA, replay-confirmed; z3 sat but non-rational model — by policy not relied on) | the *config range* admits the singular operator; the default (C) is safe |
+
+**The sign-constraint answer, from the source alone: NO.** The default
+`_coeff_field` path is verbatim `return theta  # a = θ (the coefficient
+itself)` (`wavelet_elliptic.py:236`); `make_varcoeff_apply` applies only
+reshape, the affine face average `0.5·(a + roll(a, ±1))`, and a positive
+constant. **Nothing between the inferred parameter and the operator
+coefficient constrains its sign or range.**
+
+## The registered fallback for B — run by the main agent, L11-priced
+
+The code-form decline triggered the registration's documented fallback:
+the scalar posing of the code's own default path (`a = θ`, line 236),
+with the face-averaging lemma **disclosed as the hand step it is**
+(cell positivity ⟹ face positivity: each face coefficient is the mean
+of two cell values). Result: interval UNKNOWN → **escalated REFUTED with
+witness `θ = 0`** — in-region, violating, replayed in my rationals. The
+supported-envelope control on the same form: VERIFIED.
+
+**The L11 price, stated:** code-form B is UNKNOWN-blocked at scalar-only
+emission; fallback B is REFUTED-with-witness. The delta is exactly the
+array-emission gap plus one disclosed one-line lemma.
+
+**Prediction scorecard (L4):** A ✓, C ✓, D ✓ exactly as pre-committed.
+B: the *verdict* prediction (REFUTED with witness) held **on the
+fallback, not the code form** — I predicted the refutation as primary
+and the decline as the named risk; measured, the decline was primary.
+And the witness coordinate is `θ = 0`, not `χ ≤ −1`: the code's default
+path has no `1+χ` — `a = θ` directly — so the SPD boundary in code
+coordinates is `a ≤ 0`; the χ-form applies only when a caller supplies
+`coeff_fn = 1+χ`. The finding is unchanged and sharper: **the inference
+space admits an indefinite operator and nothing checks it.**
+
+## Band adjudication — row 1, with the row-2 finding alongside
+
+**Row 1 lands: both instances pose; A VERIFIES over the supported
+envelope.** The class is real, the templates are validated (with one
+measured gap, below), the two silent-failure modes are now checkable —
+**step 2 (the LA contract) is greenlit as this band's outcome.** Stated,
+not acted on: build order remains Nick's.
+
+The row-2 substance arrived via the fallback: **the SPD hazard is real
+and caught** — unguarded (line 236 quoted), asserted-to-the-solver,
+and REFUTED with a replayed witness over the sign-spanning inference
+range. D's witness (`mass = 0`) is the nullspace hazard's config-space
+form: the range admits it, the default avoids it, nothing checks it.
+
+## Findings beyond the bands
+
+1. **Scalar-only emission blocked the code-form posing on a second
+   codebase** (FVM R2/R3, now magnetics B). Recorded as **demand
+   sighting #2 for array-aware emission** — the payoff analysis said
+   that build should wait for "a reason other than this headline";
+   independent blocking instances accumulating on real code is that
+   reason forming. Recorded, not built.
+2. **The template gap found on first application:** `field_positive`
+   takes one transform producing one value; the real code path produces
+   *two* face arrays, so the transcriber wrote the A/B harnesses
+   directly. §6 candidate: transforms returning a tuple, one obligation
+   per value.
+3. **The layered witness policy worked as designed under divergence:**
+   z3 returned sat with a non-rational model for a QF_LRA query; the
+   REFUTED rests on cvc5's replay-confirmed witness, z3's answer
+   recorded but not relied on.
+4. **First contact was clean** — no crash, no registry gap, no posture
+   escape. Not a counterexample to L14: the class ran on the well-worn
+   scalar core by design (the boundary "input-side, mask-free" is also
+   an attention-surface boundary); L14's prediction concerns new
+   *primitive* surfaces, which this pass deliberately avoided.
+
+## §6 — the over-specialization sweep (report-only; nothing refactored)
+
+Candidates where a class-level shape would serve, each with its cost —
+**Nick decides with this list; none of it was acted on:**
+
+- **The ⊤-widening instrument is convention-copied per harness** ("the
+  `tautology_test.py` pattern", re-implemented in `maddening_cfl.py`,
+  `mime_fvm.py`, …) — and the procedure has already changed once
+  (inputs-only variant), so copies can drift against the registered
+  instrument. Generalisation: a library `widen(closed, mode)` in src,
+  with the per-pass scripts calling it. Cost: small. **Strongest item.**
+- **The regional-obligation pattern recurs unabstracted** (heat's A2
+  control, R1, the fallback here): declare region, apply the code's
+  transform, assert a bound. Generalisation: a `region_bound` template
+  beside `field_positive`. Cost: small.
+- **`field_positive`'s single-value transform** (finding 2 above).
+  Cost: trivial, but it is an API change — batch with the step-4
+  usability pass.
+- **`stack` is still unregistered** — hit386's harness conformed
+  `jnp.stack` → `jnp.array` to dodge it (ledger L11's second witness).
+  Generalisation: one censused registry row. Cost: one row + tests.
+- **Deliberately NOT flagged:** the corpus harnesses' specificity
+  (fidelity to incidents is their point — generalising them would
+  violate the fidelity census); the form-guarded registry rows
+  (census-by-census scope, not over-specialization); scalar-only
+  emission (a documented, this-pass-priced scope decision).
+
+## Ledger
+
+L14 gains a scope note (recorded in the ledger): first-contact risk
+tracks new *primitive/execution* surfaces, not new codebases per se — a
+class that deliberately stays on the well-worn core can meet a new
+codebase cleanly, and did.

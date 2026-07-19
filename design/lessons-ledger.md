@@ -340,6 +340,16 @@ whenever a build touches a new primitive class.
 **(d)** Every build touching a primitive class, dtype family, or
 execution surface the corpus has not previously exercised.
 
+> **Scope note (2026-07-19, from the precondition-class pass):** the
+> risk tracks new *primitive/execution* surfaces, **not new codebases
+> per se**. First contact with the magnetics codebase was clean — posed
+> end-to-end, no crash, no registry gap — because the precondition class
+> deliberately stays on the well-worn scalar core: its boundary
+> ("input-side, mask-free") is also an attention-surface boundary. A
+> class designed to run on exercised machinery can meet a new codebase
+> without paying first-contact tax; the tax returns the moment an
+> obligation needs a new primitive.
+
 ## L15 — A regression test is a comment until it fails against the unfixed code
 
 **(a)** A test written alongside a fix passes for *some* reason; only a
