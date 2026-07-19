@@ -260,3 +260,101 @@ line — the caveat that becomes its clause (i) failure.
 
 No count; MIME held out from E2a. No CI wiring. No build. Every band row
 surfaces, so: **report and wait.**
+
+---
+
+# Part A — the reading challenged, and materially corrected (2026-07-19)
+
+Commissioned to challenge the unclaimed-headline reading. **Conclusion:
+the headline stays unclaimed — but two of my stated reasons were wrong,
+and the measurement found a bounded path to earning it that I did not
+know existed.** Everything below is measured.
+
+## Correction 1 — R2's wall is not "the dependency problem" (my error, published)
+
+I wrote that R2's UNKNOWN was the dependency problem and that it "points
+at affine/relational domains." **Both are wrong.** `Sf` and `d` are
+declared **independent**, so there is no correlation to lose. The
+declared region genuinely contains degenerate geometry: an anti-aligned
+pair `Sf = (1,0,0)`, `d = (−1,0,0)` lies inside R2's box, and
+`assert(Sf·d > 0)` over it is **`violated-over-set`** — definitely
+false, measured. So R2's region contains sign changes and a pole
+(`Sf·d = 0`), the obligation is genuinely ill-posed there, and **the
+tool's UNKNOWN and its division decline were both honest.** The defect
+was the region, not the domain.
+
+## Correction 2 — the real dependency is a *self*-correlation, and F1's "derivation" was doing precision work
+
+The code computes `area² / (Sf·d)` where `area = |Sf|`, so **`a` appears
+on both sides**. Measured over **F1's own safe region** `cos ∈ [0.71,1]`:
+
+| form | interval | escalated |
+|---|---|---|
+| `a/(dm·c)` — F1's, cancellation done by hand | **VERIFIED** | VERIFIED |
+| `a·a/(a·dm·c)` — the code's shape, uncancelled | **UNKNOWN** | **VERIFIED** |
+
+**F1's second disclosed derivation — the `a²/a` cancellation — is not
+presentational. It is the precision device that makes the obligation
+interval-provable at all.** Without it, even the safe region is
+undecidable by intervals. I had read those derivations as convenience;
+they were load-bearing.
+
+## Correction 3 — the solver already dissolves it; what remains is plumbing
+
+The same uncancelled, code-shaped form under escalation:
+
+- safe region `[0.71, 1]` → **VERIFIED**;
+- failing region `[0.11, 1]` → **REFUTED with witness**
+  `a=1, dm=1, cos = 15/128 ≈ 0.117` — *closer to the scar's 0.11 than
+  R1's own witness.*
+
+So **the mathematical obstacle to clause (i) does not exist.** The
+solver handles the self-correlation natively, which is precisely what it
+is for.
+
+What actually blocks a code-form check today is **three ordinary,
+censusable rows**, measured by attribution:
+
+1. **`reduce_sum` unregistered** — `jnp.sum(mesh.Sf * mesh.d, axis=1)`
+   (line 250, verbatim) falls to ⊤, taking the divisor with it;
+2. **`integer_pow` unregistered** — `mesh.area ** 2` (line 251,
+   verbatim) falls to ⊤;
+3. **`slice` outside the SMT emission set** — with the sum written
+   longhand the propagation reaches **100% coverage**, and escalation
+   then declines with `primitive 'slice' is outside the supported
+   emission set` (vector indexing).
+
+Two transfer rows and one emission row. None is a domain problem, none
+is assume-emission, none is affine.
+
+## Position on the commissioned openings
+
+1. **Underselling clause (iii)?** No — I hold the reading. It was stated
+   as the earned result and it survives; the new measurement strengthens
+   it (a code-shaped form refutes with a witness at `cos ≈ 0.117`).
+2. **Can R1+R2 clear it as a pair?** **No, and for a sharper reason than
+   I gave:** their regions are not merely different, R2's *contains
+   poles and sign reversals that R1's excludes by construction*, and the
+   constraint that would align them (`|Sf| ≥ 0.5`, `cos ≥ 0.11`) is not
+   expressible in a box — it needs relational assumes. The pair route is
+   closed. The single-obligation route (trace the code's expression over
+   a polar-parameterised region) is open but blocked by the three rows.
+3. **Is clause (i) right?** **More clearly right than when it was
+   written, and I argue it independent of the payoff.** Correction 2 is
+   the argument: a hand-derived reformulation was *silently doing
+   precision work*, and if line 251 changed shape the cancellation could
+   become invalid with nothing to notice. That is exactly the staleness
+   (i) exists to catch. **I am not relaxing it** — it still fails today,
+   and I have named what would make it pass rather than redefining pass.
+4. **Is the inversion the right next thread?** It is cheap and real, but
+   I now rank the **three-row build** above it: it converts an unclaimed
+   headline into a claimable one on a real failure, on the code's own
+   form. That is a **build decision** — surfaced, not executed.
+5. Factual corrections: the two above, both against my own reading.
+
+## Consequence
+
+Per the work order's gate — *"if it changes materially, stop and surface
+before Part B"* — **Part B was not registered or run.** The inversion
+registration waits on a human read of the corrections above and of the
+build question they raise.

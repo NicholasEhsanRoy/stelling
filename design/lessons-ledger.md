@@ -202,3 +202,30 @@ semantics claim needs a measurement, never a specification reading).
 **(d)** Any future semantics work — a QF_FP solver fragment, GPU/TPU
 targets, fused-multiply-add or reassociation modelling, affine under
 ieee; and any claim of the form "this operation preserves values."
+
+## L11 — A harness choice can conceal a tool gap; disclosure is not sizing
+
+**(a)** Permitted hand assistance in a harness (a reformulation, a
+substitution, a conformant rewrite) can be **silently doing load-bearing
+work that the tool cannot do** — not simplifying presentation but
+supplying precision or coverage. Disclosing the choice is necessary and
+**not sufficient**: the disclosure records *that* a hand step happened,
+never *what capability it stood in for*. **Every disclosed hand step
+should be priced: re-run without it and record what the tool alone
+returns.** The gap that appears is a censusable tool finding; the absence
+of a gap is evidence the step was cosmetic.
+**(b)** F1's `a²/a` cancellation (`design/regional-obligation.md`,
+Part A) was recorded as one of "two disclosed derivations" and read as
+convenience — measured, the uncancelled code-shaped form is **UNKNOWN
+over F1's own safe region**, so the cancellation was the precision device
+that made the obligation interval-provable, standing in for correlation
+handling the interval domain lacks. Earlier witness, same shape: hit386's
+harness was conformed from `jnp.stack` to `jnp.array` to match the
+censused primitive set — a harness choice that stood in for a missing
+`stack` registry row (recorded then as "the coverage discipline
+working", which it was, but the substitution's *size* went unpriced).
+**(c)** **Convention** — price each disclosed hand step by re-running
+without it; report the delta beside the verdict.
+**(d)** Every harness with hand assistance; the E2a permitted-assistance
+list; any usefulness claim resting on a hand-derived form; and clause (i)
+of the private-track criterion, which exists for exactly this failure.
