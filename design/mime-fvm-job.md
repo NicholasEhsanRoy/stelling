@@ -158,6 +158,25 @@ trace-the-code level. A CI job asserting this lemma (mesh-quality floor
 separate decision, and closing the lemma-to-code gap needs the
 relational machinery below.
 
+> **Correction (2026-07-19, from `design/private-track-criterion.md`).**
+> The sentence above — "a CI job asserting this lemma would be honest and
+> useful" — is **materially qualified** by the criterion registered and
+> applied later, and the qualification cuts against this reading:
+> **F1 fails clause (iii)**, because the scar mesh's `cos ≈ 0.11`
+> *violates* F1's own alignment-floor precondition, so a CI job asserting
+> F1 is **silent exactly on the failing mesh**. Two further measured
+> facts belong here: **`0.71` appears nowhere in the FVM package and no
+> mesh-quality check of any kind exists**, so the gate that would have
+> fired is unwritten and **at the pinned ref the scar is caught by
+> nothing**; and the floor-bearing lines have **changed zero times**
+> since the fix introduced them. F1's standing is therefore
+> **design-time result, not CI check** — and given the absent gate, it is
+> the only statement of that threshold anywhere in the project. The
+> verdict, its nonvacuity, and its ℝ-faithfulness are untouched; what is
+> corrected is the *usefulness* claim attached to them. The third
+> framing this correction opened is registered separately in
+> `design/regional-obligation.md`.
+
 ## F2 — the relational wall, first sighting on real solver geometry
 
 Exactly as predicted: the alignment floor is a **relation** between
