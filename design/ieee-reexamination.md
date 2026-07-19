@@ -152,3 +152,122 @@ Every harness is re-run under **`real`** first: all three must reproduce
 their recorded statuses byte-identically. The `ieee` run is additive and
 uses a separate mode; if any real-mode verdict moves, that is the
 fourth-row stop.
+
+---
+
+# Reading (2026-07-19 — registration `76215e9` preceded every number below)
+
+## Result
+
+| harness | role | real | **ieee** | recorded reproduced |
+|---|---|---|---|---|
+| dfx#417 | **counted** | VERIFIED | **VERIFIED** | ✓ |
+| npy#249 | **counted** | VERIFIED | **VERIFIED** | ✓ |
+| hit386 | **control** | VERIFIED | **UNKNOWN** (o1, o2 undecided; o3 discharged) | ✓ |
+
+All three reproduce their recorded real-mode statuses; coverage is 100%
+in every case and under both modes; nonvacuity checked throughout.
+
+**Band: row 2 — "both counted verdicts survive; the control does not."
+STOP and surface.** The continue decision is band-membership, and this
+band says stop, so **Task B was not started.**
+
+## What landed green, fenced as registered
+
+**Both counted verdicts survive under the arithmetic a device actually
+runs.** dfx#417 and npy#249 discharge under measured-FTZ+DAZ binary64
+semantics, at 100% coverage, with nonvacuity checked. Per the fence
+fixed in this registration's head: this **upgrades the arithmetic the
+verdicts speak** (ℝ → device-float, the regulatory-relevant form) and
+**does not upgrade the relation to the incidents** — that clause fails
+for a layer reason, and no change of arithmetic moves a verdict to
+another layer. The standing figure's *meaning* improves; its *number*
+and its *relation breakdown* are untouched.
+
+Both predictions for the counted cases were pre-committed and held, for
+the pre-committed reasons (dfx#417: no divergence class reachable;
+npy#249: `exp` image `[1.25e−9, 244.7]`, no overflow, no underflow, ~10²⁹⁹
+above the subnormal band).
+
+## The control's failure, classified per the pre-registered distinction
+
+**Verdict: artifact of our imprecision, not genuine float divergence** —
+and the classification is measured, not argued. Four probes
+(`scratchpad/taskA_diagnose.py`, `taskA_probe4.py`):
+
+1. **The dependency loss is mode-independent.** The harness declares
+   `c ∈ [0.019, ∞)`; the field recomputes `c = exp(a₁) − x₀` where
+   `x₀ = exp(a₁) − c`, and interval propagation loses the correlation,
+   recreating `c ∈ [0, ∞)`. Asserting the declaration's own bound on the
+   recomputed value is **UNKNOWN under `real` *and* `ieee`** — this is
+   the interval domain, not the semantics. It is what makes `0·∞`
+   reachable in the field's `dx0`.
+2. **`0·∞` is exactly the stamped convention's failure mode.** Under
+   `real` it is `0` by the `REAL_CONVENTION_ASSUMPTION` line the stamp
+   has carried since the semantics field was added; under `ieee` it is
+   NaN. **This registration was that assumption's first test, and it
+   fired.**
+3. **The asserted quantity is float-clean in isolation.**
+   `dx1 = exp(a₃)·(exp(a₀) − x₁)` with all three inputs points
+   discharges under `ieee`. It never reads `x₀` or `c`.
+4. **The failure is caused by co-location, measured directly.** hit386's
+   `o1` written verbatim — where `field` builds `jnp.array([dx0, dx1])`
+   and the caller indexes `[1]` — is **UNKNOWN under `ieee`**; the
+   *identical* `dx1` computed without the co-located `dx0` is
+   **discharged**. A minimal reproduction confirms the mechanism
+   generally: `[bad, good]` with `bad = x·0` over `[0, ∞)` and an assert
+   on `good` alone is undecided, while the same `good` not placed in the
+   array discharges.
+
+**So: per-element maybe-NaN hygiene is lost at array construction.** The
+NaN possibility of an *unasserted, discarded* component spreads to a
+co-located, asserted, float-clean one.
+
+**Under any actual float execution `c ≥ 0.019`, `0·∞` never occurs, and
+`dx1` is a finite point.** The ℝ verdict is not wrong about float; the
+`ieee` mode cannot reproduce it. Two compounding imprecisions, neither a
+fact about the program:
+
+- the interval domain's dependency loss on the declared coordinate
+  (a **known**, named class — this is the affine/relational demand,
+  appearing here in the control);
+- the array-construction flag union (a **new** precision observation,
+  recorded below).
+
+## The flag-hygiene observation — recorded, not fixed
+
+Unioning maybe-NaN across an array is **sound** (an over-approximated
+flag can only block a discharge, never enable one), so this is a
+**precision** class, not a soundness class — no verdict is endangered
+and nothing is unsound. It was not surfaced by the IEEE audit's
+plumbing sweep, which walked the transfer registry rather than
+co-location through array construction.
+
+**Not fixed here, deliberately:** the band said stop, and fixing past a
+stop is the motivated continuation this batch's rule exists to prevent.
+Additionally, tightening a flag is a precision change whose interaction
+with L8 (protections that exist by accident of imprecision) deserves a
+human read rather than a 3am judgement.
+
+## Ledger consequence
+
+**L8 gains a second, opposite-signed witness**, which is the entry's own
+"second witness" bar: at `#632` the tool's imprecision **hid** a float
+divergence (accidental protection — the 2-ulp bracket straddled where
+float could not distinguish); here the tool's imprecision **manufactured**
+one (accidental obstruction — a discarded component's NaN possibility
+blocking a clean assertion). Same root: **precision and semantics are
+not independent axes.** Recorded in `design/lessons-ledger.md` L8(b).
+
+## What a human needs to decide
+
+1. Whether the array-construction flag union should be made per-element
+   (a precision improvement with an L8-shaped caution), and whether that
+   is a prerequisite for taking any ieee result about an ∞-carrying
+   declaration seriously.
+2. Whether the control's non-reproduction under `ieee` should be
+   recorded against the *instrument* — i.e. that half-infinite
+   declarations plus recomputed coordinates are outside what `ieee` mode
+   can currently reproduce, which is a scope statement the mode does not
+   presently carry in its stamp.
+3. Whether Task B proceeds now, or after (1).

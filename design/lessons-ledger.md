@@ -148,7 +148,15 @@ are deleted by any reasonable optimization unless the semantics is made
 explicit first.
 **(b)** The #632 exhibit (2-ulp brackets accidentally straddling); the
 stamp's semantics field (third contract growth); the affine IEEE-first
-precondition (`design/unknown-triage.md`).
+precondition (`design/unknown-triage.md`). **Second witness, opposite
+sign** (`design/ieee-reexamination.md`, 2026-07-19): at #632 the tool's
+imprecision **hid** a float divergence (accidental protection); on the
+hit386 control under `ieee` it **manufactured** one — a discarded
+component's `0·∞` NaN possibility, itself created by dependency loss on
+a declared coordinate, spread through array co-location and blocked a
+float-clean assertion. Both directions, same root: **precision and
+semantics are not independent axes**, so a precision change is a
+semantics-relevant change and vice versa.
 **(c)** **Structural** (the stamp field, no defaults) + this pass makes
 the ordering constraint mechanical (tightened domains refuse to run
 under `real`).
