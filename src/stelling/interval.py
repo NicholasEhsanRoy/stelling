@@ -31,6 +31,13 @@ Comparisons return **three-valued** boolean intervals encoded on {0.0, 1.0}
 endpoints: ``[1,1]`` definitely true, ``[0,0]`` definitely false, ``[0,1]``
 unknown. A definite comparison of outward-rounded operands is sound; an
 unknown one is reported as such, never guessed.
+
+One addition sits outside the outward-rounded ℝ rules above: the
+``ieee_*`` kernels (their own section below) serve ``semantics="ieee"``
+propagation with NATIVE binary64 endpoints — no outward rounding, no
+``0·∞ = 0`` convention — and route NaN-producing corners into a
+``made_nan`` flag instead of ever raising or leaking a NaN endpoint
+(:data:`IEEE_ENDPOINT_ASSUMPTION`).
 """
 
 from __future__ import annotations
@@ -51,6 +58,44 @@ POW_LIBM_ASSUMPTION = (
     "pow endpoints assume a faithfully-rounded libm pow (error <= 1 ulp), "
     "evaluated at the four monotone (base, exponent) corners and bumped "
     "1 ulp outward — the same fidelity demotion as exp's"
+)
+
+# The ieee-mode counterpart of the real mode's 0·∞ = 0 convention line:
+# under semantics="ieee" the semantic value of an op IS the float result,
+# so endpoints are computed with the very float operations the program
+# executes and NOT bumped outward (outward rounding brackets the real
+# value; the float value is computable). Soundness rests on the
+# monotonicity of the fl-rounded basic ops. The claim is qualified inside
+# the open subnormal band, where flush-to-zero targets diverge from
+# gradual underflow — see SUBNORMAL_INDETERMINACY_ASSUMPTION.
+IEEE_ENDPOINT_ASSUMPTION = (
+    "ieee endpoint arithmetic is native binary64 round-to-nearest: interval "
+    "endpoints are the same float results the traced program computes, with "
+    "NO outward rounding (the float value itself is bracketed exactly); "
+    "relied on: monotonicity of the fl-rounded basic ops (add, sub, mul, "
+    "div, max, min are monotone in each argument after rounding), so box "
+    "images are bracketed by endpoint/corner evaluation — qualified inside "
+    "the open subnormal band, where results are additionally hulled with 0 "
+    "(see the subnormal-indeterminacy assumption)"
+)
+
+# Whether the execution target flushes subnormals is device/compiler-
+# dependent: measured jax 0.11.0 CPU binary64 flushes (FTZ on results,
+# DAZ on operands) in arithmetic, comparisons, and libm — eager and jit
+# alike — while strict IEEE-754 keeps gradual underflow. Neither pure
+# semantics is right for every target, so ieee mode is sound for BOTH:
+# any interval touching the open subnormal band (-MIN_NORMAL, MIN_NORMAL)
+# excluding {0} is hulled with 0 (the flushed image joins the gradual
+# values already present), and subnormal-band outcomes are therefore
+# indeterminate, never definite.
+SUBNORMAL_INDETERMINACY_ASSUMPTION = (
+    "subnormal indeterminacy: whether the target flushes subnormals "
+    "(FTZ/DAZ) is device/compiler-dependent — measured jax 0.11.0 CPU "
+    "binary64 flushes subnormals in arithmetic, comparisons, and libm, "
+    "while strict IEEE-754 keeps gradual underflow. ieee-mode intervals "
+    "touching the open subnormal band (0 < |x| < 2**-1022) are hulled "
+    "with 0, making verdicts sound for both semantics; subnormal-band "
+    "outcomes are treated as indeterminate, never definite"
 )
 
 
@@ -463,6 +508,159 @@ def pow_(a: IntervalArray, b: IntervalArray) -> IntervalArray:
         return min(lo_bounds), max(hi_bounds)
 
     return _binary(a, b, f)
+
+
+# -- ieee (binary64) endpoint arithmetic --------------------------------------
+#
+# The semantics="ieee" kernels for the monotone arithmetic core. Under ieee
+# semantics the semantic value of an op IS the float result, so endpoints
+# are computed with native binary64 round-to-nearest arithmetic and NOT
+# bumped outward: fl-rounded add/sub/mul/div are monotone in each argument,
+# and the real extremum of each op over a box sits at a corner, so the
+# corner evaluations bracket the float image exactly
+# (:data:`IEEE_ENDPOINT_ASSUMPTION`). Each kernel returns
+# ``(IntervalArray, made_nan)``: NaN-producing corner classes (inf − inf,
+# 0·±inf, 0/0, ±inf/±inf) are detected from the operand endpoints, routed
+# into the ``made_nan`` flag, and the interval is the hull of the non-NaN
+# corners — a NaN endpoint never leaks into an interval. When every corner
+# is NaN the non-NaN value set is empty and the kernels return ⊤ (any
+# interval is a sound superset of the empty set) with ``made_nan=True``.
+# Operand maybe-NaN flags are the CALLER's business (NaN poisons all four
+# ops, so OR-ing operand flags into the result is sound there).
+#
+# Subnormal haze (the flush-fidelity fix): the kernels model BOTH gradual
+# underflow and flush-to-zero targets. Operand endpoint pairs are hazed
+# before the corner evaluation (DAZ: a subnormal operand may read as 0 —
+# which also routes DAZ-created NaN classes like subnormal/subnormal =
+# 0/0 into the flag) and result endpoints are hazed after it (FTZ: a
+# subnormal result may flush to 0). See :func:`subnormal_haze` and
+# :data:`SUBNORMAL_INDETERMINACY_ASSUMPTION`.
+
+MIN_NORMAL = 2.0**-1022  # smallest positive normal binary64
+
+
+def _band_touching(lo: float, hi: float) -> bool:
+    """Does [lo, hi] contain a point of the OPEN subnormal band
+    (-MIN_NORMAL, MIN_NORMAL) excluding {0}?"""
+    return (hi > 0.0 and lo < MIN_NORMAL) or (lo < 0.0 and hi > -MIN_NORMAL)
+
+
+def _elt_haze(lo: float, hi: float) -> tuple[float, float]:
+    """One element of the subnormal haze: hull a band-touching interval
+    with 0 (identity when the interval already contains 0 or stays clear
+    of the band)."""
+    if _band_touching(lo, hi):
+        return min(lo, 0.0), max(hi, 0.0)
+    return lo, hi
+
+
+def subnormal_haze(a: IntervalArray) -> tuple[IntervalArray, bool]:
+    """The subnormal haze: every element whose interval touches the open
+    subnormal band ``(-MIN_NORMAL, MIN_NORMAL)`` excluding {0} is hulled
+    with 0.
+
+    Whether a target flushes subnormals (FTZ/DAZ) is device/compiler-
+    dependent (measured jax 0.11.0 CPU binary64 flushes in arithmetic,
+    comparisons, and libm; strict IEEE-754 keeps gradual underflow), so
+    ieee mode covers BOTH: the flushed image (0) joins the gradual values
+    already present, and band-located claims become indeterminate rather
+    than definite (:data:`SUBNORMAL_INDETERMINACY_ASSUMPTION`). Returns
+    ``(hazed, changed)``; ``changed`` is False when the haze was the
+    identity (no band contact, or the interval already contained 0 so no
+    endpoint moved) — the exactness machinery keys off it.
+    """
+    changed = False
+    los, his = list(a.los), list(a.his)
+    for i, (lo, hi) in enumerate(zip(a.los, a.his)):
+        nlo, nhi = _elt_haze(lo, hi)
+        if nlo != lo or nhi != hi:
+            los[i], his[i] = nlo, nhi
+            changed = True
+    if not changed:
+        return a, False
+    return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his)), True
+
+
+def _ieee_binary(a: IntervalArray, b: IntervalArray, f):
+    shape, xs, ys = _pair_elements(a, b)
+    los, his = [], []
+    made_nan = False
+    for (alo, ahi), (blo, bhi) in zip(xs, ys):
+        # DAZ face: a subnormal operand may read as 0 at runtime — hazing
+        # the operand pairs widens the corner hull to cover the flushed
+        # products/quotients AND lets the NaN-class detection see the
+        # flushed 0 (a DAZ-created 0/0 or 0·±inf is a real NaN)
+        alo, ahi = _elt_haze(alo, ahi)
+        blo, bhi = _elt_haze(blo, bhi)
+        lo, hi, nan_here = f(alo, ahi, blo, bhi)
+        # FTZ face: a subnormal result may flush to 0
+        lo, hi = _elt_haze(lo, hi)
+        los.append(lo)
+        his.append(hi)
+        made_nan = made_nan or nan_here
+    return (
+        IntervalArray(shape=shape, los=tuple(los), his=tuple(his)),
+        made_nan,
+    )
+
+
+def _corner_hull(corners, made_nan):
+    """Hull of the non-NaN corner values; ⊤ when every corner is NaN."""
+    finite = [c for c in corners if c == c]  # drops NaN, keeps ±inf
+    if not finite:
+        return -_INF, _INF, True
+    return min(finite), max(finite), made_nan or len(finite) < len(corners)
+
+
+def ieee_add(a: IntervalArray, b: IntervalArray):
+    def f(alo, ahi, blo, bhi):
+        # NaN class: (+inf) + (−inf). inf is attainable only at endpoints,
+        # so every NaN-producing pair is one of the four corners.
+        corners = (alo + blo, alo + bhi, ahi + blo, ahi + bhi)
+        return _corner_hull(corners, False)
+
+    return _ieee_binary(a, b, f)
+
+
+def ieee_sub(a: IntervalArray, b: IntervalArray):
+    def f(alo, ahi, blo, bhi):
+        corners = (alo - blo, alo - bhi, ahi - blo, ahi - bhi)
+        return _corner_hull(corners, False)
+
+    return _ieee_binary(a, b, f)
+
+
+def ieee_mul(a: IntervalArray, b: IntervalArray):
+    def f(alo, ahi, blo, bhi):
+        # NaN class 0·±inf: 0 may sit in the interior, inf only at
+        # endpoints — detected from containment, not only from corners.
+        a0, b0 = alo <= 0.0 <= ahi, blo <= 0.0 <= bhi
+        ainf = alo == -_INF or ahi == _INF
+        binf = blo == -_INF or bhi == _INF
+        made_nan = (a0 and binf) or (b0 and ainf)
+        corners = (alo * blo, alo * bhi, ahi * blo, ahi * bhi)
+        return _corner_hull(corners, made_nan)
+
+    return _ieee_binary(a, b, f)
+
+
+def ieee_div(a: IntervalArray, b: IntervalArray):
+    def f(alo, ahi, blo, bhi):
+        a0, b0 = alo <= 0.0 <= ahi, blo <= 0.0 <= bhi
+        ainf = alo == -_INF or ahi == _INF
+        binf = blo == -_INF or bhi == _INF
+        # NaN classes: 0/0 and ±inf/±inf. x/0 for x ≠ 0 is ±inf — a
+        # VALUE under ieee, not NaN.
+        made_nan = (a0 and b0) or (ainf and binf)
+        if b0:
+            # the denominator attains 0: quotients reach ±inf with signs
+            # set by which side of 0 the denominator approaches — ⊤ is the
+            # sound hull (and the only closed-interval answer offered here)
+            return -_INF, _INF, made_nan
+        corners = (alo / blo, alo / bhi, ahi / blo, ahi / bhi)
+        return _corner_hull(corners, made_nan)
+
+    return _ieee_binary(a, b, f)
 
 
 # -- comparisons (three-valued) ----------------------------------------------

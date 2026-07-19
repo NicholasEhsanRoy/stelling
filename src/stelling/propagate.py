@@ -89,6 +89,34 @@ and a note discloses that obligations in that branch may be vacuous
 under the branch's precondition — no raise, no narrowing.
 ``assume_mode="inert"`` reproduces the drop-everything MVP behavior
 byte-identically — the comparability control for the vacuity instrument.
+
+``semantics`` is the dial SOUNDNESS.md's stamp contract names: ``"real"``
+(the default, byte-identical to everything above) judges obligations in
+exact real arithmetic; ``semantics="ieee"`` judges them about the traced
+program's **IEEE binary64 round-to-nearest float execution**. The ieee
+domain is the same :class:`stelling.interval.IntervalArray` plus a
+per-array ``maybe_nan`` flag (a parallel ``var id -> bool`` table beside
+the interval env): endpoint arithmetic for the monotone core is native
+binary64 with NO outward rounding (the float value itself is computable
+— :data:`stelling.interval.IEEE_ENDPOINT_ASSUMPTION`), overflow
+saturates to the VALUE ±inf, NaN-producing corner classes (``inf−inf``,
+``0·±inf``, ``0/0``, ``inf/inf``) set ``maybe_nan``, ⊤ is
+maybe-NaN, and a predicate over a maybe-NaN operand is never definitely
+true (NaN falsifies every comparison except ``ne``, which it satisfies).
+Every registered transfer is censused for ieee in
+:data:`IEEE_TRANSFERS` — sound as-is, given an ieee variant, or declined
+to ⊤-maybe-NaN with the gap quoted; the real mode's extended-real
+conventions (the ``0·∞ = 0`` endpoint rule) are never reused. The
+``domain`` parameter (only registered value ``"interval"``) is the
+integration point for future tightened domains, which are refused under
+``semantics="real"`` outright: tightening ℝ arithmetic without float
+semantics converts accidental UNKNOWNs into false VERIFIEDs.
+
+The exactness-certification machinery (the per-var exact set and the
+box-nonemptiness-certifies-region-nonemptiness decision) lives in
+:mod:`stelling.exactness` and is consumed here; the principle it holds —
+a sound over-approximation certifies emptiness but never nonemptiness —
+is that module's docstring.
 """
 
 from __future__ import annotations
@@ -97,13 +125,17 @@ import math
 import struct
 from dataclasses import dataclass
 
+from stelling import exactness
 from stelling import interval as iv
 from stelling import ir
 from stelling.coverage import DEFAULT_TRANSPARENT, Coverage, CoverageCounter, sub_jaxprs
 
 __all__ = [
+    "IEEE_TRANSFERS",
     "ObligationReport",
     "Propagation",
+    "TIGHTENED_DOMAIN_REAL_REFUSAL",
+    "TRANSFERS",
     "UnsatisfiableAssumptionError",
     "interval_env",
     "propagate",
@@ -149,6 +181,9 @@ class Propagation:
     transfers_used: tuple[tuple[str, str], ...]  # (primitive, tier), sorted
     assumptions: tuple[str, ...]
     notes: tuple[str, ...]
+    # which arithmetic the obligations were judged about ("real" | "ieee");
+    # the verdict assemblers stamp from this field, never from a guess
+    semantics: str = "real"
 
     @property
     def all_discharged(self) -> bool:
@@ -532,6 +567,475 @@ _LIBM_ASSUMPTIONS = {
 }
 
 
+# -- the ieee transfer registry -----------------------------------------------
+#
+# The censused counterpart of TRANSFERS for semantics="ieee": every key of
+# TRANSFERS appears here explicitly — (i) verified sound as-is for float
+# (pure data movement, structural ops — wrapped only to route the
+# maybe-NaN flag), (ii) given an ieee variant (the arithmetic core with
+# native binary64 endpoints and NaN-corner routing; comparisons with the
+# NaN-falsification rule; anything that touched the extended-real
+# conventions — the real-mode 0·∞ = 0 inside iv.mul is exactly what is
+# NOT reused), or (iii) declined to ⊤-maybe-NaN with the gap quoted.
+# No silent reuse; the registry is the census, mirrored in the build
+# report.
+#
+# Signature: t(eqn, params, ins, flags) -> (outs, out_flags) | None
+# where flags/out_flags are the per-array maybe-NaN flags. None and
+# IntervalError decline exactly as in real mode, except ⊤ outputs carry
+# maybe_nan=True (⊤ under ieee is maybe-NaN: an unmodeled value could be
+# anything a float can be, including NaN).
+
+
+def _ieee_f64_only(eqn) -> None:
+    """The binary64 guard for the arithmetic core: ieee endpoints are
+    native binary64, which does not model float32/float16 rounding or
+    integer wraparound — any other dtype declines with the gap quoted."""
+    bad = sorted(
+        {v.aval.dtype for v in (*eqn.invars, *eqn.outvars)} - {"float64"}
+    )
+    if bad:
+        raise iv.IntervalError(
+            f"ieee endpoint arithmetic is binary64-only; operand/result "
+            f"dtypes {bad} are not modeled (float32/float16 round "
+            f"differently, integer arithmetic wraps) — declined"
+        )
+
+
+def _ieee_arith(op):
+    """The monotone core (add/sub/mul/div): native binary64 corner
+    endpoints, NaN corners routed to the flag (never into an interval).
+    A maybe-NaN operand poisons the result (NaN propagates through all
+    four ops), so operand flags OR into the output flag."""
+
+    def t(eqn, params, ins, flags):
+        _ieee_f64_only(eqn)
+        box, made_nan = op(ins[0], ins[1])
+        return [box], [made_nan or any(flags)]
+
+    return t
+
+
+def _ieee_unary_exact(fn):
+    """neg/abs: exact sign arithmetic — the float result IS the real
+    result, no rounding, no new NaN (neg(nan)/abs(nan) stay NaN: flag
+    propagates)."""
+
+    def t(eqn, params, ins, flags):
+        _ieee_f64_only(eqn)
+        # subnormal haze on the result: whether a sign operation is
+        # flushed is target-dependent; the hull with 0 covers both
+        return [iv.subnormal_haze(fn(ins[0]))[0]], [flags[0]]
+
+    return t
+
+
+def _ieee_minmax(fn):
+    """max/min: float max/min of non-NaN operands is exact (no rounding),
+    so the real transfer's endpoint rule is float-exact when neither
+    operand is maybe-NaN. With a maybe-NaN operand the result is the
+    other operand, the extremum, or NaN depending on the backend's NaN
+    ordering (measured on jax 0.11.0 cpu: lax.max/min PROPAGATE NaN in
+    both operand orders) — the operand hull covers every one of those
+    non-NaN outcomes, so hull + flag is sound without leaning on the
+    measurement."""
+
+    def t(eqn, params, ins, flags):
+        _ieee_f64_only(eqn)
+        a, b = ins
+        if any(flags):
+            mn, mx = iv.minimum(a, b), iv.maximum(a, b)
+            hull = iv.IntervalArray(shape=mn.shape, los=mn.los, his=mx.his)
+            return [iv.subnormal_haze(hull)[0]], [True]
+        return [iv.subnormal_haze(fn(a, b))[0]], [False]
+
+    return t
+
+
+def _ieee_exp(eqn, params, ins, flags):
+    """exp keeps its 1-ulp outward libm bracket — a faithfully-rounded
+    libm result lands within 1 ulp of the true value, so the outward
+    bracket contains the float the program computes (the same
+    EXP_LIBM_ASSUMPTION stamps, via the sound-libm tier). exp(NaN) is
+    NaN and nothing else: flag propagation is exact. The subnormal haze
+    covers flushing libm targets (measured jax 0.11.0 CPU:
+    exp(-720) = 0.0 while IEEE exp is subnormal — the 1-ulp bracket alone
+    cannot absorb a flush to 0)."""
+    _ieee_f64_only(eqn)
+    return [iv.subnormal_haze(iv.exp(ins[0]))[0]], [flags[0]]
+
+
+def _ieee_pow(eqn, params, ins, flags):
+    """pow keeps its libm corner brackets (strictly positive base — the
+    same decline otherwise), but a maybe-NaN operand DECLINES rather than
+    flag-propagating: IEEE pow has non-NaN results at NaN inputs
+    (pow(NaN, 0) = 1 and pow(1, NaN) = 1 — measured on jax 0.11.0), and 1
+    may lie outside the corner bracket, so flag propagation alone would
+    be unsound."""
+    _ieee_f64_only(eqn)
+    if any(flags):
+        raise iv.IntervalError(
+            "pow over a maybe-NaN operand: IEEE pow(NaN, 0) = 1 and "
+            "pow(1, NaN) = 1 escape both the corner bracket and the NaN "
+            "flag — no sound rule here, declined"
+        )
+    # subnormal haze on the result: a flushing libm pow may return 0
+    # where the bracket is subnormal
+    return [iv.subnormal_haze(iv.pow_(*ins))[0]], [False]
+
+
+def _non_f64_float_dtypes(atoms) -> list[str]:
+    """The non-binary64 FLOAT dtypes among these atoms' avals. The ieee
+    mode models binary64 only, and the measured flush is PER-DTYPE
+    (jax 0.11.0 CPU flushes float32 subnormals — |x| < 2**-126, which are
+    NORMAL binary64 numbers invisible to the binary64 haze — while
+    float16 is not flushed on this target): any surface that would judge
+    a non-f64 float definitely must decline instead of mismodelling."""
+    return sorted(
+        {
+            v.aval.dtype
+            for v in atoms
+            if "float" in (v.aval.dtype or "") and v.aval.dtype != "float64"
+        }
+    )
+
+
+def _ieee_cmp_f64_only(eqn) -> None:
+    """The comparison face of the binary64-only guard (re-attack U2): DAZ
+    reaches comparisons per-dtype (measured jax 0.11.0 CPU:
+    ``float32(1e-45) > 0`` is False, ``float32(1e-39) == float32(1e-40)``
+    is True), and the binary64 haze cannot see the f32 band — so any
+    comparison with a non-f64 float operand declines with the gap
+    quoted. Integer/bool comparisons are unaffected (no flush hazard)."""
+    bad = _non_f64_float_dtypes(eqn.invars)
+    if bad:
+        raise iv.IntervalError(
+            f"ieee mode models binary64 only; {'/'.join(bad)} comparison "
+            f"semantics (incl. per-dtype subnormal flush — measured on jax "
+            f"0.11.0 CPU: float32 subnormals flush, float32(1e-45) > 0 is "
+            f"False) are not modelled — declined"
+        )
+
+
+def _ieee_cmp(fn, nan_answer):
+    """Comparisons under ieee: exact on non-NaN operands (float compare
+    agrees with the real order on ±inf), three-valued as in real mode.
+    NaN falsifies lt/gt/le/ge/eq and satisfies ne, so with a maybe-NaN
+    operand the elements whose definite answer disagrees with the NaN
+    answer degrade to unknown: definite-true is blocked for the
+    falsified comparisons (never definitely true), definite-false is
+    blocked for ne — the other face stands (NaN agrees with it).
+    Comparison outputs are bools: never NaN, flag False.
+
+    Operands are subnormal-hazed before judging: DAZ reaches
+    comparisons themselves (measured jax 0.11.0 CPU: ``5e-324 > 0`` is
+    False, ``5e-324 == 1e-320`` is True), so a band-touching operand
+    must be judged as possibly 0."""
+    blocked = iv.BOOL_FALSE if nan_answer else iv.BOOL_TRUE
+
+    def t(eqn, params, ins, flags):
+        _ieee_cmp_f64_only(eqn)
+        r = fn(*(iv.subnormal_haze(x)[0] for x in ins))
+        if any(flags):
+            los, his = [], []
+            for lo, hi in zip(r.los, r.his):
+                if (lo, hi) == blocked:
+                    lo, hi = iv.BOOL_UNKNOWN
+                los.append(lo)
+                his.append(hi)
+            r = iv.IntervalArray(shape=r.shape, los=tuple(los), his=tuple(his))
+        return [r], [False]
+
+    return t
+
+
+def _ieee_bool_logic(name, op):
+    """Kleene and/or on bools (same bool-dtype guard as real mode —
+    bitwise integer forms decline). Bools are never NaN; a maybe-NaN
+    flag on a bool operand is a decline artifact (⊤-maybe-NaN), so that
+    operand's elements read as unknown before the Kleene op — false ∧
+    unknown is still false, nothing definite leaks from a flagged
+    operand."""
+
+    def t(eqn, params, ins, flags):
+        dtypes = [v.aval.dtype for v in eqn.invars]
+        if any(d != "bool" for d in dtypes):
+            raise iv.IntervalError(
+                f"{name!r} transfer covers bool operands only (three-valued "
+                f"logic); got dtypes {dtypes} — bitwise integer {name} has "
+                f"no interval rule"
+            )
+        ops = [
+            iv.IntervalArray(
+                shape=b.shape, los=(0.0,) * b.size, his=(1.0,) * b.size
+            )
+            if f
+            else b
+            for b, f in zip(ins, flags)
+        ]
+        return [op(*ops)], [False]
+
+    return t
+
+
+def _ieee_reduce_or(eqn, params, ins, flags):
+    dtypes = [v.aval.dtype for v in eqn.invars]
+    if any(d != "bool" for d in dtypes):
+        raise iv.IntervalError(
+            f"'reduce_or' transfer covers bool operands only; got dtypes "
+            f"{dtypes}"
+        )
+    a = ins[0]
+    if flags[0]:
+        a = iv.IntervalArray(
+            shape=a.shape, los=(0.0,) * a.size, his=(1.0,) * a.size
+        )
+    return [iv.reduce_or(a, tuple(params["axes"]))], [False]
+
+
+# the selector dtypes jax's select_n accepts (measured: lax.select_n
+# rejects float selectors at trace time) — the ONLY dtypes for which
+# "a selector value is never NaN" is a fact rather than an assumption
+_SELECTOR_DTYPES = frozenset(
+    {"bool", "int8", "int16", "int32", "int64",
+     "uint8", "uint16", "uint32", "uint64"}
+)
+
+
+def _ieee_select_n(eqn, params, ins, flags):
+    """Selection/join is pure data movement — the real transfer's measured
+    clamp semantics and straddle join are float-sound as-is. The output
+    flag is the OR of every case's flag — conservative (a case the
+    selector excludes may still set it), sound.
+
+    The selector invariant is ENFORCED, not assumed (audit F1): only
+    bool/integer selectors are accepted (jax rejects float selectors at
+    trace time, but hand-built/deserialized IR arrives here unchecked —
+    a float selector's value could be NaN, which no selection rule
+    models), and a maybe-NaN-flagged selector declines outright (its
+    provenance is untrusted; picking a case from its interval would
+    silently drop the NaN possibility)."""
+    sel_dtype = eqn.invars[0].aval.dtype if eqn.invars else ""
+    if sel_dtype not in _SELECTOR_DTYPES:
+        raise iv.IntervalError(
+            f"select_n selector dtype {sel_dtype!r} is not bool/integer "
+            f"(jax rejects float selectors at trace time; a float selector "
+            f"may be NaN) — no selection rule; declined"
+        )
+    if flags[0]:
+        raise iv.IntervalError(
+            "select_n selector carries maybe-NaN under ieee semantics — "
+            "its provenance is untrusted and selection would drop the NaN "
+            "possibility; declined"
+        )
+    r = iv.select_n(ins[0], list(ins[1:]))
+    return [r], [any(flags[1:])]
+
+
+def _ieee_passthrough(real_transfer):
+    """Category (i): pure data movement with exact semantics — element
+    routing only, no arithmetic, no rounding, dtype-agnostic, NaN moves
+    like any other value. The real transfer is reused with the operand
+    flags OR-ed onto every output."""
+
+    def t(eqn, params, ins, flags):
+        outs = real_transfer(eqn, params, ins)
+        if outs is None:
+            return None
+        return outs, [any(flags)] * len(outs)
+
+    return t
+
+
+def _ieee_scatter(eqn, params, ins, flags):
+    """The static-index x.at[k].set(v) form: data movement (sound as-is);
+    output flag = operand ∨ updates. Maybe-NaN INDICES decline — the
+    static-index rule needs definite integer indices, and a NaN index is
+    mode-dependent garbage."""
+    if len(ins) == 3 and flags[1]:
+        raise iv.IntervalError(
+            "scatter indices carry maybe-NaN under ieee semantics — the "
+            "static-index rule needs definite non-NaN indices; declined"
+        )
+    outs = _t_scatter(eqn, params, ins)
+    if outs is None:
+        return None
+    return outs, [flags[0] or flags[2]]
+
+
+def _ieee_gather(eqn, params, ins, flags):
+    """The static-index leading-axis row form: data movement (sound
+    as-is); output flag = operand's. Maybe-NaN indices decline, as for
+    scatter."""
+    if len(ins) == 2 and flags[1]:
+        raise iv.IntervalError(
+            "gather indices carry maybe-NaN under ieee semantics — the "
+            "static-index rule needs definite non-NaN indices; declined"
+        )
+    outs = _t_gather(eqn, params, ins)
+    if outs is None:
+        return None
+    return outs, [flags[0]]
+
+
+def _ieee_convert(eqn, params, ins, flags):
+    """convert_element_type under ieee. A non-f64 FLOAT source declines
+    outright (re-attack U2): the whitelist's value-preservation claim is
+    a gradual-semantics fact, measured FALSE under this target's
+    per-dtype DAZ — jax 0.11.0 CPU converts an f32 subnormal to f64 as
+    0.0 (storage keeps the bits; compute flushes), which would carry the
+    flushed 0 into f64 dataflow past the binary64 haze and the f64-only
+    arithmetic guard. The remaining whitelisted conversions (int/bool
+    sources, f64 identity) really are value-preserving for every source
+    value including ±inf and NaN (NaN converts to NaN: flag propagates).
+    The float→int trunc path is float-exact (trunc is the measured
+    conversion semantics, the in-range guard keeps it defined, integer
+    results are exact doubles) but declines a maybe-NaN input —
+    converting NaN to int is target-dependent garbage. Everything else
+    declines exactly as in real mode."""
+    src = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
+    dst = str(params.get("new_dtype"))
+    if "float" in src and src != "float64":
+        raise iv.IntervalError(
+            f"ieee mode models binary64 only; {src} conversion semantics "
+            f"(incl. per-dtype subnormal flush — measured on jax 0.11.0 "
+            f"CPU: f32→f64 convert of a subnormal yields 0.0, so the "
+            f"exact-conversion whitelist's value-preservation claim fails "
+            f"under DAZ) are not modelled — declined"
+        )
+    if src == dst or (src, dst) in _EXACT_CONVERSIONS:
+        return [ins[0]], [flags[0]]
+    if "float" in src and dst in _INT_RANGE:
+        if flags[0]:
+            raise iv.IntervalError(
+                "float->int conversion of a maybe-NaN value is "
+                "target-dependent garbage under ieee semantics — declined"
+            )
+        outs = _t_convert(eqn, params, ins)
+        if outs is None:
+            return None
+        return outs, [False]
+    return None  # value-changing or unrecognized conversion -> ⊤, noted
+
+
+def _ieee_any(eqn, params, ins, flags):
+    """Declared inputs start maybe_nan=False: the declared closed box is
+    a set of floats, and NaN bounds are refused (iv.from_bounds raises on
+    NaN, which declines the declaration loudly rather than admitting an
+    unbounded-NaN input). The box is subnormal-hazed on entry — DAZ
+    flushes inputs, so a band-located declared value may be consumed as
+    0; the dispatcher withholds exactness from declarations the haze
+    changed."""
+    box = iv.from_bounds(
+        tuple(params["shape"]), float(params["lo"]), float(params["hi"])
+    )
+    return [iv.subnormal_haze(box)[0]], [False]
+
+
+IEEE_TRANSFERS = {
+    # (ii) ieee variants: the monotone arithmetic core — native binary64
+    # endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0
+    # convention (iv._prod inside iv.mul) is NOT reused.
+    "add": (_ieee_arith(iv.ieee_add), TIER_EXACT),
+    "sub": (_ieee_arith(iv.ieee_sub), TIER_EXACT),
+    "mul": (_ieee_arith(iv.ieee_mul), TIER_EXACT),
+    "div": (_ieee_arith(iv.ieee_div), TIER_EXACT),
+    # (i)/(ii) exact sign arithmetic; flag propagates (NaN stays NaN)
+    "neg": (_ieee_unary_exact(iv.neg), TIER_EXACT),
+    "abs": (_ieee_unary_exact(iv.abs_), TIER_EXACT),
+    # (ii) exact on non-NaN operands; NaN-ordering ambiguity covered by
+    # the operand hull + flag
+    "max": (_ieee_minmax(iv.maximum), TIER_EXACT),
+    "min": (_ieee_minmax(iv.minimum), TIER_EXACT),
+    # (ii) libm brackets kept (faithful rounding lands within 1 ulp);
+    # pow declines maybe-NaN operands (pow(NaN,0)=1 escapes the flag)
+    "pow": (_ieee_pow, TIER_SOUND_LIBM),
+    "exp": (_ieee_exp, TIER_SOUND_LIBM),
+    # (i) identity
+    "stop_gradient": (_ieee_passthrough(lambda eqn, p, ins: [ins[0]]), TIER_EXACT),
+    # (i) data movement (the dimensions= reshape declines as in real mode)
+    "reshape": (_ieee_passthrough(_t_reshape), TIER_EXACT),
+    # (ii) selection/join reused; flag = OR over cases
+    "select_n": (_ieee_select_n, TIER_EXACT),
+    # (ii) comparisons: NaN falsifies lt/gt/le/ge/eq (definite-true
+    # blocked under maybe-NaN), satisfies ne (definite-false blocked)
+    "lt": (_ieee_cmp(iv.lt, nan_answer=False), TIER_EXACT),
+    "gt": (_ieee_cmp(iv.gt, nan_answer=False), TIER_EXACT),
+    "le": (_ieee_cmp(iv.le, nan_answer=False), TIER_EXACT),
+    "ge": (_ieee_cmp(iv.ge, nan_answer=False), TIER_EXACT),
+    "eq": (_ieee_cmp(iv.eq, nan_answer=False), TIER_EXACT),
+    "ne": (_ieee_cmp(iv.ne, nan_answer=True), TIER_EXACT),
+    # (ii) Kleene logic; flagged bool operands read as unknown
+    "and": (_ieee_bool_logic("and", iv.logical_and), TIER_EXACT),
+    "or": (_ieee_bool_logic("or", iv.logical_or), TIER_EXACT),
+    "reduce_or": (_ieee_reduce_or, TIER_EXACT),
+    # (i) pure data movement, dtype-agnostic, flags ride along
+    "squeeze": (
+        _ieee_passthrough(
+            lambda eqn, p, ins: [iv.squeeze(ins[0], tuple(p.get("dimensions", ())))]
+        ),
+        TIER_EXACT,
+    ),
+    "slice": (
+        _ieee_passthrough(
+            lambda eqn, p, ins: [
+                iv.slice_(
+                    ins[0],
+                    tuple(p["start_indices"]),
+                    tuple(p["limit_indices"]),
+                    tuple(p["strides"]) if p.get("strides") else None,
+                )
+            ]
+        ),
+        TIER_EXACT,
+    ),
+    "scatter": (_ieee_scatter, TIER_EXACT),
+    "gather": (_ieee_gather, TIER_EXACT),
+    "transpose": (
+        _ieee_passthrough(
+            lambda eqn, p, ins: [
+                iv.transpose(ins[0], tuple(p.get("permutation", ()) or ()))
+            ]
+        ),
+        TIER_EXACT,
+    ),
+    "broadcast_in_dim": (
+        _ieee_passthrough(
+            lambda eqn, p, ins: [
+                iv.broadcast_in_dim(
+                    ins[0], tuple(p["shape"]), tuple(p["broadcast_dimensions"])
+                )
+            ]
+        ),
+        TIER_EXACT,
+    ),
+    "concatenate": (
+        _ieee_passthrough(
+            lambda eqn, p, ins: [iv.concatenate(list(ins), int(p["dimension"]))]
+        ),
+        TIER_EXACT,
+    ),
+    # (ii) exact whitelist passes with flag propagation; trunc path
+    # declines maybe-NaN inputs; everything else declines as before
+    "convert_element_type": (_ieee_convert, TIER_EXACT),
+    # (i) declarations: flag starts False, NaN bounds refused
+    "stelling_any": (_ieee_any, TIER_EXACT),
+    # (i) identity pass-throughs (judging is flag-aware in the dispatcher)
+    "stelling_assert": (
+        _ieee_passthrough(lambda eqn, p, ins: [ins[0]]), TIER_EXACT
+    ),
+    "stelling_nonvacuity": (
+        _ieee_passthrough(lambda eqn, p, ins: [ins[0]]), TIER_EXACT
+    ),
+}
+
+# the census must stay total: a registered transfer with no ieee census
+# entry would be silent reuse, the exact thing rule 6 forbids
+assert set(IEEE_TRANSFERS) == set(TRANSFERS), (
+    "every registered transfer must be censused for ieee semantics"
+)
+
+
 # -- constraining assume ------------------------------------------------------
 
 _ASSUME_MODES = ("constrain", "inert")
@@ -573,6 +1077,56 @@ def _finite_point(box: iv.IntervalArray | None) -> bool:
     return box is not None and all(
         lo == hi and math.isfinite(lo) for lo, hi in zip(box.los, box.his)
     )
+
+
+def _subnormal_const_literal(atom: ir.Atom) -> bool:
+    """A literal constant whose raw decode the subnormal haze changes —
+    i.e. a subnormal-band constant. Under ieee its as-consumed value is
+    flush-indeterminate, so the drop reason must name that shape rather
+    than claim both sides vary (the audit-F6 discipline)."""
+    if not isinstance(atom, ir.Literal):
+        return False
+    try:
+        raw = _value_to_interval(atom.val, atom.aval.shape)
+    except (iv.IntervalError, ir.TranscriptionError):
+        return False
+    return iv.subnormal_haze(raw)[1]
+
+
+_SUBNORMAL_BOUND_REASON = (
+    "a comparison side is a subnormal-band constant — its as-consumed "
+    "value is flush-vs-gradual indeterminate under ieee semantics "
+    "(FTZ/DAZ targets read it as 0); no certified half-space represents it"
+)
+
+
+def _strict_flush_witness(cmp: str, k: float, nlo: float, nhi: float) -> bool:
+    """Flush-robust certification witness for a STRICT assume under ieee:
+    does the closed meet stand-in contain a NON-subnormal point strictly
+    satisfying the comparison? A strict region whose only content is
+    subnormal may be EMPTY at runtime on a DAZ target (every member reads
+    as 0, which the strict comparison excludes), so certification demands
+    a witness whose runtime reading is itself (0, a normal, or ±inf)."""
+    if cmp == "gt":  # region (k, nhi]
+        if k < 0.0 <= nhi:
+            return True  # w = 0
+        if nhi > k and abs(nhi) >= iv.MIN_NORMAL:
+            return True  # w = nhi (normal or ±inf)
+        if k < -iv.MIN_NORMAL <= nhi:
+            return True  # w = -MIN_NORMAL
+        if k < iv.MIN_NORMAL <= nhi:
+            return True  # w = +MIN_NORMAL
+        return False
+    # lt: region [nlo, k)
+    if nlo <= 0.0 < k:
+        return True  # w = 0
+    if nlo < k and abs(nlo) >= iv.MIN_NORMAL:
+        return True  # w = nlo (normal or ±inf)
+    if nlo <= iv.MIN_NORMAL < k:
+        return True  # w = +MIN_NORMAL
+    if nlo <= -iv.MIN_NORMAL and k > -iv.MIN_NORMAL:
+        return True  # w = -MIN_NORMAL
+    return False
 
 
 def _nonfinite_const(atom: ir.Atom, box: iv.IntervalArray | None) -> bool:
@@ -631,9 +1185,14 @@ def _bool_status(b: iv.IntervalArray, *, constrained: bool = False) -> tuple[str
 
 
 class _Propagator:
-    def __init__(self, assume_mode: str) -> None:
+    def __init__(self, assume_mode: str, semantics: str = "real") -> None:
         self.assume_mode = assume_mode
+        self.semantics = semantics
         self.env: dict[int, iv.IntervalArray] = {}
+        # ieee mode's parallel table: var id -> maybe_nan. Real mode never
+        # writes it (the flag machinery is fenced behind semantics checks),
+        # so the real path's behavior is untouched.
+        self.nan: dict[int, bool] = {}
         # var id -> producing equation, for the jaxpr currently being run
         # (scoped in run(); assume classification only — never a transfer
         # input)
@@ -663,8 +1222,10 @@ class _Propagator:
         # correlation-blind joins can inflate a box past the true image,
         # so box-nonemptiness certifies true-region nonemptiness only for
         # exact boxes. Scope-local (swapped with env at every sub-jaxpr
-        # descent): a scope certifies only its own declarations.
-        self.exact: set[int] = set()
+        # descent): a scope certifies only its own declarations. The set,
+        # its maintenance rules, and the certification decision live in
+        # stelling.exactness (the shared primitive future layers import).
+        self.exact = exactness.ExactSet()
         # set once a constraining assume narrows a NON-exact variable: an
         # uncertified-precondition constraint is then in force, and every
         # subsequent definite violation is withheld from REFUTED (a
@@ -681,10 +1242,15 @@ class _Propagator:
             # is untouched — that one is a transcription defect, not a
             # value.
             try:
-                return _value_to_interval(atom.val, atom.aval.shape)
+                box = _value_to_interval(atom.val, atom.aval.shape)
             except (iv.IntervalError, ir.TranscriptionError) as e:
                 self.notes.append(f"literal outside the domain ({e}); ⊤")
                 return iv.top(atom.aval.shape)
+            if self.semantics == "ieee":
+                # DAZ flushes inputs: literal constants entering ieee
+                # propagation are subnormal-hazed like every other value
+                box = iv.subnormal_haze(box)[0]
+            return box
         got = self.env.get(atom.id)
         if got is None:
             # not a coverage gap: an equation reading a never-bound var is a
@@ -698,9 +1264,26 @@ class _Propagator:
             )
         return got
 
+    def read_flag(self, atom: ir.Atom) -> bool:
+        """The atom's maybe-NaN flag (ieee mode). Decodable literals are
+        definite non-NaN values; undecodable ones (the NaN sentinel above
+        all) may be NaN. Vars default to False — every flag-True binding
+        is written explicitly."""
+        if isinstance(atom, ir.Literal):
+            try:
+                _value_to_interval(atom.val, atom.aval.shape)
+            except (iv.IntervalError, ir.TranscriptionError):
+                return True
+            return False
+        return self.nan.get(atom.id, False)
+
     def top_out(self, eqn: ir.JaxprEqn) -> None:
         for out in eqn.outvars:
             self.env[out.id] = iv.top(out.aval.shape)
+            if self.semantics == "ieee":
+                # ⊤ under ieee is maybe-NaN: an unknown/declined value
+                # could be anything a float can be, including NaN
+                self.nan[out.id] = True
 
     def mark_unreached(self, eqn: ir.JaxprEqn) -> None:
         stack = list(sub_jaxprs(eqn))
@@ -719,9 +1302,15 @@ class _Propagator:
         failures make the assume inert, which is always sound."""
         if isinstance(atom, ir.Literal):
             try:
-                return _value_to_interval(atom.val, atom.aval.shape)
+                box = _value_to_interval(atom.val, atom.aval.shape)
             except (iv.IntervalError, ir.TranscriptionError):
                 return None
+            if self.semantics == "ieee":
+                # the same haze read() applies: assume classification must
+                # see the interval the judging paths see (a subnormal-band
+                # bound is then not a finite point and cannot narrow)
+                box = iv.subnormal_haze(box)[0]
+            return box
         return self.env.get(atom.id)
 
     def _unsatisfiable(
@@ -872,6 +1461,25 @@ class _Propagator:
                 f"comparison {prim!r} with {len(producer.invars)} operand(s)"
             )
             return
+        if self.semantics == "ieee":
+            # re-attack U2's swept surface: assume classification consumes
+            # the comparison EQUATION directly, bypassing the guarded
+            # comparison transfer — the same invariant must be enforced
+            # here too. A non-f64-float comparison must neither narrow,
+            # nor certify satisfiability, nor raise the unsatisfiable-
+            # precondition oracle (a "definitely false" f32-band
+            # comparison can be TRUE at runtime under per-dtype DAZ:
+            # measured float32(1e-45) == float32(1e-40) is True) — inert
+            # with the gap quoted is the only sound posture.
+            bad = _non_f64_float_dtypes(producer.invars)
+            if bad:
+                dropped.append(
+                    f"ieee mode models binary64 only; {'/'.join(bad)} "
+                    f"comparison semantics (incl. per-dtype subnormal "
+                    f"flush) are not modelled — no narrowing, no "
+                    f"satisfiability claim"
+                )
+                return
         a, b = producer.invars
         box_a, box_b = self._quiet_interval(a), self._quiet_interval(b)
         point_a, point_b = _finite_point(box_a), _finite_point(box_b)
@@ -894,6 +1502,9 @@ class _Propagator:
                 (lo, hi) == iv.BOOL_FALSE
                 for lo, hi in zip(result.los, result.his)
             ):
+                # under ieee a NaN side would ALSO falsify the comparison,
+                # so the definitely-false refusal stands with or without a
+                # maybe-NaN flag on either side
                 self._unsatisfiable(
                     where,
                     f"constant comparison {_render_bound(box_a)} "
@@ -908,6 +1519,17 @@ class _Propagator:
                     f"(harness defect; nothing was verified)",
                 )
                 return
+            if self.semantics == "ieee" and (
+                self.read_flag(a) or self.read_flag(b)
+            ):
+                # the interval parts compare definitely true, but a NaN
+                # side would falsify — "definitely true" cannot be claimed
+                dropped.append(
+                    "a comparison side may be NaN under ieee semantics "
+                    "(NaN falsifies the comparison) — the assumed "
+                    "comparison is not certified true; dropped"
+                )
+                return
             dropped.append(
                 "both comparison sides are point intervals — nothing to "
                 "narrow (the assumed comparison is definitely true)"
@@ -916,18 +1538,36 @@ class _Propagator:
         if not point_a and not point_b:
             # audit F6: a constant-but-not-finite bound (±inf, NaN, an
             # undecodable literal) is not a varying side — the disclosed
-            # reason must name the actual shape
-            if _nonfinite_const(a, box_a) or _nonfinite_const(b, box_b):
+            # reason must name the actual shape. Under ieee a subnormal-
+            # band literal is hazed to a non-point for the same reason,
+            # and gets its own truthful reason.
+            if self.semantics == "ieee" and (
+                _subnormal_const_literal(a) or _subnormal_const_literal(b)
+            ):
+                dropped.append(_SUBNORMAL_BOUND_REASON)
+            elif _nonfinite_const(a, box_a) or _nonfinite_const(b, box_b):
                 dropped.append(_NONFINITE_BOUND_REASON)
             else:
                 dropped.append(_RELATIONAL_REASON)
             return
         if point_a:
-            target_atom, target_box, bound = b, box_b, box_a
+            target_atom, target_box, bound, bound_atom = b, box_b, box_a, a
             cmp = _CMP_FLIP[prim]  # cmp(k, v) === flipped-cmp(v, k)
         else:
-            target_atom, target_box, bound = a, box_a, box_b
+            target_atom, target_box, bound, bound_atom = a, box_a, box_b, b
             cmp = prim
+        if self.semantics == "ieee" and self.read_flag(bound_atom):
+            # a maybe-NaN bound: if the bound IS NaN the true assumed
+            # region is empty (NaN falsifies every _ASSUME_CMPS
+            # comparison), so a half-space built from its interval could
+            # certify a vacuous precondition — no certified half-space
+            # represents a maybe-NaN bound; inert is the sound posture
+            dropped.append(
+                "the comparison bound may be NaN under ieee semantics "
+                "(its producer carries maybe-NaN) — no certified "
+                "half-space represents it"
+            )
+            return
         if not isinstance(target_atom, ir.Var):
             dropped.append(
                 "the varying comparison side is a literal, not an "
@@ -1034,7 +1674,23 @@ class _Propagator:
                 lo == hi == k
                 for lo, hi, k in zip(target_box.los, target_box.his, ks)
             )
+        if self.semantics == "ieee" and self.read_flag(target_atom):
+            # a maybe-NaN target: NaN falsifies the assumed comparison, so
+            # the predicate is NOT definitely true over the value set even
+            # when the interval part is — the audit-F8 self-certification
+            # channel stays closed for flagged targets
+            def_true = False
         self.env[target_atom.id] = new
+        if self.semantics == "ieee" and self.nan.get(target_atom.id):
+            # an assumed-true comparison excludes NaN (NaN would falsify
+            # it), so the narrowed target's maybe-NaN flag is soundly
+            # cleared — the clearing is a judgement call the spec flags;
+            # disclosed here so no verdict rests on it silently
+            self.nan[target_atom.id] = False
+            self.notes.append(
+                f"assume cleared maybe-NaN on var {target_atom.id} at "
+                f"{where}: an assumed-true comparison excludes NaN"
+            )
         narrowed.append(
             (
                 target_atom.id,
@@ -1046,15 +1702,42 @@ class _Propagator:
                 # exact), OR the predicate is definitely true over the box
                 # (audit F8). Everything else — a cutting assume on a
                 # transfer output — is an over-approximation (audit F7).
-                target_atom.id in self.exact or def_true,
+                # The decision is the shared primitive in
+                # stelling.exactness (module-attr call, so tests can pin
+                # the routing). Under ieee, a STRICT certification
+                # additionally needs a flush-robust witness: a strict
+                # region whose only content is subnormal may be empty at
+                # runtime on a DAZ target (its members read as 0, which
+                # the strict comparison excludes) — without one the
+                # precondition stays uncertified (indeterminate, never
+                # definite).
+                exactness.certifies_nonemptiness(
+                    self.exact, target_atom.id, definitely_true=def_true
+                )
+                and not (
+                    self.semantics == "ieee"
+                    and cmp in ("gt", "lt")
+                    and not def_true
+                    and not all(
+                        _strict_flush_witness(cmp, k, nlo, nhi)
+                        for k, nlo, nhi in zip(ks, new.los, new.his)
+                    )
+                ),
             )
         )
 
-    def run(self, jaxpr: ir.Jaxpr, consts, args) -> list[iv.IntervalArray]:
+    def run(
+        self, jaxpr: ir.Jaxpr, consts, args, arg_flags=None
+    ) -> list[iv.IntervalArray]:
+        ieee = self.semantics == "ieee"
         for var, c in zip(jaxpr.constvars, consts):
             if isinstance(c, iv.IntervalArray):
                 self.env[var.id] = c  # pre-boxed const: provenance unknown,
-                continue  # so non-exact (conservative — audit F7)
+                if ieee:  # so non-exact (conservative — audit F7) and,
+                    # under ieee, maybe-NaN (a box of unknown provenance
+                    # carries no NaN-freedom claim)
+                    self.nan[var.id] = True
+                continue
             try:
                 box = _value_to_interval(c, var.aval.shape)
             except (iv.IntervalError, ir.TranscriptionError) as e:
@@ -1062,14 +1745,22 @@ class _Propagator:
                 # (audit-gate finding 1 — a NaN closure const killed the run)
                 self.notes.append(f"const outside the domain ({e}); ⊤")
                 self.env[var.id] = iv.top(var.aval.shape)
+                if ieee:  # ⊤ under ieee is maybe-NaN
+                    self.nan[var.id] = True
                 continue
+            if ieee:
+                # DAZ flushes inputs: constants entering ieee propagation
+                # are subnormal-hazed; a band const stops being a point,
+                # so mark_if_point below withholds exactness by itself
+                box = iv.subnormal_haze(box)[0]
             self.env[var.id] = box
             # exact iff the decoded box is a point per element — a >2**53
             # int decodes to a genuine bracket, which is NOT its value set
-            if all(lo == hi for lo, hi in zip(box.los, box.his)):
-                self.exact.add(var.id)
-        for var, a in zip(jaxpr.invars, args):
+            self.exact.mark_if_point(var.id, box.los, box.his)
+        for i, (var, a) in enumerate(zip(jaxpr.invars, args)):
             self.env[var.id] = a
+            if ieee and arg_flags is not None and arg_flags[i]:
+                self.nan[var.id] = True
         # assume classification looks up the predicate's producing equation
         # at the CURRENT jaxpr level only; sub-jaxpr runs (transparent
         # wrappers, cond branches) get their own map, restored on exit —
@@ -1094,17 +1785,32 @@ class _Propagator:
             ins = [self.read(a) for a in eqn.invars]
             if inner is not None and len(inner.jaxpr.invars) == len(ins):
                 self.counter.record_transparent(eqn.primitive)
+                ieee = self.semantics == "ieee"
+                in_flags = (
+                    [self.read_flag(a) for a in eqn.invars] if ieee else None
+                )
                 outer_env = self.env  # isolated scope, as for cond branches
                 outer_exact = self.exact
+                outer_nan = self.nan
                 self.env = {}
-                self.exact = set()
+                self.exact = exactness.ExactSet()
+                self.nan = {}
+                out_flags = None
                 try:
-                    outs = self.run(inner.jaxpr, inner.consts, ins)
+                    outs = self.run(inner.jaxpr, inner.consts, ins, in_flags)
+                    if ieee:
+                        out_flags = [
+                            self.read_flag(o) for o in inner.jaxpr.outvars
+                        ]
                 finally:
                     self.env = outer_env
                     self.exact = outer_exact
+                    self.nan = outer_nan
                 for out, val in zip(eqn.outvars, outs):
                     self.env[out.id] = val
+                if ieee:
+                    for out, f in zip(eqn.outvars, out_flags):
+                        self.nan[out.id] = f
                 return
             self.notes.append(
                 f"transparent {eqn.primitive!r}: arity mismatch or no sub-jaxpr; ⊤"
@@ -1132,11 +1838,26 @@ class _Propagator:
                 self.mark_unreached(eqn)
                 self.top_out(eqn)
                 return
+            ieee = self.semantics == "ieee"
+            op_flags = (
+                [self.read_flag(a) for a in eqn.invars[1:]] if ieee else None
+            )
+            # under ieee the index invariant is enforced, not assumed
+            # (the F1/U2 lesson): jax's cond index is always int32, so a
+            # FLOAT-dtyped index is out-of-contract hand-built IR whose
+            # value could flush per-dtype — its interval is untrusted and
+            # every branch is joined; same for a maybe-NaN-flagged index
+            index_untrusted = ieee and (
+                self.read_flag(eqn.invars[0])
+                or eqn.invars[0].aval.dtype not in _SELECTOR_DTYPES
+            )
             index, operands = ins[0], ins[1:]
             last = len(branches) - 1
             w_lo, w_hi = index.los[0], index.his[0]
-            if w_lo == -math.inf or w_hi == math.inf:
-                possible = set(range(last + 1))  # ⊤ index: any branch
+            if w_lo == -math.inf or w_hi == math.inf or index_untrusted:
+                # ⊤ index, or an untrusted (flagged / non-int) index
+                # under ieee: any branch
+                possible = set(range(last + 1))
             else:
                 lo_i, hi_i = int(math.floor(w_lo)), int(math.floor(w_hi))
                 possible = {i for i in range(last + 1) if lo_i <= i <= hi_i}
@@ -1163,7 +1884,9 @@ class _Propagator:
             # check (audit finding 6)
             outer_env = self.env
             outer_exact = self.exact
+            outer_nan = self.nan
             results = []
+            branch_flags = []  # ieee: per-branch outvar flags
             # every branch here is possibly-untaken from the analysis's
             # view (the selector interval admits it, nothing more): an
             # unsatisfiable assume inside is a branch-scoped vacuity, not
@@ -1176,14 +1899,28 @@ class _Propagator:
                 for i in sorted(possible):
                     b = branches[i]
                     self.env = {}
-                    self.exact = set()
-                    results.append(self.run(b.jaxpr, list(b.consts), operands))
+                    self.exact = exactness.ExactSet()
+                    self.nan = {}
+                    results.append(
+                        self.run(b.jaxpr, list(b.consts), operands, op_flags)
+                    )
+                    if ieee:
+                        branch_flags.append(
+                            [self.read_flag(o) for o in b.jaxpr.outvars]
+                        )
             finally:
                 self.branch_depth -= 1
                 self.env = outer_env
                 self.exact = outer_exact
+                self.nan = outer_nan
             for j, out in enumerate(eqn.outvars):
                 self.env[out.id] = iv.join([r[j] for r in results])
+                if ieee:
+                    # the output is SOME branch's output whatever the
+                    # index value is (out-of-range selects the final
+                    # branch), so the join's flag is the OR over possible
+                    # branches — the index's own flag does not propagate
+                    self.nan[out.id] = any(f[j] for f in branch_flags)
             return
 
         if eqn.primitive == "stelling_assume":
@@ -1193,6 +1930,11 @@ class _Propagator:
             # narrowing is a superset of the predicate's value under the
             # assumption). The constraint semantics differ by mode.
             ins = [self.read(a) for a in eqn.invars]
+            in_flags = (
+                [self.read_flag(a) for a in eqn.invars]
+                if self.semantics == "ieee"
+                else None
+            )
             where = eqn.source_info[-1] if eqn.source_info else "unknown location"
             if self.assume_mode == "constrain" and eqn.invars:
                 self._assume_constrain(eqn, where)
@@ -1204,11 +1946,14 @@ class _Propagator:
                     f"assume constraint DROPPED (inert in MVP propagation) at {where}: "
                     f"VERIFIED proves a superset; UNKNOWN may be confounded by this drop"
                 )
-            for out, val in zip(eqn.outvars, ins):
+            for i, (out, val) in enumerate(zip(eqn.outvars, ins)):
                 self.env[out.id] = val
+                if in_flags is not None:
+                    self.nan[out.id] = in_flags[i]
             return
 
-        entry = TRANSFERS.get(eqn.primitive)
+        ieee = self.semantics == "ieee"
+        entry = (IEEE_TRANSFERS if ieee else TRANSFERS).get(eqn.primitive)
         if entry is None:
             self.counter.record_unknown(eqn.primitive)
             self.mark_unreached(eqn)
@@ -1217,19 +1962,25 @@ class _Propagator:
 
         transfer, tier = entry
         ins = [self.read(a) for a in eqn.invars]
+        in_flags = [self.read_flag(a) for a in eqn.invars] if ieee else None
         try:
-            outs = transfer(eqn, params, ins)
+            result = (
+                transfer(eqn, params, ins, in_flags)
+                if ieee
+                else transfer(eqn, params, ins)
+            )
         except iv.IntervalError as e:
             # a transfer whose domain doesn't cover this legal form (rank
             # broadcasting, batched selectors, …) DECLINES: sound ⊤
             # degradation with the reason quoted — the registered
             # degrade-don't-crash posture (second audit, FRAGILE 5; the
-            # shape guards previously killed the whole analysis here)
+            # shape guards previously killed the whole analysis here).
+            # Under ieee, top_out marks the outputs maybe-NaN.
             self.notes.append(f"{eqn.primitive!r} declined this form: {e}; ⊤")
             self.counter.record_unknown(eqn.primitive)
             self.top_out(eqn)
             return
-        if outs is None:  # a known transfer declining this configuration
+        if result is None:  # a known transfer declining this configuration
             self.notes.append(
                 f"{eqn.primitive!r} has no sound rule for params "
                 f"{ {k: v for k, v in params.items() if not isinstance(v, ir.ClosedJaxpr)} }; ⊤"
@@ -1237,6 +1988,7 @@ class _Propagator:
             self.counter.record_unknown(eqn.primitive)
             self.top_out(eqn)
             return
+        outs, out_flags = result if ieee else (result, None)
         self.counter.record_known(eqn.primitive)
         self.used[eqn.primitive] = tier
         if tier == TIER_SOUND_LIBM:
@@ -1249,6 +2001,25 @@ class _Propagator:
             )
         if eqn.primitive == "stelling_assert":
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
+            if ieee and in_flags and in_flags[0] and status != "unknown":
+                # the predicate VALUE arrived flagged maybe-NaN (a decline
+                # artifact ⊤ reaching the assert, or a flagged selector
+                # path): a bool cannot BE NaN, so the flag marks untrusted
+                # provenance — neither definite face is claimed
+                where = (
+                    eqn.source_info[-1] if eqn.source_info else "unknown location"
+                )
+                self.notes.append(
+                    f"obligation withheld from a definite status at {where}: "
+                    f"the predicate value carries maybe-NaN under ieee "
+                    f"semantics (its producer was declined/unmodeled) — "
+                    f"judged unknown"
+                )
+                status = "unknown"
+                detail = (
+                    "predicate value carries maybe-NaN under ieee semantics "
+                    "(see notes); no definite status is claimed"
+                )
             if status == "violated-over-set" and self.uncertified:
                 # audit F7: a definite violation judged while an
                 # UNCERTIFIED-precondition constraint is in force is
@@ -1284,6 +2055,22 @@ class _Propagator:
             )
         if eqn.primitive == "stelling_nonvacuity":
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
+            if ieee and in_flags and in_flags[0] and status != "unknown":
+                # same posture as the assert above: a maybe-NaN membership
+                # condition supports neither the checked nor the FAILED face
+                where = (
+                    eqn.source_info[-1] if eqn.source_info else "unknown location"
+                )
+                self.notes.append(
+                    f"nonvacuity condition withheld from a definite status "
+                    f"at {where}: the membership predicate carries "
+                    f"maybe-NaN under ieee semantics — judged unknown"
+                )
+                status = "unknown"
+                detail = (
+                    "membership condition carries maybe-NaN under ieee "
+                    "semantics (see notes); no definite status is claimed"
+                )
             if status == "violated-over-set" and self.uncertified:
                 # audit F9: the definite FAILED stamp sentence is the same
                 # claim class the assert withholding guards — a membership
@@ -1317,16 +2104,30 @@ class _Propagator:
                     source_info=eqn.source_info,
                 )
             )
-        for out, val in zip(eqn.outvars, outs):
+        for i, (out, val) in enumerate(zip(eqn.outvars, outs)):
             self.env[out.id] = val
+            if ieee:
+                self.nan[out.id] = out_flags[i]
         if eqn.primitive == "stelling_any":
             # the ONE transfer whose output box is exact: the declared
             # closed box IS the declared value set (no rounding at
             # declaration). Every other transfer output stays non-exact
             # (audit F7: rounding pads and correlation-blind arithmetic
-            # can inflate a box past the true image).
+            # can inflate a box past the true image). Under ieee, a
+            # declaration the subnormal haze CHANGED is not exact: its
+            # as-consumed value set is flush-indeterminate (the hazed box
+            # is a sound hull of both semantics, not the declared set),
+            # so it must not certify assume-satisfiability.
+            if ieee:
+                raw = iv.from_bounds(
+                    tuple(params["shape"]),
+                    float(params["lo"]),
+                    float(params["hi"]),
+                )
+                if iv.subnormal_haze(raw)[1]:
+                    return
             for out in eqn.outvars:
-                self.exact.add(out.id)
+                self.exact.mark_declared(out.id)
 
 
 def _check_assume_mode(assume_mode: str) -> None:
@@ -1334,6 +2135,45 @@ def _check_assume_mode(assume_mode: str) -> None:
         raise ValueError(
             f"assume_mode must be one of {_ASSUME_MODES}, got {assume_mode!r}"
         )
+
+
+_SEMANTICS_MODES = ("real", "ieee")
+_DOMAINS = ("interval",)
+
+# The mechanical guard on the domain dial: quoted verbatim when a
+# tightened (non-interval) domain is requested under semantics="real".
+TIGHTENED_DOMAIN_REAL_REFUSAL = (
+    "a tightened domain under semantics='real' is refused outright: "
+    "tightening ℝ arithmetic without float semantics converts accidental "
+    "UNKNOWNs into false VERIFIEDs (the interval slack was masking the "
+    "ℝ-vs-float gap, not modeling it) — tightened domains run only under "
+    "semantics='ieee'"
+)
+
+
+def _check_semantics(semantics: str) -> None:
+    if semantics not in _SEMANTICS_MODES:
+        raise ValueError(
+            f"semantics must be one of {_SEMANTICS_MODES}, got {semantics!r}"
+        )
+
+
+def _check_domain(domain: str, semantics: str) -> None:
+    """Guard 1: ``"interval"`` is the only registered domain. A
+    non-interval value always raises; under ``semantics="real"`` the
+    refusal carries the rationale a future tightened domain must not be
+    allowed to erode (:data:`TIGHTENED_DOMAIN_REAL_REFUSAL`)."""
+    if domain in _DOMAINS:
+        return
+    if semantics == "real":
+        raise ValueError(
+            f"domain must be one of {_DOMAINS} (the only registered "
+            f"domain), got {domain!r}. {TIGHTENED_DOMAIN_REAL_REFUSAL}"
+        )
+    raise ValueError(
+        f"domain must be one of {_DOMAINS} (the only registered domain), "
+        f"got {domain!r}"
+    )
 
 
 def interval_env(
@@ -1372,10 +2212,21 @@ def interval_env(
 
 
 def propagate(
-    closed: ir.ClosedJaxpr, *, assume_mode: str = "constrain"
+    closed: ir.ClosedJaxpr,
+    *,
+    semantics: str = "real",
+    assume_mode: str = "constrain",
+    domain: str = "interval",
 ) -> Propagation:
     """Forward-propagate the declared boxes through a transcribed query and
     judge every ``stelling_assert`` obligation.
+
+    ``semantics="real"`` (the default) judges obligations in exact real
+    arithmetic — byte-identical to the pre-dial behavior;
+    ``semantics="ieee"`` judges them about the traced program's IEEE
+    binary64 round-to-nearest execution (see the module docstring). Any
+    other value raises :class:`ValueError`. The returned
+    :class:`Propagation` records which semantics ran.
 
     ``assume_mode="constrain"`` (the default) narrows the propagated
     domain at each soundly-constrainable ``stelling_assume`` (see the
@@ -1383,20 +2234,36 @@ def propagate(
     drop-every-assume MVP behavior byte-identically (notes, coverage,
     env) — the comparability control for the vacuity instrument. Any
     other value raises :class:`ValueError`.
+
+    ``domain="interval"`` is the only registered abstract domain. Any
+    other value raises :class:`ValueError`; under ``semantics="real"``
+    the refusal quotes why a tightened domain may never run there
+    (:data:`TIGHTENED_DOMAIN_REAL_REFUSAL`).
     """
+    _check_semantics(semantics)
     _check_assume_mode(assume_mode)
-    p = _Propagator(assume_mode)
+    _check_domain(domain, semantics)
+    p = _Propagator(assume_mode, semantics)
     if closed.jaxpr.invars:
         raise ir.TranscriptionError(
             "propagate expects a self-contained harness query (inputs declared "
             f"via any_array), got {len(closed.jaxpr.invars)} free invar(s)"
         )
     p.run(closed.jaxpr, list(closed.consts), [])
+    assumptions = set(p.assumptions)
+    if semantics == "ieee":
+        # the mode-wide stamped assumptions: how ieee endpoints are
+        # computed and what their soundness relies on, and the
+        # subnormal-band indeterminacy (flush-vs-gradual is
+        # target-dependent; band outcomes are never definite)
+        assumptions.add(iv.IEEE_ENDPOINT_ASSUMPTION)
+        assumptions.add(iv.SUBNORMAL_INDETERMINACY_ASSUMPTION)
     return Propagation(
         obligations=tuple(p.obligations),
         nonvacuity_checks=tuple(p.nonvacuity_checks),
         coverage=p.counter.freeze(),
         transfers_used=tuple(sorted(p.used.items())),
-        assumptions=tuple(sorted(p.assumptions)),
+        assumptions=tuple(sorted(assumptions)),
         notes=tuple(p.notes),
+        semantics=semantics,
     )

@@ -34,9 +34,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 
+from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
 from stelling.propagate import ObligationReport, Propagation
 
 __all__ = [
+    "SEMANTICS_IEEE",
+    "SEMANTICS_REAL",
     "SolverStamp",
     "Stamp",
     "StampError",
@@ -47,6 +50,13 @@ __all__ = [
 ]
 
 ARITHMETIC_MODE_INTERVAL = "interval/f64/outward-1ulp (stelling.interval)"
+
+# ieee-mode representation: endpoints are native binary64 results (no
+# outward rounding — the float value itself is bracketed exactly; libm ops
+# keep their 1-ulp outward brackets) plus a per-array maybe-NaN flag.
+ARITHMETIC_MODE_INTERVAL_IEEE = (
+    "interval/f64/native-endpoints+maybe-nan (stelling.interval)"
+)
 
 # The representation names how brackets are computed; the SEMANTICS names
 # which arithmetic the verdict is *about*. They are different fields because
@@ -67,6 +77,17 @@ SEMANTICS_REAL = (
 REAL_CONVENTION_ASSUMPTION = (
     "closed-real-interval endpoint convention 0*inf = 0 — a consequence of "
     "'real' semantics; unsound under IEEE semantics, where inf is a value"
+)
+
+# The dial's second position. An ieee verdict claims facts about the float
+# execution itself: overflow saturates to the value ±inf, NaN-producing
+# corners are tracked, and 0·∞ = 0 does NOT ride (the
+# REAL_CONVENTION_ASSUMPTION line must never appear in an ieee stamp).
+SEMANTICS_IEEE = (
+    "ieee (IEEE-754 binary64): obligations judged about the traced "
+    "program's IEEE binary64 round-to-nearest float execution over the "
+    "declared sets; the exact-real (ℝ) value is NOT what is claimed — a "
+    "predicate can hold in floats and fail in ℝ, and vice versa"
 )
 
 
@@ -344,23 +365,41 @@ def make_verdict(
             f"nonvacuity {nonvacuity.split(' — ')[0]}: this VERIFIED may be "
             f"vacuous — the declared set is not tied to the incident's data",
         )
+    # the stamp says which arithmetic the verdict is ABOUT, from the
+    # propagation that ran — never from a guess. The 0·∞ = 0 convention is
+    # a consequence of ℝ semantics and must NOT ride in an ieee stamp; the
+    # ieee stamp carries the native-binary64-endpoint assumption instead.
+    if propagation.semantics == "ieee":
+        semantics = SEMANTICS_IEEE
+        arithmetic_mode = ARITHMETIC_MODE_INTERVAL_IEEE
+        convention = IEEE_ENDPOINT_ASSUMPTION
+        solver_reason = (
+            "no solver invoked: every obligation was judged by native-"
+            "binary64 interval arithmetic alone (ieee semantics refuses "
+            "solver escalation: the SMT backends emit over the reals)"
+        )
+    else:
+        semantics = SEMANTICS_REAL
+        arithmetic_mode = ARITHMETIC_MODE_INTERVAL
+        convention = REAL_CONVENTION_ASSUMPTION
+        solver_reason = (
+            "no solver invoked: every obligation was judged by outward-rounded "
+            "interval arithmetic alone"
+        )
     stamp = Stamp(
         stelling_version=stelling_version,
         jax_version=jax_version,
         query_content_hash=closed.content_hash(),
-        arithmetic_mode=ARITHMETIC_MODE_INTERVAL,
-        semantics=SEMANTICS_REAL,
+        arithmetic_mode=arithmetic_mode,
+        semantics=semantics,
         precision_config=precision_config,
         device_class=device_class,
-        solver=solver_absent(
-            "no solver invoked: every obligation was judged by outward-rounded "
-            "interval arithmetic alone"
-        ),
+        solver=solver_absent(solver_reason),
         nonvacuity=nonvacuity,
         transfer_tiers=propagation.transfers_used,
         transfer_provenance=tuple((p, "core") for p, _ in propagation.transfers_used),
         assumptions=tuple(
-            sorted({*propagation.assumptions, REAL_CONVENTION_ASSUMPTION})
+            sorted({*propagation.assumptions, convention})
         ),
         coverage=propagation.coverage.summary(),
     )

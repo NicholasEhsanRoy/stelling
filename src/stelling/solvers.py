@@ -62,11 +62,14 @@ from stelling.obligation import (
     slice_unknown_obligations,
     witness_is_valid,
 )
+from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
 from stelling.propagate import ObligationReport, Propagation, interval_env
 from stelling.smt import Script, emit
 from stelling.verdict import (
     ARITHMETIC_MODE_INTERVAL,
+    ARITHMETIC_MODE_INTERVAL_IEEE,
     REAL_CONVENTION_ASSUMPTION,
+    SEMANTICS_IEEE,
     SEMANTICS_REAL,
     SolverStamp,
     Stamp,
@@ -113,6 +116,19 @@ CONSTRAINED_ASSUME_REFUSAL = (
     "could violate the precondition while the verdict claims "
     "conditionality; escalation declines until constrained bounds can be "
     "emitted faithfully"
+)
+
+# The ieee-mode refusal, quoted verbatim in every declined obligation's
+# detail and in the escalation notes. The SMT backends emit over the reals
+# (QF_LRA/QF_NRA): an `unsat` there proves the ℝ obligation, not the
+# binary64 one, and stamping it against an ieee-semantics claim would be
+# exactly the ℝ-vs-float confusion the semantics dial exists to prevent.
+IEEE_SEMANTICS_REFUSAL = (
+    "ieee semantics: the SMT backends emit over the reals (QF_LRA/QF_NRA), "
+    "which model neither binary64 rounding nor overflow-to-inf nor NaN — "
+    "escalating would prove the ℝ obligation under an ieee-stamped claim; "
+    "escalation declines until a float-semantics emission ships as its own "
+    "audited build"
 )
 
 OB_DISCHARGED = "discharged"
@@ -186,21 +202,28 @@ class EmissionInfidelityError(RuntimeError):
 
 
 class MispairedEscalationError(RuntimeError):
-    """A constrained propagation was paired with an escalation that
-    performed solver work.
+    """A propagation whose escalation is refused outright was paired with
+    an escalation that performed solver work.
 
-    The escalation-refusal invariant ("a constrained propagation never
+    Two refusal classes share this shape. (1) A CONSTRAINED propagation:
+    the escalation-refusal invariant ("a constrained propagation never
     reaches a solver") is enforced twice, anti-correlated
     (SOUNDNESS.md: one invariant, two mechanisms): once in
-    :func:`escalate` against the propagation it receives, and once here
-    at verdict assembly against the propagation being STAMPED. The
+    :func:`escalate` against the propagation it receives, and once at
+    verdict assembly against the propagation being STAMPED. The
     second mechanism catches the mode-mixed caller bypass (escalate on
     an inert propagation, assemble against a constrained one — audit
     F3), where a witness violating the stamped precondition would mint
-    a REFUTED that does not refute the conditional claim. A constrained
-    propagation may only ever pair with a refusal-shaped escalation:
-    zero invocations, zero spawns, zero witnesses, every record
-    UNKNOWN.
+    a REFUTED that does not refute the conditional claim. (2) An
+    IEEE-SEMANTICS propagation: the SMT backends emit over the reals, so
+    solver outcomes prove the ℝ obligation — stamping them against an
+    ieee-semantics claim (escalate on the real-mode propagation,
+    assemble against the ieee one) would mint an ℝ-proved verdict under
+    a float-semantics stamp; same two-mechanism shape
+    (:data:`IEEE_SEMANTICS_REFUSAL` in :func:`escalate`, this gate at
+    assembly). In both classes the propagation may only ever pair with
+    a refusal-shaped escalation: zero invocations, zero spawns, zero
+    witnesses, every record UNKNOWN.
     """
 
 
@@ -292,11 +315,19 @@ class ObligationEscalation:
 @dataclass(frozen=True)
 class Escalation:
     """All escalation outcomes for one propagated query, plus the ledger
-    the invocations were recorded in as they happened."""
+    the invocations were recorded in as they happened.
+
+    ``semantics`` records which semantics the propagation this escalation
+    was produced from ran under — :func:`make_solver_verdict` refuses to
+    stamp an escalation against a propagation of the other semantics in
+    EITHER direction (the symmetric mispairing gate): obligation details
+    and refusal reasons would be misattributed across the semantics
+    boundary."""
 
     records: tuple[ObligationEscalation, ...]
     notes: tuple[str, ...] = ()
     ledger: _Ledger = field(default_factory=_Ledger)
+    semantics: str = "real"
 
     @property
     def invocations(self) -> tuple[SolverStamp, ...]:
@@ -1098,6 +1129,12 @@ def escalate(
     and solver failures degrade to UNKNOWN with quoted reasons; only
     :exc:`SolverDisagreement` and :exc:`EmissionInfidelityError` raise.
 
+    A propagation that ran under ``semantics="ieee"`` declines escalation
+    wholly (:data:`IEEE_SEMANTICS_REFUSAL`): the SMT backends emit over
+    the reals, and an answer there proves the ℝ obligation, not the
+    binary64 one an ieee verdict would claim. Zero invocations; the
+    empty ledger is the derived record of absence.
+
     A propagation that CONSTRAINED any assume declines escalation wholly
     (:data:`CONSTRAINED_ASSUME_REFUSAL` — the v1 refusal): the emitted
     problem would not respect the assumed precondition, and a sat witness
@@ -1108,7 +1145,30 @@ def escalate(
     """
     unknown = [o for o in propagation.obligations if o.status == "unknown"]
     if not unknown:
-        return Escalation(records=(), notes=())
+        return Escalation(
+            records=(), notes=(), semantics=propagation.semantics
+        )
+    if propagation.semantics == "ieee":
+        # guard 2, mechanism 1: an ieee-mode propagation refuses solver
+        # escalation wholly — the refusal is semantic and holds whether
+        # or not anything is installed, so it is checked before backend
+        # discovery. No invocation occurs; the fresh (empty) ledger IS
+        # the record of absence (derived, never written).
+        return Escalation(
+            records=tuple(
+                ObligationEscalation(
+                    index=o.index,
+                    outcome=OB_UNKNOWN,
+                    detail=f"escalation declined: {IEEE_SEMANTICS_REFUSAL}",
+                    invocations=(),
+                    witness=None,
+                    notes=(),
+                )
+                for o in unknown
+            ),
+            notes=(IEEE_SEMANTICS_REFUSAL,),
+            semantics=propagation.semantics,
+        )
     if propagation.coverage.constrained:
         # checked before solver availability: the refusal is semantic and
         # holds whether or not anything is installed, so the disclosed
@@ -1128,6 +1188,7 @@ def escalate(
                 for o in unknown
             ),
             notes=(CONSTRAINED_ASSUME_REFUSAL,),
+            semantics=propagation.semantics,
         )
     backends, missing = _backends_for(config)
     if not backends:
@@ -1146,6 +1207,7 @@ def escalate(
                 for o in unknown
             ),
             notes=(INSTALL_HINT,),
+            semantics=propagation.semantics,
         )
     env = interval_env(closed)
     ledger = _Ledger()
@@ -1185,7 +1247,10 @@ def escalate(
                 notes=(f"assert #{item.index}: {reason}",),
             )
         records.append(record)
-    return Escalation(records=tuple(records), notes=(), ledger=ledger)
+    return Escalation(
+        records=tuple(records), notes=(), ledger=ledger,
+        semantics=propagation.semantics,
+    )
 
 
 # -- solver-assisted verdict assembly -----------------------------------------
@@ -1249,6 +1314,66 @@ def make_solver_verdict(
     stamped = sum(1 for s in ledger_stamps if s.invoked)
     if escalation.ledger.spawns != stamped:
         raise ProvenanceError(escalation.ledger.spawns, stamped, ledger_stamps)
+
+    # -- the symmetric semantics-pairing gate: an escalation may only be
+    # stamped against a propagation of the semantics it was produced
+    # from, in EITHER direction. Forward mix (ieee propagation +
+    # real-produced escalation): solver outcomes over the reals must
+    # never be stamped against a float-semantics claim. Reverse mix
+    # (real propagation + ieee-produced refusal escalation): the
+    # obligation details would quote the ieee refusal under a real stamp
+    # — a misattribution, refused the same way. A completely EMPTY
+    # escalation (no records, no notes, no spawns, no stamps — the
+    # nothing-to-escalate shape) is exempt: it contributes nothing a
+    # semantics mismatch could misattribute, and the absence reason is
+    # derived from the propagation's own semantics below.
+    if (
+        escalation.records
+        or escalation.notes
+        or escalation.ledger.spawns
+        or ledger_stamps
+    ) and escalation.semantics != propagation.semantics:
+        raise MispairedEscalationError(
+            f"mispaired escalation: the propagation being stamped ran "
+            f"under semantics='{propagation.semantics}', but the supplied "
+            f"escalation was produced from a "
+            f"semantics='{escalation.semantics}' propagation — obligation "
+            f"details and refusal reasons would be misattributed across "
+            f"the semantics boundary; refusing to emit. Assemble the "
+            f"verdict from the propagation the escalation was actually "
+            f"produced from."
+        )
+
+    # -- the ieee mispairing gate: the second, anti-correlated mechanism
+    # of the ieee escalation refusal (guard 2). escalate() refuses against
+    # the propagation IT receives; this gate refuses against the
+    # propagation being STAMPED, catching the mode-mixed caller bypass —
+    # kept alongside the semantics-pairing gate above (which relies on
+    # the escalation's own semantics record; this one is derived from the
+    # WORK the escalation carries, so a forged/buggy semantics field
+    # cannot smuggle ℝ solver outcomes under an ieee stamp).
+    if propagation.semantics == "ieee" and (
+        escalation.ledger.spawns
+        or ledger_stamps
+        or any(
+            r.invocations or r.witness is not None or r.outcome != OB_UNKNOWN
+            for r in escalation.records
+        )
+    ):
+        n_wit = sum(1 for r in escalation.records if r.witness is not None)
+        raise MispairedEscalationError(
+            f"mispaired escalation: the propagation being stamped ran "
+            f"under semantics='ieee', but the supplied escalation carries "
+            f"solver work ({escalation.ledger.spawns} spawn(s), "
+            f"{len(ledger_stamps)} ledger stamp(s), {n_wit} witness(es)) — "
+            f"it cannot have been produced from this propagation, whose "
+            f"escalation is refused outright ({IEEE_SEMANTICS_REFUSAL}). "
+            f"The SMT backends emit over the reals; their outcomes prove "
+            f"the ℝ obligation and must not be stamped against an "
+            f"ieee-semantics claim; refusing to emit. Assemble the verdict "
+            f"from the propagation the escalation was actually produced "
+            f"from."
+        )
 
     # -- the mispairing gate: the second, anti-correlated mechanism of the
     # constrained-assume refusal (audit F3). escalate() refuses against
@@ -1335,10 +1460,20 @@ def make_solver_verdict(
         solver = ledger_stamps
     else:
         if not any(o.status == "unknown" for o in propagation.obligations):
-            reason = (
-                "no solver invoked: every obligation was decided by outward-rounded "
-                "interval arithmetic alone; escalation had nothing to do"
-            )
+            if propagation.semantics == "ieee":
+                # the ieee wording names the arithmetic that actually
+                # judged it (native binary64, no outward rounding) — the
+                # real-mode sentence below stays byte-identical
+                reason = (
+                    "no solver invoked: every obligation was decided by "
+                    "native-binary64 interval arithmetic alone; escalation "
+                    "had nothing to do"
+                )
+            else:
+                reason = (
+                    "no solver invoked: every obligation was decided by outward-rounded "
+                    "interval arithmetic alone; escalation had nothing to do"
+                )
         else:
             reason = (
                 "no solver invoked: escalation completed no invocation (solver "
@@ -1347,12 +1482,24 @@ def make_solver_verdict(
             )
         solver = solver_absent(reason)
 
+    # which arithmetic the verdict is about comes from the propagation
+    # that ran (the honest ieee pairing — a refusal-shaped escalation —
+    # still emits, and its stamp must say ieee, not ℝ; the 0·∞ = 0
+    # convention line must not ride in it)
+    if propagation.semantics == "ieee":
+        semantics = SEMANTICS_IEEE
+        arithmetic_mode = ARITHMETIC_MODE_INTERVAL_IEEE
+        convention = IEEE_ENDPOINT_ASSUMPTION
+    else:
+        semantics = SEMANTICS_REAL
+        arithmetic_mode = ARITHMETIC_MODE_INTERVAL
+        convention = REAL_CONVENTION_ASSUMPTION
     stamp = Stamp(
         stelling_version=stelling_version,
         jax_version=jax_version,
         query_content_hash=closed.content_hash(),
-        arithmetic_mode=ARITHMETIC_MODE_INTERVAL,
-        semantics=SEMANTICS_REAL,
+        arithmetic_mode=arithmetic_mode,
+        semantics=semantics,
         precision_config=precision_config,
         device_class=device_class,
         solver=solver,
@@ -1362,7 +1509,7 @@ def make_solver_verdict(
             (p, "core") for p, _ in propagation.transfers_used
         ),
         assumptions=tuple(
-            sorted({*propagation.assumptions, REAL_CONVENTION_ASSUMPTION})
+            sorted({*propagation.assumptions, convention})
         ),
         coverage=propagation.coverage.summary(),
     )

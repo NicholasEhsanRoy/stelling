@@ -57,10 +57,17 @@ bounds over horizons no test can reach.
 - **Say anything about discrete steps.** Every verdict so far is about
   the continuous flow; a solver's stepped trajectory is a different
   object, and no artifact here blurs them.
-- **Model IEEE float semantics.** The stamp says `real`: obligations are
-  judged in exact real arithmetic, and a predicate can hold in ℝ while
-  failing in floats — that gap held a 258-day bug upstream, which is why
-  the stamp names its semantics per verdict.
+- **Judge in float semantics by default.** The default stamp says
+  `real`: obligations are judged in exact real arithmetic, and a
+  predicate can hold in ℝ while failing in floats — that gap held a
+  258-day bug upstream, which is why the stamp names its semantics per
+  verdict. An opt-in `ieee` mode now judges the censused binary64
+  behaviours (rounding collapse, overflow-as-value, NaN) and stamps
+  itself; it treats subnormal-band outcomes as indeterminate (measured:
+  this CPU target flushes subnormals; others may not), declines
+  non-binary64 floats with the gap quoted, and refuses solver
+  escalation (the SMT backends speak ℝ). Every counted or recorded
+  verdict to date is a `real`-mode verdict.
 - **Discharge the recorded incidents.** Against the 20 long-horizon
   failures this project mined from public trackers, hand proofs
   discharged **0 of 3** attempted; the box invariants it checks are

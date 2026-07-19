@@ -497,14 +497,19 @@ def test_select_n_negative_selector_clamps_to_first_case():
 
 # --- second audit, findings 4-A and 1/2: the registered ℝ-semantics gap ------
 #
-# These two constructions are CORRECT under the registered `semantics: real`
-# dial (the stamp's own disclaimer: a predicate can hold in ℝ and fail in
+# These two constructions are CORRECT under the `semantics="real"` dial
+# (the stamp's own disclaimer: a predicate can hold in ℝ and fail in
 # floats) and are pinned here as MARKERS of the gap: over ℝ, (x+x)*0 = 0 and
-# any real is ≤ +∞, so both discharge; in IEEE both are NaN and false. The
-# day the semantics dial moves toward FP-exact, these tests flip and must be
-# consciously rewritten — that is their job. The ⊤-widening vacuity guard
-# already fences the r ≤ ∞ shape out of any count (it discharges under ⊤,
-# hence tautological).
+# any real is ≤ +∞, so both discharge; in IEEE both are NaN-possible and do
+# not. THE DIAL EVENT HAPPENED: `propagate(..., semantics="ieee")` is the
+# second dial position, and under it both shapes flip exactly as predicted —
+# the conscious rewrites these markers demanded are the ieee companions
+# `test_ieee_marker_overflow_times_zero_does_not_discharge` and
+# `test_ieee_marker_top_output_leq_inf_does_not_discharge` in
+# tests/test_ieee_semantics.py, which assert the flips. The real-mode tests
+# below stay byte-identical and keep pinning the ℝ side of the dial. The
+# ⊤-widening vacuity guard still fences the r ≤ ∞ shape out of any count
+# (it discharges under ⊤, hence tautological).
 
 
 def test_R_gap_marker_overflow_times_zero_discharges_in_R():
@@ -528,6 +533,8 @@ def test_R_gap_marker_overflow_times_zero_discharges_in_R():
         (out,),
     )
     # ℝ: (x+x)·0 = 0 < 1 — true. IEEE: inf·0 = NaN, NaN < 1 — false.
+    # The ieee companion asserting the flip:
+    # test_ieee_semantics.test_ieee_marker_overflow_times_zero_does_not_discharge
     assert propagate(q).obligations[0].status == "discharged"
 
 
@@ -549,4 +556,6 @@ def test_R_gap_marker_top_output_leq_inf_discharges_and_is_tautological():
     # ⊤ = [−∞, ∞] contains every REAL; r ≤ +∞ is an ℝ-tautology, and it
     # discharges even though r fell to ⊤ — which also means it survives
     # ⊤-widening, so the vacuity guard voids any count that leaned on it.
+    # The ieee companion asserting the flip (⊤ under ieee is maybe-NaN):
+    # test_ieee_semantics.test_ieee_marker_top_output_leq_inf_does_not_discharge
     assert propagate(q).obligations[0].status == "discharged"

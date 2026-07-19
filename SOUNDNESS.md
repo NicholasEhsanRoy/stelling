@@ -338,4 +338,58 @@ verdicts:
   audited build. 431 tests green with both solvers; 423 with jax and no
   solver; 354 zero-dep.
 
+- **2026-07-19 (pre-release): IEEE semantics landed as a second dial
+  position — and the "one jaxpr, three devices" commitment bit twice,
+  as a soundness bug this time.** `semantics="ieee"` judges obligations
+  about the traced program's binary64 execution (censused: rounding
+  collapse via native-endpoint kernels with no outward rounding,
+  overflow-as-value, NaN with its comparison algebra); `real` stays the
+  default, byte-identical, and every recorded verdict remains a
+  real-mode verdict. The two marker tests pinned at the second audit
+  ("must consciously flip if the dial ever moves") flipped in the
+  predicted direction — that was the registered acceptance criterion —
+  and `t + dt > t` with a sub-ulp `dt` is now **REFUTED** under ieee
+  while its `dt ≥ ulp(t)` sibling still verifies: the mode models
+  float rather than refusing everything.
+  **The audit (`design/ieee-semantics.md`) found the mode modelling a
+  standard instead of a target.** Measured jax 0.11.0 CPU binary64 is
+  **FTZ+DAZ** — subnormals flushed in arithmetic, *in comparisons*, and
+  in libm, eager matching jit — while the mode modelled gradual
+  underflow: seven end-to-end shapes contradicted the measured execution
+  at the declared point (false VERIFIEDs including `x·x > 0` at
+  `1e-160` and `x > 0` at `5e-324` with no arithmetic involved; a wrong
+  REFUTED on distinct subnormals; and the underflow-boundary shape of
+  this project's own diffrax hit). Fixed by a **subnormal haze** — any
+  interval meeting the open subnormal band is hulled with 0, at the
+  kernels, at comparison operands, and at declarations — so in-band
+  outcomes are indeterminate and the mode is sound for flushing *and*
+  gradual targets; a stamped assumption discloses this and its measured
+  basis. The standing re-attack rule then found the haze **dtype-blind**
+  (the band is per-dtype: f32 subnormals are normal f64 numbers, and
+  the `_EXACT_CONVERSIONS` whitelist's value-preservation claim is
+  measurably false for `f32→f64` under DAZ — two more false VERIFIEDs
+  and a wrong REFUTED); fixed by completing the binary64-only guard
+  (every ieee comparison and every non-f64-float convert source
+  declines with the gap quoted; the assume classifier, which read
+  comparison equations behind the guarded transfer, drops them inert —
+  it could otherwise have raised a *false harness-defect* claim on a
+  comparison that is true at runtime). Second re-attack: clean. Also
+  fixed pre-landing: an unenforced maybe-NaN selector invariant
+  (FRAGILE) and two disclosure defects. This is the
+  precision/device commitment above — "one jaxpr, three devices, three
+  numerics" — recurring as a soundness defect rather than a disclosure
+  gap; recorded as ledger L10 (`design/lessons-ledger.md`): model the
+  measured target, not the standard it claims.
+  Two guards ship with the dial: **tightened domains (affine, when
+  built) mechanically refuse to run under `real` semantics** — the
+  registered IEEE-first precondition is now enforced rather than
+  remembered — and **ieee-mode propagation refuses solver escalation**
+  (the SMT backends emit over Reals; escalating a float obligation would
+  prove the ℝ claim under an ieee stamp), double-guarded like the
+  constrained-assume seam. **No `real`-mode verdict changed anywhere**:
+  every recorded harness re-runs identical, the pre-existing baseline
+  passes unmodified, and real-mode behaviour was byte-compared against
+  `HEAD` by the auditor twice. 522 tests green with both solvers; 514
+  with jax and no solver; 445 zero-dep.
+
 *(no releases yet)*
