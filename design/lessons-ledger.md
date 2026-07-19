@@ -67,14 +67,25 @@ subsidy for careless fixes; one data point cannot distinguish them.
 **(b)** The UNSOUND-fixes-are-re-attacked rule found F7 in the first
 fix on the rule's first application (`design/constraining-assume.md`).
 **(c)** **Watch** — the metric: *UNSOUND-fix re-attacks that find an
-escape / UNSOUND-fix re-attacks run*. Current: **2 / 5** —
+escape / UNSOUND-fix re-attacks run*. Current: **3 / 6** —
 constraining-assume pass: F1's fix → F7 found; F3's fix → clean; F7's
 fix → clean. IEEE pass: U1's fix (the subnormal haze) → U2 found (the
-haze was dtype-blind); U2's fix → clean. Both catches share a shape:
-the fix was correct for the case that taught it and blind to a sibling
-case (aggressive-vs-exact boxes; binary64-vs-per-dtype bands) — the
-escapes are scope errors, not carelessness. Track per pass; act only on
-a trend.
+haze was dtype-blind); U2's fix → clean. Three-rows pass: the integer
+guard fix → **UNSOUND 3 and 4 found** (`div` unguarded on the transfer
+side; ieee falsified by FMA contraction). **All three catches share one
+shape** — the fix was correct for the case that taught it and blind to a
+sibling case (aggressive-vs-exact boxes; binary64-vs-per-dtype bands;
+emission-sites-vs-transfer-sites and reassociation-vs-contraction). The
+escapes are **scope errors, not carelessness**, which is why the answer
+is a mandatory sweep with its axis named (L12), not more care. Track per
+pass; act only on a trend — but note every catch so far has been a real
+false verdict. **First evidence of convergence, recorded 2026-07-19:**
+within the three-rows pass the re-attack sequence ran 2 → 1 → 0 UNSOUND
+across three successive fix rounds, and the round that returned 0 was
+the one whose fix had stopped enumerating cases (L12's addendum). So the
+metric may be measuring *fix architecture* rather than fix care — a
+class-closing fix survives re-attack, an enumerating one does not.
+Watch whether that holds on the next pass before believing it.
 **(d)** Every pass that fixes an UNSOUND finding.
 
 ## L4 — Arguments from me, facts from the probe
@@ -229,3 +240,128 @@ without it; report the delta beside the verdict.
 **(d)** Every harness with hand assistance; the E2a permitted-assistance
 list; any usefulness claim resting on a hand-derived form; and clause (i)
 of the private-track criterion, which exists for exactly this failure.
+
+## L12 — Sweep the class, don't patch the instance
+
+**(a)** A guard added at one transfer or emission site **triggers a
+mandatory sweep of every sibling site before the fix is called done.**
+The invariant-at-one-consumer failure has now appeared four times, which
+is past pattern; the sweep is the **default step in any guard-shaped
+fix**, not something to remember. The sweep's output is recorded even
+when it finds nothing: "swept N sibling sites, M needed the guard,
+K cleared with reasons" — a silent sweep is indistinguishable from no
+sweep.
+**(b)** Four witnesses: guards-generate-hazards (L5); the narrated stamp;
+FTZ modelled per-band but not per-dtype (L10); and the decisive one —
+the integer emission guard, where the audit reported **one** unguarded
+site (`integer_pow`) and the commissioned sweep found **four more**
+(`add`, `sub`, `mul`, `neg`). Patching the reported instance alone would
+have left the auditor's own false VERIFIED intact, minted through the
+`mul`. The sweep was the difference between fixing a finding and closing
+a class.
+**(c)** **Convention → standing step in the fix protocol** (alongside the
+structuralization question and the auditor re-attack).
+**(d)** Every guard-shaped fix; every audit finding of the form "site X
+lacks the check that site Y has."
+
+> **Fifth witness, and the sharpest — the rule recurred inside the fix
+> for the rule.** The integer-guard fix swept the *emission* sites and
+> not the *transfer* sites, leaving `div` unguarded there; the re-attack
+> found six more false definite verdicts through it (3 VERIFIED, 3
+> REFUTED, including the INT_MIN/−1 wrap that UNSOUND 1 was about). The
+> cleared-list entry read "div (already stricter)", true of the emission
+> and false of the transfer. **So the sweep must name its axis:** a sweep
+> over one layer's sites is not a sweep of the class when the same
+> invariant is enforced at two layers. Record which layer was swept, and
+> sweep each layer that can mint a verdict independently — interval
+> propagation decides without ever reaching the emission, which is what
+> made the original finding unsound in the first place.
+
+> **The generalisation the three rounds earned, in the builder's own
+> words: _"the escape route was an enumeration every time."_** Each of
+> the three UNSOUND findings in this pass had the same shape — a fix
+> correct for the case that taught it and blind to a sibling — and each
+> was closed only when the fix stopped enumerating members and started
+> enforcing the property: a **total census** (every registered primitive
+> classified or the assert trips), then a **behavioural assert** (each
+> computing transfer is *run* on an out-of-range value, because a marker
+> attribute is a label and labels can be worn), then a **taint that
+> recognises no shapes at all** (a pattern match on jaxpr syntax is a bet
+> that the shape survives compilation; a taint is not). **A guard-shaped
+> fix that names its cases is unfinished — the test is whether an
+> unenumerated instance is caught.** Write that test: the taint fix was
+> accepted only after chains nobody had listed (`abs→reshape→transpose→
+> max→add`, `array+slice`, `where/select`) were confirmed caught.
+
+## L13 — Stay sound without going useless
+
+**(a)** When more than one *sound* option exists, prefer the one that
+**preserves the tool's ability to decide**. Soundness-by-refusal is
+always available and always cheap, and under audit pressure it is the
+path of least resistance — a tool that declines everything is
+unimpeachable and worthless. **This governs the choice among sound
+options only; it is never a licence to trade soundness for utility, and
+it may not be cited to relax a guard, weaken a criterion, or admit an
+unmodelled behaviour.** The test: does the precision-preserving option
+have a soundness argument of its own? If not, it is not one of the
+options.
+**(b)** Five instances now: ieee mode **models** float rather than
+refusing it; the subnormal haze makes band outcomes indeterminate rather
+than declining the whole mode; constraining `assume` **narrows** where
+provably sound rather than always dropping; the solver escalates rather
+than leaving every straddle UNKNOWN; and the integer **reachability**
+guard — exact where the result provably fits, ⊤ only where wraparound is
+genuinely reachable — so `i*i > 0` for an index in `{1,4}` still
+discharges where a blanket integer decline would have blinded the tool to
+every index and counter in the corpus.
+**(c)** **Convention** — a named design principle, stated in the record
+whenever a guard or decline is chosen, with its own soundness argument.
+**(d)** Every guard, decline, or domain-scope decision; every audit fix
+round, where refusal is the tempting default.
+
+## L14 — Undiscovered defects live where attention has not been directed
+
+**(a)** A surface that no build has exercised has not been audited, no
+matter how many audits the project has run — audits inherit the
+attention gradient of the builds that preceded them (L6, one level up).
+So **a build entering a never-exercised surface carries an explicit
+first-contact instruction: audit this surface as if it predates us,
+because it probably does.** The corollary is a prediction: the next
+undiscovered defect is on whatever surface the next build first
+exercises.
+**(b)** The oldest false VERIFIED in the project — integer arithmetic
+modelled as unbounded reals, live since the MVP — survived **six** prior
+audits, not because they were weak but because nothing had ever pushed
+integer arithmetic to its overflow boundary. It took a build that
+*needed* integer arithmetic (`integer_pow`, `reduce_sum`) to route
+attention there, and it was found immediately once attention arrived.
+**(c)** **Convention** — a standing clause in builder and auditor specs
+whenever a build touches a new primitive class.
+**(d)** Every build touching a primitive class, dtype family, or
+execution surface the corpus has not previously exercised.
+
+## L15 — A regression test is a comment until it fails against the unfixed code
+
+**(a)** A test written alongside a fix passes for *some* reason; only a
+**counterfactual run — the fix disabled, the test failing** — shows it
+passes for *the* reason. Same for a claim in a report: an edit *made* is
+not an edit *landed*. **Verify by removal, never by assertion.** This is
+L11's move (price a hand step by re-running without it) applied to the
+project's own evidence: the counterfactual is the evidence, and without
+it a regression test is a comment with a green tick.
+**(b)** Two witnesses in one pass (`design/three-rows-*`, fix rounds
+3–4). (i) The claim "a joined `cond` output is tainted if any branch
+tainted it" reached the build report because the edit implementing it was
+*made*; the edit had silently no-op'd on an indentation mismatch, and
+`branch_taints` sat declared-appended-never-read while every `cond` join
+laundered the taint. Caught only when the auditor ran the behaviour.
+(ii) The regression test written for that fix **did not discriminate** —
+a straddling branch index made the query `unknown` from the branch join,
+so it would have passed against the broken code; caught by running it
+with the taint laundered and seeing it still pass.
+**(c)** **Convention → mandatory step for any soundness fix here:** state
+in the report that the test was run against the unfixed code and failed.
+Cheap; it is the only thing separating a regression test from a comment.
+**(d)** Every soundness fix; every regression test accompanying an
+UNSOUND/FRAGILE finding; every claim in a build report about behaviour
+rather than intent.

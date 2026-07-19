@@ -18,13 +18,23 @@ Nothing here guesses. The v1 emission set is scalar-only: ``add``,
 ``sub``, ``mul``, ``neg``, guarded ``div``, ``integer_pow``, ``max``,
 ``min``, the comparisons, boolean ``and``/``or``/``not``/``xor``,
 boolean-selector ``select_n``, value-preserving
-``convert_element_type``, and size-1 shape plumbing. Everything else —
+``convert_element_type``, size-1 shape plumbing, and the two
+single-element forms ``slice`` (one index, unit strides) and
+``reduce_sum`` (one addend). Everything else —
 array-shaped inputs, transcendentals, unknown primitives, possibly-zero
 divisors, non-float input declarations, obligations that cannot be
 mapped one-to-one onto top-level asserts — **declines**, with the
 primitive and form quoted, and the obligation stays UNKNOWN. Declines
 never raise; :exc:`ReplayError` is raised only by the replay evaluator,
 whose caller treats it as an emission-infidelity signal.
+
+**Scalar-only is a boundary, not a formality.** Nothing here builds a
+term for an array of more than one element, so an obligation whose slice
+crosses a genuine array — ``concatenate`` of several scalars, an
+elementwise product of two vectors, a reduction over more than one
+addend — declines at the first such equation and stays UNKNOWN however
+well interval propagation understood it. That is the honest boundary of
+the v1 emission and it is reported, not worked around.
 
 Zero-dep: this module imports only the standard library and stelling's
 own jax-free modules.
@@ -40,7 +50,7 @@ from typing import Mapping
 
 from stelling import interval as iv
 from stelling import ir
-from stelling.propagate import _EXACT_CONVERSIONS, Propagation
+from stelling.propagate import _EXACT_CONVERSIONS, _INT_DTYPE_BOUNDS, Propagation
 
 __all__ = [
     "DeclinedObligation",
@@ -80,6 +90,22 @@ _ARITH = frozenset({"add", "sub", "mul", "neg", "div", "integer_pow", "max", "mi
 _COMPARE = frozenset({"lt", "le", "gt", "ge", "eq", "ne"})
 _BOOL_OPS = frozenset({"and", "or", "not", "xor"})
 _IDENTITY_SHAPE = frozenset({"broadcast_in_dim", "reshape", "squeeze"})
+# Single-scalar-element selection and reduction. Both denote exactly their
+# operand's one value, so both emit as that operand's EXISTING term — pure
+# selection, no new SMT variable, sharing preserved:
+#
+# * ``slice`` selecting one element (start/limit determine one index, unit
+#   strides) from a single-element operand;
+# * ``reduce_sum`` over a single-element operand (a sum of one addend is
+#   that addend, in ℝ and in float alike — no addition is performed).
+#
+# The emission set is scalar-only and this does NOT widen it: every other
+# form — multi-element operands above all — declines with the form quoted,
+# exactly like every other primitive here. A multi-element ``slice`` is
+# what an obligation indexing a real array hits, and it still declines;
+# what changed is that it now declines naming its shape instead of naming
+# the whole primitive as unsupported.
+_SINGLE_ELEMENT = frozenset({"slice", "reduce_sum"})
 # Harness primitives whose value semantics are the identity on their input.
 # stelling_assume's *constraint* is inert (dropped, disclosed by the
 # propagation notes) and is deliberately NOT emitted — only its data flow
@@ -88,8 +114,43 @@ _IDENTITY_HARNESS = frozenset({"stelling_assume", "stelling_nonvacuity"})
 
 _SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _IDENTITY_SHAPE | _IDENTITY_HARNESS
-    | {"select_n", "convert_element_type"}
+    | _SINGLE_ELEMENT | {"select_n", "convert_element_type"}
 )
+
+# Emitted primitives that COMPUTE a new numeric value, and therefore can
+# overflow an integer dtype. SMT-LIB2 Reals are unbounded, so emitting jax
+# integer arithmetic as Real arithmetic models a program that wraps with
+# one that does not — and the solver then proves the wrong claim, minting a
+# false VERIFIED with the full weight of a proof behind it (audit
+# UNSOUND 2, found on `integer_pow`; the sweep it prompted found the same
+# gap on `add`/`sub`/`mul`/`neg`, all reachable through the bool->int
+# conversion the whitelist admits).
+#
+# The rest of the emission set is safe by construction and stays unguarded:
+# `max`/`min`/`select_n` SELECT an operand value rather than computing one,
+# the comparisons are exact over Reals for integers, the shape ops and
+# harness primitives are identities, `div` already carries its own stricter
+# float-only guard, and `convert_element_type` is whitelist-guarded.
+_INT_OVERFLOW_EMITTED = frozenset(
+    {"add", "sub", "mul", "neg", "div", "integer_pow", "reduce_sum"}
+)
+
+# Mechanised for the same reason the transfer-side census is (audit
+# UNSOUND 3): the first sweep of this defect class was a review, it cleared
+# `div` on the emission's own float guard, and the sibling transfer site
+# went unswept. A review finds siblings once; an assert finds them every
+# time. Every emittable primitive is classified, and the union must be
+# total over `_SUPPORTED`.
+_INT_SAFE_EMITTED = frozenset(
+    _COMPARE | _BOOL_OPS | _IDENTITY_SHAPE | _IDENTITY_HARNESS
+    | {"max", "min", "select_n", "convert_element_type", "slice"}
+)
+
+assert _INT_OVERFLOW_EMITTED | _INT_SAFE_EMITTED == _SUPPORTED, (
+    "the integer-semantics census must stay total over the emission set: "
+    f"unclassified {_SUPPORTED - _INT_OVERFLOW_EMITTED - _INT_SAFE_EMITTED}"
+)
+assert not (_INT_OVERFLOW_EMITTED & _INT_SAFE_EMITTED)
 
 
 class ReplayError(RuntimeError):
@@ -286,6 +347,64 @@ class _Slicer:
                 raise _Decline(
                     f"'integer_pow' with negative exponent {y}: "
                     f"{DIV_GUARD_REASON}"
+                )
+        if prim in _INT_OVERFLOW_EMITTED:
+            # SMT-LIB2 Reals are unbounded; jax integers wrap. Emitting a
+            # computed integer as a Real would let the solver prove a claim
+            # the program falsifies, so integer dtypes decline here — the
+            # emission is stricter than the transfer on purpose. The
+            # transfer can settle in-range integer arithmetic itself
+            # (propagate._int_overflow_guard); escalating it would need the
+            # Real relaxation to be argued faithful, and this round declines
+            # rather than makes that argument load-bearing.
+            dt = eqn.outvars[0].aval.dtype or ""
+            if dt in _INT_DTYPE_BOUNDS:
+                raise _Decline(
+                    f"{prim!r} on dtype {dt!r}: jax integer arithmetic wraps "
+                    f"on overflow and SMT-LIB2 Reals are unbounded, so a Real "
+                    f"emission does not model it"
+                )
+        if prim == "slice":
+            # _check_scalar above already refused every multi-element form
+            # (naming the shape). What is left to pin is that the selection
+            # really is the single-index, unit-stride one — so a form that
+            # merely happens to be size-1 by accident cannot slip through
+            # aliased to the wrong term.
+            strides = params.get("strides")
+            if strides is not None and any(int(s) != 1 for s in strides):
+                raise _Decline(
+                    f"'slice' with non-unit strides {tuple(strides)} (only a "
+                    f"single-scalar-element selection with unit strides has "
+                    f"a v1 emission)"
+                )
+            start = tuple(params.get("start_indices", ()))
+            limit = tuple(params.get("limit_indices", ()))
+            if len(start) != len(limit) or any(
+                hi - lo != 1 for lo, hi in zip(start, limit)
+            ):
+                raise _Decline(
+                    f"'slice' start_indices={start} limit_indices={limit} do "
+                    f"not determine a single element (only a "
+                    f"single-scalar-element selection has a v1 emission)"
+                )
+        if prim == "reduce_sum":
+            dt = eqn.invars[0].aval.dtype or ""
+            if not dt.startswith("float"):
+                raise _Decline(
+                    f"'reduce_sum' on dtype {dt!r}: jax integer addition "
+                    f"wraps on overflow, which Real addition does not model"
+                )
+            # _check_scalar refused multi-element operands already; an empty
+            # (size-0) reduction is refused here rather than emitted as the
+            # 0.0 identity, because no size-0 value is constructible in the
+            # scalar-only emission at all — emitting for an unreachable form
+            # would be a rule nothing could exercise.
+            if _size(eqn.invars[0].aval.shape) != 1:
+                raise _Decline(
+                    f"'reduce_sum' over an operand of shape "
+                    f"{eqn.invars[0].aval.shape} (v1 emission is scalar-only: "
+                    f"only a reduction over a single-element operand has a "
+                    f"term)"
                 )
         if prim == "select_n":
             if len(eqn.invars) != 3:
@@ -577,7 +696,12 @@ def evaluate_predicate(
                     out = Fraction(1 if v else 0)
                 else:
                     out = v
-            elif prim in _IDENTITY_SHAPE or prim in _IDENTITY_HARNESS:
+            elif (
+                prim in _IDENTITY_SHAPE
+                or prim in _IDENTITY_HARNESS
+                or prim in _SINGLE_ELEMENT
+            ):
+                # validated single-element forms: the value IS the operand's
                 out = ins[0]
             else:
                 raise ReplayError(

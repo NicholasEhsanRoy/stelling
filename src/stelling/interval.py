@@ -11,6 +11,11 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   (+, -, *, /) are correctly rounded (≤ 0.5 ulp), so the true real result
   always lies inside the bumped bracket. We do not attempt tight rounding;
   we buy soundness with one deliberate ulp of slack per operation.
+* ``integer_pow`` endpoints take a **tighter** route to the same
+  guarantee: a double is a dyadic rational, so ``Fraction(x) ** n`` is the
+  EXACT power, and it is bumped one ulp outward only on the side the
+  round-to-nearest double actually fell — not at all when the result is
+  representable. No libm is involved, so the tier stays ``sound``.
 * ``exp`` endpoints assume a **faithfully-rounded libm** (error ≤ 1 ulp)
   and are bumped one ulp outward — the *same* fidelity demotion the
   supply probe's hand brackets carried (``np.nextafter`` around
@@ -88,6 +93,37 @@ IEEE_ENDPOINT_ASSUMPTION = (
 # excluding {0} is hulled with 0 (the flushed image joins the gradual
 # values already present), and subnormal-band outcomes are therefore
 # indeterminate, never definite.
+# The reliance ieee mode has always had, disclosed once the three-row
+# round made it load-bearing (audit COSMETIC 4). ieee mode models each
+# jaxpr EQUATION as the float operation it names, which is a claim about
+# the compiler: that it does not reassociate ACROSS equations. The new
+# reduce_sum decline draws exactly this contrast — it refuses a reduction
+# because the order is free INSIDE one equation, while continuing to model
+# an `add` chain whose order the dataflow records — so the contrast is now
+# doing work and belongs in the stamp rather than in a comment.
+# Measured (jax 0.11.0 CPU, under jit) at a = b = 1e308, c = d = -1e308:
+# `(a+b)+(c+d)`, `(a+c)+(b+d)` and `((a+b)+c)+d` return nan, 0.0 and +inf
+# respectively — each matching its own jaxpr order, so the reliance holds
+# on the measured target. It is an assumption about the compiler either
+# way, and an undisclosed one is exactly what ledger L10 forbids.
+IEEE_EQUATION_ORDER_ASSUMPTION = (
+    "ieee equation-order reliance: ieee mode judges each jaxpr equation as "
+    "the binary64 operation it names, which assumes the compiler does not "
+    "REASSOCIATE ACROSS equations — a float `add` chain is modelled in the "
+    "order the jaxpr's dataflow records it. Verified on the measured target "
+    "(jax 0.11.0 CPU, jit: the three association orders of a+b+c+d at "
+    "±1e308 return nan / 0.0 / +inf, each matching its own jaxpr order), "
+    "but it is a compiler assumption, not a language guarantee. It covers "
+    "ORDER only, and order is not the compiler's only freedom over these "
+    "equations: CONTRACTION (fusing a multiply and an add into one "
+    "fused-multiply-add, rounding once instead of twice) leaves the order "
+    "untouched and IS exercised on this target, so it is not assumed away "
+    "here — it is MODELLED, by hulling both roundings (see the ieee "
+    "contraction assumption). Order freedom INSIDE a single equation is "
+    "covered by neither and is declined instead (reduce_sum over >2 "
+    "elements, integer_pow beyond y=1)"
+)
+
 SUBNORMAL_INDETERMINACY_ASSUMPTION = (
     "subnormal indeterminacy: whether the target flushes subnormals "
     "(FTZ/DAZ) is device/compiler-dependent — measured jax 0.11.0 CPU "
@@ -127,6 +163,44 @@ IEEE_NAN_HYGIENE_SCOPE = (
     "union is sound (an over-approximated flag only blocks discharges, "
     "never mints them); per-element tracking is a known fix path, "
     "deliberately unbuilt"
+)
+
+
+# The two ieee declines this module owns. Both are the SAME defect class,
+# and naming it once is the point: the jaxpr records WHICH values an
+# equation combines but not in WHAT ORDER the compiler combines them, and
+# neither float addition nor float multiplication is associative. Where an
+# equation contracts more than one such operation into itself, no
+# single-order model is sound for the compiled program, so ieee mode
+# declines instead of picking one (the guard rule: an unmodelled behaviour
+# disclosed is sound, a mismodelled one is not). Verified by construction,
+# not asserted — tests/test_three_rows.py::test_reassociation_* builds the
+# counterexamples these reasons cite, so a quoted reason cannot rot.
+REDUCE_SUM_IEEE_ORDER_DECLINE = (
+    "reduce_sum over {n} elements has no ieee transfer: float addition is "
+    "NOT associative and the jaxpr fixes no summation order, so XLA may "
+    "evaluate the reduction in any association order and a transfer "
+    "modelling one order would be unsound for the compiled program. The "
+    "orders are not near-equal either — with a = b = 1e308 and c = d = "
+    "-1e308, ((a+b)+(c+d)) is NaN, ((a+c)+(b+d)) is 0.0 and (((a+b)+c)+d) "
+    "is +inf: one reduction over finite operands, three association "
+    "orders, three qualitatively different results. No all-orders bound "
+    "is offered here, so this declines with the gap quoted. Reductions of "
+    "at most 2 elements ARE modelled: they perform 0 or 1 additions, and "
+    "IEEE addition is commutative, so no association freedom exists"
+)
+
+INTEGER_POW_IEEE_SCHEDULE_DECLINE = (
+    "integer_pow with exponent y={y} has no ieee transfer: the jaxpr fixes "
+    "no evaluation schedule for the power, and the candidate lowerings "
+    "disagree in the last ulps — float multiplication is NOT associative "
+    "(measured: ((x*x)*x)*x differs from (x*x)*(x*x) for 34% of x in "
+    "[0.5, 2.0]), and for negative exponents 1/(x*x) differs from "
+    "(1/x)*(1/x) for 53% of the same sample; a correctly-rounded libm pow "
+    "is a third distinct answer. A transfer modelling one schedule would "
+    "be unsound for the compiled program, so this declines with the gap "
+    "quoted. y=0 and y=1 ARE modelled: they perform NO arithmetic (the "
+    "empty product and the identity), so no schedule freedom exists"
 )
 
 
@@ -490,6 +564,252 @@ def exp(a: IntervalArray) -> IntervalArray:
     )
 
 
+def _frac_bracket(fr) -> tuple[float, float]:
+    """The tightest SOUND double bracket of an exact :class:`Fraction`.
+
+    Round-to-nearest gives one endpoint; comparing the rounded double back
+    against the exact rational says which side it fell on, so the bracket
+    bumps one ulp on that side only — and not at all when the rational is
+    exactly representable. Overflow saturates outward, keeping maxfloat as
+    a finite witness (the :func:`exp` overflow treatment).
+    """
+    from fractions import Fraction  # stdlib; kept local to the one user
+
+    try:
+        x = float(fr)
+    except OverflowError:
+        maxf = math.nextafter(_INF, 0.0)
+        return (maxf, _INF) if fr > 0 else (-_INF, -maxf)
+    if x == _INF:
+        return math.nextafter(_INF, 0.0), _INF
+    if x == -_INF:
+        return -_INF, math.nextafter(-_INF, 0.0)
+    xf = Fraction(x)
+    if xf == fr:
+        return x, x  # exactly representable: no bump, the value IS the set
+    if xf < fr:
+        return x, math.nextafter(x, _INF)
+    return math.nextafter(x, -_INF), x
+
+
+def _int_pow_bracket(x: float, n: int) -> tuple[float, float]:
+    """Sound double bracket of ``x ** n`` for an integer ``n >= 0``.
+
+    Finite endpoints go through the EXACT rational power (a double is a
+    dyadic rational, so ``Fraction(x) ** n`` is exact) and are bracketed
+    outward only where the double cannot represent the result — tighter
+    than repeated outward-rounded multiplication and, unlike
+    :func:`pow_`, riding on no libm fidelity claim (tier ``sound``, not
+    ``sound-libm``).
+    """
+    from fractions import Fraction
+
+    if n == 0:
+        return 1.0, 1.0  # the empty product, for EVERY base (see integer_pow)
+    if x == _INF:
+        return _INF, _INF
+    if x == -_INF:
+        return (-_INF, -_INF) if n % 2 else (_INF, _INF)
+    return _frac_bracket(Fraction(x) ** n)
+
+
+def _recip_bracket(p: float) -> tuple[float, float]:
+    """Sound double bracket of ``1 / p`` for a NONZERO ``p``. An infinite
+    endpoint reciprocates to exactly 0 (the extended-real limit), which
+    keeps the sign fact an outward bump would destroy."""
+    from fractions import Fraction
+
+    if p == _INF or p == -_INF:
+        return 0.0, 0.0
+    return _frac_bracket(Fraction(1, 1) / Fraction(p))
+
+
+def _integer_pow_elt(lo: float, hi: float, y: int) -> tuple[float, float]:
+    """One element of :func:`integer_pow` — see that function's contract."""
+    if y == 0:
+        return 1.0, 1.0
+    if y == 1:
+        return lo, hi
+    if y > 0:
+        if y % 2 == 0:
+            # even: decreasing on (-inf, 0], increasing on [0, inf)
+            if lo >= 0.0:
+                return max(0.0, _int_pow_bracket(lo, y)[0]), _int_pow_bracket(hi, y)[1]
+            if hi <= 0.0:
+                return max(0.0, _int_pow_bracket(hi, y)[0]), _int_pow_bracket(lo, y)[1]
+            # straddles 0: the image is [0, max(lo**y, hi**y)]. The lower
+            # endpoint is EXACTLY 0 (attained at x = 0) — non-negativity is
+            # PRODUCED here, never left to an outward bump to permit.
+            return 0.0, max(
+                _int_pow_bracket(lo, y)[1], _int_pow_bracket(hi, y)[1]
+            )
+        # odd: strictly increasing over the whole line
+        return _int_pow_bracket(lo, y)[0], _int_pow_bracket(hi, y)[1]
+    # y < 0 — a reciprocal, and therefore the SAME zero-in-divisor
+    # discipline div uses: a base interval reaching 0 has a genuine pole
+    # inside it (the image is unbounded on at least one side), and ⊤ is the
+    # only sound closed-interval answer. Never a silently-inverted interval.
+    if lo <= 0.0 <= hi:
+        return -_INF, _INF
+    p_lo, p_hi = _integer_pow_elt(lo, hi, -y)  # base excludes 0
+    if p_lo <= 0.0 <= p_hi:
+        # the power's own bracket reached 0 (underflow of a tiny base): the
+        # reciprocal is unbounded over it, so the same discipline applies
+        return -_INF, _INF
+    cands = (_recip_bracket(p_lo), _recip_bracket(p_hi))
+    return min(c[0] for c in cands), max(c[1] for c in cands)
+
+
+# The exact-rational endpoint path costs time proportional to the size of
+# `Fraction(x) ** n`, whose numerator and denominator grow LINEARLY in n —
+# and jax puts no bound on the exponent (`x ** 10_000_000` is one legal
+# equation). Degrade-don't-crash extends to degrade-don't-hang, so the
+# path is capped (audit FRAGILE 2).
+#
+# 1024 chosen on measured single-element cost of `integer_pow` at the cap,
+# worst base class first:
+#     base ~1e300      9.2 ms      base 5e-324   3.2 ms
+#     base 0.1         0.55 ms     base 2.0      0.009 ms
+# and on the scaling above it: y=4096 -> 80 ms, y=16384 -> 705 ms,
+# y=65536 -> 6.5 s (all base ~1e300). 1024 is 16x the SMT emission's
+# INTEGER_POW_EXPANSION_CAP, so the transfer is never the binding
+# constraint on anything that could be escalated, while still covering
+# every exponent hand-written numerical code plausibly contains.
+INTEGER_POW_EXACT_CAP = 1024
+
+# The cap above bounds the per-element cost f(y); the transfer is
+# ELEMENTWISE, so the bill is size x f(y) and the exponent cap alone does
+# not bound it (audit FRAGILE 3: a 200 000-element array at the capped
+# exponent cost 112 s). Measured at the cap, cost per unit of `size * |y|`
+# is ~0.54 us for a full-mantissa base and ~9 us for a base near the
+# overflow boundary — the worst class. 100 000 units therefore bounds the
+# worst case near 0.9 s while still admitting y=2 over 50 000 elements,
+# y=64 over 1 562, and the capped y=1024 over 97.
+INTEGER_POW_WORK_CAP = 100_000
+
+INTEGER_POW_WORK_DECLINE = (
+    "integer_pow over {size} elements at |y| = {n} would cost {work} units "
+    "of exact-rational work, beyond the budget ({cap}): the endpoints are "
+    "computed per element and the exponent cap alone bounds only the "
+    "per-element cost, not size x f(y) — declined with the shape and "
+    "exponent quoted"
+)
+
+INTEGER_POW_CAP_DECLINE = (
+    "integer_pow exponent |y| = {n} exceeds the exact-rational endpoint cap "
+    "({cap}): the endpoints are computed as the EXACT rational power, whose "
+    "size grows linearly in the exponent, and jax bounds the exponent "
+    "nowhere (`x ** 10_000_000` is a single legal equation costing minutes). "
+    "Unbounded compute is neither a verdict nor a decline, so this declines "
+    "with the exponent quoted"
+)
+
+
+def integer_pow(a: IntervalArray, y: int) -> IntervalArray:
+    """``x ** y`` for a fixed integer ``y`` (jax's ``integer_pow`` primitive).
+
+    * ``y = 0`` → the constant 1 for **every** base. This is the empty
+      product, and it is what jax computes: measured on jax 0.11.0 CPU
+      (binary64), ``integer_pow(x, 0) == 1.0`` at ``x`` = 0.0, -0.0, ±inf
+      **and NaN**.
+    * ``y > 0`` even → non-negative by construction: ``[0, max(lo**y,
+      hi**y)]`` when the base straddles 0, else the ordered endpoints.
+    * ``y > 0`` odd → monotone increasing: the ordered endpoints.
+    * ``y < 0`` → a reciprocal, routed through the same zero-in-divisor
+      discipline as :func:`div`: a base interval containing 0 yields ⊤
+      (the pole is real — the image really is unbounded there), never an
+      inverted interval.
+
+    Endpoints come from the EXACT rational power bracketed outward
+    (:func:`_int_pow_bracket`), so no libm fidelity is assumed: tier
+    ``sound``.
+
+    Exponents beyond :data:`INTEGER_POW_EXACT_CAP` return ⊤ rather than
+    paying an unbounded exact-rational cost — sound, and the same posture
+    :func:`div` already takes for a vanishing denominator (a kernel-level
+    ⊤, never a raise). The **registered transfer** checks the cap first
+    and declines with :data:`INTEGER_POW_CAP_DECLINE` quoted, so the
+    refusal reaches the verdict notes rather than passing silently; this
+    ⊤ is the belt to that braces, for any caller reaching the kernel
+    directly.
+    """
+    if abs(y) > INTEGER_POW_EXACT_CAP or a.size * abs(y) > INTEGER_POW_WORK_CAP:
+        return top(a.shape)
+    los, his = [], []
+    for lo, hi in zip(a.los, a.his):
+        l, h = _integer_pow_elt(lo, hi, y)
+        los.append(l)
+        his.append(h)
+    return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
+
+
+def _check_axes(a: IntervalArray, axes: tuple[int, ...], name: str) -> set[int]:
+    ax = set(axes)
+    if any(not (isinstance(d, int) and 0 <= d < len(a.shape)) for d in ax):
+        raise IntervalError(
+            f"{name} axes {axes} out of range for shape {a.shape}"
+        )
+    return ax
+
+
+def _reduced_shape(
+    a: IntervalArray, ax: set[int]
+) -> tuple[tuple[int, ...], int, int]:
+    """``(out_shape, out_n, n_contrib)`` for a reduction over ``ax``."""
+    out_shape = tuple(d for i, d in enumerate(a.shape) if i not in ax)
+    out_n = 1
+    for d in out_shape:
+        out_n *= d
+    n_contrib = 1
+    for i, d in enumerate(a.shape):
+        if i in ax:
+            n_contrib *= d
+    return out_shape, out_n, n_contrib
+
+
+def reduce_sum(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
+    """Sum over ``axes``: output shape is the input shape with those axes
+    removed.
+
+    Under the declared **ℝ** semantics addition is exactly associative and
+    commutative, so the true sum of the reduced elements lies in
+    ``[Σ lo_i, Σ hi_i]`` whatever order the compiler picks — the bracket
+    bounds every association order at once, because in ℝ they all denote
+    the same number. Each accumulation step is bumped one ulp outward, so
+    an ``n``-element sum spends exactly the ``n - 1`` bumps its ``n - 1``
+    real additions earn: the accumulator is SEEDED with the first
+    contributor rather than with 0, which also makes a one-element
+    reduction exact.
+
+    The fold identity is 0: an empty reduction range yields exactly
+    ``[0, 0]``, matching jax (measured: ``jnp.sum`` of a size-0 array is
+    ``0.0``).
+
+    **This reasoning is available only under ℝ.** Float addition is not
+    associative and the jaxpr fixes no summation order, so the ieee
+    counterpart (:func:`ieee_reduce_sum`) cannot reuse it — see that
+    function and :data:`REDUCE_SUM_IEEE_ORDER_DECLINE`.
+    """
+    ax = _check_axes(a, axes, "reduce_sum")
+    out_shape, out_n, _ = _reduced_shape(a, ax)
+    los = [0.0] * out_n  # additive identity: the empty sum is exactly 0
+    his = [0.0] * out_n
+    seen = [False] * out_n
+    if a.size:
+        for coord in _coords(a.shape):
+            i = _flat_index(coord, a.shape)
+            j = _flat_index(
+                tuple(c for k, c in enumerate(coord) if k not in ax), out_shape
+            )
+            if not seen[j]:
+                los[j], his[j] = a.los[i], a.his[i]
+                seen[j] = True
+            else:
+                los[j] = _down(los[j] + a.los[i])
+                his[j] = _up(his[j] + a.his[i])
+    return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
+
+
 def pow_(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     """``base ** exponent`` for a **strictly positive** base interval.
 
@@ -694,6 +1014,267 @@ def ieee_div(a: IntervalArray, b: IntervalArray):
     return _ieee_binary(a, b, f)
 
 
+def ieee_reduce_sum(a: IntervalArray, axes: tuple[int, ...]):
+    """The ieee counterpart of :func:`reduce_sum` — **bounded to the
+    association-free cases, declining the rest**.
+
+    The real transfer's bracket rests on ℝ addition being associative, and
+    that is exactly what float addition is not: XLA is free to reassociate
+    a reduction, the jaxpr records no order, and the orders do not agree
+    (:data:`REDUCE_SUM_IEEE_ORDER_DECLINE` carries the finite-operands
+    NaN-vs-0.0-vs-inf construction). So this kernel models only the
+    reductions that contain **no association freedom at all**:
+
+    * ``n = 0`` contributors — the empty sum is exactly ``0.0`` (measured
+      on jax 0.11.0), no addition performed;
+    * ``n = 1`` — the identity on the single element, no addition
+      performed;
+    * ``n = 2`` — exactly one addition, and IEEE addition is *commutative*
+      (verified in-tree: 0 counterexamples in 5 000 random pairs plus the
+      ±inf / ±0 / subnormal / ±maxfloat corners; independently re-measured
+      at 211 396 pairs, also 0), so the single binary tree is the only one
+      there is.
+
+    ``n >= 3`` admits genuinely distinct association trees and raises
+    :class:`IntervalError` with the gap quoted — the propagator turns that
+    into a noted ⊤ (maybe-NaN) decline, never a crash.
+
+    Returns ``(IntervalArray, made_nan)`` like the other ieee kernels, with
+    the same DAZ-before / FTZ-after subnormal haze and NaN-corner routing.
+    """
+    ax = _check_axes(a, axes, "reduce_sum")
+    out_shape, out_n, n_contrib = _reduced_shape(a, ax)
+    if n_contrib > 2:
+        raise IntervalError(REDUCE_SUM_IEEE_ORDER_DECLINE.format(n=n_contrib))
+    buckets: list[list[tuple[float, float]]] = [[] for _ in range(out_n)]
+    if a.size:
+        for coord in _coords(a.shape):
+            i = _flat_index(coord, a.shape)
+            j = _flat_index(
+                tuple(c for k, c in enumerate(coord) if k not in ax), out_shape
+            )
+            buckets[j].append((a.los[i], a.his[i]))
+    los, his = [], []
+    made_nan = False
+    for parts in buckets:
+        if not parts:  # the empty sum: exactly 0.0, nothing read, never NaN
+            los.append(0.0)
+            his.append(0.0)
+            continue
+        if len(parts) == 1:  # identity, but DAZ still reads the operand
+            lo, hi = _elt_haze(*parts[0])
+            los.append(lo)
+            his.append(hi)
+            continue
+        (alo, ahi), (blo, bhi) = parts
+        alo, ahi = _elt_haze(alo, ahi)  # DAZ face
+        blo, bhi = _elt_haze(blo, bhi)
+        lo, hi, nan_here = _corner_hull(
+            (alo + blo, alo + bhi, ahi + blo, ahi + bhi), False
+        )
+        lo, hi = _elt_haze(lo, hi)  # FTZ face
+        los.append(lo)
+        his.append(hi)
+        made_nan = made_nan or nan_here
+    return (
+        IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his)),
+        made_nan,
+    )
+
+
+IEEE_CONTRACTION_ASSUMPTION = (
+    "ieee contraction hull: XLA may CONTRACT a multiply feeding an add/sub "
+    "into a single fused multiply-add, rounding once instead of twice — "
+    "measured on jax 0.11.0 CPU, where the compiled HLO contains "
+    "multiply_add_fusion and (a*b)-1 at a = 1+2**-27, b = 1-2**-27 is 0.0 "
+    "eager but -2**-54 under jit. Contraction is a compiler freedom over "
+    "the SAME equation order, so it is not covered by the equation-order "
+    "reliance. Rather than assume it away, every add/sub whose operand is a "
+    "product carries the HULL of both roundings: the contracted value is "
+    "computed exactly (the exact rational a*b+c rounded once) and joined "
+    "with the uncontracted one, so results agree wherever the two "
+    "roundings agree and are indeterminate only where they differ"
+)
+
+IEEE_CONTRACTION_DECLINE = (
+    "add/sub over a product operand has no ieee transfer for this form: XLA "
+    "may contract it into a fused multiply-add (measured on this target), "
+    "and the contracted value cannot be bracketed here because {why} — "
+    "declined rather than modelled with one of the two roundings"
+)
+
+
+def _fma_corner(a: float, b: float, c: float) -> float:
+    """The CONTRACTED value ``fl(a*b + c)`` — one rounding, exactly.
+
+    ``a*b + c`` over exact rationals is exact, and ``float(Fraction)`` is
+    round-to-nearest, so this is precisely what a fused multiply-add
+    computes. Operands are finite (the caller declines infinities).
+    """
+    from fractions import Fraction
+
+    try:
+        return float(Fraction(a) * Fraction(b) + Fraction(c))
+    except OverflowError:
+        # the exact value exceeds the double range: an fma saturates to the
+        # signed infinity, exactly as the hardware does
+        return _INF if (Fraction(a) * Fraction(b) + Fraction(c)) > 0 else -_INF
+
+
+def ieee_fma_hull(
+    a: IntervalArray,
+    b: IntervalArray,
+    c: IntervalArray,
+    *,
+    negate_product: bool = False,
+    negate_addend: bool = False,
+):
+    """Native-precision interval of the CONTRACTED ``±(a*b) ± c`` over the
+    operand boxes — the value an FMA-contracting compiler computes.
+
+    ``a*b + c`` is monotone in each argument separately (the product is
+    monotone in ``a`` for fixed ``b`` and vice versa; the sum is monotone
+    in ``c``) and rounding is monotone, so the extremes over the box sit at
+    the eight corners. Each corner is evaluated exactly and rounded once
+    (:func:`_fma_corner`).
+
+    Infinite operand endpoints raise :class:`IntervalError`: an fma over
+    infinities has delicate corner semantics this does not model, and the
+    caller turns that into a quoted decline. Returns
+    ``(IntervalArray, made_nan)`` like the other ieee kernels.
+    """
+    shape = a.shape if a.size >= b.size else b.shape
+    if c.size > _size_of(shape):
+        shape = c.shape
+    xs, ys, zs = (
+        _bcast_elements(a, shape), _bcast_elements(b, shape),
+        _bcast_elements(c, shape),
+    )
+    los, his = [], []
+    made_nan = False
+    for (alo, ahi), (blo, bhi), (clo, chi) in zip(xs, ys, zs):
+        for v in (alo, ahi, blo, bhi, clo, chi):
+            if v == _INF or v == -_INF:
+                raise IntervalError(
+                    IEEE_CONTRACTION_DECLINE.format(
+                        why="an operand endpoint is infinite and fused "
+                            "multiply-add corner semantics over infinities "
+                            "are not modelled here"
+                    )
+                )
+        alo, ahi = _elt_haze(alo, ahi)  # DAZ face, as in the other kernels
+        blo, bhi = _elt_haze(blo, bhi)
+        clo, chi = _elt_haze(clo, chi)
+        if negate_product:
+            alo, ahi = -ahi, -alo
+        if negate_addend:
+            clo, chi = -chi, -clo
+        corners = [
+            _fma_corner(x, y, z)
+            for x in (alo, ahi) for y in (blo, bhi) for z in (clo, chi)
+        ]
+        lo, hi, nan_here = _corner_hull(tuple(corners), False)
+        lo, hi = _elt_haze(lo, hi)  # FTZ face
+        los.append(lo)
+        his.append(hi)
+        made_nan = made_nan or nan_here
+    return (
+        IntervalArray(shape=shape, los=tuple(los), his=tuple(his)),
+        made_nan,
+    )
+
+
+def _size_of(shape: tuple[int, ...]) -> int:
+    n = 1
+    for d in shape:
+        n *= d
+    return n
+
+
+def hull(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    """Elementwise interval hull of two same-shape boxes — the join used to
+    cover two legal compiler behaviours at once."""
+    if a.shape != b.shape:
+        raise IntervalError(
+            f"hull over mismatched shapes {a.shape} vs {b.shape}"
+        )
+    return IntervalArray(
+        shape=a.shape,
+        los=tuple(min(x, y) for x, y in zip(a.los, b.los)),
+        his=tuple(max(x, y) for x, y in zip(a.his, b.his)),
+    )
+
+
+# -- integer semantics --------------------------------------------------------
+
+
+INT_DIV_DECLINE = (
+    "'div' on dtype {dtype!r}: jax integer division TRUNCATES toward zero "
+    "(measured: lax.div(-7, 2) = -3, not -3.5), which real division does "
+    "not model. {why} — declined"
+)
+
+
+def _trunc_div(a: int, b: int) -> int:
+    """Integer division truncating toward zero — jax/XLA's measured
+    semantics, and NOT python's ``//`` (which floors: ``-7 // 2 == -4``
+    while ``lax.div(-7, 2) == -3``)."""
+    q = abs(a) // abs(b)
+    return -q if (a < 0) != (b < 0) else q
+
+
+_EXACT_INT_FLOAT = 2**53
+
+
+def _exact_int(v: float) -> int | None:
+    """``v`` as an exact python int, or None if it is not an integer this
+    double represents exactly."""
+    if v != v or v == _INF or v == -_INF:
+        return None
+    if v != math.floor(v) or abs(v) > _EXACT_INT_FLOAT:
+        return None
+    return int(v)
+
+
+def int_div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    """Integer ``div``: truncation toward zero, computed EXACTLY.
+
+    For a denominator of fixed sign, ``a/b`` is monotone in each argument,
+    and truncation toward zero is monotone non-decreasing, so the image
+    extremes sit at the four corners — evaluated in exact python integer
+    arithmetic, so no rounding enters at all.
+
+    A denominator whose interval contains 0 yields ⊤ (integer division by
+    zero is not a value this domain models), matching :func:`div`'s
+    discipline. Endpoints that are not exactly-representable integers
+    raise :class:`IntervalError` — the exact corner rule needs exact
+    integers, and truncation is not something to approximate.
+    """
+    def f(alo, ahi, blo, bhi):
+        if blo <= 0.0 <= bhi:
+            return -_INF, _INF  # division by zero reachable: ⊤, as for div
+        ints = [_exact_int(v) for v in (alo, ahi, blo, bhi)]
+        if any(i is None for i in ints):
+            raise IntervalError(
+                INT_DIV_DECLINE.format(
+                    dtype="integer",
+                    why=(
+                        f"an operand endpoint ({alo}, {ahi}) / ({blo}, {bhi}) "
+                        f"is not an exactly-representable integer, so the "
+                        f"exact truncating-corner rule does not apply"
+                    ),
+                )
+            )
+        ai_lo, ai_hi, bi_lo, bi_hi = ints
+        qs = [
+            _trunc_div(x, y)
+            for x in (ai_lo, ai_hi) for y in (bi_lo, bi_hi)
+        ]
+        return float(min(qs)), float(max(qs))
+
+    return _binary(a, b, f)
+
+
 # -- comparisons (three-valued) ----------------------------------------------
 
 
@@ -864,7 +1445,31 @@ def slice_(
     limit_indices: tuple[int, ...],
     strides: tuple[int, ...] | None,
 ) -> IntervalArray:
-    steps = strides or (1,) * len(a.shape)
+    """Static slice. Params inconsistent with the operand's shape raise
+    :class:`IntervalError` — the normal decline channel — rather than
+    escaping as an ``IndexError`` from the element read below.
+
+    A legal jax trace cannot produce such params (jax clamps its own), but
+    :meth:`stelling.ir.ClosedJaxpr.from_dict` is a public deserialisation
+    entry point, and a query arriving through it must degrade like any
+    other unsupported form instead of killing the walk (audit FRAGILE 1;
+    the registered degrade-don't-crash posture).
+    """
+    rank = len(a.shape)
+    steps = tuple(strides) if strides else (1,) * rank
+    if not (len(start_indices) == len(limit_indices) == len(steps) == rank):
+        raise IntervalError(
+            f"slice params do not match operand rank {rank}: "
+            f"start_indices={tuple(start_indices)}, "
+            f"limit_indices={tuple(limit_indices)}, strides={steps}"
+        )
+    for ax, (lo, hi, st) in enumerate(zip(start_indices, limit_indices, steps)):
+        if st < 1 or not (0 <= lo <= hi <= a.shape[ax]):
+            raise IntervalError(
+                f"slice axis {ax} selects [{lo}, {hi}) step {st}, which is "
+                f"outside the operand's extent {a.shape[ax]} (shape "
+                f"{a.shape}) — no element rule for an out-of-range selection"
+            )
     out_shape = tuple(
         -(-(hi - lo) // st) for lo, hi, st in zip(start_indices, limit_indices, steps)
     )

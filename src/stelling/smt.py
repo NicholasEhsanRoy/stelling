@@ -199,7 +199,14 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
                 body = f"(ite {ins[0]} 1.0 0.0)"
             else:
                 alias = ins[0]  # value-preserving: identity in emission
-        else:  # identity plumbing (shape ops, assume/nonvacuity data flow)
+        else:
+            # identity plumbing: shape ops, assume/nonvacuity data flow, and
+            # the validated single-element forms (a one-index `slice`, a
+            # one-addend `reduce_sum`) — each denotes its operand's own
+            # value, so it ALIASES that operand's term. No new term, no new
+            # declaration: sharing is preserved by construction, and the
+            # slice validator is what guarantees the form really is
+            # single-element.
             alias = ins[0]
         if alias is not None:
             names[out.id] = alias

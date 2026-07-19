@@ -18,8 +18,21 @@ allowed-by-census structural addition from the maddening HeatNode trace
 (``scatter`` in its static-index ``x.at[k].set(v)`` form only), plus two
 allowed-by-census structural additions from the MIME fvm laplacian trace
 (``gather`` in its static-index leading-axis row form only, and
-``transpose`` — both pure data movement with exact semantics). Everything
-else falls to ⊤ — soundly, with coverage recording exactly how much fell.
+``transpose`` — both pure data movement with exact semantics), plus the
+closed three-row round measured by attribution against a real trace
+(``reduce_sum`` and ``integer_pow``; that round's third row was
+emission-only). Everything else falls to ⊤ — soundly, with coverage
+recording exactly how much fell.
+
+The three-row round is also where the ieee census first had to say **no**
+to arithmetic it can state in ℝ. Both new rows contract more than one
+float operation into a single equation while the jaxpr records no
+evaluation ORDER for them, and neither float addition nor float
+multiplication is associative — so under ``semantics="ieee"`` each is
+censused down to the sub-cases that perform no arithmetic at all (a
+reduction of at most 2 elements; exponent 0 or 1) and declines the rest
+with the gap quoted. The ℝ transfers are unaffected: there, every
+association order denotes the same number.
 
 Every transfer declares an assumption tier (design commitment 5):
 ``exact`` (no arithmetic, or arithmetic with no rounding), ``sound``
@@ -299,10 +312,43 @@ _EXACT_CONVERSIONS = frozenset(
         ("int8", "float64"), ("int16", "float64"), ("int32", "float64"),
         ("bool", "int8"), ("bool", "int16"), ("bool", "int32"),
         ("bool", "int64"), ("bool", "float32"), ("bool", "float64"),
+        # bool -> unsigned was missing, which left a uint counter ⊤ for a
+        # reason that had nothing to do with its arithmetic (audit
+        # COSMETIC 5, case 2). {0, 1} is representable in every unsigned
+        # width — MEASURED on jax 0.11.0, both values, eager and jit, for
+        # uint4/8/16/32/64.
+        ("bool", "uint4"), ("bool", "uint8"), ("bool", "uint16"),
+        ("bool", "uint32"), ("bool", "uint64"),
     }
 )
 
-_INT_RANGE = {"int32": 2.0**31, "int64": 2.0**63}
+# Exact representable ranges per integer dtype: intN spans
+# [-2**(N-1), 2**(N-1)-1], uintN spans [0, 2**N - 1], bool spans [0, 1].
+# Kept as exact python ints, never floats: an int64 bound is not
+# representable as a double and the whole point of the overflow guard is to
+# be exact at the boundary (python compares int to float exactly).
+_INT_DTYPE_BOUNDS: dict[str, tuple[int, int]] = {
+    "bool": (0, 1),
+    # int4/uint4 exist in jax 0.11.0. Their absence made the guard a silent
+    # no-op for them, which was harmless only because no int4 conversion is
+    # whitelisted — a coincidence, not a guarantee (audit, latent note).
+    **{f"int{n}": (-(2 ** (n - 1)), 2 ** (n - 1) - 1) for n in (4, 8, 16, 32, 64)},
+    **{f"uint{n}": (0, 2**n - 1) for n in (4, 8, 16, 32, 64)},
+}
+
+
+def _is_integer_dtype(dtype: str) -> bool:
+    """Whether a dtype name denotes integer semantics — by NAME, so a dtype
+    the bounds table has never heard of still reads as an integer and
+    declines, instead of silently skipping the guard."""
+    return dtype == "bool" or dtype.startswith(("int", "uint"))
+
+# The float->int conversion guard's half-open bound, DERIVED from the table
+# above so the two cannot drift: `-bound <= x < bound` is exactly
+# [min, max] for a signed dtype. Behaviour unchanged — the strict upper
+# comparison the second audit pinned (finding 4-B) is what makes the
+# derivation exact.
+_INT_RANGE = {d: float(_INT_DTYPE_BOUNDS[d][1] + 1) for d in ("int32", "int64")}
 
 
 def _t_convert(eqn, params, ins):
@@ -474,24 +520,290 @@ def _t_gather(eqn, params, ins):
     return [iv.take_rows(operand, ks)]
 
 
+# jax integer arithmetic WRAPS on overflow; every arithmetic transfer here
+# computes over ℝ, which does not model wraparound. Modelling int32 as an
+# unbounded real is a false-VERIFIED generator — measured, `v * v > 0`
+# discharges while jax computes -1794967296 (audit UNSOUND 1).
+#
+# The fix is an overflow-REACHABILITY guard, not a blanket refusal of
+# integers: refusing integers wholesale would ⊤ every index and counter
+# computation in every trace. The exact result interval is already in
+# hand — it is outward-rounded, hence a SUPERSET of the true integer
+# result set — so it is checked against the dtype's representable range:
+#
+#   * fits  -> no wraparound is reachable over the declared box, the
+#              real-arithmetic result IS the integer result, it stands;
+#   * escapes -> wraparound is reachable, ⊤ with the range quoted.
+#
+# Sound in the direction that matters: the check can only be pessimistic
+# (the superset may escape a range the true values stay inside), never
+# optimistic.
+_INT_WRAPAROUND_DECLINE = (
+    "{prim!r} on dtype {dtype!r}: jax integer arithmetic wraps on overflow, "
+    "which this transfer's real-arithmetic rule does not model — declined"
+)
+
+# Three DISTINCT causes, each saying what actually happened (audit
+# COSMETIC 5: one sentence was doing duty for all three, and was false for
+# two of them).
+_INT_OVERFLOW_DECLINE = (
+    "{prim!r} on dtype {dtype!r}: integer wraparound is not excluded over "
+    "the declared box — the result range reaches [{rlo}, {rhi}], outside "
+    "the representable range [{lo}, {hi}]; jax wraps, this domain does not "
+    "model it — declined"
+)
+
+_INT_UNBOUNDED_DECLINE = (
+    "{prim!r} on dtype {dtype!r}: an operand's range is unbounded (⊤, from "
+    "an unmodelled producer or an earlier decline), so whether the result "
+    "stays inside the representable range [{lo}, {hi}] cannot be decided "
+    "at all — declined. This is NOT a wraparound finding"
+)
+
+_INT_BRACKET_DECLINE = (
+    "{prim!r} on dtype {dtype!r}: the result cannot be resolved against the "
+    "representable range [{lo}, {hi}] — it lands within {width} of the "
+    "boundary, and the double bracket at this magnitude is itself {width} "
+    "wide, so wraparound can be neither shown nor excluded — declined. "
+    "This is a BRACKET limit, not a demonstrated overflow"
+)
+
+
+def _snap_int(lo: float, hi: float) -> tuple[float, float]:
+    """Tighten an integer-valued result bracket to the integers it can
+    actually contain. The true values are integers inside ``[lo, hi]``, so
+    ``[ceil(lo), floor(hi)]`` still contains every one of them — exact, and
+    it removes the one-ulp outward bump that the arithmetic kernels added
+    (audit COSMETIC 5, case 1: a result landing exactly on the dtype
+    maximum used to decline although wraparound was provably impossible)."""
+    if lo == -math.inf or hi == math.inf or lo != lo or hi != hi:
+        return lo, hi
+    return math.ceil(lo), math.floor(hi)
+
+
+def _require_float_dtype(eqn, prim: str) -> None:
+    """The blanket float-only guard. Retained for the cases the
+    reachability guard cannot decide — a NEGATIVE integer exponent, whose
+    jax semantics are not real division at all — never for ordinary
+    integer arithmetic, which now goes through
+    :func:`_int_overflow_guard`."""
+    dt = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
+    if not dt.startswith("float"):
+        raise iv.IntervalError(
+            _INT_WRAPAROUND_DECLINE.format(prim=prim, dtype=dt)
+        )
+
+
+def _int_overflow_guard(eqn, prim: str, outs):
+    """Guard AND tighten the result of a computing transfer on integers.
+
+    Raises unless every output element provably stays inside the result
+    dtype's representable range — three distinct refusals, each attributed
+    to what actually happened: an unbounded operand, a bracket too wide to
+    resolve at this magnitude, or a genuine escape from the range.
+
+    Returns the outputs with each integer bracket SNAPPED to the integers
+    it can contain. The true values of an integer-dtyped result are
+    integers, so ``[ceil(lo), floor(hi)]`` still contains every one of them
+    — an exact tightening, not an approximation, and it removes the
+    one-ulp outward bump the arithmetic kernels added. Without it a counter
+    bounded by ``n + 1 <= 2`` could not be discharged although it is
+    provably true (audit COSMETIC 5 / over-guard reports: deciding it
+    exactly beats declining it).
+
+    A no-op for float dtypes, which are returned untouched.
+    """
+    dtype = (eqn.outvars[0].aval.dtype or "") if eqn.outvars else ""
+    if not _is_integer_dtype(dtype):
+        return outs  # float (or dtypeless): nothing wraps, nothing to snap
+    bounds = _INT_DTYPE_BOUNDS.get(dtype)
+    if bounds is None:
+        # an integer dtype the table has never heard of: refuse rather than
+        # skip the guard silently (the audit's int4/uint4 latent note — the
+        # table is now complete, and this keeps it honest if jax adds more)
+        raise iv.IntervalError(
+            f"{prim!r} on integer dtype {dtype!r}: no representable range is "
+            f"registered for it, so integer wraparound cannot be excluded — "
+            f"declined"
+        )
+    lo_b, hi_b = bounds
+    snapped = []
+    for box in outs:
+        los, his = [], []
+        for raw_lo, raw_hi in zip(box.los, box.his):
+            if raw_lo == -math.inf or raw_hi == math.inf:
+                raise iv.IntervalError(
+                    _INT_UNBOUNDED_DECLINE.format(
+                        prim=prim, dtype=dtype, lo=lo_b, hi=hi_b
+                    )
+                )
+            # the true values are integers: snap the bracket to them first,
+            # so a one-ulp bump cannot masquerade as an overflow
+            lo, hi = _snap_int(raw_lo, raw_hi)
+            # int-vs-float comparison is exact in python, which is why the
+            # bounds are kept as ints: float(2**63) would round
+            if lo >= lo_b and hi <= hi_b:
+                los.append(float(lo))
+                his.append(float(hi))
+                continue
+            # distinguish "the bracket is too wide to resolve here" from
+            # "the result genuinely escapes": at int64/uint64 magnitudes one
+            # double ulp spans thousands of integers, and that is a bracket
+            # limit rather than a demonstrated overflow
+            width = max(math.ulp(float(lo_b)), math.ulp(float(hi_b)))
+            if width > 1 and (
+                (hi > hi_b and hi - hi_b < width)
+                or (lo < lo_b and lo_b - lo < width)
+            ):
+                raise iv.IntervalError(
+                    _INT_BRACKET_DECLINE.format(
+                        prim=prim, dtype=dtype, lo=lo_b, hi=hi_b,
+                        width=int(width),
+                    )
+                )
+            raise iv.IntervalError(
+                _INT_OVERFLOW_DECLINE.format(
+                    prim=prim, dtype=dtype, rlo=lo, rhi=hi, lo=lo_b, hi=hi_b,
+                )
+            )
+        snapped.append(
+            iv.IntervalArray(shape=box.shape, los=tuple(los), his=tuple(his))
+        )
+    return snapped
+
+
+def _int_guarded(prim: str, compute):
+    """Wrap an arithmetic transfer with the overflow-reachability guard.
+    The marker attribute is what the census assert below checks, so
+    membership is enforced rather than declared."""
+
+    def t(eqn, params, ins):
+        outs = compute(eqn, params, ins)
+        if outs is None:
+            return None
+        return _int_overflow_guard(eqn, prim, outs)
+
+    t._int_guarded = True
+    return t
+
+
+def _integer_exponent(params) -> int | None:
+    """The ``y`` param as a genuine integer, or ``None`` to decline. bool is
+    an int subclass in Python and is NOT an exponent."""
+    y = params.get("y")
+    if isinstance(y, bool) or not isinstance(y, int):
+        return None
+    return y
+
+
+# Primitives that do NOT pass the product-derived taint on. The default is
+# to propagate through EVERYTHING: an exemption is a claim that no
+# compiler, under any simplification set, could present the upstream
+# product to a later add/sub as a raw addend through this primitive. Each
+# is a separate flagged judgement call, and the standing posture where the
+# argument is not airtight is to propagate.
+#
+#  * `exp` — a transcendental. `exp(a*b)` is not a product of anything the
+#    compiler holds; no fused multiply-add can absorb the original
+#    multiply through it. (Deliberately NOT extended to `pow` or
+#    `integer_pow`: `pow(x, 2)` is a multiply after expansion, which is
+#    precisely the kind of simplification this finding is about.)
+#
+#  * the comparisons and boolean logic — their outputs are BOOLEANS, not
+#    float addends at all. A bool cannot be an fma operand; any later
+#    float use goes through a conversion whose value is 0 or 1, not a
+#    product. The chain genuinely restarts.
+_TAINT_STOPS = frozenset({
+    "exp",
+    "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
+})
+
+
+def _integer_pow_budget(box, y: int) -> None:
+    """Degrade-don't-HANG, both dimensions. The exponent cap bounds the
+    per-element cost; the work cap bounds ``size x |y|``, which is what an
+    elementwise transfer actually pays (audit FRAGILE 3)."""
+    if abs(y) > iv.INTEGER_POW_EXACT_CAP:
+        raise iv.IntervalError(
+            iv.INTEGER_POW_CAP_DECLINE.format(
+                n=abs(y), cap=iv.INTEGER_POW_EXACT_CAP
+            )
+        )
+    work = box.size * abs(y)
+    if work > iv.INTEGER_POW_WORK_CAP:
+        raise iv.IntervalError(
+            iv.INTEGER_POW_WORK_DECLINE.format(
+                size=box.size, n=abs(y), work=work,
+                cap=iv.INTEGER_POW_WORK_CAP,
+            )
+        )
+
+
+def _t_div(eqn, params, ins):
+    """``div``. On floats this is real division, unchanged. On INTEGERS it
+    is not: jax integer division TRUNCATES toward zero (measured:
+    ``lax.div(-7, 2) = -3``, not −3.5) and ``INT_MIN / -1`` WRAPS (measured:
+    ``lax.div(-2**31, -1) = -2147483648``, not +2³¹). Modelling either as
+    real division mints false definite verdicts in both directions — audit
+    UNSOUND 3, and the second of those is literally the wraparound class
+    the overflow guard exists for, so it routes through the same guard."""
+    dtype = (eqn.outvars[0].aval.dtype or "") if eqn.outvars else ""
+    if not _is_integer_dtype(dtype):
+        return [iv.div(*ins)]
+    return _int_overflow_guard(eqn, "div", [iv.int_div(*ins)])
+
+
+def _t_reduce_sum(eqn, params, ins):
+    outs = [iv.reduce_sum(ins[0], tuple(params["axes"]))]
+    return _int_overflow_guard(eqn, "reduce_sum", outs)
+
+
+def _t_integer_pow(eqn, params, ins):
+    y = _integer_exponent(params)
+    if y is None:
+        return None  # non-integer exponent: no rule, ⊤ with the params noted
+    # degrade-don't-HANG in BOTH dimensions: the exact-rational endpoints
+    # cost time linear in the exponent (jax bounds it nowhere) and are paid
+    # per element (audit FRAGILE 2 and 3)
+    _integer_pow_budget(ins[0], y)
+    if y < 0:
+        # a negative exponent over integers is not real division: jax's
+        # integer semantics here are not modelled at all, so the
+        # reachability guard has nothing to decide and the blanket float
+        # guard is the honest one
+        _require_float_dtype(eqn, "integer_pow")
+    outs = [iv.integer_pow(ins[0], y)]
+    return _int_overflow_guard(eqn, "integer_pow", outs)
+
+
 TRANSFERS = {
-    "add": (lambda eqn, p, ins: [iv.add(*ins)], TIER_SOUND),
-    "sub": (lambda eqn, p, ins: [iv.sub(*ins)], TIER_SOUND),
-    "mul": (lambda eqn, p, ins: [iv.mul(*ins)], TIER_SOUND),
-    "div": (lambda eqn, p, ins: [iv.div(*ins)], TIER_SOUND),
-    "neg": (lambda eqn, p, ins: [iv.neg(ins[0])], TIER_EXACT),
-    "abs": (lambda eqn, p, ins: [iv.abs_(ins[0])], TIER_EXACT),
+    # the arithmetic core carries the integer overflow-reachability guard
+    # (audit UNSOUND 1): in-range integer arithmetic keeps its exact real
+    # result, wraparound-reachable arithmetic declines with the range
+    # quoted. A no-op on every float dtype.
+    "add": (_int_guarded("add", lambda eqn, p, ins: [iv.add(*ins)]), TIER_SOUND),
+    "sub": (_int_guarded("sub", lambda eqn, p, ins: [iv.sub(*ins)]), TIER_SOUND),
+    "mul": (_int_guarded("mul", lambda eqn, p, ins: [iv.mul(*ins)]), TIER_SOUND),
+    # real division on floats; TRUNCATING integer division, exactly, on
+    # integers — with INT_MIN/-1 routed through the overflow guard
+    "div": (_t_div, TIER_SOUND),
+    # neg/abs wrap at INT_MIN only (-(-2**31) is -2**31 in two's
+    # complement), which the same guard catches
+    "neg": (_int_guarded("neg", lambda eqn, p, ins: [iv.neg(ins[0])]), TIER_EXACT),
+    "abs": (_int_guarded("abs", lambda eqn, p, ins: [iv.abs_(ins[0])]), TIER_EXACT),
     "max": (lambda eqn, p, ins: [iv.maximum(*ins)], TIER_EXACT),
     "min": (lambda eqn, p, ins: [iv.minimum(*ins)], TIER_EXACT),
     # pow's corner rule holds for strictly positive bases only; anything
     # else declines inside iv.pow_ (IntervalError -> noted ⊤).
-    "pow": (lambda eqn, p, ins: [iv.pow_(*ins)], TIER_SOUND_LIBM),
+    "pow": (_int_guarded("pow", lambda eqn, p, ins: [iv.pow_(*ins)]),
+            TIER_SOUND_LIBM),
     "stop_gradient": (lambda eqn, p, ins: [ins[0]], TIER_EXACT),
     "reshape": (_t_reshape, TIER_EXACT),
     # select_n(which, *cases): the masked case-split. Exact where `which` is
     # definite; a sound join where it straddles (design/control-flow-*).
     "select_n": (lambda eqn, p, ins: [iv.select_n(ins[0], ins[1:])], TIER_EXACT),
-    "exp": (lambda eqn, p, ins: [iv.exp(ins[0])], TIER_SOUND_LIBM),
+    "exp": (_int_guarded("exp", lambda eqn, p, ins: [iv.exp(ins[0])]),
+            TIER_SOUND_LIBM),
     "lt": (lambda eqn, p, ins: [iv.lt(*ins)], TIER_EXACT),
     "gt": (lambda eqn, p, ins: [iv.gt(*ins)], TIER_EXACT),
     "le": (lambda eqn, p, ins: [iv.le(*ins)], TIER_EXACT),
@@ -501,6 +813,14 @@ TRANSFERS = {
     "and": (_t_bool_logic("and", iv.logical_and), TIER_EXACT),
     "or": (_t_bool_logic("or", iv.logical_or), TIER_EXACT),
     "reduce_or": (_t_reduce_or, TIER_EXACT),
+    # the sum over the reduced axes. Sound under ℝ for EVERY association
+    # order at once (in ℝ they all denote the same number); the ieee
+    # counterpart cannot reuse that and declines — see IEEE_TRANSFERS.
+    "reduce_sum": (_t_reduce_sum, TIER_SOUND),
+    # x ** y for integer y. Even y > 0 PRODUCES non-negativity; y < 0
+    # routes through div's zero-in-divisor discipline (⊤ when the base
+    # straddles 0 — the pole is real and nothing here papers over it).
+    "integer_pow": (_t_integer_pow, TIER_SOUND),
     "squeeze": (
         lambda eqn, p, ins: [iv.squeeze(ins[0], tuple(p.get("dimensions", ())))],
         TIER_EXACT,
@@ -555,6 +875,184 @@ TRANSFERS = {
     "stelling_assert": (lambda eqn, p, ins: [ins[0]], TIER_EXACT),
     "stelling_nonvacuity": (lambda eqn, p, ins: [ins[0]], TIER_EXACT),
 }
+
+
+# -- the integer-semantics census over the TRANSFER sites ---------------------
+#
+# The first sweep for this defect class was run over the EMISSION sites and
+# not over the transfer sites, and `div` fell through the gap (audit
+# UNSOUND 3): the cleared-list entry "div — already stricter" was true of
+# the emission and false of the transfer, and interval propagation mints
+# definite statuses without ever reaching the emission. A review found the
+# siblings once and then did not find them again.
+#
+# So the classification is mechanised instead of remembered. Every
+# registered transfer is either COMPUTING — it can produce a numeric value
+# its operands did not contain, so it carries the overflow-reachability
+# guard — or NON-COMPUTING, with the reason recorded here. The assert makes
+# the census TOTAL: a new transfer cannot be registered without landing in
+# one of the two sets, exactly as IEEE_TRANSFERS cannot be left short.
+_INT_COMPUTING = frozenset({
+    "add", "sub", "mul", "div", "neg", "abs",
+    "pow", "exp", "reduce_sum", "integer_pow",
+})
+
+# Why each of these cannot introduce an out-of-range integer:
+#   max/min/select_n  select an operand value; they compute nothing
+#   comparisons/and/or/reduce_or  produce bools, exact for integers
+#   convert_element_type  carries its own whitelist + range guard
+#   the structural ops  are pure data movement (copies of in-range values)
+#   the harness primitives  are declarations and identities
+_INT_NON_COMPUTING = frozenset({
+    "max", "min", "select_n",
+    "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
+    "convert_element_type",
+    "stop_gradient", "reshape", "squeeze", "slice", "scatter", "gather",
+    "transpose", "broadcast_in_dim", "concatenate",
+    "stelling_any", "stelling_assert", "stelling_nonvacuity",
+})
+
+assert _INT_COMPUTING | _INT_NON_COMPUTING == set(TRANSFERS), (
+    "the integer-semantics census must stay total over TRANSFERS: "
+    f"unclassified {set(TRANSFERS) - _INT_COMPUTING - _INT_NON_COMPUTING}, "
+    f"stale {_INT_COMPUTING | _INT_NON_COMPUTING - set(TRANSFERS)}"
+)
+assert not (_INT_COMPUTING & _INT_NON_COMPUTING)
+
+# and every computing transfer must actually be wearing the guard — the
+# census is only worth having if membership is enforced rather than
+# declared — and DECLARED is what the first version of this assert was
+# (audit COSMETIC 6): it read a settable marker attribute plus a
+# hand-maintained escape list, either of which a computing transfer could
+# satisfy while leaving the class wide open. An assert that can pass while
+# the invariant fails is worse than no assert, because it licenses trust.
+#
+# So the check is BEHAVIOURAL: each computing transfer is actually run on
+# an out-of-range integer operand, and must either decline or return a
+# result inside the dtype's range. Nothing about how it is implemented,
+# labelled or wrapped can satisfy this — only doing the right thing can.
+# RETIRED, deliberately kept and deliberately empty. This was the
+# hand-maintained escape list the declarative assert consulted; the escape
+# list WAS the defect, so it is not repaired but abolished — and a name
+# that once granted exemptions is left here at zero so that re-adding one
+# is a visible act rather than a quiet edit to a live list.
+_INT_GUARDED_INSIDE: frozenset[str] = frozenset()
+
+def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
+    """Operand values chosen to push ``prim`` past the named boundary.
+    ``None`` for the second slot means the primitive is unary."""
+    hi, lo = float(hi_b), float(lo_b)
+    if high:
+        return {
+            "add": (hi, hi), "sub": (hi, lo), "mul": (hi, hi),
+            "div": (lo, -1.0), "neg": (lo, None), "abs": (lo, None),
+            "pow": (hi, 2.0), "exp": (hi, None),
+            "reduce_sum": (hi, None), "integer_pow": (hi, None),
+        }[prim]
+    return {
+        "add": (lo, lo), "sub": (lo, hi), "mul": (lo, hi),
+        "div": (hi, -1.0), "neg": (hi, None), "abs": (hi, None),
+        "pow": (lo, 3.0), "exp": (lo, None),
+        "reduce_sum": (lo, None), "integer_pow": (lo, None),
+    }[prim]
+
+
+def _probe_slice(dtype: str, high: bool):
+    """One (dtype, direction) slice of the sweep as concrete operand
+    boxes-to-be — a readable summary of the shapes :func:`_probe_operands`
+    generates, DERIVED from it so the two cannot drift."""
+    lo_b, hi_b = _INT_DTYPE_BOUNDS[dtype]
+    out = {}
+    for prim in sorted(_INT_COMPUTING):
+        first, second = _probe_operands(prim, lo_b, hi_b, high)
+        out[prim] = (
+            (first, first),
+            (second, second) if second is not None else None,
+        )
+    return out
+
+
+# The int32 / upper-boundary slice, materialised under its own name. This
+# used to BE the census — one dtype, one direction per primitive — which is
+# exactly the narrowness the audit named: a transfer could decline the one
+# probed value while accepting a sibling. It is kept only as a readable
+# summary; the census itself sweeps every dtype in both directions.
+_INT_PROBE_OPERANDS = _probe_slice("int32", True)
+
+
+def _assert_computing_transfers_close_the_integer_class() -> None:
+    """The behavioural census: run every computing transfer at every
+    integer dtype's boundary, in BOTH directions, and require it to decline
+    or return a result inside that dtype's representable range.
+
+    Nothing about how a transfer is implemented, labelled or wrapped can
+    satisfy this — only doing the right thing can. Widened from a single
+    int32 probe per primitive to the whole invariant (audit: a transfer
+    could decline the one probed value while accepting a sibling; the
+    assert should test the invariant, not a representative of it). Kept at
+    import rather than in a test because it runs for every consumer of the
+    module, not only when the suite runs — measured cost of the full sweep
+    is ~2 ms.
+    """
+    declines = 0
+    for prim in sorted(_INT_COMPUTING):
+        exponents = ((2,), (3,)) if prim == "integer_pow" else ((None,),)
+        for dtype, (lo_b, hi_b) in sorted(_INT_DTYPE_BOUNDS.items()):
+            for high in (True, False):
+                y = (2 if high else 3) if prim == "integer_pow" else None
+                first, second = _probe_operands(prim, lo_b, hi_b, high)
+                shape = (3,) if prim == "reduce_sum" else ()
+                aval_in = ir.Aval(
+                    kind="ShapedArray", shape=shape, dtype=dtype
+                )
+                boxes = [iv.from_bounds(shape, first, first)]
+                if second is not None:
+                    boxes.append(iv.from_bounds((), second, second))
+                invars = tuple(
+                    ir.Var(
+                        id=i,
+                        aval=aval_in if i == 0 else ir.Aval(
+                            kind="ShapedArray", shape=(), dtype=dtype
+                        ),
+                    )
+                    for i in range(len(boxes))
+                )
+                params = {
+                    "integer_pow": (("y", y),),
+                    "reduce_sum": (("axes", (0,)),),
+                }
+                eqn = ir.JaxprEqn(
+                    primitive=prim, invars=invars,
+                    outvars=(ir.Var(
+                        id=99,
+                        aval=ir.Aval(
+                            kind="ShapedArray", shape=(), dtype=dtype
+                        ),
+                    ),),
+                    params=params.get(prim, ()),
+                )
+                try:
+                    outs = TRANSFERS[prim][0](eqn, eqn.params_dict(), boxes)
+                except iv.IntervalError:
+                    declines += 1
+                    continue  # declined: the class is closed here
+                if outs is None:
+                    declines += 1
+                    continue  # no rule for this configuration: also closed
+                for box in outs:
+                    for lo, hi in zip(box.los, box.his):
+                        assert lo >= lo_b and hi <= hi_b, (
+                            f"computing transfer {prim!r} on {dtype!r} "
+                            f"returned {[lo, hi]}, outside its range "
+                            f"[{lo_b}, {hi_b}], without declining — the "
+                            f"integer class is open"
+                        )
+    # the sweep must actually BITE, or it would pass by never reaching the
+    # guard at all
+    assert declines > 0, "the integer census probed nothing that declined"
+
+
+_assert_computing_transfers_close_the_integer_class()
 
 
 # Every sound-libm transfer names the exact libm-fidelity assumption it
@@ -778,6 +1276,64 @@ def _ieee_bool_logic(name, op):
     return t
 
 
+def _ieee_reduce_sum(eqn, params, ins, flags):
+    """reduce_sum under ieee — the ONE row of this build whose real-mode
+    argument does not survive the dial.
+
+    The real transfer is sound for every association order because ℝ
+    addition is associative, so all orders denote one number. Float
+    addition is not, XLA may reassociate a reduction, and the jaxpr
+    records no order: the association freedom lives INSIDE the equation,
+    where no equation-faithful model can reach it. So only the
+    association-free reductions are modelled (0, 1 or 2 contributors —
+    zero or one addition, and IEEE addition is commutative); 3 or more
+    declines with the gap quoted (:data:`stelling.interval
+    .REDUCE_SUM_IEEE_ORDER_DECLINE`), which the dispatcher turns into
+    ⊤-maybe-NaN.
+
+    A maybe-NaN operand poisons the sum (NaN + anything is NaN) — except
+    over an EMPTY reduction range, which reads no element at all and is
+    exactly 0.0 whatever flag the (elementless) operand carries.
+    """
+    _ieee_f64_only(eqn)
+    box, made_nan = iv.ieee_reduce_sum(ins[0], tuple(params["axes"]))
+    reads_an_element = ins[0].size > 0
+    return [box], [made_nan or (flags[0] and reads_an_element)]
+
+
+def _ieee_integer_pow(eqn, params, ins, flags):
+    """integer_pow under ieee — the same defect class as reduce_sum above,
+    with float MULTIPLICATION in place of addition.
+
+    The jaxpr fixes the exponent but not the evaluation schedule, and the
+    candidate lowerings disagree in the last ulps (measured: ``((x*x)*x)*x
+    != (x*x)*(x*x)`` for 34% of x in [0.5, 2.0]; ``1/(x*x) !=
+    (1/x)*(1/x)`` for 53%; a correctly-rounded libm ``pow`` is a third
+    answer). So only the arithmetic-free exponents are modelled:
+
+    * ``y = 0`` → exactly 1.0 for every base. MEASURED on jax 0.11.0 CPU
+      binary64 at 0.0, -0.0, ±inf and **NaN** — so this is the one ieee
+      transfer that legitimately CLEARS a maybe-NaN flag: the result does
+      not depend on the operand's value at all.
+    * ``y = 1`` → the identity (flag rides along, DAZ haze applied).
+
+    Every other exponent declines with the gap quoted. That is strictly
+    MORE conservative than the real transfer's zero-in-divisor rule for
+    negative y — under ieee the pole is not even reached, because the
+    schedule question bites first.
+    """
+    _ieee_f64_only(eqn)
+    y = _integer_exponent(params)
+    if y is None:
+        return None
+    _integer_pow_budget(ins[0], y)
+    if y == 0:
+        return [iv.point(1.0, ins[0].shape)], [False]
+    if y == 1:
+        return [iv.subnormal_haze(ins[0])[0]], [flags[0]]
+    raise iv.IntervalError(iv.INTEGER_POW_IEEE_SCHEDULE_DECLINE.format(y=y))
+
+
 def _ieee_reduce_or(eqn, params, ins, flags):
     dtypes = [v.aval.dtype for v in eqn.invars]
     if any(d != "bool" for d in dtypes):
@@ -969,6 +1525,14 @@ IEEE_TRANSFERS = {
     "and": (_ieee_bool_logic("and", iv.logical_and), TIER_EXACT),
     "or": (_ieee_bool_logic("or", iv.logical_or), TIER_EXACT),
     "reduce_or": (_ieee_reduce_or, TIER_EXACT),
+    # (ii) censused DOWN to the association-free cases: <=2 contributors
+    # are exact (0 or 1 addition; IEEE add is commutative), >=3 declines —
+    # float addition is not associative and the jaxpr fixes no order
+    "reduce_sum": (_ieee_reduce_sum, TIER_EXACT),
+    # (ii) censused down the same way: y in {0, 1} perform NO arithmetic
+    # and are exact (y=0 is measured 1.0 even at NaN, so it CLEARS the
+    # flag); every other exponent declines — no fixed multiply schedule
+    "integer_pow": (_ieee_integer_pow, TIER_EXACT),
     # (i) pure data movement, dtype-agnostic, flags ride along
     "squeeze": (
         _ieee_passthrough(
@@ -1193,6 +1757,19 @@ class _Propagator:
         # writes it (the flag machinery is fenced behind semantics checks),
         # so the real path's behavior is untouched.
         self.nan: dict[int, bool] = {}
+        # ieee mode's second parallel table: var id -> PRODUCT-DERIVED.
+        # XLA contracts a multiply feeding an add/sub into one fused
+        # multiply-add, and it does so AFTER its own simplification passes
+        # — so a syntactic "is my operand's producer a mul?" test is a bet
+        # that the jaxpr shape survives compilation, and that bet loses
+        # (audit UNSOUND 5: ten forms, from `neg` to a one-element
+        # `reduce_sum`, break the match while the contraction still
+        # happens). The taint closes the CLASS instead: it flows from every
+        # mul output through the dataflow, and every add/sub that meets it
+        # hulls both roundings, whatever lies between. Soundness does not
+        # depend on recognising the intervening shape, which is exactly
+        # what a simplification set makes unrecognisable.
+        self.taint: dict[int, bool] = {}
         # var id -> producing equation, for the jaxpr currently being run
         # (scoped in run(); assume classification only — never a transfer
         # input)
@@ -1277,6 +1854,14 @@ class _Propagator:
             return False
         return self.nan.get(atom.id, False)
 
+    def read_taint(self, atom: ir.Atom) -> bool:
+        """Whether this atom's value is PRODUCT-DERIVED (ieee mode). A
+        literal never is; vars default to False and every taint is written
+        explicitly."""
+        if isinstance(atom, ir.Literal):
+            return False
+        return self.taint.get(atom.id, False)
+
     def top_out(self, eqn: ir.JaxprEqn) -> None:
         for out in eqn.outvars:
             self.env[out.id] = iv.top(out.aval.shape)
@@ -1284,6 +1869,121 @@ class _Propagator:
                 # ⊤ under ieee is maybe-NaN: an unknown/declined value
                 # could be anything a float can be, including NaN
                 self.nan[out.id] = True
+                # ...and a DECLINED equation must not launder the taint:
+                # whatever the compiler did with the product, the result is
+                # still product-derived
+                self.taint[out.id] = any(
+                    self.read_taint(a) for a in eqn.invars
+                )
+
+    def _contraction_hull(self, eqn: ir.JaxprEqn, outs, out_flags):
+        """Cover BOTH roundings of a product feeding an add/sub (ieee only).
+
+        XLA contracts ``a*b + c`` into a single fused multiply-add — the
+        compiled HLO for this target contains ``multiply_add_fusion``, and
+        measured, ``(a*b) - 1`` at ``a = 1+2**-27, b = 1-2**-27`` is
+        ``0.0`` eager but ``-2**-54`` under jit. Contraction leaves the
+        equation ORDER untouched, so the equation-order reliance does not
+        reach it, and an assumption measured false on the target is not
+        stampable. The mode therefore models both: the contracted value is
+        computed exactly (:func:`stelling.interval.ieee_fma_hull`) and
+        hulled with the uncontracted one, so results stay definite
+        wherever the two roundings agree and go indeterminate only where
+        they differ.
+
+        Forms whose contracted value cannot be bracketed here — an
+        infinite operand endpoint, an unreadable producer, shapes that do
+        not broadcast — raise :class:`stelling.interval.IntervalError` and
+        the caller turns that into a quoted ⊤ decline.
+        """
+        candidates = [
+            i for i, atom in enumerate(eqn.invars) if self.read_taint(atom)
+        ]
+        if not candidates:
+            return outs, out_flags
+        box = outs[0]
+        made_nan = bool(out_flags and out_flags[0])
+        for i in candidates:
+            atom = eqn.invars[i]
+            other = eqn.invars[1 - i]
+            # sub: `p - c` negates the addend; `c - p` negates the product.
+            negate_product = eqn.primitive == "sub" and i == 1
+            negate_addend = eqn.primitive == "sub" and i == 0
+            prod = (
+                self.producers.get(atom.id)
+                if isinstance(atom, ir.Var)
+                else None
+            )
+            c = self.read(other)
+            if (
+                prod is not None
+                and prod.primitive == "mul"
+                and len(prod.invars) == 2
+            ):
+                # PRECISION path: the product is right there, so the
+                # contracted value is computed exactly and a form whose two
+                # roundings agree stays definite. Soundness never rests on
+                # reaching this branch — the taint is what guarantees we
+                # are here at all.
+                a, b = (self.read(x) for x in prod.invars)
+                fused, fused_nan = iv.ieee_fma_hull(
+                    a, b, c,
+                    negate_product=negate_product,
+                    negate_addend=negate_addend,
+                )
+            else:
+                # SOUND path: something lies between the multiply and here
+                # — and what that something is, after XLA's simplification
+                # passes, is not knowable from the jaxpr. The tainted
+                # operand is a rounded product `fl(p)`, so `p` sits within
+                # half an ulp of it; widening by a full ulp each way covers
+                # every `p` the compiler could still be holding, and the
+                # outward-rounded add covers the single rounding an fma
+                # applies to `p ± c`.
+                fused, fused_nan = self._unrecovered_contraction(
+                    self.read(atom), c,
+                    negate_product=negate_product,
+                    negate_addend=negate_addend,
+                )
+            if fused.shape != box.shape:
+                raise iv.IntervalError(
+                    iv.IEEE_CONTRACTION_DECLINE.format(
+                        why=(
+                            f"the contracted operands broadcast to "
+                            f"{fused.shape} but the equation's result is "
+                            f"{box.shape}"
+                        )
+                    )
+                )
+            box = iv.hull(box, fused)
+            made_nan = made_nan or fused_nan
+        return [box, *outs[1:]], [made_nan, *(out_flags or [])[1:]]
+
+    @staticmethod
+    def _unrecovered_contraction(
+        prod_box, c, *, negate_product: bool, negate_addend: bool
+    ):
+        """Sound bracket of the contracted value when the multiply cannot
+        be recovered from the jaxpr (see :meth:`_contraction_hull`)."""
+        widened = iv.IntervalArray(
+            shape=prod_box.shape,
+            los=tuple(math.nextafter(v, -math.inf) for v in prod_box.los),
+            his=tuple(math.nextafter(v, math.inf) for v in prod_box.his),
+        )
+        if negate_product:
+            widened = iv.neg(widened)
+        if negate_addend:
+            c = iv.neg(c)
+        try:
+            # the real (outward-rounded) add: its one-ulp bump is what
+            # covers the fma's own final rounding
+            return iv.add(widened, c), False
+        except iv.IntervalError as e:
+            raise iv.IntervalError(
+                iv.IEEE_CONTRACTION_DECLINE.format(
+                    why=f"the widened product bracket is not addable ({e})"
+                )
+            ) from None
 
     def mark_unreached(self, eqn: ir.JaxprEqn) -> None:
         stack = list(sub_jaxprs(eqn))
@@ -1727,7 +2427,7 @@ class _Propagator:
         )
 
     def run(
-        self, jaxpr: ir.Jaxpr, consts, args, arg_flags=None
+        self, jaxpr: ir.Jaxpr, consts, args, arg_flags=None, arg_taints=None
     ) -> list[iv.IntervalArray]:
         ieee = self.semantics == "ieee"
         for var, c in zip(jaxpr.constvars, consts):
@@ -1761,6 +2461,9 @@ class _Propagator:
             self.env[var.id] = a
             if ieee and arg_flags is not None and arg_flags[i]:
                 self.nan[var.id] = True
+            # taint crosses scope boundaries with the value it marks
+            if ieee and arg_taints is not None and arg_taints[i]:
+                self.taint[var.id] = True
         # assume classification looks up the predicate's producing equation
         # at the CURRENT jaxpr level only; sub-jaxpr runs (transparent
         # wrappers, cond branches) get their own map, restored on exit —
@@ -1789,28 +2492,42 @@ class _Propagator:
                 in_flags = (
                     [self.read_flag(a) for a in eqn.invars] if ieee else None
                 )
+                in_taints = (
+                    [self.read_taint(a) for a in eqn.invars] if ieee else None
+                )
                 outer_env = self.env  # isolated scope, as for cond branches
                 outer_exact = self.exact
                 outer_nan = self.nan
+                outer_taint = self.taint
                 self.env = {}
                 self.exact = exactness.ExactSet()
                 self.nan = {}
+                self.taint = {}
                 out_flags = None
+                out_taints = None
                 try:
-                    outs = self.run(inner.jaxpr, inner.consts, ins, in_flags)
+                    outs = self.run(
+                        inner.jaxpr, inner.consts, ins, in_flags, in_taints
+                    )
                     if ieee:
                         out_flags = [
                             self.read_flag(o) for o in inner.jaxpr.outvars
+                        ]
+                        out_taints = [
+                            self.read_taint(o) for o in inner.jaxpr.outvars
                         ]
                 finally:
                     self.env = outer_env
                     self.exact = outer_exact
                     self.nan = outer_nan
+                    self.taint = outer_taint
                 for out, val in zip(eqn.outvars, outs):
                     self.env[out.id] = val
                 if ieee:
                     for out, f in zip(eqn.outvars, out_flags):
                         self.nan[out.id] = f
+                    for out, t in zip(eqn.outvars, out_taints):
+                        self.taint[out.id] = t
                 return
             self.notes.append(
                 f"transparent {eqn.primitive!r}: arity mismatch or no sub-jaxpr; ⊤"
@@ -1841,6 +2558,9 @@ class _Propagator:
             ieee = self.semantics == "ieee"
             op_flags = (
                 [self.read_flag(a) for a in eqn.invars[1:]] if ieee else None
+            )
+            op_taints = (
+                [self.read_taint(a) for a in eqn.invars[1:]] if ieee else None
             )
             # under ieee the index invariant is enforced, not assumed
             # (the F1/U2 lesson): jax's cond index is always int32, so a
@@ -1885,8 +2605,10 @@ class _Propagator:
             outer_env = self.env
             outer_exact = self.exact
             outer_nan = self.nan
+            outer_taint = self.taint
             results = []
             branch_flags = []  # ieee: per-branch outvar flags
+            branch_taints = []  # ieee: per-branch outvar product-taints
             # every branch here is possibly-untaken from the analysis's
             # view (the selector interval admits it, nothing more): an
             # unsatisfiable assume inside is a branch-scoped vacuity, not
@@ -1901,18 +2623,26 @@ class _Propagator:
                     self.env = {}
                     self.exact = exactness.ExactSet()
                     self.nan = {}
+                    self.taint = {}
                     results.append(
-                        self.run(b.jaxpr, list(b.consts), operands, op_flags)
+                        self.run(
+                            b.jaxpr, list(b.consts), operands, op_flags,
+                            op_taints,
+                        )
                     )
                     if ieee:
                         branch_flags.append(
                             [self.read_flag(o) for o in b.jaxpr.outvars]
+                        )
+                        branch_taints.append(
+                            [self.read_taint(o) for o in b.jaxpr.outvars]
                         )
             finally:
                 self.branch_depth -= 1
                 self.env = outer_env
                 self.exact = outer_exact
                 self.nan = outer_nan
+                self.taint = outer_taint
             for j, out in enumerate(eqn.outvars):
                 self.env[out.id] = iv.join([r[j] for r in results])
                 if ieee:
@@ -1921,6 +2651,17 @@ class _Propagator:
                     # branch), so the join's flag is the OR over possible
                     # branches — the index's own flag does not propagate
                     self.nan[out.id] = any(f[j] for f in branch_flags)
+                    # the product taint joins exactly the same way, and for
+                    # the same reason: the output IS some branch's output,
+                    # so if any possible branch produced it from a multiply
+                    # the join is product-derived. Writing this was stated
+                    # in the build and NOT done (audit COSMETIC 7) — the
+                    # join defaulted the taint to False and laundered it.
+                    # It was harmless only because XLA does not currently
+                    # contract across a cond boundary on this target, which
+                    # is precisely the kind of compiler behaviour the taint
+                    # exists so as not to depend on.
+                    self.taint[out.id] = any(t[j] for t in branch_taints)
             return
 
         if eqn.primitive == "stelling_assume":
@@ -1946,10 +2687,17 @@ class _Propagator:
                     f"assume constraint DROPPED (inert in MVP propagation) at {where}: "
                     f"VERIFIED proves a superset; UNKNOWN may be confounded by this drop"
                 )
+            in_taints = (
+                [self.read_taint(a) for a in eqn.invars]
+                if self.semantics == "ieee"
+                else None
+            )
             for i, (out, val) in enumerate(zip(eqn.outvars, ins)):
                 self.env[out.id] = val
                 if in_flags is not None:
                     self.nan[out.id] = in_flags[i]
+                if in_taints is not None:
+                    self.taint[out.id] = in_taints[i]
             return
 
         ieee = self.semantics == "ieee"
@@ -1989,6 +2737,39 @@ class _Propagator:
             self.top_out(eqn)
             return
         outs, out_flags = result if ieee else (result, None)
+        if (
+            ieee
+            and eqn.primitive == "reduce_sum"
+            and self.read_taint(eqn.invars[0])
+            and ins[0].size > 1
+        ):
+            # a 2-element reduce_sum IS an addition, so a product among its
+            # elements can be contracted exactly as at an `add`. The
+            # per-array taint says the array is product-derived but not
+            # WHICH element is, so the contracted value cannot be bracketed
+            # here — decline with the reason quoted (audit UNSOUND 5: a
+            # one-element reduce_sum was one of the ten forms, and the
+            # two-element case is where the addition itself appears).
+            self.notes.append(
+                f"'reduce_sum' declined this form: "
+                f"{iv.IEEE_CONTRACTION_DECLINE.format(why='the reduction performs an addition over a product-derived array, and the per-array taint does not say which element carries the product')}; ⊤"
+            )
+            self.counter.record_unknown(eqn.primitive)
+            self.top_out(eqn)
+            return
+        if ieee and eqn.primitive in ("add", "sub"):
+            # UNSOUND 4: XLA may CONTRACT a product feeding this add/sub
+            # into one fused multiply-add. Both roundings are legal for the
+            # same jaxpr, so the result must cover both.
+            try:
+                outs, out_flags = self._contraction_hull(eqn, outs, out_flags)
+            except iv.IntervalError as e:
+                self.notes.append(
+                    f"{eqn.primitive!r} declined this form: {e}; ⊤"
+                )
+                self.counter.record_unknown(eqn.primitive)
+                self.top_out(eqn)
+                return
         self.counter.record_known(eqn.primitive)
         self.used[eqn.primitive] = tier
         if tier == TIER_SOUND_LIBM:
@@ -2108,6 +2889,12 @@ class _Propagator:
             self.env[out.id] = val
             if ieee:
                 self.nan[out.id] = out_flags[i]
+                # `mul` is the taint SOURCE; everything else passes what it
+                # was given unless it is a registered stop
+                self.taint[out.id] = eqn.primitive == "mul" or (
+                    eqn.primitive not in _TAINT_STOPS
+                    and any(self.read_taint(a) for a in eqn.invars)
+                )
         if eqn.primitive == "stelling_any":
             # the ONE transfer whose output box is exact: the declared
             # closed box IS the declared value set (no rounding at
@@ -2258,6 +3045,15 @@ def propagate(
         # target-dependent; band outcomes are never definite)
         assumptions.add(iv.IEEE_ENDPOINT_ASSUMPTION)
         assumptions.add(iv.SUBNORMAL_INDETERMINACY_ASSUMPTION)
+        # the equation-order reliance, disclosed once the three-row round's
+        # reduce_sum decline made the contrast load-bearing (audit
+        # COSMETIC 4): modelling an `add` chain while refusing a reduction
+        # rests on the compiler not reassociating ACROSS equations
+        assumptions.add(iv.IEEE_EQUATION_ORDER_ASSUMPTION)
+        # contraction is the OTHER compiler freedom over the same equation
+        # order, and it is measured TRUE on this target — so it is modelled
+        # (a hull over both roundings), never assumed away
+        assumptions.add(iv.IEEE_CONTRACTION_ASSUMPTION)
         # the mode's measured precision boundary, disclosed so a non-green
         # under ieee is read against it rather than as a float finding
         assumptions.add(iv.IEEE_NAN_HYGIENE_SCOPE)

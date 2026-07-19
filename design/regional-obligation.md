@@ -381,3 +381,78 @@ Per the work order's gate — *"if it changes materially, stop and surface
 before Part B"* — **Part B was not registered or run.** The inversion
 registration waits on a human read of the corrections above and of the
 build question they raise.
+
+---
+
+# The headline, adjudicated (2026-07-19) — UNCLAIMED, both faces recorded
+
+The three-row build ran to earn the clause-(i)-and-(iii) headline. It
+did not. Adjudicated conjunction-shaped per **L7.2**, because the
+residual soundness risk at this point is this adjudication, and the
+claim-pressure was the highest the project has seen.
+
+## The faces, measured post-fix
+
+**(iii) — does the code's own form fire on the failing region?**
+**NO.** `jnp.sum(mesh.Sf * mesh.d)` → `area² / Sf_dot_d` over
+`cos ∈ [0.11, 1.0]` returns **UNKNOWN**; escalation declines with
+`primitive 'reduce_sum' touches value of shape (3,) (v1 emission is
+scalar-only)`. Same in the safe region. The hand-substituted longhand
+form declines identically on `slice`.
+
+**(i) — is the form that fires the code's own?** **NO.** The only form
+that reaches a verdict is the hand-simplified `p/(q·r) ≤ 8`
+(VERIFIED safe, REFUTED failing, witness `p=3/2, q=1, r=1/8 → 12 > 8`,
+re-replayed by the adjudicator in exact rationals: in-region, violating).
+No hand step was *reintroduced* to make anything emit — the raw form
+simply never fired.
+
+**The VERIFIED half, re-confirmed under the guard** (the round's own
+requirement, since int-over-Reals `unsat` is exactly the shape of a
+spurious safe-region VERIFIED): **sound.** Walked equation by equation,
+the VERIFIED trace is `mul`, `div`, `le` on **float64** operands with a
+single `bool` comparison output — **no guard-governed integer arithmetic
+anywhere**, so the reachability guard cannot have applied. The pre-fix
+VERIFIED was not partly the defect. Measured, not argued.
+
+**Verdict: the headline stays unclaimed.** Had it been earned it would
+have been a **private-track** result — clause (i)+(iii) of the CI
+usefulness criterion on the author's own code — and **never an E2a
+count**; MIME is held out from counting.
+
+## The diagnosis I owe, corrected — and it was mine
+
+Part A told Nick that **three ordinary censusable rows** stood between
+the tool and the code's own form. **That was wrong, and by a layer, not
+a row.** Both blocked paths decline for one reason the rows do not
+touch: **the SMT emission set is scalar-only**, documented v1 scope
+enforced at **seven** sites, firing on any operand whose size ≠ 1
+whatever the primitive. No number of transfer rows reaches past it; it
+takes an array-aware emission layer (element-term tracking, array
+elementwise ops, `concatenate`) — a build with its own design and audit
+surface.
+
+**And the scope was my own decision.** The solver build's spec, written
+by me, says: *"All inputs must be scalar (`shape == ()`); any
+array-shaped input or any primitive/form outside this list → decline
+with the primitive and form quoted."* The decline messages then
+announced that reach verbatim — `(v1 emission is scalar-only)` — and
+Part A read past it into "three missing rows."
+
+**This is an L9 violation by the author of L9** (*state the instrument's
+reach next to every null result*): a null result whose error text named
+the instrument's reach, diagnosed as a census gap. Recorded as the
+fourth factual correction in this arc and the most consequential,
+because it is the one that set a build's scope.
+
+## What the pass produced instead
+
+Not the headline — something the project needed more: the **oldest false
+VERIFIED in its history**, integer arithmetic modelled as unbounded
+reals, live since the MVP and through six prior audits, found only
+because a build finally routed attention to integer arithmetic
+(**L14**). Five UNSOUND in total, all fixed, none in the three rows, and
+three structural closures earned along the way (total census →
+behavioural assert → taint). The rows themselves stand: coverage on the
+target family 91% → 100%, `mime_fvm_regional` 90% → 95%, exact-rational
+`integer_pow` endpoints, and **no recorded verdict moved**.

@@ -392,4 +392,62 @@ verdicts:
   `HEAD` by the auditor twice. 522 tests green with both solvers; 514
   with jax and no solver; 445 zero-dep.
 
+- **2026-07-19 (pre-release): three censused registry rows landed, and
+  the audit they triggered found five UNSOUND defects — including the
+  oldest false VERIFIED in the project.** The rows (`reduce_sum`,
+  `integer_pow` transfers; `slice` in the SMT emission set) were
+  identified by measured attribution, not guessed, and **change verdicts
+  by design** — obligations that previously fell to ⊤ can now be decided.
+  Their own arithmetic survived exhaustive attack (5040 brackets + 4000
+  independent `Decimal` cross-checks on `integer_pow`'s exact-rational
+  endpoints; 211,396 commutativity pairs and all 14 ≥3-element routes on
+  the ieee association bound; 1007 real and 770 ieee differential
+  statuses, zero contradictions). **Nothing the three rows compute was
+  unsound.** What the audit found was elsewhere, and older:
+
+  1. **Integer arithmetic modelled as unbounded reals — live since the
+     MVP, through six prior audits.** `v*v > 0` discharged to VERIFIED
+     where jax computes `−1794967296`. Fixed with an **overflow-
+     reachability** guard rather than a blanket decline: the exact
+     integer result interval is checked against the dtype range, the
+     exact answer stands where it fits, ⊤ only where wraparound is
+     genuinely reachable — so `i*i > 0` for an index in `{1,4}` still
+     discharges.
+  2. **The same gap at five emission sites.** A commissioned sweep of
+     the emission set found `add`, `sub`, `mul`, `neg` carrying the
+     identical defect alongside the reported `integer_pow`; patching only
+     the reported instance would have left the original false VERIFIED
+     intact through the `mul`.
+  3. **`div` on integers, transfer side** — the sweep had covered the
+     emission sites and not the transfer sites, and *interval
+     propagation mints definite verdicts without ever reaching the
+     emission*. Six more false definite verdicts (3 VERIFIED, 3 REFUTED,
+     including the `INT_MIN/−1` wrap). Now modelled exactly via
+     truncating integer corner arithmetic.
+  4. **ieee mode falsified by FMA contraction.** XLA emits
+     `multiply_add_fusion`; `(a·b)−1` is `0.0` eager and `−2⁻⁵⁴` under
+     jit. Four definite ieee verdicts contradicted by the compiled
+     program. A measured-false assumption may not be stamped as if true,
+     so this was fixed by **hulling both roundings**, not disclosed away.
+  5. **The contraction fix's first form matched jaxpr syntax; XLA
+     contracts post-simplification** — ten more false VERIFIEDs through
+     intervening equations XLA elides. Closed as a class by **taint**:
+     product-derived taint flows from every `mul` through every
+     primitive (a declined ⊤ keeps its taint), and every `add`/`sub`
+     with a tainted operand hulls both roundings. Soundness no longer
+     depends on recognising a shape; verified against chains nobody had
+     enumerated. Precision is a separate mechanism, so missing a
+     recovery costs tightness and never soundness.
+
+  Four adversarial re-attack rounds ran under the standing
+  UNSOUND-fixes-are-re-attacked rule, returning 2 → 1 → 0 further
+  UNSOUND; the round that returned zero was the one whose fix had
+  stopped enumerating cases. Every finding is a permanent regression
+  test, each verified to **fail against the unfixed code** — two claims
+  in this pass reached a report because an edit was *made* rather than
+  because it *landed* (`design/lessons-ledger.md` L15). **No recorded
+  verdict moved**: all six recorded harnesses reproduce identical
+  statuses, with two coverage lines improving and disclosed. 782 tests
+  green with both solvers; 771 with jax and no solver; 674 zero-dep.
+
 *(no releases yet)*

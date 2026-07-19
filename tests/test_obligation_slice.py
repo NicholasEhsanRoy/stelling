@@ -199,21 +199,26 @@ def test_possibly_zero_divisor_declines_with_the_guard_reason_quoted():
 
 
 def test_negative_integer_pow_uses_the_guarded_division_rule():
-    def q(lo, hi):
+    # The bound is chosen to sit INSIDE the propagated interval on the
+    # allowed branch: integer_pow now has an interval transfer (x ∈ [1, 2],
+    # y = -2 propagates to exactly [0.25, 1.0]), so a slack bound like 100.0
+    # would be discharged outright and never reach escalation at all. This
+    # test is about the EMISSION guard, so it keeps the obligation unknown.
+    def q(lo, hi, bound):
         x, s, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
         return close(
             [
                 any_eqn(x, lo, hi),
                 eqn("integer_pow", [x], s, [("y", -2)]),
-                eqn("le", [s, lit(100.0)], pred),
+                eqn("le", [s, lit(bound)], pred),
                 eqn("stelling_assert", [pred], out),
             ],
             [out],
         )
 
-    ok = sole_slice(q(1.0, 2.0))  # base excludes 0: allowed, nonlinear
+    ok = sole_slice(q(1.0, 2.0, 0.5))  # base excludes 0: allowed, nonlinear
     assert isinstance(ok, ObligationSlice) and ok.fragment == "QF_NRA"
-    bad = sole_slice(q(-1.0, 1.0))  # base may be zero: the guard declines
+    bad = sole_slice(q(-1.0, 1.0, 100.0))  # base may be zero: guard declines
     assert isinstance(bad, DeclinedObligation)
     assert DIV_GUARD_REASON in bad.reason
 
