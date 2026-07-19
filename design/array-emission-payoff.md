@@ -92,3 +92,135 @@ the finding and the output is "consolidate/publish," not "build anyway."
 No build. No run. No CI wiring. No affine (two sightings, not three). No
 user contact. MIME held out from counting; any headline is private-track,
 never an E2a count.
+
+---
+
+# Reading (2026-07-19 — registration `f923078` preceded it; no new runs)
+
+## Which obligation the build would deliver: **R3-shape**, and it needs no assume
+
+From the record, decided rather than assumed:
+
+- **F2-shape is not the candidate.** It takes the floor as an `assume`,
+  so it is silent on `cos ≈ 0.11` by construction — that is why F2 failed
+  clause (iii) in the first place. Array-aware emission would make it
+  *fire*, producing a verdict that assumes the scar away. Nobody would
+  build it for that.
+- **R2-shape is not the candidate either.** Measured (Part A,
+  Correction 1): its component-box region genuinely contains poles and
+  sign reversals — an anti-aligned pair lies inside it and
+  `assert(Sf·d > 0)` is *violated-over-set*. A refutation there is a true
+  statement about a region that **includes meshes the solver never
+  produces**, and the witness would likely land near `cos ≈ 0`, not at
+  the alignment the scar actually reached. It is not the mesh's region.
+- **R3-shape is the candidate.** The code's own expression —
+  `jnp.sum(Sf*d)` then `area**2 / Sf_dot_d`, traced verbatim — over a
+  region whose declared coordinates *are* the geometric ones. Measured in
+  Part A: **100% propagation coverage, declining only at emission.**
+
+**A correction to my own earlier line rides here.** When R2 walled, I
+wrote that the blocker "points at affine/relational domains or a
+multiplicative reformulation," and the band's gloss said it would
+"resurrect assume-emission." **Neither is required.** The geometric
+parameterisation supplies what a relational `assume` would have supplied,
+so **R3-shape needs array emission only** — assume-emission stays dead on
+its own clause-(iii) failure and is not resurrected by this analysis.
+
+## The clause scores
+
+**(i) — the formula is the code's; the parameterisation is not.**
+**Passes, with a named residual risk.** The formula is traced verbatim
+from `operators.py:250–251`, so a formula edit is tracked automatically —
+which is exactly what F1 fails. What is hand-built is the *input
+parameterisation*, and it goes stale under a different and narrower
+condition: only if the code begins reading a geometric quantity the
+parameterisation misrepresents (it currently reads `mesh.area` and
+`Sf_dot_d` and nothing else). **That staleness would not be
+self-detecting**, and it is the honest residual — smaller than F1's, not
+zero.
+
+**(ii) — CI time: comfortable, and the growth model is the finding.**
+The obligation is **per-face, and faces are independent**, so it is a
+single symbolic obligation *regardless of mesh size* — no per-face
+blow-up. The array shapes involved are a fixed `(3,)` dot product, so
+the emission growth model is **bounded unrolling of small static
+shapes**: three scalar terms, not quantification and not per-element
+conjunction over a mesh. Measured scalar solve is ~70 ms; three terms
+does not change that materially.
+
+**This materially shrinks the build.** What is needed is not
+general array-aware emission but **static-shape unrolling for small
+fixed extents** — a much smaller surface than "array emission" implies.
+Recorded because it changes the *cost* side of the recommendation even
+though it does not change the *relevance* side.
+
+**(iii) — fires on the scar: passes.** R3-shape poses over a region whose
+`cos` lower bound is a declared input, so setting it to the scar's
+`0.11` puts the failure inside the region rather than outside it. The
+solver already produces exactly this split on the algebraically
+equivalent form (VERIFIED safe / REFUTED-with-witness at `cos = 1/8`),
+and Part A measured the code-shaped uncancelled form escalating the same
+way at `cos ≈ 0.117`. So (iii) is not in doubt.
+
+**(iv) — regression-on-change. Not cleared.** Scored against the
+one-liner a maintainer *would* write, per the registration:
+
+| axis | one-liner `assert mesh.min_cos >= 0.71` | R3-per-run check | marginal value |
+|---|---|---|---|
+| a mesh degrades | fires | fires | **none** |
+| the coefficient formula changes | **silently keeps passing** — it encodes a constant derived from a formula it never reads | re-derives from the actual code and fires | **real, but only on code change** |
+
+So the check's entire marginal value over the one-liner accrues **on code
+change** — which is regression-on-change, the same clause-(iv) status
+F1 and F2 hold, and the criterion is explicit that this value is
+**temporal and cannot be cleared by inspection**. The measured rate
+stands at **zero floor-code changes since the fix introduced them**.
+
+**One strengthening, recorded because it is real and still does not clear
+the clause:** R3-per-run **eliminates the `0.71` constant entirely**. It
+does not need a floor at all — it takes the mesh's actual alignment and
+the code's actual formula and asks whether the coefficient is bounded.
+That removes a stale-constant hazard the one-liner structurally has (the
+one-liner is *wrong, silently*, if the formula drifts). This makes the
+code-form check **strictly better than F1/F2 on (iv)'s mechanism** while
+leaving (iv) unmet on (iv)'s own terms, because the mechanism only pays
+out when the code moves.
+
+## Band: the middle row
+
+> **Clears (i) ∧ (iii); (iv) is regression-on-change. Array-aware
+> emission is a fidelity upgrade, not a relevance one — a cleaner (i) on
+> a check whose relevance ceiling is already reached. Not justified on
+> the headline alone.**
+
+The sharpest way to put it: **the CI-shaped check that exists today is
+R1**, at zero build cost. It already fires on the scar with a replayed
+witness. Array emission buys clause **(i)** on top of that — the code's
+own form instead of a hand-derived one — and **nothing on (iii) or
+(iv)**. That is worth something; it is not worth the largest remaining
+emission budget on the strength of the headline.
+
+**Recommendation: consolidate/publish, not build.** And the honest note
+that goes with it — the build is *cheaper* than the work order assumed
+(static-shape unrolling, not general array emission), so if it is ever
+built it should be built for a reason other than this headline.
+
+## What would move this band, stated so it can be checked rather than assumed
+
+(iv)'s temporal condition is a fact about the *workflow*, not the code,
+and I cannot measure it:
+
+- **if the FVM coefficient code is under active development** (rather
+  than zero changes in the measured window), the machine-re-derives value
+  starts paying out and (iv) moves toward clearing;
+- **if meshes are generated per-run** rather than being fixed assets, the
+  mesh axis stops being covered by a one-liner a human maintains and the
+  per-run mechanism matters more;
+- **if the same check would cover several coefficients** (the
+  orthogonal/over-relaxed pair, the LSQ gradient, the flux limiters)
+  rather than this one, the fixed build cost amortises across obligations
+  and the calculus changes.
+
+Each is Nick's to answer; none is inferable from the repository. **They
+are the questions that would flip this to the top band**, and they should
+be answered before the build is reconsidered — not after it is built.
