@@ -352,6 +352,29 @@ is assume-emission, none is affine.
    form. That is a **build decision** — surfaced, not executed.
 5. Factual corrections: the two above, both against my own reading.
 
+## Sighting bookkeeping, corrected (2026-07-19)
+
+Correction 1's consequence for the demand ledgers, stated because the
+two builds it touches are different builds:
+
+- **R2 is not a new sighting for anything.** Its UNKNOWN is a region
+  defect, not a domain limitation.
+- **A "third affine sighting" was never committed** — a search of
+  `design/` finds no such claim (the only "third sighting" on file is the
+  elimination-mode one, `bjx#D416`, a different and still-unadopted
+  thread). So there is nothing to retract; the pre-Part-A line in this
+  file that said the blocker "points at affine/relational domains" is
+  corrected above, in place.
+- **The standing counts, unchanged by this pass, and kept distinct:**
+  **affine** has two demand sightings, both on held-out code — heat's
+  stencil and LBM's Mach bound — with F3's predicted-behind-the-wall
+  sighting explicitly *not* advancing it, and **valid counting evidence
+  0**. **Relational / constraining-assume** separately has two —
+  `bjx#969` (corpus-side) and F2 (real-solver-side). These are **not the
+  same pair**: a linear-correlation domain and a relational-assume
+  capability are different builds, and F2/`bjx#969` belong to the
+  latter.
+
 ## Consequence
 
 Per the work order's gate — *"if it changes materially, stop and surface
