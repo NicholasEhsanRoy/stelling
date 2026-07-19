@@ -2258,6 +2258,9 @@ def propagate(
         # target-dependent; band outcomes are never definite)
         assumptions.add(iv.IEEE_ENDPOINT_ASSUMPTION)
         assumptions.add(iv.SUBNORMAL_INDETERMINACY_ASSUMPTION)
+        # the mode's measured precision boundary, disclosed so a non-green
+        # under ieee is read against it rather than as a float finding
+        assumptions.add(iv.IEEE_NAN_HYGIENE_SCOPE)
     return Propagation(
         obligations=tuple(p.obligations),
         nonvacuity_checks=tuple(p.nonvacuity_checks),

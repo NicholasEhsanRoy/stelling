@@ -98,6 +98,37 @@ SUBNORMAL_INDETERMINACY_ASSUMPTION = (
     "outcomes are treated as indeterminate, never definite"
 )
 
+# A precision boundary of the mode, disclosed because it is real and
+# because a non-green under ieee must be readable against it (the same
+# graceful-degradation property the dependency-wall notes carry).
+# Measured 2026-07-19 (design/ieee-reexamination.md): the maybe-NaN flag
+# is unioned across an array's elements at construction, so a DISCARDED
+# component's NaN possibility spreads to a co-located, asserted,
+# float-clean one. It compounds with the interval domain's dependency
+# loss: a half-infinite declaration recomputed through its own
+# coordinates (`c` declared [k, inf), recomputed as `exp(a) - x0` where
+# `x0 = exp(a) - c`) loses its lower bound, which makes `0 * inf`
+# reachable in a component that no obligation reads. The union is SOUND —
+# an over-approximated flag only ever blocks a discharge, never mints
+# one — so this costs precision, never correctness: ieee mode may return
+# UNKNOWN exactly where the real-mode verdict discharges. The fix
+# (per-element flag tracking through array construction) would make such
+# obligations discharge and therefore needs the full build-and-audit
+# treatment; it is deliberately not a silent precision bump.
+IEEE_NAN_HYGIENE_SCOPE = (
+    "ieee precision boundary (not a soundness limit): the maybe-NaN flag "
+    "is unioned across an array's elements at construction, so a "
+    "discarded component's NaN possibility can block a co-located, "
+    "asserted, float-clean obligation — compounding with interval "
+    "dependency loss on half-infinite declarations recomputed through "
+    "their own coordinates. Half-infinite declarations with recomputed "
+    "coordinates are therefore OUTSIDE what ieee mode can reproduce: it "
+    "may return UNKNOWN where the real-mode verdict discharges. The "
+    "union is sound (an over-approximated flag only blocks discharges, "
+    "never mints them); per-element tracking is a known fix path, "
+    "deliberately unbuilt"
+)
+
 
 class IntervalError(ArithmeticError):
     """The domain met a value it has no sound treatment for (e.g. NaN)."""

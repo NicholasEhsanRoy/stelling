@@ -208,6 +208,28 @@ def test_real_verdict_stamp_is_byte_identical():
     assert v.stamp.arithmetic_mode == "interval/f64/outward-1ulp (stelling.interval)"
 
 
+def test_ieee_stamps_its_measured_precision_boundary_and_real_never_does():
+    """The mode's known precision limit is disclosed, not implied.
+
+    Measured (design/ieee-reexamination.md): the maybe-NaN flag is unioned
+    across array elements at construction, so ieee mode can return UNKNOWN
+    exactly where the real-mode verdict discharges. Sound (an
+    over-approximated flag only blocks discharges) but real, so it rides
+    in every ieee stamp — a non-green under ieee must be readable against
+    the scope line rather than as a float finding.
+    """
+    q = _simple_query()
+    ieee = make_verdict(q, propagate(q, semantics="ieee"), **VERSIONS)
+    real = make_verdict(q, propagate(q), **VERSIONS)
+    assert iv.IEEE_NAN_HYGIENE_SCOPE in ieee.stamp.assumptions
+    assert "OUTSIDE what ieee mode can reproduce" in iv.IEEE_NAN_HYGIENE_SCOPE
+    # it is a precision statement, never a soundness one
+    assert "not a soundness limit" in iv.IEEE_NAN_HYGIENE_SCOPE
+    # and it must never appear in a real-mode stamp
+    assert iv.IEEE_NAN_HYGIENE_SCOPE not in real.stamp.assumptions
+    assert not any("maybe-NaN flag is unioned" in a for a in real.stamp.assumptions)
+
+
 # --- the ieee kernels (interval.py unit level) --------------------------------
 
 
