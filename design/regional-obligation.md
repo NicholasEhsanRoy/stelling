@@ -141,3 +141,122 @@ decision — this measures only whether the check *fires*). No build; if
 the wall is hit, that surfaces as a re-justified build for a later
 human-in-loop pass. No count; MIME held out. No new transfers, domain,
 or emission surface.
+
+---
+
+# Reading (2026-07-19 — registration `0f3b6b2` preceded every number below)
+
+`corpus/supply/mime_fvm_regional.py` (blind transcriber; every result
+below independently re-measured by the main agent with its own harnesses
+and its own `Fraction` arithmetic).
+
+## Results — all four predictions held
+
+| run | verdict | diagnosis |
+|---|---|---|
+| **R1 interval-only** | **UNKNOWN** | **no propagation notes, 100% coverage** — partially-false shaped, mechanically *not* the wall |
+| **R1 escalated** | **REFUTED, witness-backed** | cvc5 (QF_NRA primary, 58 ms) and z3 (12 ms) **both sat, agreeing**; witness replayed |
+| **R2 interval-only** | UNKNOWN | 19/21 known (⊤ from `sqrt`, `integer_pow` in the numerator) |
+| **R2 escalated** | UNKNOWN, **declined** | `'div': divisor may be zero over the declared box — SMT-LIB2 division is underspecified at 0`; **zero invocations** |
+
+**The witness, verbatim and verified:** `a = 3/2`, `dm = 1`,
+`cos = 1/8 = 0.125` → `a/(dm·c) = 12 > 8`. Independently confirmed in
+exact rationals with no stelling code in the loop: **in the declared
+region**, **violating the bound**, and **`cos = 0.125` is below the 0.71
+stable floor and inside `[0.11, 1.0]`** — a low-alignment point, which is
+the regime the scar mesh occupies.
+
+**The controlled check (mine, not in the spec): the region is the sole
+cause.** The *identical* R1 form over F1's region `cos ∈ [0.71, 1.0]`
+still **VERIFIES**. Everything else — boxes, bound, form, semantics — is
+held fixed. So the flip from VERIFIED to REFUTED is attributable to the
+region and nothing else.
+
+**R2's wall, isolated.** The transcriber's own side-measurement (R2b:
+`|Sf|² = Sf·Sf` by hand, removing both ⊤s) and my independent
+reconstruction both land **UNKNOWN at 100% coverage with the identical
+decline** — so the ⊤s were incidental. The wall is the divisor:
+`assert(Sf·d > 0)` over independent component boxes is itself
+**unknown**. This is the **dependency** problem, not the
+relational-assume problem.
+
+## Band adjudication — R1 and R2 land in different rows; both stop
+
+- **R1 → row 1** ("REFUTED-with-witness"): **fires on the scar regime**,
+  needs no build.
+- **R2 → row 2** ("dependency-wall UNKNOWN").
+
+Both rows are STOP-and-surface, so the terminal action is unchanged. The
+fork registered in advance resolved **exactly as predicted**: *R1 fires
+without any build but fails clause (i); R2 satisfies clause (i) but
+cannot fire.*
+
+**Correction to row 2's editorial gloss (the action is unchanged).** The
+band said a wall here would "resurrect assume-emission, re-scoped."
+**The measured cause does not support that consequence:** R2 contains
+**no `assume` at all** — the floor is neither assumed nor imposed, by
+construction — so assume-emission is not what is blocked. What is blocked
+is a divisor that straddles zero over decorrelated component boxes, which
+points at **affine/relational domains** (keeping `Sf·d` correlated) or a
+multiplicative reformulation, neither of which is the assume-emission
+build. Recorded as a correction to the band's causal attribution, not to
+its action; **assume-emission remains dead on its clause-(iii) failure**
+and is not resurrected by this result.
+
+## Four-clause scoring (per `design/private-track-criterion.md`)
+
+| clause | **R1** | **R2** |
+|---|---|---|
+| (i) code's own form | **FAIL** — polar form, two disclosed derivations (the transcriber flagged this unprompted: the REFUTED is about the polar form, "not about line 251 as executed") | **PASS** — the raw form, as written |
+| (ii) CI time | **PASS** — 7 equations, ~70 ms of solver time | PASS (would be) |
+| (iii) **fires on the scar** | **PASS** — first time on the private track: a refutation over the geometry region the failing mesh occupies, with a concrete low-cos counterexample | **cannot fire** — walled |
+| (iv) recurring value | **not established** — R1 is regression-on-change like F1, and per-run value additionally needs a live mesh statistic (out of scope here) | n/a |
+
+**Neither clears all four**, so the headline the work order reserved for
+a four-clause pass — "the first genuinely CI-shaped result" — **is not
+earned**, and I am not claiming it.
+
+**What *is* earned, stated exactly:** **clause (iii) passes for the first
+time in the project's history.** F1 and F2 are silent on the failing
+regime by construction; R1 produces a sound refutation over it, with a
+witness naming the alignment value, using **no new machinery** — existing
+interval propagation plus the solver leg built two passes ago. The
+solver's first demonstrated customer was a conditioning obligation; this
+is its **first use that bears on a real failure the author paid for**.
+
+## Banked observations — not acted on
+
+1. **The tool can invert the question.** Bisecting the declared region
+   floor, interval propagation flips VERIFIED→UNKNOWN at
+   **`cos ≈ 0.500000`**, matching the exact algebra
+   `a_hi/(dm_lo·B) = 2.0/(0.5·8) = 0.5`. So instead of *"is the
+   coefficient bounded given the floor?"* the tool can answer *"what
+   floor does a given bound require?"* — 40 propagations, sub-second,
+   design-time. **Caveat that must ride with it:** `B = 8.0` was itself
+   chosen in F1 with `0.71` in mind (~42% margin over the corner value
+   5.63), so the proximity of the derived `0.5` to the owner's empirical
+   *divergent* boundary (`≤ 0.59`) is **suggestive, not independent**.
+2. **Per-run value needs one input the project doesn't have**: the actual
+   cos range of the meshes under test. That is the CI-wiring question,
+   and it is a human decision, not a verification one.
+3. **Nonvacuity was UNCHECKED on all four runs** (bare numbers, no
+   membership conditions declared). For R1 this is materially repaired by
+   the witness itself: a replayed in-box counterexample **constructively
+   demonstrates the region is inhabited**, which is the property
+   nonvacuity exists to establish. Verified in my own arithmetic.
+
+## Ring discipline — verified, not asserted
+
+The harness contains no reference to the scar, the divergence, the
+cylinder mesh, the anomalies file, commit `91e95e6`, the validation
+results, or the `0.59` divergent boundary. Its only "commit" mention is
+the transcriber explicitly **disclaiming** that it verified the pin
+(which was out of its scope). The region and bound travelled as bare
+numbers, and the transcriber flagged, unprompted and against interest,
+that R1's refutation is about the polar form rather than the executed
+line — the caveat that becomes its clause (i) failure.
+
+## Held
+
+No count; MIME held out from E2a. No CI wiring. No build. Every band row
+surfaces, so: **report and wait.**
