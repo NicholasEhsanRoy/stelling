@@ -18,7 +18,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 from stelling import ir
-from stelling.coverage import sub_jaxprs
+from stelling.vacuity import widen as _widen
 from stelling.propagate import propagate
 
 # importing the harness modules re-runs their cases (deterministic, green);
@@ -31,38 +31,11 @@ INF = math.inf
 
 
 def widen(closed: ir.ClosedJaxpr) -> ir.ClosedJaxpr:
-    j = closed.jaxpr
-    for eqn in j.eqns:  # loud guard: no nested declarations may escape
-        for sub in sub_jaxprs(eqn):
-            for e in sub.eqns:
-                assert e.primitive != "stelling_any", (
-                    "nested stelling_any would escape widening — restructure"
-                )
-    eqns = []
-    for eqn in j.eqns:
-        if eqn.primitive == "stelling_any":
-            params = dict(eqn.params)
-            params["lo"], params["hi"] = -INF, INF
-            eqn = ir.JaxprEqn(
-                primitive=eqn.primitive,
-                invars=eqn.invars,
-                outvars=eqn.outvars,
-                params=tuple(params.items()),
-                effects=eqn.effects,
-                source_info=eqn.source_info,
-            )
-        eqns.append(eqn)
-    return ir.ClosedJaxpr(
-        jaxpr=ir.Jaxpr(
-            constvars=j.constvars,
-            invars=j.invars,
-            outvars=j.outvars,
-            eqns=tuple(eqns),
-            effects=j.effects,
-            debug_info=j.debug_info,
-        ),
-        consts=closed.consts,
-    )
+    """The registered all-declarations procedure — extracted to
+    :func:`stelling.vacuity.widen` (one implementation, imported
+    everywhere; L12) — behaviour byte-identical to the local copy this
+    replaced."""
+    return _widen(closed, mode="all")
 
 
 from stelling._jax_compat import trace  # noqa: E402

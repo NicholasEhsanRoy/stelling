@@ -17,7 +17,7 @@ from stelling import preconditions  # jax-free import must always work
 
 
 def test_module_imports_without_jax():
-    assert preconditions.__all__ == ["field_positive", "scalar_nonzero"]
+    assert preconditions.__all__ == ["check", "field_positive", "scalar_nonzero"]
 
 
 jax = pytest.importorskip("jax")
@@ -153,3 +153,92 @@ def test_templates_cover_negative_axis():
         return (o,)
 
     assert verdict(h).status == "VERIFIED"
+
+
+# --- the multi-value transform (the magnetics template gap, closed) ----------
+
+
+def test_field_positive_multi_value_transform():
+    """A transform returning a tuple states one obligation per value."""
+
+    def h():
+        _, obs = field_positive((), "float64", (0.5, 2.0),
+                                transform=lambda x: (x + 1.0, x * 2.0))
+        assert isinstance(obs, tuple) and len(obs) == 2
+        return obs
+
+    assert verdict(h).status == "VERIFIED"
+
+
+def test_field_positive_multi_value_one_bad_face_refutes():
+    """Each produced value carries its own obligation: one definitely
+    non-positive value refutes even when the sibling verifies."""
+
+    def h():
+        _, obs = field_positive((), "float64", (0.5, 2.0),
+                                transform=lambda x: (x + 1.0, -x))
+        return obs
+
+    assert verdict(h).status == "REFUTED"
+
+
+def test_field_positive_poses_the_magnetics_face_shape_without_hand_adaptation():
+    """The §1a acceptance: the magnetics SPD check's real shape — one cell
+    field, the code's default a = θ path, conservative face averaging via
+    roll producing TWO face arrays — poses through the template directly.
+    This exact shape needed a hand-written harness before the
+    generalization (design/precondition-class.md, §6)."""
+    inv_h2 = 1.0 / 0.25**2
+
+    def faces(theta):
+        a = theta                                   # _coeff_field default path
+        a_plus = 0.5 * (a + jnp.roll(a, -1)) * inv_h2
+        a_minus = 0.5 * (a + jnp.roll(a, 1)) * inv_h2
+        return a_plus, a_minus
+
+    def h_supported():
+        _, obs = field_positive((4,), "float64", (1e-6, 1e2), transform=faces)
+        return obs
+
+    def h_sign_spanning():
+        _, obs = field_positive((4,), "float64", (-2.0, 1e2), transform=faces)
+        return obs
+
+    assert verdict(h_supported).status == "VERIFIED"
+    assert verdict(h_sign_spanning).status == "UNKNOWN"  # honest straddle
+
+
+# --- check(), the front door -------------------------------------------------
+
+
+def test_check_interval_only_fills_stamps_and_records_absence():
+    from stelling.preconditions import check
+    from stelling.verdict import SolverStamp
+
+    def h():
+        _, o = field_positive((), "float64", (1e-6, 1e2),
+                              transform=lambda x: 1.0 + x)
+        return (o,)
+
+    v = check(h)
+    assert v.status == "VERIFIED"
+    assert v.stamp.stelling_version == stelling.__version__
+    assert v.stamp.precision_config == "jax_enable_x64=True"
+    assert isinstance(v.stamp.solver, SolverStamp) and not v.stamp.solver.invoked
+
+
+def test_check_escalates_only_with_an_explicit_timeout():
+    from stelling._optional import available
+    from stelling.preconditions import check
+
+    def h():
+        _, o = scalar_nonzero("float64", (0.0, 1.0))
+        return (o,)
+
+    v = check(h)  # no timeout: interval-only, honest UNKNOWN
+    assert v.status == "UNKNOWN"
+    if not (available("z3") or available("cvc5")):
+        pytest.skip("no solver installed")
+    v2 = check(h, solver_timeout_ms=20000)
+    assert v2.status == "REFUTED"
+    assert v2.witnesses and dict(v2.witnesses[0].values)["x0"] == "0"

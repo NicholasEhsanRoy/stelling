@@ -12,6 +12,7 @@ SPDX-PackageDownloadLocation = "https://github.com/NicholasEhsanRoy/stelling"
 path = [
   "*.md",
   "design/**",
+  "docs/**",
   ".gitignore",
   ".license-header.txt",
   "CITATION.cff",

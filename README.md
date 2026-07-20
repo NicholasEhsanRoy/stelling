@@ -28,6 +28,11 @@ bounds over horizons no test can reach.
   with three-valued verdicts: **VERIFIED**, **REFUTED** (set-level: the
   stated box is not invariant — not a witness), **UNKNOWN** (our
   imprecision, never guessed away).
+- **Checks the preconditions your solver assumes** — positivity of a
+  coefficient field over its envelope, a nonzero mass/shift scalar over
+  its admissible config range — as reusable obligation templates
+  (`stelling.preconditions`) with a one-call front door (`check()`), each
+  verdict stamped. Guide: [docs/preconditions.md](docs/preconditions.md).
 - **Escalates undecided obligations to SMT solvers** (optional extras,
   never required): scalar linear/polynomial obligations emit as
   SMT-LIB2 text — exact dyadic rationals, the closed declared box, the

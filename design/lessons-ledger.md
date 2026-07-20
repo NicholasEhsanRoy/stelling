@@ -277,6 +277,18 @@ lacks the check that site Y has."
 > propagation decides without ever reaching the emission, which is what
 > made the original finding unsound in the first place.
 
+> **Sixth witness — the instrument itself (2026-07-19,
+> `design/portability-pass.md`).** The ⊤-widening vacuity transform was
+> convention-copied into three corpus harnesses, and the copies had
+> already forked once (all-declarations vs inputs-only). The instrument
+> that polices every count was maintained by the convention this entry
+> exists to forbid. Extracted to `stelling/vacuity.py` — one
+> implementation, both **registered** procedures as required modes, the
+> byte-identical gate proved by matching query content hashes at every
+> call site. The unregistered finite-⊤ criterion was deliberately NOT
+> encoded: a counting rule is a registration, and code would
+> misrepresent its status.
+
 > **The generalisation the three rounds earned, in the builder's own
 > words: _"the escape route was an enumeration every time."_** Each of
 > the three UNSOUND findings in this pass had the same shape — a fix

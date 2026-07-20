@@ -36,30 +36,52 @@ This module imports jax-free (the harness import happens inside the
 templates, at call time): importing it costs nothing in a bare
 environment, but *calling* a template requires the ``[jax]`` extra —
 tracing happens through the harness primitives.
+
+:func:`check` is the front door: it runs a harness end-to-end — trace,
+propagate, assemble the stamped verdict, optionally escalate undecided
+obligations to an SMT solver — without the caller touching the
+propagation internals. The solver is invoked **only** when a timeout is
+passed explicitly (the never-on-defaults discipline, applied to the
+convenience layer too) and only if a solver is installed; otherwise the
+verdict is interval-only and the stamp records the solver's absence.
 """
 
 from __future__ import annotations
 
-__all__ = ["field_positive", "scalar_nonzero"]
+__all__ = ["check", "field_positive", "scalar_nonzero"]
 
 
 def field_positive(shape, dtype, envelope, transform=None, *, bound=0.0):
     """Pointwise positivity/coercivity of a (transformed) input field.
 
-    Declares ``field`` over ``envelope`` and states
-    ``transform(field) > bound`` at every point. The canonical instance
-    is variable-coefficient ellipticity: every CG or Cholesky on
-    ``-∇·(a∇·)`` assumes the coefficient ``a`` is positive, and the
-    assumption usually lives in the inputs unchecked.
+    Declares ``field`` over ``envelope``, applies ``transform`` — **your
+    code's own construction**, not a hand-simplified stand-in — and
+    states ``value > bound`` at every point of every value the transform
+    produces. The canonical instance is variable-coefficient
+    ellipticity: every CG or Cholesky on ``-∇·(a∇·)`` assumes the
+    coefficient ``a`` is positive, and the assumption usually lives in
+    the inputs unchecked.
 
-    Returns ``(field, obligation)`` — return the obligation from the
-    harness so it cannot be dropped as dead code; the field is returned
-    so callers can state further obligations over the same declaration.
+    ``transform`` may return a single array **or a tuple/list of
+    arrays** — real constructions often produce several quantities that
+    must each satisfy the precondition (a conservative discretisation
+    yields per-axis *face* coefficient arrays from one cell field; each
+    face array must be positive). One obligation is stated per produced
+    value, and the return mirrors the transform's shape:
+
+    * single value in → ``(field, obligation)``;
+    * tuple/list in → ``(field, tuple_of_obligations)``.
+
+    Return the obligation(s) from your harness so none can be dropped as
+    dead code; the field is returned so further obligations can be
+    stated over the same declaration.
     """
     from stelling.harness import any_array, assert_
 
     field = any_array(shape, dtype, envelope)
     value = transform(field) if transform is not None else field
+    if isinstance(value, (tuple, list)):
+        return field, tuple(assert_(v > bound) for v in value)
     return field, assert_(value > bound)
 
 
@@ -80,3 +102,44 @@ def scalar_nonzero(dtype, envelope):
 
     scalar = any_array((), dtype, envelope)
     return scalar, assert_(scalar != 0.0)
+
+
+def check(harness, *, solver_timeout_ms=None):
+    """Run a precondition harness end-to-end and return the stamped
+    :class:`stelling.verdict.Verdict`.
+
+    ``harness`` is a zero-argument function that declares inputs (via
+    the templates above or :func:`stelling.harness.any_array` directly)
+    and returns its obligations. The verdict's status is ``VERIFIED``,
+    ``REFUTED`` (with a replay-confirmed concrete witness when a solver
+    found one), or ``UNKNOWN`` — never guessed; anything the analysis
+    could not decide says so, with the reason quoted in the notes.
+
+    ``solver_timeout_ms``: pass an explicit per-obligation time limit to
+    escalate interval-undecided obligations to the SMT portfolio (needs
+    the ``[solvers]`` extra, or one of them). **There is no default** —
+    a solver run is a stamped, reproducible event and its budget is part
+    of what the stamp records. Omit it and the verdict is interval-only.
+
+    Version, precision, and solver stamps are filled from the live
+    environment; the precision entry records the *actual*
+    ``jax_enable_x64`` state at trace time, not an assumption.
+    """
+    import stelling as _stelling
+    from stelling._jax_compat import jax_version, trace, x64_enabled
+    from stelling.propagate import propagate
+    from stelling.verdict import make_verdict
+
+    cj = trace(harness)
+    p = propagate(cj)
+    versions = dict(
+        stelling_version=_stelling.__version__,
+        jax_version=jax_version(),
+        precision_config=f"jax_enable_x64={x64_enabled()}",
+    )
+    if solver_timeout_ms is None:
+        return make_verdict(cj, p, **versions)
+    from stelling.solvers import SolverConfig, escalate, make_solver_verdict
+
+    esc = escalate(cj, p, SolverConfig(timeout_ms=int(solver_timeout_ms)))
+    return make_solver_verdict(cj, p, esc, **versions)

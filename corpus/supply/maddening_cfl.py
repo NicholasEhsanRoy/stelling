@@ -46,7 +46,7 @@ from maddening.nodes.heat import HeatNode  # noqa: E402
 
 import stelling  # noqa: E402
 from stelling import ir  # noqa: E402
-from stelling.coverage import sub_jaxprs  # noqa: E402
+from stelling.vacuity import widen as _widen  # noqa: E402
 from stelling._jax_compat import jax_version, trace  # noqa: E402
 from stelling.harness import any_array, any_pytree, assert_, nonvacuity  # noqa: E402
 from stelling.propagate import propagate  # noqa: E402
@@ -65,40 +65,11 @@ print(
 
 
 def widen(closed: ir.ClosedJaxpr) -> ir.ClosedJaxpr:
-    """Rewrite every top-level ``stelling_any``'s bounds to (−inf, +inf) in
-    the IR; fail loudly if any declaration hides below top level."""
-    j = closed.jaxpr
-    for eqn in j.eqns:  # loud guard: no nested declarations may escape
-        for sub in sub_jaxprs(eqn):
-            for e in sub.eqns:
-                assert e.primitive != "stelling_any", (
-                    "nested stelling_any would escape widening — restructure"
-                )
-    eqns = []
-    for eqn in j.eqns:
-        if eqn.primitive == "stelling_any":
-            params = dict(eqn.params)
-            params["lo"], params["hi"] = -INF, INF
-            eqn = ir.JaxprEqn(
-                primitive=eqn.primitive,
-                invars=eqn.invars,
-                outvars=eqn.outvars,
-                params=tuple(params.items()),
-                effects=eqn.effects,
-                source_info=eqn.source_info,
-            )
-        eqns.append(eqn)
-    return ir.ClosedJaxpr(
-        jaxpr=ir.Jaxpr(
-            constvars=j.constvars,
-            invars=j.invars,
-            outvars=j.outvars,
-            eqns=tuple(eqns),
-            effects=j.effects,
-            debug_info=j.debug_info,
-        ),
-        consts=closed.consts,
-    )
+    """Rewrite every top-level ``stelling_any``'s bounds to (−inf, +inf)
+    — the registered all-declarations procedure, extracted to
+    :func:`stelling.vacuity.widen` (L12); behaviour byte-identical to
+    the local copy this replaced."""
+    return _widen(closed, mode="all")
 
 
 def pose(name, harness):

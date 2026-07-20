@@ -56,6 +56,7 @@ from mime.nodes.environment.fvm.operators import laplacian_orthogonal  # noqa: E
 
 import stelling  # noqa: E402
 from stelling import ir  # noqa: E402
+from stelling.vacuity import widen as _widen  # noqa: E402
 from stelling.coverage import DEFAULT_TRANSPARENT, sub_jaxprs  # noqa: E402
 from stelling._jax_compat import jax_version, trace  # noqa: E402
 from stelling.harness import (  # noqa: E402
@@ -100,39 +101,11 @@ print(
 
 
 def widen_inputs_only(closed: ir.ClosedJaxpr) -> ir.ClosedJaxpr:
-    j = closed.jaxpr
-    for eqn in j.eqns:  # loud guard: no nested declarations may escape
-        for sub in sub_jaxprs(eqn):
-            for e in sub.eqns:
-                assert e.primitive != "stelling_any", (
-                    "nested stelling_any would escape widening — restructure"
-                )
-    eqns = []
-    for eqn in j.eqns:
-        if eqn.primitive == "stelling_any":
-            params = dict(eqn.params)
-            if params["lo"] != params["hi"]:  # non-point declarations only
-                params["lo"], params["hi"] = -INF, INF
-                eqn = ir.JaxprEqn(
-                    primitive=eqn.primitive,
-                    invars=eqn.invars,
-                    outvars=eqn.outvars,
-                    params=tuple(params.items()),
-                    effects=eqn.effects,
-                    source_info=eqn.source_info,
-                )
-        eqns.append(eqn)
-    return ir.ClosedJaxpr(
-        jaxpr=ir.Jaxpr(
-            constvars=j.constvars,
-            invars=j.invars,
-            outvars=j.outvars,
-            eqns=tuple(eqns),
-            effects=j.effects,
-            debug_info=j.debug_info,
-        ),
-        consts=closed.consts,
-    )
+    """The registered inputs-only procedure (non-point declarations
+    widen; points and literals stay) — extracted to
+    :func:`stelling.vacuity.widen` (L12); behaviour byte-identical to
+    the local copy this replaced."""
+    return _widen(closed, mode="inputs-only")
 
 
 def pose(name, harness):

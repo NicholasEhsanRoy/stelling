@@ -105,6 +105,12 @@ def jax_version() -> str:
     return jax.__version__
 
 
+def x64_enabled() -> bool:
+    """The live ``jax_enable_x64`` state — for stamps that must record the
+    configuration the trace actually ran under, not an assumption."""
+    return bool(jax.config.jax_enable_x64)
+
+
 # -- harness primitives -------------------------------------------------------
 #
 # The harness API (any_array / assume / assert_) binds real jax primitives so
