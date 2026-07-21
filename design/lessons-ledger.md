@@ -460,3 +460,40 @@ gate (automatable as a CI job).
 **structural** wiring per instance.
 **(d)** Every manual verification duty; every future "run it in CI"
 step.
+
+## L19 — A finding is a conjunction; the pose mechanizes only half of it
+
+**(a)** A defect claim is *violated ∧ silently-consequential*. A local
+obligation mechanizes "violated" (the flagged arithmetic is real); the
+consequence half is usually asserted by framing, and it is where false
+positives live. Four measured failure modes of the unmechanized
+conjunct: **(1)** a downstream framework postcondition catches the
+consequence (the local hazard is the detection mechanism); **(2)** the
+value is tracer-capable, so eager validation is impossible and its
+absence excused — conversely, static-only values (Python `int`/`None`
+in Python-level branching) have no tracer excuse, and that is where
+real config defects live; **(3)** the violation is harmless (every path
+still computes a valid result); **(4)** the failure is loud (trace-time
+crash, flagged breakdown). **Gate-grade requires both conjuncts
+established at the pose's own locality; anything else is born
+triage-grade.** Calibration, not suppression. This is L2's
+conjunctive-claim lesson recurring one level up — at the finding, not
+the verdict.
+**(b)** The lineax out-of-sample verification
+(`design/ci-readiness.md`): 1 of 8 findings real; all seven
+dissolutions land in the four causes above (each premise re-verified
+against source/execution before encoding); the one real defect
+(`max_steps` equality flag bug) survives all four questions — the
+calibrated rules downgrade the seven and keep the one.
+**(c)** **Convention** (the four questions in `docs/preconditions.md`'s
+gate-or-triage section) + one candidate **structural** upgrade recorded:
+the traced-vs-static sort is derivable from the trace (a poser build,
+with audit, when taken).
+**(d)** Every REFUTED adjudication; the CI triage step; any future
+"unguided sweep" protocol; and the precision expectations of every
+new-codebase field test.
+**Meta:** the honest out-of-sample number existed only because a
+stake-free blind verifier hunted for the caller contract that unmakes
+each finding — the distinct-context audit discipline, applied to
+findings. An in-sample rate reported by the rule-maker is a lower bound
+on self-deception, not a measurement.

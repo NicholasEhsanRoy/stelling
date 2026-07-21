@@ -161,8 +161,38 @@ class of false alarms without silencing a single real finding:
 
 ## Reading a CI verdict: gate or triage
 
-A REFUTED whose witness is a value the *input space genuinely admits*
-(an unguarded config scalar, an unchecked asserted tag) is gate-grade.
-A REFUTED that depends on whether a caller invariant holds is a flag for
-a human to triage. The rules above move most of the second kind out of
-the alarm stream before it reaches you; what remains fired for a reason.
+**A finding is a conjunction: the precondition is violated, AND the
+violation has a silent consequence.** Stelling mechanizes the first
+conjunct — the arithmetic it flags is real (a zero diagonal really does
+produce `inf`). The second conjunct usually depends on context a local
+obligation cannot see, and out-of-sample verification measured exactly
+four ways it fails. Before treating a REFUTED as gate-grade, answer
+four questions:
+
+1. **Is the consequence caught downstream?** A framework may wrap every
+   public call in a postcondition (e.g. "any nonfinite solution rewrites
+   `successful → singular` and raises") — then the local unguarded
+   division is not a leak, it is the *detection mechanism*. A
+   "produces nonfinite" finding whose downstream catchability is
+   unchecked is triage-grade.
+2. **Could the value be a tracer?** In a JAX library, eager validation
+   is necessarily best-effort: any value that can arrive as a tracer
+   cannot be checked at construction, so a missing eager check on it is
+   the *unvalidatable class*, not a defect. The sharp converse: a value
+   that is static Python (`int`/`None` in Python-level branching — it
+   would crash on a tracer) has **no tracer excuse**, and a missing
+   check there is a genuine candidate.
+3. **Is the violation actually harmful?** If every execution path from
+   the violated precondition still computes a valid result (both
+   branches of the conditional are correct; only the schedule changes),
+   the precondition was for intent, not correctness.
+4. **Is the failure actually silent?** A degenerate config that crashes
+   at trace time, or that returns flagged as a breakdown, is loud —
+   miscategorised at worst, not the silent class this checker exists
+   for.
+
+**Gate-grade = both conjuncts established at the same locality as the
+pose** (a static-only value, no downstream rescue possible, a wrong
+result under a success flag). Everything else starts triage-grade —
+calibration, not suppression: the framework might *not* guard, the
+value might be static, and then the finding is real.

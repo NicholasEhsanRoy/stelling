@@ -306,3 +306,68 @@ adjacent). Unattended after this pass: the vacuity check (now in
 `check()`), replay, provenance, stamps, IR gates. Flagged for a human:
 the REFUTED adjudications. Automatable next (not this pass): the
 recorded-set no-flip gate as a CI job.
+
+---
+
+# The out-of-sample precision reading (2026-07-21, the lineax verification)
+
+A **stake-free, blind, falsification-first** verifier (fresh lineax
+context, no stelling context, hunting for the caller contract that makes
+each finding *not* a bug) adjudicated the 8 lineax findings:
+**1 of 8 real** (1/17 raw REFUTED) — the `max_steps` result-flag defect
+(`num_steps == max_steps` at `cg.py:215/219` is an *equality*, so
+negative caps in CG — and `max_steps=0` in GMRES — exit with an
+all-zeros solution flagged `successful`, contradicting the docstring).
+Real, minimal-diff-fixable, being reported separately.
+
+**The seven dissolutions cluster on FOUR distinct causes, not two**
+(the honest count the analysis was asked for):
+
+1. **Downstream framework postcondition** (claims 1, 2, and the failure
+   tails of 3, 4): `_solve.py:99–113` rewrites any nonfinite-solution
+   `successful → singular` and raises by default — **verified against
+   the source this pass**. The "unguarded" divisions are the detection
+   mechanism, not the leak.
+2. **Tracer-unvalidatable values** (heads of 3, 4): tolerances and
+   operator scalars can be tracers — **verified this pass by building
+   CG inside `jax.jit` with a traced `rtol`**; the isinstance gate is
+   load-bearing, and the "bypass" is the unvalidatable class handled
+   correctly.
+3. **Harmless violation** (claim 5): `stabilise_every=0` → mod-0 = 0 →
+   stabilise-every-step; both `lax.cond` branches compute valid
+   residuals, so no wrong result exists — the posed precondition
+   governed the schedule, not correctness.
+4. **Loud, not silent** (claims 6, 7): `restart<0` crashes at trace
+   time; `stagnation_iters=0` returns *flagged* as stagnation — outside
+   the silent-failure class by construction.
+
+**The unification that holds** (and the one that doesn't): the four
+causes do not all reduce to "missing non-local context" — causes 3 and
+4 are local consequence-analysis failures. What unifies all four is
+sharper: **a finding is a conjunction (violated ∧ silently
+consequential); stelling mechanizes the first conjunct and the second
+was asserted by framing.** All seven false positives are half-checked
+conjunctions at the finding level — the project's own conjunctive-claim
+lesson (L2, the conjunctive-validator commitment) recurring one level
+up, at the *finding* instead of the verdict.
+
+**The counter-check, passed:** the `max_steps` defect survives all four
+questions — no downstream rescue (all-zeros is finite, the nonfinite
+postcondition never fires), no tracer excuse (`if self.max_steps is
+None` is Python-level branching — static-only), consequential (a wrong
+all-zeros answer under `successful`), and silent (the success flag is
+the defect). Gate-grade under the calibrated rules; the rules downgrade
+the seven and keep the one.
+
+**Linkage to the flag-and-triage posture:** the four questions are the
+operational definition of gate-grade vs triage-grade — they are what
+the human triage step checks. The traced-vs-static sort (question 2) is
+mechanically derivable from the trace and is recorded as a candidate
+poser automation (a capability change with audit discipline when
+built; documentation-level guidance today).
+
+**The meta-observation:** the honest 1/8 was knowable **only** through
+a stake-free blind verifier — the in-sample 0/9 was correctly distrusted
+and correctly labelled in-sample when reported. The distinct-context
+discipline that audits stelling's code is equally necessary for
+stelling's *findings*.
