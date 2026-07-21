@@ -528,3 +528,37 @@ by doing Y", verify Y was *distinguishable from doing nothing*.
 **(d)** Every stamped line that reports an action (solver invocations,
 widen re-checks, replay confirmations, coverage claims); every future
 instrument with a degenerate query class on which it is a no-op.
+
+## L21 — A fidelity check pins only what it can distinguish
+
+**(a)** A check that binds a transcription to the real code ("bit-identical
+output on random inputs") licenses claims only up to its own
+discriminating power — and that power is capped silently by absorbed
+parameters (a value the float arithmetic swallows) and by degenerate
+instances (a symmetric case on which wrong code computes right values).
+The check's PASSING says nothing about either cap; only deliberately
+wrong variants run through the same gates measure where the caps are.
+This is L15's counterfactual discipline applied one level up: not
+"would this test fail on the unfixed code" but "would this instrument
+notice the error class at all."
+**(b)** The LA attachment's round-2 audit (2026-07-21): a 10× wrong
+`reg` passed all three original fidelity gates — absorbed in binary64
+in the boundary-fed configuration (`0.3125 + 1e-29 == 0.3125`),
+invisible in the boundary-starved one because the rhs is exactly
+nullspace-aligned (the check observes only the first column of M⁻¹) —
+while the script was protected in fact only by an unrelated
+signature-read assert. Separately, on the 2×1 mesh every cell stencil
+is congruent, so cell-permutation/transpose/sign mutations produced
+value-identical assemblies no value comparison can see. Fixed by
+layering (a starved-config exact M cross-check — which now catches the
+reg mutation — and a non-congruent 3×2 fidelity mesh) and by naming
+the residual value-identical class algebraically, member by member.
+The layered stack's power is now itself measured: the mutation battery
+runs every gate against twelve wrong assemblies and asserts who
+catches what.
+**(c)** **Structural**: the mutation battery is part of the record;
+"what would this gate miss" is answered by measurement, not assurance.
+**(d)** Every fidelity check binding a harness to real code; witness
+validators; any future "bit-identical"/"reproduces exactly" claim; the
+adoption pattern — a stranger copying an attachment must copy the
+mutation battery, not just the happy-path check.

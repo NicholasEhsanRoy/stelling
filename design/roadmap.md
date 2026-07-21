@@ -60,8 +60,17 @@ cannot block publish; if the seam exceeds a session, stop and report.
 *Update, same day:* first slice landed within the session
 (`stelling.contracts`, two templates, requires mechanized / ensures
 DECLARED; first-contact audit: ten findings, zero UNSOUND, all fixed —
-`design/la-contract-build.md`). Stop-clause not triggered. Remaining
-under this item: attachment to a real solver call site.
+`design/la-contract-build.md`). Stop-clause not triggered.
+*Second update, same day:* attached to the real call site — MIME's
+`grad_least_squares` normal system, via `conditioning_2x2_field`
+(family transform, symmetry posed) and
+`corpus/supply/mime_lsq_conditioning.py` (fidelity stack with measured
+discriminating power, L21; the real boundary-starved default REFUTED,
+boundary-fed VERIFIED, geometric region solver-decided both ways).
+Round-2 critical audit: seven findings, zero UNSOUND, all adjudicated —
+`design/la-attachment.md`. Item 2 is complete as scoped; solver help
+for family obligations is budget-bounded at ~46 matrices (measured,
+documented) — larger meshes pose deliberate sub-families.
 
 **3. Enumerated discharge mechanism** — the A.2 architecture of
 `design/finding-conjunction.md`.

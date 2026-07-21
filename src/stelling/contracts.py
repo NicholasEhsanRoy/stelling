@@ -88,6 +88,7 @@ __all__ = [
     "check_contract",
     "coefficient_contrast",
     "conditioning_2x2",
+    "conditioning_2x2_field",
 ]
 
 # The ONE status an ensures face can ever have. Deliberately distinct
@@ -432,6 +433,293 @@ def conditioning_2x2(dtype, a_range, c_range, b_range, kappa) -> Contract:
     )
     return Contract(
         name="conditioning_2x2",
+        requires_description=requires_description,
+        harness=harness,
+        ensures=ensures,
+    )
+
+
+def conditioning_2x2_field(shape, dtype, theta_range, kappa, transform) -> Contract:
+    """Contract for the solve leg on a caller-built FAMILY of symmetric 2x2
+    matrices — :func:`conditioning_2x2` lifted over a transform, mirroring
+    :func:`coefficient_contrast`'s transform convention.
+
+    ``theta`` is declared over ``shape``/``theta_range`` (one closed range,
+    every element), and ``transform(theta)`` — **your code's own
+    construction**, e.g. a per-cell normal-matrix assembly over real mesh
+    connectivity — returns either
+
+    * an array ``[..., 2, 2]`` of matrices (any leading batch shape, e.g.
+      per-cell ``[N, 2, 2]``), or
+    * a triple ``(a, b, c)`` of same-shaped arrays/scalars, read as the
+      family ``[[a, b], [b, c]]`` — validated at trace time: every
+      non-scalar element must have one identical shape (a mixed pair
+      like ``(2, 1)`` with ``(3,)`` would silently outer-broadcast to a
+      family the caller never posed, and is refused naming both shapes);
+      scalars broadcast against the non-scalar shape.
+
+    ``transform=None`` is the identity: ``theta`` itself is the family and
+    must be declared with trailing shape ``(2, 2)`` (refused at authoring
+    otherwise). A tuple/list return of any length other than 3, a
+    non-array/non-triple return, an array whose trailing shape is not
+    ``(2, 2)``, and a family of ZERO matrices are all refused loudly at
+    trace time — never a silent zero-obligation UNKNOWN.
+
+    **requires (mechanized), per matrix of the family** — the same four
+    closed conjuncts as :func:`conditioning_2x2`, posed elementwise over
+    the batch (a VERIFIED means every matrix at every envelope point):
+
+    1. ``a >= 0``
+    2. ``c >= 0``
+    3. ``a*c - b*b >= 0``
+    4. ``(a + c)^2 <= (a*c - b*b) * (kappa + 1/kappa + 2)``
+
+    with the identical closed-form/closure argument, per matrix: the posed
+    set per family member is ``{M SPD with cond_2(M) <= kappa} ∪ {M = 0}``
+    — the closure, whose single non-SPD member is the zero matrix (proof
+    in :func:`conditioning_2x2`'s docstring; the ensures excludes that
+    point by name). ``kappa`` carries the same validation (finite,
+    ``>= 1``), and the coefficient ``kappa + 1/kappa + 2`` is computed in
+    binary64 and transcribed into the query.
+
+    **PLUS, on the full-array path only: symmetry is POSED, never
+    silently assumed.** The four conjuncts read ``b`` off ONE off-diagonal
+    (``b = M[..., 0, 1]``), and reading one off-diagonal of a
+    possibly-asymmetric matrix would smuggle an unchecked precondition —
+    the conjuncts would then certify the conditioning of a symmetrized
+    stand-in, not of the matrix the transform actually built. So a
+    ``[..., 2, 2]`` return poses two additional closed obligations,
+
+    5. ``M[..., 0, 1] <= M[..., 1, 0]``
+    6. ``M[..., 1, 0] <= M[..., 0, 1]``,
+
+    making the requires conjunction exactly "every matrix of the family is
+    symmetric AND lies in the closed conditioning set". If the caller
+    passes an ``(a, b, c)`` triple instead, passing one off-diagonal IS
+    their symmetry assertion — the caller vouches, in the API's own shape,
+    that both off-diagonals are the same value, and no symmetry obligation
+    is posed (exactly as :func:`conditioning_2x2` itself).
+
+    Expect the symmetry pair to be interval-UNDECIDED over non-point
+    envelopes even when the transform is symmetric by construction: the
+    two off-diagonals are distinct element terms with equal propagated
+    boxes, and equal non-point boxes straddle a ``<=`` in both
+    directions. Measured, this holds even at ALL-POINT envelopes when
+    the off-diagonal is a computed product — outward rounding widens
+    ``0.0 * theta`` to ``[-5e-324, 5e-324]``, off the point. That
+    UNKNOWN is honest, and solver escalation discharges it trivially
+    when the entries share structure (e.g. ``mul(d0, d1)`` vs
+    ``mul(d1, d0)`` from a transcribed outer product). On an asymmetric
+    family the same pair REFUTES with a concrete witness — which is the
+    point.
+
+    Family assembly must stay on supported primitives: build stacked
+    entries with ``jnp.concatenate`` over ``reshape``\\ d pieces —
+    measured on jax 0.11.0, ``jnp.stack`` traces to a ``stack`` primitive
+    with no transfer row, which would send the whole family to ⊤.
+
+    Vacuity, the emission budget, and never-on solver defaults are
+    inherited unchanged through :func:`check_contract`.
+
+    **Scale, measured.** Solver escalation is gated by the ONE
+    per-obligation emission budget
+    (:data:`stelling.obligation.ELEMENT_BUDGET` = 512 element terms — a
+    committed, measured-solver-cost decision; it does not move for this
+    template). With a per-cell assembly costing ~11 element terms per
+    matrix (the MIME LSQ attachment's shape,
+    corpus/supply/mime_lsq_conditioning.py), the conditioning conjunct
+    escalates up to N = 46 matrices and declines loudly at N = 47 —
+    "517 element terms ... over the per-obligation emission budget of
+    512", both numbers quoted in the decline. Interval-decidable
+    obligations keep working at any N. So on a real mesh, pose
+    deliberate sub-families — a region, a sampled subset, a known-worst
+    cell class — rather than the whole mesh; a whole-mesh family past a
+    few dozen cells gets no solver help, honestly declined, never
+    silently approximated.
+
+    **ensures (DECLARED, never checked), per matrix:** the same
+    kappa-derived norm-sensitivity face as :func:`conditioning_2x2`,
+    worded over the family — for every point of the envelope and every
+    matrix of the family at which the requires holds and that matrix is
+    nonzero, and every right-hand side ``r``:
+    ``||M^-1 r||_2 <= (kappa / ||M||_2) * ||r||_2``.
+    """
+    if isinstance(kappa, bool) or not isinstance(kappa, (int, float)):
+        raise ValueError(f"kappa must be a real number, got {kappa!r}")
+    kappa = float(kappa)
+    if not math.isfinite(kappa) or kappa < 1.0:
+        raise ValueError(
+            f"kappa must be finite and >= 1 (cond_2 is always >= 1, and the "
+            f"reduction tr^2 <= det*(kappa + 1/kappa + 2) encodes "
+            f"cond_2 <= kappa only for kappa >= 1 — f(kappa) = f(1/kappa), "
+            f"so kappa < 1 would silently pose cond_2 <= 1/kappa); got "
+            f"{kappa!r}"
+        )
+    coeff = kappa + 1.0 / kappa + 2.0  # binary64; transcribed into the query
+    if transform is not None and not callable(transform):
+        raise ValueError(
+            f"conditioning_2x2_field: transform must be a callable or None "
+            f"(None = identity: theta itself is the family), got "
+            f"{transform!r}"
+        )
+    dims = []
+    for d in shape:
+        # per-dim validation at authoring, the same funnel
+        # coefficient_contrast runs (ir.py posture): exact Python ints
+        # only, no negative extents. Zero extents are NOT refused here —
+        # there is no extremum fold in this template, and the family's
+        # own emptiness is checked at trace time where the transform's
+        # batch shape is known.
+        if isinstance(d, bool) or not isinstance(d, int):
+            raise ValueError(
+                f"conditioning_2x2_field: shape {tuple(shape)!r} has a "
+                f"non-int extent {d!r} ({type(d).__name__}); extents must "
+                f"be Python ints (no coercion); refusing at authoring time"
+            )
+        if d < 0:
+            raise ValueError(
+                f"conditioning_2x2_field: shape {tuple(shape)!r} has a "
+                f"negative extent {d!r}: no jax program constructs such an "
+                f"array; refusing at authoring time"
+            )
+        dims.append(d)
+    dims = tuple(dims)
+    if transform is None and (len(dims) < 2 or dims[-2:] != (2, 2)):
+        raise ValueError(
+            f"conditioning_2x2_field: transform=None declares theta itself "
+            f"as the matrix family, so shape must end in (2, 2); got "
+            f"{dims}; refusing at authoring time"
+        )
+    lo, hi = _closed_range("conditioning_2x2_field", "theta_range", theta_range)
+
+    requires_description = (
+        f"family M = transform(theta) for theta over shape {dims} ({dtype}) "
+        f"with every element in [{lo!r}, {hi!r}]"
+        f"{' (identity transform: theta is the family)' if transform is None else ''}: "
+        f"per matrix of the family, a >= 0 AND c >= 0 AND a*c - b*b >= 0 "
+        f"(closed principal-minor / PSD form) AND (a + c)^2 <= "
+        f"(a*c - b*b) * {coeff!r} (the exact reduction of cond_2(M) <= "
+        f"{kappa!r}; coefficient = kappa + 1/kappa + 2), at every point of "
+        f"the declared envelope — where (a, b, c) is the caller's triple if "
+        f"the transform returns one (passing one off-diagonal IS the "
+        f"caller's symmetry assertion), and a = M[..,0,0], b = M[..,0,1], "
+        f"c = M[..,1,1] with symmetry POSED as two additional closed "
+        f"obligations M[..,0,1] <= M[..,1,0] AND M[..,1,0] <= M[..,0,1] if "
+        f"it returns full [..., 2, 2] matrices — the closed-form posing of "
+        f"'every matrix of the family is symmetric positive-definite with "
+        f"cond_2(M) <= {kappa!r}', exact up to the single per-matrix "
+        f"closure point M = 0"
+    )
+
+    def harness():
+        from stelling.harness import any_array, assert_
+
+        theta = any_array(dims, dtype, (lo, hi))
+        value = transform(theta) if transform is not None else theta
+        if isinstance(value, (tuple, list)):
+            if len(value) != 3:
+                raise ValueError(
+                    f"conditioning_2x2_field: the transform returned a "
+                    f"{type(value).__name__} of length {len(value)}; the "
+                    f"convention is an array [..., 2, 2] of matrices or a "
+                    f"triple (a, b, c) of same-shaped arrays/scalars"
+                )
+            a, b, c = value
+            # same-shaped arrays or scalars only (audit round 2, F6): a
+            # mixed pair of non-scalar shapes ((2, 1) with (3,)) would
+            # silently outer-broadcast to a family the caller never
+            # posed. Scalars broadcast against the one non-scalar shape;
+            # that is the documented convention.
+            non_scalar = {
+                name_: tuple(getattr(v, "shape", ()))
+                for name_, v in (("a", a), ("b", b), ("c", c))
+                if tuple(getattr(v, "shape", ())) != ()
+            }
+            if len(set(non_scalar.values())) > 1:
+                raise ValueError(
+                    f"conditioning_2x2_field: the (a, b, c) triple mixes "
+                    f"non-scalar shapes {non_scalar}; same-shaped arrays "
+                    f"or scalars only — mixed non-scalar shapes would "
+                    f"silently broadcast to a family the caller never posed"
+                )
+            b10 = None  # the caller's off-diagonal IS their symmetry assertion
+        else:
+            m_shape = getattr(value, "shape", None)
+            if m_shape is None:
+                raise ValueError(
+                    f"conditioning_2x2_field: the transform returned "
+                    f"{type(value).__name__}, which is neither an array "
+                    f"[..., 2, 2] nor an (a, b, c) triple"
+                )
+            m_shape = tuple(m_shape)
+            if len(m_shape) < 2 or m_shape[-2:] != (2, 2):
+                raise ValueError(
+                    f"conditioning_2x2_field: the transform returned an "
+                    f"array of shape {m_shape}; a matrix family must have "
+                    f"trailing shape (2, 2)"
+                )
+            batch = 1
+            for dim in m_shape[:-2]:
+                batch *= dim
+            if batch == 0:
+                raise ValueError(
+                    f"conditioning_2x2_field: the transform returned a "
+                    f"family of zero matrices (shape {m_shape}) — nothing "
+                    f"to pose"
+                )
+            a = value[..., 0, 0]
+            b = value[..., 0, 1]
+            b10 = value[..., 1, 0]
+            c = value[..., 1, 1]
+        tr = a + c
+        det = a * c - b * b
+        obligations = [
+            assert_(a >= 0.0),
+            assert_(c >= 0.0),
+            assert_(det >= 0.0),
+            assert_(tr * tr <= det * coeff),
+        ]
+        if b10 is not None:
+            # symmetry POSED (array path): reading b off one off-diagonal
+            # above is licensed only by these two closed obligations, never
+            # silently assumed. The asserts are CALLED after the four
+            # conjuncts' asserts so the obligation indices are stable
+            # across both return paths (0-3 the conjuncts; 4-5 the
+            # symmetry pair) — an obligation's index is its assert's
+            # position in the traced query, which is call order.
+            obligations.append(assert_(b <= b10))
+            obligations.append(assert_(b10 <= b))
+        return tuple(obligations)
+
+    ensures = EnsuresFace(
+        statement=(
+            f"for every point of the declared envelope and every matrix of "
+            f"the family at which the requires holds and that matrix is not "
+            f"the zero matrix — equivalently, at every envelope point and "
+            f"family position where M is symmetric positive-definite with "
+            f"cond_2(M) <= {kappa!r} — and for every right-hand side r: "
+            f"||M^-1 r||_2 <= ({kappa!r} / ||M||_2) * ||r||_2 "
+            f"(norm-sensitivity of the solve output, per matrix). "
+            f"Universally quantified over the declared envelope and the "
+            f"family: nothing is claimed at points or matrices violating "
+            f"the requires, the statement is vacuously true if no envelope "
+            f"point satisfies the requires, and it does not assert that "
+            f"any such point exists."
+        ),
+        derivation=(
+            f"per matrix of the family: ||M^-1 r||_2 <= ||M^-1||_2 * "
+            f"||r||_2 (operator-norm inequality), and ||M^-1||_2 = "
+            f"cond_2(M) / ||M||_2 <= {kappa!r} / ||M||_2 wherever the "
+            f"requires holds with M != 0 (cond_2 = ||M||_2 * ||M^-1||_2 by "
+            f"definition; the requires face bounds it by kappa per matrix "
+            f"— probe: corpus/supply/la_contract_probe.py Part 4). The "
+            f"single per-matrix closure point M = 0 is excluded by name in "
+            f"the statement: M^-1 does not exist there."
+        ),
+        conditional_on=requires_description,
+    )
+    return Contract(
+        name="conditioning_2x2_field",
         requires_description=requires_description,
         harness=harness,
         ensures=ensures,

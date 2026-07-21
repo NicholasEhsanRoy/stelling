@@ -10,6 +10,11 @@ here through stelling's own pipeline (the probe's Z3-checked results are
 ground truth). Counterfactual pins state, in comments, exactly which
 plausible wrong implementation each would catch — each was measured to
 flip the verdict when the wrong implementation is substituted.
+
+This module needs jax (the module-level importorskip below skips the
+WHOLE file at collection in a jax-less environment — measured); the
+contract layer's genuinely jax-free tests live in
+tests/test_contracts_nojax.py so they actually run in both venvs.
 """
 
 from __future__ import annotations
@@ -21,214 +26,10 @@ import pytest
 
 from stelling import contracts  # jax-free import must always work
 from stelling.contracts import (
-    Contract,
     ContractVerdict,
     ENSURES_DECLARED,
     EnsuresFace,
 )
-
-
-def test_module_imports_without_jax():
-    assert contracts.__all__ == [
-        "Contract",
-        "ContractVerdict",
-        "ENSURES_DECLARED",
-        "EnsuresFace",
-        "check_contract",
-        "coefficient_contrast",
-        "conditioning_2x2",
-    ]
-
-
-# --- the DECLARED-only ensures invariant (jax-free, structural) --------------
-
-
-def test_ensures_status_token_is_distinct_from_verdict_statuses():
-    assert ENSURES_DECLARED == "DECLARED"
-    assert ENSURES_DECLARED not in {"VERIFIED", "REFUTED", "UNKNOWN"}
-
-
-def test_ensures_face_refuses_every_non_declared_status():
-    for status in ("VERIFIED", "REFUTED", "UNKNOWN", "declared", "CHECKED", ""):
-        with pytest.raises(ValueError, match="DECLARED and nothing else"):
-            EnsuresFace(
-                statement="s", derivation="d", conditional_on="c",
-                status=status,
-            )
-
-
-def test_ensures_face_cannot_be_upgraded_via_replace():
-    face = EnsuresFace(statement="s", derivation="d", conditional_on="c")
-    assert face.status == ENSURES_DECLARED
-    with pytest.raises(ValueError, match="DECLARED and nothing else"):
-        dataclasses.replace(face, status="VERIFIED")
-
-
-def test_ensures_face_requires_populated_texts():
-    with pytest.raises(ValueError, match="must be populated"):
-        EnsuresFace(statement="", derivation="d", conditional_on="c")
-
-
-def test_contract_requires_exactly_one_of_ensures_and_reason():
-    face = EnsuresFace(statement="s", derivation="d", conditional_on="c")
-    with pytest.raises(ValueError, match="exactly one"):
-        Contract(name="x", requires_description="r", harness=lambda: (),
-                 ensures=None, no_ensures_reason="")
-    with pytest.raises(ValueError, match="exactly one"):
-        Contract(name="x", requires_description="r", harness=lambda: (),
-                 ensures=face, no_ensures_reason="also a reason")
-
-
-# --- audit F1: the sealed-type funnels ---------------------------------------
-# The docstring's DECLARED-only claim was measured false via three public
-# routes (audit b5_mutation.py): a subclass with a no-op __post_init__, a
-# duck-typed stand-in through Contract, and direct ContractVerdict
-# construction. All three must now refuse with the sealed-type wording.
-
-
-class _UpgradedFace(EnsuresFace):
-    def __post_init__(self):  # drop the refusal — the audit's subclass route
-        pass
-
-
-def test_contract_refuses_subclassed_ensures_face():
-    laundered = _UpgradedFace(statement="looks checked", derivation="d",
-                              conditional_on="c", status="VERIFIED")
-    assert laundered.status == "VERIFIED"  # the subclass itself constructs...
-    with pytest.raises(ValueError, match="sealed type"):
-        Contract(name="x", requires_description="r", harness=lambda: (),
-                 ensures=laundered)  # ...but cannot flow anywhere
-
-
-def test_contract_refuses_duck_typed_ensures():
-    from types import SimpleNamespace
-
-    fake = SimpleNamespace(status="VERIFIED", statement="s",
-                           derivation="d", conditional_on="c")
-    with pytest.raises(ValueError, match="sealed type"):
-        Contract(name="x", requires_description="r", harness=lambda: (),
-                 ensures=fake)
-
-
-def test_contract_verdict_refuses_non_sealed_ensures():
-    from types import SimpleNamespace
-
-    with pytest.raises(ValueError, match="sealed type"):
-        ContractVerdict(
-            contract_name="x", requires_description="r", requires=object(),
-            ensures=SimpleNamespace(status="VERIFIED", statement="s",
-                                    derivation="d", conditional_on="c"),
-        )
-    with pytest.raises(ValueError, match="sealed type"):
-        ContractVerdict(
-            contract_name="x", requires_description="r", requires=object(),
-            ensures=_UpgradedFace(statement="s", derivation="d",
-                                  conditional_on="c", status="VERIFIED"),
-        )
-
-
-def test_contract_verdict_requires_exactly_one_of_ensures_and_reason():
-    # the pairing check Contract has, now on the directly-constructible
-    # verdict container too (audit F1)
-    with pytest.raises(ValueError, match="exactly one"):
-        ContractVerdict(contract_name="x", requires_description="r",
-                        requires=object(), ensures=None, no_ensures_reason="")
-    face = EnsuresFace(statement="s", derivation="d", conditional_on="c")
-    with pytest.raises(ValueError, match="exactly one"):
-        ContractVerdict(contract_name="x", requires_description="r",
-                        requires=object(), ensures=face,
-                        no_ensures_reason="also a reason")
-
-
-# --- audit F6: render/stamp integrity of the ensures strings -----------------
-
-
-def test_ensures_face_refuses_embedded_newlines():
-    """A newline in a hand-built face forged column-0 verdict-looking
-    lines ('== VERIFIED', a fake solver line) in render and stamp
-    (audit b5_mutation.py section 8)."""
-    for field, value in (
-        ("statement", "ok\n== VERIFIED"),
-        ("derivation", "d\rsolver: z3 4.war (fake)"),
-        ("conditional_on", "c\ncoverage: fake"),
-    ):
-        kwargs = dict(statement="s", derivation="d", conditional_on="c")
-        kwargs[field] = value
-        with pytest.raises(ValueError, match="single physical line"):
-            EnsuresFace(**kwargs)
-
-
-def test_template_ensures_strings_are_single_line():
-    face = contracts.conditioning_2x2(
-        "float64", (1, 2), (1, 2), (0, 0), 8.0
-    ).ensures
-    for text in (face.statement, face.derivation, face.conditional_on):
-        assert "\n" not in text and "\r" not in text
-
-
-# --- audit F10: whitespace-only ensures texts --------------------------------
-
-
-def test_ensures_face_refuses_whitespace_only_texts():
-    with pytest.raises(ValueError, match="must be populated"):
-        EnsuresFace(statement="   ", derivation="d", conditional_on="c")
-    with pytest.raises(ValueError, match="must be populated"):
-        EnsuresFace(statement="s", derivation="\t", conditional_on="c")
-
-
-# --- audit F8: authoring-time refusals for impossible envelopes/shapes -------
-
-
-def test_authoring_refuses_impossible_ranges():
-    """Reversed and NaN ranges declared empty envelopes that authored
-    successfully and rendered ('a in [2.0, 1.0]') until first check;
-    non-finite endpoints likewise (audit b_emptiness.py B1, h_misc H7).
-    Both templates now refuse at authoring, where the guard messages
-    already claimed refusal happens."""
-    nan = float("nan")
-    with pytest.raises(ValueError, match="empty envelope"):
-        contracts.conditioning_2x2("float64", (2.0, 1.0), (1, 2), (0, 0), 8.0)
-    with pytest.raises(ValueError, match="empty envelope"):
-        contracts.conditioning_2x2("float64", (nan, 1.0), (1, 2), (0, 0), 8.0)
-    with pytest.raises(ValueError, match="non-finite endpoint"):
-        contracts.conditioning_2x2(
-            "float64", (float("inf"), float("inf")), (1, 2), (0, 0), 8.0
-        )
-    with pytest.raises(ValueError, match="empty envelope"):
-        contracts.coefficient_contrast((4,), "float64", (2.0, 1.0), 10.0)
-    with pytest.raises(ValueError, match="empty envelope"):
-        contracts.coefficient_contrast((4,), "float64", (nan, 1.0), 10.0)
-
-
-def test_authoring_refuses_malformed_shapes():
-    """(-1,) and (2,-3) passed the zero-product guard (a product of
-    negatives misses them) and ('4',) was silently int-coerced (audit
-    c_posings C3/C7); per-dim validation now refuses each, ir.py-style."""
-    with pytest.raises(ValueError, match="negative extent"):
-        contracts.coefficient_contrast((-1,), "float64", (0.0, 1.0), 10.0)
-    with pytest.raises(ValueError, match="negative extent"):
-        contracts.coefficient_contrast((2, -3), "float64", (0.0, 1.0), 10.0)
-    with pytest.raises(ValueError, match="non-int extent"):
-        contracts.coefficient_contrast(("4",), "float64", (0.0, 1.0), 10.0)
-    with pytest.raises(ValueError, match="non-int extent"):
-        contracts.coefficient_contrast((True,), "float64", (0.0, 1.0), 10.0)
-
-
-def test_template_authoring_validation_is_eager_and_jax_free():
-    # kappa < 1 poses cond_2 <= 1/kappa (f(kappa) = f(1/kappa)), never
-    # what the caller asked — refused at authoring time.
-    with pytest.raises(ValueError, match="kappa"):
-        contracts.conditioning_2x2("float64", (1, 2), (1, 2), (0, 0), 0.5)
-    with pytest.raises(ValueError, match="contrast_bound"):
-        contracts.coefficient_contrast((4,), "float64", (0.0, 1.0), 0.5)
-    with pytest.raises(ValueError, match="zero"):
-        contracts.coefficient_contrast((0,), "float64", (0.0, 1.0), 10.0)
-
-
-def test_check_contract_requires_vacuity_mode():
-    c = contracts.conditioning_2x2("float64", (1, 2), (1, 2), (0, 0), 8.0)
-    with pytest.raises(TypeError):
-        contracts.check_contract(c)  # no silent mode, no silent skip
 
 
 jax = pytest.importorskip("jax")
@@ -824,6 +625,350 @@ def test_solver_timeout_ms_rejects_str_and_float():
     with pytest.raises(TypeError, match="solver_timeout_ms must be an int"):
         check_contract(contract, vacuity_mode="inputs-only",
                        solver_timeout_ms=True)
+
+
+# --- T3: conditioning_2x2_field — the family template -------------------------
+# MIME-free by construction: every transform here is a hand construction.
+# The known answers reuse the probe's Z3-checked ground truth (probe Parts
+# 1-2) through the family template's two return conventions.
+
+from stelling.contracts import conditioning_2x2_field  # noqa: E402
+
+
+def _stack_last(*scalars):
+    """Family assembly on supported primitives only: concatenate over
+    reshaped single-element pieces (measured on jax 0.11.0: jnp.stack
+    traces to a `stack` primitive with no transfer row)."""
+    import jax.numpy as jnp
+
+    return jnp.concatenate([jnp.reshape(s, (1,)) for s in scalars])
+
+
+def _as_family(rows):
+    """rows: list of (m00, m01, m10, m11) scalar tuples -> [N, 2, 2]."""
+    import jax.numpy as jnp
+
+    flat = jnp.concatenate([_stack_last(*r) for r in rows])
+    return jnp.reshape(flat, (len(rows), 2, 2))
+
+
+def test_t3_trace_time_refusals_are_loud():
+    """Out-of-convention transform returns refuse at trace time with the
+    convention quoted — never a silent zero-obligation UNKNOWN."""
+    import jax.numpy as jnp
+
+    with pytest.raises(ValueError, match="length 2"):
+        check_contract(
+            conditioning_2x2_field(
+                (2,), "float64", (0.0, 1.0), 8.0, lambda t: (1.0, 2.0)
+            ),
+            vacuity_mode="inputs-only",
+        )
+    with pytest.raises(ValueError, match=r"trailing shape \(2, 2\)"):
+        check_contract(
+            conditioning_2x2_field(
+                (3,), "float64", (0.0, 1.0), 8.0, lambda t: t
+            ),
+            vacuity_mode="inputs-only",
+        )
+    with pytest.raises(ValueError, match="zero matrices"):
+        check_contract(
+            conditioning_2x2_field(
+                (2,), "float64", (0.0, 1.0), 8.0,
+                lambda t: jnp.zeros((0, 2, 2)),
+            ),
+            vacuity_mode="inputs-only",
+        )
+    with pytest.raises(ValueError, match="neither an array"):
+        check_contract(
+            conditioning_2x2_field(
+                (2,), "float64", (0.0, 1.0), 8.0, lambda t: 3.0
+            ),
+            vacuity_mode="inputs-only",
+        )
+
+
+def test_t3_triple_refuses_mixed_non_scalar_shapes():
+    """Audit round 2, F6: a triple mixing non-scalar shapes ((2, 1) with
+    (3,)) would silently outer-broadcast to a family the caller never
+    posed — refused at trace time naming both shapes."""
+    import jax.numpy as jnp
+
+    def mixed(t):
+        a = jnp.reshape(1.0 + t, (2, 1))  # (2, 1)
+        b = jnp.concatenate([t, t[:1]])  # (3,)
+        return a, b, 1.5
+
+    with pytest.raises(ValueError, match=r"\(2, 1\).*\(3,\)"):
+        check_contract(
+            conditioning_2x2_field((2,), "float64", (0.0, 0.1), 8.0, mixed),
+            vacuity_mode="inputs-only",
+        )
+
+
+def test_t3_triple_scalar_broadcast_still_works():
+    """The documented convention: scalars broadcast against the one
+    non-scalar shape (a over (2,), b and c scalar -> a (2,)-family)."""
+
+    def tri(t):
+        return 1.0 + t, 0.0 * t[0], 1.5 + t[0]
+
+    cv = check_contract(
+        conditioning_2x2_field((2,), "float64", (0.0, 0.1), 8.0, tri),
+        vacuity_mode="inputs-only",
+    )
+    assert cv.requires_status == "VERIFIED"
+    assert len(cv.requires.obligations) == 4
+    assert all(o.status == "discharged" for o in cv.requires.obligations)
+    # the broadcast is per-expression: obligations touching `a` (a >= 0,
+    # det >= 0, the ratio) are judged over the broadcast 2 elements; the
+    # scalar-only c >= 0 stays scalar
+    details = [o.detail for o in cv.requires.obligations]
+    assert "2 element(s)" in details[0]
+    assert "1 element(s)" in details[1]
+    assert "2 element(s)" in details[2] and "2 element(s)" in details[3]
+
+
+def test_t3_triple_vs_array_paths_pose_the_same_conditioning():
+    """The two return conventions on the same well-conditioned point
+    family: the triple poses the four conjuncts (the caller's off-diagonal
+    IS their symmetry assertion), the [..., 2, 2] array poses the same
+    four PLUS the two symmetry obligations — indices 0-3 stable across
+    both paths, 4-5 the symmetry pair.
+
+    Measured seam, pinned here: even at an all-point envelope the
+    symmetry pair STRADDLES when the off-diagonal is a computed product
+    (0.0 * t propagates to the outward-rounded [-5e-324, 5e-324], and
+    equal non-point boxes straddle <= in both directions) — the array
+    path is interval-UNKNOWN where the triple path is interval-VERIFIED,
+    and the pair needs the (trivial) solver step to close."""
+
+    def triple(t):
+        return 1.0 + t, 0.0 * t, 1.0 + t
+
+    def family(t):
+        a = 1.0 + t
+        b = 0.0 * t
+        return _as_family([(a, b, b, a)])[0]  # single [2, 2] matrix
+
+    cv3 = check_contract(
+        conditioning_2x2_field((), "float64", (0.0, 0.0), 8.0, triple),
+        vacuity_mode="inputs-only",
+    )
+    assert cv3.requires_status == "VERIFIED"
+    assert len(cv3.requires.obligations) == 4
+    cv4 = check_contract(
+        conditioning_2x2_field((), "float64", (0.0, 0.0), 8.0, family),
+        vacuity_mode="inputs-only",
+    )
+    assert cv4.requires_status == "UNKNOWN"
+    assert len(cv4.requires.obligations) == 6  # + the posed symmetry pair
+    assert [o.status for o in cv4.requires.obligations] == (
+        ["discharged"] * 4 + ["unknown"] * 2
+    )
+    straddles = [n for n in cv4.requires.notes if "straddles" in n]
+    assert len(straddles) == 2  # the pair, quoted in numbers
+    # both faces declare the same per-matrix ensures shape
+    assert cv3.ensures_status == ENSURES_DECLARED
+    assert "every matrix of the family" in cv4.ensures.statement
+
+
+def test_t3_family_query_stays_on_supported_primitives():
+    """Structural pin: the [..., 2, 2] extraction is slice+squeeze and the
+    assembly is concatenate+reshape — no gather, no scatter, no stack may
+    appear (gather/stack have no emission row; their appearance would send
+    the family or its escalation to ⊤/decline)."""
+
+    def family(t):
+        a = 1.0 + t[0]
+        b = t[1] * t[0]
+        return _as_family([(a, b, b, a), (a, b, b, a)])
+
+    closed = trace(
+        conditioning_2x2_field((2,), "float64", (0.1, 0.2), 8.0, family).harness
+    )
+    prims = set()
+    stack = list(closed.jaxpr.eqns)
+    while stack:
+        eqn = stack.pop()
+        prims.add(eqn.primitive)
+        for sub in sub_jaxprs(eqn):
+            stack.extend(sub.eqns)
+    assert "gather" not in prims
+    assert "scatter" not in prims
+    assert "stack" not in prims
+    assert {"slice", "concatenate", "reshape", "mul"} <= prims
+
+
+def test_t3_symmetric_family_symmetry_straddles_then_solver_discharges():
+    """The posed symmetry pair on a symmetric-by-construction family over
+    a non-point envelope: the off-diagonals are DISTINCT element terms
+    (mul(t0, t1) vs mul(t1, t0)) with equal propagated boxes, and equal
+    boxes straddle <= in both directions — interval-UNKNOWN, honestly.
+    The straddle is quoted in numbers on the verdict."""
+
+    def family(t):
+        b01 = t[0] * t[1]
+        b10 = t[1] * t[0]  # the transcribed-outer-product shape
+        return _as_family([(1.5, b01, b10, 1.5)])
+
+    contract = conditioning_2x2_field((2,), "float64", (0.1, 0.2), 8.0, family)
+    cv = check_contract(contract, vacuity_mode="inputs-only")
+    assert cv.requires_status == "UNKNOWN"
+    assert [o.status for o in cv.requires.obligations] == [
+        "discharged", "discharged", "discharged", "discharged",
+        "unknown", "unknown",  # the symmetry pair, straddling
+    ]
+    straddles = [n for n in cv.requires.notes if "straddles" in n]
+    assert len(straddles) == 2
+    assert any("obligation #4" in n for n in straddles)
+    assert any("obligation #5" in n for n in straddles)
+
+
+@needs_solver
+def test_t3_symmetry_pair_discharged_trivially_by_solver():
+    def family(t):
+        b01 = t[0] * t[1]
+        b10 = t[1] * t[0]
+        return _as_family([(1.5, b01, b10, 1.5)])
+
+    cv = check_contract(
+        conditioning_2x2_field((2,), "float64", (0.1, 0.2), 8.0, family),
+        vacuity_mode="inputs-only",
+        solver_timeout_ms=20000,
+    )
+    assert cv.requires_status == "VERIFIED"
+    for idx in (4, 5):
+        ob = cv.requires.obligations[idx]
+        assert ob.status == "discharged"
+        assert "solver escalation" in ob.detail and "unsat" in ob.detail
+
+
+@needs_solver
+def test_t3_posed_symmetry_refutes_asymmetric_transform_with_witness():
+    """The symmetry rule's bite: a deliberately asymmetric family (m10 =
+    2*m01, undecidable by intervals since the boxes overlap) REFUTES with
+    a replay-confirmed witness confirming the asymmetry. A template that
+    silently read one off-diagonal would have VERIFIED this family."""
+
+    def family(t):
+        return _as_family([(1.0, t, 2.0 * t, 1.0)])
+
+    cv = check_contract(
+        conditioning_2x2_field((), "float64", (0.1, 0.2), 8.0, family),
+        vacuity_mode="inputs-only",
+        solver_timeout_ms=20000,
+    )
+    assert cv.requires_status == "REFUTED"
+    assert cv.requires.witnesses
+    for w in cv.requires.witnesses:
+        assert w.obligation_index == 5  # m10 <= m01 is the violated one
+        assert "exact-rational replay" in w.replay
+        (name, text), = [(n, v) for n, v in w.values]
+        theta = Fraction(text)
+        assert Fraction(0.1) <= theta <= Fraction(0.2)  # box membership
+        assert 2 * theta > theta  # the asymmetry, re-derived exactly
+
+
+def test_t3_identity_family_over_a_box_is_honestly_undecided():
+    """transform=None: theta IS the family, its off-diagonals are
+    independent declared elements — the family genuinely contains
+    asymmetric matrices, so symmetry must NOT verify."""
+    cv = check_contract(
+        conditioning_2x2_field((2, 2), "float64", (1.0, 2.0), 8.0, None),
+        vacuity_mode="inputs-only",
+    )
+    assert cv.requires_status in ("UNKNOWN", "REFUTED")
+    assert cv.requires.obligations[4].status != "discharged"
+    assert cv.requires.obligations[5].status != "discharged"
+
+
+@needs_solver
+def test_t3_identity_family_refuted_with_confirmed_witnesses():
+    """The identity family over a box REFUTES under escalation: with all
+    four entries independent it contains non-PSD members and asymmetric
+    members alike, and whichever obligation the portfolio refutes first,
+    every shown witness is replay-confirmed and inside the declared box.
+    A witness on the symmetry pair names a concrete asymmetric member."""
+    cv = check_contract(
+        conditioning_2x2_field((2, 2), "float64", (1.0, 2.0), 8.0, None),
+        vacuity_mode="inputs-only",
+        solver_timeout_ms=20000,
+    )
+    assert cv.requires_status == "REFUTED"
+    assert cv.requires.witnesses
+    for w in cv.requires.witnesses:
+        assert w.obligation_index in (2, 3, 4, 5)
+        assert "exact-rational replay" in w.replay
+        vals = {name: Fraction(text) for name, text in w.values}
+        assert all(1 <= v <= 2 for v in vals.values())
+        if w.obligation_index in (4, 5):
+            # flat C-order of (2, 2): x0_1 = M[0,1], x0_2 = M[1,0]
+            assert vals["x0_1"] != vals["x0_2"]  # concrete asymmetric member
+
+
+def test_t3_known_conditioning_refuted_by_intervals_at_the_mesh_point():
+    """Probe Part 1 through the family template: the boundary-starved
+    per-cell normal matrix (a = 0.25 + reg, b = 0, c = reg) as a
+    two-member family — REFUTED on intervals alone, per matrix, both
+    members, no solver."""
+    reg = 1e-30
+
+    def family(t):
+        a = (0.25 + reg) + t
+        b = 0.0 * t
+        c = reg + t
+        return _as_family([(a, b, b, c), (a, b, b, c)])
+
+    cv = check_contract(
+        conditioning_2x2_field((), "float64", (0.0, 0.0), 8.0, family),
+        vacuity_mode="inputs-only",
+    )
+    assert cv.requires_status == "REFUTED"
+    ratio = cv.requires.obligations[3]
+    assert ratio.status == "violated-over-set"
+    assert "definitely false for 2/2 element(s)" in ratio.detail
+    assert isinstance(cv.requires.stamp.solver, SolverStamp)
+    assert not cv.requires.stamp.solver.invoked
+
+
+@needs_solver
+def test_t3_known_conditioning_solver_verified_through_a_transform():
+    """Probe Part 2's well-shaped region through a triple transform
+    (a, c in [1, 2] via 1 + t, b in ±0.5 via t - 0.5 scaling): solver
+    VERIFIED via QF_NRA, exactly as the point template's KA1."""
+
+    def triple(t):
+        return 1.0 + t[0], t[1] - 0.5, 1.0 + t[2]
+
+    cv = check_contract(
+        conditioning_2x2_field((3,), "float64", (0.0, 1.0), 8.0, triple),
+        vacuity_mode="inputs-only",
+        solver_timeout_ms=20000,
+    )
+    assert cv.requires_status == "VERIFIED"
+    ratio = cv.requires.obligations[3]
+    assert ratio.status == "discharged"
+    assert "solver escalation (QF_NRA)" in ratio.detail
+    assert len(cv.requires.obligations) == 4  # triple path: no symmetry pair
+
+
+def test_t3_ensures_face_is_sealed_declared_and_per_matrix():
+    contract = conditioning_2x2_field(
+        (), "float64", (0.0, 0.0), 8.0, lambda t: (1.0 + t, 0.0 * t, 1.0 + t)
+    )
+    face = contract.ensures
+    assert type(face) is EnsuresFace
+    assert face.status == ENSURES_DECLARED
+    assert "every matrix of the family" in face.statement
+    assert "vacuously true" in face.statement
+    assert "does not assert that any such point exists" in face.statement
+    assert "corpus/supply/la_contract_probe.py Part 4" in face.derivation
+    assert face.conditional_on == contract.requires_description
+    for text in (face.statement, face.derivation, face.conditional_on):
+        assert "\n" not in text and "\r" not in text
+    with pytest.raises(ValueError, match="DECLARED and nothing else"):
+        dataclasses.replace(face, status="VERIFIED")
 
 
 # --- audit F9: the straddle hint promises the offer, not the outcome ---------
