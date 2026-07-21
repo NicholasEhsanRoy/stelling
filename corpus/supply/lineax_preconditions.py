@@ -690,7 +690,7 @@ def main():
         name = fn.__name__
         print(f"\n{'=' * 72}\n### {name}\n{fn.__doc__}\n{'-' * 72}")
         try:
-            v = check(fn)
+            v = check(fn, vacuity_mode="inputs-only")
         except Exception as e:  # a tool refusal is a result to quote
             print(f"[interval] EXCEPTION: {type(e).__name__}: {e}")
             continue
@@ -698,7 +698,7 @@ def main():
         print(v.render())
         if v.status == "UNKNOWN":
             try:
-                v2 = check(fn, solver_timeout_ms=20_000)
+                v2 = check(fn, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
             except Exception as e:
                 print(f"[escalated 20000ms] EXCEPTION: {type(e).__name__}: {e}")
                 continue

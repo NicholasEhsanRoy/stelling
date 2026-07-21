@@ -403,3 +403,60 @@ Cheap; it is the only thing separating a regression test from a comment.
 **(d)** Every soundness fix; every regression test accompanying an
 UNSOUND/FRAGILE finding; every claim in a build report about behaviour
 rather than intent.
+
+## L16 — Readiness is evidence, not argument
+
+**(a)** The "arguments from me, facts from the probe" discipline applies
+to **the project's own readiness claims**, not only to verdicts about
+corpus targets. A load-bearing claim about stelling itself — safe
+construction, usefulness, a capability's non-usefulness — deserves a
+registered probe exactly as a claim about diffrax does.
+**(b)** All three readiness claims of the CI pass were asserted and all
+three were corrected by measurement (`design/ci-readiness.md`):
+safe-construction was **false** (the funnel falsified by enumeration);
+usefulness was unmeasured in the CI mode (now demonstrated, blind, on an
+external repo); affine/LA-not-useful was **contradicted** (the D-clamp
+false-alarm cause is an LA-shaped theorem; the magnetics conditioning
+scar is LA-shaped with a measured failure).
+**(c)** **Convention** — readiness claims get registrations and bands
+like any reading.
+**(d)** Every "is it ready / is it useful / do we need X" decision.
+
+## L17 — Completeness claims are verified against the language's affordances
+
+**(a)** "All construction routes through the gate" is a completeness
+claim, and completeness claims fail where the enumeration missed a path
+the *language* affords, not a path the author thought of. Verify against
+what the language actually permits (public dataclasses are freely
+constructible; `object.__new__` exists; dicts are just JSON) — and the
+structural fix is to make the invariant hold **at construction**, not at
+a chosen chokepoint the author believes everything passes through.
+**(b)** The construction census: the funnel claim was false because `ir`
+is a public module of frozen dataclasses — direct construction (I1's
+route) was reachable and ungated; fixed by `__post_init__` validation
+(every path, guaranteed by the language itself). Same family: the census
+undercount, the sibling-site blindness, `_INT_GUARDED_INSIDE`'s
+wearable marker.
+**(c)** **Convention** (completeness claims name their verification
+method against the language) producing **structural** fixes.
+**(d)** Every funnel/coverage/completeness claim; every "all paths go
+through X" assertion.
+
+## L18 — Duty-enforced protections do not survive the CI transition
+
+**(a)** A soundness protection enforced by discipline (an operator
+re-running a control, a human replaying a witness) protects only while a
+disciplined human is in the loop. CI removes the human. **The
+CI-readiness question is: which backstops are still manual — and each
+must go structural before unattended trust.** The failure mode is the
+worst kind: silent wrong passes with nobody watching.
+**(b)** The vacuity control: tautology-shaped VERIFIEDs in the first
+field test were caught **only by registered duty**; `check()` — the
+entry point CI would call — did not run `widen()`. Now wired: `check()`
+cannot return an unchecked VERIFIED, with the mode explicit (no silent
+mode, no silent skip). Next in the same class: the recorded-set no-flip
+gate (automatable as a CI job).
+**(c)** **Convention** (the standing CI question) producing
+**structural** wiring per instance.
+**(d)** Every manual verification duty; every future "run it in CI"
+step.

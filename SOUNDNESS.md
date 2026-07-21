@@ -498,4 +498,24 @@ verdicts:
   content hashes and statuses. 906 tests green with both solvers; 758
   zero-dep.
 
+- **2026-07-21 (pre-release): the I1 residual superseded — structurally
+  prevented, no longer out-of-contract-by-convention.** The
+  construction-path census (`design/ci-readiness.md`) falsified the
+  funnel claim ("all IR construction routes through the gates"): `ir` is
+  a public module of freely-constructible dataclasses, so direct
+  construction — exactly I1's route — was reachable and ungated.
+  Validation now runs in the dataclasses' own `__post_init__` (the same
+  shared predicates the `from_dict` door uses), so the I1 instance — a
+  declaration whose params and aval disagree — **raises at construction
+  on every path**, including hand-built IR. The stated residual: per-
+  primitive shape inference for non-declaration equations remains out of
+  scope (a shape-inference engine, not a validation pass), and deliberate
+  constructor circumvention (`object.__new__`) is outside the contract as
+  it is for any Python library. Threat-model note: if untrusted
+  serialized IR ever becomes a feature, re-audit the door; the
+  direct-construction route is closed. Same pass: `check()` gained the
+  built-in vacuity control (an entry-point VERIFIED has always been
+  widen-checked; mode explicit, never defaulted) — the first
+  duty-enforced backstop converted to structure for CI (ledger L18).
+
 *(no releases yet)*

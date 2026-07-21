@@ -104,9 +104,10 @@ def scalar_nonzero(dtype, envelope):
     return scalar, assert_(scalar != 0.0)
 
 
-def check(harness, *, solver_timeout_ms=None):
+def check(harness, *, vacuity_mode, solver_timeout_ms=None):
     """Run a precondition harness end-to-end and return the stamped
-    :class:`stelling.verdict.Verdict`.
+    :class:`stelling.verdict.Verdict` — with the vacuity check built in:
+    **this entry point cannot return an unchecked VERIFIED.**
 
     ``harness`` is a zero-argument function that declares inputs (via
     the templates above or :func:`stelling.harness.any_array` directly)
@@ -114,6 +115,23 @@ def check(harness, *, solver_timeout_ms=None):
     ``REFUTED`` (with a replay-confirmed concrete witness when a solver
     found one), or ``UNKNOWN`` — never guessed; anything the analysis
     could not decide says so, with the reason quoted in the notes.
+
+    ``vacuity_mode`` is **required** (no default — the two registered
+    procedures answer different questions, and a silently-picked mode
+    would let a caller run the wrong one without saying so; see
+    :mod:`stelling.vacuity`). ``"inputs-only"`` is the standard choice
+    for precondition checks: non-point declarations widen, transcribed
+    constants and thresholds hold still. ``"all"`` widens every
+    declaration. On a VERIFIED verdict, the identical query is re-run
+    with the declared bounds widened per the mode, at the same pipeline
+    depth (escalated iff the original call escalated): an obligation
+    that **still discharges with its bounds gone** never depended on the
+    declared envelope — a range theorem, or a mis-posed envelope — and
+    the verdict says so **in itself** (a note per such obligation and a
+    stamped vacuity line), instead of relying on someone re-running the
+    control by discipline. The status stays VERIFIED — the claim is
+    true — but a CI consumer can and should treat an
+    envelope-not-load-bearing VERIFIED as a flag.
 
     ``solver_timeout_ms``: pass an explicit per-obligation time limit to
     escalate interval-undecided obligations to the SMT portfolio (needs
@@ -125,9 +143,12 @@ def check(harness, *, solver_timeout_ms=None):
     environment; the precision entry records the *actual*
     ``jax_enable_x64`` state at trace time, not an assumption.
     """
+    import dataclasses
+
     import stelling as _stelling
     from stelling._jax_compat import jax_version, trace, x64_enabled
     from stelling.propagate import propagate
+    from stelling.vacuity import widen
     from stelling.verdict import make_verdict
 
     cj = trace(harness)
@@ -137,9 +158,44 @@ def check(harness, *, solver_timeout_ms=None):
         jax_version=jax_version(),
         precision_config=f"jax_enable_x64={x64_enabled()}",
     )
-    if solver_timeout_ms is None:
-        return make_verdict(cj, p, **versions)
-    from stelling.solvers import SolverConfig, escalate, make_solver_verdict
 
-    esc = escalate(cj, p, SolverConfig(timeout_ms=int(solver_timeout_ms)))
-    return make_solver_verdict(cj, p, esc, **versions)
+    def _finish(closed, prop):
+        if solver_timeout_ms is None:
+            return make_verdict(closed, prop, **versions)
+        from stelling.solvers import SolverConfig, escalate, make_solver_verdict
+
+        esc = escalate(closed, prop, SolverConfig(timeout_ms=int(solver_timeout_ms)))
+        return make_solver_verdict(closed, prop, esc, **versions)
+
+    v = _finish(cj, p)
+    if v.status != "VERIFIED":
+        return v  # widening cannot rescue an UNKNOWN/REFUTED; nothing to check
+
+    wcj = widen(cj, mode=vacuity_mode)
+    wide = _finish(wcj, propagate(wcj))
+    still = [
+        o.index for o in wide.obligations if o.status == "discharged"
+    ]
+    if still:
+        vac_line = (
+            f"vacuity checked (mode={vacuity_mode}): obligation(s) "
+            f"{tuple(still)} discharge with the declared bounds widened to "
+            f"(-inf, inf) — the verdict does not depend on the declared "
+            f"envelope for them (a range theorem, or a mis-posed envelope)"
+        )
+        notes = v.notes + tuple(
+            f"obligation #{i}: discharges with all declared bounds widened "
+            f"(vacuity mode={vacuity_mode}) — envelope not load-bearing"
+            for i in still
+        )
+    else:
+        vac_line = (
+            f"vacuity checked (mode={vacuity_mode}): no obligation "
+            f"discharges with the declared bounds widened — the declared "
+            f"envelope is load-bearing for this VERIFIED"
+        )
+        notes = v.notes
+    stamp = dataclasses.replace(
+        v.stamp, assumptions=v.stamp.assumptions + (vac_line,)
+    )
+    return dataclasses.replace(v, stamp=stamp, notes=notes)

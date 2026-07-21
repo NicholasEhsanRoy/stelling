@@ -220,7 +220,7 @@ def test_check_interval_only_fills_stamps_and_records_absence():
                               transform=lambda x: 1.0 + x)
         return (o,)
 
-    v = check(h)
+    v = check(h, vacuity_mode="inputs-only")
     assert v.status == "VERIFIED"
     assert v.stamp.stelling_version == stelling.__version__
     assert v.stamp.precision_config == "jax_enable_x64=True"
@@ -235,10 +235,68 @@ def test_check_escalates_only_with_an_explicit_timeout():
         _, o = scalar_nonzero("float64", (0.0, 1.0))
         return (o,)
 
-    v = check(h)  # no timeout: interval-only, honest UNKNOWN
+    v = check(h, vacuity_mode="inputs-only")  # no timeout: interval-only, honest UNKNOWN
     assert v.status == "UNKNOWN"
     if not (available("z3") or available("cvc5")):
         pytest.skip("no solver installed")
-    v2 = check(h, solver_timeout_ms=20000)
+    v2 = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20000)
     assert v2.status == "REFUTED"
     assert v2.witnesses and dict(v2.witnesses[0].values)["x0"] == "0"
+
+
+# --- the vacuity wiring (check() cannot return an unchecked VERIFIED) --------
+
+
+def test_check_requires_vacuity_mode():
+    from stelling.preconditions import check
+
+    def h():
+        _, o = scalar_nonzero("float64", (1.0, 1.0))
+        return (o,)
+
+    with pytest.raises(TypeError):
+        check(h)  # no silent mode, no silent skip
+
+
+def test_check_flags_envelope_not_load_bearing_verified():
+    """A range-theorem obligation (|x| >= bound below zero) discharges with
+    the bounds gone: the entry point itself must say so — a note per
+    obligation and a stamped vacuity line."""
+    from stelling.preconditions import check
+
+    def h():
+        _, o = field_positive((3,), "float64", (-10.0, 10.0),
+                              transform=lambda d: jnp.abs(d), bound=-1e-300)
+        return (o,)
+
+    v = check(h, vacuity_mode="inputs-only")
+    assert v.status == "VERIFIED"
+    assert any("envelope not load-bearing" in n for n in v.notes)
+    assert any("vacuity checked (mode=inputs-only)" in a
+               for a in v.stamp.assumptions)
+
+
+def test_check_stamps_load_bearing_when_bounds_matter():
+    from stelling.preconditions import check
+
+    def h():
+        _, o = scalar_nonzero("float64", (1.0, 1024.0))
+        return (o,)
+
+    v = check(h, vacuity_mode="inputs-only")
+    assert v.status == "VERIFIED"
+    assert not any("envelope not load-bearing" in n for n in v.notes)
+    assert any("envelope is load-bearing" in a for a in v.stamp.assumptions)
+
+
+def test_check_non_verified_returns_unchanged():
+    """Widening cannot rescue UNKNOWN/REFUTED; no vacuity line is added."""
+    from stelling.preconditions import check
+
+    def h():
+        _, o = scalar_nonzero("float64", (0.0, 0.0))
+        return (o,)
+
+    v = check(h, vacuity_mode="inputs-only")
+    assert v.status == "REFUTED"
+    assert not any("vacuity checked" in a for a in v.stamp.assumptions)

@@ -259,3 +259,50 @@ the `mass > 0 ⇒ diag > 0` theorem — **LA-shaped knowledge appearing as
 the false-alarm cause in the field test**. Two independent evidence
 points *for* LA's immediate usefulness; the roadmap note is corrected —
 LA's status is *unmeasured, with specific evidence it would bite*.
+
+---
+
+# The wiring + refinement pass (2026-07-21, follow-on work order)
+
+## Part A — `check()` cannot return an unchecked VERIFIED (done)
+
+`check(harness, *, vacuity_mode, solver_timeout_ms=None)`:
+`vacuity_mode` is **required** (TypeError without it — no silent mode,
+preserving vacuity.py's no-default decision) and on every VERIFIED the
+identical query re-runs widened at the same pipeline depth. Obligations
+that discharge with their bounds gone are flagged in the verdict itself
+(a note per obligation + a stamped vacuity line); load-bearing
+envelopes are stamped as such. Acceptance: B1's tautology-shaped S3 now
+surfaces flagged **from the entry point**, S6 stamps load-bearing,
+non-VERIFIED verdicts pass through untouched, and no genuine verdict
+changed. The guarantee moved from operator duty to the entry point.
+
+## Part B — the three refinements, and the re-measured rate
+
+Codified in `docs/preconditions.md` ("Posing guidance"): (1) inputs,
+not loop state; (2) tag-as-instruction vs tag-as-assertion; (3)
+sentinel conventions. Re-measure over the field-test corpus:
+**9/9 true positives still fire** (the flagship lineax `well_posed`
+division, the triangular diagonal, the tolerance guard-bypass, the
+`Div` scalar, the four unguarded config scalars, and B1's D-clamp —
+witnesses unchanged), the four sentinel/strength poses come back clean
+under corrected posing, and the five loop-state/tag poses leave the
+protocol as out-of-class. **False positives among firings: 0/9** —
+with the honest caveat that this is *in-sample* (measured on the corpus
+that taught the rules); the out-of-sample rate is what the next new
+codebase measures.
+
+## Part C — the CI posture, decided: **flag-and-triage**
+
+Owner-decision record: the target posture is **stelling flags
+preconditions in CI; a human triages the flags** — not an unattended
+gate. The adjudication step (real hazard vs caller invariant) required
+reading downstream use and caught its own misreadings; pretending it
+automates produces a gate that cries wolf or silences real findings.
+Within that posture the tool separates **gate-grade** (REFUTED with a
+witness the input space genuinely admits — post-refinement firings are
+exactly this class) from **triage-grade** (anything caller-invariant-
+adjacent). Unattended after this pass: the vacuity check (now in
+`check()`), replay, provenance, stamps, IR gates. Flagged for a human:
+the REFUTED adjudications. Automatable next (not this pass): the
+recorded-set no-flip gate as a CI job.

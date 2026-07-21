@@ -45,7 +45,7 @@ def harness():
     )
     return obligations
 
-print(check(harness).render())
+print(check(harness, vacuity_mode="inputs-only").render())
 ```
 
 Check that a configuration scalar can never be the singular value —
@@ -60,10 +60,18 @@ def harness():
     return (obligation,)
 
 # an explicit time budget opts in to the SMT step (never on by default):
-print(check(harness, solver_timeout_ms=20_000).render())
+print(check(harness, vacuity_mode="inputs-only", solver_timeout_ms=20_000).render())
 ```
 
 ## Reading the verdict
+
+`vacuity_mode` is required — `"inputs-only"` is the standard choice
+(your declared ranges widen; transcribed constants hold still). On a
+VERIFIED, check() re-runs the query with the bounds widened: if an
+obligation still discharges with the bounds gone, the verdict tells
+you (a note and a stamped line) that the envelope was not
+load-bearing — the claim is a theorem or the envelope is mis-posed.
+A VERIFIED from check() has always already passed this check.
 
 - **VERIFIED** — the property holds at every point of the declared
   envelope, judged by outward-rounded interval arithmetic (and the SMT
@@ -124,3 +132,37 @@ code assumes float64, enable it before tracing (as in the examples) —
 and note that stelling checks the obligation under the configuration the
 trace *ran under*, which is only meaningful if it matches the
 configuration your production code runs under.
+
+## Posing guidance — what not to pose (learned from the field)
+
+Three rules from the first unguided field tests, each of which removed a
+class of false alarms without silencing a single real finding:
+
+1. **Pose inputs, not loop state.** A denominator produced by the
+   iteration and fed back (a Lanczos/bidiagonalization `rho`, a running
+   residual) is not an input — it is constrained by the algorithm's own
+   invariants, and posing it as a free box manufactures a false REFUTED.
+   The class boundary is the solve: if the quantity exists only inside
+   the loop, its guarantees are the algorithm's business, not an input
+   precondition.
+2. **A tag can be an instruction, not an assertion.** `unit_diagonal`
+   tells the backend to *ignore* the stored diagonal — the stored values
+   carry no claim, so posing "diagonal == 1" flags nothing real. Before
+   posing a tagged property, read the downstream use: if the tagged data
+   is never read, there is no precondition. (A tag that *asserts* a
+   property the code then relies on — `well_posed=True` guarding an
+   unchecked division — is the opposite case, and exactly what should be
+   posed: asserted-never-verified is the class's home ground.)
+3. **Sentinels are values, not hazards.** `conlim = 0` meaning
+   "disabled" and `rcond = 0` meaning "cut only exact zeros" are
+   documented conventions; pose the precondition over the non-sentinel
+   range, or at the guard's own strength (`>= 0`, not `> 0`), or the
+   alarm is about the convention, not the code.
+
+## Reading a CI verdict: gate or triage
+
+A REFUTED whose witness is a value the *input space genuinely admits*
+(an unguarded config scalar, an unchecked asserted tag) is gate-grade.
+A REFUTED that depends on whether a caller invariant holds is a flag for
+a human to triage. The rules above move most of the second kind out of
+the alarm stream before it reaches you; what remains fired for a reason.
