@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import itertools
 import math
+import operator
 from dataclasses import dataclass
 
 _INF = math.inf
@@ -244,6 +245,7 @@ class IntervalArray:
     his: tuple[float, ...]
 
     def __post_init__(self) -> None:
+        check_shape(self.shape)
         n = 1
         for d in self.shape:
             n *= d
@@ -269,9 +271,41 @@ class IntervalArray:
         return self.shape == ()
 
 
+def check_shape(shape) -> None:
+    """Refuse shapes no jax program can carry, through the decline channel.
+
+    Two predicates, both measured on jax 0.11.0 (fix re-attacks R1/N2):
+    every extent must be INTEGRAL (``from_dict`` does not coerce shape
+    entry types, so a JSON shape can hold a string — comparing it raised
+    a raw TypeError before this guard) and NONNEGATIVE (every concrete
+    jax context rejects a negative extent — "shape must have every
+    element be nonnegative"; the type is uninhabited, and a box for it
+    would be internally incoherent: on (-2,-2) the element-count product
+    and the coordinate enumeration disagreed, 4 vs 1 — the
+    dropped-addends UNSOUND). Zero extents are LEGAL (jax constructs
+    zero-size arrays; do not over-guard). Every box construction routes
+    through here (:class:`IntervalArray.__post_init__`), plus the
+    pre-construction sites that compute element products first."""
+    for d in shape:
+        try:
+            k = operator.index(d)
+        except TypeError:
+            raise IntervalError(
+                f"shape {tuple(shape)!r} has a non-integer extent {d!r} "
+                f"(malformed IR: from_dict does not coerce shape entries)"
+            ) from None
+        if k < 0:
+            raise IntervalError(
+                f"shape {tuple(shape)} has a negative extent: no jax "
+                f"program constructs such a value (measured: jax rejects "
+                f"negative dims in every concrete context)"
+            )
+
+
 def point(value: float, shape: tuple[int, ...] = ()) -> IntervalArray:
     """A degenerate (exact) interval; no outward bump — the value itself is
     the set."""
+    check_shape(shape)
     n = 1
     for d in shape:
         n *= d
@@ -280,6 +314,7 @@ def point(value: float, shape: tuple[int, ...] = ()) -> IntervalArray:
 
 
 def from_bounds(shape: tuple[int, ...], lo: float, hi: float) -> IntervalArray:
+    check_shape(shape)
     n = 1
     for d in shape:
         n *= d
@@ -287,6 +322,7 @@ def from_bounds(shape: tuple[int, ...], lo: float, hi: float) -> IntervalArray:
 
 
 def from_values(shape: tuple[int, ...], values: list[float]) -> IntervalArray:
+    check_shape(shape)
     vals = tuple(float(v) for v in values)
     return IntervalArray(shape=shape, los=vals, his=vals)
 
@@ -1424,6 +1460,11 @@ def _coords(shape: tuple[int, ...]):
     if shape == ():
         yield ()
         return
+    check_shape(shape)  # non-integer or negative extents must never
+    # enumerate: on (-2,-2) the loop below would yield exactly ONE
+    # coordinate while the element product says 4 — the silent
+    # inconsistency behind the fix-re-attack's dropped-addends UNSOUND
+    # (R1); a string extent would raise a raw TypeError (N2)
     if 0 in shape:  # a zero-size array has no elements — no coordinates
         return  # (audit-gate finding 2: the phantom first coordinate
         # produced an IndexError that bypassed the decline channel)
@@ -1486,9 +1527,21 @@ def reshape(a: IntervalArray, new_sizes: tuple[int, ...]) -> IntervalArray:
     """Data-preserving shape change: element storage is already flat
     C-order, so a C-order reshape is the identity on the element tuples.
     (Reshapes with a ``dimensions`` permutation are not this function —
-    the transfer declines them before calling here.)"""
+    the transfer declines them before calling here.)
+
+    ``new_sizes`` must be nonnegative — measured jax 0.11.0 rejects
+    negative entries ("reshape new_sizes must all be positive", while a
+    zero extent is accepted: ``lax.reshape(zeros((0,)), (0, 3))`` works),
+    and the element-count check alone would admit sign-coincidences like
+    ``(-1, -4)`` on 4 elements (fix-re-attack R2): checked explicitly,
+    before the count."""
     n = 1
     for d in new_sizes:
+        if d < 0:
+            raise IntervalError(
+                f"reshape new_sizes {tuple(new_sizes)} contain a negative "
+                f"extent — jax rejects this form"
+            )
         n *= d
     if n != a.size:
         raise IntervalError(
@@ -1498,7 +1551,29 @@ def reshape(a: IntervalArray, new_sizes: tuple[int, ...]) -> IntervalArray:
 
 
 def squeeze(a: IntervalArray, dimensions: tuple[int, ...]) -> IntervalArray:
-    out_shape = tuple(d for i, d in enumerate(a.shape) if i not in set(dimensions))
+    """Remove size-1 axes: flat C-order elements are untouched. The
+    contract is jax's, measured on 0.11.0: each named axis must be
+    in-range, distinct, and of size 1 (lax rejects all three violations;
+    negative axes are normalized away before the traced equation, so an
+    IR carrying one is ``from_dict``-only and refused here). Violations
+    raise :class:`IntervalError` — the decline channel — where an
+    out-of-range axis was previously IGNORED silently."""
+    dims = tuple(int(d) for d in dimensions)
+    rank = len(a.shape)
+    if len(set(dims)) != len(dims):
+        raise IntervalError(f"squeeze dimensions {dims} are not distinct")
+    for d in dims:
+        if not 0 <= d < rank:
+            raise IntervalError(
+                f"squeeze dimension {d} is out of range for rank {rank} "
+                f"(shape {a.shape})"
+            )
+        if a.shape[d] != 1:
+            raise IntervalError(
+                f"squeeze dimension {d} has size {a.shape[d]}, not 1 "
+                f"(shape {a.shape}) — jax rejects this form"
+            )
+    out_shape = tuple(d for i, d in enumerate(a.shape) if i not in set(dims))
     return IntervalArray(shape=out_shape, los=a.los, his=a.his)
 
 
@@ -1507,11 +1582,64 @@ def broadcast_in_dim(
     out_shape: tuple[int, ...],
     broadcast_dimensions: tuple[int, ...],
 ) -> IntervalArray:
+    """Static broadcast: pure data movement per jax's own contract.
+
+    Params outside that contract raise :class:`IntervalError` — the
+    normal decline channel — instead of silently mis-routing. This
+    function is the ONE routing oracle for broadcast (the propagation
+    transfer, the SMT emission, and the witness replay all drive it), so
+    an unvalidated precondition here is wrong in all three at once: a
+    ``broadcast_dimensions`` shorter than the operand rank used to
+    zip-truncate the source coordinate and alias every output element to
+    element 0 — a silently dropped dependence, the worst routing shape.
+
+    The enforced contract is jax 0.11.0's, measured (each rejected by
+    ``jax.lax.broadcast_in_dim``; every trigger is ``from_dict``-only —
+    the one form lax ACCEPTS with a short bd, the equal-shape identity,
+    short-circuits and records no equation):
+
+    * ``len(broadcast_dimensions) == operand rank``;
+    * entries distinct, nonnegative, and ``< len(out_shape)``;
+    * each operand extent is 1 or equals its output dimension's extent.
+
+    NON-MONOTONIC ``broadcast_dimensions`` are LEGAL (measured: lax
+    accepts and traces ``bd=(1, 0)`` — transpose-broadcast semantics)
+    and are routed exactly as jax routes them; the validation must never
+    refuse them.
+    """
+    bd = tuple(int(d) for d in broadcast_dimensions)
+    out_shape = tuple(int(d) for d in out_shape)
+    rank = len(a.shape)
+    if len(bd) != rank:
+        raise IntervalError(
+            f"broadcast_in_dim broadcast_dimensions {bd} must have length "
+            f"equal to the operand rank {rank} (shape {a.shape}) — jax "
+            f"rejects this form; routing it would alias elements"
+        )
+    if len(set(bd)) != len(bd):
+        raise IntervalError(
+            f"broadcast_in_dim broadcast_dimensions {bd} contain duplicates "
+            f"— jax rejects this form; routing it would alias elements"
+        )
+    for in_axis, out_axis in enumerate(bd):
+        if not 0 <= out_axis < len(out_shape):
+            raise IntervalError(
+                f"broadcast_in_dim broadcast_dimensions {bd} name axis "
+                f"{out_axis}, outside the output rank {len(out_shape)} "
+                f"(shape {out_shape})"
+            )
+        if a.shape[in_axis] != 1 and a.shape[in_axis] != out_shape[out_axis]:
+            raise IntervalError(
+                f"broadcast_in_dim operand extent {a.shape[in_axis]} of axis "
+                f"{in_axis} is neither 1 nor the output extent "
+                f"{out_shape[out_axis]} of axis {out_axis} (operand "
+                f"{a.shape} -> output {out_shape}, broadcast_dimensions {bd})"
+            )
     los, his = [], []
     for coord in _coords(out_shape):
         src = tuple(
             coord[out_axis] if a.shape[in_axis] != 1 else 0
-            for in_axis, out_axis in enumerate(broadcast_dimensions)
+            for in_axis, out_axis in enumerate(bd)
         )
         i = _flat_index(src, a.shape)
         los.append(a.los[i])
@@ -1572,7 +1700,31 @@ def take_rows(a: IntervalArray, ks: list[int]) -> IntervalArray:
 
 
 def concatenate(parts: list[IntervalArray], dimension: int) -> IntervalArray:
+    """Concatenate along a static axis: pure data movement per jax's
+    contract, measured on 0.11.0 — a non-empty operand list, equal ranks,
+    ``0 <= dimension < rank`` (lax rejects negatives), and equal extents
+    off the concatenation axis. Violations raise :class:`IntervalError`
+    (the decline channel): the off-axis-extent case previously read
+    elements through the WRONG shape silently — a mis-join no legal jax
+    trace can produce but ``from_dict`` can."""
+    if not parts:
+        raise IntervalError("concatenate with no operands")
+    dimension = int(dimension)
     base = parts[0].shape
+    rank = len(base)
+    if not 0 <= dimension < rank:
+        raise IntervalError(
+            f"concatenate dimension {dimension} out of bounds for rank "
+            f"{rank} (shapes {[p.shape for p in parts]})"
+        )
+    for p in parts[1:]:
+        if len(p.shape) != rank or any(
+            ax != dimension and p.shape[ax] != base[ax] for ax in range(rank)
+        ):
+            raise IntervalError(
+                f"concatenate operand shapes {[q.shape for q in parts]} "
+                f"disagree off the concatenation dimension {dimension}"
+            )
     out_shape = tuple(
         sum(p.shape[dimension] for p in parts) if ax == dimension else d
         for ax, d in enumerate(base)

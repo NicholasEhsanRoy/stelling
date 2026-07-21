@@ -155,6 +155,24 @@ def any_array(shape, dtype, bounds):
     """Declare a harness input: an arbitrary array of ``shape``/``dtype``
     with every element in ``bounds = (lo, hi)``. Traces to a
     ``stelling_any`` equation carrying the bounds as params."""
+    dims = tuple(int(d) for d in shape)
+    if any(d < 0 for d in dims):
+        # measured on jax 0.11.0: every concrete context rejects a
+        # negative extent (jnp.zeros((-2,-2)) raises "shape must have
+        # every element be nonnegative"), so no array of this shape
+        # exists and the declared set is EMPTY — declaring it would let
+        # universal claims verify (or refute!) vacuously. Same
+        # refusal-at-declaration posture as the empty/NaN bounds and the
+        # (inf, inf) empty real set below (audit-gate finding 3; fix
+        # re-attack R1). Zero-size shapes stay legal: jax constructs
+        # them, and their vacuous discharge is the measured jnp.all
+        # convention.
+        raise ValueError(
+            f"any_array shape {dims} has a negative extent; no jax "
+            f"program can construct such an array (measured: jax rejects "
+            f"negative dims in every concrete context), so the declared "
+            f"set is empty; refusing at declaration time"
+        )
     lo, hi = float(bounds[0]), float(bounds[1])
     if not lo <= hi:  # also rejects NaN: an empty declared set verifies
         raise ValueError(  # everything vacuously, and is never what anyone meant
@@ -172,7 +190,7 @@ def any_array(shape, dtype, bounds):
             f"semantics); refusing at declaration time"
         )
     return _any_p.bind(
-        shape=tuple(int(d) for d in shape),
+        shape=dims,
         dtype=str(np.dtype(dtype)),
         lo=lo,
         hi=hi,

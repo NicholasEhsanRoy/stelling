@@ -48,6 +48,27 @@ to detect. This is the second time *transcribe, don't design* has paid in
 a way nobody argued for. The case for it is empirical now, not aesthetic;
 stop relitigating it.
 
+**The deserialization door carries a BOUNDED validation pass**
+(:func:`ClosedJaxpr.from_dict` — the negative/malformed-shape audit arc
+R1/N1/P1 shared one root: ``from_dict`` admitted IR whose avals lie, and
+each in-pipeline fix narrowed the exploit by one lie while the class
+stayed open). Loaded IR is checked for: shape entries integral and
+nonnegative everywhere (avals, ``stelling_any`` shape params,
+:class:`Array` value shapes); ``stelling_any`` outvar avals consistent
+with their own shape/dtype params; :class:`Array` payload lengths equal
+to ``product(shape) x itemsize`` (for dtypes whose itemsize the ``.str``
+code names); and aval-vs-value shape consistency for literals and
+consts. Violations raise :class:`TranscriptionError` at LOAD — the same
+loud posture trace-side transcription has, now symmetric at the
+deserialization door. **Explicitly out of scope:** full per-primitive
+shape inference (validating every equation's output aval against its
+inputs) — that is a shape-inference engine, not a validation pass. The
+in-pipeline read gate and shape/decode predicates remain the defence for
+lies past this bounded set, and the residual class (adversarial IR with
+coordinated lies beyond these checks) is FRAGILE-by-convention:
+degrade-not-crash where reachable, never a definite verdict from a
+refused value.
+
 This module must never import jax (or anything outside the standard
 library): ``stelling._jax_compat`` is the only module allowed to touch jax,
 and everything else consumes these types.
@@ -232,6 +253,7 @@ class ClosedJaxpr:
         obj = _decode(d)
         if not isinstance(obj, ClosedJaxpr):
             raise ValueError(f"expected a serialized ClosedJaxpr, got {type(obj).__name__}")
+        _validate_loaded(obj)
         return obj
 
     def content_hash(self) -> str:
@@ -405,3 +427,160 @@ def _decode(obj: object) -> object:
             consts=tuple(_decode(c) for c in obj["consts"]),
         )
     raise ValueError(f"malformed IR serialization: unknown tag {k!r}")
+
+
+# --- the bounded from_dict validation pass ----------------------------------
+#
+# See the module docstring: a fixed list of checks at the deserialization
+# door, loud (TranscriptionError), symmetric with trace-side
+# transcription; NOT a shape-inference engine. content_hash and the
+# encode/decode forms are untouched — validation reads the decoded
+# objects and never rewrites them.
+
+import operator as _operator  # noqa: E402  (stdlib; kept local to the pass)
+
+
+def _load_extent_problem(shape) -> str | None:
+    for d in shape:
+        try:
+            k = _operator.index(d)
+        except TypeError:
+            return f"non-integer shape extent {d!r}"
+        if k < 0:
+            return f"negative shape extent {d}"
+    return None
+
+
+def _load_itemsize(dtype: str) -> int | None:
+    """Bytes per element from a numpy ``.str`` dtype code ('<f8' -> 8),
+    or None when the code does not name one (the length check is then
+    skipped — an honest bound, not a guess)."""
+    tail = dtype[2:] if len(dtype) > 2 else ""
+    return int(tail) if tail.isdigit() else None
+
+
+def _load_check(cond: bool, where: str, what: str) -> None:
+    if not cond:
+        raise TranscriptionError(
+            f"from_dict validation: {where}: {what} — refusing to load "
+            f"(the deserialization door is loud, like trace-side "
+            f"transcription; see the module docstring)"
+        )
+
+
+def _validate_array_value(arr: Array, where: str) -> None:
+    problem = _load_extent_problem(arr.shape)
+    _load_check(problem is None, where, f"array value has {problem}")
+    itemsize = _load_itemsize(arr.dtype)
+    if itemsize is not None:
+        n = 1
+        for d in arr.shape:
+            n *= int(d)
+        _load_check(
+            len(arr.data) == n * itemsize,
+            where,
+            f"array value of shape {arr.shape} dtype {arr.dtype!r} carries "
+            f"{len(arr.data)} byte(s), expected {n * itemsize}",
+        )
+
+
+def _validate_value_against_aval(val, aval: Aval, where: str) -> None:
+    if isinstance(val, Array):
+        _validate_array_value(val, where)
+        _load_check(
+            tuple(val.shape) == tuple(aval.shape),
+            where,
+            f"array value shape {tuple(val.shape)} contradicts the "
+            f"recorded aval shape {tuple(aval.shape)}",
+        )
+    elif isinstance(val, (bool, int, float, complex)):
+        _load_check(
+            tuple(aval.shape) == (),
+            where,
+            f"scalar value {val!r} under a non-scalar aval shape "
+            f"{tuple(aval.shape)}",
+        )
+    # str and None values carry no shape claim to cross-check
+
+
+def _validate_aval(aval: Aval, where: str) -> None:
+    problem = _load_extent_problem(aval.shape)
+    _load_check(problem is None, where, f"aval has {problem}")
+
+
+def _validate_atom(atom, where: str) -> None:
+    if isinstance(atom, Var):
+        _validate_aval(atom.aval, where)
+    elif isinstance(atom, Literal):
+        _validate_aval(atom.aval, where)
+        _validate_value_against_aval(atom.val, atom.aval, where)
+
+
+def _validate_param_value(v, where: str) -> None:
+    if isinstance(v, ClosedJaxpr):
+        _validate_closed(v, where)
+    elif isinstance(v, Jaxpr):
+        _validate_jaxpr(v, where)
+    elif isinstance(v, Array):
+        _validate_array_value(v, where)
+    elif isinstance(v, tuple):
+        for i, item in enumerate(v):
+            _validate_param_value(item, f"{where}[{i}]")
+    elif isinstance(v, NamedTupleParam):
+        for name, item in v.fields:
+            _validate_param_value(item, f"{where}.{name}")
+
+
+def _validate_jaxpr(jaxpr: Jaxpr, where: str) -> None:
+    for i, v in enumerate(jaxpr.constvars):
+        _validate_aval(v.aval, f"{where}.constvars[{i}]")
+    for i, v in enumerate(jaxpr.invars):
+        _validate_aval(v.aval, f"{where}.invars[{i}]")
+    for i, a in enumerate(jaxpr.outvars):
+        _validate_atom(a, f"{where}.outvars[{i}]")
+    for k, eqn in enumerate(jaxpr.eqns):
+        w = f"{where}.eqns[{k}] ({eqn.primitive!r})"
+        for i, a in enumerate(eqn.invars):
+            _validate_atom(a, f"{w}.invars[{i}]")
+        for i, v in enumerate(eqn.outvars):
+            _validate_aval(v.aval, f"{w}.outvars[{i}]")
+        params = dict(eqn.params)
+        for name, v in eqn.params:
+            _validate_param_value(v, f"{w}.params[{name!r}]")
+        if eqn.primitive == "stelling_any" and eqn.outvars:
+            # the declaration's aval must agree with its OWN params —
+            # the P1 arc's lies all started at a declaration whose two
+            # self-descriptions disagreed
+            shape = params.get("shape")
+            if isinstance(shape, tuple):
+                problem = _load_extent_problem(shape)
+                _load_check(
+                    problem is None, w, f"stelling_any shape param has {problem}"
+                )
+                _load_check(
+                    tuple(shape) == tuple(eqn.outvars[0].aval.shape),
+                    w,
+                    f"stelling_any shape param {tuple(shape)} contradicts "
+                    f"the outvar aval shape {tuple(eqn.outvars[0].aval.shape)}",
+                )
+            dtype = params.get("dtype")
+            if isinstance(dtype, str) and eqn.outvars[0].aval.dtype is not None:
+                _load_check(
+                    dtype == eqn.outvars[0].aval.dtype,
+                    w,
+                    f"stelling_any dtype param {dtype!r} contradicts the "
+                    f"outvar aval dtype {eqn.outvars[0].aval.dtype!r}",
+                )
+
+
+def _validate_closed(closed: ClosedJaxpr, where: str = "query") -> None:
+    _validate_jaxpr(closed.jaxpr, where)
+    for i, (var, val) in enumerate(zip(closed.jaxpr.constvars, closed.consts)):
+        _validate_value_against_aval(
+            val, var.aval, f"{where}.consts[{i}] (constvar {var.id})"
+        )
+
+
+def _validate_loaded(closed: ClosedJaxpr) -> None:
+    """The bounded from_dict validation pass (module docstring)."""
+    _validate_closed(closed)

@@ -275,9 +275,11 @@ def test_array_shaped_operations_decline_scalar_only():
     assert "'reduce_or'" in item.reason
 
 
-def test_nonscalar_input_declaration_declines():
-    # a size-1 but non-() declaration: eqns pass the size checks, the
-    # declaration itself is what declines (shape () only)
+def test_nonscalar_input_declaration_now_emits_per_element_names():
+    # array-emission build: a non-() static declaration is one SMT constant
+    # per element, named x{k}_{i} (flat C-order); the old scalar-shape-only
+    # decline is retired. A (1,)-shaped declaration is an array of one
+    # element and gets the element naming, not the legacy scalar x{k}.
     shp = ir.Aval(kind="ShapedArray", shape=(1,), dtype="float64")
     x = var(0, shp)
     pred = var(1, ir.Aval(kind="ShapedArray", shape=(1,), dtype="bool"))
@@ -291,8 +293,10 @@ def test_nonscalar_input_declaration_declines():
         [out],
     )
     item = sole_slice(q)
-    assert isinstance(item, DeclinedObligation)
-    assert "scalar shape ()" in item.reason
+    assert isinstance(item, ObligationSlice), getattr(item, "reason", item)
+    assert [i.name for i in item.inputs] == ["x0_0"]
+    assert item.inputs[0].shape == (1,) and item.inputs[0].element == 0
+    assert (item.inputs[0].lo, item.inputs[0].hi) == (0.0, 1.0)
 
 
 def test_int_dtyped_input_declines_because_relaxation_admits_nonmembers():

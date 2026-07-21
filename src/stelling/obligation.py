@@ -4,37 +4,44 @@
 """Obligation slices for solver escalation: extraction, routing, replay.
 
 For each obligation interval propagation left ``unknown``, this module
-extracts the *expression slice* — the top-level ir equations from the
+extracts the *expression slice* — the ir equations from the
 ``stelling_any`` declarations and constants to the ``stelling_assert``
-operand — validates it against the v1 emission set, and classifies its
-fragment (``QF_LRA`` for purely linear content, ``QF_NRA`` for polynomial:
-a product of two non-constant subterms, an integer power >= 2, or division
-by a non-constant). It also evaluates a slice at a concrete rational point
+operand (descending transparent call wrappers such as ``jit`` for the
+computation; obligations themselves remain top-level-only) — validates
+it against the emission set, and classifies its fragment (``QF_LRA`` for
+purely linear content, ``QF_NRA`` for polynomial: a product of two
+non-constant subterms, an integer power >= 2, or division by a
+non-constant). It also evaluates a slice at a concrete rational point
 (:func:`evaluate_predicate`) in exact :class:`fractions.Fraction`
 arithmetic — the solver-free replay that witness-backed refutations
 require.
 
-Nothing here guesses. The v1 emission set is scalar-only: ``add``,
-``sub``, ``mul``, ``neg``, guarded ``div``, ``integer_pow``, ``max``,
-``min``, the comparisons, boolean ``and``/``or``/``not``/``xor``,
-boolean-selector ``select_n``, value-preserving
-``convert_element_type``, size-1 shape plumbing, and the two
-single-element forms ``slice`` (one index, unit strides) and
-``reduce_sum`` (one addend). Everything else —
-array-shaped inputs, transcendentals, unknown primitives, possibly-zero
-divisors, non-float input declarations, obligations that cannot be
-mapped one-to-one onto top-level asserts — **declines**, with the
-primitive and form quoted, and the obligation stays UNKNOWN. Declines
-never raise; :exc:`ReplayError` is raised only by the replay evaluator,
-whose caller treats it as an emission-infidelity signal.
+Nothing here guesses. The emission is **bounded static-shape**: scalars
+and small fixed-shape arrays, one SMT term per element, gated by a single
+per-obligation element budget (:data:`ELEMENT_BUDGET`) — deliberately NOT
+general array reasoning (no quantified array theory, no dynamic shapes).
+The emission set: elementwise ``add``, ``sub``, ``mul``, ``neg``, guarded
+``div``, ``integer_pow``, ``max``, ``min``, the comparisons, boolean
+``and``/``or``/``not``/``xor``, boolean-selector ``select_n``,
+value-preserving ``convert_element_type`` (all with jax/numpy rank
+broadcasting, sharing preserved: a broadcast scalar is ONE term
+everywhere); the structural index-routing ops ``broadcast_in_dim``,
+``reshape``, ``squeeze``, ``transpose``, ``slice``, ``concatenate``
+(no new terms — an output element IS its source element's term); and the
+exact n-ary ``reduce_sum``. Everything else — over-budget slices,
+transcendentals, unknown primitives, possibly-zero divisor elements,
+non-float input declarations, obligations that cannot be mapped
+one-to-one onto top-level asserts — **declines**, with the primitive and
+form (and, for the budget, the count and the budget) quoted, and the
+obligation stays UNKNOWN. Declines never raise; :exc:`ReplayError` is
+raised only by the replay evaluator, whose caller treats it as an
+emission-infidelity signal.
 
-**Scalar-only is a boundary, not a formality.** Nothing here builds a
-term for an array of more than one element, so an obligation whose slice
-crosses a genuine array — ``concatenate`` of several scalars, an
-elementwise product of two vectors, a reduction over more than one
-addend — declines at the first such equation and stays UNKNOWN however
-well interval propagation understood it. That is the honest boundary of
-the v1 emission and it is reported, not worked around.
+The index bookkeeping (element pairing, structural routing, reduction
+grouping) is computed by ONE set of helpers, driven through the very
+:mod:`stelling.interval` functions the propagation transfers use, and is
+shared by slice validation, the SMT emission, and the replay — three
+consumers, one routing, so they cannot disagree with each other.
 
 Zero-dep: this module imports only the standard library and stelling's
 own jax-free modules.
@@ -44,22 +51,26 @@ from __future__ import annotations
 
 import math
 import struct
+from operator import index as _op_index
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Mapping
 
 from stelling import interval as iv
 from stelling import ir
+from stelling.coverage import DEFAULT_TRANSPARENT
 from stelling.propagate import _EXACT_CONVERSIONS, _INT_DTYPE_BOUNDS, Propagation
 
 __all__ = [
     "DeclinedObligation",
+    "ELEMENT_BUDGET",
     "ObligationSlice",
     "ReplayError",
     "SliceInput",
     "evaluate_predicate",
     "slice_obligation",
     "slice_unknown_obligations",
+    "violating_elements",
     "witness_is_valid",
 ]
 
@@ -72,8 +83,47 @@ DIV_GUARD_REASON = (
     "underspecified at 0"
 )
 
+# The single per-obligation element budget — THE ONE choke point replacing
+# the seven scalar-only gates of the v1 emission. An obligation is
+# emittable iff its slice touches only static shapes and BOTH of the
+# gate's quantities stay at or under this number: the emitted
+# element-terms (declared input elements + output elements of every
+# term-producing equation; reduce_sum also counts its operand elements —
+# its n-ary bodies inline one addend per operand element; structural
+# index routing adds none) AND the root conjunct count (the assert
+# operand's elements — structural routing mints no terms, but the negated
+# conjunction it feeds repeats one term per element, so a structural-only
+# inflation of the root is script cost the term count cannot see;
+# first-contact audit F1). Anything above declines with both quantities
+# and the budget quoted, computed from static shape metadata BEFORE any
+# per-element work (an over-budget decline is O(#equations), never
+# O(#elements) — audit F2; measured post-fix: 0.01 ms at 1.6M declared
+# elements where the pre-fix order cost 2.91 s). The value is measured,
+# not guessed. Emitted scripts of
+# correlation-dependent per-face ring obligations (the acceptance FACE
+# shape; roll = slice+concatenate) were timed on this machine's portfolio
+# (z3 5.0.0 wheel; cvc5 1.3.4 wheel, coverings) at growing element
+# counts, in both answer directions (2026-07-21; full table in the build
+# report). The binding fragment is QF_NRA unsat under cvc5 coverings —
+# the portfolio's QF_NRA *primary*:
+#
+#   terms:            256     512     1024     2048
+#   cvc5 nl-cov unsat 0.32 s  2.2 s   18.5 s   timeout (> 120 s)
+#   z3 unsat          ≤ 60 ms everywhere; sat ≤ 140 ms everywhere
+#   QF_LRA (both)     ≤ 0.4 s out to 8192 terms
+#
+# 512 keeps the worst measured fragment near 2 s — inside the 30 s
+# acceptance-config solver limit with more than 10x margin — while one
+# doubling already spends 18.5 s and two doublings hang the primary. One
+# budget for both fragments, deliberately: a per-fragment pair would be
+# two gates that can disagree, and the single-gate discipline is the
+# point; the cost is LRA headroom the measurements show it could afford.
+# The budget is a solver-cost gate, so an over-budget obligation is an
+# UNKNOWN with the number quoted, never a hang.
+ELEMENT_BUDGET = 512
+
 # integer_pow exponents are expanded to explicit products; beyond this the
-# script stops being auditable by eye and v1 declines instead.
+# script stops being auditable by eye and the emission declines instead.
 INTEGER_POW_EXPANSION_CAP = 64
 
 _FLOAT_INPUT_DTYPES = frozenset({"float16", "float32", "float64"})
@@ -89,23 +139,17 @@ _SCALAR_STRUCT_FMT = {
 _ARITH = frozenset({"add", "sub", "mul", "neg", "div", "integer_pow", "max", "min"})
 _COMPARE = frozenset({"lt", "le", "gt", "ge", "eq", "ne"})
 _BOOL_OPS = frozenset({"and", "or", "not", "xor"})
-_IDENTITY_SHAPE = frozenset({"broadcast_in_dim", "reshape", "squeeze"})
-# Single-scalar-element selection and reduction. Both denote exactly their
-# operand's one value, so both emit as that operand's EXISTING term — pure
-# selection, no new SMT variable, sharing preserved:
-#
-# * ``slice`` selecting one element (start/limit determine one index, unit
-#   strides) from a single-element operand;
-# * ``reduce_sum`` over a single-element operand (a sum of one addend is
-#   that addend, in ℝ and in float alike — no addition is performed).
-#
-# The emission set is scalar-only and this does NOT widen it: every other
-# form — multi-element operands above all — declines with the form quoted,
-# exactly like every other primitive here. A multi-element ``slice`` is
-# what an obligation indexing a real array hits, and it still declines;
-# what changed is that it now declines naming its shape instead of naming
-# the whole primitive as unsupported.
-_SINGLE_ELEMENT = frozenset({"slice", "reduce_sum"})
+# Structural ops are index bookkeeping, not new terms: an output element
+# ALIASES its source element's existing term (a concatenate's output
+# element IS its source element's term — sharing by construction, never a
+# fresh variable). The routing is computed through the very
+# stelling.interval functions the propagation transfers use
+# (:func:`_route_structural`), so the emission cannot route an index
+# differently from the propagation that judged the obligation.
+_STRUCTURAL = frozenset(
+    {"broadcast_in_dim", "reshape", "squeeze", "transpose", "slice",
+     "concatenate"}
+)
 # Harness primitives whose value semantics are the identity on their input.
 # stelling_assume's *constraint* is inert (dropped, disclosed by the
 # propagation notes) and is deliberately NOT emitted — only its data flow
@@ -113,8 +157,8 @@ _SINGLE_ELEMENT = frozenset({"slice", "reduce_sum"})
 _IDENTITY_HARNESS = frozenset({"stelling_assume", "stelling_nonvacuity"})
 
 _SUPPORTED = (
-    _ARITH | _COMPARE | _BOOL_OPS | _IDENTITY_SHAPE | _IDENTITY_HARNESS
-    | _SINGLE_ELEMENT | {"select_n", "convert_element_type"}
+    _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
+    | {"reduce_sum", "select_n", "convert_element_type"}
 )
 
 # Emitted primitives that COMPUTE a new numeric value, and therefore can
@@ -140,10 +184,11 @@ _INT_OVERFLOW_EMITTED = frozenset(
 # `div` on the emission's own float guard, and the sibling transfer site
 # went unswept. A review finds siblings once; an assert finds them every
 # time. Every emittable primitive is classified, and the union must be
-# total over `_SUPPORTED`.
+# total over `_SUPPORTED`. The structural ops are pure data movement
+# (copies of in-range values), so they are int-safe by construction.
 _INT_SAFE_EMITTED = frozenset(
-    _COMPARE | _BOOL_OPS | _IDENTITY_SHAPE | _IDENTITY_HARNESS
-    | {"max", "min", "select_n", "convert_element_type", "slice"}
+    _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
+    | {"max", "min", "select_n", "convert_element_type"}
 )
 
 assert _INT_OVERFLOW_EMITTED | _INT_SAFE_EMITTED == _SUPPORTED, (
@@ -163,12 +208,24 @@ class ReplayError(RuntimeError):
 
 @dataclass(frozen=True)
 class SliceInput:
-    """One ``stelling_any`` declaration reachable from the obligation."""
+    """One ELEMENT of a ``stelling_any`` declaration reachable from the
+    obligation.
 
-    name: str  # deterministic: "x{k}", k = declaration order in the query
+    A scalar (shape ``()``) declaration contributes one input named
+    ``x{k}`` (``k`` = declaration order in the query — the pre-array
+    scheme, byte-identical); an array declaration of static shape
+    contributes one input per element, named ``x{k}_{i}`` with ``i`` the
+    flat C-order element index, each carrying the declaration's bounds
+    (scalar bounds broadcast to every element). These names are the SMT
+    constants, the witness value names, and the model names the dispatch
+    layer screens — one naming, three consumers."""
+
+    name: str
     var_id: int
     lo: float
     hi: float
+    shape: tuple[int, ...] = ()  # the DECLARATION's shape
+    element: int = 0  # this element's flat C-order index in the declaration
 
 
 @dataclass(frozen=True)
@@ -177,11 +234,17 @@ class ObligationSlice:
 
     index: int  # the obligation's index in the propagation report
     fragment: str  # QF_LRA | QF_NRA
-    inputs: tuple[SliceInput, ...]  # declaration order
-    consts: tuple[tuple[int, bool | int | float], ...]  # (var id, exact value)
-    eqns: tuple[ir.JaxprEqn, ...]  # original (topological) order, sans stelling_any
-    root: ir.Atom  # the assert operand (boolean)
+    inputs: tuple[SliceInput, ...]  # declaration order, then element order
+    # (var id, exact value) — an array-shaped constant stores the tuple of
+    # its decoded elements in flat C-order; a scalar stores the bare value
+    # (the pre-array shape of this field, unchanged).
+    consts: tuple[tuple[int, object], ...]
+    eqns: tuple[ir.JaxprEqn, ...]  # flattened topological order, sans stelling_any
+    root: ir.Atom  # the assert operand (boolean, any static shape)
     source_info: tuple[str, ...]
+    # total emitted element-terms (input elements + term-producing output
+    # elements), the number the single budget gate judged; <= ELEMENT_BUDGET
+    element_terms: int = 1
 
 
 @dataclass(frozen=True)
@@ -201,6 +264,25 @@ class _Decline(Exception):
         self.reason = reason
 
 
+def _shape_problem(shape) -> str | None:
+    """The uninhabited/malformed-shape problem of a static shape, or None.
+    Two measured predicates (fix re-attacks R1/N1/N2): every extent must
+    be INTEGRAL (from_dict does not coerce shape entries — a string
+    extent made `d < 0` raise raw, and `1 * "x"` is silent garbage in a
+    size product) and NONNEGATIVE (jax rejects negative extents in every
+    concrete context: the type is uninhabited). Zero extents are legal."""
+    for d in shape:
+        try:
+            k = _op_index(d)
+        except TypeError:
+            return f"a non-integer extent {d!r} (malformed IR)"
+        if k < 0:
+            return (
+                "a negative extent (no jax program constructs such a value)"
+            )
+    return None
+
+
 def _size(shape: tuple[int, ...]) -> int:
     n = 1
     for d in shape:
@@ -209,12 +291,14 @@ def _size(shape: tuple[int, ...]) -> int:
 
 
 def _decode_scalar(val):
-    """A literal/const value -> exact python bool | int | float, or decline."""
+    """A size-1 literal/const value -> exact python bool | int | float, or
+    decline. (The emission's single-element decoder; array constants go
+    through :func:`_decode_elements`.)"""
     if isinstance(val, ir.Array):
         if _size(val.shape) != 1:
             raise _Decline(
-                f"array-shaped constant of shape {val.shape} (v1 emission is "
-                f"scalar-only)"
+                f"array-shaped constant of shape {val.shape} where a single "
+                f"value is required"
             )
         fmt = _SCALAR_STRUCT_FMT.get(val.dtype)
         if fmt is None:
@@ -223,6 +307,42 @@ def _decode_scalar(val):
         return v
     if isinstance(val, (bool, int, float)):
         return val
+    raise _Decline(
+        f"constant of type {type(val).__name__!r} has no exact Real emission"
+    )
+
+
+def _decode_elements(val) -> tuple:
+    """A literal/const value -> tuple of exact python values, one per
+    element in flat C-order, or decline. A scalar decodes to a 1-tuple; a
+    static-shape :class:`stelling.ir.Array` decodes every element."""
+    if isinstance(val, ir.Array):
+        problem = _shape_problem(val.shape)
+        if problem is not None:
+            # fix-re-attack R1/N2: a negative or non-integer element
+            # count would reach struct.unpack as a malformed format and
+            # raise struct.error raw — decline quoted instead
+            raise _Decline(
+                f"array-shaped constant of shape {val.shape} has {problem}"
+            )
+        n = _size(val.shape)
+        fmt = _SCALAR_STRUCT_FMT.get(val.dtype)
+        if fmt is None:
+            raise _Decline(f"constant with undecodable dtype {val.dtype!r}")
+        expect = struct.calcsize(f"<{n}{fmt}")
+        if len(val.data) != expect:
+            # the length predicate (fix-re-attack N2, the sibling of the
+            # negative route one assumption away: "what else does unpack
+            # assume") — truncated, oversized, and empty payloads under a
+            # positive shape raised raw struct.error before this
+            raise _Decline(
+                f"array-shaped constant of shape {val.shape} dtype "
+                f"{val.dtype!r} carries {len(val.data)} byte(s), expected "
+                f"{expect} — truncated or oversized payload (malformed IR)"
+            )
+        return struct.unpack(f"<{n}{fmt}", val.data)
+    if isinstance(val, (bool, int, float)):
+        return (val,)
     raise _Decline(
         f"constant of type {type(val).__name__!r} has no exact Real emission"
     )
@@ -245,20 +365,258 @@ def _is_bool_dtype(aval: ir.Aval) -> bool:
     return aval.dtype == "bool"
 
 
-def _atom_excludes_zero(atom: ir.Atom, env: Mapping[int, iv.IntervalArray]) -> bool:
-    """Whether the atom's propagated interval definitely excludes 0."""
+def _zero_element_problem(
+    atom: ir.Atom, env: Mapping[int, iv.IntervalArray]
+) -> str | None:
+    """None when EVERY element of the atom definitely excludes 0, else a
+    string naming the first element that may be zero (the per-element div
+    guard: the propagation env is already per-element, and any element
+    straddling 0 declines the whole division, naming the element).
+
+    For a size-1 atom the returned string is empty — the pre-array decline
+    wording stands alone; for arrays the element is named."""
+
+    def named(i: int, extra: str, size: int) -> str:
+        return "" if size == 1 else f" (element {i}{extra})"
+
     if isinstance(atom, ir.Literal):
         try:
-            v = _decode_scalar(atom.val)
+            vals = _decode_elements(atom.val)
         except _Decline:
-            return False
-        if isinstance(v, bool):
-            return False
-        return bool(v == v and v != 0)  # NaN-safe; exact
+            return " (undecodable constant divisor)"
+        if not vals:
+            return " (zero-size constant divisor)"
+        for i, v in enumerate(vals):
+            if isinstance(v, bool) or v != v or v == 0:  # NaN-safe; exact
+                return named(i, f" = {v!r}", len(vals))
+        return None
+    size = _size(atom.aval.shape)
     got = env.get(atom.id)
-    if got is None or got.size != 1:
-        return False
-    return got.los[0] > 0.0 or got.his[0] < 0.0
+    if got is None:
+        return (
+            " (no top-level propagated interval for this divisor — a value "
+            "produced inside a transparent call carries none)"
+        )
+    if got.size != size or size == 0:
+        return (
+            f" (propagated interval has {got.size} element(s) for a divisor "
+            f"of shape {tuple(atom.aval.shape)})"
+        )
+    for i, (lo, hi) in enumerate(zip(got.los, got.his)):
+        if not (lo > 0.0 or hi < 0.0):
+            return named(i, f" spans [{lo}, {hi}]", size)
+    return None
+
+
+# -- the one index bookkeeping (validation, emission, and replay share it) ----
+#
+# Element pairing, structural routing, and reduction grouping are computed
+# by driving the SAME stelling.interval functions the propagation transfers
+# invoke, on synthetic boxes whose element VALUES are their own flat
+# indices: the interval function's data movement then reads back as an
+# index map. One implementation — the sibling's — so the emission cannot
+# route an element differently from the propagation that judged the
+# obligation; the differential tests measure the routing against jax
+# itself. Index values are exact in float far beyond ELEMENT_BUDGET
+# (< 2**53). Interval-layer refusals (IntervalError) and malformed-IR
+# index escapes (IndexError — parameters a legal jax trace cannot produce
+# but ClosedJaxpr.from_dict can) both surface as declines with the reason
+# quoted, never as crashes.
+
+
+def _index_box(shape: tuple[int, ...], base: int) -> iv.IntervalArray:
+    vals = tuple(float(base + i) for i in range(_size(shape)))
+    return iv.IntervalArray(shape=shape, los=vals, his=vals)
+
+
+def _shape_of(atom: ir.Atom) -> tuple[int, ...]:
+    return tuple(atom.aval.shape)
+
+
+def _pair_elementwise(eqn: ir.JaxprEqn) -> list[list[int]]:
+    """Per-operand source flat-index lists for an elementwise equation, one
+    entry per OUTPUT element (flat C-order) — jax/numpy rank broadcasting
+    via :func:`stelling.interval._pair_elements`, the propagation's own
+    pairing. A broadcast scalar operand yields index 0 for every output
+    element: the SAME source term everywhere (sharing, never fresh
+    variables). Declines on incompatible shapes or an output aval that
+    contradicts the broadcast result."""
+    shapes = [_shape_of(a) for a in eqn.invars]
+    out_shape = _shape_of(eqn.outvars[0])
+    if len(shapes) == 1:
+        if shapes[0] != out_shape:
+            raise _Decline(
+                f"{eqn.primitive!r}: operand shape {shapes[0]} does not "
+                f"match output shape {out_shape}"
+            )
+        return [list(range(_size(out_shape)))]
+    if len(shapes) == 2:
+        try:
+            got_shape, xs, ys = iv._pair_elements(
+                _index_box(shapes[0], 0), _index_box(shapes[1], 0)
+            )
+        except (iv.IntervalError, IndexError) as e:
+            raise _Decline(f"{eqn.primitive!r}: {e}") from e
+        if tuple(got_shape) != out_shape:
+            raise _Decline(
+                f"{eqn.primitive!r}: operand shapes {shapes[0]} and "
+                f"{shapes[1]} broadcast to {tuple(got_shape)}, not the "
+                f"output shape {out_shape}"
+            )
+        return [[int(lo) for lo, _ in xs], [int(lo) for lo, _ in ys]]
+    raise _Decline(
+        f"{eqn.primitive!r} with {len(shapes)} operands has no elementwise "
+        f"pairing rule"
+    )
+
+
+def _pair_select_n(eqn: ir.JaxprEqn) -> list[list[int]]:
+    """select_n(which, on_false, on_true) pairing: the cases must share the
+    output shape, and ``which`` is either case-shaped (element i selects
+    element i) or a SCALAR broadcast across every element (the measured
+    jax form — ``jnp.where(pred_scalar, arr, arr)`` traces to exactly
+    this inside its transparent jit): one selector term shared by every
+    output element. Exactly the two forms
+    :func:`stelling.interval.select_n` accepts; anything else declines."""
+    w_shape, f_shape, t_shape = (_shape_of(a) for a in eqn.invars)
+    out_shape = _shape_of(eqn.outvars[0])
+    if f_shape != t_shape or f_shape != out_shape:
+        raise _Decline(
+            f"'select_n' case shapes {f_shape} and {t_shape} must both "
+            f"equal the output shape {out_shape}"
+        )
+    n = _size(out_shape)
+    if w_shape == out_shape:
+        which = list(range(n))
+    elif w_shape == () and out_shape != ():
+        which = [0] * n  # one scalar selector term, shared by every element
+    else:
+        raise _Decline(
+            f"'select_n' selector shape {w_shape} with case shape "
+            f"{out_shape}: equal shapes or a scalar selector are the only "
+            f"supported forms"
+        )
+    return [which, list(range(n)), list(range(n))]
+
+
+def _route_structural(eqn: ir.JaxprEqn) -> list[tuple[int, int]]:
+    """(operand index, source flat element) per OUTPUT element for a
+    structural op — pure index bookkeeping, no new terms. Computed by
+    running the corresponding :mod:`stelling.interval` function on
+    index-valued boxes (each operand's elements encoded with a disjoint
+    offset), so the routing IS the propagation transfer's data movement.
+    Malformed params (wrong ranks, out-of-range selections, permutations
+    that aren't, concatenate pieces whose off-axis extents disagree, an
+    output aval contradicting the computed shape) decline quoted."""
+    prim = eqn.primitive
+    params = eqn.params_dict()
+    in_shapes = [_shape_of(a) for a in eqn.invars]
+    out_shape = _shape_of(eqn.outvars[0])
+    offsets: list[int] = []
+    boxes: list[iv.IntervalArray] = []
+    off = 0
+    for s in in_shapes:
+        offsets.append(off)
+        boxes.append(_index_box(s, off))
+        off += _size(s)
+    try:
+        if prim == "broadcast_in_dim":
+            out = iv.broadcast_in_dim(
+                boxes[0],
+                tuple(params["shape"]),
+                tuple(params["broadcast_dimensions"]),
+            )
+        elif prim == "reshape":
+            if params.get("dimensions") is not None:
+                # a dimensions= reshape permutes before reshaping — the
+                # propagation transfer declines it, and so does the
+                # emission (same sibling, same boundary)
+                raise _Decline(
+                    f"'reshape' with dimensions={params['dimensions']!r} "
+                    f"permutes before reshaping; no emission rule"
+                )
+            out = iv.reshape(boxes[0], tuple(params["new_sizes"]))
+        elif prim == "squeeze":
+            out = iv.squeeze(boxes[0], tuple(params.get("dimensions", ())))
+        elif prim == "transpose":
+            out = iv.transpose(
+                boxes[0], tuple(params.get("permutation", ()) or ())
+            )
+        elif prim == "slice":
+            strides = params.get("strides")
+            out = iv.slice_(
+                boxes[0],
+                tuple(params["start_indices"]),
+                tuple(params["limit_indices"]),
+                tuple(strides) if strides else None,
+            )
+        elif prim == "concatenate":
+            # rank/extent congruence and dimension range are validated by
+            # the ORACLE itself (interval.concatenate raises IntervalError
+            # on jax-illegal forms — one choke point shared with the
+            # propagation transfer and the replay), surfacing here as the
+            # quoted decline below
+            out = iv.concatenate(boxes, int(params["dimension"]))
+        else:  # pragma: no cover - guarded by _STRUCTURAL membership
+            raise _Decline(f"no structural routing rule for {prim!r}")
+    except KeyError as e:
+        raise _Decline(f"{prim!r} is missing required param {e}") from e
+    except (iv.IntervalError, IndexError) as e:
+        raise _Decline(f"{prim!r}: {e}") from e
+    if out.shape != out_shape:
+        raise _Decline(
+            f"{prim!r}: computed output shape {out.shape} contradicts the "
+            f"recorded aval shape {out_shape}"
+        )
+    routes: list[tuple[int, int]] = []
+    for v in out.los:
+        enc = int(v)
+        op_idx = 0
+        for j in range(len(offsets) - 1, -1, -1):
+            if enc >= offsets[j]:
+                op_idx = j
+                break
+        routes.append((op_idx, enc - offsets[op_idx]))
+    return routes
+
+
+def _group_reduce_sum(eqn: ir.JaxprEqn) -> list[list[int]]:
+    """Per-OUTPUT-element groups of source flat indices for reduce_sum
+    over static ``axes`` — the exact n-ary sum's addend sets. Shape and
+    axis validation mirror :func:`stelling.interval.reduce_sum` (whose
+    identity for an empty group is exactly 0, matching measured jax:
+    ``jnp.sum`` of a size-0 array is 0.0)."""
+    params = eqn.params_dict()
+    in_shape = _shape_of(eqn.invars[0])
+    out_shape = _shape_of(eqn.outvars[0])
+    rank = len(in_shape)
+    try:
+        axes = tuple(int(a) for a in params["axes"])
+    except KeyError as e:
+        raise _Decline(f"'reduce_sum' is missing required param {e}") from e
+    if len(set(axes)) != len(axes) or any(
+        not 0 <= ax < rank for ax in axes
+    ):
+        raise _Decline(
+            f"'reduce_sum' axes {axes} are not distinct in-range axes of "
+            f"shape {in_shape}"
+        )
+    ax_set = set(axes)
+    expect = tuple(d for k, d in enumerate(in_shape) if k not in ax_set)
+    if expect != out_shape:
+        raise _Decline(
+            f"'reduce_sum' over axes {axes} of {in_shape} yields shape "
+            f"{expect}, not the recorded aval shape {out_shape}"
+        )
+    groups: list[list[int]] = [[] for _ in range(_size(out_shape))]
+    for coord in iv._coords(in_shape):
+        i = iv._flat_index(coord, in_shape)
+        j = iv._flat_index(
+            tuple(c for k, c in enumerate(coord) if k not in ax_set),
+            out_shape,
+        )
+        groups[j].append(i)
+    return groups
 
 
 class _Slicer:
@@ -270,35 +628,133 @@ class _Slicer:
         self.env = env
         jaxpr = closed.jaxpr
         self.producers: dict[int, ir.JaxprEqn] = {}
-        for eqn in jaxpr.eqns:
-            for out in eqn.outvars:
-                self.producers[out.id] = eqn
-        self.consts: dict[int, object] = {
-            var.id: val for var, val in zip(jaxpr.constvars, closed.consts)
-        }
+        # var id -> the atom it stands for, one step (a transparent call's
+        # invar binding, or its outvar's binding to the inner result)
+        self.aliases: dict[int, ir.Atom] = {}
+        self.consts: dict[int, object] = {}
         self.any_order: dict[int, int] = {}  # any outvar id -> declaration index
-        for eqn in jaxpr.eqns:
+        self.eqn_order: dict[int, int] = {}  # id(eqn) -> flattened position
+        self.defined: set[int] = set()  # every id bound in the flat view
+        # a scope defect poisons every slice of this query: variable ids
+        # must be unique across the flattened scopes (the transcriber
+        # guarantees it; hand-built or deserialized IR might not), because
+        # a reused id would silently alias two different values — the
+        # decorrelation/aliasing bug this build must never commit.
+        self.poisoned: str | None = None
+        self.const_avals: dict[int, ir.Aval] = {}
+        for var, val in zip(jaxpr.constvars, closed.consts):
+            self._define(var.id, f"constvar {var.id}")
+            self.consts[var.id] = val
+            self.const_avals[var.id] = var.aval
+        self._flatten(jaxpr.eqns)
+
+    def _define(self, vid: int, what: str) -> None:
+        if vid in self.defined and self.poisoned is None:
+            self.poisoned = (
+                f"variable id {vid} is bound more than once across the "
+                f"flattened call scopes ({what}); inlining transparent "
+                f"calls would alias two different values"
+            )
+        self.defined.add(vid)
+
+    def _flatten(self, eqns) -> None:
+        """The transparent call descent for the COMPUTATION slice: inline
+        every well-formed transparent wrapper's equations (jit,
+        custom_jvp_call, custom_vjp_call, remat2 — the same set the
+        propagation descends), binding inner invars to the call's operand
+        atoms and the call's outvars to the inner results, recursively.
+        Obligations/asserts remain top-level-only exactly as before — the
+        assert-count mapping in :func:`slice_unknown_obligations` is
+        untouched, and an inner ``stelling_assert`` still declines the
+        whole mapping there. A wrapper that resists sound inlining (no
+        sub-jaxpr, arity mismatch, const mismatch) is left in place as an
+        opaque equation, which the validator declines with the form
+        quoted."""
+        for eqn in eqns:
+            if eqn.primitive in DEFAULT_TRANSPARENT:
+                inner = next(
+                    (
+                        v
+                        for _, v in eqn.params
+                        if isinstance(v, ir.ClosedJaxpr)
+                    ),
+                    None,
+                )
+                if (
+                    inner is not None
+                    and len(inner.jaxpr.invars) == len(eqn.invars)
+                    and len(inner.jaxpr.outvars) == len(eqn.outvars)
+                    and len(inner.jaxpr.constvars) == len(inner.consts)
+                ):
+                    for var, val in zip(inner.jaxpr.constvars, inner.consts):
+                        self._define(var.id, f"inner constvar of {eqn.primitive!r}")
+                        self.consts[var.id] = val
+                        self.const_avals[var.id] = var.aval
+                    for ivar, atom in zip(inner.jaxpr.invars, eqn.invars):
+                        self._define(ivar.id, f"inner invar of {eqn.primitive!r}")
+                        self.aliases[ivar.id] = atom
+                    self._flatten(inner.jaxpr.eqns)
+                    for out, iatom in zip(eqn.outvars, inner.jaxpr.outvars):
+                        self._define(out.id, f"outvar of {eqn.primitive!r}")
+                        self.aliases[out.id] = iatom
+                    continue
+                # malformed wrapper: keep it opaque; _validate quotes it
+            self.eqn_order[id(eqn)] = len(self.eqn_order)
+            for out in eqn.outvars:
+                self._define(out.id, f"outvar of {eqn.primitive!r}")
+                self.producers[out.id] = eqn
             if eqn.primitive == "stelling_any":
                 self.any_order[eqn.outvars[0].id] = len(self.any_order)
-        self.eqn_order = {id(eqn): i for i, eqn in enumerate(jaxpr.eqns)}
+
+    def _resolve(self, atom: ir.Atom) -> ir.Atom:
+        """Follow alias bindings to the atom that actually carries the
+        value: a produced var, a declaration, a const var, or a literal."""
+        hops = 0
+        while isinstance(atom, ir.Var) and atom.id in self.aliases:
+            atom = self.aliases[atom.id]
+            hops += 1
+            if hops > len(self.aliases):
+                raise _Decline(
+                    "alias resolution does not terminate (cyclic call "
+                    "binding in the flattened scopes)"
+                )
+        return atom
 
     # -- validation of one equation form -------------------------------------
-
-    def _check_scalar(self, eqn: ir.JaxprEqn) -> None:
-        for atom in (*eqn.invars, *eqn.outvars):
-            if _size(atom.aval.shape) != 1:
-                raise _Decline(
-                    f"primitive {eqn.primitive!r} touches value of shape "
-                    f"{atom.aval.shape} (v1 emission is scalar-only)"
-                )
+    #
+    # Form checks only (dtypes, params, guards). There is deliberately NO
+    # per-equation size gate here: the one size gate is the per-obligation
+    # element budget in :meth:`slice` — a single choke point cannot
+    # disagree with itself, and the seven scattered scalar-only gates it
+    # replaced could.
 
     def _validate(self, eqn: ir.JaxprEqn) -> None:
         prim = eqn.primitive
+        for atom in (*eqn.invars, *eqn.outvars):
+            problem = _shape_problem(atom.aval.shape)
+            if problem is not None:
+                # an uninhabited/malformed shape (fix-re-attacks R1/N1/N2):
+                # measured jax rejects negative extents in every concrete
+                # context, and a non-integer extent is IR no trace can
+                # carry — nothing here may route, count, or emit over
+                # either. The interval oracle refuses them too
+                # (check_shape); this is the slicer's OWN guard, because a
+                # layer that can mint emission independently needs its own
+                # refusal.
+                raise _Decline(
+                    f"primitive {prim!r} touches a value of shape "
+                    f"{tuple(atom.aval.shape)} with {problem}"
+                )
+        if prim in DEFAULT_TRANSPARENT:
+            raise _Decline(
+                f"transparent {prim!r} could not be inlined (no sub-jaxpr, "
+                f"or call/sub-jaxpr arity mismatch); the wrapper form "
+                f"resists sound descent"
+            )
         if prim not in _SUPPORTED:
             raise _Decline(
                 f"primitive {prim!r} is outside the supported emission set"
             )
-        self._check_scalar(eqn)
         params = eqn.params_dict()
         if prim in _BOOL_OPS:
             dtypes = [a.aval.dtype for a in eqn.invars]
@@ -332,8 +788,12 @@ class _Slicer:
                     f"'div' on dtype {dt!r}: jax integer division truncates, "
                     f"which Real division does not model"
                 )
-            if not _atom_excludes_zero(eqn.invars[1], self.env):
-                raise _Decline(f"'div': {DIV_GUARD_REASON}")
+            problem = _zero_element_problem(eqn.invars[1], self.env)
+            if problem is not None:
+                # the per-element div guard: every divisor element must
+                # have an interval definitely excluding 0; any element
+                # straddling declines, naming the element
+                raise _Decline(f"'div': {DIV_GUARD_REASON}{problem}")
         if prim == "integer_pow":
             y = params.get("y")
             if not isinstance(y, int):
@@ -343,11 +803,13 @@ class _Slicer:
                     f"'integer_pow' exponent {y} exceeds the v1 expansion "
                     f"cap ({INTEGER_POW_EXPANSION_CAP})"
                 )
-            if y < 0 and not _atom_excludes_zero(eqn.invars[0], self.env):
-                raise _Decline(
-                    f"'integer_pow' with negative exponent {y}: "
-                    f"{DIV_GUARD_REASON}"
-                )
+            if y < 0:
+                problem = _zero_element_problem(eqn.invars[0], self.env)
+                if problem is not None:
+                    raise _Decline(
+                        f"'integer_pow' with negative exponent {y}: "
+                        f"{DIV_GUARD_REASON}{problem}"
+                    )
         if prim in _INT_OVERFLOW_EMITTED:
             # SMT-LIB2 Reals are unbounded; jax integers wrap. Emitting a
             # computed integer as a Real would let the solver prove a claim
@@ -364,47 +826,12 @@ class _Slicer:
                     f"on overflow and SMT-LIB2 Reals are unbounded, so a Real "
                     f"emission does not model it"
                 )
-        if prim == "slice":
-            # _check_scalar above already refused every multi-element form
-            # (naming the shape). What is left to pin is that the selection
-            # really is the single-index, unit-stride one — so a form that
-            # merely happens to be size-1 by accident cannot slip through
-            # aliased to the wrong term.
-            strides = params.get("strides")
-            if strides is not None and any(int(s) != 1 for s in strides):
-                raise _Decline(
-                    f"'slice' with non-unit strides {tuple(strides)} (only a "
-                    f"single-scalar-element selection with unit strides has "
-                    f"a v1 emission)"
-                )
-            start = tuple(params.get("start_indices", ()))
-            limit = tuple(params.get("limit_indices", ()))
-            if len(start) != len(limit) or any(
-                hi - lo != 1 for lo, hi in zip(start, limit)
-            ):
-                raise _Decline(
-                    f"'slice' start_indices={start} limit_indices={limit} do "
-                    f"not determine a single element (only a "
-                    f"single-scalar-element selection has a v1 emission)"
-                )
         if prim == "reduce_sum":
             dt = eqn.invars[0].aval.dtype or ""
             if not dt.startswith("float"):
                 raise _Decline(
                     f"'reduce_sum' on dtype {dt!r}: jax integer addition "
                     f"wraps on overflow, which Real addition does not model"
-                )
-            # _check_scalar refused multi-element operands already; an empty
-            # (size-0) reduction is refused here rather than emitted as the
-            # 0.0 identity, because no size-0 value is constructible in the
-            # scalar-only emission at all — emitting for an unreachable form
-            # would be a rule nothing could exercise.
-            if _size(eqn.invars[0].aval.shape) != 1:
-                raise _Decline(
-                    f"'reduce_sum' over an operand of shape "
-                    f"{eqn.invars[0].aval.shape} (v1 emission is scalar-only: "
-                    f"only a reduction over a single-element operand has a "
-                    f"term)"
                 )
         if prim == "select_n":
             if len(eqn.invars) != 3:
@@ -429,97 +856,258 @@ class _Slicer:
                     f"'convert_element_type' {src!r} -> {dst!r} is "
                     f"value-changing (outside the exact-conversions whitelist)"
                 )
+        # the index bookkeeping itself is the shape validation: malformed
+        # structural params, non-broadcastable operand shapes, and an
+        # output aval contradicting the computed shape all decline here —
+        # through the SAME helpers the emission and the replay will drive,
+        # so what validates is exactly what emits and replays
+        if prim in _STRUCTURAL:
+            _route_structural(eqn)
+        elif prim == "reduce_sum":
+            _group_reduce_sum(eqn)
+        elif prim == "select_n":
+            _pair_select_n(eqn)
+        else:  # elementwise ops and the identity harness primitives
+            _pair_elementwise(eqn)
 
     # -- the backward slice ---------------------------------------------------
 
+    def _rewrite(self, eqn: ir.JaxprEqn) -> ir.JaxprEqn:
+        """The eqn with every invar resolved through the call-scope alias
+        bindings — the inlining substitution. Unchanged eqns (the whole
+        query, when no transparent call was descended) are returned as the
+        ORIGINAL objects, so a slice through top-level-only computation is
+        object-identical to the pre-descent one."""
+        if not self.aliases:
+            return eqn
+        resolved = tuple(self._resolve(a) for a in eqn.invars)
+        if all(r is a for r, a in zip(resolved, eqn.invars)):
+            return eqn
+        return ir.JaxprEqn(
+            primitive=eqn.primitive,
+            invars=resolved,
+            outvars=eqn.outvars,
+            params=eqn.params,
+            effects=eqn.effects,
+            source_info=eqn.source_info,
+        )
+
     def slice(self, index: int, assert_eqn: ir.JaxprEqn) -> ObligationSlice:
-        root = assert_eqn.invars[0]
-        if _size(root.aval.shape) != 1:
-            raise _Decline(
-                f"assert operand has shape {root.aval.shape} (v1 emission is "
-                f"scalar-only)"
-            )
+        if self.poisoned is not None:
+            raise _Decline(self.poisoned)
+        root = self._resolve(assert_eqn.invars[0])
+        root_size = _size(root.aval.shape)
         if not _is_bool_dtype(root.aval):
             raise _Decline(
                 f"assert operand has dtype {root.aval.dtype!r}, expected bool"
             )
+        root_problem = _shape_problem(root.aval.shape)
+        if root_problem is not None:
+            raise _Decline(
+                f"assert operand has shape {tuple(root.aval.shape)} with "
+                f"{root_problem}"
+            )
+        if root_size == 0:
+            # zero elements: the universal claim is vacuously true, and
+            # interval propagation already discharges it (matching measured
+            # jax: jnp.all of a size-0 predicate is True), so nothing
+            # reaches escalation through the normal path — a direct ask
+            # declines rather than mints a vacuous proof obligation.
+            raise _Decline(
+                f"assert operand has shape {tuple(root.aval.shape)} with "
+                f"zero elements: the empty universal claim is vacuously "
+                f"true and is decided by interval propagation, not by "
+                f"emission"
+            )
+
+        # -- pass 1: reachability + THE choke point, from static shape ---
+        # metadata ONLY. The budget is the single gate that replaced the
+        # seven scalar-only sites, and it must be CHEAP to say no: no
+        # constant decoding, no routing validation, no per-element
+        # allocation happens before it — an over-budget decline costs
+        # O(#equations), never O(#elements) (first-contact audit F2).
         needed: list[ir.Atom] = [root]
-        seen_eqns: dict[int, ir.JaxprEqn] = {}
+        # id(original eqn) -> (flattened order, original eqn)
+        seen_eqns: dict[int, tuple[int, ir.JaxprEqn]] = {}
         inputs: dict[int, None] = {}
-        used_consts: dict[int, bool | int | float] = {}
+        const_ids: dict[int, None] = {}
+        literal_atoms: list[ir.Literal] = []
         while needed:
-            atom = needed.pop()
+            atom = self._resolve(needed.pop())
             if isinstance(atom, ir.Literal):
-                v = _decode_scalar(atom.val)  # declines undecodables
-                if not isinstance(v, bool):
-                    _numeric_fraction(v)  # declines non-finite
+                literal_atoms.append(atom)  # decoded in pass 2, post-gate
                 continue
             if atom.id in self.consts:
-                v = _decode_scalar(self.consts[atom.id])
-                if not isinstance(v, bool):
-                    _numeric_fraction(v)
-                used_consts[atom.id] = v
+                const_ids[atom.id] = None  # decoded in pass 2, post-gate
                 continue
             producer = self.producers.get(atom.id)
             if producer is None:
                 raise _Decline(
-                    f"variable {atom.id} has no top-level producer (slices "
-                    f"crossing into sub-jaxprs have no v1 emission)"
+                    f"variable {atom.id} has no producer in the flattened "
+                    f"computation (an opaque sub-jaxpr boundary the descent "
+                    f"could not cross)"
                 )
             if producer.primitive == "stelling_any":
-                if atom.id in inputs:
-                    continue
-                params = producer.params_dict()
-                if tuple(params.get("shape", ())) != ():
-                    raise _Decline(
-                        f"input declaration of shape "
-                        f"{tuple(params.get('shape', ()))} (v1 emission "
-                        f"accepts scalar shape () declarations only)"
-                    )
-                dtype = str(params.get("dtype"))
-                if dtype not in _FLOAT_INPUT_DTYPES:
-                    raise _Decline(
-                        f"input declaration of dtype {dtype!r}: only float "
-                        f"scalar declarations are supported (an int/bool "
-                        f"input's real relaxation would admit non-member "
-                        f"witnesses)"
-                    )
-                lo, hi = float(params["lo"]), float(params["hi"])
-                if math.isnan(lo) or math.isnan(hi) or lo > hi:
-                    raise _Decline(
-                        f"input declaration with bounds ({lo!r}, {hi!r}) has "
-                        f"no emission (empty or NaN-bounded set)"
-                    )
                 inputs[atom.id] = None
                 continue
             if id(producer) in seen_eqns:
                 continue
-            self._validate(producer)
-            seen_eqns[id(producer)] = producer
+            for patom in (*producer.invars, *producer.outvars):
+                problem = _shape_problem(patom.aval.shape)
+                if problem is None and isinstance(patom, ir.Literal) and isinstance(patom.val, ir.Array):
+                    problem = _shape_problem(patom.val.shape)
+                if problem is not None:
+                    # probed in pass 1, before the budget count reads any
+                    # of these shapes: a malformed extent would corrupt
+                    # the count silently (`1 * "x"` repeats the string)
+                    # or raise raw (fix-re-attack N2's adjacent case)
+                    raise _Decline(
+                        f"primitive {producer.primitive!r} touches a value "
+                        f"of shape {tuple(patom.aval.shape)} with {problem}"
+                    )
+            seen_eqns[id(producer)] = (self.eqn_order[id(producer)], producer)
             needed.extend(producer.invars)
 
-        ordered = tuple(
-            sorted(seen_eqns.values(), key=lambda e: self.eqn_order[id(e)])
-        )
-        slice_inputs = tuple(
-            SliceInput(
-                name=f"x{self.any_order[vid]}",
-                var_id=vid,
-                lo=float(self.producers[vid].params_dict()["lo"]),
-                hi=float(self.producers[vid].params_dict()["hi"]),
+        # The gate's two quantities (audit F1): the emitted element TERMS
+        # (declared input elements + term-producing output elements;
+        # reduce_sum additionally counts its operand elements — its n-ary
+        # bodies inline one addend per operand element, so the operand,
+        # not the output, is its script cost) and the ROOT CONJUNCT count
+        # (the assert operand's elements: structural routing mints no
+        # terms, but the negated conjunction it feeds repeats one term
+        # per element — that repetition is script cost the term count
+        # cannot see). One gate, both quantities, both quoted.
+        element_terms = 0
+        for vid in inputs:
+            decl_shape = tuple(
+                self.producers[vid].params_dict().get("shape", ())
             )
-            for vid in sorted(inputs, key=lambda v: self.any_order[v])
+            problem = _shape_problem(decl_shape)
+            if problem is not None:
+                raise _Decline(
+                    f"input declaration of shape {decl_shape!r} has "
+                    f"{problem}"
+                )
+            element_terms += _size(tuple(int(d) for d in decl_shape))
+        for _, eqn in seen_eqns.values():
+            prim = eqn.primitive
+            if prim in _STRUCTURAL or prim in _IDENTITY_HARNESS:
+                continue  # index routing: no new terms
+            element_terms += _size(eqn.outvars[0].aval.shape)
+            if prim == "reduce_sum" and eqn.invars:
+                element_terms += _size(eqn.invars[0].aval.shape)
+        if element_terms > ELEMENT_BUDGET or root_size > ELEMENT_BUDGET:
+            raise _Decline(
+                f"obligation needs {element_terms} element terms and "
+                f"{root_size} root conjuncts, over the per-obligation "
+                f"emission budget of {ELEMENT_BUDGET} (bounded static-shape "
+                f"emission; the budget is measured solver cost, see "
+                f"stelling.obligation.ELEMENT_BUDGET)"
+            )
+
+        # -- pass 2: decode, validate, build — all bounded by the gate ---
+        for atom in literal_atoms:
+            for v in _decode_elements(atom.val):  # declines undecodables
+                if not isinstance(v, bool):
+                    _numeric_fraction(v)  # declines non-finite
+        used_consts: dict[int, object] = {}
+        for cid in const_ids:
+            c_aval = self.const_avals.get(cid)
+            if c_aval is not None:
+                problem = _shape_problem(c_aval.shape)
+                if problem is not None:
+                    # P1(b): the slicer rebuilds values independently of
+                    # the propagation, so it must refuse the refused
+                    # class itself — the constvar's DECLARED aval, which
+                    # a lying consumer reference never shows it
+                    raise _Decline(
+                        f"constvar {cid} has aval shape "
+                        f"{tuple(c_aval.shape)} with {problem}"
+                    )
+            vals = _decode_elements(self.consts[cid])
+            if c_aval is not None and len(vals) != _size(c_aval.shape):
+                raise _Decline(
+                    f"constvar {cid} decodes to {len(vals)} element(s) "
+                    f"but its aval shape {tuple(c_aval.shape)} holds "
+                    f"{_size(c_aval.shape)} (aval/value mismatch, "
+                    f"malformed IR)"
+                )
+            for v in vals:
+                if not isinstance(v, bool):
+                    _numeric_fraction(v)
+            # a single-element const stores its bare value (the pre-array
+            # shape of the field, byte-identical); an array const stores
+            # the flat tuple of its elements
+            used_consts[cid] = vals[0] if len(vals) == 1 else vals
+        ordered = tuple(
+            self._validated_rewrite(e)
+            for _, e in sorted(seen_eqns.values(), key=lambda t: t[0])
         )
-        fragment = self._fragment(slice_inputs, ordered)
+        slice_inputs: list[SliceInput] = []
+        for vid in sorted(inputs, key=lambda v: self.any_order[v]):
+            params = self.producers[vid].params_dict()
+            dtype = str(params.get("dtype"))
+            if dtype not in _FLOAT_INPUT_DTYPES:
+                raise _Decline(
+                    f"input declaration of dtype {dtype!r}: only float "
+                    f"declarations are supported (an int/bool input's "
+                    f"real relaxation would admit non-member witnesses)"
+                )
+            lo = float(params.get("lo", math.nan))
+            hi = float(params.get("hi", math.nan))
+            if math.isnan(lo) or math.isnan(hi) or lo > hi:
+                raise _Decline(
+                    f"input declaration with bounds ({lo!r}, {hi!r}) has "
+                    f"no emission (empty or NaN-bounded set)"
+                )
+            shape = tuple(int(d) for d in params.get("shape", ()))
+            if any(d < 0 for d in shape):
+                # an empty declared set (fix-re-attack R1): no array of a
+                # negative-extent shape exists, so there is nothing to
+                # declare and any universal claim over it is vacuous —
+                # the public API refuses this at declaration; from_dict
+                # queries decline here, quoted
+                raise _Decline(
+                    f"input declaration of shape {shape} has a negative "
+                    f"extent: no jax program constructs such an array, so "
+                    f"the declared set is empty"
+                )
+            k = self.any_order[vid]
+            if shape == ():
+                slice_inputs.append(
+                    SliceInput(name=f"x{k}", var_id=vid, lo=lo, hi=hi)
+                )
+            else:
+                # one SMT constant per element, deterministically named
+                # x{k}_{i} (flat C-order), each carrying the declaration's
+                # bounds — scalar bounds broadcast to every element
+                for i in range(_size(shape)):
+                    slice_inputs.append(
+                        SliceInput(
+                            name=f"x{k}_{i}",
+                            var_id=vid,
+                            lo=lo,
+                            hi=hi,
+                            shape=shape,
+                            element=i,
+                        )
+                    )
+        fragment = self._fragment(tuple(slice_inputs), ordered)
         return ObligationSlice(
             index=index,
             fragment=fragment,
-            inputs=slice_inputs,
+            inputs=tuple(slice_inputs),
             consts=tuple(sorted(used_consts.items())),
             eqns=ordered,
             root=root,
             source_info=assert_eqn.source_info,
+            element_terms=element_terms,
         )
+
+    def _validated_rewrite(self, eqn: ir.JaxprEqn) -> ir.JaxprEqn:
+        sub = self._rewrite(eqn)
+        self._validate(sub)
+        return sub
 
     # -- fragment classification ---------------------------------------------
 
@@ -593,6 +1181,8 @@ def slice_unknown_obligations(
         # obligations were recorded from inside sub-jaxprs (transparent
         # wrappers / cond branches): index-based mapping onto top-level
         # asserts would be a guess, so every unknown obligation declines.
+        # The call descent inlines sub-jaxpr COMPUTATION only; obligations
+        # remain top-level-only, exactly as before.
         return tuple(
             DeclinedObligation(
                 index=o.index,
@@ -600,7 +1190,7 @@ def slice_unknown_obligations(
                     f"{len(propagation.obligations)} obligation(s) but "
                     f"{len(asserts)} top-level stelling_assert equation(s): "
                     f"asserts nested in sub-jaxprs cannot be mapped to "
-                    f"slices in v1"
+                    f"slices"
                 ),
                 source_info=o.source_info,
             )
@@ -612,18 +1202,53 @@ def slice_unknown_obligations(
 # -- exact-rational replay ----------------------------------------------------
 
 
-def evaluate_predicate(
-    sl: ObligationSlice, values: Mapping[str, Fraction]
-) -> bool:
-    """Evaluate the obligation predicate at a concrete rational point.
+def _scalar_binop(prim: str, a, b):
+    if prim == "add":
+        return a + b
+    if prim == "sub":
+        return a - b
+    if prim == "mul":
+        return a * b
+    if prim == "div":
+        return a / b
+    if prim == "max":
+        return max(a, b)
+    if prim == "min":
+        return min(a, b)
+    if prim == "lt":
+        return a < b
+    if prim == "le":
+        return a <= b
+    if prim == "gt":
+        return a > b
+    if prim == "ge":
+        return a >= b
+    if prim == "eq":
+        return a == b
+    if prim == "ne":
+        return a != b
+    if prim == "and":
+        return a and b
+    if prim == "or":
+        return a or b
+    if prim == "xor":
+        return bool(a) != bool(b)
+    raise ReplayError(
+        f"no replay rule for primitive {prim!r} (slice should have declined)"
+    )
 
-    ``values`` maps input names (``x0``, …) to exact rationals. Pure
-    Python :class:`fractions.Fraction` arithmetic — no solver, no floats.
-    Returns the predicate's truth value at the point (``False`` means the
-    obligation is violated there). Anything inexact or impossible raises
-    :exc:`ReplayError` — the caller treats that as emission infidelity.
-    """
-    env: dict[int, object] = {}
+
+def _root_elements(
+    sl: ObligationSlice, values: Mapping[str, Fraction]
+) -> tuple[bool, ...]:
+    """The per-element truth values of the assert operand at a concrete
+    rational point, flat C-order — the replay engine. Pure
+    :class:`fractions.Fraction` arithmetic, elementwise through the same
+    pairing/routing/grouping helpers validation and emission drive.
+    Anything inexact or impossible raises :exc:`ReplayError`."""
+    env: dict[int, tuple] = {}
+    per_var: dict[int, dict[int, Fraction]] = {}
+    sizes: dict[int, int] = {}
     for inp in sl.inputs:
         if inp.name not in values:
             raise ReplayError(f"witness has no value for input {inp.name}")
@@ -633,17 +1258,33 @@ def evaluate_predicate(
                 f"witness value for {inp.name} is {type(v).__name__}, not an "
                 f"exact Fraction"
             )
-        env[inp.var_id] = v
+        per_var.setdefault(inp.var_id, {})[inp.element] = v
+        sizes[inp.var_id] = max(sizes.get(inp.var_id, 1), _size(inp.shape))
+    for vid, elems in per_var.items():
+        n = sizes[vid]
+        if set(elems) != set(range(n)):
+            raise ReplayError(
+                f"witness elements for input variable {vid} do not cover "
+                f"its {n} element(s)"
+            )
+        env[vid] = tuple(elems[i] for i in range(n))
 
     for var_id, val in sl.consts:
-        env[var_id] = val if isinstance(val, bool) else _numeric_fraction(val)
+        vals = val if isinstance(val, tuple) else (val,)
+        env[var_id] = tuple(
+            v if isinstance(v, bool) else _numeric_fraction(v) for v in vals
+        )
 
-    def read(atom: ir.Atom):
+    def read(atom: ir.Atom) -> tuple:
         if isinstance(atom, ir.Literal):
-            v = _decode_scalar(atom.val)
-            return v if isinstance(v, bool) else _numeric_fraction(v)
+            return tuple(
+                v if isinstance(v, bool) else _numeric_fraction(v)
+                for v in _decode_elements(atom.val)
+            )
         if atom.id in env:
             return env[atom.id]
+        if _size(atom.aval.shape) == 0:
+            return ()  # a zero-size value has no elements to bind
         raise ReplayError(f"replay reads unbound variable {atom.id}")
 
     for eqn in sl.eqns:
@@ -651,84 +1292,120 @@ def evaluate_predicate(
         params = eqn.params_dict()
         try:
             ins = [read(a) for a in eqn.invars]
-            if prim == "add":
-                out = ins[0] + ins[1]
-            elif prim == "sub":
-                out = ins[0] - ins[1]
-            elif prim == "mul":
-                out = ins[0] * ins[1]
-            elif prim == "neg":
-                out = -ins[0]
-            elif prim == "div":
-                out = ins[0] / ins[1]
-            elif prim == "integer_pow":
-                out = ins[0] ** int(params["y"])
-            elif prim == "max":
-                out = max(ins[0], ins[1])
-            elif prim == "min":
-                out = min(ins[0], ins[1])
-            elif prim == "lt":
-                out = ins[0] < ins[1]
-            elif prim == "le":
-                out = ins[0] <= ins[1]
-            elif prim == "gt":
-                out = ins[0] > ins[1]
-            elif prim == "ge":
-                out = ins[0] >= ins[1]
-            elif prim == "eq":
-                out = ins[0] == ins[1]
-            elif prim == "ne":
-                out = ins[0] != ins[1]
-            elif prim == "and":
-                out = ins[0] and ins[1]
-            elif prim == "or":
-                out = ins[0] or ins[1]
-            elif prim == "not":
-                out = not ins[0]
-            elif prim == "xor":
-                out = bool(ins[0]) != bool(ins[1])
-            elif prim == "select_n":
-                out = ins[2] if ins[0] else ins[1]
-            elif prim == "convert_element_type":
-                v = ins[0]
-                dst = str(params.get("new_dtype"))
-                if isinstance(v, bool) and dst != "bool":
-                    out = Fraction(1 if v else 0)
-                else:
-                    out = v
-            elif (
-                prim in _IDENTITY_SHAPE
-                or prim in _IDENTITY_HARNESS
-                or prim in _SINGLE_ELEMENT
-            ):
-                # validated single-element forms: the value IS the operand's
+            n_out = _size(_shape_of(eqn.outvars[0]))
+            if prim in _STRUCTURAL:
+                routes = _route_structural(eqn)
+                out = tuple(ins[op][src] for op, src in routes)
+            elif prim in _IDENTITY_HARNESS:
                 out = ins[0]
+            elif prim == "reduce_sum":
+                groups = _group_reduce_sum(eqn)
+                out = tuple(
+                    sum((ins[0][i] for i in group), Fraction(0))
+                    for group in groups
+                )
+            elif prim == "select_n":
+                which, on_false, on_true = _pair_select_n(eqn)
+                out = tuple(
+                    ins[2][on_true[i]] if ins[0][which[i]] else ins[1][on_false[i]]
+                    for i in range(n_out)
+                )
+            elif prim == "neg":
+                (idx,) = _pair_elementwise(eqn)
+                out = tuple(-ins[0][i] for i in idx)
+            elif prim == "not":
+                (idx,) = _pair_elementwise(eqn)
+                out = tuple(not ins[0][i] for i in idx)
+            elif prim == "integer_pow":
+                (idx,) = _pair_elementwise(eqn)
+                y = int(params["y"])
+                out = tuple(ins[0][i] ** y for i in idx)
+            elif prim == "convert_element_type":
+                (idx,) = _pair_elementwise(eqn)
+                dst = str(params.get("new_dtype"))
+                out = tuple(
+                    Fraction(1 if ins[0][i] else 0)
+                    if isinstance(ins[0][i], bool) and dst != "bool"
+                    else ins[0][i]
+                    for i in idx
+                )
             else:
-                raise ReplayError(
-                    f"no replay rule for primitive {prim!r} (slice should "
-                    f"have declined)"
+                ia, ib = _pair_elementwise(eqn)
+                out = tuple(
+                    _scalar_binop(prim, ins[0][ia[i]], ins[1][ib[i]])
+                    for i in range(n_out)
                 )
         except ZeroDivisionError as e:
             raise ReplayError(
                 f"division by zero at {prim!r} during replay: {e}"
             ) from e
+        except IndexError as e:
+            raise ReplayError(
+                f"element routing escaped its operand at {prim!r} during "
+                f"replay: {e}"
+            ) from e
         except _Decline as d:
-            raise ReplayError(f"undecodable value during replay: {d.reason}") from d
+            raise ReplayError(f"replay cannot evaluate: {d.reason}") from d
         for outvar in eqn.outvars:
             env[outvar.id] = out
 
-    result = None
+    result: tuple | None = None
     if isinstance(sl.root, ir.Literal):
-        v = _decode_scalar(sl.root.val)
-        result = v if isinstance(v, bool) else None
+        try:
+            result = tuple(_decode_elements(sl.root.val))
+        except _Decline as d:
+            raise ReplayError(
+                f"undecodable predicate literal: {d.reason}"
+            ) from d
     elif sl.root.id in env:
         result = env[sl.root.id]
-    if not isinstance(result, bool):
-        raise ReplayError(
-            f"replay produced {type(result).__name__} for the predicate, "
-            f"expected bool"
+    if result is None or not result or not all(
+        isinstance(r, bool) for r in result
+    ):
+        got = (
+            "nothing"
+            if result is None
+            else "zero elements"
+            if not result
+            else type(next(r for r in result if not isinstance(r, bool))).__name__
         )
-    return result
+        raise ReplayError(
+            f"replay produced {got} for the predicate, expected bool"
+        )
+    return tuple(result)
+
+
+def evaluate_predicate(
+    sl: ObligationSlice, values: Mapping[str, Fraction]
+) -> bool:
+    """Evaluate the obligation predicate at a concrete rational point.
+
+    ``values`` maps input names (``x0``, ``x1_2``, …) to exact rationals,
+    one per declared element. Pure Python :class:`fractions.Fraction`
+    arithmetic — no solver, no floats. The obligation is the UNIVERSAL
+    elementwise claim, so this returns the conjunction of the per-element
+    truth values (``False`` means at least one element is violated at the
+    point — for a scalar operand, exactly the pre-array meaning).
+    Anything inexact or impossible raises :exc:`ReplayError` — the caller
+    treats that as emission infidelity.
+    """
+    return all(_root_elements(sl, values))
+
+
+def violating_elements(
+    sl: ObligationSlice, values: Mapping[str, Fraction]
+) -> tuple[int, ...]:
+    """Flat C-order indices of the assert-operand elements that are FALSE
+    at the point — the "which element(s) violate" fact of an array-scale
+    witness, computed by the same replay the validator's violation
+    conjunct runs (:func:`_root_elements`; one computation, so the naming
+    can never disagree with the decision). For a SCALAR assert operand
+    this returns ``()`` — the violated predicate is the scalar itself,
+    and the pre-array witness rendering carries no element line."""
+    elements = _root_elements(sl, values)
+    if len(elements) == 1 and _size(sl.root.aval.shape) == 1:
+        return ()
+    return tuple(i for i, ok in enumerate(elements) if not ok)
 
 
 # -- the witness validator -----------------------------------------------------

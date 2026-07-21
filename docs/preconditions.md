@@ -95,12 +95,17 @@ mesh machinery, no method internals.
 - **Properties of the solve's behaviour** — conditioning over the
   envelope, residual-implies-error — are a different, planned layer.
   The boundary is exactly the solve: this module checks what goes *in*.
-- **Array-shaped obligations at the SMT step.** Interval propagation
-  judges array obligations elementwise (the first example is an array,
-  and VERIFIED means every element). The SMT escalation is currently
-  **scalar-only**: an interval-undecided *array* obligation stays
-  UNKNOWN, with the reason quoted (`v1 emission is scalar-only`) rather
-  than guessed away. Scalar obligations escalate fully.
+- **Array obligations escalate for small static shapes.** Interval
+  propagation judges array obligations elementwise (the first example
+  is an array, and VERIFIED means every element), and the SMT step now
+  takes **small, statically-shaped** array obligations too — one
+  per-obligation emission budget (512 element terms and root
+  conjuncts) with anything above it declining, the numbers quoted. A
+  REFUTED array obligation's witness names **which element violates**,
+  with per-element values, replay-confirmed before you see it. General
+  dynamic or arbitrarily-large array reasoning stays out of scope — the
+  sound, tractable thing is bounded static-shape emission, and the
+  budget line in the decline tells you when you have left it.
 - **Float-exact claims by default.** The default verdict is about exact
   real arithmetic over your declared sets, and the stamp says so; an
   opt-in `ieee` mode judges binary64 behaviour and stamps its own scope.

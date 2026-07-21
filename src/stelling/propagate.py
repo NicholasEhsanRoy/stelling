@@ -135,6 +135,7 @@ is that module's docstring.
 from __future__ import annotations
 
 import math
+from operator import index as _op_index
 import struct
 from dataclasses import dataclass
 
@@ -251,9 +252,24 @@ def _decode_array(a: ir.Array) -> iv.IntervalArray:
             f"no zero-dep decoder for array dtype {a.dtype!r}; add one before "
             f"propagating this query"
         )
+    # shape predicates first (fix re-attacks R1/N2): integral nonnegative
+    # extents (a negative or string extent would reach struct.unpack as a
+    # malformed format and raise raw), through the decline channel
+    iv.check_shape(a.shape)
     n = 1
     for d in a.shape:
         n *= d
+    # ... and the PAYLOAD LENGTH against the shape (N2): a truncated,
+    # oversized, or empty buffer under a positive shape raised raw
+    # struct.error out of the walk — the exact sibling of the negative
+    # route, one predicate away ("what else does unpack assume")
+    expect = struct.calcsize(f"<{n}{fmt}")
+    if len(a.data) != expect:
+        raise iv.IntervalError(
+            f"array constant of shape {a.shape} dtype {a.dtype!r} carries "
+            f"{len(a.data)} byte(s), expected {expect} — truncated or "
+            f"oversized payload (malformed IR)"
+        )
     los, his = [], []
     for v in struct.unpack(f"<{n}{fmt}", a.data):
         if isinstance(v, int):
@@ -351,6 +367,72 @@ def _is_integer_dtype(dtype: str) -> bool:
 _INT_RANGE = {d: float(_INT_DTYPE_BOUNDS[d][1] + 1) for d in ("int32", "int64")}
 
 
+def _safe_top(shape) -> iv.IntervalArray:
+    """⊤ of the shape — or the scalar ⊤ stand-in when the shape is
+    uninhabited (a negative extent, which :class:`interval.IntervalArray`
+    refuses to construct). The stand-in exists so a DECLINE over an
+    impossible shape can still bind the outvar and keep the walk alive
+    (the guard rule: declines never raise): no value of the variable
+    exists, every equation CONSUMING it is itself declined by the
+    negative-shape screen (its invar aval carries the negative dim), and
+    the stand-in is read only by the assert/nonvacuity bookkeeping, where
+    a full ⊤ box supports no definite face — so nothing can launder it
+    into a definite verdict."""
+    try:
+        return iv.top(tuple(shape))
+    except iv.IntervalError:
+        return iv.top(())
+
+
+def _refused_value_problem(aval_shape, value) -> str | None:
+    """The refused-class problem of a constvar/literal binding, or None.
+
+    Refused-class means NO coherent value can exist: a malformed or
+    uninhabited shape on either coordinate (the recorded aval OR an
+    ir.Array payload's own shape — a from_dict query can lie on one and
+    not the other), or a payload whose byte length contradicts its shape.
+    Deliberately NOT the inhabited-but-unbracketable class (NaN
+    sentinels, undecodable dtypes), which keeps the registered
+    ⊤-with-note treatment: those values EXIST."""
+    try:
+        iv.check_shape(aval_shape)
+    except iv.IntervalError as e:
+        return str(e)
+    if isinstance(value, ir.Array):
+        try:
+            iv.check_shape(value.shape)
+        except iv.IntervalError as e:
+            return str(e)
+        fmt = _STRUCT_FMT.get(value.dtype)
+        if fmt is not None:
+            n = 1
+            for d in value.shape:
+                n *= d
+            expect = struct.calcsize(f"<{n}{fmt}")
+            if len(value.data) != expect:
+                return (
+                    f"payload of {len(value.data)} byte(s) contradicts "
+                    f"shape {value.shape} dtype {value.dtype!r} "
+                    f"(expected {expect})"
+                )
+    return None
+
+
+def _req(params, name: str, prim: str):
+    """A required equation param, or an :class:`interval.IntervalError`
+    decline. Transfers must never read a required param by bare
+    subscript: a malformed ``from_dict`` query with the param missing
+    would escape the transfer-call guard as a raw ``KeyError`` and kill
+    the whole propagation walk (first-contact audit F4 — the guard rule
+    is "declines never raise", and the transfer-call site catches exactly
+    ``IntervalError``)."""
+    if name not in params:
+        raise iv.IntervalError(
+            f"{prim!r} equation is missing its required param {name!r}"
+        )
+    return params[name]
+
+
 def _t_convert(eqn, params, ins):
     (a,) = ins
     src = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
@@ -382,7 +464,7 @@ def _t_reshape(eqn, params, ins):
         # a dimensions= reshape permutes before reshaping — not the C-order
         # flat identity; no rule yet, so decline (⊤ with the params noted).
         return None
-    return [iv.reshape(ins[0], tuple(params["new_sizes"]))]
+    return [iv.reshape(ins[0], tuple(_req(params, "new_sizes", "reshape")))]
 
 
 def _t_bool_logic(name, op):
@@ -410,7 +492,7 @@ def _t_reduce_or(eqn, params, ins):
             f"'reduce_or' transfer covers bool operands only; got dtypes "
             f"{dtypes}"
         )
-    return [iv.reduce_or(ins[0], tuple(params["axes"]))]
+    return [iv.reduce_or(ins[0], tuple(_req(params, "axes", "reduce_or")))]
 
 
 # The single-element scatter dimension_numbers of ``x.at[k].set(v)`` on a
@@ -754,7 +836,7 @@ def _t_div(eqn, params, ins):
 
 
 def _t_reduce_sum(eqn, params, ins):
-    outs = [iv.reduce_sum(ins[0], tuple(params["axes"]))]
+    outs = [iv.reduce_sum(ins[0], tuple(_req(params, "axes", "reduce_sum")))]
     return _int_overflow_guard(eqn, "reduce_sum", outs)
 
 
@@ -829,8 +911,8 @@ TRANSFERS = {
         lambda eqn, p, ins: [
             iv.slice_(
                 ins[0],
-                tuple(p["start_indices"]),
-                tuple(p["limit_indices"]),
+                tuple(_req(p, "start_indices", "slice")),
+                tuple(_req(p, "limit_indices", "slice")),
                 tuple(p["strides"]) if p.get("strides") else None,
             )
         ],
@@ -856,19 +938,27 @@ TRANSFERS = {
     "broadcast_in_dim": (
         lambda eqn, p, ins: [
             iv.broadcast_in_dim(
-                ins[0], tuple(p["shape"]), tuple(p["broadcast_dimensions"])
+                ins[0],
+                tuple(_req(p, "shape", "broadcast_in_dim")),
+                tuple(_req(p, "broadcast_dimensions", "broadcast_in_dim")),
             )
         ],
         TIER_EXACT,
     ),
     "concatenate": (
-        lambda eqn, p, ins: [iv.concatenate(list(ins), int(p["dimension"]))],
+        lambda eqn, p, ins: [
+            iv.concatenate(list(ins), int(_req(p, "dimension", "concatenate")))
+        ],
         TIER_EXACT,
     ),
     "convert_element_type": (_t_convert, TIER_EXACT),
     "stelling_any": (
         lambda eqn, p, ins: [
-            iv.from_bounds(tuple(p["shape"]), float(p["lo"]), float(p["hi"]))
+            iv.from_bounds(
+                tuple(_req(p, "shape", "stelling_any")),
+                float(_req(p, "lo", "stelling_any")),
+                float(_req(p, "hi", "stelling_any")),
+            )
         ],
         TIER_EXACT,
     ),
@@ -1296,7 +1386,7 @@ def _ieee_reduce_sum(eqn, params, ins, flags):
     exactly 0.0 whatever flag the (elementless) operand carries.
     """
     _ieee_f64_only(eqn)
-    box, made_nan = iv.ieee_reduce_sum(ins[0], tuple(params["axes"]))
+    box, made_nan = iv.ieee_reduce_sum(ins[0], tuple(_req(params, "axes", "reduce_sum")))
     reads_an_element = ins[0].size > 0
     return [box], [made_nan or (flags[0] and reads_an_element)]
 
@@ -1346,7 +1436,7 @@ def _ieee_reduce_or(eqn, params, ins, flags):
         a = iv.IntervalArray(
             shape=a.shape, los=(0.0,) * a.size, his=(1.0,) * a.size
         )
-    return [iv.reduce_or(a, tuple(params["axes"]))], [False]
+    return [iv.reduce_or(a, tuple(_req(params, "axes", "reduce_or")))], [False]
 
 
 # the selector dtypes jax's select_n accepts (measured: lax.select_n
@@ -1483,7 +1573,9 @@ def _ieee_any(eqn, params, ins, flags):
     0; the dispatcher withholds exactness from declarations the haze
     changed."""
     box = iv.from_bounds(
-        tuple(params["shape"]), float(params["lo"]), float(params["hi"])
+        tuple(_req(params, "shape", "stelling_any")),
+        float(_req(params, "lo", "stelling_any")),
+        float(_req(params, "hi", "stelling_any")),
     )
     return [iv.subnormal_haze(box)[0]], [False]
 
@@ -1545,8 +1637,8 @@ IEEE_TRANSFERS = {
             lambda eqn, p, ins: [
                 iv.slice_(
                     ins[0],
-                    tuple(p["start_indices"]),
-                    tuple(p["limit_indices"]),
+                    tuple(_req(p, "start_indices", "slice")),
+                    tuple(_req(p, "limit_indices", "slice")),
                     tuple(p["strides"]) if p.get("strides") else None,
                 )
             ]
@@ -1567,7 +1659,9 @@ IEEE_TRANSFERS = {
         _ieee_passthrough(
             lambda eqn, p, ins: [
                 iv.broadcast_in_dim(
-                    ins[0], tuple(p["shape"]), tuple(p["broadcast_dimensions"])
+                    ins[0],
+                    tuple(_req(p, "shape", "broadcast_in_dim")),
+                    tuple(_req(p, "broadcast_dimensions", "broadcast_in_dim")),
                 )
             ]
         ),
@@ -1575,7 +1669,9 @@ IEEE_TRANSFERS = {
     ),
     "concatenate": (
         _ieee_passthrough(
-            lambda eqn, p, ins: [iv.concatenate(list(ins), int(p["dimension"]))]
+            lambda eqn, p, ins: [
+                iv.concatenate(list(ins), int(_req(p, "dimension", "concatenate")))
+            ]
         ),
         TIER_EXACT,
     ),
@@ -1770,6 +1866,12 @@ class _Propagator:
         # depend on recognising the intervening shape, which is exactly
         # what a simplification set makes unrecognisable.
         self.taint: dict[int, bool] = {}
+        # var ids whose value comes from a REFUSED negative/malformed
+        # shape (fix re-attack N1): membership, not aval classification,
+        # is what gates every env reference — ids are globally unique per
+        # transcription, so the set is deliberately NOT scope-swapped
+        # (refusal follows the value across call boundaries).
+        self.refused_shape: set[int] = set()
         # var id -> producing equation, for the jaxpr currently being run
         # (scoped in run(); assume classification only — never a transfer
         # input)
@@ -1822,7 +1924,7 @@ class _Propagator:
                 box = _value_to_interval(atom.val, atom.aval.shape)
             except (iv.IntervalError, ir.TranscriptionError) as e:
                 self.notes.append(f"literal outside the domain ({e}); ⊤")
-                return iv.top(atom.aval.shape)
+                return _safe_top(atom.aval.shape)
             if self.semantics == "ieee":
                 # DAZ flushes inputs: literal constants entering ieee
                 # propagation are subnormal-hazed like every other value
@@ -1864,7 +1966,7 @@ class _Propagator:
 
     def top_out(self, eqn: ir.JaxprEqn) -> None:
         for out in eqn.outvars:
-            self.env[out.id] = iv.top(out.aval.shape)
+            self.env[out.id] = _safe_top(out.aval.shape)
             if self.semantics == "ieee":
                 # ⊤ under ieee is maybe-NaN: an unknown/declined value
                 # could be anything a float can be, including NaN
@@ -2438,13 +2540,26 @@ class _Propagator:
                     # carries no NaN-freedom claim)
                     self.nan[var.id] = True
                 continue
+            refused = _refused_value_problem(var.aval.shape, c)
+            if refused is not None:
+                # the REFUSED class (no coherent value exists): bind and
+                # register as one operation, so the read gate declines
+                # every consumer regardless of what their avals claim
+                # (fix re-attack P1 — the constvar route was half-gated)
+                self.notes.append(
+                    f"constvar {var.id} refused: {refused}; ⊤"
+                )
+                self._bind_refused(var)
+                continue
             try:
                 box = _value_to_interval(c, var.aval.shape)
             except (iv.IntervalError, ir.TranscriptionError) as e:
                 # same posture as literals: an unrepresentable const binds ⊤
                 # (audit-gate finding 1 — a NaN closure const killed the run)
+                # — the INHABITED-unknown class: the value exists, only its
+                # bracket does not, so it participates as ⊤ (registered)
                 self.notes.append(f"const outside the domain ({e}); ⊤")
-                self.env[var.id] = iv.top(var.aval.shape)
+                self.env[var.id] = _safe_top(var.aval.shape)
                 if ieee:  # ⊤ under ieee is maybe-NaN
                     self.nan[var.id] = True
                 continue
@@ -2479,8 +2594,87 @@ class _Propagator:
             self.producers = prev_producers
         return [self.read(o) for o in jaxpr.outvars]
 
+    def _shape_refusal(self, eqn: ir.JaxprEqn) -> str | None:
+        """The uninhabited/malformed-shape refusal reason for an equation,
+        or None. THE property gate (fix re-attacks R1/N1): a value from a
+        refused negative-shape declaration is identified by its VAR ID at
+        the env reference — never by classifying the consumer, whose
+        recorded avals a from_dict query can simply lie about (the N1
+        laundering: a consumer claiming a scalar aval for a refused id
+        read the ⊤ stand-in as a real value, and ⊤·0 = [0,0] minted a
+        definite face over an empty declared set). Every equation's env
+        reads go through its invars, checked here before any read, so no
+        aval lie can route around the gate. Also refused here: any
+        negative or non-integer extent in the equation's own recorded
+        avals or in an inline array literal's payload shape (from_dict
+        does not coerce shape entry types, so `d < 0` on a string raised
+        raw before the integral check)."""
+        for atom in eqn.invars:
+            if isinstance(atom, ir.Var) and atom.id in self.refused_shape:
+                return (
+                    "reads a value from a refused negative-shape "
+                    "declaration"
+                )
+        for atom in (*eqn.invars, *eqn.outvars):
+            if isinstance(atom, ir.Literal):
+                # the shared refused-class predicate covers the recorded
+                # aval, the payload's own shape, AND the payload length
+                # (a length-lying literal has no coherent value either —
+                # the same class one predicate over, unified here so the
+                # interval path cannot ⊤-launder what the slicer refuses)
+                problem = _refused_value_problem(atom.aval.shape, atom.val)
+                if problem is not None:
+                    return f"carries a refused literal ({problem})"
+                continue
+            for d in atom.aval.shape:
+                try:
+                    k = _op_index(d)
+                except TypeError:
+                    return (
+                        f"carries a non-integer shape extent {d!r} "
+                        f"(malformed IR: from_dict does not coerce "
+                        f"shape entries)"
+                    )
+                if k < 0:
+                    return (
+                        "touches a negative-extent shape (no jax "
+                        "program constructs such a value)"
+                    )
+        return None
+
+    def _bind_refused(self, var: ir.Var) -> None:
+        """Bind a refused-shape value: the stand-in env entry and the
+        ``refused_shape`` membership are ONE operation. The separable
+        pair was P1's defect — a constvar decline bound the stand-in
+        without registering the id, and the read gate then cleared its
+        consumers; no call site can now do one without the other (L7).
+        Under ieee the stand-in is maybe-NaN, like every ⊤-out."""
+        self.env[var.id] = _safe_top(var.aval.shape)
+        self.refused_shape.add(var.id)
+        if self.semantics == "ieee":
+            self.nan[var.id] = True
+
     def eqn(self, eqn: ir.JaxprEqn) -> None:
         params = eqn.params_dict()
+        refusal = self._shape_refusal(eqn)
+        if refusal is not None:
+            # the negative/malformed-shape screen (fix-re-attacks R1/N1).
+            # stelling_assert/stelling_nonvacuity stay EXEMPT from
+            # declining so the obligation/check is still RECORDED (judged
+            # below over the ⊤ stand-in, which supports no definite
+            # face; the stand-in never participates in arithmetic because
+            # this gate declines every computing consumer first) — but
+            # their OUTPUTS join the refused set: refusal is a property
+            # of the VALUE and follows its id through every binding.
+            if eqn.primitive in ("stelling_assert", "stelling_nonvacuity"):
+                for out in eqn.outvars:
+                    self.refused_shape.add(out.id)
+            else:
+                self.notes.append(f"{eqn.primitive!r} {refusal}; ⊤")
+                self.counter.record_unknown(eqn.primitive)
+                for out in eqn.outvars:
+                    self._bind_refused(out)
+                return
         if eqn.primitive in DEFAULT_TRANSPARENT:
             inner = next(
                 (v for _, v in eqn.params if isinstance(v, ir.ClosedJaxpr)), None
@@ -2521,8 +2715,20 @@ class _Propagator:
                     self.exact = outer_exact
                     self.nan = outer_nan
                     self.taint = outer_taint
-                for out, val in zip(eqn.outvars, outs):
-                    self.env[out.id] = val
+                for out, val, iout in zip(
+                    eqn.outvars, outs, inner.jaxpr.outvars
+                ):
+                    # refusal follows the value across the call boundary:
+                    # an inner outvar refused for its shape refuses the
+                    # call's outvar too (fix re-attack N1/P1 — bind and
+                    # register as one operation)
+                    if (
+                        isinstance(iout, ir.Var)
+                        and iout.id in self.refused_shape
+                    ):
+                        self._bind_refused(out)
+                    else:
+                        self.env[out.id] = val
                 if ieee:
                     for out, f in zip(eqn.outvars, out_flags):
                         self.nan[out.id] = f
@@ -2643,8 +2849,37 @@ class _Propagator:
                 self.exact = outer_exact
                 self.nan = outer_nan
                 self.taint = outer_taint
+            branch_refused = [
+                any(
+                    isinstance(branches[i].jaxpr.outvars[j], ir.Var)
+                    and branches[i].jaxpr.outvars[j].id in self.refused_shape
+                    for i in possible
+                )
+                for j in range(len(eqn.outvars))
+            ]
             for j, out in enumerate(eqn.outvars):
-                self.env[out.id] = iv.join([r[j] for r in results])
+                if branch_refused[j]:
+                    # a possible branch's output comes from a refused
+                    # shape: the join would mix a stand-in with real
+                    # boxes — the cond output is refused too (N1)
+                    self.notes.append(
+                        f"cond output {j} comes from a refused "
+                        f"negative-shape value in a possible branch; ⊤"
+                    )
+                    self._bind_refused(out)
+                    continue
+                try:
+                    self.env[out.id] = iv.join([r[j] for r in results])
+                except iv.IntervalError as e:
+                    # branches returning mismatched shapes (malformed IR)
+                    # previously escaped as a raw raise from the join —
+                    # degrade-don't-crash, quoted
+                    self.notes.append(f"cond output join declined: {e}; ⊤")
+                    self.env[out.id] = _safe_top(out.aval.shape)
+                    if ieee:
+                        self.nan[out.id] = True
+                        self.taint[out.id] = False
+                    continue
                 if ieee:
                     # the output is SOME branch's output whatever the
                     # index value is (out-of-range selects the final

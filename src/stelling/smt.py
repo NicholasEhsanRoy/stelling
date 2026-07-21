@@ -8,20 +8,35 @@ transports deliver this text (wheel bindings through their own SMT-LIB2
 parser, an external binary over stdin), and its sha256 rides in the stamp,
 so an invocation is auditable and diffable. The query asserts the declared
 box constraints (closed, exact dyadic rationals — never a decimal
-approximation) **and the negation of the obligation predicate**: ``unsat``
-means the predicate holds over the whole declared box.
+approximation) **and the negation of the obligation predicate**: for an
+array-shaped assert operand the predicate is the universal elementwise
+claim, so the negated assert is ``(not (and e_0 … e_{n-1}))`` — ``unsat``
+means every element holds everywhere in the box, and a ``sat`` model is a
+point where at least one element violates.
 
-Emission is deterministic: input constants are named ``x{k}`` in the
-declaration order of the query's ``stelling_any`` equations, intermediate
-terms are ``define-fun``\\ s named ``t{var id}`` in slice order, and the
-per-solver option block is a fixed list — a solver is never invoked on
-defaults, so ``:produce-models`` and the time limit (plus ``:nl-cov
-true`` / ``:nl-ext none`` for cvc5 on QF_NRA — the two are mutually
-exclusive and both are therefore pinned) are always in the text.
+Emission is deterministic and bounded static-shape: a scalar (shape
+``()``) input is the constant ``x{k}`` (declaration order — the pre-array
+scheme, byte-identical); an array input declares one constant per element,
+``x{k}_{i}`` with ``i`` the flat C-order index. Intermediate terms are
+``define-fun``\\ s named ``t{var id}`` when the output has one element and
+``t{var id}_{i}`` per element otherwise. **Sharing is preserved by
+construction**: every consumer references terms by name, a broadcast
+scalar operand is the SAME single term in every element's body (never one
+fresh variable per element — fresh variables would invent decorrelation),
+and structural ops (``broadcast_in_dim``, ``reshape``, ``squeeze``,
+``transpose``, ``slice``, ``concatenate``) emit NO terms at all: their
+output elements alias their source elements' existing terms through the
+same index bookkeeping the slice validator and the replay use
+(:mod:`stelling.obligation`). ``reduce_sum`` emits the exact n-ary
+``(+ …)`` of its addend terms — exact over Reals. The per-solver option
+block is a fixed list — a solver is never invoked on defaults, so
+``:produce-models`` and the time limit (plus ``:nl-cov true`` /
+``:nl-ext none`` for cvc5 on QF_NRA — the two are mutually exclusive and
+both are therefore pinned) are always in the text.
 
 This module only emits; it declines nothing (the slice was validated by
-:mod:`stelling.obligation`) and invokes nothing (:mod:`stelling.solvers`
-owns transports).
+:mod:`stelling.obligation`, including the single element-budget gate) and
+invokes nothing (:mod:`stelling.solvers` owns transports).
 """
 
 from __future__ import annotations
@@ -35,8 +50,16 @@ from stelling import ir
 from stelling.obligation import (
     QF_NRA,
     ObligationSlice,
-    _decode_scalar,
+    _decode_elements,
+    _group_reduce_sum,
     _numeric_fraction,
+    _pair_elementwise,
+    _pair_select_n,
+    _route_structural,
+    _size,
+    _shape_of,
+    _IDENTITY_HARNESS,
+    _STRUCTURAL,
 )
 
 __all__ = ["Script", "emit", "rational"]
@@ -72,7 +95,7 @@ def rational(fr: Fraction) -> str:
     return f"(/ {fr.numerator} {fr.denominator})"
 
 
-def _value_text(v: bool | int | float) -> str:
+def _value_text(v) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
     return rational(_numeric_fraction(v))
@@ -105,17 +128,22 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
         raise ValueError(f"timeout_ms must be positive, got {timeout_ms}")
     options = _options(solver, sl.fragment, timeout_ms)
 
-    names: dict[int, str] = {}  # var id -> term text
+    names: dict[int, tuple[str, ...]] = {}  # var id -> per-element term texts
     for var_id, val in sl.consts:
-        names[var_id] = _value_text(val)
+        vals = val if isinstance(val, tuple) else (val,)
+        names[var_id] = tuple(_value_text(v) for v in vals)
     for inp in sl.inputs:
-        names[inp.var_id] = inp.name
+        # per-element input names accumulate in element order (the slice
+        # orders inputs by declaration then element)
+        names[inp.var_id] = names.get(inp.var_id, ()) + (inp.name,)
 
-    def term(atom: ir.Atom) -> str:
+    def term(atom: ir.Atom) -> tuple[str, ...]:
         if isinstance(atom, ir.Literal):
-            return _value_text(_decode_scalar(atom.val))
+            return tuple(_value_text(v) for v in _decode_elements(atom.val))
         got = names.get(atom.id)
         if got is None:
+            if _size(atom.aval.shape) == 0:
+                return ()  # a zero-size value has no element terms
             raise ValueError(
                 f"emission reads unbound variable {atom.id} — slice "
                 f"validation should have declined this"
@@ -131,91 +159,137 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
     for inp in sl.inputs:
         lines.append(f"(declare-const {inp.name} Real)")
     for inp in sl.inputs:
-        # closed, exact bounds; a half-infinite bound emits only its finite
-        # side; a (-inf, inf) declaration emits no bound constraint at all.
+        # closed, exact bounds per element; a half-infinite bound emits only
+        # its finite side; a (-inf, inf) declaration emits no bound at all.
         if inp.lo != -math.inf:
             lines.append(f"(assert (<= {rational(Fraction(inp.lo))} {inp.name}))")
         if inp.hi != math.inf:
             lines.append(f"(assert (<= {inp.name} {rational(Fraction(inp.hi))}))")
+
+    def define(out: ir.Var, bodies: list[str]) -> tuple[str, ...]:
+        """Emit define-funs for a term-producing output and return its
+        element term names: ``t{id}`` for a one-element output (the
+        pre-array naming, byte-identical), ``t{id}_{i}`` per element
+        otherwise."""
+        sort = "Bool" if out.aval.dtype == "bool" else "Real"
+        if len(bodies) == 1:
+            lines.append(f"(define-fun t{out.id} () {sort} {bodies[0]})")
+            return (f"t{out.id}",)
+        made = []
+        for i, body in enumerate(bodies):
+            lines.append(f"(define-fun t{out.id}_{i} () {sort} {body})")
+            made.append(f"t{out.id}_{i}")
+        return tuple(made)
 
     for eqn in sl.eqns:
         prim = eqn.primitive
         params = eqn.params_dict()
         ins = [term(a) for a in eqn.invars]
         out = eqn.outvars[0]
-        body: str | None = None
-        alias: str | None = None
-        if prim == "add":
-            body = f"(+ {ins[0]} {ins[1]})"
-        elif prim == "sub":
-            body = f"(- {ins[0]} {ins[1]})"
-        elif prim == "mul":
-            body = f"(* {ins[0]} {ins[1]})"
-        elif prim == "neg":
-            body = f"(- {ins[0]})"
-        elif prim == "div":
-            body = f"(/ {ins[0]} {ins[1]})"
-        elif prim == "integer_pow":
+        n_out = _size(_shape_of(out))
+        if prim in _STRUCTURAL:
+            # index bookkeeping, not new terms: each output element IS its
+            # source element's term
+            routes = _route_structural(eqn)
+            names[out.id] = tuple(ins[op][src] for op, src in routes)
+            continue
+        if prim in _IDENTITY_HARNESS:
+            # assume/nonvacuity data flow: identity; the assume CONSTRAINT
+            # is deliberately never emitted (inert, as in propagation)
+            names[out.id] = ins[0]
+            continue
+        if prim == "reduce_sum":
+            groups = _group_reduce_sum(eqn)
+            if all(len(g) == 1 for g in groups) and groups:
+                # a sum of one addend is that addend: alias, no new term
+                names[out.id] = tuple(ins[0][g[0]] for g in groups)
+                continue
+            bodies = []
+            for group in groups:
+                if not group:
+                    bodies.append("0.0")  # jax's measured empty-sum identity
+                elif len(group) == 1:
+                    bodies.append(ins[0][group[0]])
+                else:
+                    bodies.append(f"(+ {' '.join(ins[0][i] for i in group)})")
+            names[out.id] = define(out, bodies)
+            continue
+        if prim == "select_n":
+            # select_n(which, on_false, on_true): ite takes the true case
+            # first; a scalar `which` is the SAME selector term in every
+            # element's ite (sharing, never a fresh per-element selector)
+            which, on_false, on_true = _pair_select_n(eqn)
+            bodies = [
+                f"(ite {ins[0][which[i]]} {ins[2][on_true[i]]} {ins[1][on_false[i]]})"
+                for i in range(n_out)
+            ]
+            names[out.id] = define(out, bodies)
+            continue
+        if prim == "integer_pow":
             y = int(params["y"])
+            (idx,) = _pair_elementwise(eqn)
             if y == 0:
-                alias = "1.0"
-            elif y == 1:
-                alias = ins[0]
-            else:
-                n = abs(y)
-                prod = ins[0] if n == 1 else f"(* {' '.join([ins[0]] * n)})"
-                body = prod if y > 0 else f"(/ 1.0 {prod})"
-        elif prim == "max":
-            body = f"(ite (>= {ins[0]} {ins[1]}) {ins[0]} {ins[1]})"
-        elif prim == "min":
-            body = f"(ite (<= {ins[0]} {ins[1]}) {ins[0]} {ins[1]})"
-        elif prim == "lt":
-            body = f"(< {ins[0]} {ins[1]})"
-        elif prim == "le":
-            body = f"(<= {ins[0]} {ins[1]})"
-        elif prim == "gt":
-            body = f"(> {ins[0]} {ins[1]})"
-        elif prim == "ge":
-            body = f"(>= {ins[0]} {ins[1]})"
-        elif prim == "eq":
-            body = f"(= {ins[0]} {ins[1]})"
-        elif prim == "ne":
-            body = f"(distinct {ins[0]} {ins[1]})"
-        elif prim == "and":
-            body = f"(and {ins[0]} {ins[1]})"
-        elif prim == "or":
-            body = f"(or {ins[0]} {ins[1]})"
-        elif prim == "not":
-            body = f"(not {ins[0]})"
-        elif prim == "xor":
-            body = f"(xor {ins[0]} {ins[1]})"
-        elif prim == "select_n":
-            # select_n(which, on_false, on_true): ite takes the true case first
-            body = f"(ite {ins[0]} {ins[2]} {ins[1]})"
-        elif prim == "convert_element_type":
+                names[out.id] = ("1.0",) * n_out
+                continue
+            if y == 1:
+                names[out.id] = tuple(ins[0][i] for i in idx)
+                continue
+            n = abs(y)
+            bodies = []
+            for i in idx:
+                base = ins[0][i]
+                prod = base if n == 1 else f"(* {' '.join([base] * n)})"
+                bodies.append(prod if y > 0 else f"(/ 1.0 {prod})")
+            names[out.id] = define(out, bodies)
+            continue
+        if prim == "convert_element_type":
             src = eqn.invars[0].aval.dtype or ""
             dst = str(params.get("new_dtype"))
+            (idx,) = _pair_elementwise(eqn)
             if src == "bool" and dst != "bool":
-                body = f"(ite {ins[0]} 1.0 0.0)"
+                bodies = [f"(ite {ins[0][i]} 1.0 0.0)" for i in idx]
+                names[out.id] = define(out, bodies)
             else:
-                alias = ins[0]  # value-preserving: identity in emission
-        else:
-            # identity plumbing: shape ops, assume/nonvacuity data flow, and
-            # the validated single-element forms (a one-index `slice`, a
-            # one-addend `reduce_sum`) — each denotes its operand's own
-            # value, so it ALIASES that operand's term. No new term, no new
-            # declaration: sharing is preserved by construction, and the
-            # slice validator is what guarantees the form really is
-            # single-element.
-            alias = ins[0]
-        if alias is not None:
-            names[out.id] = alias
-        else:
-            sort = "Bool" if out.aval.dtype == "bool" else "Real"
-            names[out.id] = f"t{out.id}"
-            lines.append(f"(define-fun t{out.id} () {sort} {body})")
+                names[out.id] = tuple(ins[0][i] for i in idx)  # identity
+            continue
+        if prim in ("neg", "not"):
+            (idx,) = _pair_elementwise(eqn)
+            op = "-" if prim == "neg" else "not"
+            names[out.id] = define(
+                out, [f"({op} {ins[0][i]})" for i in idx]
+            )
+            continue
+        sym = {
+            "add": "+", "sub": "-", "mul": "*", "div": "/",
+            "lt": "<", "le": "<=", "gt": ">", "ge": ">=",
+            "eq": "=", "ne": "distinct",
+            "and": "and", "or": "or", "xor": "xor",
+        }
+        if prim not in sym and prim not in ("max", "min"):
+            raise ValueError(
+                f"emission has no rule for primitive {prim!r} — slice "
+                f"validation should have declined this"
+            )
+        ia, ib = _pair_elementwise(eqn)
+        bodies = []
+        for i in range(n_out):
+            a, b = ins[0][ia[i]], ins[1][ib[i]]
+            if prim == "max":
+                bodies.append(f"(ite (>= {a} {b}) {a} {b})")
+            elif prim == "min":
+                bodies.append(f"(ite (<= {a} {b}) {a} {b})")
+            else:
+                bodies.append(f"({sym[prim]} {a} {b})")
+        names[out.id] = define(out, bodies)
 
-    lines.append(f"(assert (not {term(sl.root)}))")
+    root_terms = term(sl.root)
+    if len(root_terms) == 1:
+        negated = f"(not {root_terms[0]})"
+    else:
+        # the array assert is the universal elementwise claim: its negation
+        # is satisfied where AT LEAST ONE element predicate fails
+        negated = f"(not (and {' '.join(root_terms)}))"
+    lines.append(f"(assert {negated})")
     lines.append("(check-sat)")
     lines.append("(get-model)")
     text = "\n".join(lines) + "\n"

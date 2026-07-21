@@ -450,4 +450,52 @@ verdicts:
   statuses, with two coverage lines improving and disclosed. 782 tests
   green with both solvers; 771 with jax and no solver; 674 zero-dep.
 
+- **2026-07-21 (pre-release): bounded static-shape array emission landed
+  through seven adversarial rounds — every defect found pre-landing,
+  none shipped.** The SMT escalation extends from scalar-only to small
+  static-shape array obligations: per-element terms with **broadcast
+  sharing preserved** (a broadcast scalar is one constant everywhere —
+  the decorrelation hazard), structural ops as index routing against a
+  single measured-against-jax oracle, transparent-call descent, array
+  asserts as negated element-conjunctions, witnesses that **name the
+  violating element** (membership and violation replayed per element
+  through the conjunctive validator), and **one per-obligation emission
+  budget** (512 element terms *and* root conjuncts, measured against
+  solver cost; declines quote both numbers) replacing seven scattered
+  scalar gates. Array obligations that declined now decide **by
+  design**; scalar emission is byte-identical (pinned script hashes);
+  no recorded verdict moved at any round.
+  **The first-contact discipline earned its budget.** The build carried
+  the audit-this-surface-as-if-it-predates-us instruction, and the arc
+  found, across builder, auditor, and four re-attacks: a latent z3
+  model-echo screening defect (every expression-valued `define-fun`
+  flagged non-rational — live since the first z3 transport); a latent
+  routing-oracle hole (jax-illegal `broadcast_in_dim` dims silently
+  mis-routing) with its propagation sibling crashing raw; **shape
+  nonnegativity validated nowhere** — `any_array((-2,-2), …)` traced
+  through the public API and the pipeline coherently minted a
+  REFUTED-with-witness over an *empty declared set* (UNSOUND; fixed at
+  declaration and at every consumption layer); a budget bypass via
+  structural-only inflation; stand-in laundering through lying-aval
+  consumers, closed **property-shaped at the env read** (the gate keys
+  on the var id — the one handle a consumer must state truthfully —
+  with bind-and-register as a single inseparable operation); decoder
+  payload-length and dim-type gaps; and a bounded **validation pass at
+  `from_dict`** (integral/nonnegative shapes everywhere, declaration
+  aval-vs-params, payload lengths, literal/const aval-vs-value) so
+  loaded IR meets the same loud posture traced IR always had — with
+  per-primitive shape inference explicitly out of scope.
+  **Documented residual, by owner-facing decision rather than
+  exhaustion:** adversarially hand-constructed IR (never `from_dict`,
+  never a trace) whose self-descriptions disagree beyond the bounded
+  checks can still reach a definite propagation verdict (the final
+  re-attack's I1: a params-vs-aval addend-count dispute in a
+  reduction). Classified FRAGILE-by-convention; the invariant that
+  holds, verified under attack: *no refused-class value — malformed or
+  uninhabited shape, length-lying payload — reaches arithmetic,
+  emission, replay, or a verdict by any route.* All 29 recorded
+  harnesses round-trip through the validated door with byte-identical
+  content hashes and statuses. 906 tests green with both solvers; 758
+  zero-dep.
+
 *(no releases yet)*

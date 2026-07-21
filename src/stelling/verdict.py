@@ -151,6 +151,11 @@ class Witness:
     values: tuple[tuple[str, str], ...]  # (input name, exact rational)
     produced_by: str  # solver name/version/transport that returned the model
     replay: str  # how the confirmation was performed
+    # for an ARRAY-shaped assert operand: the flat C-order indices of the
+    # element predicates that are false at this point, per the same replay
+    # that confirmed the violation. Empty for the scalar form, whose
+    # rendering is unchanged — the violated predicate is the scalar itself.
+    violating_elements: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.values:
@@ -297,6 +302,14 @@ class Verdict:
                 for name, value in w.values:
                     approx = _approx(value)
                     lines.append(f"    {name} = {value}{approx}")
+                if w.violating_elements:
+                    # array-scale honesty: the assert was a universal
+                    # elementwise claim; name exactly which element(s) this
+                    # point falsifies (flat C-order indices)
+                    lines.append(
+                        "    violating element(s) of the assert operand: "
+                        + ", ".join(str(i) for i in w.violating_elements)
+                    )
                 lines.append(f"    produced by: {w.produced_by}")
                 lines.append(f"    replay: {w.replay}")
         for o in self.obligations:

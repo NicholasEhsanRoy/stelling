@@ -128,40 +128,39 @@ def test_acceptance_interval_only_is_unknown_at_full_coverage():
         assert dict(p.transfers_used)["integer_pow"] == "sound"
 
 
-def test_acceptance_family_escalation_is_blocked_by_the_emission_boundary():
-    """**A pinned coverage finding, not a pass.**
+def test_acceptance_family_escalation_is_no_longer_blocked():
+    """The conscious flip of a pinned coverage finding.
 
-    The three rows take the acceptance family to full interval coverage
-    and unblock its division guard, but they do not make it escalatable:
-    its obligation slice crosses genuine 3-element arrays, and the v1 SMT
-    emission is scalar-only. Escalation therefore declines and both
-    verdicts stay UNKNOWN — where the round's specification expected
-    VERIFIED at r_lo=0.71 and REFUTED at r_lo=0.11.
-
-    Closing it needs a FOURTH row (`concatenate`) plus array-element term
-    tracking and array-shaped elementwise arithmetic. The list is closed
-    at three, so this is reported rather than built, and pinned here so
-    the day it changes is a conscious act.
-    """
+    The three-rows round pinned this family as NOT escalatable: its slice
+    crosses genuine 3-element arrays and the v1 emission was scalar-only,
+    so both regions stayed UNKNOWN where the specification expected
+    VERIFIED at r_lo=0.71 and REFUTED at r_lo=0.11. The bounded
+    static-shape array emission closes exactly that gap (concatenate
+    routing, per-element terms, elementwise arithmetic, the n-ary
+    reduce_sum) — this family is its DOT acceptance case, and the day the
+    pin changed is today, deliberately. The end-to-end known answers live
+    in test_array_acceptance.py; here the former decline is asserted to
+    be a validated slice."""
     for r_lo in (0.71, 0.11):
         cj = trace(acceptance_harness(r_lo))
         p = propagate(cj)
         items = slice_unknown_obligations(cj, p, interval_env(cj))
         assert len(items) == 1
-        assert isinstance(items[0], DeclinedObligation)
-        assert "scalar-only" in items[0].reason
+        assert not isinstance(items[0], DeclinedObligation), items[0].reason
+        assert items[0].fragment == "QF_NRA"
 
 
 def test_acceptance_family_division_guard_is_unblocked_by_row_one():
     """What row 1's interval transfer DID buy the acceptance family: the
     divisor `s` is no longer ⊤, so it definitely excludes zero and the
-    div guard passes. Before this row the slice died on the divisor."""
-    from stelling.obligation import _atom_excludes_zero
+    (now per-element) div guard passes. Before this row the slice died on
+    the divisor."""
+    from stelling.obligation import _zero_element_problem
 
     cj = trace(acceptance_harness(0.71))
     env = interval_env(cj)
     (div_eqn,) = [e for e in cj.jaxpr.eqns if e.primitive == "div"]
-    assert _atom_excludes_zero(div_eqn.invars[1], env)
+    assert _zero_element_problem(div_eqn.invars[1], env) is None
     s_box = env[div_eqn.invars[1].id]
     assert s_box.los[0] > 0.0, (s_box.los, s_box.his)
 

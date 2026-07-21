@@ -67,25 +67,25 @@ subsidy for careless fixes; one data point cannot distinguish them.
 **(b)** The UNSOUND-fixes-are-re-attacked rule found F7 in the first
 fix on the rule's first application (`design/constraining-assume.md`).
 **(c)** **Watch** — the metric: *UNSOUND-fix re-attacks that find an
-escape / UNSOUND-fix re-attacks run*. Current: **3 / 6** —
-constraining-assume pass: F1's fix → F7 found; F3's fix → clean; F7's
-fix → clean. IEEE pass: U1's fix (the subnormal haze) → U2 found (the
-haze was dtype-blind); U2's fix → clean. Three-rows pass: the integer
-guard fix → **UNSOUND 3 and 4 found** (`div` unguarded on the transfer
-side; ieee falsified by FMA contraction). **All three catches share one
-shape** — the fix was correct for the case that taught it and blind to a
-sibling case (aggressive-vs-exact boxes; binary64-vs-per-dtype bands;
-emission-sites-vs-transfer-sites and reassociation-vs-contraction). The
-escapes are **scope errors, not carelessness**, which is why the answer
-is a mandatory sweep with its axis named (L12), not more care. Track per
-pass; act only on a trend — but note every catch so far has been a real
-false verdict. **First evidence of convergence, recorded 2026-07-19:**
-within the three-rows pass the re-attack sequence ran 2 → 1 → 0 UNSOUND
-across three successive fix rounds, and the round that returned 0 was
-the one whose fix had stopped enumerating cases (L12's addendum). So the
-metric may be measuring *fix architecture* rather than fix care — a
-class-closing fix survives re-attack, an enumerating one does not.
-Watch whether that holds on the next pass before believing it.
+escape / UNSOUND-fix re-attacks run*. Current: **8 / 12** —
+constraining-assume: F1'→F7 found, F3'→clean, F7'→clean. IEEE:
+U1'→U2 found, U2'→clean. Three-rows: int-guard'→U3+U4 found,
+div/FMA'→U5 found, taint'→clean (cosmetic only). Array-emission arc
+(2026-07-21): F3'→**R1+R2 found** (R1 public-API UNSOUND),
+negshape'→**N1+N2 found**, read-gate'→**P1 found**, P1'→**I1 found**
+(inside the documented residual class; the cycle then ended by the
+pre-fixed stop rule, not by exhaustion). Every catch is a fix correct
+for the case that taught it and blind to a sibling — the answer stays
+L12's axis-named sweep, not more care. **Second convergence signature,
+recorded with the arc:** the array-arc catches were progressively
+narrower (public API → 2 coordinated from_dict lies → 3 lies →
+direct-construction-only residual), and the final round confirmed the
+stated invariant *for its scope* — the rule kept catching, but each
+catch was strictly smaller, and the honest terminus was a **decision**
+(stop and surface the residual class as an owner posture question)
+rather than a clean round. A net that only ever returns clean was
+suspicious; a net whose catches shrink monotonically toward a
+documented residual is what closing a class actually looks like.
 **(d)** Every pass that fixes an UNSOUND finding.
 
 ## L4 — Arguments from me, facts from the probe
@@ -361,6 +361,22 @@ execution surface the corpus has not previously exercised.
 > class designed to run on exercised machinery can meet a new codebase
 > without paying first-contact tax; the tax returns the moment an
 > obligation needs a new primitive.
+
+> **The prediction confirmed three times in one pass (2026-07-21, the
+> array-emission build).** The build carried the first-contact
+> instruction explicitly, and the surface still yielded three latent
+> defects, each predating the build: (1) the **builder** hit the z3
+> model-echo screening defect — every expression-valued `define-fun`
+> echo flagged "non-rational", degrading every z3-consulted sat
+> witness — latent since the first z3 transport, exposed by the first
+> QF_LRA-sat path; (2) the **auditor** found the routing-oracle hole
+> (jax-illegal `broadcast_in_dim` dims silently mis-routing) and its
+> propagation sibling crashing raw; (3) the **re-attack** found shape
+> nonnegativity validated *nowhere* — `any_array((-2,-2), …)` traced
+> through the public API and the pipeline coherently minted a
+> REFUTED-with-witness over an *empty declared set*. None of the three
+> was in the new code's own logic; all three were in what the new code
+> first touched. The instruction is not a formality: budget the rounds.
 
 ## L15 — A regression test is a comment until it fails against the unfixed code
 

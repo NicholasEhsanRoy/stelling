@@ -60,6 +60,7 @@ from stelling.obligation import (
     DeclinedObligation,
     ObligationSlice,
     slice_unknown_obligations,
+    violating_elements,
     witness_is_valid,
 )
 from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
@@ -424,8 +425,23 @@ def _run_z3(script_text: str, wall_s: float) -> _RawResult:
                         values.append((decl.name(), str(v.as_fraction())))
                     elif z3.is_int_value(v):
                         values.append((decl.name(), str(v.as_long())))
-                    else:  # e.g. an algebraic root-obj: not a rational
+                    elif z3.is_algebraic_value(v):
+                        # an algebraic numeral (a root-obj like √2): a
+                        # witness VALUE nothing can replay exactly — the
+                        # one shape the nonrational policy exists for
                         nonrational = True
+                    # everything else is a definition echo: z3 lists the
+                    # script's define-funs (Real and Bool alike) among the
+                    # model decls, VALUED AS EXPRESSIONS over the inputs
+                    # (measured: `t8_0 -> x0_0 + x0_1`). Those are
+                    # auxiliary definitions, not witness values, and must
+                    # not poison replayability — declared inputs are
+                    # always Real constants (rational or algebraic), and
+                    # _screen_model ignores undeclared names anyway.
+                    # Latent since the first z3 transport (every sat model
+                    # with any define-fun was flagged); exposed by the
+                    # first QF_LRA sat-with-witness path, where z3 is the
+                    # portfolio primary (the array FACE case).
                 box["values"] = tuple(sorted(values))
                 box["nonrational"] = nonrational
             elif answer == "unknown":
@@ -577,7 +593,15 @@ def _sexpr_fraction(x: object) -> Fraction:
 
 def _model_values_from_text(text: str) -> tuple[tuple[tuple[str, str], ...], bool]:
     """Parse ``(define-fun name () Sort value)`` forms out of solver stdout.
-    Returns (values, saw_nonrational)."""
+    Returns (values, saw_nonrational).
+
+    Only arith-sorted (Real/Int) zero-arity entries are witness-value
+    candidates; entries of other sorts (a solver echoing the script's Bool
+    ``define-fun``\\ s, e.g.) are auxiliary definitions, not witness
+    values, and must not poison replayability — declared inputs are always
+    Real, and ``_screen_model`` ignores undeclared names. ``nonrational``
+    is reserved for what it names: an arith value nothing can replay
+    exactly (an algebraic number, an unparseable numeral)."""
     values: list[tuple[str, str]] = []
     nonrational = False
     try:
@@ -590,10 +614,11 @@ def _model_values_from_text(text: str) -> tuple[tuple[tuple[str, str], ...], boo
         if not isinstance(form, list) or not form:
             continue
         if form[0] == "define-fun" and len(form) >= 5 and form[2] == []:
-            try:
-                values.append((str(form[1]), str(_sexpr_fraction(form[4]))))
-            except (ValueError, ZeroDivisionError):
-                nonrational = True
+            if form[3] in ("Real", "Int"):
+                try:
+                    values.append((str(form[1]), str(_sexpr_fraction(form[4]))))
+                except (ValueError, ZeroDivisionError):
+                    nonrational = True
         else:
             pending.extend(f for f in form if isinstance(f, list))
     return tuple(sorted(values)), nonrational
@@ -822,10 +847,11 @@ def _complete_values(
     got: dict[str, Fraction],
     notes: list[str],
 ) -> dict[str, Fraction]:
-    """Fill genuine per-variable don't-cares from each input's own declared
-    box (disclosed; the replay still decides). Callers guarantee at least
-    one declared input was actually supplied (audit F2) — a model that
-    supplies none is a transport failure, not a field of don't-cares."""
+    """Fill genuine per-element don't-cares from each input element's own
+    declared box (disclosed per element; the replay still decides).
+    Callers guarantee at least one declared input element was actually
+    supplied (audit F2) — a model that supplies none is a transport
+    failure, not a field of don't-cares."""
     values: dict[str, Fraction] = {}
     for inp in sl.inputs:
         if inp.name in got:
@@ -889,6 +915,11 @@ def make_validated_witness(
         values=tuple((inp.name, str(values[inp.name])) for inp in sl.inputs),
         produced_by=produced_by,
         replay=_REPLAY_SENTENCE,
+        # which element(s) of an ARRAY assert operand are false at the
+        # point — the same replay computation the validator's violation
+        # conjunct just ran, re-read for naming (a scalar operand names
+        # nothing: the predicate itself is the violation, as before)
+        violating_elements=violating_elements(sl, values),
     )
 
 
@@ -1074,12 +1105,21 @@ def _dispatch_obligation(
                 solver_label=backend.label,
                 script_text=script.text,
             )
+            elements = ""
+            if witness.violating_elements:
+                # the array assert is a universal elementwise claim; the
+                # detail names which element(s) the witness falsifies
+                # (flat C-order indices into the assert operand)
+                elements = (
+                    "; violating element(s) of the assert operand: "
+                    + ", ".join(str(i) for i in witness.violating_elements)
+                )
             return ObligationEscalation(
                 index=sl.index,
                 outcome=OB_VIOLATED_WITNESS,
                 detail=(
                     f"violated at a concrete witness found by {backend.label} "
-                    f"({sl.fragment}); {_REPLAY_SENTENCE}"
+                    f"({sl.fragment}); {_REPLAY_SENTENCE}{elements}"
                 ),
                 invocations=invocations(),
                 witness=witness,

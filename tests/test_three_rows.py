@@ -801,7 +801,12 @@ def test_slice_emission_used_to_decline_and_the_old_reason_is_gone():
     assert "slice" in _SUPPORTED and "reduce_sum" in _SUPPORTED
 
 
-def test_slice_with_non_unit_strides_declines_with_the_form_quoted():
+def test_slice_with_non_unit_strides_now_routes_by_measured_semantics():
+    # array-emission build: strided static slices are index bookkeeping
+    # (measured: lax.slice(arange(10), (1,), (8,), (3,)) == [1, 4, 7]) —
+    # the old non-unit-stride decline is retired with the scalar-only
+    # boundary. Here stride 2 over [0, 1) still selects exactly element 0,
+    # and the emission aliases it to x0 with no new term.
     q = single_element_slice_query(
         params=[
             ("start_indices", (0,)),
@@ -811,16 +816,19 @@ def test_slice_with_non_unit_strides_declines_with_the_form_quoted():
     )
     p = propagate(q)
     (item,) = slice_unknown_obligations(q, p, interval_env(q))
-    assert isinstance(item, DeclinedObligation)
-    assert "non-unit strides" in item.reason and "(2,)" in item.reason
+    assert isinstance(item, ObligationSlice), getattr(item, "reason", item)
+    script = emit(item, "z3", 1000)
+    assert script.text.count("declare-const") == 1
+    assert "(<= x0 (/ 1 2))" in script.text
 
 
-def test_slice_not_determining_one_element_declines_with_the_form_quoted():
-    """Defence in depth, checked at the validator directly. ``_check_scalar``
-    reads the AVAL shapes; this check reads the slice PARAMS. Well-formed
-    IR keeps the two consistent, so only hand-built or deserialized IR can
-    make them disagree — and that is exactly the case where a size-1 aval
-    must not be allowed to alias a multi-element selection."""
+def test_slice_params_contradicting_the_aval_decline_with_the_form_quoted():
+    """Defence in depth, checked at the validator directly: the routing
+    reads the slice PARAMS and refuses when they contradict the recorded
+    aval shapes. Well-formed IR keeps the two consistent, so only
+    hand-built or deserialized IR can make them disagree — and that is
+    exactly the case where an aval must not be allowed to alias a
+    differently-sized selection (the array-scale aliasing bug)."""
     from stelling.obligation import _Decline, _Slicer
 
     q = single_element_slice_query()
@@ -831,20 +839,37 @@ def test_slice_not_determining_one_element_declines_with_the_form_quoted():
         var(2, aval((1,))),
         [
             ("start_indices", (0,)),
-            ("limit_indices", (3,)),  # three elements, not one
+            ("limit_indices", (3,)),  # three elements from a 1-element operand
             ("strides", None),
         ],
     )
     with pytest.raises(_Decline) as e:
         slicer._validate(bad)
-    assert "single" in e.value.reason
-    assert "limit_indices=(3,)" in e.value.reason
+    assert "'slice'" in e.value.reason
+    assert "outside the operand's extent" in e.value.reason
+    # and params consistent with the OPERAND but not the OUTPUT aval also
+    # decline (the routing's shape must match the recorded aval exactly)
+    bad2 = eqn(
+        "slice",
+        [var(1, aval((3,)))],
+        var(2, aval((1,))),  # aval claims one element; params select two
+        [
+            ("start_indices", (0,)),
+            ("limit_indices", (2,)),
+            ("strides", None),
+        ],
+    )
+    with pytest.raises(_Decline) as e2:
+        slicer._validate(bad2)
+    assert "contradicts the recorded aval shape" in e2.value.reason
 
 
-def test_multi_element_slice_declines_naming_its_shape_not_the_primitive():
-    """The row's actual boundary: indexing a genuine array still declines,
-    but it now declines quoting the FORM, which is what the emission set
-    being scalar-only means."""
+def test_multi_element_slice_now_routes_onto_the_shared_source_term():
+    """The old scalar-only boundary is retired by the array-emission
+    build: indexing a genuine (small, static) array is index bookkeeping.
+    A scalar broadcast to (3,) then sliced back down is STILL the one
+    declared constant — sharing preserved through the whole structural
+    chain, no new terms, no fresh variables."""
     a3 = aval((3,))
     x, arr, sel, sq = var(0), var(1, a3), var(2, aval((1,))), var(3)
     pred, out = var(4, BOOL), var(5, BOOL)
@@ -875,9 +900,11 @@ def test_multi_element_slice_declines_naming_its_shape_not_the_primitive():
     )
     p = propagate(q)
     (item,) = slice_unknown_obligations(q, p, interval_env(q))
-    assert isinstance(item, DeclinedObligation)
-    assert "scalar-only" in item.reason
-    assert "outside the supported emission set" not in item.reason
+    assert isinstance(item, ObligationSlice), getattr(item, "reason", item)
+    script = emit(item, "z3", 1000)
+    assert script.text.count("declare-const") == 1  # one input, one constant
+    assert "(<= x0 (/ 1 2))" in script.text  # element 1 of the bcast IS x0
+    assert script.text.count("define-fun") == 1  # only the comparison
 
 
 def test_reduce_sum_over_one_addend_emits_as_that_addend():
@@ -891,7 +918,11 @@ def test_reduce_sum_over_one_addend_emits_as_that_addend():
     assert script.text.count("declare-const") == 1
 
 
-def test_reduce_sum_emission_declines_multi_element_and_integer_operands():
+def test_reduce_sum_emission_now_nary_for_floats_still_declines_integers():
+    # array-emission build: the multi-element float reduction emits the
+    # exact n-ary sum of the element terms (a broadcast scalar stays ONE
+    # shared term inside it); the integer decline is unchanged — jax
+    # integer addition wraps, Real addition does not model it.
     a3 = aval((3,))
     x, arr, s = var(0), var(1, a3), var(2)
     pred, out = var(3, BOOL), var(4, BOOL)
@@ -912,8 +943,25 @@ def test_reduce_sum_emission_declines_multi_element_and_integer_operands():
     )
     p = propagate(q)
     (item,) = slice_unknown_obligations(q, p, interval_env(q))
-    assert isinstance(item, DeclinedObligation)
-    assert "scalar-only" in item.reason
+    assert isinstance(item, ObligationSlice), getattr(item, "reason", item)
+    script = emit(item, "z3", 1000)
+    assert "(+ x0 x0 x0)" in script.text  # n-ary, and the scalar is SHARED
+    assert script.text.count("declare-const") == 1
+    # the integer half of the boundary stands exactly as before
+    i3 = ir.Aval(kind="ShapedArray", shape=(3,), dtype="int32")
+    i0 = ir.Aval(kind="ShapedArray", shape=(), dtype="int32")
+    from stelling.obligation import _Decline, _Slicer
+
+    slicer = _Slicer(q, interval_env(q))
+    bad = eqn(
+        "reduce_sum",
+        [var(1, i3)],
+        var(2, i0),
+        [("axes", (0,))],
+    )
+    with pytest.raises(_Decline) as e:
+        slicer._validate(bad)
+    assert "'reduce_sum'" in e.value.reason and "int32" in e.value.reason
 
 
 def test_slice_replay_evaluates_the_single_element_form():
