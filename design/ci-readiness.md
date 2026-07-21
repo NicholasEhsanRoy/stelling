@@ -162,3 +162,100 @@ unconstructable for declarations — the checked class — and remains
 FRAGILE-by-convention beyond it). Within that stated bound, **"safe on
 all reachable construction paths" is now verified by enumeration plus a
 language-level funnel, not asserted.** Part B may run.
+
+---
+
+# Part B reading (2026-07-21)
+
+## B1 — MADDENING, unguided (8 posable sites, 2 out-of-class)
+
+S2 is the finding: **the D-clamp** (`precond.py:77`,
+`where(D > 0, D, 1.0)`) — `diag ≠ 0` REFUTED, witness `(0,1,0,0)`,
+violating elements named. Adjudicated **REAL-BUT-CONDITIONAL**: it
+composes with S7's admissible `mass = 0` (the constant mode's diagonal
+entry is then exactly 0), so the clamp silently substitutes 1.0 and the
+Jacobi preconditioner silently no-ops on the very mode where the
+operator is singular — two REFUTEDs chaining into one silent-degradation
+scenario. The precision gap is named: the tool cannot see the
+`mass > 0 ⇒ diag > 0` theorem, which is **LA-shaped knowledge** (Part C).
+S3/S4 VERIFIED but **tautology-shaped** under `widen()` (range theorems:
+`|x| ≥ 0`, `Σx² ≥ 0`) — reported as *guards verified as unconditional
+theorems*, not envelope-dependent facts. S6 VERIFIED, bounds
+load-bearing. S1/S5 honest declines (`sqrt`, `abs` outside the emission
+set — decline-map data). S7/S8: the guided pass's findings re-derived by
+the unguided protocol.
+
+## B2 — lineax 0.1.1, unguided, blind (81 sites, 52 poses)
+
+**Tally: 9 VERIFIED, 17 REFUTED, 26 declines** (dominant decline:
+`dot_general` outside the emission set ×10 — every tree_dot/quadratic
+form; then `abs`, `iota`, `cond`, non-finite constants, zero-crossing
+divisors, int64 declarations).
+
+**The false-positive adjudication (every REFUTED, main agent, against
+the source):**
+
+- **REAL — 8 of 17.** The flagship: **`diagonal.py:81` — a
+  `well_posed=True` `DiagonalLinearOperator` divides by the
+  caller-asserted-nonzero diagonal with NO check anywhere** (the
+  `well_posed=False` branch has an rcond guard; the `True` branch is
+  bare `vector / diag`) — witness `(0,1,0,0)`, violating elements named:
+  a tag honoured, never verified, silent inf/nan. **`triangular.py`
+  stored diagonal ≠ 0** — same class. **The tolerance guard bypass**:
+  `__check_init__` validates tolerances behind `isinstance(…, (int,
+  float))`, so an **array-typed tolerance skips validation** and a
+  negative tolerance flows in silently — a guard that exists and misses.
+  `DivLinearOperator` scalar ≠ 0 unguarded. Plus four unguarded config
+  scalars (`stabilise_every`, `restart`, `stagnation_iters`,
+  `max_steps` — verified: `__check_init__` checks none of them; the
+  `mass = 0` class, low severity).
+- **FALSE ALARMS — 9 of 17**, three nameable causes: (a) **loop-state
+  denominators posed as inputs** (the lsmr `rho` family and two sqrt
+  domains — algorithmic invariants guarantee them, and they are
+  *out-of-class by the registration* — the mechanical protocol failed to
+  apply the input-side boundary to division sites); (b) **tag semantics
+  misread** (`unit_diagonal` is an *instruction* to jax to ignore the
+  stored diagonal, not an assertion about it — 2 poses); (c) **sentinel
+  and guard-strength conventions** (`conlim = 0`, `rcond = 0` are
+  meaningful values the guards deliberately pass — 4 poses).
+
+**The number: raw false-positive rate 9/17 (53%); applying the
+registered class boundary the protocol should have enforced (loop-state
+sites excluded), 6/14 (43%).** Middle band: real findings, high
+false-positive rate — **the CI gap is precision, and its causes are
+finite and named**: denominator-provenance classification (input vs
+loop-carried), tag-semantics reading (is the tagged data actually
+read?), and sentinel conventions. Each is a protocol/analysis
+refinement, not a soundness problem.
+
+**The adoption artifact exists**: an unguided, blind sweep of an
+external library found a genuine honoured-never-verified solver tag with
+a concrete element-named witness, plus a real validation-gate bypass —
+on code stelling's author did not write.
+
+# Part C — the CI-trust gap, named (report-only)
+
+**Already automatic** (structural, run on every verdict): witness replay
+(membership ∧ violation, conjunctive), the provenance gate, the census
+asserts, stamp validation, the from_dict/type-level IR gates.
+**Not automatic today:** (i) **the vacuity control** — `check()` does
+not run `widen()`; per-harness vacuity is a manual discipline (B1's
+tautology-shaped VERIFIEDs were caught only because the duty was
+registered) — the clearest candidate to automate; (ii) the recorded-set
+no-flip gate (automatable as a CI job; today a manual step); (iii) the
+**both-faces adjudication and false-positive adjudication** — inherently
+human, semantic judgements (B2's 9 false alarms were separable from the
+8 real findings only by reading the target's source); CI can *surface*,
+a human still *adjudicates*. A CI-trusted stelling equals the
+human-supervised one only after (i) and (ii) are wired; (iii) is the
+honest permanent residue.
+
+**The affine/LA record, corrected**: "LA is deepening, not broadly
+useful" was **argued, not measured**. The measured record now says: the
+magnetics governing property (residual-bounds-error via conditioning) is
+LA-contract-shaped *with a measured scar*, and B1's one real composed
+finding (the D-clamp chain) is blocked from full precision by exactly
+the `mass > 0 ⇒ diag > 0` theorem — **LA-shaped knowledge appearing as
+the false-alarm cause in the field test**. Two independent evidence
+points *for* LA's immediate usefulness; the roadmap note is corrected —
+LA's status is *unmeasured, with specific evidence it would bite*.
