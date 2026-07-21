@@ -29,3 +29,16 @@ repos:
           ! grep -rn "jax\._src" src --include="*.py"'
         pass_filenames: false
         always_run: true
+      - id: library-identifier-hygiene
+        name: core prose is library-neutral; provenance lines carry census/design markers
+        # ARCHITECTURE.md Rule 2. Logically identical to
+        # tests/test_prose_hygiene.py (banned list + marker rule kept in
+        # sync there); a divergence between hook and test is a bug. The
+        # second grep anchors past "path:lineno:" so a marker in a file
+        # PATH (census.py) cannot mask an unmarked line.
+        language: system
+        entry: >-
+          bash -c 'set -e;
+          ! grep -rniE "\b(mime|maddening|lineax|equinox|diffrax|blackjax|optimistix|optax)\b" src/stelling --include="*.py" | grep -viE "^[^:]*:[0-9]+:.*(census|design/)"'
+        pass_filenames: false
+        always_run: true

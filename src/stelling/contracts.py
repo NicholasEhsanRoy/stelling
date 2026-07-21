@@ -526,8 +526,8 @@ def conditioning_2x2_field(shape, dtype, theta_range, kappa, transform) -> Contr
     (:data:`stelling.obligation.ELEMENT_BUDGET` = 512 element terms — a
     committed, measured-solver-cost decision; it does not move for this
     template). With a per-cell assembly costing ~11 element terms per
-    matrix (the MIME LSQ attachment's shape,
-    corpus/supply/mime_lsq_conditioning.py), the conditioning conjunct
+    matrix (the worked shape: a per-cell normal-matrix assembly of a
+    solver's least-squares stencil), the conditioning conjunct
     escalates up to N = 46 matrices and declines loudly at N = 47 —
     "517 element terms ... over the per-obligation emission budget of
     512", both numbers quoted in the decline. Interval-decidable
@@ -734,8 +734,8 @@ def coefficient_contrast(
     :func:`stelling.preconditions.field_positive`: your code's own
     construction, ``None`` for identity, a tuple/list return posing the
     obligation pair per produced value). The motivating construction is
-    permeability ``mu = 1 + chi`` over a declared susceptibility
-    envelope.
+    a positive coefficient field built by your construction from a
+    declared parameter envelope, e.g. ``mu = 1 + chi``.
 
     **requires (mechanized), per produced value:**
 

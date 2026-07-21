@@ -304,10 +304,10 @@ def _value_to_interval(v, shape: tuple[int, ...]) -> iv.IntervalArray:
 # Exactly the target census list + the harness primitives, plus the closed
 # pytree-probe registration round (abs, eq, ne, and, or, stop_gradient,
 # reshape, pow, reduce_or — the primitives the probe's own ⊤ list named),
-# plus the maddening heat-node round's one allowed structural addition
-# (scatter, static-index set form only), plus the MIME fvm round's two
-# allowed structural additions (gather, static-index row form only;
-# transpose).
+# plus the maddening heat-node census round's one allowed structural
+# addition (scatter, static-index set form only), plus the two allowed
+# structural additions of the MIME fvm census round (gather,
+# static-index row form only; transpose).
 # Signature:
 # transfer(eqn, params: dict, ins: list[IntervalArray]) -> list[IntervalArray]
 
@@ -507,8 +507,9 @@ _SCATTER_SET_CORE = {
 
 def _t_scatter(eqn, params, ins):
     """``x.at[k].set(v)`` in its static-index form — the allowed-by-census
-    structural addition from the maddening HeatNode trace (the Dirichlet
-    boundary writes ``T_new.at[0].set(T_left)`` / ``.at[-1].set(T_right)``).
+    structural addition from the maddening HeatNode census trace (the
+    Dirichlet boundary writes ``T_new.at[0].set(T_left)`` /
+    ``.at[-1].set(T_right)``).
 
     Covered form, exactly: rank-1 operand, one index row holding one
     definite in-range integer, scalar update, no update computation
@@ -923,12 +924,12 @@ TRANSFERS = {
     # _t_scatter).
     "scatter": (_t_scatter, TIER_EXACT),
     # x[idx], static-index leading-axis row form only — census addition from
-    # the MIME fvm laplacian trace; every other gather configuration
+    # the MIME fvm laplacian census trace; every other gather configuration
     # declines (see _t_gather).
     "gather": (_t_gather, TIER_EXACT),
-    # axis permutation: pure data movement (MIME fvm round, reached inside
-    # the transparent jnp.linalg.inv jit); malformed permutations decline
-    # inside iv.transpose (IntervalError -> noted ⊤).
+    # axis permutation: pure data movement (MIME fvm census round, reached
+    # inside the transparent jnp.linalg.inv jit); malformed permutations
+    # decline inside iv.transpose (IntervalError -> noted ⊤).
     "transpose": (
         lambda eqn, p, ins: [
             iv.transpose(ins[0], tuple(p.get("permutation", ()) or ()))

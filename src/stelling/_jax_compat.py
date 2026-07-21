@@ -84,8 +84,8 @@ _OPAQUE_PARAMS = frozenset(
         # level by definition, for every analysis stelling will ever run.
         # Found by census contact (diffrax/equinox error paths, 0.10.2).
         ("pure_callback", "callback"),
-        # lineax's `linear_solve` is an equinox-defined primitive; `flatten`
-        # is equinox flattening plumbing (census contact, lineax 0.1.1).
+        # lineax's `linear_solve` is an equinox-defined primitive (census
+        # contact, lineax 0.1.1); `flatten` is equinox plumbing (same census).
         ("linear_solve", "flatten"),
     }
 )

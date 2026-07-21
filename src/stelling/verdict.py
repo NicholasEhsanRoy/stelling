@@ -61,7 +61,8 @@ ARITHMETIC_MODE_INTERVAL_IEEE = (
 # The representation names how brackets are computed; the SEMANTICS names
 # which arithmetic the verdict is *about*. They are different fields because
 # the gap between them is where false-VERIFIED lives: `t + dt > t` is
-# trivially true in ℝ and was a 258-day float bug (diffrax#632). Today's
+# trivially true in ℝ and was a 258-day float bug
+# (diffrax#632 — the census exhibit corpus/supply/exhibit_632.py). Today's
 # only value — the founding doc's ℝ-with-margin/IEEE-exact dial, position
 # recorded per verdict:
 SEMANTICS_REAL = (
