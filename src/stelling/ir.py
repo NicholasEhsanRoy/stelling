@@ -104,6 +104,14 @@ class Aval:
     dtype: str | None  # e.g. "float32"; None for dtype-less avals (tokens)
     weak_type: bool = False
 
+    def __post_init__(self) -> None:
+        # local well-formedness at the type level: EVERY construction path
+        # (trace, from_dict, internal transforms, direct dataclass
+        # construction) passes through here — the construction-path census
+        # found the gates lived only at the two doors, leaving direct
+        # construction ungated (design/ci-readiness.md, Part A)
+        _validate_aval(self, "Aval")
+
 
 @dataclass(frozen=True)
 class Array:
@@ -112,6 +120,9 @@ class Array:
     dtype: str  # numpy dtype ``.str`` including byte order, e.g. "<f4"
     shape: tuple[int, ...]
     data: bytes
+
+    def __post_init__(self) -> None:
+        _validate_array_value(self, "Array")  # local, type-level (census)
 
     def to_numpy(self):
         import numpy as np  # lazy: numpy is not a stelling dependency
@@ -129,6 +140,11 @@ class Var:
 class Literal:
     val: bool | int | float | complex | str | Array
     aval: Aval
+
+    def __post_init__(self) -> None:
+        # the val and the aval are two self-descriptions of one value;
+        # their agreement is this type's local invariant (census)
+        _validate_value_against_aval(self.val, self.aval, "Literal")
 
 
 Atom = Var | Literal
@@ -215,6 +231,9 @@ class JaxprEqn:
         # in jax) and effects (a set) are stored sorted.
         object.__setattr__(self, "params", tuple(sorted(self.params, key=lambda kv: kv[0])))
         object.__setattr__(self, "effects", tuple(sorted(self.effects)))
+        # type-level: a declaration's two self-descriptions must agree
+        # (the census's structuralization — see _validate_decl_eqn)
+        _validate_decl_eqn(self, "JaxprEqn")
 
     def params_dict(self) -> dict[str, object]:
         return dict(self.params)
@@ -244,6 +263,14 @@ class Jaxpr:
 class ClosedJaxpr:
     jaxpr: Jaxpr
     consts: tuple[bool | int | float | complex | str | Array, ...] = field(default=())
+
+    def __post_init__(self) -> None:
+        # local pairing invariant: each const against its constvar's aval
+        # (component objects self-validated at their own construction)
+        for i, (var, val) in enumerate(zip(self.jaxpr.constvars, self.consts)):
+            _validate_value_against_aval(
+                val, var.aval, f"ClosedJaxpr.consts[{i}] (constvar {var.id})"
+            )
 
     def to_dict(self, *, include_metadata: bool = True) -> dict:
         return _encode(self, include_metadata)
@@ -462,9 +489,10 @@ def _load_itemsize(dtype: str) -> int | None:
 def _load_check(cond: bool, where: str, what: str) -> None:
     if not cond:
         raise TranscriptionError(
-            f"from_dict validation: {where}: {what} — refusing to load "
-            f"(the deserialization door is loud, like trace-side "
-            f"transcription; see the module docstring)"
+            f"malformed IR: {where}: {what} — refused at construction "
+            f"(validation runs in the dataclasses' own __post_init__, so "
+            f"every path that builds IR — trace, from_dict, or direct "
+            f"construction — passes through it; see the module docstring)"
         )
 
 
@@ -547,30 +575,40 @@ def _validate_jaxpr(jaxpr: Jaxpr, where: str) -> None:
         params = dict(eqn.params)
         for name, v in eqn.params:
             _validate_param_value(v, f"{w}.params[{name!r}]")
-        if eqn.primitive == "stelling_any" and eqn.outvars:
-            # the declaration's aval must agree with its OWN params —
-            # the P1 arc's lies all started at a declaration whose two
-            # self-descriptions disagreed
-            shape = params.get("shape")
-            if isinstance(shape, tuple):
-                problem = _load_extent_problem(shape)
-                _load_check(
-                    problem is None, w, f"stelling_any shape param has {problem}"
-                )
-                _load_check(
-                    tuple(shape) == tuple(eqn.outvars[0].aval.shape),
-                    w,
-                    f"stelling_any shape param {tuple(shape)} contradicts "
-                    f"the outvar aval shape {tuple(eqn.outvars[0].aval.shape)}",
-                )
-            dtype = params.get("dtype")
-            if isinstance(dtype, str) and eqn.outvars[0].aval.dtype is not None:
-                _load_check(
-                    dtype == eqn.outvars[0].aval.dtype,
-                    w,
-                    f"stelling_any dtype param {dtype!r} contradicts the "
-                    f"outvar aval dtype {eqn.outvars[0].aval.dtype!r}",
-                )
+        _validate_decl_eqn(eqn, w)
+
+
+def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
+    """A stelling_any declaration's aval must agree with its OWN
+    params — two self-descriptions of one declared set. Called from
+    JaxprEqn.__post_init__ (every construction path) and from the
+    from_dict walk (kept for its load-path error context)."""
+    if eqn.primitive != "stelling_any" or not eqn.outvars:
+        return
+    params = dict(eqn.params)
+    # the declaration's aval must agree with its OWN params —
+    # the P1 arc's lies all started at a declaration whose two
+    # self-descriptions disagreed
+    shape = params.get("shape")
+    if isinstance(shape, tuple):
+        problem = _load_extent_problem(shape)
+        _load_check(
+            problem is None, where, f"stelling_any shape param has {problem}"
+        )
+        _load_check(
+            tuple(shape) == tuple(eqn.outvars[0].aval.shape),
+            where,
+            f"stelling_any shape param {tuple(shape)} contradicts "
+            f"the outvar aval shape {tuple(eqn.outvars[0].aval.shape)}",
+        )
+    dtype = params.get("dtype")
+    if isinstance(dtype, str) and eqn.outvars[0].aval.dtype is not None:
+        _load_check(
+            dtype == eqn.outvars[0].aval.dtype,
+            where,
+            f"stelling_any dtype param {dtype!r} contradicts the "
+            f"outvar aval dtype {eqn.outvars[0].aval.dtype!r}",
+        )
 
 
 def _validate_closed(closed: ClosedJaxpr, where: str = "query") -> None:

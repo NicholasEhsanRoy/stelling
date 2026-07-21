@@ -1665,32 +1665,6 @@ def test_f4_propagate_survives_malformed_structural_params():
 # consumption layer declines quoted.
 
 
-def neg_decl_query():
-    """The c13 a5 shape: a (-2,-2) declaration, elementwise le, assert."""
-    na = aval((-2, -2))
-    nb = aval((-2, -2), "bool")
-    return close(
-        [
-            any_eqn(var(0, na), 0.0, 1.0, shape=(-2, -2)),
-            eqn("le", [var(0, na), lit(0.5)], var(1, nb)),
-            eqn("stelling_assert", [var(1, nb)], var(2, nb)),
-        ],
-        [var(2, nb)],
-    )
-
-
-def neg_sum_query():
-    """The c13 a5 reduce_sum shape (the dropped-addends UNSOUND)."""
-    na = aval((-2, -2))
-    return close(
-        [
-            any_eqn(var(0, na), 0.25, 1.0, shape=(-2, -2)),
-            eqn("reduce_sum", [var(0, na)], var(1), [("axes", (0, 1))]),
-            eqn("le", [var(1), lit(0.5)], var(2, BOOL)),
-            eqn("stelling_assert", [var(2, BOOL)], var(3, BOOL)),
-        ],
-        [var(3, BOOL)],
-    )
 
 
 def test_r1_interval_layer_refuses_negative_extents():
@@ -1733,229 +1707,74 @@ def test_r2_reshape_rejects_negative_new_sizes_despite_matching_product():
     assert z.shape == (0, 3) and z.size == 0
 
 
-def test_r1_propagate_declines_negative_shape_queries_never_decides():
-    # the c13 a5 queries through the real propagation: the walk survives,
-    # the obligation is RECORDED unknown (never decided, never dropped),
-    # and the negative-shape screen's note is quoted
-    for q in (neg_decl_query(), neg_sum_query()):
-        p = propagate(q)
-        assert [o.status for o in p.obligations] == ["unknown"]
-        assert any("negative-extent shape" in n for n in p.notes)
 
 
-def test_r1_slicer_declines_negative_shape_queries_quoted():
-    for q in (neg_decl_query(), neg_sum_query()):
-        p = propagate(q)
-        items = slice_unknown_obligations(q, p, interval_env(q))
-        assert len(items) == 1
-        assert isinstance(items[0], DeclinedObligation), items[0]
-        assert "negative extent" in items[0].reason
 
-
-def test_r1_full_pipeline_negative_sum_is_unknown_with_zero_witnesses():
-    # the R1 severity pin: pre-fix this minted REFUTED with a fabricated
-    # 4-element witness "confirmed" by a replay that had dropped three
-    # addends from the sum. Post-fix: UNKNOWN, zero witnesses, zero
-    # invocations.
-    from stelling.solvers import SolverConfig, escalate, make_solver_verdict
-    from test_solver_dispatch import VERSIONS as _V
-
-    q = neg_sum_query()
-    p = propagate(q)
-    esc = escalate(q, p, SolverConfig(timeout_ms=5000))
-    v = make_solver_verdict(q, p, esc, **_V)
-    assert v.status == "UNKNOWN"
-    assert v.witnesses == ()
-    assert esc.ledger.spawns == 0
-
-
-def test_r1_slicer_guard_layering_root_first_then_eqns():
-    # which slicer guard fires where, pinned: a negative-shaped ROOT is
-    # refused before any walk (neg_decl_query's operand IS the root);
-    # a scalar-rooted query reaches the consuming equation's guard
-    # (neg_sum_query). The declaration-loop guard is defense in depth
-    # behind both — every reachable path declines earlier, at the root
-    # or at an equation whose aval carries the negative dim.
-    p1 = propagate(neg_decl_query())
-    (i1,) = slice_unknown_obligations(
-        neg_decl_query(), p1, interval_env(neg_decl_query())
-    )
-    assert "assert operand has shape (-2, -2)" in i1.reason
-    p2 = propagate(neg_sum_query())
-    (i2,) = slice_unknown_obligations(
-        neg_sum_query(), p2, interval_env(neg_sum_query())
-    )
-    assert "'reduce_sum' touches a value of shape (-2, -2)" in i2.reason
-
-
-def test_r1_negative_shaped_literal_on_the_exempt_assert_path_declines():
-    # found by the builder's own re-attack of the R1 fix: the assert /
-    # nonvacuity path is exempt from the negative-shape screen (so the
-    # obligation is still RECORDED), which means its operand gets READ —
-    # and a negative-shaped ARRAY LITERAL reached the struct decoder as a
-    # malformed format (raw struct.error, guard rule broken). Both
-    # decoders (propagation's and the slicer's) now decline it quoted.
-    na = aval((-2,), "bool")
-    neg_lit = ir.Literal(
-        val=ir.Array(dtype="|b1", shape=(-2,), data=b"\x01\x01"), aval=na
-    )
-    q = close([eqn("stelling_assert", [neg_lit], var(0, na))], [var(0, na)])
-    for sem in ("real", "ieee"):
-        p = propagate(q, semantics=sem)  # was: raw struct.error
-        assert [o.status for o in p.obligations] == ["unknown"]
-        assert any("negative extent" in n for n in p.notes)
-    # the slicer-side decoder declines the same class, quoted
-    from stelling.obligation import _Decline, _decode_elements
-
-    with pytest.raises(_Decline, match="negative extent"):
-        _decode_elements(ir.Array(dtype="<f8", shape=(-2,), data=b"\x00" * 16))
 
 
 # --- fix round 4 (re-attack N1/N2): the read gate + decode predicates ---------
 
 
-def launder_query(eq_rhs, lying=True):
-    """Re-attack N1: a from_dict consumer referencing the refused
-    declaration's id under a LYING scalar aval. Pre-fix, the consumer
-    escaped the aval-keyed screen, read the scalar ⊤ stand-in as a real
-    value, and ⊤·0 = [0,0] minted a definite face — end-to-end REFUTED
-    for a query whose only declaration is uninhabited."""
-    neg = (-2, -2)
-    consumer_aval = aval(()) if lying else aval(neg)
-    out_aval = aval(()) if lying else aval(neg)
-    b_aval = aval((), "bool") if lying else aval(neg, "bool")
-    return close(
-        [
-            any_eqn(var(0, aval(neg)), 0.25, 1.0, shape=neg),
-            eqn("mul", [var(0, consumer_aval), lit(0.0)], var(1, out_aval)),
-            eqn("eq", [var(1, out_aval), lit(eq_rhs)], var(2, b_aval)),
-            eqn("stelling_assert", [var(2, b_aval)], var(3, b_aval)),
-        ],
-        [var(3, b_aval)],
-    )
 
 
-def test_n1_lying_consumer_aval_cannot_read_a_refused_declaration():
-    # the property gate: refusal is keyed on the VAR ID at the env
-    # reference, so no aval lie can route around it
-    for rhs in (1.0, 0.0):
-        q = launder_query(rhs, lying=True)
-        p = propagate(q)
-        assert [o.status for o in p.obligations] == ["unknown"]
-        assert any(
-            "reads a value from a refused negative-shape declaration" in n
-            for n in p.notes
-        )
-        items = slice_unknown_obligations(q, p, interval_env(q))
-        assert isinstance(items[0], DeclinedObligation)
-    # the honest-aval control is unchanged (screened, unknown)
-    p_honest = propagate(launder_query(1.0, lying=False))
-    assert [o.status for o in p_honest.obligations] == ["unknown"]
-    # ieee behaviour unchanged (it already blocked the route)
-    p_ieee = propagate(launder_query(1.0, lying=True), semantics="ieee")
-    assert [o.status for o in p_ieee.obligations] == ["unknown"]
 
 
-def test_n1_full_pipeline_laundering_is_unknown_zero_witnesses():
-    from stelling.solvers import SolverConfig, escalate, make_solver_verdict
-    from test_solver_dispatch import VERSIONS as _V
-
-    q = launder_query(1.0, lying=True)
-    p = propagate(q)
-    esc = escalate(q, p, SolverConfig(timeout_ms=5000))
-    v = make_solver_verdict(q, p, esc, **_V)
-    assert v.status == "UNKNOWN"
-    assert v.witnesses == () and esc.ledger.spawns == 0
 
 
-def test_n1_refusal_follows_the_value_through_a_transparent_call():
-    # the refused id crosses a jit boundary: the call outvar inherits the
-    # refusal even though the call's own avals lie positive
-    neg = (-2,)
-    ix, ic = var(10, aval(neg)), var(11, aval(neg))
-    inner = ir.ClosedJaxpr(
-        jaxpr=ir.Jaxpr(
-            constvars=(), invars=(ix,), outvars=(ic,),
-            eqns=(eqn("neg", [ix], ic),),
-        )
-    )
-    q = close(
-        [
-            any_eqn(var(0, aval(neg)), 0.0, 1.0, shape=neg),
-            ir.JaxprEqn(
-                primitive="jit",
-                invars=(var(0, aval(neg)),),
-                outvars=(var(1, aval(neg)),),
-                params=(("jaxpr", inner),),
-            ),
-            # LYING consumer of the call's output, scalar aval
-            eqn("mul", [var(1, aval(())), lit(0.0)], var(2, aval(()))),
-            eqn("eq", [var(2, aval(())), lit(1.0)], var(3, BOOL)),
-            eqn("stelling_assert", [var(3, BOOL)], var(4, BOOL)),
-        ],
-        [var(4, BOOL)],
-    )
-    p = propagate(q)
-    assert [o.status for o in p.obligations] == ["unknown"]
+# --- fix round 6 (re-attack P1): the constvar route + the from_dict door ------
 
 
-def test_n2_string_shape_extent_degrades_never_raises():
-    # from_dict does not coerce shape entry types: a string extent made
-    # the screen's `d < 0` raise a raw TypeError pre-fix
-    sa = ir.Aval(kind="ShapedArray", shape=("x",), dtype="float64")
-    q = close(
-        [
-            any_eqn(var(0, F64_ARR[2]), 0.0, 1.0, shape=(2,)),
-            eqn("neg", [var(0, F64_ARR[2])], var(1, sa)),
-            eqn("le", [var(1, sa), lit(0.5)], var(2, BOOL_ARR[2])),
-            eqn("stelling_assert", [var(2, BOOL_ARR[2])], var(3, BOOL_ARR[2])),
-        ],
-        [var(3, BOOL_ARR[2])],
-    )
-    p = propagate(q)  # was: raw TypeError
-    assert [o.status for o in p.obligations] == ["unknown"]
-    assert any("non-integer shape extent" in n for n in p.notes)
-    items = slice_unknown_obligations(q, p, interval_env(q))
-    assert isinstance(items[0], DeclinedObligation)
-    assert "non-integer extent" in items[0].reason
-    # and the interval layer's own predicate
-    import stelling.interval as ivv
-
-    with pytest.raises(ivv.IntervalError, match="non-integer extent"):
-        ivv.from_bounds(("x",), 0.0, 1.0)
 
 
-def payload_query(data):
-    arr = ir.Literal(
-        val=ir.Array(dtype="<f8", shape=(2,), data=data), aval=aval((2,))
-    )
-    return close(
-        [
-            any_eqn(var(0, F64_ARR[2]), 0.0, 1.0, shape=(2,)),
-            eqn("add", [var(0, F64_ARR[2]), arr], var(1, F64_ARR[2])),
-            eqn("le", [var(1, F64_ARR[2]), lit(0.5)], var(2, BOOL_ARR[2])),
-            eqn("stelling_assert", [var(2, BOOL_ARR[2])], var(3, BOOL_ARR[2])),
-        ],
-        [var(3, BOOL_ARR[2])],
-    )
 
 
-def test_n2_payload_length_mismatches_decline_never_struct_error():
-    # positive shape, wrong buffer: truncated, oversized, empty — all
-    # raised raw struct.error out of propagate() AND escalate() pre-fix
+
+
+# --- the from_dict door (Part 2 of the P1 round) ------------------------------
+
+# --- type-level supersession (the CI-readiness construction census) -----------
+#
+# The construction-path census (design/ci-readiness.md, Part A) found the
+# well-formedness gates lived only at the two doors, leaving direct
+# dataclass construction ungated — the I1 residual's route. Validation
+# now runs in the ir dataclasses' own __post_init__, so the malformed IR
+# the N/P/R-round regression tests used to build IS UNCONSTRUCTABLE: the
+# raise moved from the pipeline/door to the constructor, strictly
+# earlier, and every superseded test's intent (no wrong verdict, no raw
+# crash) holds a fortiori. Superseded here (names kept for the record):
+# test_r1_* (negative-shape queries), test_n1_* (lying-aval laundering),
+# test_n2_* (string extents, payload lies), test_p1_* (refused constvar
+# lies), test_from_dict_refuses_* (door refusals, now constructor
+# refusals). The in-pipeline gates (read gate, screens, decoders) remain
+# in the code as defence-in-depth behind the types.
+
+
+def test_type_level_negative_extents_are_unconstructable():
+    with pytest.raises(ir.TranscriptionError, match="negative shape extent"):
+        aval((-2, -2))
+    with pytest.raises(ir.TranscriptionError, match="negative shape extent"):
+        ir.Array(dtype="<f8", shape=(-2,), data=b"\x00" * 16)
+    # zero-size stays legal (do not over-guard; measured jax constructs it)
+    assert aval((0, 3)).shape == (0, 3)
+    assert ir.Array(dtype="<f8", shape=(0,), data=b"").shape == (0,)
+
+
+def test_type_level_noninteger_extents_are_unconstructable():
+    with pytest.raises(ir.TranscriptionError, match="non-integer shape extent"):
+        ir.Aval(kind="ShapedArray", shape=("x",), dtype="float64")
+    # index-able dims stay legal (bool dims measured consistent with jax)
+    assert ir.Aval(kind="ShapedArray", shape=(True, 2), dtype="float64")
+
+
+def test_type_level_payload_length_lies_are_unconstructable():
     for name, data in (
         ("truncated", struct.pack("<1d", 1.0)),
         ("oversized", struct.pack("<3d", 1.0, 2.0, 3.0)),
         ("empty", b""),
     ):
-        q = payload_query(data)
-        p = propagate(q)  # was: raw struct.error
-        assert [o.status for o in p.obligations] == ["unknown"], name
-        items = slice_unknown_obligations(q, p, interval_env(q))
-        assert isinstance(items[0], DeclinedObligation), name
-        assert "byte(s), expected" in items[0].reason, name
-    # a CORRECT payload still decodes (no over-guarding); bound chosen to
-    # keep the obligation interval-unknown so it reaches the slicer
+        with pytest.raises(ir.TranscriptionError, match="byte"):
+            ir.Array(dtype="<f8", shape=(2,), data=data)
+    # a correct payload constructs and still emits exactly (no over-guard)
     good_arr = ir.Literal(
         val=ir.Array(dtype="<f8", shape=(2,), data=struct.pack("<2d", 0.25, 0.75)),
         aval=aval((2,)),
@@ -1976,237 +1795,70 @@ def test_n2_payload_length_mismatches_decline_never_struct_error():
     assert "(+ x0_0 (/ 1 4))" in text and "(+ x0_1 (/ 3 4))" in text
 
 
-# --- fix round 6 (re-attack P1): the constvar route + the from_dict door ------
-
-
-def refused_constvar_query(consumer_aval_shape=()):
-    """P1: a constvar under a refused (-2,-2) aval whose VALUE is a bare
-    float, consumed under a lying clean aval. Pre-fix: propagation bound
-    the stand-in WITHOUT registering the id (the read gate then cleared
-    the consumer, and ⊤·0 = [0,0] minted a definite face), and the
-    slicer decoded the raw float with the constvar's aval never
-    consulted — REFUTED-with-replayed-witness end to end."""
-    ca = aval(consumer_aval_shape)
-    return ir.ClosedJaxpr(
-        jaxpr=ir.Jaxpr(
-            constvars=(var(0, aval((-2, -2))),),
-            invars=(),
-            outvars=(var(3, aval((), "bool")),),
-            eqns=(
-                eqn("mul", [var(0, ca), lit(0.0)], var(1)),
-                eqn("eq", [var(1), lit(1.0)], var(2, BOOL)),
-                eqn("stelling_assert", [var(2, BOOL)], var(3, BOOL)),
-            ),
-        ),
-        consts=(0.5,),
-    )
-
-
-def test_p1_refused_constvar_bind_and_register_are_one_operation():
-    q = refused_constvar_query()
-    p = propagate(q)
-    assert [o.status for o in p.obligations] == ["unknown"]
-    assert any("constvar 0 refused" in n for n in p.notes)
-    # the lying consumer is gated by ID, not by its claimed aval
-    assert any(
-        "reads a value from a refused negative-shape declaration" in n
-        for n in p.notes
-    )
-    # ieee parallel tables behave identically
-    p_ieee = propagate(q, semantics="ieee")
-    assert [o.status for o in p_ieee.obligations] == ["unknown"]
-
-
-def test_p1_slicer_validates_constvar_avals_with_the_shared_predicate():
-    q = refused_constvar_query()
-    p = propagate(q)
-    items = slice_unknown_obligations(q, p, interval_env(q))
-    assert isinstance(items[0], DeclinedObligation)
-    assert "constvar 0" in items[0].reason
-    assert "negative extent" in items[0].reason
-
-
-def test_p1_full_pipeline_refused_constvar_unknown_zero_witnesses():
-    from stelling.solvers import SolverConfig, escalate, make_solver_verdict
-    from test_solver_dispatch import VERSIONS as _V
-
-    q = refused_constvar_query()
-    p = propagate(q)
-    esc = escalate(q, p, SolverConfig(timeout_ms=5000))
-    v = make_solver_verdict(q, p, esc, **_V)
-    assert v.status == "UNKNOWN"
-    assert v.witnesses == () and esc.ledger.spawns == 0
-
-
-def test_p1_inner_scope_constvar_same_gap_closed():
-    # the same gap one scope down: a transparent call whose INNER
-    # constvar is refused; the call boundary must not launder it out
-    inner = ir.ClosedJaxpr(
-        jaxpr=ir.Jaxpr(
-            constvars=(var(50, aval((-2, -2))),),
-            invars=(var(51, aval(())),),
-            outvars=(var(53, aval(())),),
-            eqns=(
-                eqn("mul", [var(50, aval(())), lit(0.0)], var(52)),
-                eqn("add", [var(52), var(51, aval(()))], var(53)),
-            ),
-        ),
-        consts=(0.5,),
-    )
-    q = close(
-        [
-            any_eqn(var(0, F64), 0.0, 1.0, shape=()),
-            ir.JaxprEqn(
-                primitive="jit",
-                invars=(var(0, F64),),
-                outvars=(var(1, F64),),
-                params=(("jaxpr", inner),),
-            ),
-            eqn("eq", [var(1, F64), lit(5.0)], var(2, BOOL)),
-            eqn("stelling_assert", [var(2, BOOL)], var(3, BOOL)),
-        ],
-        [var(3, BOOL)],
-    )
-    p = propagate(q)
-    assert [o.status for o in p.obligations] == ["unknown"]
-    items = slice_unknown_obligations(q, p, interval_env(q))
-    assert isinstance(items[0], DeclinedObligation)
-
-
-def test_p1_slicer_declines_aval_value_size_mismatch_consts():
-    # a scalar const under a positive-but-wrong aval: the slicer's
-    # independent decode must not emit it under either shape reading.
-    # (An eq against a declared input keeps the obligation
-    # interval-unknown, so the slicer deterministically runs.)
-    q = ir.ClosedJaxpr(
-        jaxpr=ir.Jaxpr(
-            constvars=(var(0, aval((3,))),),
-            invars=(),
-            outvars=(var(4, aval((), "bool")),),
-            eqns=(
-                any_eqn(var(5, F64), 0.0, 3.0, shape=()),
-                eqn("reduce_sum", [var(0, aval((3,)))], var(1), [("axes", (0,))]),
-                eqn("eq", [var(1), var(5, F64)], var(2, BOOL)),
-                eqn("stelling_assert", [var(2, BOOL)], var(4, BOOL)),
-            ),
-        ),
-        consts=(0.5,),
-    )
-    p = propagate(q)
-    assert [o.status for o in p.obligations] == ["unknown"]
-    items = slice_unknown_obligations(q, p, interval_env(q))
-    assert len(items) == 1 and isinstance(items[0], DeclinedObligation)
-    assert "aval/value mismatch" in items[0].reason
-
-
-# --- the from_dict door (Part 2 of the P1 round) ------------------------------
-
-
-def rt(q):
-    return ir.ClosedJaxpr.from_dict(q.to_dict())
-
-
-def test_from_dict_refuses_negative_and_noninteger_extents_loud():
-    with pytest.raises(ir.TranscriptionError, match="negative shape extent"):
-        rt(neg_decl_query())
-    with pytest.raises(ir.TranscriptionError, match="negative shape extent"):
-        rt(refused_constvar_query())
-    sa = ir.Aval(kind="ShapedArray", shape=("x",), dtype="float64")
-    q_str = close(
-        [
-            any_eqn(var(0, F64_ARR[2]), 0.0, 1.0, shape=(2,)),
-            eqn("neg", [var(0, F64_ARR[2])], var(1, sa)),
-            eqn("le", [var(1, sa), lit(0.5)], var(2, BOOL_ARR[2])),
-            eqn("stelling_assert", [var(2, BOOL_ARR[2])], var(3, BOOL_ARR[2])),
-        ],
-        [var(3, BOOL_ARR[2])],
-    )
-    with pytest.raises(ir.TranscriptionError, match="non-integer shape extent"):
-        rt(q_str)
-
-
-def test_from_dict_refuses_stelling_any_param_aval_disagreement():
-    q_lie = close(
-        [
-            ir.JaxprEqn(
-                primitive="stelling_any",
-                invars=(),
-                outvars=(var(0, aval((4,))),),
-                params=(
-                    ("shape", (2, 2)),
-                    ("dtype", "float64"),
-                    ("lo", 0.0),
-                    ("hi", 1.0),
-                ),
-            ),
-            eqn("le", [var(0, aval((4,))), lit(0.5)], var(1, BOOL_ARR[4])),
-            eqn("stelling_assert", [var(1, BOOL_ARR[4])], var(2, BOOL_ARR[4])),
-        ],
-        [var(2, BOOL_ARR[4])],
-    )
-    with pytest.raises(ir.TranscriptionError, match="contradicts the outvar aval"):
-        rt(q_lie)
-    # and a negative shape PARAM under a clean aval is refused too
-    q_negparam = close(
-        [
-            ir.JaxprEqn(
-                primitive="stelling_any",
-                invars=(),
-                outvars=(var(0, aval((4,))),),
-                params=(
-                    ("shape", (-2, -2)),
-                    ("dtype", "float64"),
-                    ("lo", 0.0),
-                    ("hi", 1.0),
-                ),
-            ),
-            eqn("le", [var(0, aval((4,))), lit(0.5)], var(1, BOOL_ARR[4])),
-            eqn("stelling_assert", [var(1, BOOL_ARR[4])], var(2, BOOL_ARR[4])),
-        ],
-        [var(2, BOOL_ARR[4])],
-    )
-    with pytest.raises(ir.TranscriptionError, match="negative shape extent"):
-        rt(q_negparam)
-
-
-def test_from_dict_refuses_payload_and_consistency_lies():
-    with pytest.raises(ir.TranscriptionError, match="byte"):
-        rt(payload_query(struct.pack("<1d", 1.0)))  # truncated literal
-    # aval-vs-val shape disagreement on a literal
-    lying_lit = ir.Literal(
-        val=ir.Array(dtype="<f8", shape=(2,), data=struct.pack("<2d", 1.0, 2.0)),
-        aval=aval((3,)),
-    )
-    q_lie = close(
-        [
-            any_eqn(var(0, F64_ARR[3]), 0.0, 1.0, shape=(3,)),
-            eqn("add", [var(0, F64_ARR[3]), lying_lit], var(1, F64_ARR[3])),
-            eqn("le", [var(1, F64_ARR[3]), lit(0.5)], var(2, BOOL_ARR[3])),
-            eqn("stelling_assert", [var(2, BOOL_ARR[3])], var(3, BOOL_ARR[3])),
-        ],
-        [var(3, BOOL_ARR[3])],
-    )
+def test_type_level_literal_aval_value_disagreement_is_unconstructable():
     with pytest.raises(ir.TranscriptionError, match="contradicts the recorded aval"):
-        rt(q_lie)
-    # scalar const under a non-scalar aval (the P1 constvar, at the door)
+        ir.Literal(
+            val=ir.Array(dtype="<f8", shape=(2,), data=struct.pack("<2d", 1.0, 2.0)),
+            aval=aval((3,)),
+        )
+    with pytest.raises(ir.TranscriptionError, match="non-scalar aval"):
+        ir.Literal(val=0.5, aval=aval((3,)))
+
+
+def test_type_level_declaration_param_aval_disagreement_is_unconstructable():
+    # the I1 instance itself: stelling_any params say one shape, the
+    # outvar aval says another — two self-descriptions of one declared
+    # set, now required to agree at construction
+    with pytest.raises(ir.TranscriptionError, match="contradicts the outvar aval"):
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((3,))),),
+            params=(("shape", (2,)), ("dtype", "float64"), ("lo", 0.0), ("hi", 1.0)),
+        )
     with pytest.raises(ir.TranscriptionError, match="negative shape extent"):
-        rt(refused_constvar_query())
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((4,))),),
+            params=(("shape", (-2, -2)), ("dtype", "float64"), ("lo", 0.0), ("hi", 1.0)),
+        )
+    with pytest.raises(ir.TranscriptionError, match="contradicts the outvar aval dtype"):
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((2,))),),
+            params=(("shape", (2,)), ("dtype", "float32"), ("lo", 0.0), ("hi", 1.0)),
+        )
 
 
-def test_from_dict_still_loads_honest_ir_and_hash_is_unchanged():
-    # legal hand-built IR round-trips; content_hash byte-identical
-    for q in (vec_gt_query(3), roll_query(3)):
-        loaded = rt(q)
-        assert loaded.content_hash() == q.content_hash()
-    # zero-size shapes pass the door (legal everywhere, measured)
-    z = close(
-        [
-            any_eqn(var(0, F64_ARR[0]), 0.0, 1.0, shape=(0,)),
-            eqn("gt", [var(0, F64_ARR[0])], var(1, BOOL_ARR[0]))
-            if False
-            else eqn("gt", [var(0, F64_ARR[0]), lit(0.0)], var(1, BOOL_ARR[0])),
-            eqn("stelling_assert", [var(1, BOOL_ARR[0])], var(2, BOOL_ARR[0])),
-        ],
-        [var(2, BOOL_ARR[0])],
+def test_type_level_const_pairing_disagreement_is_unconstructable():
+    # the P1 constvar: a scalar const under a non-scalar constvar aval
+    j = ir.Jaxpr(
+        constvars=(var(0, aval((3,))),),
+        invars=(),
+        outvars=(var(2, aval((), "bool")),),
+        eqns=(
+            eqn("reduce_sum", [var(0, aval((3,)))], var(1), [("axes", (0,))]),
+            eqn("stelling_assert", [var(1, BOOL)], var(2, BOOL)),
+        ),
     )
-    assert rt(z).content_hash() == z.content_hash()
+    with pytest.raises(ir.TranscriptionError, match="non-scalar aval"):
+        ir.ClosedJaxpr(jaxpr=j, consts=(0.5,))
+
+
+def test_the_door_still_refuses_malformed_dicts():
+    # a malformed DICT never constructs objects until _decode, so the
+    # from_dict door is still a live, distinct gate: corrupt a valid
+    # query's serialized form and the load must refuse loudly
+    q = vec_gt_query(3)
+    d = q.to_dict()
+    import copy, json
+
+    d_bad = json.loads(json.dumps(d))
+    # find and corrupt the declaration's aval shape in the dict form
+    corrupted = json.loads(json.dumps(d_bad).replace("[3]", "[-3]", 1))
+    with pytest.raises(ir.TranscriptionError, match="negative shape extent"):
+        ir.ClosedJaxpr.from_dict(corrupted)
+    # the uncorrupted dict still loads, hash byte-identical
+    assert ir.ClosedJaxpr.from_dict(d).content_hash() == q.content_hash()

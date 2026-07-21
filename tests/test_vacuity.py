@@ -29,7 +29,7 @@ def _any_eqn(var_id, lo, hi, *, shape=()):
         primitive="stelling_any",
         invars=(),
         outvars=(v,),
-        params=(("lo", lo), ("hi", hi), ("shape", shape), ("dtype", "<f8")),
+        params=(("lo", lo), ("hi", hi), ("shape", shape), ("dtype", "float64")),
         effects=(),
         source_info=(),
     )
