@@ -34,6 +34,7 @@ __all__ = [
     "any_pytree",
     "assume",
     "assert_",
+    "fold_extrema",
     "nonvacuity",
     "trace",
 ]
@@ -305,6 +306,41 @@ def any_pytree(tree, bounds):
         declared_bounds[id(leaf)] = pair
         out_leaves.append(val)
     return treedef.unflatten(out_leaves)
+
+
+def fold_extrema(value):
+    """``(max, min)`` of a traced array's elements, as ``(1,)``-shaped
+    values, via a pairwise fold of binary ``max``/``min`` over
+    single-element ``slice``\\ s of the flattened array.
+
+    This is :mod:`stelling.contracts`' extremum encoding: ``reduce_max``
+    and ``reduce_min`` have no transfer or emission row, so the fold
+    stays on already-supported primitives (``reshape`` — structural,
+    often elided for 1-D — ``slice``, binary ``max``/``min``). In ℝ the
+    fold IS the extremum, exactly, in both directions: not an
+    approximation. It lives here because this is the one module allowed
+    to touch jax; the encoding choice and its budget arithmetic are
+    documented at the posing site
+    (:func:`stelling.contracts.coefficient_contrast`).
+    """
+    # a transform may return a plain Python/numpy constant (the
+    # field_positive convention this mirrors tolerates constant returns);
+    # coerce before reading .size so a constant field poses
+    # trivially-discharged obligations instead of crashing raw (audit F5)
+    value = jax.numpy.asarray(value)
+    n = int(value.size)
+    if n == 0:
+        raise ValueError(
+            "fold_extrema over a zero-element value: max/min of an empty "
+            "field does not exist (measured jax refuses size-0 reductions)"
+        )
+    flat = jax.numpy.reshape(value, (n,))
+    parts = [jax.lax.slice(flat, (i,), (i + 1,)) for i in range(n)]
+    mx = mn = parts[0]
+    for p in parts[1:]:
+        mx = jax.numpy.maximum(mx, p)
+        mn = jax.numpy.minimum(mn, p)
+    return mx, mn
 
 
 def assume(pred):

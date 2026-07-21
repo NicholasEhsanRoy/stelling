@@ -57,6 +57,11 @@ magnetics conditioning scar (measured failure above coefficient
 contrast ≈10²) and the D-clamp adjudication, whose cause needed LA
 vocabulary to state. *Status:* begun 2026-07-21; explicit stop-clause —
 cannot block publish; if the seam exceeds a session, stop and report.
+*Update, same day:* first slice landed within the session
+(`stelling.contracts`, two templates, requires mechanized / ensures
+DECLARED; first-contact audit: ten findings, zero UNSOUND, all fixed —
+`design/la-contract-build.md`). Stop-clause not triggered. Remaining
+under this item: attachment to a real solver call site.
 
 **3. Enumerated discharge mechanism** — the A.2 architecture of
 `design/finding-conjunction.md`.

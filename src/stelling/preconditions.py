@@ -143,13 +143,56 @@ def check(harness, *, vacuity_mode, solver_timeout_ms=None):
     environment; the precision entry records the *actual*
     ``jax_enable_x64`` state at trace time, not an assumption.
     """
+    verdict, _ = _pipeline(
+        harness, vacuity_mode=vacuity_mode, solver_timeout_ms=solver_timeout_ms
+    )
+    return verdict
+
+
+def _pipeline(harness, *, vacuity_mode, solver_timeout_ms):
+    """The one pipeline behind :func:`check` — trace, propagate, optional
+    solver escalation, stamped verdict assembly, and the VERIFIED widen
+    re-check at the same pipeline depth.
+
+    Returns ``(verdict, closed)``: exactly the verdict :func:`check`
+    returns (behavior-identical extraction — check() is this helper with
+    the traced query dropped), plus the traced :class:`stelling.ir`
+    query. The extraction exists for :mod:`stelling.contracts`, whose
+    requires face reuses this ONE pipeline rather than growing a second,
+    and which quotes interval straddles from the query it gets back.
+    Private: the public entry points are :func:`check` and
+    :func:`stelling.contracts.check_contract`.
+    """
     import dataclasses
 
     import stelling as _stelling
     from stelling._jax_compat import jax_version, trace, x64_enabled
     from stelling.propagate import propagate
-    from stelling.vacuity import widen
+    from stelling.vacuity import _MODES, widen
     from stelling.verdict import make_verdict
+
+    # Eager argument validation, BEFORE tracing (audit F7/F10). The widen
+    # used to be the only vacuity_mode validator and it runs only on a
+    # VERIFIED — so a typo'd mode could ride green through UNKNOWN paths
+    # for a project's whole life and first explode on the day a VERIFIED
+    # occurred. Same wording as widen's own refusal; _MODES is the single
+    # source of truth. The timeout is exactly int-or-None: no str parsing,
+    # no float truncation — a solver budget is a stamped, reproducible
+    # quantity, and a silently-coerced one would stamp a number the caller
+    # never wrote.
+    if vacuity_mode not in _MODES:
+        raise ValueError(
+            f"widen mode must be one of {_MODES}, got {vacuity_mode!r}"
+        )
+    if solver_timeout_ms is not None and (
+        isinstance(solver_timeout_ms, bool)
+        or not isinstance(solver_timeout_ms, int)
+    ):
+        raise TypeError(
+            f"solver_timeout_ms must be an int number of milliseconds or "
+            f"None, got {type(solver_timeout_ms).__name__} "
+            f"({solver_timeout_ms!r})"
+        )
 
     cj = trace(harness)
     p = propagate(cj)
@@ -169,9 +212,47 @@ def check(harness, *, vacuity_mode, solver_timeout_ms=None):
 
     v = _finish(cj, p)
     if v.status != "VERIFIED":
-        return v  # widening cannot rescue an UNKNOWN/REFUTED; nothing to check
+        # widening cannot rescue an UNKNOWN/REFUTED; nothing to check
+        return v, cj
 
     wcj = widen(cj, mode=vacuity_mode)
+    if wcj == cj or wcj.content_hash() == cj.content_hash():
+        # The widened query is IDENTICAL to the original (under
+        # "inputs-only", point declarations hold still, so an all-point
+        # envelope widens to itself). Re-running it would prove nothing
+        # about the envelope — the old path here stamped "discharges with
+        # the declared bounds widened", which was measured false on
+        # exactly this case (audit F2: mode='all' on the same query says
+        # load-bearing). The instrument is inert: no re-run, no
+        # load-bearing claim in either direction, and the stamp says so.
+        anys = [
+            e for e in cj.jaxpr.eqns if e.primitive == "stelling_any"
+        ]
+        if not anys:
+            why = (
+                "the query declares no bounded inputs, so widening "
+                "changes nothing"
+            )
+        elif vacuity_mode == "inputs-only" and all(
+            e.params_dict()["lo"] == e.params_dict()["hi"] for e in anys
+        ):
+            why = (
+                "every declared input is a point interval, so this mode "
+                "widens nothing on this query; mode='all' would also "
+                "widen transcribed constants"
+            )
+        else:
+            why = "the widened query is identical to the original"
+        vac_line = (
+            f"vacuity instrument inert (mode={vacuity_mode}): {why} — "
+            f"the widen re-check would re-run the identical query and "
+            f"measure nothing, so it did not run"
+        )
+        stamp = dataclasses.replace(
+            v.stamp, assumptions=v.stamp.assumptions + (vac_line,)
+        )
+        return dataclasses.replace(v, stamp=stamp), cj
+
     wide = _finish(wcj, propagate(wcj))
     still = [
         o.index for o in wide.obligations if o.status == "discharged"
@@ -195,7 +276,31 @@ def check(harness, *, vacuity_mode, solver_timeout_ms=None):
             f"envelope is load-bearing for this VERIFIED"
         )
         notes = v.notes
-    stamp = dataclasses.replace(
-        v.stamp, assumptions=v.stamp.assumptions + (vac_line,)
+    # The widen re-check runs at the same pipeline depth, so on the
+    # escalated path it makes real solver invocations the vacuity line
+    # then relies on — and a relied-on invocation must be stamped (audit
+    # F3: 10 measured transport spawns vs 2 stamped). Every re-check
+    # invocation is appended to the final stamp's ledger view, tagged so
+    # a reader can tell the re-check's asks from the original run's; the
+    # interval-only path has an interval-only re-check (nothing to
+    # append) and its absence line stays accurate.
+    wide_solver = wide.stamp.solver
+    recheck_inv = tuple(
+        dataclasses.replace(
+            s, reason=f"vacuity widen re-check: {s.reason}"
+        )
+        for s in (wide_solver if isinstance(wide_solver, tuple) else ())
     )
-    return dataclasses.replace(v, stamp=stamp, notes=notes)
+    if recheck_inv:
+        orig = v.stamp.solver
+        solver_field = (
+            orig if isinstance(orig, tuple) else ()
+        ) + recheck_inv
+    else:
+        solver_field = v.stamp.solver
+    stamp = dataclasses.replace(
+        v.stamp,
+        solver=solver_field,
+        assumptions=v.stamp.assumptions + (vac_line,),
+    )
+    return dataclasses.replace(v, stamp=stamp, notes=notes), cj

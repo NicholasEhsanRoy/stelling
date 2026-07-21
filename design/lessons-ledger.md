@@ -497,3 +497,34 @@ stake-free blind verifier hunted for the caller contract that unmakes
 each finding — the distinct-context audit discipline, applied to
 findings. An in-sample rate reported by the rule-maker is a lower bound
 on self-deception, not a measurement.
+
+## L20 — A stamped disclosure must be conditioned on the act it reports
+
+**(a)** A record line synthesized from control flow ("the widen re-check
+ran, and everything still discharged") will eventually report an act
+that never happened. An instrument that can be *inert* on a query class
+must detect its own inertness and stamp it as inertness — a disclosure
+derived from reaching a code path is a claim about the path, not about
+the measurement. The failure is the worst shape for this project: a
+**true verdict carrying a false stamped line**, i.e. the auditable
+record lying while the answer stands.
+**(b)** The vacuity instrument under `mode="inputs-only"` on an
+all-point envelope: point declarations hold still by design, the
+"widened" query is byte-identical, the re-run proves nothing — yet the
+stamp claimed "discharge(s) with the declared bounds widened to
+(-inf, inf) — the verdict does not depend on the declared envelope",
+directly contradicted by `mode="all"` on the identical query
+("load-bearing"). Found by the LA contract layer's first-contact audit
+(2026-07-21) because point envelopes are first-class contract use
+(the probe's real mesh matrix); pre-existing in `check()` since the
+vacuity wiring. Same audit, same class: the widen re-check's solver
+invocations were relied on by the vacuity line but absent from the
+stamp (10 spawned, 2 recorded). Both fixed structurally: the identical
+widened query is detected and the re-run skipped with an inert line
+stamped; re-check invocations are stamped with a distinguishing tag.
+**(c)** **Structural** (identity check + inert line; tagged
+invocations). The convention behind it: before stamping "X was checked
+by doing Y", verify Y was *distinguishable from doing nothing*.
+**(d)** Every stamped line that reports an action (solver invocations,
+widen re-checks, replay confirmations, coverage claims); every future
+instrument with a degenerate query class on which it is a no-op.
