@@ -21,8 +21,15 @@ allowed-by-census structural additions from the MIME fvm laplacian trace
 ``transpose`` — both pure data movement with exact semantics), plus the
 closed three-row round measured by attribution against a real trace
 (``reduce_sum`` and ``integer_pow``; that round's third row was
-emission-only). Everything else falls to ⊤ — soundly, with coverage
-recording exactly how much fell.
+emission-only), plus the two allowed-by-census additions of the
+scatter-add/stack census round (the MIME LSQ normal-system census
+contact: a real ``jax.ops.segment_sum`` assembly traced to a
+``scatter-add`` equation with no row — coverage ``1 ⊤ (scatter-add
+×1)``, obligation UNKNOWN, escalation declined naming the primitive —
+so ``scatter-add`` lands in its static-index accumulate row forms only,
+and ``stack``, what ``jnp.stack`` traces to on jax 0.11.0, lands as
+pure element routing). Everything else falls to ⊤ — soundly, with
+coverage recording exactly how much fell.
 
 The three-row round is also where the ieee census first had to say **no**
 to arithmetic it can state in ℝ. Both new rows contract more than one
@@ -433,11 +440,34 @@ def _req(params, name: str, prim: str):
     return params[name]
 
 
+def _in_range_int_narrowing(a, src: str, dst: str) -> bool:
+    """Whether this ``int64 -> int32`` conversion is STATICALLY in range:
+    every element interval lies inside int32's representable range, so
+    the narrowing is the identity on every value the operand can hold —
+    exact, no wraparound reachable. The census contact is INDEX data
+    (third audit, F5b: the default-dtype ``at[].add`` sugar under x64
+    declares its index constants int64 and narrows them to int32 before
+    the scatter; without this the index column fell to ⊤ and the
+    accumulate row declined for a reason that had nothing to do with its
+    semantics). The rule is value-based, not use-based — a transfer
+    cannot see what its output feeds — and is sound generically: an
+    in-range int64 value IS its int32 image. The range check is static
+    (the propagated interval) and exact at the boundary: float(2**31 - 1)
+    is exactly representable, so `hi <= 2**31 - 1` admits the boundary
+    value and `2**31` fails it (both sides pinned by test)."""
+    if (src, dst) != ("int64", "int32"):
+        return False
+    lo_b, hi_b = _INT_DTYPE_BOUNDS["int32"]
+    return all(lo_b <= x <= hi_b for x in (*a.los, *a.his))
+
+
 def _t_convert(eqn, params, ins):
     (a,) = ins
     src = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
     dst = str(params.get("new_dtype"))
     if src == dst or (src, dst) in _EXACT_CONVERSIONS:
+        return [a]
+    if _in_range_int_narrowing(a, src, dst):
         return [a]
     if "float" in src and dst in _INT_RANGE:
         # float -> integer truncates toward zero; trunc is monotone, so
@@ -603,6 +633,224 @@ def _t_gather(eqn, params, ins):
     return [iv.take_rows(operand, ks)]
 
 
+# The core scatter-add dimension-number fields shared by every measured
+# form; any OTHER field a jax version adds (batching dims today) must be
+# empty or the form oracle returns None (the transfer declines).
+_SCATTER_ADD_CORE = {
+    "inserted_window_dims": (0,),
+    "scatter_dims_to_operand_dims": (0,),
+}
+
+
+def _is_add_combiner(update_jaxpr) -> bool:
+    """Whether a ``scatter-add`` equation's recorded combining function is
+    the measured single-``add`` form: a :class:`stelling.ir.ClosedJaxpr`
+    with no consts, two scalar invars, and exactly one ``add`` equation
+    combining them into the single outvar (measured on jax 0.11.0 — every
+    traced ``scatter-add`` carries exactly this). The primitive NAME
+    declares the accumulate semantic; a recorded combiner that
+    contradicts the name is malformed IR and the form oracle refuses it
+    rather than trusting either self-description."""
+    if not isinstance(update_jaxpr, ir.ClosedJaxpr):
+        return False
+    j = update_jaxpr.jaxpr
+    if update_jaxpr.consts or len(j.invars) != 2 or len(j.outvars) != 1:
+        return False
+    if len(j.eqns) != 1:
+        return False
+    e = j.eqns[0]
+    if e.primitive != "add" or len(e.invars) != 2 or len(e.outvars) != 1:
+        return False
+    invar_ids = {v.id for v in j.invars}
+    got_ids = {a.id for a in e.invars if isinstance(a, ir.Var)}
+    if got_ids != invar_ids:
+        return False  # the add must combine exactly the two operands
+    out = j.outvars[0]
+    return isinstance(out, ir.Var) and out.id == e.outvars[0].id
+
+
+def _scatter_add_row_form(
+    params,
+    operand_shape: tuple[int, ...],
+    indices_shape: tuple[int, ...],
+    updates_shape: tuple[int, ...],
+) -> int | None:
+    """The pinned static-shape FORM of a ``scatter-add`` equation, or None.
+
+    Exactly the dimension_numbers configurations measured on jax 0.11.0
+    (the scatter-add/stack census round: ``jax.ops.segment_sum`` 1-D and
+    with trailing dims, ``x.at[idx].add(v)`` with array and static scalar
+    idx), and no generalization past them. For operand rank ``r >= 1``:
+
+    * **index-column form** — indices ``(n, 1)``, updates
+      ``(n, *operand.shape[1:])``, ``update_window_dims = (1, …, r-1)``:
+      updates row ``j`` accumulates into operand row ``k_j``
+      (``segment_sum`` and array-index ``at[].add``);
+    * **scalar-index form** — indices ``(1,)``, updates
+      ``operand.shape[1:]``, ``update_window_dims = (0, …, r-2)``: the
+      single updates block accumulates into row ``k_0`` (the
+      ``x.at[1].add(v)`` sugar).
+
+    Both share ``inserted_window_dims = (0,)`` and
+    ``scatter_dims_to_operand_dims = (0,)``; every other
+    dimension-numbers field (batching dims) must be empty. The ``mode``
+    param is deliberately NOT constrained: the registered transfer
+    refuses any index that is not definitely in range, and all
+    ``GatherScatterMode``\\ s agree on in-range indices (out-of-range is
+    where they diverge — measured: FILL_OR_DROP drops the update, clip
+    accumulates into the clamped row). The recorded combiner
+    (``update_jaxpr``) must be absent or the measured single-``add``
+    form (:func:`_is_add_combiner`); ``update_consts`` must be empty.
+
+    Returns the number of scattered index rows ``n``, or None (the
+    caller declines).
+    """
+    r = len(operand_shape)
+    if r < 1:
+        return None
+    dn = params.get("dimension_numbers")
+    if not isinstance(dn, ir.NamedTupleParam):
+        return None
+    fields = dict(dn.fields)
+    if any(fields.get(k) != v for k, v in _SCATTER_ADD_CORE.items()):
+        return None
+    known = set(_SCATTER_ADD_CORE) | {"update_window_dims"}
+    if any(v != () for k, v in fields.items() if k not in known):
+        return None
+    uj = params.get("update_jaxpr")
+    if uj is not None and not _is_add_combiner(uj):
+        return None  # a combiner contradicting the primitive name
+    if params.get("update_consts") not in ((), None):
+        return None
+    uwd = fields.get("update_window_dims")
+    tail = tuple(operand_shape[1:])
+    if (
+        len(indices_shape) == 2
+        and indices_shape[1] == 1
+        and uwd == tuple(range(1, r))
+        and updates_shape == (indices_shape[0],) + tail
+    ):
+        return indices_shape[0]
+    if (
+        indices_shape == (1,)
+        and uwd == tuple(range(0, r - 1))
+        and updates_shape == tail
+    ):
+        return 1
+    return None
+
+
+def _check_unique_indices_promise(params, ks, exc_type) -> None:
+    """The ``unique_indices`` promise check (third audit, F2): an equation
+    carrying ``unique_indices=True`` whose static indices measurably
+    contain duplicates has VIOLATED its own promise, and what jax computes
+    then is implementation-defined — the promise exists precisely so
+    backends may exploit it (skip the atomic/combine path). The measured
+    CPU happening to accumulate is a coincidence of one backend, not a
+    semantic; modelling accumulate here would be a guess on a
+    self-described-unreliable input, the same never-guess posture as the
+    out-of-range mode dependence. So it declines loudly, at the transfer
+    AND at the emission (both call here with their own decline type).
+
+    ``unique_indices=True`` with actually-unique indices proceeds — the
+    promise holds and accumulate degenerates to at-most-one contribution
+    per element, where every backend agrees. ``indices_are_sorted``
+    deliberately needs NO action: sorting permutes the contribution order
+    only, and the ℝ accumulate is order-free (addition is associative and
+    commutative there), so a kept or violated sort promise cannot change
+    the value this transfer brackets."""
+    if params.get("unique_indices") is not True:
+        return
+    if len(set(ks)) == len(ks):
+        return
+    from collections import Counter
+
+    k, c = Counter(ks).most_common(1)[0]
+    raise exc_type(
+        f"scatter-add carries unique_indices=True but its static indices "
+        f"contain duplicates (index {k} appears {c} times): the promise "
+        f"licenses backends to assume no index is repeated, so duplicate "
+        f"behaviour under it is implementation-defined — modelling "
+        f"accumulate here would be a guess on a self-described-unreliable "
+        f"input; declined (the never-guess posture of the out-of-range "
+        f"mode dependence, applied to the uniqueness promise)"
+    )
+
+
+def _t_scatter_add(eqn, params, ins):
+    """``scatter-add`` in its static-index accumulate row forms — the
+    allowed-by-census addition from the MIME LSQ normal-system census
+    round (``jax.ops.segment_sum`` assembling the LSQ normal matrix
+    ``M = Σ_f d_f ⊗ d_f`` traced to exactly this equation; the same
+    primitive is what ``x.at[idx].add(v)`` lowers to).
+
+    The defining semantic — the reason this is NOT the registered
+    set-form ``scatter`` row with a different name: **duplicate indices
+    ACCUMULATE**. ``out[i] = operand[i] + Σ_j updates[j]`` over every
+    index row ``j`` mapping to ``i`` (measured:
+    ``zeros(3).at[[0,2,0,0]].add([1,10,100,1000])`` is ``[1101, 0, 10]``;
+    the set form's last-wins would be ``[1000, 0, 10]``). With static
+    indices the contributing set per output element is statically known,
+    so the transfer is the outward-rounded interval sum of the operand
+    element and its contributing update elements — exact in ℝ, sound for
+    every accumulation order at once (:func:`stelling.interval
+    .scatter_add_rows` carries the argument), one outward bump per real
+    addition, untouched elements copied exactly.
+
+    Covered forms, exactly (:func:`_scatter_add_row_form`): the two
+    measured static-row configurations. Everything else declines:
+    non-point (traced/dynamic) indices and out-of-range indices decline
+    loudly with the reason quoted (out-of-range handling is
+    mode-dependent — FILL_OR_DROP drops, clip clamp-accumulates, both
+    measured — and is never guessed); a ``unique_indices=True`` equation
+    whose static indices measurably contain duplicates declines loudly
+    (the violated promise makes duplicate behaviour
+    implementation-defined — :func:`_check_unique_indices_promise`, same
+    check at the emission); unrecognized dimension numbers,
+    batching dims, a combiner that is not the single ``add``, and
+    mismatched shapes decline to a noted ⊤ via the form oracle. Integer
+    dtypes route through the overflow-reachability guard exactly as
+    ``add``/``reduce_sum`` do: in-range integer accumulation keeps its
+    exact result where the bracket resolves it (exact snapping is a
+    magnitude-conditional claim — see :func:`_int_overflow_guard`),
+    wraparound-reachable accumulation declines with the range quoted.
+    """
+    if len(ins) != 3:
+        return None
+    operand, indices, updates = ins
+    n = _scatter_add_row_form(
+        params, operand.shape, indices.shape, updates.shape
+    )
+    if n is None:
+        return None
+    ks = []
+    for lo, hi in zip(indices.los, indices.his):
+        if lo != hi or not math.isfinite(lo) or lo != math.floor(lo):
+            raise iv.IntervalError(
+                f"scatter-add indices are not definite integers over the "
+                f"declared box (an index element spans [{lo}, {hi}]) — the "
+                f"static-index accumulate rule needs static indices; "
+                f"traced/dynamic indices have no row"
+            )
+        k = int(lo)
+        if not 0 <= k < operand.shape[0]:
+            raise iv.IntervalError(
+                f"scatter-add index {k} is out of range for the operand's "
+                f"leading axis {operand.shape[0]} — out-of-range handling "
+                f"is mode-dependent (measured on jax 0.11.0: FILL_OR_DROP "
+                f"drops the update, clip accumulates into the clamped row) "
+                f"and is never guessed"
+            )
+        ks.append(k)
+    _check_unique_indices_promise(params, ks, iv.IntervalError)
+    if updates.shape == operand.shape[1:]:
+        # the scalar-index sugar: one updates block, normalized to the
+        # one-row form (a flat C-order reshape is the identity on elements)
+        updates = iv.reshape(updates, (1,) + operand.shape[1:])
+    outs = [iv.scatter_add_rows(operand, updates, ks)]
+    return _int_overflow_guard(eqn, "scatter-add", outs)
+
+
 # jax integer arithmetic WRAPS on overflow; every arithmetic transfer here
 # computes over ℝ, which does not model wraparound. Modelling int32 as an
 # unbounded real is a false-VERIFIED generator — measured, `v * v > 0`
@@ -693,6 +941,18 @@ def _int_overflow_guard(eqn, prim: str, outs):
     bounded by ``n + 1 <= 2`` could not be discharged although it is
     provably true (audit COSMETIC 5 / over-guard reports: deciding it
     exactly beats declining it).
+
+    The snap yields a POINT (and thereby definite equality verdicts) only
+    where one double ulp at the result's magnitude spans at most one
+    integer — |result| < 2**53. At int64 magnitudes the arithmetic
+    kernels' outward bump itself spans many integers (measured, third
+    audit F6: an in-range ``2**62 + 0`` accumulate keeps the snapped
+    bracket ``[2**62 - 512, 2**62 + 1024]`` — one outward ulp each way
+    at that magnitude — and stays undecided, while ``2**62 + 2**62``
+    escapes the range and declines correctly), so "in-range integer
+    arithmetic keeps its exact result" is a magnitude-conditional claim:
+    exact below 2**53, a sound-but-wide in-range bracket above.
+    Deliberate: tightness is never bought at the price of the bracket.
 
     A no-op for float dtypes, which are returned untouched.
     """
@@ -923,6 +1183,20 @@ TRANSFERS = {
     # HeatNode trace; every other scatter configuration declines (see
     # _t_scatter).
     "scatter": (_t_scatter, TIER_EXACT),
+    # the ACCUMULATE scatter (what jax.ops.segment_sum and x.at[idx].add(v)
+    # lower to), static indices only — census addition from the MIME LSQ
+    # normal-system census round; duplicate indices accumulate, which is
+    # why this is its own row and NOT the set-form 'scatter' above (see
+    # _t_scatter_add). Outward-rounded accumulation: tier sound.
+    "scatter-add": (_t_scatter_add, TIER_SOUND),
+    # k same-shape arrays joined along a new axis (what jnp.stack traces
+    # to on jax 0.11.0) — same census round as scatter-add; pure element
+    # routing, no arithmetic; malformed axes/shapes decline inside
+    # iv.stack (IntervalError -> noted ⊤).
+    "stack": (
+        lambda eqn, p, ins: [iv.stack(list(ins), int(_req(p, "axis", "stack")))],
+        TIER_EXACT,
+    ),
     # x[idx], static-index leading-axis row form only — census addition from
     # the MIME fvm laplacian census trace; every other gather configuration
     # declines (see _t_gather).
@@ -986,6 +1260,10 @@ TRANSFERS = {
 _INT_COMPUTING = frozenset({
     "add", "sub", "mul", "div", "neg", "abs",
     "pow", "exp", "reduce_sum", "integer_pow",
+    # the accumulate scatter SUMS (operand element + contributing update
+    # elements), so it can produce a value its operands did not contain —
+    # exactly the add/reduce_sum class, same guard
+    "scatter-add",
 })
 
 # Why each of these cannot introduce an out-of-range integer:
@@ -999,7 +1277,7 @@ _INT_NON_COMPUTING = frozenset({
     "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
     "convert_element_type",
     "stop_gradient", "reshape", "squeeze", "slice", "scatter", "gather",
-    "transpose", "broadcast_in_dim", "concatenate",
+    "transpose", "broadcast_in_dim", "concatenate", "stack",
     "stelling_any", "stelling_assert", "stelling_nonvacuity",
 })
 
@@ -1009,6 +1287,147 @@ assert _INT_COMPUTING | _INT_NON_COMPUTING == set(TRANSFERS), (
     f"stale {_INT_COMPUTING | _INT_NON_COMPUTING - set(TRANSFERS)}"
 )
 assert not (_INT_COMPUTING & _INT_NON_COMPUTING)
+
+# -- the probe-or-exempt census over the CLASSIFICATION itself ----------------
+#
+# Third audit, F3: the behavioural boundary sweep probes only the names
+# CLASSIFIED computing, so a future two-edit misfiling — an arithmetic
+# primitive given a transfer and filed _INT_NON_COMPUTING (plus its ieee
+# row) — passed every import-time assert and would mint false VERIFIEDs
+# on wrapping integer arithmetic (demonstrated on an int32 cumsum, scratch
+# edits reverted). The classification is therefore itself censused: every
+# registered transfer is either PROBED (in _INT_COMPUTING, swept at every
+# dtype boundary in both directions) or EXEMPT with a written soundness
+# reason below. A silent two-edit misfiling is now a conscious three-edit
+# act whose third edit is a soundness claim in this registry.
+_INT_NON_COMPUTING_EXEMPT: dict[str, str] = {
+    "max": (
+        "selects one of its operands' values elementwise; no arithmetic "
+        "creates a value its in-range operands did not already contain"
+    ),
+    "min": (
+        "selects one of its operands' values elementwise; no arithmetic "
+        "creates a value its in-range operands did not already contain"
+    ),
+    "select_n": (
+        "selects/joins operand values elementwise (measured clamp "
+        "semantics); it computes no new numeric value"
+    ),
+    "lt": "produces booleans; comparison of in-range integers is exact and its result dtype cannot wrap",
+    "gt": "produces booleans; comparison of in-range integers is exact and its result dtype cannot wrap",
+    "le": "produces booleans; comparison of in-range integers is exact and its result dtype cannot wrap",
+    "ge": "produces booleans; comparison of in-range integers is exact and its result dtype cannot wrap",
+    "eq": "produces booleans; comparison of in-range integers is exact and its result dtype cannot wrap",
+    "ne": "produces booleans; comparison of in-range integers is exact and its result dtype cannot wrap",
+    "and": (
+        "bool-only by its own dtype guard (the bitwise integer form "
+        "declines inside the transfer); Kleene logic on {0, 1}"
+    ),
+    "or": (
+        "bool-only by its own dtype guard (the bitwise integer form "
+        "declines inside the transfer); Kleene logic on {0, 1}"
+    ),
+    "reduce_or": (
+        "bool-only by its own dtype guard; a three-valued OR-fold whose "
+        "outputs are booleans"
+    ),
+    "convert_element_type": (
+        "carries its own exact-conversions whitelist plus the float->int "
+        "range guard and the interval-based int64->int32 index-narrowing "
+        "range check; every value-changing conversion declines"
+    ),
+    "stop_gradient": "the identity on its operand",
+    "reshape": (
+        "pure element routing (flat C-order identity) — misclassification "
+        "would require the routing kernel itself to compute, which it "
+        "cannot: it only copies in-range values"
+    ),
+    "squeeze": (
+        "pure element routing (axis removal) — copies of in-range values, "
+        "no arithmetic performed on them"
+    ),
+    "slice": (
+        "pure element routing (static selection) — copies of in-range "
+        "values, no arithmetic performed on them"
+    ),
+    "scatter": (
+        "element REPLACEMENT (the set form): the output holds only values "
+        "its operand and update already contained; the accumulate sibling "
+        "'scatter-add' computes and is probed"
+    ),
+    "gather": (
+        "pure element routing (static row take) — copies of in-range "
+        "values, no arithmetic performed on them"
+    ),
+    "transpose": (
+        "pure element routing (axis permutation) — copies of in-range "
+        "values, no arithmetic performed on them"
+    ),
+    "broadcast_in_dim": (
+        "pure element routing (replication) — copies of in-range values, "
+        "no arithmetic performed on them"
+    ),
+    "concatenate": (
+        "pure element routing (adjacency) — copies of in-range values, no "
+        "arithmetic performed on them"
+    ),
+    "stack": (
+        "pure element routing (new-axis join) — copies of in-range "
+        "values, no arithmetic performed on them"
+    ),
+    "stelling_any": (
+        "a declaration: its output box IS the declared bounds; nothing is "
+        "computed from operand values"
+    ),
+    "stelling_assert": "the identity on its predicate operand",
+    "stelling_nonvacuity": "the identity on its membership operand",
+}
+
+
+def _assert_integer_classification_censused(
+    registered=None, probed=None, exemptions=None
+) -> None:
+    """Probe-or-exempt (third audit, F3): every primitive with a
+    registered transfer must be either covered by the behavioural integer
+    boundary sweep (classified ``_INT_COMPUTING``) or present in
+    :data:`_INT_NON_COMPUTING_EXEMPT` with a non-empty written reason —
+    and every exemption must name a live, unprobed primitive (a stale
+    exemption is a soundness claim about nothing, the fidelity module's
+    stale-residual discipline applied here). Callable with explicit
+    arguments so the regression test can doctor a copy in-process; the
+    import-time call runs on the live registries."""
+    registered = set(TRANSFERS) if registered is None else set(registered)
+    probed = set(_INT_COMPUTING) if probed is None else set(probed)
+    exemptions = (
+        dict(_INT_NON_COMPUTING_EXEMPT)
+        if exemptions is None
+        else dict(exemptions)
+    )
+    for prim in sorted(registered):
+        if prim in probed:
+            continue
+        reason = exemptions.get(prim)
+        if not isinstance(reason, str) or not reason.strip():
+            raise AssertionError(
+                f"integer-classification census: primitive {prim!r} has a "
+                f"registered transfer, is not covered by the behavioural "
+                f"integer boundary sweep, and carries no written exemption "
+                f"reason — the CLASSIFICATION itself must be censused: "
+                f"either classify it computing (probed at every dtype "
+                f"boundary in both directions) or write its soundness "
+                f"claim into _INT_NON_COMPUTING_EXEMPT"
+            )
+    stale = sorted(set(exemptions) - (registered - probed))
+    if stale:
+        raise AssertionError(
+            f"integer-classification census: exemption entr"
+            f"{'ies' if len(stale) > 1 else 'y'} {stale} name no live "
+            f"unprobed primitive — a stale exemption is a soundness claim "
+            f"about nothing; delete or correct it"
+        )
+
+
+_assert_integer_classification_censused()
 
 # and every computing transfer must actually be wearing the guard — the
 # census is only worth having if membership is enforced rather than
@@ -1031,7 +1450,11 @@ _INT_GUARDED_INSIDE: frozenset[str] = frozenset()
 
 def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
     """Operand values chosen to push ``prim`` past the named boundary.
-    ``None`` for the second slot means the primitive is unary."""
+    ``None`` for the second slot means the primitive is unary. For
+    ``scatter-add`` the two slots are (operand element, update element) —
+    the accumulation ``boundary + boundary`` escapes the range in both
+    directions except at an unsigned lower bound of 0, where the in-range
+    exact result must stand."""
     hi, lo = float(hi_b), float(lo_b)
     if high:
         return {
@@ -1039,12 +1462,14 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
             "div": (lo, -1.0), "neg": (lo, None), "abs": (lo, None),
             "pow": (hi, 2.0), "exp": (hi, None),
             "reduce_sum": (hi, None), "integer_pow": (hi, None),
+            "scatter-add": (hi, hi),
         }[prim]
     return {
         "add": (lo, lo), "sub": (lo, hi), "mul": (lo, hi),
         "div": (hi, -1.0), "neg": (hi, None), "abs": (hi, None),
         "pow": (lo, 3.0), "exp": (lo, None),
         "reduce_sum": (lo, None), "integer_pow": (lo, None),
+        "scatter-add": (lo, lo),
     }[prim]
 
 
@@ -1092,36 +1517,77 @@ def _assert_computing_transfers_close_the_integer_class() -> None:
             for high in (True, False):
                 y = (2 if high else 3) if prim == "integer_pow" else None
                 first, second = _probe_operands(prim, lo_b, hi_b, high)
-                shape = (3,) if prim == "reduce_sum" else ()
-                aval_in = ir.Aval(
-                    kind="ShapedArray", shape=shape, dtype=dtype
-                )
-                boxes = [iv.from_bounds(shape, first, first)]
-                if second is not None:
-                    boxes.append(iv.from_bounds((), second, second))
-                invars = tuple(
-                    ir.Var(
-                        id=i,
-                        aval=aval_in if i == 0 else ir.Aval(
-                            kind="ShapedArray", shape=(), dtype=dtype
+                if prim == "scatter-add":
+                    # the 3-operand accumulate form: one operand row at the
+                    # boundary, one in-range index (0), one update at the
+                    # boundary — the accumulation boundary+boundary escapes
+                    # the range (except unsigned low, where 0+0 must stand
+                    # exactly), and the transfer must decline it
+                    boxes = [
+                        iv.from_bounds((1,), first, first),
+                        iv.point(0.0, (1, 1)),
+                        iv.from_bounds((1,), second, second),
+                    ]
+                    avals = (
+                        ir.Aval(kind="ShapedArray", shape=(1,), dtype=dtype),
+                        ir.Aval(
+                            kind="ShapedArray", shape=(1, 1), dtype="int32"
+                        ),
+                        ir.Aval(kind="ShapedArray", shape=(1,), dtype=dtype),
+                    )
+                    invars = tuple(
+                        ir.Var(id=i, aval=a) for i, a in enumerate(avals)
+                    )
+                    eqn = ir.JaxprEqn(
+                        primitive=prim, invars=invars,
+                        outvars=(ir.Var(id=99, aval=avals[0]),),
+                        params=(
+                            (
+                                "dimension_numbers",
+                                ir.NamedTupleParam(
+                                    cls="ScatterDimensionNumbers",
+                                    fields=(
+                                        ("update_window_dims", ()),
+                                        ("inserted_window_dims", (0,)),
+                                        ("scatter_dims_to_operand_dims", (0,)),
+                                        ("operand_batching_dims", ()),
+                                        ("scatter_indices_batching_dims", ()),
+                                    ),
+                                ),
+                            ),
                         ),
                     )
-                    for i in range(len(boxes))
-                )
-                params = {
-                    "integer_pow": (("y", y),),
-                    "reduce_sum": (("axes", (0,)),),
-                }
-                eqn = ir.JaxprEqn(
-                    primitive=prim, invars=invars,
-                    outvars=(ir.Var(
-                        id=99,
-                        aval=ir.Aval(
-                            kind="ShapedArray", shape=(), dtype=dtype
-                        ),
-                    ),),
-                    params=params.get(prim, ()),
-                )
+                else:
+                    shape = (3,) if prim == "reduce_sum" else ()
+                    aval_in = ir.Aval(
+                        kind="ShapedArray", shape=shape, dtype=dtype
+                    )
+                    boxes = [iv.from_bounds(shape, first, first)]
+                    if second is not None:
+                        boxes.append(iv.from_bounds((), second, second))
+                    invars = tuple(
+                        ir.Var(
+                            id=i,
+                            aval=aval_in if i == 0 else ir.Aval(
+                                kind="ShapedArray", shape=(), dtype=dtype
+                            ),
+                        )
+                        for i in range(len(boxes))
+                    )
+                    params = {
+                        "integer_pow": (("y", y),),
+                        "reduce_sum": (("axes", (0,)),),
+                    }
+                    eqn = ir.JaxprEqn(
+                        primitive=prim, invars=invars,
+                        outvars=(ir.Var(
+                            id=99,
+                            aval=ir.Aval(
+                                kind="ShapedArray", shape=(), dtype=dtype
+                            ),
+                        ),),
+                        params=params.get(prim, ()),
+                    )
                 try:
                     outs = TRANSFERS[prim][0](eqn, eqn.params_dict(), boxes)
                 except iv.IntervalError:
@@ -1525,6 +1991,20 @@ def _ieee_gather(eqn, params, ins, flags):
     return outs, [flags[0]]
 
 
+def _ieee_scatter_add(eqn, params, ins, flags):
+    """Category (iii), whole-primitive: the censused ieee REFUSAL for
+    scatter-add — the honest floor, chosen over an order-independent
+    enclosure. The real transfer's soundness argument is ℝ-associativity
+    of the per-element accumulation, which is exactly what float addition
+    does not offer (the reduce_sum defect class), and the contraction
+    freedom (a product-derived update fused into the accumulate's add)
+    has no taint-hull built for the scatter path — so EVERY form declines
+    with the gap quoted, including duplicate-free and empty-update forms.
+    The dispatcher turns the raise into a noted ⊤ maybe-NaN, counted in
+    coverage: a refusal is a censused entry, not an omission."""
+    raise iv.IntervalError(iv.SCATTER_ADD_IEEE_DECLINE)
+
+
 def _ieee_convert(eqn, params, ins, flags):
     """convert_element_type under ieee. A non-f64 FLOAT source declines
     outright (re-attack U2): the whitelist's value-preservation claim is
@@ -1551,6 +2031,11 @@ def _ieee_convert(eqn, params, ins, flags):
             f"under DAZ) are not modelled — declined"
         )
     if src == dst or (src, dst) in _EXACT_CONVERSIONS:
+        return [ins[0]], [flags[0]]
+    if _in_range_int_narrowing(ins[0], src, dst):
+        # the statically-in-range int64->int32 narrowing (third audit,
+        # F5b) is an exact integer identity — no float semantics, no
+        # flush hazard — so it passes under ieee exactly as in real mode
         return [ins[0]], [flags[0]]
     if "float" in src and dst in _INT_RANGE:
         if flags[0]:
@@ -1648,6 +2133,20 @@ IEEE_TRANSFERS = {
     ),
     "scatter": (_ieee_scatter, TIER_EXACT),
     "gather": (_ieee_gather, TIER_EXACT),
+    # (iii) the whole-primitive censused refusal: the accumulate's ℝ-
+    # associativity argument does not survive the dial, and no all-orders
+    # bound or contraction hull is built for the scatter path — every
+    # form declines with iv.SCATTER_ADD_IEEE_DECLINE quoted
+    "scatter-add": (_ieee_scatter_add, TIER_EXACT),
+    # (i) pure element routing, dtype-agnostic, flags ride along
+    "stack": (
+        _ieee_passthrough(
+            lambda eqn, p, ins: [
+                iv.stack(list(ins), int(_req(p, "axis", "stack")))
+            ]
+        ),
+        TIER_EXACT,
+    ),
     "transpose": (
         _ieee_passthrough(
             lambda eqn, p, ins: [
@@ -2673,6 +3172,10 @@ class _Propagator:
             else:
                 self.notes.append(f"{eqn.primitive!r} {refusal}; ⊤")
                 self.counter.record_unknown(eqn.primitive)
+                # sub-jaxprs of a refused equation were never analyzed:
+                # unreached, so the denominator stays a function of the
+                # program on this decline path too (third audit, F1)
+                self.mark_unreached(eqn)
                 for out in eqn.outvars:
                     self._bind_refused(out)
                 return
@@ -2962,6 +3465,18 @@ class _Propagator:
             # Under ieee, top_out marks the outputs maybe-NaN.
             self.notes.append(f"{eqn.primitive!r} declined this form: {e}; ⊤")
             self.counter.record_unknown(eqn.primitive)
+            # the coverage denominator is a function of the PROGRAM, never
+            # of the outcome (third audit, F1): an equation carrying a
+            # sub-jaxpr (scatter-add's recorded combiner) whose transfer
+            # declines never analyzed those inner equations — they count
+            # UNREACHED, exactly as under an unregistered primitive, so
+            # the same program reports the same total on the success path
+            # (inner add: known), every decline path (unreached), and
+            # under every semantics dial. Before this, the inner equation
+            # silently vanished from the total on declines (real 6 vs
+            # ieee 5 on one program). A no-op for every sub-jaxpr-free
+            # equation.
+            self.mark_unreached(eqn)
             self.top_out(eqn)
             return
         if result is None:  # a known transfer declining this configuration
@@ -2970,6 +3485,10 @@ class _Propagator:
                 f"{ {k: v for k, v in params.items() if not isinstance(v, ir.ClosedJaxpr)} }; ⊤"
             )
             self.counter.record_unknown(eqn.primitive)
+            # same accounting as the IntervalError decline above: inner
+            # equations of a declined form count unreached, keeping the
+            # denominator outcome-independent (third audit, F1)
+            self.mark_unreached(eqn)
             self.top_out(eqn)
             return
         outs, out_flags = result if ieee else (result, None)
@@ -3007,6 +3526,18 @@ class _Propagator:
                 self.top_out(eqn)
                 return
         self.counter.record_known(eqn.primitive)
+        if eqn.primitive == "scatter-add":
+            # the accumulate row is the first registered transfer whose
+            # equation CARRIES a sub-jaxpr (the recorded add combiner).
+            # Its inner equation was honored — the form oracle pinned it
+            # to the single `add` the transfer just performed — so it
+            # counts known here: the coverage denominator must neither
+            # drop it silently (the audit-finding-4 vanishing class) nor
+            # call it unreached (before this row it WAS unreached, and
+            # the before/after totals must stay comparable)
+            for j in sub_jaxprs(eqn):
+                for e in j.eqns:
+                    self.counter.record_known(e.primitive)
         self.used[eqn.primitive] = tier
         if tier == TIER_SOUND_LIBM:
             self.assumptions.add(

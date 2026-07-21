@@ -26,9 +26,12 @@ The emission set: elementwise ``add``, ``sub``, ``mul``, ``neg``, guarded
 value-preserving ``convert_element_type`` (all with jax/numpy rank
 broadcasting, sharing preserved: a broadcast scalar is ONE term
 everywhere); the structural index-routing ops ``broadcast_in_dim``,
-``reshape``, ``squeeze``, ``transpose``, ``slice``, ``concatenate``
-(no new terms — an output element IS its source element's term); and the
-exact n-ary ``reduce_sum``. Everything else — over-budget slices,
+``reshape``, ``squeeze``, ``transpose``, ``slice``, ``concatenate``,
+``stack`` (no new terms — an output element IS its source element's
+term); the exact n-ary ``reduce_sum``; and static-index ``scatter-add``
+(the accumulate scatter: per output element, the exact sum of the
+operand element and its statically-known contributing update elements —
+duplicate indices contribute once each). Everything else — over-budget slices,
 transcendentals, unknown primitives, possibly-zero divisor elements,
 non-float input declarations, obligations that cannot be mapped
 one-to-one onto top-level asserts — **declines**, with the primitive and
@@ -148,7 +151,7 @@ _BOOL_OPS = frozenset({"and", "or", "not", "xor"})
 # differently from the propagation that judged the obligation.
 _STRUCTURAL = frozenset(
     {"broadcast_in_dim", "reshape", "squeeze", "transpose", "slice",
-     "concatenate"}
+     "concatenate", "stack"}
 )
 # Harness primitives whose value semantics are the identity on their input.
 # stelling_assume's *constraint* is inert (dropped, disclosed by the
@@ -158,7 +161,7 @@ _IDENTITY_HARNESS = frozenset({"stelling_assume", "stelling_nonvacuity"})
 
 _SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
-    | {"reduce_sum", "select_n", "convert_element_type"}
+    | {"reduce_sum", "select_n", "convert_element_type", "scatter-add"}
 )
 
 # Emitted primitives that COMPUTE a new numeric value, and therefore can
@@ -176,7 +179,10 @@ _SUPPORTED = (
 # harness primitives are identities, `div` already carries its own stricter
 # float-only guard, and `convert_element_type` is whitelist-guarded.
 _INT_OVERFLOW_EMITTED = frozenset(
-    {"add", "sub", "mul", "neg", "div", "integer_pow", "reduce_sum"}
+    {"add", "sub", "mul", "neg", "div", "integer_pow", "reduce_sum",
+     # the accumulate scatter SUMS operand and update elements — the
+     # add/reduce_sum class exactly, so integer dtypes decline here too
+     "scatter-add"}
 )
 
 # Mechanised for the same reason the transfer-side census is (audit
@@ -196,6 +202,87 @@ assert _INT_OVERFLOW_EMITTED | _INT_SAFE_EMITTED == _SUPPORTED, (
     f"unclassified {_SUPPORTED - _INT_OVERFLOW_EMITTED - _INT_SAFE_EMITTED}"
 )
 assert not (_INT_OVERFLOW_EMITTED & _INT_SAFE_EMITTED)
+
+# -- the probe-or-exempt census over the emission classification --------------
+#
+# Third audit, F3, emission face (the transfer-side sibling sweep — audit
+# UNSOUND 3's lesson applied forward): _INT_SAFE_EMITTED derives partly
+# from set unions (_STRUCTURAL above all), so a primitive could join the
+# int-safe class by the same edit that adds its support, with no
+# independent check on the claim. The emission layer has NO behavioural
+# boundary sweep, so here EVERY int-safe name carries a written soundness
+# reason: a future addition to any constituent set is a conscious edit to
+# this registry too, and the reason is the claim.
+_INT_SAFE_EMITTED_REASONS: dict[str, str] = {
+    "lt": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
+    "le": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
+    "gt": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
+    "ge": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
+    "eq": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
+    "ne": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
+    "and": "boolean connective on Bool terms (non-bool operands decline in _validate)",
+    "or": "boolean connective on Bool terms (non-bool operands decline in _validate)",
+    "not": "boolean connective on Bool terms (non-bool operands decline in _validate)",
+    "xor": "boolean connective on Bool terms (non-bool operands decline in _validate)",
+    "broadcast_in_dim": "emits NO terms: output elements alias source terms (index routing only)",
+    "reshape": "emits NO terms: output elements alias source terms (index routing only)",
+    "squeeze": "emits NO terms: output elements alias source terms (index routing only)",
+    "transpose": "emits NO terms: output elements alias source terms (index routing only)",
+    "slice": "emits NO terms: output elements alias source terms (index routing only)",
+    "concatenate": "emits NO terms: output elements alias source terms (index routing only)",
+    "stack": "emits NO terms: output elements alias source terms (index routing only)",
+    "stelling_assume": "identity data flow; the constraint is deliberately never emitted",
+    "stelling_nonvacuity": "identity data flow",
+    "max": "emits an ite SELECTING an operand term; no arithmetic term is created",
+    "min": "emits an ite SELECTING an operand term; no arithmetic term is created",
+    "select_n": "emits an ite selecting a case term; no arithmetic term is created",
+    "convert_element_type": (
+        "whitelist-guarded in _validate: only value-preserving conversions "
+        "emit (identity or the bool->{0,1} ite)"
+    ),
+}
+
+
+def _assert_emission_classification_censused(
+    supported=None, guarded=None, reasons=None
+) -> None:
+    """Probe-or-exempt at the emission layer (third audit, F3): every
+    emittable primitive is either integer-GUARDED (in
+    ``_INT_OVERFLOW_EMITTED`` — integer dtypes decline in ``_validate``)
+    or carries a written int-safety reason in
+    :data:`_INT_SAFE_EMITTED_REASONS`; stale reasons refuse (a claim
+    about nothing). Callable with explicit arguments so the regression
+    test can doctor a copy in-process; the import-time call runs on the
+    live sets."""
+    supported = _SUPPORTED if supported is None else set(supported)
+    guarded = _INT_OVERFLOW_EMITTED if guarded is None else set(guarded)
+    reasons = (
+        dict(_INT_SAFE_EMITTED_REASONS) if reasons is None else dict(reasons)
+    )
+    for prim in sorted(supported):
+        if prim in guarded:
+            continue
+        reason = reasons.get(prim)
+        if not isinstance(reason, str) or not reason.strip():
+            raise AssertionError(
+                f"emission-classification census: primitive {prim!r} is "
+                f"emittable, carries no integer overflow guard, and has "
+                f"no written int-safety reason — the classification "
+                f"itself must be censused: either guard it "
+                f"(_INT_OVERFLOW_EMITTED) or write its soundness claim "
+                f"into _INT_SAFE_EMITTED_REASONS"
+            )
+    stale = sorted(set(reasons) - (supported - guarded))
+    if stale:
+        raise AssertionError(
+            f"emission-classification census: reason entr"
+            f"{'ies' if len(stale) > 1 else 'y'} {stale} name no live "
+            f"unguarded emittable primitive — a stale reason is a "
+            f"soundness claim about nothing; delete or correct it"
+        )
+
+
+_assert_emission_classification_censused()
 
 
 class ReplayError(RuntimeError):
@@ -557,6 +644,11 @@ def _route_structural(eqn: ir.JaxprEqn) -> list[tuple[int, int]]:
             # propagation transfer and the replay), surfacing here as the
             # quoted decline below
             out = iv.concatenate(boxes, int(params["dimension"]))
+        elif prim == "stack":
+            # same oracle discipline: interval.stack IS the routing (and
+            # the propagation transfer), so shape/axis violations surface
+            # as the quoted decline below
+            out = iv.stack(boxes, int(params["axis"]))
         else:  # pragma: no cover - guarded by _STRUCTURAL membership
             raise _Decline(f"no structural routing rule for {prim!r}")
     except KeyError as e:
@@ -616,6 +708,149 @@ def _group_reduce_sum(eqn: ir.JaxprEqn) -> list[list[int]]:
             out_shape,
         )
         groups[j].append(i)
+    return groups
+
+
+def _exact_static_elements(eqns, consts, atom):
+    """Exact per-element values of ``atom`` where it derives from
+    constants/literals through STRUCTURAL routing (and the identity
+    harness primitives) alone; ``None`` where it does not — i.e. where
+    the value is traced/dynamic. Drives the same :func:`_route_structural`
+    oracle validation, emission, and replay drive, so the three consumers
+    of a static index column cannot read it differently. ``consts``
+    values may be raw (:class:`stelling.ir.Array` / python scalars) or
+    already-decoded element tuples (the :class:`ObligationSlice.consts`
+    shape) — both are normalized here."""
+    env: dict[int, tuple] = {}
+    for vid, val in consts.items():
+        if isinstance(val, tuple):
+            env[vid] = val
+            continue
+        try:
+            env[vid] = _decode_elements(val)
+        except _Decline:
+            continue  # undecodable const: simply not statically known
+
+    def read(a: ir.Atom):
+        if isinstance(a, ir.Literal):
+            try:
+                return _decode_elements(a.val)
+            except _Decline:
+                return None
+        return env.get(a.id)
+
+    for e in eqns:
+        if len(e.outvars) != 1:
+            continue
+        if e.primitive in _IDENTITY_HARNESS:
+            v = read(e.invars[0]) if e.invars else None
+            if v is not None:
+                env[e.outvars[0].id] = v
+            continue
+        if e.primitive not in _STRUCTURAL:
+            continue
+        ins = [read(a) for a in e.invars]
+        if any(v is None for v in ins):
+            continue
+        try:
+            routes = _route_structural(e)
+        except _Decline:
+            continue
+        env[e.outvars[0].id] = tuple(ins[op][src] for op, src in routes)
+    return read(atom)
+
+
+def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
+    """Per-OUTPUT-element groups of contributing UPDATES flat indices for
+    a pinned-form static-index ``scatter-add`` equation — the accumulate
+    semantics' addend sets, shared by slice validation, the SMT emission,
+    and the replay (one bookkeeping, three consumers, as for every other
+    grouping in this module). ``groups[i]`` lists the updates elements
+    added onto operand element ``i``; **duplicate indices produce
+    multiple entries in one group** — that is the primitive's defining
+    semantic, and collapsing them would be the set-form confusion.
+
+    Declines (reason quoted) on any configuration outside the measured
+    static row forms (:func:`stelling.propagate._scatter_add_row_form` is
+    the one form oracle, shared with the propagation transfer), on
+    indices that are not statically derivable from constants through
+    structural routing (traced/dynamic indices), on non-integral index
+    values, and on out-of-range indices (mode-dependent drop/clamp,
+    never guessed).
+    """
+    from stelling.propagate import (
+        _check_unique_indices_promise,
+        _scatter_add_row_form,
+    )
+
+    if len(eqn.invars) != 3 or len(eqn.outvars) != 1:
+        raise _Decline(
+            f"'scatter-add' with {len(eqn.invars)} operand(s) and "
+            f"{len(eqn.outvars)} output(s) is outside the measured form"
+        )
+    operand_shape = _shape_of(eqn.invars[0])
+    indices_shape = _shape_of(eqn.invars[1])
+    updates_shape = _shape_of(eqn.invars[2])
+    out_shape = _shape_of(eqn.outvars[0])
+    if out_shape != operand_shape:
+        raise _Decline(
+            f"'scatter-add' output shape {out_shape} contradicts the "
+            f"operand shape {operand_shape} (malformed IR)"
+        )
+    n = _scatter_add_row_form(
+        eqn.params_dict(), operand_shape, indices_shape, updates_shape
+    )
+    if n is None:
+        raise _Decline(
+            f"'scatter-add' configuration (operand {operand_shape}, "
+            f"indices {indices_shape}, updates {updates_shape}) is outside "
+            f"the measured static-index accumulate row forms"
+        )
+    vals = _exact_static_elements(eqns, consts, eqn.invars[1])
+    if vals is None:
+        # wording (third audit, F5a): the derivation walks constants
+        # through STRUCTURAL routing only, so a constant index column
+        # reaching here through a non-structural op (the traced
+        # negative-index normalization arithmetic above all) is also
+        # refused — "traced/dynamic" would misdescribe it
+        raise _Decline(
+            "'scatter-add' index data not statically derivable through "
+            "the supported derivation forms (constants through structural "
+            "routing) — the static-index accumulate emission needs a "
+            "statically-known index column"
+        )
+    ks: list[int] = []
+    for v in vals:
+        if isinstance(v, bool) or (
+            not isinstance(v, int)
+            and not (isinstance(v, float) and v == math.floor(v) and math.isfinite(v))
+        ):
+            raise _Decline(
+                f"'scatter-add' index value {v!r} is not an integer"
+            )
+        k = int(v)
+        if not 0 <= k < operand_shape[0]:
+            raise _Decline(
+                f"'scatter-add' index {k} is out of range for the "
+                f"operand's leading axis {operand_shape[0]} — out-of-range "
+                f"handling is mode-dependent (drop vs clamp) and is never "
+                f"guessed"
+            )
+        ks.append(k)
+    if len(ks) != n:
+        raise _Decline(
+            f"'scatter-add' indices decode to {len(ks)} element(s) but the "
+            f"form implies {n} (aval/value mismatch, malformed IR)"
+        )
+    # the unique_indices promise check (third audit, F2), through the SAME
+    # oracle the transfer uses — promise-violated duplicates are
+    # implementation-defined and decline at both layers identically
+    _check_unique_indices_promise(eqn.params_dict(), ks, _Decline)
+    rowsz = _size(operand_shape[1:])
+    groups: list[list[int]] = [[] for _ in range(_size(operand_shape))]
+    for j, k in enumerate(ks):
+        for t in range(rowsz):
+            groups[k * rowsz + t].append(j * rowsz + t)
     return groups
 
 
@@ -833,6 +1068,22 @@ class _Slicer:
                     f"'reduce_sum' on dtype {dt!r}: jax integer addition "
                     f"wraps on overflow, which Real addition does not model"
                 )
+        if prim == "scatter-add":
+            if len(eqn.invars) != 3:
+                raise _Decline(
+                    f"'scatter-add' with {len(eqn.invars)} operand(s) is "
+                    f"outside the measured form"
+                )
+            dts = {
+                (a.aval.dtype or "")
+                for a in (eqn.invars[0], eqn.invars[2], eqn.outvars[0])
+            }
+            if len(dts) != 1 or not next(iter(dts)).startswith("float"):
+                raise _Decline(
+                    f"'scatter-add' operand/updates/output dtypes {sorted(dts)} "
+                    f"must be one float dtype: the accumulate is Real "
+                    f"addition, and jax integer addition wraps on overflow"
+                )
         if prim == "select_n":
             if len(eqn.invars) != 3:
                 raise _Decline(
@@ -867,6 +1118,13 @@ class _Slicer:
             _group_reduce_sum(eqn)
         elif prim == "select_n":
             _pair_select_n(eqn)
+        elif prim == "scatter-add":
+            # the accumulate plan needs the whole slice's dataflow (its
+            # index column derives from constants through structural
+            # routing), so it is validated once over the completed
+            # topological slice in :meth:`slice`, through the same
+            # _scatter_add_plan the emission and the replay drive
+            pass
         else:  # elementwise ops and the identity harness primitives
             _pair_elementwise(eqn)
 
@@ -996,6 +1254,13 @@ class _Slicer:
             element_terms += _size(eqn.outvars[0].aval.shape)
             if prim == "reduce_sum" and eqn.invars:
                 element_terms += _size(eqn.invars[0].aval.shape)
+            if prim == "scatter-add" and len(eqn.invars) == 3:
+                # the accumulate bodies inline one addend per operand
+                # element and one per updates element (each update
+                # contributes to exactly one output element) — the same
+                # operand-side script cost reduce_sum counts
+                element_terms += _size(eqn.invars[0].aval.shape)
+                element_terms += _size(eqn.invars[2].aval.shape)
         if element_terms > ELEMENT_BUDGET or root_size > ELEMENT_BUDGET:
             raise _Decline(
                 f"obligation needs {element_terms} element terms and "
@@ -1043,6 +1308,15 @@ class _Slicer:
             self._validated_rewrite(e)
             for _, e in sorted(seen_eqns.values(), key=lambda t: t[0])
         )
+        for e in ordered:
+            if e.primitive == "scatter-add":
+                # whole-slice validation of the accumulate plan: the form
+                # oracle, the static index column (derivable from the
+                # slice's own constants through structural routing), and
+                # the in-range check — through the SAME _scatter_add_plan
+                # the emission and the replay drive, so what validates is
+                # exactly what emits and replays
+                _scatter_add_plan(ordered, used_consts, e)
         slice_inputs: list[SliceInput] = []
         for vid in sorted(inputs, key=lambda v: self.any_order[v]):
             params = self.producers[vid].params_dict()
@@ -1303,6 +1577,17 @@ def _root_elements(
                 out = tuple(
                     sum((ins[0][i] for i in group), Fraction(0))
                     for group in groups
+                )
+            elif prim == "scatter-add":
+                # the same accumulate the transfer and the emission
+                # perform: operand element + Σ contributing updates, in
+                # exact rational arithmetic (ℝ addition is associative, so
+                # the fold order here denotes THE value); duplicates
+                # contribute once EACH — the defining semantic
+                groups = _scatter_add_plan(sl.eqns, dict(sl.consts), eqn)
+                out = tuple(
+                    sum((ins[2][u] for u in groups[i]), ins[0][i])
+                    for i in range(n_out)
                 )
             elif prim == "select_n":
                 which, on_false, on_true = _pair_select_n(eqn)

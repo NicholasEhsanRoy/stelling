@@ -29,6 +29,12 @@ commitment: any item can be displaced by a measured result.
   `__post_init__` (`design/ci-readiness.md`, Part A census)
 - CI posture: flag-and-triage, gate-or-triage four questions, measured
   out-of-sample precision with its four causes (`design/ci-readiness.md`)
+- The socket architecture: sockets live with their library, fidelity
+  instruments ship in core (`ARCHITECTURE.md`,
+  `design/socket-decoupling.md`)
+- scatter-add / segment_sum / stack censused rows — sockets trace the
+  real assembly instead of transcribing it; classification censuses
+  probe-or-exempt (`design/scatter-rows.md`, L22)
 
 ## Next, in order
 

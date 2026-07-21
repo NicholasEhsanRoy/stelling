@@ -167,7 +167,7 @@ IEEE_NAN_HYGIENE_SCOPE = (
 )
 
 
-# The two ieee declines this module owns. Both are the SAME defect class,
+# The ieee declines this module owns. All are the SAME defect class,
 # and naming it once is the point: the jaxpr records WHICH values an
 # equation combines but not in WHAT ORDER the compiler combines them, and
 # neither float addition nor float multiplication is associative. Where an
@@ -202,6 +202,24 @@ INTEGER_POW_IEEE_SCHEDULE_DECLINE = (
     "be unsound for the compiled program, so this declines with the gap "
     "quoted. y=0 and y=1 ARE modelled: they perform NO arithmetic (the "
     "empty product and the identity), so no schedule freedom exists"
+)
+
+SCATTER_ADD_IEEE_DECLINE = (
+    "scatter-add has no ieee transfer: duplicate scatter indices ACCUMULATE "
+    "(out[i] = operand[i] + Σ updates[j] over every index row j mapping to "
+    "i — the defining semantic; jax.ops.segment_sum exists because of it), "
+    "the jaxpr fixes no order for that per-element accumulation, and float "
+    "addition is NOT associative — a transfer modelling one association "
+    "order would be unsound for the compiled program (the reduce_sum "
+    "construction transfers verbatim: one sum over finite operands, three "
+    "association orders, NaN vs 0.0 vs +inf). Contraction is the second "
+    "compiler freedom over the same equation: an update arriving as a "
+    "product could be fused into the accumulate's add, rounding once "
+    "instead of twice, and no taint-hull is built for the scatter path. "
+    "No all-orders bound is offered here, so EVERY scatter-add form "
+    "declines under ieee semantics — including the duplicate-free and "
+    "empty-update forms, deliberately: the refusal is the censused floor, "
+    "not a per-case judgement"
 )
 
 
@@ -844,6 +862,69 @@ def reduce_sum(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
                 los[j] = _down(los[j] + a.los[i])
                 his[j] = _up(his[j] + a.his[i])
     return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
+
+
+def scatter_add_rows(
+    a: IntervalArray, updates: IntervalArray, ks: list[int]
+) -> IntervalArray:
+    """Leading-axis row ACCUMULATE: the operand ``a`` with updates row
+    ``j`` **added into** row ``ks[j]`` — the interval meaning of a
+    static-index ``scatter-add``.
+
+    The defining semantic, and the one that distinguishes this from
+    :func:`take_rows`-style data movement and from the set/replace
+    scatter: **duplicate rows in ``ks`` accumulate**. Each output element
+    is ``operand[i] + Σ updates[j]`` over every ``j`` whose row maps to
+    ``i`` (measured on jax 0.11.0:
+    ``zeros(3).at[[0,2,0,0]].add([1,10,100,1000])`` is
+    ``[1101, 0, 10]``, where the set form's last-wins answer would be
+    ``[1000, 0, 10]``). Replacing instead of adding here would be
+    unsound; the fidelity battery's first mutation is exactly that
+    variant.
+
+    Sound under ℝ for EVERY accumulation order at once: real addition is
+    associative and commutative, so the true value of each output element
+    is one number whatever order the contributions combine in, and the
+    interval sum brackets it. Each accumulation step is bumped one ulp
+    outward — ``n`` contributions spend the ``n`` bumps their ``n`` real
+    additions earn — and untouched elements are copies of the operand's
+    (no arithmetic, no bump). This ℝ-associativity reasoning is exactly
+    what float addition does not offer, so the ieee mode declines the
+    primitive instead of reusing this kernel
+    (:data:`SCATTER_ADD_IEEE_DECLINE`).
+
+    ``updates`` must have shape ``(len(ks), *a.shape[1:])``; each ``k``
+    must be an in-range row. Violations raise :class:`IntervalError` (the
+    transfer's decline channel; the registered transfer checks ranges
+    before calling here). A NaN-producing accumulation (``inf + -inf``)
+    raises through the endpoint check, exactly as :func:`add` would.
+    """
+    if not a.shape:
+        raise IntervalError(
+            "scatter_add_rows needs a leading axis; got rank-0 operand"
+        )
+    rowsz = 1
+    for d in a.shape[1:]:
+        rowsz *= d
+    expect = (len(ks),) + a.shape[1:]
+    if updates.shape != expect:
+        raise IntervalError(
+            f"scatter_add_rows updates shape {updates.shape} does not match "
+            f"{expect} (one row of {a.shape[1:]} per index)"
+        )
+    los, his = list(a.los), list(a.his)
+    for j, k in enumerate(ks):
+        if not 0 <= k < a.shape[0]:
+            raise IntervalError(
+                f"scatter_add_rows row {k} out of range for leading axis "
+                f"{a.shape[0]}"
+            )
+        for t in range(rowsz):
+            oi = k * rowsz + t
+            ui = j * rowsz + t
+            los[oi] = _down(los[oi] + updates.los[ui])
+            his[oi] = _up(his[oi] + updates.his[ui])
+    return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
 
 
 def pow_(a: IntervalArray, b: IntervalArray) -> IntervalArray:
@@ -1697,6 +1778,42 @@ def take_rows(a: IntervalArray, ks: list[int]) -> IntervalArray:
     return IntervalArray(
         shape=(len(ks),) + a.shape[1:], los=tuple(los), his=tuple(his)
     )
+
+
+def stack(parts: list[IntervalArray], axis: int) -> IntervalArray:
+    """Join ``k`` same-shape boxes along a NEW axis at position ``axis``:
+    ``out[..., i, ...] = parts[i]`` — pure element routing, no arithmetic,
+    the interval meaning of jax's ``stack`` primitive (jnp.stack traces to
+    it on the measured jax 0.11.0; the traced ``axis`` param arrives
+    already normalized — ``jnp.stack(..., axis=-1)`` on rank-2 operands
+    records ``axis=2`` — so only canonical positions ``0 <= axis <=
+    rank`` exist in traced IR, and anything else is refused as
+    ``from_dict``-only). A non-empty operand list and agreeing shapes are
+    required, as for :func:`concatenate`; violations raise
+    :class:`IntervalError` (the decline channel), never a crash."""
+    if not parts:
+        raise IntervalError("stack with no operands")
+    axis = int(axis)
+    base = parts[0].shape
+    if any(p.shape != base for p in parts[1:]):
+        raise IntervalError(
+            f"stack operand shapes {[p.shape for p in parts]} disagree "
+            f"(stack joins equal shapes along a new axis)"
+        )
+    if not 0 <= axis <= len(base):
+        raise IntervalError(
+            f"stack axis {axis} out of bounds for operand rank {len(base)} "
+            f"(the new axis can sit at positions 0..{len(base)})"
+        )
+    out_shape = base[:axis] + (len(parts),) + base[axis:]
+    los, his = [], []
+    for coord in _coords(out_shape):
+        p = parts[coord[axis]]
+        src = coord[:axis] + coord[axis + 1:]
+        i = _flat_index(src, base)
+        los.append(p.los[i])
+        his.append(p.his[i])
+    return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
 
 
 def concatenate(parts: list[IntervalArray], dimension: int) -> IntervalArray:

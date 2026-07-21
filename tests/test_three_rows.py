@@ -1406,6 +1406,10 @@ def test_every_computing_transfer_actually_carries_the_guard():
             box, second = (_INT_MIN32, _INT_MIN32), (-1.0, -1.0)
         if prim == "reduce_sum":
             continue  # its own shape; covered by its dedicated test
+        if prim == "scatter-add":
+            # its own 3-operand shape; covered by its dedicated test
+            # (tests/test_scatter_rows.py::test_int_scatter_add_overflow_declines)
+            continue
         q = wrapping_int_query(box[0], box[1], prim, params, second=second)
         p = sole(q)
         assert p.obligations[0].status == "unknown", prim

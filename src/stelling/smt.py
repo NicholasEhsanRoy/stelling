@@ -24,11 +24,15 @@ construction**: every consumer references terms by name, a broadcast
 scalar operand is the SAME single term in every element's body (never one
 fresh variable per element — fresh variables would invent decorrelation),
 and structural ops (``broadcast_in_dim``, ``reshape``, ``squeeze``,
-``transpose``, ``slice``, ``concatenate``) emit NO terms at all: their
-output elements alias their source elements' existing terms through the
-same index bookkeeping the slice validator and the replay use
+``transpose``, ``slice``, ``concatenate``, ``stack``) emit NO terms at
+all: their output elements alias their source elements' existing terms
+through the same index bookkeeping the slice validator and the replay use
 (:mod:`stelling.obligation`). ``reduce_sum`` emits the exact n-ary
-``(+ …)`` of its addend terms — exact over Reals. The per-solver option
+``(+ …)`` of its addend terms — exact over Reals; static-index
+``scatter-add`` emits, per touched output element, the exact n-ary sum
+of the operand element's term and its contributing update terms (one
+addend per contribution — duplicates accumulate), aliasing untouched
+elements to the operand's terms. The per-solver option
 block is a fixed list — a solver is never invoked on defaults, so
 ``:produce-models`` and the time limit (plus ``:nl-cov true`` /
 ``:nl-ext none`` for cvc5 on QF_NRA — the two are mutually exclusive and
@@ -56,6 +60,7 @@ from stelling.obligation import (
     _pair_elementwise,
     _pair_select_n,
     _route_structural,
+    _scatter_add_plan,
     _size,
     _shape_of,
     _IDENTITY_HARNESS,
@@ -82,6 +87,15 @@ class Script:
             ("set-logic", self.logic),
             ("smt2_sha256", self.sha256),
         )
+
+
+def _scatter_add_sum_body(operand_term: str, update_terms) -> str:
+    """The accumulate body of one touched scatter-add output element: the
+    exact n-ary sum of the operand element's term and every contributing
+    update term. A named seam (third audit, F4c) so the fidelity gauge
+    can express emitted-sum mutations — behavior-identical extraction,
+    pinned by the byte-level emission tests."""
+    return f"(+ {operand_term} {' '.join(update_terms)})"
 
 
 def rational(fr: Fraction) -> str:
@@ -213,6 +227,38 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
                 else:
                     bodies.append(f"(+ {' '.join(ins[0][i] for i in group)})")
             names[out.id] = define(out, bodies)
+            continue
+        if prim == "scatter-add":
+            # the accumulate scatter: per output element, the exact n-ary
+            # sum of the operand element's term and its contributing
+            # update elements' terms — DUPLICATE indices contribute one
+            # addend each (the primitive's defining semantic; collapsing
+            # them would be the set-form confusion). The contribution
+            # groups come from the same _scatter_add_plan the slice
+            # validator and the replay drive, so the emission cannot
+            # route a contribution differently from either. Untouched
+            # elements ALIAS the operand element's term: no arithmetic
+            # happened there, so no new term exists there.
+            try:
+                groups = _scatter_add_plan(sl.eqns, dict(sl.consts), eqn)
+            except Exception as e:  # validation admitted it; this cannot
+                raise ValueError(  # decline — an inconsistency is a bug
+                    f"emission cannot plan 'scatter-add' ({e}) — slice "
+                    f"validation should have declined this"
+                ) from e
+            made = []
+            for i in range(n_out):
+                g = groups[i]
+                if not g:
+                    made.append(ins[0][i])  # alias: the operand's term
+                    continue
+                body = _scatter_add_sum_body(
+                    ins[0][i], [ins[2][u] for u in g]
+                )
+                name = f"t{out.id}_{i}" if n_out > 1 else f"t{out.id}"
+                lines.append(f"(define-fun {name} () Real {body})")
+                made.append(name)
+            names[out.id] = tuple(made)
             continue
         if prim == "select_n":
             # select_n(which, on_false, on_true): ite takes the true case

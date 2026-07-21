@@ -562,3 +562,36 @@ catches what.
 validators; any future "bit-identical"/"reproduces exactly" claim; the
 adoption pattern — a stranger copying an attachment must copy the
 mutation battery, not just the happy-path check.
+
+## L22 — A classification is a soundness claim: census it, probe-or-exempt
+
+**(a)** A census that derives its support sets from a hand-filed
+classification cannot catch misclassification — the totality asserts
+verify that every registered name is *somewhere*, not that it is filed
+*truthfully*. Filing is a soundness claim like any other: it must be
+behaviorally probed where a probe exists, or carry an explicit written
+exemption reason where it does not, with the probe-or-exempt condition
+itself asserted at import. Otherwise the census's strength is an
+illusion that holds only until the first wrong filing.
+**(b)** The scatter-add row audit (2026-07-22): a scratch two-edit
+future misfiling — an arithmetic primitive given a transfer, classified
+`_INT_NON_COMPUTING`, plus the ieee row the totality assert forces —
+passed EVERY import-time census assert (the behavioral integer boundary
+sweep probes only `_INT_COMPUTING` names) and minted a false VERIFIED
+on an int32-wrapping cumsum. The builder had independently self-reported
+the benign half of the same pattern (structural-set membership deriving
+emission support). Fixed structurally at both layers: probe-or-exempt
+registries with a written reason per exemption, a stale-exemption
+refusal (the fidelity module's stale-residual discipline, reused), and
+an assert that raises on any registered-but-unprobed-unexempted name.
+Every current primitive earned an honest written reason; the silent
+two-edit path is now a conscious three-edit act whose third edit is a
+soundness claim in a censused registry.
+**(c)** **Structural** (the import-time assert + the reason
+registries). The convention behind it: wherever a set membership
+*implies* a soundness property, the membership claim needs its own
+census.
+**(d)** Every classification registry that feeds a soundness decision
+(integer computing/non-computing, structural/arithmetic, ieee
+category); every future row addition; any "derived set" whose
+derivation launders an unchecked claim into an asserted-looking one.
