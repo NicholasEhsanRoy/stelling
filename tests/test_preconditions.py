@@ -286,7 +286,13 @@ def test_check_stamps_load_bearing_when_bounds_matter():
     v = check(h, vacuity_mode="inputs-only")
     assert v.status == "VERIFIED"
     assert not any("envelope not load-bearing" in n for n in v.notes)
-    assert any("envelope is load-bearing" in a for a in v.stamp.assumptions)
+    # the measured wording (audit-4 F1): the re-run establishes only
+    # that the widened mechanisms did not re-derive the VERIFIED — never
+    # the load-bearing inference the old dash-clause asserted
+    assert any(
+        "not re-derivable without the declared envelope" in a
+        for a in v.stamp.assumptions
+    )
 
 
 def test_check_non_verified_returns_unchanged():

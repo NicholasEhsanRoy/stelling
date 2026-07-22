@@ -885,16 +885,19 @@ def coefficient_contrast(
 # -- the checker --------------------------------------------------------------
 
 
-def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None):
+def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None, refine=None):
     """Check a contract's requires face through the standard pipeline and
     return the :class:`ContractVerdict` carrying both faces.
 
     The requires face runs exactly :func:`stelling.preconditions.check`'s
     machinery (shared helper — one pipeline): interval propagation over
-    the traced obligations, solver escalation **only** under an explicit
-    ``solver_timeout_ms`` (never-on defaults), the full standard stamp,
-    and — ``vacuity_mode`` being required here exactly as there — the
-    widen re-check on every VERIFIED at the same pipeline depth.
+    the traced obligations, the affine refinement **only** under an
+    explicit ``refine="affine"`` (never-on defaults, exactly as in
+    ``check()``; an unknown value raises eagerly), solver escalation
+    **only** under an explicit ``solver_timeout_ms`` (never-on
+    defaults), the full standard stamp, and — ``vacuity_mode`` being
+    required here exactly as there — the widen re-check on every
+    VERIFIED at the same pipeline depth.
 
     Two contract-layer disclosures ride on the returned requires verdict,
     both via the standard append-only mechanics:
@@ -917,6 +920,7 @@ def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None):
         contract.harness,
         vacuity_mode=vacuity_mode,
         solver_timeout_ms=solver_timeout_ms,
+        refine=refine,
     )
     notes = _straddle_notes(
         closed, verdict, solver_offered=solver_timeout_ms is not None

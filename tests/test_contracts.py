@@ -119,10 +119,13 @@ def test_t1_ka1_with_solver_budget_is_verified_via_qf_nra():
     assert isinstance(stamps, tuple) and stamps
     assert all(s.invoked for s in stamps)
     assert any("QF_NRA" in s.reason for s in stamps)
-    # the widen re-check ran at the same pipeline depth and the envelope
-    # is load-bearing (over (-inf, inf) nothing discharges)
+    # the widen re-check ran at the same pipeline depth and could not
+    # re-derive the VERIFIED (over (-inf, inf) nothing discharges) — the
+    # stamp states that measurement, never the load-bearing inference
+    # (audit-4 F1)
     assert any(
-        "vacuity checked (mode=inputs-only)" in a and "load-bearing" in a
+        "vacuity checked (mode=inputs-only)" in a
+        and "not re-derivable without the declared envelope" in a
         for a in cv.requires.stamp.assumptions
     )
     # requires-VERIFIED is universal, not existential: the standard
@@ -493,11 +496,14 @@ def test_point_envelope_vacuity_is_inert_not_falsely_load_bearing():
     )
     assert not any("load-bearing" in a for a in cv.requires.stamp.assumptions)
     assert not any("load-bearing" in n for n in cv.requires.notes)
-    # mode='all' on the SAME query widens the points: the real instrument
+    # mode='all' on the SAME query widens the points: the real
+    # instrument ran at full power and failed to re-derive — the
+    # universal wording states exactly that measurement (audit-4 F1)
     cv_all = check_contract(contract, vacuity_mode="all")
     assert cv_all.requires_status == "VERIFIED"
     assert any(
-        "vacuity checked (mode=all)" in a and "load-bearing" in a
+        "vacuity checked (mode=all)" in a
+        and "not re-derivable without the declared envelope" in a
         for a in cv_all.requires.stamp.assumptions
     )
 

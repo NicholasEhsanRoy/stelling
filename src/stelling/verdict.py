@@ -348,8 +348,18 @@ def make_verdict(
     jax_version: str,
     precision_config: str,
     device_class: str = "none: no concrete execution in this verdict",
+    refinement=None,
 ) -> Verdict:
-    """Assemble the verdict for an interval-propagated harness query."""
+    """Assemble the verdict for an interval-propagated harness query.
+
+    ``refinement`` (default None — byte-identical assembly) is the
+    :class:`stelling.affine.RefinementReport` of an affine refinement
+    that ran on this propagation: the stamp then records the refinement
+    ran (an appended assumptions line) and the solver-absence reason
+    names the layers that actually judged, via the report's own
+    derivation — the absence line must not claim "interval arithmetic
+    alone" when the refinement decided anything.
+    """
     if propagation.any_violated:
         status = "REFUTED"
     elif propagation.all_discharged:
@@ -400,6 +410,15 @@ def make_verdict(
             "no solver invoked: every obligation was judged by outward-rounded "
             "interval arithmetic alone"
         )
+    assumptions = tuple(sorted({*propagation.assumptions, convention}))
+    if refinement is not None:
+        # the refinement's participation is derived from its record at
+        # the single absence-derivation point, never narrated separately;
+        # the arithmetic line names the deciding abstraction when the
+        # affine domain decided anything
+        solver_reason = refinement.reword_absence(solver_reason)
+        arithmetic_mode = refinement.reword_arithmetic(arithmetic_mode)
+        assumptions = assumptions + (refinement.stamp_line(),)
     stamp = Stamp(
         stelling_version=stelling_version,
         jax_version=jax_version,
@@ -412,9 +431,7 @@ def make_verdict(
         nonvacuity=nonvacuity,
         transfer_tiers=propagation.transfers_used,
         transfer_provenance=tuple((p, "core") for p, _ in propagation.transfers_used),
-        assumptions=tuple(
-            sorted({*propagation.assumptions, convention})
-        ),
+        assumptions=assumptions,
         coverage=propagation.coverage.summary(),
     )
     return Verdict(

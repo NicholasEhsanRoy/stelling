@@ -111,6 +111,19 @@ today — no measured case where interval imprecision (as opposed to
 envelope truth) flipped or blocked a verdict that mattered. Parked
 until a measured UNKNOWN-that-matters names it; recorded here so the
 gap is a known unknown, not an invisible one.
+*Update 2026-07-22:* unparked — the parking condition was met by the
+LA work's own measured straddles (the probe's dependency case; the
+socket's solver-discharged symmetry pair) and the build was ordered.
+**Landed** as the opt-in `refine="affine"` (zero-UNSOUND audit, fourth
+consecutive; built blind to a held-out evaluation measured first).
+The reading (`design/affine-refinement.md`,
+`corpus/supply/affine_holdout/`): v1 buys the commuted-product class
+on real code (the MIME symmetry pair: 4 QF_NRA invocations → 0),
+tightens-but-cannot-close the quadratic class exactly as the probe
+predicted, and names the v2 frontier by measurement — scatter routing
+in the slice layer (the HeatNode flagship, 18/20 elements), select_n
+joins, strict roots. Those three are the item's remaining content,
+each now carrying a measured evidence line.
 
 ## Irreducible — named so the ceiling is honest
 

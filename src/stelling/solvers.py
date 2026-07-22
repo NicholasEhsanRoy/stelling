@@ -1328,8 +1328,18 @@ def make_solver_verdict(
     jax_version: str,
     precision_config: str,
     device_class: str = _DEVICE_CLASS_DEFAULT,
+    refinement=None,
 ) -> Verdict:
     """Assemble a verdict from interval propagation plus solver escalation.
+
+    ``refinement`` (default None — byte-identical assembly) is the
+    :class:`stelling.affine.RefinementReport` of an affine refinement
+    that ran on ``propagation`` BEFORE the escalation (the escalation
+    then saw only what the refinement left undecided): the stamp records
+    the refinement ran, and the derived solver-absence reason names the
+    layers that actually judged — when the refinement decided everything
+    and a solver budget was offered, the absence line records that no
+    solver was needed, truthfully.
 
     A separate assembly path: the public no-solver path
     (:func:`stelling.verdict.make_verdict`) is untouched. Status: REFUTED
@@ -1520,6 +1530,11 @@ def make_solver_verdict(
                 "unavailable, every unknown obligation declined, or a failure "
                 "before any invocation; the notes carry the reasons)"
             )
+        if refinement is not None:
+            # the deciding layers, named truthfully: the report's own
+            # derivation (shared with make_verdict, so the two cannot
+            # drift), never separate narration
+            reason = refinement.reword_absence(reason)
         solver = solver_absent(reason)
 
     # which arithmetic the verdict is about comes from the propagation
@@ -1534,6 +1549,15 @@ def make_solver_verdict(
         semantics = SEMANTICS_REAL
         arithmetic_mode = ARITHMETIC_MODE_INTERVAL
         convention = REAL_CONVENTION_ASSUMPTION
+    assumptions = tuple(sorted({*propagation.assumptions, convention}))
+    if refinement is not None:
+        # a stamped line records the refinement was enabled (domain,
+        # registry, ops actually used) — appended after the sorted set,
+        # the same append-only mechanics the vacuity line uses; the
+        # arithmetic line names the deciding abstraction when the affine
+        # domain decided anything
+        assumptions = assumptions + (refinement.stamp_line(),)
+        arithmetic_mode = refinement.reword_arithmetic(arithmetic_mode)
     stamp = Stamp(
         stelling_version=stelling_version,
         jax_version=jax_version,
@@ -1548,9 +1572,7 @@ def make_solver_verdict(
         transfer_provenance=tuple(
             (p, "core") for p, _ in propagation.transfers_used
         ),
-        assumptions=tuple(
-            sorted({*propagation.assumptions, convention})
-        ),
+        assumptions=assumptions,
         coverage=propagation.coverage.summary(),
     )
     witnesses = tuple(

@@ -104,7 +104,7 @@ def scalar_nonzero(dtype, envelope):
     return scalar, assert_(scalar != 0.0)
 
 
-def check(harness, *, vacuity_mode, solver_timeout_ms=None):
+def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None):
     """Run a precondition harness end-to-end and return the stamped
     :class:`stelling.verdict.Verdict` — with the vacuity check built in:
     **this entry point cannot return an unchecked VERIFIED.**
@@ -139,20 +139,36 @@ def check(harness, *, vacuity_mode, solver_timeout_ms=None):
     a solver run is a stamped, reproducible event and its budget is part
     of what the stamp records. Omit it and the verdict is interval-only.
 
+    ``refine``: ``None`` (default — the refinement never runs, and every
+    existing path is byte-identical) or ``"affine"`` to attempt the
+    affine-form (zonotope) refinement on each interval-undecided
+    obligation AFTER interval judging and BEFORE any solver escalation
+    (:mod:`stelling.affine`): the escalation then sees only what the
+    refinement left undecided. Never on by default — the solver-opt-in
+    precedent; an unknown value raises eagerly at entry. The stamp
+    records the refinement ran, each affine-decided obligation's
+    mechanism note names affine, and the VERIFIED widen re-check runs at
+    the same depth (refined iff the original refined).
+
     Version, precision, and solver stamps are filled from the live
     environment; the precision entry records the *actual*
     ``jax_enable_x64`` state at trace time, not an assumption.
     """
     verdict, _ = _pipeline(
-        harness, vacuity_mode=vacuity_mode, solver_timeout_ms=solver_timeout_ms
+        harness,
+        vacuity_mode=vacuity_mode,
+        solver_timeout_ms=solver_timeout_ms,
+        refine=refine,
     )
     return verdict
 
 
-def _pipeline(harness, *, vacuity_mode, solver_timeout_ms):
+def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
     """The one pipeline behind :func:`check` — trace, propagate, optional
+    affine refinement (``refine="affine"``, never on by default), optional
     solver escalation, stamped verdict assembly, and the VERIFIED widen
-    re-check at the same pipeline depth.
+    re-check at the same pipeline depth (refined iff the original
+    refined, escalated iff the original escalated).
 
     Returns ``(verdict, closed)``: exactly the verdict :func:`check`
     returns (behavior-identical extraction — check() is this helper with
@@ -193,6 +209,13 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms):
             f"None, got {type(solver_timeout_ms).__name__} "
             f"({solver_timeout_ms!r})"
         )
+    # the refinement dial is validated eagerly like the vacuity mode: an
+    # unknown value must raise at entry, never ride green until the day
+    # it would have mattered
+    if refine not in (None, "affine"):
+        raise ValueError(
+            f"refine must be None or 'affine', got {refine!r}"
+        )
 
     cj = trace(harness)
     p = propagate(cj)
@@ -203,14 +226,35 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms):
     )
 
     def _finish(closed, prop):
+        # the refinement slots here, inside the ONE finishing path both
+        # the original run and the widen re-check go through — that is
+        # what makes the re-check run at the same depth (refined iff the
+        # original refined, escalated iff the original escalated).
+        # Returns the verdict AND the refinement record: the vacuity line
+        # derives its reduced-power disclosure from the two records
+        # (which layers DECIDED originally vs in the re-check), never
+        # from flags.
+        refinement = None
+        if refine == "affine":
+            from stelling.affine import refine_propagation
+
+            prop, refinement = refine_propagation(closed, prop)
         if solver_timeout_ms is None:
-            return make_verdict(closed, prop, **versions)
+            return (
+                make_verdict(closed, prop, refinement=refinement, **versions),
+                refinement,
+            )
         from stelling.solvers import SolverConfig, escalate, make_solver_verdict
 
         esc = escalate(closed, prop, SolverConfig(timeout_ms=int(solver_timeout_ms)))
-        return make_solver_verdict(closed, prop, esc, **versions)
+        return (
+            make_solver_verdict(
+                closed, prop, esc, refinement=refinement, **versions
+            ),
+            refinement,
+        )
 
-    v = _finish(cj, p)
+    v, orig_ref = _finish(cj, p)
     if v.status != "VERIFIED":
         # widening cannot rescue an UNKNOWN/REFUTED; nothing to check
         return v, cj
@@ -253,7 +297,7 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms):
         )
         return dataclasses.replace(v, stamp=stamp), cj
 
-    wide = _finish(wcj, propagate(wcj))
+    wide, wide_ref = _finish(wcj, propagate(wcj))
     still = [
         o.index for o in wide.obligations if o.status == "discharged"
     ]
@@ -270,11 +314,48 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms):
             for i in still
         )
     else:
+        # State the MEASUREMENT, never the load-bearing inference: the
+        # old dash-clause ("the declared envelope is load-bearing for
+        # this VERIFIED") asserted an inference the re-run does not
+        # establish, and it is measurably false for range theorems the
+        # widened mechanisms cannot re-derive (an interval-⊤ square, an
+        # affine-decided cancellation whose widened boxes decline by
+        # construction). What the re-run measured is exactly this:
         vac_line = (
             f"vacuity checked (mode={vacuity_mode}): no obligation "
-            f"discharges with the declared bounds widened — the declared "
-            f"envelope is load-bearing for this VERIFIED"
+            f"discharges with the declared bounds widened — under the "
+            f"mechanism(s) that ran, this VERIFIED was not re-derivable "
+            f"without the declared envelope"
         )
+        # Reduced-power disclosure, derived from the two measured
+        # refinement records (decided counts) and the re-check's actual
+        # solver invocations — not from flags: when the affine domain
+        # decided obligations originally but decided nothing in the
+        # widened re-check, the re-check ran WEAKER than the original,
+        # and envelope-independence of those obligations was not
+        # measured at all.
+        if (
+            orig_ref is not None
+            and orig_ref.decided
+            and not (wide_ref is not None and wide_ref.decided)
+        ):
+            wide_solver_ran = isinstance(wide.stamp.solver, tuple)
+            ran = (
+                "interval and solver escalation"
+                if wide_solver_ran
+                else "interval-only"
+            )
+            hint = (
+                ""
+                if wide_solver_ran
+                else "; an explicit solver_timeout_ms measures it"
+            )
+            vac_line += (
+                f". The re-check ran weaker than the original ({ran}: the "
+                f"affine refinement declines unbounded boxes by "
+                f"construction), so envelope-independence of the "
+                f"affine-decided obligation(s) was not measured{hint}."
+            )
         notes = v.notes
     # The widen re-check runs at the same pipeline depth, so on the
     # escalated path it makes real solver invocations the vacuity line
