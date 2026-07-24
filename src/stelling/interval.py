@@ -23,6 +23,15 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   (:data:`EXP_LIBM_ASSUMPTION`). ``pow`` (strictly positive base only)
   makes the same demotion around ``math.pow`` at the monotone corners
   (:data:`POW_LIBM_ASSUMPTION`).
+* ``sqrt`` is a **correctly-rounded IEEE-754 basic operation** (error ≤
+  0.5 ulp, like +, -, *, /), so it carries no libm-fidelity demotion:
+  ``math.sqrt`` is bumped one ulp outward, which contains the true real
+  root under correct rounding with a full ulp to spare and stays sound
+  even on a platform whose sqrt is merely faithfully rounded (≤ 1 ulp).
+  It is monotone increasing on its domain ``[0, ∞)``; a below-0 lower
+  endpoint is the OBLIGATION ``arg ≥ 0`` failing and raises (the ``pow``
+  out-of-domain posture), and the lower endpoint is floored at 0 so the
+  ``sqrt(x) ≥ 0`` fact is produced rather than left to an outward bump.
 * Endpoints may be ``±inf`` (overflow saturates outward; half-infinite
   sets are representable). Interval multiplication uses the ``0·±inf = 0``
   endpoint convention (sound for closed real intervals, as in IEEE 1788).
@@ -618,6 +627,61 @@ def exp(a: IntervalArray) -> IntervalArray:
     )
 
 
+SQRT_DOMAIN_REASON = (
+    "sqrt has a real value only for a nonnegative argument, and the "
+    "argument interval's lower bound {lo} is negative: the obligation "
+    "arg >= 0 is not established over the declared box, so the box includes "
+    "out-of-domain points (jnp.sqrt of a negative is NaN). Declined — the "
+    "pow domain posture (a domain-restricted transfer refuses the "
+    "out-of-domain box loudly, and the propagator turns the refusal into a "
+    "noted top), never a silently-narrowed answer"
+)
+
+
+def sqrt(a: IntervalArray) -> IntervalArray:
+    """Real square root over ``[lo, hi]`` — monotone increasing on the
+    domain ``[0, inf)``, outward-rounded.
+
+    sqrt is a CORRECTLY-ROUNDED IEEE-754 basic operation (error <= 0.5 ulp,
+    like +, -, *, /), so — unlike :func:`exp` and :func:`pow_`, which ride a
+    faithfully-rounded libm demotion — its endpoints need no libm-fidelity
+    assumption: ``math.sqrt`` is bumped one ulp outward, which contains the
+    true real root under correct rounding with a full ulp to spare and stays
+    sound even on a platform whose sqrt is merely faithfully rounded (error
+    <= 1 ulp). Tier ``sound``.
+
+    The lower endpoint is floored at 0: ``sqrt(x) >= 0`` for every ``x`` in
+    the domain, so non-negativity is PRODUCED here rather than left to an
+    outward bump to (wrongly) admit a negative value — the :func:`exp`
+    lower-floor discipline. ``sqrt(0) = 0`` exactly and ``sqrt(inf) = inf``.
+
+    The argument's domain is ``arg >= 0`` — the OBLIGATION a sqrt call
+    carries. Where a base interval reaches below 0 (``lo < 0``) the box
+    includes out-of-domain points, so the transfer RAISES
+    :class:`IntervalError` (:data:`SQRT_DOMAIN_REASON`) — the :func:`pow_`
+    domain posture, which the propagator turns into a noted top-decline,
+    never a crash. sqrt's domain is CLOSED at 0 (``sqrt(0) = 0`` is defined),
+    so only a strictly-negative lower bound declines; ``lo == 0`` is
+    in-domain.
+    """
+    if any(lo < 0.0 for lo in a.los):
+        raise IntervalError(SQRT_DOMAIN_REASON.format(lo=min(a.los)))
+
+    def s(x: float, up_side: bool) -> float:
+        if x == _INF:
+            return _INF
+        if x == 0.0:
+            return 0.0  # sqrt(0) = 0 exactly (covers -0.0 too)
+        v = math.sqrt(x)
+        return _up(v) if up_side else max(0.0, _down(v))
+
+    return IntervalArray(
+        shape=a.shape,
+        los=tuple(s(l, False) for l in a.los),
+        his=tuple(s(h, True) for h in a.his),
+    )
+
+
 def _frac_bracket(fr) -> tuple[float, float]:
     """The tightest SOUND double bracket of an exact :class:`Fraction`.
 
@@ -1129,6 +1193,51 @@ def ieee_div(a: IntervalArray, b: IntervalArray):
         return _corner_hull(corners, made_nan)
 
     return _ieee_binary(a, b, f)
+
+
+def ieee_sqrt(a: IntervalArray):
+    """Native binary64 square root — the ieee counterpart of :func:`sqrt`.
+
+    sqrt is correctly-rounded under IEEE-754, so the interval endpoints are
+    the very float roots the program computes (NO outward rounding), and
+    sqrt is monotone increasing on ``[0, inf)`` so the image of a box sits at
+    its endpoints (:data:`IEEE_ENDPOINT_ASSUMPTION`). A NEGATIVE argument
+    produces NaN under ieee (``jnp.sqrt(-1.0)`` is NaN — a VALUE here, routed
+    into ``made_nan``, never leaked as an endpoint), so a box whose lower
+    bound is below 0 sets the flag while its non-negative part still brackets
+    the real roots. A wholly-negative box has an empty non-NaN image and
+    returns top with ``made_nan=True`` (the all-NaN-corner convention of the
+    other ieee kernels).
+
+    Subnormal haze, DAZ-before / FTZ-after, as in every ieee kernel: a
+    subnormal argument may flush to 0 (``sqrt`` of it reads as
+    ``sqrt(0) = 0``) and a subnormal result may flush to 0. Returns
+    ``(IntervalArray, made_nan)`` like the other ieee kernels.
+    """
+    los, his = [], []
+    made_nan = False
+    for lo, hi in zip(a.los, a.his):
+        # DAZ face: a subnormal operand may read as 0 at runtime
+        lo, hi = _elt_haze(lo, hi)
+        nan_here = lo < 0.0  # a negative argument yields NaN under ieee
+        if hi < 0.0:
+            # wholly out of domain: every value is NaN, the non-NaN image is
+            # empty -> top (any interval is a sound superset of the empty set)
+            rlo, rhi = -_INF, _INF
+        else:
+            # the in-domain part is [max(0, lo), hi]; sqrt is monotone there
+            d_lo = lo if lo > 0.0 else 0.0
+            rlo = math.sqrt(d_lo)
+            rhi = _INF if hi == _INF else math.sqrt(hi)
+        # FTZ face: a subnormal result may flush to 0
+        rlo, rhi = _elt_haze(rlo, rhi)
+        los.append(rlo)
+        his.append(rhi)
+        made_nan = made_nan or nan_here
+    return (
+        IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his)),
+        made_nan,
+    )
 
 
 def ieee_reduce_sum(a: IntervalArray, axes: tuple[int, ...]):

@@ -1119,6 +1119,23 @@ def _t_integer_pow(eqn, params, ins):
     return _int_overflow_guard(eqn, "integer_pow", outs)
 
 
+def _t_sqrt(eqn, params, ins):
+    """``sqrt`` — real square root, a FLOAT-only primitive (jax's ``sqrt``
+    rejects integer dtypes at trace time, so an integer sqrt is IR no trace
+    can carry). The blanket float-only guard declines an integer/bool
+    operand loudly rather than modelling a wrapping integer as a real — the
+    same posture the negative integer_pow exponent takes, and the reason
+    this transfer is classified computing yet declines every integer probe.
+
+    On floats the monotone outward-rounded transfer runs; the domain refusal
+    (``arg >= 0``, the obligation a sqrt call carries) is raised inside
+    :func:`stelling.interval.sqrt` where a below-0 lower bound reaches the
+    out-of-domain region, and the walk turns that :class:`IntervalError`
+    into a noted top-decline."""
+    _require_float_dtype(eqn, "sqrt")
+    return [iv.sqrt(ins[0])]
+
+
 TRANSFERS = {
     # the arithmetic core carries the integer overflow-reachability guard
     # (audit UNSOUND 1): in-range integer arithmetic keeps its exact real
@@ -1147,6 +1164,16 @@ TRANSFERS = {
     "select_n": (lambda eqn, p, ins: [iv.select_n(ins[0], ins[1:])], TIER_EXACT),
     "exp": (_int_guarded("exp", lambda eqn, p, ins: [iv.exp(ins[0])]),
             TIER_SOUND_LIBM),
+    # sqrt: real square root — monotone increasing on [0, inf), outward-
+    # rounded. A CORRECTLY-ROUNDED IEEE basic op (tier sound, NO libm
+    # demotion, unlike exp/pow). Float-only (declines on integers via the
+    # blanket guard, so it declines every integer probe rather than snapping
+    # a non-integer result). Domain arg >= 0 is the OBLIGATION: a below-0
+    # lower bound declines inside iv.sqrt (the pow domain posture). census
+    # tier-1b addition — sqrt is the root of the L2 residual norm in every
+    # convergence diagnostic and a node hazard (face-area/two-norm) across
+    # the corpus; the authorized core-row build.
+    "sqrt": (_t_sqrt, TIER_SOUND),
     "lt": (lambda eqn, p, ins: [iv.lt(*ins)], TIER_EXACT),
     "gt": (lambda eqn, p, ins: [iv.gt(*ins)], TIER_EXACT),
     "le": (lambda eqn, p, ins: [iv.le(*ins)], TIER_EXACT),
@@ -1260,6 +1287,13 @@ TRANSFERS = {
 _INT_COMPUTING = frozenset({
     "add", "sub", "mul", "div", "neg", "abs",
     "pow", "exp", "reduce_sum", "integer_pow",
+    # sqrt COMPUTES a new value on floats (it is not a selector, router, or
+    # identity), so it is classified computing and probed. It is float-only
+    # (jax's sqrt rejects integer dtypes), so its transfer DECLINES every
+    # integer probe via the blanket float-only guard — the honest way a
+    # computing float op closes the integer class, and strictly the
+    # negative-integer_pow-exponent posture applied to the whole domain.
+    "sqrt",
     # the accumulate scatter SUMS (operand element + contributing update
     # elements), so it can produce a value its operands did not contain —
     # exactly the add/reduce_sum class, same guard
@@ -1460,14 +1494,14 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
         return {
             "add": (hi, hi), "sub": (hi, lo), "mul": (hi, hi),
             "div": (lo, -1.0), "neg": (lo, None), "abs": (lo, None),
-            "pow": (hi, 2.0), "exp": (hi, None),
+            "pow": (hi, 2.0), "exp": (hi, None), "sqrt": (hi, None),
             "reduce_sum": (hi, None), "integer_pow": (hi, None),
             "scatter-add": (hi, hi),
         }[prim]
     return {
         "add": (lo, lo), "sub": (lo, hi), "mul": (lo, hi),
         "div": (hi, -1.0), "neg": (hi, None), "abs": (hi, None),
-        "pow": (lo, 3.0), "exp": (lo, None),
+        "pow": (lo, 3.0), "exp": (lo, None), "sqrt": (lo, None),
         "reduce_sum": (lo, None), "integer_pow": (lo, None),
         "scatter-add": (lo, lo),
     }[prim]
@@ -1737,6 +1771,20 @@ def _ieee_pow(eqn, params, ins, flags):
     # subnormal haze on the result: a flushing libm pow may return 0
     # where the bracket is subnormal
     return [iv.subnormal_haze(iv.pow_(*ins))[0]], [False]
+
+
+def _ieee_sqrt(eqn, params, ins, flags):
+    """sqrt under ieee — native binary64, CORRECTLY rounded, so the float
+    root is bracketed exactly (no outward rounding), unlike the 1-ulp libm
+    bracket exp/pow carry. A NEGATIVE argument produces NaN, routed into the
+    flag by :func:`stelling.interval.ieee_sqrt` (never leaked as an
+    endpoint); a maybe-NaN operand poisons the result (``sqrt(NaN) = NaN``),
+    so the operand flag ORs into the output flag. binary64-only, like the
+    rest of the ieee arithmetic core (the subnormal haze is applied inside
+    the kernel)."""
+    _ieee_f64_only(eqn)
+    box, made_nan = iv.ieee_sqrt(ins[0])
+    return [box], [made_nan or flags[0]]
 
 
 def _non_f64_float_dtypes(atoms) -> list[str]:
@@ -2085,6 +2133,10 @@ IEEE_TRANSFERS = {
     # pow declines maybe-NaN operands (pow(NaN,0)=1 escapes the flag)
     "pow": (_ieee_pow, TIER_SOUND_LIBM),
     "exp": (_ieee_exp, TIER_SOUND_LIBM),
+    # (ii) native binary64, CORRECTLY rounded — the float root bracketed
+    # exactly (no outward bump, tier sound not sound-libm); a negative arg
+    # is NaN routed to the flag, a maybe-NaN operand poisons the result
+    "sqrt": (_ieee_sqrt, TIER_EXACT),
     # (i) identity
     "stop_gradient": (_ieee_passthrough(lambda eqn, p, ins: [ins[0]]), TIER_EXACT),
     # (i) data movement (the dimensions= reshape declines as in real mode)
