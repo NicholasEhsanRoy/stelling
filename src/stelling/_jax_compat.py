@@ -429,7 +429,27 @@ class _Transcriber:
             return v
         if isinstance(v, np.generic):
             return v.item()
-        arr = np.asarray(v)  # materializes jax arrays on host
+        try:
+            arr = np.asarray(v)  # materializes jax arrays on host
+        except Exception as e:
+            # A const that is not a materialisable array. The live case is a
+            # nested ``ClosedJaxpr`` hidden in a primitive's params whose
+            # consts are still TRACERS (third-party solver primitives that
+            # stash a sub-jaxpr in a static param do this), and
+            # ``np.asarray`` then raises from inside stelling.
+            #
+            # That leak is the defect, not the const: a caller who points
+            # stelling at unsupported code and gets a jax tracer exception
+            # concludes the TOOL is broken, where a named refusal would tell
+            # them the tool does not cover this yet. Same information,
+            # opposite conclusion. So the refusal is raised in stelling's own
+            # taxonomy, with the reason attached.
+            raise ir.UnsupportedParamError(
+                f"const of type {type(v).__name__!r} could not be "
+                f"materialised as an array ({type(e).__name__}: {e}); a "
+                f"nested jaxpr whose consts are live tracers cannot be "
+                f"transcribed"
+            ) from e
         return ir.Array(
             dtype=arr.dtype.str,
             shape=tuple(int(d) for d in arr.shape),
