@@ -136,15 +136,32 @@ def test_comparisons_three_valued():
 
 
 def test_structural_ops_are_exact():
+    """Pure data movement moves BOTH endpoints unchanged.
+
+    Both endpoints are asserted deliberately. The earlier form of this test
+    checked ``.los`` only, which meant an upper-endpoint widening in any of
+    the four ops would pass a test named "are_exact" — and structural ops
+    are exactly where such a widening would be silent, since they perform
+    no arithmetic and so have no rounding to justify one.
+    """
     a = iv.from_values((2, 2), [1.0, 2.0, 3.0, 4.0])
     s = iv.slice_(a, (0, 1), (2, 2), None)
-    assert s.shape == (2, 1) and s.los == (2.0, 4.0)
+    assert s.shape == (2, 1) and s.los == (2.0, 4.0) and s.his == (2.0, 4.0)
     q = iv.squeeze(s, (1,))
-    assert q.shape == (2,) and q.los == (2.0, 4.0)
+    assert q.shape == (2,) and q.los == (2.0, 4.0) and q.his == (2.0, 4.0)
     b = iv.broadcast_in_dim(iv.point(7.0), (3,), ())
-    assert b.shape == (3,) and b.los == (7.0, 7.0, 7.0)
+    assert b.shape == (3,) and b.los == (7.0, 7.0, 7.0) and b.his == (7.0, 7.0, 7.0)
     c = iv.concatenate([iv.from_values((1,), [1.0]), iv.from_values((2,), [2.0, 3.0])], 0)
-    assert c.shape == (3,) and c.los == (1.0, 2.0, 3.0)
+    assert c.shape == (3,) and c.los == (1.0, 2.0, 3.0) and c.his == (1.0, 2.0, 3.0)
+    # non-degenerate boxes too: a point interval cannot distinguish an
+    # endpoint that moved from one that was copied from the other side.
+    w = iv.IntervalArray(shape=(2,), los=(-1.5, 0.25), his=(2.5, 0.75))
+    assert iv.slice_(w, (0,), (1,), None).los == (-1.5,)
+    assert iv.slice_(w, (0,), (1,), None).his == (2.5,)
+    assert iv.concatenate([w, w], 0).los == (-1.5, 0.25, -1.5, 0.25)
+    assert iv.concatenate([w, w], 0).his == (2.5, 0.75, 2.5, 0.75)
+    assert iv.broadcast_in_dim(iv.IntervalArray(shape=(), los=(-3.0,), his=(4.0,)),
+                               (2,), ()).his == (4.0, 4.0)
 
 
 def test_scalar_literal_broadcasts_against_array():

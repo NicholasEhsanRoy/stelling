@@ -127,9 +127,17 @@ def test_semantics_values_are_validated():
     assert propagate(q, semantics="ieee").semantics == "ieee"
 
 
-def test_real_default_path_is_unchanged():
-    # the default and the explicit real mode produce the identical
-    # Propagation — the dial's real position is the pre-dial behavior
+def test_real_is_the_default_semantics_and_the_dial_is_a_no_op_at_that_position():
+    """What this pins: ``semantics="real"`` is the DEFAULT, passing it
+    explicitly changes nothing, and one known query discharges under it.
+
+    What it does NOT pin, despite the name it used to carry: real mode's
+    behaviour against any fixed baseline. The first assertion compares real
+    mode to itself, so it survives any change to real mode — a renamed
+    "…_is_unchanged" would be cited as evidence real mode is pinned, and it
+    is not. The only fixed expectation here is the single `discharged`
+    below.
+    """
     q = _simple_query()
     assert propagate(q) == propagate(q, semantics="real")
     p = propagate(q)
