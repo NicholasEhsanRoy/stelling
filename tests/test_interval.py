@@ -91,8 +91,12 @@ def test_div_zero_crossing_denominator_is_top():
 
 
 def test_div_sound_bracket():
+    """[1,2]/[4,8] = [1/8, 1/2] exactly, and both endpoints are doubles, so
+    the exact-when-representable rule returns them unwidened. The corners are
+    computed as exact rationals, so no corner is inexact and the outward
+    rounding never fires here."""
     r = iv.div(scalar(1.0, 2.0), scalar(4.0, 8.0))
-    assert r.los[0] < 0.125 and r.his[0] > 0.5
+    assert r.los[0] == 0.125 and r.his[0] == 0.5
 
 
 def test_exp_brackets_libm():

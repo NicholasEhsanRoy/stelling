@@ -40,8 +40,11 @@ call site does not say which one applies, so the rule is:**
   is a dyadic rational) and then rounded outward ONLY if the exact result
   is not representable. Sound because these are correctly-rounded ops whose
   slack was pure *endpoint-representation* conservatism.
-* **unconditional one-ulp bump** — ``mul``, ``div``, ``exp``, ``pow``,
-  ``sqrt``. **Do not "optimise" these to the rule above without reading
+* **unconditional one-ulp bump** — ``mul``, ``exp``, ``pow``, ``sqrt``.
+  (``div`` joined the first group for its finite, non-zero-straddling case;
+  its two ⊤ escapes — a divisor interval containing 0, and ``inf/inf`` — are
+  untouched, which is what keeps ``integer_pow``'s negative-exponent use of
+  the zero discipline exactly as it was.) **Do not "optimise" these to the rule above without reading
   why each one is here**, because in three of them the ulp is doing a
   second job: ``exp``/``pow`` carry the faithfully-rounded-libm assumption
   (error ≤ 1 ulp, stamped into every verdict that uses them), and ``sqrt``'s
@@ -560,13 +563,27 @@ def div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
             # denominator may vanish: ⊤ is the only sound closed-interval
             # answer here; the verdict degrades to UNKNOWN, never crashes.
             return -_INF, _INF
-        quotients = []
         for x in (alo, ahi):
             for y in (blo, bhi):
                 if (x == _INF or x == -_INF) and (y == _INF or y == -_INF):
                     # inf/inf is indeterminate; widen fully outward.
                     return -_INF, _INF
-                quotients.append(x / y)  # y is nonzero; finite/±inf -> ±0.0
+        if _exactable(alo, ahi, blo, bhi):
+            # The zero-straddle test above has already established that
+            # neither divisor endpoint is 0, so these rational divisions are
+            # total. Fraction division is EXACT, so no corner is inexact and
+            # there is nothing to taint per-corner: take the extrema of four
+            # exact rationals and round outward ONCE, and not at all when the
+            # extremum is representable. `0.0 / x` is exactly 0 and survives,
+            # which is what lets a sum-of-squares residual keep its floor
+            # through the division that follows it.
+            ex = [Fraction(x) / Fraction(y)
+                  for x in (alo, ahi) for y in (blo, bhi)]
+            return _exact_down(min(ex)), _exact_up(max(ex))
+        # An infinite endpoint is in play: `Fraction(inf)` raises, and
+        # `finite/±inf -> ±0.0` is an endpoint convention rather than real
+        # arithmetic, so the unconditional bump stays in force here.
+        quotients = [x / y for x in (alo, ahi) for y in (blo, bhi)]
         return _down(min(quotients)), _up(max(quotients))
 
     return _binary(a, b, f)

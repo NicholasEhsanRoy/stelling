@@ -1497,11 +1497,18 @@ def test_integer_div_by_a_zero_crossing_divisor_is_TOP():
     assert (box.los[0], box.his[0]) == (-INF, INF)
 
 
-def test_float_div_is_completely_unchanged():
-    """Real mode's float division must not have moved a millimetre."""
+def test_float_div_is_not_collateral_damage_of_this_round():
+    """This round (reduce_sum / integer_pow / slice) must not perturb float
+    division. It guards against COLLATERAL change, not against div ever being
+    improved: div was later moved to the exact-when-representable endpoint
+    rule by its own diff, deliberately, which is why the assertion below pins
+    exact values rather than a strict bracket. [1,4]/[2,2] = [1/2, 2] exactly
+    and both endpoints are doubles, so nothing is widened. Pinning the exact
+    quotient is a tighter guard than the strict form it replaces, which would
+    also have passed under a propagator that widened by a decade."""
     a = iv.from_bounds((), 1.0, 4.0)
     b = iv.from_bounds((), 2.0, 2.0)
-    assert iv.div(a, b).los[0] < 0.5 < iv.div(a, b).his[0]
+    assert iv.div(a, b).los[0] == 0.5 and iv.div(a, b).his[0] == 2.0
     q = pow_query(1.0, 2.0, 2, bound=10.0)
     assert sole(q).obligations[0].status == "discharged"
 
