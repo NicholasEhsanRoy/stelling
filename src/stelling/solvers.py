@@ -56,6 +56,7 @@ from typing import Callable
 
 from stelling import _optional
 from stelling import ir
+from stelling import verdict as _verdict
 from stelling.obligation import (
     DeclinedObligation,
     ObligationSlice,
@@ -1493,6 +1494,26 @@ def make_solver_verdict(
     notes = propagation.notes + escalation.notes
     for record in escalation.records:
         notes = notes + record.notes
+    # THE SCATTER VERIFIED BAR (stelling.verdict.VERIFIED_BARRED_PRIMITIVES).
+    # Scoped to the SOLVER path deliberately, and this scoping is the whole
+    # design decision: the bar exists because a new SMT EMISSION row that
+    # missed a violation would mint a false VERIFIED with nothing downstream
+    # to catch it. It is not a doubt about the long-standing interval
+    # transfer, which is censused and unchanged. A whole-query bar would flip
+    # every interval-only VERIFIED on a scatter-bearing slice — including the
+    # Richardson/HeatNode flagship, whose Dirichlet writeback puts `scatter`
+    # in its jaxpr — for a reason that has nothing to do with the row under
+    # audit. Barring the claim the audit is about, and only that one, is the
+    # narrowest bar that does the job.
+    if status == "VERIFIED" and escalation is not None:
+        barred = _verdict._barred_primitives(closed)
+        if barred:
+            status = "UNKNOWN"
+            notes = notes + (
+                "VERIFIED withheld — "
+                + _verdict.VERIFIED_BAR_REASON.format(prims=", ".join(barred)),
+            )
+
     if status == "VERIFIED" and not nonvacuity.startswith("checked"):
         notes = notes + (
             f"nonvacuity {nonvacuity.split(' — ')[0]}: this VERIFIED may be "

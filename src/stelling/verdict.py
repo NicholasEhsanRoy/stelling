@@ -408,6 +408,67 @@ def _approx(exact: str) -> str:
     return f" (≈ {float(fr):.6g})"
 
 
+# ── THE SCATTER VERIFIED BAR — ONE REMOVAL POINT ─────────────────────────────
+#
+# Obligations whose slice touches `scatter` are INELIGIBLE FOR VERIFIED until
+# the emission row has been attacked by a distinct-context adversarial auditor.
+#
+# The reason is an asymmetry, not caution in general. A wrong scatter encoding
+# that produces a SPURIOUS witness is caught downstream: every REFUTED witness
+# is re-checked by independent exact-rational replay, and a witness that fails
+# replay raises rather than becoming a verdict. A wrong encoding that MISSES a
+# violation has no such downstream check — it mints a false VERIFIED, which is
+# this project's own thesis defect.
+#
+# So the row may be built and exercised on the refutation path, where it is
+# self-checking, while the direction that cannot be self-checked stays closed.
+# Under this bar the worst case of a wrong row is a witness that fails replay.
+# Without it the worst case is silent.
+#
+# TO LIFT: delete this set's contents (leave the empty frozenset and this
+# comment). That is the whole mechanism — one identifiable place, by design,
+# so lifting it is a deliberate act and not a diffuse relaxation. It is the
+# principal's to lift, after the auditor reports.
+VERIFIED_BARRED_PRIMITIVES = frozenset({"scatter"})
+
+VERIFIED_BAR_REASON = (
+    "obligation slice touches {prims}, whose SMT emission has not yet been "
+    "attacked by a distinct-context adversarial auditor. A wrong encoding that "
+    "produced a spurious witness would be caught by exact-rational replay; one "
+    "that MISSED a violation would mint a false VERIFIED with nothing "
+    "downstream to catch it, so the un-self-checking direction stays closed "
+    "until the audit lands. This is a bar on the CLAIM, not a finding about "
+    "the program: nothing here says the obligation is false."
+)
+
+
+def _barred_primitives(closed) -> tuple[str, ...]:
+    """Barred primitives present anywhere in the traced query, innermost
+    scopes included. Deliberately whole-query rather than slice-scoped: a
+    bar that under-fires is worse than one that over-fires, and the slice is
+    not available at this layer."""
+    if not VERIFIED_BARRED_PRIMITIVES or closed is None:
+        return ()
+    found, seen = set(), []
+
+    def walk(jaxpr):
+        for eqn in getattr(jaxpr, "eqns", ()):
+            name = str(eqn.primitive)
+            if name in VERIFIED_BARRED_PRIMITIVES:
+                found.add(name)
+            for v in eqn.params_dict().values() if hasattr(eqn, "params_dict") else ():
+                inner = getattr(v, "jaxpr", None)
+                if inner is not None and id(inner) not in seen:
+                    seen.append(id(inner))
+                    walk(inner)
+
+    try:
+        walk(getattr(closed, "jaxpr", None))
+    except Exception:  # a bar must never be the thing that breaks a verdict
+        return tuple(sorted(VERIFIED_BARRED_PRIMITIVES))
+    return tuple(sorted(found))
+
+
 def make_verdict(
     closed,
     propagation: Propagation,
