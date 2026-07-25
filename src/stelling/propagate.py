@@ -2586,6 +2586,19 @@ class _Propagator:
                     negate_addend=negate_addend,
                 )
             else:
+                # CONSTRAINT ON FUTURE TIGHTENING (read before touching
+                # the ieee add/sub kernels): the last clause below leans on
+                # the ieee add ROUNDING OUTWARD to absorb the fma's single
+                # rounding. If ieee add/sub are ever moved to the
+                # exact-when-representable discipline the real-mode
+                # transfers now use, that slack disappears and this hull
+                # stops covering the fused form — a silent soundness
+                # regression with no test that would notice, because the
+                # real-mode tightening (which is safe) and the ieee one
+                # (which is not) look identical at the call site. The
+                # real-mode tightening is clean precisely BECAUSE this
+                # whole path is gated on `ieee` at its caller.
+                #
                 # SOUND path: something lies between the multiply and here
                 # — and what that something is, after XLA's simplification
                 # passes, is not knowable from the jaxpr. The tainted

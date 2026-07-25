@@ -482,7 +482,13 @@ def test_mode_mixed_pairing_raises_instead_of_minting_a_refuted(
             eqn("ge", [x, lit(2.0)], ap),
             eqn("stelling_assume", [ap], aout),
             eqn("add", [x, x], s),
-            eqn("ge", [s, lit(4.0)], pred),
+            # threshold 5.0, not 4.0: under the constrained box x in [2,4]
+            # the sum is exactly [4,8], so `s >= 4` is now DECIDED by
+            # interval arithmetic alone and the escalation path this test
+            # exists to exercise is never reached. 5.0 keeps the
+            # obligation undecided in both assume modes while leaving the
+            # mispairing structure identical.
+            eqn("ge", [s, lit(5.0)], pred),
             eqn("stelling_assert", [pred], out),
         ],
         [out],

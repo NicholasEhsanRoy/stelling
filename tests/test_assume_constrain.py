@@ -1389,16 +1389,26 @@ def _image_gap_query(assume_cmp, assume_bound):
 
 
 def _rounding_pad_query():
-    # the auditor's r1b channel B: v = x + 0.0 pads the box past the
-    # strict boundary, so the collapse detector cannot fire; the true
-    # region of v > 1 is empty over x ∈ [0, 1].
+    # the auditor's r1b channel B: a transfer's rounding pad pushes the box
+    # past the strict boundary, so the collapse detector cannot fire; the
+    # true region of v > 1 is empty over x ∈ [0, 1].
+    #
+    # This channel USES `mul` deliberately. It was `add [x, 0.0]` until
+    # `add` moved to the exact-when-representable discipline, at which
+    # point `x + 0.0` became exact, the box stopped exceeding its image,
+    # `v > 1` collapsed onto [1.0, 1.0], and stelling correctly raised
+    # UnsatisfiableAssumptionError — a harness defect, not a guard failure.
+    # `mul` still carries an unconditional one-ulp bump (see the two
+    # endpoint disciplines in interval.py), so `x * 1.0` reproduces the
+    # padded box this channel exists to exercise. If `mul` is ever
+    # converted too, this channel needs the same treatment again.
     x, v, ap, aout, p2, out = (
         var(0), var(1), var(2, boolav()), var(3, boolav()), var(4, boolav()), var(5, boolav()),
     )
     return close(
         [
             any_eqn(x, 0.0, 1.0),
-            eqn("add", [x, lit(0.0)], v),
+            eqn("mul", [x, lit(1.0)], v),
             eqn("gt", [v, lit(1.0)], ap),
             eqn("stelling_assume", [ap], aout),
             eqn("le", [v, lit(0.5)], p2),
@@ -1412,7 +1422,7 @@ def _rounding_pad_query():
     "q_builder",
     [
         lambda: _image_gap_query("le", -0.5),  # channel A: image-gap (mul)
-        _rounding_pad_query,  # channel B: rounding-pad (add)
+        _rounding_pad_query,  # channel B: rounding-pad (mul)
         lambda: _image_gap_query("eq", -0.5),  # channel C: eq outside the image
     ],
 )
@@ -1680,7 +1690,13 @@ def test_strict_boundary_noop_assume_does_not_certify():
     # per the box and excluded by the predicate, so the region may be a
     # strict subset and satisfiability stays uncertified. The nonstrict
     # form at the same bound IS definitely true and certifies.
-    k = math.nextafter(1.0, -math.inf)  # w's box lower endpoint (1+0 rounded down)
+    # k must BE w's box lower endpoint — that is what makes the strict
+    # form a boundary no-op. `add [x, 0.0]` used to pad the box down by an
+    # ulp, so this was nextafter(1.0, -inf); under the
+    # exact-when-representable rule `x + 0.0` is exact and the endpoint is
+    # 1.0 itself. Pinning the old padded value would make `w > k`
+    # definitely true and silently stop testing the boundary case.
+    k = 1.0  # w's box lower endpoint (x + 0.0 is exact)
 
     def q_with(cmp):
         x, w, ap, aout, p2, out = (

@@ -32,6 +32,24 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   endpoint is the OBLIGATION ``arg ≥ 0`` failing and raises (the ``pow``
   out-of-domain posture), and the lower endpoint is floored at 0 so the
   ``sqrt(x) ≥ 0`` fact is produced rather than left to an outward bump.
+**TWO ENDPOINT DISCIPLINES LIVE HERE. They are not interchangeable and the
+call site does not say which one applies, so the rule is:**
+
+* **exact-when-representable** — ``add``, ``sub``, ``reduce_sum``,
+  ``integer_pow``. The endpoint is computed exactly (``Fraction``; a double
+  is a dyadic rational) and then rounded outward ONLY if the exact result
+  is not representable. Sound because these are correctly-rounded ops whose
+  slack was pure *endpoint-representation* conservatism.
+* **unconditional one-ulp bump** — ``mul``, ``div``, ``exp``, ``pow``,
+  ``sqrt``. **Do not "optimise" these to the rule above without reading
+  why each one is here**, because in three of them the ulp is doing a
+  second job: ``exp``/``pow`` carry the faithfully-rounded-libm assumption
+  (error ≤ 1 ulp, stamped into every verdict that uses them), and ``sqrt``'s
+  ulp is what keeps it sound on a platform whose ``sqrt`` is merely
+  faithfully rounded rather than correctly rounded. ``mul``/``div`` are
+  representational like the first group and are simply not converted yet —
+  that is a scope boundary, not a soundness statement.
+
 * Endpoints may be ``±inf`` (overflow saturates outward; half-infinite
   sets are representable). Interval multiplication uses the ``0·±inf = 0``
   endpoint convention (sound for closed real intervals, as in IEEE 1788).
@@ -58,10 +76,13 @@ from __future__ import annotations
 
 import itertools
 import math
+import sys
+from fractions import Fraction  # stdlib; the exact-endpoint route's arithmetic
 import operator
 from dataclasses import dataclass
 
 _INF = math.inf
+_FMAX = sys.float_info.max  # largest finite double: the outward-saturation endpoint
 
 EXP_LIBM_ASSUMPTION = (
     "exp endpoints assume a faithfully-rounded libm exp (error <= 1 ulp), "
@@ -254,6 +275,46 @@ def _up(x: float) -> float:
     return x if x == _INF else math.nextafter(x, _INF)
 
 
+def _exactable(*xs: float) -> bool:
+    """True when every endpoint is finite, so ``Fraction`` can represent it.
+
+    ``Fraction(inf)`` raises, and the closed-interval ``0 * ±inf = 0``
+    convention is an endpoint rule rather than a real-arithmetic one, so the
+    exact route is confined to the finite case and the unconditional bump
+    stays in force everywhere else.
+    """
+    return all(x == x and x != _INF and x != -_INF for x in xs)
+
+
+def _exact_down(exact: Fraction) -> float:
+    """The largest double ``<= exact`` — correct directed rounding, not a bump.
+
+    ``float()`` rounds to nearest, which may land above; one step down fixes
+    it. When ``exact`` is representable this returns it UNCHANGED, which is
+    the whole point: an endpoint computed without rounding needs no slack.
+    """
+    try:
+        f = float(exact)
+    except OverflowError:
+        # The exact sum is outside the double range. Saturating outward is
+        # the sound answer and matches the overflow posture elsewhere.
+        return -_INF if exact < 0 else _FMAX
+    if f == -_INF:
+        return f
+    return f if Fraction(f) <= exact else math.nextafter(f, -_INF)
+
+
+def _exact_up(exact: Fraction) -> float:
+    """The smallest double ``>= exact`` — correct directed rounding."""
+    try:
+        f = float(exact)
+    except OverflowError:
+        return _INF if exact > 0 else -_FMAX
+    if f == _INF:
+        return f
+    return f if Fraction(f) >= exact else math.nextafter(f, _INF)
+
+
 def _prod(a: float, b: float) -> float:
     """Endpoint product with the closed-interval convention 0 * ±inf = 0."""
     if (a == 0.0 and (b == _INF or b == -_INF)) or (
@@ -436,12 +497,28 @@ def _binary(a: IntervalArray, b: IntervalArray, f) -> IntervalArray:
 # -- arithmetic ---------------------------------------------------------------
 
 
+def _add_lo(alo: float, blo: float) -> float:
+    if not _exactable(alo, blo):
+        return _down(alo + blo)
+    return _exact_down(Fraction(alo) + Fraction(blo))
+
+
+def _add_hi(ahi: float, bhi: float) -> float:
+    if not _exactable(ahi, bhi):
+        return _up(ahi + bhi)
+    return _exact_up(Fraction(ahi) + Fraction(bhi))
+
+
 def add(a: IntervalArray, b: IntervalArray) -> IntervalArray:
-    return _binary(a, b, lambda alo, ahi, blo, bhi: (_down(alo + blo), _up(ahi + bhi)))
+    return _binary(
+        a, b, lambda alo, ahi, blo, bhi: (_add_lo(alo, blo), _add_hi(ahi, bhi))
+    )
 
 
 def sub(a: IntervalArray, b: IntervalArray) -> IntervalArray:
-    return _binary(a, b, lambda alo, ahi, blo, bhi: (_down(alo - bhi), _up(ahi - blo)))
+    return _binary(
+        a, b, lambda alo, ahi, blo, bhi: (_add_lo(alo, -bhi), _add_hi(ahi, -blo))
+    )
 
 
 def neg(a: IntervalArray) -> IntervalArray:
@@ -903,6 +980,24 @@ def reduce_sum(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
     ``[0, 0]``, matching jax (measured: ``jnp.sum`` of a size-0 array is
     ``0.0``).
 
+    **What this actually does, which is weaker than "sum exactly, round
+    once":** each accumulation step is exact-when-representable
+    (:func:`_add_lo`/:func:`_add_hi`) and rounds outward only where THAT
+    STEP is inexact. So for ``n >= 3`` the result is NOT the correctly
+    directed rounding of the exact total, and the endpoints are NOT the two
+    neighbours of it — the single-op property that one endpoint equals
+    ``fl(R)`` does not extend here. Sound (every step is directed outward),
+    tighter than the old unconditional bump, and deliberately not maximally
+    tight: exact ``Fraction`` accumulation over field-sized arrays is a cost
+    nobody has measured. Revisit only if a measured obligation needs it.
+
+    One consequence worth relying on: **nonnegative in, nonnegative out.**
+    Exact addition of nonnegative endpoints is nonnegative, and rounding a
+    nonnegative real downward cannot cross zero (``0.0`` is a double), so a
+    sum of ``lo >= 0`` contributors cannot produce ``lo < 0`` — measured
+    over 20k randomised reductions, worst observed ``lo`` is ``0.0``. That
+    is the "sum of squares >= 0" class discharging without a sign clamp.
+
     **This reasoning is available only under ℝ.** Float addition is not
     associative and the jaxpr fixes no summation order, so the ieee
     counterpart (:func:`ieee_reduce_sum`) cannot reuse it — see that
@@ -913,6 +1008,7 @@ def reduce_sum(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
     los = [0.0] * out_n  # additive identity: the empty sum is exactly 0
     his = [0.0] * out_n
     seen = [False] * out_n
+    nonneg = [True] * out_n  # every contributor so far had lo >= 0
     if a.size:
         for coord in _coords(a.shape):
             i = _flat_index(coord, a.shape)
@@ -922,9 +1018,21 @@ def reduce_sum(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
             if not seen[j]:
                 los[j], his[j] = a.los[i], a.his[i]
                 seen[j] = True
+                nonneg[j] = a.los[i] >= 0.0
             else:
-                los[j] = _down(los[j] + a.los[i])
-                his[j] = _up(his[j] + a.his[i])
+                los[j] = _add_lo(los[j], a.los[i])
+                his[j] = _add_hi(his[j], a.his[i])
+                nonneg[j] = nonneg[j] and a.los[i] >= 0.0
+    # Sign-awareness, deliberately NOT gated on semantics: rounding a
+    # nonnegative real yields a nonnegative float under every rounding mode
+    # and every association order, overflow included. So a sum whose every
+    # contributor has ``lo >= 0`` cannot have a negative lower endpoint, and
+    # a lower endpoint that went below zero is slack, never information.
+    # ``-0.0`` is normalised to ``+0.0`` so no downstream row can branch on
+    # the sign bit of a bound this rule produced.
+    for j in range(out_n):
+        if nonneg[j] and los[j] <= 0.0:
+            los[j] = 0.0
     return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
 
 

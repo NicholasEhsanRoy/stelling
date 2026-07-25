@@ -68,6 +68,41 @@ Pending instances, recorded now so they land with the features they bind:
   literal-and-fence pair for each bundled contrib registry. Lands with
   the contrib registry (`design/open-primitive-set.md`).
 
+## Measuring a change runs on BOTH worktrees
+
+Any measurement of what a diff *does* — a verdict that flipped, a bracket that
+narrowed, a timing, a coverage count — runs twice: once on a worktree at the
+unchanged baseline, once on the tree with the diff. `git worktree add <path> HEAD`
+then point `PYTHONPATH` at that tree's `src`.
+
+**A control that fires identically on both is a defect in the instrument, not a
+finding about the diff.** That rule is the whole point, and it has caught four
+things that would otherwise have been reported as results: a transfer row that
+passed its own spec while failing the property that justified it; a measurement
+run against a tree being edited underneath it; a soundness alarm raised against a
+diff that turned out to be a wrong predicate; and a threshold test whose
+"UNSOUND" verdict fired on the baseline too.
+
+Corollaries worth stating because each cost something:
+
+- Do not edit a repo an agent or job is concurrently measuring. Use a worktree, or
+  land the edit before launching.
+- A one-sided run cannot distinguish "the diff did this" from "this was always
+  true." Prefer no measurement to a one-sided one.
+- When a control fires on the baseline, fix the control and re-run both. Do not
+  reason about which side is "really" affected.
+
+## Guard coverage is proven by mutation, not by construction
+
+A test that reaches a guard and a test whose scenario stops short of it look
+identical in CI — both green. So when a change makes a scenario decidable earlier
+in the pipeline, do not assume the guard is still exercised: **mutate the guard
+(invert the condition or neuter the raise) and confirm the test fails.** Restore
+it afterwards. If no scenario can be built that the mutation breaks, the guard is
+UNCOVERED — record it as such next to the coverage numbers. Do not delete the
+test, and do not mark it `xfail`: the guard is not expected to fail, the scenario
+stopped reaching it, and `XPASS` is the status nobody reads.
+
 ## Ground rules
 
 - SPDX headers are inserted automatically by the pre-commit hook; don't

@@ -23,20 +23,39 @@ def scalar(lo, hi):
     return iv.IntervalArray(shape=(), los=(float(lo),), his=(float(hi),))
 
 
-def test_add_brackets_true_result_and_widens():
-    r = iv.add(iv.point(0.1), iv.point(0.2))
-    # the *exact* real sum of the two doubles lies strictly inside the
-    # bracket — checked in exact rational arithmetic, not in floats
+def test_add_brackets_true_result_exactly():
+    """add is exact-when-representable: the endpoints are the two
+    representable NEIGHBOURS of the exact real sum, so the bracket is as
+    tight as doubles allow.
+
+    The old form of this test also asserted ``lo < fl(0.1)+fl(0.2) < hi`` —
+    a bracket strictly around the *rounded double*. That assertion cannot
+    survive a tight endpoint rule and should not: round-to-nearest returns
+    one of the two neighbours of the exact sum, which are exactly the
+    endpoints, so the float always lands ON a bound. It recorded an intent
+    that was never achievable as a guarantee, because float containment
+    does NOT compose — summing ``[2**53, 1, 1]`` left to right gives
+    ``2**53`` while the exact total is ``2**53 + 2``, outside any
+    exactly-summed bracket. Real-mode brackets bound REALS; the stamp and
+    the module docstring both say so.
+    """
     from fractions import Fraction
 
+    r = iv.add(iv.point(0.1), iv.point(0.2))
     true = Fraction(0.1) + Fraction(0.2)
-    assert Fraction(r.los[0]) < true < Fraction(r.his[0])
-    assert r.los[0] < 0.1 + 0.2 < r.his[0]  # the rounded double too
+    assert Fraction(r.los[0]) <= true <= Fraction(r.his[0])
+    # exactness, not mere containment: adjacent doubles straddling `true`
+    assert math.nextafter(r.los[0], math.inf) == r.his[0]
+    # and round-to-nearest lands on one of them
+    assert (0.1 + 0.2) in (r.los[0], r.his[0])
 
 
 def test_sub_directed():
+    """Directed subtraction — lo = a.lo - b.hi, hi = a.hi - b.lo — and
+    EXACT here: -0.5 and 1.5 are both representable, so the
+    exact-when-representable rule returns them unwidened."""
     r = iv.sub(scalar(1.0, 2.0), scalar(0.5, 1.5))
-    assert r.los[0] < -0.5 <= 0.5 < r.his[0]
+    assert r.los[0] == -0.5 and r.his[0] == 1.5
 
 
 @pytest.mark.parametrize(
@@ -332,7 +351,9 @@ def test_rank_broadcasting_size1_and_missing_leading_dims():
     for got_lo, got_hi, want in zip(
         r.los, r.his, [2.0, 3.0, 4.0, 11.0, 12.0, 13.0]
     ):
-        assert got_lo < want < got_hi  # outward bracket around the true sum
+        # every one of these sums is exactly representable, so the
+        # exact-when-representable rule returns it with no widening at all
+        assert got_lo == want == got_hi
 
 
 def test_rank_broadcasting_applies_to_comparisons():
