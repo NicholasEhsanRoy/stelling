@@ -103,6 +103,23 @@ UNCOVERED — record it as such next to the coverage numbers. Do not delete the
 test, and do not mark it `xfail`: the guard is not expected to fail, the scenario
 stopped reaching it, and `XPASS` is the status nobody reads.
 
+**First, prove the mutation is live.** A mutation that does not actually change
+the running code produces a passing test that reads exactly like "the guard is not
+reached" — a false negative that concludes the opposite of the truth. So: a
+mutation must be shown to change behaviour *somewhere*. Run the whole suite under
+it; if **nothing anywhere fails**, the mutation is suspect and must be re-sited
+before "not reached" may be concluded.
+
+Both failure modes here were hit in one sitting while writing this section:
+
+- a `sed` targeted by line number landed on a **comment line** two lines above the
+  condition, so the guard was untouched and the test passed;
+- a pattern-based replacement asserted a single occurrence and found **two call
+  sites**, aborting before it changed anything — again leaving a passing test.
+
+In both cases the passing test would have supported "guard UNCOVERED." Neither was
+true.
+
 ## Ground rules
 
 - SPDX headers are inserted automatically by the pre-commit hook; don't

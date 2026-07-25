@@ -159,6 +159,24 @@ class of false alarms without silencing a single real finding:
    range, or at the guard's own strength (`>= 0`, not `> 0`), or the
    alarm is about the convention, not the code.
 
+## State thresholds as representable values where you can
+
+Interval endpoints are computed by correct directed rounding, which returns the
+exact result **unchanged whenever it is representable as a double**. A threshold
+that is itself a double — `0`, `1`, `0.5`, any power of two, any small integer —
+can therefore be met exactly at a boundary. A threshold that is not — `0.1`,
+`1/3`, `0.7` — is stored as the nearest double, and an obligation that turns on
+that boundary can land in the gap between the two.
+
+Practically: prefer `x >= 0`, `dt <= 0.5`, `scale > 0` over `x >= 0.1` when the
+physics gives you the choice. If the threshold is genuinely `0.1`, nothing is
+wrong — but a boundary-tight obligation there is likelier to come back UNKNOWN,
+and the fix is usually to state the bound you actually mean rather than to widen
+the envelope.
+
+This affects **boundary-tight** obligations specifically. An UNKNOWN with room to
+spare on both sides is not this; look at the propagation notes instead.
+
 ## Reading a CI verdict: gate or triage
 
 **A finding is a conjunction: the precondition is violated, AND the
