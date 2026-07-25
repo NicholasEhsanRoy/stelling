@@ -120,6 +120,52 @@ Both failure modes here were hit in one sitting while writing this section:
 In both cases the passing test would have supported "guard UNCOVERED." Neither was
 true.
 
+## Stop before soundness-critical work when mechanical slips accumulate
+
+Mechanical slips — a `sed` that lands on the wrong line, an assertion with the
+wrong expected value, a patch whose pattern doesn't match, reading a tool's
+output as success when it reported failure — are not evenly distributed across a
+long working session. They cluster, and the cluster is a signal about the state
+of whoever is working, not about the difficulty of the task.
+
+**The rule: when slips start accumulating, stop before the next
+soundness-critical change, not after it.** Land what is already verified, leave
+the rest unmerged on a branch, and record why. A half-built transfer row or
+emission encoding is worse than none: it has to be reverted or branched anyway,
+and any audit of it is an audit of something nobody trusts.
+
+This is not a counsel of perfection about avoiding mistakes. Every slip listed
+below was caught — most of them by the controls in this file, which is what they
+are for. The rule is about what to do once you notice you are producing them at a
+rate, on work whose failure mode is a false VERIFIED.
+
+The instances that produced this rule, named the way the mutation norm names its
+two, because a norm with the evidence stripped out is just an opinion:
+
+Session of 2026-07-25, five, with the last edit carrying three at once:
+- a `sed` targeted by line number landed on a comment two lines above the
+  condition it meant to mutate;
+- a pattern replacement asserted a single occurrence and found two, aborting
+  before it changed anything;
+- a repaired test assertion carried the wrong expected value (`hi == 0.5` where
+  `hi = a.hi - b.lo = 1.5`);
+- a bisection ceiling was set outside its own declared envelope;
+- one edit introduced a stray colon, placed a block before the variable it read,
+  and omitted the import it needed.
+
+Session of 2026-07-26, four, the last of which prompted the stop:
+- a probe read `.solver.invoked` off a field that is a tuple of stamps;
+- a new test was `skipif`-guarded on the very condition it existed to check, so
+  the mutation that should have failed it skipped it instead;
+- a new test set `jax_enable_x64` at module import, leaking float64 into later
+  modules — walking into a hazard this repo already documents by name in
+  `tests/test_preconditions.py`'s fixture comment;
+- **a `cd` failed, the edit that depended on it never ran, and the output was
+  read as success.** That one is the worst of the set and the reason the rule is
+  written this way: the others produce a wrong artifact, which the suite catches.
+  This one produces a *false belief about the state of the tree*, and the next
+  hour is spent building on it.
+
 ## Ground rules
 
 - SPDX headers are inserted automatically by the pre-commit hook; don't
