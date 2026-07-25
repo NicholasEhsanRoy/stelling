@@ -535,6 +535,36 @@ _SCATTER_SET_CORE = {
 }
 
 
+def _scatter_set_row_form(params, operand_shape, indices_shape, updates_shape):
+    """The ONE admissibility oracle for the static-index ``scatter`` set-form,
+    shared by the propagation transfer and the SMT emission — the same posture
+    :func:`_scatter_add_row_form` holds for the accumulate form.
+
+    Returns True for the single covered form: canonical single-element
+    dimension numbers, rank-1 operand, one index row, scalar update. Everything
+    else is False and the caller declines with its own wording. Sharing it is
+    the point: a bounds or shape rule that lived in two places could be
+    tightened in one and not the other, and the emission is the face where
+    getting it wrong mints a false model rather than a ⊤.
+
+    NOTE what this does NOT check: the index VALUE (each caller reads it from
+    its own domain — intervals on the transfer side, static constants on the
+    emission side) and the scatter ``mode``. Both are the caller's, and both
+    are load-bearing; see the callers.
+    """
+    dn = params.get("dimension_numbers")
+    if not isinstance(dn, ir.NamedTupleParam):
+        return False
+    fields = dict(dn.fields)
+    if any(fields.get(k) != v for k, v in _SCATTER_SET_CORE.items()):
+        return False
+    if any(v != () for k, v in fields.items() if k not in _SCATTER_SET_CORE):
+        return False
+    if len(operand_shape) != 1 or indices_shape != (1,) or updates_shape != ():
+        return False
+    return True
+
+
 def _t_scatter(eqn, params, ins):
     """``x.at[k].set(v)`` in its static-index form — the allowed-by-census
     structural addition from the maddening HeatNode census trace (the
@@ -555,16 +585,10 @@ def _t_scatter(eqn, params, ins):
     if len(ins) != 3 or params.get("update_jaxpr") is not None:
         return None
     operand, indices, updates = ins
-    dn = params.get("dimension_numbers")
-    if not isinstance(dn, ir.NamedTupleParam):
-        return None
-    fields = dict(dn.fields)
-    if any(fields.get(k) != v for k, v in _SCATTER_SET_CORE.items()):
-        return None
-    if any(v != () for k, v in fields.items() if k not in _SCATTER_SET_CORE):
-        return None
-    if len(operand.shape) != 1 or indices.shape != (1,) or updates.shape != ():
-        return None
+    if not _scatter_set_row_form(
+        params, operand.shape, indices.shape, updates.shape
+    ):
+        return None  # form outside the covered row — the shared oracle's call
     lo, hi = indices.los[0], indices.his[0]
     if lo != hi or not math.isfinite(lo) or lo != math.floor(lo):
         return None  # dynamic or non-integral index: no exact rule
