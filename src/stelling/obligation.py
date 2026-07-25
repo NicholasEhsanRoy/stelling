@@ -1474,6 +1474,39 @@ def slice_unknown_obligations(
 
 
 # -- exact-rational replay ----------------------------------------------------
+#
+# THE EMISSION == REPLAY INVARIANT, machine-checked.
+#
+# Replay is what makes REFUTED self-certifying: a solver model is only ever
+# promoted to a Witness after this module re-derives the violation in exact
+# rational arithmetic, independently of the solver. That guarantee is only as
+# broad as replay's own coverage — a primitive that can be EMITTED but not
+# REPLAYED yields a witness nobody can independently check, which is the
+# interval-REFUTED-without-a-witness problem wearing a different costume.
+#
+# Measured 2026-07-26: the two sets are currently EQUAL, in both directions.
+# That equality is an invariant to preserve, not a coincidence to note, and it
+# is exactly the kind that decays silently — adding a primitive to _SUPPORTED
+# is a one-line edit, and nothing about that edit points at this file. So it is
+# asserted at import, in the same posture as the int-semantics census above.
+#
+# The declaration below must mirror the dispatch in _root_elements and
+# _scalar_binop. It is the weaker half of the check: it pins that the SETS
+# agree, not that each branch is reachable and correct. The stronger half is a
+# probe test that drives every member through replay; the two together are the
+# census.
+_REPLAY_SUPPORTED = (
+    _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
+    | {"reduce_sum", "select_n", "convert_element_type", "scatter-add"}
+)
+
+assert _REPLAY_SUPPORTED == _SUPPORTED, (
+    "the exact-rational replay must cover exactly the emission set, or a "
+    "witness can be produced that replay cannot independently confirm: "
+    f"emittable-but-not-replayable {sorted(_SUPPORTED - _REPLAY_SUPPORTED)}, "
+    f"replayable-but-not-emittable {sorted(_REPLAY_SUPPORTED - _SUPPORTED)}"
+)
+
 
 
 def _scalar_binop(prim: str, a, b):
@@ -1608,6 +1641,28 @@ def _root_elements(
             elif prim == "convert_element_type":
                 (idx,) = _pair_elementwise(eqn)
                 dst = str(params.get("new_dtype"))
+                src = str(eqn.invars[0].aval.dtype or "")
+                # RE-DERIVE the exactness judgement; do not inherit it.
+                # Replay's whole job is to confirm a violation INDEPENDENTLY
+                # of the machinery that produced it, and every other branch
+                # here re-derives its routing through the shared helpers. This
+                # one used to read only the destination dtype and treat any
+                # other conversion as the identity on the rational — so a
+                # value-changing narrowing (float64 -> float32) would have been
+                # carried through unrounded, and replay would have been
+                # agreeing with the emission because it had asked the same
+                # question, not because it had answered it. Unreachable today
+                # (the emission declines such a slice before replay sees it),
+                # which is precisely why it could sit here unnoticed.
+                if not (src == dst or (src, dst) in _EXACT_CONVERSIONS):
+                    raise ReplayError(
+                        f"replay cannot re-derive a value-changing conversion "
+                        f"{src!r} -> {dst!r}: the exact rational would have to "
+                        f"be rounded to the destination format, and replay "
+                        f"models exact arithmetic. The emission declines this "
+                        f"form too — replay refuses independently rather than "
+                        f"relying on that."
+                    )
                 out = tuple(
                     Fraction(1 if ins[0][i] else 0)
                     if isinstance(ins[0][i], bool) and dst != "bool"
