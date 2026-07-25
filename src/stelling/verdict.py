@@ -3,7 +3,10 @@
 
 """Verdicts and their stamps, per SOUNDNESS.md's contract.
 
-A verdict is ``VERIFIED``, ``REFUTED``, or ``UNKNOWN``. REFUTED
+A verdict is ``VERIFIED``, ``REFUTED``, ``UNKNOWN`` — or ``DECLINED``,
+which is not a fourth judgment but the absence of one: the query could not
+be transcribed, so nothing was analysed and nothing is stamped. See
+:class:`Verdict`. REFUTED
 (`design/e2a-registration.md`, amendment 1) is a **set-level refutation
 of the stated box**: at least one obligation is definitely false over
 the propagated superset of the declared set, so the box is not invariant
@@ -38,6 +41,7 @@ from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
 from stelling.propagate import ObligationReport, Propagation
 
 __all__ = [
+    "declined",
     "SEMANTICS_IEEE",
     "SEMANTICS_REAL",
     "SolverStamp",
@@ -253,16 +257,80 @@ class Stamp:
         return "\n".join(lines)
 
 
+_STATUSES = frozenset({"VERIFIED", "REFUTED", "UNKNOWN", "DECLINED"})
+
+
+def declined(reason: str) -> "Verdict":
+    """The verdict for a query stelling could not transcribe.
+
+    ``reason`` is quoted verbatim into the notes: a caller who points
+    stelling at unsupported code learns what stelling could not read,
+    which is the difference between "this tool is broken" and "this tool
+    does not cover this yet".
+    """
+    return Verdict(
+        status="DECLINED", obligations=(), stamp=None,
+        notes=(f"declined: {reason}",), witnesses=(),
+    )
+
+
 @dataclass(frozen=True)
 class Verdict:
-    status: str  # "VERIFIED" | "REFUTED" | "UNKNOWN"
+    """A judged query, or a query that could not be read at all.
+
+    ``DECLINED`` is not a fourth judgment — it is the ABSENCE of one. The
+    query was never transcribed, so there is nothing to judge and nothing
+    to stamp: a stamp identifies a query by ``query_content_hash``, and a
+    query that could not be read has no hash. Minting a sentinel one would
+    produce a stamp that LOOKS like an attestation of something, which is
+    the failure this project exists to prevent, so ``stamp`` is ``None``
+    exactly when the status is ``DECLINED`` and never otherwise.
+
+    It is a status rather than an exception so that batch callers compose:
+    a CI soak or a graph-wide pass over many nodes must be able to report
+    "2 verified, 0 unknown, 3 declined" and keep going. An exception makes
+    the first unsupported node kill the run.
+    """
+
+    status: str  # "VERIFIED" | "REFUTED" | "UNKNOWN" | "DECLINED"
     obligations: tuple[ObligationReport, ...]
-    stamp: Stamp
+    stamp: Stamp | None  # None IFF status == "DECLINED"
     notes: tuple[str, ...]  # the addresses: where and why anything degraded
     witnesses: tuple[Witness, ...] = ()  # replay-confirmed counterexamples
 
+    def __post_init__(self) -> None:
+        if self.status not in _STATUSES:
+            raise StampError(
+                f"verdict status must be one of {sorted(_STATUSES)}, got "
+                f"{self.status!r}"
+            )
+        if (self.stamp is None) != (self.status == "DECLINED"):
+            raise StampError(
+                "a DECLINED verdict carries no stamp and every other status "
+                "must carry one: a stamp identifies a query by content hash, "
+                "and a declined query was never read, so there is no hash to "
+                f"identify it by (status={self.status!r}, "
+                f"stamp={'None' if self.stamp is None else 'present'})"
+            )
+        if self.status == "DECLINED" and (self.obligations or self.witnesses):
+            raise StampError(
+                "a DECLINED verdict judged nothing, so it can carry neither "
+                "obligations nor witnesses"
+            )
+
     def render(self) -> str:
         lines = [f"== {self.status}"]
+        if self.status == "DECLINED":
+            lines.append(
+                "  the query was not analysed — stelling could not read it. "
+                "No claim is made about the program, in either direction."
+            )
+            lines.extend(f"  {n}" for n in self.notes)
+            lines.append(
+                "  no stamp: a stamp identifies a query by content hash, and "
+                "this query was never transcribed."
+            )
+            return "\n".join(lines)
         if self.status == "REFUTED":
             # Rendering honesty: the set-level wording ("not a witness")
             # belongs ONLY to interval refutations. A witness-backed REFUTED

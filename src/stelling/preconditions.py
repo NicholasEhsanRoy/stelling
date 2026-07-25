@@ -104,7 +104,8 @@ def scalar_nonzero(dtype, envelope):
     return scalar, assert_(scalar != 0.0)
 
 
-def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None):
+def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None,
+          strict=False):
     """Run a precondition harness end-to-end and return the stamped
     :class:`stelling.verdict.Verdict` — with the vacuity check built in:
     **this entry point cannot return an unchecked VERIFIED.**
@@ -154,12 +155,31 @@ def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None):
     environment; the precision entry records the *actual*
     ``jax_enable_x64`` state at trace time, not an assumption.
     """
-    verdict, _ = _pipeline(
-        harness,
-        vacuity_mode=vacuity_mode,
-        solver_timeout_ms=solver_timeout_ms,
-        refine=refine,
-    )
+    from stelling import ir
+    from stelling.verdict import declined as _declined
+
+    try:
+        verdict, _ = _pipeline(
+            harness,
+            vacuity_mode=vacuity_mode,
+            solver_timeout_ms=solver_timeout_ms,
+            refine=refine,
+        )
+    except ir.TranscriptionError as e:
+        # stelling could not READ the query. That is a capability gap, not a
+        # judgment and not a harness defect, so it returns a status rather
+        # than raising: a batch caller — a CI soak, a graph-wide pass — must
+        # be able to record "declined" for one node and carry on to the next.
+        # Raising makes the first unsupported node kill the run.
+        #
+        # Deliberately NOT caught here: harness defects (an empty declared
+        # set, an unsatisfiable assume) and jax's own tracing failures. The
+        # first are the caller's bug and must stay loud; the second happen
+        # upstream of stelling, and swallowing them would mislabel "jax
+        # cannot trace this program" as "stelling does not cover it".
+        if strict:
+            raise
+        return _declined(str(e))
     return verdict
 
 
