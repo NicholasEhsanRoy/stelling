@@ -432,7 +432,7 @@ def _approx(exact: str) -> str:
 VERIFIED_BARRED_PRIMITIVES = frozenset({"scatter"})
 
 VERIFIED_BAR_REASON = (
-    "obligation slice touches {prims}, whose SMT emission has not yet been "
+    "the traced query contains {prims}, whose SMT emission has not yet been "
     "attacked by a distinct-context adversarial auditor. A wrong encoding that "
     "produced a spurious witness would be caught by exact-rational replay; one "
     "that MISSED a violation would mint a false VERIFIED with nothing "
