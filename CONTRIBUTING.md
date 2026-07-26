@@ -128,6 +128,35 @@ reject at least one point, a probe must assert something the cheap layers cannot
 decide — are kept because they are more actionable than this rule; use them first
 and fall back to this when the situation fits none of them.
 
+## State which query a measurement actually ran
+
+Norm D catches an instrument that cannot detect the thing. This catches one that
+**answers a different, easier question than the one reported** — and it passes every
+check aimed at it, because the check is aimed at the question you meant to ask.
+
+Three instances, all found by follow-up rather than by review:
+
+- a solver-timing sweep whose obligations were **discharged by interval
+  arithmetic**. The solvers did run — on the *vacuity widen re-check*, a different
+  and easier query — so the wall-clock was interval cost plus a re-check, reported
+  as the cost of solving the obligation. **It survived a full night's reporting.**
+- a cause-stack layer that was **the stub's artifact**: a primitive added to the
+  emission set without its plan declines on the generic fallback, describing the
+  stub rather than the engine.
+- an object-identity comparison run on **post-transcription** values, which are
+  constructed fresh per parameter and so are always distinct — reported as
+  evidence against the hypothesis it could not test.
+
+So: **say what ran.** For a solver measurement that means reporting how many
+invocations were on the *obligation itself*, separately from re-checks —
+`solver_timeout_ms` being set is not evidence the solver decided anything, and a
+verdict of VERIFIED is not evidence either. Intervals discharge most easy
+obligations before escalation is reached.
+
+The discriminator is cheap: count the invocations whose reason does not mention a
+re-check, and print it beside the timing. If that count is zero, the measurement is
+about interval propagation and must not be reported as being about the solver.
+
 ## Guard coverage is proven by mutation, not by construction
 
 A test that reaches a guard and a test whose scenario stops short of it look
