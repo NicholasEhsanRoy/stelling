@@ -120,6 +120,30 @@ mesh machinery, no method internals.
   If your precondition is a float-boundary fact, read the stamp's
   semantics line before trusting either mode blindly.
 
+  **What that costs you, concretely — two primitives are enough.** This is
+  not a corner case reachable only through exotic arithmetic:
+
+  ```python
+  x = any_array((3,), "float32", (1.0 - 1e-12, 1.0 + 1e-12))
+  assert_((x[0] + jnp.float32(1e-9)) - x[0] > 0.0)      # VERIFIED
+  ```
+
+  In exact real arithmetic the expression is `1e-9`, so the predicate is
+  true and the default (`real`) verdict of VERIFIED is correct *for what it
+  claims*. Executed in float32 it is exactly `0.0` at every point of that
+  envelope, so the predicate is **false everywhere the program actually
+  runs**. Measured on jax 0.11.0; the same VERIFIED-against-executed-zero
+  appears for `jnp.sum(k * x)` and for `jnp.matmul(k, x)`, so it is a
+  property of the semantics dial rather than of any one primitive or row.
+
+  The verdict is not wrong — it says `real` on the stamp, and in ℝ the
+  claim holds. But **"VERIFIED" plus a `real` semantics line does not mean
+  "this holds when you run it"**, and the gap can be the whole value rather
+  than a last-ulp difference. If the property you care about is one the
+  floating-point execution must satisfy, either pose it in `ieee` mode or
+  state the threshold as a representable value (see below) — do not read a
+  `real` VERIFIED as a statement about the float program.
+
 Each limit shows up in the verdict itself — as a quoted decline, an
 UNKNOWN with its reason, or a stamped assumption — never as a silent
 pass. That is the design: the tool tells you when it could not earn the
