@@ -52,6 +52,7 @@ own jax-free modules.
 
 from __future__ import annotations
 
+import itertools
 import math
 import struct
 from operator import index as _op_index
@@ -161,7 +162,8 @@ _IDENTITY_HARNESS = frozenset({"stelling_assume", "stelling_nonvacuity"})
 
 _SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
-    | {"reduce_sum", "select_n", "convert_element_type", "scatter-add"}
+    | {"reduce_sum", "select_n", "convert_element_type", "scatter-add",
+       "dot_general"}
 )
 
 # Emitted primitives that COMPUTE a new numeric value, and therefore can
@@ -182,7 +184,10 @@ _INT_OVERFLOW_EMITTED = frozenset(
     {"add", "sub", "mul", "neg", "div", "integer_pow", "reduce_sum",
      # the accumulate scatter SUMS operand and update elements — the
      # add/reduce_sum class exactly, so integer dtypes decline here too
-     "scatter-add"}
+     "scatter-add",
+     # the contraction sums PRODUCTS; same class, and the generic guard
+     # above (integer OUTPUT dtype declines) covers it with no extra code
+     "dot_general"}
 )
 
 # Mechanised for the same reason the transfer-side census is (audit
@@ -716,6 +721,148 @@ def _group_reduce_sum(eqn: ir.JaxprEqn) -> list[list[int]]:
     return groups
 
 
+def _dot_general_plan(eqns, consts, eqn: ir.JaxprEqn):
+    """Per-OUTPUT-element linear combinations for a constant-operand
+    ``dot_general`` — the one bookkeeping the SMT emission and the exact
+    replay both drive, so neither can route a coefficient the other would
+    not.
+
+    Returns ``(sym_operand, groups)`` where ``sym_operand`` is 0 or 1 (which
+    invar carries the SYMBOLIC terms) and ``groups[i]`` is a list of
+    ``(Fraction coefficient, flat index into that operand)`` pairs. The
+    output element is ``Σ coeff * sym[idx]`` — a constant-coefficient linear
+    combination, which is what QF_LRA is for.
+
+    **Why a constant operand is required, stated as the decline says it.**
+    With both operands symbolic each term is a product of two variables and
+    the obligation leaves linear arithmetic entirely. That is a scope
+    decision, not a capability gap, and the decline names it.
+
+    Admissibility is decided by
+    :func:`stelling.propagate._dot_general_row_form`, the SAME oracle the
+    interval transfer drives — built shared from the start rather than
+    extracted later, which is how the scatter row acquired a gate the
+    transfer had and the emission did not.
+
+    TWO CHECKS THIS FACE MAKES THAT THE TRANSFER DOES NOT, each with its
+    reason, per the shared-oracle discipline:
+
+    1. **operand constancy.** The interval transfer is indifferent to it —
+       it propagates boxes whether or not an operand is pinned — so it
+       cannot live in the shared oracle without declining forms the transfer
+       handles correctly.
+    2. **float operand dtypes.** The oracle already forbids integer
+       ACCUMULATION, and integer operands under float64 accumulation measure
+       benign (5.9e-16), so the transfer admits them. The emission is over
+       SMT-LIB2 Reals, which are unbounded, and an integer-dtyped operand
+       reaching a Real emission is the same class the ``reduce_sum`` and
+       ``scatter-add`` guards refuse. Declined here and only here.
+    """
+    from stelling.propagate import _dot_general_row_form
+
+    if len(eqn.invars) != 2 or len(eqn.outvars) != 1:
+        raise _Decline(
+            f"'dot_general' with {len(eqn.invars)} operand(s) and "
+            f"{len(eqn.outvars)} output(s) is outside the measured form"
+        )
+    lhs_dt = eqn.invars[0].aval.dtype or ""
+    rhs_dt = eqn.invars[1].aval.dtype or ""
+    dn, reason = _dot_general_row_form(eqn.params_dict(), lhs_dt, rhs_dt)
+    if dn is None:
+        raise _Decline(f"'dot_general' declined: {reason}")
+
+    for name, dt in (("lhs", lhs_dt), ("rhs", rhs_dt)):
+        if not dt.startswith("float"):
+            raise _Decline(
+                f"'dot_general' {name} operand dtype {dt!r}: the emission is "
+                f"over SMT-LIB2 Reals, which are unbounded, so a non-float "
+                f"operand is not modelled here even where the interval "
+                f"transfer admits it"
+            )
+
+    lhs_shape = _shape_of(eqn.invars[0])
+    rhs_shape = _shape_of(eqn.invars[1])
+    lhs_vals = _exact_static_elements(eqns, consts, eqn.invars[0])
+    rhs_vals = _exact_static_elements(eqns, consts, eqn.invars[1])
+    if lhs_vals is None and rhs_vals is None:
+        raise _Decline(
+            "'dot_general' has NO constant operand: a sum of products of two "
+            "symbolic operands is NONLINEAR arithmetic, outside this row's "
+            "linear scope. The row models a constant-coefficient linear "
+            "combination; it is not that the primitive is unsupported"
+        )
+    # Constant in EITHER position. Contract #4's constant is operand ZERO
+    # (the projection matrix) while LBM's is operand one, so a row scoped to
+    # "second operand constant" would miss the contract it was built for.
+    if rhs_vals is not None:
+        const_side, const_vals, sym_operand = 1, rhs_vals, 0
+    else:
+        const_side, const_vals, sym_operand = 0, lhs_vals, 1
+
+    (lc, rc), (lb, rb) = dn
+    lfree = tuple(i for i in range(len(lhs_shape)) if i not in lb and i not in lc)
+    rfree = tuple(j for j in range(len(rhs_shape)) if j not in rb and j not in rc)
+    out_shape = (
+        tuple(lhs_shape[i] for i in lb)
+        + tuple(lhs_shape[i] for i in lfree)
+        + tuple(rhs_shape[j] for j in rfree)
+    )
+    if out_shape != _shape_of(eqn.outvars[0]):
+        raise _Decline(
+            f"'dot_general' output shape {_shape_of(eqn.outvars[0])} "
+            f"contradicts the contraction's {out_shape} (malformed IR)"
+        )
+    for v in const_vals:
+        if isinstance(v, bool) or not isinstance(v, (int, float, Fraction)):
+            raise _Decline(
+                f"'dot_general' constant operand carries a non-numeric "
+                f"element {v!r}"
+            )
+
+    nb, nl = len(lb), len(lfree)
+    groups: list[list[tuple[Fraction, int]]] = []
+    for out_coord in _coords_of(out_shape):
+        bcoord = out_coord[:nb]
+        lcf = out_coord[nb:nb + nl]
+        rcf = out_coord[nb + nl:]
+        terms: list[tuple[Fraction, int]] = []
+        for c in itertools.product(*[range(lhs_shape[i]) for i in lc]):
+            ac = [0] * len(lhs_shape)
+            bc = [0] * len(rhs_shape)
+            for d, v in zip(lb, bcoord):
+                ac[d] = v
+            for d, v in zip(rb, bcoord):
+                bc[d] = v
+            for d, v in zip(lfree, lcf):
+                ac[d] = v
+            for d, v in zip(rfree, rcf):
+                bc[d] = v
+            for d, v in zip(lc, c):
+                ac[d] = v
+            for d, v in zip(rc, c):
+                bc[d] = v
+            ia = _flat_of(tuple(ac), lhs_shape)
+            ib = _flat_of(tuple(bc), rhs_shape)
+            if const_side == 1:
+                coeff, sym_idx = Fraction(const_vals[ib]), ia
+            else:
+                coeff, sym_idx = Fraction(const_vals[ia]), ib
+            terms.append((coeff, sym_idx))
+        groups.append(terms)
+    return sym_operand, groups
+
+
+def _coords_of(shape):
+    return itertools.product(*[range(d) for d in shape])
+
+
+def _flat_of(coord, shape) -> int:
+    i = 0
+    for c, d in zip(coord, shape):
+        i = i * d + c
+    return i
+
+
 def _exact_static_elements(eqns, consts, atom):
     """Exact per-element values of ``atom`` where it derives from
     constants/literals through STRUCTURAL routing (and the identity
@@ -1123,12 +1270,13 @@ class _Slicer:
             _group_reduce_sum(eqn)
         elif prim == "select_n":
             _pair_select_n(eqn)
-        elif prim == "scatter-add":
-            # the accumulate plan needs the whole slice's dataflow (its
-            # index column derives from constants through structural
-            # routing), so it is validated once over the completed
-            # topological slice in :meth:`slice`, through the same
-            # _scatter_add_plan the emission and the replay drive
+        elif prim in ("scatter-add", "dot_general"):
+            # these plans need the whole slice's dataflow — scatter-add's
+            # index column and dot_general's constant operand both derive
+            # from constants through structural routing — so they are
+            # validated once over the completed topological slice in
+            # :meth:`slice`, through the same plan the emission and the
+            # replay drive
             pass
         else:  # elementwise ops and the identity harness primitives
             _pair_elementwise(eqn)
@@ -1322,6 +1470,13 @@ class _Slicer:
                 # the emission and the replay drive, so what validates is
                 # exactly what emits and replays
                 _scatter_add_plan(ordered, used_consts, e)
+            elif e.primitive == "dot_general":
+                # same posture, same reason: the constant operand derives
+                # from the slice's own constants through structural
+                # routing, so the plan needs the completed slice and is
+                # driven here through the one function the emission and
+                # the replay also drive
+                _dot_general_plan(ordered, used_consts, e)
         slice_inputs: list[SliceInput] = []
         for vid in sorted(inputs, key=lambda v: self.any_order[v]):
             params = self.producers[vid].params_dict()
@@ -1502,7 +1657,8 @@ def slice_unknown_obligations(
 # census.
 _REPLAY_SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
-    | {"reduce_sum", "select_n", "convert_element_type", "scatter-add"}
+    | {"reduce_sum", "select_n", "convert_element_type", "scatter-add",
+       "dot_general"}
 )
 
 if _REPLAY_SUPPORTED != _SUPPORTED:
@@ -1627,6 +1783,23 @@ def _root_elements(
                 out = tuple(
                     sum((ins[2][u] for u in groups[i]), ins[0][i])
                     for i in range(n_out)
+                )
+            elif prim == "dot_general":
+                # the same linear combination the emission builds, in exact
+                # rational arithmetic: Σ c_k · sym_k. ℝ addition is
+                # associative so the fold order denotes THE value, and the
+                # coefficients come from the one plan both faces drive — a
+                # replay that recomputed them independently could confirm a
+                # witness the emission never described.
+                sym_operand, groups = _dot_general_plan(
+                    sl.eqns, dict(sl.consts), eqn
+                )
+                out = tuple(
+                    sum(
+                        (coeff * ins[sym_operand][idx] for coeff, idx in terms),
+                        Fraction(0),
+                    )
+                    for terms in groups
                 )
             elif prim == "select_n":
                 which, on_false, on_true = _pair_select_n(eqn)

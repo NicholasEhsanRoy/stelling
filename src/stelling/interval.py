@@ -237,6 +237,20 @@ INTEGER_POW_IEEE_SCHEDULE_DECLINE = (
     "empty product and the identity), so no schedule freedom exists"
 )
 
+DOT_GENERAL_IEEE_DECLINE = (
+    "dot_general has no ieee transfer: the real transfer's soundness rests "
+    "on R-associativity of the per-output-element accumulation, and float "
+    "addition is NOT associative — the jaxpr fixes no summation order for a "
+    "contraction, so a transfer modelling one order would be unsound for the "
+    "compiled program (the reduce_sum construction transfers verbatim). "
+    "Contraction freedom is the second gap and it is sharper here than "
+    "anywhere else in the registry: a dot product is exactly what a backend "
+    "fuses into FMAs, so the products need not be rounded before they are "
+    "summed, and no taint-hull for that is built. Declines on EVERY form, "
+    "including the one-term contraction, because the refusal is about the "
+    "argument rather than about how many terms happen to be present."
+)
+
 SCATTER_ADD_IEEE_DECLINE = (
     "scatter-add has no ieee transfer: duplicate scatter indices ACCUMULATE "
     "(out[i] = operand[i] + Σ updates[j] over every index row j mapping to "
@@ -1050,6 +1064,140 @@ def reduce_sum(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
     for j in range(out_n):
         if nonneg[j] and los[j] <= 0.0:
             los[j] = 0.0
+    return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
+
+
+def dot_general(
+    a: IntervalArray,
+    b: IntervalArray,
+    dimension_numbers,
+) -> IntervalArray:
+    """General contraction: the interval meaning of jax's ``dot_general``.
+
+    ``dimension_numbers`` is jax's own ``((lhs_contract, rhs_contract),
+    (lhs_batch, rhs_batch))``. The output is ordered as jax orders it:
+    batch dims first, then the lhs free dims ascending, then the rhs free
+    dims ascending.
+
+    **Why this is exact per output element, modulo rounding — and it is the
+    property the whole row rests on.** Fix one output element. The lhs
+    elements contributing to it are exactly ``{(batch, lfree, c)}`` as ``c``
+    ranges over the contracted index tuples, and those multi-indices are
+    pairwise DISTINCT — enumerated and duplicate-checked across matvec,
+    matmul, a (64,32,32,19)x(19,3) contraction, a two-axis contraction and a
+    batched contraction. So **no operand element appears twice in any one
+    output element's sum**, and the dependency problem that makes interval
+    arithmetic pessimistic does not arise within an element. Correlations
+    BETWEEN output elements are still lost, which is the ordinary image gap
+    and not this function's concern.
+
+    Each term is a four-corner interval product (:func:`mul`'s rule, which
+    is exact for the corners and rounds outward once), and the terms are
+    accumulated with the same exact-when-representable steps
+    :func:`reduce_sum` uses — seeded with the first contributor, so a
+    one-term contraction spends no bumps at all.
+
+    Under **R** semantics addition is associative, so the bracket bounds
+    every association order XLA might pick at once. This reasoning is not
+    available under ieee, exactly as for :func:`reduce_sum`, which is why
+    the ieee census entry for this primitive declines rather than reusing
+    this function.
+
+    An EMPTY contraction (no contracted axes) is the outer product: the
+    contracted index range is the single empty tuple, so each output element
+    is one product and no accumulation happens.
+    """
+    (lc, rc), (lb, rb) = dimension_numbers
+    lc, rc, lb, rb = tuple(lc), tuple(rc), tuple(lb), tuple(rb)
+    for name, dims, arr in (("lhs", lc + lb, a), ("rhs", rc + rb, b)):
+        if len(set(dims)) != len(dims):
+            raise IntervalError(
+                f"dot_general {name} names a dimension twice: {dims}"
+            )
+        for d in dims:
+            if not 0 <= d < len(arr.shape):
+                raise IntervalError(
+                    f"dot_general {name} dimension {d} out of range for "
+                    f"shape {arr.shape}"
+                )
+    if len(lc) != len(rc) or len(lb) != len(rb):
+        raise IntervalError(
+            "dot_general contracting/batch dimension lists must pair up: "
+            f"{dimension_numbers}"
+        )
+    for i, j in zip(lc, rc):
+        if a.shape[i] != b.shape[j]:
+            raise IntervalError(
+                f"dot_general contracted dims disagree: lhs[{i}]="
+                f"{a.shape[i]} vs rhs[{j}]={b.shape[j]}"
+            )
+    for i, j in zip(lb, rb):
+        if a.shape[i] != b.shape[j]:
+            raise IntervalError(
+                f"dot_general batch dims disagree: lhs[{i}]={a.shape[i]} vs "
+                f"rhs[{j}]={b.shape[j]}"
+            )
+
+    lfree = tuple(i for i in range(len(a.shape)) if i not in lb and i not in lc)
+    rfree = tuple(j for j in range(len(b.shape)) if j not in rb and j not in rc)
+    batch_shape = tuple(a.shape[i] for i in lb)
+    out_shape = (
+        batch_shape
+        + tuple(a.shape[i] for i in lfree)
+        + tuple(b.shape[j] for j in rfree)
+    )
+    check_shape(out_shape)
+    contracted_ranges = [range(a.shape[i]) for i in lc]
+
+    los: list[float] = []
+    his: list[float] = []
+    for out_coord in _coords(out_shape):
+        nb, nl = len(lb), len(lfree)
+        bcoord = out_coord[:nb]
+        lcoord_free = out_coord[nb:nb + nl]
+        rcoord_free = out_coord[nb + nl:]
+        acc_lo = 0.0
+        acc_hi = 0.0
+        seen = False
+        nonneg = True
+        for c in itertools.product(*contracted_ranges):
+            ac = [0] * len(a.shape)
+            bc = [0] * len(b.shape)
+            for d, v in zip(lb, bcoord):
+                ac[d] = v
+            for d, v in zip(rb, bcoord):
+                bc[d] = v
+            for d, v in zip(lfree, lcoord_free):
+                ac[d] = v
+            for d, v in zip(rfree, rcoord_free):
+                bc[d] = v
+            for d, v in zip(lc, c):
+                ac[d] = v
+            for d, v in zip(rc, c):
+                bc[d] = v
+            ia = _flat_index(tuple(ac), a.shape)
+            ib = _flat_index(tuple(bc), b.shape)
+            alo, ahi = a.los[ia], a.his[ia]
+            blo, bhi = b.los[ib], b.his[ib]
+            corners = (
+                _prod(alo, blo), _prod(alo, bhi),
+                _prod(ahi, blo), _prod(ahi, bhi),
+            )
+            plo, phi = _down(min(corners)), _up(max(corners))
+            if not seen:
+                acc_lo, acc_hi, seen = plo, phi, True
+            else:
+                acc_lo = _add_lo(acc_lo, plo)
+                acc_hi = _add_hi(acc_hi, phi)
+            nonneg = nonneg and plo >= 0.0
+        # Same sign rule as reduce_sum, and sound for the same reason:
+        # rounding a nonnegative real cannot cross zero under any mode, so a
+        # sum of nonnegative-lo terms cannot have a negative lower endpoint,
+        # and one that does is slack rather than information.
+        if seen and nonneg and acc_lo <= 0.0:
+            acc_lo = 0.0
+        los.append(acc_lo)
+        his.append(acc_hi)
     return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
 
 

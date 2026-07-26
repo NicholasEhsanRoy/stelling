@@ -1410,6 +1410,15 @@ def test_every_computing_transfer_actually_carries_the_guard():
             # its own 3-operand shape; covered by its dedicated test
             # (tests/test_scatter_rows.py::test_int_scatter_add_overflow_declines)
             continue
+        if prim == "dot_general":
+            # its own 2-operand-plus-dimension_numbers shape, which this
+            # generic query builder cannot express. Covered two ways: the
+            # import-time behavioural census sweeps it at every integer
+            # dtype boundary in BOTH directions, and
+            # tests/test_dot_general_interval.py::
+            # test_integer_dot_general_declines_at_every_dtype_boundary
+            # asserts the same thing where a reader will look for it.
+            continue
         q = wrapping_int_query(box[0], box[1], prim, params, second=second)
         p = sole(q)
         assert p.obligations[0].status == "unknown", prim

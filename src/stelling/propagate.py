@@ -755,6 +755,205 @@ def _scatter_add_row_form(
     return None
 
 
+# Relative precision of an accumulator, in mantissa bits. Used ONLY to
+# compare accumulation width against operand width; every threshold below is
+# backed by a measured discrepancy, never by caution (CONTRIBUTING.md: "a
+# decline rule must trace to a measured discrepancy with a magnitude").
+_MANTISSA_BITS = {
+    "bfloat16": 8, "float16": 11, "float32": 24, "float64": 53,
+}
+
+
+def _dot_general_row_form(params, lhs_dtype: str, rhs_dtype: str):
+    """THE SHARED ADMISSIBILITY ORACLE for the ``dot_general`` row.
+
+    Built shared from the start and driven by BOTH faces — the interval
+    transfer (:func:`_t_dot_general`) and the SMT emission
+    (:func:`stelling.obligation._dot_general_plan`). The scatter defect this
+    design exists to prevent was an oracle *extracted* after the fact, which
+    moved the shape rules and left the combiner check behind in the transfer;
+    a row admitting ``.apply(f)`` as ``.set`` was the result.
+
+    Returns ``(dimension_numbers, None)`` when the equation is inside the
+    modelled form, or ``(None, reason)`` when it is not. The reason is
+    returned rather than logged so each face can surface it in its own
+    vocabulary without either inventing wording the other does not use.
+
+    All FOUR semantics-changing params are read. Scatter had one such param
+    and three independent audits found three defects in it; an unread param
+    is not a benign param.
+
+    Every decline below names the magnitude that motivates it, measured on
+    jax 0.11.0 against an independently-computed model:
+
+    ``preferred_element_type`` complex, or a complex operand
+        DECLINED ON DOMAIN, not precision — measured 3.62 relative, but the
+        number is beside the point. :class:`~stelling.interval.IntervalArray`
+        carries ``los``/``his``, which presuppose a total order; ℂ has none,
+        so there is no interval representation here to be imprecise with.
+
+    ``preferred_element_type`` integral
+        3.9e-08 … 1.0 — jax accumulates in the integer type and WRAPS, while
+        the row models an exact real contraction. Measured 1.0000000002
+        (int32) and 1.0 (int64): the result is not approximately wrong, it
+        is unrelated.
+
+    ``preferred_element_type`` narrower than a float operand
+        float32 3.9e-08, float16 1.6e-04, bfloat16 2.1e-03.
+
+        AND THE RULE BOUNDS NARROWING, NOT ERROR — the earlier wording
+        implied otherwise and a blinded audit measured the gap. On matched
+        data this gate DECLINES float64 operands accumulated in float32 at
+        a relative error of 2.3e-08 while ADMITTING bfloat16 operands
+        accumulated in bfloat16 at 2.1e-03, ninety thousand times larger.
+        That is not incoherent once stated correctly: under ℝ semantics a
+        float16 program diverges from exact real arithmetic no matter which
+        primitive runs it, and stelling admits float16 ``add`` on exactly
+        the same footing. Tightening this to "accumulation must be
+        float64" would refuse ordinary ``float32 @ float32`` that every
+        other row in the engine accepts. What this rule enforces is that
+        the accumulation is no narrower than the operands the caller chose;
+        the declared ℝ/IEEE gap is the framework's, recorded in every stamp,
+        and is not this row's to close.
+
+    integer operands accumulated in anything but ``float64``
+        int32 with float32 accumulation measures 2.0e-08. With float64 it
+        measures 5.9e-16 and int64 with float64 measures 1.9e-16 — both far
+        below the gauge's 1e-12 threshold, so integer operands are ADMITTED
+        under float64 accumulation. Declining integer *operands* outright
+        would be a capability loss with no discrepancy behind it, which is
+        the failure mode the norm forbids; the decline is on the
+        ACCUMULATION dtype.
+
+    ``out_sharding``
+        Admitted only when ``None``. Not measured, and that is exactly why:
+        a sharded contraction is a distributed program whose semantics this
+        row has never been compared against, and an unread param is not a
+        benign one.
+
+    ``precision``
+        Read, and unrecognised values decline. Recognised values are
+        admitted: all of DEFAULT/HIGH/HIGHEST and the per-operand 2-tuple
+        measure identical to ``None`` on this CPU backend, and under ℝ
+        semantics ``precision`` selects float rounding rather than a
+        different real-valued function. TF32 paths on accelerators round
+        differently, which ℝ semantics does not model either — the stamp
+        records ``device_class``.
+    """
+    dn = params.get("dimension_numbers")
+    if dn is None:
+        return None, "dot_general has no dimension_numbers"
+    try:
+        (lc, rc), (lb, rb) = dn
+        dn = ((tuple(lc), tuple(rc)), (tuple(lb), tuple(rb)))
+    except Exception:
+        return None, f"dot_general dimension_numbers not in jax's form: {dn!r}"
+
+    if "out_sharding" in params and params["out_sharding"] is not None:
+        return None, (
+            "dot_general carries out_sharding="
+            f"{params['out_sharding']!r}: a sharded contraction is a "
+            "distributed program this row has not been compared against"
+        )
+
+    prec = params.get("precision")
+    if not _recognised_precision(prec):
+        return None, (
+            f"dot_general precision={prec!r} is not a form this row has "
+            "measured"
+        )
+
+    for name, dt in (("lhs", lhs_dtype), ("rhs", rhs_dtype)):
+        if "complex" in dt:
+            return None, (
+                f"dot_general {name} operand is {dt}: complex is outside "
+                "this row's DOMAIN, not merely its precision — interval "
+                "endpoints presuppose a total order and ℂ has none"
+            )
+
+    pet = params.get("preferred_element_type")
+    if pet is None:
+        # ABSENT ACCUMULATION TYPE IS NOT AN ABSENT CONSTRAINT. With no
+        # preferred_element_type jax derives the output dtype from the
+        # operands, so int32 x int32 accumulates in int32 and WRAPS -- the
+        # 1.0-relative class -- while a row that skipped the dtype checks
+        # here would model it as exact real arithmetic. This is the
+        # present-vs-absent distinction that produced the scatter-add false
+        # VERIFIED, at the parameter level rather than the key level.
+        for name, dt in (("lhs", lhs_dtype), ("rhs", rhs_dtype)):
+            if dt not in _MANTISSA_BITS:
+                return None, (
+                    f"dot_general has no preferred_element_type and a {dt} "
+                    f"{name} operand: accumulation follows the operands, and "
+                    "integer accumulation WRAPS where this row models exact "
+                    "real arithmetic (measured 1.0 relative)"
+                )
+        return dn, None
+    if pet is not None:
+        pet = str(pet)
+        if "complex" in pet:
+            return None, (
+                f"dot_general accumulates in {pet}: complex is outside this "
+                "row's domain — interval endpoints presuppose a total order"
+            )
+        if pet not in _MANTISSA_BITS:
+            return None, (
+                f"dot_general accumulates in {pet}, an integer or "
+                "unrecognised type: integer accumulation WRAPS where this "
+                "row models exact real arithmetic (measured 1.0 relative)"
+            )
+        acc_bits = _MANTISSA_BITS[pet]
+        for name, dt in (("lhs", lhs_dtype), ("rhs", rhs_dtype)):
+            if dt in _MANTISSA_BITS:
+                if acc_bits < _MANTISSA_BITS[dt]:
+                    return None, (
+                        f"dot_general accumulates in {pet} from a {dt} "
+                        f"{name} operand: the accumulation is narrower than "
+                        "the operands (measured 3.9e-08 for float32)"
+                    )
+            elif pet != "float64":
+                # integral operand: only float64 accumulation measured benign
+                return None, (
+                    f"dot_general accumulates a {dt} {name} operand in "
+                    f"{pet}: only float64 accumulation of integer operands "
+                    "is measured benign (5.9e-16); float32 measures 2.0e-08"
+                )
+    return dn, None
+
+
+def _recognised_precision(prec) -> bool:
+    """``precision`` forms this row has measured. A 2-tuple is jax's
+    per-operand form, which is what a string like ``"highest"`` normalises
+    to.
+
+    READS THE TRANSCRIBED FORM, which is the only form this ever sees. A
+    blinded audit found the first version broken here: it did
+    ``str(prec).split(".")[-1].upper()``, which works on a raw
+    ``jax.lax.Precision`` member and NEVER matches the transcriber's
+    ``ir.EnumParam(cls='Precision', member='HIGHEST')``. Every non-``None``
+    precision from a real trace declined.
+
+    The decline direction is safe, so nothing unsound shipped — but the
+    cost was real: an explicit ``precision="highest"`` on a contraction is
+    ordinary numerical-code practice, and the row refused every one of them
+    while its docstring said otherwise.
+
+    The reason the unit tests missed it is worth more than the bug: they
+    constructed params from RAW JAX OBJECTS and the engine only ever
+    receives TRANSCRIBED ones. A test that builds its own input in a form
+    the system never produces is testing a path that does not exist.
+    """
+    if prec is None:
+        return True
+    if isinstance(prec, tuple):
+        return len(prec) == 2 and all(_recognised_precision(p) for p in prec)
+    if isinstance(prec, ir.EnumParam):
+        return prec.cls == "Precision" and prec.member.upper() in (
+            "DEFAULT", "HIGH", "HIGHEST"
+        )
+    return str(prec).split(".")[-1].upper() in ("DEFAULT", "HIGH", "HIGHEST")
+
+
 def _check_unique_indices_promise(params, ks, exc_type) -> None:
     """The ``unique_indices`` promise check (third audit, F2): an equation
     carrying ``unique_indices=True`` whose static indices measurably
@@ -1116,6 +1315,38 @@ def _t_reduce_sum(eqn, params, ins):
     return _int_overflow_guard(eqn, "reduce_sum", outs)
 
 
+def _t_dot_general(eqn, params, ins):
+    """Interval transfer for ``dot_general``, gated by the shared oracle.
+
+    Declines to ⊤ (``None``) on anything the oracle refuses. The oracle's
+    reason is not narrated here: a ⊤ is recorded by the coverage tool with
+    the primitive named, and the *emission* face is where a caller sees the
+    prose, so surfacing it twice in two vocabularies would invite them to
+    drift apart.
+
+    Censused ``_INT_COMPUTING``, following ``sqrt``'s precedent exactly: a
+    primitive that COMPUTES a new value is classified computing even when
+    it is float-only, and its gate is what closes the integer class. Here
+    the oracle declines integral ``preferred_element_type`` outright and
+    declines an absent one over integer operands, so an integer-dtyped
+    output cannot reach the arithmetic — the honest way a computing float
+    op closes the class, rather than by claiming it computes nothing.
+    """
+    if len(ins) != 2 or len(eqn.invars) != 2:
+        return None
+    lhs_dt = eqn.invars[0].aval.dtype or ""
+    rhs_dt = eqn.invars[1].aval.dtype or ""
+    dn, _reason = _dot_general_row_form(params, lhs_dt, rhs_dt)
+    if dn is None:
+        return None
+    try:
+        return [iv.dot_general(ins[0], ins[1], dn)]
+    except iv.IntervalError:
+        # shapes the oracle admitted but the domain refuses: ⊤ rather than
+        # a crash, same posture as every other transfer
+        return None
+
+
 def _t_integer_pow(eqn, params, ins):
     y = _integer_exponent(params)
     if y is None:
@@ -1202,6 +1433,7 @@ TRANSFERS = {
     # order at once (in ℝ they all denote the same number); the ieee
     # counterpart cannot reuse that and declines — see IEEE_TRANSFERS.
     "reduce_sum": (_t_reduce_sum, TIER_SOUND),
+    "dot_general": (_t_dot_general, TIER_SOUND),
     # x ** y for integer y. Even y > 0 PRODUCES non-negativity; y < 0
     # routes through div's zero-in-divisor discipline (⊤ when the base
     # straddles 0 — the pole is real and nothing here papers over it).
@@ -1313,6 +1545,12 @@ _INT_COMPUTING = frozenset({
     # elements), so it can produce a value its operands did not contain —
     # exactly the add/reduce_sum class, same guard
     "scatter-add",
+    # the contraction SUMS products, so it too can produce a value its
+    # operands did not contain. Float-only in practice because the shared
+    # oracle refuses integral accumulation (and an ABSENT
+    # preferred_element_type over integer operands, which follows the
+    # operands and would wrap) — sqrt's posture, applied to a binary op.
+    "dot_general",
 })
 
 # Why each of these cannot introduce an out-of-range integer:
@@ -1517,6 +1755,9 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
             "pow": (hi, 2.0), "exp": (hi, None), "sqrt": (hi, None),
             "reduce_sum": (hi, None), "integer_pow": (hi, None),
             "scatter-add": (hi, hi),
+            # the contraction's products escape exactly as `mul`'s do, so
+            # it takes mul's operand values
+            "dot_general": (hi, hi),
         }[prim]
     return {
         "add": (lo, lo), "sub": (lo, hi), "mul": (lo, hi),
@@ -1524,6 +1765,7 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
         "pow": (lo, 3.0), "exp": (lo, None), "sqrt": (lo, None),
         "reduce_sum": (lo, None), "integer_pow": (lo, None),
         "scatter-add": (lo, lo),
+        "dot_general": (lo, hi),
     }[prim]
 
 
@@ -1609,6 +1851,43 @@ def _assert_computing_transfers_close_the_integer_class() -> None:
                                     ),
                                 ),
                             ),
+                        ),
+                    )
+                elif prim == "dot_general":
+                    # the 2-operand contraction form, at integer dtypes and
+                    # with NO preferred_element_type -- which is what jax
+                    # emits for an integer matmul, and which makes the
+                    # accumulation follow the operands and WRAP. The shared
+                    # oracle must decline it. Probing the absent-param form
+                    # deliberately: an absent param is the class that has
+                    # produced three defects in this codebase, and the one
+                    # this row's own oracle nearly shipped a hole on.
+                    avals = (
+                        ir.Aval(kind="ShapedArray", shape=(1,), dtype=dtype),
+                        ir.Aval(kind="ShapedArray", shape=(1,), dtype=dtype),
+                    )
+                    boxes = [
+                        iv.from_bounds((1,), first, first),
+                        iv.from_bounds((1,), second, second),
+                    ]
+                    invars = tuple(
+                        ir.Var(id=i, aval=a) for i, a in enumerate(avals)
+                    )
+                    eqn = ir.JaxprEqn(
+                        primitive=prim, invars=invars,
+                        outvars=(
+                            ir.Var(
+                                id=99,
+                                aval=ir.Aval(
+                                    kind="ShapedArray", shape=(), dtype=dtype
+                                ),
+                            ),
+                        ),
+                        params=(
+                            ("dimension_numbers", (((0,), (0,)), ((), ()))),
+                            ("precision", None),
+                            ("preferred_element_type", None),
+                            ("out_sharding", None),
                         ),
                     )
                 else:
@@ -2073,6 +2352,17 @@ def _ieee_scatter_add(eqn, params, ins, flags):
     raise iv.IntervalError(iv.SCATTER_ADD_IEEE_DECLINE)
 
 
+def _ieee_dot_general(eqn, params, ins, flags):
+    """dot_general under ieee: a whole-primitive censused REFUSAL.
+
+    Same shape of refusal as ``scatter-add`` and for the sharper version of
+    the same reason — see :data:`stelling.interval.DOT_GENERAL_IEEE_DECLINE`.
+    The dispatcher turns the raise into a noted ⊤ maybe-NaN counted in
+    coverage: a refusal is a censused entry, not an omission.
+    """
+    raise iv.IntervalError(iv.DOT_GENERAL_IEEE_DECLINE)
+
+
 def _ieee_convert(eqn, params, ins, flags):
     """convert_element_type under ieee. A non-f64 FLOAT source declines
     outright (re-attack U2): the whitelist's value-preservation claim is
@@ -2210,6 +2500,7 @@ IEEE_TRANSFERS = {
     # bound or contraction hull is built for the scatter path — every
     # form declines with iv.SCATTER_ADD_IEEE_DECLINE quoted
     "scatter-add": (_ieee_scatter_add, TIER_EXACT),
+    "dot_general": (_ieee_dot_general, TIER_EXACT),
     # (i) pure element routing, dtype-agnostic, flags ride along
     "stack": (
         _ieee_passthrough(

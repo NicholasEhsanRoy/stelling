@@ -55,6 +55,7 @@ from stelling.obligation import (
     QF_NRA,
     ObligationSlice,
     _decode_elements,
+    _dot_general_plan,
     _group_reduce_sum,
     _numeric_fraction,
     _pair_elementwise,
@@ -226,6 +227,55 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
                     bodies.append(ins[0][group[0]])
                 else:
                     bodies.append(f"(+ {' '.join(ins[0][i] for i in group)})")
+            names[out.id] = define(out, bodies)
+            continue
+        if prim == "dot_general":
+            # A CONSTANT-COEFFICIENT LINEAR COMBINATION, which is what this
+            # row exists to produce: per output element, Σ c_k · sym_k with
+            # every c_k a rational literal. QF_LRA, no nonlinear cost.
+            #
+            # The coefficient/index pairs come from the same
+            # _dot_general_plan the slice validation and the replay drive,
+            # so the emission cannot route a coefficient either of them
+            # would not.
+            #
+            # Coefficients of 0 are DROPPED and coefficients of 1 emit the
+            # bare term. Both are exact identities over the reals, not
+            # simplifications: a structurally-zero coefficient contributes
+            # nothing to the sum, and dropping it keeps the formula the size
+            # of the contraction's support rather than its index space.
+            try:
+                sym_operand, groups = _dot_general_plan(
+                    sl.eqns, dict(sl.consts), eqn
+                )
+            except Exception as e:  # validation admitted it; this cannot
+                raise ValueError(  # decline — an inconsistency is a bug
+                    f"emission cannot plan 'dot_general' ({e}) — slice "
+                    f"validation should have declined this"
+                ) from e
+            bodies = []
+            for terms in groups:
+                parts = []
+                for coeff, idx in terms:
+                    if coeff == 0:
+                        continue
+                    # NOT named `term`: that is the enclosing scope's
+                    # helper, and binding it here shadowed the function for
+                    # every LATER equation in the emission loop -- a failure
+                    # that appears one equation after the mistake.
+                    sym_term = ins[sym_operand][idx]
+                    if coeff == 1:
+                        parts.append(sym_term)
+                    else:
+                        parts.append(f"(* {rational(coeff)} {sym_term})")
+                if not parts:
+                    # every coefficient was zero: the element IS zero, and
+                    # jax's measured empty-sum identity is 0.0
+                    bodies.append("0.0")
+                elif len(parts) == 1:
+                    bodies.append(parts[0])
+                else:
+                    bodies.append(f"(+ {' '.join(parts)})")
             names[out.id] = define(out, bodies)
             continue
         if prim == "scatter-add":
