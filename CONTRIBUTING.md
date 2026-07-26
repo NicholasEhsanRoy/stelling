@@ -190,6 +190,74 @@ reads cannot diverge: the scatter rows carry `mode` as their only `EnumParam` an
 definitely-in-range indices, which the transfer already requires), so their
 raw-object tests are sound.
 
+## Claim divergence: the code is narrower or wider than what it says
+
+A distinct failure class from a wrong answer. The code does one thing, its stated
+claim says another, and **every test passes** — because the tests check the
+behaviour, and nothing checks the claim. It ships as a silent capability loss, or
+as a promise nobody keeps.
+
+Four instances so far, and the fourth changes the class:
+
+- `test_float_div_is_completely_unchanged` — a name asserting more than the test
+  checked;
+- `VERIFIED_BAR_REASON` — prose describing a scope the mechanism did not have;
+- `_recognised_precision` — a docstring claiming DEFAULT/HIGH/HIGHEST were
+  admitted while every transcribed form declined;
+- **`_Slicer._define`'s comment: "variable ids must be unique across the flattened
+  scopes (the transcriber guarantees it)". The transcriber does not guarantee it.**
+
+The fourth is the most consequential and widens the definition. The first three are
+documentation drifting from behaviour. This one is **a correctness assumption stated
+as an established fact**, and stating it that way is *how the defect survived*: the
+comment reads as a citation, so nobody re-derived it, and the check built on it
+silently declined every multi-call query for months.
+
+So: **a comment asserting an invariant is a claim, and an invariant nothing
+enforces is a claim divergence waiting to happen.** If a comment says some other
+component guarantees a property you depend on, either point at the enforcing code
+or write the enforcement. "X guarantees it" with no referent is the smell.
+
+## Read key PRESENCE, not `.get()` — present-with-value-`None` is not absent
+
+Named for the reachable half deliberately. This was called "absent params" for a
+while, and that name points at the half that **cannot happen**: a param key missing
+entirely is structurally unreachable from jax for every row measured — `bind`
+requires them all, so an equation always carries the full key set.
+
+Every defect in this class came from the *other* half. `params.get(k)` returns
+`None` both when the key is absent and when it is present with value `None`, and
+jax uses the difference:
+
+- `scatter-add`'s `update_jaxpr` present and `None` is jax's **replace** combiner
+  (`lambda x, y: y`), not accumulation. Read with `.get()` it was modelled as an
+  add, and produced a false VERIFIED with both solvers answering unsat.
+- `dot_general`'s `preferred_element_type` present and `None` means the
+  accumulation **follows the operands**, so integer operands wrap. Skipping the
+  dtype checks on `None` would have admitted it as exact real arithmetic.
+
+Absent keys matter only for hand-built or deserialized IR. Write `if k in params:`
+and handle the two facts separately, with the `None` branch stating what jax
+substitutes.
+
+## A probe reading a final verdict must assert something non-trivial
+
+When a probe measures an **intermediate mechanism** through a **final verdict**, a
+trivially-true assertion never reaches the mechanism, and the probe reports it
+absent.
+
+Measured, on the aliasing investigation: three probe rows asserted `x >= -1e30`,
+which interval arithmetic discharges outright. The slice — where the aliasing poison
+is consulted — never ran. All three reported VERIFIED and were recorded "clean",
+including cases that were in fact poisoned. Reading the mechanism's own state
+directly flipped three of six rows. **The conclusion survived; the evidence for it
+did not.**
+
+So: assert something the cheap layers cannot decide, or read the mechanism's state
+directly instead of inferring it from the verdict. This is the anti-vacuity
+companion rule one level up — there, a gate test must not pass by closing the row;
+here, a probe must not "measure" a stage its input never reaches.
+
 ## Stop before soundness-critical work when mechanical slips accumulate
 
 Mechanical slips — a `sed` that lands on the wrong line, an assertion with the
