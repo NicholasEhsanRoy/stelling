@@ -157,6 +157,14 @@ The discriminator is cheap: count the invocations whose reason does not mention 
 re-check, and print it beside the timing. If that count is zero, the measurement is
 about interval propagation and must not be reported as being about the solver.
 
+**And name the FRAGMENT, not just the query.** A fourth instance had
+`obl-solves = 2` on every row — the obligation genuinely reached the solver — and
+was still measuring the wrong thing, because every one was `QF_LRA` while the
+constant under test is set by `QF_NRA`. Those two differ by three orders of
+magnitude: 8192 linear terms cost under half a second, and 384 *nonlinear* terms
+cost 237. A measurement that does not say which logic it ran in is not a
+measurement of solver cost. `set-logic` is in the stamp's options.
+
 ## Guard coverage is proven by mutation, not by construction
 
 A test that reaches a guard and a test whose scenario stops short of it look
