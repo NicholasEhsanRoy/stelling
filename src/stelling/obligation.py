@@ -912,6 +912,101 @@ def _exact_static_elements(eqns, consts, atom):
     return read(atom)
 
 
+def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
+    """Per-OUTPUT-element ``(operand position, source flat element)`` routes for
+    a static-index ``scatter`` SET equation — deliberately the same shape
+    :func:`_route_structural` produces, because the set form IS pure data
+    movement: every output element is either the operand's element or the one
+    scalar update. No arithmetic, so nothing to round and nothing to overflow.
+
+    One bookkeeping, three consumers (slice validation, emission, replay), as
+    for every other grouping in this module.
+
+    Declines, each quoted, and each load-bearing:
+
+    * a form outside :func:`stelling.propagate._scatter_set_row_form` — the
+      SAME predicate the propagation transfer uses, so the two faces cannot
+      drift apart on shapes or dimension numbers;
+    * a scatter ``mode`` other than ``FILL_OR_DROP``. ``CLIP`` silently
+      REWRITES an out-of-range index to an in-range one, so encoding the
+      operation as substitution at the written index would model a different
+      program; ``PROMISE_IN_BOUNDS`` is undefined out of range;
+    * an index not statically derivable from constants through structural
+      routing, or non-integral;
+    * an OUT-OF-RANGE index. This is the soundness check, not a tidiness one:
+      under ``FILL_OR_DROP`` an out-of-range update is DROPPED, so the
+      program's result is ``out = operand`` — emitting substitution would
+      assert the update landed, which is a false model. The transfer declines
+      the same case for the same reason.
+
+    ``unique_indices`` and ``indices_are_sorted`` are deliberately NOT relied
+    on: they are caller promises jax does not verify, and the covered form
+    writes exactly one element, for which both are vacuous.
+    """
+    from stelling.propagate import _scatter_set_row_form
+
+    if len(eqn.invars) != 3 or len(eqn.outvars) != 1:
+        raise _Decline(
+            f"'scatter' with {len(eqn.invars)} operand(s) and "
+            f"{len(eqn.outvars)} output(s) is outside the measured form"
+        )
+    operand_shape = _shape_of(eqn.invars[0])
+    indices_shape = _shape_of(eqn.invars[1])
+    updates_shape = _shape_of(eqn.invars[2])
+    out_shape = _shape_of(eqn.outvars[0])
+    if out_shape != operand_shape:
+        raise _Decline(
+            f"'scatter' output shape {out_shape} contradicts the operand "
+            f"shape {operand_shape} (malformed IR)"
+        )
+    params = eqn.params_dict()
+    if not _scatter_set_row_form(
+        params, operand_shape, indices_shape, updates_shape
+    ):
+        raise _Decline(
+            f"'scatter' configuration (operand {operand_shape}, indices "
+            f"{indices_shape}, updates {updates_shape}) is outside the "
+            f"measured static-index set row form"
+        )
+    mode = str(params.get("mode"))
+    if "FILL_OR_DROP" not in mode:
+        raise _Decline(
+            f"'scatter' mode {mode!r} is not FILL_OR_DROP: CLIP rewrites an "
+            f"out-of-range index to an in-range one and PROMISE_IN_BOUNDS is "
+            f"undefined out of range, so neither is substitution at the "
+            f"written index — the mode is never guessed"
+        )
+    vals = _exact_static_elements(eqns, consts, eqn.invars[1])
+    if vals is None:
+        raise _Decline(
+            "'scatter' index data not statically derivable through the "
+            "supported derivation forms (constants through structural "
+            "routing) — the static-index set emission needs a statically "
+            "known index"
+        )
+    if len(vals) != 1:
+        raise _Decline(
+            f"'scatter' indices decode to {len(vals)} element(s) but the "
+            f"covered form writes exactly one (aval/value mismatch)"
+        )
+    v = vals[0]
+    if isinstance(v, bool) or (
+        not isinstance(v, int)
+        and not (isinstance(v, float) and v == math.floor(v) and math.isfinite(v))
+    ):
+        raise _Decline(f"'scatter' index value {v!r} is not an integer")
+    k = int(v)
+    if not 0 <= k < operand_shape[0]:
+        raise _Decline(
+            f"'scatter' index {k} is out of range for the operand's leading "
+            f"axis {operand_shape[0]} — under FILL_OR_DROP the update is "
+            f"DROPPED, so the result is the operand unchanged rather than a "
+            f"substitution, and that is never guessed"
+        )
+    n = _size(operand_shape)
+    return [(2, 0) if i == k else (0, i) for i in range(n)]
+
+
 def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
     """Per-OUTPUT-element groups of contributing UPDATES flat indices for
     a pinned-form static-index ``scatter-add`` equation — the accumulate
