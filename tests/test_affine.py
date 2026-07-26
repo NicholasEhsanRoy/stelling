@@ -865,7 +865,9 @@ def test_absence_line_names_both_layers_when_affine_decided():
     v = make_verdict(q, rp, refinement=rep, **VERSIONS)
     assert v.status == "VERIFIED"
     assert v.stamp.solver.reason == (
-        "no solver invoked: every obligation was judged by outward-rounded "
+        "no solver invoked: escalation was NOT ATTEMPTED "
+        "(solver_timeout_ms not set); every obligation was judged by "
+        "outward-rounded "
         "interval arithmetic with affine (zonotope) refinement — 2 "
         "obligation(s) decided by the affine domain"
     )
@@ -883,7 +885,9 @@ def test_absence_line_keeps_interval_alone_only_with_honest_suffix():
     rp, rep = refine_propagation(q, propagate(q))
     v = make_verdict(q, rp, refinement=rep, **VERSIONS)
     assert v.stamp.solver.reason == (
-        "no solver invoked: every obligation was judged by outward-rounded "
+        "no solver invoked: escalation was NOT ATTEMPTED "
+        "(solver_timeout_ms not set); every obligation was judged by "
+        "outward-rounded "
         "interval arithmetic alone (affine refinement was enabled and "
         "decided nothing: 1 obligation(s) attempted)"
     )
@@ -955,7 +959,9 @@ def test_default_assembly_without_refinement_is_byte_identical():
         q, p, refinement=None, **VERSIONS
     ).render()
     assert make_verdict(q, p, **VERSIONS).stamp.solver.reason == (
-        "no solver invoked: every obligation was judged by outward-rounded "
+        "no solver invoked: escalation was NOT ATTEMPTED "
+        "(solver_timeout_ms not set); every obligation was judged by "
+        "outward-rounded "
         "interval arithmetic alone"
     )
 

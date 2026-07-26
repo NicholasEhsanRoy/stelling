@@ -342,6 +342,28 @@ class Verdict:
         eqns = self.stamp.coverage.split(" eqns")[0]
         if eqns.isdigit():
             lines.append(f"  {eqns} equations verified")
+        # THE OPT-IN, NAMED WHERE THE UNDECIDED RESULT IS READ.
+        # `check()` does not escalate unless solver_timeout_ms is passed, and
+        # its default is None -- a hard early return before the solver module
+        # is even imported. So the documented front door produces
+        # interval-only results, and a caller who does not know the opt-in
+        # exists reads UNKNOWN as "stelling looked and could not decide".
+        # The last sentence is the load-bearing one: without it the default
+        # output invites exactly the misattribution the escalation-status
+        # audit was built to detect, relocated from the record into the
+        # reader's head. Surfaced only when something is actually undecided
+        # -- on an interval-discharged VERIFIED the hint is noise.
+        if self.status == "UNKNOWN" and "NOT ATTEMPTED" in (
+            self.stamp.solver.reason
+            if not isinstance(self.stamp.solver, tuple)
+            else ""
+        ):
+            lines.append(
+                "  interval-only: no SMT solver has seen this query. "
+                "Undecided obligations here may still be decidable — pass "
+                "solver_timeout_ms=<ms> to check(). This is NOT a finding "
+                "that the property is undecidable."
+            )
         if self.status == "REFUTED":
             # Rendering honesty: the set-level wording ("not a witness")
             # belongs ONLY to interval refutations. A witness-backed REFUTED
@@ -547,8 +569,9 @@ def make_verdict(
         arithmetic_mode = ARITHMETIC_MODE_INTERVAL
         convention = REAL_CONVENTION_ASSUMPTION
         solver_reason = (
-            "no solver invoked: every obligation was judged by outward-rounded "
-            "interval arithmetic alone"
+            "no solver invoked: escalation was NOT ATTEMPTED "
+            "(solver_timeout_ms not set); every obligation was judged by "
+            "outward-rounded interval arithmetic alone"
         )
     assumptions = tuple(sorted({*propagation.assumptions, convention}))
     if refinement is not None:

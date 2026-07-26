@@ -113,7 +113,9 @@ def test_refine_default_never_runs_and_is_byte_identical(monkeypatch):
     assert v_default.status == "UNKNOWN"
     # the old absence wording is untouched when the refinement is off
     assert v_default.stamp.solver.reason == (
-        "no solver invoked: every obligation was judged by outward-rounded "
+        "no solver invoked: escalation was NOT ATTEMPTED "
+        "(solver_timeout_ms not set); every obligation was judged by "
+        "outward-rounded "
         "interval arithmetic alone"
     )
     assert not any("affine" in a for a in v_default.stamp.assumptions)
@@ -137,7 +139,9 @@ def test_traced_commuted_products_verify_with_the_mechanism_named():
         assert o.status == "discharged"
         assert o.detail == DISCHARGED_BY_AFFINE
     assert v.stamp.solver.reason == (
-        "no solver invoked: every obligation was judged by outward-rounded "
+        "no solver invoked: escalation was NOT ATTEMPTED "
+        "(solver_timeout_ms not set); every obligation was judged by "
+        "outward-rounded "
         "interval arithmetic with affine (zonotope) refinement — 2 "
         "obligation(s) decided by the affine domain"
     )
