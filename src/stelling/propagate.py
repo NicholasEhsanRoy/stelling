@@ -755,6 +755,167 @@ def _scatter_add_row_form(
     return None
 
 
+# Relative precision of an accumulator, in mantissa bits. Used ONLY to
+# compare accumulation width against operand width; every threshold below is
+# backed by a measured discrepancy, never by caution (CONTRIBUTING.md: "a
+# decline rule must trace to a measured discrepancy with a magnitude").
+_MANTISSA_BITS = {
+    "bfloat16": 8, "float16": 11, "float32": 24, "float64": 53,
+}
+
+
+def _dot_general_row_form(params, lhs_dtype: str, rhs_dtype: str):
+    """THE SHARED ADMISSIBILITY ORACLE for the ``dot_general`` row.
+
+    Built shared from the start and driven by BOTH faces — the interval
+    transfer (:func:`_t_dot_general`) and the SMT emission
+    (:func:`stelling.obligation._dot_general_plan`). The scatter defect this
+    design exists to prevent was an oracle *extracted* after the fact, which
+    moved the shape rules and left the combiner check behind in the transfer;
+    a row admitting ``.apply(f)`` as ``.set`` was the result.
+
+    Returns ``(dimension_numbers, None)`` when the equation is inside the
+    modelled form, or ``(None, reason)`` when it is not. The reason is
+    returned rather than logged so each face can surface it in its own
+    vocabulary without either inventing wording the other does not use.
+
+    All FOUR semantics-changing params are read. Scatter had one such param
+    and three independent audits found three defects in it; an unread param
+    is not a benign param.
+
+    Every decline below names the magnitude that motivates it, measured on
+    jax 0.11.0 against an independently-computed model:
+
+    ``preferred_element_type`` complex, or a complex operand
+        DECLINED ON DOMAIN, not precision — measured 3.62 relative, but the
+        number is beside the point. :class:`~stelling.interval.IntervalArray`
+        carries ``los``/``his``, which presuppose a total order; ℂ has none,
+        so there is no interval representation here to be imprecise with.
+
+    ``preferred_element_type`` integral
+        3.9e-08 … 1.0 — jax accumulates in the integer type and WRAPS, while
+        the row models an exact real contraction. Measured 1.0000000002
+        (int32) and 1.0 (int64): the result is not approximately wrong, it
+        is unrelated.
+
+    ``preferred_element_type`` narrower than a float operand
+        float32 3.9e-08, float16 1.6e-04, bfloat16 2.1e-03.
+
+    integer operands accumulated in anything but ``float64``
+        int32 with float32 accumulation measures 2.0e-08. With float64 it
+        measures 5.9e-16 and int64 with float64 measures 1.9e-16 — both far
+        below the gauge's 1e-12 threshold, so integer operands are ADMITTED
+        under float64 accumulation. Declining integer *operands* outright
+        would be a capability loss with no discrepancy behind it, which is
+        the failure mode the norm forbids; the decline is on the
+        ACCUMULATION dtype.
+
+    ``out_sharding``
+        Admitted only when ``None``. Not measured, and that is exactly why:
+        a sharded contraction is a distributed program whose semantics this
+        row has never been compared against, and an unread param is not a
+        benign one.
+
+    ``precision``
+        Read, and unrecognised values decline. Recognised values are
+        admitted: all of DEFAULT/HIGH/HIGHEST and the per-operand 2-tuple
+        measure identical to ``None`` on this CPU backend, and under ℝ
+        semantics ``precision`` selects float rounding rather than a
+        different real-valued function. TF32 paths on accelerators round
+        differently, which ℝ semantics does not model either — the stamp
+        records ``device_class``.
+    """
+    dn = params.get("dimension_numbers")
+    if dn is None:
+        return None, "dot_general has no dimension_numbers"
+    try:
+        (lc, rc), (lb, rb) = dn
+        dn = ((tuple(lc), tuple(rc)), (tuple(lb), tuple(rb)))
+    except Exception:
+        return None, f"dot_general dimension_numbers not in jax's form: {dn!r}"
+
+    if "out_sharding" in params and params["out_sharding"] is not None:
+        return None, (
+            "dot_general carries out_sharding="
+            f"{params['out_sharding']!r}: a sharded contraction is a "
+            "distributed program this row has not been compared against"
+        )
+
+    prec = params.get("precision")
+    if not _recognised_precision(prec):
+        return None, (
+            f"dot_general precision={prec!r} is not a form this row has "
+            "measured"
+        )
+
+    for name, dt in (("lhs", lhs_dtype), ("rhs", rhs_dtype)):
+        if "complex" in dt:
+            return None, (
+                f"dot_general {name} operand is {dt}: complex is outside "
+                "this row's DOMAIN, not merely its precision — interval "
+                "endpoints presuppose a total order and ℂ has none"
+            )
+
+    pet = params.get("preferred_element_type")
+    if pet is None:
+        # ABSENT ACCUMULATION TYPE IS NOT AN ABSENT CONSTRAINT. With no
+        # preferred_element_type jax derives the output dtype from the
+        # operands, so int32 x int32 accumulates in int32 and WRAPS -- the
+        # 1.0-relative class -- while a row that skipped the dtype checks
+        # here would model it as exact real arithmetic. This is the
+        # present-vs-absent distinction that produced the scatter-add false
+        # VERIFIED, at the parameter level rather than the key level.
+        for name, dt in (("lhs", lhs_dtype), ("rhs", rhs_dtype)):
+            if dt not in _MANTISSA_BITS:
+                return None, (
+                    f"dot_general has no preferred_element_type and a {dt} "
+                    f"{name} operand: accumulation follows the operands, and "
+                    "integer accumulation WRAPS where this row models exact "
+                    "real arithmetic (measured 1.0 relative)"
+                )
+        return dn, None
+    if pet is not None:
+        pet = str(pet)
+        if "complex" in pet:
+            return None, (
+                f"dot_general accumulates in {pet}: complex is outside this "
+                "row's domain — interval endpoints presuppose a total order"
+            )
+        if pet not in _MANTISSA_BITS:
+            return None, (
+                f"dot_general accumulates in {pet}, an integer or "
+                "unrecognised type: integer accumulation WRAPS where this "
+                "row models exact real arithmetic (measured 1.0 relative)"
+            )
+        acc_bits = _MANTISSA_BITS[pet]
+        for name, dt in (("lhs", lhs_dtype), ("rhs", rhs_dtype)):
+            if dt in _MANTISSA_BITS:
+                if acc_bits < _MANTISSA_BITS[dt]:
+                    return None, (
+                        f"dot_general accumulates in {pet} from a {dt} "
+                        f"{name} operand: the accumulation is narrower than "
+                        "the operands (measured 3.9e-08 for float32)"
+                    )
+            elif pet != "float64":
+                # integral operand: only float64 accumulation measured benign
+                return None, (
+                    f"dot_general accumulates a {dt} {name} operand in "
+                    f"{pet}: only float64 accumulation of integer operands "
+                    "is measured benign (5.9e-16); float32 measures 2.0e-08"
+                )
+    return dn, None
+
+
+def _recognised_precision(prec) -> bool:
+    """``precision`` forms this row has measured. A 2-tuple is jax's
+    per-operand form and normalises a string like ``"highest"``."""
+    if prec is None:
+        return True
+    if isinstance(prec, tuple):
+        return len(prec) == 2 and all(_recognised_precision(p) for p in prec)
+    return str(prec).split(".")[-1].upper() in ("DEFAULT", "HIGH", "HIGHEST")
+
+
 def _check_unique_indices_promise(params, ks, exc_type) -> None:
     """The ``unique_indices`` promise check (third audit, F2): an equation
     carrying ``unique_indices=True`` whose static indices measurably
@@ -1114,6 +1275,38 @@ def _t_div(eqn, params, ins):
 def _t_reduce_sum(eqn, params, ins):
     outs = [iv.reduce_sum(ins[0], tuple(_req(params, "axes", "reduce_sum")))]
     return _int_overflow_guard(eqn, "reduce_sum", outs)
+
+
+def _t_dot_general(eqn, params, ins):
+    """Interval transfer for ``dot_general``, gated by the shared oracle.
+
+    Declines to ⊤ (``None``) on anything the oracle refuses. The oracle's
+    reason is not narrated here: a ⊤ is recorded by the coverage tool with
+    the primitive named, and the *emission* face is where a caller sees the
+    prose, so surfacing it twice in two vocabularies would invite them to
+    drift apart.
+
+    No int-overflow guard wraps this. Unlike ``add``/``mul``/``reduce_sum``,
+    which compute integer results, every form this row admits has a
+    FLOATING accumulation type — the oracle declines integral
+    ``preferred_element_type`` outright and declines an absent one over
+    integer operands — so an integer-dtyped output cannot reach here. That
+    is a property of the gate, and it is why this primitive is censused as
+    int-non-computing rather than given a guard that could never fire.
+    """
+    if len(ins) != 2 or len(eqn.invars) != 2:
+        return None
+    lhs_dt = eqn.invars[0].aval.dtype or ""
+    rhs_dt = eqn.invars[1].aval.dtype or ""
+    dn, _reason = _dot_general_row_form(params, lhs_dt, rhs_dt)
+    if dn is None:
+        return None
+    try:
+        return [iv.dot_general(ins[0], ins[1], dn)]
+    except iv.IntervalError:
+        # shapes the oracle admitted but the domain refuses: ⊤ rather than
+        # a crash, same posture as every other transfer
+        return None
 
 
 def _t_integer_pow(eqn, params, ins):
