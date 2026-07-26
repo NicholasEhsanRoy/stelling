@@ -120,6 +120,42 @@ Both failure modes here were hit in one sitting while writing this section:
 In both cases the passing test would have supported "guard UNCOVERED." Neither was
 true.
 
+## A decline rule must trace to a measured discrepancy with a magnitude
+
+A parameter-space gauge earns a decline rule by showing that the operation's real
+semantics differ from what the row models. That evidence has to be **a number**:
+a measured discrepancy, with a magnitude you can read and compare. A `None`
+returned by the model, an absent parameter, a raised exception, an `inf` — none
+of these is a measurement. They are the gauge declining to look.
+
+**The failure mode is self-concealing, which is why it needs a rule rather than
+care.** A spurious decline is *sound* — the row refuses something it could have
+handled, so no verdict is ever wrong and nothing downstream catches it. The lost
+capability reads as conservatism. A spurious *admission* gets found by the next
+audit; a spurious decline can sit forever, and the gauge that motivated it will
+keep reporting a clean run.
+
+Both instances were caught before the row existed, and only because the gauge ran
+first:
+
+- comparing the model at `rtol=0, atol=0` made XLA's and numpy's differing
+  **summation order** register as a semantic difference — `2.2e-16` and
+  `8.9e-16`. The acceptance criterion was "zero survivors", so meeting it would
+  have **required declining `(3,5) @ (5,)`, the shape of the one contract the row
+  was being built for**, and the criterion would have certified that as success;
+- the model returned `None` whenever batch dims were present, which the harness
+  mapped to `inf`. That point read as "outside the modelled form" **having never
+  been compared to anything**, and was about to become a decline rule. Evaluated
+  properly, batch dims are benign.
+
+Both would have failed this rule on inspection: neither traced to a magnitude.
+When a threshold is needed, **derive it from what the tool judges**, not from
+convenience — verdicts here are decided in R, reassociation is exact in R, and an
+accumulation-dtype change measures `3.9e-08`, so a threshold at `1e-12` sits nine
+orders from one class and four from the other. Print the magnitudes with the
+results, so a value from the wrong class reappearing is visible rather than
+inferred.
+
 ## Stop before soundness-critical work when mechanical slips accumulate
 
 Mechanical slips — a `sed` that lands on the wrong line, an assertion with the
