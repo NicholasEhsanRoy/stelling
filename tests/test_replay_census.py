@@ -33,17 +33,25 @@ def test_emission_and_replay_cover_exactly_the_same_primitives():
     )
 
 
-def test_the_census_is_asserted_at_import_not_only_here():
-    """The invariant is enforced at import time as well as by this test.
+def test_the_census_is_enforced_at_import_and_survives_dash_O():
+    """The invariant is enforced at import as well as by this test — and by a
+    RAISE, not an `assert`.
 
-    A test can be deselected; an import-time assert cannot. This checks the
-    assert exists rather than re-checking the sets, so deleting it is a
-    visible failure rather than a silent loss of the guarantee.
+    The earlier form of this test checked for an `assert` statement and
+    justified it as "a test can be deselected; an import-time assert cannot".
+    That is right about pytest and wrong about Python: under `-O` or
+    `PYTHONOPTIMIZE=1`, `__debug__` is False and every `assert` is compiled
+    out — so the guarantee would have vanished in exactly the deployment mode
+    someone reaches for in CI or a container image. An explicit raise is
+    unconditional.
     """
     import inspect
 
     src = inspect.getsource(ob)
-    assert "assert _REPLAY_SUPPORTED == _SUPPORTED" in src, (
-        "the import-time census assert has been removed; the set equality is "
-        "then only pinned by a test, which can be deselected"
+    assert "if _REPLAY_SUPPORTED != _SUPPORTED:" in src, (
+        "the import-time census check has been removed or weakened; the set "
+        "equality would then be pinned only by a test, which can be deselected"
+    )
+    assert "assert _REPLAY_SUPPORTED" not in src, (
+        "the census check is an `assert` again — it is stripped under -O"
     )

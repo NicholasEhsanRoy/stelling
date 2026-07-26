@@ -197,11 +197,16 @@ _INT_SAFE_EMITTED = frozenset(
     | {"max", "min", "select_n", "convert_element_type"}
 )
 
-assert _INT_OVERFLOW_EMITTED | _INT_SAFE_EMITTED == _SUPPORTED, (
+if _INT_OVERFLOW_EMITTED | _INT_SAFE_EMITTED != _SUPPORTED:
+    raise RuntimeError(
     "the integer-semantics census must stay total over the emission set: "
     f"unclassified {_SUPPORTED - _INT_OVERFLOW_EMITTED - _INT_SAFE_EMITTED}"
 )
-assert not (_INT_OVERFLOW_EMITTED & _INT_SAFE_EMITTED)
+if _INT_OVERFLOW_EMITTED & _INT_SAFE_EMITTED:
+    raise RuntimeError(
+        "a primitive cannot be both integer-overflow-guarded and "
+        f"int-safe: {sorted(_INT_OVERFLOW_EMITTED & _INT_SAFE_EMITTED)}"
+    )
 
 # -- the probe-or-exempt census over the emission classification --------------
 #
@@ -1500,7 +1505,8 @@ _REPLAY_SUPPORTED = (
     | {"reduce_sum", "select_n", "convert_element_type", "scatter-add"}
 )
 
-assert _REPLAY_SUPPORTED == _SUPPORTED, (
+if _REPLAY_SUPPORTED != _SUPPORTED:
+    raise RuntimeError(
     "the exact-rational replay must cover exactly the emission set, or a "
     "witness can be produced that replay cannot independently confirm: "
     f"emittable-but-not-replayable {sorted(_SUPPORTED - _REPLAY_SUPPORTED)}, "

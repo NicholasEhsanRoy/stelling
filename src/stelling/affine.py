@@ -150,7 +150,8 @@ _AFFINE_STRUCTURAL = frozenset(
 # extension. Asserted at import so the invariant cannot rot silently;
 # the test suite additionally requires a dedicated behavior test per
 # registry name.
-assert AFFINE_SUPPORTED <= set(TRANSFERS), (
+if not AFFINE_SUPPORTED <= set(TRANSFERS):
+    raise RuntimeError(
     "AFFINE_SUPPORTED must be a subset of the censused transfer registry: "
     f"unadmitted {sorted(AFFINE_SUPPORTED - set(TRANSFERS))}"
 )

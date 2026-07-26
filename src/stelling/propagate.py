@@ -1315,12 +1315,17 @@ _INT_NON_COMPUTING = frozenset({
     "stelling_any", "stelling_assert", "stelling_nonvacuity",
 })
 
-assert _INT_COMPUTING | _INT_NON_COMPUTING == set(TRANSFERS), (
+if _INT_COMPUTING | _INT_NON_COMPUTING != set(TRANSFERS):
+    raise RuntimeError(
     "the integer-semantics census must stay total over TRANSFERS: "
     f"unclassified {set(TRANSFERS) - _INT_COMPUTING - _INT_NON_COMPUTING}, "
     f"stale {_INT_COMPUTING | _INT_NON_COMPUTING - set(TRANSFERS)}"
 )
-assert not (_INT_COMPUTING & _INT_NON_COMPUTING)
+if _INT_COMPUTING & _INT_NON_COMPUTING:
+    raise RuntimeError(
+        "a primitive cannot both compute and not compute an integer "
+        f"value: {sorted(_INT_COMPUTING & _INT_NON_COMPUTING)}"
+    )
 
 # -- the probe-or-exempt census over the CLASSIFICATION itself ----------------
 #
@@ -2243,7 +2248,8 @@ IEEE_TRANSFERS = {
 
 # the census must stay total: a registered transfer with no ieee census
 # entry would be silent reuse, the exact thing rule 6 forbids
-assert set(IEEE_TRANSFERS) == set(TRANSFERS), (
+if set(IEEE_TRANSFERS) != set(TRANSFERS):
+    raise RuntimeError(
     "every registered transfer must be censused for ieee semantics"
 )
 
