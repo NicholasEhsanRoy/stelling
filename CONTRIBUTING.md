@@ -156,6 +156,40 @@ orders from one class and four from the other. Print the magnitudes with the
 results, so a value from the wrong class reappearing is visible rather than
 inferred.
 
+## Gate tests construct params as the TRANSCRIBER produces them
+
+A gate reads `eqn.params_dict()`, and those params come from the transcriber, not
+from jax's public API. The two forms differ. `precision="highest"` reaches a gate
+as `ir.EnumParam(cls='Precision', member='HIGHEST')`, never as a
+`jax.lax.Precision` member; a dtype arrives as a `str`, not a `numpy.dtype`.
+
+So a gate test that builds its params from raw jax objects is **testing a path the
+system never takes**. It can pass in full while the gate is broken for every real
+trace, because the input it supplies is one the engine cannot produce.
+
+Found by a blinded audit on the `dot_general` row. `_recognised_precision` did
+`str(prec).split(".")[-1].upper()`, which matches a raw `Precision` member and
+never matches the transcribed `EnumParam`. **Every non-`None` precision from a
+real trace declined, while the oracle's docstring said it was admitted, and the
+gate's unit tests were green throughout** — they passed raw objects. The decline
+direction was safe, so nothing unsound shipped; what shipped was a row silently
+narrower than its documentation, refusing a contraction form that is ordinary
+practice in numerical code.
+
+Build gate-test params by tracing a real program and reading the equation back
+(`transcribe(jax.make_jaxpr(...)())`). Raw-object tests are fine as a supplement —
+they are quicker to write and read — but at least one test per gated param must go
+through transcription, and it needs an anti-vacuity companion showing the gate
+still declines something, or a gate widened to accept the transcribed form can
+quietly accept everything.
+
+When sweeping for this, the question is not "which tests use raw objects" but
+"which gated params have a transcribed form that differs". A param the gate never
+reads cannot diverge: the scatter rows carry `mode` as their only `EnumParam` and
+**deliberately do not constrain it** (all `GatherScatterMode`s agree on
+definitely-in-range indices, which the transfer already requires), so their
+raw-object tests are sound.
+
 ## Stop before soundness-critical work when mechanical slips accumulate
 
 Mechanical slips — a `sed` that lands on the wrong line, an assertion with the
