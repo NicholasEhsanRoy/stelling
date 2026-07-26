@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 from jax.lax import dot_general_p
 
+from stelling.harness import assert_
 from stelling.interval import IntervalArray, IntervalError
 from stelling.interval import dot_general as iv_dot
 from stelling.propagate import _dot_general_row_form
@@ -198,3 +199,87 @@ def test_absent_pet_over_float_operands_is_still_admitted():
     dn, reason = _dot_general_row_form(
         _p(preferred_element_type=None), "float64", "float64")
     assert dn is not None, f"absent pet over float operands declined: {reason}"
+
+
+def test_integer_dot_general_declines_at_every_dtype_boundary():
+    """The integer class, closed by the gate rather than by a guard.
+
+    `dot_general` is censused `_INT_COMPUTING` — it sums products, so it can
+    produce a value its operands did not contain. It is float-only in
+    practice because the shared oracle refuses integral accumulation AND an
+    absent `preferred_element_type` over integer operands, which is what jax
+    emits for an integer matmul and which makes the accumulation follow the
+    operands and wrap.
+
+    The import-time behavioural census already sweeps this at every integer
+    dtype in both directions; this asserts it where a reader looks, and at
+    the oracle directly so the reason is visible.
+    """
+    from stelling.propagate import _INT_COMPUTING, _INT_DTYPE_BOUNDS
+
+    assert "dot_general" in _INT_COMPUTING
+    for dtype in sorted(_INT_DTYPE_BOUNDS):
+        # what jax emits for an integer matmul: no preferred_element_type
+        dn, reason = _dot_general_row_form(
+            _p(preferred_element_type=None), dtype, dtype)
+        assert dn is None, f"{dtype}: absent pet over integer operands admitted"
+        assert "WRAPS" in reason, reason
+        # and the explicit integral accumulation
+        dn, reason = _dot_general_row_form(
+            _p(preferred_element_type=jnp.dtype(dtype)), dtype, dtype)
+        assert dn is None, f"{dtype}: integral accumulation admitted"
+
+
+def test_ieee_mode_declines_the_whole_primitive():
+    """ieee is a censused REFUSAL, not an omission.
+
+    The real transfer's soundness rests on ℝ-associativity of the
+    per-element accumulation, which float addition does not offer. It
+    declines on EVERY form including a one-term contraction, because the
+    refusal is about the argument rather than about how many terms are
+    present.
+    """
+    from stelling.interval import DOT_GENERAL_IEEE_DECLINE
+    from stelling.propagate import IEEE_TRANSFERS, TRANSFERS
+
+    assert set(IEEE_TRANSFERS) == set(TRANSFERS)
+    fn, _tier = IEEE_TRANSFERS["dot_general"]
+    with pytest.raises(IntervalError, match="no ieee transfer"):
+        fn(None, {}, [], None)
+    assert "NOT associative" in DOT_GENERAL_IEEE_DECLINE
+
+
+def test_contract_4_conservative_projection_verifies():
+    """ACCEPTANCE: the contract this row was built for.
+
+    A conservative 1D projection of a nonnegative field stays nonnegative —
+    every coefficient is an overlap length over a target width. The
+    projector is a CONSTANT (3,5) matrix and the field is symbolic, and the
+    constant is operand ZERO, so a row scoped to "second operand constant"
+    would miss exactly this.
+
+    Built OUTSIDE the harness, as a factory should be. Built inside, its
+    setup loop is pulled into the query: 349 equations instead of 4, and a
+    wrong CAUSE rather than a wrong verdict.
+    """
+    pytest.importorskip("maddening")
+    from maddening.core.coupling.interface_mapping import (
+        conservative_projection_1d,
+    )
+    from stelling.harness import any_array as _aa
+    from stelling.preconditions import check
+
+    project = conservative_projection_1d(
+        jnp.linspace(0.0, 1.0, 6), jnp.linspace(0.0, 1.0, 4)
+    )
+
+    def q():
+        v = _aa((5,), "float64", (0.0, 100.0))
+        return (assert_(project(v) >= 0.0),)
+
+    v = check(q, vacuity_mode="inputs-only", solver_timeout_ms=20000)
+    assert v.status == "VERIFIED", f"contract #4 regressed: {v.status}"
+    assert v.stamp.coverage.startswith("4 eqns"), (
+        f"query size changed: {v.stamp.coverage} — a different program is "
+        f"being verified than the one this contract names"
+    )

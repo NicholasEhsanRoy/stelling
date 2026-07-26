@@ -237,6 +237,20 @@ INTEGER_POW_IEEE_SCHEDULE_DECLINE = (
     "empty product and the identity), so no schedule freedom exists"
 )
 
+DOT_GENERAL_IEEE_DECLINE = (
+    "dot_general has no ieee transfer: the real transfer's soundness rests "
+    "on R-associativity of the per-output-element accumulation, and float "
+    "addition is NOT associative — the jaxpr fixes no summation order for a "
+    "contraction, so a transfer modelling one order would be unsound for the "
+    "compiled program (the reduce_sum construction transfers verbatim). "
+    "Contraction freedom is the second gap and it is sharper here than "
+    "anywhere else in the registry: a dot product is exactly what a backend "
+    "fuses into FMAs, so the products need not be rounded before they are "
+    "summed, and no taint-hull for that is built. Declines on EVERY form, "
+    "including the one-term contraction, because the refusal is about the "
+    "argument rather than about how many terms happen to be present."
+)
+
 SCATTER_ADD_IEEE_DECLINE = (
     "scatter-add has no ieee transfer: duplicate scatter indices ACCUMULATE "
     "(out[i] = operand[i] + Σ updates[j] over every index row j mapping to "

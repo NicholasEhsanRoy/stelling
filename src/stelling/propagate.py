@@ -1286,13 +1286,13 @@ def _t_dot_general(eqn, params, ins):
     prose, so surfacing it twice in two vocabularies would invite them to
     drift apart.
 
-    No int-overflow guard wraps this. Unlike ``add``/``mul``/``reduce_sum``,
-    which compute integer results, every form this row admits has a
-    FLOATING accumulation type — the oracle declines integral
-    ``preferred_element_type`` outright and declines an absent one over
-    integer operands — so an integer-dtyped output cannot reach here. That
-    is a property of the gate, and it is why this primitive is censused as
-    int-non-computing rather than given a guard that could never fire.
+    Censused ``_INT_COMPUTING``, following ``sqrt``'s precedent exactly: a
+    primitive that COMPUTES a new value is classified computing even when
+    it is float-only, and its gate is what closes the integer class. Here
+    the oracle declines integral ``preferred_element_type`` outright and
+    declines an absent one over integer operands, so an integer-dtyped
+    output cannot reach the arithmetic — the honest way a computing float
+    op closes the class, rather than by claiming it computes nothing.
     """
     if len(ins) != 2 or len(eqn.invars) != 2:
         return None
@@ -1395,6 +1395,7 @@ TRANSFERS = {
     # order at once (in ℝ they all denote the same number); the ieee
     # counterpart cannot reuse that and declines — see IEEE_TRANSFERS.
     "reduce_sum": (_t_reduce_sum, TIER_SOUND),
+    "dot_general": (_t_dot_general, TIER_SOUND),
     # x ** y for integer y. Even y > 0 PRODUCES non-negativity; y < 0
     # routes through div's zero-in-divisor discipline (⊤ when the base
     # straddles 0 — the pole is real and nothing here papers over it).
@@ -1506,6 +1507,12 @@ _INT_COMPUTING = frozenset({
     # elements), so it can produce a value its operands did not contain —
     # exactly the add/reduce_sum class, same guard
     "scatter-add",
+    # the contraction SUMS products, so it too can produce a value its
+    # operands did not contain. Float-only in practice because the shared
+    # oracle refuses integral accumulation (and an ABSENT
+    # preferred_element_type over integer operands, which follows the
+    # operands and would wrap) — sqrt's posture, applied to a binary op.
+    "dot_general",
 })
 
 # Why each of these cannot introduce an out-of-range integer:
@@ -1710,6 +1717,9 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
             "pow": (hi, 2.0), "exp": (hi, None), "sqrt": (hi, None),
             "reduce_sum": (hi, None), "integer_pow": (hi, None),
             "scatter-add": (hi, hi),
+            # the contraction's products escape exactly as `mul`'s do, so
+            # it takes mul's operand values
+            "dot_general": (hi, hi),
         }[prim]
     return {
         "add": (lo, lo), "sub": (lo, hi), "mul": (lo, hi),
@@ -1717,6 +1727,7 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
         "pow": (lo, 3.0), "exp": (lo, None), "sqrt": (lo, None),
         "reduce_sum": (lo, None), "integer_pow": (lo, None),
         "scatter-add": (lo, lo),
+        "dot_general": (lo, hi),
     }[prim]
 
 
@@ -1802,6 +1813,43 @@ def _assert_computing_transfers_close_the_integer_class() -> None:
                                     ),
                                 ),
                             ),
+                        ),
+                    )
+                elif prim == "dot_general":
+                    # the 2-operand contraction form, at integer dtypes and
+                    # with NO preferred_element_type -- which is what jax
+                    # emits for an integer matmul, and which makes the
+                    # accumulation follow the operands and WRAP. The shared
+                    # oracle must decline it. Probing the absent-param form
+                    # deliberately: an absent param is the class that has
+                    # produced three defects in this codebase, and the one
+                    # this row's own oracle nearly shipped a hole on.
+                    avals = (
+                        ir.Aval(kind="ShapedArray", shape=(1,), dtype=dtype),
+                        ir.Aval(kind="ShapedArray", shape=(1,), dtype=dtype),
+                    )
+                    boxes = [
+                        iv.from_bounds((1,), first, first),
+                        iv.from_bounds((1,), second, second),
+                    ]
+                    invars = tuple(
+                        ir.Var(id=i, aval=a) for i, a in enumerate(avals)
+                    )
+                    eqn = ir.JaxprEqn(
+                        primitive=prim, invars=invars,
+                        outvars=(
+                            ir.Var(
+                                id=99,
+                                aval=ir.Aval(
+                                    kind="ShapedArray", shape=(), dtype=dtype
+                                ),
+                            ),
+                        ),
+                        params=(
+                            ("dimension_numbers", (((0,), (0,)), ((), ()))),
+                            ("precision", None),
+                            ("preferred_element_type", None),
+                            ("out_sharding", None),
                         ),
                     )
                 else:
@@ -2266,6 +2314,17 @@ def _ieee_scatter_add(eqn, params, ins, flags):
     raise iv.IntervalError(iv.SCATTER_ADD_IEEE_DECLINE)
 
 
+def _ieee_dot_general(eqn, params, ins, flags):
+    """dot_general under ieee: a whole-primitive censused REFUSAL.
+
+    Same shape of refusal as ``scatter-add`` and for the sharper version of
+    the same reason — see :data:`stelling.interval.DOT_GENERAL_IEEE_DECLINE`.
+    The dispatcher turns the raise into a noted ⊤ maybe-NaN counted in
+    coverage: a refusal is a censused entry, not an omission.
+    """
+    raise iv.IntervalError(iv.DOT_GENERAL_IEEE_DECLINE)
+
+
 def _ieee_convert(eqn, params, ins, flags):
     """convert_element_type under ieee. A non-f64 FLOAT source declines
     outright (re-attack U2): the whitelist's value-preservation claim is
@@ -2403,6 +2462,7 @@ IEEE_TRANSFERS = {
     # bound or contraction hull is built for the scatter path — every
     # form declines with iv.SCATTER_ADD_IEEE_DECLINE quoted
     "scatter-add": (_ieee_scatter_add, TIER_EXACT),
+    "dot_general": (_ieee_dot_general, TIER_EXACT),
     # (i) pure element routing, dtype-agnostic, flags ride along
     "stack": (
         _ieee_passthrough(

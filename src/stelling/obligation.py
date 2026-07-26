@@ -162,7 +162,8 @@ _IDENTITY_HARNESS = frozenset({"stelling_assume", "stelling_nonvacuity"})
 
 _SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
-    | {"reduce_sum", "select_n", "convert_element_type", "scatter-add"}
+    | {"reduce_sum", "select_n", "convert_element_type", "scatter-add",
+       "dot_general"}
 )
 
 # Emitted primitives that COMPUTE a new numeric value, and therefore can
@@ -183,7 +184,10 @@ _INT_OVERFLOW_EMITTED = frozenset(
     {"add", "sub", "mul", "neg", "div", "integer_pow", "reduce_sum",
      # the accumulate scatter SUMS operand and update elements — the
      # add/reduce_sum class exactly, so integer dtypes decline here too
-     "scatter-add"}
+     "scatter-add",
+     # the contraction sums PRODUCTS; same class, and the generic guard
+     # above (integer OUTPUT dtype declines) covers it with no extra code
+     "dot_general"}
 )
 
 # Mechanised for the same reason the transfer-side census is (audit
@@ -1266,12 +1270,13 @@ class _Slicer:
             _group_reduce_sum(eqn)
         elif prim == "select_n":
             _pair_select_n(eqn)
-        elif prim == "scatter-add":
-            # the accumulate plan needs the whole slice's dataflow (its
-            # index column derives from constants through structural
-            # routing), so it is validated once over the completed
-            # topological slice in :meth:`slice`, through the same
-            # _scatter_add_plan the emission and the replay drive
+        elif prim in ("scatter-add", "dot_general"):
+            # these plans need the whole slice's dataflow — scatter-add's
+            # index column and dot_general's constant operand both derive
+            # from constants through structural routing — so they are
+            # validated once over the completed topological slice in
+            # :meth:`slice`, through the same plan the emission and the
+            # replay drive
             pass
         else:  # elementwise ops and the identity harness primitives
             _pair_elementwise(eqn)
@@ -1465,6 +1470,13 @@ class _Slicer:
                 # the emission and the replay drive, so what validates is
                 # exactly what emits and replays
                 _scatter_add_plan(ordered, used_consts, e)
+            elif e.primitive == "dot_general":
+                # same posture, same reason: the constant operand derives
+                # from the slice's own constants through structural
+                # routing, so the plan needs the completed slice and is
+                # driven here through the one function the emission and
+                # the replay also drive
+                _dot_general_plan(ordered, used_consts, e)
         slice_inputs: list[SliceInput] = []
         for vid in sorted(inputs, key=lambda v: self.any_order[v]):
             params = self.producers[vid].params_dict()
@@ -1645,7 +1657,8 @@ def slice_unknown_obligations(
 # census.
 _REPLAY_SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
-    | {"reduce_sum", "select_n", "convert_element_type", "scatter-add"}
+    | {"reduce_sum", "select_n", "convert_element_type", "scatter-add",
+       "dot_general"}
 )
 
 if _REPLAY_SUPPORTED != _SUPPORTED:
@@ -1770,6 +1783,23 @@ def _root_elements(
                 out = tuple(
                     sum((ins[2][u] for u in groups[i]), ins[0][i])
                     for i in range(n_out)
+                )
+            elif prim == "dot_general":
+                # the same linear combination the emission builds, in exact
+                # rational arithmetic: Σ c_k · sym_k. ℝ addition is
+                # associative so the fold order denotes THE value, and the
+                # coefficients come from the one plan both faces drive — a
+                # replay that recomputed them independently could confirm a
+                # witness the emission never described.
+                sym_operand, groups = _dot_general_plan(
+                    sl.eqns, dict(sl.consts), eqn
+                )
+                out = tuple(
+                    sum(
+                        (coeff * ins[sym_operand][idx] for coeff, idx in terms),
+                        Fraction(0),
+                    )
+                    for terms in groups
                 )
             elif prim == "select_n":
                 which, on_false, on_true = _pair_select_n(eqn)
