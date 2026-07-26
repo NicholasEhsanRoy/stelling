@@ -1027,11 +1027,23 @@ class _Slicer:
         # therefore be unique across the FLATTENED scopes.
         #
         # THE TRANSCRIBER DOES NOT GIVE US THAT, and the comment that used to
-        # sit here said it did ("the transcriber guarantees it"). It numbers
-        # variables PER SCOPE, so every inner jaxpr starts from a low base
-        # and two of them both contain id 3. That claim-as-citation is why
-        # the resulting ceiling went unexamined for months: it read as
-        # established, so nobody re-derived it.
+        # sit here said it did ("the transcriber guarantees it"). That
+        # claim-as-citation is why the resulting ceiling went unexamined for
+        # months: it read as established, so nobody re-derived it.
+        #
+        # What actually happens (measured, and NOT what a first reading
+        # suggests): `_Transcriber` numbers with ONE GLOBAL counter keyed by
+        # `id(jax Var)` in first-encounter order — not per scope. Ids collide
+        # because JAX REUSES JAXPR OBJECTS. One callee invoked at several call
+        # sites yields the same inner jaxpr object each time, so the same jax
+        # Vars are encountered again and correctly receive the same IR id —
+        # and flattening then binds that one id twice. Two DISTINCT callees
+        # collide the same way when they share a nested library jaxpr:
+        # `jnp.where` is itself jit-wrapped and cached, so two callees that
+        # both use it embed one identical nested jaxpr object.
+        #
+        # The consequence is what matters here and it is unchanged: one id,
+        # two bindings, in a single flattened namespace.
         #
         # So uniqueness is now ENFORCED HERE rather than assumed: every
         # binding introduced by a transparent-call descent is given a FRESH
