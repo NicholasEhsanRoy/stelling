@@ -331,6 +331,17 @@ class Verdict:
                 "this query was never transcribed."
             )
             return "\n".join(lines)
+        # EQUATION COUNT, SECOND LINE. A wrong harness build or step boundary
+        # does not produce a wrong answer — it silently changes WHICH PROGRAM
+        # was verified, and the equation count is the only tell. Measured
+        # instance: a projector built inside the harness traced 349 equations
+        # instead of 5, yielding a wrong CAUSE rather than a wrong verdict.
+        # The stamp has always carried this inside its coverage line, but at
+        # the bottom, under transfers and provenance — not where an author
+        # looks. Same reasoning as the w6 soak's `eqns` column.
+        eqns = self.stamp.coverage.split(" eqns")[0]
+        if eqns.isdigit():
+            lines.append(f"  {eqns} equations verified")
         if self.status == "REFUTED":
             # Rendering honesty: the set-level wording ("not a witness")
             # belongs ONLY to interval refutations. A witness-backed REFUTED
