@@ -62,6 +62,7 @@ from stelling.obligation import (
     _pair_select_n,
     _route_structural,
     _scatter_add_plan,
+    _scatter_set_plan,
     _size,
     _shape_of,
     _IDENTITY_HARNESS,
@@ -206,6 +207,21 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
             # index bookkeeping, not new terms: each output element IS its
             # source element's term
             routes = _route_structural(eqn)
+            names[out.id] = tuple(ins[op][src] for op, src in routes)
+            continue
+        if prim == "scatter":
+            # the static-index SET form is pure data movement, so it makes NO
+            # new terms: element k's term IS the update's, every other
+            # element's term IS the operand's. Same shape as _STRUCTURAL
+            # above, driven by the same plan the slice validator and the
+            # replay drive, so the three cannot route an element differently.
+            try:
+                routes = _scatter_set_plan(sl.eqns, dict(sl.consts), eqn)
+            except Exception as e:  # validation admitted it; this cannot
+                raise ValueError(  # decline — an inconsistency is a bug
+                    f"emission cannot plan 'scatter' ({e}) — slice "
+                    f"validation should have declined this"
+                ) from e
             names[out.id] = tuple(ins[op][src] for op, src in routes)
             continue
         if prim in _IDENTITY_HARNESS:

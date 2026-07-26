@@ -163,7 +163,7 @@ _IDENTITY_HARNESS = frozenset({"stelling_assume", "stelling_nonvacuity"})
 _SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
     | {"reduce_sum", "select_n", "convert_element_type", "scatter-add",
-       "dot_general"}
+       "dot_general", "scatter"}
 )
 
 # Emitted primitives that COMPUTE a new numeric value, and therefore can
@@ -199,7 +199,7 @@ _INT_OVERFLOW_EMITTED = frozenset(
 # (copies of in-range values), so they are int-safe by construction.
 _INT_SAFE_EMITTED = frozenset(
     _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
-    | {"max", "min", "select_n", "convert_element_type"}
+    | {"max", "min", "select_n", "convert_element_type", "scatter"}
 )
 
 if _INT_OVERFLOW_EMITTED | _INT_SAFE_EMITTED != _SUPPORTED:
@@ -224,6 +224,15 @@ if _INT_OVERFLOW_EMITTED & _INT_SAFE_EMITTED:
 # reason: a future addition to any constituent set is a conscious edit to
 # this registry too, and the reason is the claim.
 _INT_SAFE_EMITTED_REASONS: dict[str, str] = {
+    "scatter": (
+        "the static-index SET form emits NO term: element k's term IS the "
+        "update's and every other element's IS the operand's, so the "
+        "equation performs pure data movement. Nothing is computed, so "
+        "nothing can overflow an integer dtype — unlike scatter-add, whose "
+        "accumulate is Real addition and therefore carries the guard. The "
+        "operand/updates/output dtypes are required to agree, so the "
+        "aliasing never equates values of different sorts"
+    ),
     "lt": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
     "le": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
     "gt": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
@@ -1402,6 +1411,27 @@ class _Slicer:
                     f"'reduce_sum' on dtype {dt!r}: jax integer addition "
                     f"wraps on overflow, which Real addition does not model"
                 )
+        if prim == "scatter":
+            if len(eqn.invars) != 3:
+                raise _Decline(
+                    f"'scatter' with {len(eqn.invars)} operand(s) is "
+                    f"outside the measured form"
+                )
+            dts = {
+                (a.aval.dtype or "")
+                for a in (eqn.invars[0], eqn.invars[2], eqn.outvars[0])
+            }
+            if len(dts) != 1:
+                raise _Decline(
+                    f"'scatter' operand/updates/output dtypes {sorted(dts)} "
+                    f"must agree: the set form ALIASES terms rather than "
+                    f"computing them, and aliasing across dtypes would equate "
+                    f"values of different sorts"
+                )
+            # NOTE the deliberate absence of scatter-add's float-only clause.
+            # The accumulate needs it because jax integer addition wraps; the
+            # SET form performs no arithmetic at all, so an integer scatter is
+            # exact data movement and admissible.
         if prim == "scatter-add":
             if len(eqn.invars) != 3:
                 raise _Decline(
@@ -1452,13 +1482,14 @@ class _Slicer:
             _group_reduce_sum(eqn)
         elif prim == "select_n":
             _pair_select_n(eqn)
-        elif prim in ("scatter-add", "dot_general"):
-            # these plans need the whole slice's dataflow — scatter-add's
-            # index column and dot_general's constant operand both derive
-            # from constants through structural routing — so they are
+        elif prim in ("scatter", "scatter-add", "dot_general"):
+            # ALL THREE plans need the whole slice's dataflow -- the scatter
+            # rows' index columns and dot_general's constant operand each
+            # derive from constants through structural routing -- so they are
             # validated once over the completed topological slice in
-            # :meth:`slice`, through the same plan the emission and the
-            # replay drive
+            # :meth:`slice`, through the same plan the emission and the replay
+            # drive. One branch rather than three: the reason is identical and
+            # a per-primitive branch is three places for it to drift.
             pass
         else:  # elementwise ops and the identity harness primitives
             _pair_elementwise(eqn)
@@ -1586,6 +1617,13 @@ class _Slicer:
             prim = eqn.primitive
             if prim in _STRUCTURAL or prim in _IDENTITY_HARNESS:
                 continue  # index routing: no new terms
+            if prim == "scatter":
+                # the SET form aliases: element k IS the update's term, the
+                # rest ARE the operand's. No arithmetic anywhere, so no new
+                # term anywhere — the same accounting as the structural
+                # routes above, and unlike scatter-add, which inlines one
+                # addend per operand element and one per updates element.
+                continue
             element_terms += _size(eqn.outvars[0].aval.shape)
             if prim == "reduce_sum" and eqn.invars:
                 element_terms += _size(eqn.invars[0].aval.shape)
@@ -1644,6 +1682,12 @@ class _Slicer:
             for _, e in sorted(seen_eqns.values(), key=lambda t: t[0])
         )
         for e in ordered:
+            if e.primitive == "scatter":
+                # same posture as the accumulate below: form oracle, static
+                # index, mode, and the in-range check all run over the
+                # completed slice through the SAME _scatter_set_plan the
+                # emission and the replay drive
+                _scatter_set_plan(ordered, used_consts, e)
             if e.primitive == "scatter-add":
                 # whole-slice validation of the accumulate plan: the form
                 # oracle, the static index column (derivable from the
@@ -1840,7 +1884,7 @@ def slice_unknown_obligations(
 _REPLAY_SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
     | {"reduce_sum", "select_n", "convert_element_type", "scatter-add",
-       "dot_general"}
+       "dot_general", "scatter"}
 )
 
 if _REPLAY_SUPPORTED != _SUPPORTED:
@@ -1955,6 +1999,14 @@ def _root_elements(
                     sum((ins[0][i] for i in group), Fraction(0))
                     for group in groups
                 )
+            elif prim == "scatter":
+                # pure data movement, so replay is the same aliasing the
+                # emission performs and the transfer performs: element k IS
+                # the update, every other element IS the operand's. Driven by
+                # the SAME _scatter_set_plan, so replay cannot route an
+                # element differently from the emission it is checking.
+                routes = _scatter_set_plan(sl.eqns, dict(sl.consts), eqn)
+                out = tuple(ins[op][src] for op, src in routes)
             elif prim == "scatter-add":
                 # the same accumulate the transfer and the emission
                 # perform: operand element + Σ contributing updates, in
