@@ -83,6 +83,20 @@ A VERIFIED from check() has always already passed this check.
   it, the verdict carries a **concrete witness** — the input value at
   which your precondition breaks — independently confirmed by exact
   rational replay before it is shown to you.
+
+  **What that confirmation covers, and what it does not.** Replay is
+  independent of the **solver**, not of the **translation**: it
+  re-derives the violation in exact rational arithmetic through the same
+  routing the SMT emission used. So it establishes that the solver did
+  not fabricate the witness, and it does *not* establish that the
+  program was translated faithfully — a defect in the translation is
+  re-derived identically and the witness is stamped confirmed. This is
+  measured rather than hypothetical.
+
+  The check that *is* translation-independent is **running the witness
+  through your own program**. It shares no code with either the emission
+  or the replay, so it is the one that catches a translation defect, and
+  it is worth doing for any witness you intend to act on.
 - **UNKNOWN** — the analysis could not decide, and says why: the notes
   quote exactly what was dropped, declined, or too wide. An UNKNOWN is
   never silently rounded to either answer.
