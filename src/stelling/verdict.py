@@ -150,6 +150,23 @@ class Witness:
     rational replay confirmed the violation — a witness that failed replay
     is an emission-infidelity bug and raises there instead of ever
     becoming one of these.
+
+    **WHAT "confirmed by independent replay" DOES AND DOES NOT MEAN.**
+    Replay is independent of the SOLVER, not of the PLAN. For primitives
+    whose emission is driven by a shared routing plan, replay drives the
+    SAME plan — so a defect in the plan is re-derived identically and the
+    witness is stamped "confirmed". Measured, not hypothetical: an
+    adversarial audit produced a witness on a trivially true property, and
+    replay confirmed it, because both faces asked the same wrong question.
+
+    So this field certifies "the solver did not fabricate this" and NOT
+    "the translation of the program is faithful". The gap is exactly the
+    class of defect a plan-level audit exists to find.
+
+    The one independent leg is **executing the witness through the real
+    program**: it shares no code with either the emission or the replay,
+    so it is the only check that catches a plan defect. It carries more
+    weight than its position in a three-way confirmation suggests.
     """
 
     obligation_index: int

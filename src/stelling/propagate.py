@@ -600,6 +600,24 @@ def _t_scatter(eqn, params, ins):
     bug class, never guessed), update windows, batching dims, higher
     ranks, computed updates.
     """
+    # WHAT THIS FUNCTION RETAINS BEYOND THE SHARED ORACLE, enumerated because
+    # an unenumerated retained check is how the two faces drifted apart once
+    # already: the combiner gate lived here while the emission used only the
+    # oracle, so `.apply` was admitted as `.set`. Everything below is either a
+    # precondition for CALLING the oracle or genuinely interval-domain.
+    #
+    #   len(ins) != 3        — arity. The oracle takes three shapes, so having
+    #                          three operands is a precondition for calling it.
+    #   update_jaxpr         — DELIBERATE DEFENSIVE DUPLICATE. The oracle now
+    #                          gates this and is the authority; this copy is
+    #                          kept, not removed, because it is the check whose
+    #                          absence caused the defect and a redundant gate
+    #                          costs nothing.
+    #   index point/finite/integral, and in-range — interval-domain. This face
+    #                          reads the index from a propagated INTERVAL; the
+    #                          emission reads it from static constants. Same
+    #                          question, two representations, so it cannot live
+    #                          in a shape-and-params oracle.
     if len(ins) != 3 or params.get("update_jaxpr") is not None:
         return None
     operand, indices, updates = ins
