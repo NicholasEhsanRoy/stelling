@@ -717,9 +717,24 @@ def _scatter_add_row_form(
     known = set(_SCATTER_ADD_CORE) | {"update_window_dims"}
     if any(v != () for k, v in fields.items() if k not in known):
         return None
-    uj = params.get("update_jaxpr")
-    if uj is not None and not _is_add_combiner(uj):
-        return None  # a combiner contradicting the primitive name
+    # KEY PRESENCE, not `.get()`. The two are different facts and jax uses the
+    # difference: an ABSENT key is the hand-built IR form, where the primitive
+    # name is the semantic authority (blessed by
+    # test_absent_combiner_is_accepted_hand_built_form). A key PRESENT with
+    # value None is what a jax-produced equation carries, and jax's
+    # `_scatter_lower` substitutes `lambda x, y: y` for it — REPLACE,
+    # last-wins, operand discarded, duplicates NOT accumulated. Reading it with
+    # `.get()` conflates the two and models a set as an add.
+    #
+    # Measured on jax 0.11.0: operand zeros(3), indices [[0],[2],[0],[0]],
+    # updates [1,10,100,1000] gives [1101,0,10] with the add combiner and
+    # [1000,0,10] with update_jaxpr=None.
+    if "update_jaxpr" in params:
+        uj = params["update_jaxpr"]
+        if uj is None:
+            return None  # jax's set/last-wins combiner, not accumulation
+        if not _is_add_combiner(uj):
+            return None  # a combiner contradicting the primitive name
     if params.get("update_consts") not in ((), None):
         return None
     uwd = fields.get("update_window_dims")
