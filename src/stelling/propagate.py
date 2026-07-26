@@ -801,6 +801,21 @@ def _dot_general_row_form(params, lhs_dtype: str, rhs_dtype: str):
     ``preferred_element_type`` narrower than a float operand
         float32 3.9e-08, float16 1.6e-04, bfloat16 2.1e-03.
 
+        AND THE RULE BOUNDS NARROWING, NOT ERROR — the earlier wording
+        implied otherwise and a blinded audit measured the gap. On matched
+        data this gate DECLINES float64 operands accumulated in float32 at
+        a relative error of 2.3e-08 while ADMITTING bfloat16 operands
+        accumulated in bfloat16 at 2.1e-03, ninety thousand times larger.
+        That is not incoherent once stated correctly: under ℝ semantics a
+        float16 program diverges from exact real arithmetic no matter which
+        primitive runs it, and stelling admits float16 ``add`` on exactly
+        the same footing. Tightening this to "accumulation must be
+        float64" would refuse ordinary ``float32 @ float32`` that every
+        other row in the engine accepts. What this rule enforces is that
+        the accumulation is no narrower than the operands the caller chose;
+        the declared ℝ/IEEE gap is the framework's, recorded in every stamp,
+        and is not this row's to close.
+
     integer operands accumulated in anything but ``float64``
         int32 with float32 accumulation measures 2.0e-08. With float64 it
         measures 5.9e-16 and int64 with float64 measures 1.9e-16 — both far
@@ -908,11 +923,34 @@ def _dot_general_row_form(params, lhs_dtype: str, rhs_dtype: str):
 
 def _recognised_precision(prec) -> bool:
     """``precision`` forms this row has measured. A 2-tuple is jax's
-    per-operand form and normalises a string like ``"highest"``."""
+    per-operand form, which is what a string like ``"highest"`` normalises
+    to.
+
+    READS THE TRANSCRIBED FORM, which is the only form this ever sees. A
+    blinded audit found the first version broken here: it did
+    ``str(prec).split(".")[-1].upper()``, which works on a raw
+    ``jax.lax.Precision`` member and NEVER matches the transcriber's
+    ``ir.EnumParam(cls='Precision', member='HIGHEST')``. Every non-``None``
+    precision from a real trace declined.
+
+    The decline direction is safe, so nothing unsound shipped — but the
+    cost was real: an explicit ``precision="highest"`` on a contraction is
+    ordinary numerical-code practice, and the row refused every one of them
+    while its docstring said otherwise.
+
+    The reason the unit tests missed it is worth more than the bug: they
+    constructed params from RAW JAX OBJECTS and the engine only ever
+    receives TRANSCRIBED ones. A test that builds its own input in a form
+    the system never produces is testing a path that does not exist.
+    """
     if prec is None:
         return True
     if isinstance(prec, tuple):
         return len(prec) == 2 and all(_recognised_precision(p) for p in prec)
+    if isinstance(prec, ir.EnumParam):
+        return prec.cls == "Precision" and prec.member.upper() in (
+            "DEFAULT", "HIGH", "HIGHEST"
+        )
     return str(prec).split(".")[-1].upper() in ("DEFAULT", "HIGH", "HIGHEST")
 
 

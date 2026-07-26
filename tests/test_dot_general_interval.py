@@ -283,3 +283,63 @@ def test_contract_4_conservative_projection_verifies():
         f"query size changed: {v.stamp.coverage} — a different program is "
         f"being verified than the one this contract names"
     )
+
+
+# -- the oracle, driven through TRANSCRIBED params --------------------------
+#
+# The tests above build params from RAW JAX OBJECTS. A blinded audit showed
+# that is not enough: `precision` reaches the engine as
+# ir.EnumParam(cls='Precision', member='HIGHEST'), never as a
+# jax.lax.Precision member, and the first `_recognised_precision` matched only
+# the latter. Every non-None precision from a real trace declined while the
+# oracle's docstring said it was admitted, and no raw-object test could see it.
+#
+# A test that builds its own input in a form the system never produces is
+# testing a path that does not exist. These go through transcribe().
+
+def _traced_dot_params(**dot_kwargs):
+    """The params a REAL trace hands the engine, not the ones jax's API takes."""
+    from stelling._jax_compat import transcribe
+    from stelling.harness import any_array as _aa
+
+    M = jnp.zeros((3, 4))
+
+    def build():
+        x = _aa((4,), "float64", (0.0, 1.0))
+        return (assert_(jnp.dot(M, x, **dot_kwargs)[0] >= -1e30),)
+
+    cj = transcribe(jax.make_jaxpr(build)())
+    for e in cj.jaxpr.eqns:
+        if str(e.primitive) == "dot_general":
+            return e.params_dict()
+    raise AssertionError("no dot_general in the trace")
+
+
+@pytest.mark.parametrize("precision", [None, "highest", "high", "default"])
+def test_every_real_precision_form_is_admitted_from_a_TRACE(precision):
+    """An explicit precision="highest" on a contraction is ordinary
+    numerical-code practice — measured at 18 call sites in one downstream
+    codebase alone — so a row that declines it refuses the most common
+    contraction it will meet. Regression-tested at the TRANSCRIBED form,
+    which is the only form the engine ever receives."""
+    kw = {} if precision is None else {"precision": precision}
+    params = _traced_dot_params(**kw)
+    dn, reason = _dot_general_row_form(params, "float64", "float64")
+    assert dn is not None, (
+        f"traced precision={precision!r} declined: {reason} — the row is "
+        f"narrower than its docstring claims"
+    )
+
+
+def test_the_precision_gate_still_declines_something():
+    """Anti-vacuity: widening to accept EnumParam must not accept anything.
+    A gate that admits every value is not a gate."""
+    params = dict(_traced_dot_params())
+    params["precision"] = "not-a-precision"
+    dn, reason = _dot_general_row_form(params, "float64", "float64")
+    assert dn is None and "not a form this row has measured" in reason
+
+    from stelling import ir
+    params["precision"] = ir.EnumParam(cls="Precision", member="TF32_ONLY")
+    dn, _ = _dot_general_row_form(params, "float64", "float64")
+    assert dn is None, "an unmeasured Precision member was admitted"
