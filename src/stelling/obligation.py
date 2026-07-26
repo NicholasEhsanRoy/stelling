@@ -969,6 +969,19 @@ def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
             f"shape {operand_shape} (malformed IR)"
         )
     params = eqn.params_dict()
+    # Named before the general form failure so the REASON is legible. The
+    # shared oracle rejects this too — the check belongs there, so both faces
+    # get it — but a caller told only "outside the measured form" would look
+    # at the shapes, which are identical to a plain `.set`, and learn nothing.
+    if params.get("update_jaxpr") is not None or params.get("update_consts"):
+        raise _Decline(
+            "'scatter' carries a combiner (update_jaxpr): this is an "
+            "`x.at[k].apply(f)`-shaped equation, not `x.at[k].set(v)`. It has "
+            "the same dimension numbers, shapes, mode and static index as a "
+            "set, and a DUMMY updates operand — the combiner is the only "
+            "thing distinguishing them, so treating it as a set would model "
+            "out[k] = <dummy> where the program computes out[k] = f(operand[k])"
+        )
     if not _scatter_set_row_form(
         params, operand_shape, indices_shape, updates_shape
     ):

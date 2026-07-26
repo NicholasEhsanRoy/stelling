@@ -552,6 +552,24 @@ def _scatter_set_row_form(params, operand_shape, indices_shape, updates_shape):
     emission side) and the scatter ``mode``. Both are the caller's, and both
     are load-bearing; see the callers.
     """
+    # THE COMBINER GATE, and it belongs HERE rather than in either caller.
+    # `x.at[k].apply(f)` traces to the SAME primitive with the SAME dimension
+    # numbers, shapes, mode and static index as `.set` — the ONLY thing
+    # distinguishing them is a non-None `update_jaxpr` carrying f, alongside a
+    # DUMMY 0.0 updates operand. A form test that does not look at it admits
+    # `.apply` as if it were `.set` and models `out[k] = 0.0` where the program
+    # computes `out[k] = f(operand[k])`.
+    #
+    # This check lived in the transfer while the emission used only this
+    # oracle, so the emission never saw it — which is precisely the asymmetry
+    # a shared oracle exists to prevent, reintroduced by extracting the shape
+    # rules and leaving this one behind. `_scatter_add_row_form` gates its own
+    # combiner via `_is_add_combiner`; the SET form's combiner must be ABSENT,
+    # because "set" means there is no combining.
+    if params.get("update_jaxpr") is not None:
+        return False
+    if params.get("update_consts"):
+        return False
     dn = params.get("dimension_numbers")
     if not isinstance(dn, ir.NamedTupleParam):
         return False
