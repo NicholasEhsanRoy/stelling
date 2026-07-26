@@ -517,9 +517,23 @@ def _barred_primitives(closed) -> tuple[str, ...]:
 
     if not VERIFIED_BARRED_PRIMITIVES or closed is None:
         return ()
-    found, seen = set(), []
+    # Uses coverage.sub_jaxprs, the SAME nesting walk the coverage tool uses,
+    # rather than a private one. The earlier version did
+    # `getattr(v, "jaxpr", None)`, which finds a ClosedJaxpr and misses a bare
+    # `ir.Jaxpr`, a jaxpr held inside a tuple, and a `NamedTupleParam` field —
+    # so a transparent primitive storing its body in any of those forms would
+    # have made the bar UNDER-fire. No such primitive exists on jax 0.11.0, so
+    # this was latent; but a bar with weaker reachability than the coverage
+    # tool is a hole in the one guard the unshipped rows rest on, and "latent"
+    # is not a reason to keep two walks.
+    from stelling.coverage import sub_jaxprs
+
+    found, seen = set(), set()
 
     def walk(jaxpr):
+        if jaxpr is None or id(jaxpr) in seen:
+            return
+        seen.add(id(jaxpr))
         for eqn in getattr(jaxpr, "eqns", ()):
             name = str(eqn.primitive)
             if name in VERIFIED_BARRED_PRIMITIVES:

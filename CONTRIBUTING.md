@@ -495,6 +495,37 @@ primitive as `x.at[k].set(v)` with byte-identical shapes, mode and index —
 property, with the witness stamped "confirmed by independent replay". The
 oracle built to prevent drift shipped with a gap on day one.
 
+## A battery that stops measuring reports a perfect score
+
+Mutation batteries, fidelity gauges, differential harnesses — anything that
+reports "nothing got through" — share a failure mode with no natural symptom:
+**when the instrument stops measuring, it reports universal success.** A green
+run and a run that never ran look identical from the outside.
+
+So every battery asserts its own discrimination before it reports, and a
+violation VOIDS the run rather than passing it:
+
+- **the baseline must be ADMITTED** — if the thing that should pass is being
+  rejected, every mutation is "caught" for the wrong reason;
+- **at least one point must be REJECTED** — if everything is admitted, the gate
+  is not discriminating and a zero-survivor result means nothing;
+- **the battery must be non-empty** — no mutations, nothing to catch.
+
+Three instances, each of which produced or nearly produced a false clean result:
+
+- a gauge was handed an **empty consts map**, so every parameter point declined
+  as "index not statically derivable". The whole battery would have reported as
+  caught — the baseline guard caught it and refused to run;
+- a `sed` mutation **landed on a comment** two lines above the condition, so the
+  guard was untouched and the test passed, reading as "the guard is not
+  reached";
+- a test was **`skipif`-guarded on the very condition it existed to check**, so
+  the mutation that should have failed it skipped it instead.
+
+The shape is one thing, and it is the same one the verify-the-artifact rule
+addresses from the other side: **an instrument's own report of success is not
+evidence it measured anything.** Make it prove it discriminated.
+
 ## Stop before soundness-critical work when mechanical slips accumulate
 
 Mechanical slips — a `sed` that lands on the wrong line, an assertion with the
