@@ -92,6 +92,42 @@ Corollaries worth stating because each cost something:
 - When a control fires on the baseline, fix the control and re-run both. Do not
   reason about which side is "really" affected.
 
+## A measurement whose result is an ABSENCE needs a positive control
+
+**The general rule the next four sections are special cases of.** If a measurement
+can only report "nothing here", it must be paired with a control showing the
+instrument detects the thing when it *is* here. Otherwise "nothing here" and "this
+instrument cannot see" produce identical output, and the reassuring one gets
+believed.
+
+Every instance below was a real reading that survived review before someone
+noticed the instrument was blind:
+
+- **a mutation that changed nothing.** A guard reported UNCOVERED because the
+  `sed` landed on a comment. The test passed for the wrong reason.
+- **a battery where every point was rejected.** An empty consts map made all of
+  them decline; the run read as "everything caught."
+- **a probe whose assertion was trivially true.** `x >= -1e30` is discharged by
+  interval arithmetic, so the slice — the stage under test — never ran, and three
+  poisoned structures were recorded "clean".
+- **an identity comparison on freshly-built objects.** Post-transcription
+  `ClosedJaxpr`s are constructed per param and are therefore always distinct, so
+  "0 duplicates share an object" was arithmetically incapable of being anything
+  else. It was recorded as evidence *against* the hypothesis it could not test.
+- **a widen that never reached the declaration.** A nested envelope escaped the
+  guard, and the verdict then carried "envelope not load-bearing" about an
+  envelope that was load-bearing.
+
+The pattern is the same in all five: **the negative result was produced by the
+instrument's reach, not by the world.**
+
+So state, for any absence claim: *what would this have looked like if the thing
+were present?* If the answer is "the same", the measurement is not evidence. The
+specific forms below — a mutation must change behaviour somewhere, a battery must
+reject at least one point, a probe must assert something the cheap layers cannot
+decide — are kept because they are more actionable than this rule; use them first
+and fall back to this when the situation fits none of them.
+
 ## Guard coverage is proven by mutation, not by construction
 
 A test that reaches a guard and a test whose scenario stops short of it look
