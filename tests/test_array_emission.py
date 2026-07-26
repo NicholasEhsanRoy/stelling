@@ -705,14 +705,36 @@ def test_malformed_wrapper_declines_with_the_form_quoted():
     assert "resists sound descent" in item.reason
 
 
-def test_variable_id_reuse_across_scopes_declines_never_missharing():
-    """An inner scope reusing an outer var id would silently alias two
-    different values if inlined — the array-scale aliasing bug. The
-    descent detects the collision and declines, quoted."""
+def test_variable_id_reuse_across_scopes_never_misshares():
+    """An inner scope reusing an OUTER var id must not alias two different
+    values — the array-scale aliasing bug.
+
+    This used to assert the DECLINE, because the descent detected the
+    collision and poisoned the query. That was sound but a ceiling, and the
+    descent now RENUMBERS instead: every inner binding gets a fresh id, so
+    the collision cannot occur and the query proceeds.
+
+    The test therefore asserts the PROPERTY rather than the old mechanism —
+    and asserts it observably. The jit call is passed ``w in [10, 12]`` while
+    its inner invar deliberately carries the outer declaration's id 0, which
+    belongs to ``x in [-1, 1]``. The two ranges are DISJOINT, so a
+    mis-sharing is not a subtle numeric difference but a verdict flip.
+
+    The bound is 11.0, which STRADDLES w's range so intervals cannot decide
+    it and the obligation actually reaches the slice — the stage under test.
+    A bound of 5.0 would be discharged outright and this test would exercise
+    nothing (CONTRIBUTING.md: a probe reading a final verdict must assert
+    something non-trivial). Under a mis-share to x in [-1, 1] the predicate
+    would instead be definitely FALSE, decided by intervals, and no unknown
+    obligation would reach the slice at all — so the two readings remain
+    distinguishable in both directions.
+    """
     n = 2
     x = var(0, F64_ARR[n])
+    w = var(5, F64_ARR[n])
     rolled = var(1, F64_ARR[n])
-    # inner invar deliberately reuses the OUTER declaration's id 0
+    # inner invar deliberately reuses the OUTER declaration's id 0, while the
+    # call is passed `w` — so the two readings are distinguishable by range
     ix = var(0, F64_ARR[n])
     ic = var(13, F64_ARR[n])
     inner = ir.ClosedJaxpr(
@@ -734,27 +756,34 @@ def test_variable_id_reuse_across_scopes_declines_never_missharing():
             ),
         )
     )
-    s = var(2, F64_ARR[n])
     pred = var(3, BOOL_ARR[n])
     out = var(4, BOOL_ARR[n])
     q = close(
         [
             any_eqn(x, -1.0, 1.0, shape=(n,)),
+            any_eqn(w, 10.0, 12.0, shape=(n,)),
             ir.JaxprEqn(
                 primitive="jit",
-                invars=(x,),
+                invars=(w,),
                 outvars=(rolled,),
                 params=(("jaxpr", inner),),
             ),
-            eqn("add", [x, rolled], s),
-            eqn("gt", [s, lit(0.0)], pred),
+            eqn("gt", [rolled, lit(11.0)], pred),
             eqn("stelling_assert", [pred], out),
         ],
         [out],
     )
     item = sole(q)
-    assert isinstance(item, DeclinedObligation)
-    assert "bound more than once" in item.reason
+    # It must DECIDE, not decline: the collision is renumbered away.
+    assert isinstance(item, ObligationSlice), getattr(item, "reason", item)
+    # And it must have read `w`, not the outer id 0. The slice's inputs name
+    # which declaration the obligation actually depends on.
+    names = {i.var_id for i in item.inputs}
+    assert names == {5}, (
+        f"slice depends on declarations {sorted(names)}; expected only var 5 "
+        f"(w). Depending on var 0 means the inner invar mis-shared the outer "
+        f"declaration's id."
+    )
 
 
 def test_obligations_stay_top_level_only_nested_assert_still_declines():
