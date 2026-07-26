@@ -1022,18 +1022,93 @@ class _Slicer:
         self.any_order: dict[int, int] = {}  # any outvar id -> declaration index
         self.eqn_order: dict[int, int] = {}  # id(eqn) -> flattened position
         self.defined: set[int] = set()  # every id bound in the flat view
-        # a scope defect poisons every slice of this query: variable ids
-        # must be unique across the flattened scopes (the transcriber
-        # guarantees it; hand-built or deserialized IR might not), because
-        # a reused id would silently alias two different values — the
-        # decorrelation/aliasing bug this build must never commit.
+        # A reused id would silently alias two different values — the
+        # decorrelation bug this build must never commit. The ids must
+        # therefore be unique across the FLATTENED scopes.
+        #
+        # THE TRANSCRIBER DOES NOT GIVE US THAT, and the comment that used to
+        # sit here said it did ("the transcriber guarantees it"). That
+        # claim-as-citation is why the resulting ceiling went unexamined for
+        # months: it read as established, so nobody re-derived it.
+        #
+        # What actually happens (measured, and NOT what a first reading
+        # suggests): `_Transcriber` numbers with ONE GLOBAL counter keyed by
+        # `id(jax Var)` in first-encounter order — not per scope. Ids collide
+        # because JAX REUSES JAXPR OBJECTS. One callee invoked at several call
+        # sites yields the same inner jaxpr object each time, so the same jax
+        # Vars are encountered again and correctly receive the same IR id —
+        # and flattening then binds that one id twice. Two DISTINCT callees
+        # collide the same way when they share a nested library jaxpr:
+        # `jnp.where` is itself jit-wrapped and cached, so two callees that
+        # both use it embed one identical nested jaxpr object.
+        #
+        # The consequence is what matters here and it is unchanged: one id,
+        # two bindings, in a single flattened namespace.
+        #
+        # So uniqueness is now ENFORCED HERE rather than assumed: every
+        # binding introduced by a transparent-call descent is given a FRESH
+        # id (:meth:`_fresh`), allocated above every id the top-level scope
+        # uses. The poison remains as a backstop for IR that arrives with a
+        # duplicate at the SAME level — hand-built or deserialized — which
+        # renumbering does not and should not paper over.
         self.poisoned: str | None = None
         self.const_avals: dict[int, ir.Aval] = {}
+        # above every top-level id, so a fresh id can never collide with one
+        top_ids = [v.id for v in jaxpr.constvars]
+        top_ids += [v.id for v in jaxpr.invars]
+        for e in jaxpr.eqns:
+            top_ids += [v.id for v in e.outvars]
+            top_ids += [a.id for a in e.invars if isinstance(a, ir.Var)]
+        self._next_id = max(top_ids, default=0) + 1
         for var, val in zip(jaxpr.constvars, closed.consts):
             self._define(var.id, f"constvar {var.id}")
             self.consts[var.id] = val
             self.const_avals[var.id] = var.aval
         self._flatten(jaxpr.eqns)
+
+    def _fresh(self) -> int:
+        """A variable id no scope has used. Allocated strictly above the
+        top-level ids, and monotonically, so no two descents can collide
+        with each other either."""
+        vid = self._next_id
+        self._next_id += 1
+        return vid
+
+    def _renumber(self, inner: ir.ClosedJaxpr) -> dict[int, int]:
+        """A fresh id for every binding the inner scope introduces.
+
+        Covers constvars, invars and every equation outvar. Deeper scopes
+        are NOT covered here: each is renumbered by its own descent, which
+        is what keeps two sibling nested calls from colliding with each
+        other."""
+        remap: dict[int, int] = {}
+        for v in (*inner.jaxpr.constvars, *inner.jaxpr.invars):
+            remap[v.id] = self._fresh()
+        for e in inner.jaxpr.eqns:
+            for ov in e.outvars:
+                remap.setdefault(ov.id, self._fresh())
+        return remap
+
+    @staticmethod
+    def _renamed(atom: ir.Atom, remap: dict[int, int]) -> ir.Atom:
+        if isinstance(atom, ir.Var) and atom.id in remap:
+            return ir.Var(id=remap[atom.id], aval=atom.aval)
+        return atom
+
+    def _renumber_eqn(self, eqn: ir.JaxprEqn, remap: dict[int, int]) -> ir.JaxprEqn:
+        """`eqn` with its inner-scope references renamed.
+
+        `params` is carried through UNCHANGED on purpose: a nested
+        ClosedJaxpr in there belongs to a deeper scope that its own descent
+        will renumber, and rewriting it here would renumber it twice."""
+        return ir.JaxprEqn(
+            primitive=eqn.primitive,
+            invars=tuple(self._renamed(a, remap) for a in eqn.invars),
+            outvars=tuple(self._renamed(v, remap) for v in eqn.outvars),
+            params=eqn.params,
+            effects=eqn.effects,
+            source_info=eqn.source_info,
+        )
 
     def _define(self, vid: int, what: str) -> None:
         if vid in self.defined and self.poisoned is None:
@@ -1073,17 +1148,29 @@ class _Slicer:
                     and len(inner.jaxpr.outvars) == len(eqn.outvars)
                     and len(inner.jaxpr.constvars) == len(inner.consts)
                 ):
+                    # EVERY inner binding gets a fresh id before anything is
+                    # recorded, so two descents of the same callee — or of
+                    # two callees whose scopes happen to number alike —
+                    # cannot land on each other. The aliases are set on the
+                    # FRESH ids, which is what keeps alias resolution (and
+                    # therefore the env lookups that ride on it) landing on
+                    # the same outer atoms as before.
+                    remap = self._renumber(inner)
                     for var, val in zip(inner.jaxpr.constvars, inner.consts):
-                        self._define(var.id, f"inner constvar of {eqn.primitive!r}")
-                        self.consts[var.id] = val
-                        self.const_avals[var.id] = var.aval
+                        nid = remap[var.id]
+                        self._define(nid, f"inner constvar of {eqn.primitive!r}")
+                        self.consts[nid] = val
+                        self.const_avals[nid] = var.aval
                     for ivar, atom in zip(inner.jaxpr.invars, eqn.invars):
-                        self._define(ivar.id, f"inner invar of {eqn.primitive!r}")
-                        self.aliases[ivar.id] = atom
-                    self._flatten(inner.jaxpr.eqns)
+                        nid = remap[ivar.id]
+                        self._define(nid, f"inner invar of {eqn.primitive!r}")
+                        self.aliases[nid] = atom
+                    self._flatten(
+                        [self._renumber_eqn(e, remap) for e in inner.jaxpr.eqns]
+                    )
                     for out, iatom in zip(eqn.outvars, inner.jaxpr.outvars):
                         self._define(out.id, f"outvar of {eqn.primitive!r}")
-                        self.aliases[out.id] = iatom
+                        self.aliases[out.id] = self._renamed(iatom, remap)
                     continue
                 # malformed wrapper: keep it opaque; _validate quotes it
             self.eqn_order[id(eqn)] = len(self.eqn_order)
