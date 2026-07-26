@@ -17,9 +17,10 @@ This defect is not scatter-set work and was parked only by accident.
 """
 from __future__ import annotations
 
-import jax
-import jax.numpy as jnp
 import pytest
+
+jax = pytest.importorskip("jax")  # zero-dep CI has no jax
+import jax.numpy as jnp
 
 from stelling.harness import any_array, assert_
 from stelling.preconditions import check

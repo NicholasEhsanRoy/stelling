@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import itertools
 
-import jax
+import pytest
+
+jax = pytest.importorskip("jax")  # zero-dep CI has no jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 from jax.lax import dot_general_p
 
 from stelling.harness import assert_

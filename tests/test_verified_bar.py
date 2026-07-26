@@ -15,9 +15,10 @@ verdicts it was never meant to touch.
 """
 from __future__ import annotations
 
-import jax
-import jax.numpy as jnp
 import pytest
+
+jax = pytest.importorskip("jax")  # zero-dep CI has no jax
+import jax.numpy as jnp
 
 import stelling.verdict as V
 from stelling.harness import any_array, assert_
@@ -77,6 +78,7 @@ def test_the_bar_does_not_touch_interval_only_verdicts():
     the emission row under audit — the interval transfer is long-standing and
     unchanged by that work.
     """
+    pytest.importorskip("maddening")  # jax CI job does not install it
     from maddening.nodes.heat import HeatNode
 
     node = HeatNode("h", timestep=0.001, n_cells=5, length=1.0,

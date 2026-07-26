@@ -19,9 +19,10 @@ how this mechanism's first investigation produced three false "clean" readings.
 """
 from __future__ import annotations
 
-import jax
-import numpy as np
 import pytest
+
+jax = pytest.importorskip("jax")  # zero-dep CI has no jax
+import numpy as np
 
 from stelling._jax_compat import transcribe
 from stelling.harness import any_array, assert_
