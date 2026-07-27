@@ -92,6 +92,83 @@ Corollaries worth stating because each cost something:
 - When a control fires on the baseline, fix the control and re-run both. Do not
   reason about which side is "really" affected.
 
+## To claim a capability would unblock work, STUB IT AND COUNT
+
+Presence, attribution, and first-decline are **proxies**. Only the counterfactual
+measures. Four proxies have been used to rank work on this project; each was
+introduced to fix the previous one's flaw, and each reproduced it in a new form.
+
+- **first-decline peeling** — overcounted by measuring *which decline came first*,
+  when a recorded blocking cause is only ever the first of a stack.
+- **source attribution by outermost frame** — overcounted `abs` at 6-of-10 by
+  measuring the harness's own obligation phrasing. The frame stack is 8 deep and
+  the creator sits second from the end, not last.
+- **attribution by the wrong aggregation unit** — reported every primitive as
+  node-side, because one node occurrence anywhere marked the whole primitive.
+  `abs` is node-side in two contracts and harness-side in four; only
+  per-(primitive, contract) can say so.
+- **presence on the obligation slice** — overcounted `sqrt` by three. A primitive
+  on the slice may sit behind another decline, or behind no decline at all: one
+  contract carrying `sqrt` was *already VERIFIED*, interval-discharged, never
+  reaching emission.
+
+The pattern is not that these were careless. Each is a reasonable measurement of
+something — just not of *"would building this produce a verdict"*. **That question
+has exactly one honest form: make the capability exist and count what decides.**
+
+```
+for each candidate capability:
+    stub it in-process (emission set, budget, guard — whatever gates it)
+    run the contracts
+    count the ones that reach a VERDICT, not the ones whose cause text changed
+```
+
+Two things that make the rule usable rather than aspirational:
+
+**It is cheap.** In-process monkeypatching of a registry or a constant costs
+minutes and touches nothing on disk. There was never a cost reason to reach for a
+proxy — the proxies were faster to *think of*, not faster to run.
+
+**A stubbed verdict is not a verdict.** A stubbed gate is unsound by construction:
+it admits what the engine refuses. Label every such run as a cause enumeration,
+never record its output as a verdict anywhere, and destroy the stub when done.
+In-process stubbing helps here too — there is no tree to accidentally commit.
+
+And distinguish **kinds** of win when counting. A decline becoming a verdict is an
+unblock. A withheld VERIFIED becoming a rendered one is worth having but is a
+different thing, and summing them overstates what the capability bought.
+
+## Don't hand-roll a traversal when a canonical accessor exists
+
+`stelling.coverage.sub_jaxprs` is the canonical way to reach an equation's
+sub-jaxprs. Three sites walked the IR without it and each got it wrong in a
+different way:
+
+- `vacuity.widen`'s guard scanned **one level** — `sub_jaxprs(eqn)` then
+  `sub.eqns`, no recursion — so a declaration two calls down escaped both the
+  guard and the widening;
+- a parameter gauge selected `eqns[0]`, **positionally**, which breaks the moment
+  jax inserts an equation (it does, for broadcasting);
+- `verdict._barred_primitives` descended via `getattr(v, "jaxpr", None)`, which
+  finds a param that IS a ClosedJaxpr but not one holding a **collection** of
+  them — and `cond` stores its branches as a tuple, so a barred primitive inside
+  a `cond` branch was not found at all.
+
+The third is the sharpest: that walk *did* recurse. It simply reached through a
+different accessor than the canonical one, and silently stopped matching it.
+
+So the rule is not "descend properly" — it is **use the accessor**. A second
+implementation of a walk is a second thing to keep correct, and nothing tells you
+when it drifts.
+
+Where a second implementation genuinely is needed, **assert parity mechanically**
+rather than leaving it to review: `tests/test_bar_walk_parity.py` checks the bar's
+walk against `sub_jaxprs` across top level, `jit`, `cond`, `scan` and nested
+combinations, in the same spirit as the `EMISSION == REPLAY` census. Give it an
+anti-vacuity companion that re-implements the *old* accessor and requires it to
+disagree — otherwise a parity test that passes under the broken walk proves
+nothing.
+
 ## A measurement whose result is an ABSENCE needs a positive control
 
 **The general rule the next four sections are special cases of.** If a measurement
