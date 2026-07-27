@@ -125,6 +125,16 @@ def test_the_bar_is_currently_unreachable_and_that_is_structural():
     assertion is written so that **merging the scatter emission row breaks
     this test**, which is the moment someone must add the positive-direction
     coverage that cannot exist today.
+
+    THE ASYMMETRY, STATED WHERE IT MATTERS RATHER THAN IN A REPORT: the repair
+    that narrowed the bar has NEGATIVE-direction coverage only. The
+    over-firing it removed was live and costing verdicts; the under-firing it
+    could theoretically introduce is unreachable on this build, so no test in
+    this suite can exercise it. That asymmetry was the reason to land the
+    repair anyway — a live defect outweighs an unreachable one — and it is the
+    reason this test asserts unreachability instead of skipping. A skip passes
+    silently forever; this fails loudly the moment the assumption stops
+    holding.
     """
     from stelling.obligation import _SUPPORTED
 
