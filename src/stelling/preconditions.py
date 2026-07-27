@@ -306,7 +306,14 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
         anys = [
             e for e in cj.jaxpr.eqns if e.primitive == "stelling_any"
         ]
-        if not anys:
+        # NESTED FIRST.  scans TOP-LEVEL eqns only, so a query whose
+        # every declaration sits inside a transparent call has 
+        # and would take the "declares no bounded inputs" branch -- which is
+        # false, and contradicts this line's own tail. Found by a blinded
+        # audit; it was my branch ordering.
+        if nested_reason is not None:
+            why = nested_reason
+        elif not anys:
             why = (
                 "the query declares no bounded inputs, so widening "
                 "changes nothing"
@@ -319,8 +326,6 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
                 "widens nothing on this query; mode='all' would also "
                 "widen transcribed constants"
             )
-        elif nested_reason is not None:
-            why = nested_reason
         else:
             why = "the widened query is identical to the original"
         tail = (
