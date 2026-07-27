@@ -1505,7 +1505,31 @@ def make_solver_verdict(
     # in its jaxpr — for a reason that has nothing to do with the row under
     # audit. Barring the claim the audit is about, and only that one, is the
     # narrowest bar that does the job.
-    if status == "VERIFIED" and escalation is not None:
+    #
+    # THE CONDITION IS "THE SOLVER DECIDED SOMETHING", NOT "THE CALLER ASKED
+    # FOR A SOLVER". `escalation is not None` is true whenever the caller
+    # passed solver_timeout_ms, INCLUDING when interval arithmetic had already
+    # discharged every obligation and escalation therefore did nothing. Under
+    # that condition the bar fired on verdicts no emission row had touched,
+    # and the same query returned VERIFIED without the argument and UNKNOWN
+    # with it -- measured on a downstream contact-mechanics contract, with
+    # obl-solves = 0 and the obligation `discharged` in both runs.
+    #
+    # That violated a property much wider than the bar: THE VERDICT IS A
+    # FUNCTION OF THE QUERY AND THE ENVELOPE, not of an escalation preference
+    # that had no effect. Stamp comparison, the W6 soak's per-line records,
+    # and the no-flip gate's whole premise assume it. See
+    # tests/test_escalation_invariant.py, which asserts it directly.
+    #
+    # "Solver-decided" is read from the escalation RECORDS rather than from
+    # the ledger: a ledger stamp says an invocation happened, while an
+    # OB_DISCHARGED record says an invocation ANSWERED -- and a false VERIFIED
+    # can only be minted by an answer.
+    solver_decided = escalation is not None and any(
+        r.outcome == OB_DISCHARGED and r.invocations
+        for r in escalation.records
+    )
+    if status == "VERIFIED" and solver_decided:
         barred = _verdict._barred_primitives(closed)
         if barred:
             status = "UNKNOWN"
