@@ -43,11 +43,49 @@ import math
 from stelling import ir
 from stelling.coverage import sub_jaxprs
 
-__all__ = ["widen"]
+__all__ = ["NestedDeclaration", "widen"]
+
+
+class NestedDeclaration(Exception):
+    """A stelling_any sits inside a transparent call, so widening cannot
+    reach it.
+
+    Raised, not asserted. The predecessor was an assert, which
+    python -O strips — and stripped, the guard did not merely stop
+    reporting: the widened query silently kept the nested declaration's
+    ORIGINAL bounds, and the verdict then carried "envelope not
+    load-bearing" about an envelope that was load-bearing. Same class as the
+    seven module-level census asserts converted for the same reason; this
+    one was missed by that sweep.
+
+    Callers treat this as the vacuity instrument being INERT — no
+    load-bearing claim in either direction — which is sound. A false
+    qualification is not.
+    """
 
 _INF = math.inf
 
 _MODES = ("all", "inputs-only")
+
+
+def _refuse_nested_declarations(jaxpr, _depth: int = 0) -> None:
+    """RECURSIVE. A declaration at ANY depth escapes the widening below,
+    which rewrites top-level stelling_any bounds only.
+
+    The predecessor walked one level — sub_jaxprs(eqn) then sub.eqns
+    — so a declaration two calls down escaped both the guard and the
+    widening. A guard that handles depth 2 and misses depth 3 is the same
+    defect with a different constant, so this recurses to the bottom.
+    """
+    for eqn in jaxpr.eqns:
+        for sub in sub_jaxprs(eqn):
+            for e in sub.eqns:
+                if e.primitive == "stelling_any":
+                    raise NestedDeclaration(
+                        f"a declaration sits {_depth + 1} transparent call(s) "
+                        f"below top level, where widening cannot reach it"
+                    )
+            _refuse_nested_declarations(sub, _depth + 1)
 
 
 def widen(closed: ir.ClosedJaxpr, *, mode: str) -> ir.ClosedJaxpr:
@@ -62,12 +100,7 @@ def widen(closed: ir.ClosedJaxpr, *, mode: str) -> ir.ClosedJaxpr:
     if mode not in _MODES:
         raise ValueError(f"widen mode must be one of {_MODES}, got {mode!r}")
     j = closed.jaxpr
-    for eqn in j.eqns:  # loud guard: no nested declarations may escape
-        for sub in sub_jaxprs(eqn):
-            for e in sub.eqns:
-                assert e.primitive != "stelling_any", (
-                    "nested stelling_any would escape widening — restructure"
-                )
+    _refuse_nested_declarations(j)
     eqns = []
     for eqn in j.eqns:
         if eqn.primitive == "stelling_any":

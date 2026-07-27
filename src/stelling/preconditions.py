@@ -204,7 +204,7 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
     import stelling as _stelling
     from stelling._jax_compat import jax_version, trace, x64_enabled
     from stelling.propagate import propagate
-    from stelling.vacuity import _MODES, widen
+    from stelling.vacuity import _MODES, NestedDeclaration, widen
     from stelling.verdict import make_verdict
 
     # Eager argument validation, BEFORE tracing (audit F7/F10). The widen
@@ -279,8 +279,22 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
         # widening cannot rescue an UNKNOWN/REFUTED; nothing to check
         return v, cj
 
-    wcj = widen(cj, mode=vacuity_mode)
-    if wcj == cj or wcj.content_hash() == cj.content_hash():
+    try:
+        wcj = widen(cj, mode=vacuity_mode)
+    except NestedDeclaration as e:
+        # SUPPRESS, do not qualify. Widening rewrites TOP-LEVEL declaration
+        # bounds; a declaration inside a transparent call keeps its original
+        # bounds in the "widened" query, so the re-check compares a query
+        # against itself and reports "envelope not load-bearing" about an
+        # envelope that IS load-bearing (measured: the same claim with the
+        # envelope genuinely widened is REFUTED). The instrument cannot make
+        # this measurement, so it makes none -- the same inert disposition
+        # the identical-query case already uses. Suppression is sound; a
+        # false qualification is not.
+        wcj, nested_reason = cj, str(e)
+    else:
+        nested_reason = None
+    if nested_reason is not None or wcj == cj or wcj.content_hash() == cj.content_hash():
         # The widened query is IDENTICAL to the original (under
         # "inputs-only", point declarations hold still, so an all-point
         # envelope widens to itself). Re-running it would prove nothing
@@ -305,12 +319,19 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
                 "widens nothing on this query; mode='all' would also "
                 "widen transcribed constants"
             )
+        elif nested_reason is not None:
+            why = nested_reason
         else:
             why = "the widened query is identical to the original"
+        tail = (
+            "the declaration is out of the widening's reach, so no "
+            "load-bearing claim is made in either direction"
+            if nested_reason is not None
+            else "the widen re-check would re-run the identical query and "
+                 "measure nothing, so it did not run"
+        )
         vac_line = (
-            f"vacuity instrument inert (mode={vacuity_mode}): {why} — "
-            f"the widen re-check would re-run the identical query and "
-            f"measure nothing, so it did not run"
+            f"vacuity instrument inert (mode={vacuity_mode}): {why} — {tail}"
         )
         stamp = dataclasses.replace(
             v.stamp, assumptions=v.stamp.assumptions + (vac_line,)
