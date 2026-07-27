@@ -211,7 +211,8 @@ def _scatter_variant(accumulate):
             return None
         operand, indices, updates = ins
         n = P._scatter_add_row_form(
-            params, operand.shape, indices.shape, updates.shape
+            params, operand.shape, indices.shape, updates.shape,
+            P._scatter_indices_dtype(eqn),
         )
         if n is None:
             return None

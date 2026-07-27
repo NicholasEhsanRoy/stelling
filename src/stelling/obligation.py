@@ -952,7 +952,10 @@ def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
     on: they are caller promises jax does not verify, and the covered form
     writes exactly one element, for which both are vacuous.
     """
-    from stelling.propagate import _scatter_set_row_form
+    from stelling.propagate import (
+        _scatter_index_dtype_covers,
+        _scatter_set_row_form,
+    )
 
     if len(eqn.invars) != 3 or len(eqn.outvars) != 1:
         raise _Decline(
@@ -982,8 +985,24 @@ def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
             "thing distinguishing them, so treating it as a set would model "
             "out[k] = <dummy> where the program computes out[k] = f(operand[k])"
         )
+    indices_dtype = eqn.invars[1].aval.dtype
+    # Named before the general form failure, for the same reason the combiner
+    # is: the shapes and dimension numbers here are those of a legitimate
+    # `.set`, so "outside the measured form" would send the reader to fields
+    # that are exactly right. The shared oracle rejects this too and is the
+    # authority; this only supplies the reason.
+    if not _scatter_index_dtype_covers(indices_dtype, operand_shape[0]):
+        raise _Decline(
+            f"'scatter' index dtype {indices_dtype!r} cannot exactly represent "
+            f"the operand's leading-axis bound {operand_shape[0] - 1}: XLA "
+            f"computes the out-of-bounds bound in the INDEX element type, so "
+            f"the range check it performs is not the one this row models and "
+            f"in-range-looking updates are silently DROPPED (measured on jax "
+            f"0.11.0: an int8 index column writes at operand length 128 and "
+            f"drops at 129)"
+        )
     if not _scatter_set_row_form(
-        params, operand_shape, indices_shape, updates_shape
+        params, operand_shape, indices_shape, updates_shape, indices_dtype
     ):
         raise _Decline(
             f"'scatter' configuration (operand {operand_shape}, indices "
@@ -1050,6 +1069,7 @@ def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
     from stelling.propagate import (
         _check_unique_indices_promise,
         _scatter_add_row_form,
+        _scatter_index_dtype_covers,
     )
 
     if len(eqn.invars) != 3 or len(eqn.outvars) != 1:
@@ -1066,8 +1086,21 @@ def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
             f"'scatter-add' output shape {out_shape} contradicts the "
             f"operand shape {operand_shape} (malformed IR)"
         )
+    indices_dtype = eqn.invars[1].aval.dtype
+    if not _scatter_index_dtype_covers(indices_dtype, operand_shape[0]):
+        raise _Decline(
+            f"'scatter-add' index dtype {indices_dtype!r} cannot exactly "
+            f"represent the operand's leading-axis bound "
+            f"{operand_shape[0] - 1}: XLA computes the out-of-bounds bound in "
+            f"the INDEX element type, so the range check it performs is not "
+            f"the one this row models and in-range-looking updates are "
+            f"silently DROPPED rather than accumulated (measured on jax "
+            f"0.11.0: an int8 index column accumulates at operand length 128 "
+            f"and drops at 129)"
+        )
     n = _scatter_add_row_form(
-        eqn.params_dict(), operand_shape, indices_shape, updates_shape
+        eqn.params_dict(), operand_shape, indices_shape, updates_shape,
+        indices_dtype,
     )
     if n is None:
         raise _Decline(
