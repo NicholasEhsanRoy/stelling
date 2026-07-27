@@ -204,7 +204,9 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
     import stelling as _stelling
     from stelling._jax_compat import jax_version, trace, x64_enabled
     from stelling.propagate import propagate
-    from stelling.vacuity import _MODES, NestedDeclaration, widen
+    from stelling.vacuity import (
+        _MODES, NestedDeclaration, declaration_bounds, unwidened, widen,
+    )
     from stelling.verdict import make_verdict
 
     # Eager argument validation, BEFORE tracing (audit F7/F10). The widen
@@ -279,61 +281,29 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
         # widening cannot rescue an UNKNOWN/REFUTED; nothing to check
         return v, cj
 
+    # THE ONE RULE (audit finding 4 + the depth defect, unified): the
+    # load-bearing note may be emitted ONLY IF widen actually moved EVERY
+    # declared bound. Both defects were the same fact seen twice -- the
+    # verdict claimed the envelope was widened when part of it was not:
+    # a nested declaration the rewrite never reaches, and a POINT declaration
+    # that `inputs-only` holds still by design. Neither is a bug in widen;
+    # the bug was claiming otherwise. So this checks the claim directly
+    # rather than enumerating the shapes that can falsify it.
+    before = declaration_bounds(cj)
     try:
         wcj = widen(cj, mode=vacuity_mode)
     except NestedDeclaration as e:
-        # SUPPRESS, do not qualify. Widening rewrites TOP-LEVEL declaration
-        # bounds; a declaration inside a transparent call keeps its original
-        # bounds in the "widened" query, so the re-check compares a query
-        # against itself and reports "envelope not load-bearing" about an
-        # envelope that IS load-bearing (measured: the same claim with the
-        # envelope genuinely widened is REFUTED). The instrument cannot make
-        # this measurement, so it makes none -- the same inert disposition
-        # the identical-query case already uses. Suppression is sound; a
-        # false qualification is not.
-        wcj, nested_reason = cj, str(e)
+        wcj, unwidened_why = cj, str(e)
     else:
-        nested_reason = None
-    if nested_reason is not None or wcj == cj or wcj.content_hash() == cj.content_hash():
-        # The widened query is IDENTICAL to the original (under
-        # "inputs-only", point declarations hold still, so an all-point
-        # envelope widens to itself). Re-running it would prove nothing
-        # about the envelope — the old path here stamped "discharges with
-        # the declared bounds widened", which was measured false on
-        # exactly this case (audit F2: mode='all' on the same query says
-        # load-bearing). The instrument is inert: no re-run, no
-        # load-bearing claim in either direction, and the stamp says so.
-        anys = [
-            e for e in cj.jaxpr.eqns if e.primitive == "stelling_any"
-        ]
-        # NESTED FIRST.  scans TOP-LEVEL eqns only, so a query whose
-        # every declaration sits inside a transparent call has 
-        # and would take the "declares no bounded inputs" branch -- which is
-        # false, and contradicts this line's own tail. Found by a blinded
-        # audit; it was my branch ordering.
-        if nested_reason is not None:
-            why = nested_reason
-        elif not anys:
-            why = (
-                "the query declares no bounded inputs, so widening "
-                "changes nothing"
-            )
-        elif vacuity_mode == "inputs-only" and all(
-            e.params_dict()["lo"] == e.params_dict()["hi"] for e in anys
-        ):
-            why = (
-                "every declared input is a point interval, so this mode "
-                "widens nothing on this query; mode='all' would also "
-                "widen transcribed constants"
-            )
-        else:
-            why = "the widened query is identical to the original"
+        unwidened_why = unwidened(before, declaration_bounds(wcj))
+    if (unwidened_why is not None or wcj == cj
+            or wcj.content_hash() == cj.content_hash()):
+        why = unwidened_why or "the widened query is identical to the original"
+        # deliberately does NOT contain the phrase the note uses: a reader
+        # (or a test) scanning for that phrase must not match a line whose
+        # whole point is that no such claim was made.
         tail = (
-            "the declaration is out of the widening's reach, so no "
-            "load-bearing claim is made in either direction"
-            if nested_reason is not None
-            else "the widen re-check would re-run the identical query and "
-                 "measure nothing, so it did not run"
+            "so the envelope's role in this verdict is left uncharacterised"
         )
         vac_line = (
             f"vacuity instrument inert (mode={vacuity_mode}): {why} — {tail}"

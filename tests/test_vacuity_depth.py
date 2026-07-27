@@ -22,6 +22,8 @@ uses. Suppression is sound; a false qualification is not.
 """
 from __future__ import annotations
 
+import math
+
 import pytest
 
 jax = pytest.importorskip("jax")  # zero-dep CI has no jax
@@ -115,3 +117,59 @@ def test_the_guard_raises_rather_than_asserts():
     """`-O` strips asserts. This one was missed by the sweep that converted
     the seven module-level census asserts for exactly that reason."""
     assert not issubclass(NestedDeclaration, AssertionError)
+
+
+# -- the FOURTH defect: mixed point / non-point declarations ----------------
+#
+# Found by a blinded audit AFTER the three depth fixes, on an axis none of them
+# touched. `widen` holds POINT declarations still under "inputs-only" by design
+# -- a declared point is a stated constant, not a degenerate range -- but the
+# verdict still claimed every bound had been widened.
+#
+# The fix is one predicate covering both axes: emit the note only if widen
+# actually moved EVERY declared bound.
+
+
+def test_mixed_point_and_nonpoint_suppresses_rather_than_claiming():
+    """The audit's sharpest instance, with its executed control."""
+    def q(s_lo, s_hi):
+        def build():
+            s = any_array((), "float64", (s_lo, s_hi))
+            x = any_array((), "float64", (0.0, 1.0))
+            return (assert_(s != 0.0), assert_(s * x * x <= 0.0))
+        return build
+
+    v = check(q(-1.0, -1.0), vacuity_mode="inputs-only",
+              solver_timeout_ms=20000)
+    assert v.status == "VERIFIED"
+    assert not any("load-bearing" in n for n in v.notes), (
+        "claimed the envelope is not load-bearing while the point declaration "
+        "was never widened"
+    )
+    assert any("point interval" in a for a in v.stamp.assumptions)
+
+    # EXECUTED CONTROL: the envelope really is load-bearing, so the suppressed
+    # claim would have been false rather than merely unsupported.
+    for lo, hi in ((-1.0, 1.0), (-1e30, 1e30)):
+        w = check(q(lo, hi), vacuity_mode="inputs-only",
+                  solver_timeout_ms=20000)
+        assert w.status == "REFUTED", (
+            f"s over ({lo},{hi}) gave {w.status}; if this is not REFUTED the "
+            f"point envelope is not load-bearing and this test proves nothing"
+        )
+
+
+def test_the_one_rule_covers_both_axes():
+    """`unwidened` is the single predicate. Depth and point-ness are the same
+    fact -- a declared bound that did not move -- so both must produce a
+    reason from it rather than from two special-case guards."""
+    from stelling.vacuity import declaration_bounds, unwidened
+
+    before = [(1, 0.0, 1.0), (2, -1.0, -1.0)]
+    after_mixed = [(1, -math.inf, math.inf), (2, -1.0, -1.0)]
+    after_all = [(1, -math.inf, math.inf), (2, -math.inf, math.inf)]
+    assert unwidened(before, after_mixed) is not None
+    assert unwidened(before, after_all) is None
+    # vacuously-true over an empty set must NOT license the claim
+    assert unwidened([], []) is not None
+

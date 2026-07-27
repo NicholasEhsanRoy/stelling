@@ -43,7 +43,7 @@ import math
 from stelling import ir
 from stelling.coverage import sub_jaxprs
 
-__all__ = ["NestedDeclaration", "widen"]
+__all__ = ["NestedDeclaration", "declaration_bounds", "unwidened", "widen"]
 
 
 class NestedDeclaration(Exception):
@@ -66,6 +66,78 @@ class NestedDeclaration(Exception):
 _INF = math.inf
 
 _MODES = ("all", "inputs-only")
+
+
+def declaration_bounds(closed) -> list:
+    """Every stelling_any's (outvar id, lo, hi), at EVERY depth.
+
+    The population the widen predicate is about. Recursive for the same reason
+    the refusal is: a declaration below top level is still a declared bound,
+    and a walk that stops at the top reports it absent.
+    """
+    out = []
+
+    def walk(jaxpr):
+        for eqn in jaxpr.eqns:
+            if eqn.primitive == "stelling_any":
+                p = dict(eqn.params)
+                out.append((eqn.outvars[0].id, p["lo"], p["hi"]))
+            for sub in sub_jaxprs(eqn):
+                walk(sub)
+
+    walk(closed.jaxpr)
+    return out
+
+
+def unwidened(before, after) -> str | None:
+    """THE ONE RULE. None iff widen moved EVERY declared bound.
+
+    Both known false-qualification defects are the same fact seen twice: the
+    verdict claimed the envelope was widened when part of it was not.
+
+      * a declaration inside a transparent call is not reached by the rewrite,
+        which walks top-level equations;
+      * a POINT declaration (lo == hi) is deliberately held still under
+        mode="inputs-only", because a declared point is a stated constant
+        rather than a degenerate range -- widening it would make the mode
+        answer a different question than its name.
+
+    Neither is a bug in widen. The bug was emitting a load-bearing claim
+    anyway. So the predicate is not "is this query shaped oddly" but the
+    directly checkable "did every declared bound actually move", which is what
+    the claim asserts.
+
+    An EMPTY declaration set returns a reason too: "every bound moved" is
+    vacuously true over nothing, and a vacuous truth is exactly what must not
+    license the claim.
+    """
+    if not before:
+        return "the query declares no bounded inputs, so widening changes nothing"
+    post = {vid: (lo, hi) for vid, lo, hi in after}
+    for vid, lo, hi in before:
+        if vid not in post:
+            return (
+                f"declaration {vid} is not present after widening, so the "
+                f"re-check is not the same query"
+            )
+        if post[vid] == (lo, hi):
+            if lo == hi:
+                allpoint = all(a == b for _, a, b in before)
+                scope = ("every declared input is a point interval"
+                         if allpoint else
+                         f"declaration {vid} is a point interval ({lo})")
+                # the hint is load-bearing guidance, not decoration: the
+                # other mode DOES widen points, so a caller who needs the
+                # measurement has somewhere to go.
+                return (
+                    f"{scope}, so this mode widens nothing on it; "
+                    f"mode='all' would also widen transcribed constants"
+                )
+            return (
+                f"declaration {vid} kept its bounds ({lo}, {hi}) -- the "
+                f"rewrite did not reach it; the envelope was not fully widened"
+            )
+    return None
 
 
 def _refuse_nested_declarations(jaxpr, _depth: int = 0) -> None:
