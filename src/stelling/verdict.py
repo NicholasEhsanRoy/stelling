@@ -526,8 +526,6 @@ def _barred_primitives(closed) -> tuple[str, ...]:
     # this was latent; but a bar with weaker reachability than the coverage
     # tool is a hole in the one guard the unshipped rows rest on, and "latent"
     # is not a reason to keep two walks.
-    from stelling.coverage import sub_jaxprs
-
     found, seen = set(), set()
 
     def walk(jaxpr):
@@ -539,9 +537,7 @@ def _barred_primitives(closed) -> tuple[str, ...]:
             if name in VERIFIED_BARRED_PRIMITIVES:
                 found.add(name)
             for inner in sub_jaxprs(eqn):
-                if id(inner) not in seen:
-                    seen.append(id(inner))
-                    walk(inner)
+                walk(inner)
 
     try:
         walk(getattr(closed, "jaxpr", None))
