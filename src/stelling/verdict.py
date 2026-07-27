@@ -479,7 +479,25 @@ def _barred_primitives(closed) -> tuple[str, ...]:
     """Barred primitives present anywhere in the traced query, innermost
     scopes included. Deliberately whole-query rather than slice-scoped: a
     bar that under-fires is worse than one that over-fires, and the slice is
-    not available at this layer."""
+    not available at this layer.
+
+    DESCENT GOES THROUGH :func:`stelling.coverage.sub_jaxprs`, THE CANONICAL
+    ACCESSOR, and must not be hand-rolled here. The predecessor descended via
+    ``getattr(v, "jaxpr", None)``, which finds a param that IS a ClosedJaxpr
+    but not one holding a COLLECTION of them — and ``cond`` stores its
+    branches as a tuple. Measured: a `scatter` inside a `cond` branch was not
+    barred at all, while the same primitive at top level, inside `jit`, and
+    inside `scan` all barred correctly. That is the UNDER-firing direction,
+    which this function's own docstring calls the worse one.
+
+    The lesson is narrower than "descend properly": **do not hand-roll a
+    traversal when a canonical accessor exists.** A second implementation of
+    a walk is a second thing to keep correct, and this one silently stopped
+    matching. `tests/test_bar_walk_parity.py` asserts the two agree
+    mechanically, in the spirit of the EMISSION == REPLAY census.
+    """
+    from stelling.coverage import sub_jaxprs
+
     if not VERIFIED_BARRED_PRIMITIVES or closed is None:
         return ()
     found, seen = set(), []
@@ -489,9 +507,8 @@ def _barred_primitives(closed) -> tuple[str, ...]:
             name = str(eqn.primitive)
             if name in VERIFIED_BARRED_PRIMITIVES:
                 found.add(name)
-            for v in eqn.params_dict().values() if hasattr(eqn, "params_dict") else ():
-                inner = getattr(v, "jaxpr", None)
-                if inner is not None and id(inner) not in seen:
+            for inner in sub_jaxprs(eqn):
+                if id(inner) not in seen:
                     seen.append(id(inner))
                     walk(inner)
 
