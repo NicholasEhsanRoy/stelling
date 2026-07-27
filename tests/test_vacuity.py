@@ -117,5 +117,13 @@ def test_nested_declaration_fails_loudly():
     j = ir.Jaxpr(constvars=(), invars=(), outvars=(outer_v,), eqns=(call,),
                  effects=(), debug_info=None)
     q = ir.ClosedJaxpr(jaxpr=j, consts=())
-    with pytest.raises(AssertionError):
+    # A REAL exception, not an assert:  strips asserts, and
+    # stripped this guard did not merely stop reporting -- the widened query
+    # silently kept the nested declaration's original bounds and the verdict
+    # then carried "envelope not load-bearing" about a load-bearing envelope.
+    from stelling.vacuity import NestedDeclaration
+    with pytest.raises(NestedDeclaration):
         widen(q, mode="all")
+    assert not isinstance(NestedDeclaration("x"), AssertionError), (
+        "an assert here vanishes under -O, which is how this defect shipped"
+    )

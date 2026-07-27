@@ -204,7 +204,9 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
     import stelling as _stelling
     from stelling._jax_compat import jax_version, trace, x64_enabled
     from stelling.propagate import propagate
-    from stelling.vacuity import _MODES, widen
+    from stelling.vacuity import (
+        _MODES, NestedDeclaration, declaration_bounds, unwidened, widen,
+    )
     from stelling.verdict import make_verdict
 
     # Eager argument validation, BEFORE tracing (audit F7/F10). The widen
@@ -279,38 +281,32 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
         # widening cannot rescue an UNKNOWN/REFUTED; nothing to check
         return v, cj
 
-    wcj = widen(cj, mode=vacuity_mode)
-    if wcj == cj or wcj.content_hash() == cj.content_hash():
-        # The widened query is IDENTICAL to the original (under
-        # "inputs-only", point declarations hold still, so an all-point
-        # envelope widens to itself). Re-running it would prove nothing
-        # about the envelope — the old path here stamped "discharges with
-        # the declared bounds widened", which was measured false on
-        # exactly this case (audit F2: mode='all' on the same query says
-        # load-bearing). The instrument is inert: no re-run, no
-        # load-bearing claim in either direction, and the stamp says so.
-        anys = [
-            e for e in cj.jaxpr.eqns if e.primitive == "stelling_any"
-        ]
-        if not anys:
-            why = (
-                "the query declares no bounded inputs, so widening "
-                "changes nothing"
-            )
-        elif vacuity_mode == "inputs-only" and all(
-            e.params_dict()["lo"] == e.params_dict()["hi"] for e in anys
-        ):
-            why = (
-                "every declared input is a point interval, so this mode "
-                "widens nothing on this query; mode='all' would also "
-                "widen transcribed constants"
-            )
-        else:
-            why = "the widened query is identical to the original"
+    # THE ONE RULE (audit finding 4 + the depth defect, unified): the
+    # load-bearing note may be emitted ONLY IF widen actually moved EVERY
+    # declared bound. Both defects were the same fact seen twice -- the
+    # verdict claimed the envelope was widened when part of it was not:
+    # a nested declaration the rewrite never reaches, and a POINT declaration
+    # that `inputs-only` holds still by design. Neither is a bug in widen;
+    # the bug was claiming otherwise. So this checks the claim directly
+    # rather than enumerating the shapes that can falsify it.
+    before = declaration_bounds(cj)
+    try:
+        wcj = widen(cj, mode=vacuity_mode)
+    except NestedDeclaration as e:
+        wcj, unwidened_why = cj, str(e)
+    else:
+        unwidened_why = unwidened(before, declaration_bounds(wcj))
+    if (unwidened_why is not None or wcj == cj
+            or wcj.content_hash() == cj.content_hash()):
+        why = unwidened_why or "the widened query is identical to the original"
+        # deliberately does NOT contain the phrase the note uses: a reader
+        # (or a test) scanning for that phrase must not match a line whose
+        # whole point is that no such claim was made.
+        tail = (
+            "so the envelope's role in this verdict is left uncharacterised"
+        )
         vac_line = (
-            f"vacuity instrument inert (mode={vacuity_mode}): {why} — "
-            f"the widen re-check would re-run the identical query and "
-            f"measure nothing, so it did not run"
+            f"vacuity instrument inert (mode={vacuity_mode}): {why} — {tail}"
         )
         stamp = dataclasses.replace(
             v.stamp, assumptions=v.stamp.assumptions + (vac_line,)
