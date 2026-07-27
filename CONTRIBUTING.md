@@ -128,6 +128,32 @@ reject at least one point, a probe must assert something the cheap layers cannot
 decide — are kept because they are more actionable than this rule; use them first
 and fall back to this when the situation fits none of them.
 
+## Before measuring a constant, read its definition site
+
+`ELEMENT_BUDGET = 512` carries a measured table in a comment **directly above the
+assignment** — solver timings at 256/512/1024/2048 terms, naming the binding
+fragment. Two sessions were spent measuring that constant and concluding it was
+three orders of magnitude too tight. The measurements were correct. They were of
+the *other* fragment, and the table said so.
+
+Nothing was missing or undocumented. It was unread, by measurement aimed at
+exactly the question it answered — and the result was a proposal to raise a
+CI-critical bound by 140×, which would have hung the first nonlinear obligation.
+
+So: **before measuring a constant, threshold, budget, tolerance or cap, read the
+source at its definition site.** If a derivation is there, the measurement's job is
+to *check that derivation on its own terms* — same regime, same fragment — not to
+replace it with a fresh number from a different regime.
+
+The campaign already has "read, don't recall" for census membership. This is its
+mirror: a value someone derived once is evidence, and re-deriving it without
+reading it discards that evidence while feeling like rigour.
+
+Corollary for anyone writing such a constant: **name the regime in the comment.**
+512's table named `QF_NRA` explicitly, which is the only reason the error was
+findable at all. A derivation silent on the regime it was taken under is a latent
+version of the same trap.
+
 ## State which query a measurement actually ran
 
 Norm D catches an instrument that cannot detect the thing. This catches one that
