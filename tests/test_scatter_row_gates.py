@@ -12,12 +12,13 @@ The combiner gate is here because an adversarial audit found it missing.
 """
 from __future__ import annotations
 
-import jax
-import jax.numpy as jnp
 import pytest
 
-from stelling.harness import any_array, assert_
-from stelling.preconditions import check
+jax = pytest.importorskip("jax")  # zero-dep CI has no jax
+import jax.numpy as jnp  # noqa: E402
+
+from stelling.harness import any_array, assert_  # noqa: E402
+from stelling.preconditions import check  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
