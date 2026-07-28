@@ -489,6 +489,54 @@ def _t_convert(eqn, params, ins):
     return None  # value-changing or unrecognized conversion -> ⊤, noted
 
 
+def _t_split(eqn, params, ins):
+    """``jax.lax.split``: cut one operand along ``axis`` into ``sizes`` pieces.
+
+    EXACT, and exactly so: every output element IS an input element, at a
+    statically known index. There is no arithmetic, no rounding, and no
+    dtype question — which is why this is classified non-computing.
+
+    Built on :func:`interval.slice_` rather than on fresh index arithmetic:
+    the offsets are a running sum along one axis and the extents are the
+    operand's on every other, which is precisely a slice. Reusing the
+    audited helper is the "don't hand-roll a traversal" norm applied to
+    indexing — a second implementation of the same bounds arithmetic is a
+    second place for it to be wrong.
+
+    Declines (⊤) when the params do not describe the operand it was handed:
+    sizes that do not sum to the axis extent, an axis outside the operand's
+    rank, a negative size, or an output count the params disagree with.
+    """
+    if len(ins) != 1:
+        return None
+    (a,) = ins
+    sizes = params.get("sizes")
+    axis = params.get("axis")
+    if sizes is None or axis is None:
+        return None  # absent params are not a traced form; never guessed
+    try:
+        sizes = tuple(int(s) for s in sizes)
+        axis = int(axis)
+    except (TypeError, ValueError):
+        return None
+    rank = len(a.shape)
+    if not 0 <= axis < rank or any(s < 0 for s in sizes):
+        return None
+    if sum(sizes) != a.shape[axis]:
+        return None  # the cut does not partition the axis
+    if len(sizes) != len(eqn.outvars):
+        return None  # params and the equation's own arity disagree
+
+    out, start = [], 0
+    for s in sizes:
+        starts = tuple(start if d == axis else 0 for d in range(rank))
+        limits = tuple(start + s if d == axis else a.shape[d]
+                       for d in range(rank))
+        out.append(iv.slice_(a, starts, limits, None))
+        start += s
+    return out
+
+
 def _t_reshape(eqn, params, ins):
     if params.get("dimensions") is not None:
         # a dimensions= reshape permutes before reshaping — not the C-order
@@ -1523,6 +1571,16 @@ TRANSFERS = {
     # result, wraparound-reachable arithmetic declines with the range
     # quoted. A no-op on every float dtype.
     "add": (_int_guarded("add", lambda eqn, p, ins: [iv.add(*ins)]), TIER_SOUND),
+    # `add_any` is NOT an alias of `add` in jax -- it is a separate
+    # Primitive("add_any") whose abstract_eval asserts core.typematch(x, y)
+    # and returns x, so it admits NO promotion and NO broadcasting where
+    # `add` admits both. What it does to the VALUES is addition (jax binds
+    # it to accumulate cotangents), so the interval rule is `add`'s rule
+    # and it carries the same overflow guard under its own name.
+    "add_any": (
+        _int_guarded("add_any", lambda eqn, p, ins: [iv.add(*ins)]),
+        TIER_SOUND,
+    ),
     "sub": (_int_guarded("sub", lambda eqn, p, ins: [iv.sub(*ins)]), TIER_SOUND),
     "mul": (_int_guarded("mul", lambda eqn, p, ins: [iv.mul(*ins)]), TIER_SOUND),
     # real division on floats; TRUNCATING integer division, exactly, on
@@ -1577,6 +1635,7 @@ TRANSFERS = {
         lambda eqn, p, ins: [iv.squeeze(ins[0], tuple(p.get("dimensions", ())))],
         TIER_EXACT,
     ),
+    "split": (_t_split, TIER_EXACT),
     "slice": (
         lambda eqn, p, ins: [
             iv.slice_(
@@ -1680,6 +1739,9 @@ _INT_COMPUTING = frozenset({
     # elements), so it can produce a value its operands did not contain —
     # exactly the add/reduce_sum class, same guard
     "scatter-add",
+    # `add_any` sums two operands exactly as `add` does, so it can produce a
+    # value neither contained; same class, same guard, probed the same way
+    "add_any",
     # the contraction SUMS products, so it too can produce a value its
     # operands did not contain. Float-only in practice because the shared
     # oracle refuses integral accumulation (and an ABSENT
@@ -1695,6 +1757,9 @@ _INT_COMPUTING = frozenset({
 #   the structural ops  are pure data movement (copies of in-range values)
 #   the harness primitives  are declarations and identities
 _INT_NON_COMPUTING = frozenset({
+    # `split` is pure data movement: every output element IS an input element
+    # at a static index, so it cannot introduce an out-of-range integer
+    "split",
     "max", "min", "select_n",
     "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
     "convert_element_type",
@@ -1728,6 +1793,11 @@ if _INT_COMPUTING & _INT_NON_COMPUTING:
 # reason below. A silent two-edit misfiling is now a conscious three-edit
 # act whose third edit is a soundness claim in this registry.
 _INT_NON_COMPUTING_EXEMPT: dict[str, str] = {
+    "split": (
+        "cuts one operand along one axis at statically known offsets; every "
+        "output element IS an input element, so no arithmetic occurs and an "
+        "in-range integer cannot be moved out of range by being copied"
+    ),
     "max": (
         "selects one of its operands' values elementwise; no arithmetic "
         "creates a value its in-range operands did not already contain"
@@ -1890,6 +1960,7 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
             "pow": (hi, 2.0), "exp": (hi, None), "sqrt": (hi, None),
             "reduce_sum": (hi, None), "integer_pow": (hi, None),
             "scatter-add": (hi, hi),
+            "add_any": (hi, hi),
             # the contraction's products escape exactly as `mul`'s do, so
             # it takes mul's operand values
             "dot_general": (hi, hi),
@@ -1900,6 +1971,7 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
         "pow": (lo, 3.0), "exp": (lo, None), "sqrt": (lo, None),
         "reduce_sum": (lo, None), "integer_pow": (lo, None),
         "scatter-add": (lo, lo),
+        "add_any": (lo, lo),
         "dot_general": (lo, hi),
     }[prim]
 
@@ -2565,6 +2637,7 @@ IEEE_TRANSFERS = {
     # convention (iv._prod inside iv.mul) is NOT reused.
     "add": (_ieee_arith(iv.ieee_add), TIER_EXACT),
     "sub": (_ieee_arith(iv.ieee_sub), TIER_EXACT),
+    "add_any": (_ieee_arith(iv.ieee_add), TIER_EXACT),
     "mul": (_ieee_arith(iv.ieee_mul), TIER_EXACT),
     "div": (_ieee_arith(iv.ieee_div), TIER_EXACT),
     # (i)/(ii) exact sign arithmetic; flag propagates (NaN stays NaN)
@@ -2615,6 +2688,7 @@ IEEE_TRANSFERS = {
         ),
         TIER_EXACT,
     ),
+    "split": (_ieee_passthrough(_t_split), TIER_EXACT),
     "slice": (
         _ieee_passthrough(
             lambda eqn, p, ins: [

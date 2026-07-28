@@ -1073,7 +1073,14 @@ def wrapping_int_query(
     v, s = var(0, a), var(1, a)
     pred, out = var(2, BOOL), var(3, BOOL)
     eqns = [any_eqn(v, bound_lo, bound_hi, dtype=dtype)]
-    if prim in ("add", "sub", "mul", "div"):
+    # The BINARY computing primitives. This list is an eighth registration
+    # site and, unlike the seven census constraints, it is not raise-guarded
+    # at import — a new binary computing transfer that is missed here builds a
+    # UNARY query and the transfer raises TypeError rather than declining.
+    # The suite is what enforces it; adding `add_any` was caught here on the
+    # first run after registration, which is the intended behaviour and the
+    # reason this is a comment rather than a silent tuple.
+    if prim in ("add", "add_any", "sub", "mul", "div"):
         if second is None:
             ins = [v, v]
         else:
