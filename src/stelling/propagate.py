@@ -205,6 +205,12 @@ class Propagation:
     # which arithmetic the obligations were judged about ("real" | "ieee");
     # the verdict assemblers stamp from this field, never from a guess
     semantics: str = "real"
+    # an assume was DROPPED in constrain mode: its predicate had no decidable
+    # box, so the query ran over a SUPERSET of the intended set. Carried out
+    # to the solver layer because the escalation refusal keys on a CONSTRAINED
+    # assume being present, and a dropped one is not present at all — leaving
+    # the solver free to emit a sat witness outside the precondition.
+    assume_dropped: bool = False
 
     @property
     def all_discharged(self) -> bool:
@@ -3060,6 +3066,11 @@ class _Propagator:
         # subsequent definite violation is withheld from REFUTED (a
         # possibly-vacuous refutation is not a refutation — audit F7).
         self.uncertified = False
+        # set when an assume was DROPPED rather than applied. Distinct from
+        # `uncertified` because it must also reach the SOLVER path: the
+        # escalation decline keys on a constrained assume being present, and
+        # a dropped one is not present at all.
+        self.assume_dropped = False
 
     def read(self, atom: ir.Atom) -> iv.IntervalArray:
         if isinstance(atom, ir.Literal):
@@ -3379,6 +3390,31 @@ class _Propagator:
                 self.notes.append(
                     ASSUME_DROP_NOTE.format(where=where) + f" ({reasons})"
                 )
+                # F7's NO-OP HALF. The narrowing path sets `uncertified` when
+                # it constrains an over-approximated variable; a DROPPED
+                # assume never reached that branch, so neither the interval
+                # withhold nor solvers.py's decline-when-constrained ever
+                # engaged — both are conditioned on the assume having TAKEN
+                # EFFECT, and an assume that no-ops is invisible to both.
+                #
+                # A dropped assume means the query ran over a SUPERSET of the
+                # intended set, so the disposition is ONE-SIDED, exactly as
+                # F7 already is (it gates `violated-over-set` only, and
+                # nothing withholds `discharged`):
+                #
+                #   VERIFIED over a superset IMPLIES VERIFIED over the subset
+                #                                       -> keep, disclose
+                #   REFUTED  over a superset does NOT   -> withhold; the
+                #                                          witness may lie
+                #                                          outside the set
+                #
+                # Measured before this: `assume(jnp.all(x >= 0))` over
+                # x in [-10, 10]^3 asserting sum(x) >= 0 returned REFUTED with
+                # the replay-confirmed witness [0, 0, -1], which violates the
+                # dropped precondition. Two-sided would over-fire the way the
+                # scatter bar did for its whole history.
+                self.uncertified = True
+                self.assume_dropped = True
 
     def _apply_assumed_pred(
         self,
@@ -4508,4 +4544,5 @@ def propagate(
         assumptions=tuple(sorted(assumptions)),
         notes=tuple(p.notes),
         semantics=semantics,
+        assume_dropped=p.assume_dropped,
     )

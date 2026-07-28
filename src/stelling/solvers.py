@@ -112,6 +112,15 @@ INSTALL_HINT = (
 # does not refute the conditional claim the propagation stamped. Full
 # refusal is the sound v1; faithful narrowed-bounds emission is a later,
 # separately-audited build.
+DROPPED_ASSUME_REFUSAL = (
+    "assume DROPPED present: the precondition had no decidable box, so the "
+    "query ran over a SUPERSET of the intended set — a sat witness could lie "
+    "outside the precondition entirely while the verdict reads REFUTED. "
+    "VERIFIED over a superset still implies VERIFIED over the intended set "
+    "and is unaffected; escalation declines rather than mint a witness that "
+    "answers a weaker question than the one written"
+)
+
 CONSTRAINED_ASSUME_REFUSAL = (
     "constrained assume present: solver escalation emits over the declared "
     "box, which does not respect the assumed precondition — a sat witness "
@@ -1288,6 +1297,29 @@ def escalate(
                 notes=(f"assert #{item.index}: {reason}",),
             )
         records.append(record)
+    if propagation.assume_dropped:
+        # F7's no-op half, solver side, and it must be ONE-SIDED. Declining
+        # escalation outright was the first attempt and it was wrong: it
+        # suppressed unsat too, and a relational assume that stays inert in
+        # constrain mode is DOCUMENTED as escalating normally precisely
+        # because the drop over-approximates and unsat over a superset still
+        # implies unsat over the subset. The suite caught it.
+        #
+        # So only VIOLATIONS are withheld. A discharge over a superset implies
+        # a discharge over the intended set; a witness over a superset may lie
+        # entirely outside the precondition, which is the measured defect.
+        records = [
+            r if r.outcome not in (OB_VIOLATED_WITNESS, OB_VIOLATED_CONSTANT)
+            else ObligationEscalation(
+                index=r.index,
+                outcome=OB_UNKNOWN,
+                detail=f"violation WITHHELD from REFUTED: {DROPPED_ASSUME_REFUSAL}",
+                invocations=r.invocations,
+                witness=None,
+                notes=r.notes + (DROPPED_ASSUME_REFUSAL,),
+            )
+            for r in records
+        ]
     return Escalation(
         records=tuple(records), notes=(), ledger=ledger,
         semantics=propagation.semantics,
