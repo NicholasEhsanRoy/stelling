@@ -769,7 +769,14 @@ MUTATIONS = {
 
 
 def test_gauge_catches_every_mutation():
-    report = gauge(BASELINE, GATES, MUTATIONS, residual={})
+    report = gauge(
+        BASELINE, GATES, MUTATIONS, residual={},
+        scope=("BOTH faces of the scatter rows plus the paths downstream of "
+               "them: interval soundness and point-box exactness on the "
+               "transfer, emission agreement, unrolled equivalence, witness "
+               "replay validity, and the element budget. Does not drive any "
+               "other primitive's rows."),
+    )
     render = report.render()
     print("\n" + render)
     # expected residual: EMPTY — every mutation is caught (the gauge

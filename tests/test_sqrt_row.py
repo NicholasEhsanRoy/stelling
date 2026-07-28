@@ -335,7 +335,12 @@ _MUTATIONS = {
 
 
 def test_sqrt_fidelity_gauge_residual_empty():
-    report = fidelity.gauge(_baseline, _GATES, _MUTATIONS, residual={})
+    report = fidelity.gauge(
+        _baseline, _GATES, _MUTATIONS, residual={},
+        scope=("the sqrt INTERVAL transfer only: lower/upper soundness, "
+               "ordering, domain refusal, and the lower floor. sqrt has no "
+               "emission row, so there is no emission face to drive."),
+    )
     # every mutation is caught by at least one gate; nothing survives
     assert report.residual == ()
     caught = dict(report.caught_by)

@@ -1444,7 +1444,13 @@ def test_fidelity_gauge_every_mutation_caught(capsys):
     for name, ctx in _mutants().items():
         with ctx:
             mutations[name] = _run_battery()
-    report = gauge(baseline, gates, mutations, residual={})
+    report = gauge(
+        baseline, gates, mutations, residual={},
+        scope=("the affine domain's own arithmetic: containment against dense "
+               "sampling, exact cancellation, honest non-closure, and "
+               "equivalence with the propagation pipeline. Does not drive the "
+               "interval transfers, any emission plan, or the solver."),
+    )
     assert report.residual == ()  # every mutation caught; nothing survives
     for _, catchers in report.caught_by:
         assert catchers

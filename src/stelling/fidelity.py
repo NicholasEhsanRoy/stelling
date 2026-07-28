@@ -42,15 +42,24 @@ class FidelityReport:
     tuple marks a survivor, and every survivor is residual-listed (the
     gauge refused otherwise). ``residual``: the survivors' explanations,
     ``(mutation_name, explanation)``, in battery order.
+
+    ``scope``: what this gauge's gates actually REACH, in the author's own
+    words. Carried into :meth:`render` because a gauge's zero is only
+    meaningful against the surface it drove — see the "instrument must declare
+    its scope" norm in ``CONTRIBUTING.md``, whose fifth instance was a scatter
+    gauge reporting zero survivors while never running the interval transfer
+    the change under test had altered.
     """
 
     gates: tuple[str, ...]
     caught_by: tuple[tuple[str, tuple[str, ...]], ...]
     residual: tuple[tuple[str, str], ...]
+    scope: str
 
     def render(self) -> str:
         lines = [
             "== fidelity gauge — measured discriminating power (L21)",
+            f"SCOPE — what these gates reach: {self.scope}",
             f"baseline: passes every gate ({', '.join(self.gates)})",
         ]
         width = max((len(name) for name, _ in self.caught_by), default=0)
@@ -70,10 +79,14 @@ class FidelityReport:
             lines.append("  (empty: every mutation was caught)")
         for name, why in self.residual:
             lines.append(f"  {name}: {why}")
+        lines.append(
+            f"== every count above is scoped to: {self.scope} — a surface "
+            f"these gates do not drive is NOT gauged by this report =="
+        )
         return "\n".join(lines)
 
 
-def gauge(baseline, gates, mutations, *, residual):
+def gauge(baseline, gates, mutations, *, residual, scope):
     """Run every gate against the baseline and every mutation; return the
     measured :class:`FidelityReport`, or refuse loudly.
 
@@ -101,6 +114,14 @@ def gauge(baseline, gates, mutations, *, residual):
 
     Gate exceptions propagate (see the module docstring).
     """
+    if not isinstance(scope, str) or not scope.strip():
+        raise ValueError(
+            "fidelity.gauge: no scope — state what these gates REACH, and "
+            "what they do not. A gauge's zero is a claim about the surface it "
+            "drove, and a report that does not name that surface gets quoted "
+            "past it; this argument is required and undefaulted so omitting it "
+            "is an error rather than a silent empty claim"
+        )
     gate_items = tuple(gates.items()) if gates is not None else ()
     if not gate_items:
         raise ValueError(
@@ -188,4 +209,5 @@ def gauge(baseline, gates, mutations, *, residual):
             for name, catchers in caught_by
             if not catchers
         ),
+        scope=scope.strip(),
     )

@@ -13,7 +13,17 @@ from __future__ import annotations
 
 import pytest
 
-from stelling.fidelity import FidelityReport, gauge
+from stelling.fidelity import FidelityReport
+from stelling.fidelity import gauge as _gauge
+
+# Every call below is about a refusal or a table, not about scope, so they share
+# one declaration. `scope` is required and undefaulted at the real entry point --
+# test_scope_is_required_and_undefaulted is what pins that.
+_SCOPE = "the toy integer gates in this module; no stelling surface is driven"
+
+
+def gauge(*args, scope=_SCOPE, **kwargs):
+    return _gauge(*args, scope=scope, **kwargs)
 
 # A tiny concrete stack used throughout: subjects are ints, the baseline
 # is 0, gates check congruences that 0 satisfies.
@@ -144,3 +154,31 @@ def test_battery_order_is_preserved_in_table():
         residual={},
     )
     assert [name for name, _ in report.caught_by] == ["z_first", "a_second"]
+
+
+def test_scope_is_required_and_undefaulted():
+    """Omitting it must be a construction error, not a silent empty claim.
+
+    The norm this enforces was earned: a scatter gauge reported zero survivors
+    while never driving the interval transfer the change under test had
+    altered, and nothing in its output said so.
+    """
+    with pytest.raises(TypeError):
+        _gauge(0, GATES, {"odd": 3}, residual={})  # no scope=
+
+
+@pytest.mark.parametrize("bad", ["", "   ", None, 7])
+def test_a_blank_or_non_string_scope_is_refused(bad):
+    with pytest.raises(ValueError, match="no scope"):
+        _gauge(0, GATES, {"odd": 3}, residual={}, scope=bad)
+
+
+def test_the_scope_reaches_the_rendered_output():
+    """A report that does not carry its scope gets quoted past it."""
+    report = _gauge(0, GATES, {"odd": 3}, residual={},
+                    scope="emission face only; the transfer is NOT driven")
+    text = report.render()
+    assert "emission face only; the transfer is NOT driven" in text
+    # once beside the header and once beside the counts, so neither a reader
+    # who skims the top nor one who skims the bottom can miss it
+    assert text.count("emission face only; the transfer is NOT driven") == 2
