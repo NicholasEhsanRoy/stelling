@@ -605,7 +605,80 @@ def _validate_jaxpr(jaxpr: Jaxpr, where: str) -> None:
         params = dict(eqn.params)
         for name, v in eqn.params:
             _validate_param_value(v, f"{w}.params[{name!r}]")
+        _validate_required_params(eqn, w)
         _validate_decl_eqn(eqn, w)
+
+
+# The param keys jax supplies on EVERY equation for these primitives, measured
+# by tracing 42 distinct forms on jax 0.11.0 and checking the key set is
+# constant per primitive (`param_key_census.py` in the sweeps repository; the
+# census reports which primitives it reached, and a primitive absent from this
+# table is simply unconstrained here).
+#
+# WHY THIS EXISTS, and it is the opposite of the defect it closes. Readers were
+# taught to test key PRESENCE rather than `.get()`, because a key present with
+# value None is a real jax form whose meaning differs from absence — for
+# `scatter-add`, present-None is jax's REPLACE combiner while ABSENT is the
+# hand-built form, where the primitive name is the semantic authority.
+#
+# That is right for a traced equation and right for hand-built IR. It is wrong
+# for a DESERIALIZED one, because it converts DELETION INTO BLESSING: remove
+# `update_jaxpr` from a persisted `.at[k].apply(...)` query and the set-row
+# admits it as a plain `.set`. Measured before this check, on operand
+# [0, 5, 0, 0] with the key removed: the transfer modelled `element[1] = 2.0`
+# where jax computes 5.0 — a box that EXCLUDES the executed value, on the
+# interval face, where no solver and no replay is involved to catch it.
+#
+# The earlier audit concluded "an absent key is structurally unreachable from
+# jax", which is true of `bind` and false of `from_dict`. This is the door that
+# distinction leaves open, closed at the door rather than at each of the ~30
+# readers that would otherwise each have to be right.
+_REQUIRED_PARAMS: dict[str, frozenset[str]] = {
+    "broadcast_in_dim": frozenset({"broadcast_dimensions", "shape", "sharding"}),
+    "concatenate": frozenset({"dimension"}),
+    "convert_element_type": frozenset({"new_dtype", "sharding", "weak_type"}),
+    "dot_general": frozenset({"dimension_numbers", "out_sharding", "precision",
+                              "preferred_element_type"}),
+    "exp": frozenset({"accuracy"}),
+    "gather": frozenset({"dimension_numbers", "fill_value", "indices_are_sorted",
+                         "mode", "slice_sizes", "unique_indices"}),
+    "integer_pow": frozenset({"y"}),
+    "mul": frozenset({"out_dtype"}),
+    "reduce_sum": frozenset({"axes", "out_sharding"}),
+    "reshape": frozenset({"dimensions", "new_sizes", "sharding"}),
+    "scatter": frozenset({"dimension_numbers", "indices_are_sorted", "mode",
+                          "unique_indices", "update_consts", "update_jaxpr"}),
+    "scatter-add": frozenset({"dimension_numbers", "indices_are_sorted", "mode",
+                              "unique_indices", "update_consts", "update_jaxpr"}),
+    "slice": frozenset({"limit_indices", "start_indices", "strides"}),
+    "sqrt": frozenset({"accuracy"}),
+    "squeeze": frozenset({"dimensions"}),
+    "stack": frozenset({"axis"}),
+    "transpose": frozenset({"permutation"}),
+}
+
+
+def _validate_required_params(eqn: "JaxprEqn", where: str) -> None:
+    """Refuse a LOADED equation missing a param jax always supplies.
+
+    Load path only, deliberately. Hand-built IR legitimately omits params —
+    that is the form whose blessing `update_jaxpr`'s absence carries — and
+    `JaxprEqn` stays constructible without them. What is not legitimate is a
+    document claiming to be a traced jax program that is missing a key every
+    traced instance of that primitive carries.
+    """
+    required = _REQUIRED_PARAMS.get(eqn.primitive)
+    if required is None:
+        return
+    missing = sorted(required - {k for k, _ in eqn.params})
+    _load_check(
+        not missing,
+        where,
+        f"missing param(s) {missing} that jax supplies on every {eqn.primitive!r} "
+        f"equation; absence is not a traced form, and readers that test key "
+        f"PRESENCE would take it for a hand-built equation and apply the "
+        f"primitive's default meaning",
+    )
 
 
 def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:

@@ -1262,8 +1262,14 @@ def test_slice_bad_params_degrade_through_a_public_deserialisation_roundtrip():
     q = close(
         [
             any_eqn(x, 0.0, 1.0),
+            # `sharding` carried because the transcriber carries it: a document
+            # arriving through from_dict claims to be a traced program, and a
+            # traced `broadcast_in_dim` always has this key. The subject of this
+            # test is a slice whose params are PRESENT and out of range, which
+            # is a different failure from a param being absent.
             eqn("broadcast_in_dim", [x], arr,
-                [("shape", (1,)), ("broadcast_dimensions", ())]),
+                [("shape", (1,)), ("broadcast_dimensions", ()),
+                 ("sharding", None)]),
             eqn("slice", [arr], sel,
                 [("start_indices", (0,)), ("limit_indices", (9,)),
                  ("strides", None)]),
