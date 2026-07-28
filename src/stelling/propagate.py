@@ -1487,6 +1487,32 @@ _TAINT_STOPS = frozenset({
 # fire, never fewer — so they go in now rather than as a comment for later.
 IEEE_PRODUCT_SOURCES = frozenset({"mul", "dot_general", "integer_pow"})
 
+# Every registered transfer that PERFORMS an addition, and therefore every
+# place a product can be contracted into. This is the complete candidate set
+# for the sink gate, kept separate from IEEE_CONTRACTION_ADDENDS because the
+# two are not the same list and the difference is the whole point:
+#
+#   add, sub, add_any   in the sink gate; hulled
+#   reduce_sum          handled by its OWN branch (a two-element reduction IS
+#                       an addition), which is a third site for one hazard
+#   dot_general         NOT hulled -- it declines in ieee mode
+#   scatter-add         NOT hulled -- it declines in ieee mode
+#
+# The last two are LATENT, measured not assumed: `c.at[0].add(a*b)` compiles to
+# ROOT bitcast_add_fusion and executes to 4.930380657631324e-32 against a
+# two-rounding 0.0. They are safe today only because their ieee transfers
+# decline before the hull is reached, which is protection by an unrelated
+# decline -- the scatter bar's shape, and it evaporates the moment either gets
+# an ieee rule.
+#
+# So the invariant a new adding transfer must satisfy is a DISJUNCTION:
+# hulled, or declining in ieee mode. tests/test_by_name_gates.py checks it
+# behaviourally, because "declines in ieee" is not a membership fact and no
+# import-time census can see it.
+IEEE_ADDITION_PERFORMERS = frozenset({
+    "add", "sub", "add_any", "reduce_sum", "dot_general", "scatter-add",
+})
+
 
 def _integer_pow_budget(box, y: int) -> None:
     """Degrade-don't-HANG, both dimensions. The exponent cap bounds the

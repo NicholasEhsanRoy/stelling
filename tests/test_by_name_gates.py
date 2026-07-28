@@ -143,3 +143,49 @@ def test_the_two_gates_are_constants_not_inline_literals():
     assert isinstance(P.IEEE_PRODUCT_SOURCES, (tuple, frozenset))
     assert "mul" in P.IEEE_PRODUCT_SOURCES
     assert {"add", "sub", "add_any"} <= set(P.IEEE_CONTRACTION_ADDENDS)
+
+
+ADDITION_FIXTURES = {
+    "reduce_sum": lambda x: jnp.sum(x * jnp.asarray([A])),
+    "dot_general": lambda x: jax.lax.dot_general(
+        x, jnp.asarray([A]), (((0,), (0,)), ((), ()))),
+    "scatter-add": lambda x: jnp.asarray([0.0]).at[0].add(x[0] * A),
+}
+
+
+@pytest.mark.parametrize("prim", sorted(ADDITION_FIXTURES))
+def test_every_addition_performer_is_hulled_or_declines(prim):
+    """THE SINK-SIDE CANARY, the mirror of the product-source one.
+
+    A product can be contracted into ANY addition, not only into `add`. Three
+    registered transfers perform one without being in the sink gate:
+    `reduce_sum` has its own branch, and `dot_general` and `scatter-add` are
+    safe only because their ieee transfers decline.
+
+    Measured, not assumed: `c.at[0].add(a*b)` compiles to ROOT
+    bitcast_add_fusion and executes to 4.930380657631324e-32 where two
+    roundings give 0.0. So the invariant is a DISJUNCTION — hulled, or
+    declining — and this fails naming the primitive if someone gives one of
+    them an ieee rule without adding it to the gate.
+    """
+    assert prim in P.IEEE_ADDITION_PERFORMERS
+
+    def build():
+        x = any_array((1,), "float64", (A, A))
+        return (assert_(ADDITION_FIXTURES[prim](x) + M <= 0.0),)
+
+    cj = transcribe(jax.make_jaxpr(build)())
+    assert prim in {str(e.primitive) for e in cj.jaxpr.eqns}, "wrong fixture"
+    r = P.propagate(cj, semantics="ieee")
+    assert r.obligations[0].status == "unknown", (
+        f"{prim!r} performs an addition a product can be fused into, and it "
+        f"neither declines in ieee mode nor sits in IEEE_CONTRACTION_ADDENDS"
+    )
+
+
+def test_the_addition_performer_set_covers_every_summing_transfer():
+    """If a new transfer sums and nobody lists it here, the canary above never
+    runs for it — the same silence that let `add_any` be gated nowhere."""
+    for prim in P.IEEE_ADDITION_PERFORMERS:
+        assert prim in P.TRANSFERS, f"stale entry {prim!r}"
+    assert set(P.IEEE_CONTRACTION_ADDENDS) <= P.IEEE_ADDITION_PERFORMERS

@@ -53,7 +53,22 @@ Every verdict object stamps, at minimum:
   arithmetic while the traced program runs in floats, and the gap between
   those is where false-VERIFIED lives — `t + dt > t` is trivially true in
   ℝ and was a 258-day float bug (diffrax#632, a hit in this project's own
-  corpus). Conventions consequent on the declared semantics (the
+  corpus).
+
+  **That gap is the FIXED-WIDTH BOUNDARY, and it has now been met under five
+  names — the same wall each time.** `convert_element_type` declining a
+  value-changing cast; int32 `add` wrapping; an accumulation dtype narrower
+  than its operands; real-mode-versus-float generally; and — measured by a
+  blinded audit — **real-mode boxes excluding the executed value at every
+  non-binary64 float dtype**, shared by `add`, `mul` and every arithmetic row
+  (float32 `1.0 + 2**-24` boxes to `[1.0000000596…, 1.0000000596…]` and
+  executes to `1.0`). The last is not a defect in any row: `ieee` mode is
+  gated to binary64, and real mode has no dtype gate at all, so ℝ-judgement of
+  a narrower float is the *stated* posture. It is listed here because five
+  sightings under five names is what an unnamed structural boundary looks
+  like, and the campaign spent measurable effort re-discovering it.
+
+  Conventions consequent on the declared semantics (the
   closed-real-interval `0·∞ = 0` endpoint rule, unsound under IEEE where
   `inf` is a value) are stamped as assumptions, which they are,
 - **nonvacuity** — whether the declared input set was mechanically tied to
