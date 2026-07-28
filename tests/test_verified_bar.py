@@ -44,6 +44,13 @@ def _query_with_scatter_and_an_smt_obligation():
     straddling zero, since the abstraction is correlation-blind) and trivial
     for SMT. Obligation 1 touches the scatter and is settled by intervals.
     Both discharge, so the verdict would be VERIFIED but for the bar.
+
+    THIS SCENARIO DEPENDS ON AN IMPRECISION, and says so deliberately: it
+    needs `y - y` to stay interval-undecidable so that escalation runs and the
+    bar is reached. Affine arithmetic decides `y - y` exactly. So whoever
+    lands affine refinement will find this test failing, and the repair is a
+    DIFFERENT construction that still forces escalation — not deleting the
+    assertion, which would leave the bar untested while looking green.
     """
     x = any_array((3,), "float64", (0.0, 1.0))
     s = x.at[0].set(0.5)

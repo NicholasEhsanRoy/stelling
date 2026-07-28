@@ -110,39 +110,42 @@ def test_the_invariant_is_actually_exercised():
     )
 
 
-def test_the_bar_is_currently_unreachable_and_that_is_structural():
-    """The other direction, and it cannot be tested here for a reason worth
-    pinning rather than skipping.
+def test_the_bar_now_fires_on_the_REAL_barred_set():
+    """The canary this replaces, and why the replacement is the point.
 
-    The bar withholds a SOLVER-DECIDED VERIFIED. A barred primitive can only
-    be solver-decided if it is in the EMISSION set — and `scatter` is not,
-    because that row is parked and unmerged. So on this build the bar's
-    protective branch is unreachable by construction, and the only behaviour
-    it had was the over-firing this module's other tests now forbid.
+    Until the scatter emission row registered, the bar withheld a
+    SOLVER-DECIDED VERIFIED and no such verdict could exist -- `scatter` was
+    absent from the emission set, so no scatter obligation could reach a
+    solver. Its entire behavioural history was over-firing. The predecessor of
+    this test asserted that unreachability precisely so it would FAIL when the
+    row landed, forcing this replacement rather than allowing a silent pass.
 
-    This is not "the bar is useless". It is "the bar's function is contingent
-    on the parked row landing", which is exactly when it will be needed. The
-    assertion is written so that **merging the scatter emission row breaks
-    this test**, which is the moment someone must add the positive-direction
-    coverage that cannot exist today.
-
-    THE ASYMMETRY, STATED WHERE IT MATTERS RATHER THAN IN A REPORT: the repair
-    that narrowed the bar has NEGATIVE-direction coverage only. The
-    over-firing it removed was live and costing verdicts; the under-firing it
-    could theoretically introduce is unreachable on this build, so no test in
-    this suite can exercise it. That asymmetry was the reason to land the
-    repair anyway — a live defect outweighs an unreachable one — and it is the
-    reason this test asserts unreachability instead of skipping. A skip passes
-    silently forever; this fails loudly the moment the assumption stops
-    holding.
+    The row has landed. So the assertion inverts: a barred primitive is now
+    emittable, and the bar's protective branch must actually work on the REAL
+    barred set rather than only on the synthetic one in
+    tests/test_bar_walk_parity.py.
     """
     from stelling.obligation import _SUPPORTED
 
-    assert not (VERIFIED_BARRED_PRIMITIVES & _SUPPORTED), (
-        f"a barred primitive is now EMITTABLE "
-        f"({sorted(VERIFIED_BARRED_PRIMITIVES & _SUPPORTED)}), so the bar's "
-        f"protective branch is reachable for the first time. Add a test that "
-        f"a solver-decided VERIFIED on that primitive's slice IS withheld — "
-        f"until now no such query could exist, so the repair narrowing the "
-        f"bar was never covered in the firing direction."
+    reachable = VERIFIED_BARRED_PRIMITIVES & _SUPPORTED
+    assert reachable, (
+        "no barred primitive is emittable, so the bar's protective branch is "
+        "unreachable again -- if the scatter row was un-registered, restore "
+        "the unreachability canary this test replaced"
     )
+
+    # a scatter-bearing obligation the SOLVER decides: correlation-sensitive,
+    # so intervals cannot settle it
+    def q():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        y = x.at[0].set(0.5)
+        return (assert_(y[1] - x[1] <= 0.0),)
+
+    v = check(q, vacuity_mode="inputs-only", solver_timeout_ms=20000)
+    if _obl_solves(v) == 0:
+        pytest.skip("intervals settled it; this needs a solver-decided verdict")
+    assert v.status != "VERIFIED", (
+        "a solver-decided VERIFIED on a scatter-bearing slice was NOT withheld "
+        "-- the bar is under-firing on the real barred set"
+    )
+    assert any("VERIFIED withheld" in n for n in v.notes)

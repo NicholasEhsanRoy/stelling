@@ -231,6 +231,36 @@ class JaxprEqn:
         # in jax) and effects (a set) are stored sorted.
         object.__setattr__(self, "params", tuple(sorted(self.params, key=lambda kv: kv[0])))
         object.__setattr__(self, "effects", tuple(sorted(self.effects)))
+        # params MIRRORS A JAX DICT, so its keys are unique by construction on
+        # the trace path — but `from_dict` reads a LIST of pairs and a
+        # hand-written serialization can repeat a key. Every consumer reads
+        # params through `params_dict()`, which silently resolves a repeat
+        # LAST-WINS, so a duplicate is not a harmless redundancy: it is two
+        # contradictory facts about one param, of which one is picked by
+        # serialization order alone.
+        #
+        # This matters most where key PRESENCE is itself semantic. For
+        # `update_jaxpr` on `scatter-add`, an ABSENT key is the hand-built
+        # form (the primitive name is the semantic authority) while a key
+        # PRESENT with value None is what jax emits and means the REPLACE
+        # combiner `lambda x, y: y` — last-wins, NOT accumulation. Measured on
+        # this IR before the check: a serialization carrying both
+        # ("update_jaxpr", None) and ("update_jaxpr", <the add jaxpr>) loaded
+        # without complaint and was admitted by the scatter-add row as
+        # accumulate when the add came last, and declined when it came first.
+        # Deserialization could not distinguish the two facts because it
+        # collapsed them; refusing the duplicate is what keeps them distinct.
+        names = [k for k, _ in self.params]
+        if len(set(names)) != len(names):
+            dups = sorted({n for n in names if names.count(n) > 1})
+            _load_check(
+                False,
+                f"JaxprEqn ({self.primitive!r})",
+                f"params carry duplicate key(s) {dups}: params mirrors a jax "
+                f"dict, whose keys are unique, and every reader resolves a "
+                f"repeat last-wins — so a duplicate silently picks one of two "
+                f"contradictory values by serialization order",
+            )
         # type-level: a declaration's two self-descriptions must agree
         # (the census's structuralization — see _validate_decl_eqn)
         _validate_decl_eqn(self, "JaxprEqn")

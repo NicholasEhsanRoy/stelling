@@ -163,7 +163,7 @@ _IDENTITY_HARNESS = frozenset({"stelling_assume", "stelling_nonvacuity"})
 _SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
     | {"reduce_sum", "select_n", "convert_element_type", "scatter-add",
-       "dot_general"}
+       "dot_general", "scatter"}
 )
 
 # Emitted primitives that COMPUTE a new numeric value, and therefore can
@@ -199,7 +199,7 @@ _INT_OVERFLOW_EMITTED = frozenset(
 # (copies of in-range values), so they are int-safe by construction.
 _INT_SAFE_EMITTED = frozenset(
     _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
-    | {"max", "min", "select_n", "convert_element_type"}
+    | {"max", "min", "select_n", "convert_element_type", "scatter"}
 )
 
 if _INT_OVERFLOW_EMITTED | _INT_SAFE_EMITTED != _SUPPORTED:
@@ -224,6 +224,15 @@ if _INT_OVERFLOW_EMITTED & _INT_SAFE_EMITTED:
 # reason: a future addition to any constituent set is a conscious edit to
 # this registry too, and the reason is the claim.
 _INT_SAFE_EMITTED_REASONS: dict[str, str] = {
+    "scatter": (
+        "the static-index SET form emits NO term: element k's term IS the "
+        "update's and every other element's IS the operand's, so the "
+        "equation performs pure data movement. Nothing is computed, so "
+        "nothing can overflow an integer dtype — unlike scatter-add, whose "
+        "accumulate is Real addition and therefore carries the guard. The "
+        "operand/updates/output dtypes are required to agree, so the "
+        "aliasing never equates values of different sorts"
+    ),
     "lt": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
     "le": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
     "gt": "emits a comparison; exact over Reals for in-range integers, result sort Bool",
@@ -912,6 +921,133 @@ def _exact_static_elements(eqns, consts, atom):
     return read(atom)
 
 
+def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
+    """Per-OUTPUT-element ``(operand position, source flat element)`` routes for
+    a static-index ``scatter`` SET equation — deliberately the same shape
+    :func:`_route_structural` produces, because the set form IS pure data
+    movement: every output element is either the operand's element or the one
+    scalar update. No arithmetic, so nothing to round and nothing to overflow.
+
+    One bookkeeping, three consumers (slice validation, emission, replay), as
+    for every other grouping in this module.
+
+    Declines, each quoted, and each load-bearing:
+
+    * a form outside :func:`stelling.propagate._scatter_set_row_form` — the
+      SAME predicate the propagation transfer uses, so the two faces cannot
+      drift apart on shapes or dimension numbers;
+    * a scatter ``mode`` other than ``FILL_OR_DROP``. ``CLIP`` silently
+      REWRITES an out-of-range index to an in-range one, so encoding the
+      operation as substitution at the written index would model a different
+      program; ``PROMISE_IN_BOUNDS`` is undefined out of range;
+    * an index not statically derivable from constants through structural
+      routing, or non-integral;
+    * an OUT-OF-RANGE index. This is the soundness check, not a tidiness one:
+      under ``FILL_OR_DROP`` an out-of-range update is DROPPED, so the
+      program's result is ``out = operand`` — emitting substitution would
+      assert the update landed, which is a false model. The transfer declines
+      the same case for the same reason.
+
+    ``unique_indices`` and ``indices_are_sorted`` are deliberately NOT relied
+    on: they are caller promises jax does not verify, and the covered form
+    writes exactly one element, for which both are vacuous.
+    """
+    from stelling.propagate import (
+        _scatter_index_dtype_covers,
+        _scatter_set_row_form,
+    )
+
+    if len(eqn.invars) != 3 or len(eqn.outvars) != 1:
+        raise _Decline(
+            f"'scatter' with {len(eqn.invars)} operand(s) and "
+            f"{len(eqn.outvars)} output(s) is outside the measured form"
+        )
+    operand_shape = _shape_of(eqn.invars[0])
+    indices_shape = _shape_of(eqn.invars[1])
+    updates_shape = _shape_of(eqn.invars[2])
+    out_shape = _shape_of(eqn.outvars[0])
+    if out_shape != operand_shape:
+        raise _Decline(
+            f"'scatter' output shape {out_shape} contradicts the operand "
+            f"shape {operand_shape} (malformed IR)"
+        )
+    params = eqn.params_dict()
+    # Named before the general form failure so the REASON is legible. The
+    # shared oracle rejects this too — the check belongs there, so both faces
+    # get it — but a caller told only "outside the measured form" would look
+    # at the shapes, which are identical to a plain `.set`, and learn nothing.
+    if params.get("update_jaxpr") is not None or params.get("update_consts"):
+        raise _Decline(
+            "'scatter' carries a combiner (update_jaxpr): this is an "
+            "`x.at[k].apply(f)`-shaped equation, not `x.at[k].set(v)`. It has "
+            "the same dimension numbers, shapes, mode and static index as a "
+            "set, and a DUMMY updates operand — the combiner is the only "
+            "thing distinguishing them, so treating it as a set would model "
+            "out[k] = <dummy> where the program computes out[k] = f(operand[k])"
+        )
+    indices_dtype = eqn.invars[1].aval.dtype
+    # Named before the general form failure, for the same reason the combiner
+    # is: the shapes and dimension numbers here are those of a legitimate
+    # `.set`, so "outside the measured form" would send the reader to fields
+    # that are exactly right. The shared oracle rejects this too and is the
+    # authority; this only supplies the reason.
+    if not _scatter_index_dtype_covers(indices_dtype, operand_shape[0]):
+        raise _Decline(
+            f"'scatter' index dtype {indices_dtype!r} cannot exactly represent "
+            f"the operand's leading-axis bound {operand_shape[0] - 1}: XLA "
+            f"computes the out-of-bounds bound in the INDEX element type, so "
+            f"the range check it performs is not the one this row models and "
+            f"in-range-looking updates are silently DROPPED (measured on jax "
+            f"0.11.0: an int8 index column writes at operand length 128 and "
+            f"drops at 129)"
+        )
+    if not _scatter_set_row_form(
+        params, operand_shape, indices_shape, updates_shape, indices_dtype
+    ):
+        raise _Decline(
+            f"'scatter' configuration (operand {operand_shape}, indices "
+            f"{indices_shape}, updates {updates_shape}) is outside the "
+            f"measured static-index set row form"
+        )
+    mode = str(params.get("mode"))
+    if "FILL_OR_DROP" not in mode:
+        raise _Decline(
+            f"'scatter' mode {mode!r} is not FILL_OR_DROP: CLIP rewrites an "
+            f"out-of-range index to an in-range one and PROMISE_IN_BOUNDS is "
+            f"undefined out of range, so neither is substitution at the "
+            f"written index — the mode is never guessed"
+        )
+    vals = _exact_static_elements(eqns, consts, eqn.invars[1])
+    if vals is None:
+        raise _Decline(
+            "'scatter' index data not statically derivable through the "
+            "supported derivation forms (constants through structural "
+            "routing) — the static-index set emission needs a statically "
+            "known index"
+        )
+    if len(vals) != 1:
+        raise _Decline(
+            f"'scatter' indices decode to {len(vals)} element(s) but the "
+            f"covered form writes exactly one (aval/value mismatch)"
+        )
+    v = vals[0]
+    if isinstance(v, bool) or (
+        not isinstance(v, int)
+        and not (isinstance(v, float) and v == math.floor(v) and math.isfinite(v))
+    ):
+        raise _Decline(f"'scatter' index value {v!r} is not an integer")
+    k = int(v)
+    if not 0 <= k < operand_shape[0]:
+        raise _Decline(
+            f"'scatter' index {k} is out of range for the operand's leading "
+            f"axis {operand_shape[0]} — under FILL_OR_DROP the update is "
+            f"DROPPED, so the result is the operand unchanged rather than a "
+            f"substitution, and that is never guessed"
+        )
+    n = _size(operand_shape)
+    return [(2, 0) if i == k else (0, i) for i in range(n)]
+
+
 def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
     """Per-OUTPUT-element groups of contributing UPDATES flat indices for
     a pinned-form static-index ``scatter-add`` equation — the accumulate
@@ -933,6 +1069,7 @@ def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
     from stelling.propagate import (
         _check_unique_indices_promise,
         _scatter_add_row_form,
+        _scatter_index_dtype_covers,
     )
 
     if len(eqn.invars) != 3 or len(eqn.outvars) != 1:
@@ -949,8 +1086,21 @@ def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
             f"'scatter-add' output shape {out_shape} contradicts the "
             f"operand shape {operand_shape} (malformed IR)"
         )
+    indices_dtype = eqn.invars[1].aval.dtype
+    if not _scatter_index_dtype_covers(indices_dtype, operand_shape[0]):
+        raise _Decline(
+            f"'scatter-add' index dtype {indices_dtype!r} cannot exactly "
+            f"represent the operand's leading-axis bound "
+            f"{operand_shape[0] - 1}: XLA computes the out-of-bounds bound in "
+            f"the INDEX element type, so the range check it performs is not "
+            f"the one this row models and in-range-looking updates are "
+            f"silently DROPPED rather than accumulated (measured on jax "
+            f"0.11.0: an int8 index column accumulates at operand length 128 "
+            f"and drops at 129)"
+        )
     n = _scatter_add_row_form(
-        eqn.params_dict(), operand_shape, indices_shape, updates_shape
+        eqn.params_dict(), operand_shape, indices_shape, updates_shape,
+        indices_dtype,
     )
     if n is None:
         raise _Decline(
@@ -1307,6 +1457,27 @@ class _Slicer:
                     f"'reduce_sum' on dtype {dt!r}: jax integer addition "
                     f"wraps on overflow, which Real addition does not model"
                 )
+        if prim == "scatter":
+            if len(eqn.invars) != 3:
+                raise _Decline(
+                    f"'scatter' with {len(eqn.invars)} operand(s) is "
+                    f"outside the measured form"
+                )
+            dts = {
+                (a.aval.dtype or "")
+                for a in (eqn.invars[0], eqn.invars[2], eqn.outvars[0])
+            }
+            if len(dts) != 1:
+                raise _Decline(
+                    f"'scatter' operand/updates/output dtypes {sorted(dts)} "
+                    f"must agree: the set form ALIASES terms rather than "
+                    f"computing them, and aliasing across dtypes would equate "
+                    f"values of different sorts"
+                )
+            # NOTE the deliberate absence of scatter-add's float-only clause.
+            # The accumulate needs it because jax integer addition wraps; the
+            # SET form performs no arithmetic at all, so an integer scatter is
+            # exact data movement and admissible.
         if prim == "scatter-add":
             if len(eqn.invars) != 3:
                 raise _Decline(
@@ -1357,13 +1528,14 @@ class _Slicer:
             _group_reduce_sum(eqn)
         elif prim == "select_n":
             _pair_select_n(eqn)
-        elif prim in ("scatter-add", "dot_general"):
-            # these plans need the whole slice's dataflow — scatter-add's
-            # index column and dot_general's constant operand both derive
-            # from constants through structural routing — so they are
+        elif prim in ("scatter", "scatter-add", "dot_general"):
+            # ALL THREE plans need the whole slice's dataflow -- the scatter
+            # rows' index columns and dot_general's constant operand each
+            # derive from constants through structural routing -- so they are
             # validated once over the completed topological slice in
-            # :meth:`slice`, through the same plan the emission and the
-            # replay drive
+            # :meth:`slice`, through the same plan the emission and the replay
+            # drive. One branch rather than three: the reason is identical and
+            # a per-primitive branch is three places for it to drift.
             pass
         else:  # elementwise ops and the identity harness primitives
             _pair_elementwise(eqn)
@@ -1491,6 +1663,13 @@ class _Slicer:
             prim = eqn.primitive
             if prim in _STRUCTURAL or prim in _IDENTITY_HARNESS:
                 continue  # index routing: no new terms
+            if prim == "scatter":
+                # the SET form aliases: element k IS the update's term, the
+                # rest ARE the operand's. No arithmetic anywhere, so no new
+                # term anywhere — the same accounting as the structural
+                # routes above, and unlike scatter-add, which inlines one
+                # addend per operand element and one per updates element.
+                continue
             element_terms += _size(eqn.outvars[0].aval.shape)
             if prim == "reduce_sum" and eqn.invars:
                 element_terms += _size(eqn.invars[0].aval.shape)
@@ -1549,6 +1728,12 @@ class _Slicer:
             for _, e in sorted(seen_eqns.values(), key=lambda t: t[0])
         )
         for e in ordered:
+            if e.primitive == "scatter":
+                # same posture as the accumulate below: form oracle, static
+                # index, mode, and the in-range check all run over the
+                # completed slice through the SAME _scatter_set_plan the
+                # emission and the replay drive
+                _scatter_set_plan(ordered, used_consts, e)
             if e.primitive == "scatter-add":
                 # whole-slice validation of the accumulate plan: the form
                 # oracle, the static index column (derivable from the
@@ -1745,7 +1930,7 @@ def slice_unknown_obligations(
 _REPLAY_SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
     | {"reduce_sum", "select_n", "convert_element_type", "scatter-add",
-       "dot_general"}
+       "dot_general", "scatter"}
 )
 
 if _REPLAY_SUPPORTED != _SUPPORTED:
@@ -1860,6 +2045,14 @@ def _root_elements(
                     sum((ins[0][i] for i in group), Fraction(0))
                     for group in groups
                 )
+            elif prim == "scatter":
+                # pure data movement, so replay is the same aliasing the
+                # emission performs and the transfer performs: element k IS
+                # the update, every other element IS the operand's. Driven by
+                # the SAME _scatter_set_plan, so replay cannot route an
+                # element differently from the emission it is checking.
+                routes = _scatter_set_plan(sl.eqns, dict(sl.consts), eqn)
+                out = tuple(ins[op][src] for op, src in routes)
             elif prim == "scatter-add":
                 # the same accumulate the transfer and the emission
                 # perform: operand element + Σ contributing updates, in

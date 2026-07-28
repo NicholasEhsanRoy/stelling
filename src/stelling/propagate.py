@@ -525,6 +525,54 @@ def _t_reduce_or(eqn, params, ins):
     return [iv.reduce_or(ins[0], tuple(_req(params, "axes", "reduce_or")))]
 
 
+def _scatter_index_dtype_covers(indices_dtype: str | None, axis_len: int) -> bool:
+    """Whether the operand's leading-axis bound is EXACTLY representable in the
+    scatter index array's element type — the one authority for the index-dtype
+    admissibility of both scatter rows, shared by both oracles and quoted by
+    the emission faces.
+
+    XLA computes a scatter's out-of-bounds bound IN THE INDEX ARRAY'S ELEMENT
+    TYPE. For the covered rows the window along the scattered axis is one
+    element (``inserted_window_dims = (0,)``), so that bound is
+    ``operand.shape[0] - 1``. When it does not fit the index dtype it WRAPS,
+    and the comparison XLA performs is not the comparison the rows model:
+    every index failing the wrapped test is silently DROPPED under
+    FILL_OR_DROP while the row models the write as landing. No error, no
+    ⊤ — a wrong value.
+
+    Measured on jax 0.11.0, `scatter` and `scatter-add` alike, index k=1,
+    FILL_OR_DROP: int8 column writes at operand length 128 (bound 127, the
+    int8 max) and DROPS at 129 (bound 128, wrapping to -128); int16 writes at
+    32768 and drops at 32769; uint8 writes at 256 and drops at 257 (bound 256
+    wrapping to 0). The unsigned case is the one that looks benign under a
+    careless probe: at 257 the wrapped bound is 0, so an index of 0 still
+    writes and only k >= 1 is dropped — the boundary is the dtype's MAXIMUM,
+    not its signedness.
+
+    A dtype the integer-bounds table does not name (including an absent aval
+    dtype) yields False: there is then no basis on which to claim the bound is
+    representable, and the rows never guess.
+    """
+    bounds = _INT_DTYPE_BOUNDS.get(indices_dtype or "")
+    if bounds is None:
+        return False
+    lo, hi = bounds
+    return lo <= axis_len - 1 <= hi
+
+
+def _scatter_indices_dtype(eqn) -> str | None:
+    """The index operand's aval dtype for a scatter-shaped equation, or None
+    when there is no such operand.
+
+    The interval domain does not carry dtypes — :class:`interval.IntervalArray`
+    is bounds only — so the propagation face reads the index dtype from the
+    EQUATION, which is where the emission face reads it too. None (and any
+    dtype the bounds table does not name) declines at
+    :func:`_scatter_index_dtype_covers`.
+    """
+    return eqn.invars[1].aval.dtype if len(eqn.invars) > 1 else None
+
+
 # The single-element scatter dimension_numbers of ``x.at[k].set(v)`` on a
 # rank-1 operand; any OTHER field a jax version adds (batching dims today)
 # must be empty or the transfer declines.
@@ -533,6 +581,69 @@ _SCATTER_SET_CORE = {
     "inserted_window_dims": (0,),
     "scatter_dims_to_operand_dims": (0,),
 }
+
+
+def _scatter_set_row_form(
+    params, operand_shape, indices_shape, updates_shape, indices_dtype
+):
+    """The ONE admissibility oracle for the static-index ``scatter`` set-form,
+    shared by the propagation transfer and the SMT emission — the same posture
+    :func:`_scatter_add_row_form` holds for the accumulate form.
+
+    Returns True for the single covered form: canonical single-element
+    dimension numbers, rank-1 operand, one index row, scalar update, and an
+    index dtype that exactly represents the operand's leading-axis bound.
+    Everything else is False and the caller declines with its own wording.
+    Sharing it is the point: a bounds or shape rule that lived in two places
+    could be tightened in one and not the other, and the emission is the face
+    where getting it wrong mints a false model rather than a ⊤.
+
+    ``indices_dtype`` is the index array's aval dtype and is REQUIRED, not
+    defaulted: the range check the callers perform is against the operand's
+    leading axis, but XLA performs it in the index element type, and a caller
+    that forgot to pass the dtype would silently get the old, wrong rule back
+    (:func:`_scatter_index_dtype_covers` carries the measurement).
+
+    NOTE what this does NOT check: the index VALUE (each caller reads it from
+    its own domain — intervals on the transfer side, static constants on the
+    emission side) and the scatter ``mode``. Both are the caller's, and both
+    are load-bearing; see the callers.
+    """
+    # THE COMBINER GATE, and it belongs HERE rather than in either caller.
+    # `x.at[k].apply(f)` traces to the SAME primitive with the SAME dimension
+    # numbers, shapes, mode and static index as `.set` — the ONLY thing
+    # distinguishing them is a non-None `update_jaxpr` carrying f, alongside a
+    # DUMMY 0.0 updates operand. A form test that does not look at it admits
+    # `.apply` as if it were `.set` and models `out[k] = 0.0` where the program
+    # computes `out[k] = f(operand[k])`.
+    #
+    # This check lived in the transfer while the emission used only this
+    # oracle, so the emission never saw it — which is precisely the asymmetry
+    # a shared oracle exists to prevent, reintroduced by extracting the shape
+    # rules and leaving this one behind. `_scatter_add_row_form` gates its own
+    # combiner via `_is_add_combiner`; the SET form's combiner must be ABSENT,
+    # because "set" means there is no combining.
+    if params.get("update_jaxpr") is not None:
+        return False
+    if params.get("update_consts"):
+        return False
+    dn = params.get("dimension_numbers")
+    if not isinstance(dn, ir.NamedTupleParam):
+        return False
+    fields = dict(dn.fields)
+    if any(fields.get(k) != v for k, v in _SCATTER_SET_CORE.items()):
+        return False
+    if any(v != () for k, v in fields.items() if k not in _SCATTER_SET_CORE):
+        return False
+    if len(operand_shape) != 1 or indices_shape != (1,) or updates_shape != ():
+        return False
+    # THE INDEX-DTYPE GATE. The callers range-check the index against
+    # operand_shape[0]; XLA range-checks it against a bound computed in the
+    # INDEX dtype, and the two are the same comparison only while that bound
+    # is representable there.
+    if not _scatter_index_dtype_covers(indices_dtype, operand_shape[0]):
+        return False
+    return True
 
 
 def _t_scatter(eqn, params, ins):
@@ -552,19 +663,32 @@ def _t_scatter(eqn, params, ins):
     bug class, never guessed), update windows, batching dims, higher
     ranks, computed updates.
     """
+    # WHAT THIS FUNCTION RETAINS BEYOND THE SHARED ORACLE, enumerated because
+    # an unenumerated retained check is how the two faces drifted apart once
+    # already: the combiner gate lived here while the emission used only the
+    # oracle, so `.apply` was admitted as `.set`. Everything below is either a
+    # precondition for CALLING the oracle or genuinely interval-domain.
+    #
+    #   len(ins) != 3        — arity. The oracle takes three shapes, so having
+    #                          three operands is a precondition for calling it.
+    #   update_jaxpr         — DELIBERATE DEFENSIVE DUPLICATE. The oracle now
+    #                          gates this and is the authority; this copy is
+    #                          kept, not removed, because it is the check whose
+    #                          absence caused the defect and a redundant gate
+    #                          costs nothing.
+    #   index point/finite/integral, and in-range — interval-domain. This face
+    #                          reads the index from a propagated INTERVAL; the
+    #                          emission reads it from static constants. Same
+    #                          question, two representations, so it cannot live
+    #                          in a shape-and-params oracle.
     if len(ins) != 3 or params.get("update_jaxpr") is not None:
         return None
     operand, indices, updates = ins
-    dn = params.get("dimension_numbers")
-    if not isinstance(dn, ir.NamedTupleParam):
-        return None
-    fields = dict(dn.fields)
-    if any(fields.get(k) != v for k, v in _SCATTER_SET_CORE.items()):
-        return None
-    if any(v != () for k, v in fields.items() if k not in _SCATTER_SET_CORE):
-        return None
-    if len(operand.shape) != 1 or indices.shape != (1,) or updates.shape != ():
-        return None
+    if not _scatter_set_row_form(
+        params, operand.shape, indices.shape, updates.shape,
+        _scatter_indices_dtype(eqn),
+    ):
+        return None  # form outside the covered row — the shared oracle's call
     lo, hi = indices.los[0], indices.his[0]
     if lo != hi or not math.isfinite(lo) or lo != math.floor(lo):
         return None  # dynamic or non-integral index: no exact rule
@@ -674,6 +798,7 @@ def _scatter_add_row_form(
     operand_shape: tuple[int, ...],
     indices_shape: tuple[int, ...],
     updates_shape: tuple[int, ...],
+    indices_dtype: str | None,
 ) -> int | None:
     """The pinned static-shape FORM of a ``scatter-add`` equation, or None.
 
@@ -702,11 +827,20 @@ def _scatter_add_row_form(
     (``update_jaxpr``) must be absent or the measured single-``add``
     form (:func:`_is_add_combiner`); ``update_consts`` must be empty.
 
+    ``indices_dtype`` (the index array's aval dtype, REQUIRED — see
+    :func:`_scatter_set_row_form` on why it is not defaulted) must exactly
+    represent the operand's leading-axis bound: XLA computes the
+    out-of-bounds bound in the index element type, so an index column too
+    narrow for that bound has its updates silently DROPPED where this row
+    models them as accumulating (:func:`_scatter_index_dtype_covers`).
+
     Returns the number of scattered index rows ``n``, or None (the
     caller declines).
     """
     r = len(operand_shape)
     if r < 1:
+        return None
+    if not _scatter_index_dtype_covers(indices_dtype, operand_shape[0]):
         return None
     dn = params.get("dimension_numbers")
     if not isinstance(dn, ir.NamedTupleParam):
@@ -1033,7 +1167,8 @@ def _t_scatter_add(eqn, params, ins):
         return None
     operand, indices, updates = ins
     n = _scatter_add_row_form(
-        params, operand.shape, indices.shape, updates.shape
+        params, operand.shape, indices.shape, updates.shape,
+        _scatter_indices_dtype(eqn),
     )
     if n is None:
         return None
