@@ -79,6 +79,19 @@ Every verdict object stamps, at minimum:
   *harness*, and a VERIFIED with unchecked nonvacuity is a different claim
   from one with it checked — the stamp's job is saying which,
 
+  **A witness-backed REFUTED is trustworthy on THREE clauses, not two.** It
+  must replay, it must execute, **and every declared precondition must hold at
+  the witness.** The third is not decorative: an `assume` whose predicate box
+  is ⊤ is DROPPED rather than applied, and the query then answers the
+  unconditional question. Measured — `assume(jnp.all(x >= 0))` over
+  `x ∈ [-10, 10]^3` asserting `sum(x) >= 0` returns REFUTED with the
+  replay-confirmed witness `[0, 0, -1]`, which **violates the precondition the
+  author wrote**. The earlier claim that a witness-backed REFUTED "cannot
+  suffer this failure mode — a witness is a model, and interval arithmetic does
+  not produce models" is true of the interval-discharge artifact it was written
+  about, and **not true in general**; it is narrowed here rather than left to
+  certify results it does not cover.
+
   **The sharpest form of that, because it is the failure the stamp cannot
   see by itself: a corrupted DECLARATION does not make a verdict false — it
   makes the verdict answer a different question, while remaining internally
