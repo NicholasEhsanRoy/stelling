@@ -268,6 +268,53 @@ magnitude: 8192 linear terms cost under half a second, and 384 *nonlinear* terms
 cost 237. A measurement that does not say which logic it ran in is not a
 measurement of solver cost. `set-logic` is in the stamp's options.
 
+## An instrument must declare its SCOPE, and an acceptance criterion must check that the scope covers the claim
+
+Norm E's sibling. **E says state which query you ran; this says state what your
+instrument reaches.** The failure it catches is not a wrong number — it is a
+correct number about a smaller thing than the claim it was used to license.
+
+Five instances, each caught by a check aimed at exactly it:
+
+- **the budget family measured the vacuity re-check.** "524,288 terms in 193 s"
+  was real timing of real solver work. Every obligation had been discharged by
+  interval propagation, so the only thing the solver ran was the widen re-check.
+  The instrument reached the solver; it did not reach *the obligation*. Caught by
+  counting invocations whose reason is not a re-check.
+- **the seventh decline cause was a stub artifact.** It existed only because a
+  stub stood where a capability would go, so it measured the scaffolding rather
+  than the program. Caught by stubbing and counting deliberately, which makes the
+  scaffold's contribution a number instead of a background.
+- **the shared-jaxpr comparison measured post-transcription objects.** Those are
+  constructed per param and therefore always distinct, so the comparison's reach
+  excluded the only state in which the hypothesis could be true. Caught by asking
+  what a positive result would have looked like.
+- **the frontier counted presence.** Presence on the obligation slice, attribution
+  by outermost frame, and first-decline peeling are all cheaper than the
+  counterfactual and all of them overcounted. The instrument reached *appears in*,
+  the claim was *blocks*. Caught by removing the row and re-running.
+- **the param gauge drives one face.** It exercises the obligation-face plans and
+  never `_t_scatter`, `_t_scatter_add`, or `interval_env` — so "zero survivors"
+  certifies emission while the fix under test changed emission *and* the transfer.
+  Caught by reading the gauge's imports against the fix's diff.
+
+The shape is identical in all five: **the instrument was sound within its reach,
+and its reach was narrower than the sentence it was quoted to support.** No
+instance was a bug in the instrument. Four of them passed review.
+
+So, two obligations. **On the instrument:** state its scope where it is defined —
+what it drives, and what it does not. A gauge that names the entry points it calls
+cannot be silently quoted past them. **On the acceptance criterion:** before
+accepting "the gauge is green" as evidence for a change, check that the gauge's
+scope covers the change's *surface*. If a fix touches two faces and the criterion
+reaches one, the criterion is not an acceptance criterion for that fix — and
+saying so is the finding, not a reason to bolt on a bespoke test beside it.
+
+The corollary that makes this cheap: **when an instrument is extended, its scope
+line is the diff to read first.** And when one instrument is found to have this
+hole, check its siblings before assuming it was unique — the assumption that
+produced it rarely rode alone.
+
 ## Guard coverage is proven by mutation, not by construction
 
 A test that reaches a guard and a test whose scenario stops short of it look
