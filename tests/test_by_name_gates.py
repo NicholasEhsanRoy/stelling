@@ -46,21 +46,36 @@ def _x64():
 def _status(make_product, addend_prim="add"):
     """`product + (-fl(product))` in ieee mode: 0.0 under two roundings,
     4.93e-32 under one fused one. A transfer that models only the two-rounding
-    answer discharges `<= 0.0`; a hulled one cannot."""
-    def build():
-        x = any_array((1,), "float64", (A, A))
-        p = make_product(x)
-        if addend_prim == "add_any":
-            from jax._src.ad_util import add_any_p
-            out = add_any_p.bind(p, jnp.asarray([M]))
-        elif addend_prim == "sub":
-            out = jnp.asarray([-M]) - p
-            return (assert_(-out <= 0.0),)
-        else:
-            out = p + jnp.asarray([M])
-        return (assert_(out <= 0.0),)
+    answer discharges `<= 0.0`; a hulled one cannot.
 
-    r = P.propagate(transcribe(jax.make_jaxpr(build)()), semantics="ieee")
+    `add_any` is reached through `jax.grad`, not through a private-module bind.
+    That is both the project's import rule and the more faithful test: `add_any`
+    is jax's cotangent accumulator, so reverse-mode is how a user meets it.
+    """
+    if addend_prim == "add_any":
+        def build():
+            x = any_array((1,), "float64", (A, A))
+
+            def loss(v):
+                # two contributions to one cotangent -> jax accumulates them
+                # with add_any, and the A* term makes the accumuland a product
+                return (A * jnp.sum(v * x) + M * jnp.sum(v))[()]
+
+            g = jax.grad(loss)(jnp.ones((1,), jnp.float64))
+            return (assert_(g <= 0.0),)
+    else:
+        def build():
+            x = any_array((1,), "float64", (A, A))
+            out = make_product(x) + jnp.asarray([M])
+            return (assert_(out <= 0.0),)
+
+    cj = transcribe(jax.make_jaxpr(build)())
+    prims = {str(e.primitive) for e in cj.jaxpr.eqns}
+    assert addend_prim in prims, (
+        f"fixture did not produce {addend_prim!r}; it produced {sorted(prims)} "
+        f"— the probe would be testing a different program"
+    )
+    r = P.propagate(cj, semantics="ieee")
     return r.obligations[0].status
 
 
