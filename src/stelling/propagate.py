@@ -489,6 +489,16 @@ def _t_convert(eqn, params, ins):
     return None  # value-changing or unrecognized conversion -> ⊤, noted
 
 
+# The primitives whose operand a product may be CONTRACTED into, as one
+# fused multiply-add. Named rather than inlined because it was a by-hand
+# tuple at the gate AND a second by-hand tuple in the test that covers the
+# gate, so a primitive could be added to the registry, pass every census
+# constraint, and be missing from both. `add_any` was, for one commit.
+# The test now iterates this constant, so the gate and its coverage cannot
+# disagree about what is gated.
+IEEE_CONTRACTION_ADDENDS = ("add", "sub", "add_any")
+
+
 def _t_split(eqn, params, ins):
     """``jax.lax.split``: cut one operand along ``axis`` into ``sizes`` pieces.
 
@@ -4098,10 +4108,26 @@ class _Propagator:
             self.counter.record_unknown(eqn.primitive)
             self.top_out(eqn)
             return
-        if ieee and eqn.primitive in ("add", "sub"):
+        if ieee and eqn.primitive in IEEE_CONTRACTION_ADDENDS:
             # UNSOUND 4: XLA may CONTRACT a product feeding this add/sub
             # into one fused multiply-add. Both roundings are legal for the
             # same jaxpr, so the result must cover both.
+            #
+            # `add_any` is HERE, and was missing for one commit. It is a
+            # by-NAME gate, and registering `add_any` with the same IEEE
+            # function object as `add` satisfied every census constraint
+            # while leaving this tuple — and therefore the contraction hull
+            # — untouched. Measured consequence, jax 0.11.0 CPU under jit,
+            # HLO `multiply_add_fusion`: the box was [0.0, 0.0] where the
+            # compiled program returns 4.930380657631324e-32, and the
+            # obligation `out <= 0.0` DISCHARGED. A false verdict, with
+            # IEEE_CONTRACTION_ASSUMPTION stamped on the run — the stamp
+            # asserting the hazard was modelled at the equation where it
+            # was not. `add` on the identical program returned unknown.
+            #
+            # `negate_product`/`negate_addend` below test `== "sub"`, so
+            # both stay False for `add_any`, which is correct: it is an
+            # addition.
             try:
                 outs, out_flags = self._contraction_hull(eqn, outs, out_flags)
             except iv.IntervalError as e:

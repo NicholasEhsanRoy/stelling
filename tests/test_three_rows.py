@@ -1724,12 +1724,21 @@ def test_ieee_contraction_hull_keeps_agreeing_cases_DEFINITE():
 def test_ieee_contraction_covers_both_operand_positions_and_sub():
     """c - a*b contracts too (negating the product), and the mul may sit on
     either side of the add."""
-    for prim, order in (("add", 0), ("add", 1), ("sub", 0), ("sub", 1)):
+    # DERIVED from the gate's own constant, not enumerated beside it: a
+    # by-hand list here is what let `add_any` be gated nowhere and tested
+    # nowhere while satisfying every import-time census constraint.
+    from stelling.propagate import IEEE_CONTRACTION_ADDENDS
+
+    for prim in IEEE_CONTRACTION_ADDENDS:
+      for order in (0, 1):
         a, b, prod, s = var(0), var(1), var(2), var(3)
         pred, out = var(4, BOOL), var(5, BOOL)
         # pick the addend that lands the result on ~0, where the two
         # roundings differ: add wants -1, sub wants +1
-        k = lit(-1.0) if prim == "add" else lit(1.0)
+        # keyed on the SUBTRACTION, not on the name `add`: `add_any` is an
+        # addition and wants add's addend, and testing `== "add"` would have
+        # silently handed it sub's and tested nothing at ~0
+        k = lit(1.0) if prim == "sub" else lit(-1.0)
         ins = [prod, k] if order == 0 else [k, prod]
         q = close(
             [

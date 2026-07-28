@@ -780,6 +780,14 @@ def decide_slice(sl: ObligationSlice) -> SliceDecision:
                         pow2_form(table, src[i], _operand_key(src[i], atom, i))
                         for i in idx
                     )
+                # COUPLED to AFFINE_SUPPORTED, and the coupling is load-bearing:
+                # this is a by-NAME tuple, and `add_any` is an addition that is
+                # deliberately NOT in AFFINE_SUPPORTED. Admitting it there
+                # without adding it here would reproduce, in this domain,
+                # exactly the defect a blinded audit found in the IEEE
+                # contraction gate — a registry entry satisfying every census
+                # constraint while a second hand-written tuple stayed behind.
+                # If `add_any` is ever admitted, it belongs in both or neither.
                 elif prim in ("add", "sub"):
                     ia, ib = _pair_elementwise(eqn)
                     fa = read(eqn.invars[0])
