@@ -1485,6 +1485,28 @@ _TAINT_STOPS = frozenset({
 # unreachability had: correct today, and silently wrong the moment someone
 # adds the missing ieee rule. Over-tainting is SOUND — it makes more hulls
 # fire, never fewer — so they go in now rather than as a comment for later.
+# The DROPPED-assume disclosure, in ONE place because inert mode and constrain
+# mode must emit the same base text (inert adds no reason parenthetical) and
+# they were two hand-written copies with a comment asking the next editor to
+# keep them byte-identical. A test pinned the string a third time. Three copies
+# of one sentence is the by-name-gate shape in prose.
+#
+# It names REFUTED explicitly. It used to cover VERIFIED and UNKNOWN only, and
+# REFUTED is the case where the drop actually costs the reader something:
+# measured, `assume(jnp.all(x >= 0))` over x in [-10, 10] asserting sum(x) >= 0
+# returns REFUTED with the replay-confirmed witness [0, 0, -1] — a
+# counterexample that VIOLATES the dropped precondition. Sound for what it
+# claims (a counterexample to the query without the assumption) and useless as
+# a counterexample to the query the author wrote, which is what a reader takes
+# a witness to be.
+ASSUME_DROP_NOTE = (
+    "assume constraint DROPPED (inert in MVP propagation) at {where}: "
+    "VERIFIED proves a superset; UNKNOWN may be confounded by this drop; "
+    "and a REFUTED WITNESS MAY VIOLATE THE DROPPED PRECONDITION \u2014 it is a "
+    "counterexample to the query WITHOUT the assumption, so check it against "
+    "the precondition before treating it as one"
+)
+
 IEEE_PRODUCT_SOURCES = frozenset({"mul", "dot_general", "integer_pow"})
 
 # Every registered transfer that PERFORMS an addition, and therefore every
@@ -3355,9 +3377,7 @@ class _Propagator:
                 # disclosure with the reason(s) appended
                 reasons = "; ".join(dropped) if dropped else "unclassified predicate"
                 self.notes.append(
-                    f"assume constraint DROPPED (inert in MVP propagation) at {where}: "
-                    f"VERIFIED proves a superset; UNKNOWN may be confounded by this drop"
-                    f" ({reasons})"
+                    ASSUME_DROP_NOTE.format(where=where) + f" ({reasons})"
                 )
 
     def _apply_assumed_pred(
@@ -4064,8 +4084,7 @@ class _Propagator:
                 # silent, never "known". Byte-identical to the MVP note.
                 self.counter.record_inert(eqn.primitive)
                 self.notes.append(
-                    f"assume constraint DROPPED (inert in MVP propagation) at {where}: "
-                    f"VERIFIED proves a superset; UNKNOWN may be confounded by this drop"
+                    ASSUME_DROP_NOTE.format(where=where)
                 )
             in_taints = (
                 [self.read_taint(a) for a in eqn.invars]

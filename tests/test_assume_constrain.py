@@ -894,10 +894,13 @@ def test_constrained_assumption_rides_into_the_verdict_stamp():
 
 # --- the mode switch ----------------------------------------------------------
 
-_OLD_DROP_NOTE = (
-    "assume constraint DROPPED (inert in MVP propagation) at unknown location: "
-    "VERIFIED proves a superset; UNKNOWN may be confounded by this drop"
-)
+# DERIVED from the emitter, not a fourth hand-written copy. What this test
+# pins is the RELATIONSHIP -- inert emits the shared base text with NO reason
+# parenthetical, constrain appends one -- not a historical string. Pinning the
+# literal made a correction to the disclosure look like a regression.
+from stelling.propagate import ASSUME_DROP_NOTE  # noqa: E402
+
+_OLD_DROP_NOTE = ASSUME_DROP_NOTE.format(where="unknown location")
 
 
 def assume_rich_query():
