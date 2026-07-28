@@ -63,6 +63,20 @@ Every verdict object stamps, at minimum:
   everything; the checker-level mutation control cannot catch a vacuous
   *harness*, and a VERIFIED with unchecked nonvacuity is a different claim
   from one with it checked — the stamp's job is saying which,
+
+  **The sharpest form of that, because it is the failure the stamp cannot
+  see by itself: a corrupted DECLARATION does not make a verdict false — it
+  makes the verdict answer a different question, while remaining internally
+  consistent.** Every `VERIFIED` is relative to its declared envelope, so a
+  declaration that silently widens (measured: deleting `lo`/`hi` from a
+  persisted `stelling_any` turned a declared `[0, 100]` into `(-inf, inf)`)
+  still yields a verdict that is *true of the set it was asked about*, and a
+  stamp recording the envelope the author intended. Nothing downstream is
+  wrong; the question moved. This is why `ir` refuses, at load, an equation
+  missing a param jax always supplies, rather than validating the answer:
+  **an answer cannot reveal that it is to the wrong question,**
+
+
 - the query's content hash (`stelling.ir.ClosedJaxpr.content_hash()`; the
   hash covers semantic content and excludes source locations, so identical
   programs traced from different files share verdicts),
