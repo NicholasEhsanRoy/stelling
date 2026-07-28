@@ -1468,6 +1468,25 @@ _TAINT_STOPS = frozenset({
     "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
 })
 
+# The primitives whose OUTPUT can be a product XLA is free to contract into a
+# following addition. This is the source end of the same hazard
+# IEEE_CONTRACTION_ADDENDS guards at the sink end, and it was `mul` alone.
+#
+# `dot_general` and `integer_pow` are here because they are products too, and
+# leaving them out was LATENT rather than safe. Measured on jax 0.11.0 CPU
+# under jit: `dot_general(a, b) + c` with a size-1 contraction compiles to
+# `ROOT %bitcast_add_fusion` and `a**2 + c` to `ROOT %multiply_add_fusion`,
+# both executing to 4.930380657631324e-32 where two separate roundings give
+# 0.0 — the same value that made `add_any`'s omission a false discharge.
+#
+# They did not produce one only because neither has an ieee transfer today, so
+# both decline to ⊤ before the taint is ever consulted. That is protection by
+# an unrelated decline, which is exactly the shape the scatter bar's
+# unreachability had: correct today, and silently wrong the moment someone
+# adds the missing ieee rule. Over-tainting is SOUND — it makes more hulls
+# fire, never fewer — so they go in now rather than as a comment for later.
+IEEE_PRODUCT_SOURCES = frozenset({"mul", "dot_general", "integer_pow"})
+
 
 def _integer_pow_budget(box, y: int) -> None:
     """Degrade-don't-HANG, both dimensions. The exponent cap bounds the
@@ -4268,9 +4287,9 @@ class _Propagator:
             self.env[out.id] = val
             if ieee:
                 self.nan[out.id] = out_flags[i]
-                # `mul` is the taint SOURCE; everything else passes what it
-                # was given unless it is a registered stop
-                self.taint[out.id] = eqn.primitive == "mul" or (
+                # IEEE_PRODUCT_SOURCES are the taint SOURCES; everything
+                # else passes what it was given unless it is a registered stop
+                self.taint[out.id] = eqn.primitive in IEEE_PRODUCT_SOURCES or (
                     eqn.primitive not in _TAINT_STOPS
                     and any(self.read_taint(a) for a in eqn.invars)
                 )
