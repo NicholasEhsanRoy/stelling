@@ -644,6 +644,7 @@ _REQUIRED_PARAMS: dict[str, frozenset[str]] = {
                          "mode", "slice_sizes", "unique_indices"}),
     "integer_pow": frozenset({"y"}),
     "mul": frozenset({"out_dtype"}),
+    "reduce_or": frozenset({"axes"}),
     "reduce_sum": frozenset({"axes", "out_sharding"}),
     "reshape": frozenset({"dimensions", "new_sizes", "sharding"}),
     "scatter": frozenset({"dimension_numbers", "indices_are_sorted", "mode",
@@ -654,6 +655,14 @@ _REQUIRED_PARAMS: dict[str, frozenset[str]] = {
     "sqrt": frozenset({"accuracy"}),
     "squeeze": frozenset({"dimensions"}),
     "stack": frozenset({"axis"}),
+    # stelling's own declaration primitive, and the sharpest case of the class.
+    # :func:`_validate_decl_eqn` guards the declaration's two self-descriptions
+    # against each other — but it reads `params.get("shape")` and skips the
+    # comparison when the key is absent, so DELETING `shape` from a persisted
+    # declaration silently retires the check. `lo`/`hi` are read with a NaN
+    # default, so deleting those declares an unconstrained set while looking
+    # like a bound one. This is the primitive the P1 arc's lies all started at.
+    "stelling_any": frozenset({"dtype", "hi", "lo", "shape"}),
     "transpose": frozenset({"permutation"}),
 }
 

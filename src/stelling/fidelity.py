@@ -56,6 +56,28 @@ class FidelityReport:
     residual: tuple[tuple[str, str], ...]
     scope: str
 
+    @property
+    def asymmetries(self) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]:
+        """Mutations some gates CAUGHT and others ADMITTED.
+
+        A survivor count cannot detect a regression confined to one gate's
+        surface: "caught" is disjunctive, so any other gate declining the
+        mutation keeps the survivor count at zero. Two gates disagreeing about
+        one subject is the signal that survives that, and for a multi-face
+        stack it is the drift shape itself — one face declining where the
+        other admits is how two faces of a row come apart.
+
+        Empty when there is one gate: a single gate cannot disagree with
+        itself, and reporting "0 asymmetries" there would be a vacuous zero.
+        """
+        if len(self.gates) < 2:
+            return ()
+        return tuple(
+            (name, caught, tuple(g for g in self.gates if g not in caught))
+            for name, caught in self.caught_by
+            if caught and len(caught) < len(self.gates)
+        )
+
     def render(self) -> str:
         lines = [
             "== fidelity gauge — measured discriminating power (L21)",
@@ -79,6 +101,18 @@ class FidelityReport:
             lines.append("  (empty: every mutation was caught)")
         for name, why in self.residual:
             lines.append(f"  {name}: {why}")
+        if len(self.gates) > 1:
+            lines.append(
+                "== face asymmetry (gates disagreeing about one subject; a "
+                "survivor count cannot see a one-gate regression) =="
+            )
+            if not self.asymmetries:
+                lines.append("  (none: every gate agrees on every mutation)")
+            for name, caught, admitted in self.asymmetries:
+                lines.append(
+                    f"  {name}: CAUGHT by {', '.join(caught)} — "
+                    f"ADMITTED by {', '.join(admitted)}"
+                )
         lines.append(
             f"== every count above is scoped to: {self.scope} — a surface "
             f"these gates do not drive is NOT gauged by this report =="
