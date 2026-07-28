@@ -1735,23 +1735,52 @@ the transfer registry appears.
 ```markdown
 ### New transfer function checklist
 
-- [ ] Registered in the transfer registry for exactly one `(primitive, domain)`
-- [ ] `TransferMeta` attached: tier, precision note, jax version the primitive's
-      semantics were verified against
-- [ ] **Tier declared, and — for `sound` or `heuristic` — the argument written**
-      in `docs/semantics/transfers/<primitive>@<domain>.md`. A `sound` claim
-      without an argument is not reviewable and will not be merged
+- [ ] Registered in the transfer registry for exactly one `(primitive, domain)`,
+      and the census constraints still hold at import (they raise, so a
+      half-registered row breaks the package rather than shipping quietly)
+- [ ] **Tier declared** — the second element of the registry entry — and it
+      reaches the verdict: `transfers_used` stamps `(primitive, tier)`
+- [ ] **For `sound` or `heuristic`, the ARGUMENT is written** beside the transfer,
+      in its docstring, naming the jax version its semantics were verified
+      against. A `sound` claim without an argument is not reviewable and will not
+      be merged. **This is the bar; everything else here is mechanical**
 - [ ] For `sound`: the rounding treatment is named. Outward rounding is not
-      optional — a sound transfer in unsoundly-rounded arithmetic is unsound
-- [ ] Differential test in `tests/differential/`: concrete runs land inside the
-      computed bounds
+      optional — a sound transfer in unsoundly-rounded arithmetic is unsound.
+      A transfer that does no arithmetic says so, and is `exact`
+- [ ] **Containment test in `tests/`**: draw a box, run the transfer, execute jax
+      at concrete points inside it, and require every output element to land in
+      the computed interval. **With both controls** — a positive one showing the
+      harness reaches the row, and a negative one showing it reports a violation
+      when the box is wrong (see `tests/test_dot_general_interval.py`)
 - [ ] At least one corpus entry exercises it, or a note saying why none does
-- [ ] Encoding map complete — every term traced to a callable; CI resolves them
-- [ ] Coverage report shows it as defined, not defaulted
-- [ ] Changelog: **Coverage** section entry; and if it flips any corpus verdict,
-      a ledger entry (§8.2)
-- [ ] Bibliography entry if the domain or transfer comes from the literature
+- [ ] Coverage report shows it as defined, not defaulted: `measure()` returns
+      `unknown = 0` and `transparent = 0` on a query that uses it
+- [ ] If it flips any recorded verdict, an entry in `docs/verdict-ledger.md`
+- [ ] **State what each gauge you rely on REACHES** (Norm G). A gauge that drives
+      the emission plans does not test the transfer, and vice versa — name the
+      face, and do not quote "zero survivors" as coverage of a face it never ran
 ```
+
+**Not yet infrastructure.** The following were specified for this checklist
+before the repository had anywhere to put them, and are kept here as a roadmap
+rather than as merge conditions. Requiring them today would mean a bar that
+references six directories that do not exist — which reads to an outside
+contributor as stale documentation, not as rigour.
+
+| deferred item | what it needs first |
+|---|---|
+| `TransferMeta` attached | the type itself; tier currently rides in the registry tuple |
+| tier argument in `docs/semantics/transfers/<primitive>@<domain>.md` | that tree; the argument is currently in the transfer's docstring, which is where it is actually read |
+| differential test in `tests/differential/` | the directory; containment tests currently live in `tests/` |
+| encoding map complete, CI resolves every term | the encoding map |
+| changelog **Coverage** section entry | a `CHANGELOG.md` |
+| bibliography entry | `docs/bibliography.bib` |
+
+**Substance over location.** Every deferred row above is satisfied *somewhere* for
+the rows shipped so far — the tier argument, the rounding statement, the
+containment test and the corpus entry all exist and all execute. What is missing
+is the filing system, and a filing system is not a soundness property. Move each
+row up into the checklist as its infrastructure lands.
 
 **The bar is the tier argument.** Everything else on the list is mechanical.
 
