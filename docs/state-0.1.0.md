@@ -47,7 +47,11 @@ It reproduces from a clean checkout of `main`.
 
 ## Capabilities
 
-**Eight consecutive capability counterfactuals at zero. One positive.**
+**Seven capability counterfactuals at zero, one positive** — counting
+CAPABILITIES, which is the unit of the table below. (Earlier reports said
+"eight consecutive", counting *runs* rather than capabilities: the transfer
+frontier was measured twice, before and after the `split`/`add_any` build.
+Stating the unit, because the same slip produced the `iota` misclassification.)
 
 | capability | per-entry | joint |
 |---|---|---|
@@ -56,6 +60,33 @@ It reproduces from a clean checkout of `main`.
 
 The exception was **invisible per-entry**. Joint stubbing is standing practice
 because of it.
+
+### **RETRACTED: the emission and transfer zeros rest on UNDER-permissive stubs**
+
+Norm I says an over-permissive stub's zero is conclusive — a stub granting MORE
+than a real implementation upper-bounds the benefit, so a zero means a real fix
+can only do worse. **That argument requires the stub to be over-permissive, and
+two of these were not.**
+
+| stub | what it granted vs a real implementation | zero conclusive? |
+|---|---|---|
+| **emission membership** (`_SUPPORTED \|= {p}`) | **LESS.** Measured: the slicer accepts, then `emit()` raises *"emission has no rule for primitive 'sqrt' — slice validation should have declined this"*, and the verdict reads `escalation attempted; internal error`. **A real emission ROW emits terms and reaches the solver; the stub cannot.** | **NO** |
+| **transfer stubs** | **LESS.** They are sound but deliberately coarse (`sin` → `[-1, 1]`, `split` → the input's hull). A real transfer is tighter, and a coarser box can fail to discharge where a tighter one succeeds. | **NO** |
+| `div` divisor-nonzero | MORE — asserts what the analysis could not establish | yes |
+| constrained-assume refusal | MORE — removes the policy without emitting the constraint | yes |
+| element budget raise | MORE — 500,000 exceeds any plausible real bound | yes |
+| `convert` exactness | MORE — pretends the rounding is free | yes |
+
+**So the emission-coverage zero never tested "what if this primitive had an
+emission row." It tested "what if it were declared emittable without one," which
+fails by construction.** The transfer zeros are weaker than stated for a
+different reason: they were measured with boxes coarser than a real transfer
+would produce.
+
+**Four of the seven capability zeros survive as conclusive. Two need re-running
+with faithful stubs, and until then they are not evidence.** The one positive
+result is unaffected — `split` + `add_any` produced a VERIFIED under COARSER
+stubs than the shipped transfers, so a real implementation can only do better.
 
 **The fixed-width boundary is a FAMILY, not a capability** — at most three
 separately buildable members:
@@ -76,9 +107,16 @@ are per-contract, not shared.**
 
 ## What blocks
 
-**Both primitive frontiers read zero over fourteen** — and the corpus now covers
-the symbolic hazard surface completely (4 of 4 hazards have contracts), so the
+**Both primitive frontiers read zero over fourteen** — and the corpus covers the
+**DOCUMENTED** symbolic hazard surface (4 of 4 hazards have contracts), so the
 zeros are no longer scoped to an opportunistically assembled population.
+
+**"Documented" is the load-bearing word.** The nine hazards were read from the
+nodes' own metadata, and **nothing has measured whether that metadata is
+complete.** It is not: the `GNNFluxCorrectedFVMNode` 2D-mesh defect — the node
+cannot be stepped on any 2D mesh — appears in no hazard list and was found by
+**trying to write a contract**. So the corpus covers what the authors wrote
+down, which is a lower bound on the hazard surface, not the surface.
 
 **Primitive frontiers cannot see guards**, by construction: both enumerate
 primitives, and a guard is a registered primitive refusing on a condition. The
@@ -121,6 +159,13 @@ because a number was wrong without them.**
 - **the gauges** — mutation batteries with declared scope, positive and negative
   controls.
 - **the norms** — each carries the instances that earned it, with numbers.
+- **contract-writing itself, as a bug-finding channel.** Two defects were found
+  by *trying to write a contract* rather than by any verdict: the lazy-cache
+  friction, and `GNNFluxCorrectedFVMNode`'s inability to step on a 2D mesh
+  (`gnn.py:312` hard-wires `3` where `mesh.dim` belongs). Both forced a node
+  into a configuration nobody exercised. **This is a value channel independent
+  of any verdict a contract produces**, and it is the kind that vanishes from a
+  record because it is not a verdict.
 
 Every number above is checkable against them, which is the property the numbers
 themselves do not have.
