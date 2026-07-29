@@ -528,6 +528,26 @@ And **the previous four instances were all in code, so the norm's own examples
 taught readers to look in the wrong place.** When a change lands, its
 proposal document is part of the change.
 
+**AND THE CLASS IS NOT ENDEMIC — measured, because two wins in a row made it
+look that way.** Both claim-lens wins came from reading a comment that already
+stated the invariant the code violated, so the codebase was swept for the shape
+deliberately: 21 source files, 488 candidate invariant-assertions
+(`guarantee`/`cannot`/`never`/`impossible`/`unreachable`/`by construction`/
+`always`/`ensures`), of which 26 sit in the sharpest shapes. **Every one
+examined — all 17 `guarantee` claims plus the 9 sharpest others — is the good
+form**, and three are exemplary: `affine.py`'s *"unreachable: literal/const
+operands decode to err-0 point forms"* **raises anyway**; `obligation.py`'s
+*"Unreachable today (the emission declines such a slice before replay sees it),
+which is precisely why it could sit here unnoticed"* **raises anyway** and names
+the unreachability as the reason the bug survived; `solvers.py`'s *"Callers
+guarantee at least one declared input element was actually supplied"* has its
+enforcement one screen above the call. Zero findings.
+
+**So the risk is a function of code AGE AND CHURN, not of the codebase.** Both
+wins were in the newest module's newest function, written across two
+high-churn sessions. The mature modules pair a claim with its defence as a
+matter of course. Hunt the shape in what was written this week.
+
 ## Read key PRESENCE, not `.get()` — present-with-value-`None` is not absent
 
 Named for the reachable half deliberately. This was called "absent params" for a
@@ -788,8 +808,10 @@ shipped as one change, and the declaration check has been audited twice:
 | the `sign`/`rem` rows | gauge, 1,258 element-checks, clean | the **float32 root defect** — a discharged obligation at 4/4 known coverage that execution refutes |
 | the declaration check | 49 tests green, 105 corpus declarations clean | a **VERIFIED over an empty set**, one dtype-width from the headline example |
 | **the FIXES for that audit** | 64 tests green, corpus clean | a **crash regression the fix itself introduced**, a **false rejection**, and a message naming values that do not exist |
+| **one helper, scoped** | 79 tests green, 0 violations in the author's own sweeps | an **`OverflowError` escaping a `ValueError`-only layer**, a guard **bypassed by one numpy type**, and two helpers returning the wrong answer at infinity and at NaN |
 
-**In every case the author's instrument was clean and the auditor was not.**
+**Five audits. Five that found something. In every case the author's instrument
+was clean and the auditor was not.**
 That is not an argument against instruments — the gauges catch regressions,
 which auditors do not — it is an argument that **a clean instrument is not
 evidence of a clean change**, because an instrument tests what its author
@@ -814,6 +836,14 @@ rules out one lens simply being the better one:
   the containment lens alone found the false rejection of the ordinary way to
   declare "any int64". **Three rounds, three different splits.**
 
+**A SCOPED audit is allowed and sometimes better.** The fifth audit excluded a
+mechanism that had already been proven exact — 172,460 structured plus 83,514
+randomized declarations on one lens, 300,000 float32 intervals against an
+independent IEEE-ordinal search on the other — and pointed both lenses at the
+surface with the worst record instead. Re-auditing a proven mechanism spends the
+budget on the part that works. **State what is excluded and why, so the scoping
+is a decision rather than an omission.**
+
 **THE COROLLARY, NOW DEMONSTRATED RATHER THAN ASSERTED: a fix authored in the
 same session as the audit that found what it fixes has NOT been audited.** The
 context that learned the defect writes the fix with the defect in view, and
@@ -830,11 +860,22 @@ looks too small to get wrong is the one with the worst record here** — the sam
 shape as *"five small rows is exactly when it gets skipped, and `add_any` was
 one line."*
 
-**And the fixes were audited only by accident of timing.** The file changed
-under one auditor mid-run, so it audited both versions and caught the
-regression. Had it finished first, the second and third defects would have
-shipped. **Schedule the re-audit as a separate act when the fix is written** —
-do not rely on an auditor being slow.
+**And the fixes were audited only by accident of timing — that accident is what
+this gate exists to replace.** The file changed under one auditor mid-run, so it
+audited both versions and caught the regression. **Had it finished first, two
+defects would have shipped**, and nothing in the process would have noticed.
+Coverage arrived by luck.
+
+That is the precise thing the gate prevents: not "changes are risky" — everyone
+knows that — but that **the moment a fix is written is the moment its coverage
+looks least necessary and is least present.** The author has the defect in view,
+the tests pass, the instrument is clean, and the only reason the fix got looked
+at was a scheduling coincidence. **Schedule the re-audit as a separate act when
+the fix is written**, and do not rely on an auditor being slow.
+
+The fifth row above is that rule paying for itself immediately: it was a
+deliberately scoped audit of one helper, and it found four defects in a surface
+whose author had just swept it clean.
 
 **An audit can also return a POSITIVE, and this one did.** Both lenses
 independently established that the decision procedure is exact across all 30
