@@ -575,6 +575,7 @@ def _t_square(eqn, params, ins):
     """
     if len(ins) != 1:
         return None
+    _refuse_complex(eqn, "square")
     _integer_pow_budget(ins[0], 2)
     return _int_overflow_guard(eqn, "square", [iv.integer_pow(ins[0], 2)])
 
@@ -1405,6 +1406,38 @@ def _require_float_dtype(eqn, prim: str) -> None:
         )
 
 
+def _refuse_complex(eqn, prim: str) -> None:
+    """The even-power non-negativity rule is a REAL-arithmetic fact, and this
+    is the guard that keeps it from being applied where it is false.
+
+    Found by a blinded audit of the `square` row. jax declares `square_p` as
+    ``standard_unop(_int | _float | _complex, 'square')`` — complex IS in its
+    domain — and `interval.integer_pow`'s even-exponent branch returns
+    ``[0, +inf]`` for a ⊤ operand. Measured: for ``square(x.astype(complex128)
+    * 1j)`` over a declared real box ``[1, 2]``, stelling claimed ``[0, inf]``
+    while jax returns ``-1``, ``-2.25``, ``-4`` — genuinely REAL negatives,
+    outside the box, recorded as KNOWN coverage rather than declined.
+
+    It applies to `integer_pow` identically, which is where `square` inherited
+    it by delegating: `_t_integer_pow` guards dtype only for a NEGATIVE
+    exponent, so `z ** 2` on a complex operand had the same false box. Both
+    are guarded here rather than only the row under audit, because a known
+    false box is not made acceptable by being pre-existing.
+
+    The codebase already holds this posture elsewhere — `_t_sqrt` refuses
+    non-float loudly and `_dot_general_row_form` declines complex operands
+    explicitly. This closes the gap those two already stood in.
+    """
+    dt = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
+    if dt.startswith("complex"):
+        raise iv.IntervalError(
+            f"{prim!r} on dtype {dt!r}: the even-power non-negativity rule is a "
+            f"real-arithmetic fact and complex squaring does not satisfy it "
+            f"(measured: square of a pure imaginary is a NEGATIVE real). "
+            f"Complex is outside this transfer's domain — declined"
+        )
+
+
 def _int_overflow_guard(eqn, prim: str, outs):
     """Guard AND tighten the result of a computing transfer on integers.
 
@@ -1699,6 +1732,7 @@ def _t_integer_pow(eqn, params, ins):
     # degrade-don't-HANG in BOTH dimensions: the exact-rational endpoints
     # cost time linear in the exponent (jax bounds it nowhere) and are paid
     # per element (audit FRAGILE 2 and 3)
+    _refuse_complex(eqn, "integer_pow")
     _integer_pow_budget(ins[0], y)
     if y < 0:
         # a negative exponent over integers is not real division: jax's
