@@ -908,7 +908,14 @@ def test_f5b_int64_index_narrowing_boundary_both_sides():
     assert p.obligations[0].status == "discharged"
     p2 = propagate(q(float(2**31)))
     assert p2.obligations[0].status == "unknown"
-    assert any("convert_element_type" in n and "no sound rule" in n for n in p2.notes)
+    # The note used to read "no sound rule for params {...}", which printed the
+    # DESTINATION dtype and never the source. Strengthened rather than relaxed:
+    # the decline must now name BOTH dtypes and say what is wrong with the pair,
+    # so this fails if the reason regresses to the generic form OR if it names
+    # the wrong conversion.
+    conv = [n for n in p2.notes if "convert_element_type" in n]
+    assert conv, p2.notes
+    assert any("'int64' -> 'int32'" in n and "not exact" in n for n in conv), conv
     # under ieee the same narrowing passes identically (exact integer
     # identity: no float semantics, no flush hazard)
     p3 = propagate(q(imax), semantics="ieee")
