@@ -93,24 +93,33 @@ an `unstack` shape at slice validation) or discharge on intervals without
 escalating. The twelfth reaches the solver and **already VERIFIES**.
 
 **So no emission row could change any verdict here, and the stub's fidelity is
-irrelevant to that conclusion** — a faithful row would sit behind the same
+UNDEFINED rather than irrelevant — an unreachable stage has no direction** — a faithful row would sit behind the same
 earlier declines. **The emission zero stands**, on the argument that nothing
 reaches the stage rather than on the stub being over-permissive.
 
 **Scope, stated because the earlier version over-reached in exactly this way:**
-this licenses *"no emission row changes a verdict in THIS corpus"*. It does not
-license *"emission rows are without value"*.
+this licenses *"no emission row changes a verdict in THIS corpus"* — and it is
+established **BECAUSE EMISSION IS UNREACHABLE, not because emission is
+unhelpful.** Those license different downstream claims. In particular it says
+**nothing at all** about a corpus where the earlier declines do not fire, which
+is exactly what an external codebase is. **The emission zero is MORE
+MADDENING-scoped than it looks, not less.**
 
-#### The transfer zero: STILL PROVISIONAL
+#### The transfer zero: RE-RUN WITH TIGHT STUBS, AND IT HOLDS
 
-Different structure, and the emission argument does not transfer. **Interval
-propagation always runs** — there is no earlier stage for a transfer to sit
-behind — so a coarse stub's box is used, and a tighter real transfer could
-discharge where the coarse one could not. **That zero needs re-running with
-tight stubs and is not evidence until it is.**
+Tightness has a ceiling, which narrowed the re-run from the whole frontier to
+**two cells**. Measured input intervals: `sin`/`cos` in `rigid_body` see
+`[-inf, inf]` — spanning a full period, so `[-1, 1]` **is** the tightest sound
+box and the coarse stub was already faithful; `atanh` sees the point `[0, 0]`
+and its stub is monotone; `not` is exact. Only **`rigid_body`'s `unstack`**
+(hull vs exact slicing) and **`gnn`'s `sin`** over `[0, 0.785]` could differ.
 
-**Five of the seven capability zeros are conclusive. One (transfer coverage)
-is provisional.** The one positive result is unaffected — `split` + `add_any`
+Re-run with a monotone-piecewise `sin` and an exact `unstack`, per-entry and
+jointly: **changed = 0, DECLINE→VERDICT = 0.** Pre-registered prediction
+(both zeros hold, because `rigid_body`'s terminal is a SHAPE check and `gnn`'s
+is a SIZE check, and box tightness affects neither) — **confirmed.**
+
+**Six of the seven capability zeros are conclusive.** The one positive result is unaffected — `split` + `add_any`
 produced a VERIFIED under COARSER stubs than the shipped transfers, so a real
 implementation can only do better.
 
@@ -149,10 +158,35 @@ primitives, and a guard is a registered primitive refusing on a condition. The
 guard frontier, measured by peeling every gap and the budget:
 `convert_element_type` blocks two contracts, `div` blocks one.
 
-**Four hazards, three distinct terminals, three nodes.** `div` on Aitken, `sqrt`
-on both `coil_array` hazards (they share a node and reach the same MPEM
-computation), `convert`→integer-overflow on LBM. **Nothing helps across
-independent nodes — n = 3.**
+### Terminals — **RETRACTED and re-derived**
+
+The earlier version (*"four hazards, three distinct terminals, three nodes,
+n = 3"*) named terminals found by **peeling with emission stubs**. Since emission
+is never reached, those peels showed **the next slice-validation decline and
+nothing more** — not what emission would do. **`sqrt` as `coil_array`'s terminal
+was wrong, not provisional**, and the n = 3 structural claim inherited it.
+
+**Re-derived from BASELINE causes only — the sole fully faithful terminals,
+measured with no stub of any kind:**
+
+| contract | baseline terminal |
+|---|---|
+| MADD HeatNode | `convert_element_type` value-changing |
+| MADD LBMNode · MIME d2q9 · MIME gnn | **element budget** |
+| MIME rigid_body | `sqrt` emission gap |
+| coil_array/caller · LBM/Re-range | **constrained-assume refusal** |
+| 7 contracts | VERIFIED |
+
+**Four distinct baseline terminals over seven blocked contracts**: the element
+budget (3), the constrained-assume refusal (2), `convert_element_type` (1), and
+`sqrt` (1). **The budget and the refusal each recur across independent nodes** —
+which is the opposite of the retracted claim. `div` does not appear at baseline
+anywhere; it was only ever visible under peeling.
+
+**What sits BELOW each baseline terminal is unmeasured**, because measuring it
+requires peeling, and peeling past an emission gap cannot be done faithfully
+while emission is unreachable. **`coil_array`'s real terminal below the refusal
+is the cell that remains open.**
 
 ## The `assume` axis
 
