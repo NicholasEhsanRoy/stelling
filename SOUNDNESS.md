@@ -68,6 +68,41 @@ Every verdict object stamps, at minimum:
   sightings under five names is what an unnamed structural boundary looks
   like, and the campaign spent measurable effort re-discovering it.
 
+  **What real mode actually brackets, MEASURED — it is not uniformly ℝ, and
+  the boundary is DTYPE CLASS rather than semantics:**
+
+  | case | real-mode box | executed jax | follows |
+  |---|---|---|---|
+  | `add` f32 `1.0 + 2**-24` | `[1.00000006, 1.00000006]` | `1.0` | **ℝ** |
+  | `gt` f64 `[1e-320, 1e-300] > 0` | definite TRUE | False | **ℝ** |
+  | `mul` f64 `[0,0] * [inf,inf]` | `≈[0, 0]` | `nan` | **ℝ** (stamped convention) |
+  | `mul` f64 `1e308 * 10` | `[1.798e308, inf]` | `inf` | **both** — outward rounding brackets it |
+  | `sqrt` f64 `[-4, -1]` | DECLINE | `nan` | either — undefined in ℝ too |
+  | `add` int32 `INT_MAX + INT_MAX` | **DECLINE** | wraps to `-2` | **EXECUTION** |
+  | `div` int32 `-7 / 2` | `[-3, -3]` | `-3` | **EXECUTION** (ℝ gives −3.5) |
+  | `convert` f64→f32 rounding | **DECLINE** | rounds | **EXECUTION** |
+  | `sign` f64 `[1e-320, 1e-300]` | `[0, 1]` | `0.0` | **EXECUTION** (FTZ) |
+
+  **Floats are judged in ℝ; integers and converts are execution-faithful.**
+  The stamp's *"exact real arithmetic"* describes the float half and **is
+  silent about the integer half**, where the code has always modelled
+  wraparound and truncation — behaviours ℝ does not have. That silence is what
+  let both readings look defensible, and it is stated here rather than left to
+  be re-derived. **The `sign`/`rem` rows depart from the float half
+  deliberately** (they gate on `MIN_NORMAL` where `add`/`mul` do not), because
+  declining is safe under both readings while admitting is safe under only
+  one; closing that divergence is a mode-wide decision, not a two-row fix.
+
+  **The campaign's strongest result met this question before it was named, and
+  answered it by withholding.** The flagship declares `float32` and its
+  recorded verdicts are REFUTED with a witness that EXECUTES — safe under
+  either reading, because execution is the arbiter and it agreed. Its *holds*
+  side was never rendered VERIFIED, for exactly the reason later measured:
+  *"a wrong gate on the refuting side yields a witness that either executes or
+  does not, and this one executes; on the 'holds' side it would mint a false
+  VERIFIED with nothing downstream to catch it."* **A caveat written honestly
+  at the time, before anyone knew which reading was right, and it held.**
+
   Conventions consequent on the declared semantics (the
   closed-real-interval `0·∞ = 0` endpoint rule, unsound under IEEE where
   `inf` is a value) are stamped as assumptions, which they are,
@@ -103,6 +138,34 @@ Every verdict object stamps, at minimum:
   wrong; the question moved. This is why `ir` refuses, at load, an equation
   missing a param jax always supplies, rather than validating the answer:
   **an answer cannot reveal that it is to the wrong question,**
+
+  **A FOURTH way a declaration can be wrong, and the only one that mints a
+  REFUTED.** The other three cost a VERIFIED that means less than it looks —
+  deserialization corruption above, a dropped `assume` widening the question,
+  and a box correctly declared but never occupied. This one manufactures a
+  counterexample. `any_array` validated shape and bound ordering but not
+  bounds *against dtype*, so a `uint8` declaration of `(-3, -1)` — impossible
+  for the dtype, a set no execution can inhabit — was accepted, and `sign`
+  returned `[-1, -1]` on it at **100% coverage with no note**, yielding a
+  REFUTED whose witness the caller could not reproduce. **A false
+  counterexample is the output shape a user trusts most.**
+
+  **The surface was thirteen entry points, not one.** Driving that same box
+  through every integer-accepting transfer: **13 of 21 admitted it**, and the
+  six comparisons (`lt`/`le`/`ne` definite TRUE, `gt`/`ge`/`eq` definite
+  FALSE) put a definite boolean straight into an assert. Routing `sign`
+  through the overflow guard closed one. The hole was at the declaration, so
+  the check is: **a declared box holding no value of its dtype is EMPTY and is
+  refused at declaration time**, the fourth instance of a posture already held
+  for a negative extent, `lo > hi`, and the infinite point. The rule is *no
+  representable value inside the interval*, not *a bound outside the range* —
+  a box wider than the dtype is an over-approximation and stays sound, so
+  `uint8 (-3, 10)` and `float32 (0.0, 1e39)` are admitted while `uint8
+  (-3, -1)` and `float32 (1e39, 1e40)` are not. Float bounds are never tested
+  for exact representability (a `float32` bound of `0.1` is ordinary and must
+  be admitted) and complex is admitted unconditionally. **Measured against
+  every literal declaration in the campaign corpus — 105 of them — zero are
+  refused,** and all 13 entry points close,
 
 
 - the query's content hash (`stelling.ir.ClosedJaxpr.content_hash()`; the

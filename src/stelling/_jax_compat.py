@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import enum
 import functools
+import math
 import warnings
 
 import jax
@@ -152,6 +153,70 @@ _assert_p.def_impl(lambda x: x)
 _nonvacuity_p.def_impl(lambda x: x)
 
 
+def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
+    """Does the closed interval ``[lo, hi]`` contain ANY value of dtype ``dt``?
+
+    The declaration layer's fourth empty-set refusal, and the narrowest test
+    that closes it. What makes an interval empty here is not "a bound outside
+    the dtype's range" — it is "no representable value inside the interval",
+    and the difference is the whole design:
+
+    * ``uint8 (-3, -1)`` holds nothing. **Empty. Rejected.**
+    * ``uint8 (-3, 10)`` holds 0..10. **Non-empty, admitted** — the box is an
+      OVER-approximation of what the dtype can produce, which is sound; every
+      transfer's answer over it still contains the executed value.
+    * ``float32 (0.0, 1e39)`` holds every float32 in [0, 3.4e38].
+      **Admitted**, for the same reason, even though the upper bound is not
+      representable.
+    * ``float32 (1e39, 1e40)`` holds nothing — float32's finite max is
+      3.4e38, and `inf` is not a member of that interval as a real either.
+      **Empty. Rejected**, which also closes the adjacent case a blinded
+      audit raised, where `rem`'s dividend guard tested the *binary64*
+      endpoints of an f32 declaration.
+    * ``int8 (0.2, 0.8)`` holds no integer. **Empty. Rejected.**
+
+    WHERE THIS IS UNSURE IT ADMITS, deliberately — a declaration check that
+    refuses a legitimate envelope is worse than the hole it closes:
+
+    * **float bounds are tested for RANGE, never for exact
+      representability.** A float32 point declaration of ``(0.1, 0.1)`` is
+      admitted although 0.1 is not a float32; refusing it would reject the
+      most ordinary envelope there is.
+    * **complex dtypes are admitted unconditionally.** What a real-bounded
+      box means for a complex array is undefined, and that is already an
+      open item; this check does not settle it by refusing.
+
+    Integer bounds come from ``propagate._INT_DTYPE_BOUNDS`` rather than a
+    second table — the same registry the overflow guard reads, so the two
+    cannot drift. Float bounds are read from ``numpy.finfo``, a lookup rather
+    than a transcribed constant.
+    """
+    if dt.startswith("complex"):
+        return True, ""
+    from stelling.propagate import _INT_DTYPE_BOUNDS  # one registry, not two
+
+    if dt in _INT_DTYPE_BOUNDS:
+        d_lo, d_hi = _INT_DTYPE_BOUNDS[dt]
+        first = math.ceil(max(lo, float(d_lo)))
+        last = math.floor(min(hi, float(d_hi)))
+        if first <= last:
+            return True, ""
+        return False, (
+            f"{dt} represents the integers [{d_lo}, {d_hi}] and the interval "
+            f"contains none of them"
+        )
+    try:
+        fmax = float(np.finfo(np.dtype(dt)).max)
+    except (TypeError, ValueError):
+        return True, ""  # a dtype this check does not model: admit, never guess
+    if max(lo, -fmax) <= min(hi, fmax):
+        return True, ""
+    return False, (
+        f"{dt}'s finite values span [{-fmax}, {fmax}] and the interval lies "
+        f"entirely outside them"
+    )
+
+
 def any_array(shape, dtype, bounds):
     """Declare a harness input: an arbitrary array of ``shape``/``dtype``
     with every element in ``bounds = (lo, hi)``. Traces to a
@@ -190,9 +255,22 @@ def any_array(shape, dtype, bounds):
             f"empty real set (an infinite point has no members under ℝ "
             f"semantics); refusing at declaration time"
         )
+    dt = str(np.dtype(dtype))
+    holds, why = _dtype_holds_a_value_in(dt, lo, hi)
+    if not holds:
+        raise ValueError(
+            f"any_array bounds ({bounds[0]!r}, {bounds[1]!r}) declare a set "
+            f"EMPTY under dtype {dt!r} — {why}. No execution of the program "
+            f"can produce a value in this box, so any claim over it is "
+            f"vacuous: measured, a uint8 declaration of (-3, -1) returned "
+            f"sign in [-1, -1] at 100% coverage and minted a REFUTED whose "
+            f"witness the caller could not reproduce. Refusing at "
+            f"declaration time, as for a negative extent, lo > hi, and the "
+            f"infinite point"
+        )
     return _any_p.bind(
         shape=dims,
-        dtype=str(np.dtype(dtype)),
+        dtype=dt,
         lo=lo,
         hi=hi,
     )

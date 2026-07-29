@@ -1664,24 +1664,44 @@ def _refuse_non_f64_float(eqn, prim: str) -> None:
     """A real-mode guard whose threshold is :data:`interval.MIN_NORMAL` is a
     BINARY64 guard, and must say so by declining every other float dtype.
 
-    Found by a blinded audit of the `sign`/`rem` rows, and it is the same
-    defect those rows were built to prevent, one dtype over. `MIN_NORMAL` is
-    ``2**-1022``; float32's smallest normal is ``2**-126``, ~270 orders of
-    magnitude above it. So an f32 operand box like ``[1e-40, 1e-30]`` clears
-    the f64 floor while the target evaluates its lower elements to ``0.0``:
-    measured, `sign` returned a definite ``[1, 1]`` and jax returned ``0.0``,
-    and end to end that was a **discharged obligation at 4/4 KNOWN coverage**
-    which execution refutes. `rem` was worse — an f32 divisor box that
-    excludes zero outright, ``[1e-39, 1e-38]``, was admitted while
-    ``rem(1.0, 5e-39)`` is **NaN**, which no interval contains.
+    A DELIBERATE DEPARTURE FROM A STATED POSTURE — not a defect fix, and the
+    distinction was got wrong once already. SOUNDNESS.md had adjudicated this
+    before these rows existed: *"real-mode boxes excluding the executed value
+    at every non-binary64 float dtype, shared by `add`, `mul` and every
+    arithmetic row… **is not a defect in any row**: ieee mode is gated to
+    binary64, and real mode has no dtype gate at all, so **ℝ-judgement of a
+    narrower float is the stated posture**."* Under that posture the f32 case
+    below is the posture behaving as documented.
 
-    DECLINE RATHER THAN MODEL, which is not a new adjudication: the ieee
-    face already answered this question the same way (re-attack U2, see
-    :func:`_non_f64_float_dtypes` and tests/test_ieee_f32_band.py), and it
-    pinned float16 as a decline *"not as target behavior"* even though f16
-    is measured NOT to flush here. Same posture in real mode: modelling a
-    per-dtype flush boundary needs a per-dtype table of smallest normals,
-    which is numeric-constant work and is not done here.
+    WHAT WAS MEASURED. `MIN_NORMAL` is ``2**-1022``; float32's smallest
+    normal is ``2**-126``, ~270 orders of magnitude above it. So an f32
+    operand box like ``[1e-40, 1e-30]`` clears the f64 floor while the target
+    evaluates its lower elements to ``0.0``: `sign` returned a definite
+    ``[1, 1]`` where jax returns ``0.0``, and end to end that was a
+    **discharged obligation at 4/4 KNOWN coverage** which execution refutes.
+    For `rem` the executed value is **NaN** (``rem(1.0, 5e-39)``), which no
+    interval contains under any reading.
+
+    WHY THE DEPARTURE IS DEFENSIBLE: **declining is safe under BOTH readings.**
+    Under execution-bracketing it removes a false box; under ℝ-judgement it is
+    merely over-conservative, and over-conservative never mints a verdict. The
+    reverse — keeping the floor and admitting f32 — is safe under only one.
+    A row that must be sound before the mode question is settled takes the
+    option that does not depend on the answer.
+
+    KNOWN INCONSISTENCY, recorded rather than hidden: **`add` and `mul` box
+    f32 the same way and have no such gate.** Two rows now depart from the
+    stated posture while their siblings follow it. That is a divergence with
+    a known cause, not a defect in either place, and closing it is a MODE-WIDE
+    decision — either every arithmetic row takes the gate, or these two drop
+    it — which needs the per-dtype table of smallest normals (numeric-constant
+    work) or the ℝ reading confirmed. Neither is done here.
+
+    The SHAPE of the decline is not a new adjudication: the ieee face answered
+    the same question the same way (re-attack U2, see
+    :func:`_non_f64_float_dtypes` and tests/test_ieee_f32_band.py), pinning
+    float16 as a decline *"not as target behavior"* even though f16 is
+    measured NOT to flush here.
     """
     bad = _non_f64_float_dtypes(eqn.invars)
     if bad:
