@@ -606,7 +606,12 @@ def _t_copy(eqn, params, ins):
     """``copy_p`` is the identity. ``jnp.array(x)`` emits it, which is why a
     kinetic-energy contract was unreachable for want of a no-op."""
     if len(ins) != 1:
-        return None
+        raise iv.IntervalError(
+            f"copy is unary and this equation carries {len(ins)} operand"
+            f"{'' if len(ins) == 1 else 's'}. A traced `copy_p` always has "
+            f"exactly one, so this IR was not produced by tracing — check the "
+            f"serialization or the hand-built equation that reached here"
+        )
     return [ins[0]]
 
 
