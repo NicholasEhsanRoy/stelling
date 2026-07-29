@@ -555,7 +555,13 @@ def any_pytree(tree, bounds):
     traced values (``jax.tree_util``). No new primitive, no new tracing
     machinery — a harness declared through this helper traces to the very
     same equations as the equivalent hand declaration, so the query
-    content hash is identical.
+    content hash is identical. **Including the refusals**: this delegates
+    every bound decision to :func:`any_array` rather than pre-processing
+    the bounds, so a declaration the hand form refuses is refused here too.
+    An earlier version converted bounds to float first and therefore
+    ADMITTED, with a silently rounded bound, a declaration the hand form
+    rejects — the claim in this sentence was false for that class, which is
+    what made it worth stating precisely rather than loosely.
 
     ``tree`` is a *prototype* pytree:
 
@@ -596,15 +602,36 @@ def any_pytree(tree, bounds):
             ) from e
 
     def canon(pair, where):
+        """Validate, and pass the bounds through UNCONVERTED.
+
+        This used to `return float(pair[0]), float(pair[1])`, and that one
+        conversion was a soundness hole: `any_array`'s storability guard keys
+        on the operand's own type, so a pre-converted bound arrived already
+        rounded and the guard never saw the value it exists to judge.
+        Measured — the hand form REFUSED `int64 (0, 2**53 + 1)` while the sugar
+        ADMITTED it with `hi` stored as `9007199254740992.0`, so the declared
+        integer was not in the box the tool then reasoned about.
+
+        The decision about a bound the IR cannot hold exactly was already made
+        one layer over, and it is reused rather than re-invented: NARROWING is
+        refused (the tool would reason about fewer values than were declared),
+        WIDENING is admitted (an over-approximation still contains every
+        executed value). Deciding it again here is how the two layers came to
+        disagree in the first place.
+
+        The alias comparison below is unaffected: python compares `0 == 0.0`
+        as equal, so `(0, 1)` and `(0.0, 1.0)` still read as the same bounds,
+        while `2**53 + 1` and `2.0**53` correctly read as different.
+        """
         if not _is_bounds_pair(pair):
             raise ValueError(
                 f"any_pytree: bounds for array leaf at {where} must be a "
                 f"(lo, hi) pair of numbers, got {pair!r}"
             )
-        return float(pair[0]), float(pair[1])
+        return pair[0], pair[1]
 
     declared: dict[int, object] = {}  # id(prototype) -> traced value
-    declared_bounds: dict[int, tuple[float, float]] = {}
+    declared_bounds: dict[int, tuple[object, object]] = {}
     out_leaves = []
     for (path, leaf), b in zip(leaves_with_paths, per_leaf):
         where = jax.tree_util.keystr(path) or "<root>"

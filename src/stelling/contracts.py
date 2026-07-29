@@ -288,7 +288,7 @@ class ContractVerdict:
 # -- templates ----------------------------------------------------------------
 
 
-def _closed_range(template: str, name: str, rng) -> tuple[float, float]:
+def _closed_range(template: str, name: str, rng):
     """Authoring-time validation of a declared closed range — the
     loudness :func:`stelling.harness.any_array` applies at trace time,
     moved to authoring, where these templates' own refusal messages
@@ -297,6 +297,13 @@ def _closed_range(template: str, name: str, rng) -> tuple[float, float]:
     envelope (NaN fails ``lo <= hi``), and a non-finite endpoint is
     refused outright — these templates pose bounded closed envelopes.
     """
+    # VALIDATE on the float image, RETURN the caller's own values. Returning
+    # the floats was the fourth route into a soundness hole found three times
+    # already: `any_array`'s storability guard keys on the operand's type, so a
+    # pre-converted bound arrives rounded and the guard never sees the value it
+    # exists to judge. Measured: `_closed_range("t", "n", (0, 2**53 + 1))`
+    # returned `9007199254740992.0`, which both mis-declared the envelope AND
+    # printed the wrong number into the contract's own requires-description.
     lo, hi = float(rng[0]), float(rng[1])
     if not lo <= hi:
         raise ValueError(
@@ -310,7 +317,7 @@ def _closed_range(template: str, name: str, rng) -> tuple[float, float]:
             f"non-finite endpoint; this template poses bounded closed "
             f"envelopes — refusing at authoring time"
         )
-    return lo, hi
+    return rng[0], rng[1]
 
 
 def conditioning_2x2(dtype, a_range, c_range, b_range, kappa) -> Contract:
