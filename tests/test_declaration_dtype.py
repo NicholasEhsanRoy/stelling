@@ -612,3 +612,47 @@ def test_the_advice_a_refusal_gives_is_followable():
     assert "UPPER bound" in msg, msg
     # and the advice works: as an upper bound it is admitted
     assert _declare("int64", 0, 2**63 - 1) is not None
+
+
+# --------------------------------------------------------------------------
+# the silent-⊤ rows: a decline that is COUNTED but carries no reason
+# --------------------------------------------------------------------------
+def test_the_convert_decline_names_the_SOURCE_dtype():
+    """`convert_element_type` returning None produced the note
+    "no sound rule for params {'new_dtype': 'float64', ...}" — which prints the
+    DESTINATION and never the SOURCE, and the source is the load-bearing half.
+
+    Measured: `int64 -> float64` is a terminal in independently-authored
+    external code, where a python int literal promotes through it, and a reader
+    of the generic note cannot tell which side of the cast is the problem.
+
+    This fails if the reason regresses to the generic form, if it names the
+    wrong dtypes, or if the coverage accounting moves — a raised decline and a
+    returned None must be counted identically.
+    """
+    def h():
+        x = any_array((3,), "int64", (0, 5))
+        return assert_(jnp.sum(x.astype(jnp.float64)) <= 1e30)
+
+    p = P.propagate(trace(h))
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("convert_element_type", 1),)
+    note = "".join(n for n in p.notes if "convert_element_type" in n)
+    assert "'int64' -> 'float64'" in note, note
+    assert "SOURCE" in note, note
+    assert "no sound rule" not in note, "the generic note must be gone"
+
+
+def test_the_float_to_int_decline_prints_the_offending_interval():
+    """The other convert path: the truncation rule is modelled, but only while
+    the operand fits the target. The refusal must print the operand's span and
+    the target's range — name it, explain it, print the numbers."""
+    def h():
+        x = any_array((2,), "float64", (0.0, 4e9))     # past int32's max
+        return assert_(jnp.sum(jnp.asarray(x.astype(jnp.int32), jnp.float64)) <= 1e30)
+
+    p = P.propagate(trace(h))
+    note = "".join(n for n in p.notes if "convert_element_type" in n)
+    assert "truncates toward zero" in note, note
+    assert "4000000000" in note.replace(".0", ""), note
+    assert "2147483647" in note, note

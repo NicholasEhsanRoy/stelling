@@ -486,13 +486,35 @@ def _t_convert(eqn, params, ins):
         # cannot hold.
         bound = _INT_RANGE[dst]
         if any(not (-bound <= x < bound) for x in (*a.los, *a.his)):
-            return None
+            raise iv.IntervalError(
+                f"{src} -> {dst} truncates toward zero, which this transfer "
+                f"models — but the operand "
+                f"spans [{min(a.los)}, {max(a.his)}], which leaves {dst}'s "
+                f"representable range [{-bound}, {bound - 1}]. Outside it jax "
+                f"clamps or wraps rather than truncating, and no interval rule "
+                f"here models that. Narrowing the operand admits this form"
+            )
         return [iv.IntervalArray(
             shape=a.shape,
             los=tuple(float(math.trunc(x)) for x in a.los),
             his=tuple(float(math.trunc(x)) for x in a.his),
         )]
-    return None  # value-changing or unrecognized conversion -> ⊤, noted
+    # THE REASON IS NAMED, and the source dtype with it. A `return None` here
+    # produced the note "'convert_element_type' has no sound rule for params
+    # {'new_dtype': 'float64', ...}; ⊤" — which prints the DESTINATION and
+    # never the SOURCE, and the source is the load-bearing half. Measured: this
+    # is a terminal in independently-authored external code, where a python int
+    # literal promotes through `int64 -> float64`, and a reader of that note
+    # cannot tell which side of the cast is the problem.
+    raise iv.IntervalError(
+        f"the conversion {src!r} -> {dst!r} is not exact. NOTE THE SOURCE "
+        f"DTYPE, {src!r} — it is the half the "
+        f"generic params note does not show. Exact widenings are admitted "
+        f"(float32->float64, int32->float64, bool->any, and the rest of "
+        f"propagate._EXACT_CONVERSIONS), as is an int64->int32 narrowing whose "
+        f"interval provably fits; every other cast may change the value it "
+        f"carries, and this transfer declines rather than modelling the change"
+    )
 
 
 # The primitives whose operand a product may be CONTRACTED into, as one
@@ -584,7 +606,12 @@ def _t_copy(eqn, params, ins):
     """``copy_p`` is the identity. ``jnp.array(x)`` emits it, which is why a
     kinetic-energy contract was unreachable for want of a no-op."""
     if len(ins) != 1:
-        return None
+        raise iv.IntervalError(
+            f"copy is unary and this equation carries {len(ins)} operand"
+            f"{'' if len(ins) == 1 else 's'}. A traced `copy_p` always has "
+            f"exactly one, so this IR was not produced by tracing — check the "
+            f"serialization or the hand-built equation that reached here"
+        )
     return [ins[0]]
 
 
@@ -861,9 +888,13 @@ def _t_rem(eqn, params, ins):
 
 def _t_reshape(eqn, params, ins):
     if params.get("dimensions") is not None:
-        # a dimensions= reshape permutes before reshaping — not the C-order
-        # flat identity; no rule yet, so decline (⊤ with the params noted).
-        return None
+        raise iv.IntervalError(
+            f"this reshape carries dimensions={tuple(params['dimensions'])!r}, "
+            f"which PERMUTES the operand before reshaping it. The row models "
+            f"the C-order flat identity only — the permuting form needs its "
+            f"own rule and does not have one, so it declines rather than "
+            f"reshaping as if the permutation were absent"
+        )
     return [iv.reshape(ins[0], tuple(_req(params, "new_sizes", "reshape")))]
 
 
