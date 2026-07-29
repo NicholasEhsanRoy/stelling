@@ -9,6 +9,41 @@ SPDX-License-Identifier: Apache-2.0
 retracted. What follows is the measurements and their scopes; the reader draws
 the summary, and if none is available that is itself the result.
 
+## SCOPE — read this before any number below
+
+**Every capability conclusion in this document was measured on ONE framework
+family: MADDENING/MIME.** The seven counterfactual zeros, both frontier zeros,
+the terminal table, the guard frontier, and the nine-hazard population are all
+**stelling-on-MADDENING** results. They are not statements about stelling.
+
+**Measured, not assumed.** Two independently-blinded agents wrote contracts
+against `jax_md` and `jaxfluids` — genuinely independent authors and domains —
+having been told nothing about this project's conclusions. **The blockers are
+IDIOMATIC**: external code terminates on `square`, `sign`, `unstack`, `copy`,
+`rem`, `nan_to_num`'s `inf`, `iota`, `int64→float64`, `abs`, `pow` — **none of
+which is a MADDENING terminal**, and five of which have neither an interval
+transfer nor an emission row.
+
+**One terminal recurs across all three, and its mechanism explains why:** the
+element budget, because it is a function of query SIZE rather than of coding
+style.
+
+**THE LARGEST SCOPE CHANGE: the emission zero held BECAUSE emission is
+unreachable in MADDENING** — eleven of twelve contracts decline before reaching
+it. **External code DOES reach emission.** So emission's value outside this
+corpus is **genuinely unmeasured, not zero.**
+
+**And the strongest evidence stelling has produced came from code nobody here
+wrote, on a first attempt.** An external `RungeKutta3` contract verified on all
+three axes simultaneously — full coverage, load-bearing envelope, nonvacuity
+checked against the library's own data — **with a passing negative control**
+(a mutated coefficient REFUTES). The internal corpus has two contracts on three
+axes and no negative control anywhere.
+
+**Framework denominator: n = 1 before that session, n = 3 after, two of them
+independent.** That is still small, and *"idiomatic"* rests on two samples
+agreeing that MADDENING's terminals do not appear in them.
+
 ## Verdicts
 
 **7 of 14 contracts VERIFIED.** They are not equivalent, and three axes

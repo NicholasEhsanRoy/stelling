@@ -553,6 +553,73 @@ def _t_split(eqn, params, ins):
     return out
 
 
+def _t_square(eqn, params, ins):
+    """``jnp.square`` — a first-class primitive on jax 0.11.0, not sugar.
+
+    DELEGATES to the exponent-2 case of :func:`interval.integer_pow`, which
+    already carries the even-exponent rule and its audit: a straddling box maps
+    to ``[0, max(lo², hi²)]``, a one-sided box to the tight monotone bracket.
+    Measured: ``integer_pow([-2, 3], 2) = [0, 9]``.
+
+    WHY THIS IS NOT THE REVERTED same-operand `mul` WORK. That change tried to
+    detect ``mul(x, x)`` as a PATTERN and route it, which meant inspecting
+    operand identity inside a binary transfer — invasive, and reverted. Here
+    the primitive IS the square: **one operand, so the dependency problem does
+    not arise at all.** The correlation ``mul`` cannot see is not present to be
+    seen.
+
+    External demand, measured: `jnp.square` appears at 137 call sites across 40
+    files in jaxfluids alone, and its absence there poisoned a defensive
+    ``x*x + eps`` division into a spurious divisor-may-be-zero decline — a
+    `div` situation the where-refinement does not touch.
+    """
+    if len(ins) != 1:
+        return None
+    _integer_pow_budget(ins[0], 2)
+    return _int_overflow_guard(eqn, "square", [iv.integer_pow(ins[0], 2)])
+
+
+def _t_copy(eqn, params, ins):
+    """``copy_p`` is the identity. ``jnp.array(x)`` emits it, which is why a
+    kinetic-energy contract was unreachable for want of a no-op."""
+    if len(ins) != 1:
+        return None
+    return [ins[0]]
+
+
+def _t_unstack(eqn, params, ins):
+    """``jnp.unstack`` — split along ``axis`` into one output per index.
+
+    EXACT: every output element IS an input element at a static index, so this
+    is built on :func:`interval.slice_` rather than fresh index arithmetic —
+    the "don't hand-roll a traversal" norm applied to indexing. Declines when
+    the params do not describe the operand it was handed.
+    """
+    if len(ins) != 1:
+        return None
+    (a,) = ins
+    axis = params.get("axis")
+    if axis is None:
+        return None  # absent params are not a traced form; never guessed
+    try:
+        axis = int(axis)
+    except (TypeError, ValueError):
+        return None
+    shape = tuple(a.shape)
+    rank = len(shape)
+    if not 0 <= axis < rank or len(eqn.outvars) != shape[axis]:
+        return None
+    out = []
+    for i in range(shape[axis]):
+        starts = tuple(i if d == axis else 0 for d in range(rank))
+        limits = tuple(i + 1 if d == axis else shape[d] for d in range(rank))
+        sl = iv.slice_(a, starts, limits, None)
+        v = eqn.outvars[i]
+        out.append(iv.IntervalArray(shape=tuple(v.aval.shape),
+                                    los=sl.los, his=sl.his))
+    return out
+
+
 def _t_reshape(eqn, params, ins):
     if params.get("dimensions") is not None:
         # a dimensions= reshape permutes before reshaping — not the C-order
@@ -1731,6 +1798,9 @@ TRANSFERS = {
         TIER_EXACT,
     ),
     "split": (_t_split, TIER_EXACT),
+    "square": (_t_square, TIER_SOUND),
+    "copy": (_t_copy, TIER_EXACT),
+    "unstack": (_t_unstack, TIER_EXACT),
     "slice": (
         lambda eqn, p, ins: [
             iv.slice_(
@@ -1837,6 +1907,9 @@ _INT_COMPUTING = frozenset({
     # `add_any` sums two operands exactly as `add` does, so it can produce a
     # value neither contained; same class, same guard, probed the same way
     "add_any",
+    # `square` multiplies its operand by itself, so it can produce a value the
+    # operand did not contain -- the same class as `mul`, same guard
+    "square",
     # the contraction SUMS products, so it too can produce a value its
     # operands did not contain. Float-only in practice because the shared
     # oracle refuses integral accumulation (and an ABSENT
@@ -1852,6 +1925,10 @@ _INT_COMPUTING = frozenset({
 #   the structural ops  are pure data movement (copies of in-range values)
 #   the harness primitives  are declarations and identities
 _INT_NON_COMPUTING = frozenset({
+    # `copy` is the identity and `unstack` routes elements to outputs; neither
+    # computes anything, so neither can introduce an out-of-range integer
+    "copy",
+    "unstack",
     # `split` is pure data movement: every output element IS an input element
     # at a static index, so it cannot introduce an out-of-range integer
     "split",
@@ -1888,6 +1965,14 @@ if _INT_COMPUTING & _INT_NON_COMPUTING:
 # reason below. A silent two-edit misfiling is now a conscious three-edit
 # act whose third edit is a soundness claim in this registry.
 _INT_NON_COMPUTING_EXEMPT: dict[str, str] = {
+    "copy": (
+        "the identity primitive: its output IS its input, so no arithmetic "
+        "occurs and an in-range integer cannot leave the range by being copied"
+    ),
+    "unstack": (
+        "routes each index along one axis to its own output; every output "
+        "element IS an input element, so no arithmetic occurs"
+    ),
     "split": (
         "cuts one operand along one axis at statically known offsets; every "
         "output element IS an input element, so no arithmetic occurs and an "
@@ -2056,6 +2141,7 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
             "reduce_sum": (hi, None), "integer_pow": (hi, None),
             "scatter-add": (hi, hi),
             "add_any": (hi, hi),
+            "square": (hi, None),
             # the contraction's products escape exactly as `mul`'s do, so
             # it takes mul's operand values
             "dot_general": (hi, hi),
@@ -2067,6 +2153,7 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
         "reduce_sum": (lo, None), "integer_pow": (lo, None),
         "scatter-add": (lo, lo),
         "add_any": (lo, lo),
+        "square": (lo, None),
         "dot_general": (lo, hi),
     }[prim]
 
@@ -2507,6 +2594,27 @@ def _ieee_reduce_sum(eqn, params, ins, flags):
     return [box], [made_nan or (flags[0] and reads_an_element)]
 
 
+def _ieee_square(eqn, params, ins, flags):
+    """`square` under ieee — DECLINES, and the reason is not schedule ambiguity.
+
+    Unlike `integer_pow`, `square_p` fixes the evaluation completely: it is ONE
+    correctly-rounded multiplication, so there is no `(x*x)*x` versus `x*(x*x)`
+    disagreement to model.
+
+    It declines for a different reason. The real-mode transfer's whole value is
+    the SAME-OPERAND rule — a straddling box maps to `[0, max(lo², hi²)]`
+    because x·x cannot be negative. Reusing `ieee_mul(a, a)` would discard
+    exactly that: it treats the operands as independent and returns `[-6, 9]`
+    for `[-2, 3]`, which is sound and useless. An ieee square transfer needs the
+    same-operand rule restated in ieee terms (signed zeros, the maybe-NaN flag,
+    and the DAZ haze on the endpoints), which is a separate piece of work.
+
+    So: ⊤ with the reason quoted, rather than a silently weaker box. The row is
+    REAL-MODE ONLY and the acceptance record says so.
+    """
+    return None
+
+
 def _ieee_integer_pow(eqn, params, ins, flags):
     """integer_pow under ieee — the same defect class as reduce_sum above,
     with float MULTIPLICATION in place of addition.
@@ -2733,6 +2841,7 @@ IEEE_TRANSFERS = {
     "add": (_ieee_arith(iv.ieee_add), TIER_EXACT),
     "sub": (_ieee_arith(iv.ieee_sub), TIER_EXACT),
     "add_any": (_ieee_arith(iv.ieee_add), TIER_EXACT),
+    "square": (_ieee_square, TIER_EXACT),
     "mul": (_ieee_arith(iv.ieee_mul), TIER_EXACT),
     "div": (_ieee_arith(iv.ieee_div), TIER_EXACT),
     # (i)/(ii) exact sign arithmetic; flag propagates (NaN stays NaN)
@@ -2784,6 +2893,8 @@ IEEE_TRANSFERS = {
         TIER_EXACT,
     ),
     "split": (_ieee_passthrough(_t_split), TIER_EXACT),
+    "copy": (_ieee_passthrough(_t_copy), TIER_EXACT),
+    "unstack": (_ieee_passthrough(_t_unstack), TIER_EXACT),
     "slice": (
         _ieee_passthrough(
             lambda eqn, p, ins: [
