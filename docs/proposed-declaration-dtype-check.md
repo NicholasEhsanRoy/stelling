@@ -3,9 +3,15 @@ SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# `any_array` should reject bounds its dtype cannot hold — PROPOSED, NOT BUILT
+# `any_array` rejects bounds its dtype cannot hold — **BUILT**
 
-Published surface, so this is the argument and not the change.
+**Status: BUILT and shipped in `89413c2`.** This file was written as a proposal
+and kept its `PROPOSED, NOT BUILT` header through the change that implemented
+it — a **claim divergence on a DOCUMENT**, which is a new surface for that
+class: the norm was written about code being narrower or wider than what it
+says, and a status header is the same failure with a shorter path to a reader.
+Corrected here rather than quietly retitled, because the divergence is the
+point. The argument below is unchanged; only the status was wrong.
 
 ## The hole
 
@@ -29,7 +35,7 @@ Three instruments nominally covered `sign`'s integer safety and **none could
 fail**: `_probe_operands` feeds it uint 0/255, the import-time behavioural census
 only range-checks those operands, and the guard test is int32-only.
 
-## It is not a `sign` bug — 13 of 21 transfers admit it
+## It is not a `sign` bug — a MAJORITY of transfers admit it
 
 Routing `sign` through `_int_overflow_guard` fixed `sign`. It fixed one row.
 Driving the same dtype-impossible `uint8` box `(-3, -1)` through every transfer
@@ -46,8 +52,14 @@ that accepts integers:
 | `max` | `[0, 255]` | in range, but on a false premise |
 | `add`, `sub`, `mul`, `div`, `rem`, `reduce_sum`, `sign` | decline | the overflow guard catches these |
 
-**13 of 21 admit. The six comparisons are the dangerous ones**, because they mint a
-definite boolean with nothing downstream to widen it.
+**The six comparisons are the dangerous ones**, because they mint a definite
+boolean with nothing downstream to widen it.
+
+**The count is convention-dependent and the first version of this table stated
+none**: the 13 above take a valid full-range box as the second operand; driving
+the impossible box on *every* operand gives 20 admits of 26 traceable rows. A
+blinded audit found that "13 of 21" also used 21 as a denominator when it is
+itself an admit count. **What is robust is the shape, not the number.**
 
 ## Why the fix belongs at the declaration
 
@@ -76,18 +88,51 @@ Recorded in that class deliberately — it is the fourth, after:
 3. **correctly-declared-but-unreachable** (a box the program never occupies),
 4. **dtype-impossible bounds** — this one.
 
-**It is the only one of the four that mints a REFUTED.** The other three cost a
-VERIFIED that means less than it looks; this one manufactures a counterexample.
+**Way #2 also mints a REFUTED** — an `assume` whose predicate box is ⊤ is
+dropped, and the measured instance returns a replay-confirmed witness violating
+the precondition the author wrote. The first version of this line claimed #4 was
+the only one, contradicting a measurement recorded twenty lines away in
+`SOUNDNESS.md`. **What distinguishes #4 is narrower:** the other three answer a
+DIFFERENT question than the author asked; this one answers **no question at
+all**, because the declared set is empty and the witness cannot be constructed
+at any dtype.
 
-## Scope of the proposal
+## The rule AS BUILT — and it is not the rule this section first proposed
 
-Reject at declaration when a bound lies outside the declared dtype's
-representable range. For integers that is exact and cheap — `_INT_DTYPE_BOUNDS`
-already holds the table. For floats it is the overflow boundary
-(`float32(1e39)` is `inf`), which is the same check and closes the adjacent case
-a blinded audit raised: an f32 declaration of `(1e39, 1e40)` currently passes the
-dividend guard in `rem` because that guard tests the **binary64** endpoints.
+**A second divergence in this same document, and the more serious one**: the
+paragraph here originally read *"reject when a bound lies outside the declared
+dtype's representable range."* **That is not what shipped, and it would have
+been wrong.** A box wider than the dtype is an OVER-approximation — every
+transfer's answer over it still contains the executed value — so rejecting it
+would refuse a legitimate envelope, which is the failure this check must not
+have.
 
-**Not proposed here:** rejecting bounds that are merely *unreachable* rather than
-unrepresentable. That is case 3 above, it is undecidable in general, and
-conflating the two would make the declaration layer a reachability analysis.
+**What shipped is: reject when the interval contains NO representable value.**
+
+| declared | verdict | why |
+|---|---|---|
+| `uint8 (-3, -1)` | **REJECT** | holds nothing |
+| `uint8 (-3, 10)` | admit | partial overlap → over-approximation, sound |
+| `int8 (-200, 200)` | admit | wider than int8, same reason |
+| `int8 (0.2, 0.8)` | **REJECT** | contains no integer |
+| `float32 (0.0, 1e39)` | admit | upper bound unrepresentable, box still non-empty |
+| `float32 (1e39, 1e40)` | **REJECT** | entirely above float32's finite max |
+| `float32 (0.1, 0.1)` | admit | 0.1 is not a float32 and must still be admitted |
+| `complex*` | admit | undefined what a real box means; not settled by refusing |
+
+Integer bounds come from `_INT_DTYPE_BOUNDS` — the same registry the overflow
+guard reads, so the two cannot drift. Float bounds are read from
+`numpy.finfo`, a lookup rather than a transcribed constant.
+
+Measured against every literal declaration in the campaign corpus — **105 of
+them — zero are refused**, and all 13 entry points close.
+
+**Deliberately NOT checked**, because a declaration check that refuses a
+legitimate envelope is worse than the hole it closes:
+
+- **exact representability of float bounds.** `float32 (0.1, 0.1)` is admitted
+  although `0.1` is not a float32. Refusing it would reject the most ordinary
+  envelope there is.
+- **bounds that are merely UNREACHABLE rather than unrepresentable.** That is
+  case 3 above, it is undecidable in general, and conflating the two would make
+  the declaration layer a reachability analysis.

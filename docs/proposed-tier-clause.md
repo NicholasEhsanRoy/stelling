@@ -75,8 +75,28 @@ Three things worth reading off it:
   registered tier.** The box is `[0, 1]`; under flush the image is `{0}`. The
   row is registered `sound` for exactly that reason, so the clause and the
   registry agree — which is the check working.
-- **`square` proves exact while registered `sound`.** An UNDER-claim, which is
-  the safe direction, and a candidate the clause surfaces for free.
+- **`square` proves exact on THIS box while registered `sound` — and that is
+  the scope limit biting its own example, not an upgrade candidate.** The
+  clause proved *per-box* exactness on a box where the arithmetic happens to be
+  clean, and reading it as a tier claim is exactly the misuse the scope section
+  warns about. Measured, on the same row:
+
+  ```
+  square [-2, 3]    transfer [0.0, 9.0]     image hull [0.0, 9.0]      PASS
+  square [-0.1, 0.3] transfer [0.0, 0.09]   image hull [0.0, 0.09]     PASS
+  square [0.1, 0.3]  transfer [0.01, 0.09]  image hull [0.010000000000000002, 0.09]
+                                                                       no proof
+  ```
+
+  **`square` is correctly registered `sound`.** The distinguishing factor is
+  not whether the squares are representable — `0.09` is reproduced identically
+  by both routes. It is that a **straddling** box takes its lower endpoint from
+  the even-power rule (exactly `0`, no arithmetic) and its upper from a single
+  squaring, while a **non-straddling** box computes both by squaring, and
+  outward rounding then shows up — here on the LOWER endpoint, `0.01` against
+  an executed `0.010000000000000002`. A clause that reported this as an upgrade
+  candidate would be inviting someone to act on a per-box proof as though it
+  quantified over every box.
 
 ## The proposal
 

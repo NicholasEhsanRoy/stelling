@@ -205,7 +205,7 @@ reject at least one point, a probe must assert something the cheap layers cannot
 decide — are kept because they are more actionable than this rule; use them first
 and fall back to this when the situation fits none of them.
 
-## Before measuring a constant, read its definition site
+## Before measuring a constant, read its definition site — and before deciding a question, read its ADJUDICATION site
 
 `ELEMENT_BUDGET = 512` carries a measured table in a comment **directly above the
 assignment** — solver timings at 256/512/1024/2048 terms, naming the binding
@@ -230,6 +230,26 @@ Corollary for anyone writing such a constant: **name the regime in the comment.*
 512's table named `QF_NRA` explicitly, which is the only reason the error was
 findable at all. A derivation silent on the regime it was taken under is a latent
 version of the same trap.
+
+**The generalization, earned by applying the norm twice in one session in
+opposite directions.** Building the `sign` row needed a smallest-normal
+constant; reading the definition site found `interval.MIN_NORMAL` **already
+there**, derived, with its device-dependence disclosed in
+`SUBNORMAL_INDETERMINACY_ASSUMPTION` directly above it — so there was no
+constant to propose, and the row reused it. The same session then gated two
+rows against non-binary64 floats and justified it in the code as a **defect
+fix**. `SOUNDNESS.md` had already adjudicated exactly that case as the
+**stated posture** — *"not a defect in any row … ℝ-judgement of a narrower
+float is the stated posture"* — five sightings under five names. Reading the
+definition site was done and saved a proposal; reading the adjudication site
+was not, and cost a wrong word in a docstring and a session's framing.
+
+**So the norm is about both, and the second half is the easier one to skip:**
+a constant has an obvious home and a decision does not. Before a change
+justifies itself by calling something a defect, find where the project last
+ruled on it. `SOUNDNESS.md`, the design notes, and the retraction tables in
+the campaign log are adjudication sites; a departure from one is defensible,
+but it has to know it is a departure.
 
 ## State which query a measurement actually ran
 

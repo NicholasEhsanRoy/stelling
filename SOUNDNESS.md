@@ -150,10 +150,27 @@ Every verdict object stamps, at minimum:
   REFUTED whose witness the caller could not reproduce. **A false
   counterexample is the output shape a user trusts most.**
 
-  **The surface was thirteen entry points, not one.** Driving that same box
-  through every integer-accepting transfer: **13 of 21 admitted it**, and the
-  six comparisons (`lt`/`le`/`ne` definite TRUE, `gt`/`ge`/`eq` definite
-  FALSE) put a definite boolean straight into an assert. Routing `sign`
+  **Correction, because the first version of this paragraph contradicted a
+  measurement twenty lines above it:** it is NOT the only one of the four that
+  mints a REFUTED. Way #2 does too, and this document already records the
+  instance — `assume(jnp.all(x >= 0))` over `x ∈ [-10,10]^3` returning REFUTED
+  with the replay-confirmed witness `[0,0,-1]` that violates the precondition
+  the author wrote. What distinguishes #4 is narrower and still worth stating:
+  the other three produce a verdict about a DIFFERENT question than the author
+  asked, while #4 produces one about **no question at all** — the declared set
+  is empty, so the witness cannot be constructed at any dtype. Found by a
+  blinded audit reading the claim, not by anything running.
+
+  **The surface was a majority of the transfer set, not one entry point.**
+  Driving that same box through every integer-accepting transfer, **the six
+  comparisons return a definite boolean straight into an assert**
+  (`lt`/`le`/`ne` TRUE, `gt`/`ge`/`eq` FALSE). **The exact count depends on an
+  operand convention that was never stated, and neither number is robust:**
+  13 admit when the second operand is a valid full-range box, 20 of 26
+  traceable rows admit when the impossible box is on every operand — and the
+  first version reported "13 of 21" with 21 as the denominator when 21 is
+  itself an admit count under a third convention. The qualitative claim is
+  what survives; a blinded audit found the arithmetic. Routing `sign`
   through the overflow guard closed one. The hole was at the declaration, so
   the check is: **a declared box holding no value of its dtype is EMPTY and is
   refused at declaration time**, the fourth instance of a posture already held

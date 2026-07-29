@@ -21,6 +21,7 @@ import warnings
 
 import jax
 import jax.extend.core as jex_core
+import jax.numpy as jnp
 import jax.sharding
 import jax.tree_util
 import numpy as np
@@ -170,10 +171,40 @@ def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
       representable.
     * ``float32 (1e39, 1e40)`` holds nothing — float32's finite max is
       3.4e38, and `inf` is not a member of that interval as a real either.
-      **Empty. Rejected**, which also closes the adjacent case a blinded
-      audit raised, where `rem`'s dividend guard tested the *binary64*
-      endpoints of an f32 declaration.
+      **Empty. Rejected.** (An earlier version of this line credited the
+      check with closing an f32 case in `rem`'s dividend guard. Measured:
+      `_refuse_non_f64_float` declines every f32 `rem` before that guard is
+      reached, so the case was already closed and this is a redundant second
+      closure, not the closure. Blinded audit.)
     * ``int8 (0.2, 0.8)`` holds no integer. **Empty. Rejected.**
+
+    THE RANGE LOOKUP, and why it is not a table. A first version dispatched on
+    membership in ``propagate._INT_DTYPE_BOUNDS`` and then on ``numpy.finfo``,
+    and a blinded audit measured that combination **silently exempting 9 of the
+    30 dtypes jax builds arrays in** — `int2`/`uint2` are absent from the
+    registry (it holds widths 4/8/16/32/64), and `numpy.finfo` raises for every
+    ml_dtypes extended type (`bfloat16`, the eight `float8_*`, the two
+    `float6_*`, `float4_e2m1fn`). All of them fell through an
+    ``except: return True`` fallback, so the box this check exists to reject
+    was **accepted verbatim one dtype-width away**: `uint8 (-3, -1)` refused,
+    `uint2 (-3, -1)` admitted and discharged at 100% coverage — a VERIFIED over
+    an empty set.
+
+    So the lookup asks **jax**, which knows its own dtypes: ``jnp.iinfo`` then
+    ``jnp.finfo``, which between them cover 29 of 30 (`bool` is the exception
+    and the registry has it). No table, no new constant, no new dependency.
+
+    ``finfo.min`` is read rather than ``-finfo.max``, because the range is not
+    always symmetric: `float8_e8m0fnu` is exponent-only, its 255 finite values
+    are all strictly positive, and negating the max would have declared
+    ``(-100, -50)`` inhabited.
+
+    THE INTEGER COMPARISON IS EXACT, in python ints, never through a float.
+    ``float(2**63 - 1)`` rounds UP to ``2**63``, so comparing against a
+    float-converted dtype bound made `int64` and `uint64` wrong at exactly the
+    boundary the registry's own comment says it exists to be exact at — a box
+    wholly above `int64` was admitted while the same shape on `uint8` was
+    refused.
 
     WHERE THIS IS UNSURE IT ADMITS, deliberately — a declaration check that
     refuses a legitimate envelope is worse than the hole it closes:
@@ -181,24 +212,36 @@ def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
     * **float bounds are tested for RANGE, never for exact
       representability.** A float32 point declaration of ``(0.1, 0.1)`` is
       admitted although 0.1 is not a float32; refusing it would reject the
-      most ordinary envelope there is.
+      most ordinary envelope there is. **This under-reach is measured, not
+      assumed: it also admits an interval lying wholly inside a representation
+      gap** — `float32 (1e-50, 1e-49)` sits below the smallest subnormal and
+      was measured minting a REFUTED at 100% coverage. Closing that requires
+      the exact test, which also rejects ``(0.1, 0.1)``; the trade is a
+      published-surface decision and is not taken here.
     * **complex dtypes are admitted unconditionally.** What a real-bounded
       box means for a complex array is undefined, and that is already an
       open item; this check does not settle it by refusing.
-
-    Integer bounds come from ``propagate._INT_DTYPE_BOUNDS`` rather than a
-    second table — the same registry the overflow guard reads, so the two
-    cannot drift. Float bounds are read from ``numpy.finfo``, a lookup rather
-    than a transcribed constant.
     """
     if dt.startswith("complex"):
         return True, ""
     from stelling.propagate import _INT_DTYPE_BOUNDS  # one registry, not two
 
-    if dt in _INT_DTYPE_BOUNDS:
-        d_lo, d_hi = _INT_DTYPE_BOUNDS[dt]
-        first = math.ceil(max(lo, float(d_lo)))
-        last = math.floor(min(hi, float(d_hi)))
+    ints = _INT_DTYPE_BOUNDS.get(dt)   # has `bool`, which jnp.iinfo does not
+    if ints is None:
+        try:
+            info = jnp.iinfo(np.dtype(dt))
+            ints = (int(info.min), int(info.max))
+        except (TypeError, ValueError):
+            ints = None
+    if ints is not None:
+        d_lo, d_hi = ints
+        # clamp BEFORE ceil/floor: math.ceil(-inf) raises, and an infinite
+        # endpoint here means "unbounded", which the dtype bound absorbs
+        if hi < d_lo or lo > d_hi:
+            first, last = 1, 0
+        else:
+            first = d_lo if lo <= d_lo else math.ceil(lo)
+            last = d_hi if hi >= d_hi else math.floor(hi)
         if first <= last:
             return True, ""
         return False, (
@@ -206,15 +249,19 @@ def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
             f"contains none of them"
         )
     try:
-        fmax = float(np.finfo(np.dtype(dt)).max)
+        info = jnp.finfo(np.dtype(dt))
+        f_lo, f_hi = float(info.min), float(info.max)
     except (TypeError, ValueError):
-        return True, ""  # a dtype this check does not model: admit, never guess
-    if max(lo, -fmax) <= min(hi, fmax):
+        # No dtype reaches here on jax 0.11.0. Left as an admit rather than a
+        # guess, and NAMED: the previous version's silent version of this line
+        # is what exempted nine dtypes.
         return True, ""
-    return False, (
-        f"{dt}'s finite values span [{-fmax}, {fmax}] and the interval lies "
-        f"entirely outside them"
-    )
+    if hi < f_lo or lo > f_hi:
+        return False, (
+            f"{dt}'s finite values span [{f_lo}, {f_hi}] and the interval "
+            f"lies entirely outside them"
+        )
+    return True, ""
 
 
 def any_array(shape, dtype, bounds):
@@ -256,17 +303,41 @@ def any_array(shape, dtype, bounds):
             f"semantics); refusing at declaration time"
         )
     dt = str(np.dtype(dtype))
+    for name, raw in (("lo", bounds[0]), ("hi", bounds[1])):
+        # The IR stores bounds as binary64. An integer bound past 2**53 does
+        # not survive that, and the loss can EMPTY a legitimate box:
+        # float(2**63 - 1) is 2**63, which no int64 holds, so the natural way
+        # to declare "exactly int64 max" installed a box nothing inhabits and
+        # the old check certified it. Refused with the loss named, rather than
+        # refused with the wrong reason or silently propagated (blinded audit).
+        if isinstance(raw, int) and not isinstance(raw, bool) and float(raw) != raw:
+            raise ValueError(
+                f"any_array bound {name}={raw!r} is not representable as the "
+                f"binary64 the IR stores; it would be recorded as "
+                f"{float(raw)!r}, a different value. Integer bounds must be "
+                f"exact as doubles (|bound| <= 2**53). Declaring a slightly "
+                f"wider box is sound — an over-approximation still contains "
+                f"every executed value — where this silent shift is not"
+            )
+    if 0 in dims:
+        # A ZERO-SIZE array satisfies ANY element-wise bounds vacuously, and
+        # jax constructs one, so no bounds/dtype pair is empty for it — the
+        # negative-extent comment above already says zero-size stays legal.
+        # The dtype check is per-element and never sees the shape, so without
+        # this it refused a declaration that IS inhabited (blinded audit; the
+        # one false-rejection finding, and the failure the check must not
+        # have).
+        return _any_p.bind(shape=dims, dtype=dt, lo=lo, hi=hi)
     holds, why = _dtype_holds_a_value_in(dt, lo, hi)
     if not holds:
         raise ValueError(
             f"any_array bounds ({bounds[0]!r}, {bounds[1]!r}) declare a set "
             f"EMPTY under dtype {dt!r} — {why}. No execution of the program "
-            f"can produce a value in this box, so any claim over it is "
-            f"vacuous: measured, a uint8 declaration of (-3, -1) returned "
-            f"sign in [-1, -1] at 100% coverage and minted a REFUTED whose "
-            f"witness the caller could not reproduce. Refusing at "
-            f"declaration time, as for a negative extent, lo > hi, and the "
-            f"infinite point"
+            f"can produce a value in this box, so every claim over it is "
+            f"vacuous — measured, such a declaration reaches a DEFINITE "
+            f"verdict at 100% coverage, in both directions, with a witness "
+            f"the caller cannot construct. Refusing at declaration time, as "
+            f"for a negative extent, lo > hi, and the infinite point"
         )
     return _any_p.bind(
         shape=dims,

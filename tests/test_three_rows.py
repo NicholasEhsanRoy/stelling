@@ -1430,9 +1430,12 @@ def test_every_computing_transfer_actually_carries_the_guard():
     ordering but not bounds-against-dtype, so a `uint8` box of (-3, -1) is
     declarable, and `sign` returned [-1, -1] on it at 100% coverage — a
     REFUTED from a premise no execution can reach. `sign` now declines it via
-    the overflow guard, but that fixed ONE row: measured, **13 of 21
+    the overflow guard, but that fixed ONE row: measured, **a majority of
     integer-accepting transfers still admit such a box**, and the six
-    comparisons return a DEFINITE boolean on it. This is a declaration-layer
+    comparisons return a DEFINITE boolean on it. (The exact count is
+    convention-dependent — 13 with a valid second operand, 20 of 26 with the
+    impossible box on every operand — so the shape is the claim, not a
+    number.) This is a declaration-layer
     hole, not a transfer-layer one, and no assertion in this file can reach
     it — see docs/proposed-declaration-dtype-check.md.
     """
