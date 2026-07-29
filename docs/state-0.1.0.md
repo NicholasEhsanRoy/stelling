@@ -61,7 +61,7 @@ Stating the unit, because the same slip produced the `iota` misclassification.)
 The exception was **invisible per-entry**. Joint stubbing is standing practice
 because of it.
 
-### **RETRACTED: the emission and transfer zeros rest on UNDER-permissive stubs**
+### **STUB-DIRECTION AUDIT: one zero provisional, one restored**
 
 Norm I says an over-permissive stub's zero is conclusive — a stub granting MORE
 than a real implementation upper-bounds the benefit, so a zero means a real fix
@@ -77,16 +77,42 @@ two of these were not.**
 | element budget raise | MORE — 500,000 exceeds any plausible real bound | yes |
 | `convert` exactness | MORE — pretends the rounding is free | yes |
 
-**So the emission-coverage zero never tested "what if this primitive had an
-emission row." It tested "what if it were declared emittable without one," which
-fails by construction.** The transfer zeros are weaker than stated for a
-different reason: they were measured with boxes coarser than a real transfer
-would produce.
+#### The emission zero: RESTORED, on a different argument
 
-**Four of the seven capability zeros survive as conclusive. Two need re-running
-with faithful stubs, and until then they are not evidence.** The one positive
-result is unaffected — `split` + `add_any` produced a VERIFIED under COARSER
-stubs than the shipped transfers, so a real implementation can only do better.
+The retraction above was **too strong for emission**, and the check that settles
+it is direct. Running the joint emission stub over the corpus:
+
+```
+contracts whose decline is an INTERNAL ERROR : 0 of 12
+solver invocations that ANSWERED             : 2, all from MADD projection
+```
+
+**The stub never raised, because eleven of twelve contracts never reach
+emission at all** — they decline earlier (element budget, `convert_element_type`,
+an `unstack` shape at slice validation) or discharge on intervals without
+escalating. The twelfth reaches the solver and **already VERIFIES**.
+
+**So no emission row could change any verdict here, and the stub's fidelity is
+irrelevant to that conclusion** — a faithful row would sit behind the same
+earlier declines. **The emission zero stands**, on the argument that nothing
+reaches the stage rather than on the stub being over-permissive.
+
+**Scope, stated because the earlier version over-reached in exactly this way:**
+this licenses *"no emission row changes a verdict in THIS corpus"*. It does not
+license *"emission rows are without value"*.
+
+#### The transfer zero: STILL PROVISIONAL
+
+Different structure, and the emission argument does not transfer. **Interval
+propagation always runs** — there is no earlier stage for a transfer to sit
+behind — so a coarse stub's box is used, and a tighter real transfer could
+discharge where the coarse one could not. **That zero needs re-running with
+tight stubs and is not evidence until it is.**
+
+**Five of the seven capability zeros are conclusive. One (transfer coverage)
+is provisional.** The one positive result is unaffected — `split` + `add_any`
+produced a VERIFIED under COARSER stubs than the shipped transfers, so a real
+implementation can only do better.
 
 **The fixed-width boundary is a FAMILY, not a capability** — at most three
 separately buildable members:
