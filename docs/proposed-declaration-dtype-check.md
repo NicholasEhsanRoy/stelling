@@ -115,24 +115,38 @@ have.
 | `uint8 (-3, 10)` | admit | partial overlap → over-approximation, sound |
 | `int8 (-200, 200)` | admit | wider than int8, same reason |
 | `int8 (0.2, 0.8)` | **REJECT** | contains no integer |
-| `float32 (0.0, 1e39)` | admit | upper bound unrepresentable, box still non-empty |
+| `float32 (0.0, 1e39)` | admit | clamps into range and holds float32s |
+| `float32 (1e-50, 1e-49)` | **REJECT** | inside a representation gap, below the smallest subnormal |
 | `float32 (1e39, 1e40)` | **REJECT** | entirely above float32's finite max |
-| `float32 (0.1, 0.1)` | admit | 0.1 is not a float32 and must still be admitted |
+| `float32 (0.1, 0.1)` | **REJECT** | holds no float32 — an empty set like any other |
 | `complex*` | admit | undefined what a real box means; not settled by refusing |
 
-Integer bounds come from `_INT_DTYPE_BOUNDS` — the same registry the overflow
-guard reads, so the two cannot drift. Float bounds are read from
-`numpy.finfo`, a lookup rather than a transcribed constant.
+Ranges come from `_INT_DTYPE_BOUNDS` first (it carries `bool`) and then from
+**jax itself** — `jnp.iinfo` and `jnp.finfo`, which between them cover 29 of
+the 30 dtypes jax builds arrays in. That is genuinely a second source, not one
+registry: this layer knows `int2`/`uint2` while the transfer layer declines
+them, a coverage disagreement in the safe direction (declare-admit →
+transfer-decline), with the values agreeing on all 11 shared dtypes.
 
 Measured against every literal declaration in the campaign corpus — **105 of
-them — zero are refused**, and all 13 entry points close.
+them, top-level `.py` only; 131 recursively — zero are refused** under the
+exact rule.
 
-**Deliberately NOT checked**, because a declaration check that refuses a
-legitimate envelope is worse than the hole it closes:
+**Exact representability IS checked** — reversed from this document's first
+version, after measurement. Range-only admitted an interval lying wholly inside
+a representation gap (`float32 (1e-50, 1e-49)`), which reached a REFUTED at
+100% coverage. No rule admits that and rejects `float32 (0.1, 0.1)`: both hold
+no value of the dtype. The trade resolves asymmetrically — admitting an empty
+point costs nothing, admitting the gap mints a false counterexample — and
+refusing a point declaration at a decimal literal is not over-strict, it tells
+the caller their declaration does not mean what they think. **The message names
+the nearest representable neighbours** so the caller learns what to write
+instead. `float64` is untouched: every python float IS a float64.
 
-- **exact representability of float bounds.** `float32 (0.1, 0.1)` is admitted
-  although `0.1` is not a float32. Refusing it would reject the most ordinary
-  envelope there is.
+**Deliberately NOT checked:**
+
 - **bounds that are merely UNREACHABLE rather than unrepresentable.** That is
   case 3 above, it is undecidable in general, and conflating the two would make
   the declaration layer a reachability analysis.
+- **complex**, admitted unconditionally — what a real-bounded box means for a
+  complex array is undefined, and this check does not settle it by refusing.

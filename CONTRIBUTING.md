@@ -511,6 +511,23 @@ enforces is a claim divergence waiting to happen.** If a comment says some other
 component guarantees a property you depend on, either point at the enforcing code
 or write the enforcement. "X guarantees it" with no referent is the smell.
 
+**A fifth instance, and it widens the class again: THE SURFACE CAN BE A
+DOCUMENT.** `docs/proposed-declaration-dtype-check.md` kept its
+`PROPOSED, NOT BUILT` header through the commit that built it, and — worse —
+its scope section described the rule the implementation **rejects**: *"reject
+when a bound lies outside the declared dtype's representable range"*, where
+what shipped is *"reject when the interval contains no representable value"*.
+Under the doc's stated rule, two declarations the tests assert must be admitted
+would be refused. So the document described a design that was **never built and
+would have been wrong**, while sitting next to a correct implementation and a
+green suite.
+
+Two things follow. **A status header is this failure with the shortest path to
+a reader** — nobody reads the diff to find out whether a doc is current.
+And **the previous four instances were all in code, so the norm's own examples
+taught readers to look in the wrong place.** When a change lands, its
+proposal document is part of the change.
+
 ## Read key PRESENCE, not `.get()` — present-with-value-`None` is not absent
 
 Named for the reachable half deliberately. This was called "absent params" for a
@@ -740,6 +757,108 @@ population, and keep any caveat that qualifies the comparison in the same line
 as the comparison. A range that has been derived (`~0.42–0.63` here) belongs
 with the point estimate, because the point estimate alone reads as precision
 the measurement does not have.
+
+**THE NORM FAILED ON ITS OWN AUTHOR ONE SESSION AFTER IT WAS WRITTEN**, which
+is a stronger data point about its difficulty than the instances that earned
+it. The session that added this section reported a corpus survey as
+*"105 float64 declarations, 9 float32"*. Both numbers are real and they come
+from **different populations**: over ALL `any_array` sites the split is
+float64 105 / float32 9 (total 114); over **fully-literal** sites — the ones
+the check could actually be run over — it is float64 **99** / float32 **6**
+(total **105**). The weld survived review because *all-sites-float64* and
+*literal-total* are both 105, so the sentence was internally consistent and
+externally false. A blinded audit found it by re-deriving.
+
+**The lesson the original instances did not carry:** two counts from adjacent
+populations will often be numerically compatible, and compatibility is not
+agreement. Naming the unit is not enough when two units produce the same
+number — the **population** has to be named too, per figure, even when it
+feels obvious to the person who just measured it.
+
+## A blinded audit is a GATE, not a step
+
+**No published-surface or soundness-adjacent change lands without a blinded,
+class-level audit by a context that did not author it.** This is the campaign's
+most reproducible finding. Counting **audits**, not changes — `sign` and `rem`
+shipped as one change, and the declaration check has been audited twice:
+
+| audit | the author's instrument | what the audit found |
+|---|---|---|
+| the `square` row | gauge, 9,040 element-checks, clean | a **false box** on complex operands, recorded as KNOWN coverage |
+| the `sign`/`rem` rows | gauge, 1,258 element-checks, clean | the **float32 root defect** — a discharged obligation at 4/4 known coverage that execution refutes |
+| the declaration check | 49 tests green, 105 corpus declarations clean | a **VERIFIED over an empty set**, one dtype-width from the headline example |
+| **the FIXES for that audit** | 64 tests green, corpus clean | a **crash regression the fix itself introduced**, a **false rejection**, and a message naming values that do not exist |
+
+**In every case the author's instrument was clean and the auditor was not.**
+That is not an argument against instruments — the gauges catch regressions,
+which auditors do not — it is an argument that **a clean instrument is not
+evidence of a clean change**, because an instrument tests what its author
+thought of and that is exactly the set the defect is not in.
+
+**TWO LENSES, NOT ONE, and the roles have reversed.** Run a *containment*
+lens (execute the thing, search for a counterexample) and a *claim* lens (read
+the implementation and ask whether it does what its comments, docs and tests
+say). Neither has been sufficient alone, twice, with the roles swapping — which
+rules out one lens simply being the better one:
+
+- **`sign`/`rem`:** containment found the f32 root defect by executing; the
+  claim lens found the `uint8` out-of-range box by reading a tier claim, plus
+  every false statement in the docstrings.
+- **the declaration check:** containment found sixteen silently-exempt dtypes
+  by executing; the **claim lens found the false rejection** — a refused
+  zero-size declaration — by reading an adjacent comment that already said
+  zero-size shapes stay legal.
+- **the fixes for it:** the two lenses agreed on three defects independently,
+  and then split again — the claim lens alone found that the change had
+  updated none of the three documents describing the rule it changed, while
+  the containment lens alone found the false rejection of the ordinary way to
+  declare "any int64". **Three rounds, three different splits.**
+
+**THE COROLLARY, NOW DEMONSTRATED RATHER THAN ASSERTED: a fix authored in the
+same session as the audit that found what it fixes has NOT been audited.** The
+context that learned the defect writes the fix with the defect in view, and
+tests it against the case it just learned. The fourth row above is that
+corollary measured: the fix for a crash **introduced a second defect in the
+same helper**, and the fix for *that* introduced a third.
+
+**One small helper — the one that formats a refusal message — was wrong on FOUR
+CONSECUTIVE ATTEMPTS**: it raised `OverflowError` on an infinite bound, then
+printed `inf` as a nearest representable value, then collapsed both direction
+words onto the same number (false in 77 of 113 cases), then crashed on a `None`.
+It computes no result and decides nothing; it only formats. **The piece that
+looks too small to get wrong is the one with the worst record here** — the same
+shape as *"five small rows is exactly when it gets skipped, and `add_any` was
+one line."*
+
+**And the fixes were audited only by accident of timing.** The file changed
+under one auditor mid-run, so it audited both versions and caught the
+regression. Had it finished first, the second and third defects would have
+shipped. **Schedule the re-audit as a separate act when the fix is written** —
+do not rely on an auditor being slow.
+
+**An audit can also return a POSITIVE, and this one did.** Both lenses
+independently established that the decision procedure is exact across all 30
+dtypes jax builds arrays in — 172,460 structured plus 83,514 randomized
+declarations against bit-pattern enumeration on one side, 300,000 float32
+intervals against an IEEE total-order oracle plus exact-rational ground truth
+for every integer dtype on the other — with zero wrong decisions. That is worth
+more than a clean instrument, because it was established by someone trying to
+break it. **The gate is not only a defect-finder; it is the only way a positive
+claim about a mechanism has ever been earned here.**
+
+Tasking rules, because a blinded audit is easy to un-blind by accident:
+
+- **Task at the PROPERTY, not at the check.** *"Find a declaration this rejects
+  that a program could inhabit, or accepts that no program could"* — never
+  *"verify these cases."* An enumeration written by the author is the shape
+  this has now caught four times.
+- **Do not name the suspected surfaces.** Give the auditor the space to search;
+  flagging where to look produces a confirmation, not an audit.
+- **Say that an honest empty result is a real result.** An auditor who believes
+  it must find something will find something.
+- **Verify every finding independently before acting on it.** Auditors are
+  sometimes wrong, and one has been: a reported defect that did not reproduce
+  as written, with a worse one sitting behind it.
 
 ## Ground rules
 

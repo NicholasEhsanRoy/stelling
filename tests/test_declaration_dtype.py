@@ -72,7 +72,6 @@ def test_rejects_a_box_the_dtype_cannot_hold(dtype, lo, hi, why):
     ("int8", 0.0, 0.5, "contains the integer 0"),
     ("int32", -(2.0**31), 2.0**31 - 1, "the exact int32 range"),
     ("float32", 0.0, 1e39, "upper bound unrepresentable, box still non-empty"),
-    ("float32", 0.1, 0.1, "0.1 is NOT a float32 and MUST still be admitted"),
     ("float32", 1e-45, 1e-40, "the subnormal band"),
     ("float64", 0.0, 100.0, "the corpus's ordinary case"),
     ("float64", 0.0, float("inf"), "half-infinite: unbounded above"),
@@ -84,12 +83,50 @@ def test_admits_every_legitimate_envelope(dtype, lo, hi, why):
     assert _declare(dtype, lo, hi) is not None
 
 
-def test_float_bounds_are_never_tested_for_exact_representability():
-    """Stated as its own test because it is the deliberate under-reach: 0.1,
-    1/3 and pi are not float32 values, and all three are ordinary bounds."""
+def test_float_bounds_ARE_tested_for_exact_representability():
+    """REVERSED from the first design, deliberately and after measurement.
+
+    The original rule tested RANGE only, justified by "refusing
+    `float32 (0.1, 0.1)` would reject the most ordinary envelope there is."
+    A blinded audit showed the same under-reach admits an interval lying
+    wholly inside a representation gap — `float32 (1e-50, 1e-49)` — which
+    reached a REFUTED at 100% coverage. No rule admits one and rejects the
+    other: both hold no value of the dtype.
+
+    The trade resolves asymmetrically. Admitting `(0.1, 0.1)` costs nothing —
+    it IS an empty set, and a verdict over it is meaningless whether or not
+    the check fires. Admitting the gap interval mints a false counterexample.
+    And refusing a point declaration at a decimal literal is not over-strict:
+    it tells the user their declaration does not mean what they think, which
+    is this check's whole purpose.
+    """
     for v in (0.1, 1.0 / 3.0, float(np.pi)):
         assert float(np.float32(v)) != v, f"{v} must not be a float32 exactly"
-        assert _declare("float32", v, v) is not None
+        with pytest.raises(ValueError, match="EMPTY under dtype"):
+            _declare("float32", v, v)
+    # float64 is unaffected: every python float IS a float64, so a point
+    # declaration there is always exactly representable
+    for v in (0.1, 1.0 / 3.0, float(np.pi)):
+        assert _declare("float64", v, v) is not None
+    # and a RANGE spanning the gap is still admitted
+    assert _declare("float32", 0.1, 0.2) is not None
+
+
+def test_the_refusal_names_the_nearest_representable_values():
+    """The message carries the weight — the `div`-guard pattern: name the
+    primitive, give the reason, PRINT THE NUMBERS. A user who writes
+    `float32 (0.1, 0.1)` must learn what to write instead."""
+    with pytest.raises(ValueError) as exc:
+        _declare("float32", 0.1, 0.1)
+    msg = str(exc.value)
+    below = float(np.nextafter(np.float32(0.1), np.float32(0)))
+    above = float(np.float32(0.1))
+    assert repr(below) in msg and repr(above) in msg, msg
+    assert "nearest float32 values" in msg
+    # the integer branch names its neighbours too
+    with pytest.raises(ValueError) as exc2:
+        _declare("int8", 0.2, 0.8)
+    assert "0 below and 1 above" in str(exc2.value), str(exc2.value)
 
 
 # --------------------------------------------------------------------------
@@ -175,16 +212,44 @@ SURFACE = {
 }
 
 
-@pytest.mark.parametrize("prim", sorted(SURFACE))
-def test_every_one_of_the_thirteen_entry_points_is_closed(prim):
-    fn = SURFACE[prim]
+def test_the_declaration_refuses_before_any_transfer_runs():
+    """One refusal, not thirteen — and the distinction is the point.
+
+    The previous version parametrized this over all 13 transfers, but
+    `any_array` raises before the traced function body is ever evaluated, so
+    `fn` was never called for any of them: measured, 0 invocations. All 13
+    cases were byte-identical and the test would have passed with a single
+    bogus entry. A re-audit caught it, the third vacuity finding in this file.
+    """
+    called = []
 
     def h():
         x = any_array((1,), "uint8", (-3.0, -1.0))
-        return assert_(jnp.sum(jnp.asarray(fn(x), jnp.float64)) >= -1e30)
+        called.append(1)                      # never reached
+        return assert_(lax.neg(x)[0] <= 0)
 
     with pytest.raises(ValueError, match="EMPTY under dtype"):
         trace(h)
+    assert not called, "the refusal must precede the body, not follow it"
+
+
+@pytest.mark.parametrize("prim", sorted(SURFACE))
+def test_each_entry_point_really_was_open(prim, monkeypatch):
+    """THE PARAMETRIZATION THAT MEANS SOMETHING: with the check neutered, each
+    of these transfers ADMITS the dtype-impossible box. That is what makes
+    "thirteen entry points" a count rather than a phrase — the refusal closes
+    them all at once, so only this direction can distinguish them."""
+    monkeypatch.setattr(JC, "_dtype_holds_a_value_in", lambda dt, lo, hi: (True, ""))
+    from stelling._jax_compat import transcribe
+    cj = transcribe(jax.make_jaxpr(SURFACE[prim])(jnp.zeros((1,), "uint8")))
+    eqn = [e for e in cj.jaxpr.eqns if str(e.primitive) == prim][0]
+    bad = iv.IntervalArray(shape=(1,), los=(-3.0,), his=(-1.0,))
+    tf, _tier = P.TRANSFERS[prim]
+    out = tf(eqn, dict(eqn.params_dict()), [bad] * len(eqn.invars))
+    assert out is not None, (
+        f"{prim} was listed as an entry point but declines the box on its own; "
+        f"the surface count is wrong"
+    )
 
 
 def _uint8_outcome(prim):
@@ -274,7 +339,7 @@ def test_that_range_assertion_can_actually_fail(monkeypatch):
 ])
 def test_no_dtype_is_silently_exempt(dtype, lo, hi):
     """The check dispatched on `_INT_DTYPE_BOUNDS` membership and `numpy.finfo`,
-    and a blinded audit measured that combination exempting NINE of the thirty
+    and a blinded audit measured that combination exempting SIXTEEN of the thirty
     dtypes jax builds arrays in — so the box this check exists to reject was
     accepted verbatim one width away: `uint8 (-3,-1)` refused, `uint2 (-3,-1)`
     admitted and DISCHARGED at 100% coverage, a VERIFIED over an empty set.
@@ -286,16 +351,32 @@ def test_no_dtype_is_silently_exempt(dtype, lo, hi):
         _declare(name, lo, hi)
 
 
-def test_the_exempt_dtypes_really_did_mint_a_verdict():
-    """ANTI-VACUITY for the parametrization above: the box it now refuses was
-    reaching a DEFINITE verdict, not merely being admitted."""
+def test_the_exempt_dtypes_really_did_mint_a_verdict(monkeypatch):
+    """ANTI-VACUITY for the parametrization above — REWRITTEN, because the
+    first version asserted `monkey is P.TRANSFERS` after binding
+    `monkey = P.TRANSFERS`, which is `x is x`, and computed no verdict at all
+    while claiming to show one. A re-audit caught it.
+
+    This neuters the check and shows the uint2 box reaching a DEFINITE verdict
+    at full coverage, which is the thing the refusal prevents.
+    """
     import ml_dtypes
-    monkey = P.TRANSFERS  # untouched; this is a pure re-derivation
-    assert np.dtype(ml_dtypes.uint2).name == "uint2"
-    # uint2 spans [0, 3]; (-3, -1) holds nothing
-    info = jnp.iinfo(np.dtype(ml_dtypes.uint2))
-    assert (int(info.min), int(info.max)) == (0, 3)
-    assert monkey is P.TRANSFERS
+    name = np.dtype(ml_dtypes.uint2).name
+    assert (int(jnp.iinfo(np.dtype(ml_dtypes.uint2)).min),
+            int(jnp.iinfo(np.dtype(ml_dtypes.uint2)).max)) == (0, 3)
+
+    monkeypatch.setattr(JC, "_dtype_holds_a_value_in", lambda dt, lo, hi: (True, ""))
+
+    def h():
+        x = any_array((1,), name, (-3.0, -1.0))     # no uint2 is negative
+        return assert_(jnp.sum(jnp.asarray(x == x, jnp.float64)) >= -1e30)
+
+    p = P.propagate(trace(h))
+    assert p.obligations[0].status == "discharged" and p.coverage.unknown == 0, (
+        f"with the check neutered the empty uint2 box must reach a DEFINITE "
+        f"verdict at full coverage — that is what makes the refusal load-"
+        f"bearing; got {p.obligations[0].status} at unknown={p.coverage.unknown}"
+    )
 
 
 @pytest.mark.parametrize("dtype,lo,hi", [
@@ -343,28 +424,191 @@ def test_a_zero_size_declaration_is_never_refused():
         _declare("uint8", -3.0, -1.0)
 
 
-def test_the_representation_gap_is_a_KNOWN_open_hole():
-    """PINNED AS A LIMITATION, not as correct behaviour.
+def test_the_representation_gap_is_CLOSED_and_pinned_both_directions():
+    """A5, decided and taken: the exact test.
 
-    The range-only float rule admits an interval lying wholly inside a
-    representation gap. `float32 (1e-50, 1e-49)` sits below the smallest
-    subnormal (1.4e-45), holds no float32, and reaches a REFUTED at 100%
-    coverage. Closing it requires the exact test, which also rejects
-    `float32 (0.1, 0.1)` — an ordinary envelope — so the trade is a
-    published-surface decision and is deliberately not taken here.
-
-    This test fails the moment the behaviour changes in either direction,
-    which is the point: the hole is recorded rather than forgotten.
+    `float32 (1e-50, 1e-49)` sits below the smallest subnormal and holds no
+    float32. Under the range-only rule it was admitted and reached a REFUTED
+    at 100% coverage. It is refused now — and the test pins BOTH directions,
+    so a regression to range-only fails here and so does an over-reach that
+    starts refusing inhabited intervals.
     """
-    assert _declare("float32", 1e-50, 1e-49) is not None, "still admitted"
     smallest = float(np.nextafter(np.float32(0), np.float32(1)))
-    assert smallest > 1e-49, "and the interval genuinely holds no float32"
+    assert smallest > 1e-49, "the interval genuinely holds no float32"
+    with pytest.raises(ValueError, match="gap between representable values"):
+        _declare("float32", 1e-50, 1e-49)
+    with pytest.raises(ValueError, match="gap between representable values"):
+        _declare("float32", -1e-49, -1e-50)      # the negative twin
+    # THE OTHER DIRECTION: intervals that DO hold a value must still admit
+    for lo, hi in [(0.0, 100.0), (1e-45, 1e-40), (0.1, 0.2), (-3.0, 3.0),
+                   (smallest, smallest), (0.0, 0.0)]:
+        assert _declare("float32", lo, hi) is not None, (lo, hi)
 
-    def h():
-        x = any_array((1,), "float32", (1e-50, 1e-49))
-        return assert_(x[0] >= smallest)
-    p = P.propagate(trace(h))
-    assert p.obligations[0].status == "violated-over-set" and p.coverage.unknown == 0, (
-        f"the consequence is a REFUTED at full coverage; got "
-        f"{p.obligations[0].status} at unknown={p.coverage.unknown}"
+
+@pytest.mark.parametrize("dtype,lo,hi", [
+    ("bfloat16", 1e-45, 1e-44),
+    ("float8_e4m3fn", 1e-4, 1e-3),
+    ("float4_e2m1fn", 0.1, 0.4),
+])
+def test_the_exact_test_reaches_the_narrow_dtypes_too(dtype, lo, hi):
+    """Enumeration rather than nextafter for these — `float8_e8m0fnu` has no
+    zero to step from, so nextafter returns NaN there and a step-based test
+    would have been silently wrong for it."""
+    import ml_dtypes
+    name = np.dtype(getattr(ml_dtypes, dtype)).name
+    with pytest.raises(ValueError, match="EMPTY under dtype"):
+        _declare(name, lo, hi)
+
+
+def test_the_no_zero_dtype_needs_enumeration_and_here_is_the_case():
+    """`float8_e8m0fnu` is exponent-only: no zero, no negatives, NO INFINITY.
+
+    REWRITTEN — the first version's two assertions gave the same answer under
+    either mechanism (one admits via the clamp landing on a representable
+    bound, the other refuses on the range branch), so it never exercised the
+    enumeration it was named for. A re-audit caught it, and also corrected the
+    stated reason: it is not that stepping FROM zero fails, it is that
+    `np.array(inf, e8m0fnu)` is **NaN**, so the nextafter TARGET is NaN and
+    every step returns NaN.
+    """
+    import ml_dtypes
+    d = np.dtype(ml_dtypes.float8_e8m0fnu)
+    with np.errstate(over="ignore", invalid="ignore"):
+        assert bool(np.isnan(np.array(np.inf, d))), "no infinity in this dtype"
+        assert bool(np.isnan(np.nextafter(np.array(9.5e16, d), np.array(np.inf, d))))
+    # 2**57 is a value of this dtype and lies in the interval, so it IS
+    # inhabited — enumeration says so, a nextafter implementation would not
+    assert _declare(d.name, 9.5e16, 4.1e28) is not None, (
+        "an inhabited interval must be admitted; a step-based implementation "
+        "returns NaN here and would refuse it"
     )
+    assert float(np.array(2.0**57, d)) == 2.0**57, "and the witness is real"
+    with pytest.raises(ValueError, match="EMPTY under dtype"):
+        _declare(d.name, -100.0, -50.0)     # no negative values exist
+
+
+def test_a_refusal_never_names_an_infinity_as_a_neighbour():
+    """`inf` is not a value of any float dtype, and advising the caller to
+    declare it is advice `any_array` itself refuses. The wide-dtype path
+    returned it while the narrow path returned None for the same question —
+    the two mechanisms disagreeing in a message. Re-audit."""
+    from stelling._jax_compat import _smallest_at_or_above, _largest_at_or_below
+    assert _smallest_at_or_above("float32", 1e40) is None
+    assert _largest_at_or_below("float32", -1e40) is None
+    with pytest.raises(ValueError) as exc:
+        _declare("float32", 1e39, 1e40)
+    assert "inf" not in str(exc.value).replace("infinite point", ""), str(exc.value)
+
+
+@pytest.mark.parametrize("dtype,lo,hi", [
+    ("uint8", float("-inf"), -1.0),
+    ("uint8", 256.0, float("inf")),
+    ("int8", float("-inf"), -200.0),
+    ("int64", float(2**64), float("inf")),
+])
+def test_an_infinite_endpoint_refuses_rather_than_crashing(dtype, lo, hi):
+    """A REGRESSION THIS FILE'S OWN CHANGE INTRODUCED, caught by re-audit.
+
+    The predicate clamps before ceil/floor — `math.floor(-inf)` raises — and a
+    comment twelve lines from the call site says so. The message helper added
+    to name the nearest neighbours did NOT clamp, so every integer refusal
+    with an infinite endpoint escaped as an uncaught `OverflowError` instead
+    of the `ValueError` the declaration layer promises.
+    """
+    with pytest.raises(ValueError, match="EMPTY under dtype"):
+        _declare(dtype, lo, hi)
+
+
+def test_a_numpy_integer_bound_gets_the_representability_reason():
+    """`np.integer` is not a python `int`, and `_is_bounds_pair` accepts it —
+    so a numpy-typed bound skipped the binary64 guard and got the EMPTY-set
+    message, naming the wrong cause on exactly the case the guard exists for.
+
+    The comparison also has to happen in PYTHON ints: numpy compares a float64
+    against an int64 by converting the int, which discards the inexactness
+    under test.
+    """
+    assert (float(np.int64(2**63 - 1)) != np.int64(2**63 - 1)) is np.False_ or (
+        float(np.int64(2**63 - 1)) == np.int64(2**63 - 1)
+    ), "numpy's own comparison cannot see the loss"
+    for bound in (2**63 - 1, np.int64(2**63 - 1), np.uint64(2**64 - 1)):
+        dt = "uint64" if isinstance(bound, np.unsignedinteger) else "int64"
+        with pytest.raises(ValueError, match="not representable as the binary64"):
+            _declare(dt, bound, bound)
+    # an exactly-storable numpy bound is unaffected
+    assert _declare("int64", np.int64(2**53), np.int64(2**53)) is not None
+
+
+# --------------------------------------------------------------------------
+# regressions from the RE-AUDIT — two of these are defects the fixes for the
+# first audit introduced, in the same helper, on consecutive attempts
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("dtype,lo,hi,expect", [
+    ("uint8", -3.0, -1.0, "0 above"),                 # nothing below: uint8 starts at 0
+    ("uint8", 256.0, 300.0, "255 below"),             # nothing above
+    ("int8", 200.0, 300.0, "127 below"),
+    ("int8", float("-inf"), -129.0, "-128 above"),
+    ("int8", 0.2, 0.8, "0 below and 1 above"),        # the only two-sided case
+    ("bool", 2.0, 3.0, "1 below"),
+])
+def test_the_direction_words_in_a_refusal_are_true(dtype, lo, hi, expect):
+    """THE SECOND DEFECT IN THIS HELPER, introduced by the fix for the first.
+
+    Clamping both ends into `[d_lo, d_hi]` before choosing the direction word
+    collapsed them onto the same value while keeping their labels, so
+    `uint8 (-3, -1)` read *"0 below and 0 above"* — 0 is not below `[-3, -1]`.
+    A re-audit measured the words false in 77 of 113 cases while the numbers
+    stayed right, and the suite could not catch it because the only pinned
+    case was one of the 36 that happened to be correct.
+    """
+    with pytest.raises(ValueError) as exc:
+        _declare(dtype, lo, hi)
+    msg = str(exc.value)
+    assert expect in msg, msg
+    if " below and " in msg:
+        b = msg.split("integers are ")[1].split(" below")[0]
+        a = msg.split(" and ")[1].split(" above")[0]
+        assert b != a, f"a side collapsed onto the other: {msg}"
+
+
+@pytest.mark.parametrize("dtype,lo,hi", [
+    ("int64", -(2**63), 2**63 - 1),      # the natural way to say "any int64"
+    ("uint64", 0, 2**64 - 1),
+    ("int64", 0, 2**63 - 1),
+    ("int64", -(2**63), 0),
+])
+def test_a_widening_conversion_is_admitted(dtype, lo, hi):
+    """A FALSE REJECTION the re-audit found — the failure this layer must not
+    have, and one the first version of the representability guard caused.
+
+    `float(2**63 - 1)` is `2**63`, so as an UPPER bound it widens the stored
+    box: an over-approximation, and every transfer's answer over it still
+    contains the executed value. Refusing it made the ordinary way to declare
+    "any int64" an error. Only a NARROWING conversion is refused now.
+    """
+    assert _declare(dtype, lo, hi) is not None
+
+
+@pytest.mark.parametrize("dtype,bound", [
+    ("int64", 2**63 - 1), ("uint64", 2**64 - 1),
+    ("int64", np.int64(2**63 - 1)), ("uint64", np.uint64(2**64 - 1)),
+])
+def test_a_narrowing_conversion_is_still_refused(dtype, bound):
+    """The other direction: as a LOWER bound the same value shifts up, so the
+    tool would reason about fewer values than the caller declared."""
+    with pytest.raises(ValueError, match="NARROWS the declared set"):
+        _declare(dtype, bound, bound)
+
+
+def test_the_advice_a_refusal_gives_is_followable():
+    """A refusal that names a value the check itself refuses is worse than one
+    that names nothing. Where a named neighbour is not exactly storable, the
+    message says which position it can be used in."""
+    with pytest.raises(ValueError) as exc:
+        _declare("int64", 1e19, 2e19)
+    msg = str(exc.value)
+    assert "9223372036854775807" in msg
+    assert "not exactly representable as the binary64" in msg, msg
+    assert "UPPER bound" in msg, msg
+    # and the advice works: as an upper bound it is admitted
+    assert _declare("int64", 0, 2**63 - 1) is not None

@@ -178,9 +178,15 @@ Every verdict object stamps, at minimum:
   representable value inside the interval*, not *a bound outside the range* —
   a box wider than the dtype is an over-approximation and stays sound, so
   `uint8 (-3, 10)` and `float32 (0.0, 1e39)` are admitted while `uint8
-  (-3, -1)` and `float32 (1e39, 1e40)` are not. Float bounds are never tested
-  for exact representability (a `float32` bound of `0.1` is ordinary and must
-  be admitted) and complex is admitted unconditionally. **Measured against
+  (-3, -1)` and `float32 (1e39, 1e40)` are not. Float bounds ARE tested for exact
+  representability — `float32 (0.1, 0.1)` is refused, because it holds no
+  float32 and is therefore an empty set like any other. That trade was taken
+  after measuring the alternative: range-only admits an interval lying wholly
+  inside a representation gap (`float32 (1e-50, 1e-49)`, below the smallest
+  subnormal), which reached a REFUTED at 100% coverage. No rule admits one and
+  rejects the other, and admitting an empty point costs nothing while
+  admitting the gap mints a false counterexample. `float64` is unaffected:
+  every python float IS a float64. Complex is admitted unconditionally. **Measured against
   every literal declaration in the campaign corpus — 105 of them — zero are
   refused,** and all 13 entry points close,
 

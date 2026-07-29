@@ -154,6 +154,142 @@ _assert_p.def_impl(lambda x: x)
 _nonvacuity_p.def_impl(lambda x: x)
 
 
+def _int_neighbours(d_lo: int, d_hi: int, lo: float, hi: float) -> str:
+    """The nearest representable integers OUTSIDE an empty interval, on each
+    side, clamped into the dtype. Same pattern as the float case: print the
+    numbers.
+
+    THIRD VERSION, and the first two were both wrong in the same helper. The
+    first ran `math.floor` on a raw bound and raised `OverflowError` on an
+    infinite endpoint — the hazard a comment twelve lines from the call site
+    names. The fix clamped both ends into `[d_lo, d_hi]` BEFORE choosing the
+    direction word, which collapsed them onto the same value while keeping
+    their original labels: `uint8 (-3, -1)` read *"0 below and 0 above"*, and
+    a re-audit measured the words false in 77 of 113 cases while the numbers
+    stayed right. So the sides are computed separately now, and a side that
+    has no representable value simply does not appear.
+    """
+    below = above = None
+    if math.isfinite(lo):
+        k = math.floor(lo)
+        below = d_hi if k > d_hi else (k if k >= d_lo else None)
+    if math.isfinite(hi):
+        k = math.ceil(hi)
+        above = d_lo if k < d_lo else (k if k <= d_hi else None)
+    parts = []
+    if below is not None:
+        parts.append(f"{below} below")
+    if above is not None:
+        parts.append(f"{above} above")
+    if not parts:
+        # Unreachable for a REFUSED box: both sides are empty only when the
+        # interval is unbounded in both directions or strictly contains the
+        # whole dtype range, and either of those holds a value. Stated rather
+        # than defended with a branch that cannot fire (the previous version's
+        # fallback here was measured dead in 877 of 877 calls).
+        return ""
+    note = ""
+    lossy = [v for v in (below, above) if v is not None and float(v) != v]
+    if lossy:
+        note = (
+            f" ({', '.join(str(v) for v in lossy)} is not exactly representable "
+            f"as the binary64 the IR stores, so it works as the UPPER bound of "
+            f"a box — where rounding only widens — but not as a lower bound or "
+            f"a point, where it would narrow the declared set)"
+        )
+    return (
+        f" The nearest representable integers are {' and '.join(parts)}; "
+        f"declaring one of those, or the interval spanning them, describes a "
+        f"set the program can actually inhabit.{note}"
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def _finite_values(dt: str):
+    """Every finite value of a narrow float dtype, sorted — computed by
+    enumerating its bit patterns, so it is exact rather than derived.
+
+    Only for dtypes of at most two bytes, where the whole domain is 256 or
+    65536 patterns. `numpy.nextafter` covers the wider ones and is used
+    instead; enumeration is what covers `float8_e8m0fnu`, where nextafter is
+    unusable because the type has no zero to step from (measured:
+    ``nextafter(0, 1)`` returns NaN there).
+    """
+    d = np.dtype(dt)
+    bits = 8 * d.itemsize
+    raw = np.arange(2**bits, dtype=np.uint8 if bits == 8 else np.uint16)
+    with np.errstate(invalid="ignore"):
+        # NaN bit patterns warn on the cast; they are filtered out next line
+        vals = raw.view(d).astype(np.float64)
+    return np.unique(vals[np.isfinite(vals)])
+
+
+def _smallest_at_or_above(dt: str, x: float):
+    """The least value of dtype ``dt`` that is >= ``x``, or None if there is
+    none. Exact: enumeration for narrow dtypes, nearest-then-step for wide
+    ones (if the nearest landed below ``x``, the next one up is the answer,
+    because nothing representable lies strictly between them)."""
+    d = np.dtype(dt)
+    if d.itemsize <= 2:
+        vals = _finite_values(dt)
+        i = int(np.searchsorted(vals, x, side="left"))
+        return None if i >= vals.size else float(vals[i])
+    # a bound outside the dtype's range overflows the cast; the value is
+    # still what we want (an infinity, filtered below) and the warning is
+    # noise, so it is silenced rather than left to litter every refusal
+    with np.errstate(over="ignore", invalid="ignore"):
+        nearest = float(np.array(x, d))
+    if nearest >= x:
+        # An out-of-range x rounds to an infinity, which is NOT a value of the
+        # dtype: returning it made a refusal print "inf above" as a nearest
+        # representable value, advice the caller cannot follow (`(inf, inf)`
+        # is itself refused). The narrow-dtype path returned None for the same
+        # question, so the two mechanisms disagreed. Re-audit.
+        return nearest if math.isfinite(nearest) else None
+    with np.errstate(over="ignore", invalid="ignore"):
+        step = float(np.nextafter(np.array(x, d), np.array(np.inf, d)))
+    return step if math.isfinite(step) else None
+
+
+def _largest_at_or_below(dt: str, x: float):
+    """Mirror of :func:`_smallest_at_or_above`, for the message."""
+    d = np.dtype(dt)
+    if d.itemsize <= 2:
+        vals = _finite_values(dt)
+        i = int(np.searchsorted(vals, x, side="right")) - 1
+        return None if i < 0 else float(vals[i])
+    # a bound outside the dtype's range overflows the cast; the value is
+    # still what we want (an infinity, filtered below) and the warning is
+    # noise, so it is silenced rather than left to litter every refusal
+    with np.errstate(over="ignore", invalid="ignore"):
+        nearest = float(np.array(x, d))
+    if nearest <= x:
+        return nearest if math.isfinite(nearest) else None
+    with np.errstate(over="ignore", invalid="ignore"):
+        step = float(np.nextafter(np.array(x, d), np.array(-np.inf, d)))
+    return step if math.isfinite(step) else None
+
+
+def _neighbours(dt: str, lo: float, hi: float) -> str:
+    """The representable values bracketing an empty interval, named so the
+    user learns what to write instead — the `div`-guard pattern: name it,
+    explain it, PRINT THE NUMBERS."""
+    below = _largest_at_or_below(dt, lo)
+    above = _smallest_at_or_above(dt, hi)
+    if below is None and above is None:
+        return ""
+    parts = []
+    if below is not None:
+        parts.append(f"{below!r} below")
+    if above is not None:
+        parts.append(f"{above!r} above")
+    return (
+        f" The nearest {dt} values are {' and '.join(parts)}; declaring one of "
+        f"those, or the interval spanning them, describes a set the program "
+        f"can actually inhabit"
+    )
+
+
 def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
     """Does the closed interval ``[lo, hi]`` contain ANY value of dtype ``dt``?
 
@@ -180,12 +316,16 @@ def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
 
     THE RANGE LOOKUP, and why it is not a table. A first version dispatched on
     membership in ``propagate._INT_DTYPE_BOUNDS`` and then on ``numpy.finfo``,
-    and a blinded audit measured that combination **silently exempting 9 of the
-    30 dtypes jax builds arrays in** — `int2`/`uint2` are absent from the
-    registry (it holds widths 4/8/16/32/64), and `numpy.finfo` raises for every
-    ml_dtypes extended type (`bfloat16`, the eight `float8_*`, the two
-    `float6_*`, `float4_e2m1fn`). All of them fell through an
-    ``except: return True`` fallback, so the box this check exists to reject
+    and a blinded audit measured that combination **silently exempting 16 of
+    the 30 dtypes jax builds arrays in** — `int2`/`uint2` are absent from the
+    registry (it holds widths 4/8/16/32/64), and `numpy.finfo` raises for
+    every ml_dtypes extended type (`bfloat16`, the eight `float8_*`, the two
+    `float6_*`, `float4_e2m1fn`) — fourteen falling through an
+    ``except: return True`` fallback, plus the two complex dtypes admitted by
+    policy. (**The first report of this said 9**, from an enumeration of 23
+    dtypes rather than all 30: the same population error as the corpus
+    histogram, one session later. The auditor's 16 was right and was
+    overridden with a smaller measurement.) so the box this check exists to reject
     was **accepted verbatim one dtype-width away**: `uint8 (-3, -1)` refused,
     `uint2 (-3, -1)` admitted and discharged at 100% coverage — a VERIFIED over
     an empty set.
@@ -209,22 +349,32 @@ def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
     WHERE THIS IS UNSURE IT ADMITS, deliberately — a declaration check that
     refuses a legitimate envelope is worse than the hole it closes:
 
-    * **float bounds are tested for RANGE, never for exact
-      representability.** A float32 point declaration of ``(0.1, 0.1)`` is
-      admitted although 0.1 is not a float32; refusing it would reject the
-      most ordinary envelope there is. **This under-reach is measured, not
-      assumed: it also admits an interval lying wholly inside a representation
-      gap** — `float32 (1e-50, 1e-49)` sits below the smallest subnormal and
-      was measured minting a REFUTED at 100% coverage. Closing that requires
-      the exact test, which also rejects ``(0.1, 0.1)``; the trade is a
-      published-surface decision and is not taken here.
+    * **float bounds ARE tested for exact representability** — the trade was
+      taken, and this paragraph said the opposite for one commit. The
+      range-only rule admitted an interval lying wholly inside a
+      representation gap: `float32 (1e-50, 1e-49)` sits below the smallest
+      subnormal and reached a REFUTED at 100% coverage. No rule admits that
+      and rejects ``float32 (0.1, 0.1)`` — both hold no value of the dtype —
+      so the choice was which to refuse, and it resolves asymmetrically:
+      admitting ``(0.1, 0.1)`` costs nothing because it IS an empty set, while
+      admitting the gap interval mints a false counterexample. Refusing a
+      point declaration at a decimal literal is not over-strict; it tells the
+      caller their declaration does not mean what they think, which is this
+      check's purpose. **float64 is unaffected**: every python float is a
+      float64, so a point declaration there is always exact.
     * **complex dtypes are admitted unconditionally.** What a real-bounded
       box means for a complex array is undefined, and that is already an
       open item; this check does not settle it by refusing.
     """
     if dt.startswith("complex"):
         return True, ""
-    from stelling.propagate import _INT_DTYPE_BOUNDS  # one registry, not two
+    # `_INT_DTYPE_BOUNDS` first (it has `bool`, which jnp.iinfo does not),
+    # then jax. NOT "one registry, not two" any more — that comment predates
+    # the jnp fallback and a re-audit caught it. jax IS a second source, and
+    # the two disagree in coverage: this layer knows int2/uint2 and the
+    # transfer layer declines them. Direction is safe (declare-admit ->
+    # transfer-decline) and the values agree on all 11 shared dtypes.
+    from stelling.propagate import _INT_DTYPE_BOUNDS
 
     ints = _INT_DTYPE_BOUNDS.get(dt)   # has `bool`, which jnp.iinfo does not
     if ints is None:
@@ -246,7 +396,8 @@ def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
             return True, ""
         return False, (
             f"{dt} represents the integers [{d_lo}, {d_hi}] and the interval "
-            f"contains none of them"
+            f"contains none of them."
+            + _int_neighbours(d_lo, d_hi, lo, hi)
         )
     try:
         info = jnp.finfo(np.dtype(dt))
@@ -254,14 +405,26 @@ def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
     except (TypeError, ValueError):
         # No dtype reaches here on jax 0.11.0. Left as an admit rather than a
         # guess, and NAMED: the previous version's silent version of this line
-        # is what exempted nine dtypes.
+        # is what exempted sixteen dtypes.
         return True, ""
     if hi < f_lo or lo > f_hi:
         return False, (
             f"{dt}'s finite values span [{f_lo}, {f_hi}] and the interval "
-            f"lies entirely outside them"
+            f"lies entirely outside them." + _neighbours(dt, lo, hi)
         )
-    return True, ""
+    # THE EXACT TEST. Range alone admits an interval lying wholly inside a
+    # REPRESENTATION GAP -- `float32 (1e-50, 1e-49)` sits below the smallest
+    # subnormal, holds no float32, and was measured reaching a REFUTED at 100%
+    # coverage. So: clamp into the dtype's range, then ask for the least
+    # representable value at or above the low end, and compare it to the high
+    # end. Exact for every float dtype jax has.
+    first = _smallest_at_or_above(dt, max(lo, f_lo))
+    if first is not None and first <= min(hi, f_hi):
+        return True, ""
+    return False, (
+        f"no {dt} value lies in the interval — it falls inside a gap between "
+        f"representable values." + _neighbours(dt, lo, hi)
+    )
 
 
 def any_array(shape, dtype, bounds):
@@ -304,20 +467,44 @@ def any_array(shape, dtype, bounds):
         )
     dt = str(np.dtype(dtype))
     for name, raw in (("lo", bounds[0]), ("hi", bounds[1])):
-        # The IR stores bounds as binary64. An integer bound past 2**53 does
-        # not survive that, and the loss can EMPTY a legitimate box:
-        # float(2**63 - 1) is 2**63, which no int64 holds, so the natural way
-        # to declare "exactly int64 max" installed a box nothing inhabits and
-        # the old check certified it. Refused with the loss named, rather than
-        # refused with the wrong reason or silently propagated (blinded audit).
-        if isinstance(raw, int) and not isinstance(raw, bool) and float(raw) != raw:
+        # The IR stores bounds as binary64, and an integer bound past 2**53
+        # does not survive that. But ONLY A NARROWING LOSS IS A PROBLEM.
+        # Rounding `lo` DOWN or `hi` UP widens the stored box, which is an
+        # over-approximation and sound — every transfer's answer over it still
+        # contains the executed value. Rounding the other way shrinks the set
+        # the tool reasons about below the one the caller declared.
+        #
+        # The first version refused on ANY inexact integer bound, which made
+        # `int64 (-2**63, 2**63-1)` — the natural way to say "any int64" —
+        # a refusal, though `float(2**63-1)` rounds UP and only widens it.
+        # A re-audit caught that as a false rejection of a legitimate
+        # envelope, which is the failure this layer must not have.
+        # `np.integer` is NOT a python int, and `_is_bounds_pair` explicitly
+        # accepts it — so a numpy-typed bound skipped this guard entirely and
+        # got the EMPTY-set message, which names the wrong cause on exactly
+        # the case this guard exists for. Re-audit.
+        # `int(raw)` first, and the comparison in PYTHON ints. numpy compares a
+        # float64 against an int64 by converting the int to float64, which
+        # discards exactly the inexactness under test: `float(np.int64(2**63-1))
+        # != np.int64(2**63-1)` is False while the python-int form is True.
+        exact = (
+            isinstance(raw, (int, np.integer))
+            and not isinstance(raw, (bool, np.bool_))
+        )
+        if not exact:
+            continue
+        v = int(raw)
+        stored = float(v)
+        narrows = (stored > v) if name == "lo" else (stored < v)
+        if stored != v and narrows:
             raise ValueError(
                 f"any_array bound {name}={raw!r} is not representable as the "
-                f"binary64 the IR stores; it would be recorded as "
-                f"{float(raw)!r}, a different value. Integer bounds must be "
-                f"exact as doubles (|bound| <= 2**53). Declaring a slightly "
-                f"wider box is sound — an over-approximation still contains "
-                f"every executed value — where this silent shift is not"
+                f"binary64 the IR stores; it would be recorded as {stored!r}, "
+                f"which NARROWS the declared set — the tool would reason about "
+                f"fewer values than you declared. (Rounding the other way is "
+                f"admitted: it widens the box, and an over-approximation still "
+                f"contains every executed value.) Integer bounds that must be "
+                f"exact as doubles satisfy |bound| <= 2**53"
             )
     if 0 in dims:
         # A ZERO-SIZE array satisfies ANY element-wise bounds vacuously, and
