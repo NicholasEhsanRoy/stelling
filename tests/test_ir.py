@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import os
+import pathlib
 import subprocess
 import sys
 
@@ -101,14 +103,59 @@ def test_param_value_types_round_trip():
     assert ir.ClosedJaxpr.from_dict(cj.to_dict()) == cj
 
 
+# The repository root, derived from THIS FILE rather than from the working
+# directory. The probe below runs `from tests.test_ir import ...` in a
+# subprocess, which needs the root importable — and reading that from `cwd`
+# made the test pass only when pytest was invoked from the root. It produced a
+# spurious red during an overnight run (pytest invoked with an absolute test
+# path from a sibling repository), which is the claim-divergence class in a
+# TEST rather than a comment: an unstated precondition, with nothing asserting
+# it and nothing naming it.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+
+def _probe(expr: str) -> str:
+    """Run `expr` in a fresh interpreter that can import `tests`, wherever the
+    caller's working directory happens to be."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(_REPO_ROOT), str(_REPO_ROOT / "src"), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    return subprocess.run(
+        [sys.executable, "-c", expr],
+        capture_output=True, text=True, check=True, cwd=str(_REPO_ROOT), env=env,
+    ).stdout.strip()
+
+
 def test_content_hash_stable_across_processes():
     """Guards against reliance on salted builtin hash() anywhere."""
-    probe = (
-        "from tests.test_ir import tiny; print(tiny(source=('a.py:1 (f)',)).content_hash())"
+    out = _probe(
+        "from tests.test_ir import tiny; "
+        "print(tiny(source=('a.py:1 (f)',)).content_hash())"
     )
-    out = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
-    ).stdout.strip()
+    assert out == tiny(source=("b.py:2 (g)",)).content_hash()
+
+
+def test_the_cross_process_probe_does_not_depend_on_the_working_directory():
+    """PINNED, because the dependency was silent and cost a spurious red.
+
+    An unattended run that hits a spurious red either stops for the wrong
+    reason or learns to discount reds, and the second is worse. So the probe's
+    independence is asserted rather than assumed: it runs from a directory that
+    is not the repository root and must still work.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            out = _probe(
+                "from tests.test_ir import tiny; "
+                "print(tiny(source=('a.py:1 (f)',)).content_hash())"
+            )
+        finally:
+            os.chdir(cwd)
     assert out == tiny(source=("b.py:2 (g)",)).content_hash()
 
 
