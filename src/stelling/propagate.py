@@ -1513,6 +1513,18 @@ ASSUME_DROP_NOTE = (
     "the precondition before treating it as one"
 )
 
+# Naming a WORKING ALTERNATIVE, not just the missing primitive. "no transfer for
+# reduce_and" tells a reader the tool is incomplete; this tells them what to
+# write instead. Both forms below use only registered primitives, and both make
+# an `assume` CONSTRAIN rather than drop — which is the part nobody would guess.
+MEMBERSHIP_IDIOM_HINT = (
+    " — `jnp.all(...)` lowers to `reduce_and`, which has no interval transfer, "
+    "so its box is ⊤. Express the same condition arithmetically instead: "
+    "`jnp.sum(jnp.maximum(lo - k, 0.0) + jnp.maximum(k - hi, 0.0)) <= 0.0` or "
+    "`jnp.sum((k < lo).astype(jnp.int32)) == 0`. Both use registered primitives "
+    "only, and both make a constraining `assume` CONSTRAIN rather than DROP"
+)
+
 IEEE_PRODUCT_SOURCES = frozenset({"mul", "dot_general", "integer_pow"})
 
 # Every registered transfer that PERFORMS an addition, and therefore every
@@ -3389,6 +3401,7 @@ class _Propagator:
                 reasons = "; ".join(dropped) if dropped else "unclassified predicate"
                 self.notes.append(
                     ASSUME_DROP_NOTE.format(where=where) + f" ({reasons})"
+                    + (MEMBERSHIP_IDIOM_HINT if "reduce_and" in reasons else "")
                 )
                 # F7's NO-OP HALF. The narrowing path sets `uncertified` when
                 # it constrains an over-approximated variable; a DROPPED

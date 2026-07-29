@@ -315,6 +315,56 @@ line is the diff to read first.** And when one instrument is found to have this
 hole, check its siblings before assuming it was unique — the assumption that
 produced it rarely rode alone.
 
+## An over-permissive stub's ZERO is conclusive; its NONZERO is not
+
+A stub that grants **more** than a real implementation could deliver
+**upper-bounds** the benefit. So a zero means a real fix can only do worse —
+conclusive — while a nonzero measures a capability nobody could build.
+
+Two instances, and the second was only safe by luck:
+
+- **the exactness stub for `convert_element_type`.** Both faces gate on one
+  whitelist, so the only available stub declared `f64→f32` EXACT — it pretends
+  the rounding is free. Stated before the number, and the zeros it produced are
+  robust for exactly this reason.
+- **`uint8→bool` added to that whitelist.** The whitelist means *emit as
+  identity*, and this conversion is a SORT CHANGE (Real → Bool), so the stub was
+  not merely optimistic but semantically wrong. **It was safe only because the
+  benefit came back zero.** Had it come back positive, the number would have
+  meant nothing until the stub was audited.
+
+The practical consequence, and it is what makes this campaign's zeros
+trustworthy: **most of the capability counterfactuals rest on stubs nobody
+audited, and they are sound BECAUSE they are zeros.** A positive result from an
+unaudited stub is not a result yet — audit the stub first, then quote the
+number.
+
+So: **state what the stub grants, before reporting what it produced.** If the
+answer is zero you are done; if it is not, the stub is now load-bearing.
+
+## Build the fixture OUTSIDE the traced region
+
+A harness that constructs anything inside the traced region gets tracers where
+it expects values, and the failure mode is **a plausible wrong reading rather
+than an error** — which is why it keeps landing. Four instances, with numbers:
+
+- **382 equations versus 329.** The same contract, cold inside the trace versus
+  warmed outside: **53 equations of node construction were being traced into the
+  query.**
+- **"not declarable" that was declarable.** Every one of eight state keys read
+  as undeclarable because `initial_state()` was called under trace and returned
+  tracers. Warmed outside, all eight declare.
+- **"undecided" that was FAILED.** A nonvacuity membership condition read
+  *undecided* for the same reason; built outside, it decides — and decides
+  against the contract.
+- **2 distinct values over 500 steps versus 501.** An unthreaded stepping loop
+  reuses the initial state, and the resulting span is a *plausible small number*
+  rather than an obvious constant.
+
+A lazy cache does not help: **it delays when code enters a region, it does not
+move it out.** The fixture must be warmed before tracing, and `frontier.warm()`
+is idempotent and runs at import for exactly this reason.
+
 ## Guard coverage is proven by mutation, not by construction
 
 A test that reaches a guard and a test whose scenario stops short of it look
