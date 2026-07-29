@@ -1080,7 +1080,7 @@ def wrapping_int_query(
     # The suite is what enforces it; adding `add_any` was caught here on the
     # first run after registration, which is the intended behaviour and the
     # reason this is a comment rather than a silent tuple.
-    if prim in ("add", "add_any", "sub", "mul", "div"):
+    if prim in ("add", "add_any", "sub", "mul", "div", "rem"):
         if second is None:
             ins = [v, v]
         else:
@@ -1400,9 +1400,44 @@ def test_the_integer_semantics_census_is_TOTAL_over_the_transfer_registry():
 
 
 def test_every_computing_transfer_actually_carries_the_guard():
-    """Membership in the census is enforced, not declared: each computing
-    transfer must reach `_int_overflow_guard` on an out-of-range integer
-    result."""
+    """Membership in the census is enforced, not declared.
+
+    The invariant the census documents is a DISJUNCTION — a computing
+    transfer run at an integer boundary must *either decline or return a
+    result inside the dtype's range* — and until `sign` and `rem` this test
+    only ever checked the first half, because every computing member either
+    overflowed (add, mul, div at INT_MIN/-1) or refused integers outright
+    (sqrt). Those two are the first that do neither: `sign` maps into
+    {-1, 0, 1} and truncated `rem` obeys |rem| < |b|, so neither CAN escape
+    any integer range, and demanding a decline of them would be demanding
+    the wrong thing.
+
+    Both halves are therefore checked. **The ASSERTION does not branch per
+    primitive** — which half applies is read off the behaviour, never
+    declared — because a hand-maintained which-half list would be the
+    abolished escape list rebuilt under another name. (The per-primitive
+    lines above are operand SETUP, which this loop has always had; a blinded
+    audit read the original wording as claiming more than that, and it did.)
+    The run asserts BOTH halves were exercised, so it cannot degenerate into
+    checking nothing.
+
+    SCOPE: int32 only, like the rest of this test. The wider per-dtype sweep
+    is the import-time behavioural census, and the containment property is in
+    tests/test_sign_rem_rows.py.
+
+    **What none of the three covers, named rather than left implied:** a
+    declared box the DTYPE CANNOT HOLD. `any_array` validates shape and
+    ordering but not bounds-against-dtype, so a `uint8` box of (-3, -1) is
+    declarable, and `sign` returned [-1, -1] on it at 100% coverage — a
+    REFUTED from a premise no execution can reach. `sign` now declines it via
+    the overflow guard, but that fixed ONE row: measured, **13 of 21
+    integer-accepting transfers still admit such a box**, and the six
+    comparisons return a DEFINITE boolean on it. This is a declaration-layer
+    hole, not a transfer-layer one, and no assertion in this file can reach
+    it — see docs/proposed-declaration-dtype-check.md.
+    """
+    lo_b, hi_b = _INT_DTYPE_BOUNDS["int32"]
+    took_decline, took_in_range = [], []
     for prim in sorted(_INT_COMPUTING):
         if prim in ("pow", "exp"):
             continue  # covered below; their kernels decline first on ints
@@ -1432,10 +1467,37 @@ def test_every_computing_transfer_actually_carries_the_guard():
             # test_integer_dot_general_declines_at_every_dtype_boundary
             # asserts the same thing where a reader will look for it.
             continue
+        if prim == "rem":
+            # rem needs a divisor that is definitely nonzero; -1 is the one
+            # its sibling `div` WRAPS on, which is the boundary worth taking
+            second = (-1.0, -1.0)
         q = wrapping_int_query(box[0], box[1], prim, params, second=second)
         p = sole(q)
-        assert p.obligations[0].status == "unknown", prim
-        assert any("declined" in n for n in p.notes), prim
+        if any("declined" in n for n in p.notes):
+            assert p.obligations[0].status == "unknown", prim
+            took_decline.append(prim)
+            continue
+        # the other half: no decline, so the result must have stayed inside
+        # the dtype. Var 1 is the primitive's output in wrapping_int_query.
+        out_box = interval_env(q).get(1)
+        assert out_box is not None, (
+            f"{prim} neither declined nor produced a box — it reached ⊤ for "
+            f"some third reason, which this invariant does not cover"
+        )
+        assert all(lo_b <= x <= hi_b for x in (*out_box.los, *out_box.his)), (
+            f"{prim} did not decline at the int32 boundary and its result box "
+            f"[{min(out_box.los)}, {max(out_box.his)}] leaves the dtype range "
+            f"[{lo_b}, {hi_b}] — a wrapping integer result recorded as known"
+        )
+        took_in_range.append(prim)
+
+    assert took_decline, "no computing transfer declined; the guard is dead"
+    assert took_in_range == ["rem", "sign"], (
+        f"expected exactly the two provably-non-escaping members to take the "
+        f"in-range half, got {took_in_range} — a NEW member here is a "
+        f"soundness claim ('its arithmetic cannot leave the dtype') and must "
+        f"be argued in _INT_COMPUTING before it is admitted to this list"
+    )
 
 
 def test_the_emission_census_is_TOTAL_over_the_supported_set():

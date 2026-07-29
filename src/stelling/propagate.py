@@ -621,6 +621,244 @@ def _t_unstack(eqn, params, ins):
     return out
 
 
+def _t_sign(eqn, params, ins):
+    """``sign`` — and the obvious rule is UNSOUND, which is this row's point.
+
+    The rule everyone writes is ``lo > 0 -> [1, 1]``. MEASURED on jax 0.11.0
+    CPU binary64, eager AND under jit::
+
+        lax.sign(1e-320) = 0.0        numpy.sign(1e-320) = 1.0
+
+    XLA flushes subnormals (FTZ on results, DAZ on operands) in arithmetic,
+    comparisons and libm alike — the same device-dependence ieee mode already
+    discloses in :data:`interval.SUBNORMAL_INDETERMINACY_ASSUMPTION`. So a
+    declared box like ``[1e-320, 1e-300]`` has ``lo > 0`` while the target
+    evaluates its lower elements to ``0.0``, and the obvious rule records a
+    DEFINITE ``[1, 1]`` that the execution does not satisfy — a false box of
+    exactly the `square` class, and one a gauge sampling ``[-3, 3]`` never
+    reaches. It is also why the oracle clause now reads *"jax, not stelling AND NOT
+    numpy"* (CONTRIBUTING.md): a numpy oracle would have certified it. The
+    executed-value containment sweep lives in the campaign repo, not here;
+    what is in THIS tree is tests/test_sign_rem_rows.py, which pins the
+    oracle disagreement and the load-bearingness of the floor.
+
+    So the definite branches are gated on :data:`interval.MIN_NORMAL` rather
+    than on zero, and the open band ``(-MIN_NORMAL, MIN_NORMAL)`` admits
+    ``0``. The constant is READ from its definition site, not re-derived: it
+    is already in the tree, already carries its derivation, and is already
+    load-bearing for this exact device-dependence in ieee mode. Admitting 0
+    across the band is sound under BOTH flush and gradual underflow, which is
+    what makes one rule serve both semantics modes.
+
+    STRICTER THAN ITS NEIGHBOURS, deliberately, and recorded rather than
+    hidden: real-mode ``gt([1e-320, 1e-300], 0)`` returns definite TRUE today
+    — the same device-dependence answered the other way. Whether real mode
+    brackets the EXECUTED program or the real-arithmetic idealization is a
+    MODE question that predates this row and reaches every comparison; this
+    transfer takes the answer that is sound under either reading and changes
+    nothing else to match.
+
+    Integers have no subnormals, so their positive floor is 1. Unsigned needs
+    no branch of its own: a uint box has ``lo >= 0``, so the negative cases
+    are unreachable and there is no dead ``-1`` branch here to be misread as
+    a live one.
+
+    BINARY64 AND INTEGERS ONLY. The floor is `MIN_NORMAL = 2**-1022`, which
+    is a *binary64* boundary; every other float dtype flushes somewhere else
+    and declines via :func:`_refuse_non_f64_float`. That restriction was
+    bought by a blinded audit, which found this row minting a **discharged
+    obligation at 4/4 KNOWN coverage** on an f32 box that execution refutes.
+
+    SOUND, NOT EXACT — and the tier says so because the row cannot be exact
+    under both readings at once. Under gradual underflow the image of
+    ``[-1e-320, 1e-320]`` is {-1, 0, 1} and ``[-1, 1]`` IS its hull; under
+    the measured flush the image is {-0.0} and the hull is ``[0, 0]``. The
+    returned box is sound under both, which is the point, and is the tight
+    hull under neither. An earlier draft registered this EXACT on the
+    gradual reading alone; the tier rides into the verdict stamp, so it
+    states the weaker claim.
+    """
+    if len(ins) != 1:
+        return None
+    _refuse_complex(eqn, "sign", _SIGN_COMPLEX_REASON)
+    _refuse_non_f64_float(eqn, "sign")
+    (a,) = ins
+    dtype = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
+    # the smallest magnitude whose sign is DEFINITE on the target
+    floor_ = 1.0 if _is_integer_dtype(dtype) else iv.MIN_NORMAL
+    los, his = [], []
+    # NO NaN-ENDPOINT BRANCH HERE, and the absence is deliberate. Falling
+    # through on a NaN endpoint WOULD be silently wrong — every comparison
+    # below is False, so the box would read [-1, 1], which does not contain
+    # sign(NaN) = NaN. But `IntervalArray` refuses a NaN endpoint at
+    # CONSTRUCTION ("NaN endpoint in interval arithmetic"), so a guard here
+    # could never fire, and a guard that cannot fire reads as protection
+    # while providing none. The property is pinned at the constructor
+    # instead; see tests/test_sign_rem_rows.py.
+    for lo, hi in zip(a.los, a.his):
+        if lo >= floor_:
+            l, h = 1.0, 1.0
+        elif hi <= -floor_:
+            l, h = -1.0, -1.0
+        elif lo >= 0.0 and hi <= 0.0:
+            # the exact-zero box, tight. Without this branch the `lo >= 0`
+            # case below fires first and returns [0, 1] for [0, 0], admitting
+            # a 1 no operand in the box can produce (blinded audit).
+            l, h = 0.0, 0.0
+        elif lo >= 0.0:
+            l, h = 0.0, 1.0
+        elif hi <= 0.0:
+            l, h = -1.0, 0.0
+        else:
+            l, h = -1.0, 1.0
+        los.append(l)
+        his.append(h)
+    outs = [iv.IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))]
+    if not _is_integer_dtype(dtype):
+        return outs
+    # Route integers through the shared guard like every other computing row
+    # that accepts them. The `-1` branches are only unreachable for unsigned
+    # dtypes if `lo >= 0` is guaranteed, and it is NOT: `any_array` validates
+    # shape and ordering but not bounds-against-dtype, so a declared
+    # uint8 box of (-3, -1) reached this and returned [-1, -1] — out of
+    # uint8's range, at 100% coverage, minting a REFUTED. Found by a blinded
+    # audit. The invariant is now enforced rather than asserted in a comment.
+    return _int_overflow_guard(eqn, "sign", outs)
+
+
+def _t_rem(eqn, params, ins):
+    """``rem`` — TRUNCATED remainder, which is what ``lax.rem`` is.
+
+    MEASURED, jax 0.11.0, floats and integers alike::
+
+        lax.rem(-7, 3) = -1     truncated: the sign follows the DIVIDEND
+        jnp.mod(-7, 3) =  2     floored:   the sign follows the DIVISOR
+
+    They disagree on every mixed-sign case with a nonzero remainder, so
+    modelling the floored rule here would be wrong on all of them. But the
+    choice is not a trade-off, because ``jnp.mod`` / ``jnp.remainder`` / ``%``
+    do not lower to this primitive at all. They lower to a ``jit`` composite
+    whose body is::
+
+        rem ; ne ; lt ; lt ; ne ; and ; add ; select_n
+
+    — truncation plus seven primitives that already have rows. MEASURED with
+    ``coverage.measure``: before this row ``jnp.mod`` is ``total=9 known=7
+    transparent=1 unknown=1``, and the single unknown IS ``rem``. After it:
+    ``known=8 transparent=1 unknown=0``. So the truncated row is the only one
+    to build, and building it takes ``jnp.mod``'s unknowns to zero — stated
+    as 7→8 known of 9 equations rather than "9/9", because the ninth is the
+    transparent ``jit`` wrapper, which is counted in its own column and is
+    neither known nor unknown.
+
+    THE BOUND. Truncated remainder satisfies ``|rem(a,b)| <= min(|a|, |b|)``
+    and carries the sign of ``a`` (or is zero): if ``|a| < |b|`` the result IS
+    ``a``, otherwise its magnitude is strictly below ``|b|``. So the dividend
+    box picks the side and the divisor's larger magnitude bounds the width.
+
+    THE DIVISOR GUARD, and why it REFUSES rather than widening: ``rem(a, 0)``
+    is NaN on floats, and NO INTERVAL CONTAINS NaN — a ⊤ here would be a false
+    box, not merely a weak one. (On integers the consequence is different and
+    the message says so: measured, ``lax.rem(int32(7), 0) = 7``. Refusing is
+    over-conservative there rather than necessary.) Same for a non-finite
+    dividend (``rem(inf, 2)`` is NaN). Both refuse loudly with the offending
+    interval printed — the three properties two independently-blinded external
+    agents rated 9/10 on stelling's **escalation-face** `div` guard: names the
+    primitive, gives the reason, PRINTS THE BOX. Note that is the *emission*
+    guard; real-mode `_t_div` does not refuse at all, it returns ⊤ silently.
+    This row is deliberately stricter than its sibling, and the attribution is
+    to the message that earned the rating, not to `div`'s transfer.
+
+    The guard's threshold is MIN_NORMAL rather than zero, for `sign`'s reason
+    read on the divisor: under DAZ a subnormal divisor reads as ``0`` and the
+    result is NaN, so a divisor box inside the open subnormal band is refused
+    even though it excludes zero exactly. Same mode-boundary caveat as `sign`,
+    same resolution — the reading that is sound under both semantics.
+
+    SOUND, not exact: for ``a = [6, 7]``, ``b = [3, 3]`` the achievable image
+    is {0, 1} and this returns ``[0, 3]``.
+    """
+    if len(ins) != 2:
+        return None
+    _refuse_non_f64_float(eqn, "rem")
+    a, b = ins
+    # THE CANONICAL ELEMENTWISE PAIRING, not a hand-rolled one. An earlier
+    # draft required equal shapes and declined everything else "because jaxpr
+    # rem is elementwise on equal shapes" — which is false: jaxprs carry
+    # scalar literals as RANK-0 operands of elementwise equations, so
+    # `jnp.mod(x, 2.0)` on an array and jax-md's `space.periodic` shift both
+    # produce `rem` with shapes [(n,), ()] and both were declined outright.
+    # `add`, `mul` and `div` have always routed through this helper. Found by
+    # a blinded audit; the static coverage census read 0 unknown throughout,
+    # which is the same census-cannot-see-guards mechanism recorded in
+    # docs/state-0.1.0.md, hitting the row that documents it.
+    try:
+        shape, xs, ys = iv._pair_elements(a, b)
+    except iv.IntervalError:
+        return None
+    los, his = [], []
+    for (alo, ahi), (blo, bhi) in zip(xs, ys):
+        if not (math.isfinite(alo) and math.isfinite(ahi)):
+            raise iv.IntervalError(
+                f"'rem' declined: the dividend's interval [{alo}, {ahi}] is "
+                f"not bounded, and rem of an infinity is NaN (measured: "
+                f"lax.rem(inf, 2) = nan). No interval contains NaN, so this "
+                f"refuses rather than widening — a wide box here would be "
+                f"FALSE, not weak. Bound the dividend to admit this form"
+            )
+        if blo < iv.MIN_NORMAL and bhi > -iv.MIN_NORMAL:
+            int_out = _is_integer_dtype(
+                (eqn.outvars[0].aval.dtype or "") if eqn.outvars else ""
+            )
+            why = (
+                "contains zero"
+                if blo <= 0.0 <= bhi
+                else (
+                    f"lies inside the open subnormal band "
+                    f"(|b| < {iv.MIN_NORMAL}), where the measured target "
+                    f"flushes the divisor to zero (DAZ)"
+                )
+            )
+            # The consequence is dtype-dependent and the message says which:
+            # measured, lax.rem(int32(7), 0) = 7, NOT NaN. A blinded audit
+            # caught the float reason being printed at integer dtypes.
+            consequence = (
+                "integer rem by zero returns the DIVIDEND unchanged "
+                "(measured: lax.rem(int32(7), 0) = 7), which no interval "
+                "rule here models"
+                if int_out
+                else "rem(a, 0) is NaN, and no interval contains NaN"
+            )
+            raise iv.IntervalError(
+                f"'rem' declined: the divisor's interval [{blo}, {bhi}] "
+                f"{why}, and {consequence}. This refuses rather than "
+                f"returning a wide box — a wide box here would be FALSE, not "
+                f"weak. A precondition bounding the divisor away from zero "
+                f"admits it"
+            )
+        m = max(abs(blo), abs(bhi))     # +inf is sound here: min() absorbs it
+        if alo >= 0.0:
+            lo, hi = 0.0, min(ahi, m)
+        elif ahi <= 0.0:
+            lo, hi = max(alo, -m), 0.0
+        else:
+            lo, hi = max(alo, -m), min(ahi, m)
+        los.append(lo)
+        his.append(hi)
+    outs = [iv.IntervalArray(shape=shape, los=tuple(los), his=tuple(his))]
+    dtype = (eqn.outvars[0].aval.dtype or "") if eqn.outvars else ""
+    if not _is_integer_dtype(dtype):
+        return outs
+    # `div`'s posture on its integer sibling. Nothing can escape (|rem| < |b|
+    # and |rem| <= |a|, both in range — measured at the boundary:
+    # rem(INT_MIN, -1) = 0, where div WRAPS), and the guard's SNAP is a no-op
+    # here because every endpoint is already integral. Its live residual
+    # effect is the refusal on an unregistered or out-of-range integer dtype,
+    # which is why it is called rather than skipped — stated accurately after
+    # a blinded audit pointed out that "for the snap" was not the reason.
+    return _int_overflow_guard(eqn, "rem", outs)
+
+
 def _t_reshape(eqn, params, ins):
     if params.get("dimensions") is not None:
         # a dimensions= reshape permutes before reshaping — not the C-order
@@ -1406,7 +1644,76 @@ def _require_float_dtype(eqn, prim: str) -> None:
         )
 
 
-def _refuse_complex(eqn, prim: str) -> None:
+def _non_f64_float_dtypes(atoms) -> list[str]:
+    """The non-binary64 FLOAT dtypes among these atoms' avals. The ieee
+    mode models binary64 only, and the measured flush is PER-DTYPE
+    (jax 0.11.0 CPU flushes float32 subnormals — |x| < 2**-126, which are
+    NORMAL binary64 numbers invisible to the binary64 haze — while
+    float16 is not flushed on this target): any surface that would judge
+    a non-f64 float definitely must decline instead of mismodelling."""
+    return sorted(
+        {
+            v.aval.dtype
+            for v in atoms
+            if "float" in (v.aval.dtype or "") and v.aval.dtype != "float64"
+        }
+    )
+
+
+def _refuse_non_f64_float(eqn, prim: str) -> None:
+    """A real-mode guard whose threshold is :data:`interval.MIN_NORMAL` is a
+    BINARY64 guard, and must say so by declining every other float dtype.
+
+    Found by a blinded audit of the `sign`/`rem` rows, and it is the same
+    defect those rows were built to prevent, one dtype over. `MIN_NORMAL` is
+    ``2**-1022``; float32's smallest normal is ``2**-126``, ~270 orders of
+    magnitude above it. So an f32 operand box like ``[1e-40, 1e-30]`` clears
+    the f64 floor while the target evaluates its lower elements to ``0.0``:
+    measured, `sign` returned a definite ``[1, 1]`` and jax returned ``0.0``,
+    and end to end that was a **discharged obligation at 4/4 KNOWN coverage**
+    which execution refutes. `rem` was worse — an f32 divisor box that
+    excludes zero outright, ``[1e-39, 1e-38]``, was admitted while
+    ``rem(1.0, 5e-39)`` is **NaN**, which no interval contains.
+
+    DECLINE RATHER THAN MODEL, which is not a new adjudication: the ieee
+    face already answered this question the same way (re-attack U2, see
+    :func:`_non_f64_float_dtypes` and tests/test_ieee_f32_band.py), and it
+    pinned float16 as a decline *"not as target behavior"* even though f16
+    is measured NOT to flush here. Same posture in real mode: modelling a
+    per-dtype flush boundary needs a per-dtype table of smallest normals,
+    which is numeric-constant work and is not done here.
+    """
+    bad = _non_f64_float_dtypes(eqn.invars)
+    if bad:
+        raise iv.IntervalError(
+            f"{prim!r} declined: its subnormal guard is a BINARY64 guard "
+            f"(threshold {iv.MIN_NORMAL}, which is 2**-1022), and operand "
+            f"dtype{'s' if len(bad) > 1 else ''} {'/'.join(bad)} flush at a "
+            f"different boundary — float32's smallest normal is 2**-126, so "
+            f"values this guard reads as definitely-nonzero are flushed to "
+            f"zero by the target. Declined rather than mismodelled; float64 "
+            f"and integer operands are unaffected"
+        )
+
+
+_EVEN_POWER_COMPLEX_REASON = (
+    "the even-power non-negativity rule is a real-arithmetic fact and "
+    "complex squaring does not satisfy it (measured: square of a pure "
+    "imaginary is a NEGATIVE real)"
+)
+
+# `sign` shares the guard and NOT the reason: it uses no even-power rule.
+# A blinded audit found it emitting `square`'s message, which named a rule
+# the row does not have — the refusal was right and its stated cause was
+# about something else entirely.
+_SIGN_COMPLEX_REASON = (
+    "sign(z) for complex z is z/|z|, a point on the unit circle, not a real "
+    "-1/0/+1 (measured: lax.sign(3+4j) = 0.6+0.8j) — the sign rule's three "
+    "definite values do not describe it"
+)
+
+
+def _refuse_complex(eqn, prim: str, reason: str = _EVEN_POWER_COMPLEX_REASON) -> None:
     """The even-power non-negativity rule is a REAL-arithmetic fact, and this
     is the guard that keeps it from being applied where it is false.
 
@@ -1431,10 +1738,8 @@ def _refuse_complex(eqn, prim: str) -> None:
     dt = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
     if dt.startswith("complex"):
         raise iv.IntervalError(
-            f"{prim!r} on dtype {dt!r}: the even-power non-negativity rule is a "
-            f"real-arithmetic fact and complex squaring does not satisfy it "
-            f"(measured: square of a pure imaginary is a NEGATIVE real). "
-            f"Complex is outside this transfer's domain — declined"
+            f"{prim!r} on dtype {dt!r}: {reason}. Complex is outside this "
+            f"transfer's domain — declined"
         )
 
 
@@ -1835,6 +2140,14 @@ TRANSFERS = {
     "square": (_t_square, TIER_SOUND),
     "copy": (_t_copy, TIER_EXACT),
     "unstack": (_t_unstack, TIER_EXACT),
+    # sound, not exact: the box is the achievable hull under GRADUAL
+    # underflow and a strict superset of it under the measured FLUSH, so it
+    # cannot be exact under both — and it is registered for the weaker of
+    # the two because the tier rides into the stamp. See _t_sign.
+    "sign": (_t_sign, TIER_SOUND),
+    # sound, not exact: |rem| <= min(|a|, |b|) bounds the box, but the
+    # achievable image inside it is not swept — see _t_rem.
+    "rem": (_t_rem, TIER_SOUND),
     "slice": (
         lambda eqn, p, ins: [
             iv.slice_(
@@ -1944,6 +2257,23 @@ _INT_COMPUTING = frozenset({
     # `square` multiplies its operand by itself, so it can produce a value the
     # operand did not contain -- the same class as `mul`, same guard
     "square",
+    # `sign` maps its operand to -1/0/+1, values the operand need not have
+    # contained, so it computes and is probed. Its arithmetic CANNOT escape
+    # any integer range ({-1,0,1} fits every width down to int4/uint4), so
+    # the probe passes structurally rather than by a guard — stated here
+    # because a probe that cannot fail is not the load-bearing check for
+    # this row. The load-bearing checks are the executed-value containment
+    # tests in tests/test_sign_rem_rows.py and the sweep in the campaign repo
+    # (Norm G: the instrument must reach the claim, and this probe reaches
+    # only the range claim).
+    "sign",
+    # truncated remainder computes a value neither operand contained
+    # (rem(7,3) = 1), so it is the same class. It cannot escape the range
+    # either — |rem| < |b| and |rem| <= |a| — and MEASURED at the boundary
+    # where its sibling does escape: rem(INT_MIN, -1) = 0 while
+    # div(INT_MIN, -1) WRAPS. It routes through the shared guard anyway,
+    # for the integer snap.
+    "rem",
     # the contraction SUMS products, so it too can produce a value its
     # operands did not contain. Float-only in practice because the shared
     # oracle refuses integral accumulation (and an ABSENT
@@ -2176,6 +2506,15 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
             "scatter-add": (hi, hi),
             "add_any": (hi, hi),
             "square": (hi, None),
+            # sign/rem sit at the dtype boundary like the rest. The divisor
+            # is `hi` rather than div's `-1`: -1 is UNREPRESENTABLE at every
+            # unsigned dtype, so that cell corresponded to no executable
+            # program (blinded audit). Both probes are satisfied
+            # STRUCTURALLY -- neither row's arithmetic can leave the range --
+            # so the load-bearing checks for them are the containment tests,
+            # not this sweep. Named rather than left to be assumed.
+            "sign": (lo, None),
+            "rem": (lo, hi),
             # the contraction's products escape exactly as `mul`'s do, so
             # it takes mul's operand values
             "dot_general": (hi, hi),
@@ -2188,6 +2527,8 @@ def _probe_operands(prim: str, lo_b: int, hi_b: int, high: bool):
         "scatter-add": (lo, lo),
         "add_any": (lo, lo),
         "square": (lo, None),
+        "sign": (hi, None),
+        "rem": (hi, lo if lo != 0.0 else hi),
         "dot_general": (lo, hi),
     }[prim]
 
@@ -2509,22 +2850,6 @@ def _ieee_sqrt(eqn, params, ins, flags):
     return [box], [made_nan or flags[0]]
 
 
-def _non_f64_float_dtypes(atoms) -> list[str]:
-    """The non-binary64 FLOAT dtypes among these atoms' avals. The ieee
-    mode models binary64 only, and the measured flush is PER-DTYPE
-    (jax 0.11.0 CPU flushes float32 subnormals — |x| < 2**-126, which are
-    NORMAL binary64 numbers invisible to the binary64 haze — while
-    float16 is not flushed on this target): any surface that would judge
-    a non-f64 float definitely must decline instead of mismodelling."""
-    return sorted(
-        {
-            v.aval.dtype
-            for v in atoms
-            if "float" in (v.aval.dtype or "") and v.aval.dtype != "float64"
-        }
-    )
-
-
 def _ieee_cmp_f64_only(eqn) -> None:
     """The comparison face of the binary64-only guard (re-attack U2): DAZ
     reaches comparisons per-dtype (measured jax 0.11.0 CPU:
@@ -2647,6 +2972,49 @@ def _ieee_square(eqn, params, ins, flags):
     REAL-MODE ONLY and the acceptance record says so.
     """
     return None
+
+
+def _ieee_sign(eqn, params, ins, flags):
+    """`sign` under ieee — and unlike `square`, this one does NOT decline.
+
+    The reason is that the real-mode rule was already built to be sound here.
+    Its definite branches are gated on MIN_NORMAL, so the open subnormal band
+    admits 0 — which IS the DAZ answer, applied to the operand where it
+    belongs rather than hulled onto the result afterwards. (Hazing the OUTPUT
+    would be a no-op that looks like a safeguard: {-1, 0, 1} contains no
+    subnormal, so `subnormal_haze` on the result would change nothing while
+    reading as though it had handled the band. It is handled by the floor.)
+
+    NaN routes to the flag exactly as `neg` and `abs` do: sign(NaN) = NaN, so
+    a maybe-NaN operand yields a maybe-NaN result and the box below covers
+    the non-NaN part. Endpoints are exact — no rounding occurs in a sign — so
+    the ieee endpoint assumption is satisfied trivially.
+    """
+    _ieee_f64_only(eqn)
+    outs = _t_sign(eqn, params, ins)
+    if outs is None:
+        return None
+    return outs, [flags[0]]
+
+
+def _ieee_rem(eqn, params, ins, flags):
+    """`rem` under ieee — also does not decline, and for a sharper reason:
+    truncated remainder is EXACT in binary64. `fmod` introduces no rounding
+    at all (the result is representable whenever the operands are), so there
+    is no schedule to fix, no association to worry about, and no outward bump
+    to justify — the contrast with `reduce_sum` and `integer_pow`, which
+    decline precisely because the jaxpr does not fix their arithmetic.
+
+    The DAZ hazard is already refused by the real-mode divisor guard, which
+    tests against MIN_NORMAL rather than zero for exactly this reason: a
+    subnormal divisor reads as 0 on the measured target and rem(a, 0) is NaN.
+    So the ieee-specific work here is the flag, and nothing else.
+    """
+    _ieee_f64_only(eqn)
+    outs = _t_rem(eqn, params, ins)
+    if outs is None:
+        return None
+    return outs, [any(flags)]
 
 
 def _ieee_integer_pow(eqn, params, ins, flags):
@@ -2929,6 +3297,12 @@ IEEE_TRANSFERS = {
     "split": (_ieee_passthrough(_t_split), TIER_EXACT),
     "copy": (_ieee_passthrough(_t_copy), TIER_EXACT),
     "unstack": (_ieee_passthrough(_t_unstack), TIER_EXACT),
+    # (ii) exact sign arithmetic with the subnormal band handled on the
+    # OPERAND by the real rule's MIN_NORMAL floor; flag propagates
+    "sign": (_ieee_sign, TIER_SOUND),
+    # (ii) truncated remainder is exact in binary64 — no rounding, no
+    # schedule; the DAZ divisor hazard is refused by the real rule's guard
+    "rem": (_ieee_rem, TIER_SOUND),
     "slice": (
         _ieee_passthrough(
             lambda eqn, p, ins: [

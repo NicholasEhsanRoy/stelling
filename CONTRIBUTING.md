@@ -669,6 +669,58 @@ Session of 2026-07-26, four, the last of which prompted the stop:
   This one produces a *false belief about the state of the tree*, and the next
   hour is spent building on it.
 
+## A gauge's oracle is the TARGET, not a reference implementation
+
+Ground truth for a containment gauge is **the program jax actually executes on
+the target**, not stelling (which is what is under test) and **not numpy**
+(which is a different implementation of the same mathematics). Until this
+round the clause read "jax, not stelling" and lived only in gauge headers; the
+second half is what earns it a place here.
+
+**The instance.** `sign`'s row was written against this measurement:
+
+```
+numpy.sign(1e-320) = 1.0        lax.sign(1e-320) = 0.0
+```
+
+XLA:CPU flushes subnormals (FTZ on results, DAZ on operands) in arithmetic,
+comparisons and libm alike, eager and under `jit`. The obvious transfer —
+`lo > 0 -> [1, 1]` — is therefore **false** on a declared box like
+`[1e-320, 1e-300]`, whose lower elements the target evaluates to `0.0`, and it
+would have been recorded as KNOWN coverage rather than declined. **A gauge
+whose oracle was numpy would have certified it**, because numpy is right about
+the mathematics and wrong about the target.
+
+So: execute the oracle, on the target, in both execution modes. And where the
+two disagree, **assert the disagreement as a control**, so that if the target
+ever stops flushing the instrument reports its own clause as stale instead of
+quietly agreeing with both. In this tree that control is
+`tests/test_sign_rem_rows.py::test_the_target_really_does_flush_subnormals`;
+the full containment sweep it was derived from lives in the campaign repo.
+
+## A figure in a norm states the UNIT it counts
+
+A norm that carries a number must say what the number counts, in the same
+sentence. **A number without its definition survives as a number and dies as a
+claim** — it is the first thing to survive a context compaction and the first
+thing to be misread once it has.
+
+**The instance**, measured by a two-pass check across a compaction boundary.
+Norm J's entry read *"a blind cross-check moved node coverage 87.5% → 62.5%"*
+and never said the denominator was **MADDENING numeric NODES**. Asked
+afterwards what the figure measured, the answer came back "the fraction of
+jaxpr equations with a known interval box" — a plausible reading, a different
+quantity, and wrong. The figures survived verbatim; the unit did not, and
+neither did the second inflation beside it (a **population** omission: 12
+numeric nodes exist, the measurer scored 8, and the 4 missed were the hardest)
+or the caveat that the two runs were **not like-for-like**.
+
+The fix is one edit per figure, and it is cheap: name the unit, name the
+population, and keep any caveat that qualifies the comparison in the same line
+as the comparison. A range that has been derived (`~0.42–0.63` here) belongs
+with the point estimate, because the point estimate alone reads as precision
+the measurement does not have.
+
 ## Ground rules
 
 - SPDX headers are inserted automatically by the pre-commit hook; don't

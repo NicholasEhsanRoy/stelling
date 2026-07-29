@@ -166,6 +166,13 @@ separately buildable members:
 | `convert` f64→f32 rounding | **1** (`HeatNode`) | **yes** — bounded-error sweep, both solvers, crossover reproducing the CFL limit |
 | integer overflow | **0** | yes, by peeling |
 | narrowing-int wrap | unmeasured — no contract reaches it | no |
+| **`int64→float64` widening from an integer literal** | **0 of 14** — no internal contract reaches it | **yes, externally**: it is the ⊤ at **41 jax-md `safe_mask` sites**, and `int64→float64` was already on the external-terminal list above with nobody having connected it to the mechanism |
+
+**The fourth member is the first with external demand and zero internal
+demand**, which is the denominator finding arriving at the family table: a
+member measured at 0 on this corpus is not measured at 0. Proposal (not a
+build — the family is parked) in
+[proposed-int-literal-convert.md](proposed-int-literal-convert.md).
 
 `convert uint8→bool` was **pulled out of the family**: it is exactly `x ≠ 0`, a
 total predicate, not a rounding. It needs a new emission rule (`(distinct in 0)`),
@@ -192,6 +199,61 @@ down, which is a lower bound on the hazard surface, not the surface.
 primitives, and a guard is a registered primitive refusing on a condition. The
 guard frontier, measured by peeling every gap and the budget:
 `convert_element_type` blocks two contracts, `div` blocks one.
+
+**And that blindness is not an internal curiosity.** Measured on `jax_md`'s
+`space.distance`, `coverage.measure` reports **total=14, known=11,
+transparent=3, unknown=0** — a census reading 100% known — while the interval
+face returns **⊤** for the same jaxpr. The census counts membership; the
+decline is a registered primitive refusing on a condition. **This is the
+mechanism by which an external idiom looks fully covered and is not.**
+
+### `div` is FIVE SITUATIONS and FOUR MECHANISMS
+
+Earlier records carried two tables that disagreed — one listing four sites with
+`gnn` absent and where-correlation loss counted twice, one listing the internal
+per-divisor mechanisms with no external sites — and a summary that said "four
+causes", which matches neither. Measured, with `Literal` divisors distinguished
+from `Var` (the first pass misclassified literals as "no box", and that was the
+instrument, caught before reporting):
+
+| # | site | mechanism | disposition |
+|---|---|---|---|
+| 1 | MADDENING Aitken | **where-correlation loss** — divisor box `[0,12]` from a `where` whose guard interval propagation cannot see | the where-refinement |
+| 2 | jax-md `safe_mask` (41 sites) | **⊤ at `convert_element_type int64→float64`**, from the literal `0` in `safe_mask`'s own body — the correlation question is never reached | the int-literal convert; **NOT** the refinement |
+| 3 | MIME coil_array | **mechanism (iii)** — the divisor has NO ENTRY in the env | a different fix; unmeasurable while emission is unreachable |
+| 4 | MIME gnn | **an upstream ⊤ cascade** — one `[-inf,inf]` box from `jit`; 15 literal divisors, the rest clean | unattributed |
+| 5 | JAXFLUIDS | **`square` ⊤ poisoning `x*x + eps`** | the `square` row — **BUILT**; its effect on the external harness is unverified |
+
+**NO CAPABILITY ADDRESSES MORE THAN ONE.** The where-refinement was credited
+with two of four; it reaches **one of five**, because site 2 stops three steps
+earlier than the mechanism it was credited for.
+
+Site 2 is worth stating precisely, because it is one character. `safe_mask`'s
+body is `jnp.where(mask, operand, 0)` — a **Python int** placeholder, which
+promotes through `convert_element_type int64→float64`, which declines.
+Measured, same box, same shape of `_where` jaxpr:
+
+```
+jnp.where(x > 1.0, x, 0)      ->  TOP        jnp.where(x > 1.0, x, 0.0)  ->  [0, 12]
+```
+
+MADDENING's Aitken survives the identical `_where` structure only because its
+placeholder is already `float64`, so its convert is `float64 -> float64` and
+passes through. And the predicate form was never the obstacle: `safe_mask`'s
+FIRST `where` **is** the in-scope form (`where(p(x), x, k)`). Classified by AST
+over all 41 call sites, not by eye:
+
+| | sites | |
+|---|---|---|
+| direct ordering comparison of the operand against a constant | **18** | in scope as scoped |
+| `&`-compound with one such conjunct | **3** | in scope — the true branch implies EVERY conjunct, so refining on the one recognised conjunct is sound and needs nothing from the others |
+| opaque mask (tests a different variable) | 14 | out |
+| `&`-compound whose operand-conjunct compares against a **variable** | 3 | out — relational, not a box |
+| `!=` predicate | 2 | out — excluding a point does not narrow an interval |
+| operand is not a plain name | 1 | out |
+
+**21 of 41 in scope. The form matches and it does not matter**, because every
+one of the 41 stops at the convert first.
 
 ### Terminals — **RETRACTED and re-derived**
 
@@ -249,8 +311,15 @@ because a number was wrong without them.**
 - **joint stubbing** — the campaign's only positive capability result was
   invisible per-entry.
 - **blind cross-checking** — twice caught an error the measurer could not:
-  obligation coverage 87.5% → 62.5%, and a reachable span that was a free-fall
-  artifact of the step count.
+  node coverage 87.5% → 62.5%, and a reachable span that was a free-fall
+  artifact of the step count. **The unit is MADDENING numeric NODES** — the
+  fraction whose chosen obligation's slice is transfer-covered — and the
+  cross-check found **two** independent inflations, obligation choice (that
+  figure) and a population omission (12 nodes exist, 8 were scored, the 4
+  missed are the hardest). **The honest figure is a range, ~0.42–0.63**, and
+  the two runs were **not like-for-like**: one agent was asked for "one
+  plausible obligation", the other for what "a domain expert would most want
+  checked."
 - **the gauges** — mutation batteries with declared scope, positive and negative
   controls.
 - **the norms** — each carries the instances that earned it, with numbers.
