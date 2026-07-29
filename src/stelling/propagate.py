@@ -888,9 +888,13 @@ def _t_rem(eqn, params, ins):
 
 def _t_reshape(eqn, params, ins):
     if params.get("dimensions") is not None:
-        # a dimensions= reshape permutes before reshaping — not the C-order
-        # flat identity; no rule yet, so decline (⊤ with the params noted).
-        return None
+        raise iv.IntervalError(
+            f"this reshape carries dimensions={tuple(params['dimensions'])!r}, "
+            f"which PERMUTES the operand before reshaping it. The row models "
+            f"the C-order flat identity only — the permuting form needs its "
+            f"own rule and does not have one, so it declines rather than "
+            f"reshaping as if the permutation were absent"
+        )
     return [iv.reshape(ins[0], tuple(_req(params, "new_sizes", "reshape")))]
 
 

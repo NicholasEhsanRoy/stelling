@@ -267,8 +267,14 @@ def test_reshape_flat_identity_discharges():
 def test_reshape_with_dimensions_declines_not_crashes():
     p = propagate(_reshape_query((1, 0)))  # permuting form: no rule
     assert p.obligations[0].status == "unknown"
-    assert any("reshape" in n and "no sound rule" in n for n in p.notes)
     assert p.coverage.unknown == 1
+    # The note used to read "no sound rule for params {...}". Strengthened, not
+    # relaxed: the decline must name the PERMUTATION it declines and say what
+    # the row does model, so this fails if the reason regresses to the generic
+    # form or describes the wrong form.
+    rn = [n for n in p.notes if "reshape" in n]
+    assert rn, p.notes
+    assert any("(1, 0)" in n and "PERMUTES" in n and "C-order" in n for n in rn), rn
 
 
 # --- pow ---------------------------------------------------------------------
