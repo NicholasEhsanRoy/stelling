@@ -20,6 +20,8 @@ over-approximation and stays sound; a box disjoint from it describes nothing.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 jax = pytest.importorskip("jax")
@@ -43,6 +45,43 @@ def _x64():
 
 def _declare(dtype, lo, hi):
     return jax.make_jaxpr(lambda: (any_array((1,), dtype, (lo, hi)),))()
+
+
+_NEIGHBOUR_RE = re.compile(
+    r"The nearest (?:representable integers|\S+ values) are ([^;]+);"
+)
+
+
+def _parse_neighbours(msg):
+    """The neighbour clause, parsed into `{below, above}` numbers.
+
+    A PARSER RATHER THAN A SUBSTRING TEST, because the substring test could not
+    fail: `"0 above"` is contained in `"0 below and 0 above"`, so the collapsed
+    message satisfied every expectation the correct one did. And the previous
+    anti-collapse control split on the FIRST `" and "`, which sits inside
+    *"the integers [-128, 127] and the interval contains none of them"* — so it
+    compared a sentence to a number and `b != a` could never be False.
+    """
+    m = _NEIGHBOUR_RE.search(msg)
+    assert m, f"no neighbour clause found in:\n  {msg}"
+    out = {"below": None, "above": None}
+    for part in m.group(1).split(" and "):
+        part = part.strip()
+        for side in ("below", "above"):
+            if part.endswith(" " + side):
+                out[side] = float(part[: -len(side) - 1])
+    assert any(v is not None for v in out.values()), f"unparsed: {m.group(1)!r}"
+    return out
+
+
+def _fmt_sides(sides):
+    """Canonical rendering of a parsed clause, for exact comparison."""
+    bits = []
+    if sides["below"] is not None:
+        bits.append(f"{sides['below']:g} below")
+    if sides["above"] is not None:
+        bits.append(f"{sides['above']:g} above")
+    return " and ".join(bits)
 
 
 # --------------------------------------------------------------------------
@@ -119,14 +158,22 @@ def test_the_refusal_names_the_nearest_representable_values():
     with pytest.raises(ValueError) as exc:
         _declare("float32", 0.1, 0.1)
     msg = str(exc.value)
-    below = float(np.nextafter(np.float32(0.1), np.float32(0)))
-    above = float(np.float32(0.1))
-    assert repr(below) in msg and repr(above) in msg, msg
     assert "nearest float32 values" in msg
-    # the integer branch names its neighbours too
+    sides = _parse_neighbours(msg)
+    # WHICH SIDE, not merely which numbers. Swapping the two words left the
+    # suite green before this, because the assertion only checked that both
+    # reprs appeared somewhere.
+    assert sides["below"] == float(np.nextafter(np.float32(0.1), np.float32(0)))
+    assert sides["above"] == float(np.float32(0.1))
+    assert sides["below"] < 0.1 < sides["above"], (
+        f"the float path's direction words do not bracket the interval: {msg}"
+    )
+    # the integer branch names its neighbours too, parsed the same way
     with pytest.raises(ValueError) as exc2:
         _declare("int8", 0.2, 0.8)
-    assert "0 below and 1 above" in str(exc2.value), str(exc2.value)
+    isides = _parse_neighbours(str(exc2.value))
+    assert (isides["below"], isides["above"]) == (0.0, 1.0)
+    assert isides["below"] < 0.2 and isides["above"] > 0.8
 
 
 # --------------------------------------------------------------------------
@@ -564,11 +611,25 @@ def test_the_direction_words_in_a_refusal_are_true(dtype, lo, hi, expect):
     with pytest.raises(ValueError) as exc:
         _declare(dtype, lo, hi)
     msg = str(exc.value)
-    assert expect in msg, msg
-    if " below and " in msg:
-        b = msg.split("integers are ")[1].split(" below")[0]
-        a = msg.split(" and ")[1].split(" above")[0]
-        assert b != a, f"a side collapsed onto the other: {msg}"
+    sides = _parse_neighbours(msg)
+    # (1) EXACT side presence, not a substring. "0 above" is a substring of
+    #     "0 below and 0 above", which is why the previous version could not
+    #     tell the collapsed message from the correct one.
+    assert _fmt_sides(sides) == expect, (
+        f"expected neighbour clause {expect!r}, parsed {_fmt_sides(sides)!r} "
+        f"from:\n  {msg}"
+    )
+    # (2) THE SEMANTIC PROPERTY, which is what "below" and "above" MEAN. This
+    #     is what the collapse violated: `uint8 (-3, -1)` read "0 below" and 0
+    #     is not below -3.
+    if sides["below"] is not None:
+        assert sides["below"] < lo, (
+            f"{sides['below']} is labelled BELOW an interval starting at {lo}"
+        )
+    if sides["above"] is not None:
+        assert sides["above"] > hi, (
+            f"{sides['above']} is labelled ABOVE an interval ending at {hi}"
+        )
 
 
 @pytest.mark.parametrize("dtype,lo,hi", [
@@ -612,3 +673,67 @@ def test_the_advice_a_refusal_gives_is_followable():
     assert "UPPER bound" in msg, msg
     # and the advice works: as an upper bound it is admitted
     assert _declare("int64", 0, 2**63 - 1) is not None
+
+
+# --------------------------------------------------------------------------
+# `_finite_values` had ZERO test references. Two green mutations were measured
+# against it: dropping negatives (which creates false rejections) and keeping
+# infinities (which reproduces the "inf above" defect a test is named for, whose
+# own assertions cover float32 only — a WIDE dtype, served by the other
+# mechanism entirely).
+# --------------------------------------------------------------------------
+NARROW = ["float16", "bfloat16", "float8_e4m3fn", "float8_e5m2",
+          "float8_e8m0fnu", "float4_e2m1fn", "float6_e3m2fn"]
+
+
+def _narrow_name(dtype):
+    import ml_dtypes
+    t = getattr(ml_dtypes, dtype, None)
+    return np.dtype(t).name if t is not None else dtype
+
+
+@pytest.mark.parametrize("dtype", NARROW)
+def test_finite_values_is_finite_sorted_unique_and_spans_the_dtype(dtype):
+    """The structural contract, which nothing checked."""
+    from stelling._jax_compat import _finite_values
+    name = _narrow_name(dtype)
+    vals = _finite_values(name)
+    assert vals.size > 0
+    assert np.all(np.isfinite(vals)), "a non-finite value is not a VALUE of the dtype"
+    assert np.all(np.diff(vals) > 0), "must be strictly sorted and unique"
+    info = jnp.finfo(np.dtype(name))
+    assert float(vals[0]) == float(info.min), f"{name}: min"
+    assert float(vals[-1]) == float(info.max), f"{name}: max"
+
+
+@pytest.mark.parametrize("dtype", [d for d in NARROW if d != "float8_e8m0fnu"])
+def test_finite_values_keeps_the_negatives(dtype):
+    """Dropping them was measured green, and it turns ordinary negative
+    envelopes into refusals — the false-rejection failure this layer must not
+    have. `float8_e8m0fnu` is excluded because it genuinely has none."""
+    from stelling._jax_compat import _finite_values
+    name = _narrow_name(dtype)
+    vals = _finite_values(name)
+    assert (vals < 0).any(), f"{name} has negative values and they must be present"
+    # and the behavioural consequence the mutation produced
+    lo = float(vals[0]) / 2.0
+    hi = float(vals[vals < 0][-1])
+    assert _declare(name, lo, hi) is not None, (
+        f"{name} ({lo}, {hi}) is inhabited and must be admitted"
+    )
+
+
+@pytest.mark.parametrize("dtype", NARROW)
+def test_a_narrow_dtype_refusal_never_names_an_infinity(dtype):
+    """The companion test for this property asserted it on `float32` only — a
+    WIDE dtype, which never touches `_finite_values`. So the narrow mechanism
+    was unpinned, and keeping infinities in the value set was measured green."""
+    from stelling._jax_compat import _smallest_at_or_above, _largest_at_or_below
+    name = _narrow_name(dtype)
+    top = float(jnp.finfo(np.dtype(name)).max)
+    assert _smallest_at_or_above(name, top * 4) is None
+    assert _largest_at_or_below(name, -abs(top) * 4) is None
+    with pytest.raises(ValueError) as exc:
+        _declare(name, top * 4, top * 8)
+    body = str(exc.value).replace("infinite point", "")
+    assert "inf" not in body, body
