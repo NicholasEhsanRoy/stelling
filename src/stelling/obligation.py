@@ -1754,12 +1754,37 @@ class _Slicer:
                 element_terms += _size(eqn.invars[0].aval.shape)
                 element_terms += _size(eqn.invars[2].aval.shape)
         if element_terms > ELEMENT_BUDGET or root_size > ELEMENT_BUDGET:
+            # docs/proposed-decline-messages.md #4: the old sentence was
+            # accurate and quantitative, which made the WRONG lever more
+            # likely to be pulled — it read as a diagnosis, and a reader
+            # went to tune the budget. The decline now names the exceeding
+            # quantity, says what the budget gates (the ATTEMPT — the
+            # interval result is budget-independent by construction), and
+            # names the lever that actually lowers the counts. The
+            # proposal's 'obligations past the budget declined again on a
+            # different cause once it was raised' is a claim about
+            # unrecorded measurements and is deliberately NOT stated.
+            over = " and ".join(
+                name
+                for name, v in (
+                    ("element terms", element_terms),
+                    ("root conjuncts", root_size),
+                )
+                if v > ELEMENT_BUDGET
+            )
             raise _Decline(
-                f"obligation needs {element_terms} element terms and "
-                f"{root_size} root conjuncts, over the per-obligation "
-                f"emission budget of {ELEMENT_BUDGET} (bounded static-shape "
-                f"emission; the budget is measured solver cost, see "
-                f"stelling.obligation.ELEMENT_BUDGET)"
+                f"obligation not attempted: it needs {element_terms} "
+                f"element terms and {root_size} root conjuncts, and its "
+                f"{over} put it over the per-obligation emission budget of "
+                f"{ELEMENT_BUDGET} (bounded static-shape emission; the "
+                f"budget is measured solver cost, see "
+                f"stelling.obligation.ELEMENT_BUDGET). The budget bounds "
+                f"what escalation will ATTEMPT; it is not a diagnosis of "
+                f"the obligation, and raising it does not change the "
+                f"interval result that left this obligation undecided. "
+                f"What lowers the counts is a smaller obligation — a "
+                f"smaller declared array, or a per-element property "
+                f"instead of a whole-array one"
             )
 
         # -- pass 2: decode, validate, build — all bounded by the gate ---
