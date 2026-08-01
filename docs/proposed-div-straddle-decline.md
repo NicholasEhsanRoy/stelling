@@ -92,10 +92,18 @@ here is the conclusive direction: a real implementation can only break less.
 
 - **It does not fix any verdict.** Nothing moves from `unknown` to a verdict;
   the value is entirely in the diagnosis and the honest coverage number.
-- **It does not address the other seven silent-⊤ rows** (`convert_element_type`,
+- **It does not address the other EIGHT silent-⊤ rows** (`convert_element_type`,
   `copy`, `dot_general`, `gather`, `reshape`, `scatter`, `split`, `unstack`).
   Those return `None`, so they *are* counted as ⊤ — they lack a reason, not a
   decline. Different fix, smaller.
+
+  *This line said "seven" while listing eight names, and the error propagated
+  into a later session's brief. Re-measured with the script that produced the
+  table: **8 silent-only, 5 loud-only, 13 both, and 20 that cannot decline at
+  all.** The earlier "33 both" was those 13 plus those 20 conflated — a
+  three-way split reported where the third bucket was two buckets. Both are the
+  count-error class recorded in CONTRIBUTING.md, and this one was made inside a
+  document about message quality.*
 - **It has not been measured on external code.** Both external agents reached
   escalation; whether a first-time user on the default path hits this is
   unmeasured, and re-running them against the fixed tool is the measurement.

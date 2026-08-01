@@ -165,9 +165,20 @@ def _int_neighbours(d_lo: int, d_hi: int, lo: float, hi: float) -> str:
     names. The fix clamped both ends into `[d_lo, d_hi]` BEFORE choosing the
     direction word, which collapsed them onto the same value while keeping
     their original labels: `uint8 (-3, -1)` read *"0 below and 0 above"*, and
-    a re-audit measured the words false in 77 of 113 cases while the numbers
-    stayed right. So the sides are computed separately now, and a side that
-    has no representable value simply does not appear.
+    the words were false in a MAJORITY of refused integer boxes while the
+    numbers stayed right. So the sides are computed separately now, and a side
+    that has no representable value simply does not appear.
+
+    NO RATIO IS QUOTED HERE, deliberately. This comment carried two — *"false
+    in 77 of 113 cases"* and, below, *"dead in 877 of 877 calls"* — and a
+    later audit re-derived them as **351 of 433** over a stated grid and **25
+    calls** over the whole suite. Neither original population is recoverable.
+    They are the fifth and sixth instances of a count-error class this project
+    has recorded, and they sat inside the comment documenting this helper's own
+    failures. The measured conclusion (docs/proposed-unit-mechanism.md) is that
+    no mechanism prevents it, so the rule applied here is the one thing that
+    has worked: **a figure is quoted only with the script that produced it, and
+    otherwise the claim is stated qualitatively.**
     """
     below = above = None
     if math.isfinite(lo):
@@ -185,8 +196,10 @@ def _int_neighbours(d_lo: int, d_hi: int, lo: float, hi: float) -> str:
         # Unreachable for a REFUSED box: both sides are empty only when the
         # interval is unbounded in both directions or strictly contains the
         # whole dtype range, and either of those holds a value. Stated rather
-        # than defended with a branch that cannot fire (the previous version's
-        # fallback here was measured dead in 877 of 877 calls).
+        # than defended with a branch that cannot fire. (The previous version's
+        # fallback here was measured dead on every call it received; the "877
+        # of 877" this comment used to quote is not reproducible — the whole
+        # suite makes 25 calls to this function.)
         return ""
     note = ""
     lossy = [v for v in (below, above) if v is not None and float(v) != v]

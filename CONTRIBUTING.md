@@ -851,14 +851,22 @@ tests it against the case it just learned. The fourth row above is that
 corollary measured: the fix for a crash **introduced a second defect in the
 same helper**, and the fix for *that* introduced a third.
 
-**One small helper — the one that formats a refusal message — was wrong on FOUR
-CONSECUTIVE ATTEMPTS**: it raised `OverflowError` on an infinite bound, then
-printed `inf` as a nearest representable value, then collapsed both direction
-words onto the same number (false in 77 of 113 cases), then crashed on a `None`.
-It computes no result and decides nothing; it only formats. **The piece that
-looks too small to get wrong is the one with the worst record here** — the same
-shape as *"five small rows is exactly when it gets skipped, and `add_any` was
-one line."*
+**The refusal-message code was wrong on FOUR CONSECUTIVE ATTEMPTS**: it raised
+`OverflowError` on an infinite bound, then printed `inf` as a nearest
+representable value, then collapsed both direction words onto the same number,
+then crashed on a `None`. It computes no result and decides nothing; it only
+formats. **The piece that looks too small to get wrong is the one with the worst
+record here** — the same shape as *"five small rows is exactly when it gets
+skipped, and `add_any` was one line."*
+
+**Precision the first version of this paragraph lacked**, and it matters because
+the count is load-bearing for the lesson: the four span **two** functions, not
+one. `_int_neighbours` raised the `OverflowError`, collapsed the words and
+crashed on the `None`; printing `inf` was `_smallest_at_or_above` surfacing
+through `_neighbours`. Saying "one small helper" made the sequence sound tighter
+than it is. And the ratio that used to sit in this sentence was re-derived as
+351 of 433 rather than 77 of 113, so it is gone — see the count-error norm
+below.
 
 **And the fixes were audited only by accident of timing — that accident is what
 this gate exists to replace.** The file changed under one auditor mid-run, so it
