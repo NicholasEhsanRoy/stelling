@@ -90,12 +90,15 @@ def test_t1_ka1_interval_only_is_unknown_with_straddle_quoted():
     assert [o.status for o in obs] == [
         "discharged", "discharged", "discharged", "unknown",
     ]
-    # the straddle is quoted, in numbers, on the verdict itself
-    straddle = [n for n in cv.requires.notes if "straddles" in n]
-    assert len(straddle) == 1
-    assert "obligation #3" in straddle[0]
-    assert "lhs in [" in straddle[0] and "rhs in [" in straddle[0]
-    assert "solver_timeout_ms" in straddle[0]  # the no-budget hint
+    # the straddle is quoted, in numbers, on the undecided obligation
+    # ITSELF — produced by the one propagation layer, not by a
+    # contracts-side mirror (which is gone: one pipeline, one quote)
+    detail = obs[3].detail
+    assert "straddles" in detail
+    assert "lhs in [" in detail and "rhs in [" in detail
+    assert not any("straddles" in n for n in cv.requires.notes)
+    # the no-budget hint rides on the rendered UNKNOWN verdict
+    assert "solver_timeout_ms" in cv.requires.render()
     # never-on defaults: no solver ran, and the stamp records the absence
     assert isinstance(cv.requires.stamp.solver, SolverStamp)
     assert not cv.requires.stamp.solver.invoked
@@ -263,8 +266,9 @@ def test_t2_ka2_interval_only_is_honest_unknown_with_straddle():
         _t2((64,), (1e-6, 1e5)), vacuity_mode="inputs-only"
     )
     assert cv.requires_status == "UNKNOWN"
-    straddle = [n for n in cv.requires.notes if "straddles" in n]
-    assert len(straddle) == 1 and "obligation #1" in straddle[0]
+    detail = cv.requires.obligations[1].detail
+    assert "straddles" in detail or "the operand spans" in detail
+    assert not any("straddles" in n for n in cv.requires.notes)
 
 
 @needs_solver
@@ -772,8 +776,10 @@ def test_t3_triple_vs_array_paths_pose_the_same_conditioning():
     assert [o.status for o in cv4.requires.obligations] == (
         ["discharged"] * 4 + ["unknown"] * 2
     )
-    straddles = [n for n in cv4.requires.notes if "straddles" in n]
-    assert len(straddles) == 2  # the pair, quoted in numbers
+    straddles = [
+        o.detail for o in cv4.requires.obligations if "straddles" in o.detail
+    ]
+    assert len(straddles) == 2  # the pair, quoted in numbers, on the details
     # both faces declare the same per-matrix ensures shape
     assert cv3.ensures_status == ENSURES_DECLARED
     assert "every matrix of the family" in cv4.ensures.statement
@@ -825,10 +831,11 @@ def test_t3_symmetric_family_symmetry_straddles_then_solver_discharges():
         "discharged", "discharged", "discharged", "discharged",
         "unknown", "unknown",  # the symmetry pair, straddling
     ]
-    straddles = [n for n in cv.requires.notes if "straddles" in n]
-    assert len(straddles) == 2
-    assert any("obligation #4" in n for n in straddles)
-    assert any("obligation #5" in n for n in straddles)
+    # the straddle rides on the undecided obligations THEMSELVES — the
+    # index binding is structural, not a parsed note reference
+    assert "straddles" in cv.requires.obligations[4].detail
+    assert "straddles" in cv.requires.obligations[5].detail
+    assert not any("straddles" in n for n in cv.requires.notes)
 
 
 @needs_solver
@@ -983,11 +990,15 @@ def test_t3_ensures_face_is_sealed_declared_and_per_matrix():
 def test_straddle_hint_promises_offer_not_result():
     """At n=200 the old hint promised 'escalates exactly this obligation'
     while the escalation layer declines on budget and no solver runs
-    (audit g_stranger.py g6). The hint now promises only the offer; the
-    decline text owns the rest."""
+    (audit g_stranger.py g6). The per-obligation hint left with the
+    contracts-side mirror; the one remaining pointer is the render's
+    interval-only line, which promises only the opt-in ('may still be
+    decidable'), never a result — the decline text owns the rest."""
     cv = check_contract(
         _t1((1, 2), (1, 2), (-0.5, 0.5)), vacuity_mode="inputs-only"
     )
-    (note,) = [n for n in cv.requires.notes if "straddles" in n]
-    assert "offers exactly this obligation to solver escalation" in note
-    assert "escalates exactly this obligation" not in note
+    rendered = cv.requires.render()
+    assert "pass solver_timeout_ms" in rendered
+    assert "may still be decidable" in rendered
+    assert "NOT a finding that the property is undecidable" in rendered
+    assert "escalates exactly this obligation" not in rendered

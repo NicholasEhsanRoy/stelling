@@ -1526,6 +1526,12 @@ def make_solver_verdict(
     notes = propagation.notes + escalation.notes
     for record in escalation.records:
         notes = notes + record.notes
+    # the coverage-cause classification of any STILL-undecided obligation
+    # (post-escalation — solver-decided ones need no cause), from the one
+    # shared derivation in stelling.verdict so the two paths cannot drift
+    notes = notes + _verdict.undecided_cause_note(
+        propagation.coverage, obligations
+    )
     # THE SCATTER VERIFIED BAR (stelling.verdict.VERIFIED_BARRED_PRIMITIVES).
     # Scoped to the SOLVER path deliberately, and this scoping is the whole
     # design decision: the bar exists because a new SMT EMISSION row that

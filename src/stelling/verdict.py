@@ -546,6 +546,50 @@ def _barred_primitives(closed) -> tuple[str, ...]:
     return tuple(sorted(found))
 
 
+def undecided_cause_note(coverage, obligations) -> tuple[str, ...]:
+    """One note classifying what the coverage instrument measured about a
+    verdict that carries undecided obligation(s) — or () when none is
+    undecided (docs/proposed-decline-messages.md #1: an UNKNOWN whose
+    coverage is complete is a different situation from one downstream of
+    ⊤ gaps, and the verdict says which it measured).
+
+    Claims only measurements: the counts are the coverage instrument's
+    own, and the complete-coverage branch asserts nothing beyond them —
+    an interval straddle is compatible with BOTH a precision near-miss
+    and a genuine violation, and the note says so rather than pick one.
+    Shared by both assembly paths (interval-only and solver), so the two
+    cannot drift."""
+    if not any(o.status == "unknown" for o in obligations):
+        return ()
+    c = coverage
+    if c.unknown == 0 and c.unreached == 0 and c.inert == 0:
+        return (
+            f"undecided obligation(s), and transfer coverage is not the "
+            f"cause: {c.known}/{c.total} equations ran a registered "
+            f"transfer, none fell to ⊤ and no constraint was dropped. "
+            f"What remains is the propagated interval straddling the "
+            f"asserted bound — a straddle is compatible with both a "
+            f"precision near-miss and a genuine violation, and interval "
+            f"arithmetic alone cannot tell which (the obligation detail "
+            f"quotes the straddle where a top-level comparison produced "
+            f"it)",
+        )
+    parts = []
+    if c.unknown:
+        names = ", ".join(f"{n} ×{k}" for n, k in c.unknown_primitives)
+        parts.append(f"{c.unknown} equation(s) fell to ⊤ ({names})")
+    if c.unreached:
+        parts.append(f"{c.unreached} equation(s) unreached")
+    if c.inert:
+        parts.append(f"{c.inert} constraint(s) dropped")
+    return (
+        "undecided obligation(s) with coverage gaps in the query: "
+        + "; ".join(parts)
+        + " — the undecided status may be downstream of these; see the "
+        "coverage line and the decline notes",
+    )
+
+
 def make_verdict(
     closed,
     propagation: Propagation,
@@ -589,7 +633,9 @@ def make_verdict(
     else:
         nonvacuity = "undecided — a membership condition could not be decided"
 
-    notes = propagation.notes
+    notes = propagation.notes + undecided_cause_note(
+        propagation.coverage, propagation.obligations
+    )
     if status == "VERIFIED" and not nonvacuity.startswith("checked"):
         notes = notes + (
             f"nonvacuity {nonvacuity.split(' — ')[0]}: this VERIFIED may be "

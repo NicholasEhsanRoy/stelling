@@ -3726,6 +3726,46 @@ def _render_bound(bound: iv.IntervalArray) -> str:
     return f"values in [{min(bound.los)}, {max(bound.los)}] ({bound.size} elements)"
 
 
+# The obligation-quote comparison tables (docs/proposed-decline-messages.md
+# #1). Deliberately separate from the assume-classification maps above:
+# these are read only when WORDING an undecided obligation's detail, never
+# when deciding anything, and they cover all six comparisons (the assume
+# tables exclude `ne` for narrowing reasons that do not apply to quoting).
+_OBL_CMP_SYMBOL = {
+    "lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "==", "ne": "!=",
+}
+
+# cmp(k, v) === flipped-cmp(v, k): normalization when the point side is on
+# the left, so the quote can always read "operand <cmp> bound".
+_OBL_CMP_FLIP = {
+    "lt": "gt", "gt": "lt", "le": "ge", "ge": "le", "eq": "eq", "ne": "ne",
+}
+
+
+# The largest finite binary64 value, as an exact int: (2 - 2**-52)*2**1023.
+# The miss-distance fragment compares its EXACT Fraction against this
+# BEFORE any float conversion — the exact difference of two finite doubles
+# can exceed the binary64 range (opposite-sign endpoint and bound), and
+# Fraction.__float__ raises OverflowError there (blinded-lens audit R1: a
+# legal query crashed the whole analysis on exactly that shape).
+_MAX_BINARY64 = (2**53 - 1) * 2**971
+
+
+def _ulp_steps(a: float, b: float, cap: int = 3) -> int | None:
+    """The EXACT number of nextafter steps from ``a`` to ``b``, or None
+    when it exceeds ``cap`` (a big count carries no more meaning than the
+    distance itself). Message wording only."""
+    if not (math.isfinite(a) and math.isfinite(b)) or a == b:
+        return None
+    x, steps = a, 0
+    while x != b:
+        x = math.nextafter(x, b)
+        steps += 1
+        if steps > cap:
+            return None
+    return steps
+
+
 def _bool_status(b: iv.IntervalArray, *, constrained: bool = False) -> tuple[str, str]:
     n_true = sum(1 for lo, hi in zip(b.los, b.his) if (lo, hi) == iv.BOOL_TRUE)
     n_false = sum(1 for lo, hi in zip(b.los, b.his) if (lo, hi) == iv.BOOL_FALSE)
@@ -3993,6 +4033,135 @@ class _Propagator:
         if not clauses:
             return ""
         return " [" + "; ".join(clauses) + "]"
+
+    def _straddle_suffix(self, eqn: ir.JaxprEqn) -> str:
+        """The quoted straddle for an interval-undecided obligation whose
+        operand is a top-level comparison, appended to the obligation
+        detail — or "" when no honest quote exists (a non-comparison
+        operand, a cross-scope value): the standard detail then stands
+        alone, no guessing (docs/proposed-decline-messages.md #1).
+
+        Message content only, produced at the ONE place the judgment is
+        made — every front door (check(), check_contract, direct
+        propagate callers, both semantics) inherits it from here, which
+        is the one-pipeline principle applied to the quote itself. The
+        boxes quoted are the LIVE judged boxes (the same env the verdict
+        was computed from — constrain-mode narrowing included), read
+        through :meth:`_quiet_box` so no note is ever doubled.
+
+        Every numeric fragment is measured: the spans are the propagated
+        intervals; the miss distance is computed exactly (Fraction) and
+        marked ≈ when its float rendering rounds; the ulp-step count is
+        an exact nextafter walk. When a strict bound's failing endpoint
+        EQUALS the bound, the text says that instead (the exactly-stated
+        threshold shape). An operand that is stelling's own artifact ⊤
+        names its origin — the same top_origin record the decline notes
+        use."""
+        pred = eqn.invars[0] if eqn.invars else None
+        if not isinstance(pred, ir.Var):
+            return ""
+        prod = self.producers.get(pred.id)
+        if (
+            prod is None
+            or prod.primitive not in _OBL_CMP_SYMBOL
+            or len(prod.invars) != 2
+        ):
+            return ""
+        lb, rb = (self._quiet_box(a) for a in prod.invars)
+        if lb is None or rb is None or lb.size == 0 or rb.size == 0:
+            return ""
+        cmp = prod.primitive
+        origin = self._cmp_origin_clause(prod)
+
+        def _is_point(b: iv.IntervalArray) -> bool:
+            return all(
+                lo == hi and math.isfinite(lo)
+                for lo, hi in zip(b.los, b.his)
+            ) and len(set(b.los)) == 1
+
+        l_pt, r_pt = _is_point(lb), _is_point(rb)
+        if l_pt == r_pt:
+            # both sides vary (or both are points): quote the straddle
+            return (
+                f"; the comparison straddles: lhs in {_render_box(lb)} "
+                f"{_OBL_CMP_SYMBOL[cmp]} rhs in {_render_box(rb)}{origin}"
+            )
+        if r_pt:
+            vb, k, cmp_v = lb, rb.los[0], cmp
+        else:
+            vb, k, cmp_v = rb, lb.los[0], _OBL_CMP_FLIP[cmp]
+        out = (
+            f"; the operand spans {_render_box(vb)} and the asserted "
+            f"bound is operand {_OBL_CMP_SYMBOL[cmp_v]} {k}"
+        )
+        if vb.size == 1 and cmp_v in ("ge", "gt", "le", "lt"):
+            if cmp_v in ("ge", "gt"):
+                endpoint, word = vb.los[0], "lower"
+            else:
+                endpoint, word = vb.his[0], "upper"
+            if math.isfinite(endpoint):
+                from fractions import Fraction
+
+                miss = abs(Fraction(k) - Fraction(endpoint))
+                if miss == 0:
+                    out += (
+                        f"; the operand's {word} endpoint equals the "
+                        f"bound, which strict {_OBL_CMP_SYMBOL[cmp_v]} "
+                        f"does not admit"
+                    )
+                elif miss > _MAX_BINARY64:
+                    # totality (blinded-lens audit R1): printability is
+                    # decided EXACTLY, before converting — float(miss)
+                    # raises OverflowError on this class, and the class
+                    # is stated as a class, never as a number
+                    out += (
+                        f"; the operand's {word} endpoint misses the "
+                        f"bound by more than the largest finite binary64 "
+                        f"value ({float(_MAX_BINARY64)})"
+                    )
+                else:
+                    miss_f = float(miss)
+                    approx = "" if Fraction(miss_f) == miss else "≈ "
+                    steps = _ulp_steps(endpoint, k)
+                    ulp = (
+                        f" ({steps} ulp step{'s' if steps != 1 else ''} "
+                        f"at this magnitude)"
+                        if steps
+                        else ""
+                    )
+                    out += (
+                        f"; the operand's {word} endpoint misses the "
+                        f"bound by {approx}{miss_f}{ulp}"
+                    )
+        return out + origin
+
+    def _cmp_origin_clause(self, prod: ir.JaxprEqn) -> str:
+        """Artifact-⊤ origins of a quoted comparison's sides — the #2
+        provenance rule applied to the straddle quote: a quoted unbounded
+        side that is stelling's own ⊤ says so, with its origin. Mirrors
+        :meth:`_operand_provenance`'s declined-declaration branch
+        (blinded-lens audit R4): a ⊤ minted at the side's OWN declaration
+        must point at the declaration, never read as 'not
+        declaration-derived' — literally-true fragments that send the
+        reader away from the one thing to fix are the #2 defect class."""
+        parts = []
+        for label, atom in zip(("lhs", "rhs"), prod.invars):
+            if isinstance(atom, ir.Var):
+                origin = self.top_origin.get(atom.id)
+                if origin is not None:
+                    prim, owhere, cause = origin
+                    if prim == "stelling_any":
+                        parts.append(
+                            f"{label} is ⊤ because its own declaration "
+                            f"declined at {owhere} ({cause})"
+                        )
+                    else:
+                        parts.append(
+                            f"{label} is stelling's own ⊤ from {prim!r} at "
+                            f"{owhere} ({cause}), not a declaration-derived "
+                            f"range"
+                        )
+        return " — " + "; ".join(parts) if parts else ""
 
     def _note_decline(self, note: str) -> None:
         """Append a TRANSFER-DECLINE note unless the identical note is
@@ -5148,6 +5317,13 @@ class _Propagator:
             )
         if eqn.primitive == "stelling_assert":
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
+            if status == "unknown":
+                # the undecided detail quotes the straddle it was judged
+                # on (docs/proposed-decline-messages.md #1) — message
+                # content only, appended before the withholding branches
+                # below (which replace the detail with their own claims
+                # and are untouched)
+                detail += self._straddle_suffix(eqn)
             if ieee and in_flags and in_flags[0] and status != "unknown":
                 # the predicate VALUE arrived flagged maybe-NaN (a decline
                 # artifact ⊤ reaching the assert, or a flagged selector
