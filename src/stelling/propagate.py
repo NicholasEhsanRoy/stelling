@@ -826,22 +826,50 @@ def _t_unstack(eqn, params, ins):
     EXACT: every output element IS an input element at a static index, so this
     is built on :func:`interval.slice_` rather than fresh index arithmetic —
     the "don't hand-roll a traversal" norm applied to indexing. Declines when
-    the params do not describe the operand it was handed.
+    the params do not describe the operand it was handed; every decline
+    names its reason with the numbers. The tracer validates the axis and
+    fixes the output count before binding (measured: an out-of-range axis
+    raises at trace time, a negative one is normalized, and the abstract
+    eval binds one output per index), so each path below marks IR that
+    did not come from that trace path: hand-built or
+    edited-after-serialization.
     """
     if len(ins) != 1:
-        return None
+        raise iv.IntervalError(
+            f"unstack routes ONE operand's indices along one axis to its "
+            f"outputs, and this equation binds {len(ins)} operands — there "
+            f"is no single array here to unstack; check the hand-built or "
+            f"deserialized IR that produced it"
+        )
     (a,) = ins
     axis = params.get("axis")
     if axis is None:
-        return None  # absent params are not a traced form; never guessed
+        raise iv.IntervalError(
+            "unstack carries no usable 'axis' param (absent or None) — the "
+            "row cuts along that axis, and an absent param is never guessed"
+        )
     try:
         axis = int(axis)
     except (TypeError, ValueError):
-        return None
+        raise iv.IntervalError(
+            f"unstack's axis param does not read as an integer: "
+            f"axis={params.get('axis')!r} — the cut offsets are integer "
+            f"arithmetic on it, and reading it raised"
+        ) from None
     shape = tuple(a.shape)
     rank = len(shape)
-    if not 0 <= axis < rank or len(eqn.outvars) != shape[axis]:
-        return None
+    if not 0 <= axis < rank:
+        raise iv.IntervalError(
+            f"unstack axis {axis} lies outside the operand's rank {rank} "
+            f"(operand shape {shape}) — there is no axis {axis} to cut"
+        )
+    if len(eqn.outvars) != shape[axis]:
+        raise iv.IntervalError(
+            f"unstack along axis {axis} of operand shape {shape} yields "
+            f"{shape[axis]} piece(s), but the equation binds "
+            f"{len(eqn.outvars)} output(s) — the operand and the equation's "
+            f"own arity disagree about how many pieces exist"
+        )
     out = []
     for i in range(shape[axis]):
         starts = tuple(i if d == axis else 0 for d in range(rank))

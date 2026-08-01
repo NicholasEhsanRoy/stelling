@@ -300,3 +300,43 @@ def test_split_malformed_params_cannot_be_traced():
     ):
         with pytest.raises(ValueError):
             jax.make_jaxpr(bad)()
+
+
+# --- unstack: the traced form, and why its declines are hand-IR-only ---------
+
+
+def test_unstack_traced_discharges_and_carries_the_facts_the_row_reads():
+    def h():
+        x = any_array((3, 2), "float64", (0.0, 1.0))
+        a, b, c = jnp.unstack(x)
+        return assert_(jnp.stack([a, b, c]) <= 1.0)
+
+    cj = trace(h)
+    (us,) = [e for e in cj.jaxpr.eqns if str(e.primitive) == "unstack"]
+    prm = dict(us.params)
+    assert len(us.invars) == 1
+    assert prm["axis"] == 0
+    assert len(us.outvars) == us.invars[0].aval.shape[prm["axis"]]
+
+    p = propagate(cj)
+    assert p.obligations[0].status == "discharged"
+    assert ("unstack", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_unstack_malformed_forms_cannot_be_traced():
+    """The reachability claim behind the unstack row's named declines,
+    measured: the axis is validated (and a negative one normalized) at
+    trace time, and the abstract eval binds one output per index — so no
+    traced program reaches those paths. They are exercised by hand-built
+    IR in test_transfers.py."""
+    x = jnp.zeros((3, 2))
+    for bad in (
+        lambda: jnp.unstack(x, axis=5),               # axis out of range
+        lambda: jnp.unstack(jnp.float64(1.0)),        # rank-0 operand
+    ):
+        with pytest.raises(ValueError):
+            jax.make_jaxpr(bad)()
+    (e,) = jax.make_jaxpr(lambda: jnp.unstack(x, axis=-1))().eqns
+    assert e.params["axis"] == 1  # normalized before binding
+    assert len(e.outvars) == 2    # one output per index of axis 1

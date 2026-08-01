@@ -979,3 +979,90 @@ def test_split_output_arity_disagreement_declines_and_never_binds():
         "name 2 pieces",
         "binds 1 output(s)",
     )
+
+
+# --- unstack: named declines (silent-⊤ conversion) ---------------------------
+#
+# Same posture as split above: jax validates the axis at trace time and its
+# abstract eval fixes the output count (measured in test_transfers_jax.py::
+# test_unstack_malformed_forms_cannot_be_traced), so every decline path is
+# hand-IR-only and driven here through the real walk, pinning the named
+# reason with its numbers and the unchanged accounting.
+
+
+def _unstack_query(params, n_out=3, n_in=1):
+    """x = any((3, 2)); unstack(x, axis) -> n_out pieces; piece0 <= 1.0."""
+    x = var(0, aval((3, 2)))
+    outs = tuple(var(1 + i, aval((2,))) for i in range(n_out))
+    pred, ob = var(9, aval((2,), "bool")), var(10, aval((2,), "bool"))
+    return close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            _meqn("unstack", [x] * n_in, outs, params),
+            eqn("le", [outs[0], lit(1.0)], pred),
+            eqn("stelling_assert", [pred], ob),
+        ],
+        [ob],
+    )
+
+
+def _unstack_declined(q, *frags):
+    p = propagate(q)  # must not raise: declines never kill the walk
+    assert p.obligations[0].status == "unknown"
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("unstack", 1),)
+    assert "unstack" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "'unstack' declined this form" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+def test_unstack_hand_ir_positive_control():
+    # the declines below must not have closed the row
+    p = propagate(_unstack_query((("axis", 0),)))
+    assert p.obligations[0].status == "discharged"
+    assert ("unstack", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_unstack_arity_decline_names_the_operand_count():
+    # 2 operands, 3 outputs: the printed count must be the OPERAND count
+    _unstack_declined(
+        _unstack_query((("axis", 0),), n_in=2),
+        "binds 2 operands",
+        "no single array",
+    )
+
+
+def test_unstack_absent_axis_declines_named():
+    note = _unstack_declined(_unstack_query(()), "'axis'", "absent or None")
+    assert "never guessed" in note
+    _unstack_declined(_unstack_query((("axis", None),)), "'axis'")
+
+
+def test_unstack_non_integer_axis_decline_prints_it():
+    _unstack_declined(
+        _unstack_query((("axis", "q"),)),
+        "does not read as an integer",
+        "axis='q'",
+    )
+
+
+def test_unstack_axis_out_of_range_decline_prints_axis_and_rank():
+    _unstack_declined(
+        _unstack_query((("axis", 5),)),
+        "axis 5 lies outside the operand's rank 2",
+        "(operand shape (3, 2))",
+    )
+
+
+def test_unstack_output_arity_disagreement_declines_and_never_binds():
+    # axis 0 has extent 3 but only 2 outputs are bound. WITHOUT the decline
+    # the walk would zip three pieces onto two outvars and DISCHARGE — the
+    # M5-class mutation measures that admission red.
+    _unstack_declined(
+        _unstack_query((("axis", 0),), n_out=2),
+        "yields 3 piece(s)",
+        "binds 2 output(s)",
+    )
