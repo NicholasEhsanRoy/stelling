@@ -443,6 +443,239 @@ def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
     )
 
 
+def _exact_at_or_above(dt: str, x):
+    """The least value of dtype ``dt`` that is ``>= x``, with ``x`` an EXACT
+    python number (int or float) and every deciding comparison done in
+    python, where int-vs-float compares are exact.
+
+    The raw-endpoint twin of :func:`_smallest_at_or_above`, which takes an
+    already-rounded binary64 and is therefore off by one dtype step exactly
+    when the rounding crossed a value — the gap-edge class the exact
+    emptiness re-check in :func:`any_array` exists for. Two mechanisms,
+    mirroring the rounded helpers:
+
+    * narrow dtypes (itemsize <= 2): bisect the enumerated value table with
+      python comparisons. ``np.searchsorted`` would convert ``x`` to float64
+      first, re-introducing the very rounding under test (it would answer
+      ``2**54`` for ``x = 2**54 + 1`` on bfloat16 — a value BELOW ``x``).
+    * wide dtypes: start from the rounded helper's candidate and step upward
+      through the dtype until the python comparison agrees. At most one
+      step is needed for a dtype inside binary64 — two of its values cannot
+      both lie within one conversion's rounding error — but the loop states
+      the invariant, not the count.
+    """
+    d = np.dtype(dt)
+    if d.itemsize <= 2:
+        vals = _finite_values(dt)
+        lo_i, hi_i = 0, int(vals.size)
+        while lo_i < hi_i:
+            mid = (lo_i + hi_i) // 2
+            if float(vals[mid]) < x:
+                lo_i = mid + 1
+            else:
+                hi_i = mid
+        return None if lo_i >= int(vals.size) else float(vals[lo_i])
+    c = _smallest_at_or_above(dt, float(x))
+    while c is not None and c < x:
+        with np.errstate(over="ignore", invalid="ignore"):
+            step = float(np.nextafter(np.array(c, d), np.array(np.inf, d)))
+        c = step if math.isfinite(step) and step > c else None
+    return c
+
+
+def _exact_at_or_below(dt: str, x):
+    """Mirror of :func:`_exact_at_or_above`: the greatest value of dtype
+    ``dt`` that is ``<= x``, exactly."""
+    d = np.dtype(dt)
+    if d.itemsize <= 2:
+        vals = _finite_values(dt)
+        lo_i, hi_i = 0, int(vals.size)
+        while lo_i < hi_i:
+            mid = (lo_i + hi_i) // 2
+            if float(vals[mid]) <= x:
+                lo_i = mid + 1
+            else:
+                hi_i = mid
+        return None if lo_i == 0 else float(vals[lo_i - 1])
+    c = _largest_at_or_below(dt, float(x))
+    while c is not None and c > x:
+        with np.errstate(over="ignore", invalid="ignore"):
+            step = float(np.nextafter(np.array(c, d), np.array(-np.inf, d)))
+        c = step if math.isfinite(step) and step < c else None
+    return c
+
+
+def _exact_neighbours(dt: str, lo, hi) -> str:
+    """Mirror of :func:`_neighbours` against RAW endpoints: the values
+    bracketing a refused interval, computed exactly so the direction words
+    stay true against what the caller declared."""
+    below = _exact_at_or_below(dt, lo)
+    above = _exact_at_or_above(dt, hi)
+    if below is None and above is None:
+        return ""
+    parts = []
+    if below is not None:
+        parts.append(f"{below!r} below")
+    if above is not None:
+        parts.append(f"{above!r} above")
+    return (
+        f" The nearest {dt} values are {' and '.join(parts)}; declaring one "
+        f"of those, or the interval spanning them, describes a set the "
+        f"program can actually inhabit"
+    )
+
+
+def _dtype_holds_a_value_in_exact(dt: str, lo, hi) -> tuple[bool, str]:
+    """Does the closed interval ``[lo, hi]`` — RAW declared endpoints, as
+    exact python numbers — contain any value of float dtype ``dt``?
+
+    The raw-endpoint twin of :func:`_dtype_holds_a_value_in`'s float branch,
+    which receives endpoints already rounded to binary64 and therefore
+    answers about the RECORDED box rather than the declared one. For a dtype
+    inside binary64 the two agree except in one class: a NARROWING integer
+    endpoint can round onto a dtype value at the edge of a representation
+    gap the declared interval sits inside, making the recorded box inhabited
+    while the declared interval holds nothing — ``float64
+    (2**53+1, 2**53+1)`` records ``[2**53, 2**53]``, a box containing only a
+    value the caller excluded. Measured: the dtype-aware gate admitted that
+    declaration (the parent refused it, with the false NARROWS cause); this
+    check restores the refusal with the true cause, in the empty-set class.
+
+    CLAMPED like its rounded twin, and for the same reason: an infinite
+    endpoint means "unbounded", which the dtype's own range absorbs —
+    ``(-inf, 2**53+1)`` is an ordinary declaration of "every float64
+    through 2**53". The first exact version passed ``lo`` through
+    unclamped, so the wide-dtype path asked for the smallest value at or
+    above ``-inf``, filtered the non-finite answer to None, and declared
+    the interval EMPTY — a false refusal inside the very check built to
+    remove false refusals; the enumeration path, which bisects a finite
+    table, was unaffected (re-audit RA1, measured on float64/float32 for
+    positive and negative narrowing ``hi``). The ``max``/``min`` clamps
+    happen in PYTHON, which compares an integer endpoint against the float
+    range bound exactly and returns the winner unconverted, so the
+    exactness discipline survives the clamp.
+
+    Only float dtypes reach here: integer dtypes are screened at the call
+    site, where the rounded answer is provably the raw answer, and complex
+    never passes the storability guard with a narrowing integer bound. The
+    messages mirror the rounded float branch, with the neighbours computed
+    against the RAW endpoints so the direction words stay true — the
+    rounded helpers would name ``2**63`` as "below" an interval ending at
+    ``2**63 - 1``.
+    """
+    try:
+        info = jnp.finfo(np.dtype(dt))
+        f_lo, f_hi = float(info.min), float(info.max)
+    except (TypeError, ValueError):
+        # every float dtype this jax builds arrays in has finfo (measured
+        # across all of them for the gate's derivation), so this fallback is
+        # stated rather than reachable: no range to clamp into
+        f_lo, f_hi = float("-inf"), float("inf")
+    if hi < f_lo or lo > f_hi:
+        # entirely outside the finite range, in exact compares — mostly
+        # pre-empted by the rounded check at the call site, but reachable
+        # when rounding pulled an endpoint back INTO range (a widening lo
+        # landing on the dtype max while the raw interval sits above it)
+        return False, (
+            f"{dt}'s finite values span [{f_lo}, {f_hi}] and the interval "
+            f"lies entirely outside them." + _exact_neighbours(dt, lo, hi)
+        )
+    first = _exact_at_or_above(dt, max(lo, f_lo))
+    if first is not None and first <= min(hi, f_hi):
+        return True, ""
+    return False, (
+        f"no {dt} value lies in the interval — it falls inside a gap between "
+        f"representable values." + _exact_neighbours(dt, lo, hi)
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def _narrowing_can_lose_values(dt: str) -> bool:
+    """Can rounding an integer bound toward the interval's interior drop a
+    value of dtype ``dt`` from the recorded box?
+
+    The storability guard in :func:`any_array` refuses a NARROWING bound
+    because the IR stores binary64: recording less than was declared means
+    the tool reasons over fewer values than the caller named. But that loss
+    needs a dtype value strictly between the declared integer ``v`` and its
+    image ``float(v)`` — and ``float(v)`` is the NEAREST binary64 to ``v``,
+    so no binary64 value lies strictly between them. A dtype whose every
+    value is itself a binary64 value therefore cannot lose a value to the
+    rounding: the recorded box still CONTAINS every declared dtype value,
+    and refusing it is a false rejection — the failure this layer must not
+    have. The dtype-blind version of the guard had exactly that failure,
+    measured: ``float64 (0, 10**23)``, ``float32 (0, 10**23)`` and ``int32
+    (0, 10**23)`` all refused, with nothing to lose. Containment is the
+    whole claim, NOT equality: a narrowing endpoint can round ONTO a dtype
+    value just outside the declared interval, so when the declared
+    dtype-set is EMPTY the recorded box may still be inhabited — the exact
+    emptiness re-check in :func:`any_array` exists for exactly that case.
+
+    So this asks a DTYPE-level question, derived from the same
+    iinfo-then-finfo lookup as :func:`_dtype_holds_a_value_in` rather than
+    from a name list:
+
+    * **integer dtypes**: every integer of magnitude at most ``2**53`` is a
+      binary64 value, so the dtype can lose iff its range leaves
+      ``[-2**53, 2**53]`` — among the integer dtypes jax builds arrays in,
+      int64 and uint64 alone. Compared in PYTHON ints: the registry/iinfo
+      bounds are exact, and pushing them through a float first is the very
+      rounding under discussion.
+    * **float dtypes**: a binary format is a subset of binary64 iff its
+      significand fits (``nmant <= 52``), its largest finite value does not
+      overflow (``maxexp <= 1024``) and its smallest subnormal does not
+      underflow (``minexp - nmant >= -1074``). Measured on this jax: every
+      float dtype it builds arrays in passes all three; x86 longdouble
+      (``nmant`` 63) fails the first and keeps the refusal.
+    * **complex dtypes** short-circuit to "can lose" BEFORE the finfo
+      lookup, deliberately: ``jnp.finfo(complex128)`` answers for the
+      float64 COMPONENT, which would read as "cannot lose". What a
+      real-bounded box means for a complex array is an open item (see
+      :func:`_dtype_holds_a_value_in`), so no claim is made either way and
+      the dtype-blind refusal stands unchanged there — BY POLICY, not by
+      the property this function is named for. A KNOWN TENSION, recorded
+      rather than resolved: the refusal that policy preserves still speaks
+      the storability vocabulary ("NARROWS the declared set"), a definite
+      claim about a box whose complex meaning this very bullet declines to
+      define. Parent parity, kept until the complex box question is
+      settled; rewording it here would change complex message bytes for no
+      behavioural gain.
+    * **a dtype neither lookup knows** keeps the refusal. The empty-set
+      check admits-when-unsure because a wrong refusal there kills a
+      legitimate envelope outright; admitting-when-unsure HERE would
+      license exactly the silent narrowing this guard exists to stop, so
+      the safe default points the other way.
+
+    Deliberately dtype-level, not bound-level: a narrowing bound so far
+    outside int64 that the shaved slice holds no int64 value still refuses,
+    because int64/uint64's decisions are the guard's purpose and are pinned
+    byte-identical — a per-bound carve-out would shift them.
+    """
+    if dt.startswith("complex"):
+        return True
+    from stelling.propagate import _INT_DTYPE_BOUNDS
+
+    ints = _INT_DTYPE_BOUNDS.get(dt)  # has `bool`, which jnp.iinfo does not
+    if ints is None:
+        try:
+            info = jnp.iinfo(np.dtype(dt))
+            ints = (int(info.min), int(info.max))
+        except (TypeError, ValueError):
+            ints = None
+    if ints is not None:
+        d_lo, d_hi = ints
+        return d_lo < -(2**53) or d_hi > 2**53
+    try:
+        info = jnp.finfo(np.dtype(dt))
+    except (TypeError, ValueError):
+        return True
+    return not (
+        info.nmant <= 52
+        and info.maxexp <= 1024
+        and info.minexp - info.nmant >= -1074
+    )
+
+
 def any_array(shape, dtype, bounds):
     """Declare a harness input: an arbitrary array of ``shape``/``dtype``
     with every element in ``bounds = (lo, hi)``. Traces to a
@@ -482,6 +715,7 @@ def any_array(shape, dtype, bounds):
             f"semantics); refusing at declaration time"
         )
     dt = str(np.dtype(dtype))
+    exact_narrowed = False
     for name, raw in (("lo", bounds[0]), ("hi", bounds[1])):
         # The IR stores bounds as binary64, and an integer bound past 2**53
         # does not survive that. But ONLY A NARROWING LOSS IS A PROBLEM.
@@ -503,6 +737,23 @@ def any_array(shape, dtype, bounds):
         # float64 against an int64 by converting the int to float64, which
         # discards exactly the inexactness under test: `float(np.int64(2**63-1))
         # != np.int64(2**63-1)` is False while the python-int form is True.
+        #
+        # AND ONLY A DTYPE THAT CAN LOSE A VALUE HAS A PROBLEM. The second
+        # version refused a narrowing bound for EVERY dtype, which was the
+        # same false-rejection class one step over: `float(v)` is the nearest
+        # binary64 to `v`, so no binary64 value lies strictly between them,
+        # and for a dtype whose values all ARE binary64 values (every REAL
+        # dtype jax builds arrays in except int64 and uint64; complex keeps
+        # refusing by policy, no claim either way — see
+        # `_narrowing_can_lose_values`) the recorded box still CONTAINS
+        # every declared dtype value. Measured false refusals: `float64
+        # (0, 10**23)`, `float32 (0, 10**23)`, `int32 (0, 10**23)` — all
+        # narrowing as real intervals, none dropping a single declared
+        # dtype value. int64 and uint64 keep the refusal below
+        # byte-identically. Containment is not equality: a narrowing
+        # endpoint can round ONTO a dtype value just OUTSIDE the declared
+        # interval, so the admission is noted in `exact_narrowed` and the
+        # emptiness of the DECLARED set is re-judged exactly, below.
         exact = (
             isinstance(raw, (int, np.integer))
             and not isinstance(raw, (bool, np.bool_))
@@ -512,7 +763,7 @@ def any_array(shape, dtype, bounds):
         v = int(raw)
         stored = float(v)
         narrows = (stored > v) if name == "lo" else (stored < v)
-        if stored != v and narrows:
+        if stored != v and narrows and _narrowing_can_lose_values(dt):
             raise ValueError(
                 f"any_array bound {name}={raw!r} is not representable as the "
                 f"binary64 the IR stores; it would be recorded as {stored!r}, "
@@ -522,6 +773,13 @@ def any_array(shape, dtype, bounds):
                 f"contains every executed value.) Integer bounds that must be "
                 f"exact as doubles satisfy |bound| <= 2**53"
             )
+        if stored != v and narrows:
+            # admitted through the dtype gate: no dtype value was DROPPED,
+            # but the recorded endpoint moved into the interval's interior,
+            # so the rounded endpoints can no longer answer whether the
+            # DECLARED interval holds any dtype value — noted here,
+            # re-judged exactly after the zero-size return below
+            exact_narrowed = True
     if 0 in dims:
         # A ZERO-SIZE array satisfies ANY element-wise bounds vacuously, and
         # jax constructs one, so no bounds/dtype pair is empty for it — the
@@ -532,6 +790,47 @@ def any_array(shape, dtype, bounds):
         # have).
         return _any_p.bind(shape=dims, dtype=dt, lo=lo, hi=hi)
     holds, why = _dtype_holds_a_value_in(dt, lo, hi)
+    if holds and exact_narrowed:
+        # THE GAP-EDGE RE-CHECK. A narrowing integer endpoint can round ONTO
+        # a representable value at the edge of a gap the declared interval
+        # sits inside: `float64 (2**53+1, 2**53+1)` records `[2**53, 2**53]`
+        # — inhabited, while the caller's interval holds no float64 at all,
+        # so every claim over it would be vacuous. The rounded check above
+        # cannot see this (it is handed the rounded endpoints), so the
+        # emptiness question is re-asked against the RAW endpoints in exact
+        # python arithmetic. ONE DIRECTION ONLY: for these dtypes each
+        # endpoint's shaved sliver holds no dtype value, so rounded-EMPTY
+        # already implies declared-empty — a rounded refusal never needs the
+        # exact pass and keeps its message.
+        #
+        # Integer dtypes are screened out because there the rounded answer
+        # IS the raw answer: a narrowing endpoint and its rounded image both
+        # sit at magnitude >= 2**53 on the same side, every loss-free
+        # integer dtype's range sits strictly inside (-(2**53), 2**53), so
+        # raw and rounded endpoints compare identically against every value
+        # of the dtype.
+        #
+        # Both-endpoint-WIDENING declarations are deliberately NOT re-judged:
+        # the parent admitted those (the rounded box inhabits — e.g.
+        # bfloat16 (2**53+1, 2**53+3), whose declared interval also holds
+        # nothing), and that pre-existing blind spot is out of this repair's
+        # scope. Parity, not endorsement.
+        from stelling.propagate import _is_integer_dtype
+
+        if not _is_integer_dtype(dt):
+            raw_lo, raw_hi = (
+                # ints stay python ints (exact); everything else through
+                # float(), which is value-preserving for float64-and-under —
+                # a wider np.floating (longdouble) rounds here exactly as it
+                # already did at the top of this function: the known
+                # bound-TYPE item, out of scope
+                int(b)
+                if isinstance(b, (int, np.integer))
+                and not isinstance(b, (bool, np.bool_))
+                else float(b)
+                for b in (bounds[0], bounds[1])
+            )
+            holds, why = _dtype_holds_a_value_in_exact(dt, raw_lo, raw_hi)
     if not holds:
         raise ValueError(
             f"any_array bounds ({bounds[0]!r}, {bounds[1]!r}) declare a set "
