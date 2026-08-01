@@ -259,3 +259,44 @@ def test_fvm_transpose_traced():
     assert ("transpose", "exact") in p.transfers_used
     # the bottom row's two 5.0s occupy column 1 of the (2, 2) transpose
     assert "2/4" in p.obligations[1].detail
+
+
+# --- split: the traced form, and why its declines are hand-IR-only -----------
+
+
+def test_split_traced_discharges_and_carries_the_params_the_row_reads():
+    def h():
+        x = any_array((5,), "float64", (0.0, 1.0))
+        a, b = jax.lax.split(x, (2, 3))
+        return assert_(jnp.concatenate([a, b]) <= 1.0)
+
+    cj = trace(h)
+    # the traced form the row is written against: one operand, integer
+    # sizes and axis params present, one output per piece — the facts the
+    # transfer's decline messages lean on
+    (sp,) = [e for e in cj.jaxpr.eqns if str(e.primitive) == "split"]
+    prm = dict(sp.params)
+    assert len(sp.invars) == 1
+    assert prm["sizes"] == (2, 3) and prm["axis"] == 0
+    assert len(sp.outvars) == len(prm["sizes"])
+
+    p = propagate(cj)
+    assert p.obligations[0].status == "discharged"
+    assert ("split", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_split_malformed_params_cannot_be_traced():
+    """The reachability claim behind the split row's named declines,
+    measured: jax validates the split params against the operand at trace
+    time, so mis-summing sizes, a negative size and an out-of-range axis
+    never reach the transfer from a traced program. Their named declines
+    are exercised by hand-built IR in test_transfers.py."""
+    x = jnp.zeros((5,))
+    for bad in (
+        lambda: jax.lax.split(x, (2, 2)),        # sizes do not sum to 5
+        lambda: jax.lax.split(x, (6, -1)),       # negative size
+        lambda: jax.lax.split(x, (5,), axis=3),  # axis out of range
+    ):
+        with pytest.raises(ValueError):
+            jax.make_jaxpr(bad)()

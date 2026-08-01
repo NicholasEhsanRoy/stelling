@@ -849,3 +849,133 @@ def test_transpose_malformed_permutation_declines_not_crashes():
     p = propagate(q)  # must not raise
     assert p.obligations[0].status == "unknown"
     assert any("transpose" in n and "declined" in n for n in p.notes)
+
+
+# --- split: named declines (silent-⊤ conversion) -----------------------------
+#
+# jax validates every one of these forms at trace time (measured in
+# test_transfers_jax.py::test_split_malformed_params_cannot_be_traced), so
+# no traced program reaches them: each decline path is driven here by
+# hand-built IR through the REAL walk, and pins both the named reason —
+# with its numbers bound to the right operands — and the accounting, which
+# must be identical to the returned-None decline it replaced: status
+# unknown, coverage.unknown == 1, the primitive in unknown_primitives.
+
+
+def _meqn(prim, ins, outs, params=()):
+    return ir.JaxprEqn(
+        primitive=prim, invars=tuple(ins), outvars=tuple(outs),
+        params=tuple(params),
+    )
+
+
+def _split_query(params, n_out=2, n_in=1):
+    """x = any((4,)); split(x) -> n_out pieces; assert piece0 <= 1.0."""
+    x = var(0, aval((4,)))
+    outs = tuple(var(1 + i, aval((2,))) for i in range(n_out))
+    pred, ob = var(9, aval((2,), "bool")), var(10, aval((2,), "bool"))
+    return close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            _meqn("split", [x] * n_in, outs, params),
+            eqn("le", [outs[0], lit(1.0)], pred),
+            eqn("stelling_assert", [pred], ob),
+        ],
+        [ob],
+    )
+
+
+def _split_declined(q, *frags):
+    p = propagate(q)  # must not raise: declines never kill the walk
+    assert p.obligations[0].status == "unknown"
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("split", 1),)
+    assert "split" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "'split' declined this form" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+_SPLIT_OK = (("sizes", (2, 2)), ("axis", 0))
+
+
+def test_split_hand_ir_positive_control():
+    # the declines below must not have closed the row: the well-formed
+    # hand-built form still discharges exactly
+    p = propagate(_split_query(_SPLIT_OK))
+    assert p.obligations[0].status == "discharged"
+    assert ("split", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_split_arity_decline_names_the_operand_count():
+    # 3 operands, 2 outputs: the printed count must be the OPERAND count
+    # (a mutant printing the output count would show 2 here)
+    _split_declined(
+        _split_query(_SPLIT_OK, n_in=3),
+        "binds 3 operands",
+        "no single array",
+    )
+
+
+def test_split_absent_params_decline_names_what_is_missing():
+    _split_declined(_split_query((("axis", 0),)), "'sizes'", "absent or None")
+    _split_declined(_split_query((("sizes", (2, 2)),)), "'axis'")
+    note = _split_declined(_split_query(()), "'sizes' and 'axis'")
+    # present-with-None is the same fact as absent for this row and is
+    # named by the same branch
+    _split_declined(
+        _split_query((("sizes", None), ("axis", 0))), "'sizes'"
+    )
+    assert "never guessed" in note
+
+
+def test_split_non_integer_params_decline_prints_them():
+    _split_declined(
+        _split_query((("sizes", ("a", "b")), ("axis", 0))),
+        "do not read as integers",
+        "sizes=('a', 'b')",
+    )
+    _split_declined(
+        _split_query((("sizes", (2, 2)), ("axis", "q"))),
+        "axis='q'",
+    )
+
+
+def test_split_axis_out_of_range_decline_prints_axis_and_rank():
+    _split_declined(
+        _split_query((("sizes", (2, 2)), ("axis", 5))),
+        "axis 5 lies outside the operand's rank 1",
+        "(operand shape (4,))",
+    )
+
+
+def test_split_negative_size_decline_prints_the_offenders():
+    _split_declined(
+        _split_query((("sizes", (5, -1)), ("axis", 0))),
+        "sizes (5, -1)",
+        "negative piece extents (-1,)",
+    )
+
+
+def test_split_non_partition_decline_prints_sum_and_extent():
+    # the numbers must be bound the right way round: 5 is the SIZES sum,
+    # 4 is the AXIS extent (a swapped mutant fails both fragments)
+    _split_declined(
+        _split_query((("sizes", (2, 3)), ("axis", 0))),
+        "sizes (2, 3) sum to 5",
+        "axis 0 has extent 4",
+    )
+
+
+def test_split_output_arity_disagreement_declines_and_never_binds():
+    # params name two pieces, the equation binds one output. WITHOUT the
+    # decline the walk would zip two pieces onto one outvar and DISCHARGE
+    # — this test measures that admission as a red, so the decline is
+    # load-bearing, not cosmetic.
+    _split_declined(
+        _split_query((("sizes", (2, 2)), ("axis", 0)), n_out=1),
+        "name 2 pieces",
+        "binds 1 output(s)",
+    )

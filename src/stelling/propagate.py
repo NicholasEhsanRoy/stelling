@@ -710,26 +710,65 @@ def _t_split(eqn, params, ins):
     Declines (⊤) when the params do not describe the operand it was handed:
     sizes that do not sum to the axis extent, an axis outside the operand's
     rank, a negative size, or an output count the params disagree with.
+    Every decline names its reason and prints the numbers that made it
+    decline — the tracer validates all of these before binding (measured:
+    mis-summing sizes, a negative size and an out-of-range axis each raise
+    at trace time), so each path below marks IR that did not come from
+    that trace path: hand-built or edited-after-serialization.
     """
     if len(ins) != 1:
-        return None
+        raise iv.IntervalError(
+            f"split cuts ONE operand along one axis, and this equation "
+            f"binds {len(ins)} operands — there is no single array here "
+            f"for the sizes to partition; check the hand-built or "
+            f"deserialized IR that produced it"
+        )
     (a,) = ins
     sizes = params.get("sizes")
     axis = params.get("axis")
     if sizes is None or axis is None:
-        return None  # absent params are not a traced form; never guessed
+        gone = " and ".join(
+            repr(n) for n in ("sizes", "axis") if params.get(n) is None
+        )
+        raise iv.IntervalError(
+            f"split carries no usable {gone} param (absent or None) — the "
+            f"row cuts at the offsets 'sizes' gives along 'axis', and an "
+            f"absent param is never guessed"
+        )
     try:
         sizes = tuple(int(s) for s in sizes)
         axis = int(axis)
     except (TypeError, ValueError):
-        return None
+        raise iv.IntervalError(
+            f"split params do not read as integers: "
+            f"sizes={params.get('sizes')!r}, axis={params.get('axis')!r} — "
+            f"the cut offsets are integer arithmetic on these, and reading "
+            f"them raised"
+        ) from None
     rank = len(a.shape)
-    if not 0 <= axis < rank or any(s < 0 for s in sizes):
-        return None
+    if not 0 <= axis < rank:
+        raise iv.IntervalError(
+            f"split axis {axis} lies outside the operand's rank {rank} "
+            f"(operand shape {a.shape}) — there is no axis {axis} to cut"
+        )
+    if any(s < 0 for s in sizes):
+        bad = tuple(s for s in sizes if s < 0)
+        raise iv.IntervalError(
+            f"split sizes {sizes} contain negative piece extents {bad} — "
+            f"no piece holds a negative number of elements"
+        )
     if sum(sizes) != a.shape[axis]:
-        return None  # the cut does not partition the axis
+        raise iv.IntervalError(
+            f"split sizes {sizes} sum to {sum(sizes)}, but the operand's "
+            f"axis {axis} has extent {a.shape[axis]} (operand shape "
+            f"{a.shape}) — the cut does not partition the axis"
+        )
     if len(sizes) != len(eqn.outvars):
-        return None  # params and the equation's own arity disagree
+        raise iv.IntervalError(
+            f"split params name {len(sizes)} pieces but the equation binds "
+            f"{len(eqn.outvars)} output(s) — the params and the equation's "
+            f"own arity disagree about how many pieces exist"
+        )
 
     out, start = [], 0
     for s in sizes:
