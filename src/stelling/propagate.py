@@ -379,6 +379,131 @@ def _is_integer_dtype(dtype: str) -> bool:
 # derivation exact.
 _INT_RANGE = {d: float(_INT_DTYPE_BOUNDS[d][1] + 1) for d in ("int32", "int64")}
 
+# Binary float formats the conversion-exactness classifier below knows, as
+# (significand bits INCLUDING the implicit leading one, minimum normal
+# exponent, maximum exponent). Read only when wording a decline NOTE —
+# admission never consults this table.
+_FLOAT_FORMATS: dict[str, tuple[int, int, int]] = {
+    "float16": (11, -14, 15),
+    "bfloat16": (8, -126, 127),
+    "float32": (24, -126, 127),
+    "float64": (53, -1022, 1023),
+}
+
+
+def _conversion_exactness(src: str, dst: str) -> tuple[str, str]:
+    """``(verdict, why)``: whether the cast ``src -> dst`` preserves EVERY
+    representable source value — ``"exact"``, ``"inexact"``, or
+    ``"unknown"`` — with ``why`` a fragment that is true on its own.
+
+    This classifies for the decline NOTE only; admission stays gated on
+    :data:`_EXACT_CONVERSIONS` membership, and the two must not be
+    conflated. The note used to render every unlisted cast as "not exact"
+    and add that "every other cast may change the value it carries" —
+    measured false on uint32->uint64, uint8->int32, bool->float16 and
+    uint32->float64, each exact at every representable source value and
+    each declined by a sentence asserting a change that cannot happen.
+
+    Verdicts are claims, so each is backed: "exact" and "inexact" only
+    with a proof from the tables (integer ranges, float capacities).
+    Everything else says "unknown" — including float->float format
+    embeddings, where the format fact is not the whole story on this
+    target: per-dtype DAZ was MEASURED flushing an f32 subnormal to 0.0
+    across an f32->f64 convert (jax 0.11.0 CPU; see the ieee convert
+    rule), so bit-format containment alone does not vouch for subnormal
+    values. Integer and bool sources have no subnormals, so no such
+    caveat dilutes their verdicts.
+    """
+    if src == dst:
+        return "exact", "it is the identity"
+    s_int, d_int = _INT_DTYPE_BOUNDS.get(src), _INT_DTYPE_BOUNDS.get(dst)
+    s_flt, d_flt = _FLOAT_FORMATS.get(src), _FLOAT_FORMATS.get(dst)
+    if s_int is not None and d_int is not None:
+        (slo, shi), (dlo, dhi) = s_int, d_int
+        if dlo <= slo and shi <= dhi:
+            return "exact", (
+                f"every {src} value lies in [{slo}, {shi}], inside {dst}'s "
+                f"[{dlo}, {dhi}], where the conversion is the identity"
+            )
+        return "inexact", (
+            f"{src} spans [{slo}, {shi}] but {dst} holds only "
+            f"[{dlo}, {dhi}], and jax wraps or collapses what falls outside"
+        )
+    if s_int is not None and d_flt is not None:
+        (slo, shi), (p, _, emax) = s_int, d_flt
+        if p <= emax and -(2**p) <= slo and shi <= 2**p:
+            return "exact", (
+                f"{dst} represents every integer of magnitude at most "
+                f"2**{p} exactly, and {src} spans [{slo}, {shi}]"
+            )
+        # One-directional, like the exact branch: magnitude <= 2**p is
+        # SUFFICIENT for exactness, not necessary — float64 also carries
+        # 2**54 exactly — so the sentence may not equate "the integers
+        # {dst} carries exactly" with that band (audit repair R1).
+        return "inexact", (
+            f"{src} spans [{slo}, {shi}], while {dst} represents every "
+            f"integer of magnitude at most 2**{p} exactly but not every "
+            f"integer beyond (2**{p} + 1 already is not), so conversion "
+            f"rounds — or overflows — some {src} values"
+        )
+    if s_flt is not None and d_int is not None:
+        return "inexact", (
+            f"{src} carries non-integers — 0.5 for one — which have no "
+            f"exact {dst} image"
+        )
+    if s_flt is not None and d_flt is not None:
+        (ps, ns, xs), (pd, nd, xd) = s_flt, d_flt
+        if pd < ps:
+            return "inexact", (
+                f"{dst} keeps {pd} significand bits to {src}'s {ps}, so "
+                f"some {src} values round"
+            )
+        if xd < xs:
+            return "inexact", (
+                f"{dst}'s exponents stop at {xd} while {src}'s reach "
+                f"{xs}, so some finite {src} values overflow"
+            )
+        if nd - (pd - 1) > ns - (ps - 1):
+            return "inexact", (
+                f"{src}'s smallest subnormals fall below {dst}'s, so "
+                f"they underflow"
+            )
+        return "unknown", (
+            f"as formats {dst} embeds {src} ({ps} significand bits into "
+            f"{pd}, exponent range covered), but per-dtype DAZ was "
+            f"measured flushing a float32 subnormal to 0.0 across a "
+            f"convert on this target (jax 0.11.0 CPU), so the embedding "
+            f"alone does not establish that every subnormal {src} value "
+            f"crosses unchanged"
+        )
+    return "unknown", (
+        f"neither an exactness proof nor a value-change witness is "
+        f"established here for it (a dtype outside the integer-bounds "
+        f"and float-format tables)"
+    )
+
+
+# The example casts the decline note names as admitted — each checked
+# against the whitelist AT THE MOMENT THE SENTENCE IS BUILT. The note
+# used to hard-code "bool->any", and a traced bool->float16 — which is
+# NOT in _EXACT_CONVERSIONS — was declined by the very sentence asserting
+# bool casts are admitted. Preferred picks first, for a varied showing;
+# should every pick be delisted someday, the first whitelist entries
+# stand in, so the sentence never names an unlisted cast and never goes
+# empty while the whitelist is nonempty.
+_ADMITTED_EXAMPLE_PICKS = (
+    ("float32", "float64"),
+    ("int32", "float64"),
+    ("bool", "int64"),
+)
+
+
+def _admitted_examples() -> str:
+    picks = [p for p in _ADMITTED_EXAMPLE_PICKS if p in _EXACT_CONVERSIONS]
+    if not picks:
+        picks = sorted(_EXACT_CONVERSIONS)[:3]
+    return ", ".join(f"{s}->{d}" for s, d in picks)
+
 
 def _safe_top(shape) -> iv.IntervalArray:
     """⊤ of the shape — or the scalar ⊤ stand-in when the shape is
@@ -486,11 +611,18 @@ def _t_convert(eqn, params, ins):
         # cannot hold.
         bound = _INT_RANGE[dst]
         if any(not (-bound <= x < bound) for x in (*a.los, *a.his)):
+            # The PRINTED range is the exact integer pair from the bounds
+            # table, never the float comparison bound: `bound - 1` is float
+            # arithmetic, and for int64 it rounds straight back to 2**63
+            # (the same trap the comment above pins for the comparison), so
+            # the note used to name 9.223372036854776e+18 = 2**63 as
+            # int64's maximum — a value int64 cannot hold.
+            lo_b, hi_b = _INT_DTYPE_BOUNDS[dst]
             raise iv.IntervalError(
                 f"{src} -> {dst} truncates toward zero, which this transfer "
                 f"models — but the operand "
                 f"spans [{min(a.los)}, {max(a.his)}], which leaves {dst}'s "
-                f"representable range [{-bound}, {bound - 1}]. Outside it jax "
+                f"representable range [{lo_b}, {hi_b}]. Outside it jax "
                 f"clamps or wraps rather than truncating, and no interval rule "
                 f"here models that. Narrowing the operand admits this form"
             )
@@ -506,14 +638,48 @@ def _t_convert(eqn, params, ins):
     # is a terminal in independently-authored external code, where a python int
     # literal promotes through `int64 -> float64`, and a reader of that note
     # cannot tell which side of the cast is the problem.
+    #
+    # WHAT the reason says is classified first: "unlisted" and
+    # "value-changing" are different facts, and the previous single sentence
+    # asserted the second of every decline — measured false on
+    # uint32->uint64 and every other exact-but-unlisted cast. The DECISION
+    # is unchanged in all three branches: this line declines exactly what it
+    # declined; only the sentence now matches the cast it describes.
+    verdict, why = _conversion_exactness(src, dst)
+    if verdict == "exact":
+        head = (
+            f"the conversion {src!r} -> {dst!r} is exact at every "
+            f"representable {src} value ({why}), yet the pair is not listed "
+            f"in propagate._EXACT_CONVERSIONS — declined as unlisted, a "
+            f"whitelist gap, not as value-changing"
+        )
+    elif verdict == "inexact":
+        head = (
+            f"the conversion {src!r} -> {dst!r} is not exact: {why} — and "
+            f"this transfer declines rather than modelling the change"
+        )
+    else:
+        head = (
+            f"the conversion {src!r} -> {dst!r} is not listed in "
+            f"propagate._EXACT_CONVERSIONS, and {why} — declined: only "
+            f"casts vouched exact pass through"
+        )
+    # The admissions sentence enumerates EVERY return path above — the
+    # identity, the whitelist, the in-range narrowing, and the in-range
+    # float-source truncation (measured admitted with no note:
+    # float64 -> int32 over (0.25, 100.75) discharges) — with the
+    # truncation targets derived from _INT_RANGE so the sentence cannot
+    # drift from the branch it describes (audit repair R2: the previous
+    # sentence omitted the truncation admission).
+    trunc_dsts = "/".join(sorted(_INT_RANGE))
     raise iv.IntervalError(
-        f"the conversion {src!r} -> {dst!r} is not exact. NOTE THE SOURCE "
-        f"DTYPE, {src!r} — it is the half the "
-        f"generic params note does not show. Exact widenings are admitted "
-        f"(float32->float64, int32->float64, bool->any, and the rest of "
-        f"propagate._EXACT_CONVERSIONS), as is an int64->int32 narrowing whose "
-        f"interval provably fits; every other cast may change the value it "
-        f"carries, and this transfer declines rather than modelling the change"
+        f"{head}. NOTE THE SOURCE DTYPE, {src!r} — it is the half the "
+        f"generic params note does not show. This transfer admits the "
+        f"identity, the casts in propagate._EXACT_CONVERSIONS "
+        f"({_admitted_examples()}, and the rest of that list), an "
+        f"int64->int32 narrowing whose interval provably fits, and a "
+        f"float-source truncation to {trunc_dsts} whose interval provably "
+        f"fits the target's range"
     )
 
 
