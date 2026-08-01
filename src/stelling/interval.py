@@ -735,14 +735,17 @@ def exp(a: IntervalArray) -> IntervalArray:
     )
 
 
+# Deliberately provenance-neutral: this layer sees only the argument
+# INTERVAL, not where it came from — the interval may be the user's
+# declaration or an artifact ⊤ propagated from an upstream decline, and
+# the propagator (which knows which) appends the provenance. The earlier
+# wording said "over the declared box", which misattributed upstream ⊤s
+# to the user's declaration (docs/proposed-decline-messages.md #2).
 SQRT_DOMAIN_REASON = (
-    "sqrt has a real value only for a nonnegative argument, and the "
-    "argument interval's lower bound {lo} is negative: the obligation "
-    "arg >= 0 is not established over the declared box, so the box includes "
-    "out-of-domain points (jnp.sqrt of a negative is NaN). Declined — the "
-    "pow domain posture (a domain-restricted transfer refuses the "
-    "out-of-domain box loudly, and the propagator turns the refusal into a "
-    "noted top), never a silently-narrowed answer"
+    "sqrt is real only for a nonnegative argument, and the argument "
+    "interval's lower bound {lo} is negative — the interval reaches "
+    "out-of-domain points (jnp.sqrt of a negative is NaN), so arg >= 0 is "
+    "not established over it; declined rather than silently narrowed"
 )
 
 

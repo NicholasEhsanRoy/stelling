@@ -3780,6 +3780,14 @@ class _Propagator:
         # (scoped in run(); assume classification only — never a transfer
         # input)
         self.producers: dict[int, ir.JaxprEqn] = {}
+        # var id -> (primitive, where, cause) for values minted as artifact
+        # ⊤ by top_out: MESSAGE PROVENANCE ONLY (docs/proposed-decline-
+        # messages.md #2 — "a decline that reports a box must say where the
+        # box came from"). Never read by any transfer, judgment, or
+        # counter; ids are globally unique per transcription, so the map is
+        # deliberately not scope-swapped (provenance follows the value
+        # across call boundaries, like refused_shape).
+        self.top_origin: dict[int, tuple[str, str, str]] = {}
         self.counter = CoverageCounter()
         self.obligations: list[ObligationReport] = []
         self.nonvacuity_checks: list[ObligationReport] = []
@@ -3873,9 +3881,17 @@ class _Propagator:
             return False
         return self.taint.get(atom.id, False)
 
-    def top_out(self, eqn: ir.JaxprEqn) -> None:
+    def top_out(
+        self, eqn: ir.JaxprEqn, cause: str = "its result was not modeled"
+    ) -> None:
+        where = eqn.source_info[-1] if eqn.source_info else "unknown location"
         for out in eqn.outvars:
             self.env[out.id] = _safe_top(out.aval.shape)
+            # message provenance only (see __init__): the ⊤ minted here is
+            # stelling's own artifact, and every downstream decline that
+            # reports this value's box may truthfully name this equation
+            # as its origin
+            self.top_origin[out.id] = (eqn.primitive, where, cause)
             if self.semantics == "ieee":
                 # ⊤ under ieee is maybe-NaN: an unknown/declined value
                 # could be anything a float can be, including NaN
@@ -3886,6 +3902,111 @@ class _Propagator:
                 self.taint[out.id] = any(
                     self.read_taint(a) for a in eqn.invars
                 )
+
+    def _quiet_box(self, atom: ir.Atom) -> iv.IntervalArray | None:
+        """The atom's box for MESSAGE TEXT only, or None: never raises and
+        never appends a note (:meth:`read` notes an undecodable literal,
+        and a message-builder must not double it)."""
+        if isinstance(atom, ir.Literal):
+            try:
+                return _value_to_interval(atom.val, atom.aval.shape)
+            except (iv.IntervalError, ir.TranscriptionError):
+                return None
+        return self.env.get(atom.id)
+
+    def _operand_provenance(self, eqn: ir.JaxprEqn) -> str:
+        """Where each operand of a DECLINING equation came from, as a
+        bracketed message fragment, or "" (docs/proposed-decline-messages.md
+        #2: a decline that reports a box must say where the box came from).
+
+        Message content only — never consulted by a transfer, judgment, or
+        counter. Each clause states only what is recorded: a literal is
+        quoted with its dtype; a value minted as artifact ⊤ by
+        :meth:`top_out` names its originating equation and cause ("it did
+        not come from your declaration" is literally true of it — the box
+        was minted here, not decoded from any declared bound); a declared
+        input names its declaration; anything else names its producing
+        equation and propagated span, or is silently omitted — no guessing.
+        Equations with more than two operands get only the artifact-⊤
+        clauses (the load-bearing ones), so wide forms stay readable.
+        """
+        clauses = []
+        brief = len(eqn.invars) > 2
+        for i, atom in enumerate(eqn.invars):
+            if isinstance(atom, ir.Literal):
+                if brief:
+                    continue
+                if isinstance(atom.val, (bool, int, float)):
+                    clauses.append(
+                        f"operand {i} is the literal {atom.val!r} "
+                        f"({atom.aval.dtype})"
+                    )
+                else:
+                    clauses.append(
+                        f"operand {i} is a {atom.aval.dtype} literal"
+                    )
+                continue
+            origin = self.top_origin.get(atom.id)
+            if origin is not None:
+                prim, owhere, cause = origin
+                if prim == "stelling_any":
+                    clauses.append(
+                        f"operand {i} is ⊤ because its own declaration "
+                        f"declined at {owhere} ({cause})"
+                    )
+                else:
+                    clauses.append(
+                        f"operand {i} is stelling's own ⊤ from {prim!r} at "
+                        f"{owhere} ({cause}) — it did not come from your "
+                        f"declaration; resolve that upstream decline first, "
+                        f"this one is downstream of it"
+                    )
+                continue
+            if brief:
+                continue
+            box = self._quiet_box(atom)
+            if box is None:
+                continue
+            producer = self.producers.get(atom.id)
+            if producer is None:
+                clauses.append(f"operand {i} spans {_render_box(box)}")
+            elif producer.primitive == "stelling_any":
+                pwhere = (
+                    producer.source_info[-1]
+                    if producer.source_info
+                    else "unknown location"
+                )
+                clauses.append(
+                    f"operand {i} is the declared input itself (declared "
+                    f"at {pwhere}), spanning {_render_box(box)}"
+                )
+            else:
+                pwhere = (
+                    producer.source_info[-1]
+                    if producer.source_info
+                    else "unknown location"
+                )
+                clauses.append(
+                    f"operand {i} was produced by {producer.primitive!r} "
+                    f"at {pwhere}, spanning {_render_box(box)}"
+                )
+        if not clauses:
+            return ""
+        return " [" + "; ".join(clauses) + "]"
+
+    def _note_decline(self, note: str) -> None:
+        """Append a TRANSFER-DECLINE note unless the identical note is
+        already present (docs/proposed-decline-messages.md: a ~120-word
+        decline note printed verbatim twice was the measured complaint).
+        Verbatim-identical decline notes say exactly what one says — the
+        site and operand provenance are in the text, so notes that differ
+        in ANY byte all stay. Scoped to the decline classes deliberately:
+        assume/withhold notes keep their multiplicity byte-identically
+        (the inert-mode comparability contract pins them). Accounting is
+        untouched — the coverage counters are recorded per equation at the
+        call sites, never derived from the notes."""
+        if note not in self.notes:
+            self.notes.append(note)
 
     def _contraction_hull(self, eqn: ir.JaxprEqn, outs, out_flags):
         """Cover BOTH roundings of a product feeding an add/sub (ieee only).
@@ -4889,7 +5010,7 @@ class _Propagator:
         if entry is None:
             self.counter.record_unknown(eqn.primitive)
             self.mark_unreached(eqn)
-            self.top_out(eqn)
+            self.top_out(eqn, cause="no interval transfer is registered for it")
             return
 
         transfer, tier = entry
@@ -4908,7 +5029,18 @@ class _Propagator:
             # degrade-don't-crash posture (second audit, FRAGILE 5; the
             # shape guards previously killed the whole analysis here).
             # Under ieee, top_out marks the outputs maybe-NaN.
-            self.notes.append(f"{eqn.primitive!r} declined this form: {e}; ⊤")
+            # The note names the SITE and the OPERANDS' provenance
+            # (docs/proposed-decline-messages.md #2): a decline that quotes
+            # a box says where the box came from — an upstream artifact ⊤
+            # is named as stelling's own, never left to read as the user's
+            # declaration. Message content only; same decline, same counts.
+            where = (
+                eqn.source_info[-1] if eqn.source_info else "unknown location"
+            )
+            self._note_decline(
+                f"{eqn.primitive!r} declined this form at {where}: {e}"
+                f"{self._operand_provenance(eqn)}; ⊤"
+            )
             self.counter.record_unknown(eqn.primitive)
             # the coverage denominator is a function of the PROGRAM, never
             # of the outcome (third audit, F1): an equation carrying a
@@ -4922,19 +5054,25 @@ class _Propagator:
             # ieee 5 on one program). A no-op for every sub-jaxpr-free
             # equation.
             self.mark_unreached(eqn)
-            self.top_out(eqn)
+            self.top_out(eqn, cause="its interval transfer declined this form")
             return
         if result is None:  # a known transfer declining this configuration
-            self.notes.append(
+            where = (
+                eqn.source_info[-1] if eqn.source_info else "unknown location"
+            )
+            self._note_decline(
                 f"{eqn.primitive!r} has no sound rule for params "
-                f"{ {k: v for k, v in params.items() if not isinstance(v, ir.ClosedJaxpr)} }; ⊤"
+                f"{ {k: v for k, v in params.items() if not isinstance(v, ir.ClosedJaxpr)} }"
+                f" at {where}{self._operand_provenance(eqn)}; ⊤"
             )
             self.counter.record_unknown(eqn.primitive)
             # same accounting as the IntervalError decline above: inner
             # equations of a declined form count unreached, keeping the
             # denominator outcome-independent (third audit, F1)
             self.mark_unreached(eqn)
-            self.top_out(eqn)
+            self.top_out(
+                eqn, cause="it has no sound rule for this configuration"
+            )
             return
         outs, out_flags = result if ieee else (result, None)
         if (
