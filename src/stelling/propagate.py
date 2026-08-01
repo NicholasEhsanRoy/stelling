@@ -1354,20 +1354,40 @@ def _t_gather(eqn, params, ins):
     ``GatherScatterMode``\\ s agree on definitely-in-range indices, so
     the mode is not constrained here.
 
-    Everything else declines to a noted ⊤: dynamic (non-point) or
-    out-of-range indices (mode-dependent clamp/drop/fill is the census's
-    wedge bug class, never guessed), batching dims, window offsets not
-    covering the full trailing block, multi-column index vectors.
+    Everything else declines to a noted ⊤ that names its reason and prints
+    the numbers: dynamic (non-point) or out-of-range indices
+    (mode-dependent clamp/drop/fill is the census's wedge bug class, never
+    guessed), batching dims, window offsets not covering the full trailing
+    block, multi-column index vectors.
     """
     if len(ins) != 2:
-        return None
+        raise iv.IntervalError(
+            f"gather takes an operand and one index array, and this "
+            f"equation binds {len(ins)} operand(s) — check the hand-built "
+            f"or deserialized IR that produced it"
+        )
     operand, indices = ins
     r = len(operand.shape)
-    if r < 1 or len(indices.shape) != 2 or indices.shape[1] != 1:
-        return None
+    if r < 1:
+        raise iv.IntervalError(
+            "gather's covered row form takes rows of the operand's leading "
+            "axis, and this operand is rank-0 (shape ()) — there is no "
+            "leading axis to take rows from"
+        )
+    if len(indices.shape) != 2 or indices.shape[1] != 1:
+        raise iv.IntervalError(
+            f"gather indices have shape {indices.shape} — the covered row "
+            f"form reads them as an (N, 1) column of leading-axis row "
+            f"numbers, and this index array is not such a column"
+        )
     dn = params.get("dimension_numbers")
     if not isinstance(dn, ir.NamedTupleParam):
-        return None
+        raise iv.IntervalError(
+            f"gather carries no readable dimension_numbers (got {dn!r}) — "
+            f"the covered row form is recognized by those fields, and "
+            f"without them the take's geometry is unknown; the traced form "
+            f"records them, so check the hand-built or deserialized IR"
+        )
     fields = dict(dn.fields)
     want = {
         "offset_dims": tuple(range(1, r)),
@@ -1375,18 +1395,54 @@ def _t_gather(eqn, params, ins):
         "start_index_map": (0,),
     }
     if any(fields.get(k) != v for k, v in want.items()):
-        return None
-    if any(v != () for k, v in fields.items() if k not in want):
-        return None
-    if tuple(params.get("slice_sizes", ())) != (1,) + operand.shape[1:]:
-        return None
+        got = ", ".join(f"{k}={fields.get(k)!r}" for k in want)
+        cov = ", ".join(f"{k}={v!r}" for k, v in want.items())
+        raise iv.IntervalError(
+            f"gather dimension numbers do not collapse exactly the leading "
+            f"axis of this rank-{r} operand: got {got}, where the covered "
+            f"leading-axis row form is {cov} — a different take geometry "
+            f"has no rule here"
+        )
+    extra = {k: v for k, v in fields.items() if k not in want and v != ()}
+    if extra:
+        raise iv.IntervalError(
+            f"gather carries non-empty dimension-number field(s) beyond "
+            f"the covered three: {extra!r} — the covered row form has "
+            f"every such field (the batching fields today) empty"
+        )
+    got_ss = tuple(params.get("slice_sizes", ()))
+    want_ss = (1,) + operand.shape[1:]
+    if got_ss != want_ss:
+        raise iv.IntervalError(
+            f"gather slice_sizes {got_ss} do not take one full row: the "
+            f"covered row form takes (1, *operand.shape[1:]) = {want_ss} "
+            f"of the operand (shape {operand.shape}) per index"
+        )
     ks = []
-    for lo, hi in zip(indices.los, indices.his):
-        if lo != hi or not math.isfinite(lo) or lo != math.floor(lo):
-            return None  # dynamic or non-integral index: no exact rule
+    for i, (lo, hi) in enumerate(zip(indices.los, indices.his)):
+        if lo != hi:
+            raise iv.IntervalError(
+                f"gather index element {i} spans [{lo}, {hi}] over the "
+                f"declared box — not a single point, so no one row is THE "
+                f"taken row, and nothing here brackets a data-dependent "
+                f"take"
+            )
+        if not math.isfinite(lo) or lo != math.floor(lo):
+            raise iv.IntervalError(
+                f"gather index element {i} is the point {lo}, which is not "
+                f"a finite integer — row numbers are integers, so this "
+                f"index names no row"
+            )
         k = int(lo)
         if not 0 <= k < operand.shape[0]:
-            return None  # out of range: clamp/drop/fill is mode-dependent
+            raise iv.IntervalError(
+                f"gather index element {i} is {k}, outside the operand's "
+                f"leading axis: 0 <= {k} < {operand.shape[0]} fails "
+                f"(operand shape {operand.shape}) — out-of-range handling "
+                f"is mode-dependent (measured on jax 0.11.0: mode 'clip' "
+                f"takes the clamped row, mode 'fill' yields the fill value "
+                f"instead of any row) and is never guessed"
+            )
         ks.append(k)
     return [iv.take_rows(operand, ks)]
 

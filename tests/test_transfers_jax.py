@@ -230,7 +230,9 @@ def test_fvm_gather_static_row_definite_false_traced():
 
 def test_fvm_gather_dynamic_index_declines_traced():
     # a traced (non-point) index reaches the transfer as a real interval:
-    # decline to a noted ⊤ — clamp/drop/fill is mode-dependent, never guessed
+    # decline to a noted ⊤ — clamp/drop/fill is mode-dependent, never
+    # guessed. The note used to read "no sound rule"; strengthened — it
+    # must name the element and print ITS declared span.
     def h():
         x = any_array((3,), "float64", (0.0, 1.0))
         i = any_array((1,), "int32", (0.0, 2.0))
@@ -238,7 +240,11 @@ def test_fvm_gather_dynamic_index_declines_traced():
 
     p = run(h)
     assert p.obligations[0].status == "unknown"
-    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+    assert any(
+        "'gather' declined this form" in n
+        and "index element 0 spans [0.0, 2.0]" in n
+        for n in p.notes
+    ), p.notes
     assert "gather" not in dict(p.transfers_used)
 
 
@@ -340,3 +346,117 @@ def test_unstack_malformed_forms_cannot_be_traced():
     (e,) = jax.make_jaxpr(lambda: jnp.unstack(x, axis=-1))().eqns
     assert e.params["axis"] == 1  # normalized before binding
     assert len(e.outvars) == 2    # one output per index of axis 1
+
+
+# --- gather: traced declines name their reason with the numbers --------------
+
+
+def _gather_traced_declined(h, *frags):
+    p = run(h)  # must not raise: declines never kill the walk
+    assert p.obligations[0].status == "unknown"
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("gather", 1),)
+    assert "gather" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "'gather' declined this form" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+def test_gather_multi_column_indices_decline_traced():
+    # x[idx] with a 2-D index array traces to gather indices (2, 2, 1) —
+    # not the (N, 1) column the covered row form reads
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        return assert_(x[jnp.array([[0, 1], [1, 2]])] <= 1.0)
+
+    _gather_traced_declined(
+        h,
+        "indices have shape (2, 2, 1)",
+        "(N, 1) column",
+    )
+
+
+def test_gather_non_leading_axis_declines_traced_with_both_geometries():
+    # x[:, idx] collapses axis 1, not the leading axis: the note must
+    # print the OBSERVED dimension numbers and the COVERED ones, each
+    # bound to its side of the sentence
+    def h():
+        x = any_array((2, 3), "float64", (0.0, 1.0))
+        return assert_(x[:, jnp.array([0])] <= 1.0)
+
+    _gather_traced_declined(
+        h,
+        "got offset_dims=(0,), collapsed_slice_dims=(1,), "
+        "start_index_map=(1,)",
+        "the covered leading-axis row form is offset_dims=(1,), "
+        "collapsed_slice_dims=(0,), start_index_map=(0,)",
+    )
+
+
+def test_gather_partial_row_slice_sizes_decline_traced():
+    # a direct lax.gather that takes half a row: everything matches the
+    # covered form except slice_sizes — the note prints got and covered
+    dn = jax.lax.GatherDimensionNumbers(
+        offset_dims=(1,), collapsed_slice_dims=(0,), start_index_map=(0,)
+    )
+
+    def h():
+        x = any_array((3, 4), "float64", (0.0, 1.0))
+        y = jax.lax.gather(
+            x, jnp.array([[0], [2]]), dn, slice_sizes=(1, 2)
+        )
+        return assert_(jnp.sum(y) <= 99.0)
+
+    _gather_traced_declined(
+        h,
+        "slice_sizes (1, 2) do not take one full row",
+        "= (1, 4)",
+        "(shape (3, 4))",
+    )
+
+
+def test_gather_out_of_range_static_index_declines_traced():
+    # a static 7 into a 3-row operand reaches the transfer as the point
+    # interval [7, 7]: the failing comparison is printed with the true
+    # bound
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        return assert_(x[jnp.array([7])] <= 1.0)
+
+    _gather_traced_declined(
+        h,
+        "index element 0 is 7",
+        "0 <= 7 < 3 fails",
+        "mode-dependent",
+    )
+
+
+def test_gather_rank0_operand_declines_traced():
+    # a rank-0 gather DOES trace on jax 0.11.0 — empty offset dims, empty
+    # slice_sizes, indices (1, 0) — and reaches the transfer's rank-0
+    # decline through the real walk (audit repair: this path was first
+    # claimed hand-IR-only, measured false)
+    gdn = jax.lax.GatherDimensionNumbers(
+        offset_dims=(), collapsed_slice_dims=(), start_index_map=()
+    )
+
+    def h():
+        s = any_array((), "float64", (0.0, 1.0))
+        y = jax.lax.gather(s, jnp.zeros((1, 0), jnp.int32), gdn, slice_sizes=())
+        return assert_(y <= 9.0)
+
+    _gather_traced_declined(h, "rank-0", "no leading axis to take rows from")
+
+
+def test_gather_out_of_range_mode_behaviours_as_the_decline_states():
+    """The decline's measured fragment, measured: "mode 'clip' takes the
+    clamped row, mode 'fill' yields the fill value instead of any row".
+    If either mode stops behaving as the message states, this goes red
+    and the message must be rewritten, not trusted."""
+    x = jnp.asarray([1.0, 5.0, 2.0])
+    idx = jnp.array(7)
+    clip = x.at[idx].get(mode="clip")
+    fill = x.at[idx].get(mode="fill", fill_value=jnp.nan)
+    assert float(clip) == float(x[2])  # the clamped (last) row
+    assert bool(jnp.isnan(fill))      # the fill value, not a row

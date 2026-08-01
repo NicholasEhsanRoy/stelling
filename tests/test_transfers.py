@@ -776,28 +776,149 @@ def test_gather_rank2_row_form_lands_whole_row():
     assert "2/2" in p.obligations[0].detail  # both elements of row 1 are 9.0
 
 
-def test_gather_dynamic_index_declines_not_crashes():
-    # a non-point index interval has no exact rule: noted ⊤, never a guess
-    p = propagate(_gather_query((0.0, 2.0), 6.0))  # must not raise
+def _gather_declined(q, *frags):
+    """The decline pinned WITH its accounting: a raised decline must count
+    exactly as the returned None it replaced (status unknown, one ⊤,
+    the primitive named in unknown_primitives, no tier recorded)."""
+    p = propagate(q)  # must not raise: declines never kill the walk
     assert p.obligations[0].status == "unknown"
-    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("gather", 1),)
     assert "gather" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "'gather' declined this form" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+def test_gather_dynamic_index_declines_not_crashes():
+    # a non-point index interval has no exact rule: noted ⊤, never a
+    # guess. The note used to read "no sound rule for params {...}";
+    # strengthened, not relaxed — it must name the element and print ITS
+    # span, the right way round.
+    _gather_declined(
+        _gather_query((0.0, 2.0), 6.0),
+        "index element 0 spans [0.0, 2.0]",
+        "not a single point",
+    )
 
 
 def test_gather_out_of_range_index_declines_not_crashes():
-    # CLIP clamps, FILL_OR_DROP fills — the wedge bug class; refuse to guess
-    p = propagate(_gather_query((7.0, 7.0), 6.0))  # must not raise
-    assert p.obligations[0].status == "unknown"
-    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+    # CLIP clamps, FILL_OR_DROP fills — the wedge bug class; refuse to
+    # guess. The note prints the failing comparison with the true bound
+    # (the operand has 3 rows) and the measured mode behaviours
+    # (measured in test_transfers_jax.py::
+    # test_gather_out_of_range_mode_behaviours_as_the_decline_states).
+    _gather_declined(
+        _gather_query((7.0, 7.0), 6.0),
+        "index element 0 is 7",
+        "0 <= 7 < 3 fails",
+        "mode-dependent",
+        "never guessed",
+    )
 
 
 def test_gather_batched_form_declines_not_crashes():
-    # the batched form (jax 0.11's lu_solve pivots gather) is not covered
-    p = propagate(
-        _gather_query((1.0, 1.0), 6.0, {"operand_batching_dims": (0,)})
-    )  # must not raise
-    assert p.obligations[0].status == "unknown"
-    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+    # the batched form (jax 0.11's lu_solve pivots gather) is not covered:
+    # the note must name the offending non-empty field with its value
+    _gather_declined(
+        _gather_query((1.0, 1.0), 6.0, {"operand_batching_dims": (0,)}),
+        "non-empty dimension-number field(s)",
+        "'operand_batching_dims': (0,)",
+    )
+
+
+def test_gather_arity_decline_names_the_operand_count():
+    # hand-IR-only: a traced gather binds operand + indices
+    idx = var(0, aval((1, 1), "int32"))
+    y = var(1, aval((1,)))
+    pred, out = var(2, aval((1,), "bool")), var(3, aval((1,), "bool"))
+    q = close(
+        [
+            any_eqn(idx, 1.0, 1.0),
+            eqn("gather", [idx], y, _gather_row_params(1, ())),
+            eqn("le", [y, lit(6.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _gather_declined(q, "binds 1 operand(s)")
+
+
+def test_gather_rank0_operand_decline_names_the_missing_axis():
+    # ALSO traced-reachable: lax.gather on a scalar with empty dims traces
+    # on jax 0.11.0 (audit repair — the first claim here was
+    # "hand-IR-only", measured false; the traced pin lives in
+    # test_transfers_jax.py::test_gather_rank0_operand_declines_traced).
+    # This jax-free hand-IR pin is kept beside it.
+    idx = var(0, aval((1, 1), "int32"))
+    x0 = var(1, aval(()))
+    y = var(2, aval((1,)))
+    pred, out = var(3, aval((1,), "bool")), var(4, aval((1,), "bool"))
+    q = close(
+        [
+            any_eqn(idx, 0.0, 0.0),
+            any_eqn(x0, 0.0, 1.0),
+            eqn("gather", [x0, idx], y, _gather_row_params(1, ())),
+            eqn("le", [y, lit(6.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _gather_declined(q, "rank-0", "no leading axis to take rows from")
+
+
+def test_gather_missing_dimension_numbers_decline_hand_ir():
+    # hand-IR-only: the traced form always records dimension_numbers
+    # (pinned in test_transfers_jax.py); here the param is simply absent
+    idx = var(0, aval((1, 1), "int32"))
+    y = var(1, aval((1,)))
+    pred, out = var(2, aval((1,), "bool")), var(3, aval((1,), "bool"))
+    q = close(
+        [
+            any_eqn(idx, 1.0, 1.0),
+            eqn(
+                "gather",
+                [_arr_lit([1.0, 5.0, 2.0], (3,)), idx],
+                y,
+                (("slice_sizes", (1,)),),
+            ),
+            eqn("le", [y, lit(6.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _gather_declined(q, "no readable dimension_numbers", "got None")
+
+
+def test_gather_non_integral_and_non_finite_points_decline_hand_ir():
+    # hand-IR-only THROUGH THE WALK: a traced gather's index array is an
+    # integer array, so a fractional or infinite POINT interval cannot
+    # reach the transfer from a traced program — but a hand declaration
+    # routed as float64 can, and the real walk drives it here.
+    def q(lo, hi):
+        idx = var(0, aval((1, 1)))  # float64 declaration as index data
+        y = var(1, aval((1,)))
+        pred, out = var(2, aval((1,), "bool")), var(3, aval((1,), "bool"))
+        return close(
+            [
+                any_eqn(idx, lo, hi),
+                eqn(
+                    "gather",
+                    [_arr_lit([1.0, 5.0, 2.0], (3,)), idx],
+                    y,
+                    _gather_row_params(1, ()),
+                ),
+                eqn("le", [y, lit(6.0)], pred),
+                eqn("stelling_assert", [pred], out),
+            ],
+            [out],
+        )
+
+    _gather_declined(
+        q(0.5, 0.5), "index element 0 is the point 0.5", "not a finite integer"
+    )
+    _gather_declined(q(float("inf"), float("inf")), "the point inf")
 
 
 def _transpose_query(perm, threshold):
