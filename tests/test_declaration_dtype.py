@@ -604,9 +604,12 @@ def test_the_direction_words_in_a_refusal_are_true(dtype, lo, hi, expect):
     Clamping both ends into `[d_lo, d_hi]` before choosing the direction word
     collapsed them onto the same value while keeping their labels, so
     `uint8 (-3, -1)` read *"0 below and 0 above"* — 0 is not below `[-3, -1]`.
-    A re-audit measured the words false in 77 of 113 cases while the numbers
-    stayed right, and the suite could not catch it because the only pinned
-    case was one of the 36 that happened to be correct.
+    A re-audit measured the words false in a MAJORITY of refused integer boxes
+    while the numbers stayed right (the original "77 of 113" population was
+    not retained; a scripted census re-derives 69 of 94 —
+    stelling-sweeps/verify_9b555_replacements.py), and the suite could not
+    catch it because the only pinned case was one where the collapse happened
+    to be correct.
     """
     with pytest.raises(ValueError) as exc:
         _declare(dtype, lo, hi)

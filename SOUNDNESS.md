@@ -567,10 +567,14 @@ verdicts:
      enumerated. Precision is a separate mechanism, so missing a
      recovery costs tightness and never soundness.
 
-  Four adversarial re-attack rounds ran under the standing
+  Three adversarial re-attack rounds ran under the standing
   UNSOUND-fixes-are-re-attacked rule, returning 2 → 1 → 0 further
   UNSOUND; the round that returned zero was the one whose fix had
-  stopped enumerating cases. Every finding is a permanent regression
+  stopped enumerating cases. (Correction: this entry said "Four" for a
+  sequence with three results. The same revision's ledger counts "three
+  successive fix rounds" for the identical 2 → 1 → 0, and its successor
+  enumerates exactly three — the count-error class recorded in
+  CONTRIBUTING.md, this instance inside the soundness log itself.) Every finding is a permanent regression
   test, each verified to **fail against the unfixed code** — two claims
   in this pass reached a report because an edit was *made* rather than
   because it *landed* (`design/lessons-ledger.md` L15). **No recorded

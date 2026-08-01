@@ -171,8 +171,11 @@ def _int_neighbours(d_lo: int, d_hi: int, lo: float, hi: float) -> str:
 
     NO RATIO IS QUOTED HERE, deliberately. This comment carried two — *"false
     in 77 of 113 cases"* and, below, *"dead in 877 of 877 calls"* — and a
-    later audit re-derived them as **351 of 433** over a stated grid and **25
-    calls** over the whole suite. Neither original population is recoverable.
+    later audit re-derived them as **351 of 433** over a grid that was itself
+    not retained, and **25 calls** over the whole suite (the second confirmed
+    by an instrumented suite run; the first re-derived as a 69-of-94 majority
+    by the scripted census in stelling-sweeps/verify_9b555_replacements.py).
+    Neither original population is recoverable.
     They are the fifth and sixth instances of a count-error class this project
     has recorded, and they sat inside the comment documenting this helper's own
     failures. The measured conclusion (docs/proposed-unit-mechanism.md) is that

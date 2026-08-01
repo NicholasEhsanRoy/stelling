@@ -387,8 +387,10 @@ not an edit *landed*. **Verify by removal, never by assertion.** This is
 L11's move (price a hand step by re-running without it) applied to the
 project's own evidence: the counterfactual is the evidence, and without
 it a regression test is a comment with a green tick.
-**(b)** Two witnesses in one pass (`design/three-rows-*`, fix rounds
-3–4). (i) The claim "a joined `cond` output is tainted if any branch
+**(b)** Two witnesses in one pass (fix rounds 3–4 of the three-rows
+pass; the `design/three-rows-*` documents this entry originally cited
+were never committed — the surviving witnesses are the descriptions
+below and the regression tests in `tests/test_three_rows*.py`). (i) The claim "a joined `cond` output is tainted if any branch
 tainted it" reached the build report because the edit implementing it was
 *made*; the edit had silently no-op'd on an indentation mismatch, and
 `branch_taints` sat declared-appended-never-read while every `cond` join

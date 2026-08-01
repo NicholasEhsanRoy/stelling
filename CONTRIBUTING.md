@@ -865,8 +865,9 @@ one. `_int_neighbours` raised the `OverflowError`, collapsed the words and
 crashed on the `None`; printing `inf` was `_smallest_at_or_above` surfacing
 through `_neighbours`. Saying "one small helper" made the sequence sound tighter
 than it is. And the ratio that used to sit in this sentence was re-derived as
-351 of 433 rather than 77 of 113, so it is gone — see the count-error norm
-below.
+351 of 433 rather than 77 of 113 — over a grid that was itself not retained;
+a scripted census (stelling-sweeps/verify_9b555_replacements.py) confirms the
+majority at 69 of 94 — so the figure is gone; see the count-error norm below.
 
 **And the fixes were audited only by accident of timing — that accident is what
 this gate exists to replace.** The file changed under one auditor mid-run, so it

@@ -98,12 +98,18 @@ here is the conclusive direction: a real implementation can only break less.
   decline. Different fix, smaller.
 
   *This line said "seven" while listing eight names, and the error propagated
-  into a later session's brief. Re-measured with the script that produced the
-  table: **8 silent-only, 5 loud-only, 13 both, and 20 that cannot decline at
-  all.** The earlier "33 both" was those 13 plus those 20 conflated — a
-  three-way split reported where the third bucket was two buckets. Both are the
-  count-error class recorded in CONTRIBUTING.md, and this one was made inside a
-  document about message quality.*
+  into a later session's brief. The verified count is the list itself: eight
+  rows. A finer partition of the 46-row registry (silent-only / loud-only /
+  both / cannot-decline) was corrected here as "8, 5, 13, 20" from a script
+  that was not retained, and it does not re-derive: a source census at this
+  proposal's revision gives 7 / 11 / 14 / 14
+  (stelling-sweeps/verify_9b555_replacements.py), and an execution probe
+  counted 13 rows with a reachable no-reason ⊤, 3 of them silent-only under
+  strict reachability. Three instruments, three partitions — the partition is
+  operationalization-dependent, so none is quoted as THE count. The earlier
+  "33 both" conflated two buckets of one partition. All of these are the
+  count-error class recorded in CONTRIBUTING.md, made inside documents about
+  message quality.*
 - **It has not been measured on external code.** Both external agents reached
   escalation; whether a first-time user on the default path hits this is
   unmeasured, and re-running them against the fixed tool is the measurement.
