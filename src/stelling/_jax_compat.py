@@ -17,7 +17,9 @@ from __future__ import annotations
 import enum
 import functools
 import math
+import sys
 import warnings
+from fractions import Fraction
 
 import jax
 import jax.extend.core as jex_core
@@ -27,6 +29,11 @@ import jax.tree_util
 import numpy as np
 
 from stelling import ir
+from stelling._bound_spelling import (
+    ACCEPTED_SPELLINGS,
+    binary64_image,
+    declared_bound_value,
+)
 from stelling._optional import TESTED_JAX_SERIES, jax_series_tested
 
 __all__ = [
@@ -445,8 +452,12 @@ def _dtype_holds_a_value_in(dt: str, lo: float, hi: float) -> tuple[bool, str]:
 
 def _exact_at_or_above(dt: str, x):
     """The least value of dtype ``dt`` that is ``>= x``, with ``x`` an EXACT
-    python number (int or float) and every deciding comparison done in
-    python, where int-vs-float compares are exact.
+    python number (int, Fraction, or float) and every deciding comparison
+    done in python, where int-vs-float and Fraction-vs-float compares are
+    exact. Since the spelling classifier landed, the ordinary caller
+    passes a Fraction; ``float(x)`` in the wide-dtype path below never
+    overflows because the caller clamps ``x`` into the dtype's finite
+    range first.
 
     The raw-endpoint twin of :func:`_smallest_at_or_above`, which takes an
     already-rounded binary64 and is therefore off by one dtype step exactly
@@ -527,7 +538,8 @@ def _exact_neighbours(dt: str, lo, hi) -> str:
 
 def _dtype_holds_a_value_in_exact(dt: str, lo, hi) -> tuple[bool, str]:
     """Does the closed interval ``[lo, hi]`` — RAW declared endpoints, as
-    exact python numbers — contain any value of float dtype ``dt``?
+    exact values (int/Fraction, or a float for ±inf and the signed
+    zeros) — contain any value of float dtype ``dt``?
 
     The raw-endpoint twin of :func:`_dtype_holds_a_value_in`'s float branch,
     which receives endpoints already rounded to binary64 and therefore
@@ -586,6 +598,60 @@ def _dtype_holds_a_value_in_exact(dt: str, lo, hi) -> tuple[bool, str]:
     return False, (
         f"no {dt} value lies in the interval — it falls inside a gap between "
         f"representable values." + _exact_neighbours(dt, lo, hi)
+    )
+
+
+def _int_dtype_holds_a_value_in_exact(dt: str, lo, hi) -> tuple[bool, str]:
+    """Integer-dtype twin of :func:`_dtype_holds_a_value_in_exact`: does
+    the closed interval ``[lo, hi]`` — RAW declared endpoints, as exact
+    rationals (or an infinite float meaning "unbounded") — contain any
+    value of integer dtype ``dt``?
+
+    The landed gap-edge re-check screened integer dtypes out entirely, on
+    an argument that was TRUE for the only narrowing spellings then
+    admitted: an integer-valued narrowing endpoint and its rounded image
+    both sit at magnitude >= 2**53 on the same side, outside every
+    loss-free integer dtype's range, so raw and rounded endpoints compare
+    identically against every value of the dtype. Exact-rational
+    spellings break that premise: a FRACTIONAL bound narrows at any
+    magnitude — a lo one part in 10**19 below 1 rounds UP onto 1.0 — so
+    the recorded box can hold an integer the declared interval excludes,
+    the same admitted-empty class the float re-check exists for, one
+    dtype family over. For integer-valued endpoints this check and the
+    rounded one agree by the screened argument above, so unscreening
+    moves no previously admitted integer-spelled declaration.
+
+    Same range lookup as the rounded integer branch of
+    :func:`_dtype_holds_a_value_in`, and the same clamp job done by the
+    two conditional clamps alone (the rounded branch's extra
+    outside-the-range pre-test is subsumed here: an interval wholly
+    outside the range makes ``first > last`` through the clamps, and the
+    clamps also absorb an infinite endpoint before ceil/floor can see
+    it — ``math.ceil(-inf)`` raises, which is the crash the rounded
+    branch's pre-test exists to prevent). Every deciding comparison is
+    exact: python compares an int against a Fraction without rounding
+    either. Admit-when-unsure for a dtype neither lookup knows,
+    mirroring the rounded twin — a wrong refusal here kills a legitimate
+    envelope outright.
+    """
+    from stelling.propagate import _INT_DTYPE_BOUNDS
+
+    ints = _INT_DTYPE_BOUNDS.get(dt)  # has `bool`, which jnp.iinfo does not
+    if ints is None:
+        try:
+            info = jnp.iinfo(np.dtype(dt))
+            ints = (int(info.min), int(info.max))
+        except (TypeError, ValueError):
+            return True, ""
+    d_lo, d_hi = ints
+    first = d_lo if lo <= d_lo else math.ceil(lo)
+    last = d_hi if hi >= d_hi else math.floor(hi)
+    if first <= last:
+        return True, ""
+    return False, (
+        f"{dt} represents the integers [{d_lo}, {d_hi}] and the interval "
+        f"contains none of them."
+        + _int_neighbours(d_lo, d_hi, lo, hi)
     )
 
 
@@ -698,17 +764,82 @@ def any_array(shape, dtype, bounds):
             f"negative dims in every concrete context), so the declared "
             f"set is empty; refusing at declaration time"
         )
-    lo, hi = float(bounds[0]), float(bounds[1])
-    if not lo <= hi:  # also rejects NaN: an empty declared set verifies
-        raise ValueError(  # everything vacuously, and is never what anyone meant
+    # WHAT VALUE DOES EACH BOUND DECLARE — asked FIRST, of the caller's own
+    # objects, in the one exact domain every judgment below shares
+    # (stelling._bound_spelling: exact rationals, or binary64's own ±inf and
+    # nan). Emptiness, the infinite point, storability, narrowing direction
+    # and the raw-endpoint emptiness re-check are all computed from these
+    # exact values and their binary64 images, so the decision is a function
+    # of (value, dtype) and never of the spelling. The previous shape of
+    # this step, `float(bounds[0])`, silently rounded every spelling the
+    # storability loop's type test did not name — measured, a longdouble
+    # point past 2**53 recorded a box DISJOINT from the declared one, and a
+    # claim false at the only declared point came back VERIFIED through
+    # preconditions.check, while the python-int spelling of the identical
+    # declaration was refused.
+    #
+    # A spelling the classifier does not know is REFUSED here, before any
+    # conversion. That default-deny is the whole coverage story for
+    # spellings not enumerated anywhere (three "a case the author did not
+    # enumerate" defects in this layer say the next one is coming): an
+    # unknown numeric type cannot reach float() at all. Routes are covered
+    # the same way: every route into the declaration layer ends in this
+    # function and passes the caller's own objects through unconverted, so
+    # each inherits this decision — the route-agreement tests measure that
+    # for the hand, sugar and template routes, and the AST scan in
+    # tests/test_declaration_routes_agree.py flags the pre-converting SHAPE
+    # in any module naming any_array (rails that catch drift, not proofs
+    # that no fifth route exists).
+    lo_x = declared_bound_value(bounds[0])
+    hi_x = declared_bound_value(bounds[1])
+    for name, raw, v in (("lo", bounds[0], lo_x), ("hi", bounds[1], hi_x)):
+        if v is None:
+            raise ValueError(
+                f"any_array bound {name}={raw!r} (type "
+                f"{type(raw).__qualname__}) is not an accepted bound "
+                f"spelling: a bound must be {ACCEPTED_SPELLINGS}. It is "
+                f"refused rather than converted, because a conversion whose "
+                f"exactness this layer cannot judge is how a declared bound "
+                f"gets silently rounded. A str like '0.1' should be spelled "
+                f"Decimal('0.1') if the exact decimal value is meant, or 0.1 "
+                f"if the binary64 value is"
+            )
+    # the binary64 images ARE the endpoints the IR records: identical to
+    # float() wherever float() returns a finite answer, and total where
+    # float() raises (see _bound_spelling.binary64_image)
+    lo, hi = binary64_image(lo_x), binary64_image(hi_x)
+    lo_is_inf = isinstance(lo_x, float) and math.isinf(lo_x)
+    hi_is_inf = isinstance(hi_x, float) and math.isinf(hi_x)
+    if (
+        # the image comparison, not the exact one, DELIBERATELY: it mirrors
+        # the old float() check bit for bit, so the raw-order-inverted class
+        # whose images collapse onto equality (int64 (2**53+1, 2**53)) stays
+        # admitted — parent parity on a disclosed blind spot, not a change
+        # smuggled in with the spelling work. Also rejects NaN: an empty
+        # declared set verifies everything vacuously, and is never what
+        # anyone meant.
+        not lo <= hi
+        # the two clauses the images cannot see: a declared-infinite
+        # endpoint against a FINITE value so large its image is also
+        # infinite — the images tie, but lo=+inf above any finite hi (or
+        # hi=-inf below any finite lo) is an empty declared set
+        or (lo_is_inf and lo_x > 0 and not (hi_is_inf and hi_x > 0))
+        or (hi_is_inf and hi_x < 0 and not (lo_is_inf and lo_x < 0))
+    ):
+        raise ValueError(
             f"any_array bounds ({bounds[0]!r}, {bounds[1]!r}) declare an empty "
             f"set; refusing at declaration time"
         )
-    if lo == hi and (lo == float("inf") or lo == float("-inf")):
+    if lo_is_inf and hi_is_inf and lo_x == hi_x:
         # under the stamped ℝ semantics an infinite endpoint means
         # "unbounded", so (inf, inf) contains no real — an empty set that
         # slipped the check above and yielded vacuous definite verdicts
-        # (audit-gate finding 3)
+        # (audit-gate finding 3). Judged on the EXACT values, never the
+        # images: a FINITE bound whose image is infinite used to land here
+        # through the longdouble spelling and be told it declared "an
+        # infinite point" — a false diagnosis for finite, distinct declared
+        # bounds (blinded lens on the phase1 branch). Such a bound is now
+        # refused by the storability guard below, with the true cause.
         raise ValueError(
             f"any_array bounds ({bounds[0]!r}, {bounds[1]!r}) declare an "
             f"empty real set (an infinite point has no members under ℝ "
@@ -716,8 +847,11 @@ def any_array(shape, dtype, bounds):
         )
     dt = str(np.dtype(dtype))
     exact_narrowed = False
-    for name, raw in (("lo", bounds[0]), ("hi", bounds[1])):
-        # The IR stores bounds as binary64, and an integer bound past 2**53
+    for name, raw, v, stored in (
+        ("lo", bounds[0], lo_x, lo),
+        ("hi", bounds[1], hi_x, hi),
+    ):
+        # The IR stores bounds as binary64, and a value binary64 cannot hold
         # does not survive that. But ONLY A NARROWING LOSS IS A PROBLEM.
         # Rounding `lo` DOWN or `hi` UP widens the stored box, which is an
         # over-approximation and sound — every transfer's answer over it still
@@ -729,24 +863,30 @@ def any_array(shape, dtype, bounds):
         # a refusal, though `float(2**63-1)` rounds UP and only widens it.
         # A re-audit caught that as a false rejection of a legitimate
         # envelope, which is the failure this layer must not have.
-        # `np.integer` is NOT a python int, and `_is_bounds_pair` explicitly
-        # accepts it — so a numpy-typed bound skipped this guard entirely and
+        # `np.integer` is NOT a python int, and an earlier type test named
+        # only `int` — so a numpy-typed bound skipped this guard entirely and
         # got the EMPTY-set message, which names the wrong cause on exactly
-        # the case this guard exists for. Re-audit.
-        # `int(raw)` first, and the comparison in PYTHON ints. numpy compares a
-        # float64 against an int64 by converting the int to float64, which
-        # discards exactly the inexactness under test: `float(np.int64(2**63-1))
-        # != np.int64(2**63-1)` is False while the python-int form is True.
+        # the case this guard exists for. Re-audit. The third escape was the
+        # rest of the type list: `isinstance(raw, (int, np.integer))` let
+        # every float-ish spelling of the same values through unjudged (the
+        # longdouble false VERIFIED above). The comparisons here are now
+        # EXACT BY CONSTRUCTION — `v` is the classifier's rational and
+        # python compares a Fraction against a float without rounding
+        # either — where the old code had to say "int(raw) first, compare
+        # in python ints" to dodge numpy converting an int64 to float64 and
+        # discarding exactly the inexactness under test.
         #
         # AND ONLY A DTYPE THAT CAN LOSE A VALUE HAS A PROBLEM. The second
         # version refused a narrowing bound for EVERY dtype, which was the
-        # same false-rejection class one step over: `float(v)` is the nearest
-        # binary64 to `v`, so no binary64 value lies strictly between them,
-        # and for a dtype whose values all ARE binary64 values (every REAL
-        # dtype jax builds arrays in except int64 and uint64; complex keeps
-        # refusing by policy, no claim either way — see
-        # `_narrowing_can_lose_values`) the recorded box still CONTAINS
-        # every declared dtype value. Measured false refusals: `float64
+        # same false-rejection class one step over: `stored` is the nearest
+        # binary64 to `v`, so no binary64 value lies strictly between them
+        # (anything strictly between would be nearer), and for a dtype whose
+        # values all ARE binary64 values (every REAL dtype jax builds arrays
+        # in except int64 and uint64; complex keeps refusing by policy, no
+        # claim either way — see `_narrowing_can_lose_values`) the recorded
+        # box still CONTAINS every declared dtype value. That argument never
+        # needed `v` to be an integer, so it covers the fractional spellings
+        # too. Measured false refusals of the dtype-blind version: `float64
         # (0, 10**23)`, `float32 (0, 10**23)`, `int32 (0, 10**23)` — all
         # narrowing as real intervals, none dropping a single declared
         # dtype value. int64 and uint64 keep the refusal below
@@ -754,26 +894,71 @@ def any_array(shape, dtype, bounds):
         # endpoint can round ONTO a dtype value just OUTSIDE the declared
         # interval, so the admission is noted in `exact_narrowed` and the
         # emptiness of the DECLARED set is re-judged exactly, below.
-        exact = (
-            isinstance(raw, (int, np.integer))
-            and not isinstance(raw, (bool, np.bool_))
-        )
-        if not exact:
+        if not isinstance(v, Fraction):
+            # a float from the classifier: ±inf or a signed zero, each
+            # held by binary64 exactly, so the recording is exact by
+            # identity (NaN cannot reach here — refused above)
             continue
-        v = int(raw)
-        stored = float(v)
-        narrows = (stored > v) if name == "lo" else (stored < v)
-        if stored != v and narrows and _narrowing_can_lose_values(dt):
+        if not math.isfinite(stored):
+            # a FINITE declared value whose nearest binary64 is ±inf: there
+            # is nothing the IR can record for it. This was two defects,
+            # one value: `float(10**400)` raised a bare OverflowError out
+            # of the layer, while `np.longdouble('1e400')` — the same
+            # magnitude, different spelling — silently recorded `inf`
+            # (measured; the phase1 lens named the escape). One refusal now
+            # covers every spelling, because it fires on the VALUE's image.
             raise ValueError(
-                f"any_array bound {name}={raw!r} is not representable as the "
-                f"binary64 the IR stores; it would be recorded as {stored!r}, "
-                f"which NARROWS the declared set — the tool would reason about "
-                f"fewer values than you declared. (Rounding the other way is "
-                f"admitted: it widens the box, and an over-approximation still "
-                f"contains every executed value.) Integer bounds that must be "
-                f"exact as doubles satisfy |bound| <= 2**53"
+                f"any_array bound {name}={raw!r} lies outside binary64's "
+                f"finite range [{(-sys.float_info.max)!r}, "
+                f"{sys.float_info.max!r}], and the IR stores bounds as "
+                f"binary64 — this bound cannot be recorded at all, and "
+                f"recording its rounded image ({stored!r}) would declare an "
+                f"unbounded side you did not declare. Use an infinite bound "
+                f"if unbounded is meant, or a bound inside the range"
             )
-        if stored != v and narrows:
+        if stored == v:
+            continue  # recorded exactly; nothing to judge
+        narrows = (stored > v) if name == "lo" else (stored < v)
+        if narrows and _narrowing_can_lose_values(dt):
+            if v.denominator == 1:
+                # integer-valued bound, any spelling: the parent's text,
+                # byte for byte. Its "fewer values" claim is true here —
+                # the bound itself is a declared value the recorded box
+                # excludes (and python-int transcripts are pinned
+                # byte-identical).
+                raise ValueError(
+                    f"any_array bound {name}={raw!r} is not representable as the "
+                    f"binary64 the IR stores; it would be recorded as {stored!r}, "
+                    f"which NARROWS the declared set — the tool would reason about "
+                    f"fewer values than you declared. (Rounding the other way is "
+                    f"admitted: it widens the box, and an over-approximation still "
+                    f"contains every executed value.) Integer bounds that must be "
+                    f"exact as doubles satisfy |bound| <= 2**53"
+                )
+            # a FRACTIONAL bound on a dtype-level-refusing dtype: the
+            # integer text's "fewer values than you declared" asserts a
+            # dropped dtype value, which the dtype gate never establishes
+            # per bound — false for (Decimal('0.1'), ...) on int64, whose
+            # shaved sliver holds no integer at all, while
+            # longdouble(2**54 + 1.5) genuinely drops the int64 value
+            # 2**54 + 1 (both measured; blinded lens, repair round 1).
+            # And the |bound| <= 2**53 advice is about integer bounds. So
+            # this text states the dtype-level POLICY as the cause and
+            # asserts neither direction — it must also stay true for
+            # complex and unknown dtypes, which reach here by policy with
+            # no dropped-value claim made either way.
+            raise ValueError(
+                f"any_array bound {name}={raw!r} is not representable as "
+                f"the binary64 the IR stores; it would be recorded as "
+                f"{stored!r}, which NARROWS the declared interval. {dt} "
+                f"refuses every narrowing bound as a dtype-level policy: "
+                f"for this dtype a narrowed recording is not established "
+                f"to contain every declared dtype value, and no per-bound "
+                f"exception is made. (Rounding the other way is admitted: "
+                f"it widens the box, and an over-approximation still "
+                f"contains every executed value.)"
+            )
+        if narrows:
             # admitted through the dtype gate: no dtype value was DROPPED,
             # but the recorded endpoint moved into the interval's interior,
             # so the rounded endpoints can no longer answer whether the
@@ -791,24 +976,33 @@ def any_array(shape, dtype, bounds):
         return _any_p.bind(shape=dims, dtype=dt, lo=lo, hi=hi)
     holds, why = _dtype_holds_a_value_in(dt, lo, hi)
     if holds and exact_narrowed:
-        # THE GAP-EDGE RE-CHECK. A narrowing integer endpoint can round ONTO
-        # a representable value at the edge of a gap the declared interval
+        # THE GAP-EDGE RE-CHECK. A narrowing endpoint can round ONTO a
+        # representable value at the edge of a gap the declared interval
         # sits inside: `float64 (2**53+1, 2**53+1)` records `[2**53, 2**53]`
         # — inhabited, while the caller's interval holds no float64 at all,
         # so every claim over it would be vacuous. The rounded check above
         # cannot see this (it is handed the rounded endpoints), so the
-        # emptiness question is re-asked against the RAW endpoints in exact
-        # python arithmetic. ONE DIRECTION ONLY: for these dtypes each
-        # endpoint's shaved sliver holds no dtype value, so rounded-EMPTY
-        # already implies declared-empty — a rounded refusal never needs the
-        # exact pass and keeps its message.
+        # emptiness question is re-asked against the RAW endpoints — the
+        # classifier's exact values, so a longdouble, Decimal or Fraction
+        # spelling is re-judged at the value it declared, where the previous
+        # version pushed non-int spellings back through float() and judged
+        # the rounded value it had just been told not to trust. ONE
+        # DIRECTION ONLY: each narrowing endpoint's shaved sliver lies
+        # strictly between the value and its nearest binary64, so it holds
+        # no value of a dtype whose values are all binary64 values, and
+        # rounded-EMPTY already implies declared-empty — a rounded refusal
+        # never needs the exact pass and keeps its message.
         #
-        # Integer dtypes are screened out because there the rounded answer
-        # IS the raw answer: a narrowing endpoint and its rounded image both
-        # sit at magnitude >= 2**53 on the same side, every loss-free
-        # integer dtype's range sits strictly inside (-(2**53), 2**53), so
-        # raw and rounded endpoints compare identically against every value
-        # of the dtype.
+        # Integer dtypes get their own exact twin now. They used to be
+        # screened out on the argument that a narrowing INTEGER endpoint and
+        # its image both sit beyond every loss-free integer dtype's range —
+        # true, but only for integer-valued bounds. A fractional bound
+        # narrows at any magnitude (Decimal('1') minus one part in 10**19
+        # rounds UP onto 1.0), so an integer dtype can be handed a recorded
+        # box holding an integer the declared interval excludes — the same
+        # admitted-empty class, one dtype family over. For integer-valued
+        # bounds the exact twin and the rounded check agree by the screened
+        # argument, so no integer-spelled decision moves.
         #
         # Both-endpoint-WIDENING declarations are deliberately NOT re-judged:
         # the parent admitted those (the rounded box inhabits — e.g.
@@ -817,20 +1011,10 @@ def any_array(shape, dtype, bounds):
         # scope. Parity, not endorsement.
         from stelling.propagate import _is_integer_dtype
 
-        if not _is_integer_dtype(dt):
-            raw_lo, raw_hi = (
-                # ints stay python ints (exact); everything else through
-                # float(), which is value-preserving for float64-and-under —
-                # a wider np.floating (longdouble) rounds here exactly as it
-                # already did at the top of this function: the known
-                # bound-TYPE item, out of scope
-                int(b)
-                if isinstance(b, (int, np.integer))
-                and not isinstance(b, (bool, np.bool_))
-                else float(b)
-                for b in (bounds[0], bounds[1])
-            )
-            holds, why = _dtype_holds_a_value_in_exact(dt, raw_lo, raw_hi)
+        if _is_integer_dtype(dt):
+            holds, why = _int_dtype_holds_a_value_in_exact(dt, lo_x, hi_x)
+        else:
+            holds, why = _dtype_holds_a_value_in_exact(dt, lo_x, hi_x)
     if not holds:
         raise ValueError(
             f"any_array bounds ({bounds[0]!r}, {bounds[1]!r}) declare a set "
@@ -856,11 +1040,26 @@ def _is_array_prototype(x) -> bool:
     return hasattr(x, "shape") and hasattr(x, "dtype")
 
 
+def _is_bound_atom(v) -> bool:
+    """One element of a ``(lo, hi)`` bounds pair — for ROUTE DISAMBIGUATION
+    only: is ``bounds`` one broadcast pair, or a pytree of per-leaf pairs?
+    That question needs exactly "could this element instead be a pytree
+    CONTAINER of bounds" (a tuple/list/dict, or the ``None`` that marks a
+    static-leaf position), so anything else is an atom. The former
+    isinstance list of number types re-diagnosed every unknown spelling as
+    "not a pair" — a second, weaker judgment upstream of the real one. The
+    JUDGMENT of each atom is :func:`any_array`'s alone: family members get
+    their decision, everything else gets the refusal naming the family, and
+    both routes emit the same bytes because the sugar passes the atom
+    through untouched."""
+    return not (v is None or isinstance(v, (tuple, list, dict)))
+
+
 def _is_bounds_pair(b) -> bool:
     return (
         isinstance(b, (tuple, list))
         and len(b) == 2
-        and all(isinstance(v, (int, float, np.integer, np.floating)) for v in b)
+        and all(_is_bound_atom(v) for v in b)
     )
 
 

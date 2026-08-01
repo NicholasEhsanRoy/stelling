@@ -77,8 +77,13 @@ solver installed plus an explicit timeout.
 from __future__ import annotations
 
 import math
+import sys
 from dataclasses import dataclass, replace
 from typing import Callable
+
+# binary64's largest finite magnitude, for the one authoring refusal that
+# names the storable range — the same number any_array's refusal quotes
+_F_MAX = sys.float_info.max
 
 __all__ = [
     "Contract",
@@ -297,14 +302,41 @@ def _closed_range(template: str, name: str, rng):
     envelope (NaN fails ``lo <= hi``), and a non-finite endpoint is
     refused outright — these templates pose bounded closed envelopes.
     """
-    # VALIDATE on the float image, RETURN the caller's own values. Returning
-    # the floats was the fourth route into a soundness hole found three times
-    # already: `any_array`'s storability guard keys on the operand's type, so a
-    # pre-converted bound arrives rounded and the guard never sees the value it
-    # exists to judge. Measured: `_closed_range("t", "n", (0, 2**53 + 1))`
-    # returned `9007199254740992.0`, which both mis-declared the envelope AND
-    # printed the wrong number into the contract's own requires-description.
-    lo, hi = float(rng[0]), float(rng[1])
+    # VALIDATE on the exact classified value, RETURN the caller's own values.
+    # Returning floats was the fourth route into a soundness hole found three
+    # times already: `any_array`'s storability guard judges the operand it is
+    # handed, so a pre-converted bound arrives rounded and the guard never
+    # sees the value it exists to judge. Measured: `_closed_range("t", "n",
+    # (0, 2**53 + 1))` returned `9007199254740992.0`, which both mis-declared
+    # the envelope AND printed the wrong number into the contract's own
+    # requires-description. Validating THROUGH float() had the same class of
+    # hole one notch smaller — `float('0.25')` validated a str the harness
+    # then re-rounded, and `float(10**400)` escaped as a bare OverflowError —
+    # so validation now runs on the same exact classification any_array
+    # decides with (stelling._bound_spelling, jax-free and numpy-lazy, so
+    # authoring stays eager and bare-environment). Spellings outside the
+    # classifier's closed family are refused HERE, at authoring, with the
+    # family named; the decision for everything accepted is unchanged and is
+    # still made by any_array at trace time, on the caller's own values.
+    from stelling._bound_spelling import (
+        ACCEPTED_SPELLINGS,
+        binary64_image,
+        declared_bound_value,
+    )
+
+    lo_x = declared_bound_value(rng[0])
+    hi_x = declared_bound_value(rng[1])
+    for v, x in ((rng[0], lo_x), (rng[1], hi_x)):
+        if x is None:
+            raise ValueError(
+                f"{template}: {name} endpoint {v!r} (type "
+                f"{type(v).__qualname__}) is not an accepted bound "
+                f"spelling: a bound must be {ACCEPTED_SPELLINGS}. It is "
+                f"refused rather than converted, because a conversion whose "
+                f"exactness this layer cannot judge is how a declared bound "
+                f"gets silently rounded — refusing at authoring time"
+            )
+    lo, hi = binary64_image(lo_x), binary64_image(hi_x)
     if not lo <= hi:
         raise ValueError(
             f"{template}: {name} = ({rng[0]!r}, {rng[1]!r}) declares an "
@@ -312,10 +344,25 @@ def _closed_range(template: str, name: str, rng):
             f"authoring time"
         )
     if not (math.isfinite(lo) and math.isfinite(hi)):
+        if isinstance(lo_x, float) or isinstance(hi_x, float):
+            # a genuinely infinite declared endpoint (the classifier
+            # returns a float only for ±inf/nan, and nan was refused above)
+            raise ValueError(
+                f"{template}: {name} = ({rng[0]!r}, {rng[1]!r}) has a "
+                f"non-finite endpoint; this template poses bounded closed "
+                f"envelopes — refusing at authoring time"
+            )
+        # both endpoints are FINITE declared values, so at least one lies
+        # outside binary64's finite range: "non-finite endpoint" would be a
+        # false diagnosis (the phase1 lens caught exactly that message on
+        # the longdouble spelling), and float() on the int spelling used to
+        # escape as a bare OverflowError before any message at all
         raise ValueError(
-            f"{template}: {name} = ({rng[0]!r}, {rng[1]!r}) has a "
-            f"non-finite endpoint; this template poses bounded closed "
-            f"envelopes — refusing at authoring time"
+            f"{template}: {name} = ({rng[0]!r}, {rng[1]!r}) has an endpoint "
+            f"outside binary64's finite range "
+            f"[{(-_F_MAX)!r}, {_F_MAX!r}]; the IR records bounds as "
+            f"binary64, so the endpoint cannot be recorded at all — "
+            f"refusing at authoring time"
         )
     return rng[0], rng[1]
 
