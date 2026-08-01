@@ -18,6 +18,8 @@ integer was not in the box the tool then reasoned about.
 """
 from __future__ import annotations
 
+import math
+
 import pytest
 
 jax = pytest.importorskip("jax")
@@ -39,6 +41,15 @@ PAIRS = [
     ("int64", 0, 10),
     ("float64", 0.0, 100.0),
     ("float32", 0.0, 1.0),
+    # the dtype-aware gate's class: an int bound past 2**53 on a dtype wholly
+    # inside binary64 — the narrowing image drops no dtype value, both routes
+    # must admit it (and must keep agreeing if the gate is ever re-litigated)
+    ("int32", 0, 10**23),
+    ("float32", 0, 10**23),
+    # the gate's F1 boundary: a narrowing endpoint rounding onto a gap edge
+    # around an EMPTY declared set — both routes must refuse it, with the
+    # empty-set cause, and must keep agreeing
+    ("float64", 2**53 + 1, 2**53 + 1),
 ]
 
 
@@ -73,24 +84,59 @@ def test_the_hand_and_sugar_routes_reach_the_same_decision(dtype, lo, hi):
     )
 
 
+def _declared_dtype_extremes(dtype, lo, hi):
+    """The declared interval clamped to the dtype's own value set: (smallest
+    dtype value >= lo, largest dtype value <= hi). Computed with numpy alone —
+    an oracle independent of the helpers in `_jax_compat` — and exactly:
+    python compares int against float without rounding, and the nextafter walk
+    moves one representable step at a time from the nearest cast."""
+    d = np.dtype(dtype)
+    if d.kind in "iu":
+        info = np.iinfo(d)
+        return (max(math.ceil(lo), int(info.min)),
+                min(math.floor(hi), int(info.max)))
+    up, down = np.array(np.inf, d), np.array(-np.inf, d)
+    c_lo = np.array(lo, d)
+    while float(c_lo) < lo:
+        c_lo = np.nextafter(c_lo, up)
+    c_hi = np.array(hi, d)
+    while float(c_hi) > hi:
+        c_hi = np.nextafter(c_hi, down)
+    return float(c_lo), float(c_hi)
+
+
 @pytest.mark.parametrize("dtype,lo,hi", PAIRS)
 def test_an_admitted_declaration_stores_a_box_containing_what_was_declared(dtype, lo, hi):
         # ANTI-VACUITY on the thing that actually went wrong: not "does it
         # refuse" but "if it admits, is the declared value IN the stored box".
         # The defect admitted `hi = 2**53 + 1` and stored `2**53`.
+        #
+        # "The declared value" is the declared DTYPE-SET, not the raw real
+        # endpoint: the storability guard is dtype-aware, and it admits a
+        # narrowing endpoint exactly when the shaved slice holds no value of
+        # the dtype — `int32 (0, 10**23)` stores `hi=1e+23`, below the raw
+        # 10**23 and above every int32. So the containment asserted here is of
+        # the endpoints CLAMPED to the dtype (an independent numpy oracle).
+        # For int64/uint64 the clamped extremes coincide with every in-range
+        # declared endpoint, so the original defect — sugar storing `2**53`
+        # for a declared `2**53 + 1` on int64 — still fails this assert
+        # (mutation-verified: re-adding `float()` to `canon` turns it red).
     proto = np.zeros((1,), np.dtype(dtype))
     try:
         cj = jax.make_jaxpr(lambda: any_pytree(proto, (lo, hi)))()
     except ValueError:
         return  # refused: nothing stored, nothing to check
     params = dict(cj.eqns[0].params)
-    assert params["lo"] <= lo, (
-        f"stored lo={params['lo']!r} is ABOVE the declared {lo!r}: the box "
-        f"excludes values that were declared"
+    d_lo, d_hi = _declared_dtype_extremes(dtype, lo, hi)
+    assert params["lo"] <= d_lo, (
+        f"stored lo={params['lo']!r} is ABOVE {d_lo!r}, the smallest {dtype} "
+        f"value of the declared [{lo!r}, {hi!r}]: the box excludes values "
+        f"that were declared"
     )
-    assert params["hi"] >= hi, (
-        f"stored hi={params['hi']!r} is BELOW the declared {hi!r}: the box "
-        f"excludes values that were declared"
+    assert params["hi"] >= d_hi, (
+        f"stored hi={params['hi']!r} is BELOW {d_hi!r}, the largest {dtype} "
+        f"value of the declared [{lo!r}, {hi!r}]: the box excludes values "
+        f"that were declared"
     )
 
 

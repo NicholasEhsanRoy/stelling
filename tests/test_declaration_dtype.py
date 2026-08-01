@@ -679,6 +679,317 @@ def test_the_advice_a_refusal_gives_is_followable():
 
 
 # --------------------------------------------------------------------------
+# the storability guard is DTYPE-AWARE — the dtype-blind version refused a
+# narrowing integer bound for every dtype, a false-rejection class on every
+# dtype but int64/uint64
+# --------------------------------------------------------------------------
+
+# the guard's own message, pinned as a LITERAL template so int64/uint64
+# refusals cannot drift by a byte while the dtype-aware gate is edited
+_STORABILITY_REFUSAL = (
+    "any_array bound {name}={raw!r} is not representable as the "
+    "binary64 the IR stores; it would be recorded as {stored!r}, "
+    "which NARROWS the declared set — the tool would reason about "
+    "fewer values than you declared. (Rounding the other way is "
+    "admitted: it widens the box, and an over-approximation still "
+    "contains every executed value.) Integer bounds that must be "
+    "exact as doubles satisfy |bound| <= 2**53"
+)
+
+
+@pytest.mark.parametrize("dtype,lo,hi,side", [
+    ("float64", 0, 10**23, "hi"),
+    ("float32", 0, 10**23, "hi"),
+    ("int32", 0, 10**23, "hi"),
+    # THE SAME CLASS IN THE LO POSITION (audit F2). Before these params
+    # existed, a mutant that kept the dtype-blind refusal for `lo` alone —
+    # `... and (name == "lo" or _narrowing_can_lose_values(dt))` — survived
+    # the whole suite: every admission pin sat in the hi position.
+    ("float64", -(10**23), 0, "lo"),
+    ("float32", -(10**23), 0, "lo"),
+    ("int32", -(10**23), 0, "lo"),
+])
+def test_a_narrowing_integer_bound_is_admitted_where_the_dtype_cannot_lose(
+        dtype, lo, hi, side):
+    """THE FALSE-REFUSAL CLASS, measured on the dtype-blind guard: the three
+    hi-position declarations here were all refused, and nothing would have
+    been lost.
+
+    `float(10**23)` rounds toward zero, so the recorded endpoint genuinely
+    narrows the declared interval AS REALS — but `float(v)` is the nearest
+    binary64 to `v`, so no binary64 value lies strictly between them, and
+    every value of these dtypes IS a binary64 value (float32/float64 by
+    format, int32 because |v| < 2**53). The shaved slice holds no value of
+    the dtype, the recorded box still contains every declared dtype value,
+    and refusing it was the failure this layer's own docstring says it must
+    not have.
+    """
+    cj = _declare(dtype, lo, hi)
+    assert cj is not None
+    params = dict(cj.eqns[0].params)
+    lo_rec, hi_rec = params["lo"], params["hi"]
+    # the recorded box: the exact endpoint survives exactly, the other is the
+    # rounded image — and the rounding genuinely narrowed as reals (python
+    # compares int/float exactly)
+    if side == "hi":
+        assert lo_rec == float(lo) == lo, "the exact endpoint may not move"
+        assert hi_rec == float(hi) and hi_rec < hi, (
+            "this case exists BECAUSE the stored hi sits below the declared "
+            "integer; if these are equal the test is testing nothing"
+        )
+    else:
+        assert hi_rec == float(hi) == hi, "the exact endpoint may not move"
+        assert lo_rec == float(lo) and lo_rec > lo, (
+            "this case exists BECAUSE the stored lo sits above the declared "
+            "integer; if these are equal the test is testing nothing"
+        )
+    # ...and yet no declared dtype value fell out: nothing of the dtype lies
+    # in the shaved slice between the raw endpoint and its recording.
+    # Computed with numpy alone, independently of the module's own helpers.
+    d = np.dtype(dtype)
+    if d.kind in "iu":
+        if side == "hi":
+            top = int(np.iinfo(d).max)
+            assert top <= hi_rec, (
+                f"the largest {dtype} value {top} fell out of the recorded "
+                f"box [{lo_rec}, {hi_rec}]"
+            )
+        else:
+            bot = int(np.iinfo(d).min)
+            assert bot >= lo_rec, (
+                f"the smallest {dtype} value {bot} fell out of the recorded "
+                f"box [{lo_rec}, {hi_rec}]"
+            )
+    elif side == "hi":
+        c = np.array(hi_rec, d)          # nearest dtype value to the stored hi
+        if float(c) <= hi_rec:
+            c = np.nextafter(c, np.array(np.inf, d))
+        assert float(c) > hi, (
+            f"{float(c)} is a {dtype} value inside the shaved slice "
+            f"({hi_rec}, {hi}] — the recorded box dropped a declared value"
+        )
+    else:
+        c = np.array(lo_rec, d)          # nearest dtype value to the stored lo
+        if float(c) >= lo_rec:
+            c = np.nextafter(c, np.array(-np.inf, d))
+        assert float(c) < lo, (
+            f"{float(c)} is a {dtype} value inside the shaved slice "
+            f"[{lo}, {lo_rec}) — the recorded box dropped a declared value"
+        )
+
+
+@pytest.mark.parametrize("dtype,lo,hi,name,raw", [
+    ("int64", 0, 2**53 + 1, "hi", 2**53 + 1),
+    ("uint64", 2**64 - 1, 2**64 - 1, "lo", 2**64 - 1),
+])
+def test_the_lossy_dtypes_keep_the_refusal_byte_for_byte(dtype, lo, hi, name, raw):
+    """int64 and uint64 are the dtypes the guard EXISTS for — of the REAL
+    dtypes jax builds arrays in, the only ones that hold values binary64
+    does not (complex also keeps the refusal, by policy rather than by that
+    property — no claim is made either way about complex boxes) — and the
+    dtype-aware gate must not move them: decision AND message, byte for
+    byte (the template above is a literal, not an import from the source)."""
+    with pytest.raises(ValueError) as exc:
+        _declare(dtype, lo, hi)
+    assert str(exc.value) == _STORABILITY_REFUSAL.format(
+        name=name, raw=raw, stored=float(raw)
+    )
+
+
+@pytest.mark.parametrize("dtype,lo,hi", [
+    ("int64", -(2**63), 2**63 - 1),   # the natural "any int64": hi rounds UP
+    ("uint64", 0, 2**64 - 1),         # hi rounds UP
+    ("int32", 0, 2**53 + 3),          # hi rounds UP on a loss-free dtype
+    # INEXACT WIDENING IN THE LO POSITION ON THE LOSSY DTYPES (audit F3a).
+    # Before these params existed, a mutant refusing ANY inexact lo —
+    # `narrows = (stored != v) if name == "lo" else (stored < v)` — survived
+    # the whole suite: every widening pin's lo was exactly representable.
+    ("int64", -(2**53) - 3, 0),       # lo rounds DOWN (away): widens
+    ("uint64", 2**53 + 1, 2**60),     # lo rounds DOWN (toward 0): widens
+    # WIDENING INT BOUNDS ON FLOAT DTYPES (audit F3b). A float-specific
+    # refusing mutant — `or ((not narrows) and dt.startswith("float"))`
+    # inside the inexact branch — survived before these: no widening pin
+    # had a float dtype with an integer bound.
+    ("float64", 0, 2**53 + 3),        # hi rounds UP: widens
+    ("float32", 0, 2**53 + 3),
+])
+def test_the_widening_direction_stays_admitted_everywhere(dtype, lo, hi):
+    """The other half of the guard's contract, restated across the gate: a
+    widening conversion is an over-approximation and is admitted for every
+    dtype — lossy, loss-free, float or integer, in either bound position,
+    at any magnitude."""
+    assert _declare(dtype, lo, hi) is not None
+
+
+@pytest.mark.parametrize("dtype,lo,hi", [
+    ("float64", 2**53 + 1, 2**53 + 1),   # point ON the first gap
+    ("float64", 2**55 + 5, 2**55 + 7),   # interval strictly inside a gap
+    ("float64", 2**63 - 1, 2**63 - 1),   # int64 max, as a FLOAT declaration
+    ("float32", 2**53 + 1, 2**53 + 1),
+    ("bfloat16", 2**54 + 1, 2**54 + 1),
+    ("float8_e8m0fnu", 2**54 + 1, 2**54 + 1),
+])
+def test_an_empty_set_behind_a_narrowing_gap_edge_refuses_with_the_true_cause(
+        dtype, lo, hi):
+    """AUDIT F1 — the hole the dtype-aware gate UNMASKED, measured on the
+    gated-but-unrepaired build: each of these ADMITTED, recording a box
+    whose only inhabitant the caller had excluded (`float64
+    (2**53+1, 2**53+1)` recorded `[2**53, 2**53]`; the `(2**55+5, 2**55+7)`
+    interval recorded a point ABOVE its own declared hi). The parent refused
+    them all — with the false NARROWS cause.
+
+    The emptiness check receives already-rounded endpoints, so a narrowing
+    endpoint that rounds ONTO a dtype value at the edge of the gap makes the
+    RECORDED box inhabited while the DECLARED interval holds nothing. These
+    must refuse with the true cause: the EMPTY-set class, judged against the
+    raw integer endpoints in exact arithmetic — and the neighbours the
+    message names must be outside the DECLARED interval, not the recorded
+    one (the rounded helpers would call `2**63` "below" an interval ending
+    at `2**63 - 1`).
+    """
+    with pytest.raises(ValueError) as exc:
+        _declare(dtype, lo, hi)
+    msg = str(exc.value)
+    assert "EMPTY under dtype" in msg, msg
+    assert "NARROWS" not in msg, (
+        f"the old false cause resurfaced (nothing about this set is a "
+        f"narrowing problem — it is empty):\n  {msg}"
+    )
+    # the caller's own numbers, not their roundings
+    assert repr(lo) in msg and repr(hi) in msg, msg
+    # direction words true AGAINST THE DECLARED ENDPOINTS, exactly (python
+    # compares int against float without rounding)
+    sides = _parse_neighbours(msg)
+    if sides["below"] is not None:
+        assert sides["below"] < lo, (sides, lo)
+    if sides["above"] is not None:
+        assert sides["above"] > hi, (sides, hi)
+
+
+def test_the_gap_edge_recheck_stops_at_parity_with_the_parent():
+    """The repair's boundary, pinned deliberately: a declaration whose
+    integer endpoints BOTH widen was already admitted by the parent — the
+    rounded box [2**53, 2**53+4] holds the bfloat16 2**53 while the declared
+    interval holds nothing — a pre-existing blind spot of the rounded
+    emptiness check, NOT one the dtype-aware gate opened, and out of the
+    audited repair's scope. Parity, not endorsement: if the exact re-check
+    is ever extended to the widening class, this pin is the place to flip.
+    """
+    assert _declare("bfloat16", 2**53 + 1, 2**53 + 3) is not None
+
+
+@pytest.mark.parametrize("dtype,lo,hi,witness", [
+    # RE-AUDIT RA2a: the declared set's ONLY inhabitant sits exactly AT the
+    # declared hi — the admit boundary of the exact re-check. A mutant
+    # shrinking `first <= min(hi, f_hi)` to `<` survived the whole suite
+    # before this param existed and flips exactly this case.
+    ("float64", 2**53 + 3, 2**53 + 4, 2.0**53 + 4),
+    # its mirror: the only inhabitant exactly AT the declared lo, with the
+    # hi doing the narrowing
+    ("float64", 2**53 + 4, 2**53 + 5, 2.0**53 + 4),
+    # RE-AUDIT RA1: unbounded-below with a narrowing int hi. The exact
+    # check must clamp `lo` into the dtype's range exactly as its rounded
+    # twin does — unclamped, the wide-dtype path asked for the smallest
+    # value >= -inf, filtered the non-finite answer, and REFUSED an
+    # interval containing every float64 through 2**53 (measured, EMPTY
+    # cause, positive and negative hi).
+    ("float64", float("-inf"), 2**53 + 1, 2.0**53),
+    ("float32", float("-inf"), 2**53 + 1, 2.0**53),
+    ("float64", float("-inf"), -(2**53) - 3, -(2.0**53) - 4),
+    # the symmetric mirror: narrowing int lo, unbounded above
+    ("float64", 2**53 + 3, float("inf"), 2.0**53 + 4),
+    ("float32", 2**53 + 3, float("inf"), 2.0**53 + 2.0**30),
+    # and the enumeration branch's -inf handling, which was already correct
+    # (a finite-table bisection has no infinity to choke on), pinned so it
+    # stays that way
+    ("bfloat16", float("-inf"), 2**54 + 1, 2.0**54),
+])
+def test_the_exact_recheck_admits_at_its_boundaries(dtype, lo, hi, witness):
+    """The admit side of the gap-edge re-check, at its two edges: an
+    inhabitant exactly on a declared endpoint, and an infinite endpoint
+    (which means "unbounded" and is absorbed by the dtype's own range,
+    exactly as in the rounded check). Each case names its witness — a value
+    of the dtype inside the DECLARED interval, verified exactly — so a
+    refusal here is a proven false refusal, the failure this layer must not
+    have."""
+    d = np.dtype(dtype)
+    assert float(np.array(witness, d)) == witness, "witness must be a dtype value"
+    assert lo <= witness <= hi, "witness must sit in the declared interval"
+    cj = _declare(dtype, lo, hi)
+    assert cj is not None
+    params = dict(cj.eqns[0].params)
+    # ...and the recorded box, which may round endpoints, still holds it
+    assert params["lo"] <= witness <= params["hi"], (
+        f"recorded box [{params['lo']}, {params['hi']}] dropped the witness "
+        f"{witness}"
+    )
+
+
+def test_zero_extent_keeps_the_storability_decision_of_its_dtype():
+    """The storability loop runs BEFORE the zero-size early return, so for the
+    lossy dtypes a narrowing bound refuses at shape (0,) exactly as at (1,) —
+    pinned unchanged from the dtype-blind guard, message and all.
+
+    For the newly-admitted dtypes the CHOICE, documented: the gate is
+    dtype-level and shape-independent, so shape (0,) admits like every other
+    shape. A zero-size declaration is vacuously inhabited whatever its bounds
+    (see test_a_zero_size_declaration_is_never_refused), and the storability
+    question — does the recorded box hold the declared dtype-set — does not
+    depend on the extent, so no shape-special case was added.
+
+    The gap-edge refusal (audit F1) joins the EMPTY-SET class, and that
+    class exempts zero-size shapes by the same doctrine — so at (0,) the
+    gap-point declaration admits. The parent refused it there only through
+    the dtype-blind NARROWS cause this change retires; the empty-set cause
+    cannot apply to a shape every bounds pair inhabits vacuously.
+    """
+    with pytest.raises(ValueError) as exc:
+        jax.make_jaxpr(lambda: (any_array((0,), "int64", (0, 2**53 + 1)),))()
+    assert str(exc.value) == _STORABILITY_REFUSAL.format(
+        name="hi", raw=2**53 + 1, stored=float(2**53 + 1)
+    )
+    assert jax.make_jaxpr(
+        lambda: (any_array((0,), "int32", (0, 10**23)),))() is not None
+    assert jax.make_jaxpr(
+        lambda: (any_array((0,), "float64", (2**53 + 1, 2**53 + 1)),)
+    )() is not None
+
+
+def test_the_loss_condition_is_derived_from_dtype_properties():
+    """The gate's truth table, family by family — derived from the same
+    iinfo-then-finfo lookup as the empty-set check, not from a name list.
+    Of the REAL dtypes jax builds arrays in, only int64 and uint64 have
+    value sets leaving binary64; the other real dtypes hold only binary64
+    values and cannot lose one to the rounding. Complex answers "can lose"
+    BY POLICY, not by that property — its components are binary64 subsets,
+    but what a real box means for a complex array is the open item, so the
+    gate makes no claim either way and preserves the refusal."""
+    can_lose = JC._narrowing_can_lose_values
+    assert can_lose("int64") and can_lose("uint64")
+    for dt in ("bool", "int8", "int16", "int32", "uint8", "uint16", "uint32",
+               "float16", "bfloat16", "float32", "float64"):
+        assert not can_lose(dt), dt
+    # the ml_dtypes families, through jnp's own lookups: int2/uint2 are absent
+    # from the bounds registry (jnp.iinfo covers them), float8_e8m0fnu is the
+    # exponent-only type whose 255 finite values are all powers of two
+    import ml_dtypes
+    for name in ("int2", "uint2", "int4", "uint4",
+                 "float8_e4m3fn", "float8_e5m2", "float8_e8m0fnu",
+                 "float6_e2m3fn", "float4_e2m1fn"):
+        assert not can_lose(str(np.dtype(getattr(ml_dtypes, name)))), name
+    # complex keeps the refusal BY POLICY, not by property: what a real-bounded
+    # box means for a complex array is an open item, and jnp.finfo(complex128)
+    # answers for the float64 COMPONENT — which is why the policy must
+    # short-circuit before the lookup rather than fall through to it
+    assert can_lose("complex64") and can_lose("complex128")
+    # x86 longdouble holds 64-bit significands binary64 does not. Not a dtype
+    # jax builds arrays in — the point is that the answer comes from the
+    # format's own properties (nmant 63 > 52), not from membership in a list
+    if np.dtype(np.longdouble).itemsize > 8:
+        assert can_lose(str(np.dtype(np.longdouble)))
+
+
+# --------------------------------------------------------------------------
 # the silent-⊤ rows: a decline that is COUNTED but carries no reason
 # --------------------------------------------------------------------------
 def test_the_convert_decline_names_the_SOURCE_dtype():
