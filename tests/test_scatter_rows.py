@@ -42,6 +42,7 @@ from stelling.propagate import (
     IEEE_TRANSFERS,
     TRANSFERS,
     _INT_COMPUTING,
+    _INT_DTYPE_BOUNDS,
     _INT_NON_COMPUTING,
     interval_env,
     propagate,
@@ -916,6 +917,16 @@ def test_f5b_int64_index_narrowing_boundary_both_sides():
     conv = [n for n in p2.notes if "convert_element_type" in n]
     assert conv, p2.notes
     assert any("'int64' -> 'int32'" in n and "not exact" in n for n in conv), conv
+    # Strengthened with the reason-classified decline text: int64 -> int32
+    # is a PROVEN value change (the ranges are not nested), and the note
+    # now prints both true ranges. The whole phrase is pinned — each range
+    # bound to its dtype — so a wrong, float-formatted, or SWAPPED range
+    # cannot come back.
+    (slo, shi), (dlo, dhi) = _INT_DTYPE_BOUNDS["int64"], _INT_DTYPE_BOUNDS["int32"]
+    assert any(
+        f"int64 spans [{slo}, {shi}] but int32 holds only [{dlo}, {dhi}]" in n
+        for n in conv
+    ), conv
     # under ieee the same narrowing passes identically (exact integer
     # identity: no float semantics, no flush hazard)
     p3 = propagate(q(imax), semantics="ieee")
