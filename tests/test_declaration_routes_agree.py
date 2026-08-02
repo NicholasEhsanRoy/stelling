@@ -32,9 +32,14 @@ from stelling.harness import any_array, any_pytree
 # binary64 cannot hold.
 PAIRS = [
     ("int64", 0, 2**53),                 # exact
-    ("int64", 0, 2**53 + 1),             # hi rounds DOWN -> widens -> admit
-    ("int64", 2**53 + 1, 2**60),         # lo rounds UP  -> narrows -> refuse
-    ("int64", -(2**53) - 1, 0),          # lo rounds DOWN -> widens -> admit
+    ("int64", 0, 2**53 + 1),             # hi rounds DOWN -> narrows -> refuse
+    ("int64", 2**53 + 1, 2**60),         # lo rounds DOWN -> widens -> admit
+    ("int64", -(2**53) - 1, 0),          # lo rounds UP  -> narrows -> refuse
+    # (the three annotations above were inverted — float() rounds 2**53+1
+    # DOWN to 2**53, ties-to-even, so the hi narrows and both los shown
+    # here widen or narrow opposite to what the old comments said —
+    # measured, published in the investigation brief, and on the landing
+    # session's known-unfixed list; the decisions never moved)
     ("int64", -(2**63), 2**63 - 1),      # the natural "any int64"
     ("uint64", 0, 2**64 - 1),
     ("uint64", 2**64 - 1, 2**64 - 1),
@@ -170,6 +175,118 @@ def test_the_alias_comparison_still_ignores_int_versus_float_spelling():
         jax.make_jaxpr(
             lambda: any_pytree({"x": a, "y": a}, {"x": (0, 1), "y": (0, 2)})
         )()
+
+
+# -- the spelling floor -------------------------------------------------------
+#
+# One VALUE, every spelling of it the layer accepts, and both routes: the
+# decision must be a function of (value, dtype), never of the spelling. The
+# live defect this pins closed: `np.longdouble(2**53+1)` was ADMITTED
+# recording `[2**53, 2**53]` — disjoint from the declared point — while the
+# python-int spelling of the identical declaration was refused, and a claim
+# false at the only declared point came back VERIFIED through
+# preconditions.check. Spellings are compared against the python-int/float
+# REFERENCE spelling of the same value, and hand-vs-sugar messages are
+# compared in FULL (both routes delegate to any_array, so the bytes match).
+
+import decimal
+import fractions
+
+
+def _spellings_of_int(v):
+    """Every floor spelling of integer value ``v`` (np.longdouble included
+    only where it holds ``v`` exactly — 2**53+1 fits its 64-bit
+    significand)."""
+    return [
+        ("int", v),
+        ("np.int64", np.int64(v)),
+        ("np.longdouble", np.longdouble(2) ** 53 + 1
+         if v == 2**53 + 1 else np.longdouble(v)),
+        ("Decimal", decimal.Decimal(v)),
+        ("Fraction", fractions.Fraction(v)),
+        ("0d-int64-array", np.array(v, dtype=np.int64)),
+        ("0d-longdouble-array", np.array(np.longdouble(2) ** 53 + 1)
+         if v == 2**53 + 1 else np.array(np.longdouble(v))),
+    ]
+
+
+_FLOOR_CASES = [
+    # (dtype, value-as-int, expected decision measured for the int spelling)
+    ("int64", 2**53 + 1, "refuse"),   # narrowing hi on a dtype that loses
+    ("float64", 2**53 + 1, "refuse"),  # declared point holds no float64
+    ("int64", 2**53, "admit"),        # exact everywhere
+    ("float64", 2**53, "admit"),
+]
+
+
+@pytest.mark.parametrize("dtype,value,expected", _FLOOR_CASES)
+def test_every_spelling_of_one_value_reaches_the_int_spellings_decision(
+    dtype, value, expected
+):
+    for tag, spelled in _spellings_of_int(value):
+        h, s = _hand(dtype, spelled, spelled), _sugar(dtype, spelled, spelled)
+        assert h.split(":")[0] == expected, (
+            f"{dtype} point {value} spelled as {tag}: hand route decided "
+            f"{h!r}, the python-int spelling decides {expected!r} — the "
+            f"decision depended on the spelling"
+        )
+        assert h.split(":")[0] == s.split(":")[0], (
+            f"{dtype} point {value} spelled as {tag}: hand={h!r} sugar={s!r}"
+        )
+
+
+# inexact-VALUED spellings (no python-int reference exists; the reference is
+# the decision measured for the exact rational the spelling denotes)
+_INEXACT_PAIRS = [
+    # Decimal('0.1') is 1/10 exactly — not a binary64, lo narrows on int64
+    ("int64", decimal.Decimal("0.1"), decimal.Decimal("0.2"), "refuse"),
+    # same VALUE spelled as a Fraction must get the same refusal
+    ("int64", fractions.Fraction(1, 10), fractions.Fraction(1, 5), "refuse"),
+    # on float64 the narrowing drops no dtype value: admitted
+    ("float64", decimal.Decimal("0.1"), decimal.Decimal("0.2"), "admit"),
+    ("float64", fractions.Fraction(1, 10), fractions.Fraction(1, 5), "admit"),
+    ("float64", fractions.Fraction(1, 3), fractions.Fraction(2, 3), "admit"),
+    # a longdouble strictly between two binary64s, hi position: narrows,
+    # drops no float64, admitted — and both routes must agree
+    ("float64", np.longdouble("0.5"),
+     np.longdouble("2.00000000000000000003"), "admit"),
+]
+
+
+@pytest.mark.parametrize("dtype,lo,hi,expected", _INEXACT_PAIRS)
+def test_inexact_valued_spellings_agree_across_routes(dtype, lo, hi, expected):
+    h, s = _hand(dtype, lo, hi), _sugar(dtype, lo, hi)
+    assert h.split(":")[0] == expected, (h, expected)
+    assert h == s, f"{dtype} ({lo!r}, {hi!r}): hand={h!r} sugar={s!r}"
+
+
+def _full(route, dtype, lo, hi):
+    """Decision plus FULL message — the routes delegate to any_array, so
+    even the refusal bytes must match."""
+    fn = {"hand": lambda: (any_array((1,), dtype, (lo, hi)),),
+          "sugar": lambda: any_pytree(np.zeros((1,), np.dtype(dtype)), (lo, hi))}[route]
+    try:
+        jax.make_jaxpr(fn)()
+        return "admit"
+    except (ValueError, TypeError) as e:
+        return f"refuse:{e}"
+
+
+@pytest.mark.parametrize("dtype,lo,hi", [
+    ("int64", np.longdouble(2) ** 53 + 1, np.longdouble(2) ** 53 + 1),
+    ("float64", decimal.Decimal(2**53 + 1), decimal.Decimal(2**53 + 1)),
+    ("float64", "0.25", "0.5"),                # str: refused by policy
+    ("float64", decimal.Decimal("1e400"), decimal.Decimal("1e400")),
+    ("int64", fractions.Fraction(1, 10), fractions.Fraction(1, 5)),
+    # 0-d arrays, spelled to REFUSE: an admitted pair here compared
+    # "admit" == "admit" and could never fail on refusal bytes (repair
+    # round 1) — admit-agreement is pinned by the spelling-floor tests
+    ("int64", np.array(2**53 + 1), np.array(2**53 + 1)),
+])
+def test_hand_and_sugar_refusal_messages_are_byte_identical(dtype, lo, hi):
+    h, s = _full("hand", dtype, lo, hi), _full("sugar", dtype, lo, hi)
+    assert h.startswith("refuse:"), "param must refuse for the bytes to matter"
+    assert h == s
 
 
 def test_no_module_pre_converts_a_bound_before_any_array_sees_it():

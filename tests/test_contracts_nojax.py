@@ -28,6 +28,69 @@ from stelling.contracts import (
 )
 
 
+def test_closed_range_validates_without_jax_or_numpy():
+    """Authoring-time bound validation must stay eager in a BARE
+    environment: the exact-value classifier it now runs on
+    (stelling._bound_spelling) imports numpy lazily and jax never. A
+    subprocess with both imports blocked authors, refuses, and returns
+    raw values exactly as the full venv does — pinning the laziness
+    itself, not just the import graph."""
+    import pathlib
+    import subprocess
+    import sys
+
+    # the src directory THIS test imported contracts from — the subprocess
+    # must exercise the same tree, not whatever an editable install points at
+    src = pathlib.Path(contracts.__file__).resolve().parents[1]
+    code = """
+import sys
+
+class _Block:
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in ("jax", "numpy"):
+            raise ImportError(f"{name} blocked for the bare-environment test")
+
+sys.meta_path.insert(0, _Block())
+from decimal import Decimal
+from stelling.contracts import _closed_range
+
+lo, hi = _closed_range("t", "n", (Decimal("0.1"), 2))
+assert lo == Decimal("0.1") and hi == 2 and type(hi) is int
+for bad, needle in [
+    ((1, 0), "empty envelope"),
+    ((0, float("inf")), "non-finite endpoint"),
+    ((0, 10**400), "outside binary64's finite range"),
+    (("0.1", 1), "not an accepted bound spelling"),
+]:
+    try:
+        _closed_range("t", "n", bad)
+    except ValueError as e:
+        assert needle in str(e), (bad, str(e))
+    else:
+        raise AssertionError(f"{bad} was not refused")
+assert "numpy" not in sys.modules and "jax" not in sys.modules
+print("bare-environment authoring ok")
+"""
+    r = subprocess.run(
+        [sys.executable, "-c", code],
+        env={"PYTHONPATH": str(src)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "bare-environment authoring ok" in r.stdout
+    # and the subprocess really ran THIS tree (an editable install of
+    # another checkout raising the same errors would fake a pass)
+    probe = subprocess.run(
+        [sys.executable, "-c",
+         "import stelling.contracts as c; print(c.__file__)"],
+        env={"PYTHONPATH": str(src)}, capture_output=True, text=True,
+        timeout=60,
+    )
+    assert str(src) in probe.stdout, probe.stdout
+
+
 def test_module_imports_without_jax():
     assert contracts.__all__ == [
         "Contract",
