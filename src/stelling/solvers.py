@@ -121,12 +121,28 @@ DROPPED_ASSUME_REFUSAL = (
     "answers a weaker question than the one written"
 )
 
+# The next-step sentences are docs/proposed-decline-messages.md #5's
+# intent against THIS tree (the proposal predates the constrain-mode
+# refusal: its 'a single-input bound does not disable escalation' is
+# false here — a constraining assume is exactly what fires this refusal,
+# so the working form is the declaration-side bound). Every sentence is
+# a measured mechanism: the refusal precedes backend discovery in
+# escalate(), it keys on coverage.constrained alone, and the
+# declaration-stated bound produces the identical narrowed box with
+# escalation unaffected — each pinned in
+# tests/test_constrained_refusal_message.py.
 CONSTRAINED_ASSUME_REFUSAL = (
     "constrained assume present: solver escalation emits over the declared "
     "box, which does not respect the assumed precondition — a sat witness "
     "could violate the precondition while the verdict claims "
     "conditionality; escalation declines until constrained bounds can be "
-    "emitted faithfully"
+    "emitted faithfully. This refusal keyed only on the constraining "
+    "assume being present, and it fired before any solver was looked for: "
+    "removing the assume removes it (escalation is then attempted, and "
+    "any remaining decline names its own reason). WHAT WORKS TODAY: a "
+    "bound on a single declared input can be stated in the declaration "
+    "itself — the envelope passed to any_array — which narrows the same "
+    "box without disabling escalation"
 )
 
 # The ieee-mode refusal, quoted verbatim in every declined obligation's
