@@ -1292,16 +1292,25 @@ def _t_scatter(eqn, params, ins):
     The output is the operand's box with element ``k``'s interval replaced
     by the update's — pure data movement, no arithmetic, no rounding.
 
-    Everything else declines to a noted ⊤: dynamic (non-point) or
-    out-of-range indices (mode-dependent clamp/drop is the census's wedge
-    bug class, never guessed), update windows, batching dims, higher
-    ranks, computed updates.
+    Everything else declines to a noted ⊤ that names its reason and
+    prints the numbers: dynamic (non-point) or out-of-range indices
+    (mode-dependent clamp/drop is the census's wedge bug class, never
+    guessed), update windows, batching dims, higher ranks, computed
+    updates. The legible causes — a combiner, leftover combiner consts,
+    unreadable dimension numbers, an index dtype that cannot hold the
+    leading-axis bound — are named BEFORE the general form failure, the
+    same order and for the same reason as the emission face
+    (:func:`stelling.obligation._scatter_set_plan`): each is a case the
+    shared oracle also rejects, so the pre-checks change no decision,
+    only the sentence.
     """
     # WHAT THIS FUNCTION RETAINS BEYOND THE SHARED ORACLE, enumerated because
     # an unenumerated retained check is how the two faces drifted apart once
     # already: the combiner gate lived here while the emission used only the
-    # oracle, so `.apply` was admitted as `.set`. Everything below is either a
-    # precondition for CALLING the oracle or genuinely interval-domain.
+    # oracle, so `.apply` was admitted as `.set`. Everything below is a
+    # precondition for CALLING the oracle, genuinely interval-domain, or a
+    # named pre-check of a case the oracle also rejects (reason-order only,
+    # never a decision).
     #
     #   len(ins) != 3        — arity. The oracle takes three shapes, so having
     #                          three operands is a precondition for calling it.
@@ -1309,26 +1318,122 @@ def _t_scatter(eqn, params, ins):
     #                          gates this and is the authority; this copy is
     #                          kept, not removed, because it is the check whose
     #                          absence caused the defect and a redundant gate
-    #                          costs nothing.
+    #                          costs nothing — and it now carries the legible
+    #                          combiner sentence.
+    #   update_consts / dimension_numbers readability / index dtype —
+    #                          named pre-checks mirroring the emission face:
+    #                          each fires only where the oracle would return
+    #                          False anyway, so the decline set is the
+    #                          oracle's; the pre-check owns the sentence.
     #   index point/finite/integral, and in-range — interval-domain. This face
     #                          reads the index from a propagated INTERVAL; the
     #                          emission reads it from static constants. Same
     #                          question, two representations, so it cannot live
     #                          in a shape-and-params oracle.
-    if len(ins) != 3 or params.get("update_jaxpr") is not None:
-        return None
+    if len(ins) != 3:
+        raise iv.IntervalError(
+            f"scatter takes an operand, one index array and one updates "
+            f"array, and this equation binds {len(ins)} operand(s) — "
+            f"check the hand-built or deserialized IR that produced it"
+        )
+    if params.get("update_jaxpr") is not None:
+        raise iv.IntervalError(
+            "scatter carries a combiner (update_jaxpr): this is an "
+            "`x.at[k].apply(f)`-shaped equation, not the covered "
+            "`x.at[k].set(v)`. It traces with the same dimension numbers, "
+            "shapes, mode and static index as a set, beside a DUMMY "
+            "updates operand (measured: 0.0 regardless of f) — modelling "
+            "it as a set would write the dummy where the program computes "
+            "f(operand[k])"
+        )
     operand, indices, updates = ins
+    indices_dtype = _scatter_indices_dtype(eqn)
+    if params.get("update_consts"):
+        raise iv.IntervalError(
+            f"scatter carries non-empty update_consts "
+            f"{params.get('update_consts')!r} with no update_jaxpr — "
+            f"combiner state without a combiner; the traced set form "
+            f"carries update_consts=() (measured), so check the hand-built "
+            f"or deserialized IR that produced this"
+        )
+    dn = params.get("dimension_numbers")
+    if not isinstance(dn, ir.NamedTupleParam):
+        raise iv.IntervalError(
+            f"scatter carries no readable dimension_numbers (got {dn!r}) "
+            f"— the covered set form is recognized by those fields, and "
+            f"without them the write's geometry is unknown; the traced "
+            f"form records them, so check the hand-built or deserialized "
+            f"IR"
+        )
+    if len(operand.shape) == 1 and not _scatter_index_dtype_covers(
+        indices_dtype, operand.shape[0]
+    ):
+        bound = operand.shape[0] - 1
+        table = _INT_DTYPE_BOUNDS.get(indices_dtype or "")
+        if indices_dtype is None:
+            why = (
+                "no dtype is recorded for the index operand, so nothing "
+                "vouches the bound is representable in it"
+            )
+        elif table is None:
+            why = (
+                f"dtype {indices_dtype!r} is not in the integer-bounds "
+                f"table here, so nothing vouches the bound fits it"
+            )
+        else:
+            why = (
+                f"{indices_dtype} represents [{table[0]}, {table[1]}], "
+                f"which does not contain {bound}"
+            )
+        raise iv.IntervalError(
+            f"scatter's index dtype cannot be vouched to represent the "
+            f"operand's leading-axis bound {bound} exactly: {why}. XLA "
+            f"computes the out-of-bounds bound in the INDEX element type, "
+            f"so the range check it performs is not the one this row "
+            f"models — measured on jax 0.11.0: an int8 index column "
+            f"writes at operand length 128 and silently DROPS an "
+            f"in-range-looking write at 129"
+        )
     if not _scatter_set_row_form(
         params, operand.shape, indices.shape, updates.shape,
-        _scatter_indices_dtype(eqn),
+        indices_dtype,
     ):
-        return None  # form outside the covered row — the shared oracle's call
+        # form outside the covered row — the shared oracle's call. The
+        # covered core is derived from the SAME constant the oracle
+        # reads, so this sentence cannot drift from the check.
+        core = ", ".join(f"{k}={v!r}" for k, v in _SCATTER_SET_CORE.items())
+        dn_got = ", ".join(f"{k}={v!r}" for k, v in dict(dn.fields).items())
+        raise iv.IntervalError(
+            f"scatter configuration (operand {operand.shape}, indices "
+            f"{indices.shape}, updates {updates.shape}, {dn_got}) is "
+            f"outside the covered static-index set row form: rank-1 "
+            f"operand, one index row (1,), scalar update (), {core}, and "
+            f"every other dimension-number field empty"
+        )
     lo, hi = indices.los[0], indices.his[0]
-    if lo != hi or not math.isfinite(lo) or lo != math.floor(lo):
-        return None  # dynamic or non-integral index: no exact rule
+    if lo != hi:
+        raise iv.IntervalError(
+            f"scatter's index spans [{lo}, {hi}] over the declared box — "
+            f"not a single point, so no one element is THE written one, "
+            f"and nothing here brackets a data-dependent write"
+        )
+    if not math.isfinite(lo) or lo != math.floor(lo):
+        raise iv.IntervalError(
+            f"scatter's index is the point {lo}, which is not a finite "
+            f"integer — element positions are integers, so this index "
+            f"names no element"
+        )
     k = int(lo)
     if not 0 <= k < operand.shape[0]:
-        return None  # out of range: FILL_OR_DROP drops, CLIP clamps — decline
+        raise iv.IntervalError(
+            f"scatter index {k} is out of range for the operand's leading "
+            f"axis: 0 <= {k} < {operand.shape[0]} fails — out-of-range "
+            f"handling is mode-dependent (measured on jax 0.11.0: "
+            f"FILL_OR_DROP drops the write and the operand passes through "
+            f"unchanged; clip clamps the index into range from both "
+            f"sides, 7 onto the last element and -2 onto the first) and "
+            f"is never guessed"
+        )
     los = list(operand.los)
     his = list(operand.his)
     los[k] = updates.los[0]

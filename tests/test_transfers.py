@@ -645,29 +645,162 @@ def test_scatter_static_set_definite_false_direction():
     assert "1/3" in p.obligations[0].detail
 
 
-def test_scatter_dynamic_index_declines_not_crashes():
-    # a non-point index interval has no exact rule: noted ⊤, never a guess
-    p = propagate(_scatter_query((0.0, 1.0), 5.0))  # must not raise
+def _scatter_declined(q, *frags):
+    """The decline pinned WITH its accounting: a raised decline must count
+    exactly as the returned None it replaced (status unknown, one ⊤,
+    the primitive named in unknown_primitives, no tier recorded)."""
+    p = propagate(q)  # must not raise: declines never kill the walk
     assert p.obligations[0].status == "unknown"
-    assert any("scatter" in n and "no sound rule" in n for n in p.notes)
     assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("scatter", 1),)
     assert "scatter" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "'scatter' declined this form" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+def test_scatter_dynamic_index_declines_not_crashes():
+    # a non-point index interval has no exact rule: noted ⊤, never a
+    # guess. The note used to read "no sound rule for params {...}";
+    # strengthened, not relaxed — it must print the span the right way
+    # round.
+    _scatter_declined(
+        _scatter_query((0.0, 1.0), 5.0),
+        "index spans [0.0, 1.0]",
+        "not a single point",
+    )
 
 
 def test_scatter_out_of_range_index_declines_not_crashes():
-    # FILL_OR_DROP drops, CLIP clamps — the wedge bug class; refuse to guess
-    p = propagate(_scatter_query((7.0, 7.0), 5.0))  # must not raise
-    assert p.obligations[0].status == "unknown"
-    assert any("scatter" in n and "no sound rule" in n for n in p.notes)
+    # FILL_OR_DROP drops, CLIP clamps — the wedge bug class; refuse to
+    # guess. The failing comparison is printed with the true bound, and
+    # the mode behaviours the note states are measured in
+    # test_transfers_jax.py::
+    # test_scatter_out_of_range_mode_behaviours_as_the_decline_states.
+    _scatter_declined(
+        _scatter_query((7.0, 7.0), 5.0),
+        "index 7 is out of range",
+        "0 <= 7 < 3 fails",
+        "mode-dependent",
+        "never guessed",
+    )
 
 
 def test_scatter_windowed_form_declines_not_crashes():
     # anything but the canonical single-element dimension numbers declines
-    p = propagate(
-        _scatter_query((1.0, 1.0), 5.0, {"update_window_dims": (0,)})
-    )  # must not raise
-    assert p.obligations[0].status == "unknown"
-    assert any("scatter" in n and "no sound rule" in n for n in p.notes)
+    # via the shared oracle's general form failure: the note must print
+    # the observed configuration AND the covered core (derived from
+    # _SCATTER_SET_CORE, so the sentence cannot drift from the check)
+    _scatter_declined(
+        _scatter_query((1.0, 1.0), 5.0, {"update_window_dims": (0,)}),
+        "operand (3,), indices (1,), updates ()",
+        "update_window_dims=(0,)",  # the observed side
+        "outside the covered static-index set row form",
+        "update_window_dims=(), inserted_window_dims=(0,), "
+        "scatter_dims_to_operand_dims=(0,)",  # the covered core
+    )
+
+
+def test_scatter_arity_decline_names_the_operand_count():
+    # hand-IR-only: a traced scatter binds operand + indices + updates
+    f3, i1 = aval((3,)), aval((1,), "int32")
+    x, idx, y = var(0, f3), var(1, i1), var(2, f3)
+    pred, out = var(3, aval((3,), "bool")), var(4, aval((3,), "bool"))
+    q = close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            any_eqn(idx, 1.0, 1.0),
+            eqn("scatter", [x, idx], y, _scatter_set_params()),
+            eqn("le", [y, lit(5.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _scatter_declined(q, "binds 2 operand(s)")
+
+
+def test_scatter_leftover_update_consts_decline_hand_ir():
+    # hand-IR-only: combiner state without a combiner. A traced set form
+    # carries update_consts=() (measured in test_transfers_jax.py::
+    # test_scatter_apply_traces_as_the_combiner_decline_states).
+    params = tuple(
+        (k, ((2.0,) if k == "update_consts" else v))
+        for k, v in _scatter_set_params()
+    )
+    f3, i1 = aval((3,)), aval((1,), "int32")
+    x, idx, y = var(0, f3), var(1, i1), var(2, f3)
+    pred, out = var(3, aval((3,), "bool")), var(4, aval((3,), "bool"))
+    q = close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            any_eqn(idx, 1.0, 1.0),
+            eqn("scatter", [x, idx, lit(5.0)], y, params),
+            eqn("le", [y, lit(5.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _scatter_declined(
+        q,
+        "non-empty update_consts (2.0,)",
+        "combiner state without a combiner",
+    )
+
+
+def test_scatter_missing_dimension_numbers_decline_hand_ir():
+    # hand-IR-only: the traced form always records dimension_numbers
+    params = tuple(
+        (k, v) for k, v in _scatter_set_params() if k != "dimension_numbers"
+    )
+    f3, i1 = aval((3,)), aval((1,), "int32")
+    x, idx, y = var(0, f3), var(1, i1), var(2, f3)
+    pred, out = var(3, aval((3,), "bool")), var(4, aval((3,), "bool"))
+    q = close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            any_eqn(idx, 1.0, 1.0),
+            eqn("scatter", [x, idx, lit(5.0)], y, params),
+            eqn("le", [y, lit(5.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _scatter_declined(q, "no readable dimension_numbers", "got None")
+
+
+def test_scatter_non_integral_point_index_declines_through_the_walk():
+    """WALK-DRIVEN, via the int-dtype declaration route, labeled: a
+    stelling_any with dtype 'int32' and lo = hi = 0.5 (or inf)
+    PROPAGATES UNREFUSED — the stelling_any transfer has no
+    dtype-storability guard, so the declared box rides the walk on an
+    int32-aval var and the scatter row is the first place the fraction
+    meets a rule that needs an integer (audit repair F3a: an earlier
+    draft claimed this path unreachable through any walk and pinned it
+    by direct call — measured false by exactly this route). A traced
+    index array cannot carry these values, and the lying-literal and
+    dtype-contradicting-declaration routes ARE refused at IR
+    construction; this consistent-but-fractional declaration is the one
+    that gets through. The declaration transfer's missing dtype guard is
+    a pre-existing surface, observed and out of scope here."""
+
+    def q(val):
+        f3, i1 = aval((3,)), aval((1,), "int32")
+        x, idx, y = var(0, f3), var(1, i1), var(2, f3)
+        pred, out = var(3, aval((3,), "bool")), var(4, aval((3,), "bool"))
+        return close(
+            [
+                any_eqn(x, 0.0, 1.0),
+                any_eqn(idx, val, val),
+                eqn("scatter", [x, idx, lit(5.0)], y, _scatter_set_params()),
+                eqn("le", [y, lit(9.0)], pred),
+                eqn("stelling_assert", [pred], out),
+            ],
+            [out],
+        )
+
+    _scatter_declined(q(0.5), "the point 0.5", "not a finite integer")
+    _scatter_declined(q(float("inf")), "the point inf")
 
 
 # --- gather / transpose: static structural forms (MIME fvm round) ------------

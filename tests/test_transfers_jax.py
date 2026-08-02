@@ -195,6 +195,12 @@ def test_at_set_dynamic_index_declines_traced():
     p = run(h)
     assert p.obligations[0].status == "unknown"
     assert p.coverage.unknown >= 1
+    # the decline names the element's declared span, the right way round
+    assert any(
+        "'scatter' declined this form" in n
+        and "index spans [0.0, 2.0]" in n
+        for n in p.notes
+    ), p.notes
 
 
 def test_fvm_gather_static_row_traced():
@@ -460,3 +466,277 @@ def test_gather_out_of_range_mode_behaviours_as_the_decline_states():
     fill = x.at[idx].get(mode="fill", fill_value=jnp.nan)
     assert float(clip) == float(x[2])  # the clamped (last) row
     assert bool(jnp.isnan(fill))      # the fill value, not a row
+
+
+# --- scatter: traced declines name their reason with the numbers -------------
+
+
+def _scatter_traced_declined(h, *frags):
+    p = run(h)  # must not raise: declines never kill the walk
+    assert p.obligations[0].status == "unknown"
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("scatter", 1),)
+    assert "scatter" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "'scatter' declined this form" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+def test_scatter_apply_declines_traced_naming_the_combiner():
+    # x.at[k].apply(f) traces to the same primitive as .set; the decline
+    # must name the combiner rather than the shapes (which are identical
+    # to a legitimate set — blaming them sends the reader nowhere)
+    def h():
+        x = any_array((3,), "float64", (2.0, 3.0))
+        return assert_(x.at[0].apply(lambda t: t + 100.0)[0] >= 1.0)
+
+    _scatter_traced_declined(
+        h,
+        "carries a combiner (update_jaxpr)",
+        "`x.at[k].apply(f)`-shaped",
+        "write the dummy where the program computes f(operand[k])",
+    )
+
+
+def test_scatter_apply_traces_as_the_combiner_decline_states():
+    """The combiner decline's measured fragments, measured: `.apply`
+    traces with the same dimension numbers, shapes, mode and static index
+    as `.set`, beside a DUMMY updates operand that is 0.0 regardless of
+    f, and the traced set form carries update_consts=(). If jax stops
+    tracing it that way, this goes red and the sentence must be
+    rewritten, not trusted."""
+    from stelling._jax_compat import transcribe
+
+    def build_apply(x):
+        return x.at[1].apply(lambda t: t + 100.0)
+
+    def build_set(x):
+        return x.at[1].set(0.0)
+
+    x0 = jnp.zeros(3, jnp.float64)
+    ap = [e for e in transcribe(jax.make_jaxpr(build_apply)(x0)).jaxpr.eqns
+          if str(e.primitive) == "scatter"][0]
+    st = [e for e in transcribe(jax.make_jaxpr(build_set)(x0)).jaxpr.eqns
+          if str(e.primitive) == "scatter"][0]
+    ap_p, st_p = dict(ap.params), dict(st.params)
+    # same dimension numbers, mode, shapes, static index; the combiner is
+    # the distinguishing field
+    assert ap_p["dimension_numbers"] == st_p["dimension_numbers"]
+    assert ap_p["mode"] == st_p["mode"]
+    assert [tuple(v.aval.shape) for v in ap.invars] == [
+        tuple(v.aval.shape) for v in st.invars
+    ]
+    assert ap_p["update_jaxpr"] is not None
+    assert st_p["update_jaxpr"] is None
+    # the traced set form carries update_consts=() (quoted by the
+    # leftover-consts decline in test_transfers.py)
+    assert st_p["update_consts"] == ()
+    # the updates operand of .apply is a DUMMY: 0.0, untouched by f's +100
+    # (the traced literal rides as a little-endian float64 payload)
+    import struct
+
+    dummy = ap.invars[2].val
+    assert struct.unpack("<d", dummy.data)[0] == 0.0
+
+
+def test_scatter_rank2_write_declines_traced_with_the_configuration():
+    # x.at[0, 0].set(v) is outside the covered rank-1 form: the note
+    # prints the observed configuration and the covered core
+    def h():
+        x = any_array((2, 2), "float64", (0.0, 1.0))
+        return assert_(x.at[0, 0].set(5.0) <= 9.0)
+
+    _scatter_traced_declined(
+        h,
+        "operand (2, 2), indices (2,), updates ()",
+        "outside the covered static-index set row form",
+        "update_window_dims=(), inserted_window_dims=(0,), "
+        "scatter_dims_to_operand_dims=(0,)",
+    )
+
+
+def test_scatter_multi_index_write_declines_traced():
+    # two index rows write two elements: outside the one-row covered form
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        y = x.at[jnp.array([0, 1])].set(jnp.array([5.0, 6.0]))
+        return assert_(y <= 9.0)
+
+    _scatter_traced_declined(
+        h,
+        "indices (2, 1), updates (2,)",
+        "outside the covered static-index set row form",
+    )
+
+
+def test_scatter_out_of_range_static_index_declines_traced():
+    # a static 7 into a 3-element operand reaches the transfer as the
+    # point interval [7, 7]: the failing comparison is printed with the
+    # true bound
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        return assert_(x.at[jnp.array(7)].set(5.0) <= 9.0)
+
+    _scatter_traced_declined(
+        h,
+        "index 7 is out of range",
+        "0 <= 7 < 3 fails",
+        "mode-dependent",
+        "never guessed",
+    )
+
+
+def test_scatter_narrow_index_dtype_declines_traced_with_the_numbers():
+    # the int8 wedge, traced end to end: at operand length 129 the
+    # out-of-bounds bound 128 does not fit int8, and XLA's range check is
+    # no longer the one the row models — the note prints the dtype's true
+    # range and the measured 128/129 boundary
+    dn = jax.lax.ScatterDimensionNumbers(
+        update_window_dims=(), inserted_window_dims=(0,),
+        scatter_dims_to_operand_dims=(0,),
+    )
+
+    def h():
+        x = any_array((129,), "float64", (0.0, 1.0))
+        y = jax.lax.scatter(
+            x, jnp.array([5], jnp.int8), jnp.asarray(7.0), dn,
+            mode=jax.lax.GatherScatterMode.FILL_OR_DROP,
+        )
+        return assert_(jnp.sum(y) <= 1e9)
+
+    _scatter_traced_declined(
+        h,
+        "leading-axis bound 128",
+        "int8 represents [-128, 127], which does not contain 128",
+        "writes at operand length 128",
+        "129",
+    )
+
+
+def test_scatter_out_of_range_mode_behaviours_as_the_decline_states():
+    """The out-of-range decline's measured fragments, measured FOR BOTH
+    SIGNS: FILL_OR_DROP drops the write and the operand passes through
+    unchanged (7 and -1 alike); clip clamps the index into range from
+    both sides — 7 onto the last element, -2 onto the first (audit
+    repair F1: the sentence used to say clip rewrites "onto the last
+    element", false for negative indices). The `.at[...]` sugar
+    normalizes a negative index at trace time (an lt/add/select_n
+    prologue before the scatter), so the negative-sign measurements ride
+    direct lax.scatter — the route on which a genuine negative reaches
+    the primitive. If either mode stops behaving as the message states,
+    this goes red and the message must be rewritten, not trusted."""
+    x = jnp.asarray([1.0, 5.0, 2.0])
+    dn = jax.lax.ScatterDimensionNumbers(
+        update_window_dims=(), inserted_window_dims=(0,),
+        scatter_dims_to_operand_dims=(0,),
+    )
+
+    def sc(idx, mode):
+        return jax.lax.scatter(
+            x, jnp.array([idx]), jnp.asarray(9.0), dn, mode=mode
+        )
+
+    drop = jax.lax.GatherScatterMode.FILL_OR_DROP
+    clip = jax.lax.GatherScatterMode.CLIP
+    assert sc(7, drop).tolist() == x.tolist()       # unchanged
+    assert sc(-1, drop).tolist() == x.tolist()      # unchanged, both signs
+    assert sc(7, clip).tolist() == [1.0, 5.0, 9.0]  # onto the last element
+    assert sc(-2, clip).tolist() == [9.0, 5.0, 2.0]  # onto the first
+
+
+def test_scatter_negative_index_declines_traced_at_the_lower_boundary():
+    # k = -1, the lower boundary (audit repair F2a): FILL_OR_DROP drops
+    # it (measured above), while python's los[-1] wraps to the LAST
+    # element — so admitting it would substitute at an element jax
+    # leaves untouched: a silent false model, and the refutation built
+    # on it would be false. The `.at` sugar normalizes negatives at
+    # trace time, so the genuine -1 rides direct lax.scatter.
+    dn = jax.lax.ScatterDimensionNumbers(
+        update_window_dims=(), inserted_window_dims=(0,),
+        scatter_dims_to_operand_dims=(0,),
+    )
+
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        y = jax.lax.scatter(
+            x, jnp.array([-1]), jnp.asarray(5.0), dn,
+            mode=jax.lax.GatherScatterMode.FILL_OR_DROP,
+        )
+        return assert_(jnp.sum(y) <= 99.0)
+
+    _scatter_traced_declined(
+        h,
+        "index -1 is out of range",
+        "0 <= -1 < 3 fails",
+    )
+
+
+def test_scatter_index_equal_to_length_declines_traced():
+    # k = n, the upper boundary one past the last element (audit repair
+    # F2c): admitting it would subscript los[3] and kill the walk with a
+    # raw IndexError — declines never raise anything but IntervalError
+    dn = jax.lax.ScatterDimensionNumbers(
+        update_window_dims=(), inserted_window_dims=(0,),
+        scatter_dims_to_operand_dims=(0,),
+    )
+
+    def h():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        y = jax.lax.scatter(
+            x, jnp.array([3]), jnp.asarray(5.0), dn,
+            mode=jax.lax.GatherScatterMode.FILL_OR_DROP,
+        )
+        return assert_(jnp.sum(y) <= 99.0)
+
+    _scatter_traced_declined(
+        h,
+        "index 3 is out of range",
+        "0 <= 3 < 3 fails",
+    )
+
+
+def test_scatter_int8_covered_length_128_still_discharges_traced():
+    # the ADMIT side of the index-dtype boundary (audit repair F2b): at
+    # operand length 128 the out-of-bounds bound 127 IS int8's maximum,
+    # the covered form holds, and the row must still DISCHARGE — pinned
+    # against the dtype pre-check (a +1 perturbation of its argument
+    # declines this very form and goes red here)
+    dn = jax.lax.ScatterDimensionNumbers(
+        update_window_dims=(), inserted_window_dims=(0,),
+        scatter_dims_to_operand_dims=(0,),
+    )
+
+    def h():
+        x = any_array((128,), "float64", (0.0, 1.0))
+        y = jax.lax.scatter(
+            x, jnp.array([5], jnp.int8), jnp.asarray(7.0), dn,
+            mode=jax.lax.GatherScatterMode.FILL_OR_DROP,
+        )
+        return assert_(y <= 7.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "discharged"
+    assert ("scatter", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_scatter_int8_boundary_writes_and_drops_as_the_decline_states():
+    """The index-dtype decline's measured fragment, measured: an int8
+    index column writes at operand length 128 and silently DROPS an
+    in-range-looking write at 129 (the bound 128 wraps in int8, so XLA's
+    comparison rejects index 5 that the row's own range check would
+    admit)."""
+    dn = jax.lax.ScatterDimensionNumbers(
+        update_window_dims=(), inserted_window_dims=(0,),
+        scatter_dims_to_operand_dims=(0,),
+    )
+
+    def write(n):
+        return jax.lax.scatter(
+            jnp.zeros(n), jnp.array([5], jnp.int8), jnp.asarray(7.0), dn,
+            mode=jax.lax.GatherScatterMode.FILL_OR_DROP,
+        )
+
+    assert float(write(128)[5]) == 7.0  # lands
+    assert float(write(129)[5]) == 0.0  # silently dropped
