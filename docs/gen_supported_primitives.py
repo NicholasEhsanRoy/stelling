@@ -76,17 +76,33 @@ def _def_line(rel: str, name: str) -> int:
     raise LookupError(f"definition of {name!r} not found in {rel}")
 
 
+# Everything a wrapped string literal puts at a continuation: the closing
+# quote of one fragment, then an optional prefix and the opening quote of
+# the next. Dropping the quotes but keeping the prefix is the trap — see
+# ``scrub`` below.
+_LITERAL_PREFIX = re.compile(r"\b[fFrRbBuU]{1,2}(?=[\"'])")
+
+
 def _quote_line(rel: str, quote: str, *, window: int = 40) -> int:
     """1-based line where the (whitespace-normalized) ``quote`` starts.
 
     The quote must appear verbatim in the file, modulo line wrapping,
-    leading comment markers, and whitespace — otherwise generation fails:
-    the page never cites text the code no longer carries.
+    leading comment markers, string-literal syntax, and whitespace —
+    otherwise generation fails: the page never cites text the code no
+    longer carries.
     """
     def scrub(text: str) -> str:
-        # comment markers and string-literal quote characters are wrapping
-        # syntax, not content — scrub both before matching
-        return _norm(text.replace("#", " ").replace('"', " "))
+        # comment markers, string-literal prefixes, and quote characters
+        # are wrapping syntax, not content — scrub all three before
+        # matching. The prefix has to go with its quote: a message
+        # wrapped between ``f"... emission "`` and ``f"set: ..."``
+        # otherwise reconstructs as "... emission f set: ...", and a
+        # sentence the code still carries verbatim stops matching for no
+        # reason but where the line happened to break.
+        return _norm(
+            _LITERAL_PREFIX.sub(" ", text)
+            .replace("#", " ").replace('"', " ").replace("'", " ")
+        )
 
     raw = _lines(rel)
     norm = [scrub(line) for line in raw]
