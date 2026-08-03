@@ -7,6 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 
 Everything a harness calls lives in **one module**:
 
+<!-- doc-example: run-only -->
 ```python
 from stelling.harness import any_array, any_pytree, assert_, assume, nonvacuity, trace
 ```
@@ -59,6 +60,8 @@ are what it printed.
 | `assume(pred)` | an **assumption** — narrows the box where it can, is disclosed where it cannot | `pred` |
 | `nonvacuity(pred)` | a **membership condition** — "the data I run on is in the declared box" | `pred` |
 | `trace(harness)` | — | the jax-free `stelling.ir.ClosedJaxpr` |
+
+<a id="a-statement-counts-once-you-call-it"></a>
 
 **A statement counts once you call it, returned or not.** Each of these
 binds a real jax primitive, so it lands in the traced jaxpr and the
@@ -116,9 +119,13 @@ assume_actually_removed  -> UNKNOWN  nonvacuity=UNCHECKED
 
 Every un-returned statement was still recorded: the obligation still
 REFUTES, the membership condition still FAILS, and the assumption still
-narrows — the last two rows are the same query except that one *calls*
-`assume` without returning it, and only deleting the call changes the
-verdict.
+narrows. The last two rows are the pair to read together — their Python
+differs only in whether `assume` is *called* — and the un-returned call
+is what makes the difference between VERIFIED and UNKNOWN. They are two
+different queries, and measurably so: 6 equations against 4, and
+different content hashes. That is the point. Calling `assume` puts a
+`stelling_assume` equation in the traced jaxpr; not returning its result
+does not take it back out.
 
 **The consequence to internalise: you cannot disable a statement by
 removing it from the return.** An `assume` you drop from the return list
@@ -264,16 +271,12 @@ import numpy as np
 from stelling.harness import any_array, any_pytree, assert_, trace
 
 
-def sugar_numpy():
-    prototype = {"k": np.zeros(()), "u": np.zeros((4,))}
-    state = any_pytree(prototype, (0.1, 10.0))   # one declaration per array leaf
-    return assert_(state["u"] * state["k"] > 0.0)
-
-
-def sugar_jnp():
-    prototype = {"k": jnp.zeros(()), "u": jnp.zeros((4,))}
-    state = any_pytree(prototype, (0.1, 10.0))
-    return assert_(state["u"] * state["k"] > 0.0)
+def sugar(scalar_leaf, vector_leaf):
+    def harness():
+        prototype = {"k": scalar_leaf(), "u": vector_leaf((4,))}
+        state = any_pytree(prototype, (0.1, 10.0))   # one declaration per leaf
+        return assert_(state["u"] * state["k"] > 0.0)
+    return harness
 
 
 def hand():
@@ -282,9 +285,14 @@ def hand():
     return assert_(u * k > 0.0)
 
 
-for name, h in (("sugar, numpy prototype", sugar_numpy),
-                ("sugar, jnp prototype", sugar_jnp),
-                ("hand declaration", hand)):
+cases = (
+    ("prototype all numpy",   sugar(lambda: np.zeros(()),  np.zeros)),
+    ("prototype all jnp",     sugar(lambda: jnp.zeros(()), jnp.zeros)),
+    ("jnp SCALAR leaf only",  sugar(lambda: jnp.zeros(()), np.zeros)),
+    ("jnp VECTOR leaf only",  sugar(lambda: np.zeros(()),  jnp.zeros)),
+    ("hand declaration",      hand),
+)
+for name, h in cases:
     cj = trace(h)
     print(f"{name:22s} {len(cj.jaxpr.eqns)} eqns  hash {cj.content_hash()[:16]}  "
           f"{[e.primitive for e in cj.jaxpr.eqns]}")
@@ -293,19 +301,26 @@ for name, h in (("sugar, numpy prototype", sugar_numpy),
 prints:
 
 ```
-sugar, numpy prototype 5 eqns  hash 93bfe936574a4195  ['stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
-sugar, jnp prototype   6 eqns  hash fcbb6209ead48d15  ['broadcast_in_dim', 'stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
+prototype all numpy    5 eqns  hash 93bfe936574a4195  ['stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
+prototype all jnp      6 eqns  hash fcbb6209ead48d15  ['broadcast_in_dim', 'stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
+jnp SCALAR leaf only   5 eqns  hash 93bfe936574a4195  ['stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
+jnp VECTOR leaf only   6 eqns  hash fcbb6209ead48d15  ['broadcast_in_dim', 'stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
 hand declaration       5 eqns  hash 93bfe936574a4195  ['stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
 ```
 
 Two leaves, two `stelling_any` equations. **With a NumPy prototype the
 sugar traces to exactly the hand declaration — same equations, same
-content hash.** With a `jnp` prototype built inside the harness it does
-not: `jnp.zeros(())` traces a `broadcast_in_dim` of its own, so the query
-is a sixth equation longer and its hash differs. Nothing is unsound about
-the `jnp` version — the two declarations are the same — but the stamp
-identifies a different query, so two verdicts you meant to be the same
-will not compare equal.
+content hash.**
+
+The last two rows locate the cost precisely: swapping *only* the scalar
+leaf to `jnp` changes nothing, and swapping *only* the vector leaf adds
+the `broadcast_in_dim`. `jnp.zeros(())` traces no equation at all;
+**`jnp.zeros((4,))` is the one that traces a `broadcast_in_dim`**, so any
+non-scalar `jnp` leaf built inside the harness lengthens the query by
+one equation and changes its hash. Nothing is unsound about the `jnp`
+version — the same two inputs are declared over the same bounds — but the
+stamp identifies the query by content hash, so two verdicts you meant to
+be comparable will not compare equal.
 
 ## `assert_(pred)` — obligations
 
@@ -579,8 +594,9 @@ exception.** By default a query stelling cannot transcribe comes back as
 a `DECLINED` verdict, so a batch caller can record it and carry on to the
 next node; `strict=True` lets the `stelling.ir.TranscriptionError`
 propagate, which is what you want in a single-target script that should
-fail loudly. Measured, on a sharded program — the one construct in this
-tree I found that transcription refuses outright:
+fail loudly. Transcription has several refusal paths (six `raise` sites
+across `stelling.ir` and the transcriber); a sharded program is the one I
+could reach from an ordinary harness, and it is what this measures:
 
 ```python
 import os

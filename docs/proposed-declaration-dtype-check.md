@@ -26,6 +26,12 @@ x = any_array((1,), "uint8", (-3.0, -1.0))     # no uint8 holds -3
 A declared box that **no execution of the program can inhabit**, admitted as a
 declaration, is then propagated as fact.
 
+> Tense note, since the argument is preserved as written: that declaration is
+> **no longer accepted**. This tree refuses it at declaration time, naming the
+> dtype and the empty interval —
+> [measured](harness-api.md#any_arrayshape-dtype-bounds). The block above is
+> the hole as it stood, not as it stands.
+
 ## What it cost, measured
 
 `sign` on that box returned `[-1, -1]` — outside uint8 — at **100% coverage, with

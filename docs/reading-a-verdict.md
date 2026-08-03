@@ -256,10 +256,16 @@ They share the root "vacu-" and nothing else.
 | **you control it with** | the required `vacuity_mode` argument | writing membership conditions |
 | **failing looks like** | `obligation #0: discharges with all declared bounds widened (vacuity mode=inputs-only) — envelope not load-bearing` | `nonvacuity: UNCHECKED` / `undecided` / `FAILED` and the may-be-vacuous note |
 
-So `vacuity checked` beside `may be vacuous` means: *the envelope was
-put through the widening re-check and the obligations did not survive
-without it; nobody has said whether the envelope contains your data.*
-Both are true at once.
+So in the render above — `vacuity checked … no obligation discharges`
+beside `may be vacuous` — the two lines mean: *the widening re-check ran
+and the obligations did not survive without the declared bounds; nobody
+has said whether those bounds contain your data.* Both are true at once.
+
+Read the whole vacuity line, not its first two words: **`vacuity
+checked` prefixes both outcomes.** `vacuity checked … no obligation
+discharges` is the reassuring one; `vacuity checked … obligation(s) (N,)
+discharge with the declared bounds widened` is the flag, and it is
+measured [below](#what-the-vacuity-line-does-and-does-not-say).
 
 ### Clearing `nonvacuity: UNCHECKED`
 
@@ -268,7 +274,8 @@ It is reachable through the documented API, and the whole of it is:
 moves the field — no argument to `check()`, no mode, no flag. *Calling*
 it is what counts: measured, an un-returned membership condition is
 recorded just the same
-([the harness API](harness-api.md#the-harness-api) has the run). Return
+([the harness API](harness-api.md#a-statement-counts-once-you-call-it)
+has the run). Return
 it alongside your obligations anyway; that is the convention. The
 quickstart's
 [§3](quickstart.md#3-tying-the-box-to-real-data) is the worked version;
@@ -310,6 +317,63 @@ consequence for you is concrete:
 |---|---|---|
 | no point declarations | reports | reports |
 | any point declaration (threshold, operating point) | **inert** — no result either way | reports, but the threshold widens too |
+
+<a id="the-four-ways-the-instrument-goes-inert"></a>
+
+**The four ways a VERIFIED comes back inert**, all measured — a point
+declaration is only the one you will meet first:
+
+```python
+import math
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+
+
+def point_declaration():
+    threshold = any_array((), jnp.float64, (1.0, 1.0))
+    a = any_array((), jnp.float64, (0.1, 2.0))
+    return assert_(a + threshold > 0.0)
+
+
+def below_a_transparent_wrapper():
+    @jax.jit
+    def inner():
+        return any_array((), jnp.float64, (0.1, 10.0))
+    return assert_(inner() > 0.0)
+
+
+def no_declarations_at_all():
+    return assert_(jnp.float64(1.0) > 0.0)
+
+
+def already_unbounded():
+    a = any_array((), jnp.float64, (-math.inf, math.inf))
+    return assert_(jnp.maximum(a, 0.0) >= 0.0)
+
+
+for h in (point_declaration, below_a_transparent_wrapper,
+          no_declarations_at_all, already_unbounded):
+    v = check(h, vacuity_mode="inputs-only")
+    reason = [a for a in v.stamp.assumptions if a.startswith("vacuity")][0]
+    print(f"{h.__name__:27s} {v.status:8s} "
+          f"{reason.split(': ', 1)[1].split(' — ')[0]}")
+```
+
+```
+point_declaration           VERIFIED declaration 1 is a point interval (1.0), so this mode widens nothing on it; mode='all' would also widen transcribed constants
+below_a_transparent_wrapper VERIFIED a declaration sits 1 transparent call(s) below top level, where widening cannot reach it
+no_declarations_at_all      VERIFIED the query declares no bounded inputs, so widening changes nothing
+already_unbounded           VERIFIED declaration 1 kept its bounds (-inf, inf) -- the rewrite did not reach it; the envelope was not fully widened
+```
+
+Only the first is mode-dependent. The other three are inert under `"all"`
+too — a declaration the rewrite cannot reach, a query with nothing to
+widen, and a declaration that is already `(-inf, inf)` are all "no
+declared bound moved", whichever mode asked.
 
 `"all"` is not simply the stronger mode. Widening a threshold makes
 almost any comparison straddle, so an obligation that *is* a tautology

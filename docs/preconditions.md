@@ -31,6 +31,7 @@ Check that a variable diffusion coefficient built from your own
 construction is positive everywhere over the parameter range your
 application can produce:
 
+<!-- doc-example: run-only -->
 ```python
 import jax, jax.numpy as jnp
 jax.config.update("jax_enable_x64", True)
@@ -59,6 +60,7 @@ Check that a configuration scalar can never be the singular value —
 posed over the **admissible range**, not just the default, because the
 question is whether your configuration space *admits* the bad value:
 
+<!-- doc-example: run-only -->
 ```python
 import jax
 jax.config.update("jax_enable_x64", True)
@@ -82,13 +84,14 @@ obligation still discharges with the bounds gone, the verdict tells
 you (a note and a stamped line) that the envelope was not
 load-bearing — the claim is a theorem or the envelope is mis-posed.
 A VERIFIED from check() has always been *put through* this check, but it
-does not always come back with a result: when a declared bound could not
-be widened — a point declaration under `"inputs-only"`, or a declaration
-made below a transparent wrapper — the instrument reports
-`vacuity instrument inert` instead, and the envelope's role is left
-uncharacterised. Read the stamped line rather than assuming which of the
-two you got; both are measured in
-[Reading a verdict](reading-a-verdict.md#choosing-vacuity_mode).
+does not always come back with a result: when not every declared bound
+moved, the instrument reports `vacuity instrument inert` instead and the
+envelope's role is left uncharacterised. There are four measured ways
+that happens — a point declaration under `"inputs-only"`, a declaration
+below a transparent wrapper, a query with no declarations at all, and a
+declaration that is already `(-inf, inf)`. Read the stamped line rather
+than assuming which of the two you got; all four are measured in
+[Reading a verdict](reading-a-verdict.md#the-four-ways-the-instrument-goes-inert).
 
 - **VERIFIED** — the property holds at every point of the declared
   envelope, judged by outward-rounded interval arithmetic (and the SMT

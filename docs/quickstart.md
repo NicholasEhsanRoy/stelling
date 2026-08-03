@@ -10,8 +10,11 @@ verdict and know which parts of it you have earned.
 
 Every code block on this page was executed verbatim against this tree
 (stelling 0.1.0, jax 0.11.0, CPU, `jax_enable_x64=True`) and the outputs
-are what it printed. Where an output line names a file path, it names
-*your* file — that line is the only part that differs on your machine.
+are what it printed — `tests/test_doc_examples.py` re-runs them and
+compares. The `at …` source line is the one part that differs on your
+machine: the **directory** shown below is a placeholder, and the file
+name is whatever you saved the block as. The line number and the
+function name are not placeholders.
 
 ## Install
 
@@ -55,7 +58,7 @@ print(check(harness, vacuity_mode="inputs-only").render())
 == VERIFIED
   9 equations verified
   assert #0: discharged — definitely true for all 8 element(s)
-    at <your dir>/quickstart.py:15 (harness)
+    at <your-dir>/quickstart.py:15 (harness)
 stelling 0.1.0 | jax 0.11.0
 query 628a25efd4417f44966443e7275a31b7c437cc45ddb6b42efcadb59308171765
 arithmetic: interval/f64/outward-1ulp (stelling.interval)
