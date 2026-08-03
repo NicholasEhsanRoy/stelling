@@ -3726,6 +3726,46 @@ def _render_bound(bound: iv.IntervalArray) -> str:
     return f"values in [{min(bound.los)}, {max(bound.los)}] ({bound.size} elements)"
 
 
+# The obligation-quote comparison tables (docs/proposed-decline-messages.md
+# #1). Deliberately separate from the assume-classification maps above:
+# these are read only when WORDING an undecided obligation's detail, never
+# when deciding anything, and they cover all six comparisons (the assume
+# tables exclude `ne` for narrowing reasons that do not apply to quoting).
+_OBL_CMP_SYMBOL = {
+    "lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "==", "ne": "!=",
+}
+
+# cmp(k, v) === flipped-cmp(v, k): normalization when the point side is on
+# the left, so the quote can always read "operand <cmp> bound".
+_OBL_CMP_FLIP = {
+    "lt": "gt", "gt": "lt", "le": "ge", "ge": "le", "eq": "eq", "ne": "ne",
+}
+
+
+# The largest finite binary64 value, as an exact int: (2 - 2**-52)*2**1023.
+# The miss-distance fragment compares its EXACT Fraction against this
+# BEFORE any float conversion — the exact difference of two finite doubles
+# can exceed the binary64 range (opposite-sign endpoint and bound), and
+# Fraction.__float__ raises OverflowError there (blinded-lens audit R1: a
+# legal query crashed the whole analysis on exactly that shape).
+_MAX_BINARY64 = (2**53 - 1) * 2**971
+
+
+def _ulp_steps(a: float, b: float, cap: int = 3) -> int | None:
+    """The EXACT number of nextafter steps from ``a`` to ``b``, or None
+    when it exceeds ``cap`` (a big count carries no more meaning than the
+    distance itself). Message wording only."""
+    if not (math.isfinite(a) and math.isfinite(b)) or a == b:
+        return None
+    x, steps = a, 0
+    while x != b:
+        x = math.nextafter(x, b)
+        steps += 1
+        if steps > cap:
+            return None
+    return steps
+
+
 def _bool_status(b: iv.IntervalArray, *, constrained: bool = False) -> tuple[str, str]:
     n_true = sum(1 for lo, hi in zip(b.los, b.his) if (lo, hi) == iv.BOOL_TRUE)
     n_false = sum(1 for lo, hi in zip(b.los, b.his) if (lo, hi) == iv.BOOL_FALSE)
@@ -3780,6 +3820,14 @@ class _Propagator:
         # (scoped in run(); assume classification only — never a transfer
         # input)
         self.producers: dict[int, ir.JaxprEqn] = {}
+        # var id -> (primitive, where, cause) for values minted as artifact
+        # ⊤ by top_out: MESSAGE PROVENANCE ONLY (docs/proposed-decline-
+        # messages.md #2 — "a decline that reports a box must say where the
+        # box came from"). Never read by any transfer, judgment, or
+        # counter; ids are globally unique per transcription, so the map is
+        # deliberately not scope-swapped (provenance follows the value
+        # across call boundaries, like refused_shape).
+        self.top_origin: dict[int, tuple[str, str, str]] = {}
         self.counter = CoverageCounter()
         self.obligations: list[ObligationReport] = []
         self.nonvacuity_checks: list[ObligationReport] = []
@@ -3873,9 +3921,17 @@ class _Propagator:
             return False
         return self.taint.get(atom.id, False)
 
-    def top_out(self, eqn: ir.JaxprEqn) -> None:
+    def top_out(
+        self, eqn: ir.JaxprEqn, cause: str = "its result was not modeled"
+    ) -> None:
+        where = eqn.source_info[-1] if eqn.source_info else "unknown location"
         for out in eqn.outvars:
             self.env[out.id] = _safe_top(out.aval.shape)
+            # message provenance only (see __init__): the ⊤ minted here is
+            # stelling's own artifact, and every downstream decline that
+            # reports this value's box may truthfully name this equation
+            # as its origin
+            self.top_origin[out.id] = (eqn.primitive, where, cause)
             if self.semantics == "ieee":
                 # ⊤ under ieee is maybe-NaN: an unknown/declined value
                 # could be anything a float can be, including NaN
@@ -3886,6 +3942,240 @@ class _Propagator:
                 self.taint[out.id] = any(
                     self.read_taint(a) for a in eqn.invars
                 )
+
+    def _quiet_box(self, atom: ir.Atom) -> iv.IntervalArray | None:
+        """The atom's box for MESSAGE TEXT only, or None: never raises and
+        never appends a note (:meth:`read` notes an undecodable literal,
+        and a message-builder must not double it)."""
+        if isinstance(atom, ir.Literal):
+            try:
+                return _value_to_interval(atom.val, atom.aval.shape)
+            except (iv.IntervalError, ir.TranscriptionError):
+                return None
+        return self.env.get(atom.id)
+
+    def _operand_provenance(self, eqn: ir.JaxprEqn) -> str:
+        """Where each operand of a DECLINING equation came from, as a
+        bracketed message fragment, or "" (docs/proposed-decline-messages.md
+        #2: a decline that reports a box must say where the box came from).
+
+        Message content only — never consulted by a transfer, judgment, or
+        counter. Each clause states only what is recorded: a literal is
+        quoted with its dtype; a value minted as artifact ⊤ by
+        :meth:`top_out` names its originating equation and cause ("it did
+        not come from your declaration" is literally true of it — the box
+        was minted here, not decoded from any declared bound); a declared
+        input names its declaration; anything else names its producing
+        equation and propagated span, or is silently omitted — no guessing.
+        Equations with more than two operands get only the artifact-⊤
+        clauses (the load-bearing ones), so wide forms stay readable.
+        """
+        clauses = []
+        brief = len(eqn.invars) > 2
+        for i, atom in enumerate(eqn.invars):
+            if isinstance(atom, ir.Literal):
+                if brief:
+                    continue
+                if isinstance(atom.val, (bool, int, float)):
+                    clauses.append(
+                        f"operand {i} is the literal {atom.val!r} "
+                        f"({atom.aval.dtype})"
+                    )
+                else:
+                    clauses.append(
+                        f"operand {i} is a {atom.aval.dtype} literal"
+                    )
+                continue
+            origin = self.top_origin.get(atom.id)
+            if origin is not None:
+                prim, owhere, cause = origin
+                if prim == "stelling_any":
+                    clauses.append(
+                        f"operand {i} is ⊤ because its own declaration "
+                        f"declined at {owhere} ({cause})"
+                    )
+                else:
+                    clauses.append(
+                        f"operand {i} is stelling's own ⊤ from {prim!r} at "
+                        f"{owhere} ({cause}) — it did not come from your "
+                        f"declaration; resolve that upstream decline first, "
+                        f"this one is downstream of it"
+                    )
+                continue
+            if brief:
+                continue
+            box = self._quiet_box(atom)
+            if box is None:
+                continue
+            producer = self.producers.get(atom.id)
+            if producer is None:
+                clauses.append(f"operand {i} spans {_render_box(box)}")
+            elif producer.primitive == "stelling_any":
+                pwhere = (
+                    producer.source_info[-1]
+                    if producer.source_info
+                    else "unknown location"
+                )
+                clauses.append(
+                    f"operand {i} is the declared input itself (declared "
+                    f"at {pwhere}), spanning {_render_box(box)}"
+                )
+            else:
+                pwhere = (
+                    producer.source_info[-1]
+                    if producer.source_info
+                    else "unknown location"
+                )
+                clauses.append(
+                    f"operand {i} was produced by {producer.primitive!r} "
+                    f"at {pwhere}, spanning {_render_box(box)}"
+                )
+        if not clauses:
+            return ""
+        return " [" + "; ".join(clauses) + "]"
+
+    def _straddle_suffix(self, eqn: ir.JaxprEqn) -> str:
+        """The quoted straddle for an interval-undecided obligation whose
+        operand is a top-level comparison, appended to the obligation
+        detail — or "" when no honest quote exists (a non-comparison
+        operand, a cross-scope value): the standard detail then stands
+        alone, no guessing (docs/proposed-decline-messages.md #1).
+
+        Message content only, produced at the ONE place the judgment is
+        made — every front door (check(), check_contract, direct
+        propagate callers, both semantics) inherits it from here, which
+        is the one-pipeline principle applied to the quote itself. The
+        boxes quoted are the LIVE judged boxes (the same env the verdict
+        was computed from — constrain-mode narrowing included), read
+        through :meth:`_quiet_box` so no note is ever doubled.
+
+        Every numeric fragment is measured: the spans are the propagated
+        intervals; the miss distance is computed exactly (Fraction) and
+        marked ≈ when its float rendering rounds; the ulp-step count is
+        an exact nextafter walk. When a strict bound's failing endpoint
+        EQUALS the bound, the text says that instead (the exactly-stated
+        threshold shape). An operand that is stelling's own artifact ⊤
+        names its origin — the same top_origin record the decline notes
+        use."""
+        pred = eqn.invars[0] if eqn.invars else None
+        if not isinstance(pred, ir.Var):
+            return ""
+        prod = self.producers.get(pred.id)
+        if (
+            prod is None
+            or prod.primitive not in _OBL_CMP_SYMBOL
+            or len(prod.invars) != 2
+        ):
+            return ""
+        lb, rb = (self._quiet_box(a) for a in prod.invars)
+        if lb is None or rb is None or lb.size == 0 or rb.size == 0:
+            return ""
+        cmp = prod.primitive
+        origin = self._cmp_origin_clause(prod)
+
+        def _is_point(b: iv.IntervalArray) -> bool:
+            return all(
+                lo == hi and math.isfinite(lo)
+                for lo, hi in zip(b.los, b.his)
+            ) and len(set(b.los)) == 1
+
+        l_pt, r_pt = _is_point(lb), _is_point(rb)
+        if l_pt == r_pt:
+            # both sides vary (or both are points): quote the straddle
+            return (
+                f"; the comparison straddles: lhs in {_render_box(lb)} "
+                f"{_OBL_CMP_SYMBOL[cmp]} rhs in {_render_box(rb)}{origin}"
+            )
+        if r_pt:
+            vb, k, cmp_v = lb, rb.los[0], cmp
+        else:
+            vb, k, cmp_v = rb, lb.los[0], _OBL_CMP_FLIP[cmp]
+        out = (
+            f"; the operand spans {_render_box(vb)} and the asserted "
+            f"bound is operand {_OBL_CMP_SYMBOL[cmp_v]} {k}"
+        )
+        if vb.size == 1 and cmp_v in ("ge", "gt", "le", "lt"):
+            if cmp_v in ("ge", "gt"):
+                endpoint, word = vb.los[0], "lower"
+            else:
+                endpoint, word = vb.his[0], "upper"
+            if math.isfinite(endpoint):
+                from fractions import Fraction
+
+                miss = abs(Fraction(k) - Fraction(endpoint))
+                if miss == 0:
+                    out += (
+                        f"; the operand's {word} endpoint equals the "
+                        f"bound, which strict {_OBL_CMP_SYMBOL[cmp_v]} "
+                        f"does not admit"
+                    )
+                elif miss > _MAX_BINARY64:
+                    # totality (blinded-lens audit R1): printability is
+                    # decided EXACTLY, before converting — float(miss)
+                    # raises OverflowError on this class, and the class
+                    # is stated as a class, never as a number
+                    out += (
+                        f"; the operand's {word} endpoint misses the "
+                        f"bound by more than the largest finite binary64 "
+                        f"value ({float(_MAX_BINARY64)})"
+                    )
+                else:
+                    miss_f = float(miss)
+                    approx = "" if Fraction(miss_f) == miss else "≈ "
+                    steps = _ulp_steps(endpoint, k)
+                    ulp = (
+                        f" ({steps} ulp step{'s' if steps != 1 else ''} "
+                        f"at this magnitude)"
+                        if steps
+                        else ""
+                    )
+                    out += (
+                        f"; the operand's {word} endpoint misses the "
+                        f"bound by {approx}{miss_f}{ulp}"
+                    )
+        return out + origin
+
+    def _cmp_origin_clause(self, prod: ir.JaxprEqn) -> str:
+        """Artifact-⊤ origins of a quoted comparison's sides — the #2
+        provenance rule applied to the straddle quote: a quoted unbounded
+        side that is stelling's own ⊤ says so, with its origin. Mirrors
+        :meth:`_operand_provenance`'s declined-declaration branch
+        (blinded-lens audit R4): a ⊤ minted at the side's OWN declaration
+        must point at the declaration, never read as 'not
+        declaration-derived' — literally-true fragments that send the
+        reader away from the one thing to fix are the #2 defect class."""
+        parts = []
+        for label, atom in zip(("lhs", "rhs"), prod.invars):
+            if isinstance(atom, ir.Var):
+                origin = self.top_origin.get(atom.id)
+                if origin is not None:
+                    prim, owhere, cause = origin
+                    if prim == "stelling_any":
+                        parts.append(
+                            f"{label} is ⊤ because its own declaration "
+                            f"declined at {owhere} ({cause})"
+                        )
+                    else:
+                        parts.append(
+                            f"{label} is stelling's own ⊤ from {prim!r} at "
+                            f"{owhere} ({cause}), not a declaration-derived "
+                            f"range"
+                        )
+        return " — " + "; ".join(parts) if parts else ""
+
+    def _note_decline(self, note: str) -> None:
+        """Append a TRANSFER-DECLINE note unless the identical note is
+        already present (docs/proposed-decline-messages.md: a ~120-word
+        decline note printed verbatim twice was the measured complaint).
+        Verbatim-identical decline notes say exactly what one says — the
+        site and operand provenance are in the text, so notes that differ
+        in ANY byte all stay. Scoped to the decline classes deliberately:
+        assume/withhold notes keep their multiplicity byte-identically
+        (the inert-mode comparability contract pins them). Accounting is
+        untouched — the coverage counters are recorded per equation at the
+        call sites, never derived from the notes."""
+        if note not in self.notes:
+            self.notes.append(note)
 
     def _contraction_hull(self, eqn: ir.JaxprEqn, outs, out_flags):
         """Cover BOTH roundings of a product feeding an add/sub (ieee only).
@@ -4889,7 +5179,7 @@ class _Propagator:
         if entry is None:
             self.counter.record_unknown(eqn.primitive)
             self.mark_unreached(eqn)
-            self.top_out(eqn)
+            self.top_out(eqn, cause="no interval transfer is registered for it")
             return
 
         transfer, tier = entry
@@ -4908,7 +5198,18 @@ class _Propagator:
             # degrade-don't-crash posture (second audit, FRAGILE 5; the
             # shape guards previously killed the whole analysis here).
             # Under ieee, top_out marks the outputs maybe-NaN.
-            self.notes.append(f"{eqn.primitive!r} declined this form: {e}; ⊤")
+            # The note names the SITE and the OPERANDS' provenance
+            # (docs/proposed-decline-messages.md #2): a decline that quotes
+            # a box says where the box came from — an upstream artifact ⊤
+            # is named as stelling's own, never left to read as the user's
+            # declaration. Message content only; same decline, same counts.
+            where = (
+                eqn.source_info[-1] if eqn.source_info else "unknown location"
+            )
+            self._note_decline(
+                f"{eqn.primitive!r} declined this form at {where}: {e}"
+                f"{self._operand_provenance(eqn)}; ⊤"
+            )
             self.counter.record_unknown(eqn.primitive)
             # the coverage denominator is a function of the PROGRAM, never
             # of the outcome (third audit, F1): an equation carrying a
@@ -4922,19 +5223,25 @@ class _Propagator:
             # ieee 5 on one program). A no-op for every sub-jaxpr-free
             # equation.
             self.mark_unreached(eqn)
-            self.top_out(eqn)
+            self.top_out(eqn, cause="its interval transfer declined this form")
             return
         if result is None:  # a known transfer declining this configuration
-            self.notes.append(
+            where = (
+                eqn.source_info[-1] if eqn.source_info else "unknown location"
+            )
+            self._note_decline(
                 f"{eqn.primitive!r} has no sound rule for params "
-                f"{ {k: v for k, v in params.items() if not isinstance(v, ir.ClosedJaxpr)} }; ⊤"
+                f"{ {k: v for k, v in params.items() if not isinstance(v, ir.ClosedJaxpr)} }"
+                f" at {where}{self._operand_provenance(eqn)}; ⊤"
             )
             self.counter.record_unknown(eqn.primitive)
             # same accounting as the IntervalError decline above: inner
             # equations of a declined form count unreached, keeping the
             # denominator outcome-independent (third audit, F1)
             self.mark_unreached(eqn)
-            self.top_out(eqn)
+            self.top_out(
+                eqn, cause="it has no sound rule for this configuration"
+            )
             return
         outs, out_flags = result if ieee else (result, None)
         if (
@@ -5010,6 +5317,13 @@ class _Propagator:
             )
         if eqn.primitive == "stelling_assert":
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
+            if status == "unknown":
+                # the undecided detail quotes the straddle it was judged
+                # on (docs/proposed-decline-messages.md #1) — message
+                # content only, appended before the withholding branches
+                # below (which replace the detail with their own claims
+                # and are untouched)
+                detail += self._straddle_suffix(eqn)
             if ieee and in_flags and in_flags[0] and status != "unknown":
                 # the predicate VALUE arrived flagged maybe-NaN (a decline
                 # artifact ⊤ reaching the assert, or a flagged selector

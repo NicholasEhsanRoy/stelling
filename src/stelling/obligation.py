@@ -63,7 +63,12 @@ from typing import Mapping
 from stelling import interval as iv
 from stelling import ir
 from stelling.coverage import DEFAULT_TRANSPARENT
-from stelling.propagate import _EXACT_CONVERSIONS, _INT_DTYPE_BOUNDS, Propagation
+from stelling.propagate import (
+    _EXACT_CONVERSIONS,
+    _INT_DTYPE_BOUNDS,
+    TRANSFERS,
+    Propagation,
+)
 
 __all__ = [
     "DeclinedObligation",
@@ -1161,7 +1166,16 @@ class _Slicer:
         self,
         closed: ir.ClosedJaxpr,
         env: Mapping[int, iv.IntervalArray],
+        top_primitives: frozenset[str] | None = None,
     ) -> None:
+        # the primitives the interval RUN recorded as fallen-to-⊤ (from
+        # coverage.unknown_primitives), or None when the caller has no run
+        # record. MESSAGE WORDING ONLY (blinded-lens audit R2/R3): the
+        # unsupported-primitive decline may describe the interval leg's
+        # behaviour on this run only from this record — never from a
+        # guess — and with None it claims neither direction. Admission is
+        # never consulted from it.
+        self.top_primitives = top_primitives
         self.env = env
         jaxpr = closed.jaxpr
         self.producers: dict[int, ir.JaxprEqn] = {}
@@ -1376,8 +1390,67 @@ class _Slicer:
                 f"resists sound descent"
             )
         if prim not in _SUPPORTED:
+            # docs/proposed-decline-messages.md #3: the decline names not
+            # only the primitive but WHAT KIND of gap this is (an unbuilt
+            # row — nothing here judges the form unemittable) and whether
+            # the OTHER leg has a row, derived from the live registry so
+            # the sentence cannot drift from it. An external evaluator
+            # read the bare sentence next to "square [sound]" in the same
+            # stamp's transfer list and could not tell whether the two
+            # facts were in contradiction; now the decline states both.
+            #
+            # What the interval leg DID on this run comes only from the
+            # run's own record (self.top_primitives — blinded-lens audit
+            # R2/R3): a registered row may still have DECLINED the
+            # triggering form (then BOTH legs have a gap here, and 'the
+            # emission row alone' would be false), and a row-less
+            # primitive may have been handled STRUCTURALLY (cond's branch
+            # join — then 'propagated ⊤' would be false). With no run
+            # record, neither direction is claimed.
+            head = (
+                f"primitive {prim!r} is outside the supported emission "
+                f"set: no SMT emission rule has been built and audited "
+                f"for it — an unbuilt row, not a policy refusal of the "
+                f"form. "
+            )
+            tops = self.top_primitives
+            row = TRANSFERS.get(prim)
+            if row is not None:
+                fact = (
+                    f"An interval transfer row for {prim!r} IS registered "
+                    f"(tier {row[1]!r})"
+                )
+                if tops is not None and prim in tops:
+                    raise _Decline(
+                        head + fact + f", but on this run the interval "
+                        f"leg ALSO fell to ⊤ at {prim!r} (its transfer "
+                        f"declined a form — see the coverage line and the "
+                        f"decline notes), so both legs have a gap here"
+                    )
+                if tops is not None:
+                    raise _Decline(
+                        head + fact + ", so the gap is the solver-emission "
+                        "row alone"
+                    )
+                raise _Decline(
+                    head + fact + "; the coverage line records whether it "
+                    "covered this run's forms"
+                )
+            fact = "It has no interval transfer row either"
+            if tops is not None and prim in tops:
+                raise _Decline(
+                    head + fact + ", so the interval leg propagated ⊤ for "
+                    "it (see the coverage line)"
+                )
+            if tops is not None:
+                raise _Decline(
+                    head + fact + ", yet it did not fall to ⊤ on this run: "
+                    "the interval leg handled it structurally (see the "
+                    "coverage line)"
+                )
             raise _Decline(
-                f"primitive {prim!r} is outside the supported emission set"
+                head + fact + "; the coverage line records how the "
+                "interval leg treated it on this run"
             )
         params = eqn.params_dict()
         if prim in _BOOL_OPS:
@@ -1681,12 +1754,37 @@ class _Slicer:
                 element_terms += _size(eqn.invars[0].aval.shape)
                 element_terms += _size(eqn.invars[2].aval.shape)
         if element_terms > ELEMENT_BUDGET or root_size > ELEMENT_BUDGET:
+            # docs/proposed-decline-messages.md #4: the old sentence was
+            # accurate and quantitative, which made the WRONG lever more
+            # likely to be pulled — it read as a diagnosis, and a reader
+            # went to tune the budget. The decline now names the exceeding
+            # quantity, says what the budget gates (the ATTEMPT — the
+            # interval result is budget-independent by construction), and
+            # names the lever that actually lowers the counts. The
+            # proposal's 'obligations past the budget declined again on a
+            # different cause once it was raised' is a claim about
+            # unrecorded measurements and is deliberately NOT stated.
+            over = " and ".join(
+                name
+                for name, v in (
+                    ("element terms", element_terms),
+                    ("root conjuncts", root_size),
+                )
+                if v > ELEMENT_BUDGET
+            )
             raise _Decline(
-                f"obligation needs {element_terms} element terms and "
-                f"{root_size} root conjuncts, over the per-obligation "
-                f"emission budget of {ELEMENT_BUDGET} (bounded static-shape "
-                f"emission; the budget is measured solver cost, see "
-                f"stelling.obligation.ELEMENT_BUDGET)"
+                f"obligation not attempted: it needs {element_terms} "
+                f"element terms and {root_size} root conjuncts, and its "
+                f"{over} put it over the per-obligation emission budget of "
+                f"{ELEMENT_BUDGET} (bounded static-shape emission; the "
+                f"budget is measured solver cost, see "
+                f"stelling.obligation.ELEMENT_BUDGET). The budget bounds "
+                f"what escalation will ATTEMPT; it is not a diagnosis of "
+                f"the obligation, and raising it does not change the "
+                f"interval result that left this obligation undecided. "
+                f"What lowers the counts is a smaller obligation — a "
+                f"smaller declared array, or a per-element property "
+                f"instead of a whole-array one"
             )
 
         # -- pass 2: decode, validate, build — all bounded by the gate ---
@@ -1849,9 +1947,17 @@ def slice_obligation(
     closed: ir.ClosedJaxpr,
     index: int,
     env: Mapping[int, iv.IntervalArray],
+    *,
+    top_primitives: frozenset[str] | None = None,
 ) -> ObligationSlice | DeclinedObligation:
     """Extract the slice for obligation ``index`` (top-level assert order),
-    or decline with the reason quoted. Never raises on legal queries."""
+    or decline with the reason quoted. Never raises on legal queries.
+
+    ``top_primitives`` (message wording only, never admission): the
+    primitives the interval RUN recorded as fallen-to-⊤, from
+    ``propagation.coverage.unknown_primitives`` — the unsupported-
+    primitive decline describes the interval leg's run behaviour from
+    this record and claims neither direction when it is ``None``."""
     jaxpr = closed.jaxpr
     asserts = [e for e in jaxpr.eqns if e.primitive == "stelling_assert"]
     if index >= len(asserts):
@@ -1864,7 +1970,7 @@ def slice_obligation(
         )
     assert_eqn = asserts[index]
     try:
-        return _Slicer(closed, env).slice(index, assert_eqn)
+        return _Slicer(closed, env, top_primitives).slice(index, assert_eqn)
     except _Decline as d:
         return DeclinedObligation(
             index=index, reason=d.reason, source_info=assert_eqn.source_info
@@ -1902,7 +2008,16 @@ def slice_unknown_obligations(
             )
             for o in unknown
         )
-    return tuple(slice_obligation(closed, o.index, env) for o in unknown)
+    # the run record rides along for message wording (audit R2/R3): the
+    # unsupported-primitive decline describes what the interval leg did
+    # on THIS run from the coverage instrument's own record
+    tops = frozenset(
+        name for name, _ in propagation.coverage.unknown_primitives
+    )
+    return tuple(
+        slice_obligation(closed, o.index, env, top_primitives=tops)
+        for o in unknown
+    )
 
 
 # -- exact-rational replay ----------------------------------------------------

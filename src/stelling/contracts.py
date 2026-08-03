@@ -953,15 +953,20 @@ def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None, refine=Non
     required here exactly as there — the widen re-check on every
     VERIFIED at the same pipeline depth.
 
-    Two contract-layer disclosures ride on the returned requires verdict,
-    both via the standard append-only mechanics:
+    Interval-undecided obligations arrive with the straddle already
+    QUOTED in their detail — the propagated closed intervals of both
+    comparison sides, produced by the ONE propagation layer itself
+    (docs/proposed-decline-messages.md #1), so an UNKNOWN says which
+    numbers failed to separate on every front door. This layer used to
+    mirror that quote as its own bolted-on note from a RE-propagated
+    inert-mode env; the mirror is gone — one pipeline, one quote, judged
+    boxes.
 
-    * interval-undecided obligations get a note QUOTING the straddle —
-      the propagated closed intervals of both comparison sides — so an
-      UNKNOWN says which numbers failed to separate;
-    * a declared ensures face is recorded in the stamp's assumption
-      lines (derivation quoted, DECLARED named); an absent one is
-      recorded as a note quoting the contract's reason.
+    One contract-layer disclosure rides on the returned requires verdict,
+    via the standard append-only mechanics: a declared ensures face is
+    recorded in the stamp's assumption lines (derivation quoted, DECLARED
+    named); an absent one is recorded as a note quoting the contract's
+    reason.
 
     The ensures face itself is carried through UNCHANGED — this function
     cannot mint, upgrade, or drop one.
@@ -970,14 +975,11 @@ def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None, refine=Non
 
     from stelling.preconditions import _pipeline
 
-    verdict, closed = _pipeline(
+    verdict, _ = _pipeline(
         contract.harness,
         vacuity_mode=vacuity_mode,
         solver_timeout_ms=solver_timeout_ms,
         refine=refine,
-    )
-    notes = _straddle_notes(
-        closed, verdict, solver_offered=solver_timeout_ms is not None
     )
     if contract.ensures is not None:
         ensures_line = (
@@ -992,16 +994,14 @@ def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None, refine=Non
             verdict.stamp,
             assumptions=verdict.stamp.assumptions + (ensures_line,),
         )
-        verdict = dataclasses.replace(
-            verdict, stamp=stamp, notes=verdict.notes + notes
-        )
+        verdict = dataclasses.replace(verdict, stamp=stamp)
     else:
         none_line = (
             f"contract {contract.name!r} ensures face: "
             f"{contract.no_ensures_reason}"
         )
         verdict = dataclasses.replace(
-            verdict, notes=verdict.notes + notes + (none_line,)
+            verdict, notes=verdict.notes + (none_line,)
         )
     return ContractVerdict(
         contract_name=contract.name,
@@ -1010,84 +1010,3 @@ def check_contract(contract, *, vacuity_mode, solver_timeout_ms=None, refine=Non
         ensures=contract.ensures,
         no_ensures_reason=contract.no_ensures_reason,
     )
-
-
-# -- straddle quoting ---------------------------------------------------------
-
-_CMP_SYMBOL = {
-    "lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "==", "ne": "!=",
-}
-
-
-def _side_bracket(atom, env):
-    """The propagated closed bracket of one comparison side, as a quote
-    fragment, or None when no honest quote exists (a value produced
-    inside a transparent call carries no top-level interval)."""
-    from stelling import ir
-    from stelling.obligation import _decode_elements
-
-    if isinstance(atom, ir.Literal):
-        try:
-            vals = [v for v in _decode_elements(atom.val)]
-        except Exception:  # undecodable constant: no quote  # noqa: BLE001
-            return None
-        if not vals or any(isinstance(v, bool) for v in vals):
-            return None
-        lo, hi = min(vals), max(vals)
-        n = len(vals)
-    else:
-        box = env.get(getattr(atom, "id", None))
-        if box is None or box.size == 0:
-            return None
-        lo, hi = min(box.los), max(box.his)
-        n = box.size
-    hull = f" (elementwise hull over {n} elements)" if n > 1 else ""
-    return f"[{lo!r}, {hi!r}]{hull}"
-
-
-def _straddle_notes(closed, verdict, *, solver_offered):
-    """One note per interval-undecided obligation whose assert operand is
-    a top-level comparison, quoting the propagated intervals of both
-    sides — the straddle, in numbers. Obligations that cannot be quoted
-    honestly (nested asserts, non-comparison operands, transparent-call
-    values) get no note; their standard UNKNOWN detail stands alone."""
-    unknown = [o for o in verdict.obligations if o.status == "unknown"]
-    if not unknown:
-        return ()
-    from stelling.propagate import interval_env
-
-    asserts = [
-        e for e in closed.jaxpr.eqns if e.primitive == "stelling_assert"
-    ]
-    if len(asserts) != len(verdict.obligations):
-        # asserts nested in sub-jaxprs: index mapping would be a guess —
-        # the same refusal rule the escalation layer applies
-        return ()
-    env = interval_env(closed)
-    producers = {}
-    for eqn in closed.jaxpr.eqns:
-        for out in eqn.outvars:
-            producers[out.id] = eqn
-    notes = []
-    # the hint promises only the OFFER: escalation may still decline
-    # (budget, unsupported form) and its own decline text then says why
-    hint = (
-        ""
-        if solver_offered
-        else "; an explicit solver_timeout_ms offers exactly this "
-        "obligation to solver escalation"
-    )
-    for o in unknown:
-        producer = producers.get(getattr(asserts[o.index].invars[0], "id", None))
-        if producer is None or producer.primitive not in _CMP_SYMBOL:
-            continue
-        sides = [_side_bracket(atom, env) for atom in producer.invars]
-        if len(sides) != 2 or any(s is None for s in sides):
-            continue
-        notes.append(
-            f"requires face: obligation #{o.index} undecided by interval "
-            f"propagation — the comparison straddles: lhs in {sides[0]} "
-            f"{_CMP_SYMBOL[producer.primitive]} rhs in {sides[1]} over the "
-            f"declared envelope{hint}"
-        )
-    return tuple(notes)
