@@ -129,11 +129,18 @@ def test_citations_survive_any_rewrapping_of_the_quoted_source():
                         f"    {opener}{head} {closer}",
                         f"    {opener}{tail}{closer}",
                     ]
-                    assert module._quote_line(rel, quote) == 3, (
+                    # the scanner's failure mode is to raise, not to
+                    # answer wrongly; both are the same defect here, so
+                    # both report it in the terms that locate it
+                    try:
+                        found = module._quote_line(rel, quote)
+                    except LookupError:
+                        found = None
+                    assert found == 3, (
                         f"{rel}: the citation is lost when the quoted text "
                         f"is wrapped after {words[cut - 1]!r} in the "
                         f"{opener!r} style — the break moved, the text did "
-                        f"not"
+                        f"not. Quote: {quote[:60]!r}..."
                     )
                     checked += 1
     finally:
