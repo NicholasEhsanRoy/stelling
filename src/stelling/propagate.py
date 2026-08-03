@@ -710,26 +710,65 @@ def _t_split(eqn, params, ins):
     Declines (⊤) when the params do not describe the operand it was handed:
     sizes that do not sum to the axis extent, an axis outside the operand's
     rank, a negative size, or an output count the params disagree with.
+    Every decline names its reason and prints the numbers that made it
+    decline — the tracer validates all of these before binding (measured:
+    mis-summing sizes, a negative size and an out-of-range axis each raise
+    at trace time), so each path below marks IR that did not come from
+    that trace path: hand-built or edited-after-serialization.
     """
     if len(ins) != 1:
-        return None
+        raise iv.IntervalError(
+            f"split cuts ONE operand along one axis, and this equation "
+            f"binds {len(ins)} operands — there is no single array here "
+            f"for the sizes to partition; check the hand-built or "
+            f"deserialized IR that produced it"
+        )
     (a,) = ins
     sizes = params.get("sizes")
     axis = params.get("axis")
     if sizes is None or axis is None:
-        return None  # absent params are not a traced form; never guessed
+        gone = " and ".join(
+            repr(n) for n in ("sizes", "axis") if params.get(n) is None
+        )
+        raise iv.IntervalError(
+            f"split carries no usable {gone} param (absent or None) — the "
+            f"row cuts at the offsets 'sizes' gives along 'axis', and an "
+            f"absent param is never guessed"
+        )
     try:
         sizes = tuple(int(s) for s in sizes)
         axis = int(axis)
     except (TypeError, ValueError):
-        return None
+        raise iv.IntervalError(
+            f"split params do not read as integers: "
+            f"sizes={params.get('sizes')!r}, axis={params.get('axis')!r} — "
+            f"the cut offsets are integer arithmetic on these, and reading "
+            f"them raised"
+        ) from None
     rank = len(a.shape)
-    if not 0 <= axis < rank or any(s < 0 for s in sizes):
-        return None
+    if not 0 <= axis < rank:
+        raise iv.IntervalError(
+            f"split axis {axis} lies outside the operand's rank {rank} "
+            f"(operand shape {a.shape}) — there is no axis {axis} to cut"
+        )
+    if any(s < 0 for s in sizes):
+        bad = tuple(s for s in sizes if s < 0)
+        raise iv.IntervalError(
+            f"split sizes {sizes} contain negative piece extents {bad} — "
+            f"no piece holds a negative number of elements"
+        )
     if sum(sizes) != a.shape[axis]:
-        return None  # the cut does not partition the axis
+        raise iv.IntervalError(
+            f"split sizes {sizes} sum to {sum(sizes)}, but the operand's "
+            f"axis {axis} has extent {a.shape[axis]} (operand shape "
+            f"{a.shape}) — the cut does not partition the axis"
+        )
     if len(sizes) != len(eqn.outvars):
-        return None  # params and the equation's own arity disagree
+        raise iv.IntervalError(
+            f"split params name {len(sizes)} pieces but the equation binds "
+            f"{len(eqn.outvars)} output(s) — the params and the equation's "
+            f"own arity disagree about how many pieces exist"
+        )
 
     out, start = [], 0
     for s in sizes:
@@ -787,22 +826,50 @@ def _t_unstack(eqn, params, ins):
     EXACT: every output element IS an input element at a static index, so this
     is built on :func:`interval.slice_` rather than fresh index arithmetic —
     the "don't hand-roll a traversal" norm applied to indexing. Declines when
-    the params do not describe the operand it was handed.
+    the params do not describe the operand it was handed; every decline
+    names its reason with the numbers. The tracer validates the axis and
+    fixes the output count before binding (measured: an out-of-range axis
+    raises at trace time, a negative one is normalized, and the abstract
+    eval binds one output per index), so each path below marks IR that
+    did not come from that trace path: hand-built or
+    edited-after-serialization.
     """
     if len(ins) != 1:
-        return None
+        raise iv.IntervalError(
+            f"unstack routes ONE operand's indices along one axis to its "
+            f"outputs, and this equation binds {len(ins)} operands — there "
+            f"is no single array here to unstack; check the hand-built or "
+            f"deserialized IR that produced it"
+        )
     (a,) = ins
     axis = params.get("axis")
     if axis is None:
-        return None  # absent params are not a traced form; never guessed
+        raise iv.IntervalError(
+            "unstack carries no usable 'axis' param (absent or None) — the "
+            "row cuts along that axis, and an absent param is never guessed"
+        )
     try:
         axis = int(axis)
     except (TypeError, ValueError):
-        return None
+        raise iv.IntervalError(
+            f"unstack's axis param does not read as an integer: "
+            f"axis={params.get('axis')!r} — the cut offsets are integer "
+            f"arithmetic on it, and reading it raised"
+        ) from None
     shape = tuple(a.shape)
     rank = len(shape)
-    if not 0 <= axis < rank or len(eqn.outvars) != shape[axis]:
-        return None
+    if not 0 <= axis < rank:
+        raise iv.IntervalError(
+            f"unstack axis {axis} lies outside the operand's rank {rank} "
+            f"(operand shape {shape}) — there is no axis {axis} to cut"
+        )
+    if len(eqn.outvars) != shape[axis]:
+        raise iv.IntervalError(
+            f"unstack along axis {axis} of operand shape {shape} yields "
+            f"{shape[axis]} piece(s), but the equation binds "
+            f"{len(eqn.outvars)} output(s) — the operand and the equation's "
+            f"own arity disagree about how many pieces exist"
+        )
     out = []
     for i in range(shape[axis]):
         starts = tuple(i if d == axis else 0 for d in range(rank))
@@ -1225,16 +1292,25 @@ def _t_scatter(eqn, params, ins):
     The output is the operand's box with element ``k``'s interval replaced
     by the update's — pure data movement, no arithmetic, no rounding.
 
-    Everything else declines to a noted ⊤: dynamic (non-point) or
-    out-of-range indices (mode-dependent clamp/drop is the census's wedge
-    bug class, never guessed), update windows, batching dims, higher
-    ranks, computed updates.
+    Everything else declines to a noted ⊤ that names its reason and
+    prints the numbers: dynamic (non-point) or out-of-range indices
+    (mode-dependent clamp/drop is the census's wedge bug class, never
+    guessed), update windows, batching dims, higher ranks, computed
+    updates. The legible causes — a combiner, leftover combiner consts,
+    unreadable dimension numbers, an index dtype that cannot hold the
+    leading-axis bound — are named BEFORE the general form failure, the
+    same order and for the same reason as the emission face
+    (:func:`stelling.obligation._scatter_set_plan`): each is a case the
+    shared oracle also rejects, so the pre-checks change no decision,
+    only the sentence.
     """
     # WHAT THIS FUNCTION RETAINS BEYOND THE SHARED ORACLE, enumerated because
     # an unenumerated retained check is how the two faces drifted apart once
     # already: the combiner gate lived here while the emission used only the
-    # oracle, so `.apply` was admitted as `.set`. Everything below is either a
-    # precondition for CALLING the oracle or genuinely interval-domain.
+    # oracle, so `.apply` was admitted as `.set`. Everything below is a
+    # precondition for CALLING the oracle, genuinely interval-domain, or a
+    # named pre-check of a case the oracle also rejects (reason-order only,
+    # never a decision).
     #
     #   len(ins) != 3        — arity. The oracle takes three shapes, so having
     #                          three operands is a precondition for calling it.
@@ -1242,26 +1318,122 @@ def _t_scatter(eqn, params, ins):
     #                          gates this and is the authority; this copy is
     #                          kept, not removed, because it is the check whose
     #                          absence caused the defect and a redundant gate
-    #                          costs nothing.
+    #                          costs nothing — and it now carries the legible
+    #                          combiner sentence.
+    #   update_consts / dimension_numbers readability / index dtype —
+    #                          named pre-checks mirroring the emission face:
+    #                          each fires only where the oracle would return
+    #                          False anyway, so the decline set is the
+    #                          oracle's; the pre-check owns the sentence.
     #   index point/finite/integral, and in-range — interval-domain. This face
     #                          reads the index from a propagated INTERVAL; the
     #                          emission reads it from static constants. Same
     #                          question, two representations, so it cannot live
     #                          in a shape-and-params oracle.
-    if len(ins) != 3 or params.get("update_jaxpr") is not None:
-        return None
+    if len(ins) != 3:
+        raise iv.IntervalError(
+            f"scatter takes an operand, one index array and one updates "
+            f"array, and this equation binds {len(ins)} operand(s) — "
+            f"check the hand-built or deserialized IR that produced it"
+        )
+    if params.get("update_jaxpr") is not None:
+        raise iv.IntervalError(
+            "scatter carries a combiner (update_jaxpr): this is an "
+            "`x.at[k].apply(f)`-shaped equation, not the covered "
+            "`x.at[k].set(v)`. It traces with the same dimension numbers, "
+            "shapes, mode and static index as a set, beside a DUMMY "
+            "updates operand (measured: 0.0 regardless of f) — modelling "
+            "it as a set would write the dummy where the program computes "
+            "f(operand[k])"
+        )
     operand, indices, updates = ins
+    indices_dtype = _scatter_indices_dtype(eqn)
+    if params.get("update_consts"):
+        raise iv.IntervalError(
+            f"scatter carries non-empty update_consts "
+            f"{params.get('update_consts')!r} with no update_jaxpr — "
+            f"combiner state without a combiner; the traced set form "
+            f"carries update_consts=() (measured), so check the hand-built "
+            f"or deserialized IR that produced this"
+        )
+    dn = params.get("dimension_numbers")
+    if not isinstance(dn, ir.NamedTupleParam):
+        raise iv.IntervalError(
+            f"scatter carries no readable dimension_numbers (got {dn!r}) "
+            f"— the covered set form is recognized by those fields, and "
+            f"without them the write's geometry is unknown; the traced "
+            f"form records them, so check the hand-built or deserialized "
+            f"IR"
+        )
+    if len(operand.shape) == 1 and not _scatter_index_dtype_covers(
+        indices_dtype, operand.shape[0]
+    ):
+        bound = operand.shape[0] - 1
+        table = _INT_DTYPE_BOUNDS.get(indices_dtype or "")
+        if indices_dtype is None:
+            why = (
+                "no dtype is recorded for the index operand, so nothing "
+                "vouches the bound is representable in it"
+            )
+        elif table is None:
+            why = (
+                f"dtype {indices_dtype!r} is not in the integer-bounds "
+                f"table here, so nothing vouches the bound fits it"
+            )
+        else:
+            why = (
+                f"{indices_dtype} represents [{table[0]}, {table[1]}], "
+                f"which does not contain {bound}"
+            )
+        raise iv.IntervalError(
+            f"scatter's index dtype cannot be vouched to represent the "
+            f"operand's leading-axis bound {bound} exactly: {why}. XLA "
+            f"computes the out-of-bounds bound in the INDEX element type, "
+            f"so the range check it performs is not the one this row "
+            f"models — measured on jax 0.11.0: an int8 index column "
+            f"writes at operand length 128 and silently DROPS an "
+            f"in-range-looking write at 129"
+        )
     if not _scatter_set_row_form(
         params, operand.shape, indices.shape, updates.shape,
-        _scatter_indices_dtype(eqn),
+        indices_dtype,
     ):
-        return None  # form outside the covered row — the shared oracle's call
+        # form outside the covered row — the shared oracle's call. The
+        # covered core is derived from the SAME constant the oracle
+        # reads, so this sentence cannot drift from the check.
+        core = ", ".join(f"{k}={v!r}" for k, v in _SCATTER_SET_CORE.items())
+        dn_got = ", ".join(f"{k}={v!r}" for k, v in dict(dn.fields).items())
+        raise iv.IntervalError(
+            f"scatter configuration (operand {operand.shape}, indices "
+            f"{indices.shape}, updates {updates.shape}, {dn_got}) is "
+            f"outside the covered static-index set row form: rank-1 "
+            f"operand, one index row (1,), scalar update (), {core}, and "
+            f"every other dimension-number field empty"
+        )
     lo, hi = indices.los[0], indices.his[0]
-    if lo != hi or not math.isfinite(lo) or lo != math.floor(lo):
-        return None  # dynamic or non-integral index: no exact rule
+    if lo != hi:
+        raise iv.IntervalError(
+            f"scatter's index spans [{lo}, {hi}] over the declared box — "
+            f"not a single point, so no one element is THE written one, "
+            f"and nothing here brackets a data-dependent write"
+        )
+    if not math.isfinite(lo) or lo != math.floor(lo):
+        raise iv.IntervalError(
+            f"scatter's index is the point {lo}, which is not a finite "
+            f"integer — element positions are integers, so this index "
+            f"names no element"
+        )
     k = int(lo)
     if not 0 <= k < operand.shape[0]:
-        return None  # out of range: FILL_OR_DROP drops, CLIP clamps — decline
+        raise iv.IntervalError(
+            f"scatter index {k} is out of range for the operand's leading "
+            f"axis: 0 <= {k} < {operand.shape[0]} fails — out-of-range "
+            f"handling is mode-dependent (measured on jax 0.11.0: "
+            f"FILL_OR_DROP drops the write and the operand passes through "
+            f"unchanged; clip clamps the index into range from both "
+            f"sides, 7 onto the last element and -2 onto the first) and "
+            f"is never guessed"
+        )
     los = list(operand.los)
     his = list(operand.his)
     los[k] = updates.los[0]
@@ -1287,20 +1459,40 @@ def _t_gather(eqn, params, ins):
     ``GatherScatterMode``\\ s agree on definitely-in-range indices, so
     the mode is not constrained here.
 
-    Everything else declines to a noted ⊤: dynamic (non-point) or
-    out-of-range indices (mode-dependent clamp/drop/fill is the census's
-    wedge bug class, never guessed), batching dims, window offsets not
-    covering the full trailing block, multi-column index vectors.
+    Everything else declines to a noted ⊤ that names its reason and prints
+    the numbers: dynamic (non-point) or out-of-range indices
+    (mode-dependent clamp/drop/fill is the census's wedge bug class, never
+    guessed), batching dims, window offsets not covering the full trailing
+    block, multi-column index vectors.
     """
     if len(ins) != 2:
-        return None
+        raise iv.IntervalError(
+            f"gather takes an operand and one index array, and this "
+            f"equation binds {len(ins)} operand(s) — check the hand-built "
+            f"or deserialized IR that produced it"
+        )
     operand, indices = ins
     r = len(operand.shape)
-    if r < 1 or len(indices.shape) != 2 or indices.shape[1] != 1:
-        return None
+    if r < 1:
+        raise iv.IntervalError(
+            "gather's covered row form takes rows of the operand's leading "
+            "axis, and this operand is rank-0 (shape ()) — there is no "
+            "leading axis to take rows from"
+        )
+    if len(indices.shape) != 2 or indices.shape[1] != 1:
+        raise iv.IntervalError(
+            f"gather indices have shape {indices.shape} — the covered row "
+            f"form reads them as an (N, 1) column of leading-axis row "
+            f"numbers, and this index array is not such a column"
+        )
     dn = params.get("dimension_numbers")
     if not isinstance(dn, ir.NamedTupleParam):
-        return None
+        raise iv.IntervalError(
+            f"gather carries no readable dimension_numbers (got {dn!r}) — "
+            f"the covered row form is recognized by those fields, and "
+            f"without them the take's geometry is unknown; the traced form "
+            f"records them, so check the hand-built or deserialized IR"
+        )
     fields = dict(dn.fields)
     want = {
         "offset_dims": tuple(range(1, r)),
@@ -1308,18 +1500,54 @@ def _t_gather(eqn, params, ins):
         "start_index_map": (0,),
     }
     if any(fields.get(k) != v for k, v in want.items()):
-        return None
-    if any(v != () for k, v in fields.items() if k not in want):
-        return None
-    if tuple(params.get("slice_sizes", ())) != (1,) + operand.shape[1:]:
-        return None
+        got = ", ".join(f"{k}={fields.get(k)!r}" for k in want)
+        cov = ", ".join(f"{k}={v!r}" for k, v in want.items())
+        raise iv.IntervalError(
+            f"gather dimension numbers do not collapse exactly the leading "
+            f"axis of this rank-{r} operand: got {got}, where the covered "
+            f"leading-axis row form is {cov} — a different take geometry "
+            f"has no rule here"
+        )
+    extra = {k: v for k, v in fields.items() if k not in want and v != ()}
+    if extra:
+        raise iv.IntervalError(
+            f"gather carries non-empty dimension-number field(s) beyond "
+            f"the covered three: {extra!r} — the covered row form has "
+            f"every such field (the batching fields today) empty"
+        )
+    got_ss = tuple(params.get("slice_sizes", ()))
+    want_ss = (1,) + operand.shape[1:]
+    if got_ss != want_ss:
+        raise iv.IntervalError(
+            f"gather slice_sizes {got_ss} do not take one full row: the "
+            f"covered row form takes (1, *operand.shape[1:]) = {want_ss} "
+            f"of the operand (shape {operand.shape}) per index"
+        )
     ks = []
-    for lo, hi in zip(indices.los, indices.his):
-        if lo != hi or not math.isfinite(lo) or lo != math.floor(lo):
-            return None  # dynamic or non-integral index: no exact rule
+    for i, (lo, hi) in enumerate(zip(indices.los, indices.his)):
+        if lo != hi:
+            raise iv.IntervalError(
+                f"gather index element {i} spans [{lo}, {hi}] over the "
+                f"declared box — not a single point, so no one row is THE "
+                f"taken row, and nothing here brackets a data-dependent "
+                f"take"
+            )
+        if not math.isfinite(lo) or lo != math.floor(lo):
+            raise iv.IntervalError(
+                f"gather index element {i} is the point {lo}, which is not "
+                f"a finite integer — row numbers are integers, so this "
+                f"index names no row"
+            )
         k = int(lo)
         if not 0 <= k < operand.shape[0]:
-            return None  # out of range: clamp/drop/fill is mode-dependent
+            raise iv.IntervalError(
+                f"gather index element {i} is {k}, outside the operand's "
+                f"leading axis: 0 <= {k} < {operand.shape[0]} fails "
+                f"(operand shape {operand.shape}) — out-of-range handling "
+                f"is mode-dependent (measured on jax 0.11.0: mode 'clip' "
+                f"takes the clamped row, mode 'fill' yields the fill value "
+                f"instead of any row) and is never guessed"
+            )
         ks.append(k)
     return [iv.take_rows(operand, ks)]
 

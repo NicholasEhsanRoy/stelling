@@ -645,29 +645,162 @@ def test_scatter_static_set_definite_false_direction():
     assert "1/3" in p.obligations[0].detail
 
 
-def test_scatter_dynamic_index_declines_not_crashes():
-    # a non-point index interval has no exact rule: noted ⊤, never a guess
-    p = propagate(_scatter_query((0.0, 1.0), 5.0))  # must not raise
+def _scatter_declined(q, *frags):
+    """The decline pinned WITH its accounting: a raised decline must count
+    exactly as the returned None it replaced (status unknown, one ⊤,
+    the primitive named in unknown_primitives, no tier recorded)."""
+    p = propagate(q)  # must not raise: declines never kill the walk
     assert p.obligations[0].status == "unknown"
-    assert any("scatter" in n and "no sound rule" in n for n in p.notes)
     assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("scatter", 1),)
     assert "scatter" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "'scatter' declined this form" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+def test_scatter_dynamic_index_declines_not_crashes():
+    # a non-point index interval has no exact rule: noted ⊤, never a
+    # guess. The note used to read "no sound rule for params {...}";
+    # strengthened, not relaxed — it must print the span the right way
+    # round.
+    _scatter_declined(
+        _scatter_query((0.0, 1.0), 5.0),
+        "index spans [0.0, 1.0]",
+        "not a single point",
+    )
 
 
 def test_scatter_out_of_range_index_declines_not_crashes():
-    # FILL_OR_DROP drops, CLIP clamps — the wedge bug class; refuse to guess
-    p = propagate(_scatter_query((7.0, 7.0), 5.0))  # must not raise
-    assert p.obligations[0].status == "unknown"
-    assert any("scatter" in n and "no sound rule" in n for n in p.notes)
+    # FILL_OR_DROP drops, CLIP clamps — the wedge bug class; refuse to
+    # guess. The failing comparison is printed with the true bound, and
+    # the mode behaviours the note states are measured in
+    # test_transfers_jax.py::
+    # test_scatter_out_of_range_mode_behaviours_as_the_decline_states.
+    _scatter_declined(
+        _scatter_query((7.0, 7.0), 5.0),
+        "index 7 is out of range",
+        "0 <= 7 < 3 fails",
+        "mode-dependent",
+        "never guessed",
+    )
 
 
 def test_scatter_windowed_form_declines_not_crashes():
     # anything but the canonical single-element dimension numbers declines
-    p = propagate(
-        _scatter_query((1.0, 1.0), 5.0, {"update_window_dims": (0,)})
-    )  # must not raise
-    assert p.obligations[0].status == "unknown"
-    assert any("scatter" in n and "no sound rule" in n for n in p.notes)
+    # via the shared oracle's general form failure: the note must print
+    # the observed configuration AND the covered core (derived from
+    # _SCATTER_SET_CORE, so the sentence cannot drift from the check)
+    _scatter_declined(
+        _scatter_query((1.0, 1.0), 5.0, {"update_window_dims": (0,)}),
+        "operand (3,), indices (1,), updates ()",
+        "update_window_dims=(0,)",  # the observed side
+        "outside the covered static-index set row form",
+        "update_window_dims=(), inserted_window_dims=(0,), "
+        "scatter_dims_to_operand_dims=(0,)",  # the covered core
+    )
+
+
+def test_scatter_arity_decline_names_the_operand_count():
+    # hand-IR-only: a traced scatter binds operand + indices + updates
+    f3, i1 = aval((3,)), aval((1,), "int32")
+    x, idx, y = var(0, f3), var(1, i1), var(2, f3)
+    pred, out = var(3, aval((3,), "bool")), var(4, aval((3,), "bool"))
+    q = close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            any_eqn(idx, 1.0, 1.0),
+            eqn("scatter", [x, idx], y, _scatter_set_params()),
+            eqn("le", [y, lit(5.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _scatter_declined(q, "binds 2 operand(s)")
+
+
+def test_scatter_leftover_update_consts_decline_hand_ir():
+    # hand-IR-only: combiner state without a combiner. A traced set form
+    # carries update_consts=() (measured in test_transfers_jax.py::
+    # test_scatter_apply_traces_as_the_combiner_decline_states).
+    params = tuple(
+        (k, ((2.0,) if k == "update_consts" else v))
+        for k, v in _scatter_set_params()
+    )
+    f3, i1 = aval((3,)), aval((1,), "int32")
+    x, idx, y = var(0, f3), var(1, i1), var(2, f3)
+    pred, out = var(3, aval((3,), "bool")), var(4, aval((3,), "bool"))
+    q = close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            any_eqn(idx, 1.0, 1.0),
+            eqn("scatter", [x, idx, lit(5.0)], y, params),
+            eqn("le", [y, lit(5.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _scatter_declined(
+        q,
+        "non-empty update_consts (2.0,)",
+        "combiner state without a combiner",
+    )
+
+
+def test_scatter_missing_dimension_numbers_decline_hand_ir():
+    # hand-IR-only: the traced form always records dimension_numbers
+    params = tuple(
+        (k, v) for k, v in _scatter_set_params() if k != "dimension_numbers"
+    )
+    f3, i1 = aval((3,)), aval((1,), "int32")
+    x, idx, y = var(0, f3), var(1, i1), var(2, f3)
+    pred, out = var(3, aval((3,), "bool")), var(4, aval((3,), "bool"))
+    q = close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            any_eqn(idx, 1.0, 1.0),
+            eqn("scatter", [x, idx, lit(5.0)], y, params),
+            eqn("le", [y, lit(5.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _scatter_declined(q, "no readable dimension_numbers", "got None")
+
+
+def test_scatter_non_integral_point_index_declines_through_the_walk():
+    """WALK-DRIVEN, via the int-dtype declaration route, labeled: a
+    stelling_any with dtype 'int32' and lo = hi = 0.5 (or inf)
+    PROPAGATES UNREFUSED — the stelling_any transfer has no
+    dtype-storability guard, so the declared box rides the walk on an
+    int32-aval var and the scatter row is the first place the fraction
+    meets a rule that needs an integer (audit repair F3a: an earlier
+    draft claimed this path unreachable through any walk and pinned it
+    by direct call — measured false by exactly this route). A traced
+    index array cannot carry these values, and the lying-literal and
+    dtype-contradicting-declaration routes ARE refused at IR
+    construction; this consistent-but-fractional declaration is the one
+    that gets through. The declaration transfer's missing dtype guard is
+    a pre-existing surface, observed and out of scope here."""
+
+    def q(val):
+        f3, i1 = aval((3,)), aval((1,), "int32")
+        x, idx, y = var(0, f3), var(1, i1), var(2, f3)
+        pred, out = var(3, aval((3,), "bool")), var(4, aval((3,), "bool"))
+        return close(
+            [
+                any_eqn(x, 0.0, 1.0),
+                any_eqn(idx, val, val),
+                eqn("scatter", [x, idx, lit(5.0)], y, _scatter_set_params()),
+                eqn("le", [y, lit(9.0)], pred),
+                eqn("stelling_assert", [pred], out),
+            ],
+            [out],
+        )
+
+    _scatter_declined(q(0.5), "the point 0.5", "not a finite integer")
+    _scatter_declined(q(float("inf")), "the point inf")
 
 
 # --- gather / transpose: static structural forms (MIME fvm round) ------------
@@ -776,28 +909,149 @@ def test_gather_rank2_row_form_lands_whole_row():
     assert "2/2" in p.obligations[0].detail  # both elements of row 1 are 9.0
 
 
-def test_gather_dynamic_index_declines_not_crashes():
-    # a non-point index interval has no exact rule: noted ⊤, never a guess
-    p = propagate(_gather_query((0.0, 2.0), 6.0))  # must not raise
+def _gather_declined(q, *frags):
+    """The decline pinned WITH its accounting: a raised decline must count
+    exactly as the returned None it replaced (status unknown, one ⊤,
+    the primitive named in unknown_primitives, no tier recorded)."""
+    p = propagate(q)  # must not raise: declines never kill the walk
     assert p.obligations[0].status == "unknown"
-    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("gather", 1),)
     assert "gather" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "'gather' declined this form" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+def test_gather_dynamic_index_declines_not_crashes():
+    # a non-point index interval has no exact rule: noted ⊤, never a
+    # guess. The note used to read "no sound rule for params {...}";
+    # strengthened, not relaxed — it must name the element and print ITS
+    # span, the right way round.
+    _gather_declined(
+        _gather_query((0.0, 2.0), 6.0),
+        "index element 0 spans [0.0, 2.0]",
+        "not a single point",
+    )
 
 
 def test_gather_out_of_range_index_declines_not_crashes():
-    # CLIP clamps, FILL_OR_DROP fills — the wedge bug class; refuse to guess
-    p = propagate(_gather_query((7.0, 7.0), 6.0))  # must not raise
-    assert p.obligations[0].status == "unknown"
-    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+    # CLIP clamps, FILL_OR_DROP fills — the wedge bug class; refuse to
+    # guess. The note prints the failing comparison with the true bound
+    # (the operand has 3 rows) and the measured mode behaviours
+    # (measured in test_transfers_jax.py::
+    # test_gather_out_of_range_mode_behaviours_as_the_decline_states).
+    _gather_declined(
+        _gather_query((7.0, 7.0), 6.0),
+        "index element 0 is 7",
+        "0 <= 7 < 3 fails",
+        "mode-dependent",
+        "never guessed",
+    )
 
 
 def test_gather_batched_form_declines_not_crashes():
-    # the batched form (jax 0.11's lu_solve pivots gather) is not covered
-    p = propagate(
-        _gather_query((1.0, 1.0), 6.0, {"operand_batching_dims": (0,)})
-    )  # must not raise
-    assert p.obligations[0].status == "unknown"
-    assert any("gather" in n and "no sound rule" in n for n in p.notes)
+    # the batched form (jax 0.11's lu_solve pivots gather) is not covered:
+    # the note must name the offending non-empty field with its value
+    _gather_declined(
+        _gather_query((1.0, 1.0), 6.0, {"operand_batching_dims": (0,)}),
+        "non-empty dimension-number field(s)",
+        "'operand_batching_dims': (0,)",
+    )
+
+
+def test_gather_arity_decline_names_the_operand_count():
+    # hand-IR-only: a traced gather binds operand + indices
+    idx = var(0, aval((1, 1), "int32"))
+    y = var(1, aval((1,)))
+    pred, out = var(2, aval((1,), "bool")), var(3, aval((1,), "bool"))
+    q = close(
+        [
+            any_eqn(idx, 1.0, 1.0),
+            eqn("gather", [idx], y, _gather_row_params(1, ())),
+            eqn("le", [y, lit(6.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _gather_declined(q, "binds 1 operand(s)")
+
+
+def test_gather_rank0_operand_decline_names_the_missing_axis():
+    # ALSO traced-reachable: lax.gather on a scalar with empty dims traces
+    # on jax 0.11.0 (audit repair — the first claim here was
+    # "hand-IR-only", measured false; the traced pin lives in
+    # test_transfers_jax.py::test_gather_rank0_operand_declines_traced).
+    # This jax-free hand-IR pin is kept beside it.
+    idx = var(0, aval((1, 1), "int32"))
+    x0 = var(1, aval(()))
+    y = var(2, aval((1,)))
+    pred, out = var(3, aval((1,), "bool")), var(4, aval((1,), "bool"))
+    q = close(
+        [
+            any_eqn(idx, 0.0, 0.0),
+            any_eqn(x0, 0.0, 1.0),
+            eqn("gather", [x0, idx], y, _gather_row_params(1, ())),
+            eqn("le", [y, lit(6.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _gather_declined(q, "rank-0", "no leading axis to take rows from")
+
+
+def test_gather_missing_dimension_numbers_decline_hand_ir():
+    # hand-IR-only: the traced form always records dimension_numbers
+    # (pinned in test_transfers_jax.py); here the param is simply absent
+    idx = var(0, aval((1, 1), "int32"))
+    y = var(1, aval((1,)))
+    pred, out = var(2, aval((1,), "bool")), var(3, aval((1,), "bool"))
+    q = close(
+        [
+            any_eqn(idx, 1.0, 1.0),
+            eqn(
+                "gather",
+                [_arr_lit([1.0, 5.0, 2.0], (3,)), idx],
+                y,
+                (("slice_sizes", (1,)),),
+            ),
+            eqn("le", [y, lit(6.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    _gather_declined(q, "no readable dimension_numbers", "got None")
+
+
+def test_gather_non_integral_and_non_finite_points_decline_hand_ir():
+    # hand-IR-only THROUGH THE WALK: a traced gather's index array is an
+    # integer array, so a fractional or infinite POINT interval cannot
+    # reach the transfer from a traced program — but a hand declaration
+    # routed as float64 can, and the real walk drives it here.
+    def q(lo, hi):
+        idx = var(0, aval((1, 1)))  # float64 declaration as index data
+        y = var(1, aval((1,)))
+        pred, out = var(2, aval((1,), "bool")), var(3, aval((1,), "bool"))
+        return close(
+            [
+                any_eqn(idx, lo, hi),
+                eqn(
+                    "gather",
+                    [_arr_lit([1.0, 5.0, 2.0], (3,)), idx],
+                    y,
+                    _gather_row_params(1, ()),
+                ),
+                eqn("le", [y, lit(6.0)], pred),
+                eqn("stelling_assert", [pred], out),
+            ],
+            [out],
+        )
+
+    _gather_declined(
+        q(0.5, 0.5), "index element 0 is the point 0.5", "not a finite integer"
+    )
+    _gather_declined(q(float("inf"), float("inf")), "the point inf")
 
 
 def _transpose_query(perm, threshold):
@@ -849,3 +1103,220 @@ def test_transpose_malformed_permutation_declines_not_crashes():
     p = propagate(q)  # must not raise
     assert p.obligations[0].status == "unknown"
     assert any("transpose" in n and "declined" in n for n in p.notes)
+
+
+# --- split: named declines (silent-⊤ conversion) -----------------------------
+#
+# jax validates every one of these forms at trace time (measured in
+# test_transfers_jax.py::test_split_malformed_params_cannot_be_traced), so
+# no traced program reaches them: each decline path is driven here by
+# hand-built IR through the REAL walk, and pins both the named reason —
+# with its numbers bound to the right operands — and the accounting, which
+# must be identical to the returned-None decline it replaced: status
+# unknown, coverage.unknown == 1, the primitive in unknown_primitives.
+
+
+def _meqn(prim, ins, outs, params=()):
+    return ir.JaxprEqn(
+        primitive=prim, invars=tuple(ins), outvars=tuple(outs),
+        params=tuple(params),
+    )
+
+
+def _split_query(params, n_out=2, n_in=1):
+    """x = any((4,)); split(x) -> n_out pieces; assert piece0 <= 1.0."""
+    x = var(0, aval((4,)))
+    outs = tuple(var(1 + i, aval((2,))) for i in range(n_out))
+    pred, ob = var(9, aval((2,), "bool")), var(10, aval((2,), "bool"))
+    return close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            _meqn("split", [x] * n_in, outs, params),
+            eqn("le", [outs[0], lit(1.0)], pred),
+            eqn("stelling_assert", [pred], ob),
+        ],
+        [ob],
+    )
+
+
+def _split_declined(q, *frags):
+    p = propagate(q)  # must not raise: declines never kill the walk
+    assert p.obligations[0].status == "unknown"
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("split", 1),)
+    assert "split" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "'split' declined this form" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+_SPLIT_OK = (("sizes", (2, 2)), ("axis", 0))
+
+
+def test_split_hand_ir_positive_control():
+    # the declines below must not have closed the row: the well-formed
+    # hand-built form still discharges exactly
+    p = propagate(_split_query(_SPLIT_OK))
+    assert p.obligations[0].status == "discharged"
+    assert ("split", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_split_arity_decline_names_the_operand_count():
+    # 3 operands, 2 outputs: the printed count must be the OPERAND count
+    # (a mutant printing the output count would show 2 here)
+    _split_declined(
+        _split_query(_SPLIT_OK, n_in=3),
+        "binds 3 operands",
+        "no single array",
+    )
+
+
+def test_split_absent_params_decline_names_what_is_missing():
+    _split_declined(_split_query((("axis", 0),)), "'sizes'", "absent or None")
+    _split_declined(_split_query((("sizes", (2, 2)),)), "'axis'")
+    note = _split_declined(_split_query(()), "'sizes' and 'axis'")
+    # present-with-None is the same fact as absent for this row and is
+    # named by the same branch
+    _split_declined(
+        _split_query((("sizes", None), ("axis", 0))), "'sizes'"
+    )
+    assert "never guessed" in note
+
+
+def test_split_non_integer_params_decline_prints_them():
+    _split_declined(
+        _split_query((("sizes", ("a", "b")), ("axis", 0))),
+        "do not read as integers",
+        "sizes=('a', 'b')",
+    )
+    _split_declined(
+        _split_query((("sizes", (2, 2)), ("axis", "q"))),
+        "axis='q'",
+    )
+
+
+def test_split_axis_out_of_range_decline_prints_axis_and_rank():
+    _split_declined(
+        _split_query((("sizes", (2, 2)), ("axis", 5))),
+        "axis 5 lies outside the operand's rank 1",
+        "(operand shape (4,))",
+    )
+
+
+def test_split_negative_size_decline_prints_the_offenders():
+    _split_declined(
+        _split_query((("sizes", (5, -1)), ("axis", 0))),
+        "sizes (5, -1)",
+        "negative piece extents (-1,)",
+    )
+
+
+def test_split_non_partition_decline_prints_sum_and_extent():
+    # the numbers must be bound the right way round: 5 is the SIZES sum,
+    # 4 is the AXIS extent (a swapped mutant fails both fragments)
+    _split_declined(
+        _split_query((("sizes", (2, 3)), ("axis", 0))),
+        "sizes (2, 3) sum to 5",
+        "axis 0 has extent 4",
+    )
+
+
+def test_split_output_arity_disagreement_declines_and_never_binds():
+    # params name two pieces, the equation binds one output. WITHOUT the
+    # decline the walk would zip two pieces onto one outvar and DISCHARGE
+    # — this test measures that admission as a red, so the decline is
+    # load-bearing, not cosmetic.
+    _split_declined(
+        _split_query((("sizes", (2, 2)), ("axis", 0)), n_out=1),
+        "name 2 pieces",
+        "binds 1 output(s)",
+    )
+
+
+# --- unstack: named declines (silent-⊤ conversion) ---------------------------
+#
+# Same posture as split above: jax validates the axis at trace time and its
+# abstract eval fixes the output count (measured in test_transfers_jax.py::
+# test_unstack_malformed_forms_cannot_be_traced), so every decline path is
+# hand-IR-only and driven here through the real walk, pinning the named
+# reason with its numbers and the unchanged accounting.
+
+
+def _unstack_query(params, n_out=3, n_in=1):
+    """x = any((3, 2)); unstack(x, axis) -> n_out pieces; piece0 <= 1.0."""
+    x = var(0, aval((3, 2)))
+    outs = tuple(var(1 + i, aval((2,))) for i in range(n_out))
+    pred, ob = var(9, aval((2,), "bool")), var(10, aval((2,), "bool"))
+    return close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            _meqn("unstack", [x] * n_in, outs, params),
+            eqn("le", [outs[0], lit(1.0)], pred),
+            eqn("stelling_assert", [pred], ob),
+        ],
+        [ob],
+    )
+
+
+def _unstack_declined(q, *frags):
+    p = propagate(q)  # must not raise: declines never kill the walk
+    assert p.obligations[0].status == "unknown"
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("unstack", 1),)
+    assert "unstack" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "'unstack' declined this form" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+def test_unstack_hand_ir_positive_control():
+    # the declines below must not have closed the row
+    p = propagate(_unstack_query((("axis", 0),)))
+    assert p.obligations[0].status == "discharged"
+    assert ("unstack", "exact") in p.transfers_used
+    assert p.coverage.unknown == 0
+
+
+def test_unstack_arity_decline_names_the_operand_count():
+    # 2 operands, 3 outputs: the printed count must be the OPERAND count
+    _unstack_declined(
+        _unstack_query((("axis", 0),), n_in=2),
+        "binds 2 operands",
+        "no single array",
+    )
+
+
+def test_unstack_absent_axis_declines_named():
+    note = _unstack_declined(_unstack_query(()), "'axis'", "absent or None")
+    assert "never guessed" in note
+    _unstack_declined(_unstack_query((("axis", None),)), "'axis'")
+
+
+def test_unstack_non_integer_axis_decline_prints_it():
+    _unstack_declined(
+        _unstack_query((("axis", "q"),)),
+        "does not read as an integer",
+        "axis='q'",
+    )
+
+
+def test_unstack_axis_out_of_range_decline_prints_axis_and_rank():
+    _unstack_declined(
+        _unstack_query((("axis", 5),)),
+        "axis 5 lies outside the operand's rank 2",
+        "(operand shape (3, 2))",
+    )
+
+
+def test_unstack_output_arity_disagreement_declines_and_never_binds():
+    # axis 0 has extent 3 but only 2 outputs are bound. WITHOUT the decline
+    # the walk would zip three pieces onto two outvars and DISCHARGE — the
+    # M5-class mutation measures that admission red.
+    _unstack_declined(
+        _unstack_query((("axis", 0),), n_out=2),
+        "yields 3 piece(s)",
+        "binds 2 output(s)",
+    )
