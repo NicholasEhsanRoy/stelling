@@ -32,7 +32,12 @@ through the same index bookkeeping the slice validator and the replay use
 ``scatter-add`` emits, per touched output element, the exact n-ary sum
 of the operand element's term and its contributing update terms (one
 addend per contribution — duplicates accumulate), aliasing untouched
-elements to the operand's terms. The per-solver option
+elements to the operand's terms. **A real-arithmetic value that is fixed
+at emission time is emitted as a NUMERAL, never as a term**
+(:func:`_fold_constant_elements`): a subtree descending only from
+literals and constvars has no `define-fun` at all, which is what keeps
+the emitted text as linear as the declared logic says the problem is.
+The per-solver option
 block is a fixed list — a solver is never invoked on defaults, so
 ``:produce-models`` and the time limit (plus ``:nl-cov true`` /
 ``:nl-ext none`` for cvc5 on QF_NRA — the two are mutually exclusive and
@@ -119,6 +124,98 @@ def _square_body(term: str) -> str:
     return f"(* {term} {term})"
 
 
+# The real-arithmetic primitives whose value is fixed the moment every
+# operand element's is. Deliberately NOT the whole emission set: the
+# comparisons, the connectives, `select_n` and `convert_element_type` are
+# left unfolded because they cannot be the factor or the divisor of an
+# emitted product, which is the position this fold exists to keep numeral.
+_FOLDABLE = frozenset(
+    {"add", "sub", "mul", "div", "neg", "max", "min", "square", "integer_pow"}
+)
+
+
+def _fold_constant_elements(eqn: ir.JaxprEqn, ins) -> tuple | None:
+    """The exact rational value of every output element of a real-arithmetic
+    equation whose operands are ALREADY constant — or ``None`` when this
+    equation is not foldable here (a non-constant operand, a primitive
+    outside :data:`_FOLDABLE`, a boolean operand, or an operation that is
+    not total on these values).
+
+    WHY THE EMISSION FOLDS AT ALL, since an unfolded constant subtree
+    already denotes the right number. The fragment a slice is stamped with
+    is decided by DEPENDENCE on a declaration
+    (``obligation._Slicer._fragment``): a product whose factors descend
+    only from literals is a constant, so the decision problem really is
+    linear and ``QF_LRA`` is the honest logic — this is not a mislabel to
+    be repaired by widening. What ships unfolded is *syntactically*
+    nonlinear, and z3's QF_LRA parser rejects that outright. Measured,
+    z3 5.0.0:
+
+        (define-fun t1 () Real (+ 2.0 1.0))
+        (define-fun t2 () Real (* t1 t1))   under QF_LRA -> rejected
+        (* 3.0 3.0)                         under QF_LRA -> sat
+
+    A rejected script costs the portfolio a member: the obligation is then
+    decided by ONE backend, and on a DISCHARGE that backend is the only
+    check there is — an ``unsat`` is a universal claim and nothing
+    downstream re-derives it, unlike a witness. Folding keeps both
+    backends on a problem both can read.
+
+    The fold is exact, not a simplification: this is
+    :class:`fractions.Fraction` arithmetic under a fragment emitted for
+    the Reals, so the numeral denotes the very real the term denoted. It
+    is a SECOND exact evaluator alongside the replay's
+    (``obligation._scalar_binop``) and is deliberately not shared with it
+    — the two faces of a row must stay independently mutable or a gauge
+    measures one expression agreeing with itself.
+
+    Conservative by construction: anything not exactly foldable returns
+    ``None`` and emits byte-identically to before. The residue is not
+    silent — a decision that ends up resting on one backend is reported as
+    a degraded portfolio by :mod:`stelling.solvers`.
+    """
+    prim = eqn.primitive
+    if prim not in _FOLDABLE or any(operand is None for operand in ins):
+        return None
+    if any(isinstance(v, bool) for operand in ins for v in operand):
+        # arithmetic on booleans has no v1 emission and the slice validator
+        # declines it; the fold must never be laxer than what admitted it
+        return None
+    idx = _pair_elementwise(eqn)
+    if prim == "neg":
+        return tuple(-ins[0][i] for i in idx[0])
+    if prim == "square":
+        # the self-product, in the arithmetic the emission does not have —
+        # written out here rather than routed through the row's emission
+        # seam, which produces TEXT
+        return tuple(ins[0][i] * ins[0][i] for i in idx[0])
+    if prim == "integer_pow":
+        y = int(eqn.params_dict()["y"])
+        if y < 0 and any(ins[0][i] == 0 for i in idx[0]):
+            return None  # no rational value; the slice guard already refuses
+        return tuple(ins[0][i] ** y for i in idx[0])
+    ia, ib = idx
+    left = [ins[0][i] for i in ia]
+    right = [ins[1][i] for i in ib]
+    if prim == "div" and any(v == 0 for v in right):
+        return None  # ditto: the per-element divisor guard already refuses
+    if prim == "add":
+        return tuple(a + b for a, b in zip(left, right))
+    if prim == "sub":
+        return tuple(a - b for a, b in zip(left, right))
+    if prim == "mul":
+        return tuple(a * b for a, b in zip(left, right))
+    if prim == "div":
+        return tuple(a / b for a, b in zip(left, right))
+    if prim == "max":
+        return tuple(max(a, b) for a, b in zip(left, right))
+    if prim == "min":
+        return tuple(min(a, b) for a, b in zip(left, right))
+    raise ValueError(  # unreachable: _FOLDABLE and the branches above agree
+        f"_FOLDABLE names {prim!r} with no fold rule"
+    )
+
+
 def rational(fr: Fraction) -> str:
     """An exact SMT-LIB2 Real literal: integers as ``N.0``, non-integers as
     ``(/ p q)``, negatives wrapped ``(- ...)``. Never a decimal
@@ -134,6 +231,15 @@ def _value_text(v) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
     return rational(_numeric_fraction(v))
+
+
+def _folded_text(v) -> str:
+    """The literal text of an already-exact folded element value — the same
+    rendering as :func:`_value_text`, entered from a value that is already
+    a ``Fraction`` (or a ``bool``) rather than a decoded jax constant."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return rational(v)
 
 
 def _options(solver: str, logic: str, timeout_ms: int) -> tuple[tuple[str, str], ...]:
@@ -164,9 +270,18 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
     options = _options(solver, sl.fragment, timeout_ms)
 
     names: dict[int, tuple[str, ...]] = {}  # var id -> per-element term texts
+    # var id -> per-element EXACT values, for exactly the vars whose value is
+    # fixed at emission time (Fraction | bool). A var in here is emitted as a
+    # numeral, so the two maps are read together: `names` says what the text
+    # is, this says whether that text is a literal the solver can fold into
+    # its linear arithmetic.
+    consts: dict[int, tuple] = {}
     for var_id, val in sl.consts:
         vals = val if isinstance(val, tuple) else (val,)
         names[var_id] = tuple(_value_text(v) for v in vals)
+        consts[var_id] = tuple(
+            v if isinstance(v, bool) else _numeric_fraction(v) for v in vals
+        )
     for inp in sl.inputs:
         # per-element input names accumulate in element order (the slice
         # orders inputs by declaration then element)
@@ -184,6 +299,23 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
                 f"validation should have declined this"
             )
         return got
+
+    def const_of(atom: ir.Atom) -> tuple | None:
+        """Per-element exact values when the atom's value is fixed at
+        emission time, else ``None``. A literal is constant by definition;
+        a var is constant exactly when something already put it in
+        ``consts`` (a constvar, or an equation this emission folded).
+
+        NOT named `value`: the option block below binds that name in this
+        same scope, and the helper was dead by the time the equation loop
+        ran — the shadowing failure ``dot_general``'s comment already
+        records once, in the other direction."""
+        if isinstance(atom, ir.Literal):
+            return tuple(
+                v if isinstance(v, bool) else _numeric_fraction(v)
+                for v in _decode_elements(atom.val)
+            )
+        return consts.get(atom.id)
 
     lines: list[str] = [
         f"; stelling escalation: obligation #{sl.index} ({sl.fragment})"
@@ -220,13 +352,27 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
         prim = eqn.primitive
         params = eqn.params_dict()
         ins = [term(a) for a in eqn.invars]
+        vals = [const_of(a) for a in eqn.invars]
         out = eqn.outvars[0]
         n_out = _size(_shape_of(out))
+        folded = _fold_constant_elements(eqn, vals)
+        if folded is not None:
+            # a value fixed at emission time makes NO term: the numerals ARE
+            # the element texts, and a product or a quotient of numerals is
+            # inside the linear fragment the slice is stamped with. Same
+            # shape as the structural aliasing below — nothing to define
+            # because nothing the solver has to reason about happened here.
+            consts[out.id] = folded
+            names[out.id] = tuple(_folded_text(v) for v in folded)
+            continue
         if prim in _STRUCTURAL:
             # index bookkeeping, not new terms: each output element IS its
             # source element's term
             routes = _route_structural(eqn)
             names[out.id] = tuple(ins[op][src] for op, src in routes)
+            if all(operand is not None for operand in vals):
+                # constness rides the SAME routes the terms just did
+                consts[out.id] = tuple(vals[op][src] for op, src in routes)
             continue
         if prim == "scatter":
             # the static-index SET form is pure data movement, so it makes NO
@@ -242,17 +388,23 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
                     f"validation should have declined this"
                 ) from e
             names[out.id] = tuple(ins[op][src] for op, src in routes)
+            if all(operand is not None for operand in vals):
+                consts[out.id] = tuple(vals[op][src] for op, src in routes)
             continue
         if prim in _IDENTITY_HARNESS:
             # assume/nonvacuity data flow: identity; the assume CONSTRAINT
             # is deliberately never emitted (inert, as in propagation)
             names[out.id] = ins[0]
+            if vals[0] is not None:
+                consts[out.id] = vals[0]
             continue
         if prim == "reduce_sum":
             groups = _group_reduce_sum(eqn)
             if all(len(g) == 1 for g in groups) and groups:
                 # a sum of one addend is that addend: alias, no new term
                 names[out.id] = tuple(ins[0][g[0]] for g in groups)
+                if vals[0] is not None:
+                    consts[out.id] = tuple(vals[0][g[0]] for g in groups)
                 continue
             bodies = []
             for group in groups:
@@ -386,6 +538,8 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
                 names[out.id] = define(out, bodies)
             else:
                 names[out.id] = tuple(ins[0][i] for i in idx)  # identity
+                if vals[0] is not None:
+                    consts[out.id] = tuple(vals[0][i] for i in idx)
             continue
         if prim in ("neg", "not"):
             (idx,) = _pair_elementwise(eqn)

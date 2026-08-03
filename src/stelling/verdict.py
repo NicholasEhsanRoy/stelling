@@ -314,6 +314,23 @@ class Verdict:
     stamp: Stamp | None  # None IFF status == "DECLINED"
     notes: tuple[str, ...]  # the addresses: where and why anything degraded
     witnesses: tuple[Witness, ...] = ()  # replay-confirmed counterexamples
+    # THE REDUNDANCY THIS VERDICT ACTUALLY GOT, per solver-decided
+    # obligation: ``(assert index, labels of the backends that ANSWERED)``.
+    # Empty on an interval-only verdict, which no solver decided.
+    #
+    # A COUNTING SURFACE, and it exists because counting was the failure.
+    # The stamp's solver tuple records who was ASKED — that is its contract
+    # — so a two-backend stamp is compatible with a one-backend decision,
+    # and a job tallying VERIFIEDs could not tell them apart. A tally that
+    # cares about the cross-check reads this:
+    #
+    #     one_backend = [i for i, who in v.solver_redundancy if len(who) < 2]
+    #
+    # It is not a soundness gate and does not change any verdict: a
+    # one-backend VERIFIED is still a VERIFIED, it just got half the
+    # redundancy the portfolio is designed around, and this says so in a
+    # form that survives being counted rather than read.
+    solver_redundancy: tuple[tuple[int, tuple[str, ...]], ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in _STATUSES:
@@ -359,6 +376,30 @@ class Verdict:
         eqns = self.stamp.coverage.split(" eqns")[0]
         if eqns.isdigit():
             lines.append(f"  {eqns} equations verified")
+        # THE PORTFOLIO'S REDUNDANCY, THIRD LINE, FOR THE SAME REASON THE
+        # EQUATION COUNT IS SECOND. A verdict decided by one backend under a
+        # two-backend stamp does not read differently from a verdict decided
+        # by both — the stamp records who was asked, the notes carry the
+        # failure, and neither is where a reader looks. On a VERIFIED this
+        # matters most: an `unsat` is a universal claim with no witness to
+        # replay, so the second backend is the only independent check there
+        # is. Surfaced only when the redundancy is actually short; a full
+        # portfolio needs no line.
+        short = [
+            (i, who) for i, who in self.solver_redundancy if len(who) < 2
+        ]
+        for i, who in short[:3]:
+            lines.append(
+                f"  PORTFOLIO DEGRADED — assert #{i} was decided by ONE "
+                f"solver backend ({', '.join(who) or 'none'}), not the two "
+                f"the portfolio is designed around; the notes say which "
+                f"backend was lost and why"
+            )
+        if len(short) > 3:
+            lines.append(
+                f"  PORTFOLIO DEGRADED — and {len(short) - 3} further "
+                f"obligation(s): {', '.join(f'assert #{i}' for i, _ in short[3:])}"
+            )
         # THE OPT-IN, NAMED WHERE THE UNDECIDED RESULT IS READ.
         # `check()` does not escalate unless solver_timeout_ms is passed, and
         # its default is None -- a hard early return before the solver module

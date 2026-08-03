@@ -235,6 +235,44 @@ program you actually run — see
 [preconditions.md](preconditions.md#what-this-checks--and-what-it-doesnt-yet)
 for a two-primitive case where that gap is the whole answer.
 
+## `PORTFOLIO DEGRADED` — when a verdict rests on one solver
+
+The `solver:` line records **every invocation**, which is who stelling
+*asked*. It is not who *answered*. A backend can be installed, invoked,
+stamped, and still contribute nothing — its transport crashed, it timed
+out, or its parser refused the emitted fragment. When that happens the
+stamp still reads `2 invocation(s)` and the decision still rests on one.
+
+That gap matters most on a **VERIFIED**. A REFUTED carries a witness, and
+a witness is re-derived in exact rational arithmetic before it is
+believed, so a lost backend there costs a cross-check another mechanism
+still performs. A VERIFIED is a universal claim over the whole declared
+box: there is no point to replay and nothing downstream re-derives it, so
+the second backend *is* the redundancy.
+
+So a decided obligation that got fewer than two answers says so, in three
+places:
+
+- a `PORTFOLIO DEGRADED` line near the top of the render, above the
+  obligations, naming the assert and the one backend that answered;
+- the same fact bracketed onto that obligation's own `assert #N:` detail
+  line, with `a discharge has no replay backstop` appended when the
+  outcome was a discharge;
+- `note:` lines naming which backend was lost and why — invoked and
+  returned `failed`/`timeout`/`unknown`, not installed, or excluded by
+  `SolverConfig.only`.
+
+For **counting** rather than reading, `Verdict.solver_redundancy` is
+`(assert index, labels of the backends that answered)` per
+solver-decided obligation:
+
+    one_backend = [i for i, who in v.solver_redundancy if len(who) < 2]
+
+This is not a soundness gate and it does not change any verdict. A
+one-backend VERIFIED is still a VERIFIED — it just got half the
+redundancy the portfolio is designed around, in a form that survives
+being tallied by a CI job rather than read by a person.
+
 ## The two vacuity instruments
 
 This is the part that reads as self-contradictory, and is not. A verdict

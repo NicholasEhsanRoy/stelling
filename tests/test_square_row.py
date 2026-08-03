@@ -16,17 +16,21 @@ SELF-PRODUCT body it emits, the ``QF_NRA`` fragment that body puts the
 problem in, the exact-rational replay that confirms a model, the
 integer-dtype refusal, and the boolean-operand refusal.
 
-**Dependency levels, stated because they are no longer one.** Everything
-here is jax-free, and most of it is solver-free too, so the file runs in
-the zero-dep arm. THREE tests are the exception: the two that record the
-unfolded-constant-product defect and the one that records its cost on a
-discharge need the portfolio to observe a backend being lost, and they
-``importorskip`` z3 and cvc5 individually rather than at module level.
-They live here and not in the gauge file because what they record is a
-property of the EMISSION — this file's subject — not of the row's
-end-to-end behaviour. The genuinely end-to-end material (verdicts,
-containment against jax eager and under ``jit``, the mutation battery)
-is still in ``tests/test_square_row_gauge_jax.py``, which needs jax.
+**Dependency levels.** Everything here is jax-free and solver-free, so
+the file runs in the zero-dep arm. The genuinely end-to-end material
+(verdicts, containment against jax eager and under ``jit``, the mutation
+battery) is in ``tests/test_square_row_gauge_jax.py``, which needs jax.
+
+THREE TESTS THAT LIVED HERE ARE GONE, deliberately and by their own
+instruction. They recorded that a `square` over a CONSTANT operand
+emitted an unfolded ``(* t1 t1)`` under ``QF_LRA``, that z3's parser
+therefore refused the script, and that the resulting one-backend verdict
+carried no degradation note — a defect `square` shared with `mul` and
+`integer_pow` and did not create. Each said "IF THE EMISSION FOLD LANDS,
+THIS RECORD IS STALE — delete it rather than adjust it". It landed:
+``smt._fold_constant_elements``. The fixed behaviour, the wider class,
+and the degraded-portfolio reporting are recorded in
+``tests/test_constant_fold_portfolio.py``.
 """
 
 from __future__ import annotations
@@ -200,186 +204,6 @@ def test_a_square_of_a_declared_input_is_nonlinear():
     y in (0, 1) to fall back to a linear case with: a dependent operand is
     unconditionally QF_NRA."""
     assert _slice_of(_query((-2.0, 3.0), 5.0)).fragment == OB.QF_NRA
-
-
-def _constant_operand_query(eqns_for_unop):
-    """``<unop>(2.0 + 1.0) + x <= 10``, with the unop's operand a
-    constant-only subtree so it does not reach a declaration.
-    ``9 + [-2, 3] = [7, 12]`` straddles 10, so the cheap layer cannot
-    settle it and the slice really is built."""
-    x, c, s, d, pred, out = (
-        var(0), var(1), var(2), var(3), var(4, BOOL), var(5, BOOL)
-    )
-    return close(
-        [
-            any_eqn(x, -2.0, 3.0),
-            eqn("add", [lit(2.0), lit(1.0)], c),  # constant-only subtree
-            eqns_for_unop(c, s),
-            eqn("add", [s, x], d),
-            eqn("le", [d, lit(10.0)], pred),
-            eqn("stelling_assert", [pred], out),
-        ],
-        [out],
-    )
-
-
-_SELF_PRODUCT_SPELLINGS = {
-    "square": lambda c, s: eqn("square", [c], s),
-    "mul": lambda c, s: eqn("mul", [c, c], s),
-    "integer_pow": lambda c, s: eqn("integer_pow", [c], s, (("y", 2),)),
-}
-
-
-def test_a_constant_square_emits_an_UNFOLDED_self_product_under_QF_LRA():
-    """MEASURED, and it is not what this test used to claim.
-
-    The premise that stood here — "a square whose operand does not reach a
-    declaration mints no nonlinear term, exactly as a constant product
-    does" — is FALSE in both halves: the slice is stamped ``QF_LRA`` and
-    the script it ships contains ``(* t1 t1)``.
-
-    **The declared logic is RIGHT and the emission is what is wrong.**
-    ``ins_dep[0]`` is false here exactly when the operand descends only
-    from literals and constvars, so the value is a constant and the
-    decision problem really is linear: ``QF_LRA`` is not a mislabel.
-    What ships is an unfolded ``(* t1 t1)`` over a non-numeral body, and
-    z3's parser rejects THAT syntactically. Measured, this run, z3 5.0.0:
-
-        (define-fun t1 () Real (+ 2.0 1.0))
-        (define-fun t2 () Real (* t1 t1))   under QF_LRA -> rejected
-        (define-fun t1 () Real 3.0)
-        (define-fun t2 () Real (* t1 t1))   under QF_LRA -> sat
-
-    So the cheap and correct repair is to FOLD the constant subtree in the
-    emission, not to stamp ``QF_NRA`` — which would push a genuinely linear
-    problem into a harder logic for no reason. Recorded here because an
-    earlier version of this docstring said "a fragment the problem is not
-    in", which points a maintainer at exactly the wrong lever.
-
-    NOT A DEFECT OF THIS ROW, and deliberately not fixed here. Measured on
-    main (b11f051), where `square` has no emission row at all, the
-    identical script comes out of ``mul`` on two constant operands and out
-    of ``integer_pow`` at y=2. `square` joins a class it did not create;
-    the emission's constant handling is shared code this row does not own.
-    The three-spelling parity below keeps that claim honest: if `square`
-    ever diverges from its two siblings here, this test says so.
-
-    IF THE FOLD LANDS, THIS RECORD IS STALE. The assertions below pin a
-    defect as PRESENT; a round that folds constant subtrees in the emission
-    should delete this test and its sibling, not adjust them."""
-    texts = {}
-    for name, mk in _SELF_PRODUCT_SPELLINGS.items():
-        q = _constant_operand_query(mk)
-        p = propagate(q)
-        assert p.obligations[0].status == "unknown", name
-        (item,) = slice_unknown_obligations(q, p, interval_env(q))
-        assert item.fragment == OB.QF_LRA, name
-        text = SM.emit(item, "z3", 30_000).text
-        assert "(set-logic QF_LRA)" in text, name
-        assert "(define-fun t2 () Real (* t1 t1))" in text, (name, text)
-        texts[name] = text
-    # one class, not three behaviours: the bodies are byte-identical
-    assert len(set(texts.values())) == 1, sorted(texts)
-
-
-def test_the_unfolded_product_silently_costs_a_portfolio_member(monkeypatch):
-    """The consequence, measured — this is why the test above is not a
-    naming quibble.
-
-    The portfolio's design is that agreement decides and disagreement is a
-    loud error. A script z3's parser refuses never gets to disagree: z3 is
-    recorded ``failed`` and the verdict is decided by cvc5 alone — one
-    backend answering under a two-backend portfolio's stamp.
-
-    The loss IS disclosed: both invocations ride in the ledger with their
-    reasons and z3's error is quoted verbatim in the notes. But it is not
-    FLAGGED. ``solvers.py`` does emit "portfolio degraded — only X ran",
-    and measured, it fires only on ``len(ordered) == 1`` — a backend that
-    is not *installed*. Degradation by REFUSAL leaves both backends in
-    ``ordered``, so that note never trips, and "how many backends actually
-    answered" is not a field any consumer reads.
-
-    Both directions are recorded: this test takes the REFUTATION, whose
-    witness is independently replayed; the next takes the DISCHARGE, which
-    has no such backstop and is the dangerous one.
-
-    Recorded, not repaired, and shared: `mul` and `integer_pow` do the same
-    on main. IF THE EMISSION FOLD LANDS, THIS RECORD IS STALE — delete it
-    rather than adjust it."""
-    pytest.importorskip("z3")
-    pytest.importorskip("cvc5")
-    # the labels below are transport-qualified, and STELLING_CVC5 (a
-    # supported configuration) relabels cvc5 as an external binary
-    monkeypatch.delenv("STELLING_CVC5", raising=False)
-    from stelling.solvers import SolverConfig, escalate
-
-    q = _constant_operand_query(_SELF_PRODUCT_SPELLINGS["square"])
-    p = propagate(q)
-    (record,) = escalate(q, p, SolverConfig(timeout_ms=30_000)).records
-    notes = " | ".join(record.notes)
-    assert "z3 (wheel) answered failed" in notes, notes
-    assert "logic does not support nonlinear arithmetic" in notes, notes
-    assert "cvc5 (wheel) answered sat" in notes, notes
-    # two invocations stamped, ONE of them an answer — and no degraded note
-    assert {s.name for s in record.invocations} == {"z3", "cvc5"}
-    assert "portfolio degraded" not in notes, notes
-    assert record.outcome == "violated-witness"
-
-
-def test_the_same_loss_on_the_DISCHARGE_has_no_replay_backstop(monkeypatch):
-    """The dangerous direction, and the reason the sibling above is not the
-    whole record.
-
-    On a REFUTATION the single surviving backend's model is re-derived by
-    ``make_validated_witness`` in exact rationals before it is believed, so
-    a wrong REFUTED is not reachable that way. **A DISCHARGE has no such
-    check.** ``unsat`` is a universal claim over the whole declared box;
-    there is no point to replay, and nothing downstream re-derives it. So
-    the same lost backend that costs a cross-check on a witness costs the
-    ONLY cross-check on a VERIFIED.
-
-    Measured: ``square(2+1) + (x - x) <= 10`` is true (9 + 0), interval
-    propagation cannot see the cancellation, the slice is QF_LRA carrying
-    ``(* t1 t1)``, z3 is recorded ``failed``, cvc5 answers ``unsat``, and
-    the outcome is ``discharged`` with ``witness=None``.
-
-    Recorded, not repaired: the repair is the emission fold named in
-    ``test_a_constant_square_emits_an_UNFOLDED_self_product_under_QF_LRA``,
-    and it fixes both directions at once. IF IT LANDS, THIS RECORD IS
-    STALE — delete it rather than adjust it."""
-    pytest.importorskip("z3")
-    pytest.importorskip("cvc5")
-    monkeypatch.delenv("STELLING_CVC5", raising=False)
-    from stelling.solvers import SolverConfig, escalate
-
-    x, c, s, z, d, pred, out = (
-        var(0), var(1), var(2), var(3), var(4), var(5, BOOL), var(6, BOOL)
-    )
-    q = close(
-        [
-            any_eqn(x, -2.0, 3.0),
-            eqn("add", [lit(2.0), lit(1.0)], c),
-            eqn("square", [c], s),
-            eqn("sub", [x, x], z),  # exactly 0, invisible to intervals
-            eqn("add", [s, z], d),
-            eqn("le", [d, lit(10.0)], pred),
-            eqn("stelling_assert", [pred], out),
-        ],
-        [out],
-    )
-    p = propagate(q)
-    assert p.obligations[0].status == "unknown"
-    (item,) = slice_unknown_obligations(q, p, interval_env(q))
-    assert item.fragment == OB.QF_LRA
-    assert "(* t1 t1)" in SM.emit(item, "z3", 30_000).text
-    (record,) = escalate(q, p, SolverConfig(timeout_ms=30_000)).records
-    notes = " | ".join(record.notes)
-    assert "z3 (wheel) answered failed" in notes, notes
-    assert "cvc5 (wheel) answered unsat" in notes, notes
-    # a one-backend VERIFIED, and nothing replays a universal claim
-    assert record.outcome == "discharged"
-    assert record.witness is None
-    assert "portfolio degraded" not in notes, notes
 
 
 def test_element_terms_counts_the_square_output_once_per_element():
