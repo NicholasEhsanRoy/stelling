@@ -14,6 +14,11 @@ bounds over horizons no test can reach.
 
 *stelling is not affiliated with or endorsed by the JAX project.*
 
+**Start here: [docs/quickstart.md](docs/quickstart.md)** — install, one
+runnable harness, a stamped verdict, in four files. The
+[Quickstart](#quickstart) section below is the two-minute version, and
+[docs/](docs/) indexes the rest.
+
 ## What it does — and what it doesn't, measured
 
 **Does:**
@@ -140,6 +145,62 @@ Either way, an external solver stays a separate program you chose to
 install: nothing links into stelling, and its Apache-2.0 licensing is
 unaffected. `python -m stelling` reports both transports, including which
 optional components a discovered binary was built with.
+
+## Quickstart
+
+A **harness** is a zero-argument function that declares its inputs,
+states its obligations, and returns them. Everything it calls comes from
+one module — `stelling.harness`:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+
+
+def harness():
+    # ANY float64 array of 8 elements, every element in [0.1, 10.0]
+    a = any_array((8,), jnp.float64, (0.1, 10.0))
+    a_face = 0.5 * (a + jnp.roll(a, -1))          # your own construction
+    return assert_(a_face > 0.0)                  # the obligation
+
+
+v = check(harness, vacuity_mode="inputs-only")
+print(v.status)
+print("semantics :", v.stamp.semantics.split(":")[0])
+print("solver    :", v.stamp.solver.reason)
+print("nonvacuity:", v.stamp.nonvacuity)
+print("coverage  :", v.stamp.coverage)
+```
+
+prints:
+
+```
+VERIFIED
+semantics : real (ℝ)
+solver    : no solver invoked: escalation was NOT ATTEMPTED (solver_timeout_ms not set); every obligation was judged by outward-rounded interval arithmetic alone
+nonvacuity: UNCHECKED — no membership conditions declared
+coverage  : 9 eqns: 8 known (89%); 1 transparent
+```
+
+VERIFIED here is about *every* array the declaration admits, not a
+sample — and the stamp says in what arithmetic, with what help, over how
+much of the query, and whether anyone has tied the declared box to data
+you actually run on. `v.render()` prints the whole stamp.
+
+## Documentation
+
+| | |
+|---|---|
+| [Quickstart](docs/quickstart.md) | install, one runnable harness, a stamped verdict |
+| [The harness API](docs/harness-api.md) | the import path and every primitive: `any_array`, `any_pytree`, `assert_`, `assume`, `nonvacuity`, `trace` |
+| [Reading a verdict](docs/reading-a-verdict.md) | the statuses, every stamp line, and the two vacuity instruments |
+| [Preconditions guide](docs/preconditions.md) | ready-made obligation templates and posing guidance |
+| [SOUNDNESS.md](SOUNDNESS.md) | what a verdict is permitted to claim |
+| [docs/](docs/) | index, including the project-state and ledger records |
 
 ## Development
 

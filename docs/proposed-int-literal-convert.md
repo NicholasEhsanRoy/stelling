@@ -13,6 +13,7 @@ proposal.**
 
 `jax_md/util.py:86`:
 
+<!-- doc-example: illustrative -->
 ```python
 def safe_mask(mask, fn, operand, placeholder=0):
   masked = jnp.where(mask, operand, 0)          # <-- the Python int
@@ -44,6 +45,7 @@ in general.
 But the test is **set membership on the dtype pair**, while the `float→int`
 branch immediately below it does a **range check** on the operand's interval:
 
+<!-- doc-example: illustrative -->
 ```python
 if src == dst or (src, dst) in _EXACT_CONVERSIONS:
     return [a]

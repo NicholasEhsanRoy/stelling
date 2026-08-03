@@ -1,5 +1,11 @@
 # Checking the preconditions your solver assumes
 
+> **New to stelling?** Read the [Quickstart](quickstart.md) first — it
+> covers the harness primitives, their import path, and how to read the
+> verdict this page prints. The reference pages are
+> [The harness API](harness-api.md) and
+> [Reading a verdict](reading-a-verdict.md).
+
 Numerical methods rest on properties their implementations assume and
 never check: the coefficient field a CG or Cholesky solve needs to be
 positive, the mass/shift scalar that removes a nullspace, the argument a
@@ -9,9 +15,10 @@ expensive computation — and when they fail, they fail **silently**: the
 solver converges to something, the flags look healthy, and the answer is
 wrong.
 
-Install: `pip install stelling` into the environment that already has
-your JAX (stelling never touches your resolver); add
-`pip install "stelling[solvers]"` if you want the SMT step below.
+Install: not yet on PyPI, so `pip install -e .` from a clone, into the
+environment that already has your JAX (stelling never touches your
+resolver); add `pip install -e ".[solvers]"` if you want the SMT step
+below.
 
 Stelling checks these **over a declared range, not at a point**. A test
 runs your code at some inputs; a verdict here holds for *every* value in
@@ -24,6 +31,7 @@ Check that a variable diffusion coefficient built from your own
 construction is positive everywhere over the parameter range your
 application can produce:
 
+<!-- doc-example: run-only -->
 ```python
 import jax, jax.numpy as jnp
 jax.config.update("jax_enable_x64", True)
@@ -52,7 +60,11 @@ Check that a configuration scalar can never be the singular value —
 posed over the **admissible range**, not just the default, because the
 question is whether your configuration space *admits* the bad value:
 
+<!-- doc-example: run-only -->
 ```python
+import jax
+jax.config.update("jax_enable_x64", True)
+
 from stelling.preconditions import scalar_nonzero, check
 
 def harness():
@@ -71,7 +83,15 @@ VERIFIED, check() re-runs the query with the bounds widened: if an
 obligation still discharges with the bounds gone, the verdict tells
 you (a note and a stamped line) that the envelope was not
 load-bearing — the claim is a theorem or the envelope is mis-posed.
-A VERIFIED from check() has always already passed this check.
+A VERIFIED from check() has always been *put through* this check, but it
+does not always come back with a result: when not every declared bound
+moved, the instrument reports `vacuity instrument inert` instead and the
+envelope's role is left uncharacterised. There are four measured ways
+that happens — a point declaration under `"inputs-only"`, a declaration
+below a transparent wrapper, a query with no declarations at all, and a
+declaration that is already `(-inf, inf)`. Read the stamped line rather
+than assuming which of the two you got; all four are measured in
+[Reading a verdict](reading-a-verdict.md#the-four-ways-the-instrument-goes-inert).
 
 - **VERIFIED** — the property holds at every point of the declared
   envelope, judged by outward-rounded interval arithmetic (and the SMT
@@ -134,29 +154,52 @@ mesh machinery, no method internals.
   If your precondition is a float-boundary fact, read the stamp's
   semantics line before trusting either mode blindly.
 
-  **What that costs you, concretely — two primitives are enough.** This is
-  not a corner case reachable only through exotic arithmetic:
+### What float-exact-by-default costs you, concretely
 
-  ```python
-  x = any_array((3,), "float32", (1.0 - 1e-12, 1.0 + 1e-12))
-  assert_((x[0] + jnp.float32(1e-9)) - x[0] > 0.0)      # VERIFIED
-  ```
+**Two primitives are enough.** This is not a corner case reachable only
+through exotic arithmetic:
 
-  In exact real arithmetic the expression is `1e-9`, so the predicate is
-  true and the default (`real`) verdict of VERIFIED is correct *for what it
-  claims*. Executed in float32 it is exactly `0.0` at every point of that
-  envelope, so the predicate is **false everywhere the program actually
-  runs**. Measured on jax 0.11.0; the same VERIFIED-against-executed-zero
-  appears for `jnp.sum(k * x)` and for `jnp.matmul(k, x)`, so it is a
-  property of the semantics dial rather than of any one primitive or row.
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
 
-  The verdict is not wrong — it says `real` on the stamp, and in ℝ the
-  claim holds. But **"VERIFIED" plus a `real` semantics line does not mean
-  "this holds when you run it"**, and the gap can be the whole value rather
-  than a last-ulp difference. If the property you care about is one the
-  floating-point execution must satisfy, either pose it in `ieee` mode or
-  state the threshold as a representable value (see below) — do not read a
-  `real` VERIFIED as a statement about the float program.
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+
+
+def harness():
+    x = any_array((3,), "float32", (1.0 - 1e-12, 1.0 + 1e-12))
+    return assert_((x[0] + jnp.float32(1e-9)) - x[0] > 0.0)
+
+
+print("verdict :", check(harness, vacuity_mode="all").status)
+x = jnp.full((3,), 1.0, dtype=jnp.float32)
+print("executed:", (x[0] + jnp.float32(1e-9)) - x[0])
+```
+
+prints:
+
+```
+verdict : VERIFIED
+executed: 0.0
+```
+
+In exact real arithmetic the expression is `1e-9`, so the predicate is
+true and the default (`real`) verdict of VERIFIED is correct *for what it
+claims*. Executed in float32 it is exactly `0.0` at every point of that
+envelope, so the predicate is **false everywhere the program actually
+runs**. Measured on jax 0.11.0; the same VERIFIED-against-executed-zero
+appears for `jnp.sum(k * x)` and for `jnp.matmul(k, x)`, so it is a
+property of the semantics dial rather than of any one primitive or row.
+
+The verdict is not wrong — it says `real` on the stamp, and in ℝ the
+claim holds. But **"VERIFIED" plus a `real` semantics line does not mean
+"this holds when you run it"**, and the gap can be the whole value rather
+than a last-ulp difference. If the property you care about is one the
+floating-point execution must satisfy, either pose it in `ieee` mode or
+state the threshold as a representable value (see below) — do not read a
+`real` VERIFIED as a statement about the float program.
 
 Each limit shows up in the verdict itself — as a quoted decline, an
 UNKNOWN with its reason, or a stamped assumption — never as a silent
