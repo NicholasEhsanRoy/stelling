@@ -222,7 +222,7 @@ instrument, caught before reporting):
 | 2 | jax-md `safe_mask` (41 sites) | **⊤ at `convert_element_type int64→float64`**, from the literal `0` in `safe_mask`'s own body — the correlation question is never reached | the int-literal convert; **NOT** the refinement |
 | 3 | MIME coil_array | **mechanism (iii)** — the divisor has NO ENTRY in the env | a different fix; unmeasurable while emission is unreachable |
 | 4 | MIME gnn | **an upstream ⊤ cascade** — one `[-inf,inf]` box from `jit`; 15 literal divisors, the rest clean | unattributed |
-| 5 | JAXFLUIDS | **`square` ⊤ poisoning `x*x + eps`** | the `square` row — **BUILT**; its effect on the external harness is unverified |
+| 5 | JAXFLUIDS | **`square` ⊤ poisoning `x*x + eps`** | the `square` **interval transfer** row — **BUILT**; its effect on the external harness is unverified. **The SMT emission row for `square` (2026-08-03) does NOT address this site**: the mechanism here is the INTERVAL transfer falling to ⊤, and an emission row does not touch it. **Site 5 remains open.** |
 
 **NO CAPABILITY ADDRESSES MORE THAN ONE.** The where-refinement was credited
 with two of four; it reaches **one of five**, because site 2 stops three steps
