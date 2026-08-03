@@ -46,3 +46,103 @@ def test_committed_page_matches_live_registries():
         "without regeneration. Regenerate with: "
         "python docs/gen_supported_primitives.py"
     )
+
+
+# The wrapping syntax a continued literal can leave at the break. The
+# scanner is a text scanner, not a parser, so these need not compose into
+# valid Python — only to look like the ways a line gets broken here.
+_WRAP_STYLES = (
+    ('"', '"'),     # implicitly concatenated plain literal
+    ('f"', '"'),    # f-string — the form the gate first lost a citation to
+    ("f'", "'"),    # f-string, single-quoted
+    ('rb"', '"'),   # any other literal prefix
+    ("# ", ""),     # a wrapped comment
+)
+
+
+def _cited_quotes(module):
+    """Every ``(file, quote)`` pair the page actually cites.
+
+    Collected by running the generator with the scanner instrumented,
+    not by reading the ``_q`` call sites: some quotes reach ``_q``
+    through a variable (the tier-reason table), and a citation added to
+    the page later is picked up here without editing this test.
+    """
+    seen: list[tuple[str, str]] = []
+    real = module._quote_line
+
+    def spy(rel, quote, **kwargs):
+        seen.append((rel, quote))
+        try:
+            return real(rel, quote, **kwargs)
+        except LookupError:
+            # enumeration must not stop at the first quote the live tree
+            # has lost: this test is about the scanner's invariance, and
+            # it has to stay diagnostic while the sibling gate is red
+            return 0
+
+    module._quote_line = spy
+    try:
+        module.generate()
+    finally:
+        module._quote_line = real
+    return seen
+
+
+def test_citations_survive_any_rewrapping_of_the_quoted_source():
+    """A citation must not be lost to where the source line happens to break.
+
+    The class: a quote the page cites is still in the code verbatim, but
+    the scanner stops finding it because the literal was re-wrapped and
+    the break left string syntax mid-sentence in the reconstructed text
+    — a continuation's ``f`` prefix rebuilding as "... emission f set:
+    ...", say. That is a formatting change wearing content drift's
+    clothes: it turns the page gate red, and both ways out of a red gate
+    are bad (re-quote text that never changed, or loosen the gate). So
+    every quote the page cites is re-wrapped at every word boundary in
+    every literal style used here, and the scanner must still report the
+    line the quote starts on.
+
+    What this does NOT cover: whether a cited quote still means what the
+    page says around it. A message can grow a new tail while its opening
+    sentence stays verbatim — the citation is then honest but partial,
+    and only review catches that. Nor does it cover registry drift, which
+    is test_committed_page_matches_live_registries' job.
+    """
+    module = _generator()
+    quotes = _cited_quotes(module)
+    assert quotes, "the generator cited nothing — the instrumentation missed"
+
+    real_lines = module._lines
+    source: list[str] = []
+    module._lines = lambda _rel: source
+    checked = 0
+    try:
+        for rel, quote in quotes:
+            words = module._norm(quote).split()
+            for cut in range(1, len(words)):
+                head, tail = " ".join(words[:cut]), " ".join(words[cut:])
+                for opener, closer in _WRAP_STYLES:
+                    source[:] = [
+                        "# padding, so a hit on line 1 cannot pass by luck",
+                        "",
+                        f"    {opener}{head} {closer}",
+                        f"    {opener}{tail}{closer}",
+                    ]
+                    # the scanner's failure mode is to raise, not to
+                    # answer wrongly; both are the same defect here, so
+                    # both report it in the terms that locate it
+                    try:
+                        found = module._quote_line(rel, quote)
+                    except LookupError:
+                        found = None
+                    assert found == 3, (
+                        f"{rel}: the citation is lost when the quoted text "
+                        f"is wrapped after {words[cut - 1]!r} in the "
+                        f"{opener!r} style — the break moved, the text did "
+                        f"not. Quote: {quote[:60]!r}..."
+                    )
+                    checked += 1
+    finally:
+        module._lines = real_lines
+    assert checked > 100, f"only {checked} rewrappings exercised"
