@@ -39,6 +39,29 @@ array, and every test below executes those. Editing the text edits what is
 tested; naming a form that does not decide fails here before it reaches a user
 who is already stuck.
 
+And the ATTRIBUTION is pinned, not just the forms:
+``propagate._REAL_ONLY_MARKER`` is a sentinel the text carries, every rewrite
+named after it is claimed to work under ``semantics="real"`` only, and
+:func:`test_the_texts_ieee_attribution_matches_the_measured_partition` requires
+that split to equal the measured one. Inverting the attribution fails there.
+It did not before: the test asserted only that the words "ieee" and
+"reduce_sum" appeared *somewhere*, so a text blaming the wrong form passed.
+
+**WHAT THIS MECHANISM DOES NOT COVER**, stated because the previous version of
+this docstring claimed "every sentence in the text is measured here" and that
+was false:
+
+* Only **backticked** spans are seen. Advice written as bare prose
+  ("just use jnp.min") is invisible to every test in this file.
+* Only spans spelled with ``k`` / ``lo`` / ``hi`` are executed. A rewrite
+  spelled with any other variable raises ``NameError`` in the classifier and
+  is silently skipped — it is neither tested nor reported.
+* Only the real-only/both-modes SPLIT is pinned. The finer prose within it
+  (which primitive declines, at what size, why) is checked by two coarse
+  consistency assertions and no more.
+* The assume-differentiation clause is pinned as a partition (exactly one
+  named form stays certified) — not sentence by sentence.
+
 Both semantics, everywhere. The rewrite tests were the only ones in this file
 not parametrized over ``semantics``, and that is exactly where a false claim
 hid: two of the three shipped forms fall to ⊤ at ``reduce_sum`` under
@@ -49,6 +72,7 @@ float-boundary facts in.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -215,17 +239,8 @@ def test_every_shipped_rewrite_makes_an_assume_constrain(span, semantics):
     assert _assume_state(span, 3, semantics) == "CONSTRAIN", span
 
 
-def test_the_texts_ieee_scoping_is_exactly_what_the_forms_do():
-    """"All three decide" was FALSE under `semantics="ieee"`, and the hint
-    prints identically in both modes, so a stuck reader in the mode
-    docs/preconditions.md recommends for float-boundary facts was handed a
-    second dead end.
-
-    This does not re-hand-copy WHICH form fails. It measures the partition and
-    demands the TEXT match it: whatever falls to ⊤ under ieee must fall at
-    `reduce_sum`, the text must name that, and at least one named form must
-    survive at every size — otherwise the hint is a dead end under ieee and
-    must say so instead."""
+def _ieee_partition():
+    """(forms that decide under ieee at every size, {form: ⊤ primitives})."""
     survives, stuck = [], {}
     for span in _rewrites():
         tops: set[str] = set()
@@ -237,21 +252,59 @@ def test_the_texts_ieee_scoping_is_exactly_what_the_forms_do():
             stuck[span] = tops
         else:
             survives.append(span)
+    return survives, stuck
 
+
+def test_the_texts_ieee_attribution_matches_the_measured_partition():
+    """"All three decide" was FALSE under `semantics="ieee"`, and the hint
+    prints identically in both modes, so a stuck reader in the mode
+    docs/preconditions.md recommends for float-boundary facts was handed a
+    second dead end.
+
+    The first repair measured the partition but asked the text only to CONTAIN
+    the words "ieee" and "reduce_sum" — so a text that blamed the wrong form
+    passed. The attribution is now STRUCTURE: `_REAL_ONLY_MARKER` splits the
+    string, and the forms named after it must be exactly the forms measured to
+    fail. Inverting the attribution fails here."""
+    survives, stuck = _ieee_partition()
     assert survives, (
         "no form the hint names decides under semantics='ieee' at every "
         "size; the text must stop recommending them there"
     )
-    if stuck:
-        assert "ieee" in HINT and "reduce_sum" in HINT, (
-            f"these forms fall to ⊤ under ieee: {sorted(stuck)} — the text "
-            f"claims no such thing, so it hands an ieee reader a dead end"
+    assert P._REAL_ONLY_MARKER in HINT, (
+        "the hint no longer carries the real-only marker, so its ieee "
+        "attribution is unpinned prose again"
+    )
+    cut = HINT.index(P._REAL_ONLY_MARKER)
+    claimed_real_only = {s for s in _rewrites() if HINT.index(f"`{s}`") > cut}
+
+    assert claimed_real_only == set(stuck), (
+        f"the text claims {sorted(claimed_real_only)} are real-only; measured "
+        f"real-only is {sorted(stuck)}. Inverting or mis-attributing which "
+        f"form survives ieee sends the reader to the one that does not."
+    )
+    assert set(survives) & set(_rewrites()) - claimed_real_only == set(survives), (
+        "a form measured to survive ieee is named after the real-only marker"
+    )
+    for span, tops in stuck.items():
+        assert tops == {"reduce_sum"}, (
+            f"{span!r} fails under ieee at {sorted(tops)}, not at "
+            f"reduce_sum as the text says"
         )
-        for span, tops in stuck.items():
-            assert tops == {"reduce_sum"}, (
-                f"{span!r} fails under ieee at {sorted(tops)}, not at "
-                f"reduce_sum as the text says"
-            )
+    # ...and the two size qualifiers the text draws inside that group: one
+    # form decides at small n and one never does, so both phrases must be
+    # earned rather than inherited from a previous edit
+    small_n_ok = {
+        s for s in stuck if _assert_status(s, 2, "ieee")[0] == "discharged"
+    }
+    assert bool(small_n_ok) == ("three or more" in HINT), (
+        f"{sorted(small_n_ok)} decide under ieee at n=2, so the text must "
+        f"qualify by size (or must stop, if none do)"
+    )
+    assert bool(set(stuck) - small_n_ok) == ("at every size" in HINT), (
+        f"{sorted(set(stuck) - small_n_ok)} fail under ieee at every size, "
+        f"so the text must say so (or must stop, if none do)"
+    )
 
 
 def test_the_form_the_text_names_first_is_one_that_survives_ieee():
@@ -436,6 +489,95 @@ def test_every_spelling_of_the_canonical_idiom_hints_on_every_face(name):
     assert len(_hinted(_run(h_assume))) == 1, name
 
 
+NESTED = {
+    "nested all": lambda M: jnp.all(jnp.all(M >= LO, axis=1)),
+    "nested all in a conjunction": lambda M: (
+        jnp.all(M >= LO) & jnp.all(jnp.all(M >= LO, axis=1))
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(NESTED))
+@pytest.mark.parametrize("semantics", SEMANTICS)
+def test_a_NESTED_reduction_still_hints(name, semantics):
+    """The dead-end guard must not count a `reduce_and` ⊤ against itself.
+
+    Scoped to one reduction's own operands it did: `jnp.all(jnp.all(M >= 0,
+    axis=1))` has a `reduce_and` ⊤ under a `reduce_and` ⊤ — the ONE thing the
+    rewrite removes — and got nothing, on a program where deleting both
+    reductions reaches `discharged` at 100% coverage in both semantics. A
+    conjunction holding a nested `all` lost the hint for its fixable half
+    too."""
+    form = NESTED[name]
+
+    def h():
+        m = any_array((3, 4), "float64", (1.0, 2.0))
+        return (assert_(form(m)),)
+
+    assert len(_hinted(_run(h, semantics))) == 1, name
+
+
+@pytest.mark.parametrize("semantics", SEMANTICS)
+def test_the_advice_actually_lands_on_a_nested_reduction(semantics):
+    """...and the premise: deleting BOTH reductions decides, at full
+    coverage, which is why withdrawing the hint there was withdrawing correct
+    guidance rather than avoiding a dead end."""
+    def h():
+        m = any_array((3, 4), "float64", (1.0, 2.0))
+        return (assert_(m >= LO),)
+
+    p = _run(h, semantics)
+    assert p.obligations[0].status == "discharged"
+    assert p.coverage.unknown == 0
+    assert p.coverage.known == p.coverage.total
+
+
+@pytest.mark.parametrize("semantics", SEMANTICS)
+def test_separate_calls_are_the_conjunction_and_carry_no_shape_condition(
+    semantics,
+):
+    """The `&` caveat the text now carries. `jnp.all(w >= 0) & jnp.all(b >= 0)`
+    over differently-shaped arrays traces with the reductions in place and
+    raises once they are gone; two calls do not, and decide.
+
+    The SENTENCE is pinned too, not only the behaviour: measuring the
+    TypeError proves the hazard is real but leaves the caveat droppable from
+    the text, which is exactly the reader-facing half."""
+    assert P._SEPARATE_CALLS_MARKER in HINT, (
+        "the hint no longer tells the reader to split a conjunction into "
+        "separate calls, and 'delete the reduction' applied verbatim to "
+        "differently-shaped conjuncts does not trace"
+    )
+    w_shape, b_shape = (3,), (5,)
+
+    def deleted_into_one_and():
+        w = any_array(w_shape, "float64", (1.0, 2.0))
+        b = any_array(b_shape, "float64", (1.0, 2.0))
+        return (assert_((w >= LO) & (b >= LO)),)
+
+    with pytest.raises(TypeError, match="incompatible shapes"):
+        jax.make_jaxpr(deleted_into_one_and)()
+
+    def separate_calls():
+        w = any_array(w_shape, "float64", (1.0, 2.0))
+        b = any_array(b_shape, "float64", (1.0, 2.0))
+        return (assert_(w >= LO), assert_(b >= LO))
+
+    p = _run(separate_calls, semantics)
+    assert [o.status for o in p.obligations] == ["discharged", "discharged"]
+
+    def separate_assumes():
+        w = any_array(w_shape, "float64", (-1.0, 1.0))
+        b = any_array(b_shape, "float64", (-1.0, 1.0))
+        assume(w >= LO)
+        assume(b >= LO)
+        return (assert_(w >= LO), assert_(b >= LO))
+
+    q = _run(separate_assumes, semantics)
+    assert q.coverage.constrained == 2
+    assert [o.status for o in q.obligations] == ["discharged", "discharged"]
+
+
 def test_a_reduction_over_another_top_gets_no_hint():
     """The reason the gate has a dead-end guard.
 
@@ -461,6 +603,70 @@ def test_a_reduction_over_another_top_gets_no_hint():
 
 
 # -- negative controls --------------------------------------------------------
+
+
+def test_a_dead_end_in_a_SIBLING_conjunct_gets_no_hint():
+    """The dead-end guard's other half, and the reason its scope is the whole
+    predicate. `assert_(jnp.all(x >= 0) & (jnp.max(y) >= 0))` and
+    `assert_(jnp.all(jnp.max(x) >= 0))` are the same two primitives and the
+    same dead end; scoped to one reduction's operands the gate said no to the
+    second and yes to the first — the decision turned on spelling."""
+    def h():
+        x = any_array((3,), "float64", (1.0, 2.0))
+        y = any_array((3,), "float64", (1.0, 2.0))
+        return (assert_(jnp.all(x >= LO) & (jnp.max(y) >= LO)),)
+
+    p = _run(h)
+    assert dict(p.coverage.unknown_primitives) == {"reduce_and": 1, "reduce_max": 1}
+    assert _hinted(p) == []
+
+
+def test_the_walk_cap_goes_silent_rather_than_guess():
+    """A bound on the PREDICATE'S CONE, not on the program, and documented in
+    docs/harness-api.md as a numbered gate condition. Degrading to no hint is
+    right; an undocumented, unpinned boundary is what this pins."""
+    def chained(m):
+        def h():
+            x = any_array((2,), "float64", (1.0, 2.0))
+            acc = jnp.all(x >= LO)
+            for _ in range(m - 1):
+                acc = acc & jnp.all(x >= LO)
+            return (assert_(acc),)
+
+        return h
+
+    assert len(_hinted(_run(chained(170)))) == 1
+    assert _hinted(_run(chained(171))) == []
+
+    # ...and a LARGE program with a small predicate is unaffected: the cap is
+    # not a program-size condition, which the doc would otherwise imply
+    def big_program_small_predicate():
+        x = any_array((3,), "float64", (1.0, 2.0))
+        acc = x
+        for _ in range(400):
+            acc = acc + x
+        return (assert_(jnp.all(x >= LO)), assert_(jnp.sum(acc) >= 0.0))
+
+    p = _run(big_program_small_predicate)
+    assert p.coverage.total > 400
+    assert len(_hinted(p)) == 1
+
+
+def test_the_documented_transparent_set_is_the_implemented_one():
+    """docs/harness-api.md enumerates the ops the gate walks through, and said
+    "`&`/reshape/squeeze only" while the code also walked broadcast_in_dim and
+    convert_element_type — which the doc's own keepdims example needs. Prose
+    that lists a set drifts from the set unless something reads both."""
+    doc = (
+        Path(__file__).resolve().parent.parent / "docs" / "harness-api.md"
+    ).read_text(encoding="utf-8")
+    missing = [
+        p for p in P._MEMBERSHIP_HINT_TRANSPARENT if f"`{p}`" not in doc
+    ]
+    assert not missing, (
+        f"docs/harness-api.md does not name {sorted(missing)}, which the gate "
+        f"walks through"
+    )
 
 
 def test_a_plain_straddle_gets_no_hint():
@@ -535,7 +741,7 @@ def test_a_reduction_used_as_a_SELECTOR_gets_no_hint():
     assert _hinted(p) == []
 
 
-def test_a_SIZE_ZERO_reduction_is_decided_and_gets_no_hint():
+def test_a_SIZE_ZERO_reduction_is_decided_and_gets_no_hint_NONVACUITY():
     """The status guard is load-bearing, not belt-and-braces. A `reduce_and`
     with a non-reduced zero-length axis is `discharged` — "definitely true for
     all 0 element(s)", matching `jnp.all` of an empty array — while its box is
@@ -551,6 +757,39 @@ def test_a_SIZE_ZERO_reduction_is_decided_and_gets_no_hint():
     assert p.nonvacuity_checks[0].detail == "definitely true for all 0 element(s)"
     assert ("reduce_and", 1) in p.coverage.unknown_primitives
     assert _hinted(p) == []
+
+
+def test_a_SIZE_ZERO_reduction_is_decided_and_gets_no_hint_ASSERT():
+    """The ASSERT face's twin of the guard above, which had no test of its
+    own: the same size-0 `reduce_and` reaches `discharged` on an obligation,
+    and without the status guard that decided obligation gains a note reading
+    UNDECIDED."""
+    def h():
+        x = any_array((0, 2), "float64", (1.0, 2.0))
+        return (assert_(jnp.all(x >= LO, axis=1)),)
+
+    p = _run(h)
+    assert p.obligations[0].status == "discharged"
+    assert p.obligations[0].detail == "definitely true for all 0 element(s)"
+    assert ("reduce_and", 1) in p.coverage.unknown_primitives
+    assert _hinted(p) == []
+
+
+@pytest.mark.parametrize("semantics", SEMANTICS)
+def test_a_MANY_conjunct_assume_hints_once_not_once_per_conjunct(semantics):
+    """The `i == 0` restriction on the conjunct-DROPPED loop. Without it a
+    three-conjunct assume emits the locator twice for one predicate — the
+    dedupe would keep the BODY single, but two notes about one fact is the
+    repetition the pointer exists to prevent."""
+    def h():
+        x = any_array((3,), "float64", (-10.0, 10.0))
+        assume((x >= LO) & jnp.all(x <= HI) & jnp.all(x <= 100.0))
+        return (assert_(jnp.sum(x) >= 0.0),)
+
+    p = _run(h, semantics)
+    assert p.coverage.constrained == 1
+    assert sum("conjunct DROPPED" in n for n in p.notes) == 2
+    assert len(_hinted(p)) == 1
 
 
 def test_the_decided_faces_get_no_hint():
@@ -588,6 +827,19 @@ def test_one_query_stating_all_three_prints_the_body_once():
     assert sum(n.startswith("assume constraint DROPPED") for n in hinted) == 1
     assert sum(n.startswith("obligation UNDECIDED") for n in hinted) == 1
     assert sum(n.startswith("nonvacuity condition UNDECIDED") for n in hinted) == 1
+
+
+def test_two_faces_on_one_source_line_say_it_once():
+    """Same subject, same site, same origin is one fact. Before the dedupe two
+    asserts on one line produced two byte-identical pointer notes."""
+    def h():
+        x = any_array((3,), "float64", (1.0, 9.0))
+        assume(jnp.all(x >= LO))
+        return (assert_(jnp.all(x >= LO)), assert_(jnp.all(x >= LO)))
+
+    p = _run(h)
+    assert len(p.notes) == len(set(p.notes))
+    assert len(_hinted(p)) == 2
 
 
 # -- the hint reaches the reader ----------------------------------------------

@@ -2402,22 +2402,47 @@ ASSUME_DROP_NOTE = (
 #                       `violated-over-set` and `sum(x) >= 0` `discharged`
 #
 # So the elementwise form is named FIRST on two independent measurements: it is
-# the only one that survives ieee, and it is the only one that leaves the
-# REFUTED face reachable. The arithmetic pair stays because a genuine reduction
-# over an array is not a pointwise fact and has nowhere else to go.
+# the only one that survives ieee at every size, and it is the only one that
+# leaves the REFUTED face reachable. The arithmetic pair stays because a genuine
+# reduction over an array is not a pointwise fact and has nowhere else to go.
+#
+# THE ATTRIBUTION IS STRUCTURE, NOT PROSE. `_REAL_ONLY_MARKER` below is a
+# sentinel the test splits this string on: every rewrite named AFTER it is
+# claimed real-only, every rewrite named before it is claimed to hold in both
+# modes, and tests/test_membership_idiom_hint.py requires that split to equal
+# the measured one. Inverting the attribution — swapping which forms sit after
+# the marker — fails there. Before this it did not: the test asserted only that
+# the words "ieee" and "reduce_sum" appeared somewhere, so a text that blamed
+# the wrong form passed. Move a rewrite across the marker only with a
+# measurement in hand.
+_REAL_ONLY_MARKER = "decide under semantics='real' but NOT under semantics='ieee':"
+
+# The second sentinel, for the second claim a test would otherwise only check
+# BEHAVIOURALLY: "delete the reduction" applied verbatim to a conjunction of
+# differently-shaped arrays does not trace. Measured, `jnp.all(w >= 0) &
+# jnp.all(b >= 0)` with w:(3,) and b:(5,) — the weights-and-biases shape, the
+# most likely spelling a reader arrives with — raises `TypeError: and got
+# incompatible shapes for broadcasting: (3,), (5,)` once the reductions are
+# gone, while two calls decide in both semantics with no shape condition. A
+# test that measured only the TypeError left the SENTENCE droppable; this is
+# the string it must keep.
+_SEPARATE_CALLS_MARKER = "Keep them separate calls rather than one `&`"
 MEMBERSHIP_IDIOM_HINT = (
     " — `jnp.all(...)` lowers to `reduce_and`, which has no interval transfer "
     "in either registry (`reduce_or` has one in both, which is why `jnp.any` "
-    "decides), so its box is ⊤. Usually the fix is to DELETE THE REDUCTION: "
-    "`assert_`, `assume` and `nonvacuity` judge an array predicate ELEMENTWISE, "
-    "so the bare `k >= lo` over an n-element array already IS the conjunction "
-    "over all n — and it is the only form here that decides at every array size "
-    "under BOTH semantics. Where the condition is genuinely a reduction, "
-    "`jnp.sum(jnp.maximum(lo - k, 0.0) + jnp.maximum(k - hi, 0.0)) <= 0.0` and "
-    "`jnp.sum((k < lo).astype(jnp.int32)) == 0` decide under semantics='real', "
-    "but under semantics='ieee' both fall to ⊤ at `reduce_sum`, which declines "
-    "three or more float contributors and declines the counting form's integer "
-    "accumulator at every size. As an `assume` the three are not "
+    "decides), so its box is ⊤. Usually the fix is to DELETE THE REDUCTION and "
+    "state each conjunct as its OWN call: `assert_`, `assume` and `nonvacuity` "
+    "judge an array predicate ELEMENTWISE, so the bare `k >= lo` over an "
+    "n-element array already IS the conjunction over all n, and two calls are "
+    "the conjunction of both. Keep them separate calls rather than one `&` — "
+    "`jnp.all(w >= 0.0) & jnp.all(b >= 0.0)` over differently-shaped arrays "
+    "stops broadcasting once the reductions are gone. Where the condition is "
+    "genuinely a reduction, these decide under semantics='real' but NOT under "
+    "semantics='ieee': `jnp.sum(jnp.maximum(lo - k, 0.0) + jnp.maximum(k - hi, "
+    "0.0)) <= 0.0`, which falls to ⊤ at `reduce_sum` for three or more "
+    "contributors, and `jnp.sum((k < lo).astype(jnp.int32)) == 0`, which falls "
+    "there at every size because its accumulator is an integer. As an `assume` "
+    "the three are not "
     "interchangeable either: all three CONSTRAIN rather than DROP, but the two "
     "arithmetic forms narrow the reduction's own intermediate — an "
     "over-approximated value — so the precondition is stamped "
@@ -4456,34 +4481,49 @@ class _Propagator:
                     )
         return out + origin
 
-    def _cone_has_top(self, atoms) -> bool:
-        """Whether any value reachable BACKWARD from ``atoms`` is stelling's
-        own artifact ⊤ — an unrestricted walk, unlike
-        :meth:`_membership_reduce_and`'s.
+    def _foreign_top_in_cone(self, atom) -> bool:
+        """Whether the judged predicate's cone holds an artifact ⊤ minted by
+        anything OTHER than ``reduce_and`` — an unrestricted backward walk,
+        unlike :meth:`_membership_reduce_and`'s.
 
-        This is the hint's dead-end guard. ``assert_(jnp.all(jnp.max(x) >= 0))``
-        satisfies every structural test the gate makes — the judged predicate
-        genuinely IS a ``reduce_and`` ⊤ — and yet every rewrite the hint names
-        still returns ``unknown``, measured, with ``reduce_max ×1``: the
-        reduction was never the only thing in the way. Deleting it is not the
-        fix, so the hint must not claim it is."""
-        stack = list(atoms)
+        The hint's dead-end guard, and the scope is the WHOLE PREDICATE, which
+        cost two measured defects to learn. Scoped to one reduction's own
+        operands it was wrong in both directions:
+
+        * it withdrew CORRECT guidance from a nested ``jnp.all``. Measured,
+          ``jnp.all(jnp.all(M >= 0, axis=1))`` has a ``reduce_and`` ⊤ under its
+          ``reduce_and`` ⊤ — the one thing the rewrite fixes — and got nothing,
+          although deleting both reductions reaches ``discharged`` at 100%
+          coverage in both semantics, and the program after ONE application of
+          the advice hints. A conjunction holding a nested ``all`` lost the
+          hint for its fixable half too.
+        * and it kept WRONG guidance where a sibling conjunct was the dead
+          end: ``assert_(jnp.all(x >= 0) & (jnp.max(y) >= 0))`` hinted while
+          ``assert_(jnp.all(jnp.max(x) >= 0))`` did not — same two primitives,
+          same dead end, opposite decision decided by spelling.
+
+        One question over the whole predicate answers both: is every ⊤ in the
+        way a ``reduce_and`` ⊤? Deleting the reductions removes exactly those,
+        and nothing else, so the hint may claim what it claims iff nothing
+        else is there."""
+        stack = [atom]
         seen: set[int] = set()
         budget = _MEMBERSHIP_HINT_WALK_CAP
         while stack:
-            atom = stack.pop()
-            if not isinstance(atom, ir.Var) or atom.id in seen:
+            a = stack.pop()
+            if not isinstance(a, ir.Var) or a.id in seen:
                 continue
-            seen.add(atom.id)
+            seen.add(a.id)
             budget -= 1
             if budget < 0:
                 # cap exhausted: the evidence is unknown, and the hint is only
                 # ever emitted on evidence — report the dead-end shape so the
                 # caller stays silent
                 return True
-            if self.top_origin.get(atom.id) is not None:
+            origin = self.top_origin.get(a.id)
+            if origin is not None and origin[0] != "reduce_and":
                 return True
-            producer = self.producers.get(atom.id)
+            producer = self.producers.get(a.id)
             if producer is not None:
                 stack.extend(producer.invars)
         return False
@@ -4509,13 +4549,18 @@ class _Propagator:
           arbitrary producers would reach the reduction in
           ``jnp.where(jnp.all(...), a, b)``, where it is a selector and
           "delete it" is wrong.
-        * ACTIONABLE: nothing under the reduction is itself ⊤
-          (:meth:`_cone_has_top`). Any dead-end conjunct kills the hint for the
-          whole predicate — a note that names a rewrite for one half of a
-          conjunction the reader cannot fix is the #2 defect class.
+        * ACTIONABLE: no ⊤ anywhere in the judged predicate's cone comes from
+          anything but ``reduce_and`` (:meth:`_foreign_top_in_cone`) — the
+          whole predicate, not one reduction's operands, and never counting a
+          nested ``reduce_and`` against itself.
 
         Returns the first actionable origin, for the locator; the caller
-        supplies the text."""
+        supplies the text. The cap is a node budget over the PREDICATE'S CONE,
+        not the program: measured, a 407-equation jaxpr whose predicate is one
+        ``jnp.all`` still hints, while a predicate that is 300 chained ``&``
+        conjuncts does not."""
+        if self._foreign_top_in_cone(atom):
+            return None
         stack = [atom]
         seen: set[int] = set()
         budget = _MEMBERSHIP_HINT_WALK_CAP
@@ -4537,8 +4582,6 @@ class _Propagator:
                     # a reduce_and that did NOT fall to ⊤ (a registered row
                     # landed, or a future scope handled it): nothing to fix
                     continue
-                if self._cone_has_top(producer.invars):
-                    return None
                 if found is None:
                     found = origin
                 continue
@@ -4581,11 +4624,19 @@ class _Propagator:
         if origin is None:
             return
         where = eqn.source_info[-1] if eqn.source_info else "unknown location"
-        self.notes.append(
+        head = (
             f"{subject} UNDECIDED at {where}: its predicate is stelling's own "
             f"⊤ from 'reduce_and' at {origin[1]}"
-            f"{self._membership_hint_for(pred)}"
         )
+        if any(n.startswith(head) for n in self.notes):
+            # two faces of one kind on ONE source line say exactly one thing:
+            # same subject, same site, same origin. `_note_decline` dedupes
+            # verbatim notes for this reason ("a ~120-word decline note printed
+            # verbatim twice was the measured complaint") and the check is the
+            # same one — on the head, because the tail differs only by whether
+            # this call would have drawn the body or the pointer.
+            return
+        self.notes.append(head + self._membership_hint_for(pred))
 
     def _cmp_origin_clause(self, prod: ir.JaxprEqn) -> str:
         """Artifact-⊤ origins of a quoted comparison's sides — the #2

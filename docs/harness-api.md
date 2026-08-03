@@ -549,6 +549,15 @@ measured reasons the preference is not cosmetic:
   withheld from REFUTED. The elementwise form narrows the declared input
   and stays certified.
 
+**One conjunct, one call.** Deleting the reduction from a *conjunction*
+means writing each conjunct as its own `assert_` / `assume` /
+`nonvacuity` call, not one `&`: `jnp.all(w >= 0.0) & jnp.all(b >= 0.0)`
+over differently-shaped `w` and `b` traces fine with the reductions in
+place and raises `TypeError: and got incompatible shapes for
+broadcasting` once they are gone. Two calls are the conjunction of both
+and carry no shape condition at all — measured `discharged`/`discharged`
+in both semantics on exactly that pair.
+
 **How you would find this yourself.** Every path that can be weakened by
 this prints the rewrite, in the notes, off one shared gate: the `assume`
 path (in both `assume_mode`s, and on the dropped conjunct of a mixed
@@ -559,18 +568,35 @@ a *note* rather than an obligation detail because escalating replaces the
 detail with the solver record's own. The body is printed once per run —
 later faces carry a pointer to it rather than a second copy.
 
-The gate is deliberately narrower than "the query contains a `jnp.all`".
-It fires when the judged predicate reaches a `reduce_and` ⊤ through
-`&`/reshape/squeeze only — so `jnp.all(a) & jnp.all(b)` and a `keepdims`
-reduction hint, while `jnp.where(jnp.all(...), a, b)` (a selector, not
-the property), `jnp.all(a) | jnp.all(b)` and `~jnp.all(a)` (deleting the
-reduction would change what you stated) do not. It also stays silent when
-something *under* the reduction is itself ⊤ — `jnp.all(jnp.max(x) >= 0)`
-gets no hint, because deleting the `jnp.all` leaves `reduce_max` in the
-way and none of the rewrites would help. So the stamp's coverage line
-remains the general instrument: **read it whenever an obligation or a
-membership condition comes back undecided**, because it names the
-primitive that stopped the analysis whatever that primitive is.
+The gate is deliberately narrower than "the query contains a `jnp.all`",
+and it has three conditions:
+
+1. **It is reached from the judged predicate** through `and`, `reshape`,
+   `squeeze`, `broadcast_in_dim` or `convert_element_type` — the ops a
+   `jnp.all` result can pass through and still *be* that conjunction. So
+   `jnp.all(a) & jnp.all(b)`, a `keepdims` reduction (which lowers to a
+   `broadcast_in_dim`/`squeeze` pair) and a nested
+   `jnp.all(jnp.all(M, axis=1))` all hint, while
+   `jnp.where(jnp.all(...), a, b)` (a selector, not the property),
+   `jnp.all(a) | jnp.all(b)` and `~jnp.all(a)` (deleting the reduction
+   would change what you stated) do not.
+2. **Nothing else in the predicate is ⊤.** `jnp.all(jnp.max(x) >= 0)`
+   gets no hint, because deleting the `jnp.all` leaves `reduce_max` in
+   the way and none of the rewrites would help — and neither does
+   `jnp.all(x >= 0) & (jnp.max(y) >= 0)`, where the dead end is a
+   sibling conjunct rather than an operand. A nested `reduce_and` is not
+   counted against itself: it is the thing the rewrite removes.
+3. **The predicate is small enough to walk.** The gate walks at most 512
+   nodes of the predicate's *cone* and goes silent rather than guess past
+   it. This is a bound on the predicate, not the program: measured, a
+   407-equation jaxpr whose predicate is one `jnp.all` still hints, while
+   a predicate that is 171 chained `&` conjuncts does not (170 still
+   does).
+
+So the stamp's coverage line remains the general instrument: **read it
+whenever an obligation or a membership condition comes back undecided**,
+because it names the primitive that stopped the analysis whatever that
+primitive is, at any size, on any spelling.
 
 ## `trace(harness)`
 
