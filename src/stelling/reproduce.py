@@ -86,6 +86,40 @@ loud instead, and the file quotes that too.
 The stakes are SOUNDNESS.md's, verbatim: a box correctly declared but
 never occupied "manufactures a counterexample ... **A false
 counterexample is the output shape a user trusts most.**"
+
+**THE ONE DEFECT THIS MODULE CANNOT HAVE is a file that reports a result
+the program does not produce — and a wrongly SILENT file is in the same
+family.** A blinded audit of the first build found six, and what they
+share is worth stating because the next one will share it too: every one
+was a place where the file's answer came from something other than
+running the program.
+
+* It built ``numpy`` arrays and handed them to a jax target.
+  ``x.at[i].set(v)``, the functional-write idiom every JAX program uses,
+  does not exist on ``numpy.ndarray``, so eager raised and the file
+  reported "no execution result" for a violation it could have confirmed
+  — while ``jax.jit`` executed the same numpy input happily. The inputs
+  are jax arrays now, and a mode that raises no longer cancels the mode
+  that runs: silence requires BOTH to have failed.
+* The published ``lhs``/``rhs`` came from eager even when jit was the
+  mode that refuted, so a CONFIRMED published a counterexample that
+  SATISFIED its own relation. They now come from a falsifying mode
+  whenever one exists, and ``execution.sides_from`` says which.
+* A ``closed=`` parameter let a caller supply the traced query the
+  content hash was compared against, so the comparison never involved the
+  subject: program A's query with subject B emitted a file carrying B's
+  name and envelope, A's hash, and a witness outside B's own published
+  envelope. The parameter is gone — a gate with a bypass is not a gate.
+* Caller text reached the emitted file's *program text*, where a crafted
+  contract name printed a result line and exited 0 without executing
+  anything. :func:`one_line` is the funnel, :class:`Subject` refuses the
+  same at its door, and the output must parse.
+* Three importable target shapes — a classmethod, a module-level callable
+  instance, a ``functools.partial`` — were reported uncallable, so the
+  file said nothing about programs it could have run.
+* The exact rational was rounded twice on the way to a narrow dtype,
+  which moves the executed value by an ulp and can flip the result at a
+  bound.
 """
 
 from __future__ import annotations
@@ -110,6 +144,7 @@ __all__ = [
     "SCHEMA",
     "SIDECAR_KEYS",
     "ReproducerError",
+    "one_line",
     "Subject",
     "UNREACHABLE",
     "reproducer_source",
@@ -157,7 +192,11 @@ SIDECAR_KEYS = (
     "equations",    # int|null — equations in the traced query
     "envelope",     # list — one {name, shape, dtype, lo, hi} per declaration
     "witness",      # obj  — {input name: exact rational string}
-    "execution",    # obj  — {result, detail, reachable, lhs, rhs, modes}
+    "witness_filled",  # list — witness names this layer invented, not solved
+    "stelling_sha",    # str  — the tree that produced the verdict
+    "x64",             # bool — jax_enable_x64 at trace and at execution
+    "execution",    # obj  — {result, detail, reachable, lhs, rhs, modes,
+                    #         sides_from}
 )
 
 # ``execution.modes`` maps an execution mode to whether the ASSERTED
@@ -167,10 +206,23 @@ SIDECAR_KEYS = (
 # so a violation binary64 absorbs eagerly is present in the compiled
 # program — measured on jax 0.11.0, in this repository's own DIVERGED
 # probe. A consumer that cannot see which mode showed what cannot tell
-# that case from a clean one.
+# that case from a clean one. EVERY mode is always present as a key, and
+# ``null`` means it did not run: a path that emitted ``{}`` instead handed
+# a consumer following this comment a KeyError.
 EXECUTION_MODES = ("eager", "jit")
 
+# ``execution.sides_from`` names the mode ``lhs``/``rhs`` were read in, and
+# it exists because publishing the wrong one is worse than publishing
+# nothing. On a mode disagreement the predecessor published the EAGER
+# sides beside a CONFIRMED, so a consumer checking ``lhs <= rhs`` against
+# ``relation`` found the published counterexample SATISFYING the relation
+# while the violating numbers lived only on stdout. The sides now come
+# from a mode where the assertion is false whenever one exists.
+
 _RELATIONS = ("<=", ">=", "<", ">")
+
+# the docstring delimiter of the emitted file; caller text may not carry it
+_TRIPLE = '"' * 3
 
 # The declaration dtypes the obligation layer admits at all
 # (stelling.obligation._FLOAT_INPUT_DTYPES). Named again here because the
@@ -235,6 +287,18 @@ class Subject:
     def __post_init__(self) -> None:
         if not self.name or not isinstance(self.name, str):
             raise ReproducerError("Subject.name must be populated")
+        if any(c in self.name for c in "\n\r") or _TRIPLE in self.name:
+            # the name reaches the emitted file's docstring: a crafted one
+            # produced a file that printed a result and exited 0 without
+            # executing anything, and a stray triple quote produced a file
+            # that would not parse. :func:`one_line` neutralises both at
+            # the funnel; this refuses them at the door as well.
+            raise ReproducerError(
+                "Subject.name must be a single physical line and must not "
+                "contain a triple quote — it is written into the emitted "
+                "file's docstring, where a newline can start a statement "
+                "and a quote can end the docstring"
+            )
         if not callable(self.fn):
             raise ReproducerError(
                 f"Subject.fn must be callable, got {type(self.fn).__name__}"
@@ -352,82 +416,177 @@ def _assert_relation(relation: str, lhs, rhs):
     return assert_(lhs > rhs)
 
 
+# ── caller text, and the one funnel it passes through ────────────────────────
+
+
+def one_line(text: str) -> str:
+    """THE FUNNEL every piece of caller text passes through before it can
+    reach the emitted file's source.
+
+    A crafted ``Subject.name`` produced a file that printed a result line
+    and exited 0 without executing anything; a contract name containing a
+    triple quote produced a file that would not parse. Both are one defect
+    — free text reaching a program text — and both are closed here rather
+    than at each of the six slots that carry such text (the contract name,
+    the solver's ``produced_by``, the replay sentence, the disclosures, the
+    reasons, the unconstructible sentence).
+
+    Newlines and control characters become spaces, so nothing a caller
+    writes can start a line; the triple quote that would end the docstring
+    is neutralised; a backslash that could escape the closing quote is
+    replaced. :class:`Subject` also refuses newlines in its own text fields
+    at construction — one invariant, two mechanisms, as elsewhere here.
+    """
+    out = "".join(
+        " " if (ord(ch) < 32 or ord(ch) == 127) else ch for ch in str(text)
+    )
+    out = out.replace(_TRIPLE, "'''").replace("\\", "/")
+    return out.strip() or "(empty)"
+
+
 # ── what could not be constructed ────────────────────────────────────────────
 
 
-def _import_problem(fn, what: str) -> str | None:
-    """Why ``fn`` cannot be named in a file that imports it, or None.
+def _resolve_target(fn, what: str) -> tuple[str | None, str | None, str | None]:
+    """``(module, qualname, problem)`` — the name an importing file can ask
+    for, or why there is none.
 
-    Each measured shape gets its own sentence, because "ImportError" five
-    frames deep is what this function exists to replace. The last branch
-    is the important one: a module-level name that resolves to a
-    DIFFERENT object — a decorator, a reassignment, a monkeypatch — would
-    silently reproduce against something else, which is worse than not
-    reproducing at all.
+    THE TEST IS IDENTITY, NOT SHAPE. What matters is whether some
+    module-level name resolves to *this exact object*, and the shapes that
+    do are wider than "a plain def": a ``classmethod`` accessed off its
+    class, a module-level callable INSTANCE (the shape a library gives a
+    configured operator object, and the one this module's own docs
+    recommend for fixture work), and a ``functools.partial`` bound at
+    module level are all importable, and all three were reported
+    uncallable by the predecessor, which asked about ``__self__`` and
+    ``__qualname__`` instead. A reproducer that reports
+    "no execution result" for a target it could have executed is a
+    wrongly-silent file, which is a defect in the same family as a wrong
+    one.
+
+    So: try the object's own ``__module__``/``__qualname__`` path first,
+    and if that does not land on ``fn``, SCAN the plausible module's own
+    namespace for a module-level name bound to it. Only when neither finds
+    it is there a problem, and each shape gets its own sentence.
     """
+    import importlib
+
+    sentinel = object()
+
+    def same(a, b):
+        """Identity, allowing for bound methods.
+
+        ``C.method`` builds a NEW bound-method object on every attribute
+        access, so a plain ``is`` test says a classmethod does not resolve
+        to itself. What matters is whether the name reaches the same
+        underlying function on the same owner.
+        """
+        if a is b:
+            return True
+        fa, fb = getattr(a, "__func__", None), getattr(b, "__func__", None)
+        return (
+            fa is not None
+            and fa is fb
+            and getattr(a, "__self__", None) is getattr(b, "__self__", None)
+        )
+
+    def resolve(module, qualname):
+        try:
+            obj = importlib.import_module(module)
+        except Exception:  # noqa: BLE001 — a missing module is not a crash
+            return sentinel
+        for part in qualname.split("."):
+            obj = getattr(obj, part, sentinel)
+            if obj is sentinel:
+                return sentinel
+        return obj
+
     module = getattr(fn, "__module__", None)
     qualname = getattr(fn, "__qualname__", None)
-    if not module or not qualname:
-        return (
-            f"{what} {fn!r} carries no __module__/__qualname__, so there is "
-            f"no name for an importing file to ask for"
+    # __main__ FIRST, and independently of qualname: an instance does not
+    # inherit its class's __qualname__ (it is not in the class __dict__), so
+    # a check gated on both string attributes missed the callable-instance
+    # shape entirely. It resolves HERE and resolves to something ELSE in the
+    # reproducer — that file's own __main__ — so it is refused rather than
+    # left to fail at run time, where it would look like the file's fault.
+    if "__main__" in (module, getattr(type(fn), "__module__", None)):
+        return None, None, (
+            f"{what} {qualname or type(fn).__name__} is defined in the "
+            f"__main__ script, and '__main__' names whatever module is being "
+            f"run — in the reproducer that is the reproducer itself, not "
+            f"your script. Move it into an importable module"
         )
-    if module == "__main__":
-        # It resolves HERE and would resolve in the reproducer too — to the
-        # reproducer's own module, which is a different object. Refused
-        # rather than left to fail at run time, because the failure would
-        # arrive in the emitted file and look like the reproducer's fault.
-        return (
-            f"{what} {qualname} is defined in the __main__ script, and "
-            f"'__main__' names whatever module is being run — in the "
-            f"reproducer that is the reproducer itself, not your script. "
-            f"Move it into an importable module"
+    if isinstance(module, str) and isinstance(qualname, str):
+        if "<locals>" not in qualname and same(resolve(module, qualname), fn):
+            return module, qualname, None
+
+    # Not reachable by its own name. Look for a module-level name bound to
+    # this exact object, in the modules it could plausibly live in.
+    candidates = []
+    for cand in (
+        module,
+        getattr(type(fn), "__module__", None),
+        getattr(getattr(fn, "func", None), "__module__", None),
+    ):
+        if isinstance(cand, str) and cand not in candidates and cand not in (
+            "__main__", "builtins", "functools"
+        ):
+            candidates.append(cand)
+    for cand in candidates:
+        try:
+            mod = importlib.import_module(cand)
+        except Exception:  # noqa: BLE001
+            continue
+        names = sorted(
+            n for n, v in vars(mod).items()
+            if same(v, fn) and not n.startswith("__")
         )
-    if getattr(fn, "__self__", None) is not None:
-        return (
-            f"{what} {module}.{qualname} is a method BOUND to a "
-            f"{type(fn.__self__).__name__} instance built at run time; the "
-            f"emitted file can import the name but not that instance. Wrap "
-            f"the construction in a module-level function, so the file can "
-            f"build the object the same way you did"
-        )
-    if qualname.endswith("<lambda>"):
-        return (
+        if names:
+            # sorted, so the emitted file is byte-identical across runs
+            return cand, names[0], None
+
+    # Nothing names it. Say which shape it is — "ImportError five frames
+    # deep" is what this function exists to replace.
+    if isinstance(qualname, str) and qualname.endswith("<lambda>"):
+        return None, None, (
             f"{what} is a lambda defined in {module}: a lambda has no "
             f"importable name. Give it a def at module level"
         )
-    if "<locals>" in qualname:
-        return (
-            f"{what} {module}.{qualname} is defined inside another function, "
-            f"so it has no importable name. Move it to module level — a "
-            f"factory can still build its arguments"
+    if isinstance(qualname, str) and "<locals>" in qualname:
+        return None, None, (
+            f"{what} {module}.{qualname} is defined inside another "
+            f"function, so no module-level name holds it. Move it to module "
+            f"level — a factory can still build its arguments"
         )
-    try:
-        import importlib
+    owner = getattr(fn, "__self__", None)
+    if owner is not None:
+        return None, None, (
+            f"{what} {module}.{qualname} is a method BOUND to a "
+            f"{type(owner).__name__} instance built at run time, and no "
+            f"module-level name holds that instance. Bind it to one, or "
+            f"wrap the construction in a module-level function so the file "
+            f"can build the object the same way you did"
+        )
+    if isinstance(module, str) and isinstance(qualname, str):
+        return None, None, (
+            f"{what} {module}.{qualname} resolves to a DIFFERENT object "
+            f"than the one passed, and no module-level name in {module} "
+            f"holds it — a "
+            f"decorator, a reassignment or a monkeypatch. Reproducing "
+            f"against whatever that name holds would measure a different "
+            f"program"
+        )
+    return None, None, (
+        f"{what} is a {type(fn).__name__} carrying no importable "
+        f"__module__/__qualname__, and no module-level name in "
+        f"{candidates or 'any plausible module'} holds it, so there is no "
+        f"name for an importing file to ask for"
+    )
 
-        obj = importlib.import_module(module)
-    except Exception as e:  # noqa: BLE001 — report, never break the emission
-        return (
-            f"{what}'s module {module!r} could not be imported here "
-            f"({type(e).__name__}: {e}), so the emitted file could not "
-            f"import it either"
-        )
-    sentinel = object()
-    for part in qualname.split("."):
-        obj = getattr(obj, part, sentinel)
-        if obj is sentinel:
-            return (
-                f"{what} {module}.{qualname} does not resolve to anything: "
-                f"the emitted file's import would fail at {part!r}"
-            )
-    if obj is not fn:
-        return (
-            f"{what} {module}.{qualname} resolves to a DIFFERENT object than "
-            f"the one passed ({obj!r} is not {fn!r}) — a decorator, a "
-            f"reassignment or a monkeypatch. Reproducing against whatever "
-            f"that name holds would measure a different program"
-        )
-    return None
+
+def _import_problem(fn, what: str) -> str | None:
+    """The problem alone — :func:`_resolve_target`'s third element."""
+    return _resolve_target(fn, what)[2]
 
 
 # ── emission ─────────────────────────────────────────────────────────────────
@@ -567,20 +726,30 @@ def _envelope(subject: Subject) -> list[dict]:
 
 def _point(subject: Subject, witness) -> tuple[list[list[str]], list[str]]:
     """The witness as one exact-rational string per element of every
-    declaration, plus a disclosure line per element the model left free.
+    declaration, plus THE NAMES of the elements this layer invented.
 
-    A solver model names only what the obligation's slice reached, and an
-    element the obligation does not touch is a genuine don't-care — the
-    dispatch layer fills those from the declared box before replay
-    (``stelling.solvers._complete_values``) and discloses each one. The
-    emitted file has to build a whole array, so it fills the same way and
-    says which elements it invented.
+    A solver model names only what the obligation's slice reached. Two
+    different absences hide behind that, and the predecessor's disclosure
+    conflated them by saying the fills happened "exactly as the replay
+    did":
+
+    * a name that IS a slice input but the model left free — the dispatch
+      layer completes those from the declared box before replay
+      (``stelling.solvers._complete_values``) and they arrive here already
+      in ``witness.values``;
+    * a declaration element the obligation never reaches, which is not a
+      slice input at all. ``_complete_values`` iterates ``sl.inputs``, so
+      no solver and no replay ever assigned it anything.
+
+    Only the second kind is invented here, and the sidecar names them
+    under ``witness_filled`` so a consumer can tell an invented value from
+    a model one — which it previously could not.
     """
     got = dict(witness.values)
     for name in got:
         _declaration_of(name, subject)  # refuse a name from another query
     values: list[list[str]] = []
-    disclosures: list[str] = []
+    filled: list[str] = []
     for k, (shape, _dtype, (lo, hi)) in enumerate(subject.declarations):
         size = 1
         for d in shape:
@@ -595,16 +764,12 @@ def _point(subject: Subject, witness) -> tuple[list[list[str]], list[str]]:
                 hi if float(hi) != float("inf") else 0
             )
             elements.append(str(Fraction(fill)))
-            disclosures.append(
-                f"{name} was not constrained by the model (the obligation "
-                f"does not reach it); filled with {Fraction(fill)} from its "
-                f"declared box, exactly as the replay did"
-            )
+            filled.append(name)
         values.append(elements)
-    return values, disclosures
+    return values, filled
 
 
-def _tool_leak(fn) -> str | None:
+def _tool_leak(fn, what: str = "the target") -> str | None:
     """Disclosure when the TARGET's own module imports stelling.
 
     The emitted file never imports stelling, and that is checked on its
@@ -633,10 +798,16 @@ def _tool_leak(fn) -> str | None:
     except Exception:  # noqa: BLE001 — a disclosure must never break emission
         return None
     for line in source.splitlines():
-        if line.startswith(("import stelling", "from stelling")):
+        # .strip() because an INDENTED import loads the tool just as well
+        # once the enclosing function runs; the predecessor anchored at
+        # column 0 and missed every lazy one. This stays a best-effort
+        # emission-time HINT — it cannot see a helper that imports stelling
+        # two modules down — and the exact check is the one the emitted
+        # file makes at run time, in the process where it matters.
+        if line.strip().startswith(("import stelling", "from stelling")):
             return (
-                f"the target's module {module} imports stelling at module "
-                f"scope ({line.strip()!r}), so running this file loads the "
+                f"{what}'s module {module} imports stelling "
+                f"({line.strip()!r}), so running this file loads the "
                 f"tool even though this file never calls it. The executed "
                 f"computation is still independent; what you lose is being "
                 f"able to run this where stelling is not installed, which is "
@@ -667,13 +838,32 @@ def reproducer_source(
     x64: bool,
     unconstructible: str | None = None,
 ) -> str:
-    """The emitted file's text. It never imports stelling — checked here,
-    on the artefact, rather than trusted to the template."""
+    """The emitted file's text.
+
+    Two structural gates on the OUTPUT, not on the template: it never
+    imports stelling, and it parses. The second exists because a contract
+    name carrying a triple quote produced a file that raised SyntaxError
+    at its first line — a reproducer that cannot be run is not evidence
+    of anything, and :func:`one_line` closing the injection route is a
+    reason to check the result rather than a reason not to.
+    """
+    sha = _stelling_sha()
     envelope = _envelope(subject)
-    values, disclosures = _point(subject, witness)
-    leak = _tool_leak(subject.fn)
-    if leak is not None:
-        disclosures = list(disclosures) + [leak]
+    values, filled = _point(subject, witness)
+    disclosures = [
+        f"{name} was not constrained by the model (the obligation does not "
+        f"reach it, so no solver and no replay ever assigned it a value); "
+        f"this file INVENTED it from the declared box and the sidecar lists "
+        f"it under witness_filled"
+        for name in filled
+    ]
+    for fn_, what_ in (
+        (subject.fn, "the target"),
+        (subject.precondition, "the caller precondition"),
+    ):
+        leak = _tool_leak(fn_, what_) if fn_ is not None else None
+        if leak is not None:
+            disclosures.append(leak)
     sidecar = {
         "schema": SCHEMA,
         "stelling": _version(),
@@ -687,6 +877,20 @@ def reproducer_source(
         "equations": equations,
         "envelope": envelope,
         "witness": _flat_witness(subject, values),
+        # WHICH witness values the solver never produced. They are in
+        # `witness` because they are the point that was executed, and they
+        # are named here because a consumer must be able to tell an
+        # invented value from a model one. The wording used to say they
+        # were filled "exactly as the replay did", which is false on this
+        # path: solvers._complete_values only completes names that ARE
+        # slice inputs, and an element the obligation does not reach is
+        # not one — no replay ever saw it.
+        "witness_filled": sorted(filled),
+        # load-bearing for the result and not derivable from anything else
+        # here: the same rational rounds differently under x64, and a sha
+        # is what a reader chasing this needs (the version is a release).
+        "stelling_sha": sha,
+        "x64": x64,
     }
     missing = set(SIDECAR_KEYS) - set(sidecar) - {"execution"}
     if missing:  # a schema key lost in a refactor must not ship silently
@@ -694,28 +898,27 @@ def reproducer_source(
             f"the sidecar payload is missing published schema key(s) "
             f"{sorted(missing)}; {SCHEMA} is a parsed surface"
         )
+    t_mod, t_qual, _ = _resolve_target(subject.fn, "the target")
+    p_mod = p_qual = None
+    if subject.precondition is not None:
+        p_mod, p_qual, _ = _resolve_target(
+            subject.precondition, "the caller precondition"
+        )
     payload = {
         "witness_elements": values,
-        "x64": x64,
-        "target_module": getattr(subject.fn, "__module__", None),
-        "target_qualname": getattr(subject.fn, "__qualname__", None),
-        "precondition_module": (
-            getattr(subject.precondition, "__module__", None)
-            if subject.precondition is not None
-            else None
+        "target_module": t_mod,
+        "target_qualname": t_qual,
+        "precondition_module": p_mod,
+        "precondition_qualname": p_qual,
+        "precondition_reason": one_line(subject.precondition_reason),
+        "no_precondition_reason": one_line(subject.no_precondition_reason),
+        "disclosures": [one_line(d) for d in disclosures],
+        "unconstructible": (
+            one_line(unconstructible) if unconstructible else None
         ),
-        "precondition_qualname": (
-            getattr(subject.precondition, "__qualname__", None)
-            if subject.precondition is not None
-            else None
-        ),
-        "precondition_reason": subject.precondition_reason,
-        "no_precondition_reason": subject.no_precondition_reason,
-        "disclosures": disclosures,
-        "unconstructible": unconstructible,
     }
     text = string.Template(_TEMPLATE).substitute(
-        banner=_banner(sidecar, witness, disclosures, _stelling_sha(), x64),
+        banner=_banner(sidecar, witness, disclosures, sha, x64),
         sidecar=json.dumps(sidecar, indent=2, sort_keys=True),
         payload=json.dumps(payload, indent=2, sort_keys=True),
         confirmed=CONFIRMED,
@@ -736,6 +939,15 @@ def reproducer_source(
                 f"({line.strip()!r}) — a file that reaches back into the tool "
                 f"checks the tool with the tool"
             )
+    try:
+        compile(text, "<reproducer>", "exec")
+    except SyntaxError as e:
+        raise ReproducerError(
+            f"the emitted reproducer does not parse ({e}); a file that "
+            f"cannot be run is not evidence of anything. This is a defect "
+            f"in the emitter, not in your contract — please report it with "
+            f"the contract name"
+        ) from e
     return text
 
 
@@ -756,16 +968,26 @@ def _banner(sidecar, witness, disclosures, sha, x64) -> str:
     stelling sha, jax version. The provenance a reader needs to know WHICH
     claim this file is evidence about."""
     lines = [
-        f"contract         : {sidecar['contract']}",
+        # BELT AND BRACES, and measured as such: `Subject.__post_init__`
+        # already refuses the newline and the triple quote, and for every
+        # other name a constructible Subject accepts — backslashes, tabs,
+        # form feeds — the funnel makes no difference to what the file
+        # does. So no test can kill this call without reaching past the
+        # frozen dataclass, which is outside this codebase's threat model.
+        # One invariant, two mechanisms, exactly as
+        # `contracts._require_sealed_ensures` documents for its own
+        # unreachable re-check. The slots below are the load-bearing ones:
+        # they arrive on the WITNESS, which guards nothing.
+        f"contract         : {one_line(sidecar['contract'])}",
         f"verdict          : {sidecar['verdict']} "
         f"(assert #{sidecar['obligation']})",
         f"query hash       : {sidecar['query']}",
         f"stelling         : {sidecar['stelling']}  sha {sha}",
         f"jax              : {sidecar['jax']}  (jax_enable_x64={x64})",
-        f"solver           : {witness.produced_by}",
+        f"solver           : {one_line(witness.produced_by)}",
         f"fragment         : {sidecar['fragment']}",
         f"equations        : {sidecar['equations']}",
-        f"replay           : {witness.replay}",
+        f"replay           : {one_line(witness.replay)}",
         "declared envelope:",
     ]
     for d in sidecar["envelope"]:
@@ -779,7 +1001,7 @@ def _banner(sidecar, witness, disclosures, sha, x64) -> str:
             + ", ".join(str(i) for i in witness.violating_elements)
         )
     for d in disclosures:
-        lines.append(f"disclosure       : {d}")
+        lines.append(f"disclosure       : {one_line(d)}")
     return "\n".join(lines)
 
 
@@ -789,16 +1011,22 @@ def write_reproducer(
     directory: str,
     *,
     obligation_index: int | None = None,
-    closed=None,
     filename: str | None = None,
 ) -> Emission:
     """Write ``<directory>/<name>.py`` reproducing ``verdict``'s witness.
 
-    ``closed`` is the traced query the verdict is about; when omitted the
-    subject's own harness is re-traced. Either way its content hash must
-    equal the verdict's stamped one, or nothing is written — a reproducer
-    built against a different program than the one that was judged is a
-    confident wrong answer, and this project has no use for one.
+    THE SUBJECT'S OWN HARNESS IS ALWAYS RE-TRACED, and its content hash
+    must equal the verdict's stamped one, or nothing is written — a
+    reproducer built against a different program than the one that was
+    judged is a confident wrong answer, and this project has no use for
+    one. There used to be a ``closed=`` parameter that let a caller supply
+    the traced query and skip the 2.8 ms re-trace. It skipped the gate
+    with it: the hash was compared between the CALLER'S query and the
+    stamp, never between the caller's query and the SUBJECT, so passing
+    program A's query while emitting subject B produced a file whose
+    sidecar carried B's name and envelope, A's query hash, a witness
+    outside B's own published envelope, and a CONFIRMED from executing B.
+    A gate with a documented bypass is not a gate; the parameter is gone.
 
     The file IS written when the target cannot be constructed. That is
     deliberate (see :attr:`Emission.unconstructible`): a file that states
@@ -809,10 +1037,8 @@ def write_reproducer(
     from stelling._jax_compat import trace, x64_enabled
 
     witness = _witness_for(verdict, obligation_index)
-    if closed is None:
-        closed = trace(subject.harness)
     stamped = verdict.stamp.query_content_hash
-    traced = closed.content_hash()
+    traced = trace(subject.harness).content_hash()
     if traced != stamped:
         raise ReproducerError(
             f"this verdict is not about this subject's program: the verdict "
@@ -916,6 +1142,10 @@ ${payload}
 """)
 
 
+# every mode present, null meaning "did not run" — the documented shape
+_NO_MODES = {"eager": None, "jit": None}
+
+
 def _sidecar(execution):
     out = os.environ.get("STELLING_REPRODUCER_JSON") or (
         os.path.splitext(os.path.abspath(__file__))[0] + ".json"
@@ -938,7 +1168,8 @@ def _stop(detail):
     print("  The verdict this file is evidence about is unchanged. It simply")
     print("  has no execution leg until the target can be called from a file.")
     _sidecar({"result": None, "detail": detail, "reachable": None,
-              "lhs": None, "rhs": None, "modes": {}})
+              "lhs": None, "rhs": None, "modes": _NO_MODES,
+              "sides_from": None})
     return ${not_executed_exit}
 
 
@@ -949,10 +1180,41 @@ def _load(module, qualname):
     return obj
 
 
+def _nearest(np, dtype, f):
+    """The correctly-rounded ``dtype`` image of an exact rational.
+
+    ``dtype(float(f))`` rounds TWICE for any type narrower than binary64 —
+    exact to double, then double to dtype — and double rounding can land
+    one ulp away from the correctly-rounded value. At a witness that sits
+    near a bound, one ulp is the whole difference between the assertion
+    holding and not, so the file would report the wrong result for the
+    right reason. Corrected by search: take the double-rounded candidate
+    and its two neighbours, and keep whichever is genuinely nearest to the
+    rational, ties to even mantissa.
+    """
+    first = dtype.type(float(f))
+    cands = {first}
+    for direction in (np.inf, -np.inf):
+        try:
+            cands.add(dtype.type(np.nextafter(first, dtype.type(direction))))
+        except Exception:
+            pass
+    best, best_err = None, None
+    for c in cands:
+        err = abs(Fraction(float(c)) - f)
+        if best_err is None or err < best_err or (
+            err == best_err and int(np.asarray(c).view(
+                np.int32 if dtype.itemsize == 4 else np.int64)) % 2 == 0
+        ):
+            best, best_err = c, err
+    return best
+
+
 def _build(np, decl, elements):
     """One declared array, from exact rationals, in the declared dtype."""
+    dtype = np.dtype(decl["dtype"])
     exact = [Fraction(t) for t in elements]
-    flat = np.asarray([float(f) for f in exact], dtype=np.dtype(decl["dtype"]))
+    flat = np.asarray([_nearest(np, dtype, f) for f in exact], dtype=dtype)
     rounded = [i for i, f in enumerate(exact) if Fraction(float(flat[i])) != f]
     return flat.reshape(tuple(decl["shape"])), rounded
 
@@ -966,7 +1228,10 @@ def main():
         return _stop(PAYLOAD["unconstructible"])
     try:
         jax = importlib.import_module("jax")
-        jax.config.update("jax_enable_x64", PAYLOAD["x64"])
+        # before jnp, and before any array exists: the declared dtypes are
+        # only meaningful under the same setting the query was traced with
+        jax.config.update("jax_enable_x64", SIDECAR["x64"])
+        jnp = importlib.import_module("jax.numpy")
         np = importlib.import_module("numpy")
     except Exception as e:
         return _stop(f"jax/numpy unavailable ({type(e).__name__}: {e})")
@@ -993,6 +1258,18 @@ def main():
                 f"({type(e).__name__}: {e})"
             )
 
+    # THE EXACT VERSION OF THE INDEPENDENCE CHECK. The emitter scans the
+    # target's module source for an `import stelling` and discloses one, but
+    # it cannot see a helper that imports it two modules down. This can: the
+    # tool is either in this process or it is not, and by here the target
+    # has been imported.
+    if "stelling" in sys.modules:
+        print("  DISCLOSURE: importing the target loaded stelling into this")
+        print("  process. Nothing in this file calls it and the executed")
+        print("  computation is still independent — but running this where")
+        print("  stelling is absent, which is how that independence gets")
+        print("  shown, is not possible while the program module reaches it.")
+
     print("== the witness, exactly as the solver produced it")
     args, inexact = [], []
     for decl, elements in zip(SIDECAR["envelope"], PAYLOAD["witness_elements"]):
@@ -1003,7 +1280,15 @@ def main():
                 f"the witness value(s) for {decl['name']} could not be built "
                 f"as {decl['dtype']} ({type(e).__name__}: {e})"
             )
-        args.append(arr)
+        # A JAX ARRAY, because the target is a jax program. Handing it a
+        # numpy array breaks the most idiomatic write pattern JAX has:
+        # `x.at[i].set(v)` does not exist on numpy.ndarray, so eager raised
+        # AttributeError and this file reported "no execution result" for a
+        # violation it could have confirmed — measured, on
+        # `(T*2.0).at[0].set(0.0) <= 100.0`, which is FALSE at its witness.
+        # (jit tolerated the numpy input, so the two modes did not even
+        # agree about whether the program could be called.)
+        args.append(jnp.asarray(arr))
         for i in rounded:
             inexact.append(f"{decl['name']}[{i}] = {elements[i]}")
         for i, t in enumerate(elements):
@@ -1041,7 +1326,8 @@ def main():
             print("  trajectory I ran' and licenses no unreachability claim;")
             print("  twice in this project's history it was read as one.")
             _sidecar({"result": "${unreachable}", "reachable": False,
-                      "lhs": None, "rhs": None, "modes": {},
+                      "lhs": None, "rhs": None, "modes": _NO_MODES,
+                      "sides_from": None,
                       "detail": "the declared caller precondition is false "
                                 "at the witness; the program was not "
                                 "executed. Licensed by: "
@@ -1063,8 +1349,9 @@ def main():
         try:
             lhs, rhs = fn(*args)
         except Exception as e:
-            print(f"\\n  [{label}] not run ({type(e).__name__}: {e})")
-            return None, None, None
+            why = f"{type(e).__name__}: {e}"
+            print(f"\\n  [{label}] not run ({why})")
+            return None, None, None, why
         lv, rv = np.asarray(lhs), np.asarray(rhs)
         ok = np.asarray(
             {"<=": lv <= rv, ">=": lv >= rv, "<": lv < rv, ">": lv > rv}[rel]
@@ -1084,19 +1371,26 @@ def main():
                     f"    [{i}]  {a!r} {rel} {b!r}  is False"
                     f"   (margin {a - b:+})"
                 )
-        return holds, flat_l, flat_r
+        return holds, flat_l, flat_r, ""
 
     # BOTH MODES ARE THE PROGRAM. The compiler is entitled to rewrite the
     # expression, and measurably does: XLA simplifies (1 + x) - 1 to x, so
     # a violation binary64 absorbs eagerly survives compilation. Running one
     # mode and calling it "the program" would report the other one's answer
     # as this one's.
-    holds_eager, flat_l, flat_r = evaluate(target, "eager")
-    if holds_eager is None:
-        return _stop("the target raised at the witness under eager execution")
-    holds_jit, _, _ = evaluate(jax.jit(target), "jit")
+    holds_eager, eager_l, eager_r, eager_why = evaluate(target, "eager")
+    holds_jit, jit_l, jit_r, jit_why = evaluate(jax.jit(target), "jit")
     modes = {"eager": holds_eager, "jit": holds_jit}
     ran = [m for m, h in modes.items() if h is not None]
+    if not ran:
+        # NEITHER mode ran. Only now is there no execution result — the
+        # predecessor stopped as soon as EAGER raised, which is how the
+        # standard `.at[].set()` write produced no result at all while jit
+        # would have executed it happily.
+        return _stop(
+            "the target raised at the witness in both execution modes "
+            "(eager: " + eager_why + "; jit: " + jit_why + ")"
+        )
     disagree = len({modes[m] for m in ran}) > 1
 
     if disagree:
@@ -1108,8 +1402,17 @@ def main():
         print("    program you debug. Compare the lowered HLO before reading")
         print("    either as the answer.")
 
-    if not all(modes[m] for m in ran):
-        where = ", ".join(m for m in ran if not modes[m])
+    # WHICH MODE'S NUMBERS GET PUBLISHED. A counterexample that satisfies
+    # its own relation is not a counterexample, so the sides come from a
+    # mode where the assertion is FALSE whenever one exists; otherwise from
+    # the first mode that ran. `sides_from` says which, always.
+    sides = {"eager": (eager_l, eager_r), "jit": (jit_l, jit_r)}
+    false_modes = [m for m in ran if not modes[m]]
+    sides_from = (false_modes or ran)[0]
+    flat_l, flat_r = sides[sides_from]
+
+    if false_modes:
+        where = ", ".join(false_modes)
         print("\\n== ${confirmed}")
         print(f"  The asserted comparison is FALSE at the witness under {where}")
         print("  execution of your own function. This is the one check of the")
@@ -1123,8 +1426,10 @@ def main():
         result = "${confirmed}"
     else:
         print("\\n== ${diverged}")
-        print("  The comparison HOLDS at the witness in your program's own")
-        print(f"  dtype, in every mode run ({', '.join(ran)}), and stelling's")
+        dt = "/".join(sorted({d["dtype"] for d in SIDECAR["envelope"]}))
+        print(f"  The comparison HOLDS at the witness in {dt}, your program's")
+        print(f"  own declared type, in every mode run ({', '.join(ran)}),")
+        print("  and stelling's")
         print("  exact-rational replay established it is FALSE in exact real")
         print("  arithmetic at the same point.")
         print("  THIS IS NOT A FAILED CHECK. It is a finding about the gap")
@@ -1133,14 +1438,15 @@ def main():
         print("  this dtype can represent. Nothing here is wrong, the verdict")
         print("  is unchanged, and its stamped semantics line already says")
         print("  which arithmetic it is a claim about.")
+        dtypes = sorted({d["dtype"] for d in SIDECAR["envelope"]})
         detail = (
             "false in the reals per the exact-rational replay, true under "
-            "execution in " + SIDECAR["envelope"][0]["dtype"] + " ("
-            + ", ".join(ran) + ")"
+            "execution in " + "/".join(dtypes) + " (" + ", ".join(ran) + ")"
         )
         result = "${diverged}"
     _sidecar({"result": result, "detail": detail, "reachable": reachable,
-              "lhs": flat_l, "rhs": flat_r, "modes": modes})
+              "lhs": flat_l, "rhs": flat_r, "modes": modes,
+              "sides_from": sides_from})
     return ${result_exit}
 
 

@@ -201,7 +201,7 @@ def test_the_schema_is_versioned_and_its_key_set_is_pinned():
     assert SIDECAR_KEYS == (
         "schema", "stelling", "jax", "query", "contract", "verdict",
         "obligation", "relation", "fragment", "equations", "envelope",
-        "witness", "execution",
+        "witness", "witness_filled", "stelling_sha", "x64", "execution",
     )
     assert len(set(SIDECAR_KEYS)) == len(SIDECAR_KEYS)
 
@@ -328,20 +328,23 @@ def test_witness_value_names_are_parsed_by_the_published_naming():
         R._declaration_of("x9", s)
 
 
-def test_don_t_care_elements_are_filled_from_the_box_and_disclosed():
-    """Same fill the dispatch layer's replay uses, and the same duty to
-    say which elements were invented."""
+def test_invented_witness_elements_are_named_not_just_disclosed():
+    """A consumer must be able to tell an INVENTED value from a solved one,
+    and could not: the sidecar published both in `witness` with nothing
+    marking which was which, and the disclosure that explained them said
+    they were filled "exactly as the replay did", which is false on this
+    path — ``solvers._complete_values`` iterates ``sl.inputs``, and an
+    element the obligation never reaches is not one of those, so no solver
+    and no replay ever assigned it anything."""
     s = _subject(declarations=(((3,), "float64", (2.0, 5.0)),))
 
     class W:
         values = (("x0_1", "3"),)
 
-    values, disclosures = R._point(s, W())
-    # the model gave element 1; the other two are filled from the box's lo
+    values, filled = R._point(s, W())
+    # the model gave element 1; the other two are invented from the box's lo
     assert values == [["2", "3", "2"]]
-    assert len(disclosures) == 2
-    assert "not constrained by the model" in disclosures[0]
-    assert "x0_0" in disclosures[0] and "x0_2" in disclosures[1]
+    assert filled == ["x0_0", "x0_2"]
 
 
 # ── the side door: the TARGET's module reaching the tool ─────────────────────
@@ -361,13 +364,37 @@ def test_a_target_whose_module_imports_stelling_is_disclosed_not_refused():
     # this very module imports stelling at module scope
     leak = R._tool_leak(_fn)
     assert leak is not None
-    assert "imports stelling at module scope" in leak
+    assert "imports stelling" in leak
     assert "Move the program out of the harness module" in leak
     # and a program module that does not is silent
     pytest.importorskip("jax")
     from reproduce_subjects import product_against_bound
 
     assert R._tool_leak(product_against_bound) is None
+
+
+def test_the_leak_hint_sees_an_indented_import_too(tmp_path):
+    """An `import stelling` inside a function loads the tool just as well
+    once that function runs; the predecessor anchored at column 0 and saw
+    none of them. This hint is still best-effort — it cannot see a helper
+    two modules down — which is why the emitted file ALSO checks
+    sys.modules at run time, where the answer is exact."""
+    mod = tmp_path / "indented_leak.py"
+    mod.write_text(
+        "def f(a):\n    import stelling  # lazy\n    return a, 1.0\n"
+    )
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("indented_leak", mod)
+    m = importlib.util.module_from_spec(spec)
+    import sys as _sys
+
+    _sys.modules["indented_leak"] = m
+    try:
+        spec.loader.exec_module(m)
+        assert "imports stelling" in R._tool_leak(m.f)
+    finally:
+        _sys.modules.pop("indented_leak", None)
 
 
 def test_the_disclosure_reaches_the_emitted_file(tmp_path):
@@ -389,7 +416,7 @@ def test_the_disclosure_reaches_the_emitted_file(tmp_path):
             leaky.harness, vacuity_mode="inputs-only", solver_timeout_ms=30_000
         )
         em = R.write_reproducer(v, leaky, str(tmp_path))
-        assert "imports stelling at module scope" in em.source
+        assert "imports stelling" in em.source
         assert em.runnable  # disclosed, still emitted, still runnable
     finally:
         jax.config.update("jax_enable_x64", old)
@@ -398,6 +425,150 @@ def test_the_disclosure_reaches_the_emitted_file(tmp_path):
 def _leaky_target(a, b):
     """Defined in THIS module, which imports stelling — the leak shape."""
     return a * b, 6.0
+
+
+# ── what the audit found ─────────────────────────────────────────────────────
+
+
+def test_callable_targets_that_a_file_CAN_name_are_not_reported_uncallable():
+    """A file that reports "no execution result" for a target it could have
+    executed is a wrongly-silent file, and three importable shapes were
+    getting exactly that: a classmethod (the predecessor asked about
+    ``__self__``, which a classmethod has), a module-level callable
+    INSTANCE (the flax/equinox shape, and the one this module's own docs
+    recommend for fixture work), and a ``functools.partial`` (whose
+    ``__module__`` is ``functools``). The test is identity — does some
+    module-level name resolve to THIS object — not shape."""
+    pytest.importorskip("jax")
+    import reproduce_subjects as S
+
+    for label, fn, expect in (
+        ("classmethod", S.ClassMethodTarget.sides,
+         ("reproduce_subjects", "ClassMethodTarget.sides")),
+        ("callable instance", S.CALLABLE_INSTANCE,
+         ("reproduce_subjects", "CALLABLE_INSTANCE")),
+        ("partial", S.PARTIAL_TARGET,
+         ("reproduce_subjects", "PARTIAL_TARGET")),
+    ):
+        module, qualname, problem = R._resolve_target(fn, "the target")
+        assert problem is None, (label, problem)
+        assert (module, qualname) == expect, (label, module, qualname)
+        # and the name really does resolve back to the same object
+        import importlib
+
+        obj = importlib.import_module(module)
+        for part in qualname.split("."):
+            obj = getattr(obj, part)
+        assert obj is fn or obj.__func__ is fn.__func__, label
+
+
+def test_the_resolver_is_deterministic_when_several_names_bind_one_object():
+    """A GENERATED file must be byte-identical across runs; picking an
+    arbitrary alias would make it not."""
+    pytest.importorskip("jax")
+    import reproduce_subjects as S
+
+    seen = {R._resolve_target(S.ALIASED_TARGET, "t")[:2] for _ in range(5)}
+    assert len(seen) == 1
+    assert seen.pop()[1] == "ALIASED_TARGET"  # sorted, so the first alias
+
+
+def test_caller_text_cannot_reach_the_emitted_program_text():
+    """A crafted Subject.name produced a file that printed a result line
+    and exited 0 WITHOUT EXECUTING ANYTHING. Two mechanisms now: the funnel
+    every string passes through, and a refusal at Subject's own door."""
+    assert "\n" not in R.one_line("a\nb")
+    assert '"""' not in R.one_line('a"""b')
+    assert "\\" not in R.one_line("a\\b")
+    assert R.one_line("\x00\x1f") == "(empty)"
+    with pytest.raises(ReproducerError, match="single physical line"):
+        _subject(name='x"""\nprint("== CONFIRMED")\n"""')
+    with pytest.raises(ReproducerError, match="triple quote"):
+        _subject(name='has """ in it')
+
+
+def test_the_funnel_holds_at_slots_no_door_guards(tmp_path):
+    """``Subject`` guards its own text fields, but three of the six slots
+    that reach the emitted docstring are not Subject's: the solver's
+    ``produced_by``, the replay sentence and the disclosures all arrive on
+    the WITNESS, which accepts any non-empty string. Those are the slots
+    the funnel is actually load-bearing for, so they are what this
+    measures."""
+    jax = pytest.importorskip("jax")
+    pytest.importorskip("z3")
+    from stelling.verdict import Witness
+
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        from stelling.preconditions import check
+
+        subject = _nonlinear_subject()
+        v = check(
+            subject.harness, vacuity_mode="inputs-only", solver_timeout_ms=30_000
+        )
+        real = v.witnesses[0]
+        crafted = Witness(
+            obligation_index=real.obligation_index,
+            values=real.values,
+            produced_by='z3"""\nprint("== CONFIRMED")\nimport sys;sys.exit(0)\n"""',
+            replay="ok\n== UNREACHABLE",
+        )
+        text = R.reproducer_source(
+            v, subject, witness=crafted, query_hash="h", fragment="QF_NRA",
+            equations=5, x64=True,
+        )
+        compile(text, "<t>", "exec")            # it still parses
+        for line in text.splitlines():
+            assert not line.startswith("print("), line
+            assert not line.startswith("sys.exit"), line
+            assert not line.startswith("== "), line
+        # and the crafted text is present, flattened onto its own one line
+        assert "z3'''" in text
+        assert "ok == UNREACHABLE" in text
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+
+def test_an_unparseable_emission_is_refused_not_written(monkeypatch):
+    """The second structural gate on the output. A file that cannot be run
+    is not evidence of anything, and a contract name carrying a triple
+    quote produced exactly that."""
+    jax = pytest.importorskip("jax")
+    pytest.importorskip("z3")
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        from stelling.preconditions import check
+
+        subject = _nonlinear_subject()
+        v = check(
+            subject.harness, vacuity_mode="inputs-only", solver_timeout_ms=30_000
+        )
+        monkeypatch.setattr(R, "_TEMPLATE", R._TEMPLATE + "\ndef (:\n")
+        with pytest.raises(ReproducerError, match="does not parse"):
+            R.write_reproducer(v, subject, "/tmp/stelling-reproduce-never")
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+
+def test_there_is_no_way_to_supply_the_traced_query_and_skip_the_gate():
+    """The gate's docstring says it stops a verdict travelling to the wrong
+    program. A ``closed=`` parameter let a caller supply the query the hash
+    was compared against, so the comparison never involved the SUBJECT at
+    all: program A's query plus subject B emitted a file carrying B's name
+    and envelope, A's hash, a witness outside B's own published envelope,
+    and a CONFIRMED from executing B. The parameter is gone; this is what
+    keeps it gone."""
+    import inspect
+
+    params = inspect.signature(R.write_reproducer).parameters
+    assert "closed" not in params, (
+        "write_reproducer must always re-trace the subject's own harness; a "
+        "gate with a documented bypass is not a gate"
+    )
+    src = inspect.getsource(R.write_reproducer)
+    assert "trace(subject.harness).content_hash()" in src
 
 
 # ── provenance ───────────────────────────────────────────────────────────────

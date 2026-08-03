@@ -56,7 +56,12 @@ it is not about.
 
 Your program lives in its own module. The harness module imports
 stelling; **the program module must not**, or the emitted file drags the
-tool back in through the side door.
+tool back in through the side door. The file checks `sys.modules` after
+importing your target and says so if it happened.
+
+`write_reproducer` always re-traces the subject's own harness and compares
+its content hash with the verdict's stamp. There is deliberately no way to
+supply the traced query and skip that: a gate with a bypass is not a gate.
 
 <!-- doc-example: illustrative -->
 ```python
@@ -112,7 +117,20 @@ Running the emitted file prints the witness, both sides, and the result:
 == CONFIRMED
 ```
 
+**Both modes are the program.** The file builds `jax` arrays and runs the
+target eagerly *and* under `jax.jit`, because the compiler is entitled to
+rewrite the expression and measurably does. If only one mode can run, that
+one decides; only when neither can is there no execution result.
+
 ## When the target cannot be called
+
+The test is **identity**: does some module-level name resolve to this
+exact object? A plain `def`, a `@classmethod`, a module-level callable
+instance (the flax/equinox shape) and a `functools.partial` bound at
+module level all pass it. A lambda, a nested function, a `__main__`
+target, a method bound to an instance no name holds, and a name that
+resolves to a *different* object than the one you passed do not — and
+each gets its own sentence saying which.
 
 Measured across this tree's contracts: **8 of 14 targets need fixture
 work** — a constructor argument, a mesh, a controller instance — before
@@ -173,17 +191,26 @@ a test and the integer in `schema` moves on any incompatible change.
 | key | |
 |---|---|
 | `schema` | `"stelling.reproducer/1"` |
-| `stelling`, `jax` | the versions that produced the verdict |
+| `stelling`, `stelling_sha`, `jax`, `x64` | the versions and the precision setting that produced the verdict |
 | `query` | the traced query's content hash |
 | `contract`, `verdict`, `obligation`, `relation` | which claim this is evidence about |
 | `fragment`, `equations` | the SMT logic emitted (or `null`), and the equation count |
 | `envelope` | one `{name, shape, dtype, lo, hi}` per declaration |
-| `witness` | `{input name: exact rational string}` |
-| `execution` | `{result, detail, reachable, lhs, rhs, modes}` |
+| `witness` | `{input name: exact rational string}` — the point that was executed |
+| `witness_filled` | the witness names this layer **invented** from the declared box, because the obligation never reaches them and no solver or replay ever assigned them a value |
+| `execution` | `{result, detail, reachable, lhs, rhs, modes, sides_from}` |
 
 `execution.result` is one of the three tokens, or `null` when the target
-could not be constructed. `execution.modes` maps `eager`/`jit` to whether
-the assertion **holds** there — a schema field rather than prose because
-the two measurably disagree: XLA's algebraic simplifier rewrites
-`(1 + x) - 1` to `x`, so a violation binary64 absorbs eagerly is present
-in the compiled program.
+could not be constructed.
+
+`execution.modes` maps `eager` and `jit` to whether the assertion **holds**
+there; both keys are always present, and `null` means that mode did not
+run. It is a schema field rather than prose because the two measurably
+disagree: XLA's algebraic simplifier rewrites `(1 + x) - 1` to `x`, so a
+violation binary64 absorbs eagerly is present in the compiled program.
+
+`execution.sides_from` names the mode `lhs`/`rhs` were read in. **The
+published sides always come from a mode where the assertion is false, when
+one exists** — a counterexample that satisfies its own `relation` is not a
+counterexample, and publishing the eager sides beside a CONFIRMED decided
+by `jit` did exactly that.

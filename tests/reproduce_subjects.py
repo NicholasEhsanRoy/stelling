@@ -18,6 +18,8 @@ heavy is imported at module scope, so importing this costs nothing.
 
 from __future__ import annotations
 
+import functools
+
 
 def weno5_central_vs_neighbours(u0, u1, u2, u3, u4):
     """JAX-Fluids' own Jiang-Shu indicators, called unbound and verbatim.
@@ -109,10 +111,87 @@ def product_against_bound(a, b):
     return a * b, 6.0
 
 
+def mixed_dtype_underflow(x32, unused64):
+    """float32 underflow beside an untouched float64 declaration.
+
+    Two things at once, both of them audit findings: the DIVERGED detail
+    must name every declared dtype (it hard-wired ``envelope[0]``), and a
+    declaration the obligation never reaches produces a witness element no
+    solver and no replay ever assigned — which the sidecar must mark as
+    invented rather than publish beside solved values.
+    """
+    return x32 * x32, 0.0
+
+
+def scatter_write(T):
+    """``(T*2).at[0].set(0)`` against ``100`` — the standard JAX write.
+
+    ``.at[i].set(v)`` is the functional-update idiom every JAX program
+    uses, and it does not exist on ``numpy.ndarray``. A reproducer that
+    built numpy inputs raised ``AttributeError`` here and reported "no
+    execution result" for a violation it could have confirmed — while the
+    identical numpy input worked fine under ``jax.jit``. Kept as an
+    acceptance, because the most idiomatic write pattern in the library
+    must not be the one that silently yields nothing.
+    """
+    return (T * 2.0).at[0].set(0.0), 100.0
+
+
+def only_under_jit(a, b):
+    """Raises on a concrete argument and runs on a tracer.
+
+    The shape of the numpy-input defect, kept as a target in its own
+    right: the reproducer must try BOTH modes and report the one that
+    ran, rather than stopping at the first that raised. It tests the
+    argument's type in plain Python — no jax internals — because that is
+    exactly how the original failure worked (``.at[].set()`` exists on a
+    tracer and not on ``numpy.ndarray``).
+    """
+    if "Tracer" not in type(a).__name__:
+        raise TypeError(
+            "only_under_jit: this target runs only under jax.jit; eagerly "
+            "it raises, which is the shape the two-mode rule exists for"
+        )
+    return a * b, 6.0
+
+
 class _Holder:
-    """A target whose method is bound to an instance built at run time —
-    the uncallable-target shape, kept here so the acceptance can exhibit
-    it without inventing one at the point of use."""
+    """A target whose method is bound to an instance built at run time,
+    with NO module-level name holding that instance — the genuinely
+    uncallable shape, kept here so the acceptance can exhibit it without
+    inventing one at the point of use."""
 
     def sides(self, a, b):
         return product_against_bound(a, b)
+
+
+# ── three importable shapes a file CAN name ──────────────────────────────────
+#
+# None is a plain `def`, all three were reported uncallable, and each one
+# resolves to a module-level name here. A reproducer that reports "no
+# execution result" for a target it could have executed is wrongly silent,
+# which is a defect in the same family as a wrong result.
+
+
+class ClassMethodTarget:
+    """A classmethod: it HAS a ``__self__`` (the class) and is importable."""
+
+    @classmethod
+    def sides(cls, a, b):
+        return product_against_bound(a, b)
+
+
+class _CallableInstance:
+    """The flax/equinox shape: a module-level callable instance. An
+    instance does not inherit its class's ``__qualname__``."""
+
+    def __call__(self, a, b):
+        return product_against_bound(a, b)
+
+
+CALLABLE_INSTANCE = _CallableInstance()
+PARTIAL_TARGET = functools.partial(product_against_bound)
+# two names for one object: resolution must pick the same one every run,
+# or a file headed "GENERATED" is not reproducible from its own inputs
+ALIASED_TARGET = _CallableInstance()
+ZZ_SECOND_NAME_FOR_ALIASED = ALIASED_TARGET
