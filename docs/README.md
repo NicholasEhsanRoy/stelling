@@ -16,6 +16,7 @@ harness, a stamped verdict, in four files.
 | [The harness API](harness-api.md) | the import path and every primitive: `any_array`, `any_pytree`, `assert_`, `assume`, `nonvacuity`, `trace` |
 | [Reading a verdict](reading-a-verdict.md) | the statuses, every stamp line, and the two vacuity instruments |
 | [Checking the preconditions your solver assumes](preconditions.md) | the task guide: ready-made obligation templates, posing guidance, reading a CI verdict |
+| [Reproducing a witness](reproducing-a-witness.md) | emitting a runnable file that executes a REFUTED's witness through your own program, without importing stelling |
 
 ## Records
 
