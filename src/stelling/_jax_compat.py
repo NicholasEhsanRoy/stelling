@@ -769,6 +769,21 @@ def _narrowing_can_lose_values(dt: str) -> bool:
     outside int64 that the shaved slice holds no int64 value still refuses,
     because int64/uint64's decisions are the guard's purpose and are pinned
     byte-identical — a per-bound carve-out would shift them.
+
+    THE SIZE OF THAT CHOICE, WRITTEN DOWN. Being dtype-level makes this the
+    layer's largest remaining ACCEPTANCE LOSS: on these dtypes a narrowing
+    bound is refused whether or not the shaved sliver holds a value, so
+    ``uint64 (Fraction(-1,3), Fraction(1,3))`` — an interval containing 0,
+    a perfectly ordinary uint64 — is refused, and so is the point
+    declaration ``int64 (2**63-1, 2**63-1)`` at int64's own maximum.
+    Measured by ``corpus/declaration_emptiness_sweep.py`` section 5: 15 of
+    the 30 narrowing-policy refusals in its population are over an
+    INHABITED declared set, identically on this build and on 69ea5d3. The
+    message states the policy rather than claiming a dropped value, which
+    is honest, but the loss is real and larger than the empty-set defect
+    the exact re-check closes. Not fixed here — a per-bound carve-out moves
+    the byte-identical int64/uint64 decisions this guard exists to hold —
+    but recorded where whoever revisits the policy will find it.
     """
     if dt.startswith("complex"):
         return True

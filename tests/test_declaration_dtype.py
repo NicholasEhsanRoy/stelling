@@ -20,8 +20,10 @@ over-approximation and stays sound; a box disjoint from it describes nothing.
 """
 from __future__ import annotations
 
+import functools
 import math
 import re
+import warnings
 from fractions import Fraction
 
 import pytest
@@ -34,6 +36,7 @@ from jax import lax
 from stelling import interval as iv
 from stelling import propagate as P
 from stelling import _jax_compat as JC
+from stelling._bound_spelling import binary64_image, declared_bound_value
 from stelling.harness import any_array, assert_, trace
 
 
@@ -889,6 +892,17 @@ def test_an_empty_set_behind_a_narrowing_gap_edge_refuses_with_the_true_cause(
         assert sides["above"] > hi, (sides, hi)
 
 
+# Every row here must be a control on the WIDENING half specifically —
+# neither endpoint narrowing, and the rounded check admitting the recorded
+# box — or it passes on the parent's logic and pins nothing. The first
+# version of this list got that wrong in four of fourteen rows (measured on
+# 69ea5d3: `uint64 (-(2**64), -1/2)`, `float16 (2**54+1, 2**54+3)` and both
+# `(-3/2**1200, -1/2**1200)` rows already refused there, the first two
+# because the ROUNDED range check catches them and the last two because
+# their `lo` NARROWS onto -0.0). They are replaced below, and the property
+# is now asserted per row by
+# `test_every_widening_empty_row_is_a_control_on_the_widening_direction`,
+# which needs no parent build to check it.
 _WIDENING_EMPTY = [
     # -- the reproducers ---------------------------------------------------
     # a float64 interval strictly between two consecutive float64s (ulp 4 at
@@ -901,12 +915,10 @@ _WIDENING_EMPTY = [
     # hi widens UP onto that minimum, the recorded box's only inhabitant.
     # Measured the same way: admitted, `assert_(x >= 0)` returned REFUTED.
     ("int64", -(2**64), -(2**63) - 1),
-    ("uint64", -(2**64), Fraction(-1, 2)),          # wholly below uint64's 0
     # -- the same shape at every float width -------------------------------
     ("float32", 2**53 + 1, 2**53 + 3),
     ("bfloat16", 2**53 + 1, 2**53 + 3),             # the flipped parity pin
     ("float8_e8m0fnu", 2**53 + 1, 2**53 + 3),
-    ("float16", 2**54 + 1, 2**54 + 3),
     # -- ABOVE THE DTYPE'S LARGEST FINITE VALUE, by one -------------------
     # the widening lo rounds back DOWN onto float32's max, so the recorded
     # box is inhabited while the declared interval holds no finite float32
@@ -916,14 +928,21 @@ _WIDENING_EMPTY = [
     # -- SUBNORMAL: strictly inside the gap between 0 and 2**-1074 --------
     # lo = 1/4 ulp rounds DOWN to +0.0, hi = 3/4 ulp rounds UP to the
     # smallest subnormal, so the recorded box is [0.0, 5e-324] — two float64
-    # values, both excluded by the declaration
+    # values, both excluded by the declaration. Both endpoints widen.
     ("float64", Fraction(1, 2**1076), Fraction(3, 2**1076)),
-    # its unsigned-integer cousin: a hi that underflows to -0.0, making the
-    # recorded box touch zero while the declared interval is strictly
-    # negative (found by a randomized sweep against an independent oracle,
-    # not by hand — the class is wider than the 2**53 gap)
-    ("uint32", Fraction(-3, 2**1200), Fraction(-1, 2**1200)),
-    ("bool", Fraction(-3, 2**1200), Fraction(-1, 2**1200)),
+    ("float8_e4m3", Fraction(1, 2**1076), Fraction(3, 2**1076)),
+    # -- UNDERFLOW TO -0.0, with the lo recorded EXACTLY ------------------
+    # the hi is too small to record, rounds UP to -0.0, and the recorded box
+    # therefore touches zero while the declared interval is strictly
+    # negative — so an unsigned dtype's smallest value, or a float dtype's
+    # zero, enters a box that excluded it. The class was found by a
+    # randomized sweep rather than by hand; the ROWS are hand-built, because
+    # the sweep's own instances had both endpoints underflowing, which makes
+    # the `lo` narrow and hands the case to the parent's half of the check.
+    ("uint64", -1.0, Fraction(-1, 2**1200)),
+    ("uint32", -1.0, Fraction(-1, 2**1200)),
+    ("bool", -1.0, Fraction(-1, 2**1200)),
+    ("float16", -1e-300, Fraction(-1, 2**1200)),
     # -- and a FRACTIONAL spelling of the float64 reproducer ---------------
     ("float64", Fraction(2**55 + 1, 2), Fraction(2**55 + 7, 2)),
 ]
@@ -939,12 +958,18 @@ def test_an_empty_set_behind_a_widening_gap_edge_refuses_too(dtype, lo, hi):
     inhabited while the DECLARED interval holds nothing. The narrowing half
     landed first, with the widening half pinned as a known blind spot on
     the argument that the parent admitted it too ("parity, not
-    endorsement"). Measured on that build: every case here was ADMITTED,
-    and the two reproducers reached REFUTED at 100% coverage — a claim that
-    some input violates the property, over a declaration with no inputs at
-    all. Parity with an older build does not make that sound, so the
-    re-check now fires on ANY inexact recording rather than on the
+    endorsement"). Measured on 69ea5d3: every row of this list was ADMITTED
+    there, and the two reproducers reached REFUTED at 100% coverage — a
+    claim that some input violates the property, over a declaration with no
+    inputs at all. Parity with an older build does not make that sound, so
+    the re-check now fires on ANY inexact recording rather than on the
     narrowing direction alone.
+
+    ("every row" is a claim about THIS list, and the first version of it was
+    false for four of fourteen rows — see the note above the list. The rows
+    were replaced, and
+    `test_every_widening_empty_row_is_a_control_on_the_widening_direction`
+    now checks the property in-tree so the claim cannot rot again.)
 
     Same cause and same message shape as the narrowing half: the EMPTY-set
     class, judged against the RAW endpoints in exact arithmetic, with the
@@ -967,42 +992,242 @@ def test_an_empty_set_behind_a_widening_gap_edge_refuses_too(dtype, lo, hi):
 
 
 @pytest.mark.parametrize("dtype,lo,hi", _WIDENING_EMPTY)
-def test_the_widening_empty_set_is_empty_by_an_independent_oracle(dtype, lo, hi):
-    """ANTI-VACUITY on the refusals above: each declared interval really does
-    hold no value of its dtype.
+def test_every_widening_empty_row_is_a_control_on_the_widening_direction(
+        dtype, lo, hi):
+    """A row that the ROUNDED check already refuses, or that has a NARROWING
+    endpoint, is refused by the parent's logic too and pins nothing about
+    this change. Four of the first fourteen rows in `_WIDENING_EMPTY` were
+    exactly that, and the list's own docstring claimed the opposite: an
+    inert row is invisible, because it passes.
 
-    The statement made is "the LEAST dtype value at or above `lo` is
-    strictly above `hi`, or there is none at all" — the same thing as "no
-    dtype value lies inside [lo, hi]", because a dtype's values are totally
-    ordered. It is computed from numpy alone, independently of every helper
-    in `_jax_compat`: a `nextafter` walk upward from the nearest cast for
-    the float dtypes, `np.iinfo` and an exact `ceil` for the integer ones.
-    Every deciding comparison is python's, which compares int and Fraction
-    against float without rounding either.
-
-    Without this, a refusing mutant (`return False, ""` at the top of the
-    exact check) passes the test above while rejecting every legitimate
-    envelope in the file.
+    So the property is asserted here per row, IN-TREE, needing no parent
+    build to check: (1) neither endpoint narrows, and (2) the rounded
+    emptiness check ADMITS the recorded box. Together those are the
+    definition of "only the widening half of the exact re-check can refuse
+    this" — the rounded check has already had its say and said yes, and no
+    narrowing endpoint exists for the parent's half to catch.
     """
-    d = np.dtype(dtype)
-    if d.kind in "iub":
-        i = (0, 1) if d.kind == "b" else (int(np.iinfo(d).min),
-                                          int(np.iinfo(d).max))
-        first = i[0] if lo == -math.inf or lo <= i[0] else math.ceil(lo)
-        above = first if first <= i[1] else None
-    elif lo == -math.inf:
-        above = float(np.nextafter(np.array(-np.inf, d), np.array(np.inf, d)))
-    else:
-        with np.errstate(over="ignore", invalid="ignore"):
-            c = np.array(float(lo), d)
-            while np.isfinite(c) and float(c) < lo:
-                c = np.nextafter(c, np.array(np.inf, d))
-        above = float(c) if np.isfinite(c) else None
-    assert above is None or above > hi, (
-        f"{above} is a {dtype} value inside the declared [{lo}, {hi}] — the "
-        f"refusal above is a FALSE refusal, the failure this layer must not "
-        f"have"
+    dt = str(np.dtype(dtype))
+    lo_x, hi_x = declared_bound_value(lo), declared_bound_value(hi)
+    rec = (binary64_image(lo_x), binary64_image(hi_x))
+    for name, x, stored in (("lo", lo_x, rec[0]), ("hi", hi_x, rec[1])):
+        if isinstance(x, Fraction) and stored != x:
+            narrows = (stored > x) if name == "lo" else (stored < x)
+            assert not narrows, (
+                f"{dt} ({lo!r}, {hi!r}): the {name} NARROWS ({x} recorded as "
+                f"{stored!r}), so the parent's half of the re-check already "
+                f"fires and this row is not a widening control"
+            )
+    holds, why = JC._dtype_holds_a_value_in(dt, *rec)
+    assert holds, (
+        f"{dt} ({lo!r}, {hi!r}): the ROUNDED check already refuses the "
+        f"recorded box {rec} — {why} — so this row is refused on the "
+        f"parent's logic and pins nothing about the widening direction"
     )
+
+
+# -- an emptiness oracle written from the FORMAT PARAMETERS -------------------
+#
+# The instrument this replaced claimed to be "computed from numpy alone,
+# independently of every helper in `_jax_compat`". It imported nothing from
+# the tree, and that is not the same thing: its float branch was
+# `_exact_at_or_above`'s wide path with the same primitive, the same
+# starting point, and the same load-bearing assumption — step with
+# `np.nextafter` from a binary64 cast, decide by comparing `float(c)` —
+# which is exactly the assumption the source comment says fails for x86
+# longdouble. Measured: on `float128 (2**54+1, 2**54+3)` that walk stops
+# after 1025 steps and reports the least value >= 2**54+1 as 2**54+4, so it
+# certifies EMPTY an interval with three inhabitants (longdouble holds
+# 2**54+1 exactly: `longdouble(2**54+1) - longdouble(2**54) == 1.0`). It
+# would have rubber-stamped the one false refusal the binary64-subset screen
+# exists to prevent. Three smaller defects came with it: `above = None` on
+# an overflowing cast is right above the format max and WRONG below the
+# format minimum (it certified `float16 [-10**9, 0]` as empty); the
+# assertion passed vacuously whenever `above` was None; and its integer
+# branch keyed on `d.kind in "iub"`, while int2/int4/uint2/uint4 are kind
+# 'V' and silently took the float branch.
+#
+# What is below shares no primitive with the code under test. The IEEE
+# formats are computed from their PUBLISHED PARAMETERS, written down here,
+# in exact rational arithmetic with no `float()` anywhere in the decision
+# path; the narrow formats are enumerated from their bit patterns, with the
+# conversion's exactness measured per value rather than assumed; integer
+# ranges are written down and keyed by NAME, not by numpy's `kind`; and a
+# dtype the table does not describe raises instead of answering, so the
+# oracle can never rubber-stamp by falling through.
+_IEEE_FORMAT = {                 # (precision, emin, emax) — IEEE 754 binary32
+    "float32": (24, -126, 127),  # and binary64, and the x87 double-extended
+    "float64": (53, -1022, 1023),   # format longdouble uses on x86
+    "float128": (64, -16382, 16383),
+}
+_INT_DOMAIN = {
+    "bool": (0, 1),
+    **{f"int{n}": (-(2 ** (n - 1)), 2 ** (n - 1) - 1)
+       for n in (2, 4, 8, 16, 32, 64)},
+    **{f"uint{n}": (0, 2**n - 1) for n in (2, 4, 8, 16, 32, 64)},
+}
+
+
+def _binade(x):
+    """The integer ``e`` with ``2**e <= x < 2**(e+1)``, for an exact
+    rational ``x > 0``. Seeded from the bit lengths and corrected, so it is
+    exact for magnitudes no float can hold."""
+    e = x.numerator.bit_length() - x.denominator.bit_length()
+    while Fraction(2) ** e > x:
+        e -= 1
+    while Fraction(2) ** (e + 1) <= x:
+        e += 1
+    return e
+
+
+def _least_ieee_at_or_above(p, emin, emax, x):
+    """The least value of the binary format ``(p, emin, emax)`` that is
+    ``>= x``, as an exact Fraction, or None if the format has none. All
+    rational arithmetic: ``//`` on Fractions is an exact floor."""
+    tiny = Fraction(1, 2) ** (p - 1 - emin)          # smallest subnormal
+    big = (Fraction(2) - Fraction(1, 2) ** (p - 1)) * Fraction(2) ** emax
+    if x > big:
+        return None
+    if x <= -big:
+        return -big
+    if x == 0:
+        return Fraction(0)
+    if x < 0:                     # round the MAGNITUDE down, toward zero
+        y = -x
+        if y < tiny:
+            return Fraction(0)
+        u = max(tiny, Fraction(1, 2) ** (p - 1 - _binade(y)))
+        return -((y // u) * u)
+    if x <= tiny:
+        return tiny
+    u = max(tiny, Fraction(1, 2) ** (p - 1 - _binade(x)))
+    v = -((-x) // u) * u          # ceil to a multiple of the spacing
+    return None if v > big else v
+
+
+@functools.lru_cache(maxsize=None)
+def _enumerated_values(dtype):
+    """Every finite value of a dtype of at most two bytes, as exact
+    Fractions, from its bit patterns. ``float()`` appears in the
+    CONSTRUCTION but not in the decision, and its exactness is measured
+    rather than assumed: each value is cast back into the dtype and its
+    VALUE required to survive, which establishes that the Fraction IS the
+    dtype's value and not a rounding of it.
+
+    The value, not the bit pattern. A sub-byte format has padding bits, so
+    several patterns denote one value: bitwise equality fails for 93 of
+    float6_e2m3fn's 256 patterns and 105 of float4_e2m1fn's, while the value
+    round-trips for every pattern of every narrow format this jax has."""
+    d = np.dtype(dtype)
+    assert d.itemsize <= 2, dtype
+    raw = np.arange(2 ** (8 * d.itemsize),
+                    dtype=np.uint8 if d.itemsize == 1 else np.uint16)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with np.errstate(invalid="ignore"):
+            vals = raw.view(d)
+    out = set()
+    for v in vals:
+        f = float(v)
+        if not math.isfinite(f):
+            continue
+        assert float(np.array(f, d)) == f, (
+            f"{dtype}: float({v!r}) = {f!r} does not cast back — this "
+            f"oracle's construction assumes binary64 holds every value of a "
+            f"<=2-byte float format, and this dtype breaks it"
+        )
+        out.add(Fraction(f))
+    return sorted(out)
+
+
+def _oracle(dtype, lo, hi):
+    """Does the closed real interval ``[lo, hi]`` hold a value of ``dtype``?
+    Returns ``(answer, witness_or_None)``, the witness exact."""
+    dt = str(np.dtype(dtype))
+    if lo == math.inf or hi == -math.inf or (
+            lo != -math.inf and hi != math.inf and lo > hi):
+        return False, None
+    if dt == "bool" or dt.startswith(("int", "uint")):
+        a, b = _INT_DOMAIN[dt]
+        first = a if (lo == -math.inf or lo <= a) else math.ceil(lo)
+        if first > b or (hi != math.inf and first > hi):
+            return False, None
+        return True, first
+    if dt in _IEEE_FORMAT:
+        p, emin, emax = _IEEE_FORMAT[dt]
+        big = (Fraction(2) - Fraction(1, 2) ** (p - 1)) * Fraction(2) ** emax
+        v = _least_ieee_at_or_above(
+            p, emin, emax, -big if lo == -math.inf else Fraction(lo))
+        if v is None or (hi != math.inf and v > hi):
+            return False, None
+        return True, v
+    if np.dtype(dt).itemsize <= 2:
+        vals = _enumerated_values(dt)
+        first = next((v for v in vals if lo == -math.inf or v >= lo), None)
+        if first is None or (hi != math.inf and first > hi):
+            return False, None
+        return True, first
+    raise AssertionError(
+        f"the oracle has no written-down description of {dt!r} and will not "
+        f"guess — add its parameters or leave the dtype out of the params"
+    )
+
+
+_ORACLE_ROWS = (
+    [(dt, lo, hi, "empty") for dt, lo, hi in _WIDENING_EMPTY]
+    + [("float64", 2**54 + 1, 2**54 + 4, "inhabited"),
+       ("float64", 2**54, 2**54 + 3, "inhabited"),
+       ("int64", -(2**64), -(2**63), "inhabited"),
+       ("uint64", 0, 2**64 - 1, "inhabited"),
+       ("bfloat16", 2**53, 2**53 + 3, "inhabited"),
+       ("float64", Fraction(1, 2**1076), Fraction(7, 2**1076), "inhabited"),
+       ("uint32", -1.0, Fraction(1, 2**1200), "inhabited"),
+       ("float32", int(np.finfo(np.float32).max), float("inf"), "inhabited"),
+       # THE ROW THE OLD ORACLE GOT WRONG. x86 longdouble holds 2**54+1
+       # exactly; the nextafter-and-float() walk reported the least value at
+       # or above it as 2**54+4 and certified this EMPTY. Both the tool and
+       # the oracle must say INHABITED.
+       (str(np.dtype(np.longdouble)), 2**54 + 1, 2**54 + 3, "inhabited")]
+)
+
+
+@pytest.mark.parametrize("dtype,lo,hi,expected", _ORACLE_ROWS)
+def test_the_emptiness_decision_agrees_with_the_format_parameter_oracle(
+        dtype, lo, hi, expected):
+    """THE ORACLE IS A CONTROL ON BOTH SIDES, which is what the instrument it
+    replaced was not.
+
+    That one only ever asserted "this parameter row is empty". It never
+    called `any_array`, so it was structurally incapable of failing on any
+    source change — its own docstring named a mutant it claimed to kill and
+    did not (`return False, ""` at the top of the exact check is killed by
+    `test_the_exact_recheck_admits_at_its_boundaries`, not by it).
+
+    This one asserts the TOOL's decision equals the ORACLE's answer, over
+    rows in both directions. A wrong parameter row, a broken oracle, and an
+    implementation that refuses or admits too much all fail it. The
+    inhabited rows carry an exact witness, checked to lie in the declared
+    interval AND in the recorded box, so an admit cannot pass vacuously.
+    """
+    holds, witness = _oracle(dtype, lo, hi)
+    assert holds == (expected == "inhabited"), (
+        f"the ORACLE says {dtype} [{lo}, {hi}] "
+        f"{'holds ' + str(witness) if holds else 'is empty'}, the param says "
+        f"{expected} — one of them is wrong, and the oracle is the "
+        f"instrument"
+    )
+    if holds:
+        assert lo <= witness <= hi, (witness, lo, hi)
+        cj = _declare(dtype, lo, hi)          # must be ADMITTED
+        params = dict(cj.eqns[0].params)
+        assert params["lo"] <= witness <= params["hi"], (
+            f"recorded box [{params['lo']}, {params['hi']}] dropped the "
+            f"witness {witness}"
+        )
+    else:
+        with pytest.raises(ValueError) as exc:
+            _declare(dtype, lo, hi)
+        assert "EMPTY under dtype" in str(exc.value), str(exc.value)
 
 
 @pytest.mark.parametrize("dtype,lo,hi,witness", [
@@ -1074,6 +1299,74 @@ def test_the_exact_recheck_admits_at_its_boundaries(dtype, lo, hi, witness):
         f"recorded box [{params['lo']}, {params['hi']}] dropped the witness "
         f"{witness}"
     )
+
+
+@pytest.mark.parametrize("lo,hi", [
+    (int(np.finfo(np.float32).max) + 1, float("inf")),
+    (int(np.finfo(np.float32).max) + 1, 10**40),
+    (float("-inf"), -int(np.finfo(np.float32).max) - 1),
+])
+def test_beyond_the_format_range_says_so_rather_than_naming_a_gap(lo, hi):
+    """The exact check's out-of-finite-range branch decides no DECISION —
+    delete it and the walk below still answers "empty" — so it survived
+    every mutation the suite could throw at it. What it decides is the
+    CAUSE, and with it gone the cause is false: these intervals sit BEYOND
+    float32's largest finite value, and the fallthrough calls that "a gap
+    between representable values", which is a different and wrong
+    explanation of a refusal the caller has to act on.
+
+    Reachable only because rounding pulls the endpoint back INTO range —
+    `f32max + 1` records as `f32max` — which is exactly the widening
+    direction this branch's re-check now covers, so it is newly worth a
+    control rather than newly written.
+    """
+    with pytest.raises(ValueError) as exc:
+        _declare("float32", lo, hi)
+    msg = str(exc.value)
+    assert "lies entirely outside them" in msg, msg
+    assert "gap between representable values" not in msg, (
+        f"the interval is beyond float32's finite range, not inside a gap "
+        f"in it:\n  {msg}"
+    )
+
+
+def test_the_subnormal_clause_of_the_loss_gate_is_stated_not_exercised():
+    """`_narrowing_can_lose_values`'s third clause — that the format's
+    smallest subnormal does not underflow binary64 — is DECIDED BY NO DTYPE.
+    Measured across every dtype this jax builds arrays in plus x86
+    longdouble: no format passes the first two clauses and fails this one,
+    so deleting it leaves the whole suite green and no real declaration
+    moves.
+
+    That is a coverage gap, not a behaviour gap, and it cannot have a
+    control made of real dtypes. So the control is a STUB FORMAT pushed
+    through the same lookup: a 52-bit significand inside binary64's
+    exponent range whose subnormals fall below binary64's, which is exactly
+    the shape the clause exists for. Recorded rather than deleted, because
+    the gate is derived from format properties rather than from a name list
+    and dropping a property because today's dtypes do not exercise it is
+    how a derivation stops being one.
+    """
+    assert JC._narrowing_can_lose_values("float64") is False    # sanity
+
+    class _Stub:                        # -1023 - 52 = -1075, below -1074
+        nmant, maxexp, minexp = 52, 1024, -1023
+
+    def _no(_):
+        raise ValueError("stub: not an integer dtype")
+
+    finfo, iinfo = JC.jnp.finfo, JC.jnp.iinfo
+    JC._narrowing_can_lose_values.cache_clear()
+    try:
+        JC.jnp.finfo, JC.jnp.iinfo = (lambda d: _Stub()), _no
+        assert JC._narrowing_can_lose_values("float64") is True, (
+            "a format whose subnormals underflow binary64 holds values "
+            "binary64 does not, so a narrowing bound on it can drop one"
+        )
+    finally:
+        JC.jnp.finfo, JC.jnp.iinfo = finfo, iinfo
+        JC._narrowing_can_lose_values.cache_clear()
+    assert JC._narrowing_can_lose_values("float64") is False    # restored
 
 
 def test_zero_extent_keeps_the_storability_decision_of_its_dtype():
