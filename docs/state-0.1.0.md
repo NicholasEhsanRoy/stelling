@@ -24,6 +24,15 @@ IDIOMATIC**: external code terminates on `square`, `sign`, `unstack`, `copy`,
 which is a MADDENING terminal**, and five of which have neither an interval
 transfer nor an emission row.
 
+> **2026-08-03 — one entry of that list has since been closed.** `square` now
+> has an SMT emission row, so an obligation whose slice traverses one reaches
+> the solver instead of terminating: the blocker measurement above stands as
+> what those two contracts hit when they were run, and `square` is no longer
+> among what they would hit today. The rest of the list is unretested by that
+> change and is left as measured. The trailing count is untouched on purpose:
+> `square` was never one of the five — it carried a `sound` interval transfer
+> throughout — so the emission row does not move that figure.
+
 **One terminal recurs across all three, and its mechanism explains why:** the
 element budget, because it is a function of query SIZE rather than of coding
 style.

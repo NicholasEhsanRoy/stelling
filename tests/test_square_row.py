@@ -136,11 +136,30 @@ def test_square_is_registered_in_every_registry_the_row_needs():
 def test_the_import_time_censuses_still_hold_with_square_in_them():
     """Both import-time raises are re-run over the live sets, so a future
     edit that adds an emittable primitive without classifying it fails here
-    as well as at import."""
+    as well as at import.
+
+    WHAT THE THIRD ASSERTION DOES NOT ESTABLISH — measured, because it
+    reads like it establishes more than it does. ``_REPLAY_SUPPORTED`` and
+    ``_SUPPORTED`` are the SAME expression over ``_ARITH``, so a primitive
+    added via ``_ARITH`` — which is how `square` was added — joins both
+    simultaneously and the equality can never fail for it. Measured: with
+    the ``elif prim == "square"`` branch DELETED from ``_root_elements``,
+    ``stelling.obligation`` still imports cleanly and this assertion still
+    passes; the deletion is caught only behaviourally, by 12 failures
+    across this file, ``test_square_row_gauge_jax.py`` and
+    ``test_square_acceptance_jaxfluids.py``. So the replay coverage of this
+    row is established by those probes, NOT by this line. Pre-existing and
+    shared: the same blind spot covers every other ``_ARITH`` member. Left
+    as found — closing it is a change to the census's own shape and needs
+    its own round."""
     assert OB._INT_OVERFLOW_EMITTED | OB._INT_SAFE_EMITTED == OB._SUPPORTED
     assert not (OB._INT_OVERFLOW_EMITTED & OB._INT_SAFE_EMITTED)
     assert OB._REPLAY_SUPPORTED == OB._SUPPORTED
     OB._assert_emission_classification_censused()  # square is guarded, not excused
+    # the blind spot, pinned rather than described: both names resolve
+    # through _ARITH, so removing `square` from one removes it from both
+    assert "square" in OB._ARITH
+    assert OB._SUPPORTED >= OB._ARITH and OB._REPLAY_SUPPORTED >= OB._ARITH
 
 
 def test_the_row_did_not_widen_the_emission_set_past_square():
@@ -167,30 +186,104 @@ def test_a_square_of_a_declared_input_is_nonlinear():
     assert _slice_of(_query((-2.0, 3.0), 5.0)).fragment == OB.QF_NRA
 
 
-def test_a_square_of_a_CONSTANT_stays_linear():
-    """The classification is about DEPENDENCE, not about the primitive: a
-    square whose operand does not reach a declaration mints no nonlinear
-    term, exactly as a constant product does."""
+def _constant_operand_query(eqns_for_unop):
+    """``<unop>(2.0 + 1.0) + x <= 10``, with the unop's operand a
+    constant-only subtree so it does not reach a declaration.
+    ``9 + [-2, 3] = [7, 12]`` straddles 10, so the cheap layer cannot
+    settle it and the slice really is built."""
     x, c, s, d, pred, out = (
         var(0), var(1), var(2), var(3), var(4, BOOL), var(5, BOOL)
     )
-    q = close(
+    return close(
         [
             any_eqn(x, -2.0, 3.0),
             eqn("add", [lit(2.0), lit(1.0)], c),  # constant-only subtree
-            eqn("square", [c], s),
+            eqns_for_unop(c, s),
             eqn("add", [s, x], d),
-            # square(3) + [-2, 3] = [7, 12] straddles 10, so the cheap layer
-            # cannot settle it and the slice really is built
             eqn("le", [d, lit(10.0)], pred),
             eqn("stelling_assert", [pred], out),
         ],
         [out],
     )
+
+
+_SELF_PRODUCT_SPELLINGS = {
+    "square": lambda c, s: eqn("square", [c], s),
+    "mul": lambda c, s: eqn("mul", [c, c], s),
+    "integer_pow": lambda c, s: eqn("integer_pow", [c], s, (("y", 2),)),
+}
+
+
+def test_a_constant_square_is_stamped_QF_LRA_and_emits_a_NONLINEAR_term():
+    """MEASURED, and it is not what this test used to claim.
+
+    The premise that stood here — "a square whose operand does not reach a
+    declaration mints no nonlinear term, exactly as a constant product
+    does" — is FALSE, and it is false in both halves, which is the point.
+    ``_Slicer._fragment`` marks `square` nonlinear only when
+    ``ins_dep[0]``, while :func:`stelling.smt._square_body` emits the
+    self-product unconditionally. So this slice is stamped ``QF_LRA`` and
+    the script it ships contains ``(* t1 t1)``. The consequence is in the
+    next test, and it is not cosmetic.
+
+    NOT A DEFECT OF THIS ROW, and deliberately not fixed here. Measured on
+    main (b11f051), where `square` has no emission row at all, the
+    identical script comes out of ``mul`` on two constant operands and out
+    of ``integer_pow`` at y=2 — same ``(set-logic QF_LRA)``, same
+    ``(define-fun t2 () Real (* t1 t1))``. `square` joins a class it did
+    not create; ``_fragment`` is shared code this row does not own, and
+    changing it needs its own gauge and its own round. The three-spelling
+    parity below is what keeps that claim honest: if `square` ever diverges
+    from its two siblings here, this test says so."""
+    texts = {}
+    for name, mk in _SELF_PRODUCT_SPELLINGS.items():
+        q = _constant_operand_query(mk)
+        p = propagate(q)
+        assert p.obligations[0].status == "unknown", name
+        (item,) = slice_unknown_obligations(q, p, interval_env(q))
+        assert item.fragment == OB.QF_LRA, name
+        text = SM.emit(item, "z3", 30_000).text
+        assert "(set-logic QF_LRA)" in text, name
+        assert "(define-fun t2 () Real (* t1 t1))" in text, (name, text)
+        texts[name] = text
+    # one class, not three behaviours: the bodies are byte-identical
+    assert len(set(texts.values())) == 1, sorted(texts)
+
+
+def test_the_mislabelled_logic_silently_costs_a_portfolio_member():
+    """The consequence, measured — this is why the test above is not a
+    naming quibble.
+
+    The portfolio's design is that agreement decides and disagreement is a
+    loud error. A script whose declared logic excludes the arithmetic it
+    contains never gets to disagree: z3 REFUSES it outright, is recorded
+    ``failed``, and the verdict is then decided by cvc5 alone — a
+    one-backend REFUTED carrying a two-backend portfolio's stamp, whose
+    ``set-logic`` names a fragment the problem is not in.
+
+    The loss IS disclosed — both invocations ride in the ledger with their
+    reasons and z3's error is quoted verbatim in the notes — so nothing is
+    hidden. But nothing is flagged either, and "how many backends actually
+    answered" is not a field any consumer reads.
+
+    Recorded, not repaired, and shared: `mul` and `integer_pow` do the same
+    on main."""
+    pytest.importorskip("z3")
+    pytest.importorskip("cvc5")
+    from stelling.solvers import SolverConfig, escalate
+
+    q = _constant_operand_query(_SELF_PRODUCT_SPELLINGS["square"])
     p = propagate(q)
-    assert p.obligations[0].status == "unknown"
-    (item,) = slice_unknown_obligations(q, p, interval_env(q))
-    assert item.fragment == OB.QF_LRA
+    (record,) = escalate(q, p, SolverConfig(timeout_ms=30_000)).records
+    notes = " | ".join(record.notes)
+    assert "z3 (wheel) answered failed" in notes, notes
+    assert "logic does not support nonlinear arithmetic" in notes, notes
+    assert "cvc5 (wheel) answered sat" in notes, notes
+    # two invocations stamped, ONE of them an answer, and the detail names
+    # the fragment the problem is not in
+    assert {s.name for s in record.invocations} == {"z3", "cvc5"}
+    assert record.outcome == "violated-witness"
+    assert "(QF_LRA)" in record.detail, record.detail
 
 
 def test_element_terms_counts_the_square_output_once_per_element():
@@ -324,6 +417,51 @@ def test_an_integer_square_declines_rather_than_relaxing_onto_reals():
     assert isinstance(item, DeclinedObligation)
     assert "'square' on dtype 'int32'" in item.reason
     assert "wraps on overflow" in item.reason
+
+
+def test_a_two_operand_square_raises_where_the_docstring_promises_a_decline():
+    """RECORDED, NOT REPAIRED, and shared.
+
+    ``obligation``'s module docstring says "Declines never raise". A
+    malformed `square` equation carrying TWO operands passes ``_validate``
+    — nothing there checks a unop's arity — and then dies inside
+    ``smt.emit`` with a bare ``ValueError: too many values to unpack
+    (expected 1)`` out of ``_pair_elementwise``, which is not a decline and
+    does not name the primitive.
+
+    Measured on main (b11f051): ``integer_pow`` does the identical thing,
+    with the byte-identical message, and `square` is not in the emission
+    set there at all. So this row joins the class rather than creating it,
+    and the class is ``neg``/``not``/``integer_pow``/`square` — every
+    emitted unop.
+
+    NOT REACHABLE BY TRACING: jax declares ``square_p`` a unop, so no
+    traced program produces this equation; it takes hand-built or
+    ``from_dict`` IR. That is why it is recorded here rather than fixed
+    here — the fix belongs with the arity check for the whole unop class,
+    which this row does not own."""
+    x, y, s, pred, out = (
+        var(0), var(1), var(2), var(3, BOOL), var(4, BOOL)
+    )
+    q = close(
+        [
+            any_eqn(x, -2.0, 3.0),
+            any_eqn(y, -2.0, 3.0),
+            eqn("square", [x, y], s),  # TWO operands on a unop
+            eqn("le", [s, lit(4.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(q)
+    assert p.obligations[0].status == "unknown"
+    (item,) = slice_unknown_obligations(q, p, interval_env(q))
+    assert not isinstance(item, DeclinedObligation), (
+        "_validate now rejects a 2-operand square — if that is deliberate, "
+        "this record is stale and should be deleted"
+    )
+    with pytest.raises(ValueError, match="too many values to unpack"):
+        SM.emit(item, "z3", 1000)
 
 
 def test_a_boolean_square_declines():
