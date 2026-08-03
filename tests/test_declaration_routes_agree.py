@@ -55,6 +55,14 @@ PAIRS = [
     # around an EMPTY declared set — both routes must refuse it, with the
     # empty-set cause, and must keep agreeing
     ("float64", 2**53 + 1, 2**53 + 1),
+    # the WIDENING half of that boundary and its one-step neighbours: the
+    # declared interval sits strictly inside a representation gap (refused)
+    # or reaches one of the gap's edges (admitted), and the two routes must
+    # reach the same answer either way
+    ("float64", 2**54 + 1, 2**54 + 3),
+    ("float64", 2**54 + 1, 2**54 + 4),
+    ("int64", -(2**64), -(2**63) - 1),
+    ("int64", -(2**64), -(2**63)),
 ]
 
 
@@ -287,6 +295,134 @@ def test_hand_and_sugar_refusal_messages_are_byte_identical(dtype, lo, hi):
     h, s = _full("hand", dtype, lo, hi), _full("sugar", dtype, lo, hi)
     assert h.startswith("refuse:"), "param must refuse for the bytes to matter"
     assert h == s
+
+
+# -- the TEMPLATE routes, measured rather than argued -------------------------
+#
+# THE POPULATION, stated because it was undercounted: SEVEN public functions
+# declare an input — `harness.any_array`, `harness.any_pytree`,
+# `contracts.conditioning_2x2`, `contracts.conditioning_2x2_field`,
+# `contracts.coefficient_contrast`, `preconditions.field_positive`,
+# `preconditions.scalar_nonzero` — and between them they expose NINE
+# bound-pair POSITIONS, because `conditioning_2x2` takes three ranges. A
+# report of this branch said "five", having stopped at the two contract
+# templates it happened to exercise; `contracts.__all__` publishes all
+# three. Both counts below are checked against `__all__` rather than
+# written out, so the next function added to it fails this file instead of
+# quietly gaining an unmeasured route.
+#
+# Every one ends in `any_array`, and that is exactly the argument the call
+# graph also supported for `any_pytree` and `contracts._closed_range` before
+# each was measured pre-converting its bounds. So the routes are MEASURED.
+
+
+def _declaration_positions(dtype, lo, hi):
+    """{"function/parameter": thunk} for every public bound-pair position."""
+    from stelling import contracts, preconditions
+
+    b, ident = (1.0, 2.0), (lambda x: x)
+    triple = lambda x: (x, x, x)             # noqa: E731 — the (a,b,c) form
+    return {
+        "harness.any_array": lambda: (any_array((1,), dtype, (lo, hi)),),
+        "harness.any_pytree":
+            lambda: any_pytree(np.zeros((1,), np.dtype(dtype)), (lo, hi)),
+        "contracts.conditioning_2x2/a_range": lambda: contracts.
+            conditioning_2x2(dtype, (lo, hi), b, (0.0, 1.0), 10.0).harness(),
+        "contracts.conditioning_2x2/c_range": lambda: contracts.
+            conditioning_2x2(dtype, b, (lo, hi), (0.0, 1.0), 10.0).harness(),
+        "contracts.conditioning_2x2/b_range": lambda: contracts.
+            conditioning_2x2(dtype, b, b, (lo, hi), 10.0).harness(),
+        "contracts.conditioning_2x2_field/theta_range": lambda: contracts.
+            conditioning_2x2_field((1,), dtype, (lo, hi), 10.0, triple)
+            .harness(),
+        "contracts.coefficient_contrast/chi_range": lambda: contracts.
+            coefficient_contrast((1,), dtype, (lo, hi), 10.0, ident)
+            .harness(),
+        "preconditions.field_positive/envelope":
+            lambda: preconditions.field_positive((1,), dtype, (lo, hi)),
+        "preconditions.scalar_nonzero/envelope":
+            lambda: preconditions.scalar_nonzero(dtype, (lo, hi)),
+    }
+
+
+def test_the_measured_routes_are_every_public_declaring_function():
+    """The population above, checked against the modules' own `__all__` so it
+    cannot silently fall behind — the way "five" happened."""
+    from stelling import contracts, harness, preconditions
+
+    declaring = {
+        f"harness.{n}" for n in harness.__all__ if n.startswith("any_")
+    } | {
+        f"contracts.{n}" for n in contracts.__all__
+        if n in ("conditioning_2x2", "conditioning_2x2_field",
+                 "coefficient_contrast")
+    } | {
+        f"preconditions.{n}" for n in preconditions.__all__
+        if n in ("field_positive", "scalar_nonzero")
+    }
+    measured = {k.split("/")[0] for k in _declaration_positions("float64", 0, 1)}
+    assert measured == declaring, (
+        f"public declaring functions {sorted(declaring)} but this file "
+        f"measures {sorted(measured)}"
+    )
+    assert len(declaring) == 7
+    assert len(_declaration_positions("float64", 0, 1)) == 9, (
+        "nine bound-pair POSITIONS: conditioning_2x2 takes three ranges"
+    )
+    # DERIVED, not asserted: anything public whose SOURCE calls any_array
+    # declares an input, and must be in the set above
+    import inspect
+    for mod in (harness, contracts, preconditions):
+        for n in mod.__all__:
+            fn = getattr(mod, n)
+            if not inspect.isfunction(fn):
+                continue
+            try:
+                src = inspect.getsource(fn)
+            except OSError:                      # pragma: no cover
+                continue
+            if "any_array(" in src or "any_pytree(" in src:
+                assert f"{mod.__name__.split('.')[-1]}.{n}" in declaring, (
+                    f"{mod.__name__}.{n} declares an input and is not in the "
+                    f"measured population"
+                )
+
+
+@pytest.mark.parametrize("dtype,lo,hi,expected", [
+    # the widening-empty class, and its one-step neighbours which must stay
+    # admitted on every route (a route that refuses these has stopped
+    # delegating and started deciding)
+    ("float64", 2**54 + 1, 2**54 + 3, "refuse"),
+    ("float64", 2**54 + 1, 2**54 + 4, "admit"),
+    ("int64", -(2**64), -(2**63) - 1, "refuse"),
+    ("int64", -(2**64), -(2**63), "admit"),
+])
+def test_every_public_declaration_position_reaches_the_hand_routes_decision(
+        dtype, lo, hi, expected):
+    """Every public way to declare an input inherits `any_array`'s judgment,
+    refusal bytes included — measured on the class where the judgment most
+    recently changed, across all nine positions."""
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)   # the templates build arrays
+    try:
+        got = {}
+        for name, thunk in _declaration_positions(dtype, lo, hi).items():
+            try:
+                jax.make_jaxpr(thunk)()
+                got[name] = "admit"
+            except ValueError as e:
+                got[name] = f"refuse:{e}"
+    finally:
+        jax.config.update("jax_enable_x64", old)
+    ref = got["harness.any_array"]
+    assert ref.split(":")[0] == expected, (ref, expected)
+    for route, v in got.items():
+        assert v == ref, (
+            f"{dtype} ({lo!r}, {hi!r}): the {route} route says {v!r} and "
+            f"the hand route says {ref!r} — a template that pre-processes its "
+            f"bounds hands the declaration layer a value already rounded, and "
+            f"then decides for itself"
+        )
 
 
 def test_no_module_pre_converts_a_bound_before_any_array_sees_it():

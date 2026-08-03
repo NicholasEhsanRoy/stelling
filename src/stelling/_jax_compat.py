@@ -543,15 +543,28 @@ def _dtype_holds_a_value_in_exact(dt: str, lo, hi) -> tuple[bool, str]:
 
     The raw-endpoint twin of :func:`_dtype_holds_a_value_in`'s float branch,
     which receives endpoints already rounded to binary64 and therefore
-    answers about the RECORDED box rather than the declared one. For a dtype
-    inside binary64 the two agree except in one class: a NARROWING integer
-    endpoint can round onto a dtype value at the edge of a representation
-    gap the declared interval sits inside, making the recorded box inhabited
-    while the declared interval holds nothing — ``float64
-    (2**53+1, 2**53+1)`` records ``[2**53, 2**53]``, a box containing only a
-    value the caller excluded. Measured: the dtype-aware gate admitted that
-    declaration (the parent refused it, with the false NARROWS cause); this
-    check restores the refusal with the true cause, in the empty-set class.
+    answers about the RECORDED box rather than the declared one. The two
+    part company whenever an endpoint is recorded inexactly, in EITHER
+    direction, and both directions do it the same way — by moving the box's
+    edge across a representation gap the declared interval sits inside:
+
+    * a NARROWING endpoint can round ONTO a dtype value at the gap's far
+      edge, just outside the declared interval — ``float64
+      (2**53+1, 2**53+1)`` records ``[2**53, 2**53]``, a box containing only
+      a value the caller excluded. Measured: the dtype-aware gate admitted
+      that declaration (the parent refused it, with the false NARROWS
+      cause); this check restored the refusal with the true cause.
+    * a WIDENING endpoint rounds outward onto the gap's NEAR edge, adding a
+      dtype value the caller excluded — ``float64 (2**54+1, 2**54+3)``
+      records ``[2**54, 2**54+4]``, whose two inhabitants are the two values
+      the declared interval sits strictly between. Measured on the
+      narrowing-only version: admitted, and ``assert_(x < 0.0)`` over it
+      reached REFUTED at 100% coverage with a witness no execution can
+      produce.
+
+    Both are the same defect — a definite verdict over a set nothing can
+    inhabit — so the call site re-judges on ANY inexact recording rather
+    than on the narrowing one alone.
 
     CLAMPED like its rounded twin, and for the same reason: an infinite
     endpoint means "unbounded", which the dtype's own range absorbs —
@@ -567,22 +580,51 @@ def _dtype_holds_a_value_in_exact(dt: str, lo, hi) -> tuple[bool, str]:
     range bound exactly and returns the winner unconverted, so the
     exactness discipline survives the clamp.
 
-    Only float dtypes reach here: integer dtypes are screened at the call
-    site, where the rounded answer is provably the raw answer, and complex
-    never passes the storability guard with a narrowing integer bound. The
-    messages mirror the rounded float branch, with the neighbours computed
-    against the RAW endpoints so the direction words stay true — the
-    rounded helpers would name ``2**63`` as "below" an interval ending at
-    ``2**63 - 1``.
+    ONLY A DTYPE INSIDE BINARY64 IS JUDGED HERE, and that screen is the
+    price of covering the widening direction. Integer dtypes go to the
+    exact twin at the call site; every other dtype now ARRIVES, because a
+    widening bound is admitted where a narrowing one is refused —
+    :func:`_narrowing_can_lose_values` answers "can lose" for complex, for
+    x86 longdouble, and for every dtype its lookups do not know, so a
+    narrowing bound never reached this function from any of them and a
+    widening bound always does. That predicate is exactly the question
+    this walk needs answered: it steps through the DTYPE and compares in
+    BINARY64 (``float(...)``), which is exact only where every value of
+    the format is itself a binary64 value. Measured with the screen
+    absent, on ``(2**54+1, 2**54+3)``, all four ways it goes wrong:
+
+    * ``complex64``/``complex128`` — ``float(np.array(x, complex128))``
+      raises TypeError: a CRASH where the rounded twin admits by policy;
+    * ``object``, ``|S4``, ``<U4`` — TypeError inside ``np.nextafter``;
+    * ``datetime64[ns]`` — numpy's own "could not convert" ValueError,
+      escaping as a refusal in a message nobody here wrote;
+    * ``float128`` — a FALSE REFUSAL, and the one that matters: x86
+      longdouble holds ``2**54+1`` exactly, but the step up from ``2**54``
+      is smaller than a binary64 ulp, ``float()`` rounds it straight back,
+      the walk cannot advance, and it reports that the dtype has no value
+      in the interval at all. The rounded twin admits it, correctly.
+
+    The screen is an ADMIT, so nothing the rounded check admits is refused
+    by this one, and the doctrine is the file's own: where this is unsure
+    it admits, because a wrong refusal kills a legitimate envelope
+    outright.
+
+    The messages mirror the rounded float branch, with the neighbours
+    computed against the RAW endpoints so the direction words stay true —
+    the rounded helpers would name ``2**63`` as "below" an interval ending
+    at ``2**63 - 1``.
     """
+    if _narrowing_can_lose_values(dt):
+        return True, ""
     try:
         info = jnp.finfo(np.dtype(dt))
         f_lo, f_hi = float(info.min), float(info.max)
     except (TypeError, ValueError):
-        # every float dtype this jax builds arrays in has finfo (measured
-        # across all of them for the gate's derivation), so this fallback is
-        # stated rather than reachable: no range to clamp into
-        f_lo, f_hi = float("-inf"), float("inf")
+        # unreachable behind the screen above, which is derived from this
+        # same finfo lookup and answers "can lose" whenever it raises.
+        # Stated rather than defended with a branch that cannot fire — and
+        # stated as the ADMIT its neighbours are.
+        return True, ""
     if hi < f_lo or lo > f_hi:
         # entirely outside the finite range, in exact compares — mostly
         # pre-empted by the rounded check at the call site, but reachable
@@ -612,14 +654,25 @@ def _int_dtype_holds_a_value_in_exact(dt: str, lo, hi) -> tuple[bool, str]:
     admitted: an integer-valued narrowing endpoint and its rounded image
     both sit at magnitude >= 2**53 on the same side, outside every
     loss-free integer dtype's range, so raw and rounded endpoints compare
-    identically against every value of the dtype. Exact-rational
-    spellings break that premise: a FRACTIONAL bound narrows at any
-    magnitude — a lo one part in 10**19 below 1 rounds UP onto 1.0 — so
-    the recorded box can hold an integer the declared interval excludes,
-    the same admitted-empty class the float re-check exists for, one
-    dtype family over. For integer-valued endpoints this check and the
-    rounded one agree by the screened argument above, so unscreening
-    moves no previously admitted integer-spelled declaration.
+    identically against every value of the dtype. Two things break that
+    premise, and both are now covered:
+
+    * exact-rational spellings — a FRACTIONAL bound narrows at any
+      magnitude (a lo one part in 10**19 below 1 rounds UP onto 1.0), so
+      the recorded box can hold an integer the declared interval excludes.
+    * the WIDENING direction, which the screened argument never covered
+      because it quantified over the loss-free dtypes alone. int64 and
+      uint64 refuse every narrowing bound at the storability gate but
+      ADMIT widening ones, and their ranges end exactly where binary64
+      goes inexact: ``int64 (-(2**64), -(2**63)-1)`` widens its ``hi`` up
+      onto ``-(2**63)`` — int64's minimum, and the recorded box's only
+      inhabitant — while the declared interval lies wholly below it.
+      Measured on the narrowing-only version: admitted, and
+      ``assert_(x >= 0)`` over it reached REFUTED.
+
+    So integer-valued endpoints do NOT always agree with the rounded
+    check, and the two-line argument that said they did was reasoning
+    about narrowing alone.
 
     Same range lookup as the rounded integer branch of
     :func:`_dtype_holds_a_value_in`, and the same clamp job done by the
@@ -716,6 +769,21 @@ def _narrowing_can_lose_values(dt: str) -> bool:
     outside int64 that the shaved slice holds no int64 value still refuses,
     because int64/uint64's decisions are the guard's purpose and are pinned
     byte-identical — a per-bound carve-out would shift them.
+
+    THE SIZE OF THAT CHOICE, WRITTEN DOWN. Being dtype-level makes this the
+    layer's largest remaining ACCEPTANCE LOSS: on these dtypes a narrowing
+    bound is refused whether or not the shaved sliver holds a value, so
+    ``uint64 (Fraction(-1,3), Fraction(1,3))`` — an interval containing 0,
+    a perfectly ordinary uint64 — is refused, and so is the point
+    declaration ``int64 (2**63-1, 2**63-1)`` at int64's own maximum.
+    Measured by ``corpus/declaration_emptiness_sweep.py`` section 5: 15 of
+    the 30 narrowing-policy refusals in its population are over an
+    INHABITED declared set, identically on this build and on 69ea5d3. The
+    message states the policy rather than claiming a dropped value, which
+    is honest, but the loss is real and larger than the empty-set defect
+    the exact re-check closes. Not fixed here — a per-bound carve-out moves
+    the byte-identical int64/uint64 decisions this guard exists to hold —
+    but recorded where whoever revisits the policy will find it.
     """
     if dt.startswith("complex"):
         return True
@@ -812,12 +880,15 @@ def any_array(shape, dtype, bounds):
     hi_is_inf = isinstance(hi_x, float) and math.isinf(hi_x)
     if (
         # the image comparison, not the exact one, DELIBERATELY: it mirrors
-        # the old float() check bit for bit, so the raw-order-inverted class
-        # whose images collapse onto equality (int64 (2**53+1, 2**53)) stays
-        # admitted — parent parity on a disclosed blind spot, not a change
-        # smuggled in with the spelling work. Also rejects NaN: an empty
-        # declared set verifies everything vacuously, and is never what
-        # anyone meant.
+        # the old float() check bit for bit, so the recorded params and the
+        # query content hash of everything it admits are the parent's. The
+        # raw-order-inverted class it cannot see (int64 (2**53+1, 2**53),
+        # whose images collapse onto equality) is no longer admitted, but it
+        # is not refused HERE: an inverted pair whose images do not invert
+        # must have moved an endpoint, so the exact emptiness re-check below
+        # fires and refuses it as the empty set it is, with the true cause.
+        # Also rejects NaN: an empty declared set verifies everything
+        # vacuously, and is never what anyone meant.
         not lo <= hi
         # the two clauses the images cannot see: a declared-infinite
         # endpoint against a FINITE value so large its image is also
@@ -846,7 +917,7 @@ def any_array(shape, dtype, bounds):
             f"semantics); refusing at declaration time"
         )
     dt = str(np.dtype(dtype))
-    exact_narrowed = False
+    recorded_inexactly = False
     for name, raw, v, stored in (
         ("lo", bounds[0], lo_x, lo),
         ("hi", bounds[1], hi_x, hi),
@@ -890,10 +961,12 @@ def any_array(shape, dtype, bounds):
         # (0, 10**23)`, `float32 (0, 10**23)`, `int32 (0, 10**23)` — all
         # narrowing as real intervals, none dropping a single declared
         # dtype value. int64 and uint64 keep the refusal below
-        # byte-identically. Containment is not equality: a narrowing
-        # endpoint can round ONTO a dtype value just OUTSIDE the declared
-        # interval, so the admission is noted in `exact_narrowed` and the
-        # emptiness of the DECLARED set is re-judged exactly, below.
+        # byte-identically. Containment is not equality, in either
+        # direction: a narrowing endpoint can round ONTO a dtype value just
+        # OUTSIDE the declared interval and a widening one rounds outward
+        # onto one, so EVERY inexact recording is noted in
+        # `recorded_inexactly` and the emptiness of the DECLARED set is
+        # re-judged exactly, below.
         if not isinstance(v, Fraction):
             # a float from the classifier: ±inf or a signed zero, each
             # held by binary64 exactly, so the recording is exact by
@@ -918,6 +991,14 @@ def any_array(shape, dtype, bounds):
             )
         if stored == v:
             continue  # recorded exactly; nothing to judge
+        # THE RECORDED ENDPOINT IS NOT THE DECLARED ONE, whichever way it
+        # moved, so the rounded endpoints can no longer answer whether the
+        # DECLARED interval holds any dtype value — noted here, re-judged
+        # exactly after the zero-size return below. Set BEFORE the narrowing
+        # branches on purpose: this is a fact about the recording, not about
+        # its direction, and the direction-conditional version of this line
+        # is what left the widening half of the gap-edge class admitted.
+        recorded_inexactly = True
         narrows = (stored > v) if name == "lo" else (stored < v)
         if narrows and _narrowing_can_lose_values(dt):
             if v.denominator == 1:
@@ -958,13 +1039,6 @@ def any_array(shape, dtype, bounds):
                 f"it widens the box, and an over-approximation still "
                 f"contains every executed value.)"
             )
-        if narrows:
-            # admitted through the dtype gate: no dtype value was DROPPED,
-            # but the recorded endpoint moved into the interval's interior,
-            # so the rounded endpoints can no longer answer whether the
-            # DECLARED interval holds any dtype value — noted here,
-            # re-judged exactly after the zero-size return below
-            exact_narrowed = True
     if 0 in dims:
         # A ZERO-SIZE array satisfies ANY element-wise bounds vacuously, and
         # jax constructs one, so no bounds/dtype pair is empty for it — the
@@ -975,40 +1049,51 @@ def any_array(shape, dtype, bounds):
         # have).
         return _any_p.bind(shape=dims, dtype=dt, lo=lo, hi=hi)
     holds, why = _dtype_holds_a_value_in(dt, lo, hi)
-    if holds and exact_narrowed:
-        # THE GAP-EDGE RE-CHECK. A narrowing endpoint can round ONTO a
-        # representable value at the edge of a gap the declared interval
-        # sits inside: `float64 (2**53+1, 2**53+1)` records `[2**53, 2**53]`
-        # — inhabited, while the caller's interval holds no float64 at all,
-        # so every claim over it would be vacuous. The rounded check above
-        # cannot see this (it is handed the rounded endpoints), so the
-        # emptiness question is re-asked against the RAW endpoints — the
-        # classifier's exact values, so a longdouble, Decimal or Fraction
-        # spelling is re-judged at the value it declared, where the previous
-        # version pushed non-int spellings back through float() and judged
-        # the rounded value it had just been told not to trust. ONE
-        # DIRECTION ONLY: each narrowing endpoint's shaved sliver lies
-        # strictly between the value and its nearest binary64, so it holds
-        # no value of a dtype whose values are all binary64 values, and
-        # rounded-EMPTY already implies declared-empty — a rounded refusal
-        # never needs the exact pass and keeps its message.
+    if holds and recorded_inexactly:
+        # THE GAP-EDGE RE-CHECK. An inexactly recorded endpoint can put the
+        # box's edge on the far side of a representation gap the declared
+        # interval sits inside, so the RECORDED box is inhabited while the
+        # DECLARED one holds nothing and every claim over it is vacuous.
+        # The rounded check above cannot see this — it is handed the rounded
+        # endpoints — so the emptiness question is re-asked against the RAW
+        # ones: the classifier's exact values, so a longdouble, Decimal or
+        # Fraction spelling is re-judged at the value it declared, where an
+        # earlier version pushed non-int spellings back through float() and
+        # judged the rounded value it had just been told not to trust.
         #
-        # Integer dtypes get their own exact twin now. They used to be
-        # screened out on the argument that a narrowing INTEGER endpoint and
-        # its image both sit beyond every loss-free integer dtype's range —
-        # true, but only for integer-valued bounds. A fractional bound
-        # narrows at any magnitude (Decimal('1') minus one part in 10**19
-        # rounds UP onto 1.0), so an integer dtype can be handed a recorded
-        # box holding an integer the declared interval excludes — the same
-        # admitted-empty class, one dtype family over. For integer-valued
-        # bounds the exact twin and the rounded check agree by the screened
-        # argument, so no integer-spelled decision moves.
+        # BOTH DIRECTIONS, because both do it:
+        #   narrowing — `float64 (2**53+1, 2**53+1)` records `[2**53, 2**53]`,
+        #     a point the caller excluded, on the gap's FAR edge;
+        #   widening  — `float64 (2**54+1, 2**54+3)` records
+        #     `[2**54, 2**54+4]`, the two values the declared interval sits
+        #     strictly BETWEEN, and `int64 (-(2**64), -(2**63)-1)` widens its
+        #     hi up onto int64's minimum, the recorded box's only inhabitant.
+        # The first landed with the second listed as a known blind spot
+        # ("parity, not endorsement") on the argument that the parent
+        # admitted it too. Measured on that build: both reach a DEFINITE
+        # verdict — REFUTED at 100% coverage, `x < 0.0` and `x >= 0`
+        # respectively — over a set no execution can inhabit, which is the
+        # defect the empty-set class exists to refuse and not something
+        # parity with an older build excuses. Widening is sound for the
+        # BOX (an over-approximation contains every executed value); it is
+        # not a licence to answer a question about a set that has none.
         #
-        # Both-endpoint-WIDENING declarations are deliberately NOT re-judged:
-        # the parent admitted those (the rounded box inhabits — e.g.
-        # bfloat16 (2**53+1, 2**53+3), whose declared interval also holds
-        # nothing), and that pre-existing blind spot is out of this repair's
-        # scope. Parity, not endorsement.
+        # STILL ONLY WHEN THE ROUNDED CHECK ADMITS, and that ordering is what
+        # keeps every existing refusal's message: rounded-EMPTY implies
+        # declared-EMPTY, because every dtype value of the declared interval
+        # survives into the recorded box. A widening endpoint only adds; a
+        # narrowing one is admitted only by `_narrowing_can_lose_values`,
+        # whose whole claim is that the shaved sliver — strictly between the
+        # value and its NEAREST binary64, so containing no binary64 at all —
+        # holds no value of a dtype whose values are all binary64 values.
+        #
+        # Integer dtypes get their own exact twin. They were once screened
+        # out on the argument that a narrowing INTEGER endpoint and its image
+        # both sit beyond every loss-free integer dtype's range; fractional
+        # bounds broke that for narrowing, and widening breaks it again and
+        # harder — int64/uint64 refuse narrowing at the storability gate but
+        # admit widening, and their ranges end exactly where binary64 goes
+        # inexact, which is the whole of the int64 reproducer above.
         from stelling.propagate import _is_integer_dtype
 
         if _is_integer_dtype(dt):

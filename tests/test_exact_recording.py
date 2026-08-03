@@ -6,8 +6,8 @@ the value and every route into the declaration layer.
 
 "Exactly" is the landed dtype-aware policy read value-first: the recorded
 box must contain every declared dtype value (an endpoint may round only
-where the shaved sliver holds no value of the dtype, and an admitted
-narrowing triggers the exact raw-endpoint emptiness re-check), and the
+where the shaved sliver holds no value of the dtype, and ANY inexact
+recording triggers the exact raw-endpoint emptiness re-check), and the
 DECISION is a function of (value, dtype) alone. The live defect this
 closed: ``np.longdouble(2**53+1)`` as a point bound was ADMITTED recording
 ``[2**53, 2**53]`` — disjoint from the declared point — and
@@ -410,18 +410,39 @@ def test_the_image_is_computed_on_the_ratio_not_on_its_parts():
     (Decimal(2**53 + 1), Decimal(2**53)),
     (np.longdouble(2) ** 53 + 1, np.longdouble(2) ** 53),
 ])
-def test_the_raw_order_inverted_blind_spot_stays_parent_parity(lo, hi):
+def test_the_raw_order_inverted_class_refuses_as_an_empty_dtype_set(lo, hi):
     """(2**53+1, 2**53) is raw-order-inverted — lo > hi as declared
-    values — but both binary64 images collapse onto 2**53 and the parent
-    ADMITTED it (disclosed blind spot: the landing audit counted it
-    parent-parity, out of scope). The ordering check therefore judges
-    IMAGES deliberately, and this pins that, spelling-independently: the
-    mutant 'improving' the check to exact raw order flips these to
-    refuse and left the whole suite green before this test existed
-    (blinded lens, repair round 1)."""
+    values — but both binary64 images collapse onto 2**53, so the
+    ordering check, which judges IMAGES deliberately, does not see it. It
+    was admitted as a disclosed blind spot ("parent parity"), and it was
+    the gap-edge defect one door down: measured on that build, the
+    recorded box [2**53, 2**53] is inhabited and `preconditions.check`
+    returned REFUTED on float64 and VERIFIED on int64 — definite verdicts
+    over a declaration with no members at all.
+
+    Extending the gap-edge re-check to the WIDENING direction closes this
+    class too, and closes all of it: an inverted pair whose images do NOT
+    invert must have moved an endpoint, so the re-check fires, and
+    `lo > hi` holds no value of any dtype under the same exact
+    comparison. The ordering check itself is unchanged.
+
+    So this pins the CAUSE, spelling-independently, and stays the live
+    control on that: the refusal must be the dtype-EMPTY one (naming the
+    dtype and the neighbours), never the ordering check's "declare an
+    empty set". The mutant 'improving' the ordering check to exact raw
+    order — green across the whole suite before this test existed
+    (blinded lens, repair round 1) — still fails here, now on the message
+    it produces rather than on the decision.
+    """
     for dtype in ("int64", "float64"):
-        d, out = _decide(dtype, lo, hi)
-        assert d == "admit" and out == (2.0**53, 2.0**53), (dtype, out)
+        d, msg = _decide(dtype, lo, hi)
+        assert d == "refuse", (dtype, msg)
+        assert "EMPTY under dtype" in msg, (dtype, msg)
+        assert "declare an empty set" not in msg, (
+            f"{dtype}: refused by the ORDERING check, which judges binary64 "
+            f"images and must keep doing so — the images here collapse onto "
+            f"{2.0**53!r} and do not invert:\n  {msg}"
+        )
 
 
 def test_a_negative_zero_bound_records_the_negative_zero_the_parent_recorded():
