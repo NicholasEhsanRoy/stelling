@@ -58,7 +58,7 @@ for h in (verified, refuted_set_level, unknown_straddle):
 ```
 verified             -> VERIFIED | definitely true for all 1 element(s)
 refuted_set_level    -> REFUTED  | definitely false for 1/1 element(s) over the declared box
-unknown_straddle     -> UNKNOWN  | undecided for 1/1 element(s)
+unknown_straddle     -> UNKNOWN  | undecided for 1/1 element(s); the operand spans [-1.0, 2.0] and the asserted bound is operand > 0.0; the operand's lower endpoint misses the bound by 1.0
 ```
 
 A straddle — true somewhere in the box, false somewhere else — is
@@ -124,8 +124,56 @@ fixed and small — measured above, it is exactly `custom_jvp_call`,
 `custom_vjp_call`, `jit`, `remat2`. In the coverage line a transparent
 equation is counted in its own bucket: it is neither `known` (it has no
 transfer) nor ⊤ (nothing was lost), which is why `through_a_jit` reads
-`4 known (80%); 1 transparent` and is still VERIFIED. Both examples above
-wrap in `jax.jit`, hence the `1 transparent` in each.
+`4 known (80%); 1 transparent` and is still VERIFIED.
+
+**You will see `transparent` counts in harnesses that never write
+`jax.jit`.** JAX jit-wraps many of its own `jnp` functions, so the
+wrapper appears in the trace whether or not you asked for it — which is
+why `through_a_sort` above, which contains no `jax.jit`, still reports
+`1 transparent`. Measured:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+
+from stelling.harness import any_array, assert_, trace
+
+
+def explicit_jit():
+    a = any_array((4,), jnp.float64, (0.1, 10.0))
+    return assert_(jax.jit(lambda z: z + 1.0)(a) > 0.0)
+
+
+def jnp_sort():
+    a = any_array((4,), jnp.float64, (0.1, 10.0))
+    return assert_(jnp.sort(a) > 0.0)
+
+
+def jnp_roll():
+    a = any_array((4,), jnp.float64, (0.1, 10.0))
+    return assert_(jnp.roll(a, -1) > 0.0)
+
+
+def plain_add():
+    a = any_array((4,), jnp.float64, (0.1, 10.0))
+    return assert_((a + 1.0) > 0.0)
+
+
+for h in (explicit_jit, jnp_sort, jnp_roll, plain_add):
+    print(f"{h.__name__:12s} {[e.primitive for e in trace(h).jaxpr.eqns]}")
+```
+
+```
+explicit_jit ['stelling_any', 'jit', 'gt', 'stelling_assert']
+jnp_sort     ['stelling_any', 'jit', 'gt', 'stelling_assert']
+jnp_roll     ['stelling_any', 'jit', 'gt', 'stelling_assert']
+plain_add    ['stelling_any', 'add', 'gt', 'stelling_assert']
+```
+
+Three of the four produce a `jit` equation and only the first asked for
+one. That is also where the quickstart's `1 transparent` comes from — its
+harness calls `jnp.roll`.
 
 The word also appears in one refusal, where it matters: a declaration
 made *inside* a transparent wrapper cannot be reached by the vacuity
@@ -206,18 +254,23 @@ They share the root "vacu-" and nothing else.
 | **appears as** | an `assumes:` line beginning `vacuity checked` / `vacuity instrument inert` | the `nonvacuity:` stamp field, plus a `note:` when it is not `checked` |
 | **how it runs** | automatic: on a VERIFIED, `check()` re-runs the identical query with declared bounds widened to (−inf, +inf) | only if your harness calls `nonvacuity(...)` |
 | **you control it with** | the required `vacuity_mode` argument | writing membership conditions |
-| **failing looks like** | "obligation #N: discharges with all declared bounds widened — envelope not load-bearing" | `nonvacuity: UNCHECKED` / `undecided` / `FAILED` and the may-be-vacuous note |
+| **failing looks like** | `obligation #0: discharges with all declared bounds widened (vacuity mode=inputs-only) — envelope not load-bearing` | `nonvacuity: UNCHECKED` / `undecided` / `FAILED` and the may-be-vacuous note |
 
 So `vacuity checked` beside `may be vacuous` means: *the envelope was
-tested and was load-bearing; nobody has said whether the envelope
-contains your data.* Both are true at once.
+put through the widening re-check and the obligations did not survive
+without it; nobody has said whether the envelope contains your data.*
+Both are true at once.
 
 ### Clearing `nonvacuity: UNCHECKED`
 
 It is reachable through the documented API, and the whole of it is:
-**call `stelling.harness.nonvacuity(...)` in your harness and return the
-result.** Nothing else moves the field — no argument to `check()`, no
-mode, no flag. The quickstart's
+**call `stelling.harness.nonvacuity(...)` in your harness.** Nothing else
+moves the field — no argument to `check()`, no mode, no flag. *Calling*
+it is what counts: measured, an un-returned membership condition is
+recorded just the same
+([the harness API](harness-api.md#the-harness-api) has the run). Return
+it alongside your obligations anyway; that is the convention. The
+quickstart's
 [§3](quickstart.md#3-tying-the-box-to-real-data) is the worked version;
 the [spellings section](harness-api.md#three-spellings-and-the-one-that-behaves-differently)
 is what to write and what not to.
@@ -370,9 +423,41 @@ refine = affine -> VERIFIED
 The other direction is the one to act on: an obligation that **still
 discharges** with its bounds gone never depended on your envelope. The
 status stays VERIFIED — the claim is true — and both a per-obligation
-note and the stamped line say so. A CI consumer should treat
-`envelope not load-bearing` as a flag: it usually means the obligation is
-a theorem, or the envelope is mis-posed.
+note and the stamped line say so:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+
+
+def harness():
+    a = any_array((), jnp.float64, (0.1, 10.0))
+    return assert_(jnp.maximum(a, 0.0) >= 0.0)     # true for every a
+
+
+v = check(harness, vacuity_mode="inputs-only")
+print("status:", v.status)
+for n in v.notes:
+    print("note  :", n)
+for line in v.stamp.assumptions:
+    if line.startswith("vacuity"):
+        print("assumes:", line)
+```
+
+```
+status: VERIFIED
+note  : nonvacuity UNCHECKED: this VERIFIED may be vacuous — the declared set is not tied to the incident's data
+note  : obligation #0: discharges with all declared bounds widened (vacuity mode=inputs-only) — envelope not load-bearing
+assumes: vacuity checked (mode=inputs-only): obligation(s) (0,) discharge with the declared bounds widened to (-inf, inf) — the verdict does not depend on the declared envelope for them (a range theorem, or a mis-posed envelope)
+```
+
+A CI consumer should treat `envelope not load-bearing` as a flag: here
+the obligation is a theorem — `max(a, 0) >= 0` for every `a` — and the
+declared envelope did no work at all.
 
 ## Reading an UNKNOWN
 

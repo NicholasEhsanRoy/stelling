@@ -15,7 +15,7 @@ bounds over horizons no test can reach.
 *stelling is not affiliated with or endorsed by the JAX project.*
 
 **Start here: [docs/quickstart.md](docs/quickstart.md)** — install, one
-runnable harness, a stamped verdict, in three files. The
+runnable harness, a stamped verdict, in four files. The
 [Quickstart](#quickstart) section below is the two-minute version, and
 [docs/](docs/) indexes the rest.
 

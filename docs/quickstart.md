@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Quickstart
 
-Ten minutes, three runnable files. At the end you will have a stamped
+Ten minutes, four runnable files. At the end you will have a stamped
 verdict and know which parts of it you have earned.
 
 Every code block on this page was executed verbatim against this tree
@@ -42,7 +42,7 @@ def harness():
     a = any_array((8,), jnp.float64, (0.1, 10.0))
     # your own construction, traced as-is
     a_face = 0.5 * (a + jnp.roll(a, -1))
-    # the obligation — returned, so it cannot be dropped as dead code
+    # the obligation — returning it is the convention, not a requirement
     return assert_(a_face > 0.0)
 
 
@@ -75,8 +75,9 @@ Three things to notice, because they are the three things that confuse
 people first:
 
 1. **VERIFIED means over the whole declared box**, not at a sample. The
-   claim is about every one of the uncountably many arrays admitted by
-   `any_array((8,), jnp.float64, (0.1, 10.0))`.
+   claim covers every array `any_array((8,), jnp.float64, (0.1, 10.0))`
+   admits — and, in the `real` semantics this stamp names, every real
+   point of that box, including the corner your tests never visit.
 2. **The stamp names its own scope.** `semantics: real (ℝ)` says the
    verdict is about exact real arithmetic, not about your float
    execution. `solver: none` says no solver was consulted.
@@ -125,7 +126,7 @@ prints:
 ```
 verified             -> VERIFIED | definitely true for all 1 element(s)
 refuted_set_level    -> REFUTED  | definitely false for 1/1 element(s) over the declared box
-unknown_straddle     -> UNKNOWN  | undecided for 1/1 element(s)
+unknown_straddle     -> UNKNOWN  | undecided for 1/1 element(s); the operand spans [-1.0, 2.0] and the asserted bound is operand > 0.0; the operand's lower endpoint misses the bound by 1.0
 ```
 
 The third one is the important one. `a > 0.0` is *false at some points*

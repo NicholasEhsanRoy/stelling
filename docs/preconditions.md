@@ -81,7 +81,14 @@ VERIFIED, check() re-runs the query with the bounds widened: if an
 obligation still discharges with the bounds gone, the verdict tells
 you (a note and a stamped line) that the envelope was not
 load-bearing — the claim is a theorem or the envelope is mis-posed.
-A VERIFIED from check() has always already passed this check.
+A VERIFIED from check() has always been *put through* this check, but it
+does not always come back with a result: when a declared bound could not
+be widened — a point declaration under `"inputs-only"`, or a declaration
+made below a transparent wrapper — the instrument reports
+`vacuity instrument inert` instead, and the envelope's role is left
+uncharacterised. Read the stamped line rather than assuming which of the
+two you got; both are measured in
+[Reading a verdict](reading-a-verdict.md#choosing-vacuity_mode).
 
 - **VERIFIED** — the property holds at every point of the declared
   envelope, judged by outward-rounded interval arithmetic (and the SMT

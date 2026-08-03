@@ -18,6 +18,7 @@ point. The argument below is unchanged; only the status was wrong.
 `any_array` validates shape, bound ordering, and infinite-point emptiness. It does
 **not** validate the bounds against the declared dtype. So this is accepted:
 
+<!-- doc-example: illustrative -->
 ```python
 x = any_array((1,), "uint8", (-3.0, -1.0))     # no uint8 holds -3
 ```

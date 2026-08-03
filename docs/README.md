@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 # Documentation
 
 **New here?** [Quickstart](quickstart.md) — install, one runnable
-harness, a stamped verdict, in three files.
+harness, a stamped verdict, in four files.
 
 ## Using stelling
 

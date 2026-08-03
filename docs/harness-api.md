@@ -60,12 +60,75 @@ are what it printed.
 | `nonvacuity(pred)` | a **membership condition** — "the data I run on is in the declared box" | `pred` |
 | `trace(harness)` | — | the jax-free `stelling.ir.ClosedJaxpr` |
 
-**Return everything you state.** `assert_`, `assume` and `nonvacuity`
-return their predicate so the harness can return it; a harness that
-computes an obligation and throws it away has not stated it. The
-declarations bind real jax primitives, so they land in the traced jaxpr
-and the query's content hash covers them — the stamp identifies the
-declarations, not just the program.
+**A statement counts once you call it, returned or not.** Each of these
+binds a real jax primitive, so it lands in the traced jaxpr and the
+query's content hash covers it — the stamp identifies the declarations,
+not just the program. Measured, on jax 0.11.0:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+
+from stelling.harness import any_array, assert_, assume, nonvacuity
+from stelling.preconditions import check
+
+
+def assert_not_returned():
+    a = any_array((), jnp.float64, (-2.0, -1.0))
+    assert_(a > 0.0)                     # never returned
+    return ()
+
+
+def nonvacuity_not_returned():
+    a = any_array((), jnp.float64, (0.1, 10.0))
+    p = any_array((), jnp.float64, (99.0, 99.0))
+    nonvacuity(p <= 10.0)                # never returned
+    return assert_(a > 0.0)
+
+
+def assume_not_returned():
+    x = any_array((3,), jnp.float64, (-10.0, 10.0))
+    assume(x >= 0.0)                     # never returned
+    return assert_(jnp.sum(x) >= 0.0)
+
+
+def assume_actually_removed():
+    x = any_array((3,), jnp.float64, (-10.0, 10.0))
+    return assert_(jnp.sum(x) >= 0.0)
+
+
+for h in (assert_not_returned, nonvacuity_not_returned,
+          assume_not_returned, assume_actually_removed):
+    v = check(h, vacuity_mode="all")
+    print(f"{h.__name__:24s} -> {v.status:8s} "
+          f"nonvacuity={v.stamp.nonvacuity.split(' — ')[0]}")
+```
+
+prints:
+
+```
+assert_not_returned      -> REFUTED  nonvacuity=UNCHECKED
+nonvacuity_not_returned  -> VERIFIED nonvacuity=FAILED
+assume_not_returned      -> VERIFIED nonvacuity=UNCHECKED
+assume_actually_removed  -> UNKNOWN  nonvacuity=UNCHECKED
+```
+
+Every un-returned statement was still recorded: the obligation still
+REFUTES, the membership condition still FAILS, and the assumption still
+narrows — the last two rows are the same query except that one *calls*
+`assume` without returning it, and only deleting the call changes the
+verdict.
+
+**The consequence to internalise: you cannot disable a statement by
+removing it from the return.** An `assume` you drop from the return list
+is still in force, and a VERIFIED still rides on it. Delete the call.
+
+Returning them anyway is this project's convention and worth keeping —
+it is what makes an obligation visible to a reader and to a linter, and
+it is the defence if some future tracing path *does* prune an unused
+equation. It is a discipline, not a mechanism, and the measurement above
+is what the mechanism actually does today.
 
 ## `any_array(shape, dtype, bounds)`
 
@@ -118,12 +181,64 @@ dtype cannot hold  -> refused: any_array bounds (-3.0, -1.0) declare a set EMPTY
 infinite point     -> refused: any_array bounds (inf, inf) declare an empty real set (an infinite point…
 ```
 
-The refusals share one motive: an **empty declared set verifies
-everything**, so emptiness is caught at declaration time rather than
-becoming a green verdict about nothing. `Decimal("0.1")` and `0.1` are
-both accepted and mean different things — the exact decimal and the
-binary64 value — which is why a `str` is refused instead of being
-guessed at.
+Three of those four refusals are one motive: an **empty declared set
+verifies everything**, so emptiness is caught at declaration time rather
+than becoming a green verdict about nothing. The `str` refusal is a
+different one — the message says so: a bound is *refused rather than
+converted* when this layer cannot judge the conversion's exactness,
+because that is how a declared bound gets silently rounded.
+
+**What the spellings are for.** Once a bound is admitted on a float
+dtype, the spelling leaves no trace: `0.1`, `Decimal("0.1")` and
+`Fraction(1, 10)` all record the same binary64 endpoint and produce the
+same query hash. Where the spelling matters is **admissibility** — the
+guard reads each bound's *exact* value, and the exact values differ
+(`0.1` is exactly 3602879701896397/36028797018963968; `Decimal("0.1")`
+is exactly 1/10). Measured, the same two spellings on two dtypes:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+from decimal import Decimal
+
+from stelling.harness import any_array, trace
+
+
+def recorded(lo, hi, dtype):
+    cj = trace(lambda: any_array((), dtype, (lo, hi)))
+    p = dict([e for e in cj.jaxpr.eqns if e.primitive == "stelling_any"][0].params)
+    return f"lo={p['lo']!r} hi={p['hi']!r} hash={cj.content_hash()[:16]}"
+
+
+for dtype in (jnp.float64, jnp.int64):
+    for label, lo in (("0.1", 0.1), ("Decimal('0.1')", Decimal("0.1"))):
+        try:
+            print(f"{str(jnp.dtype(dtype)):8s} {label:14s} -> {recorded(lo, 10.0, dtype)}")
+        except ValueError as e:
+            print(f"{str(jnp.dtype(dtype)):8s} {label:14s} -> refused: "
+                  f"{str(e).split('. ')[0][:96]}…")
+```
+
+prints:
+
+```
+float64  0.1            -> lo=0.1 hi=10.0 hash=a6f639be687fa246
+float64  Decimal('0.1') -> lo=0.1 hi=10.0 hash=a6f639be687fa246
+int64    0.1            -> lo=0.1 hi=10.0 hash=3e9afcecb4af3e5d
+int64    Decimal('0.1') -> refused: any_array bound lo=Decimal('0.1') is not representable as the binary64 the IR stores; it would b…
+```
+
+The two float64 rows are byte-identical, hash included; the int64 row
+hashes differently only because the dtype is part of the recorded query.
+On `float64` the two spellings are indistinguishable in the query. On
+`int64` they are not: binary64's `0.1` is slightly *above* 1/10, so
+recording `Decimal("0.1")` as a lower bound would move the endpoint into
+the interval's interior, and `int64` refuses every narrowing bound as a
+dtype-level policy. The float spelling declares that same binary64 value
+exactly, so there is nothing to narrow. Rounding the other way — a bound
+whose recording *widens* the box — is always admitted, because an
+over-approximation still contains every executed value.
 
 **A point declaration is `lo == hi`.** It is a stated constant, not a
 degenerate range, and it interacts with `vacuity_mode`; see
@@ -134,34 +249,63 @@ degenerate range, and it interacts with `vacuity_mode`; see
 Tracing-time sugar: one `any_array` per array leaf of a prototype pytree,
 each over the same bounds.
 
+**Build the prototype outside the traced code, from NumPy.** The
+prototype's only job is to carry shapes and dtypes, but it is an ordinary
+value in the harness: build it with `jnp.zeros` inside the harness and you
+trace its *construction* into the query too. Measured — same three
+declarations, three ways:
+
 ```python
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
+import numpy as np
 
-from stelling.harness import any_pytree, assert_, trace
-from stelling.preconditions import check
+from stelling.harness import any_array, any_pytree, assert_, trace
 
 
-def harness():
-    prototype = {"u": jnp.zeros((4,)), "k": jnp.zeros(())}
+def sugar_numpy():
+    prototype = {"k": np.zeros(()), "u": np.zeros((4,))}
     state = any_pytree(prototype, (0.1, 10.0))   # one declaration per array leaf
     return assert_(state["u"] * state["k"] > 0.0)
 
 
-print("primitives:", [e.primitive for e in trace(harness).jaxpr.eqns])
-print("status    :", check(harness, vacuity_mode="all").status)
+def sugar_jnp():
+    prototype = {"k": jnp.zeros(()), "u": jnp.zeros((4,))}
+    state = any_pytree(prototype, (0.1, 10.0))
+    return assert_(state["u"] * state["k"] > 0.0)
+
+
+def hand():
+    k = any_array((), jnp.float64, (0.1, 10.0))
+    u = any_array((4,), jnp.float64, (0.1, 10.0))
+    return assert_(u * k > 0.0)
+
+
+for name, h in (("sugar, numpy prototype", sugar_numpy),
+                ("sugar, jnp prototype", sugar_jnp),
+                ("hand declaration", hand)):
+    cj = trace(h)
+    print(f"{name:22s} {len(cj.jaxpr.eqns)} eqns  hash {cj.content_hash()[:16]}  "
+          f"{[e.primitive for e in cj.jaxpr.eqns]}")
 ```
 
 prints:
 
 ```
-primitives: ['broadcast_in_dim', 'stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
-status    : VERIFIED
+sugar, numpy prototype 5 eqns  hash 93bfe936574a4195  ['stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
+sugar, jnp prototype   6 eqns  hash fcbb6209ead48d15  ['broadcast_in_dim', 'stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
+hand declaration       5 eqns  hash 93bfe936574a4195  ['stelling_any', 'stelling_any', 'mul', 'gt', 'stelling_assert']
 ```
 
-Two leaves, two `stelling_any` equations — the same trace the hand
-declaration produces, hence the same content hash.
+Two leaves, two `stelling_any` equations. **With a NumPy prototype the
+sugar traces to exactly the hand declaration — same equations, same
+content hash.** With a `jnp` prototype built inside the harness it does
+not: `jnp.zeros(())` traces a `broadcast_in_dim` of its own, so the query
+is a sixth equation longer and its hash differs. Nothing is unsound about
+the `jnp` version — the two declarations are the same — but the stamp
+identifies a different query, so two verdicts you meant to be the same
+will not compare equal.
 
 ## `assert_(pred)` — obligations
 
@@ -421,9 +565,69 @@ query hash: 52336382a4d6677b35371cfd40267eb8c36e144c6d16c18bbe25b18a4b4372ef
 ## Running a harness
 
 `stelling.preconditions.check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None, strict=False)`
-is the front door. `vacuity_mode` is required;
-`solver_timeout_ms` has no default and no solver runs without it. See
-[Reading a verdict](reading-a-verdict.md) for what comes back, and
+is the front door.
+
+| argument | |
+|---|---|
+| `vacuity_mode` | **required** — `"inputs-only"` or `"all"`; see [Reading a verdict](reading-a-verdict.md#choosing-vacuity_mode) |
+| `solver_timeout_ms` | no default; omit it and no solver runs |
+| `refine` | `None`, or `"affine"` for the zonotope refinement on interval-undecided obligations |
+| `strict` | `False` (default) returns `DECLINED` for a query that cannot be transcribed; `True` re-raises instead |
+
+**`strict` decides whether an unreadable query is a status or an
+exception.** By default a query stelling cannot transcribe comes back as
+a `DECLINED` verdict, so a batch caller can record it and carry on to the
+next node; `strict=True` lets the `stelling.ir.TranscriptionError`
+propagate, which is what you want in a single-target script that should
+fail loudly. Measured, on a sharded program — the one construct in this
+tree I found that transcription refuses outright:
+
+```python
+import os
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=2"
+
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+import numpy as np
+
+from stelling import ir
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+
+mesh = jax.sharding.Mesh(np.array(jax.devices()).reshape(2), ("x",))
+spec = jax.sharding.PartitionSpec("x")
+
+
+def harness():
+    a = any_array((4,), jnp.float64, (0.1, 10.0))
+    sharded = jax.shard_map(lambda z: z + 1.0, mesh=mesh, in_specs=spec, out_specs=spec)
+    return assert_(sharded(a) > 0.0)
+
+
+v = check(harness, vacuity_mode="all")
+print("strict=False ->", v.status, "| stamp:", v.stamp)
+print("  ", v.notes[0])
+try:
+    check(harness, vacuity_mode="all", strict=True)
+except ir.TranscriptionError as e:
+    print("strict=True  -> raised", type(e).__name__)
+```
+
+prints:
+
+```
+strict=False -> DECLINED | stamp: None
+   declined: primitive 'shard_map': param 'mesh' is a non-empty mesh (Mesh(axis_sizes=(2,), axis_names=('x',), axis_types=(Auto,))); sharded programs are not supported yet.
+strict=True  -> raised UnsupportedParamError
+```
+
+`strict` covers transcription failures only. Harness defects (an empty
+declared set, an unsatisfiable assume) and jax's own tracing failures
+raise in both modes — the first are your bug and must stay loud, the
+second happen upstream of stelling.
+
+See [Reading a verdict](reading-a-verdict.md) for what comes back, and
 [Checking the preconditions your solver assumes](preconditions.md) for the
 two ready-made obligation templates (`field_positive`, `scalar_nonzero`)
 that build the harness for you.
