@@ -14,10 +14,19 @@ This file pins the emission row and only the emission row: the four
 registries `square` now appears in (read from the definitions), the
 SELF-PRODUCT body it emits, the ``QF_NRA`` fragment that body puts the
 problem in, the exact-rational replay that confirms a model, the
-integer-dtype refusal, and the boolean-operand refusal. The end-to-end
-verdicts, the containment against jax eager and under ``jit``, and the
-mutation battery live in ``tests/test_square_row_gauge_jax.py`` — that file
-needs jax and a solver; this one must run in the zero-dep arm.
+integer-dtype refusal, and the boolean-operand refusal.
+
+**Dependency levels, stated because they are no longer one.** Everything
+here is jax-free, and most of it is solver-free too, so the file runs in
+the zero-dep arm. THREE tests are the exception: the two that record the
+unfolded-constant-product defect and the one that records its cost on a
+discharge need the portfolio to observe a backend being lost, and they
+``importorskip`` z3 and cvc5 individually rather than at module level.
+They live here and not in the gauge file because what they record is a
+property of the EMISSION — this file's subject — not of the row's
+end-to-end behaviour. The genuinely end-to-end material (verdicts,
+containment against jax eager and under ``jit``, the mutation battery)
+is still in ``tests/test_square_row_gauge_jax.py``, which needs jax.
 """
 
 from __future__ import annotations
@@ -142,16 +151,23 @@ def test_the_import_time_censuses_still_hold_with_square_in_them():
     reads like it establishes more than it does. ``_REPLAY_SUPPORTED`` and
     ``_SUPPORTED`` are the SAME expression over ``_ARITH``, so a primitive
     added via ``_ARITH`` — which is how `square` was added — joins both
-    simultaneously and the equality can never fail for it. Measured: with
-    the ``elif prim == "square"`` branch DELETED from ``_root_elements``,
-    ``stelling.obligation`` still imports cleanly and this assertion still
-    passes; the deletion is caught only behaviourally, by 12 failures
-    across this file, ``test_square_row_gauge_jax.py`` and
-    ``test_square_acceptance_jaxfluids.py``. So the replay coverage of this
-    row is established by those probes, NOT by this line. Pre-existing and
-    shared: the same blind spot covers every other ``_ARITH`` member. Left
-    as found — closing it is a change to the census's own shape and needs
-    its own round."""
+    simultaneously and the equality can never fail for it. Measured at
+    `6bcb22f`: with the ``elif prim == "square"`` branch DELETED from
+    ``_root_elements``, ``stelling.obligation`` still imports cleanly and
+    this assertion still passes; the deletion is caught only behaviourally,
+    by **13** failures — 5 in this file, 5 in
+    ``test_square_row_gauge_jax.py``, 3 in
+    ``test_square_acceptance_jaxfluids.py``.
+
+    That count is a moving quantity and has already moved once: it was
+    measured as 12 in the commit that WROTE this paragraph, before that
+    same commit's own new test was counted. It is re-measured here rather
+    than carried. What does not move is the shape: the replay coverage of
+    this row is established by those probes, NOT by this line.
+
+    Pre-existing and shared: the same blind spot covers every other
+    ``_ARITH`` member. Left as found — closing it is a change to the
+    census's own shape and needs its own round."""
     assert OB._INT_OVERFLOW_EMITTED | OB._INT_SAFE_EMITTED == OB._SUPPORTED
     assert not (OB._INT_OVERFLOW_EMITTED & OB._INT_SAFE_EMITTED)
     assert OB._REPLAY_SUPPORTED == OB._SUPPORTED
@@ -214,27 +230,43 @@ _SELF_PRODUCT_SPELLINGS = {
 }
 
 
-def test_a_constant_square_is_stamped_QF_LRA_and_emits_a_NONLINEAR_term():
+def test_a_constant_square_emits_an_UNFOLDED_self_product_under_QF_LRA():
     """MEASURED, and it is not what this test used to claim.
 
     The premise that stood here — "a square whose operand does not reach a
     declaration mints no nonlinear term, exactly as a constant product
-    does" — is FALSE, and it is false in both halves, which is the point.
-    ``_Slicer._fragment`` marks `square` nonlinear only when
-    ``ins_dep[0]``, while :func:`stelling.smt._square_body` emits the
-    self-product unconditionally. So this slice is stamped ``QF_LRA`` and
-    the script it ships contains ``(* t1 t1)``. The consequence is in the
-    next test, and it is not cosmetic.
+    does" — is FALSE in both halves: the slice is stamped ``QF_LRA`` and
+    the script it ships contains ``(* t1 t1)``.
+
+    **The declared logic is RIGHT and the emission is what is wrong.**
+    ``ins_dep[0]`` is false here exactly when the operand descends only
+    from literals and constvars, so the value is a constant and the
+    decision problem really is linear: ``QF_LRA`` is not a mislabel.
+    What ships is an unfolded ``(* t1 t1)`` over a non-numeral body, and
+    z3's parser rejects THAT syntactically. Measured, this run, z3 5.0.0:
+
+        (define-fun t1 () Real (+ 2.0 1.0))
+        (define-fun t2 () Real (* t1 t1))   under QF_LRA -> rejected
+        (define-fun t1 () Real 3.0)
+        (define-fun t2 () Real (* t1 t1))   under QF_LRA -> sat
+
+    So the cheap and correct repair is to FOLD the constant subtree in the
+    emission, not to stamp ``QF_NRA`` — which would push a genuinely linear
+    problem into a harder logic for no reason. Recorded here because an
+    earlier version of this docstring said "a fragment the problem is not
+    in", which points a maintainer at exactly the wrong lever.
 
     NOT A DEFECT OF THIS ROW, and deliberately not fixed here. Measured on
     main (b11f051), where `square` has no emission row at all, the
     identical script comes out of ``mul`` on two constant operands and out
-    of ``integer_pow`` at y=2 — same ``(set-logic QF_LRA)``, same
-    ``(define-fun t2 () Real (* t1 t1))``. `square` joins a class it did
-    not create; ``_fragment`` is shared code this row does not own, and
-    changing it needs its own gauge and its own round. The three-spelling
-    parity below is what keeps that claim honest: if `square` ever diverges
-    from its two siblings here, this test says so."""
+    of ``integer_pow`` at y=2. `square` joins a class it did not create;
+    the emission's constant handling is shared code this row does not own.
+    The three-spelling parity below keeps that claim honest: if `square`
+    ever diverges from its two siblings here, this test says so.
+
+    IF THE FOLD LANDS, THIS RECORD IS STALE. The assertions below pin a
+    defect as PRESENT; a round that folds constant subtrees in the emission
+    should delete this test and its sibling, not adjust them."""
     texts = {}
     for name, mk in _SELF_PRODUCT_SPELLINGS.items():
         q = _constant_operand_query(mk)
@@ -250,26 +282,35 @@ def test_a_constant_square_is_stamped_QF_LRA_and_emits_a_NONLINEAR_term():
     assert len(set(texts.values())) == 1, sorted(texts)
 
 
-def test_the_mislabelled_logic_silently_costs_a_portfolio_member():
+def test_the_unfolded_product_silently_costs_a_portfolio_member(monkeypatch):
     """The consequence, measured — this is why the test above is not a
     naming quibble.
 
     The portfolio's design is that agreement decides and disagreement is a
-    loud error. A script whose declared logic excludes the arithmetic it
-    contains never gets to disagree: z3 REFUSES it outright, is recorded
-    ``failed``, and the verdict is then decided by cvc5 alone — a
-    one-backend REFUTED carrying a two-backend portfolio's stamp, whose
-    ``set-logic`` names a fragment the problem is not in.
+    loud error. A script z3's parser refuses never gets to disagree: z3 is
+    recorded ``failed`` and the verdict is decided by cvc5 alone — one
+    backend answering under a two-backend portfolio's stamp.
 
-    The loss IS disclosed — both invocations ride in the ledger with their
-    reasons and z3's error is quoted verbatim in the notes — so nothing is
-    hidden. But nothing is flagged either, and "how many backends actually
+    The loss IS disclosed: both invocations ride in the ledger with their
+    reasons and z3's error is quoted verbatim in the notes. But it is not
+    FLAGGED. ``solvers.py`` does emit "portfolio degraded — only X ran",
+    and measured, it fires only on ``len(ordered) == 1`` — a backend that
+    is not *installed*. Degradation by REFUSAL leaves both backends in
+    ``ordered``, so that note never trips, and "how many backends actually
     answered" is not a field any consumer reads.
 
+    Both directions are recorded: this test takes the REFUTATION, whose
+    witness is independently replayed; the next takes the DISCHARGE, which
+    has no such backstop and is the dangerous one.
+
     Recorded, not repaired, and shared: `mul` and `integer_pow` do the same
-    on main."""
+    on main. IF THE EMISSION FOLD LANDS, THIS RECORD IS STALE — delete it
+    rather than adjust it."""
     pytest.importorskip("z3")
     pytest.importorskip("cvc5")
+    # the labels below are transport-qualified, and STELLING_CVC5 (a
+    # supported configuration) relabels cvc5 as an external binary
+    monkeypatch.delenv("STELLING_CVC5", raising=False)
     from stelling.solvers import SolverConfig, escalate
 
     q = _constant_operand_query(_SELF_PRODUCT_SPELLINGS["square"])
@@ -279,11 +320,66 @@ def test_the_mislabelled_logic_silently_costs_a_portfolio_member():
     assert "z3 (wheel) answered failed" in notes, notes
     assert "logic does not support nonlinear arithmetic" in notes, notes
     assert "cvc5 (wheel) answered sat" in notes, notes
-    # two invocations stamped, ONE of them an answer, and the detail names
-    # the fragment the problem is not in
+    # two invocations stamped, ONE of them an answer — and no degraded note
     assert {s.name for s in record.invocations} == {"z3", "cvc5"}
+    assert "portfolio degraded" not in notes, notes
     assert record.outcome == "violated-witness"
-    assert "(QF_LRA)" in record.detail, record.detail
+
+
+def test_the_same_loss_on_the_DISCHARGE_has_no_replay_backstop(monkeypatch):
+    """The dangerous direction, and the reason the sibling above is not the
+    whole record.
+
+    On a REFUTATION the single surviving backend's model is re-derived by
+    ``make_validated_witness`` in exact rationals before it is believed, so
+    a wrong REFUTED is not reachable that way. **A DISCHARGE has no such
+    check.** ``unsat`` is a universal claim over the whole declared box;
+    there is no point to replay, and nothing downstream re-derives it. So
+    the same lost backend that costs a cross-check on a witness costs the
+    ONLY cross-check on a VERIFIED.
+
+    Measured: ``square(2+1) + (x - x) <= 10`` is true (9 + 0), interval
+    propagation cannot see the cancellation, the slice is QF_LRA carrying
+    ``(* t1 t1)``, z3 is recorded ``failed``, cvc5 answers ``unsat``, and
+    the outcome is ``discharged`` with ``witness=None``.
+
+    Recorded, not repaired: the repair is the emission fold named in
+    ``test_a_constant_square_emits_an_UNFOLDED_self_product_under_QF_LRA``,
+    and it fixes both directions at once. IF IT LANDS, THIS RECORD IS
+    STALE — delete it rather than adjust it."""
+    pytest.importorskip("z3")
+    pytest.importorskip("cvc5")
+    monkeypatch.delenv("STELLING_CVC5", raising=False)
+    from stelling.solvers import SolverConfig, escalate
+
+    x, c, s, z, d, pred, out = (
+        var(0), var(1), var(2), var(3), var(4), var(5, BOOL), var(6, BOOL)
+    )
+    q = close(
+        [
+            any_eqn(x, -2.0, 3.0),
+            eqn("add", [lit(2.0), lit(1.0)], c),
+            eqn("square", [c], s),
+            eqn("sub", [x, x], z),  # exactly 0, invisible to intervals
+            eqn("add", [s, z], d),
+            eqn("le", [d, lit(10.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(q)
+    assert p.obligations[0].status == "unknown"
+    (item,) = slice_unknown_obligations(q, p, interval_env(q))
+    assert item.fragment == OB.QF_LRA
+    assert "(* t1 t1)" in SM.emit(item, "z3", 30_000).text
+    (record,) = escalate(q, p, SolverConfig(timeout_ms=30_000)).records
+    notes = " | ".join(record.notes)
+    assert "z3 (wheel) answered failed" in notes, notes
+    assert "cvc5 (wheel) answered unsat" in notes, notes
+    # a one-backend VERIFIED, and nothing replays a universal claim
+    assert record.outcome == "discharged"
+    assert record.witness is None
+    assert "portfolio degraded" not in notes, notes
 
 
 def test_element_terms_counts_the_square_output_once_per_element():
@@ -431,9 +527,25 @@ def test_a_two_operand_square_raises_where_the_docstring_promises_a_decline():
 
     Measured on main (b11f051): ``integer_pow`` does the identical thing,
     with the byte-identical message, and `square` is not in the emission
-    set there at all. So this row joins the class rather than creating it,
-    and the class is ``neg``/``not``/``integer_pow``/`square` — every
-    emitted unop.
+    set there at all. So this row joins the class rather than creating it.
+
+    THE CLASS, ENUMERATED — because an earlier version of this record said
+    "``neg``/``not``/``integer_pow``/`square` — every emitted unop", which
+    is wrong in both directions and would send a maintainer to four sites
+    when there are ten. Measured on this tree over every emitted
+    single-operand primitive, each given a spurious second operand, with a
+    straddling bound so the slice is really built:
+
+        raises from smt.emit     square, neg, integer_pow
+        raises from PROPAGATE    convert_element_type   (a different site)
+        EMITS ANYWAY, silently   reshape, squeeze, transpose,
+        ignoring the 2nd operand broadcast_in_dim, stelling_assume,
+                                 stelling_nonvacuity
+
+    ``not`` is NOT in this table: a boolean declaration has no emission, so
+    no probe reaches it, and the earlier record listed it on inference
+    rather than measurement. The six silent ones are the worse half and
+    were entirely absent from that record.
 
     NOT REACHABLE BY TRACING: jax declares ``square_p`` a unop, so no
     traced program produces this equation; it takes hand-built or
