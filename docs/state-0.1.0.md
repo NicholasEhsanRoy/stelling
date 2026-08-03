@@ -19,10 +19,48 @@ the terminal table, the guard frontier, and the nine-hazard population are all
 **Measured, not assumed.** Two independently-blinded agents wrote contracts
 against `jax_md` and `jaxfluids` — genuinely independent authors and domains —
 having been told nothing about this project's conclusions. **The blockers are
-IDIOMATIC**: external code terminates on `square`, `sign`, `unstack`, `copy`,
-`rem`, `nan_to_num`'s `inf`, `iota`, `int64→float64`, `abs`, `pow` — **none of
-which is a MADDENING terminal**, and five of which have neither an interval
-transfer nor an emission row.
+IDIOMATIC.** That finding is four separate claims with four different
+standings, and it is written out that way because it was previously one
+sentence and the sentence did not survive re-derivation (2026-08-03,
+`rederive_terminals_idiomatic.py`).
+
+1. **The external terminal list is RECORDED-HISTORICAL, not re-derivable.**
+   External code was measured to terminate on `square`, `sign`, `unstack`,
+   `copy`, `rem`, `nan_to_num`'s `inf`, `iota`, `int64→float64`, `abs`, `pow`.
+   **The two blinded contracts are not in this tree**, so nothing here can
+   re-derive that list, and **every claim quantifying over it inherits that
+   status.** *Unit: primitives and forms hit by two external contracts,
+   n = 2 codebases, as measured in the session that wrote them.*
+
+2. **None of them is a MADDENING terminal — ON THE FORM UNIT, and the unit is
+   where this turns.** *False on the primitive unit:* `int64→float64` **is**
+   `convert_element_type`, which is MADD HeatNode's own baseline terminal.
+   *True on the form unit:* MADDENING's terminal is `convert_element_type`
+   **float64→float32** (value-changing); the external one is **int64→float64**.
+   Same primitive, different forms. **1 of the 10 listed items turns on this
+   distinction.** *Unit: forms, n = 10 listed items.*
+
+3. **One of them has neither an interval transfer nor an emission row: `iota`.**
+   *Measured as of `f8f5850`.* Seven have a transfer and no emission row; one
+   (`nan_to_num`'s `inf`) is not a primitive, so no registry key exists to look
+   up. **This clause previously read "five", which was measured against the tree
+   as it stood immediately before the commit that published it and was
+   invalidated by that same commit** — see the note below. *Unit: registry
+   membership at a named sha, n = 8 primitives of the 10 listed items.*
+
+4. **Two terminals recur, not one — and the mechanism claim stands.** Within
+   MADDENING/MIME the element budget recurs on **3** contracts *and* the
+   constrained-assume refusal on **2** (`BASELINE_pre_0_4_0.json`). Whether the
+   budget is the sole *cross-framework* recurrence depends on claim 1 and is
+   therefore not re-derivable here. **The mechanism is untouched by the count
+   and stands: the budget recurs because it is a function of query SIZE rather
+   than of coding style.** *Unit: blocked contracts, n = 7 of 14.*
+
+> **A number here is safe to the extent its unit is written beside it.**
+> Measured: of ten conclusion-bearing clauses in this document, four were
+> re-derived, and the only one that re-derived exactly is the one whose unit the
+> document names. All three failures were failures of unit, not of arithmetic.
+> See `CLAUSE_CENSUS_state_0_1_0.md`.
 
 > **2026-08-03 — `square` now has an SMT emission row.** What that changes,
 > stated only as far as it was measured. A NEW contract, written against
