@@ -2365,15 +2365,128 @@ ASSUME_DROP_NOTE = (
 
 # Naming a WORKING ALTERNATIVE, not just the missing primitive. "no transfer for
 # reduce_and" tells a reader the tool is incomplete; this tells them what to
-# write instead. Both forms below use only registered primitives, and both make
-# an `assume` CONSTRAIN rather than drop — which is the part nobody would guess.
+# write instead. The cause is a REGISTRY ASYMMETRY — `reduce_or` has a transfer
+# in both registries and `reduce_and` has one in neither — so `jnp.any` decides
+# and `jnp.all` does not; tests/test_membership_idiom_hint.py pins that, because
+# the moment a `reduce_and` row lands the first sentence here becomes false.
+#
+# THREE forms, and the ordering is measured, not stylistic. Measured on
+# x declared (n,) float64, spelled EXACTLY as the string below spells them
+# (the two-sided hinge and the one-sided count — a comment that paraphrases the
+# string it annotates is a second copy that drifts, and this one had):
+#
+#                                     real          ieee
+#   x >= lo                           decides       decides, every n
+#   sum(max(lo-x,0)+max(x-hi,0))<=0   decides       ⊤ at reduce_sum for n >= 3
+#   sum((x<lo).astype(int32)) == 0    decides       ⊤ at reduce_sum at EVERY n
+#
+# The ieee column is the whole reason this comment exists. `_ieee_reduce_sum`
+# declines three or more float contributors (association freedom), and
+# `_ieee_f64_only` declines the counting form's int64 accumulator at any size —
+# so under semantics="ieee" the elementwise form is the ONLY one of the three
+# that decides at every array size, and a hint that said "all three decide"
+# handed a stuck reader a second dead end in the mode docs/preconditions.md
+# tells them to use for float-boundary facts. The string says which.
+#
+# As an `assume` they differ again, and this is the part nobody would guess.
+# Measured on x ∈ [-10, 10]^3, real mode, with the shipped spellings:
+#
+#   hinge  (two-sided)  CONSTRAINED, narrows var 7 -- the reduction's own
+#   count  (one-sided)  CONSTRAINED, narrows var 5 -- intermediate, an
+#                       over-approximated value, so each raises
+#                       satisfiability-UNCERTIFIED: `assert_(sum(x) <= -100)`
+#                       comes back `unknown` (withheld from REFUTED) and
+#                       `assert_(sum(x) >= 0)` stays `unknown`
+#   x >= 0              CONSTRAINED, narrows var 1 -- the DECLARED input --
+#                       to [0, 10]^3, no UNCERTIFIED: `sum(x) <= -100` reaches
+#                       `violated-over-set` and `sum(x) >= 0` `discharged`
+#
+# So the elementwise form is named FIRST on two independent measurements: it is
+# the only one that survives ieee at every size, and it is the only one that
+# leaves the REFUTED face reachable. The arithmetic pair stays because a genuine
+# reduction over an array is not a pointwise fact and has nowhere else to go.
+#
+# THE ATTRIBUTION IS STRUCTURE, NOT PROSE. `_REAL_ONLY_MARKER` below is a
+# sentinel the test splits this string on: every rewrite named AFTER it is
+# claimed real-only, every rewrite named before it is claimed to hold in both
+# modes, and tests/test_membership_idiom_hint.py requires that split to equal
+# the measured one. Inverting the attribution — swapping which forms sit after
+# the marker — fails there. Before this it did not: the test asserted only that
+# the words "ieee" and "reduce_sum" appeared somewhere, so a text that blamed
+# the wrong form passed. Move a rewrite across the marker only with a
+# measurement in hand.
+_REAL_ONLY_MARKER = "decide under semantics='real' but NOT under semantics='ieee':"
+
+# The second sentinel, for the second claim a test would otherwise only check
+# BEHAVIOURALLY: "delete the reduction" applied verbatim to a conjunction of
+# differently-shaped arrays does not trace. Measured, `jnp.all(w >= 0) &
+# jnp.all(b >= 0)` with w:(3,) and b:(5,) — the weights-and-biases shape, the
+# most likely spelling a reader arrives with — raises `TypeError: and got
+# incompatible shapes for broadcasting: (3,), (5,)` once the reductions are
+# gone, while two calls decide in both semantics with no shape condition. A
+# test that measured only the TypeError left the SENTENCE droppable; this is
+# the string it must keep.
+_SEPARATE_CALLS_MARKER = "Keep them separate calls rather than one `&`"
 MEMBERSHIP_IDIOM_HINT = (
-    " — `jnp.all(...)` lowers to `reduce_and`, which has no interval transfer, "
-    "so its box is ⊤. Express the same condition arithmetically instead: "
-    "`jnp.sum(jnp.maximum(lo - k, 0.0) + jnp.maximum(k - hi, 0.0)) <= 0.0` or "
-    "`jnp.sum((k < lo).astype(jnp.int32)) == 0`. Both use registered primitives "
-    "only, and both make a constraining `assume` CONSTRAIN rather than DROP"
+    " — `jnp.all(...)` lowers to `reduce_and`, which has no interval transfer "
+    "in either registry (`reduce_or` has one in both, which is why `jnp.any` "
+    "decides), so its box is ⊤. Usually the fix is to DELETE THE REDUCTION and "
+    "state each conjunct as its OWN call: `assert_`, `assume` and `nonvacuity` "
+    "judge an array predicate ELEMENTWISE, so the bare `k >= lo` over an "
+    "n-element array already IS the conjunction over all n, and two calls are "
+    "the conjunction of both. Keep them separate calls rather than one `&` — "
+    "`jnp.all(w >= 0.0) & jnp.all(b >= 0.0)` over differently-shaped arrays "
+    "stops broadcasting once the reductions are gone. Where the condition is "
+    "genuinely a reduction, these decide under semantics='real' but NOT under "
+    "semantics='ieee': `jnp.sum(jnp.maximum(lo - k, 0.0) + jnp.maximum(k - hi, "
+    "0.0)) <= 0.0`, which falls to ⊤ at `reduce_sum` for three or more "
+    "contributors, and `jnp.sum((k < lo).astype(jnp.int32)) == 0`, which falls "
+    "there at every size because its accumulator is an integer. As an `assume` "
+    "the three are not "
+    "interchangeable either: all three CONSTRAIN rather than DROP, but the two "
+    "arithmetic forms narrow the reduction's own intermediate — an "
+    "over-approximated value — so the precondition is stamped "
+    "satisfiability-UNCERTIFIED and every definite violation is then withheld "
+    "from REFUTED, whereas the elementwise form narrows the compared value "
+    "itself and stays certified where that value is a declared input"
 )
+
+# The hint is ~1.2k characters and one run can state a property on three faces.
+# Printing it three times is the complaint `_note_decline`'s dedupe already
+# exists for ("a ~120-word decline note printed verbatim twice was the measured
+# complaint") — and verbatim dedupe cannot fire here, because each face names
+# its own site. So the BODY is printed once per propagation and every later
+# face gets its own locator plus this pointer. Deliberately order-free: notes
+# ride into the verdict in emission order, but "the note above" would be a
+# claim about a tuple index that no test pins.
+MEMBERSHIP_IDIOM_POINTER = (
+    " — same cause (`jnp.all(...)` → `reduce_and` → ⊤) and the same rewrites as "
+    "the membership-idiom note printed elsewhere on this run; the text is "
+    "printed once per run rather than once per face"
+)
+
+# What a `jnp.all` result can pass through and still BE that conjunction, for
+# the gate below. `and` qualifies on the meaning: `assert_(a & b)` judged
+# elementwise is exactly `all(a) & all(b)`, so deleting both reductions
+# preserves the property. The rest are shape-only moves — `keepdims=True`
+# lowers to a broadcast_in_dim/squeeze or reshape pair.
+#
+# `or` and `not` are deliberately ABSENT although they are boolean too:
+# `all(a) | all(b)` is NOT elementwise `a | b`, and `~all(a)` is not `~a`, so
+# "delete the reduction" would change the stated property. The hint would be
+# wrong there, and no hint beats a wrong hint. `select_n` is absent for the
+# same reason at one remove: in `jnp.where(jnp.all(...), a, b)` the reduction
+# is a SELECTOR, not the judged property.
+_MEMBERSHIP_HINT_TRANSPARENT = frozenset({
+    "and", "reshape", "squeeze", "broadcast_in_dim", "convert_element_type",
+})
+
+# Node cap for both membership-hint walks. Message-content code runs only on
+# undecided faces, but "only" is not "never" and an unbounded backward walk
+# over a wide jaxpr is a hang. Exhausting the cap degrades to NO HINT, never to
+# a hint asserted without the evidence (degrade-don't-hang, the same posture
+# _integer_pow_budget takes).
+_MEMBERSHIP_HINT_WALK_CAP = 512
 
 IEEE_PRODUCT_SOURCES = frozenset({"mul", "dot_general", "integer_pow"})
 
@@ -4090,6 +4203,11 @@ class _Propagator:
         # subsequent definite violation is withheld from REFUTED (a
         # possibly-vacuous refutation is not a refutation — audit F7).
         self.uncertified = False
+        # set once MEMBERSHIP_IDIOM_HINT's body has been printed on this run.
+        # One property can be stated on three faces and the hint is ~1.2k
+        # characters; every later face gets the pointer instead (see
+        # MEMBERSHIP_IDIOM_POINTER). Message content only.
+        self.membership_hint_emitted = False
         # set when an assume was DROPPED rather than applied. Distinct from
         # `uncertified` because it must also reach the SOLVER path: the
         # escalation decline keys on a constrained assume being present, and
@@ -4362,6 +4480,163 @@ class _Propagator:
                         f"bound by {approx}{miss_f}{ulp}"
                     )
         return out + origin
+
+    def _foreign_top_in_cone(self, atom) -> bool:
+        """Whether the judged predicate's cone holds an artifact ⊤ minted by
+        anything OTHER than ``reduce_and`` — an unrestricted backward walk,
+        unlike :meth:`_membership_reduce_and`'s.
+
+        The hint's dead-end guard, and the scope is the WHOLE PREDICATE, which
+        cost two measured defects to learn. Scoped to one reduction's own
+        operands it was wrong in both directions:
+
+        * it withdrew CORRECT guidance from a nested ``jnp.all``. Measured,
+          ``jnp.all(jnp.all(M >= 0, axis=1))`` has a ``reduce_and`` ⊤ under its
+          ``reduce_and`` ⊤ — the one thing the rewrite fixes — and got nothing,
+          although deleting both reductions reaches ``discharged`` at 100%
+          coverage in both semantics, and the program after ONE application of
+          the advice hints. A conjunction holding a nested ``all`` lost the
+          hint for its fixable half too.
+        * and it kept WRONG guidance where a sibling conjunct was the dead
+          end: ``assert_(jnp.all(x >= 0) & (jnp.max(y) >= 0))`` hinted while
+          ``assert_(jnp.all(jnp.max(x) >= 0))`` did not — same two primitives,
+          same dead end, opposite decision decided by spelling.
+
+        One question over the whole predicate answers both: is every ⊤ in the
+        way a ``reduce_and`` ⊤? Deleting the reductions removes exactly those,
+        and nothing else, so the hint may claim what it claims iff nothing
+        else is there."""
+        stack = [atom]
+        seen: set[int] = set()
+        budget = _MEMBERSHIP_HINT_WALK_CAP
+        while stack:
+            a = stack.pop()
+            if not isinstance(a, ir.Var) or a.id in seen:
+                continue
+            seen.add(a.id)
+            budget -= 1
+            if budget < 0:
+                # cap exhausted: the evidence is unknown, and the hint is only
+                # ever emitted on evidence — report the dead-end shape so the
+                # caller stays silent
+                return True
+            origin = self.top_origin.get(a.id)
+            if origin is not None and origin[0] != "reduce_and":
+                return True
+            producer = self.producers.get(a.id)
+            if producer is not None:
+                stack.extend(producer.invars)
+        return False
+
+    def _membership_reduce_and(self, atom) -> tuple[str, str, str] | None:
+        """The ``top_origin`` record of a ``reduce_and`` ⊤ that DELETING would
+        fix, reached from a judged predicate through meaning-preserving ops —
+        or ``None``.
+
+        The ONE gate behind every membership-idiom emission. It was three
+        different instruments: the assume path substring-matched its own
+        dropped-conjunct reasons, and the assert/nonvacuity paths read
+        ``top_origin`` on the predicate itself. Measured, the three disagreed
+        on the canonical two-sided spelling — ``jnp.all(k >= lo) &
+        jnp.all(k <= hi)`` hinted as an assume and not as an assert, because
+        the judged predicate there is the ``and`` output — and on
+        ``keepdims``, which no gate reached. One instrument or the docs
+        describe none of them.
+
+        Two conditions, each measured into existence:
+
+        * REACHABLE through :data:`_MEMBERSHIP_HINT_TRANSPARENT` only. Walking
+          arbitrary producers would reach the reduction in
+          ``jnp.where(jnp.all(...), a, b)``, where it is a selector and
+          "delete it" is wrong.
+        * ACTIONABLE: no ⊤ anywhere in the judged predicate's cone comes from
+          anything but ``reduce_and`` (:meth:`_foreign_top_in_cone`) — the
+          whole predicate, not one reduction's operands, and never counting a
+          nested ``reduce_and`` against itself.
+
+        Returns the first actionable origin, for the locator; the caller
+        supplies the text. The cap is a node budget over the PREDICATE'S CONE,
+        not the program: measured, a 407-equation jaxpr whose predicate is one
+        ``jnp.all`` still hints, while a predicate that is 300 chained ``&``
+        conjuncts does not."""
+        if self._foreign_top_in_cone(atom):
+            return None
+        stack = [atom]
+        seen: set[int] = set()
+        budget = _MEMBERSHIP_HINT_WALK_CAP
+        found: tuple[str, str, str] | None = None
+        while stack:
+            a = stack.pop()
+            if not isinstance(a, ir.Var) or a.id in seen:
+                continue
+            seen.add(a.id)
+            budget -= 1
+            if budget < 0:
+                return None
+            producer = self.producers.get(a.id)
+            if producer is None:
+                continue
+            if producer.primitive == "reduce_and":
+                origin = self.top_origin.get(a.id)
+                if origin is None:
+                    # a reduce_and that did NOT fall to ⊤ (a registered row
+                    # landed, or a future scope handled it): nothing to fix
+                    continue
+                if found is None:
+                    found = origin
+                continue
+            if producer.primitive in _MEMBERSHIP_HINT_TRANSPARENT:
+                stack.extend(producer.invars)
+        return found
+
+    def _membership_hint_for(self, atom) -> str:
+        """:data:`MEMBERSHIP_IDIOM_HINT` the first time this propagation earns
+        it, :data:`MEMBERSHIP_IDIOM_POINTER` after that, ``""`` when the gate
+        says no.
+
+        The text is in the NOTES at every site rather than in an obligation
+        detail because the detail does not survive: measured, escalating the
+        same query replaces the propagation's detail wholesale with the solver
+        record's own (``escalation declined: primitive 'reduce_and' …``), so a
+        detail-only hint would vanish for exactly the reader who tried harder,
+        while ``solvers.make_solver_verdict`` carries ``propagation.notes``
+        through unchanged."""
+        if self._membership_reduce_and(atom) is None:
+            return ""
+        if self.membership_hint_emitted:
+            return MEMBERSHIP_IDIOM_POINTER
+        self.membership_hint_emitted = True
+        return MEMBERSHIP_IDIOM_HINT
+
+    def _note_membership_idiom(self, eqn: ir.JaxprEqn, subject: str) -> None:
+        """The membership hint as a standalone note, for the two faces that
+        had no note of their own to ride on.
+
+        The hint existed at ONE call site, the dropped-assume note, while the
+        same ⊤ makes ``assert_(jnp.all(...))`` an undecided obligation and
+        ``nonvacuity(jnp.all(...))`` an undecided membership condition with
+        NOTHING printed (measured: no propagation note at all on either path,
+        and the nonvacuity face does not even reach
+        :func:`stelling.verdict.undecided_cause_note`, which fires only on an
+        undecided *obligation*)."""
+        pred = eqn.invars[0] if eqn.invars else None
+        origin = self._membership_reduce_and(pred)
+        if origin is None:
+            return
+        where = eqn.source_info[-1] if eqn.source_info else "unknown location"
+        head = (
+            f"{subject} UNDECIDED at {where}: its predicate is stelling's own "
+            f"⊤ from 'reduce_and' at {origin[1]}"
+        )
+        if any(n.startswith(head) for n in self.notes):
+            # two faces of one kind on ONE source line say exactly one thing:
+            # same subject, same site, same origin. `_note_decline` dedupes
+            # verbatim notes for this reason ("a ~120-word decline note printed
+            # verbatim twice was the measured complaint") and the check is the
+            # same one — on the head, because the tail differs only by whether
+            # this call would have drawn the body or the pointer.
+            return
+        self.notes.append(head + self._membership_hint_for(pred))
 
     def _cmp_origin_clause(self, prod: ir.JaxprEqn) -> str:
         """Artifact-⊤ origins of a quoted comparison's sides — the #2
@@ -4638,12 +4913,18 @@ class _Propagator:
                         "— the conditional claim may be vacuous; the "
                         "inert-mode control is the visibility instrument"
                     )
-            for reason in dropped:
+            for i, reason in enumerate(dropped):
                 # a conjunction can mix constrainable and inert conjuncts;
-                # the un-narrowable part is still a drop and still says so
+                # the un-narrowable part is still a drop and still says so.
+                # The hint rides the FIRST such conjunct: it is a fact about
+                # the assumed predicate, not about one reason, and this branch
+                # reached NO hint at all before — `assume((x >= lo) &
+                # jnp.all(x <= hi))` narrows on the first conjunct and dropped
+                # the second in silence.
                 self.notes.append(
                     f"assume conjunct DROPPED at {where}: constraining "
                     f"proceeded without this conjunct — a superset ({reason})"
+                    + (self._membership_hint_for(eqn.invars[0]) if i == 0 else "")
                 )
         else:
             self.counter.record_inert(eqn.primitive)
@@ -4655,7 +4936,7 @@ class _Propagator:
                 reasons = "; ".join(dropped) if dropped else "unclassified predicate"
                 self.notes.append(
                     ASSUME_DROP_NOTE.format(where=where) + f" ({reasons})"
-                    + (MEMBERSHIP_IDIOM_HINT if "reduce_and" in reasons else "")
+                    + self._membership_hint_for(eqn.invars[0])
                 )
                 # F7's NO-OP HALF. The narrowing path sets `uncertified` when
                 # it constrains an over-approximated variable; a DROPPED
@@ -5384,10 +5665,19 @@ class _Propagator:
                 self._assume_constrain(eqn, where)
             else:
                 # inert (amendment 2): sound, counted, addressed — never
-                # silent, never "known". Byte-identical to the MVP note.
+                # silent, never "known". Byte-identical to the MVP note, plus
+                # the membership hint on the same gate every other face uses:
+                # assume_mode="inert" is a SUPPORTED mode, and a reader who
+                # wrote `jnp.all` there was the only one getting nothing while
+                # the doc said all three paths print the rewrite.
                 self.counter.record_inert(eqn.primitive)
                 self.notes.append(
                     ASSUME_DROP_NOTE.format(where=where)
+                    + (
+                        self._membership_hint_for(eqn.invars[0])
+                        if eqn.invars
+                        else ""
+                    )
                 )
             in_taints = (
                 [self.read_taint(a) for a in eqn.invars]
@@ -5552,6 +5842,12 @@ class _Propagator:
                 # below (which replace the detail with their own claims
                 # and are untouched)
                 detail += self._straddle_suffix(eqn)
+                # ...and where the straddle quote has nothing to say because
+                # the predicate is a `reduce_and` ⊤, the membership-idiom
+                # hint does. The two are complements, never both: a ⊤ has no
+                # producing comparison to quote. Note, not detail — see
+                # _note_membership_idiom.
+                self._note_membership_idiom(eqn, "obligation")
             if ieee and in_flags and in_flags[0] and status != "unknown":
                 # the predicate VALUE arrived flagged maybe-NaN (a decline
                 # artifact ⊤ reaching the assert, or a flagged selector
@@ -5606,6 +5902,22 @@ class _Propagator:
             )
         if eqn.primitive == "stelling_nonvacuity":
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
+            if status == "unknown":
+                # the assert's hint, on the face that needs it MOST: an
+                # undecided membership condition alongside discharged
+                # obligations reaches neither a decline note nor
+                # undecided_cause_note (which fires on an undecided
+                # OBLIGATION), so before this the whole diagnosis was the
+                # stamp's one word `undecided`.
+                #
+                # The status guard is LOAD-BEARING, not belt-and-braces: a
+                # reduce_and whose output is SIZE-0 (a non-reduced axis of
+                # length zero) is `discharged` — measured, "definitely true
+                # for all 0 element(s)", matching jnp.all of an empty array —
+                # while its box is still stelling's ⊤ and the gate still says
+                # yes. Without the guard that decided face would carry a note
+                # calling itself UNDECIDED.
+                self._note_membership_idiom(eqn, "nonvacuity condition")
             if ieee and in_flags and in_flags[0] and status != "unknown":
                 # same posture as the assert above: a maybe-NaN membership
                 # condition supports neither the checked nor the FAILED face
