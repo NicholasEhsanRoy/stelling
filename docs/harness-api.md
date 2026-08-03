@@ -533,20 +533,44 @@ reduced      -> undecided | 7 eqns: 6 known (86%); 1 ⊤ across 1 primitives (re
 
 Prefer `elementwise`. The two arithmetic rewrites cost more equations for
 the same answer; they exist for the cases where the condition is
-genuinely a reduction over an array rather than a pointwise fact.
+genuinely a reduction over an array rather than a pointwise fact. Two
+measured reasons the preference is not cosmetic:
 
-**How you would find this yourself.** All three paths print the rewrite
-now, in the notes: the `assume` path names it in its `DROPPED` note, and
-an `assert_` or `nonvacuity` whose predicate is the `reduce_and` ⊤ gets
-an `obligation UNDECIDED at …` / `nonvacuity condition UNDECIDED at …`
-note carrying the same text. It is a *note* rather than an obligation
-detail because escalating replaces the detail with the solver record's
-own. The note fires only when the judged predicate **is** that ⊤ — a
-query that merely contains a `jnp.all` somewhere else gets nothing — so
-the stamp's coverage line remains the general instrument: **read it
-whenever an obligation or a membership condition comes back undecided**,
-because it names the primitive that stopped the analysis whatever that
-primitive is.
+* **Under `semantics="ieee"` the arithmetic rewrites do not decide.**
+  Both fall to ⊤ at `reduce_sum` — the slack form for three or more
+  contributors (float addition is not associative and the jaxpr fixes no
+  order), the counting form at *every* size (its accumulator is an
+  integer, and ieee endpoint arithmetic is binary64-only). The
+  elementwise form decides in both modes at every size.
+* **As an `assume` they are not interchangeable.** All three CONSTRAIN
+  rather than DROP, but the arithmetic pair narrows the reduction's own
+  intermediate — an over-approximated value — so the precondition is
+  stamped satisfiability-UNCERTIFIED and every definite violation is
+  withheld from REFUTED. The elementwise form narrows the declared input
+  and stays certified.
+
+**How you would find this yourself.** Every path that can be weakened by
+this prints the rewrite, in the notes, off one shared gate: the `assume`
+path (in both `assume_mode`s, and on the dropped conjunct of a mixed
+conjunction) names it in its `DROPPED` note; an undecided `assert_` or
+`nonvacuity` gets an `obligation UNDECIDED at …` /
+`nonvacuity condition UNDECIDED at …` note carrying the same text. It is
+a *note* rather than an obligation detail because escalating replaces the
+detail with the solver record's own. The body is printed once per run —
+later faces carry a pointer to it rather than a second copy.
+
+The gate is deliberately narrower than "the query contains a `jnp.all`".
+It fires when the judged predicate reaches a `reduce_and` ⊤ through
+`&`/reshape/squeeze only — so `jnp.all(a) & jnp.all(b)` and a `keepdims`
+reduction hint, while `jnp.where(jnp.all(...), a, b)` (a selector, not
+the property), `jnp.all(a) | jnp.all(b)` and `~jnp.all(a)` (deleting the
+reduction would change what you stated) do not. It also stays silent when
+something *under* the reduction is itself ⊤ — `jnp.all(jnp.max(x) >= 0)`
+gets no hint, because deleting the `jnp.all` leaves `reduce_max` in the
+way and none of the rewrites would help. So the stamp's coverage line
+remains the general instrument: **read it whenever an obligation or a
+membership condition comes back undecided**, because it names the
+primitive that stopped the analysis whatever that primitive is.
 
 ## `trace(harness)`
 
