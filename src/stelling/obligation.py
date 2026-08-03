@@ -21,7 +21,9 @@ and small fixed-shape arrays, one SMT term per element, gated by a single
 per-obligation element budget (:data:`ELEMENT_BUDGET`) — deliberately NOT
 general array reasoning (no quantified array theory, no dynamic shapes).
 The emission set: elementwise ``add``, ``sub``, ``mul``, ``neg``, guarded
-``div``, ``integer_pow``, ``max``, ``min``, the comparisons, boolean
+``div``, ``integer_pow``, ``square`` (the self-product of ONE term — jax's
+own primitive on this series, not sugar for ``integer_pow``), ``max``,
+``min``, the comparisons, boolean
 ``and``/``or``/``not``/``xor``, boolean-selector ``select_n``,
 value-preserving ``convert_element_type`` (all with jax/numpy rank
 broadcasting, sharing preserved: a broadcast scalar is ONE term
@@ -145,7 +147,18 @@ _SCALAR_STRUCT_FMT = {
     "|b1": "?",
 }
 
-_ARITH = frozenset({"add", "sub", "mul", "neg", "div", "integer_pow", "max", "min"})
+_ARITH = frozenset(
+    {"add", "sub", "mul", "neg", "div", "integer_pow", "max", "min",
+     # `square` is jax's own primitive on this series, NOT sugar for
+     # integer_pow(y=2) — `jnp.square(x)` binds `square_p` and a slice that
+     # traverses one had no emission at all, so a property genuinely false
+     # over the declared box declined instead of producing a witness. It
+     # emits as the SELF-PRODUCT of one term (:func:`stelling.smt._square_body`),
+     # which is what the primitive is: one operand, so the two factors are
+     # the SAME SMT constant and the solver sees the correlation an
+     # interval cannot. Same class as `mul` for every guard that follows.
+     "square"}
+)
 _COMPARE = frozenset({"lt", "le", "gt", "ge", "eq", "ne"})
 _BOOL_OPS = frozenset({"and", "or", "not", "xor"})
 # Structural ops are index bookkeeping, not new terms: an output element
@@ -187,6 +200,13 @@ _SUPPORTED = (
 # float-only guard, and `convert_element_type` is whitelist-guarded.
 _INT_OVERFLOW_EMITTED = frozenset(
     {"add", "sub", "mul", "neg", "div", "integer_pow", "reduce_sum",
+     # `square` multiplies its operand by itself, so it computes a value the
+     # operand did not contain and can leave an integer dtype's range —
+     # `mul`'s class exactly, and the class `integer_pow` was found in
+     # (audit UNSOUND 2). The transfer already classifies it this way
+     # (propagate._INT_COMPUTING); the emission must not be laxer than the
+     # transfer about a defect the transfer catches.
+     "square",
      # the accumulate scatter SUMS operand and update elements — the
      # add/reduce_sum class exactly, so integer dtypes decline here too
      "scatter-add",
@@ -1472,7 +1492,7 @@ class _Slicer:
                 raise _Decline(
                     f"comparison {prim!r} mixes boolean and numeric operands"
                 )
-        if prim in ("max", "min", "add", "sub", "mul", "neg", "div"):
+        if prim in ("max", "min", "add", "sub", "mul", "neg", "div", "square"):
             if any(_is_bool_dtype(a.aval) for a in eqn.invars):
                 raise _Decline(
                     f"arithmetic {prim!r} on boolean operands has no v1 "
@@ -1937,6 +1957,11 @@ class _Slicer:
                 y = eqn.params_dict().get("y")
                 if y not in (0, 1):
                     nonlinear = True
+            if prim == "square" and ins_dep[0]:
+                # unconditionally nonlinear when the operand depends on a
+                # declaration: `square` has no exponent param to fall back
+                # to a linear case with, unlike integer_pow's y in (0, 1).
+                nonlinear = True
             if any(ins_dep):
                 for out in eqn.outvars:
                     dependent.add(out.id)
@@ -2056,6 +2081,21 @@ if _REPLAY_SUPPORTED != _SUPPORTED:
     f"replayable-but-not-emittable {sorted(_REPLAY_SUPPORTED - _SUPPORTED)}"
 )
 
+
+
+def _square_value(v):
+    """One element of `square`'s replay: the exact rational self-product.
+
+    Named and module-level for the same reason
+    :func:`stelling.smt._square_body` is — the two faces of this row are
+    one expression each, and a row whose faces cannot be mutated
+    INDEPENDENTLY cannot be gauged (a single seam patched in both places at
+    once measures agreement with itself). ``v * v`` and not ``v ** 2``: the
+    replay's whole job is to re-derive the violation, and the self-product
+    is the shape the emission writes, in the arithmetic — exact
+    :class:`fractions.Fraction` — the emission does not have.
+    """
+    return v * v
 
 
 def _scalar_binop(prim: str, a, b):
@@ -2212,6 +2252,9 @@ def _root_elements(
                 (idx,) = _pair_elementwise(eqn)
                 y = int(params["y"])
                 out = tuple(ins[0][i] ** y for i in idx)
+            elif prim == "square":
+                (idx,) = _pair_elementwise(eqn)
+                out = tuple(_square_value(ins[0][i]) for i in idx)
             elif prim == "convert_element_type":
                 (idx,) = _pair_elementwise(eqn)
                 dst = str(params.get("new_dtype"))

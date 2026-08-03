@@ -24,6 +24,30 @@ IDIOMATIC**: external code terminates on `square`, `sign`, `unstack`, `copy`,
 which is a MADDENING terminal**, and five of which have neither an interval
 transfer nor an emission row.
 
+> **2026-08-03 — `square` now has an SMT emission row.** What that changes,
+> stated only as far as it was measured. A NEW contract, written against
+> `jaxfluids`' `WENO5Base.smoothness`, moves from `escalation declined:
+> primitive 'square' is outside the supported emission set` to **REFUTED with
+> a replay-confirmed witness** (`tests/test_square_acceptance_jaxfluids.py`).
+> That is a new contract, not a re-run: the two blinded external contracts
+> behind the measurement above are not in this tree, so **nothing is claimed
+> here about what they would hit today**, and the terminal table's site 5
+> ("its effect on the external harness is unverified") is left standing. Note
+> also that site 5's mechanism is `square` **⊤ poisoning** — the INTERVAL
+> transfer falling to ⊤ — which an emission row does not touch.
+>
+> Not a universal, and the counterexamples are in this repository. A slice
+> traversing `square` still declines on an `int32`/`int64` declaration and
+> through the bool→`int32` route (`square`'s own overflow guard), on boolean
+> operands, over the element budget, and — for a complex value reached by
+> `astype` — at the conversion, before `square` is reached at all. Measured;
+> each has a test in `tests/test_square_row.py`.
+>
+> The trailing count is untouched on purpose: `square` was never one of the
+> five — it carried a `sound` interval transfer throughout — so the emission
+> row does not move that figure. The rest of the list is unretested by this
+> change and is left as measured.
+
 **One terminal recurs across all three, and its mechanism explains why:** the
 element budget, because it is a function of query SIZE rather than of coding
 style.

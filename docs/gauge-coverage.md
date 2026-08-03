@@ -33,11 +33,18 @@ how the two faces drifted apart once already.
 | `scatter-add` | **yes** | **yes** | as above |
 | `dot_general` | **no** | **yes** | `param_gauge_dot.py` drives `TRANSFERS`/`interval_env` only; `tests/test_dot_general_interval.py` is containment |
 | `convert_element_type` | **no** | **yes** | `param_gauge_convert.py` drives `interval_env` only |
+| `square` | **yes** | **yes** | `tests/test_square_row_gauge_jax.py` drives both from one battery — the emission gates run the pipeline through `check`/`escalate` to a replayed witness, eagerly AND with the `square` fused inside a `jit`; `interval-containment-eager-and-jit` drives `interval_env` against the values jax computes on this target. Its transfer-face mutation is CAUGHT by the containment gate and ADMITTED by every emission gate, so the two faces are visibly independent rather than assumed to be |
 | the other 29 in the emission set | **no** | mostly yes | containment sweep (Run 11), which is transfer-face by construction |
 | the 6 transfers with no emission row | n/a | mostly yes | same |
 
 **Totals: 39 registered transfers, 33 in the emission set. Two primitives have
-both faces gauged.**
+both faces gauged.** Those three figures were measured when this table was
+first written and are left as they were read. **As of the round that added
+`square`'s emission row (2026-08-03) the emission set is 34 and THREE
+primitives have both faces gauged** (`scatter`, `scatter-add`, `square`); the
+transfer-side figures are a different population at a different date and are
+not restated here. `docs/supported-primitives.md` is generated from the live
+registries and is the current count of both.
 
 ## What this table says that the earlier numbers did not
 
