@@ -178,6 +178,7 @@ __all__ = [
     "NOT_EXECUTED_EXIT",
     "RESULT_EXIT",
     "SCHEMA",
+    "SCHEMA_STABILITY",
     "SIDECAR_KEYS",
     "ReproducerError",
     "one_line",
@@ -204,15 +205,41 @@ EXECUTION_RESULTS = (CONFIRMED, DIVERGED, UNREACHABLE)
 RESULT_EXIT = 0
 NOT_EXECUTED_EXIT = 3
 
-# ── the published sidecar schema ─────────────────────────────────────────────
+# ── the sidecar schema, PROVISIONAL for 0.1.0 ────────────────────────────────
 #
-# A CI coverage line and an external soak parse this, so it is a PUBLISHED
-# SURFACE: adding a key is compatible, removing or retyping one is not, and
-# either way the integer in SCHEMA moves. It is small on purpose. Every
-# field is one an outside consumer cannot re-derive for itself, and nothing
-# here is a rendering — the prose all lives in the emitted file's own
-# output, where changing it breaks nobody's parser.
-SCHEMA = "stelling.reproducer/1"
+# **The schema is PROVISIONAL / UNSTABLE for 0.1.0.** Fields may be added,
+# removed or renamed in 0.1.1 without a deprecation cycle. It is planned to
+# FREEZE in 0.1.1, once the external soak has parsed real emissions and the
+# fields have been exercised by a consumer that did not write them.
+#
+# The withdrawal is deliberate, and the reason is that the argument for
+# declaring it stable was never an argument for declaring it stable NOW. It
+# ran: a CI coverage line and an external soak parse this, therefore it is a
+# published surface. That is a reason for it to become stable EVENTUALLY —
+# nothing has parsed a single one of these files in anger yet, so no field
+# here has been tested by anyone but its author, and "small and designed to
+# survive" is a prediction until a consumer has tried to live on it. A
+# schema declared stable and then changed is a break for whatever parses
+# it; the marking costs a version string.
+#
+# Everything else in this feature is repairable in a patch release. This is
+# the only irreversible commitment in it, which is why it is the one thing
+# held back.
+#
+# The marking is in the SCHEMA IDENTIFIER ITSELF, not only in a field, so a
+# consumer doing the ordinary thing — comparing `schema` against the string
+# it was written for — fails closed rather than succeeding against a
+# guarantee that was never given. The `stability` field carries the sentence
+# and the freeze condition for a reader who has only the JSON.
+SCHEMA = "stelling.reproducer/1-provisional"
+
+SCHEMA_STABILITY = (
+    "PROVISIONAL / UNSTABLE for stelling 0.1.0: fields may be added, "
+    "removed or renamed in 0.1.1 without a deprecation cycle. Planned to "
+    "freeze in 0.1.1, once the external soak has parsed real emissions and "
+    "these fields have been exercised by a consumer that did not write "
+    "them. Do not build on this without pinning the stelling version."
+)
 
 # JSON HAS NO ENCODING FOR ±inf OR NaN, and Python's json module emits the
 # bare tokens `Infinity`/`NaN`, which its own loader accepts and jq,
@@ -224,7 +251,9 @@ SCHEMA = "stelling.reproducer/1"
 NONFINITE = {float("inf"): "inf", float("-inf"): "-inf"}
 
 SIDECAR_KEYS = (
-    "schema",       # str  — SCHEMA above
+    "schema",       # str  — SCHEMA above; the identifier says "provisional"
+    "stability",    # str  — SCHEMA_STABILITY: what that means, and when it
+                    #        stops being true
     "stelling",     # str  — the version that emitted this
     "jax",          # str  — the jax that traced the query
     "query",        # str  — ir.ClosedJaxpr.content_hash() of the judged query
@@ -972,6 +1001,7 @@ def _reproducer_source(verdict, subject: Subject, obligation_index) -> str:
     ]
     sidecar = {
         "schema": SCHEMA,
+        "stability": SCHEMA_STABILITY,
         "stelling": _version(),
         "jax": _jax_version(),
         "query": query_hash,
@@ -1094,6 +1124,8 @@ def _banner(sidecar, witness, disclosures, sha, x64) -> str:
         f"fragment         : {sidecar['fragment']}",
         f"equations        : {sidecar['equations']}",
         f"replay           : {one_line(witness.replay)}",
+        f"sidecar schema   : {sidecar['schema']}",
+        f"                   {one_line(sidecar['stability'])}",
         "declared envelope:",
     ]
     for d in sidecar["envelope"]:
@@ -1224,6 +1256,14 @@ Exit status is ${result_exit} for all three, because a nonzero status is how CI
 says "this check failed" and two of the three are not failures of
 anything. Exit ${not_executed_exit} means there is no execution result at all: the
 target could not be constructed. Read the JSON sidecar, not the status.
+
+THE SIDECAR SCHEMA IS PROVISIONAL. It is unstable for stelling 0.1.0 —
+fields may be added, removed or renamed in 0.1.1 without a deprecation
+cycle — and is planned to freeze in 0.1.1, once an external soak has
+parsed real emissions and the fields have been exercised by a consumer
+that did not write them. The schema identifier says so, and every sidecar
+this file writes carries the same sentence in its `stability` field. Pin
+the stelling version if you build on it.
 """
 import importlib
 import json

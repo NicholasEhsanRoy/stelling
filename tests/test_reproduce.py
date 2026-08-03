@@ -198,13 +198,39 @@ def test_a_name_that_resolves_to_a_different_object_is_refused():
 def test_the_schema_is_versioned_and_its_key_set_is_pinned():
     """SCHEMA is a parsed surface. This test is the thing that makes
     changing it a deliberate act rather than a diff nobody noticed."""
-    assert SCHEMA == "stelling.reproducer/1"
+    assert SCHEMA == "stelling.reproducer/1-provisional"
     assert SIDECAR_KEYS == (
-        "schema", "stelling", "jax", "query", "contract", "verdict",
-        "obligation", "relation", "fragment", "equations", "envelope",
-        "witness", "witness_filled", "stelling_sha", "x64", "execution",
+        "schema", "stability", "stelling", "jax", "query", "contract",
+        "verdict", "obligation", "relation", "fragment", "equations",
+        "envelope", "witness", "witness_filled", "stelling_sha", "x64",
+        "execution",
     )
     assert len(set(SIDECAR_KEYS)) == len(SIDECAR_KEYS)
+
+
+def test_the_schema_is_marked_provisional_in_the_identifier_itself():
+    """A reader deciding whether to build on this must be able to tell
+    from the artifact, not from a changelog — and the ordinary version
+    check must FAIL CLOSED rather than succeed against a guarantee that
+    was never given.
+
+    The marking is withdrawn, not redesigned: nothing here has been parsed
+    in anger, so no field has been tested by anyone but its author, and
+    "small and designed to survive" is a prediction until a consumer has
+    tried to live on it. Everything else in this feature is repairable in
+    a patch release; this is the one irreversible commitment.
+    """
+    assert "provisional" in SCHEMA
+    # the check a consumer written against a stable 0.1.0 would do
+    assert SCHEMA != "stelling.reproducer/1"
+    for phrase in (
+        "PROVISIONAL / UNSTABLE for stelling 0.1.0",
+        "added, removed or renamed in 0.1.1",
+        "without a deprecation cycle",
+        "freeze in 0.1.1",
+        "soak has parsed real emissions",
+    ):
+        assert phrase in R.SCHEMA_STABILITY, phrase
 
 
 def test_the_execution_modes_are_pinned_too():

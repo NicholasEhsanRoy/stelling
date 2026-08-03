@@ -192,13 +192,42 @@ judged set rather than a fact discovered afterwards.
 ## The JSON sidecar
 
 Running the file writes `<name>.json` beside it (or wherever
-`STELLING_REPRODUCER_JSON` points). It is a **published surface** — a CI
-coverage line and an external soak parse it — so its key set is pinned by
-a test and the integer in `schema` moves on any incompatible change.
+`STELLING_REPRODUCER_JSON` points).
+
+### The schema is PROVISIONAL for 0.1.0
+
+**It is unstable, and you should not build on it without pinning the
+stelling version.** Concretely: fields may be **added, removed or
+renamed** in 0.1.1, **without a deprecation cycle**, and a consumer
+written against 0.1.0 may simply stop working.
+
+It is planned to **freeze in 0.1.1**, once the external soak has parsed
+real emissions and the fields have been exercised by a consumer that did
+not write them.
+
+The reason it is not frozen now is that the argument for freezing it was
+never an argument for freezing it *yet*. That argument ran: a CI coverage
+line and an external soak parse this, therefore it is a published surface.
+That is a case for stability *eventually* — nothing has parsed one of
+these files in anger, so no field here has been tested by anyone but its
+author, and "small and designed to survive" is a prediction until a
+consumer has tried to live on it. Everything else in this feature can be
+repaired in a patch release; a schema declared stable and then changed is
+a break for whatever parses it.
+
+You can tell from the artifact, without a changelog. The **identifier
+itself** carries the marking, so the ordinary version check —
+`doc["schema"] == "stelling.reproducer/1"` — fails closed rather than
+succeeding against a guarantee that was never given. Every sidecar also
+carries a `stability` field spelling out what it means and when it stops
+being true, and the emitted file says the same in its header.
+
+### The fields
 
 | key | |
 |---|---|
-| `schema` | `"stelling.reproducer/1"` |
+| `schema` | `"stelling.reproducer/1-provisional"` |
+| `stability` | what "provisional" means here, and the freeze condition |
 | `stelling`, `stelling_sha`, `jax`, `x64` | the versions and the precision setting that produced the verdict |
 | `query` | the traced query's content hash |
 | `contract`, `verdict`, `obligation`, `relation` | which claim this is evidence about |

@@ -52,6 +52,7 @@ import jax.numpy as jnp  # noqa: E402
 
 
 from stelling.preconditions import check  # noqa: E402
+import stelling.reproduce as R  # noqa: E402
 from stelling.reproduce import (  # noqa: E402
     CONFIRMED,
     DIVERGED,
@@ -172,6 +173,16 @@ ABSORBED = Subject(
     relation="<=",
     declarations=(((), "float64", (0.0, 2.0 ** -70)),),
     no_precondition_reason=NO_CALLER_NARROWING,
+)
+
+WEIGHTS_UNDECLARED = Subject(
+    name="normalized-weight-pair-open",
+    fn=weight_pair_sum,
+    relation="<=",
+    declarations=(((), "float64", (0.0, 1.0)), ((), "float64", (0.0, 1.0))),
+    no_precondition_reason=(
+        "stated deliberately: no caller precondition is declared on this pair"
+    ),
 )
 
 WEIGHTS = Subject(
@@ -1102,6 +1113,61 @@ def test_a_measured_reachability_is_not_published_as_unknown(tmp_path):
     )
     _, side2 = _run(no_pre, tmp_path, STELLING_REPRO_RAISE="1")
     assert side2["execution"]["reachable"] is None, side2["execution"]
+
+
+# ── the provisional marking, on every path that writes a sidecar ────────────
+
+
+def test_every_sidecar_writing_path_carries_the_provisional_marking(tmp_path):
+    """A consumer holding only the JSON must not be able to miss it.
+
+    There are four paths that write a sidecar and they are reached by
+    different code — the two result branches, the UNREACHABLE early
+    return, and `_stop` — so "it is in the baked SIDECAR dict" is an
+    argument, not a measurement. This runs all four.
+
+    Strict parsing is checked on the same files, because a consumer who
+    reads a provisional marker is exactly the consumer who will be using a
+    strict parser: `parse_constant` fires on precisely the tokens Python
+    emits and no other language accepts.
+    """
+    pytest.importorskip("z3")
+
+    def strict(c):
+        raise AssertionError(f"invalid JSON token {c!r}")
+
+    stopping = Subject(
+        name="stops",
+        fn=raises_in_every_mode,
+        relation="<=",
+        declarations=(((), "float64", (1.0, 3.0)), ((), "float64", (1.0, 3.0))),
+        no_precondition_reason="control case; no precondition is declared",
+    )
+    cases = [
+        (CONFIRMED, WEIGHTS_UNDECLARED, {}),
+        (DIVERGED, UNDERFLOW, {}),
+        (UNREACHABLE, WEIGHTS, {}),
+        (None, stopping, {"STELLING_REPRO_RAISE": "1"}),
+    ]
+    seen = set()
+    for expected, subject, env in cases:
+        _, em = _emit(subject, tmp_path)
+        proc, _ = _run(em, tmp_path, **env)
+        raw = pathlib.Path(em.sidecar_path).read_text()
+        # STRICT: no bare Infinity/NaN, and no token only Python accepts
+        doc = json.loads(raw, parse_constant=strict)
+        assert doc["execution"]["result"] == expected, (subject.name, proc.stdout)
+        assert doc["schema"] == SCHEMA
+        assert "provisional" in doc["schema"], subject.name
+        assert doc["stability"] == R.SCHEMA_STABILITY, subject.name
+        assert "PROVISIONAL / UNSTABLE" in doc["stability"]
+        assert "0.1.1" in doc["stability"]
+        assert set(doc) == set(SIDECAR_KEYS), subject.name
+        # and the reader who never opens the JSON sees it too
+        assert "sidecar schema   : " in em.source
+        assert "PROVISIONAL / UNSTABLE" in em.source
+        seen.add(expected)
+    assert seen == {CONFIRMED, DIVERGED, UNREACHABLE, None}
 
 
 # ── the uncallable target, stated rather than crashed ────────────────────────
