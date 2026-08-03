@@ -43,12 +43,34 @@ conservative fold is exactly the case that must not be silent.
 
 SCOPE — what these tests REACH: the emitted TEXT for the affected class
 and its controls, checked against the real z3 parser under the declared
-logic; the fold's arithmetic against jax's own eager and jit execution;
-the dispatch layer's degradation reporting on both outcome directions and
-both causes (absent backend, refusing backend); and end-to-end verdict
-containment for a battery of constant-bearing harnesses. They do NOT
-reach: the affine domain, ieee semantics, arrays past the small battery
-here, the scatter rows, or any primitive outside the emission set.
+logic; every binary fold rule pinned BY VALUE against a literal written
+into this file; the fold's three fail-closed gates (non-constant or
+boolean operand, division by a constant zero, and an UNRENDERABLE
+numeral); its broadcast element pairing; its arithmetic against jax's own
+jit execution; the dispatch layer's degradation reporting on both outcome
+directions and both causes (absent backend, refusing backend), with the
+refusing-backend case driven through the REAL z3/cvc5 transports and not
+only through fakes; and end-to-end verdict containment for a battery of
+constant-bearing harnesses.
+
+SCOPE — what they do NOT reach: the affine domain, ieee semantics, arrays
+past the two small shapes here, the scatter rows, and any primitive
+outside the emission set.
+
+THE FOLD'S BOUNDARY IS A DISCLOSED RESIDUE, NOT A CLOSED SET.
+``smt._FOLDABLE`` covers the elementwise real-arithmetic producers.
+Outside it, and REACHABLE from ordinary jax: `select_n` (folding one
+needs its selector folded, hence the comparisons and connectives too),
+`convert_element_type` on a constant bool, and the plan-driven reductions
+`reduce_sum` and `dot_general`. Each can put a constant TERM in the
+factor position under QF_LRA, where z3 refuses the script with the same
+error this fold exists to prevent — measured, through the real portfolio,
+on ``jnp.where(a > b, a + b, a - b) * v``, and pinned at the bottom of
+this file in BOTH outcome directions. Nothing there is wrong, only
+degraded: repair 2 flags every one of them. An earlier version of the
+``_FOLDABLE`` comment claimed those producers "cannot be the factor or
+the divisor of an emitted product"; that claim was false and has been
+corrected rather than defended.
 
 Positive and negative controls throughout: a genuinely nonlinear slice
 must STILL be QF_NRA and STILL emit the unfolded self-product (otherwise
@@ -57,30 +79,49 @@ a full-portfolio verdict must carry NO degradation note (otherwise the
 flag means nothing).
 
 MEASURED DISCRIMINATING POWER, this tree, both solvers installed. Each
-mechanism was deleted in turn and the suite re-run; the counts are the
-tests that CAUGHT the deletion, and every one of them is in this file —
-nothing that existed before this round noticed any of these:
+mechanism was deleted or corrupted in turn and the whole suite re-run;
+the counts are the tests that CAUGHT it, and every one of them is in this
+file — nothing that existed before this round notices any of them. The
+`before` column is the same measurement against the FIRST version of this
+file, which is why three of these tests exist at all:
 
-    the fold, disabled entirely                      24 caught
-    the degradation notes + detail clause, disabled   2 caught
-    the top-of-render PORTFOLIO DEGRADED line          3 caught
-    Verdict.solver_redundancy, never populated         5 caught
+                                                    before   now
+    the fold, disabled entirely                         24     30
+    the fail-closed renderability gate, removed          0      1
+    the `max` rule, corrupted to its 2nd operand         0      2
+    the broadcast element pairing, ignored               0      1
+    the degradation notes + detail clause, disabled      2      4
+    the top-of-render PORTFOLIO DEGRADED line            3      5
+    Verdict.solver_redundancy, never populated           5      7
 
-Per-primitive wrong-fold mutations are a live battery below
-(:data:`MUTATIONS`) rather than a recorded number, because a fold that
-computes the wrong value is the one way this repair could mint a false
-VERIFIED.
+THE THREE ZEROES ARE THE POINT, and a blinded audit of the first round
+found all three:
+
+  * the renderability cliff — four harnesses went VERIFIED (base) to
+    UNKNOWN (folded) on a raw ``ValueError`` about integer string
+    conversion, which falsified that round's "no verdict changed";
+  * a `max` fold corrupted to return its second operand, which left the
+    WHOLE SUITE GREEN and turned a correct REFUTED into a false VERIFIED
+    on a full two-backend portfolio — because the battery computed its
+    expected value BY CALLING THE FOLD and only asserted the text
+    changed, so it measured its own sensitivity and never the rule. Note
+    what fixing it took TWICE: pinning `max(2.0, 5.0)` by value still
+    admitted the corruption, because on that pair "return the second
+    operand" and `max` agree. Both argument orders are pinned now;
+  * a fold that ignores the broadcast pairing, likewise green, because
+    every case here was scalar-shaped, where the pairing is the identity.
 """
 
 from __future__ import annotations
 
+import struct
 from fractions import Fraction
 
 import pytest
 
 import stelling.obligation as OB
 import stelling.smt as SM
-from stelling import solvers
+from stelling import ir, solvers
 from stelling.obligation import ObligationSlice, slice_unknown_obligations
 from stelling.propagate import interval_env, propagate
 from stelling.solvers import (
@@ -301,37 +342,49 @@ def test_the_fold_declines_what_it_cannot_do_exactly():
     ) == (Fraction(1, 4),)
 
 
-# mutation name -> (primitive, the constant-only equation that exercises its
-# fold, a deliberately wrong rule, a bound the propagated interval straddles)
-MUTATIONS = {
-    "add-folds-as-sub": ("add", (2.0, 1.0), lambda a, b: a - b, 4.0),
-    "mul-folds-as-add": ("mul", (2.0, 3.0), lambda a, b: a + b, 5.0),
-    "div-folds-inverted": ("div", (6.0, 3.0), lambda a, b: b / a, 3.0),
-    "min-folds-as-max": ("min", (2.0, 5.0), lambda a, b: max(a, b), 3.0),
-    "max-folds-as-min": ("max", (2.0, 5.0), lambda a, b: min(a, b), 6.0),
+# primitive -> (operands, the emitted body of `d = c + x`, a deliberately
+# wrong rule, a bound the propagated interval straddles).
+#
+# THE THIRD FIELD IS WRITTEN OUT BY HAND AND IS THE POINT. Its predecessor
+# computed the expected value by CALLING THE FOLD and then asserted only
+# that the emitted text CHANGED under monkeypatch — which measures the
+# battery's own sensitivity and never the rule's value. Measured
+# consequence of that gap: corrupting `max` to return its second operand
+# left the WHOLE SUITE GREEN (1696 passed), and on
+# `jnp.maximum(a + b, a - b) * v <= 2.0` turned a correct REFUTED into a
+# FALSE VERIFIED on a full two-backend portfolio with no degradation flag
+# — the discharge direction, the one with no replay backstop.
+#
+# `add`/`sub`/`mul`/`div`/`square`/`integer_pow` were independently pinned
+# by the byte-level CLASS table above; `max` and `min` were pinned
+# NOWHERE. `test_smt_emission.test_max_min_select_emit_as_ite` pins the
+# `ite` body for two DECLARED operands, which the fold never sees.
+# case -> (primitive, operands, the emitted body of `d = c + x`, a
+# deliberately wrong rule, a bound the propagated interval straddles).
+#
+# BOTH ARGUMENT ORDERS FOR `max` AND `min`, and that is not symmetry for
+# its own sake. Measured: with only `max(2.0, 5.0)` pinned, corrupting the
+# rule to "return the second operand" still emits 5.0 — the corruption is
+# INDISTINGUISHABLE from `max` on that pair, and the byte-level pin passed
+# while the end-to-end battery caught it alone. A value pin whose operands
+# make the wrong answer equal the right one is not a pin.
+FOLD_RULES = {
+    "add": ("add", (2.0, 1.0), "(+ 3.0 x0)", lambda a, b: a - b, 4.0),
+    "sub": ("sub", (2.0, 1.0), "(+ 1.0 x0)", lambda a, b: a + b, 2.0),
+    "mul": ("mul", (2.0, 3.0), "(+ 6.0 x0)", lambda a, b: a + b, 5.0),
+    "div": ("div", (6.0, 3.0), "(+ 2.0 x0)", lambda a, b: b / a, 3.0),
+    # max: the larger operand, whichever side it is on
+    "max-left": ("max", (5.0, 2.0), "(+ 5.0 x0)", lambda a, b: b, 6.0),
+    "max-right": ("max", (2.0, 5.0), "(+ 5.0 x0)", lambda a, b: a, 6.0),
+    # min: the smaller operand, whichever side it is on
+    "min-left": ("min", (2.0, 5.0), "(+ 2.0 x0)", lambda a, b: b, 3.0),
+    "min-right": ("min", (5.0, 2.0), "(+ 2.0 x0)", lambda a, b: a, 3.0),
 }
 
 
-@pytest.mark.parametrize("mutation", sorted(MUTATIONS))
-def test_mutation_a_wrong_fold_is_CAUGHT_by_the_emitted_value(mutation, monkeypatch):
-    """The battery under every assertion above, and the reason the fold's
-    exactness is a measurement and not a promise.
-
-    A fold is a second exact evaluator beside the replay's, and a wrong
-    one would put a number in the script that the program never computes
-    — the one way this repair could mint a false VERIFIED. Each mutation
-    replaces the fold's rule for one primitive with a deliberately wrong
-    one; the emitted numeral must change. A mutation that survives is a
-    hole in this file, not a curiosity.
-
-    The baseline is asserted too: the unmutated emission must carry the
-    value the operation really has, so a mutation that changed the text
-    for some unrelated reason cannot pass for a catch."""
-    prim, (a, b), wrong, bound = MUTATIONS[mutation]
-    x, c, d, pred, out = (
-        var(0), var(1), var(2), var(3, BOOL), var(4, BOOL)
-    )
-    q = close(
+def _fold_rule_query(prim, a, b, bound):
+    x, c, d, pred, out = var(0), var(1), var(2), var(3, BOOL), var(4, BOOL)
+    return close(
         [
             any_eqn(x, -2.0, 3.0),
             eqn(prim, [lit(a), lit(b)], c),  # constant-only: foldable
@@ -341,18 +394,189 @@ def test_mutation_a_wrong_fold_is_CAUGHT_by_the_emitted_value(mutation, monkeypa
         ],
         [out],
     )
-    real = SM._fold_constant_elements
-    right = real(q.jaxpr.eqns[1], [(Fraction(a),), (Fraction(b),)])
-    baseline = SM.emit(_slice_of(q), "z3", 30_000).text
-    assert SM.rational(right[0]) in baseline, (mutation, baseline)
+
+
+@pytest.mark.parametrize("case", sorted(FOLD_RULES))
+def test_each_fold_rule_emits_the_value_the_operation_really_has(case):
+    """Every binary fold rule pinned BY VALUE, against a literal written
+    into this file — never against the fold's own output.
+
+    This is the assertion that would have caught a corrupted `max`, and
+    the one the previous battery could not make because it asked the
+    subject what the answer was."""
+    prim, (a, b), body, _wrong, bound = FOLD_RULES[case]
+    text = SM.emit(_slice_of(_fold_rule_query(prim, a, b, bound)), "z3", 30_000).text
+    assert body in text, (case, text)
+    assert "(define-fun t1 " not in text, (case, text)  # and no term was minted
+
+
+@pytest.mark.parametrize("case", sorted(FOLD_RULES))
+def test_mutation_a_wrong_fold_rule_is_CAUGHT(case, monkeypatch):
+    """The battery, now measuring the RULE rather than itself: the wrong
+    rule must produce a body that is not the hand-written one.
+
+    A fold is a second exact evaluator beside the replay's, and a wrong
+    one puts a number in the script that the program never computes — the
+    one way this repair could mint a false VERIFIED. A mutation that
+    survives is a hole in this file, not a curiosity."""
+    prim, (a, b), body, wrong, bound = FOLD_RULES[case]
+    real = SM._fold_values
 
     def mutated(eqn_, ins):
         if eqn_.primitive == prim and not any(v is None for v in ins):
             return (wrong(ins[0][0], ins[1][0]),)
         return real(eqn_, ins)
 
-    monkeypatch.setattr(SM, "_fold_constant_elements", mutated)
-    assert SM.emit(_slice_of(q), "z3", 30_000).text != baseline, mutation
+    monkeypatch.setattr(SM, "_fold_values", mutated)
+    text = SM.emit(_slice_of(_fold_rule_query(prim, a, b, bound)), "z3", 30_000).text
+    assert body not in text, (case, text)
+
+
+# --- the three ways a fold must fail closed ----------------------------------
+
+
+def test_an_UNRENDERABLE_numeral_falls_back_to_the_unfolded_emission():
+    """The gate a measured VERIFIED -> UNKNOWN regression put here.
+
+    The value is exactly foldable and CANNOT BE WRITTEN DOWN: CPython caps
+    ``int``->``str`` at ``sys.get_int_max_str_digits()`` (4300 since 3.11)
+    and an exact dyadic power blows past it in the DENOMINATOR, which is a
+    power of two. Without the gate ``rational()`` raised out of ``emit``,
+    the escalation guard turned it into UNKNOWN, and obligations that were
+    VERIFIED before the fold came back quoting a raw Python message as the
+    verdict's reason.
+
+    Both sides are pinned, because the threshold is what makes this a
+    cliff rather than a curiosity: ``c ** 32`` at c = 1e-100 folds to a
+    numeral; ``c ** 64`` — a single step, at this row's own
+    ``INTEGER_POW_EXPANSION_CAP`` — does not, and must emit the unfolded
+    product instead of raising."""
+    import sys
+
+    assert sys.get_int_max_str_digits() == 4300, "the cap this pins"
+    tiny = Fraction(1e-100)
+    assert len(str((tiny ** 32).denominator)) < 4300
+    with pytest.raises(ValueError, match="4300 digits"):
+        str((tiny ** 64).denominator)
+
+    def q(y):
+        x, c, s, d, pred, out = (
+            var(0), var(1), var(2), var(3), var(4, BOOL), var(5, BOOL)
+        )
+        return close(
+            [
+                any_eqn(x, -2.0, 3.0),
+                eqn("add", [lit(1e-100), lit(0.0)], c),
+                eqn("integer_pow", [c], s, (("y", y),)),
+                eqn("add", [s, x], d),
+                eqn("le", [d, lit(2.0)], pred),
+                eqn("stelling_assert", [pred], out),
+            ],
+            [out],
+        )
+
+    folded = SM.emit(_slice_of(q(32)), "z3", 30_000).text
+    assert "(define-fun t2 " not in folded, folded  # folded to a numeral
+
+    # the cliff: no raise, and the emission is the unfolded product — of
+    # numerals, since the OPERAND still folded, so both backends can read it
+    unfolded = SM.emit(_slice_of(q(64)), "z3", 30_000).text
+    assert "(define-fun t2 () Real (* " in unfolded, unfolded
+    assert "t1" not in {
+        line.split()[1] for line in unfolded.splitlines()
+        if line.startswith("(define-fun ")
+    }
+
+
+def test_the_fold_declines_a_division_by_a_constant_zero():
+    """Fail-closed gate two, at the seam. (The slice validator refuses
+    such a slice first; the fold refuses independently rather than rely
+    on that.)"""
+    assert SM._fold_constant_elements(
+        eqn("div", [lit(1.0), lit(0.0)], S), [(Fraction(1),), (Fraction(0),)]
+    ) is None
+    assert SM._fold_constant_elements(
+        eqn("div", [lit(1.0), lit(4.0)], S), [(Fraction(1),), (Fraction(4),)]
+    ) == (Fraction(1, 4),)
+
+
+def _arr_lit(values, shape):
+    data = struct.pack(f"<{len(values)}d", *[float(v) for v in values])
+    return ir.Literal(
+        val=ir.Array(dtype="<f8", shape=tuple(shape), data=data),
+        aval=ir.Aval(kind="ShapedArray", shape=tuple(shape), dtype="float64"),
+    )
+
+
+def _pairing_query():
+    """``(2,1) + (1,2) -> (2,2)`` over constants, plus a declared (2,2).
+
+    The smallest shape where the source index is not the output index in
+    EITHER operand, so a fold that ignores the pairing produces different
+    numbers rather than the same ones by luck."""
+    a = _arr_lit([10.0, 20.0], (2, 1))
+    b = _arr_lit([1.0, 2.0], (1, 2))
+    a22 = ir.Aval(kind="ShapedArray", shape=(2, 2), dtype="float64")
+    b22 = ir.Aval(kind="ShapedArray", shape=(2, 2), dtype="bool")
+    x, c, d, pred, out = (
+        ir.Var(id=0, aval=a22), ir.Var(id=1, aval=a22), ir.Var(id=2, aval=a22),
+        ir.Var(id=3, aval=b22), ir.Var(id=4, aval=b22),
+    )
+    return close(
+        [
+            any_eqn(x, -2.0, 3.0, shape=(2, 2)),
+            eqn("add", [a, b], c),  # constant-only, genuinely broadcast
+            eqn("add", [c, x], d),
+            eqn("le", [d, lit(22.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+
+
+def test_the_fold_pairs_broadcast_operands_the_way_the_emission_does():
+    """The fold's element pairing, pinned — it was not, anywhere.
+
+    Every other case in this file is scalar, where ``_pair_elementwise``
+    returns the identity and a fold that ignored it entirely would agree.
+    Measured: replacing the pairing with positional indexing left the
+    whole suite green.
+
+    ``(2,1) + (1,2) -> (2,2)`` is the smallest shape where the source
+    index is not the output index in EITHER operand, so a fold that reads
+    ``ins[k][i]`` instead of ``ins[k][idx[k][i]]`` produces different
+    numbers. The four expected values are written out, in flat C order."""
+    text = SM.emit(_slice_of(_pairing_query()), "z3", 30_000).text
+    for i, value in enumerate(("11.0", "12.0", "21.0", "22.0")):
+        assert f"(define-fun t2_{i} () Real (+ {value} x0_{i}))" in text, (i, text)
+
+
+def test_mutation_a_fold_that_ignores_the_pairing_is_CAUGHT(monkeypatch):
+    """The battery entry for the pairing: a fold that reads
+    ``ins[k][i]`` — output position — instead of ``ins[k][idx[k][i]]``
+    must change the emitted numerals.
+
+    The mutation is applied to the FOLD, not to the shared
+    ``_pair_elementwise``: patching the helper breaks every other
+    equation in the slice too, and a test that dies in the comparison's
+    pairing has measured the shape check rather than the fold."""
+    real = SM._fold_values
+
+    def mutated(eqn_, ins):
+        if eqn_.primitive == "add" and not any(v is None for v in ins):
+            # same OUTPUT length, wrong source indices: a mutation that
+            # also changed the length would be caught by a downstream
+            # IndexError, which measures shape bookkeeping, not pairing
+            n = len(SM._pair_elementwise(eqn_)[0])
+            return tuple(
+                ins[0][min(i, len(ins[0]) - 1)] + ins[1][min(i, len(ins[1]) - 1)]
+                for i in range(n)
+            )
+        return real(eqn_, ins)
+
+    monkeypatch.setattr(SM, "_fold_values", mutated)
+    text = SM.emit(_slice_of(_pairing_query()), "z3", 30_000).text
+    assert "(+ 12.0 x0_1)" not in text, text
 
 
 # --- degradation reporting: who ANSWERED, not who was ASKED -------------------
@@ -581,6 +805,16 @@ _BATTERY = [
     ("max(c, v) refuted", lambda jnp, a, b, v: jnp.maximum(a + b, v), 2.5, False),
     ("(c-v)*c", lambda jnp, a, b, v: (a + b - v) * (a + b), 9.5, True),
     ("(c-v)*c refuted", lambda jnp, a, b, v: (a + b - v) * (a + b), 8.5, False),
+    # max/min of TWO CONSTANTS — the fold path. The `max(c, v)` entries
+    # above have a symbolic operand and therefore never fold, which is
+    # exactly how a corrupted `max` rule reached a false VERIFIED with the
+    # whole suite green.
+    ("max(c, c2)*v", lambda jnp, a, b, v: jnp.maximum(a + b, a - b) * v, 3.0, True),
+    ("max(c, c2)*v refuted",
+     lambda jnp, a, b, v: jnp.maximum(a + b, a - b) * v, 2.0, False),
+    ("min(c, c2)*v", lambda jnp, a, b, v: jnp.minimum(a + b, a - b) * v, 1.0, True),
+    ("min(c, c2)*v refuted",
+     lambda jnp, a, b, v: jnp.minimum(a + b, a - b) * v, 0.5, False),
 ]
 BOX = (0.0, 1.0)
 
@@ -665,8 +899,119 @@ def test_the_battery_is_contained_by_what_jax_actually_computes():
             for index, who in v.solver_redundancy:
                 assert len(who) == PORTFOLIO_SIZE, (name, index, who, v.notes)
             assert "PORTFOLIO DEGRADED" not in v.render(), name
-        assert tally["VERIFIED"] + tally["REFUTED"] == len(_BATTERY) == 10
+        assert tally["VERIFIED"] + tally["REFUTED"] == len(_BATTERY) == 14
         # both directions really occur, or "contained" would be vacuous
-        assert tally == {"VERIFIED": 6, "REFUTED": 4}, tally
+        assert tally == {"VERIFIED": 8, "REFUTED": 6}, tally
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+
+# --- the DISCLOSED RESIDUE, through the real z3/cvc5 portfolio ---------------
+#
+# Two things at once, and they are the same measurement.
+#
+# (1) The fold's boundary is `_FOLDABLE` — the elementwise REAL-arithmetic
+# producers. `select_n` is outside it (folding one needs its selector folded,
+# which is the comparisons and the connectives too), as are the plan-driven
+# reductions `reduce_sum` and `dot_general`. An earlier version of that
+# module comment claimed those producers "cannot be the factor or the divisor
+# of an emitted product". That is FALSE and this pins the falsification.
+#
+# (2) These tests drive the REAL transports into a degraded state via a
+# REFUSED SCRIPT, which is what the three deleted `test_square_row.py` tests
+# used to do and what the fake-backend tests above cannot: a fake backend
+# returns a canned answer, it does not exercise "z3's parser rejects the text
+# -> answer='failed' -> the note fires". Finding C shows that path is still
+# reachable in production, so it must stay tested with real solvers.
+
+
+def _where_harness(bound, *, cancel):
+    """``jnp.where(a > b, a + b, a - b) * v`` — ordinary jax. The selector
+    and both cases are constant, so `select_n` produces a constant TERM
+    that the fold does not touch, and the product against the declared `v`
+    is syntactically nonlinear under the QF_LRA the slice is stamped with.
+
+    ``cancel`` adds ``+ (v - v)`` — exactly zero in the program, [-1, 1]
+    to the interval leg — to keep the obligation off the cheap layer so it
+    really reaches the portfolio."""
+    import jax
+    import jax.numpy as jnp
+
+    from stelling.harness import any_array, assert_
+
+    def body(a, b, v):
+        got = jnp.where(a > b, a + b, a - b) * v
+        return got + (v - v) if cancel else got
+
+    f = jax.jit(body)
+
+    def h():
+        v = any_array((), "float64", (0.0, 1.0))
+        return (assert_(f(jnp.float64(2.0), jnp.float64(1.0), v) <= bound),)
+
+    return h
+
+
+@pytest.mark.parametrize(
+    "bound,cancel,outcome,universal",
+    [(2.0, False, "violated-witness", False), (3.0, True, "discharged", True)],
+)
+def test_the_residue_is_a_REAL_refused_script_and_is_flagged(
+    bound, cancel, outcome, universal, monkeypatch
+):
+    """z3 really refuses, cvc5 really decides, and the loss is flagged —
+    no fakes anywhere in this test.
+
+    Both directions, because they are reported differently: the discharge
+    carries the no-backstop sentence and the refutation must not. The
+    refutation's witness still replays, which is the whole reason that
+    direction reads differently."""
+    pytest.importorskip("jax")
+    pytest.importorskip("z3")
+    pytest.importorskip("cvc5")
+    import jax
+
+    from stelling.harness import trace
+
+    # the labels below are transport-qualified, and STELLING_CVC5 (a
+    # supported configuration) relabels cvc5 as an external binary
+    monkeypatch.delenv("STELLING_CVC5", raising=False)
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        q = trace(_where_harness(bound, cancel=cancel))
+        p = propagate(q)
+        assert [o.status for o in p.obligations] == ["unknown"]
+        (item,) = slice_unknown_obligations(q, p, interval_env(q))
+        # the residue, at the byte level: a constant SELECTION still mints a
+        # term, and that term is a factor of an emitted product under QF_LRA
+        assert item.fragment == OB.QF_LRA
+        text = SM.emit(item, "z3", 30_000).text
+        ite = [
+            line for line in text.splitlines()
+            if line.startswith("(define-fun") and "(ite " in line
+        ]
+        assert ite, text
+        term = ite[0].split()[1]
+        assert f"(* {term} x0)" in text, text
+
+        esc = escalate(q, p, SolverConfig(timeout_ms=30_000))
+        (record,) = esc.records
+        assert record.outcome == outcome
+        notes = " | ".join(record.notes)
+        # the REAL parser refusal, quoted verbatim by the real transport
+        assert "z3 (wheel) answered failed" in notes, notes
+        assert "logic does not support nonlinear arithmetic" in notes, notes
+        assert record.answered_by == ("cvc5 (wheel)",)
+        assert "portfolio degraded" in notes, notes
+        assert ("no backstop" in notes) is universal, notes
+
+        v = make_solver_verdict(
+            q, p, esc, stelling_version="test",
+            jax_version=jax.__version__, precision_config="jax_enable_x64=True",
+        )
+        assert v.status == ("VERIFIED" if universal else "REFUTED")
+        assert v.solver_redundancy == ((0, ("cvc5 (wheel)",)),)
+        assert "PORTFOLIO DEGRADED — assert #0 was decided by ONE solver" in v.render()
     finally:
         jax.config.update("jax_enable_x64", old)

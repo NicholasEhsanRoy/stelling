@@ -124,14 +124,78 @@ def _square_body(term: str) -> str:
     return f"(* {term} {term})"
 
 
-# The real-arithmetic primitives whose value is fixed the moment every
-# operand element's is. Deliberately NOT the whole emission set: the
-# comparisons, the connectives, `select_n` and `convert_element_type` are
-# left unfolded because they cannot be the factor or the divisor of an
-# emitted product, which is the position this fold exists to keep numeral.
+# The real-arithmetic elementwise primitives whose value is fixed the
+# moment every operand element's is.
+#
+# THIS IS NOT THE WHOLE SET THAT COULD BE FOLDED, and the residue is a
+# DISCLOSED GAP rather than an argument. An earlier version of this
+# comment claimed the comparisons, the connectives, `select_n` and
+# `convert_element_type` were left out because they "cannot be the factor
+# or the divisor of an emitted product". That is FALSE, measured: a
+# `select_n` over constant cases produces a constant term, and
+# `jnp.where(a > b, a + b, a - b) * v` — ordinary jax — emits
+# ``(* t3 t3)`` under QF_LRA, which z3 refuses with the same error this
+# fold exists to prevent. `reduce_sum` and `dot_general` reach the same
+# position from constant operands.
+#
+# What is true is narrower and is the actual boundary: this fold covers
+# the ELEMENTWISE REAL-ARITHMETIC producers, whose element pairing comes
+# from `_pair_elementwise` — the same helper the emission and the replay
+# already drive. Outside it are the boolean-valued producers (a fold of
+# `select_n` needs its selector folded, so that is `_COMPARE` and
+# `_BOOL_OPS` too), and the plan-driven reductions `reduce_sum` and
+# `dot_general`. Extending across that boundary is a further round with
+# its own value pins, deliberately not taken in the round that repaired
+# this fold's own renderability hole.
+#
+# The residue is not silent: an obligation whose script a backend then
+# refuses is reported as a degraded portfolio by :mod:`stelling.solvers`,
+# and `tests/test_constant_fold_portfolio.py` pins the `select_n` case
+# end to end through the real z3/cvc5 portfolio.
 _FOLDABLE = frozenset(
     {"add", "sub", "mul", "div", "neg", "max", "min", "square", "integer_pow"}
 )
+
+
+def _renderable(values: tuple | None) -> tuple | None:
+    """``values`` when every element can actually be WRITTEN as an SMT
+    literal, else ``None``.
+
+    THE THIRD WAY A FOLD FAILS, and it is not an arithmetic one: the value
+    is exactly right and the emission cannot write it down. CPython caps
+    ``int``→``str`` at ``sys.get_int_max_str_digits()`` (4300 by default
+    since 3.11), and an exact dyadic power crosses it fast — the
+    DENOMINATOR is the one that goes, being a power of two.
+    ``Fraction(1e-100) ** 64`` has a 5000-digit denominator.
+
+    Measured, and the reason this gate exists rather than a comment: with
+    no fallback, ``rational()`` raised out of :func:`emit`, the escalation
+    guard turned it into an UNKNOWN, and obligations that were VERIFIED
+    before the fold came back UNKNOWN quoting a raw Python message as the
+    verdict's reason. Reachable and idiomatic — a single ``c ** 64`` at
+    the ``INTEGER_POW_EXPANSION_CAP`` with c near 1e-100, or eight chained
+    squarings of a tolerance near 1e-16; ``c ** 32`` and seven squarings
+    still fold. Tolerance^n and κ^n are ordinary scientific code.
+
+    Fail closed, exactly as the arithmetic gates do: no text means no
+    fold, and the unfolded emission ships — which never renders the
+    product, only its factors, so it is strictly the smaller numeral.
+
+    Raising ``sys.set_int_max_str_digits`` would make this disappear and
+    is the wrong lever: a global process mutation, performed by a library,
+    on behalf of a caller who did not ask for it and whose other integer
+    conversions would silently change behaviour.
+    """
+    if values is None:
+        return None
+    for v in values:
+        if isinstance(v, bool):
+            continue
+        try:
+            rational(v)
+        except ValueError:
+            return None
+    return values
 
 
 def _fold_constant_elements(eqn: ir.JaxprEqn, ins) -> tuple | None:
@@ -169,11 +233,25 @@ def _fold_constant_elements(eqn: ir.JaxprEqn, ins) -> tuple | None:
     — the two faces of a row must stay independently mutable or a gauge
     measures one expression agreeing with itself.
 
-    Conservative by construction: anything not exactly foldable returns
-    ``None`` and emits byte-identically to before. The residue is not
-    silent — a decision that ends up resting on one backend is reported as
-    a degraded portfolio by :mod:`stelling.solvers`.
+    Conservative by construction, through THREE gates and one exit: the
+    primitive must be in :data:`_FOLDABLE` with every operand constant and
+    non-boolean; the operation must be total on those values (no division
+    by a constant zero); and the result must be RENDERABLE
+    (:func:`_renderable` — the gate a measured VERIFIED→UNKNOWN regression
+    put here). Anything failing any of them returns ``None`` and emits
+    byte-identically to before. The residue is not silent — a decision
+    that ends up resting on one backend is reported as a degraded
+    portfolio by :mod:`stelling.solvers`.
     """
+    return _renderable(_fold_values(eqn, ins))
+
+
+def _fold_values(eqn: ir.JaxprEqn, ins) -> tuple | None:
+    """The arithmetic half of :func:`_fold_constant_elements`: the exact
+    values, before anything asks whether they can be written down. Split
+    out so the renderability gate is a SINGLE exit that no branch here can
+    bypass — the predecessor returned from nine places, and a gate added
+    to one of them would have been a gate on one ninth of the rule."""
     prim = eqn.primitive
     if prim not in _FOLDABLE or any(operand is None for operand in ins):
         return None
