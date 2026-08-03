@@ -100,6 +100,25 @@ def _scatter_add_sum_body(operand_term: str, update_terms) -> str:
     return f"(+ {operand_term} {' '.join(update_terms)})"
 
 
+def _square_body(term: str) -> str:
+    """`square`'s emitted body: the SELF-PRODUCT of one term.
+
+    The same term twice, never two names — that is what makes the emission
+    say something an interval cannot. ``square([-2, 3])`` is ``[0, 9]``
+    because the transfer knows the two factors are one value; a slice that
+    emitted ``(* a b)`` for two independently-constrained constants would
+    hand the solver a strictly weaker problem and could return a "witness"
+    at a point the program cannot reach.
+
+    A named seam, exactly as :func:`_scatter_add_sum_body` is: the row's
+    emission and its replay (``obligation._square_value``) must be
+    separately mutable or the gauge measures one expression agreeing with
+    itself. Behaviour-identical extraction, pinned by the byte-level
+    emission tests.
+    """
+    return f"(* {term} {term})"
+
+
 def rational(fr: Fraction) -> str:
     """An exact SMT-LIB2 Real literal: integers as ``N.0``, non-integers as
     ``(/ p q)``, negatives wrapped ``(- ...)``. Never a decimal
@@ -353,6 +372,10 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
                 prod = base if n == 1 else f"(* {' '.join([base] * n)})"
                 bodies.append(prod if y > 0 else f"(/ 1.0 {prod})")
             names[out.id] = define(out, bodies)
+            continue
+        if prim == "square":
+            (idx,) = _pair_elementwise(eqn)
+            names[out.id] = define(out, [_square_body(ins[0][i]) for i in idx])
             continue
         if prim == "convert_element_type":
             src = eqn.invars[0].aval.dtype or ""

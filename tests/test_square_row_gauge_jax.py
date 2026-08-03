@@ -152,13 +152,41 @@ def _harness(bound, *, box=BOX, jit=False):
     return h
 
 
-def _int_harness():
-    """An integer-dtype square: the emission must decline it (jax integer
-    arithmetic wraps; SMT-LIB2 Reals do not)."""
+def _declared_int_harness():
+    """A DECLARED integer-dtype square. The emission must decline it (jax
+    integer arithmetic wraps; SMT-LIB2 Reals do not) — but note that a
+    non-float DECLARATION declines on its own rule too, so this form shows
+    the guard's message without being evidence that the guard is what
+    stopped it. :func:`_bool_to_int_harness` is the form that is."""
 
     def h():
         x = any_array((), "int32", (2_000_000_000.0, 2_100_000_000.0))
         return (assert_(jnp.square(x) - x >= 0),)
+
+    return h
+
+
+def _bool_to_int_harness():
+    """An integer-dtype `square` whose ONLY decline is `square`'s own
+    overflow guard.
+
+    Measured, not assumed: the battery caught this file's first attempt at
+    an integer gate, because a DECLARED int input declines on the
+    float-declaration rule as well, so removing `square`'s guard changed
+    nothing and the mutation survived every gate. The reachable form is the
+    one audit UNSOUND 2's comment names — through the bool->{0,1}
+    conversion the whitelist admits — where the declaration is float, the
+    conversion is exact, the comparison is int-safe, and `square` is the
+    single guarded primitive in the slice.
+
+    ``square(b) >= 1`` is interval-UNDECIDED (square([0,1]) = [0,1]) and
+    genuinely false at b = 0, so with the guard removed the obligation
+    reaches the solver and comes back refuted — which is the catch."""
+
+    def h():
+        x = any_array((), "float64", (0.0, 1.0))
+        b = (x > 0.5).astype(jnp.int32)
+        return (assert_(jnp.square(b) >= 1),)
 
     return h
 
@@ -424,17 +452,29 @@ def gate_fragment_is_nonlinear(subject):
         return False
 
 
+def _declines_emission(harness):
+    closed = trace(harness)
+    p = propagate(closed)
+    if not [o for o in p.obligations if o.status == "unknown"]:
+        return None  # the transfer settled it; nothing was ever emitted
+    items = OB.slice_unknown_obligations(closed, p, interval_env(closed))
+    return all(isinstance(i, OB.DeclinedObligation) for i in items)
+
+
 def gate_integer_dtype_declines(subject):
     """The emission is STRICTER than the transfer on purpose: an integer
-    square must decline rather than be relaxed onto unbounded Reals."""
+    square must decline rather than be relaxed onto unbounded Reals.
+
+    BOTH forms are driven, and the second is the load-bearing one — the
+    declared-int form declines on the float-declaration rule as well, so on
+    its own it cannot tell whether `square`'s guard fired at all."""
     try:
         with _patched(subject), _maybe_linear_fragment(subject):
-            closed = trace(_int_harness())
-            p = propagate(closed)
-            if not [o for o in p.obligations if o.status == "unknown"]:
-                return True  # the transfer settled it; nothing to emit
-            items = OB.slice_unknown_obligations(closed, p, interval_env(closed))
-            return all(isinstance(i, OB.DeclinedObligation) for i in items)
+            for harness in (_declared_int_harness(), _bool_to_int_harness()):
+                declined = _declines_emission(harness)
+                if declined is False:
+                    return False
+        return True
     except Exception:
         return False
 
@@ -582,15 +622,19 @@ def _stage_affine():
     return (v.status, f"refine='affine' (OUT OF SCOPE, recorded): {v.notes}")
 
 
-def _stage_int():
-    closed = trace(_int_harness())
-    p = propagate(closed)
-    if not [o for o in p.obligations if o.status == "unknown"]:
-        return ("SETTLED", f"transfer decided it: {p.obligations[0].status}")
-    item = OB.slice_unknown_obligations(closed, p, interval_env(closed))[0]
-    if isinstance(item, OB.DeclinedObligation):
-        return ("DECLINE", item.reason)
-    return ("REACH", f"emitted as {item.fragment} — the guard did not fire")
+def _stage_int(harness, label):
+    def run():
+        closed = trace(harness)
+        p = propagate(closed)
+        if not [o for o in p.obligations if o.status == "unknown"]:
+            return ("SETTLED", f"{label}: transfer decided it: "
+                               f"{p.obligations[0].status}")
+        item = OB.slice_unknown_obligations(closed, p, interval_env(closed))[0]
+        if isinstance(item, OB.DeclinedObligation):
+            return ("DECLINE", f"{label}: {item.reason}")
+        return ("REACH", f"{label}: emitted as {item.fragment} — no guard fired")
+
+    return run
 
 
 def measure() -> Reading:
@@ -660,7 +704,14 @@ def measure() -> Reading:
                 "verdict-negative-control",
                 _stage_verdict(TRUE_BOUND, "x^2 - x <= 6 over [-2,3]: TRUE inside"),
             ),
-            ("integer-dtype", _stage_int),
+            (
+                "integer-dtype-declared",
+                _stage_int(_declared_int_harness(), "int32 DECLARATION"),
+            ),
+            (
+                "integer-dtype-bool-route",
+                _stage_int(_bool_to_int_harness(), "bool->int32, float decl"),
+            ),
             ("ieee-semantics", _stage_ieee),
             ("affine-refinement", _stage_affine),
         )
