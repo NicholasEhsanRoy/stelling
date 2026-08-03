@@ -37,7 +37,7 @@ The verdict was decided elsewhere; this is evidence *about* it.
 | result | meaning |
 |---|---|
 | `CONFIRMED` | the comparison is false at the witness under execution, in at least one of the two modes the file runs (eager and `jax.jit`) |
-| `DIVERGED` | it is false in exact real arithmetic, and TRUE in your program's own dtype in every mode that ran — a finding about the real/float gap, **not a failed check** |
+| `DIVERGED` | it is false in exact real arithmetic, and TRUE in your program's own dtype in **every** mode, all of which must have run — a finding about the real/float gap, **not a failed check** |
 | `UNREACHABLE` | the witness lies at a point your own caller precondition excludes — a caller-precondition result, **not a bug in the program** |
 
 Exit status is `0` for all three. A nonzero status is how CI says "this
@@ -117,10 +117,18 @@ Running the emitted file prints the witness, both sides, and the result:
 == CONFIRMED
 ```
 
-**Both modes are the program.** The file builds `jax` arrays and runs the
-target eagerly *and* under `jax.jit`, because the compiler is entitled to
-rewrite the expression and measurably does. If only one mode can run, that
-one decides; only when neither can is there no execution result.
+**Both modes are the program, and each gets its own inputs.** The file
+builds fresh `jax` arrays per mode — a jax buffer is destroyable, and a
+target using `donate_argnums` deletes its argument — then runs the target
+eagerly *and* under `jax.jit`, because the compiler is entitled to rewrite
+the expression and measurably does.
+
+A violation observed in **either** mode is a `CONFIRMED`: it was executed.
+`DIVERGED` is the opposite kind of claim — an absence — so it needs
+**every** mode to have run and held. When nothing was false and a mode
+could not run, there is no execution result, and the file says which mode
+was missing and why. Reporting less is the trade this whole feature is
+built on.
 
 ## When the target cannot be called
 
@@ -199,6 +207,16 @@ a test and the integer in `schema` moves on any incompatible change.
 | `witness` | `{input name: exact rational string}` — the point that was executed |
 | `witness_filled` | the witness names this layer **invented** from the declared box, because the obligation never reaches them and no solver or replay ever assigned them a value |
 | `execution` | `{result, detail, reachable, lhs, rhs, modes, sides_from}` |
+
+Every numeric field is a JSON **number**, or one of the strings `"inf"`,
+`"-inf"`, `"nan"` — JSON has no encoding for those, and the bare
+`Infinity` token Python emits by default is rejected by `jq`, `JSON.parse`,
+Go and serde. Both writers set `allow_nan=False`, so a path that forgets
+this raises instead of producing something no consumer can read.
+
+`execution.reachable` is `true`/`false` when a caller precondition was
+declared and ran, and `null` only when none was declared — a measured
+value is never published as an unknowable one.
 
 `execution.result` is one of the three tokens, or `null` when the target
 could not be constructed.

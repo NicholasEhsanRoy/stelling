@@ -155,6 +155,108 @@ def only_under_jit(a, b):
     return a * b, 6.0
 
 
+def donating_step(x):
+    """A donated input buffer — the standard JAX step-function idiom.
+
+    ``jax.jit(..., donate_argnums=0)`` DELETES its argument. The two
+    execution modes shared one set of buffers, so the eager call destroyed
+    the input and the jit call then raised "Array has been deleted"; the
+    file reported the eager answer as the whole answer and printed
+    "Nothing here is wrong" at a witness where the compiled form violates.
+    Each mode now builds its own inputs.
+    """
+    import jax
+
+    donated = jax.jit(lambda v: v * 1.0, donate_argnums=0)(x)
+    return (1.0 + donated) - 1.0, 0.0
+
+
+def widening_square(x):
+    """``float64(x)**2`` against 0 — a target whose ANSWER depends on
+    ``jax_enable_x64``.
+
+    Under x64 off, the float64 request is truncated to float32 and the
+    product underflows to exactly 0.0, so the assertion holds: DIVERGED.
+    With x64 forced on it is computed in float64, stays positive, and the
+    assertion is false: CONFIRMED. The emitted file must restore the
+    setting its query was traced under, and this is what measures that it
+    does — mutating the file to force ``True`` survived every test before
+    it existed.
+    """
+    import jax.numpy as jnp
+
+    wide = jnp.asarray(x, jnp.float64)
+    return wide * wide, 0.0
+
+
+# Two targets whose EXECUTION behaviour is switched by an environment
+# variable the tracing process does not set. A target that simply raises
+# cannot be traced at all, so a harness could never be built from it — and
+# a test that used an UNCONSTRUCTIBLE target instead measured the "nothing
+# was attempted" shape rather than the "every attempt failed" one it was
+# named for.
+
+
+def raises_in_every_mode(a, b):
+    """Traces cleanly; raises in BOTH execution modes.
+
+    Silence is correct here, and this is the only shape it is correct for.
+    """
+    import os
+
+    if os.environ.get("STELLING_REPRO_RAISE"):
+        raise ValueError("this target raises in every execution mode")
+    return a * b, 6.0
+
+
+def always_producible(a, b):
+    """A caller precondition that HOLDS at every point of the envelope.
+
+    Not a stand-in for "no precondition": it is declared, it runs, and it
+    returns true — which the sidecar must be able to report as a MEASURED
+    reachability rather than the ``null`` that means "not declared".
+    """
+    return True
+
+
+def eager_only_absorbs(x):
+    """Traces cleanly; HOLDS eagerly and cannot run under ``jax.jit``.
+
+    The numpy round-trip is ordinary interop that works on a concrete
+    array and raises ``TracerArrayConversionError`` on a tracer. Eagerly
+    the increment is absorbed and the assertion holds; under jit there is
+    no measurement at all. DIVERGED must not be claimed from the one mode
+    that ran — an unmeasured mode is not an agreeing one.
+    """
+    import os
+
+    import jax.numpy as jnp
+    import numpy as np
+
+    if os.environ.get("STELLING_REPRO_NUMPY"):
+        x = jnp.asarray(np.asarray(x))
+    return (1.0 + x) - 1.0, 0.0
+
+
+def overflowing_bound(x, bound):
+    """A witness FORCED above the declared dtype's finite range.
+
+    ``x`` is declared float32 over a box that reaches past float32's
+    finite maximum; ``bound`` is a float64 point at 3.5e38, above that
+    maximum, so any witness must exceed it and therefore converts to inf.
+    The comparison is widened to float64 because a float32 literal at
+    3.5e38 would itself be inf and the assertion would be vacuous.
+
+    ``_nearest`` computed ``Fraction(float(inf))``, which raises
+    OverflowError, so the file reported NO EXECUTION RESULT for a
+    violation the program does exhibit. Overflow to inf IS the correctly
+    rounded conversion; there is no finite neighbour to search for.
+    """
+    import jax.numpy as jnp
+
+    return jnp.asarray(x, jnp.float64) * 1.0, bound
+
+
 class _Holder:
     """A target whose method is bound to an instance built at run time,
     with NO module-level name holding that instance — the genuinely

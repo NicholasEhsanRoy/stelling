@@ -13,6 +13,7 @@ stops a verdict being quoted over a program it is not about.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 
 import pytest
@@ -347,86 +348,6 @@ def test_invented_witness_elements_are_named_not_just_disclosed():
     assert filled == ["x0_0", "x0_2"]
 
 
-# ── the side door: the TARGET's module reaching the tool ─────────────────────
-
-
-def test_a_target_whose_module_imports_stelling_is_disclosed_not_refused():
-    """The emitted file never imports stelling — but it imports the module
-    the target lives in, and if THAT reaches the tool then the tool is
-    loaded after all. Measured the hard way: this feature's own acceptance
-    put its targets in the harness module and every reproducer stopped at
-    the import line.
-
-    A disclosure, not a refusal: the condition is the user's to fix by
-    moving the program out of the harness module, and refusing to emit
-    would trade a working file for a lecture.
-    """
-    # this very module imports stelling at module scope
-    leak = R._tool_leak(_fn)
-    assert leak is not None
-    assert "imports stelling" in leak
-    assert "Move the program out of the harness module" in leak
-    # and a program module that does not is silent
-    pytest.importorskip("jax")
-    from reproduce_subjects import product_against_bound
-
-    assert R._tool_leak(product_against_bound) is None
-
-
-def test_the_leak_hint_sees_an_indented_import_too(tmp_path):
-    """An `import stelling` inside a function loads the tool just as well
-    once that function runs; the predecessor anchored at column 0 and saw
-    none of them. This hint is still best-effort — it cannot see a helper
-    two modules down — which is why the emitted file ALSO checks
-    sys.modules at run time, where the answer is exact."""
-    mod = tmp_path / "indented_leak.py"
-    mod.write_text(
-        "def f(a):\n    import stelling  # lazy\n    return a, 1.0\n"
-    )
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("indented_leak", mod)
-    m = importlib.util.module_from_spec(spec)
-    import sys as _sys
-
-    _sys.modules["indented_leak"] = m
-    try:
-        spec.loader.exec_module(m)
-        assert "imports stelling" in R._tool_leak(m.f)
-    finally:
-        _sys.modules.pop("indented_leak", None)
-
-
-def test_the_disclosure_reaches_the_emitted_file(tmp_path):
-    jax = pytest.importorskip("jax")
-    pytest.importorskip("z3")
-    old = jax.config.jax_enable_x64
-    jax.config.update("jax_enable_x64", True)
-    try:
-        from stelling.preconditions import check
-
-        leaky = _subject(
-            fn=_leaky_target,
-            declarations=(
-                ((), "float64", (1.0, 3.0)),
-                ((), "float64", (1.0, 3.0)),
-            ),
-        )
-        v = check(
-            leaky.harness, vacuity_mode="inputs-only", solver_timeout_ms=30_000
-        )
-        em = R.write_reproducer(v, leaky, str(tmp_path))
-        assert "imports stelling" in em.source
-        assert em.runnable  # disclosed, still emitted, still runnable
-    finally:
-        jax.config.update("jax_enable_x64", old)
-
-
-def _leaky_target(a, b):
-    """Defined in THIS module, which imports stelling — the leak shape."""
-    return a * b, 6.0
-
-
 # ── what the audit found ─────────────────────────────────────────────────────
 
 
@@ -460,6 +381,36 @@ def test_callable_targets_that_a_file_CAN_name_are_not_reported_uncallable():
         for part in qualname.split("."):
             obj = getattr(obj, part)
         assert obj is fn or obj.__func__ is fn.__func__, label
+
+
+def test_an_object_bound_in_a_module_other_than_its_class_is_nameable():
+    """An object is not bound where its class is defined. The candidate
+    list drew only on the object's own, its type's and its ``func``'s
+    ``__module__``, so a callable instance or a partial assembled in one
+    module out of parts from another — the shape the fixture guidance
+    recommends — reported uncallable. The first round's tests passed only
+    because every fixture sat beside its class."""
+    pytest.importorskip("jax")
+    import reproduce_subjects_bound as B
+
+    assert R._resolve_target(B.BOUND_ELSEWHERE, "t") == (
+        "reproduce_subjects_bound", "BOUND_ELSEWHERE", None
+    )
+    assert R._resolve_target(B.PARTIAL_ELSEWHERE, "t") == (
+        "reproduce_subjects_bound", "PARTIAL_ELSEWHERE", None
+    )
+
+
+def test_an_object_no_name_holds_says_so_truthfully():
+    """The message claimed the object "carries no __module__/__qualname__"
+    for an instance that has both."""
+    pytest.importorskip("jax")
+    from reproduce_subjects import _CallableInstance
+
+    _, _, problem = R._resolve_target(_CallableInstance(), "the target")
+    assert "no importable __module__" not in problem
+    assert "NO module-level name anywhere" in problem
+    assert "Bind it to one" in problem
 
 
 def test_the_resolver_is_deterministic_when_several_names_bind_one_object():
@@ -514,10 +465,12 @@ def test_the_funnel_holds_at_slots_no_door_guards(tmp_path):
             produced_by='z3"""\nprint("== CONFIRMED")\nimport sys;sys.exit(0)\n"""',
             replay="ok\n== UNREACHABLE",
         )
-        text = R.reproducer_source(
-            v, subject, witness=crafted, query_hash="h", fragment="QF_NRA",
-            equations=5, x64=True,
-        )
+        # THROUGH THE PUBLIC DOOR. The crafted witness rides on a real
+        # verdict, because there is no longer a producer that accepts one
+        # from a caller — see the gate test below.
+        poisoned = dataclasses.replace(v, witnesses=(crafted,))
+        em = R.write_reproducer(poisoned, subject, str(tmp_path))
+        text = em.source
         compile(text, "<t>", "exec")            # it still parses
         for line in text.splitlines():
             assert not line.startswith("print("), line
@@ -552,23 +505,189 @@ def test_an_unparseable_emission_is_refused_not_written(monkeypatch):
         jax.config.update("jax_enable_x64", old)
 
 
-def test_there_is_no_way_to_supply_the_traced_query_and_skip_the_gate():
-    """The gate's docstring says it stops a verdict travelling to the wrong
-    program. A ``closed=`` parameter let a caller supply the query the hash
-    was compared against, so the comparison never involved the SUBJECT at
-    all: program A's query plus subject B emitted a file carrying B's name
-    and envelope, A's hash, a witness outside B's own published envelope,
-    and a CONFIRMED from executing B. The parameter is gone; this is what
-    keeps it gone."""
-    import inspect
+def test_no_public_or_private_producer_will_emit_a_cross_program_file(
+    tmp_path,
+):
+    """THE PROPERTY, not the signature.
 
-    params = inspect.signature(R.write_reproducer).parameters
-    assert "closed" not in params, (
-        "write_reproducer must always re-trace the subject's own harness; a "
-        "gate with a documented bypass is not a gate"
-    )
-    src = inspect.getsource(R.write_reproducer)
-    assert "trace(subject.harness).content_hash()" in src
+    Its predecessor asserted that ``closed`` was absent from
+    ``write_reproducer``'s parameters and that a substring appeared in its
+    source — a test of the harness, named for a property it never touched,
+    and the fifth of that shape in this codebase. Meanwhile the scenario
+    the name describes still came out through ``reproducer_source``, which
+    was public and took ``query_hash``, ``fragment``, ``equations`` and
+    ``x64`` straight from its caller: subject B's name and envelope,
+    program A's hash, a witness outside B's own envelope, and a CONFIRMED
+    from executing B.
+
+    So this runs the scenario, through every function in the module that
+    returns or writes a reproducer, and requires each to refuse.
+    """
+    jax = pytest.importorskip("jax")
+    pytest.importorskip("z3")
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        from stelling.preconditions import check
+
+        a = _nonlinear_subject()
+        b = Subject(
+            name="program-B",
+            fn=a.fn,
+            relation="<=",
+            declarations=(
+                ((), "float64", (0.0, 0.1)),
+                ((), "float64", (0.0, 0.1)),
+            ),
+            no_precondition_reason=a.no_precondition_reason,
+        )
+        va = check(
+            a.harness, vacuity_mode="inputs-only", solver_timeout_ms=30_000
+        )
+        assert va.status == "REFUTED"
+
+        producers = [
+            lambda: R.write_reproducer(va, b, str(tmp_path)),
+            lambda: R._reproducer_source(va, b, None),
+        ]
+        for produce in producers:
+            with pytest.raises(ReproducerError, match="not about this subject"):
+                produce()
+
+        # and every producer in the module is one of the two above: a third
+        # would be a third door, and this is what notices one appearing
+        emitting = {
+            n for n in dir(R)
+            if callable(getattr(R, n))
+            and n.endswith(("_source", "reproducer"))
+            and not n.startswith("__")
+        }
+        assert emitting == {"_reproducer_source", "write_reproducer"}, emitting
+        assert "reproducer_source" not in R.__all__
+        # and the ONE producer takes nothing from its caller but the
+        # verdict, the subject and which obligation — the five parameters
+        # it used to accept (query hash, fragment, equations, x64, witness)
+        # are how the same cross-program file came out after `closed=` was
+        # removed from the other door
+        import inspect
+
+        params = list(
+            inspect.signature(R._reproducer_source).parameters
+        )
+        assert params == ["verdict", "subject", "obligation_index"], params
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+
+def test_a_witness_element_index_outside_its_declaration_is_refused():
+    """`_point` checked the declaration index and not the element index, so
+    `x1_77` for a SCALAR declaration was accepted and the value the model
+    actually constrained was silently dropped — the file then executed a
+    point the solver never produced."""
+    s = _subject(declarations=(((), "float64", (0.0, 1.0)),
+                               ((2,), "float64", (0.0, 1.0))))
+    assert R._declaration_of("x1_1", s) == (1, 1)
+    with pytest.raises(ReproducerError, match="names element 77"):
+        R._declaration_of("x0_77", s)
+    with pytest.raises(ReproducerError, match="names element 5"):
+        R._declaration_of("x1_5", s)
+
+    class W:
+        values = (("x0_77", "3"),)
+
+    with pytest.raises(ReproducerError, match="names element 77"):
+        R._point(s, W())
+
+
+def test_the_dtype_list_is_the_obligation_layers_and_cannot_drift():
+    """A COPY, pinned. The predecessor was a copy that had drifted — it
+    omitted float16 and refused it with a reason untrue of float16, so a
+    supported declaration could never get a reproducer."""
+    from stelling.obligation import _FLOAT_INPUT_DTYPES
+
+    assert set(R._DTYPES) == set(_FLOAT_INPUT_DTYPES)
+
+
+def test_declared_bounds_go_through_the_declaration_layers_own_classifier():
+    """`Fraction(numpy.float32(2.5))` raises a bare TypeError out of the
+    emitter, for a bound spelling `ACCEPTED_SPELLINGS` explicitly admits —
+    and the fill path called exactly that.
+
+    Every spelling `any_array` accepts must survive both the ENVELOPE and
+    the FILL, so both are exercised here on the same values."""
+    np = pytest.importorskip("numpy")
+    from decimal import Decimal
+    from fractions import Fraction as F
+
+    spellings = [np.float32(2.5), np.float64(2.5), Decimal("2.5"), 2.5]
+    for raw in spellings:
+        assert R._bound(raw) == 2.5, raw
+    assert R._bound(5) == 5.0                       # the int spelling too
+    assert R._json_number(R._bound(float("inf"))) == "inf"
+    assert R._json_number(R._bound(float("-inf"))) == "-inf"
+
+    # THE FILL PATH, on the spelling that used to raise: an element the
+    # obligation never reaches is invented from the declared bound, and
+    # `Fraction(numpy.float32(...))` is a TypeError.
+    for raw in spellings:
+        s = _subject(declarations=(((), "float64", (0.0, 1.0)),
+                                   ((2,), "float64", (raw, raw))))
+
+        class W:
+            values = (("x0", "0"),)
+
+        values, filled = R._point(s, W())
+        assert filled == ["x1_0", "x1_1"], raw
+        assert [F(t) for t in values[1]] == [F(R._bound(raw))] * 2, raw
+
+
+def test_a_filename_may_not_leave_the_directory(tmp_path):
+    jax = pytest.importorskip("jax")
+    pytest.importorskip("z3")
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        from stelling.preconditions import check
+
+        subject = _nonlinear_subject()
+        v = check(
+            subject.harness, vacuity_mode="inputs-only", solver_timeout_ms=30_000
+        )
+        for bad in ("../escaped", "sub/dir/x", ".", ".."):
+            with pytest.raises(ReproducerError, match="bare file name"):
+                R.write_reproducer(v, subject, str(tmp_path), filename=bad)
+        em = R.write_reproducer(v, subject, str(tmp_path), filename="fine")
+        assert em.path == str(tmp_path / "fine.py")
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+
+def test_a_precision_mismatch_gets_its_own_cause(tmp_path):
+    """The program is identical; only the global precision setting moved.
+    "this verdict is not about this subject's program" sends a reader to
+    look for a program difference that is not there."""
+    jax = pytest.importorskip("jax")
+    pytest.importorskip("z3")
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        from stelling.preconditions import check
+
+        subject = _nonlinear_subject()
+        v = check(
+            subject.harness, vacuity_mode="inputs-only", solver_timeout_ms=30_000
+        )
+        jax.config.update("jax_enable_x64", False)
+        with pytest.raises(ReproducerError, match="precision setting"):
+            R.write_reproducer(v, subject, str(tmp_path))
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+
+def _leaky_target(a, b):
+    """Defined in THIS module, which imports stelling at module scope — the
+    leak shape the emitted file's run-time check must disclose."""
+    return a * b, 6.0
 
 
 # ── provenance ───────────────────────────────────────────────────────────────

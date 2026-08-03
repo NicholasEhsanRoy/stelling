@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import textwrap
@@ -70,8 +71,23 @@ BOX = (-1.0, 1.0)
 
 @pytest.fixture(autouse=True)
 def _x64():
+    """x64 ON for every test EXCEPT the ones that ask otherwise.
+
+    It used to be unconditional, which meant nothing in this file ever ran
+    at any other setting — and a mutation making the emitted file ignore
+    `SIDECAR["x64"]` and force True survived all 61 tests. x64 is the one
+    global the DIVERGED/CONFIRMED distinction lives on.
+    """
     old = jax.config.jax_enable_x64
     jax.config.update("jax_enable_x64", True)
+    yield
+    jax.config.update("jax_enable_x64", old)
+
+
+@pytest.fixture
+def x64_off():
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", False)
     yield
     jax.config.update("jax_enable_x64", old)
 
@@ -88,9 +104,14 @@ def _x64():
 from reproduce_subjects import (  # noqa: E402
     _Holder,
     absorbed_increment,
+    donating_step,
     mixed_dtype_underflow,
+    eager_only_absorbs,
     only_under_jit,
+    overflowing_bound,
+    raises_in_every_mode,
     scatter_write,
+    widening_square,
     underflowing_square,
     heat_node_max_principle,
     weight_pair_sum,
@@ -210,8 +231,9 @@ def _elsewhere(tmp_path, blocked="stelling"):
     return where, env
 
 
-def _run(emission, tmp_path, blocked="stelling"):
+def _run(emission, tmp_path, blocked="stelling", **env_extra):
     where, env = _elsewhere(tmp_path, blocked)
+    env.update(env_extra)
     proc = subprocess.run(
         [sys.executable, emission.path],
         cwd=str(where), env=env, capture_output=True, text=True, timeout=600,
@@ -708,12 +730,17 @@ def test_a_mode_that_raises_does_not_cancel_the_mode_that_runs(tmp_path):
 
 
 def test_no_execution_result_needs_BOTH_modes_to_have_failed(tmp_path):
-    """The other half: silence is still available, and still honest, when
-    neither mode can run — and only then."""
+    """Silence is still available, and still honest, when neither mode can
+    run — and only then.
+
+    Its predecessor used an UNCONSTRUCTIBLE target, so no mode was ever
+    attempted and it measured the `_NO_MODES` shape (covered elsewhere)
+    rather than the property in its own name. This target is perfectly
+    constructible and raises in both modes."""
     pytest.importorskip("z3")
     subject = Subject(
-        name="bound-method-target-2",
-        fn=_Holder().sides,
+        name="raises-in-every-mode",
+        fn=raises_in_every_mode,
         relation="<=",
         declarations=(
             ((), "float64", (1.0, 3.0)),
@@ -722,10 +749,176 @@ def test_no_execution_result_needs_BOTH_modes_to_have_failed(tmp_path):
         no_precondition_reason="control case; no precondition is declared",
     )
     _, em = _emit(subject, tmp_path)
-    proc, sidecar = _run(em, tmp_path)
-    assert proc.returncode == NOT_EXECUTED_EXIT
+    assert em.runnable, "the target must be CONSTRUCTIBLE for this to measure"
+    # the control first: with the switch off the very same file runs
+    ok, ok_side = _run(em, tmp_path)
+    assert ok_side["execution"]["result"] == CONFIRMED, ok.stdout
+    proc, sidecar = _run(em, tmp_path, STELLING_REPRO_RAISE="1")
+    assert proc.returncode == NOT_EXECUTED_EXIT, proc.stdout
     assert sidecar["execution"]["result"] is None
     assert sidecar["execution"]["modes"] == {"eager": None, "jit": None}
+    assert "in both execution modes" in sidecar["execution"]["detail"]
+    assert "ValueError" in sidecar["execution"]["detail"]
+
+
+# ── the modes must not share buffers, and DIVERGED needs both ───────────────
+
+
+DONATING = Subject(
+    name="donating-step",
+    fn=donating_step,
+    relation="<=",
+    declarations=(((), "float64", (0.0, 2.0 ** -70)),),
+    no_precondition_reason=NO_CALLER_NARROWING,
+)
+
+
+def test_a_donated_buffer_does_not_make_the_other_mode_unrunnable(tmp_path):
+    """THE FILE DESTROYED ITS OWN INPUT AND THEN PUBLISHED "Nothing here is
+    wrong".
+
+    `jax.jit(..., donate_argnums=0)` — the standard step-function idiom —
+    deletes its argument. Both modes were handed the SAME buffers, so the
+    eager call destroyed the input, the jit call raised "Array has been
+    deleted", and the "a mode that raises no longer cancels the mode that
+    runs" rule then treated eager as the whole answer: `== DIVERGED …
+    Nothing here is wrong, the verdict is unchanged`.
+
+    Ground truth at the same witness with a fresh buffer, measured
+    directly in :func:`test_the_donation_ground_truth`: jit gives
+    8.47e-22 against 0.0, which is FALSE. The correct result is CONFIRMED.
+    """
+    pytest.importorskip("z3")
+    _, em = _emit(DONATING, tmp_path)
+    proc, sidecar = _run(em, tmp_path)
+    assert proc.returncode == RESULT_EXIT, proc.stdout + proc.stderr
+    assert sidecar["execution"]["result"] == CONFIRMED, proc.stdout
+    assert sidecar["execution"]["modes"] == {"eager": True, "jit": False}
+    assert sidecar["execution"]["sides_from"] == "jit"
+    assert sidecar["execution"]["lhs"][0] > sidecar["execution"]["rhs"][0]
+    assert "Array has been deleted" not in proc.stdout
+
+
+def test_the_donation_ground_truth(tmp_path):
+    """The independent half of the test above: what the program does at
+    that witness, measured here rather than taken from the file."""
+    import numpy as np
+
+    pytest.importorskip("z3")
+    v, _ = _emit(DONATING, tmp_path)
+    x = float(Fraction(dict(v.witnesses[0].values)["x0"]))
+    eager_l, eager_r = donating_step(jnp.asarray(x, jnp.float64))
+    assert float(np.asarray(eager_l)) <= eager_r          # absorbed
+    jit_l, jit_r = jax.jit(donating_step)(jnp.asarray(x, jnp.float64))
+    assert float(np.asarray(jit_l)) > jit_r               # and not, compiled
+
+
+def test_diverged_requires_every_mode_to_have_run_and_held(tmp_path):
+    """DIVERGED says the property holds "in the program's own dtype". A
+    mode that raised was not measured, and an unmeasured mode is not an
+    agreeing one — so when nothing was false and a mode could not run,
+    this file has no answer and says so, rather than claiming the weaker
+    fact under the stronger token.
+
+    ``eager_only_absorbs`` holds eagerly (the increment is absorbed) and
+    cannot run under jit (an ordinary numpy round-trip raises on a
+    tracer). The control is the same file with the switch off, where both
+    modes run and DIVERGED is available.
+    """
+    pytest.importorskip("z3")
+    subject = Subject(
+        name="eager-only-absorbs",
+        fn=eager_only_absorbs,
+        relation="<=",
+        declarations=(((), "float64", (0.0, 2.0 ** -70)),),
+        no_precondition_reason=NO_CALLER_NARROWING,
+    )
+    _, em = _emit(subject, tmp_path)
+
+    proc, side = _run(em, tmp_path, STELLING_REPRO_NUMPY="1")
+    assert proc.returncode == NOT_EXECUTED_EXIT, proc.stdout
+    assert side["execution"]["result"] is None
+    assert side["execution"]["modes"] == {"eager": True, "jit": None}
+    assert "DIVERGED needs every mode" in side["execution"]["detail"]
+
+    # the control: both modes run, and the same holding measurement IS
+    # reported — so the refusal above is the missing mode talking
+    ctrl, ctrl_side = _run(em, tmp_path)
+    assert ctrl_side["execution"]["modes"] == {"eager": True, "jit": False}, (
+        ctrl.stdout
+    )
+
+
+# ── a witness the declared dtype cannot hold at all ─────────────────────────
+
+
+def test_a_witness_above_the_dtype_range_still_produces_a_result(tmp_path):
+    """`_nearest` computed `Fraction(float(inf))`, which raises
+    OverflowError, so a witness above float32's finite range turned into
+    NO EXECUTION RESULT for a violation the program does exhibit —
+    overflow to inf IS the correctly rounded conversion."""
+    pytest.importorskip("z3")
+    # the upper bound is ABOVE float32's finite maximum (3.4e38) on
+    # purpose: any witness past it converts to inf, which is what used to
+    # raise inside `_nearest`
+    subject = Subject(
+        name="overflowing-bound",
+        fn=overflowing_bound,
+        relation="<=",
+        declarations=(
+            ((), "float32", (0.0, 1e40)),
+            ((), "float64", (3.5e38, 3.5e38)),
+        ),
+        no_precondition_reason=NO_CALLER_NARROWING,
+    )
+    v, em = _emit(subject, tmp_path)
+    assert float(Fraction(dict(v.witnesses[0].values)["x0"])) > 3.4e38
+    proc, sidecar = _run(em, tmp_path)
+    assert proc.returncode == RESULT_EXIT, proc.stdout + proc.stderr
+    assert sidecar["execution"]["result"] == CONFIRMED, proc.stdout
+    # the executed left side really is infinite, and the sidecar spells it
+    # in a way every JSON parser reads
+    assert sidecar["execution"]["lhs"] == ["inf"], sidecar["execution"]
+
+    def strict(c):
+        raise AssertionError(f"invalid JSON token {c!r}")
+
+    raw = pathlib.Path(em.sidecar_path).read_text()
+    assert "Infinity" not in raw
+    json.loads(raw, parse_constant=strict)
+
+
+# ── the sidecar must be JSON everyone can read ──────────────────────────────
+
+
+def test_the_sidecar_is_strict_json_even_with_non_finite_numbers(tmp_path):
+    """Python emits the bare tokens `Infinity`/`NaN` and reads them back;
+    jq, JSON.parse, Go and serde reject them. A published surface only its
+    author's language can parse is not published."""
+    pytest.importorskip("z3")
+    subject = Subject(
+        name="half-infinite-envelope",
+        fn=overflowing_bound,
+        relation="<=",
+        declarations=(
+            ((), "float32", (0.0, float("inf"))),
+            ((), "float64", (3.5e38, 3.5e38)),
+        ),
+        no_precondition_reason=NO_CALLER_NARROWING,
+    )
+    _, em = _emit(subject, tmp_path)
+    proc, _ = _run(em, tmp_path)
+    raw = pathlib.Path(em.sidecar_path).read_text()
+    assert "Infinity" not in raw and "NaN" not in raw, raw
+    # a STRICT reader: parse_constant fires on exactly the invalid tokens
+    def strict(c):
+        raise AssertionError(f"invalid JSON token {c!r}")
+
+    doc = json.loads(raw, parse_constant=strict)
+    assert doc["envelope"][0]["hi"] == "inf"
+    assert doc["execution"]["lhs"] == ["inf"] or isinstance(
+        doc["execution"]["lhs"][0], (float, str)
+    )
 
 
 # ── the published sides must be a real counterexample ───────────────────────
@@ -776,6 +969,141 @@ def test_every_confirmed_publishes_sides_that_violate_the_relation(tmp_path):
         assert any(not rel(a, b) for a, b in pairs), (subject.name, e)
 
 
+# ── x64 is the setting the whole distinction lives on ───────────────────────
+
+
+def test_the_file_restores_the_precision_its_query_was_traced_under(
+    tmp_path, x64_off
+):
+    """The single global the DIVERGED/CONFIRMED distinction depends on, and
+    nothing in this file ran at any other setting — so mutating the emitted
+    file to ignore `SIDECAR["x64"]` and force True survived every test.
+
+    `widening_square` asks for float64 explicitly. Traced and run under x64
+    OFF the request is truncated to float32, the product underflows to
+    exactly 0.0 and the assertion HOLDS: DIVERGED. Forced to x64 on, the
+    same source computes in float64, stays positive, and the assertion is
+    FALSE: CONFIRMED. Two different answers from one file, so the file
+    must restore the setting its query was traced under."""
+    pytest.importorskip("z3")
+    assert jax.config.jax_enable_x64 is False
+    subject = Subject(
+        name="widening-square",
+        fn=widening_square,
+        relation="<=",
+        declarations=(((), "float32", (0.0, 2.0 ** -100)),),
+        no_precondition_reason=NO_CALLER_NARROWING,
+    )
+    _, em = _emit(subject, tmp_path)
+    proc, sidecar = _run(em, tmp_path)
+    assert sidecar["x64"] is False
+    assert sidecar["execution"]["result"] == DIVERGED, proc.stdout
+
+    # and with the setting forced the other way, the SAME file reports the
+    # other result — which is what makes restoring it load-bearing
+    forced = pathlib.Path(str(tmp_path / "forced.py"))
+    forced.write_text(
+        pathlib.Path(em.path).read_text().replace(
+            'jax.config.update("jax_enable_x64", SIDECAR["x64"])',
+            'jax.config.update("jax_enable_x64", True)',
+        )
+    )
+
+    class E:
+        path = str(forced)
+        sidecar_path = str(forced)[:-3] + ".json"
+
+    proc2, side2 = _run(E(), tmp_path)
+    assert side2["execution"]["result"] == CONFIRMED, proc2.stdout
+
+
+# ── the tool-load disclosure, exactly ───────────────────────────────────────
+
+
+def test_a_lazily_imported_stelling_is_disclosed_too(tmp_path):
+    """The check moved AFTER the calls. Asked before them it missed an
+    `import stelling` inside the function — the same one an emission-time
+    scan of the module's top level also misses. The source scan that used
+    to run instead was wrong in the other direction as well: it accused a
+    module whose DOCSTRING merely quoted such a line."""
+    pytest.importorskip("z3")
+    from reproduce_subjects_bound import (
+        lazily_reaches_stelling,
+        only_mentions_it_in_prose,
+    )
+
+    env_base = os.path.dirname(os.path.abspath(__file__))
+    for fn, expect in ((lazily_reaches_stelling, True),
+                       (only_mentions_it_in_prose, False)):
+        subject = Subject(
+            name=f"leak-{fn.__name__}",
+            fn=fn,
+            relation="<=",
+            declarations=(
+                ((), "float64", (1.0, 3.0)),
+                ((), "float64", (1.0, 3.0)),
+            ),
+            no_precondition_reason="control case; no precondition",
+        )
+        _, em = _emit(subject, tmp_path)
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [env_base, os.path.join(os.path.dirname(env_base), "src")]
+        )
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        proc = subprocess.run(
+            [sys.executable, em.path], cwd=str(tmp_path), env=env,
+            capture_output=True, text=True, timeout=600,
+        )
+        assert proc.returncode == RESULT_EXIT, proc.stdout + proc.stderr
+        got = "loaded stelling into this" in proc.stdout
+        assert got is expect, (fn.__name__, proc.stdout)
+        if expect:
+            assert "RUNNING the target loaded" in proc.stdout
+
+
+# ── a precondition that ran and held is not an unknown one ──────────────────
+
+
+def test_a_measured_reachability_is_not_published_as_unknown(tmp_path):
+    """`null` means "no precondition was declared". A run whose
+    precondition RAN AND HELD, and whose target then raised, published
+    `null` too — a measured value indistinguishable from an unknowable
+    one."""
+    pytest.importorskip("z3")
+    from reproduce_subjects import always_producible
+
+    subject = Subject(
+        name="held-then-raised",
+        fn=raises_in_every_mode,
+        relation="<=",
+        declarations=(((), "float64", (1.0, 3.0)), ((), "float64", (1.0, 3.0))),
+        precondition=always_producible,
+        precondition_reason=(
+            "structural: both factors are free inputs of the caller, so "
+            "every point of the declared envelope is producible"
+        ),
+    )
+    _, em = _emit(subject, tmp_path)
+    proc, sidecar = _run(em, tmp_path, STELLING_REPRO_RAISE="1")
+    assert sidecar["execution"]["result"] is None, sidecar["execution"]
+    assert sidecar["execution"]["reachable"] is True, sidecar["execution"]
+    assert "caller precondition holds at the witness: True" in proc.stdout
+    # and the two null-shaped answers stay distinguishable
+    _, no_pre = _emit(
+        Subject(
+            name="held-then-raised-no-precondition",
+            fn=raises_in_every_mode,
+            relation="<=",
+            declarations=subject.declarations,
+            no_precondition_reason="none is declared, deliberately",
+        ),
+        tmp_path,
+    )
+    _, side2 = _run(no_pre, tmp_path, STELLING_REPRO_RAISE="1")
+    assert side2["execution"]["reachable"] is None, side2["execution"]
+
+
 # ── the uncallable target, stated rather than crashed ────────────────────────
 
 
@@ -799,7 +1127,7 @@ def test_a_bound_method_target_is_named_as_the_fixture_problem(tmp_path):
     proc, sidecar = _run(em, tmp_path)
     assert proc.returncode == NOT_EXECUTED_EXIT, proc.stdout + proc.stderr
     assert "NO EXECUTION RESULT" in proc.stdout
-    assert "WHAT COULD NOT BE CONSTRUCTED" in proc.stdout
+    assert "WHAT IS MISSING" in proc.stdout
     assert "_Holder" in proc.stdout
     assert sidecar["execution"]["result"] is None
     # and everything else in the sidecar is still there — the provenance
