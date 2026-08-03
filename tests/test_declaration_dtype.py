@@ -20,7 +20,9 @@ over-approximation and stays sound; a box disjoint from it describes nothing.
 """
 from __future__ import annotations
 
+import math
 import re
+from fractions import Fraction
 
 import pytest
 
@@ -115,6 +117,27 @@ def test_rejects_a_box_the_dtype_cannot_hold(dtype, lo, hi, why):
     ("float64", 0.0, 100.0, "the corpus's ordinary case"),
     ("float64", 0.0, float("inf"), "half-infinite: unbounded above"),
     ("complex64", -3.0, 3.0, "complex admitted unconditionally, by policy"),
+    # A WIDENING BOUND ON A DTYPE THE EXACT RE-CHECK CANNOT JUDGE. Since the
+    # re-check covers the widening direction, a widening bound reaches it for
+    # EVERY dtype — a narrowing one could not, because each dtype below
+    # answers "can lose" and is refused at the storability gate first. The
+    # re-check's walk steps through the DTYPE and compares in BINARY64, so it
+    # is screened to the formats binary64 contains, and the screen is an
+    # ADMIT. Measured with it absent, on these very params:
+    #   complex  -> TypeError. jnp.finfo answers for the float64 COMPONENT,
+    #               and float() of a complex array raises — a crash where
+    #               the policy says "no claim either way".
+    #   object   -> TypeError inside np.nextafter.
+    #   float128 -> A FALSE REFUSAL, the one that matters: x86 longdouble
+    #               HOLDS 2**54+1, but the step up from 2**54 is smaller
+    #               than a binary64 ulp and float() rounds it straight back,
+    #               so the walk cannot advance and reports an empty interval
+    #               for one with three inhabitants.
+    ("complex128", 2**54 + 1, 2**54 + 3, "widening bound, complex by policy"),
+    ("complex64", 2**54 + 1, 2**54 + 3, "widening bound, complex by policy"),
+    ("object", 2**54 + 1, 2**54 + 3, "a dtype neither lookup knows"),
+    (str(np.dtype(np.longdouble)), 2**54 + 1, 2**54 + 3,
+     "a format WIDER than binary64 — it holds every value declared"),
 ])
 def test_admits_every_legitimate_envelope(dtype, lo, hi, why):
     """A declaration check that refuses a legitimate envelope is worse than
@@ -866,16 +889,120 @@ def test_an_empty_set_behind_a_narrowing_gap_edge_refuses_with_the_true_cause(
         assert sides["above"] > hi, (sides, hi)
 
 
-def test_the_gap_edge_recheck_stops_at_parity_with_the_parent():
-    """The repair's boundary, pinned deliberately: a declaration whose
-    integer endpoints BOTH widen was already admitted by the parent — the
-    rounded box [2**53, 2**53+4] holds the bfloat16 2**53 while the declared
-    interval holds nothing — a pre-existing blind spot of the rounded
-    emptiness check, NOT one the dtype-aware gate opened, and out of the
-    audited repair's scope. Parity, not endorsement: if the exact re-check
-    is ever extended to the widening class, this pin is the place to flip.
+_WIDENING_EMPTY = [
+    # -- the reproducers ---------------------------------------------------
+    # a float64 interval strictly between two consecutive float64s (ulp 4 at
+    # 2**54); the recorded box [2**54, 2**54+4] is exactly the pair it sits
+    # between. Measured on the narrowing-only build: admitted, and
+    # `assert_(x < 0.0)` over it returned REFUTED at 100% coverage.
+    ("float64", 2**54 + 1, 2**54 + 3),
+    ("float64", -(2**54) - 3, -(2**54) - 1),        # the negative twin
+    # its integer-dtype twin: an interval wholly BELOW int64's minimum whose
+    # hi widens UP onto that minimum, the recorded box's only inhabitant.
+    # Measured the same way: admitted, `assert_(x >= 0)` returned REFUTED.
+    ("int64", -(2**64), -(2**63) - 1),
+    ("uint64", -(2**64), Fraction(-1, 2)),          # wholly below uint64's 0
+    # -- the same shape at every float width -------------------------------
+    ("float32", 2**53 + 1, 2**53 + 3),
+    ("bfloat16", 2**53 + 1, 2**53 + 3),             # the flipped parity pin
+    ("float8_e8m0fnu", 2**53 + 1, 2**53 + 3),
+    ("float16", 2**54 + 1, 2**54 + 3),
+    # -- ABOVE THE DTYPE'S LARGEST FINITE VALUE, by one -------------------
+    # the widening lo rounds back DOWN onto float32's max, so the recorded
+    # box is inhabited while the declared interval holds no finite float32
+    # (and `inf` is not a member of it as a real either)
+    ("float32", int(np.finfo(np.float32).max) + 1, float("inf")),
+    ("float32", float("-inf"), -int(np.finfo(np.float32).max) - 1),
+    # -- SUBNORMAL: strictly inside the gap between 0 and 2**-1074 --------
+    # lo = 1/4 ulp rounds DOWN to +0.0, hi = 3/4 ulp rounds UP to the
+    # smallest subnormal, so the recorded box is [0.0, 5e-324] — two float64
+    # values, both excluded by the declaration
+    ("float64", Fraction(1, 2**1076), Fraction(3, 2**1076)),
+    # its unsigned-integer cousin: a hi that underflows to -0.0, making the
+    # recorded box touch zero while the declared interval is strictly
+    # negative (found by a randomized sweep against an independent oracle,
+    # not by hand — the class is wider than the 2**53 gap)
+    ("uint32", Fraction(-3, 2**1200), Fraction(-1, 2**1200)),
+    ("bool", Fraction(-3, 2**1200), Fraction(-1, 2**1200)),
+    # -- and a FRACTIONAL spelling of the float64 reproducer ---------------
+    ("float64", Fraction(2**55 + 1, 2), Fraction(2**55 + 7, 2)),
+]
+
+
+@pytest.mark.parametrize("dtype,lo,hi", _WIDENING_EMPTY)
+def test_an_empty_set_behind_a_widening_gap_edge_refuses_too(dtype, lo, hi):
+    """The other half of the gap-edge class, and the last known way a
+    definite verdict could be minted over a set no execution can inhabit.
+
+    A NARROWING endpoint rounds onto the gap's far edge; a WIDENING one
+    rounds outward onto its near edge — and both leave the RECORDED box
+    inhabited while the DECLARED interval holds nothing. The narrowing half
+    landed first, with the widening half pinned as a known blind spot on
+    the argument that the parent admitted it too ("parity, not
+    endorsement"). Measured on that build: every case here was ADMITTED,
+    and the two reproducers reached REFUTED at 100% coverage — a claim that
+    some input violates the property, over a declaration with no inputs at
+    all. Parity with an older build does not make that sound, so the
+    re-check now fires on ANY inexact recording rather than on the
+    narrowing direction alone.
+
+    Same cause and same message shape as the narrowing half: the EMPTY-set
+    class, judged against the RAW endpoints in exact arithmetic, with the
+    neighbours named outside the DECLARED interval.
     """
-    assert _declare("bfloat16", 2**53 + 1, 2**53 + 3) is not None
+    with pytest.raises(ValueError) as exc:
+        _declare(dtype, lo, hi)
+    msg = str(exc.value)
+    assert "EMPTY under dtype" in msg, msg
+    assert "NARROWS" not in msg, (
+        f"nothing here narrows — the recorded box is a SUPERSET of the "
+        f"declared interval, and it is the declaration that is empty:\n  {msg}"
+    )
+    assert repr(lo) in msg and repr(hi) in msg, msg
+    sides = _parse_neighbours(msg)
+    if sides["below"] is not None:
+        assert sides["below"] < lo, (sides, lo)
+    if sides["above"] is not None:
+        assert sides["above"] > hi, (sides, hi)
+
+
+@pytest.mark.parametrize("dtype,lo,hi", _WIDENING_EMPTY)
+def test_the_widening_empty_set_is_empty_by_an_independent_oracle(dtype, lo, hi):
+    """ANTI-VACUITY on the refusals above: each declared interval really does
+    hold no value of its dtype.
+
+    The statement made is "the LEAST dtype value at or above `lo` is
+    strictly above `hi`, or there is none at all" — the same thing as "no
+    dtype value lies inside [lo, hi]", because a dtype's values are totally
+    ordered. It is computed from numpy alone, independently of every helper
+    in `_jax_compat`: a `nextafter` walk upward from the nearest cast for
+    the float dtypes, `np.iinfo` and an exact `ceil` for the integer ones.
+    Every deciding comparison is python's, which compares int and Fraction
+    against float without rounding either.
+
+    Without this, a refusing mutant (`return False, ""` at the top of the
+    exact check) passes the test above while rejecting every legitimate
+    envelope in the file.
+    """
+    d = np.dtype(dtype)
+    if d.kind in "iub":
+        i = (0, 1) if d.kind == "b" else (int(np.iinfo(d).min),
+                                          int(np.iinfo(d).max))
+        first = i[0] if lo == -math.inf or lo <= i[0] else math.ceil(lo)
+        above = first if first <= i[1] else None
+    elif lo == -math.inf:
+        above = float(np.nextafter(np.array(-np.inf, d), np.array(np.inf, d)))
+    else:
+        with np.errstate(over="ignore", invalid="ignore"):
+            c = np.array(float(lo), d)
+            while np.isfinite(c) and float(c) < lo:
+                c = np.nextafter(c, np.array(np.inf, d))
+        above = float(c) if np.isfinite(c) else None
+    assert above is None or above > hi, (
+        f"{above} is a {dtype} value inside the declared [{lo}, {hi}] — the "
+        f"refusal above is a FALSE refusal, the failure this layer must not "
+        f"have"
+    )
 
 
 @pytest.mark.parametrize("dtype,lo,hi,witness", [
@@ -903,15 +1030,39 @@ def test_the_gap_edge_recheck_stops_at_parity_with_the_parent():
     # (a finite-table bisection has no infinity to choke on), pinned so it
     # stays that way
     ("bfloat16", float("-inf"), 2**54 + 1, 2.0**54),
+    # -- THE WIDENING DIRECTION'S OWN ADMIT BOUNDARY ----------------------
+    # Each of these is ONE STEP from a `_WIDENING_EMPTY` case above and must
+    # stay admitted: the sloppy version of that refusal — "an inexactly
+    # recorded endpoint at this magnitude means the dtype cannot hold the
+    # interval" — rejects every one of them, and rejecting a program a user
+    # legitimately wrote is worse than the hole being closed.
+    ("float64", 2**54 + 1, 2**54 + 4, 2.0**54 + 4),   # inhabitant AT the hi
+    ("float64", 2**54, 2**54 + 3, 2.0**54),           # inhabitant AT the lo
+    ("bfloat16", 2**53, 2**53 + 3, 2.0**53),
+    ("float8_e8m0fnu", 2**53, 2**53 + 3, 2.0**53),
+    # int64's minimum, sitting exactly at the declared hi, with a WIDENING
+    # lo below it (the reproducer's hi moved up by one integer)
+    ("int64", -(2**64) - 3072, -(2**63), -(2.0**63)),
+    ("uint64", 2**53 + 1, 2**60, 2.0**53 + 2),        # widening lo, uint64
+    # the float32-max refusal's paired control: the SAME bounds on a dtype
+    # that does hold values up there
+    ("float64", int(np.finfo(np.float32).max) + 1, float("inf"), 2.0**128),
+    # the subnormal refusal's paired control: [1/4 ulp, 7/4 ulp] straddles
+    # the smallest subnormal, so it IS inhabited — by exactly one value
+    ("float64", Fraction(1, 2**1076), Fraction(7, 2**1076), 2.0**-1074),
+    # the underflow-to-zero refusal's paired control: the same tiny
+    # interval, straddling zero instead of sitting below it
+    ("uint32", Fraction(-3, 2**1200), Fraction(1, 2**1200), 0.0),
 ])
 def test_the_exact_recheck_admits_at_its_boundaries(dtype, lo, hi, witness):
-    """The admit side of the gap-edge re-check, at its two edges: an
-    inhabitant exactly on a declared endpoint, and an infinite endpoint
-    (which means "unbounded" and is absorbed by the dtype's own range,
-    exactly as in the rounded check). Each case names its witness — a value
-    of the dtype inside the DECLARED interval, verified exactly — so a
-    refusal here is a proven false refusal, the failure this layer must not
-    have."""
+    """The admit side of the gap-edge re-check, at its edges: an inhabitant
+    exactly on a declared endpoint, an infinite endpoint (which means
+    "unbounded" and is absorbed by the dtype's own range, exactly as in the
+    rounded check), and — since the re-check covers the widening direction —
+    the one-step neighbours of every widening refusal. Each case names its
+    witness — a value of the dtype inside the DECLARED interval, verified
+    exactly — so a refusal here is a proven false refusal, the failure this
+    layer must not have."""
     d = np.dtype(dtype)
     assert float(np.array(witness, d)) == witness, "witness must be a dtype value"
     assert lo <= witness <= hi, "witness must sit in the declared interval"

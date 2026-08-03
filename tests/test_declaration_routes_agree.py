@@ -55,6 +55,14 @@ PAIRS = [
     # around an EMPTY declared set — both routes must refuse it, with the
     # empty-set cause, and must keep agreeing
     ("float64", 2**53 + 1, 2**53 + 1),
+    # the WIDENING half of that boundary and its one-step neighbours: the
+    # declared interval sits strictly inside a representation gap (refused)
+    # or reaches one of the gap's edges (admitted), and the two routes must
+    # reach the same answer either way
+    ("float64", 2**54 + 1, 2**54 + 3),
+    ("float64", 2**54 + 1, 2**54 + 4),
+    ("int64", -(2**64), -(2**63) - 1),
+    ("int64", -(2**64), -(2**63)),
 ]
 
 
@@ -287,6 +295,69 @@ def test_hand_and_sugar_refusal_messages_are_byte_identical(dtype, lo, hi):
     h, s = _full("hand", dtype, lo, hi), _full("sugar", dtype, lo, hi)
     assert h.startswith("refuse:"), "param must refuse for the bytes to matter"
     assert h == s
+
+
+# -- the TEMPLATE routes, measured rather than argued -------------------------
+#
+# `_hand` and `_sugar` cover two ways to declare an input; the other public
+# ways go through a template — `contracts.conditioning_2x2` (whose ranges
+# pass `_closed_range`) and the two `preconditions` templates. Every one of
+# them ends in `any_array`, but that is exactly the argument the call graph
+# also supported for `any_pytree` and `_closed_range` before each was
+# measured pre-converting its bounds, so the routes are MEASURED here.
+
+
+def _template_routes(dtype, lo, hi):
+    """The decision each template route reaches, as {route: decision}."""
+    from stelling import contracts, preconditions
+
+    def go(fn):
+        try:
+            jax.make_jaxpr(fn)()
+            return "admit"
+        except ValueError as e:
+            return f"refuse:{e}"
+
+    return {
+        "contract": go(lambda: contracts.conditioning_2x2(
+            dtype, (lo, hi), (1, 2), (0, 1), 10.0).harness()),
+        "field_positive": go(
+            lambda: preconditions.field_positive((1,), dtype, (lo, hi))),
+        "scalar_nonzero": go(
+            lambda: preconditions.scalar_nonzero(dtype, (lo, hi))),
+    }
+
+
+@pytest.mark.parametrize("dtype,lo,hi,expected", [
+    # the widening-empty class, and its one-step neighbours which must stay
+    # admitted on every route (a route that refuses these has stopped
+    # delegating and started deciding)
+    ("float64", 2**54 + 1, 2**54 + 3, "refuse"),
+    ("float64", 2**54 + 1, 2**54 + 4, "admit"),
+    ("int64", -(2**64), -(2**63) - 1, "refuse"),
+    ("int64", -(2**64), -(2**63), "admit"),
+])
+def test_the_template_routes_reach_the_hand_routes_decision(
+        dtype, lo, hi, expected):
+    """Every public way to declare an input inherits `any_array`'s judgment,
+    refusal bytes included — measured on the class where the judgment most
+    recently changed."""
+    ref = _full("hand", dtype, lo, hi)
+    assert ref.split(":")[0] == expected, (ref, expected)
+    assert _full("sugar", dtype, lo, hi) == ref
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)   # the templates build arrays
+    try:
+        routes = _template_routes(dtype, lo, hi)
+    finally:
+        jax.config.update("jax_enable_x64", old)
+    for route, got in routes.items():
+        assert got == ref, (
+            f"{dtype} ({lo!r}, {hi!r}): the {route} route says {got!r} and "
+            f"the hand route says {ref!r} — a template that pre-processes its "
+            f"bounds hands the declaration layer a value already rounded, and "
+            f"then decides for itself"
+        )
 
 
 def test_no_module_pre_converts_a_bound_before_any_array_sees_it():
