@@ -13,6 +13,15 @@ interval-row fact and its tier from the LIVE registry
 (stelling.propagate.TRANSFERS), so the sentence cannot drift from it,
 and names the gap class (an unbuilt row) explicitly.
 
+`square` was the evaluator's own primitive and is kept in that history,
+but it is no longer a SPECIMEN: its emission row shipped, so it takes the
+other branch now. The exemplar for this branch moved to ``abs`` — also
+transfer-registered, also recorded declining here by an external
+evaluator (`corpus/supply/affine_holdout/SCOUT_CASES.md`), still
+unemitted. Every test below asserts its specimen is outside the emission
+set BEFORE using it, so the next row to land fails here loudly instead of
+quietly exercising the wrong branch.
+
 Message content only: both branches still decline, the DeclinedObligation
 shape is unchanged, and the branch selection is bound to registry
 membership. Hand-built IR — no jax needed.
@@ -24,6 +33,7 @@ from stelling import ir
 from stelling.obligation import (
     DeclinedObligation,
     ObligationSlice,
+    _SUPPORTED,
     slice_unknown_obligations,
 )
 from stelling.propagate import TRANSFERS, interval_env, propagate
@@ -94,22 +104,52 @@ def _declined_reason(prim):
 
 
 def test_interval_row_present_is_named_with_its_live_tier():
-    # 'square' is the external evaluator's own case: an interval row
-    # exists (and its tier is read from the registry, not narrated)
-    assert "square" in TRANSFERS
-    tier = TRANSFERS["square"][1]
-    reason, p = _declined("square")
-    # 'alone' may be claimed only because the run recorded no square-⊤
-    assert "square" not in dict(p.coverage.unknown_primitives)
-    assert "primitive 'square' is outside the supported emission set" in reason
+    # an interval row exists and did NOT fall to ⊤ on this run, so the
+    # 'alone' sentence is the true one. The tier is read from the
+    # registry, not narrated.
+    assert "abs" in TRANSFERS
+    assert "abs" not in _SUPPORTED, (
+        "'abs' now has an emission row, so it takes the other branch and is "
+        "no longer a specimen for this one — move the exemplar to a "
+        "primitive that is in TRANSFERS and not in _SUPPORTED, or this test "
+        "is exercising a branch it does not name"
+    )
+    tier = TRANSFERS["abs"][1]
+    # abs([-3, 2]) = [0, 3], which straddles 2.5: the obligation is really
+    # undecided, so the slice is really built and really declines
+    reason, p = _declined("abs", lo=-3.0, hi=2.0)
+    # 'alone' may be claimed only because the run recorded no abs-⊤
+    assert "abs" not in dict(p.coverage.unknown_primitives)
+    assert "primitive 'abs' is outside the supported emission set" in reason
     assert "an unbuilt row, not a policy refusal of the form" in reason
     assert (
-        f"An interval transfer row for 'square' IS registered "
+        f"An interval transfer row for 'abs' IS registered "
         f"(tier {tier!r}), so the gap is the solver-emission row alone"
         in reason
     )
     # the no-row sentence must not ride on this branch
     assert "no interval transfer row either" not in reason
+
+
+def test_the_evaluators_own_primitive_now_takes_the_other_branch():
+    """The history above, closed. `square` was the message's motivating
+    case; its emission row shipped, so the decline it used to produce no
+    longer exists — pinned here so the docstring's history cannot read as
+    a live claim."""
+    assert "square" in _SUPPORTED and "square" in TRANSFERS
+    x, t, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
+    q = close(
+        [
+            any_eqn(x, 1.0, 2.0),
+            eqn("square", [x], t),
+            eqn("lt", [t, lit(2.5)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(q)
+    (item,) = slice_unknown_obligations(q, p, interval_env(q))
+    assert isinstance(item, ObligationSlice)
 
 
 def test_registered_row_that_declined_this_run_names_both_gaps():
@@ -174,11 +214,12 @@ def test_without_a_run_record_neither_direction_is_claimed():
     # sentence must claim neither 'alone' nor 'both gaps'
     from stelling.obligation import slice_obligation
 
+    assert "abs" in TRANSFERS and "abs" not in _SUPPORTED
     x, t, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
     q = close(
         [
             any_eqn(x, 1.0, 2.0),
-            eqn("square", [x], t),
+            eqn("abs", [x], t),
             eqn("lt", [t, lit(2.5)], pred),
             eqn("stelling_assert", [pred], out),
         ],

@@ -110,6 +110,17 @@ The supported sets are listed in docs/supported-primitives.md.
 disjoint whitelists and neither is published. *"That table is the highest-value
 missing page."*
 
+**2026-08-03 — the specimen closed, the finding did not.** `square` now has an
+emission row, so the message quoted above is no longer reachable for it: an
+obligation over `jnp.square` reaches the solver. The evaluator's reading is
+recorded as it was read and is not restated; what it was *about* — a decline
+that names the primitive and nothing else — is still the point, and its live
+specimen is now `abs` (`tests/test_unsupported_emission_message.py`, which
+asserts its exemplar is outside the emission set before using it). Note also
+that the proposed text's parenthesis, *"it also has no interval transfer"*, was
+never true of `square`: it had a `sound` interval row the whole time, which is
+exactly the contradiction the evaluator could not reconcile.
+
 ---
 
 ## 4. The element-budget message
