@@ -2365,14 +2365,47 @@ ASSUME_DROP_NOTE = (
 
 # Naming a WORKING ALTERNATIVE, not just the missing primitive. "no transfer for
 # reduce_and" tells a reader the tool is incomplete; this tells them what to
-# write instead. Both forms below use only registered primitives, and both make
-# an `assume` CONSTRAIN rather than drop — which is the part nobody would guess.
+# write instead. The cause is a REGISTRY ASYMMETRY — `reduce_or` has a transfer
+# in both registries and `reduce_and` has one in neither — so `jnp.any` decides
+# and `jnp.all` does not; tests/test_membership_idiom_hint.py pins that, because
+# the moment a `reduce_and` row lands the first sentence here becomes false.
+#
+# THREE forms, and the ordering is measured, not stylistic. All three decide on
+# all three property-stating primitives, and all three make an `assume`
+# CONSTRAIN rather than DROP. They are still not interchangeable, which is the
+# part nobody would guess: measured on x ∈ [-10, 10]^3,
+#
+#   assume(sum(maximum(0 - x, 0)) <= 0)   CONSTRAINED, narrows var 4 (the
+#   assume(sum((x < 0).astype(i32)) == 0) reduction's own intermediate) — and
+#                                         each raises satisfiability-UNCERTIFIED,
+#                                         so `assert_(sum(x) <= -100)` comes back
+#                                         `unknown` (withheld from REFUTED) and
+#                                         `assert_(sum(x) >= 0)` stays `unknown`
+#   assume(x >= 0)                        CONSTRAINED, narrows var 1 (the
+#                                         DECLARED input) to [0, 10]^3, no
+#                                         UNCERTIFIED — `sum(x) <= -100` reaches
+#                                         `violated-over-set` and `sum(x) >= 0`
+#                                         reaches `discharged`
+#
+# So the elementwise form is named FIRST: deleting the reduction is not merely a
+# shorter spelling, it is the one that leaves the REFUTED face reachable. The
+# arithmetic pair stays because a genuine reduction over an array is not a
+# pointwise fact and has nowhere else to go.
 MEMBERSHIP_IDIOM_HINT = (
     " — `jnp.all(...)` lowers to `reduce_and`, which has no interval transfer, "
-    "so its box is ⊤. Express the same condition arithmetically instead: "
-    "`jnp.sum(jnp.maximum(lo - k, 0.0) + jnp.maximum(k - hi, 0.0)) <= 0.0` or "
-    "`jnp.sum((k < lo).astype(jnp.int32)) == 0`. Both use registered primitives "
-    "only, and both make a constraining `assume` CONSTRAIN rather than DROP"
+    "so its box is ⊤. Usually the fix is to DELETE THE REDUCTION: `assert_`, "
+    "`assume` and `nonvacuity` judge an array predicate ELEMENTWISE, so the "
+    "bare `k >= lo` over an n-element array already IS the conjunction over all "
+    "n. Where the condition is genuinely a reduction, express it arithmetically "
+    "instead: `jnp.sum(jnp.maximum(lo - k, 0.0) + jnp.maximum(k - hi, 0.0)) <= "
+    "0.0` or `jnp.sum((k < lo).astype(jnp.int32)) == 0`. All three use "
+    "registered primitives only and all three decide. As an `assume` they are "
+    "NOT interchangeable: all three CONSTRAIN rather than DROP, but the two "
+    "arithmetic forms narrow the reduction's own intermediate — an "
+    "over-approximated value — so the precondition is stamped "
+    "satisfiability-UNCERTIFIED and every definite violation is then withheld "
+    "from REFUTED, whereas the elementwise form narrows the compared value "
+    "itself and stays certified where that value is a declared input"
 )
 
 IEEE_PRODUCT_SOURCES = frozenset({"mul", "dot_general", "integer_pow"})
@@ -4363,6 +4396,47 @@ class _Propagator:
                     )
         return out + origin
 
+    def _note_membership_idiom(self, eqn: ir.JaxprEqn, subject: str) -> None:
+        """:data:`MEMBERSHIP_IDIOM_HINT`, for an UNDECIDED ``stelling_assert``
+        / ``stelling_nonvacuity`` whose predicate is stelling's own ⊤ from
+        ``reduce_and`` — or nothing.
+
+        The hint existed at ONE call site, the dropped-assume note, while the
+        same ⊤ makes ``assert_(jnp.all(...))`` an undecided obligation and
+        ``nonvacuity(jnp.all(...))`` an undecided membership condition with
+        NOTHING printed (measured: no propagation note at all on either path,
+        and the nonvacuity face does not even reach
+        :func:`stelling.verdict.undecided_cause_note`, which fires only on an
+        undecided *obligation*). One cause, three property-stating primitives,
+        one text.
+
+        It goes in the NOTES rather than the obligation detail because the
+        detail does not survive: measured, escalating the same query replaces
+        the propagation's detail wholesale with the solver record's own
+        (``escalation declined: primitive 'reduce_and' …``), so a detail-only
+        hint would vanish for exactly the reader who tried harder, while
+        ``solvers.make_solver_verdict`` carries ``propagation.notes`` through
+        unchanged.
+
+        The gate is the ``top_origin`` record the decline notes already read —
+        the predicate value IS a ⊤ minted at ``reduce_and`` — and nothing
+        wider. A ⊤ from any other primitive, or a predicate that merely
+        straddles, gets no hint: naming a rewrite at a reader whose problem it
+        does not solve is the #2 defect class, and this is the same
+        no-guessing posture :meth:`_straddle_suffix` takes when it declines to
+        quote."""
+        pred = eqn.invars[0] if eqn.invars else None
+        if not isinstance(pred, ir.Var):
+            return
+        origin = self.top_origin.get(pred.id)
+        if origin is None or origin[0] != "reduce_and":
+            return
+        where = eqn.source_info[-1] if eqn.source_info else "unknown location"
+        self.notes.append(
+            f"{subject} UNDECIDED at {where}: its predicate is stelling's own "
+            f"⊤ from 'reduce_and' at {origin[1]}{MEMBERSHIP_IDIOM_HINT}"
+        )
+
     def _cmp_origin_clause(self, prod: ir.JaxprEqn) -> str:
         """Artifact-⊤ origins of a quoted comparison's sides — the #2
         provenance rule applied to the straddle quote: a quoted unbounded
@@ -5552,6 +5626,12 @@ class _Propagator:
                 # below (which replace the detail with their own claims
                 # and are untouched)
                 detail += self._straddle_suffix(eqn)
+                # ...and where the straddle quote has nothing to say because
+                # the predicate is a `reduce_and` ⊤, the membership-idiom
+                # hint does. The two are complements, never both: a ⊤ has no
+                # producing comparison to quote. Note, not detail — see
+                # _note_membership_idiom.
+                self._note_membership_idiom(eqn, "obligation")
             if ieee and in_flags and in_flags[0] and status != "unknown":
                 # the predicate VALUE arrived flagged maybe-NaN (a decline
                 # artifact ⊤ reaching the assert, or a flagged selector
@@ -5606,6 +5686,14 @@ class _Propagator:
             )
         if eqn.primitive == "stelling_nonvacuity":
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
+            if status == "unknown":
+                # the assert's hint, on the face that needs it MOST: an
+                # undecided membership condition alongside discharged
+                # obligations reaches neither a decline note nor
+                # undecided_cause_note (which fires on an undecided
+                # OBLIGATION), so before this the whole diagnosis was the
+                # stamp's one word `undecided`
+                self._note_membership_idiom(eqn, "nonvacuity condition")
             if ieee and in_flags and in_flags[0] and status != "unknown":
                 # same posture as the assert above: a maybe-NaN membership
                 # condition supports neither the checked nor the FAILED face

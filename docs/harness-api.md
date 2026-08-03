@@ -535,13 +535,18 @@ Prefer `elementwise`. The two arithmetic rewrites cost more equations for
 the same answer; they exist for the cases where the condition is
 genuinely a reduction over an array rather than a pointwise fact.
 
-**How you would find this yourself.** The `assume` path prints the
-rewrite in its drop note — the `DROPPED` note names `reduce_and` and
-quotes both arithmetic forms. The `assert_` and `nonvacuity` paths do
-not print that hint; there, the tell is the stamp's coverage line naming
-`reduce_and` among the ⊤ primitives. **Read the coverage line whenever an
-obligation or a membership condition comes back undecided** — it names
-the primitive that stopped the analysis.
+**How you would find this yourself.** All three paths print the rewrite
+now, in the notes: the `assume` path names it in its `DROPPED` note, and
+an `assert_` or `nonvacuity` whose predicate is the `reduce_and` ⊤ gets
+an `obligation UNDECIDED at …` / `nonvacuity condition UNDECIDED at …`
+note carrying the same text. It is a *note* rather than an obligation
+detail because escalating replaces the detail with the solver record's
+own. The note fires only when the judged predicate **is** that ⊤ — a
+query that merely contains a `jnp.all` somewhere else gets nothing — so
+the stamp's coverage line remains the general instrument: **read it
+whenever an obligation or a membership condition comes back undecided**,
+because it names the primitive that stopped the analysis whatever that
+primitive is.
 
 ## `trace(harness)`
 
