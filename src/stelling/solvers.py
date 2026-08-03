@@ -32,6 +32,18 @@ boundary is checked against the ledger before any escalated verdict
 emits (:exc:`ProvenanceError` on divergence). Solvers are never invoked
 on defaults, and the dispatch config's time limit is required.
 
+**WHO ANSWERED IS NOT WHO WAS ASKED, and both are recorded.** A stamp is
+the record of the ask; a backend that was invoked and stamped but
+returned failed/unknown/timeout contributed nothing to the outcome, so a
+two-backend stamp is compatible with a one-backend decision. That gap is
+derived per obligation (:attr:`ObligationEscalation.answered_by`,
+surfaced as :attr:`stelling.verdict.Verdict.solver_redundancy`) and, when
+a decision rests on fewer than :data:`PORTFOLIO_SIZE` answers, said out
+loud in the notes and on the obligation's own detail line. It matters
+most on a DISCHARGE: a ``sat`` reaches REFUTED only through independent
+exact-rational replay, while an ``unsat`` is a universal claim nothing
+re-derives — there the second backend is the only cross-check there is.
+
 Guard rule: every decline and every solver failure (crash, garbage
 output, missing binary, unsupported fragment) degrades the obligation to
 UNKNOWN with the reason quoted in the verdict notes. Raising is reserved
@@ -157,6 +169,13 @@ IEEE_SEMANTICS_REFUSAL = (
     "escalation declines until a float-semantics emission ships as its own "
     "audited build"
 )
+
+# The portfolio's designed redundancy: TWO backends, independently, on the
+# same emitted text. It is a constant rather than `len(backends)` on
+# purpose — the question a reader has is "did this verdict get the
+# cross-check the design promises", and measuring the answer against
+# whatever happened to be installed answers a different, easier question.
+PORTFOLIO_SIZE = 2
 
 OB_DISCHARGED = "discharged"
 OB_VIOLATED_WITNESS = "violated-witness"
@@ -337,6 +356,14 @@ class ObligationEscalation:
     invocations: tuple[SolverStamp, ...]
     witness: Witness | None
     notes: tuple[str, ...]
+    # The labels of the backends whose DEFINITIVE answer (sat/unsat) this
+    # outcome rests on — empty for an outcome no answer decided.
+    # Deliberately NOT derivable from ``invocations``: a stamp records the
+    # ASK, and a backend that was invoked and stamped but returned
+    # failed/unknown/timeout contributed nothing to the outcome. The gap
+    # between the two is exactly a degraded portfolio, and before this
+    # field there was no quantity a consumer could read it from.
+    answered_by: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -949,6 +976,32 @@ def make_validated_witness(
     )
 
 
+def _absences(
+    config: SolverConfig,
+    ordered: tuple[_Backend, ...],
+    missing: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Why each portfolio member is not among the backends that ran, one
+    phrase per absent member, in a fixed order.
+
+    Three disjoint causes covering ``{z3, cvc5}``: it ran, it is wanted but
+    not installed (``missing``), or the caller excluded it with
+    ``SolverConfig.only``. The predecessor said "not installed" for every
+    absence, which is FALSE for the ``only=`` case — a configured
+    restriction rendered as a missing dependency sends a reader to install
+    something they already have."""
+    ran = {b.name for b in ordered}
+    out = []
+    for name in ("z3", "cvc5"):
+        if name in ran:
+            continue
+        if name in missing:
+            out.append(f"{name} is not installed")
+        else:
+            out.append(f"{name} was excluded by SolverConfig.only={config.only!r}")
+    return tuple(out)
+
+
 def _dispatch_obligation(
     sl: ObligationSlice,
     config: SolverConfig,
@@ -968,10 +1021,11 @@ def _dispatch_obligation(
             scripts[backend.flavor] = emit(sl, backend.flavor, config.timeout_ms)
     wall_s = _wall_seconds(config.timeout_ms)
     notes: list[str] = []
+    absences = _absences(config, ordered, missing)
     if len(ordered) == 1:
         notes.append(
             f"assert #{sl.index}: portfolio degraded — only {ordered[0].label} "
-            f"ran ({', '.join(missing) or 'the other solver'} not installed)"
+            f"ran ({'; '.join(absences)})"
         )
 
     ledger_start = len(ledger.stamps)
@@ -1033,6 +1087,69 @@ def _dispatch_obligation(
             notes.append(f"assert #{sl.index}: {backend.label}: {raw.detail}")
 
     answers = {raw.answer for _, _, raw, _ in runs}
+    # WHO ANSWERED, which is not who was ASKED. The stamps record the ask —
+    # that is their whole contract, appended before the transport runs so no
+    # result can ever be narrated into one — and until this line "how many
+    # backends actually answered" was not a quantity any consumer could
+    # read. The redundancy a verdict rests on is a property of the ANSWERS,
+    # so it is derived here, once, from the runs.
+    answered = tuple(
+        b.label for b, _, raw, _ in runs if raw.answer in ("sat", "unsat")
+    )
+
+    def degraded_notes(*, universal: bool) -> tuple[str, ...]:
+        """The note(s) a DECIDED obligation carries when its outcome rests
+        on fewer than :data:`PORTFOLIO_SIZE` independent answers — ``()``
+        when it rests on the full portfolio.
+
+        The pre-invocation note above fires on an absent BACKEND; this one
+        fires on an absent ANSWER, which is the wider condition and the one
+        that was silent: a backend that is installed, invoked, and stamped,
+        but whose transport failed or whose parser refused the script,
+        leaves the stamp saying two and the decision resting on one.
+
+        ``universal`` marks the direction with no downstream backstop. A
+        ``sat`` becomes REFUTED only through an independent exact-rational
+        replay of the model, so a lost backend there costs a cross-check
+        that another mechanism still performs. An ``unsat`` is a universal
+        claim over the whole declared box: there is no point to replay and
+        nothing re-derives it, so the second backend IS the redundancy."""
+        if len(answered) >= PORTFOLIO_SIZE:
+            return ()
+        gaps = [
+            f"{b.label} was invoked and returned {raw.answer}"
+            for b, _, raw, _ in runs
+            if raw.answer not in ("sat", "unsat")
+        ]
+        gaps.extend(absences)
+        out = [
+            f"assert #{sl.index}: portfolio degraded — this outcome rests on "
+            f"{len(answered)} of the {PORTFOLIO_SIZE} backends the portfolio "
+            f"is designed around ({' and '.join(answered)} answered; "
+            f"{'; '.join(gaps)})"
+        ]
+        if universal:
+            out.append(
+                f"assert #{sl.index}: and this is the direction with no "
+                f"backstop: a discharge is a universal claim over the whole "
+                f"declared box, so nothing downstream re-derives it the way "
+                f"exact-rational replay re-derives a witness. The second "
+                f"backend was the only independent check on this obligation "
+                f"and it did not answer"
+            )
+        return tuple(out)
+
+    def degraded_clause(*, universal: bool) -> str:
+        """The same fact, on the obligation's own detail line — where a
+        reader looks first, and where a REFUTED/VERIFIED is read one
+        obligation at a time."""
+        if len(answered) >= PORTFOLIO_SIZE:
+            return ""
+        return (
+            f" [PORTFOLIO DEGRADED: {len(answered)} of {PORTFOLIO_SIZE} "
+            f"backends answered" + ("; a discharge has no replay backstop]"
+                                    if universal else "]")
+        )
 
     if "sat" in answers and "unsat" in answers:
         raise SolverDisagreement(
@@ -1054,10 +1171,12 @@ def _dispatch_obligation(
             detail=(
                 f"discharged by solver escalation ({sl.fragment}): the box "
                 f"with the negated predicate is unsat per {' and '.join(agreed)}"
+                + degraded_clause(universal=True)
             ),
             invocations=invocations(),
             witness=None,
-            notes=tuple(notes),
+            notes=tuple(notes) + degraded_notes(universal=True),
+            answered_by=answered,
         )
 
     if "sat" in answers:
@@ -1117,10 +1236,12 @@ def _dispatch_obligation(
                         f"inputs and its predicate is definitely false — "
                         f"{_REPLAY_SENTENCE}; {backend.label} ({sl.fragment}) "
                         f"answered sat in agreement"
+                        + degraded_clause(universal=False)
                     ),
                     invocations=invocations(),
                     witness=None,
-                    notes=tuple(notes),
+                    notes=tuple(notes) + degraded_notes(universal=False),
+                    answered_by=answered,
                 )
             witness = make_validated_witness(
                 sl,
@@ -1146,10 +1267,12 @@ def _dispatch_obligation(
                 detail=(
                     f"violated at a concrete witness found by {backend.label} "
                     f"({sl.fragment}); {_REPLAY_SENTENCE}{elements}"
+                    + degraded_clause(universal=False)
                 ),
                 invocations=invocations(),
                 witness=witness,
-                notes=tuple(notes),
+                notes=tuple(notes) + degraded_notes(universal=False),
+                answered_by=answered,
             )
         detail_tail = (
             "; ".join(sat_problems)
@@ -1677,10 +1800,19 @@ def make_solver_verdict(
     witnesses = tuple(
         r.witness for r in escalation.records if r.witness is not None
     )
+    # the counting surface, derived from the records that actually DECIDED
+    # something — an obligation nobody answered has no redundancy to report,
+    # and listing it at zero would put every UNKNOWN in the degraded column
+    redundancy = tuple(
+        (r.index, r.answered_by)
+        for r in escalation.records
+        if r.outcome != OB_UNKNOWN
+    )
     return Verdict(
         status=status,
         obligations=obligations,
         stamp=stamp,
         notes=notes,
         witnesses=witnesses,
+        solver_redundancy=redundancy,
     )
