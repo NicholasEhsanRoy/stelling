@@ -726,10 +726,24 @@ def test_the_documented_failure_is_the_measured_failure():
     # ImportError` will not catch it" passed, fifteen lines below the assertion
     # that ImportError IS in the measured bases. The phrase is derived from the
     # measurement rather than typed, so a base change moves it.
-    assert f"a subclass of `{imported['bases'][0]}`" in para, (
+    relation = f"a subclass of `{imported['bases'][0]}`"
+    assert relation in para, (
         f"docs/harness-api.md must state the measured relation verbatim: "
         f"{imported['short_type']} is a subclass of {imported['bases'][0]}. "
         f"user code and stelling's own callers rely on `except ImportError`"
+    )
+    # ...and not while negating it. The affirmative phrase is a SUBSTRING of
+    # its own negation ("NOT a subclass of `ImportError`"), so the presence
+    # check alone passed a page saying the opposite -- the same substring
+    # defect this assertion was added to close, reproduced inside the fix for
+    # it. Caught by mutating the fix rather than by reading it.
+    negated = re.search(
+        r"(?:\bnot\b|n't|\bnever\b)\s+" + re.escape(relation), para, re.I
+    )
+    assert not negated, (
+        f"docs/harness-api.md names the measured relation and denies it: "
+        f"{negated.group(0)!r}. Measured, {imported['short_type']} IS a "
+        f"subclass of {imported['bases'][0]}."
     )
 
     # WHAT IT SAYS. The page quotes the sentence, not just the install line, so
