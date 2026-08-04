@@ -9,9 +9,10 @@ Two kinds of check live here and they measure different things.
 *Token scans* (:func:`test_jax_imported_only_in_compat_module` and friends)
 enforce exactly one thing: **no file outside ``_jax_compat.py`` spells the
 jax token.** That is a proxy for the churn boundary, not a proof of it — a
-file can reach jax with no token at all (``from stelling._jax_compat import
-jnp, np, jax`` works today, and so does ``importlib.import_module`` with a
-spliced name), and the scan stays green for both. It is worth pinning as the
+file can reach jax without an ``import jax`` / ``from jax`` **statement**
+(``from stelling._jax_compat import jnp, np, jax`` works today, and so does a
+module-scope ``importlib.import_module("jax")`` with a plain literal name —
+no splicing needed), and the scan stays green for both. It is worth pinning as the
 cheap, statically checkable half — but it says nothing about what a user
 without jax sees. It was mistaken for that guarantee once: ``harness.py``
 contained no ``import jax`` token and still died at import in a bare
@@ -73,7 +74,8 @@ def test_jax_imported_only_in_compat_module():
     ``from stelling._jax_compat import jax``, or a name assembled at runtime —
     leaves this green. What it does buy is cheap: a *grep-visible* boundary, so
     a jax release that moves a symbol has one file to read first, and the
-    pre-commit hook of the same name can enforce it without importing anything.
+    ``jax-import-hygiene`` pre-commit hook can enforce it without importing
+    anything.
 
     NOT a claim about bare environments either — a module can require jax at
     import without ever spelling the token, which is exactly how ``harness.py``
@@ -395,6 +397,44 @@ def test_a_real_jax_less_interpreter_says_the_same_thing(tmp_path):
     assert JAX_EXTRA_HINT in got["harness"]["msg"], got
 
 
+def test_the_availability_probe_does_not_import_what_it_probes():
+    """``available()`` says "without importing it" and nothing pinned that.
+
+    Found by the survivor triage, the second time it has paid: an audit filed
+    an import-and-catch reimplementation as an EQUIVALENT mutant because it
+    still answers ``True``/``False`` correctly. It is not equivalent, and the
+    triage rule — apply the mutant, then look at what the code produces —
+    settles it: the answer is identical, the *effect* is not. Import-and-catch
+    leaves the probed package in ``sys.modules``, and it makes the divergence
+    table in this file's own prelude false, because under the no-jax hook it
+    would return False where the shipped probe raises.
+
+    A probe that imports is not a probe: it is the cost the extras exist to
+    avoid, paid on every call.
+
+    Break it: implement ``available`` as ``try: import; return True``.
+    """
+    import importlib.util
+    import sys as _sys
+
+    from stelling import _optional
+
+    # z3 rather than jax: it is a real optional dependency, small, and not
+    # already imported by the suite. Asserting that first, or the test is
+    # measuring a module something else pulled in.
+    _sys.modules.pop("z3", None)
+    answer = _optional.available("z3")
+    assert isinstance(answer, bool), answer
+    assert "z3" not in _sys.modules, (
+        "available('z3') imported z3. Its docstring says 'without importing "
+        "it', and the extras exist so that a bare install pays nothing for a "
+        "dependency it does not use."
+    )
+    # positive control: the probe is looking at something real, not answering
+    # False for everything. `sys` is always importable and always a spec.
+    assert importlib.util.find_spec("sys") is not None
+
+
 def test_importing_harness_without_jax_names_the_extra():
     """The property the token scan could not see.
 
@@ -459,10 +499,16 @@ def test_importing_harness_without_jax_names_the_extra():
 
     # `import stelling.harness` alone fails (the "module" label above), so the
     # requirement is at IMPORT time, and the module docstring has to say so.
-    # It has to say so in a form its own negation cannot satisfy: "at import
-    # time" on its own is a substring of "does NOT require the extra at import
-    # time; it is lazy", which would leave a docstring saying the opposite of
-    # the measurement green. The whole clause is pinned instead.
+    # The whole clause is pinned rather than the substring "at import time",
+    # which is also a substring of "does NOT require the extra at import time".
+    #
+    # WHAT THIS DOES NOT COVER, stated rather than claimed away: pinning a
+    # clause cannot stop the docstring contradicting it ELSEWHERE. Measured, a
+    # docstring keeping this clause and negating it in the next sentence -- the
+    # ordinary shape of a correction record, "an earlier revision said X; that
+    # was withdrawn" -- stays green. The bound on the damage is that it is a
+    # documentation lie and never a masked regression: making the facade
+    # genuinely lazy turns four behavioural tests red whatever the prose says.
     doc = " ".join((SRC / "stelling" / "harness.py").read_text().split())
     claim = "requires the ``[jax]`` extra **at import time**, not at first call"
     assert claim in doc, (
@@ -510,8 +556,10 @@ def test_no_public_module_fails_without_naming_the_jax_extra():
 
     # ... and so would a broken hook, which the inventory cannot see: with jax
     # importable, every module imports, `failures` is empty, `nameless` is
-    # empty and this passes having measured nothing. Measured, removing the
-    # hook turns the rest of the suite red while leaving this test green.
+    # empty and this passes having measured nothing. That is what the assertion
+    # below is for. Before it existed, removing the hook turned the rest of the
+    # suite red while leaving THIS test green; with it, removing the hook takes
+    # this test down too.
     # `harness` is the module that cannot import without jax, so its presence
     # here is the evidence that jax really was absent in the subprocess.
     assert "harness" in got["failures"], (
@@ -578,12 +626,22 @@ def test_the_lazy_call_sites_also_name_the_jax_extra():
 
 def test_the_documented_failure_is_the_measured_failure():
     """docs/harness-api.md makes three claims about a JAX-less environment —
-    *when* the import fails, *what* it raises, and *what it says* — and this is
-    the test that holds the page to them. Each is compared against a
-    measurement, not against a literal written here: a check that only looked
-    for a substring of the page would stay green while the page said the
-    opposite of the code, which is the failure mode this whole file exists to
-    stop repeating.
+    *when* the import fails, *what* it raises, and *what it says* — and this
+    compares each against a measurement taken here.
+
+    WHAT IT DOES NOT COVER, stated as a list rather than claimed away, because
+    a sentence saying "the page is held to its claims" ranges over every way
+    the page could be wrong and cannot be true:
+
+    * **Only one paragraph.** The scan selects the paragraph containing
+      ``Importing `stelling.harness```. Another paragraph elsewhere on the page
+      may contradict all three claims; measured, that stays green.
+    * **Two of the five comparisons are literals typed here**, not
+      measurements: the timing clause and the two ``preconditions`` clauses.
+      Reword the page past them and they go red loudly, but the page could be
+      re-worded *and* falsified together in one edit.
+    * **Nothing on this page outside that paragraph** — including the "every
+      code block was executed verbatim" claim, which no test enforces.
 
     Concretely, all three of these have to go red, and none of them touches a
     token the page could keep by accident:
@@ -661,6 +719,17 @@ def test_the_documented_failure_is_the_measured_failure():
     )
     assert imported["short_type"] in named, (
         f"the page must name {imported['short_type']}, the class measured here"
+    )
+    # ...and the RELATION, not just the tokens. Naming both classes while
+    # DENYING the subclass relation kept every check above green: measured, a
+    # page reading "which is NOT a subclass of `ImportError`, so `except
+    # ImportError` will not catch it" passed, fifteen lines below the assertion
+    # that ImportError IS in the measured bases. The phrase is derived from the
+    # measurement rather than typed, so a base change moves it.
+    assert f"a subclass of `{imported['bases'][0]}`" in para, (
+        f"docs/harness-api.md must state the measured relation verbatim: "
+        f"{imported['short_type']} is a subclass of {imported['bases'][0]}. "
+        f"user code and stelling's own callers rely on `except ImportError`"
     )
 
     # WHAT IT SAYS. The page quotes the sentence, not just the install line, so
