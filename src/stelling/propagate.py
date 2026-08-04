@@ -211,6 +211,25 @@ class Propagation:
     # assume being present, and a dropped one is not present at all — leaving
     # the solver free to emit a sat witness outside the precondition.
     assume_dropped: bool = False
+    # Values this walk bound to ⊤ — every element [-inf, inf], the widest
+    # box there is — in the top-level scope, as (producing primitive,
+    # count), most frequent first. THE FACT THE COVERAGE CENSUS CANNOT
+    # HOLD, and the reason it is recorded here instead of there:
+    # :func:`stelling.coverage.measure` is a static census over the IR
+    # and a set of primitive NAMES, so it can only answer "is a transfer
+    # registered for this primitive". A registered transfer that runs and
+    # returns ⊤ on the values it was handed is `known` to the census and
+    # invisible in its counts. Measured: `exp(x) - exp(x)` over
+    # x ∈ [-1000, 1000] counts 4/4 known, 0 fallen to ⊤, and propagates
+    # [-inf, inf]. The verdict assemblers pair this with the census's own
+    # zero-gap counts to state what the coverage line did NOT establish.
+    #
+    # Top-level scope only, and that is the whole claim: sub-jaxpr runs
+    # (jit/custom_jvp wrappers, cond branches) get isolated envs that are
+    # discarded on exit, so a ⊤ inside one is seen here exactly when it
+    # reaches the wrapping equation's outvars — which is when it can
+    # still affect anything.
+    top_boxes: tuple[tuple[str, int], ...] = ()
 
     @property
     def all_discharged(self) -> bool:
@@ -6045,6 +6064,50 @@ def _check_domain(domain: str, semantics: str) -> None:
     )
 
 
+# the label for a ⊤ box no top-level EQUATION produced: a closure const
+# that had no bracket, or a value bound outside the equation list
+_TOP_NOT_FROM_EQUATION = "<constant or closure const>"
+
+
+def _is_top(box: iv.IntervalArray) -> bool:
+    """Is this box ⊤ — [-inf, inf] on every element?
+
+    A zero-size box is NOT ⊤: it has no element that could carry
+    information, so "the analysis knows nothing about it" says nothing.
+    An all-quantifier over no elements would report every empty array as
+    a total loss.
+    """
+    return box.size > 0 and all(
+        lo == -math.inf and hi == math.inf
+        for lo, hi in zip(box.los, box.his)
+    )
+
+
+def _top_boxes(
+    closed: ir.ClosedJaxpr, env: dict[int, iv.IntervalArray]
+) -> tuple[tuple[str, int], ...]:
+    """The ⊤ boxes in a finished top-level environment, attributed to the
+    equation that produced each (see :attr:`Propagation.top_boxes`).
+
+    Attribution is by outvar id against this jaxpr's own equations — the
+    same map :meth:`_Propagator.run` builds for assume classification,
+    rebuilt here because that one is scoped and restored. An id no
+    equation produced is a constvar and is labelled as one rather than
+    guessed at.
+    """
+    producers: dict[int, str] = {}
+    for eqn in closed.jaxpr.eqns:
+        for out in eqn.outvars:
+            if isinstance(out, ir.Var):
+                producers[out.id] = eqn.primitive
+    seen: dict[str, int] = {}
+    for vid, box in env.items():
+        if isinstance(box, iv.IntervalArray) and _is_top(box):
+            name = producers.get(vid, _TOP_NOT_FROM_EQUATION)
+            seen[name] = seen.get(name, 0) + 1
+    return tuple(sorted(seen.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
 def interval_env(
     closed: ir.ClosedJaxpr, *, assume_mode: str = "inert"
 ) -> dict[int, iv.IntervalArray]:
@@ -6148,4 +6211,5 @@ def propagate(
         notes=tuple(p.notes),
         semantics=semantics,
         assume_dropped=p.assume_dropped,
+        top_boxes=_top_boxes(closed, p.env),
     )
