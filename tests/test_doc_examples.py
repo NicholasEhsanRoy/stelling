@@ -19,18 +19,18 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                31
-      marked illustrative — not run                  3
+    ```python blocks                                33
+      marked illustrative — not run                  5
       EXECUTED (exit 0 required)                    28
         marked run-only — output not compared        3
         OUTPUT COMPARED against a fence             25
-    plain ``` fences                                49
+    plain ``` fences                                51
       consumed as an example's claimed output       25
-      HAND-WRITTEN, compared to nothing             24
+      HAND-WRITTEN, compared to nothing             26
 
 So the claim this file earns is: *every runnable example runs, and 25 of
 the 28 have their stdout compared byte for byte after a narrow
-normalisation.* The 24 unattached fences — a render pasted into prose, a
+normalisation.* The 26 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
 
@@ -94,13 +94,13 @@ SRC = REPO / "src"
 # The inventory the docstring states. A change here is a change to what
 # this file promises, so it must be made deliberately and in both places.
 EXPECTED_INVENTORY = {
-    "python_blocks": 31,
-    "illustrative": 3,
+    "python_blocks": 33,
+    "illustrative": 5,
     "executed": 28,
     "run_only": 3,
     "compared": 25,
-    "plain_fences": 49,
-    "plain_unattached": 24,
+    "plain_fences": 51,
+    "plain_unattached": 26,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")
