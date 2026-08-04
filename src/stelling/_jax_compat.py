@@ -21,7 +21,21 @@ import sys
 import warnings
 from fractions import Fraction
 
-import jax
+from stelling._optional import require
+
+# This is the file that imports jax, so it is the file that says what to do
+# when jax is absent. Without this, a jax-less environment gets a bare
+# `ModuleNotFoundError: No module named 'jax'` pointing at a private module the
+# user never typed, naming neither stelling nor the extra that fixes it;
+# `require` raises the sentence that does: 'run: pip install "stelling[jax]"'.
+# Every route in passes through here — stelling.harness re-exports from this
+# module at import time, and contracts/preconditions/reproduce import it inside
+# their functions — so one guard covers the lazy call sites too. A no-op when
+# jax is installed: the imports below then hit sys.modules. Anything other than
+# a missing jax (a broken jaxlib, say) is re-raised unchanged.
+require("jax")
+
+import jax  # noqa: E402  (the block below deliberately follows the guard)
 import jax.extend.core as jex_core
 import jax.numpy as jnp
 import jax.sharding
