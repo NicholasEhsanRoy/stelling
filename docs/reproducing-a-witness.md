@@ -41,9 +41,14 @@ The verdict was decided elsewhere; this is evidence *about* it.
 | `UNREACHABLE` | the witness lies at a point your own caller precondition excludes — a caller-precondition result, **not a bug in the program** |
 
 Exit status is `0` for all three. A nonzero status is how CI says "this
-check failed", and two of the three are not failures of anything. Exit
-`3` means there is no execution result at all, because the target could
-not be constructed. **Read the JSON sidecar, not the status.**
+check failed", and two of the three are not failures of anything.
+
+Exit `3` means **no execution result**: this file has nothing to report
+about the program. That covers a target it could not construct or run —
+and also a target that ran perfectly well but not in every mode, where the
+assertion held where it ran and the other mode raised, so `DIVERGED` (a
+claim of absence) is not available and nothing was false either. The
+sidecar's `execution.detail` says which. **Read it, not the status.**
 
 ## Factoring your program so a file can call it
 
@@ -56,8 +61,10 @@ it is not about.
 
 Your program lives in its own module. The harness module imports
 stelling; **the program module must not**, or the emitted file drags the
-tool back in through the side door. The file checks `sys.modules` after
-importing your target and says so if it happened.
+tool back in through the side door. The file checks `sys.modules` at each
+step — after importing your program, after running your caller
+precondition, and after running the target — and names the phase and the
+callable that first loaded the tool, on every path that reports anything.
 
 `write_reproducer` always re-traces the subject's own harness and compares
 its content hash with the verdict's stamp. There is deliberately no way to
@@ -247,8 +254,8 @@ this raises instead of producing something no consumer can read.
 declared and ran, and `null` only when none was declared — a measured
 value is never published as an unknowable one.
 
-`execution.result` is one of the three tokens, or `null` when the target
-could not be constructed.
+`execution.result` is one of the three tokens, or `null` when this file has
+no result to report — see exit `3` above; `execution.detail` says why.
 
 `execution.modes` maps `eager` and `jit` to whether the assertion **holds**
 there; both keys are always present, and `null` means that mode did not

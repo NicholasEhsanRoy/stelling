@@ -58,6 +58,7 @@ from stelling.reproduce import (  # noqa: E402
     DIVERGED,
     EXECUTION_MODES,
     NOT_EXECUTED_EXIT,
+    ReproducerError,
     RESULT_EXIT,
     SCHEMA,
     SIDECAR_KEYS,
@@ -105,6 +106,7 @@ def x64_off():
 from reproduce_subjects import (  # noqa: E402
     _Holder,
     absorbed_increment,
+    donating_precondition,
     donating_step,
     mixed_dtype_underflow,
     eager_only_absorbs,
@@ -112,6 +114,8 @@ from reproduce_subjects import (  # noqa: E402
     overflowing_bound,
     raises_in_every_mode,
     scatter_write,
+    three_float32_sums,
+    underflow_optional_jit,
     widening_square,
     underflowing_square,
     heat_node_max_principle,
@@ -119,6 +123,20 @@ from reproduce_subjects import (  # noqa: E402
     weights_are_normalized,
     weno5_central_vs_neighbours,
 )
+
+def always_false(a, b):
+    """A caller precondition that excludes every point, for the control."""
+    return False
+
+
+def _leaky_raiser(a, b):
+    """Its module imports stelling; it raises in both modes on demand."""
+    from test_reproduce import _leaky_target
+
+    if os.environ.get("STELLING_REPRO_RAISE"):
+        raise ValueError("raises in every execution mode")
+    return _leaky_target(a, b)
+
 
 NORMALIZED = (
     "both weights are produced by the same normalization w_i = a_i / sum(a), "
@@ -831,33 +849,42 @@ def test_diverged_requires_every_mode_to_have_run_and_held(tmp_path):
     this file has no answer and says so, rather than claiming the weaker
     fact under the stronger token.
 
-    ``eager_only_absorbs`` holds eagerly (the increment is absorbed) and
-    cannot run under jit (an ordinary numpy round-trip raises on a
-    tracer). The control is the same file with the switch off, where both
-    modes run and DIVERGED is available.
+    THE CONTROL ISOLATES ONE VARIABLE: whether the jit mode RAN.
+    ``underflow_optional_jit`` holds in BOTH modes — a float32 product
+    that underflows to exactly 0.0, which no compiler rewrites — and the
+    switch decides only whether jit can run at all (an ordinary numpy
+    round-trip raises on a tracer). So the two runs differ in the presence
+    of the jit measurement and in nothing else.
+
+    Its predecessor used a target whose jit measurement changed VALUE as
+    well as presence: the control reported CONFIRMED, sourced from jit's
+    FALSE, and DIVERGED was unavailable for that fixture in either
+    configuration. Two variables moved, so nothing was isolated, and the
+    comment claiming "the same holding measurement IS reported" was false.
     """
     pytest.importorskip("z3")
     subject = Subject(
-        name="eager-only-absorbs",
-        fn=eager_only_absorbs,
+        name="underflow-optional-jit",
+        fn=underflow_optional_jit,
         relation="<=",
-        declarations=(((), "float64", (0.0, 2.0 ** -70)),),
+        declarations=(((), "float32", (0.0, 2.0 ** -100)),),
         no_precondition_reason=NO_CALLER_NARROWING,
     )
     _, em = _emit(subject, tmp_path)
 
+    # the control FIRST, so the value the other run withholds is on record
+    ctrl, ctrl_side = _run(em, tmp_path)
+    assert ctrl_side["execution"]["modes"] == {"eager": True, "jit": True}, (
+        ctrl.stdout
+    )
+    assert ctrl_side["execution"]["result"] == DIVERGED
+
     proc, side = _run(em, tmp_path, STELLING_REPRO_NUMPY="1")
     assert proc.returncode == NOT_EXECUTED_EXIT, proc.stdout
     assert side["execution"]["result"] is None
+    # eager measured the SAME value; only jit's presence changed
     assert side["execution"]["modes"] == {"eager": True, "jit": None}
     assert "DIVERGED needs every mode" in side["execution"]["detail"]
-
-    # the control: both modes run, and the same holding measurement IS
-    # reported — so the refusal above is the missing mode talking
-    ctrl, ctrl_side = _run(em, tmp_path)
-    assert ctrl_side["execution"]["modes"] == {"eager": True, "jit": False}, (
-        ctrl.stdout
-    )
 
 
 # ── a witness the declared dtype cannot hold at all ─────────────────────────
@@ -1070,7 +1097,7 @@ def test_a_lazily_imported_stelling_is_disclosed_too(tmp_path):
         got = "loaded stelling into this" in proc.stdout
         assert got is expect, (fn.__name__, proc.stdout)
         if expect:
-            assert "RUNNING the target loaded" in proc.stdout
+            assert "running the target" in proc.stdout
 
 
 # ── a precondition that ran and held is not an unknown one ──────────────────
@@ -1113,6 +1140,260 @@ def test_a_measured_reachability_is_not_published_as_unknown(tmp_path):
     )
     _, side2 = _run(no_pre, tmp_path, STELLING_REPRO_RAISE="1")
     assert side2["execution"]["reachable"] is None, side2["execution"]
+
+
+# ── round three: six named repairs, each with the test that finds it ────────
+
+
+def test_the_rounded_note_names_every_declaration_that_rounded(tmp_path):
+    """FIX 1. The NOTE is the only thing distinguishing the point the file
+    EXECUTED from the witness the verdict is about, so under-reporting it
+    lets a reader take a rounded value for an exact one.
+
+    It was a closure list appended to from inside `build_args`, which is
+    called once per mode — guarded with `if not inexact` to stop it
+    tripling, and that guard dropped every declaration after the first one
+    that rounded. Three float32 declarations, all rounding, and all three
+    must appear exactly once."""
+    pytest.importorskip("z3")
+    subject = Subject(
+        name="three-float32-sums",
+        fn=three_float32_sums,
+        relation="<=",
+        declarations=tuple(((), "float32", (0.1, 0.9)) for _ in range(3)),
+        no_precondition_reason=NO_CALLER_NARROWING,
+    )
+    v, em = _emit(subject, tmp_path)
+
+    # the premise: every one of the three witness values really does round
+    import numpy as np
+
+    exact = {n: Fraction(t) for n, t in v.witnesses[0].values}
+    assert len(exact) == 3
+    for name, f in exact.items():
+        assert Fraction(float(np.float32(float(f)))) != f, name
+
+    proc, _ = _run(em, tmp_path)
+    note = proc.stdout.split("NOTE:")[1].split("disclosure")[0]
+    for name, f in exact.items():
+        assert note.count(f"{name}[0] = {f}") == 1, (name, note)
+
+
+def test_the_leak_disclosure_reaches_the_paths_that_return_early(tmp_path):
+    """FIX 2. It sat after both execution calls, so four earlier returns
+    imported the target and left without asking. It is called from
+    `_sidecar` now, which every terminal path goes through — reachable by
+    construction rather than by placement.
+
+    The import-failed path is the worst of them and gets its own branch:
+    that is the stelling-absent environment the disclosure is ABOUT, and a
+    user who cannot run the file at all is exactly the one who needs to be
+    told why."""
+    pytest.importorskip("z3")
+    from test_reproduce import _leaky_target       # its module imports stelling
+
+    decls = (((), "float64", (1.0, 3.0)), ((), "float64", (1.0, 3.0)))
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    def with_stelling(em, **extra):
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [here, os.path.join(os.path.dirname(here), "src")]
+        )
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env.update(extra)
+        return subprocess.run(
+            [sys.executable, em.path], cwd=str(tmp_path), env=env,
+            capture_output=True, text=True, timeout=600,
+        )
+
+    # (1) UNREACHABLE — returns before either mode runs
+    _, em = _emit(
+        Subject(name="leak-unreachable", fn=_leaky_target, relation="<=",
+                declarations=decls, precondition=always_false,
+                precondition_reason="structural, for this control"),
+        tmp_path,
+    )
+    out = with_stelling(em).stdout
+    assert f"== {UNREACHABLE}" in out
+    assert "loaded stelling into this" in out, out
+
+    # (2) both modes raised — returns before the old placement
+    _, em = _emit(
+        Subject(name="leak-raises", fn=_leaky_raiser, relation="<=",
+                declarations=decls, no_precondition_reason="control"),
+        tmp_path,
+    )
+    out = with_stelling(em, STELLING_REPRO_RAISE="1").stdout
+    assert "NO EXECUTION RESULT" in out
+    assert "loaded stelling into this" in out, out
+
+    # (2b) the tool arrives DURING a call that then raises in both modes,
+    #      so no phase sample runs after it — the disclosure must key on
+    #      sys.modules, not on where the samples happen to sit
+    from reproduce_subjects_bound import lazily_reaches_stelling_then_raises
+
+    _, em_lazy = _emit(
+        Subject(name="leak-lazy-raises",
+                fn=lazily_reaches_stelling_then_raises, relation="<=",
+                declarations=decls, no_precondition_reason="control"),
+        tmp_path,
+    )
+    out = with_stelling(em_lazy, STELLING_REPRO_RAISE="1").stdout
+    assert "NO EXECUTION RESULT" in out
+    assert "loaded stelling into this" in out, out
+
+    # (3) the target could not be imported BECAUSE stelling is absent —
+    #     the tool is not in this process, so the disclosure comes from
+    #     the other side: the reason we stopped names it
+    proc, side = _run(em, tmp_path)              # stelling blocked
+    assert proc.returncode == NOT_EXECUTED_EXIT
+    assert "so your program reaches the" in proc.stdout, proc.stdout
+    assert side["execution"]["result"] is None
+
+
+def test_the_precision_message_does_not_claim_the_programs_are_the_same(
+    tmp_path,
+):
+    """FIX 3. It fired on an x64 mismatch before any program-identity
+    check, so an unrelated function over an unrelated envelope was told
+    "The program is the same" and sent to change a config setting. It
+    still refuses, so no bad artefact — but it is a misdiagnosis of
+    exactly the kind the other branch's wording exists to avoid."""
+    pytest.importorskip("z3")
+    subject = Subject(
+        name="prog-a",
+        fn=weight_pair_sum,
+        relation="<=",
+        declarations=(((), "float64", (0.0, 1.0)), ((), "float64", (0.0, 1.0))),
+        no_precondition_reason=NO_CALLER_NARROWING,
+    )
+    v = check(
+        subject.harness, vacuity_mode="inputs-only", solver_timeout_ms=TIMEOUT_MS
+    )
+    assert v.status == "REFUTED"
+    unrelated = Subject(
+        name="prog-b",
+        fn=underflowing_square,
+        relation="<=",
+        declarations=(((), "float32", (0.0, 2.0 ** -100)),),
+        no_precondition_reason=NO_CALLER_NARROWING,
+    )
+    jax.config.update("jax_enable_x64", False)
+    try:
+        with pytest.raises(ReproducerError) as exc:
+            write_reproducer(v, unrelated, str(tmp_path))
+    finally:
+        jax.config.update("jax_enable_x64", True)
+    message = str(exc.value)
+    assert "The program is the same" not in message
+    assert "CANNOT TELL" in message
+    assert "if they still differ, this verdict is about a different" in message
+
+
+def test_exit_three_is_not_described_as_a_construction_failure(tmp_path):
+    """FIX 4, prose only — the rule itself is deliberate and unchanged.
+
+    Two surfaces said exit 3 means "the target could not be constructed".
+    Measured false on the DIVERGED-withheld path: the target was
+    constructed, imported, called, and HELD."""
+    pytest.importorskip("z3")
+    subject = Subject(
+        name="withheld-diverged",
+        fn=underflow_optional_jit,
+        relation="<=",
+        declarations=(((), "float32", (0.0, 2.0 ** -100)),),
+        no_precondition_reason=NO_CALLER_NARROWING,
+    )
+    _, em = _emit(subject, tmp_path)
+    proc, side = _run(em, tmp_path, STELLING_REPRO_NUMPY="1")
+    assert proc.returncode == NOT_EXECUTED_EXIT
+    assert side["execution"]["modes"]["eager"] is True   # it ran, and held
+    header = em.source.split('"""')[1]
+    assert "could not be constructed" not in header, header
+    assert "NO EXECUTION RESULT" in header
+    assert "not in every mode" in header
+
+
+def test_the_tool_disclosure_names_the_phase_and_the_callable(tmp_path):
+    """FIX 6. `tool_loaded_before` was sampled after the caller
+    precondition had already run, so a precondition that imports stelling
+    lazily was reported as "importing the target" — the wrong callable and
+    the wrong phase, both."""
+    pytest.importorskip("z3")
+    from reproduce_subjects_bound import (
+        lazily_reaches_stelling,
+        lazily_reaching_precondition,
+    )
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    subject = Subject(
+        name="lazy-precondition",
+        fn=weight_pair_sum,
+        relation="<=",
+        declarations=(((), "float64", (0.0, 1.0)), ((), "float64", (0.0, 1.0))),
+        precondition=lazily_reaching_precondition,
+        precondition_reason="structural, for this control",
+    )
+    _, em = _emit(subject, tmp_path)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [here, os.path.join(os.path.dirname(here), "src")]
+    )
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    proc = subprocess.run(
+        [sys.executable, em.path], cwd=str(tmp_path), env=env,
+        capture_output=True, text=True, timeout=600,
+    )
+    line = [l for l in proc.stdout.splitlines() if "DISCLOSURE" in l]
+    assert line, proc.stdout
+    assert "running the caller precondition" in line[0], line
+    assert "lazily_reaching_precondition" in line[0], line
+    assert "importing the target" not in proc.stdout
+
+    # and the other phase is named correctly too
+    _, em2 = _emit(
+        Subject(name="lazy-target", fn=lazily_reaches_stelling, relation="<=",
+                declarations=(((), "float64", (1.0, 3.0)),
+                              ((), "float64", (1.0, 3.0))),
+                no_precondition_reason="control"),
+        tmp_path,
+    )
+    proc2 = subprocess.run(
+        [sys.executable, em2.path], cwd=str(tmp_path), env=env,
+        capture_output=True, text=True, timeout=600,
+    )
+    line2 = [l for l in proc2.stdout.splitlines() if "DISCLOSURE" in l]
+    assert "running the target" in line2[0], line2
+    assert "lazily_reaches_stelling" in line2[0], line2
+
+
+def test_a_donating_precondition_does_not_cost_the_execution_result(tmp_path):
+    """THE UNCLAIMED WIN, pinned.
+
+    A caller precondition that donates its argument buffer destroyed the
+    arrays both modes were about to use, and the run gave no execution
+    result at all. Giving each mode its own inputs fixed it as a side
+    effect and nothing tested it. An improvement nothing pins is one that
+    can silently regress."""
+    pytest.importorskip("z3")
+    subject = Subject(
+        name="donating-precondition",
+        fn=underflowing_square,
+        relation="<=",
+        declarations=(((), "float32", (0.0, 2.0 ** -100)),),
+        precondition=donating_precondition,
+        precondition_reason=(
+            "structural: every point of the declared envelope is producible"
+        ),
+    )
+    _, em = _emit(subject, tmp_path)
+    proc, side = _run(em, tmp_path)
+    assert proc.returncode == RESULT_EXIT, proc.stdout + proc.stderr
+    assert side["execution"]["result"] == DIVERGED, proc.stdout
+    assert side["execution"]["modes"] == {"eager": True, "jit": True}
+    assert side["execution"]["reachable"] is True
+    assert "Array has been deleted" not in proc.stdout
 
 
 # ── the provisional marking, on every path that writes a sidecar ────────────

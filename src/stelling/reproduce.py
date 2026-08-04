@@ -200,8 +200,13 @@ EXECUTION_RESULTS = (CONFIRMED, DIVERGED, UNREACHABLE)
 
 # EXIT STATUS IS NOT A JUDGMENT. All three results exit 0, because a nonzero
 # status is how CI renders "this check failed" and two of the three are not
-# failures of anything. The one nonzero code marks "there is no execution
-# result at all": the target could not be constructed, so nothing ran.
+# failures of anything. The one nonzero code marks "NO EXECUTION RESULT" —
+# this file has nothing to report about the program, which is not the same
+# as having nothing to report about its target. It covers both: the target
+# could not be constructed or run at all, AND the case where it ran
+# perfectly well and what ran was not enough to name a result (the
+# assertion held in one mode and the other could not run, so DIVERGED —
+# a claim of absence — is not available and nothing was false either).
 RESULT_EXIT = 0
 NOT_EXECUTED_EXIT = 3
 
@@ -762,6 +767,14 @@ def _require_same_program(verdict, subject: Subject, trace, x64: bool) -> None:
     ``jax_enable_x64`` is a different query (its declared dtypes differ),
     and "this verdict is not about this subject's program" sends a reader
     to look for a program difference that is not there.
+
+    IT DOES NOT CLAIM THE PROGRAMS ARE THE SAME. This check cannot tell a
+    precision difference from a program difference — it has one hash on
+    each side and a config flag — and its predecessor said "The program is
+    the same" anyway, which for an unrelated subject over an unrelated
+    envelope is a misdiagnosis of exactly the kind the other branch's
+    wording exists to prevent. It names the difference it CAN see and the
+    one action that distinguishes the two.
     """
     stamped = verdict.stamp.query_content_hash
     traced = trace(subject.harness).content_hash()
@@ -771,13 +784,17 @@ def _require_same_program(verdict, subject: Subject, trace, x64: bool) -> None:
     if stamped_x64 != f"jax_enable_x64={x64}":
         raise ReproducerError(
             f"this verdict was produced under {stamped_x64} and the "
-            f"emission is running under jax_enable_x64={x64}. The program "
-            f"is the same; the global precision setting is not, so the "
-            f"harness traces to a different query ({traced} against the "
-            f"stamped {stamped}) and an emitted file would execute at a "
-            f"precision the verdict is not about. Set "
+            f"emission is running under jax_enable_x64={x64}, and the "
+            f"subject's harness traces to {traced} against the stamped "
+            f"{stamped}. A different jax_enable_x64 alone is enough to "
+            f"make ONE program trace to two queries, because it changes "
+            f"the declared dtypes — so the precision setting explains a "
+            f"hash mismatch on its own. THIS CHECK CANNOT TELL WHETHER "
+            f"THAT IS ALL THAT DIFFERS: it has one hash on each side. Set "
             f"jax.config.update('jax_enable_x64', {stamped_x64.split('=')[1]}) "
-            f"and emit again"
+            f"and emit again — if the hashes agree then, it was the "
+            f"precision; if they still differ, this verdict is about a "
+            f"different program"
         )
     raise ReproducerError(
         f"this verdict is not about this subject's program: the verdict "
@@ -1254,8 +1271,12 @@ file cannot change it:
 
 Exit status is ${result_exit} for all three, because a nonzero status is how CI
 says "this check failed" and two of the three are not failures of
-anything. Exit ${not_executed_exit} means there is no execution result at all: the
-target could not be constructed. Read the JSON sidecar, not the status.
+anything. Exit ${not_executed_exit} means there is NO EXECUTION RESULT: this file has
+nothing to report about the program. That covers a target it could not
+construct or run, and also a target that ran fine but not in every mode —
+the assertion held where it ran and the other mode raised, so DIVERGED,
+which is a claim of absence, is not available and nothing was false
+either. The sidecar's `detail` says which. Read it, not the status.
 
 THE SIDECAR SCHEMA IS PROVISIONAL. It is unstable for stelling 0.1.0 —
 fields may be added, removed or renamed in 0.1.1 without a deprecation
@@ -1286,7 +1307,60 @@ ${payload}
 _NO_MODES = {"eager": None, "jit": None}
 
 
+# The FIRST point at which stelling was observed in this process, as
+# (phase, who). Recorded rather than sampled once, because the answer
+# depends on WHEN you look: the predecessor sampled a single flag after the
+# caller precondition had already run and then attributed every case to
+# "importing the target", which for a precondition that imports the tool
+# lazily while running names the wrong callable AND the wrong phase.
+_TOOL_PHASE = []
+
+
+def _note_tool_phase(phase, who):
+    if "stelling" in sys.modules and not _TOOL_PHASE:
+        _TOOL_PHASE.append((phase, who))
+
+
+def _disclose_tool(detail):
+    """The independence disclosure, on EVERY path that reports anything.
+
+    It used to sit after both execution calls, so four earlier returns
+    imported the target and left without asking — UNREACHABLE,
+    both-modes-raised, target-import-failed and witness-build-failed. The
+    worst was the import failure, which is the stelling-absent environment
+    the disclosure is ABOUT. Called from `_sidecar`, it is reachable from
+    every terminal path by construction rather than by placement.
+    """
+    if "stelling" in sys.modules:
+        # SYS.MODULES DECIDES WHETHER TO DISCLOSE; _TOOL_PHASE only says
+        # WHO and WHEN. Keying the disclosure itself on the recorded phase
+        # put it back at the mercy of where the samples sit: a target that
+        # imports the tool lazily and then raises in both modes returns
+        # before the "running the target" sample, and disclosed nothing
+        # even though the tool was demonstrably in the process. Measured,
+        # in this repair round, before it shipped.
+        phase, who = (
+            _TOOL_PHASE[0] if _TOOL_PHASE else ("running", "your program")
+        )
+        print(f"\\n  DISCLOSURE: {phase} {who} loaded stelling into this")
+        print("  process. Nothing in this file calls it and the executed")
+        print("  computation is still independent — but running this where")
+        print("  stelling is absent, which is how that independence gets")
+        print("  shown, is not possible while your program reaches it.")
+    elif detail and "stelling" in str(detail):
+        # the tool is NOT in this process and the reason we stopped names
+        # it: the import failed because stelling is absent here, which is
+        # the same fact seen from the other side
+        print("\\n  DISCLOSURE: this run could not import your program"
+              " BECAUSE")
+        print("  stelling is unavailable here, so your program reaches the")
+        print("  tool. The executed computation would still be independent;")
+        print("  what you cannot do is run this where stelling is absent,")
+        print("  which is how that independence gets shown.")
+
+
 def _sidecar(execution):
+    _disclose_tool(execution.get("detail"))
     out = os.environ.get("STELLING_REPRODUCER_JSON") or (
         os.path.splitext(os.path.abspath(__file__))[0] + ".json"
     )
@@ -1409,6 +1483,7 @@ def main():
         np = importlib.import_module("numpy")
     except Exception as e:
         return _stop(f"jax/numpy unavailable ({type(e).__name__}: {e})")
+    tgt = f"{PAYLOAD['target_module']}.{PAYLOAD['target_qualname']}"
     try:
         target = _load(PAYLOAD["target_module"], PAYLOAD["target_qualname"])
     except Exception as e:
@@ -1417,7 +1492,9 @@ def main():
             f"{PAYLOAD['target_qualname']} could not be imported "
             f"({type(e).__name__}: {e})"
         )
+    _note_tool_phase("importing", tgt)
     precondition = None
+    pre = None
     if PAYLOAD["precondition_qualname"]:
         try:
             precondition = _load(
@@ -1431,9 +1508,13 @@ def main():
                 f"{PAYLOAD['precondition_qualname']} could not be imported "
                 f"({type(e).__name__}: {e})"
             )
+        pre = (
+            f"{PAYLOAD['precondition_module']}."
+            f"{PAYLOAD['precondition_qualname']}"
+        )
+        _note_tool_phase("importing", pre)
 
     print("== the witness, exactly as the solver produced it")
-    inexact = []
 
     def build_args():
         """A FRESH input array per call, and one call per execution mode.
@@ -1456,13 +1537,33 @@ def main():
             # array breaks the most idiomatic write pattern JAX has:
             # `x.at[i].set(v)` does not exist on numpy.ndarray.
             out.append(jnp.asarray(arr))
-            if not inexact:
-                for i in rounded:
-                    inexact.append(f"{decl['name']}[{i}] = {elements[i]}")
         return out
+
+    def rounded_note():
+        """Which witness values the declared dtype could not hold.
+
+        ITS OWN PASS, holding no state between calls. It used to be a
+        closure list appended to from inside `build_args`, which is called
+        once per execution mode — so it was guarded with `if not inexact`
+        to stop it tripling, and that guard silently dropped every
+        declaration after the first one that rounded. Measured on three
+        float32 declarations that all round: the note named one. This note
+        is the only thing distinguishing the point the file EXECUTED from
+        the witness the verdict is about, so under-reporting it lets a
+        reader take a rounded value for an exact one.
+        """
+        lines = []
+        for decl, elements in zip(SIDECAR["envelope"],
+                                  PAYLOAD["witness_elements"]):
+            _, rounded = _build(np, decl, elements)
+            lines.extend(
+                f"{decl['name']}[{i}] = {elements[i]}" for i in rounded
+            )
+        return lines
 
     try:
         args = build_args()
+        inexact = rounded_note()
     except Exception as e:
         return _stop(
             f"the witness value(s) could not be built in the declared "
@@ -1489,6 +1590,7 @@ def main():
                 f"the caller precondition raised at the witness "
                 f"({type(e).__name__}: {e})"
             )
+        _note_tool_phase("running the caller precondition", pre)
         print(f"\\n== caller precondition holds at the witness: {reachable}")
         print(f"  declared because: {PAYLOAD['precondition_reason']}")
         if not reachable:
@@ -1522,7 +1624,6 @@ def main():
     print("\\n== executing YOUR function")
     print(f"  {PAYLOAD['target_module']}.{PAYLOAD['target_qualname']}")
     rel = SIDECAR["relation"]
-    tool_loaded_before = "stelling" in sys.modules
 
     def evaluate(fn, label, make_args):
         """Both sides, and whether the assertion holds, in one mode."""
@@ -1582,20 +1683,7 @@ def main():
         )
     disagree = len({modes[m] for m in ran}) > 1
 
-    # THE INDEPENDENCE CHECK, AFTER THE CALLS AND NOT BEFORE. The tool is
-    # either in this process or it is not — no source scan can match that —
-    # but asking before the target has RUN misses a lazy `import stelling`
-    # inside the function, which is the one an emission-time scan of the
-    # module's top level would also miss. Asked here, both are caught. The
-    # predecessor scanned the module source (which accused a docstring that
-    # merely quoted such a line) and asked sys.modules too early.
-    if "stelling" in sys.modules:
-        when = "importing" if tool_loaded_before else "RUNNING"
-        print(f"\\n  DISCLOSURE: {when} the target loaded stelling into this")
-        print("  process. Nothing in this file calls it and the executed")
-        print("  computation is still independent — but running this where")
-        print("  stelling is absent, which is how that independence gets")
-        print("  shown, is not possible while your program reaches it.")
+    _note_tool_phase("running the target", tgt)
 
     if disagree:
         print("\\n  THE TWO MODES DISAGREE, and that is itself the finding:")

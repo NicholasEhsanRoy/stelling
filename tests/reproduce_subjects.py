@@ -219,6 +219,51 @@ def always_producible(a, b):
     return True
 
 
+def three_float32_sums(a, b, c):
+    """Three float32 declarations whose witness values ALL round.
+
+    The NOTE naming rounded values is the only thing distinguishing the
+    point the file executed from the witness the verdict is about, and it
+    listed the first rounding declaration only.
+    """
+    return a + b + c, 1.0 / 3
+
+
+def underflow_optional_jit(x):
+    """``x*x <= 0`` in float32 — HOLDS in both modes, with jit switchable.
+
+    The control for the DIVERGED-needs-every-mode rule has to isolate one
+    variable: whether the jit mode RAN. Its predecessor used a target
+    whose jit measurement changed VALUE as well as presence, so the two
+    runs differed in two ways and nothing was isolated. Here the eager
+    measurement and the jit measurement are both "holds"; the switch only
+    decides whether jit can run at all.
+    """
+    import os
+
+    import jax.numpy as jnp
+    import numpy as np
+
+    if os.environ.get("STELLING_REPRO_NUMPY"):
+        x = jnp.asarray(np.asarray(x))
+    return x * x, 0.0
+
+
+def donating_precondition(x):
+    """A caller precondition that DONATES its argument buffer.
+
+    Fixed as a side effect of giving each mode its own inputs, and
+    unclaimed: at the shared-buffer commit this gave no execution result
+    at all, because the precondition destroyed the arrays both modes were
+    about to use. An improvement nothing pins is one that can silently
+    regress.
+    """
+    import jax
+
+    jax.jit(lambda v: v * 1.0, donate_argnums=0)(x)
+    return True
+
+
 def eager_only_absorbs(x):
     """Traces cleanly; HOLDS eagerly and cannot run under ``jax.jit``.
 

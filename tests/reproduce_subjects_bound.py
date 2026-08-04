@@ -35,6 +35,36 @@ def lazily_reaches_stelling(a, b):
     return product_against_bound(a, b)
 
 
+def lazily_reaching_precondition(a, b):
+    """A caller PRECONDITION that reaches stelling lazily, while running.
+
+    It has to live in a module that does not import stelling at module
+    scope, or importing the precondition already loads the tool and the
+    phase this fixture exists to distinguish never happens.
+    """
+    import stelling  # noqa: F401
+
+    return True
+
+
+def lazily_reaches_stelling_then_raises(a, b):
+    """Loads the tool during the call and then raises in BOTH modes.
+
+    The path that showed the disclosure was still placement-dependent
+    after being moved into `_sidecar`: it keyed on a phase recorded at
+    four fixed points, and this one returns before the last of them. The
+    disclosure keys on ``sys.modules`` now, and the recorded phase only
+    supplies the attribution.
+    """
+    import os
+
+    import stelling  # noqa: F401  — lazy, during the call
+
+    if os.environ.get("STELLING_REPRO_RAISE"):
+        raise ValueError("raises in every execution mode")
+    return product_against_bound(a, b)
+
+
 def only_mentions_it_in_prose(a, b):
     """A module whose text contains the line but never runs it::
 
