@@ -1,0 +1,135 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+
+"""What the sdist ships is an ALLOWLIST, and this holds it shut.
+
+The sdist is the one artefact where a mistake is immutable: it cannot be
+unpublished from PyPI. Hatchling's *default* sdist takes everything not
+gitignored — tracked or not — which is fail-OPEN, and it shipped an internal
+file that was protected only by being uncommitted. `.git/info/exclude` does not
+protect against it either; hatchling reads `.gitignore` files and nothing else.
+
+Two tests, in the order they matter:
+
+1. ``test_an_arbitrary_new_file_does_not_ship`` — the real property, by
+   INTERVENTION. Drop a file the allowlist has never heard of, build, and
+   confirm it is absent. *Absence of a NAMED file is the weaker check and is
+   exactly what would have passed before the leak*: the checklist was not
+   named anywhere, it simply was not excluded.
+
+2. ``test_every_root_entry_is_a_decision`` — a new path at the repo root must be
+   either allowlisted or listed here as deliberately withheld. It cannot be
+   neither. This one needs no build backend, so it runs everywhere and fails
+   closed when someone adds a file and does not think about distribution.
+"""
+
+from __future__ import annotations
+
+import pathlib
+import shutil
+import subprocess
+import tarfile
+import tomllib
+
+import pytest
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+
+
+def _allowlist() -> set[str]:
+    cfg = tomllib.loads((REPO / "pyproject.toml").read_text())
+    inc = cfg["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
+    # entries are rooted ("/src"); compare on the bare name
+    return {entry.lstrip("/") for entry in inc}
+
+
+# Root entries that exist and are deliberately NOT distributed. Each needs a
+# reason, because "why is this not in the sdist" is the question a future reader
+# will ask. A path in neither this set nor the allowlist fails the test.
+WITHHELD = {
+    ".git": "the repository itself",
+    ".claude": (
+        "local agent/tool configuration — untracked AND not gitignored, so under "
+        "hatchling's default it would have shipped; found by this test on its "
+        "first run, which is the second live instance of the leak"
+    ),
+    ".gitignore": "listed in the allowlist; kept here only if it moves",
+    "stelling_0_1_0_release_checklist.md": (
+        "internal release working document, deliberately untracked — this is the "
+        "file whose leak motivated the allowlist"
+    ),
+    "dist": "build output",
+    "build": "build output",
+    ".venv": "local environment",
+    "venv": "local environment",
+    ".pytest_cache": "test cache",
+    ".ruff_cache": "lint cache",
+    ".mypy_cache": "type-check cache",
+    "__pycache__": "bytecode cache",
+    ".pdm-build": "build backend scratch",
+    "uv.lock": "a lock file pins an environment; a library must not ship one",
+}
+
+
+def test_every_allowlist_entry_exists() -> None:
+    """An allowlist that names a deleted path rots silently and stops
+    protecting the thing it was written for."""
+    missing = sorted(e for e in _allowlist() if not (REPO / e).exists())
+    assert not missing, (
+        "pyproject's sdist allowlist names paths that no longer exist:\n  "
+        + "\n  ".join(missing)
+    )
+
+
+def test_every_root_entry_is_a_decision() -> None:
+    """A new file at the repo root is shipped or withheld — never neither."""
+    allow = _allowlist()
+    undecided = sorted(
+        p.name
+        for p in REPO.iterdir()
+        if p.name not in allow and p.name not in WITHHELD
+    )
+    assert not undecided, (
+        "these root paths are neither in pyproject's sdist allowlist nor in "
+        "WITHHELD:\n  "
+        + "\n  ".join(undecided)
+        + "\n\nAdd each to the allowlist (it ships) or to WITHHELD with a reason "
+        "(it does not). An sdist on PyPI cannot be unpublished."
+    )
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build an sdist")
+def test_an_arbitrary_new_file_does_not_ship(tmp_path: pathlib.Path) -> None:
+    """THE property, established by intervention rather than by naming a file.
+
+    Break it: replace the allowlist with hatchling's default (delete the
+    ``[tool.hatch.build.targets.sdist]`` table) and this fails.
+    """
+    probe = REPO / "zz_sdist_allowlist_probe.txt"
+    assert not probe.exists(), "probe path is already taken"
+    probe.write_text("this file must never reach an artefact\n")
+    try:
+        proc = subprocess.run(
+            ["uv", "build", "--offline", "--sdist", "--out-dir", str(tmp_path), str(REPO)],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        assert proc.returncode == 0, f"sdist build failed:\n{proc.stderr}"
+        built = sorted(tmp_path.glob("*.tar.gz"))
+        assert len(built) == 1, f"expected one sdist, got {built}"
+        with tarfile.open(built[0]) as tf:
+            names = tf.getnames()
+        # the control must be able to see something, or its zero is vacuous
+        assert any(n.endswith("/pyproject.toml") for n in names), (
+            "the built sdist does not even contain pyproject.toml — this test is "
+            "not looking at a real artefact"
+        )
+        leaked = [n for n in names if n.endswith(probe.name)]
+        assert not leaked, (
+            f"an arbitrary untracked file reached the sdist: {leaked}. The sdist "
+            "allowlist is not holding; hatchling's default ships everything that "
+            "is not gitignored."
+        )
+    finally:
+        probe.unlink(missing_ok=True)

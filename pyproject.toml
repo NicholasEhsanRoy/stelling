@@ -61,5 +61,45 @@ path = "src/stelling/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/stelling"]
 
+# The sdist ships an ALLOWLIST, not a filtered copy of the working tree.
+#
+# Hatchling's default sdist takes everything that is not gitignored — tracked or
+# not. That is fail-OPEN: a file protected only by being untracked still ships,
+# and `.git/info/exclude` does not protect it either, because hatchling reads
+# `.gitignore` files and nothing else. Measured: an internal release checklist,
+# untracked and deliberately uncommitted, shipped byte-identical inside
+# `stelling-0.1.0.tar.gz`, and a probe file dropped in the tree shipped with it.
+#
+# An sdist on PyPI cannot be unpublished, so this is one of the few places where
+# a defect is immutable once released. Hence an allowlist: a path that is not
+# named below does not ship, and a new stray file at the root fails closed
+# instead of being distributed. `tests/test_sdist_contents.py` holds this shut
+# with the same intervention that found the leak.
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/docs",
+  "/corpus",
+  "/design",
+  "/assets",
+  "/LICENSES",
+  "/.github",
+  "/pyproject.toml",
+  "/README.md",
+  "/LICENSE",
+  "/REUSE.toml",
+  "/CITATION.cff",
+  "/CONTRIBUTING.md",
+  "/DCO",
+  "/SECURITY.md",
+  "/SOUNDNESS.md",
+  "/ARCHITECTURE.md",
+  "/DOCUMENTATION_ARCHITECTURE.md",
+  "/.pre-commit-config.yaml",
+  "/.license-header.txt",
+  "/.gitignore",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
