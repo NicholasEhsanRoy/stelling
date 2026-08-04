@@ -16,13 +16,32 @@ family: MADDENING/MIME.** The seven counterfactual zeros, both frontier zeros,
 the terminal table, the guard frontier, and the nine-hazard population are all
 **stelling-on-MADDENING** results. They are not statements about stelling.
 
+**WHERE THE INSTRUMENTS ARE, because five are named below and not one of them is
+in this repository.** They live in the campaign repo `stelling-sweeps` and are
+written throughout as `stelling-sweeps/<name>`, so that no reader looks for them
+here. They load the MADDENING/MIME corpus, which is not a dependency of this
+repository, so **nothing they measured can be re-derived in this tree** and
+committing them here would add scripts that cannot run. Every figure sourced
+from them is RECORDED-HISTORICAL in the sense clause 1 gives that word, and
+carries the sha of the instrument that produced it instead of a gate. *As-of, in
+`stelling-sweeps`:* `stelling-sweeps/nonvacuity_seven.py` at `311d0e2`,
+`stelling-sweeps/row7_driven.py` at `396e8cd`,
+`stelling-sweeps/BASELINE_pre_0_4_0.json` at `1608457`,
+`stelling-sweeps/rederive_terminals_idiomatic.py` at `7a594aa`,
+`stelling-sweeps/CLAUSE_CENSUS_state_0_1_0.md` at `fa69d34`. **The registry
+census in clause 3 is the opposite case — its
+population is in this tree, so it is gated and not stamped**, which is the
+distinction this document's own rule draws further down: *a count over a
+population that is not in the tree gets a sha; a count that is computable from
+the tree gets a gate.*
+
 **Measured, not assumed.** Two independently-blinded agents wrote contracts
 against `jax_md` and `jaxfluids` — genuinely independent authors and domains —
 having been told nothing about this project's conclusions. **The blockers are
 IDIOMATIC.** That finding is four separate claims with four different
 standings, and it is written out that way because it was previously one
 sentence and the sentence did not survive re-derivation (2026-08-03,
-`rederive_terminals_idiomatic.py`).
+`stelling-sweeps/rederive_terminals_idiomatic.py`).
 
 1. **The external terminal list is RECORDED-HISTORICAL, not re-derivable.**
    External code was measured to terminate on `square`, `sign`, `unstack`,
@@ -41,8 +60,8 @@ sentence and the sentence did not survive re-derivation (2026-08-03,
    distinction.** *Unit: forms, n = 10 listed items.*
 
 3. **One of them has neither an interval transfer nor an emission row: `iota`.**
-   **This clause is no longer written by hand, and the reason is its own
-   history.** It is a claim about what is in two live registries, so it is
+   **No figure in this clause is left to a human transcription, and the reason
+   is its own history.** It is a claim about what is in two live registries, so it is
    computable from this tree — and a registry claim is invalidated by the next
    commit that touches a registry. It has been wrong twice for exactly that
    reason: it read *"five"*, which was measured against the tree as it stood
@@ -52,8 +71,17 @@ sentence and the sentence did not survive re-derivation (2026-08-03,
    `f8f5850` was six, because `square` had gained an emission row at `e3b9deb`,
    one merge earlier. Stamping a sha did not save it, because the number was
    still typed by a human. The census below is **executed, and its output is
-   compared byte for byte by `tests/test_doc_examples.py`**, so it now goes red
-   rather than stale. *Unit: membership in `stelling.propagate.TRANSFERS` and
+   compared byte for byte, by `tests/test_doc_examples.py`**. That mechanises
+   the measurement and nothing after it — and the step after it, measurement to
+   prose, is where all three of this project's recorded unit failures actually
+   happened. So the sentence you just read and the unit line below are
+   **re-derived from those same two registries by
+   `tests/test_release_doc_claims.py`**: the count, the named member, and both
+   populations, with the census's `recorded` list required to be clause 1's ten
+   items under the identification clause 2 states. That gate imports no jax, so
+   unlike the executed census it also runs in the zero-dep configuration this
+   count is about. Prose that stops agreeing with the block goes red; it can no
+   longer go stale. *Unit: membership in `stelling.propagate.TRANSFERS` and
    `stelling.obligation._SUPPORTED`, n = 9 primitives of the 10 recorded items
    — `nan_to_num`'s `inf` is not a primitive and has no registry key.*
 
@@ -81,7 +109,8 @@ sentence and the sentence did not survive re-derivation (2026-08-03,
 
 4. **Two terminals recur, not one — and the mechanism claim stands.** Within
    MADDENING/MIME the element budget recurs on **3** contracts *and* the
-   constrained-assume refusal on **2** (`BASELINE_pre_0_4_0.json`). Whether the
+   constrained-assume refusal on **2** (`stelling-sweeps/BASELINE_pre_0_4_0.json`
+   at `1608457`). Whether the
    budget is the sole *cross-framework* recurrence depends on claim 1 and is
    therefore not re-derivable here. **The mechanism is untouched by the count
    and stands: the budget recurs because it is a function of query SIZE rather
@@ -91,7 +120,7 @@ sentence and the sentence did not survive re-derivation (2026-08-03,
 > Measured: of ten conclusion-bearing clauses in this document, four were
 > re-derived, and the only one that re-derived exactly is the one whose unit the
 > document names. All three failures were failures of unit, not of arithmetic.
-> See `CLAUSE_CENSUS_state_0_1_0.md`.
+> See `stelling-sweeps/CLAUSE_CENSUS_state_0_1_0.md` at `fa69d34`.
 
 > **SIX CLAUSES BELOW WERE NOT RE-DERIVED, AND UNATTEMPTED IS NOT EVIDENCE
 > EITHER WAY.** Each needs a counterfactual sweep or a corpus re-run rather than
@@ -184,9 +213,10 @@ distinguish them:
 `MADD row7.richardson`** — **on the DRIVEN reading of `row7`, which is the unit
 that was missing and is stated here.**
 
-**Two counts of two, over two different populations.** Re-measured in this tree
-(`nonvacuity_seven.py`, which ties each box to the node's own
-`initial_state()`): the contracts whose nonvacuity comes back `checked` are
+**Two counts of two, over two different populations.** Re-measured — **outside
+this tree, and not re-derivable in it** — by
+`stelling-sweeps/nonvacuity_seven.py` at `311d0e2`, which ties each box to the
+node's own `initial_state()`: the contracts whose nonvacuity comes back `checked` are
 **`MADD RigidBody` and `MIME coil_array`**, and `MADD row7.richardson` comes
 back **FAILED** there. So the axis table's *"2 checked non-vacuous"* and the
 *"deep, load-bearing AND non-vacuous"* pair are **numerically compatible and
@@ -194,7 +224,8 @@ not the same set** — the exact confusion this project's own rule about naming
 the population per figure was written against.
 
 **`row7` is `checked` against a DRIVEN point and against no other.** Measured
-(`row7_driven.py`): undriven, the node's reachable span is `[0, 0]` against a
+outside this tree (`stelling-sweeps/row7_driven.py` at `396e8cd`): undriven,
+the node's reachable span is `[0, 0]` against a
 declared envelope of `(10.0, 100.0)` — **DISJOINT**, and nonvacuity at
 `initial_state()`'s `0.0` is FAILED. Driven (left = 100.0, right = 20.0, 4000
 steps at dt = 0.01) the span is `[0, 100]`, and nonvacuity at the driven
@@ -202,7 +233,8 @@ steady-state value `20.0` is `checked`. *Unit: one stated point per contract,
 and which point is load-bearing.*
 
 **`MIME surface_contact`'s nonvacuity has never been measured at all** —
-`nonvacuity_seven.py`'s `nv_contact` is an unfinished stub that returns `None`
+`stelling-sweeps/nonvacuity_seven.py`'s `nv_contact` is an unfinished stub that
+returns `None`
 and is not in its case list. It is named here because nothing above rests on
 it, and a reader counting the seven VERIFIEDs should know which cell is empty
 rather than zero.
@@ -245,23 +277,26 @@ Stating the unit, because the same slip produced the `iota` misclassification.)
 The exception was **invisible per-entry**. Joint stubbing is standing practice
 because of it.
 
-### **STUB-DIRECTION AUDIT: one zero provisional, one restored**
+### **STUB-DIRECTION AUDIT: two zeros questioned — one restored, one re-run and held**
 
 Norm I says an over-permissive stub's zero is conclusive — a stub granting MORE
 than a real implementation upper-bounds the benefit, so a zero means a real fix
 can only do worse. **That argument requires the stub to be over-permissive, and
 two of these were not.**
 
-**THE UNIT OF THE MORE/LESS COLUMN — supplied here, because neither this table
-nor the norm it invokes ever said which direction "over-permissive" runs in.**
-Checked before writing this: `CONTRIBUTING.md`'s *"An over-permissive stub's
-ZERO is conclusive; its NONZERO is not"* states the upper-bound argument and
-the rule *"state what the stub grants, before reporting what it produced"* —
-and it **does not define the direction**, so the definition below is this
-page's, not a quotation. For this table: MORE/LESS is *what the stub grants the
-analysis relative to a faithful implementation*, judged **for a DEFINITE
-verdict** — VERIFIED or REFUTED rather than a DECLINE, which is what every
-contract in this corpus seeks. Sought differently, a cell can flip.
+**THE UNIT OF THE MORE/LESS COLUMN — half quoted, half supplied here, and the
+halves are marked because an earlier version of this paragraph claimed the norm
+was silent when it is not.** `CONTRIBUTING.md`'s *"An over-permissive stub's
+ZERO is conclusive; its NONZERO is not"* **does define the direction**, in the
+sentence that opens it: *"A stub that grants **more** than a real implementation
+could deliver **upper-bounds** the benefit."* It also carries the rule *"state
+what the stub grants, before reporting what it produced"*. So MORE/LESS below —
+*what the stub grants the analysis relative to a faithful implementation* — is
+that norm's, restated, not this page's invention. **What the norm does not say
+is for which OUTCOME the grant is judged, and that is the part supplied here:**
+judged **for a DEFINITE verdict** — VERIFIED or REFUTED rather than a DECLINE,
+which is what every contract in this corpus seeks. Sought differently, a cell
+can flip.
 
 **And where the stubbed stage is never reached, the direction is UNDEFINED —
 not neutral and not LESS.** An unreachable stage grants nothing in either
@@ -327,7 +362,17 @@ jointly: **changed = 0, DECLINE→VERDICT = 0.** Pre-registered prediction
 (both zeros hold, because `rigid_body`'s terminal is a SHAPE check and `gnn`'s
 is a SIZE check, and box tightness affects neither) — **confirmed.**
 
-**Six of the seven capability zeros are conclusive.** The one positive result is unaffected — `split` + `add_any`
+**Six of the seven capability zeros are conclusive** — and the seventh is named
+here, because a count of conclusive zeros that never says which one is not is
+the same defect as a count with no unit. *Unit: one zero per capability in the
+table above, n = 7, on the reading the table's two columns force — six
+capabilities are zero **jointly**, and the seventh, transfer coverage
+**pre-build**, is zero **per-entry only**.* **That per-entry zero is the
+non-conclusive one**, and it is non-conclusive for a measured reason and not a
+cautious one: the joint run over the same capability returned **1**. It is the
+same fact the note under that table already states — the exception was
+**invisible per-entry** — counted here rather than only described. The one
+positive result is unaffected — `split` + `add_any`
 produced a VERIFIED under COARSER stubs than the shipped transfers, so a real
 implementation can only do better.
 
@@ -419,10 +464,14 @@ sentence missed by two on each of the first two columns for exactly that reason.
 *As-of, because this one CANNOT be gated here:* stelling `0c4cead`, jax 0.11.0,
 jax-md at `eec6d1f`, x64 enabled. **`jax_md` is not a dependency of this
 repository**, so no test in this tree re-derives these four numbers — unlike the
-registry census near the top of this page, which is executed by
-`tests/test_doc_examples.py` on every run. A count over a population that is not
-in the tree gets a sha; a count that is computable from the tree gets a gate.
-The `jax_md` block above is illustrative for that reason and is not run.
+registry census near the top of this page, which `tests/test_release_doc_claims.py`
+re-derives from the registries on **every** run, the zero-dep one included.
+(`tests/test_doc_examples.py` executes that census as well and compares its
+fence byte for byte, but that module skips every example when jax is absent, so
+on its own it would leave a zero-dep-core count unchecked in precisely the
+configuration the count is about.) A count over a population that is not in the
+tree gets a sha; a count that is computable from the tree gets a gate. The
+`jax_md` block above is illustrative for that reason and is not run.
 
 ### `div` is FIVE SITUATIONS and FOUR MECHANISMS
 
@@ -492,13 +541,19 @@ measured with no stub of any kind:**
 | 7 contracts | VERIFIED |
 
 *Unit: one baseline terminal per contract, n = 14, read from
-`BASELINE_pre_0_4_0.json`'s `rows`; the contract labels are that file's, with
+`stelling-sweeps/BASELINE_pre_0_4_0.json`'s `rows` at `1608457` — a file
+outside this repository, so this table is recorded, not re-derivable here; the
+contract labels are that file's, with
 `MIME d2q9/LBM` shortened.* **The first label in the refusal row read
 `coil_array/caller` — which is not one of the fourteen contracts in the
 baseline, nor one of the twelve the frontier traces.** Re-read from the
 baseline: the pair recorded against the constrained-assume refusal is
 `MADD aitken/caller` and `MADD LBM/Re-range`; `MIME coil_array` is one of the
-seven VERIFIEDs and hits no terminal at all.
+seven VERIFIEDs and hits no terminal at all. **`MADD aitken/caller` is not the
+`aitken` counted among those seven** — that one is the baseline's
+`MADD aitken.omega_floor`, shortened to `aitken` above. They are two separate
+rows of the fourteen, and mistaking a contract for its `/caller` variant is the
+identical slip that produced the label just corrected.
 
 **Four distinct baseline terminals over seven blocked contracts**: the element
 budget (3), the constrained-assume refusal (2), `convert_element_type` (1), and
@@ -554,7 +609,7 @@ because a number was wrong without them.**
 - **contract-writing itself, as a bug-finding channel.** Two defects were found
   by *trying to write a contract* rather than by any verdict: the lazy-cache
   friction, and `GNNFluxCorrectedFVMNode`'s inability to step on a 2D mesh
-  (`gnn.py:312` hard-wires `3` where `mesh.dim` belongs). Both forced a node
+  (MIME's `gnn.py:312` hard-wires `3` where `mesh.dim` belongs). Both forced a node
   into a configuration nobody exercised. **This is a value channel independent
   of any verdict a contract produces**, and it is the kind that vanishes from a
   record because it is not a verdict.

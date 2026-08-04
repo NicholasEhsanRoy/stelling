@@ -541,10 +541,13 @@ verdicts:
   number this tree re-derives. The load-bearing part of the sentence — that
   the three rows' own arithmetic held while the audit found defects
   elsewhere — rests on the defects enumerated below, each of which has a
-  test. **`CONTRIBUTING.md`'s norm — "a figure states the UNIT it counts"
-  — is the one these four fail: no unit, no population, no instrument.
-  They are named rather than quietly dropped, because a deleted number
-  with no reason attached gets re-proposed.**
+  test. **The norm in `CONTRIBUTING.md` is *"A figure in a norm states
+  the UNIT it counts"*, and these four are in this log rather than in a
+  norm, so it does not reach them by its own terms — but the property it
+  names is exactly the one they fail: no unit, no population, no
+  instrument. Applying it here is this entry's extension of it, not a
+  quotation of its scope.** They are named rather than quietly dropped,
+  because a deleted number with no reason attached gets re-proposed.
 
   What the audit found was elsewhere, and older:
 
