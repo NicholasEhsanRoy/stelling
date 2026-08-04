@@ -531,10 +531,32 @@ verdicts:
   endpoints; 211,396 commutativity pairs and all 14 ≥3-element routes on
   the ieee association bound; 1007 real and 770 ieee differential
   statuses, zero contradictions). **Nothing the three rows compute was
-  unsound.** What the audit found was elsewhere, and older:
+  unsound.**
+
+  **Those four counts are RECORDED-HISTORICAL and no instrument in this
+  repository produces them** — searched for, not assumed: no test and no
+  committed sweep computes 5040, 4000, 211,396, or 1007/770, and the
+  sessions that ran them left no script. They are reported as what a
+  reader can check they are: *the size an attack was reported at*, not a
+  number this tree re-derives. The load-bearing part of the sentence — that
+  the three rows' own arithmetic held while the audit found defects
+  elsewhere — rests on the defects enumerated below, each of which has a
+  test. **The norm in `CONTRIBUTING.md` is *"A figure in a norm states
+  the UNIT it counts"*, and these four are in this log rather than in a
+  norm, so it does not reach them by its own terms — but the property it
+  names is exactly the one they fail: no unit, no population, no
+  instrument. Applying it here is this entry's extension of it, not a
+  quotation of its scope.** They are named rather than quietly dropped,
+  because a deleted number with no reason attached gets re-proposed.
+
+  What the audit found was elsewhere, and older:
 
   1. **Integer arithmetic modelled as unbounded reals — live since the
-     MVP, through six prior audits.** `v*v > 0` discharged to VERIFIED
+     MVP, and through prior audits that did not catch it** (recorded at
+     the time as *"six"*; that count has no surviving instrument or
+     enumeration and is not re-derivable here, so the number is withdrawn
+     and the fact it was quantifying — that more than one earlier audit
+     passed over this defect — is what remains). `v*v > 0` discharged to VERIFIED
      where jax computes `−1794967296`. Fixed with an **overflow-
      reachability** guard rather than a blanket decline: the exact
      integer result interval is checked against the dtype range, the

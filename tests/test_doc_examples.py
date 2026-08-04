@@ -19,20 +19,41 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                33
-      marked illustrative — not run                  5
-      EXECUTED (exit 0 required)                    28
+    ```python blocks                                35
+      marked illustrative — not run                  6
+      EXECUTED (exit 0 required)                    29
         marked run-only — output not compared        3
-        OUTPUT COMPARED against a fence             25
-    plain ``` fences                                51
-      consumed as an example's claimed output       25
+        OUTPUT COMPARED against a fence             26
+    plain ``` fences                                52
+      consumed as an example's claimed output       26
       HAND-WRITTEN, compared to nothing             26
 
-So the claim this file earns is: *every runnable example runs, and 25 of
-the 28 have their stdout compared byte for byte after a narrow
+So the claim this file earns is: *every runnable example runs, and 26 of
+the 29 have their stdout compared byte for byte after a narrow
 normalisation.* The 26 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
+
+**Every figure in that table and in the sentence after it is read back
+OUT of this docstring** by :func:`_docstring_inventory` and compared to
+``EXPECTED_INVENTORY``. Until it was, the table was the honour system:
+the dict was checked against the docs and the docstring against nothing,
+so the table could be set to any digits at all with the suite green — in
+the file that two paragraphs below declares a documented count should be
+written by the tree and not by an author.
+
+**A second job this file now does, and it is not an example.** One of the
+compared blocks is a REGISTRY CENSUS in ``docs/state-0.1.0.md`` — it
+teaches nobody how to use the tool; it exists so that a *number in prose*
+about what is in ``TRANSFERS``/``_SUPPORTED`` cannot drift from the
+registries it describes. That page's figure had already been wrong twice,
+once against the very sha it was stamped with, and stamping a sha does not
+help when a human still types the digit. So the rule this file makes
+enforceable, and enforces wherever a count is written as a block, is:
+**a documented count that is computable from this tree should be written by
+the tree, not by an author.** Counts over populations that are NOT in this
+tree (the two blinded external contracts, the ``jax_md`` census) cannot be
+gated here and carry an as-of-sha instead.
 
 **Markers.** Default-deny: an unmarked ```python block is executed and
 must be followed by a fence carrying its output. A block that is not
@@ -67,6 +88,15 @@ skipped when no backend is installed, since their output is about an
 escalation that cannot happen. Those examples are unverified in a
 solver-free environment.
 
+**And EVERY example here is skipped when jax is absent** —
+:func:`test_doc_example` opens with ``pytest.importorskip("jax")``, so in
+the zero-dep configuration this module verifies nothing about any
+documented output. That matters most for the one block that needs no jax:
+the registry census above counts a ZERO-DEP-CORE registry, and it was the
+block skipped in the zero-dep run. Its jax-free gate is
+``tests/test_release_doc_claims.py``, which also re-derives the prose
+around it; this module's byte-for-byte comparison is the with-jax half.
+
 The subprocess runs with ``PYTHONPATH`` pointing at **this repo's**
 ``src/``. Without that a developer with stelling installed from
 elsewhere would measure a different tree than the one they are editing,
@@ -94,17 +124,73 @@ SRC = REPO / "src"
 # The inventory the docstring states. A change here is a change to what
 # this file promises, so it must be made deliberately and in both places.
 EXPECTED_INVENTORY = {
-    "python_blocks": 33,
-    "illustrative": 5,
-    "executed": 28,
+    "python_blocks": 35,
+    "illustrative": 6,
+    "executed": 29,
     "run_only": 3,
-    "compared": 25,
-    "plain_fences": 51,
+    "compared": 26,
+    "plain_fences": 52,
     "plain_unattached": 26,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")
 _FENCE = re.compile(r"^(\s*)```(\w*)\s*$")
+
+# --- the docstring's own numbers, read back out of it ------------------
+#
+# ``consumed`` has no entry in EXPECTED_INVENTORY: it is the same
+# quantity as ``compared`` seen from the fence side, and the table states
+# both, so the reader keeps it and the test asserts they agree.
+_TABLE_ANCHOR = ":func:`test_inventory_is_what_the_docstring_says`::"
+_TABLE_ROW = re.compile(r"^\s{4,}(?P<label>\S.*?)\s{2,}(?P<n>\d+)\s*$")
+_DOCSTRING_ROWS = {
+    "```python blocks": "python_blocks",
+    "marked illustrative — not run": "illustrative",
+    "EXECUTED (exit 0 required)": "executed",
+    "marked run-only — output not compared": "run_only",
+    "OUTPUT COMPARED against a fence": "compared",
+    "plain ``` fences": "plain_fences",
+    "consumed as an example's claimed output": "consumed",
+    "HAND-WRITTEN, compared to nothing": "plain_unattached",
+}
+# figures the prose derives from the table, in the order they are stated
+_DERIVED_FIGURES = [
+    (re.compile(r"and (\d+) of the (\d+) have their stdout compared"),
+     ("compared", "executed")),
+    (re.compile(r"The (\d+) unattached fences"), ("plain_unattached",)),
+]
+
+
+def _docstring_inventory() -> dict[str, int]:
+    """The inventory as the DOCSTRING states it, parsed out of it.
+
+    The dict was checked against the docs and the docstring against
+    nothing, so the table beside it was an honour-system copy — the
+    failure message below asks a contributor to update both, and only one
+    of them was load-bearing."""
+    lines = (__doc__ or "").split("\n")
+    starts = [n for n, ln in enumerate(lines) if ln.rstrip().endswith(_TABLE_ANCHOR)]
+    assert len(starts) == 1, (
+        f"the inventory table is located by the line ending {_TABLE_ANCHOR!r}; "
+        f"found {len(starts)} such lines in this docstring"
+    )
+    got: dict[str, int] = {}
+    for ln in lines[starts[0] + 1:]:
+        if not ln.strip():
+            continue
+        if not ln.startswith("    "):
+            break
+        m = _TABLE_ROW.match(ln)
+        assert m, f"inventory table row this reader cannot parse: {ln!r}"
+        key = _DOCSTRING_ROWS.get(m.group("label").strip())
+        assert key is not None, (
+            f"unrecognised inventory row label {m.group('label').strip()!r} — "
+            "add it to _DOCSTRING_ROWS rather than leaving it unread"
+        )
+        got[key] = int(m.group("n"))
+    missing = sorted(set(_DOCSTRING_ROWS.values()) - set(got))
+    assert not missing, f"the docstring inventory table lost rows: {missing}"
+    return got
 
 
 def _doc_files() -> list[pathlib.Path]:
@@ -235,7 +321,13 @@ def test_inventory_is_what_the_docstring_says():
 
     It goes red when the docs gain or lose an example, or when a checked
     block is quietly marked illustrative — decisions that should be made
-    in the open rather than absorbed."""
+    in the open rather than absorbed.
+
+    Two halves, and for a long time only the first existed: the counts
+    are recomputed from the docs and compared to ``EXPECTED_INVENTORY``,
+    AND ``EXPECTED_INVENTORY`` is compared to the numbers read back out
+    of the docstring table and the sentences derived from it. Without the
+    second half this test did not read the docstring it is named for."""
     got = dict.fromkeys(EXPECTED_INVENTORY, 0)
     for path in _doc_files():
         blocks = list(_fences(path.read_text(encoding="utf-8")))
@@ -268,6 +360,31 @@ def test_inventory_is_what_the_docstring_says():
         "Update EXPECTED_INVENTORY *and* the table in this module's "
         "docstring — together they are this file's claim about itself."
     )
+
+    stated = _docstring_inventory()
+    assert stated.pop("consumed") == stated["compared"], (
+        "the docstring says a different number of plain fences are consumed "
+        "as claimed output than are compared; they are one quantity"
+    )
+    assert stated == EXPECTED_INVENTORY, (
+        f"the docstring's inventory table is not EXPECTED_INVENTORY.\n"
+        f"  docstring {stated}\n  dict      {EXPECTED_INVENTORY}\n"
+        "Both are this file's claim about itself and neither is decorative."
+    )
+
+    flat = re.sub(r"\s+", " ", __doc__ or "")
+    for pattern, keys in _DERIVED_FIGURES:
+        m = pattern.search(flat)
+        assert m is not None, (
+            f"the docstring sentence matching {pattern.pattern!r} is gone; it "
+            "carried figures derived from the inventory table"
+        )
+        stated_figures = tuple(int(g) for g in m.groups())
+        wanted = tuple(EXPECTED_INVENTORY[k] for k in keys)
+        assert stated_figures == wanted, (
+            f"the docstring prose says {stated_figures} where the inventory "
+            f"says {wanted} for {keys}"
+        )
 
 
 def test_collected_cases_match_the_inventory():
