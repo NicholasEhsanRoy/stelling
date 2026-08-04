@@ -19,20 +19,33 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                33
-      marked illustrative — not run                  5
-      EXECUTED (exit 0 required)                    28
+    ```python blocks                                35
+      marked illustrative — not run                  6
+      EXECUTED (exit 0 required)                    29
         marked run-only — output not compared        3
-        OUTPUT COMPARED against a fence             25
-    plain ``` fences                                51
-      consumed as an example's claimed output       25
+        OUTPUT COMPARED against a fence             26
+    plain ``` fences                                52
+      consumed as an example's claimed output       26
       HAND-WRITTEN, compared to nothing             26
 
-So the claim this file earns is: *every runnable example runs, and 25 of
-the 28 have their stdout compared byte for byte after a narrow
+So the claim this file earns is: *every runnable example runs, and 26 of
+the 29 have their stdout compared byte for byte after a narrow
 normalisation.* The 26 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
+
+**A second job this file now does, and it is not an example.** One of the
+compared blocks is a REGISTRY CENSUS in ``docs/state-0.1.0.md`` — it
+teaches nobody how to use the tool; it exists so that a *number in prose*
+about what is in ``TRANSFERS``/``_SUPPORTED`` cannot drift from the
+registries it describes. That page's figure had already been wrong twice,
+once against the very sha it was stamped with, and stamping a sha does not
+help when a human still types the digit. So the rule this file makes
+enforceable, and enforces wherever a count is written as a block, is:
+**a documented count that is computable from this tree should be written by
+the tree, not by an author.** Counts over populations that are NOT in this
+tree (the two blinded external contracts, the ``jax_md`` census) cannot be
+gated here and carry an as-of-sha instead.
 
 **Markers.** Default-deny: an unmarked ```python block is executed and
 must be followed by a fence carrying its output. A block that is not
@@ -94,12 +107,12 @@ SRC = REPO / "src"
 # The inventory the docstring states. A change here is a change to what
 # this file promises, so it must be made deliberately and in both places.
 EXPECTED_INVENTORY = {
-    "python_blocks": 33,
-    "illustrative": 5,
-    "executed": 28,
+    "python_blocks": 35,
+    "illustrative": 6,
+    "executed": 29,
     "run_only": 3,
-    "compared": 25,
-    "plain_fences": 51,
+    "compared": 26,
+    "plain_fences": 52,
     "plain_unattached": 26,
 }
 

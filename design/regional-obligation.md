@@ -449,7 +449,9 @@ because it is the one that set a build's scope.
 
 Not the headline — something the project needed more: the **oldest false
 VERIFIED in its history**, integer arithmetic modelled as unbounded
-reals, live since the MVP and through six prior audits, found only
+reals, live since the MVP and through prior audits that missed it — the
+count recorded at the time, *"six"*, has no surviving enumeration and is
+withdrawn as a number (`SOUNDNESS.md` carries the same withdrawal) — found only
 because a build finally routed attention to integer arithmetic
 (**L14**). Five UNSOUND in total, all fixed, none in the three rows, and
 three structural closures earned along the way (total census →
