@@ -58,9 +58,13 @@ carry is unchecked by it.
 from __future__ import annotations
 
 import contextlib
+import inspect
 import io
+import os
 import pathlib
 import re
+import subprocess
+import sys
 import textwrap
 
 from stelling import obligation, propagate
@@ -433,6 +437,67 @@ QUOTATIONS = [
      "count over a population that is not in the tree gets a sha; a count "
      "that is computable from the tree gets a gate"),
 ]
+
+
+# ------------------------------------------------------- the zero-dep claim
+
+_ZERO_DEP_PROBE = '''\
+import importlib.util
+import sys
+
+
+class _NoJax:
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in ("jax", "jaxlib"):
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+        return None
+
+
+sys.meta_path.insert(0, _NoJax())
+
+spec = importlib.util.spec_from_file_location("_gate_under_test", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+for name in sys.argv[2:]:
+    getattr(mod, name)()
+assert "jax" not in sys.modules, "this gate pulled jax in after all"
+print("ok")
+'''
+
+
+def test_this_gate_holds_with_jax_absent():
+    """The property that makes this file worth having, pinned instead of
+    asserted in its docstring.
+
+    The census counts a ZERO-DEP-CORE registry. A gate for it that only
+    runs where jax is installed leaves the count unchecked in exactly the
+    configuration it describes, which is the state this file was written
+    to end. So every fixture-free check above is re-run in a subprocess
+    with ``jax`` and ``jaxlib`` made unimportable — the list is computed,
+    not typed, so a check added later cannot quietly fall out of it."""
+    names = [
+        n for n, obj in sorted(globals().items())
+        if n.startswith("test_")
+        and n != "test_this_gate_holds_with_jax_absent"
+        and callable(obj)
+        and not inspect.signature(obj).parameters
+    ]
+    assert len(names) >= 8, (
+        f"the zero-dep probe is only covering {names} — if the checks above "
+        "have grown fixtures, give it an explicit list rather than letting it "
+        "shrink to nothing"
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
+    r = subprocess.run(
+        [sys.executable, "-c", _ZERO_DEP_PROBE, str(pathlib.Path(__file__).resolve()), *names],
+        capture_output=True, text=True, env=env, timeout=300,
+    )
+    assert r.returncode == 0 and r.stdout.strip().endswith("ok"), (
+        "the release-doc gates do not hold with jax absent, which is the "
+        f"configuration the registry census is about.\n--- stderr ---\n"
+        f"{r.stderr[-3000:]}"
+    )
 
 
 def test_registered_quotations_are_verbatim():
