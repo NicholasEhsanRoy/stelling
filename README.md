@@ -1,4 +1,4 @@
-<img src="assets/stelling_logo.png" alt="the stelling wordmark: three cubes arranged as ∴, therefore, beside the name" width="100%">
+<img src="https://raw.githubusercontent.com/NicholasEhsanRoy/stelling/main/assets/stelling_logo.png" alt="the stelling wordmark: three cubes arranged as ∴, therefore, beside the name" width="100%">
 
 # Stelling
 Inspired by Kani, Stelling is an assertion-based verifier for JAX array
@@ -14,10 +14,10 @@ bounds over horizons no test can reach.
 
 *stelling is not affiliated with or endorsed by the JAX project.*
 
-**Start here: [docs/quickstart.md](docs/quickstart.md)** — install, one
+**Start here: [docs/quickstart.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/quickstart.md)** — install, one
 runnable harness, a stamped verdict, in four files. The
 [Quickstart](#quickstart) section below is the two-minute version, and
-[docs/](docs/) indexes the rest.
+[docs/](https://github.com/NicholasEhsanRoy/stelling/tree/main/docs/) indexes the rest.
 
 ## What it does — and what it doesn't, measured
 
@@ -37,7 +37,7 @@ runnable harness, a stamped verdict, in four files. The
   coefficient field over its envelope, a nonzero mass/shift scalar over
   its admissible config range — as reusable obligation templates
   (`stelling.preconditions`) with a one-call front door (`check()`), each
-  verdict stamped. Guide: [docs/preconditions.md](docs/preconditions.md).
+  verdict stamped. Guide: [docs/preconditions.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/preconditions.md).
 - **Escalates undecided obligations to SMT solvers** (optional extras,
   never required): scalar linear/polynomial obligations emit as
   SMT-LIB2 text — exact dyadic rationals, the closed declared box, the
@@ -195,12 +195,12 @@ you actually run on. `v.render()` prints the whole stamp.
 
 | | |
 |---|---|
-| [Quickstart](docs/quickstart.md) | install, one runnable harness, a stamped verdict |
-| [The harness API](docs/harness-api.md) | the import path and every primitive: `any_array`, `any_pytree`, `assert_`, `assume`, `nonvacuity`, `trace` |
-| [Reading a verdict](docs/reading-a-verdict.md) | the statuses, every stamp line, and the two vacuity instruments |
-| [Preconditions guide](docs/preconditions.md) | ready-made obligation templates and posing guidance |
-| [SOUNDNESS.md](SOUNDNESS.md) | what a verdict is permitted to claim |
-| [docs/](docs/) | index, including the project-state and ledger records |
+| [Quickstart](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/quickstart.md) | install, one runnable harness, a stamped verdict |
+| [The harness API](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/harness-api.md) | the import path and every primitive: `any_array`, `any_pytree`, `assert_`, `assume`, `nonvacuity`, `trace` |
+| [Reading a verdict](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reading-a-verdict.md) | the statuses, every stamp line, and the two vacuity instruments |
+| [Preconditions guide](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/preconditions.md) | ready-made obligation templates and posing guidance |
+| [SOUNDNESS.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/SOUNDNESS.md) | what a verdict is permitted to claim |
+| [docs/](https://github.com/NicholasEhsanRoy/stelling/tree/main/docs/) | index, including the project-state and ledger records |
 
 ## Development
 
@@ -212,8 +212,8 @@ pytest
 
 Every source file carries an SPDX header (template in `.license-header.txt`);
 the pre-commit hook inserts it into new files automatically. Commits must be
-signed off (`git commit -s`) — see [CONTRIBUTING.md](CONTRIBUTING.md) and
-[DCO](DCO). Only `stelling/_jax_compat.py` may import jax; everything else
+signed off (`git commit -s`) — see [CONTRIBUTING.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/CONTRIBUTING.md) and
+[DCO](https://github.com/NicholasEhsanRoy/stelling/blob/main/DCO). Only `stelling/_jax_compat.py` may import jax; everything else
 consumes the jax-free `stelling.ir`, and both rules are enforced by hooks
 and tests.
 
@@ -225,7 +225,7 @@ attribution to propagate (one gets added the day third-party code actually
 lands in-tree). The stelling name and logo (`assets/`) are **not** under
 the code license: they are marks of the maintainer, reserved so a fork
 cannot be mistaken for the project
-([`LICENSES/LicenseRef-stelling-marks.txt`](LICENSES/LicenseRef-stelling-marks.txt)).
+([`LICENSES/LicenseRef-stelling-marks.txt`](https://github.com/NicholasEhsanRoy/stelling/blob/main/LICENSES/LicenseRef-stelling-marks.txt)).
 Nominative use — referring to stelling by name or logo — is fine and
 expected. This is the same source-open/marks-reserved split Ferrocene
 ships, not an open-core arrangement, and it is consistent with Apache-2.0,
@@ -245,5 +245,5 @@ Provenance is machine-verifiable: the repo is REUSE-compliant
 ([reuse.software](https://reuse.software); `LICENSES/`, `REUSE.toml`,
 `reuse lint` in CI), contributions are DCO-signed, and releases are
 published via PyPI Trusted Publishing with PEP 740 attestations
-([SECURITY.md](SECURITY.md) shows how to verify). The verdict trust policy
-lives in [SOUNDNESS.md](SOUNDNESS.md).
+([SECURITY.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/SECURITY.md) shows how to verify). The verdict trust policy
+lives in [SOUNDNESS.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/SOUNDNESS.md).
