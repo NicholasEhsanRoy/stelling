@@ -25,11 +25,14 @@ Two tests, in the order they matter:
 
 from __future__ import annotations
 
+import email
 import pathlib
+import re
 import shutil
 import subprocess
 import tarfile
 import tomllib
+import zipfile
 
 import pytest
 
@@ -96,6 +99,83 @@ def test_every_root_entry_is_a_decision() -> None:
         + "\n\nAdd each to the allowlist (it ships) or to WITHHELD with a reason "
         "(it does not). An sdist on PyPI cannot be unpublished."
     )
+
+
+# --- what the PyPI project page renders ------------------------------------
+#
+# The long description is README.md, and PyPI does NOT host this repository's
+# files. A relative `<img src="assets/…">` is a broken image on the project page
+# and a relative `](docs/…)` is a 404 — while both read perfectly in the repo,
+# which is why this survived every reading of the README and needed the built
+# artefact to show it.
+
+_REPO_URL_PREFIXES = (
+    "https://github.com/NicholasEhsanRoy/stelling/blob/main/",
+    "https://github.com/NicholasEhsanRoy/stelling/tree/main/",
+    "https://raw.githubusercontent.com/NicholasEhsanRoy/stelling/main/",
+)
+
+
+def _readme_refs(text: str) -> tuple[list[str], list[str]]:
+    images = re.findall(r'<img[^>]*src="([^"]+)"', text)
+    links = sorted({u for u in re.findall(r"\]\(([^)#][^)]*)\)", text)})
+    return images, links
+
+
+def test_readme_carries_no_relative_reference() -> None:
+    """Break it: change one absolute URL back to its repo-relative form."""
+    images, links = _readme_refs((REPO / "README.md").read_text())
+    assert images, "no images found — this check is not looking at the README"
+    assert links, "no links found — this check is not looking at the README"
+    bad = [u for u in images + links if not u.startswith(("http://", "https://", "mailto:"))]
+    assert not bad, (
+        "README.md carries repo-relative references. They read fine on GitHub and "
+        "are a broken image / 404 on the PyPI project page, which is where a "
+        "stranger lands first:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_every_readme_repo_link_resolves_to_a_real_path() -> None:
+    """Absolute URLs stop the PyPI 404s but can still 404 on GitHub. A link into
+    this repository must name a path this repository has.
+
+    Break it: point one link at `docs/does-not-exist.md`."""
+    images, links = _readme_refs((REPO / "README.md").read_text())
+    checked, missing = 0, []
+    for url in images + links:
+        for prefix in _REPO_URL_PREFIXES:
+            if url.startswith(prefix):
+                rel = url[len(prefix) :].rstrip("/")
+                checked += 1
+                if not (REPO / rel).exists():
+                    missing.append(url)
+                break
+    assert checked, "no in-repo links were checked — the prefixes have drifted"
+    assert not missing, "README links into this repo that name no such path:\n  " + "\n  ".join(missing)
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_built_metadata_carries_no_relative_reference(tmp_path: pathlib.Path) -> None:
+    """The property on the ARTEFACT, not on the source file — this is what PyPI
+    renders. Verified by extraction from the built distribution rather than by
+    reading README.md, because reading it is what missed this."""
+    proc = subprocess.run(
+        ["uv", "build", "--offline", "--out-dir", str(tmp_path), str(REPO)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert proc.returncode == 0, f"build failed:\n{proc.stderr}"
+    wheels = sorted(tmp_path.glob("*.whl"))
+    assert len(wheels) == 1, f"expected one wheel, got {wheels}"
+    with zipfile.ZipFile(wheels[0]) as z:
+        name = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+        meta = email.message_from_string(z.read(name).decode())
+    body = meta.get_payload()
+    assert meta.get("Description-Content-Type") == "text/markdown"
+    assert len(body) > 1000, "long description is suspiciously short — not the README"
+    images, links = _readme_refs(body)
+    assert images and links, "the built metadata carries no refs — check is vacuous"
+    bad = [u for u in images + links if not u.startswith(("http://", "https://", "mailto:"))]
+    assert not bad, "the published long description carries relative refs:\n  " + "\n  ".join(bad)
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build an sdist")
