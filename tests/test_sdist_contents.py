@@ -52,9 +52,10 @@ def _allowlist() -> set[str]:
 WITHHELD = {
     ".git": "the repository itself",
     ".claude": (
-        "local agent/tool configuration — untracked AND not gitignored, so under "
-        "hatchling's default it would have shipped; found by this test on its "
-        "first run, which is the second live instance of the leak"
+        "local agent/tool configuration — untracked AND not gitignored, so the "
+        "allowlist is the only thing keeping it out. It is currently EMPTY, so "
+        "nothing of substance would have shipped; the point is that it was "
+        "undecided, and the decision is recorded before content appears"
     ),
     ".gitignore": "listed in the allowlist; kept here only if it moves",
     "stelling_0_1_0_release_checklist.md": (
@@ -176,6 +177,44 @@ def test_built_metadata_carries_no_relative_reference(tmp_path: pathlib.Path) ->
     assert images and links, "the built metadata carries no refs — check is vacuous"
     bad = [u for u in images + links if not u.startswith(("http://", "https://", "mailto:"))]
     assert not bad, "the published long description carries relative refs:\n  " + "\n  ".join(bad)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_no_untracked_file_anywhere_would_ship() -> None:
+    """The allowlist has ROOT-LEVEL granularity, and that is not the whole job.
+
+    Measured: an allowlist entry like ``/docs`` admits the directory, and
+    hatchling then takes everything inside it that is not gitignored. A stray
+    untracked file at ``docs/scratch.md`` or ``src/stelling/tmp.py`` **still
+    ships** — the root allowlist does not reach it. The checklist that started
+    all this merely happened to sit at the root.
+
+    So the allowlist closes the root and this closes the rest: any untracked,
+    non-gitignored path anywhere in the tree WILL be distributed, and must be a
+    decision. Committed files are out of scope — they are reviewed.
+
+    Break it: `touch docs/anything.md` and run this test.
+    """
+    proc = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=REPO, capture_output=True, text=True, timeout=120,
+    )
+    if proc.returncode != 0:
+        pytest.skip("not a git checkout (an unpacked sdist, say)")
+    undecided = []
+    for ln in proc.stdout.splitlines():
+        if not ln.startswith("?? "):
+            continue
+        path = ln[3:].strip().strip('"')
+        if path.split("/", 1)[0] in WITHHELD or path in WITHHELD:
+            continue
+        undecided.append(path)
+    assert not undecided, (
+        "these paths are untracked, not gitignored, and would be DISTRIBUTED in "
+        "the sdist:\n  " + "\n  ".join(undecided)
+        + "\n\nThe root allowlist does not reach inside an allowlisted directory. "
+        "Commit the file, gitignore it, or add it to WITHHELD with a reason."
+    )
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build an sdist")
