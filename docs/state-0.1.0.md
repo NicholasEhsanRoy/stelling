@@ -60,8 +60,9 @@ sentence and the sentence did not survive re-derivation (2026-08-03,
    distinction.** *Unit: forms, n = 10 listed items.*
 
 3. **One of them has neither an interval transfer nor an emission row: `iota`.**
-   **No figure in this clause is left to a human transcription, and the reason
-   is its own history.** It is a claim about what is in two live registries, so it is
+   **Four figures in this clause are re-derived from the registries; the rest
+   are not, and they are listed at the end of it.** The reason is its own
+   history. It is a claim about what is in two live registries, so it is
    computable from this tree — and a registry claim is invalidated by the next
    commit that touches a registry. It has been wrong twice for exactly that
    reason: it read *"five"*, which was measured against the tree as it stood
@@ -77,8 +78,9 @@ sentence and the sentence did not survive re-derivation (2026-08-03,
    happened. So the sentence you just read and the unit line below are
    **re-derived from those same two registries by
    `tests/test_release_doc_claims.py`**: the count, the named member, and both
-   populations, with the census's `recorded` list required to be clause 1's ten
-   items under the identification clause 2 states. That gate imports no jax, so
+   populations, with the census's `recorded` list required to be the **nine**
+   primitives among clause 1's ten items, under the identification clause 2
+   states and the exclusion this clause's unit line states. That gate imports no jax, so
    unlike the executed census it also runs in the zero-dep configuration this
    count is about. Prose that stops agreeing with the block goes red; it can no
    longer go stale. *Unit: membership in `stelling.propagate.TRANSFERS` and
@@ -106,6 +108,27 @@ sentence and the sentence did not survive re-derivation (2026-08-03,
    transfer only 6  ['sign', 'unstack', 'copy', 'rem', 'abs', 'pow']
    both          2  ['square', 'convert_element_type']
    ```
+
+   **The figures in this clause that NOTHING re-derives**, listed because the
+   sentence this replaces claimed there were none. A claim that everything is
+   checked ranges over every figure the gate does not reach — an open set the
+   author cannot enumerate, because enumerating it would mean gating it. A list
+   of what is *not* covered ranges over a closed set, and fails safe: too long
+   costs nothing, too short gets found.
+
+   - *"wrong twice"* — how many times this clause has been wrong.
+   - *"five"* and *"seven … as of `f8f5850`"* — the two historical readings.
+   - *"the correct figure at `f8f5850` was six"* — **computable from this tree**
+     (`git archive f8f5850 src`, then run the census), and typed anyway.
+   - *"one merge earlier"* — likewise computable
+     (`git log --first-parent e3b9deb..f8f5850`).
+   - *"all three of this project's recorded unit failures"* — a count over
+     `docs/proposed-unit-mechanism.md`, not over this tree.
+   - *"1 of the 10 listed items"* in clause 2 — gated only for its `n = 10`
+     unit line, not for that sentence.
+
+   All seven are true as written and were re-derived by hand; none has a gate,
+   so none is protected from the next commit that makes it false.
 
 4. **Two terminals recur, not one — and the mechanism claim stands.** Within
    MADDENING/MIME the element budget recurs on **3** contracts *and* the
