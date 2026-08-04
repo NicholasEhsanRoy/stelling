@@ -1321,24 +1321,35 @@ def _note_tool_phase(phase, who):
         _TOOL_PHASE.append((phase, who))
 
 
+# THIS GUARD FAILED TWICE, IN TWO SHAPES, AND THE SECOND IS WHAT THE
+# OBVIOUS REPAIR FOR THE FIRST PRODUCES. Both are "the guard exists but
+# does not fire where it is needed", which this project keeps meeting.
+#
+#   1. Reachable from one place only. It sat after both execution calls,
+#      so four earlier returns left without asking — UNREACHABLE,
+#      both-modes-raised, witness-build-failed, and target-import-failed,
+#      the worst of them because it IS the stelling-absent environment
+#      this disclosure is about.
+#   2. Reachable everywhere and keyed on the wrong signal. Moved into
+#      `_sidecar`, it asked `_TOOL_PHASE`, which is right there and looks
+#      like the answer: a target that loads the tool lazily and then
+#      raises in both modes returns before the last phase sample, so it
+#      disclosed nothing with stelling demonstrably in the process.
+#
+# THE SEPARATION THAT RESOLVES BOTH: `sys.modules` decides WHETHER to
+# disclose; `_TOOL_PHASE` supplies only WHO and WHEN. Moving this check
+# back into the flow re-derives (1); re-keying it on the phase re-derives
+# (2). Both were measured, the second before it shipped.
+
+
 def _disclose_tool(detail):
     """The independence disclosure, on EVERY path that reports anything.
 
-    It used to sit after both execution calls, so four earlier returns
-    imported the target and left without asking — UNREACHABLE,
-    both-modes-raised, target-import-failed and witness-build-failed. The
-    worst was the import failure, which is the stelling-absent environment
-    the disclosure is ABOUT. Called from `_sidecar`, it is reachable from
-    every terminal path by construction rather than by placement.
+    Called from `_sidecar`, so it is reachable from every terminal path by
+    construction rather than by placement. See the note above before
+    moving it or changing what it asks.
     """
     if "stelling" in sys.modules:
-        # SYS.MODULES DECIDES WHETHER TO DISCLOSE; _TOOL_PHASE only says
-        # WHO and WHEN. Keying the disclosure itself on the recorded phase
-        # put it back at the mercy of where the samples sit: a target that
-        # imports the tool lazily and then raises in both modes returns
-        # before the "running the target" sample, and disclosed nothing
-        # even though the tool was demonstrably in the process. Measured,
-        # in this repair round, before it shipped.
         phase, who = (
             _TOOL_PHASE[0] if _TOOL_PHASE else ("running", "your program")
         )
