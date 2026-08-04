@@ -29,8 +29,8 @@ carries the sha of the instrument that produced it instead of a gate. *As-of, in
 `stelling-sweeps/BASELINE_pre_0_4_0.json` at `1608457`,
 `stelling-sweeps/rederive_terminals_idiomatic.py` at `7a594aa`,
 `stelling-sweeps/CLAUSE_CENSUS_state_0_1_0.md` at `fa69d34`. **The registry
-census in clause 3 is the opposite case — its
-population is in this tree, so it is gated and not stamped**, which is the
+census in clause 3 is the opposite case — its population is in this tree, so it
+is gated and not stamped**, which is the
 distinction this document's own rule draws further down: *a count over a
 population that is not in the tree gets a sha; a count that is computable from
 the tree gets a gate.*
@@ -110,8 +110,8 @@ sentence and the sentence did not survive re-derivation (2026-08-03,
 4. **Two terminals recur, not one — and the mechanism claim stands.** Within
    MADDENING/MIME the element budget recurs on **3** contracts *and* the
    constrained-assume refusal on **2** (`stelling-sweeps/BASELINE_pre_0_4_0.json`
-   at `1608457`). Whether the
-   budget is the sole *cross-framework* recurrence depends on claim 1 and is
+   at `1608457`). Whether the budget is the sole *cross-framework* recurrence
+   depends on claim 1 and is
    therefore not re-derivable here. **The mechanism is untouched by the count
    and stands: the budget recurs because it is a function of query SIZE rather
    than of coding style.** *Unit: blocked contracts, n = 7 of 14.*
@@ -216,7 +216,8 @@ that was missing and is stated here.**
 **Two counts of two, over two different populations.** Re-measured — **outside
 this tree, and not re-derivable in it** — by
 `stelling-sweeps/nonvacuity_seven.py` at `311d0e2`, which ties each box to the
-node's own `initial_state()`: the contracts whose nonvacuity comes back `checked` are
+node's own `initial_state()`: the contracts whose nonvacuity comes back
+`checked` are
 **`MADD RigidBody` and `MIME coil_array`**, and `MADD row7.richardson` comes
 back **FAILED** there. So the axis table's *"2 checked non-vacuous"* and the
 *"deep, load-bearing AND non-vacuous"* pair are **numerically compatible and
@@ -225,8 +226,8 @@ the population per figure was written against.
 
 **`row7` is `checked` against a DRIVEN point and against no other.** Measured
 outside this tree (`stelling-sweeps/row7_driven.py` at `396e8cd`): undriven,
-the node's reachable span is `[0, 0]` against a
-declared envelope of `(10.0, 100.0)` — **DISJOINT**, and nonvacuity at
+the node's reachable span is `[0, 0]` against a declared
+envelope of `(10.0, 100.0)` — **DISJOINT**, and nonvacuity at
 `initial_state()`'s `0.0` is FAILED. Driven (left = 100.0, right = 20.0, 4000
 steps at dt = 0.01) the span is `[0, 100]`, and nonvacuity at the driven
 steady-state value `20.0` is `checked`. *Unit: one stated point per contract,
