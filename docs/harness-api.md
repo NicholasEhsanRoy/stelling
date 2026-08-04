@@ -44,13 +44,13 @@ ok          from stelling.harness
 `stelling._jax_compat`, which is private and should not be imported
 directly.
 
-Importing `stelling.harness` needs a JAX in the environment — at import
-time, not at first call. Without one it raises
-`stelling.OptionalDependencyError` (a subclass of `ImportError`) saying
+Importing `stelling.harness` needs a JAX in the environment: it fails at
+import time, not at first call. `import stelling.harness` raises
+`stelling.OptionalDependencyError` — a subclass of `ImportError` — saying
 `jax is required for tracing harnesses to jaxprs but is not installed;
-run: pip install "stelling[jax]"`. Importing `stelling.preconditions`
-does not need JAX (its harness imports happen inside the functions), but
-calling `check` in a JAX-less environment raises the same thing.
+run: pip install "stelling[jax]"`. `stelling.preconditions` does not need
+JAX to import (its harness imports happen inside the functions), but
+calling `check` in a JAX-less environment raises the same error.
 
 Every code block on this page was executed verbatim against this tree
 (stelling 0.1.0, jax 0.11.0, CPU, `jax_enable_x64=True`) and the outputs
