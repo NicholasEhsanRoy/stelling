@@ -73,6 +73,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 STATE = REPO / "docs" / "state-0.1.0.md"
 SOUNDNESS = REPO / "SOUNDNESS.md"
 CONTRIBUTING = REPO / "CONTRIBUTING.md"
+NORMS = REPO / "docs" / "norms.md"
 
 # ------------------------------------------------------------------ reading
 
@@ -423,15 +424,20 @@ def test_every_file_the_release_page_names_is_placed():
 
 # (quoting file, file it is attributed to, the quoted text). Whitespace
 # is normalised on both sides; nothing else is.
+# The norms moved out of CONTRIBUTING.md into docs/norms.md. All four of these
+# point at NORMS rather than CONTRIBUTING, including the two whose TITLES still
+# appear in CONTRIBUTING's index: an index entry would satisfy the check while
+# the norm's own text drifted underneath it, which is the drift this list exists
+# to catch.
 QUOTATIONS = [
-    (STATE, CONTRIBUTING,
+    (STATE, NORMS,
      "An over-permissive stub's ZERO is conclusive; its NONZERO is not"),
-    (STATE, CONTRIBUTING,
+    (STATE, NORMS,
      "A stub that grants **more** than a real implementation could deliver "
      "**upper-bounds** the benefit."),
-    (STATE, CONTRIBUTING,
+    (STATE, NORMS,
      "state what the stub grants, before reporting what it produced"),
-    (SOUNDNESS, CONTRIBUTING,
+    (SOUNDNESS, NORMS,
      "A figure in a norm states the UNIT it counts"),
     (STATE, STATE,
      "count over a population that is not in the tree gets a sha; a count "
