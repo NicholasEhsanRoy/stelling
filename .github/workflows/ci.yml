@@ -34,6 +34,108 @@ jobs:
       - run: uv pip install -e ".[solvers,jax]" pytest
       - run: .venv/bin/python -m pytest -q
 
+  # The two any_pytree acceptance tests hold the bar for "faithful sugar" —
+  # a sugar declaration must trace to a content-hash-IDENTICAL query to the
+  # hand-written one, against a REAL third-party library's pytrees (blackjax's
+  # MCLMC state, wrap_key_data, PRNG key dtypes). Measured: blackjax was
+  # declared nowhere — not in [dependency-groups] dev, not in any workflow —
+  # so those two tests SKIPPED in every CI run this project has ever had, and
+  # the bar was never once measured outside a developer's machine.
+  #
+  # A TEST dependency, not a runtime one: nothing here touches the
+  # zero-required-dependencies story, and the library-neutrality hook governs
+  # src/stelling, not tests/. It is deliberately NOT in [dependency-groups]
+  # dev either — a heavy MCMC library has no business in every contributor's
+  # environment for two tests.
+  #
+  # A SEPARATE job, so that blackjax breaking (its own resolution, a yanked
+  # wheel, a jax bump) cannot redden the lanes that test stelling.
+  #
+  # NOT A REQUIRED CHECK (branch protection is a repo setting, not this file:
+  # leave this job OUT of the required list). A red here must be loud — hence
+  # no `continue-on-error`, which would bury the failure as a warning on a
+  # green run — but it must not block a merge, because the failure can be
+  # entirely about a third-party library on a day stelling did not change.
+  #
+  # The one cost of living in this workflow rather than its own: README.md's
+  # `ci` badge reports the WORKFLOW conclusion, so a red here reddens the
+  # badge. Accepted because the probe libraries are pinned, which removes most
+  # of the third-party flakiness that argument is about. If that stops being
+  # true, move this job to its own workflow file rather than silencing it.
+  acceptance-any-pytree:
+    name: any_pytree acceptance (pinned blackjax + diffrax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      # Two-stage install ON PURPOSE. Stage one resolves exactly what the
+      # test-jax lane resolves; stage two adds the probe libraries. The jax
+      # version is read between the two, so a probe library that drags jax
+      # somewhere else is MEASURED rather than assumed away.
+      - run: uv pip install -e ".[solvers,jax]" pytest
+      # Scratch goes in RUNNER_TEMP, never the checkout: the last step runs
+      # the whole suite, and tests/test_sdist_contents.py fails closed on any
+      # untracked, non-gitignored path in the tree — correctly, since an
+      # untracked file inside an allowlisted directory really would ship. A
+      # job that dropped `jax-before.txt` at the repo root would redden that
+      # test and the failure would look like nothing to do with this job.
+      - name: resolved jax BEFORE the probe libraries
+        run: .venv/bin/python -c "import jax; print(jax.__version__)" | tee "${RUNNER_TEMP}/jax-before.txt"
+      # PINNED, and the pin has a cost worth stating: a pinned bar stops
+      # tracking the live library, which is half the point of testing against
+      # a real one. It is pinned anyway because the property is hash EQUALITY
+      # against hand declarations written for these exact pytree structures
+      # (design/any-pytree-probe.md, read against diffrax 0.7.2 / blackjax
+      # 1.6.2 / jax 0.11.0) — unpinned, a library changing its own state tuple
+      # would read as a stelling regression. Moving the pin is the deliberate
+      # act that re-establishes the bar, and belongs with the probe re-read.
+      - run: uv pip install "blackjax==1.6.2" "diffrax==0.7.2"
+      - name: RESOLVED JAX VERSION (a probe library moving jax fails this job)
+        run: |
+          set -euo pipefail
+          before="$(cat "${RUNNER_TEMP}/jax-before.txt")"
+          # These imports are themselves the check that the install worked: a
+          # job that installs blackjax and then silently skips is the exact
+          # defect this job exists to close, so absence must fail HERE.
+          after="$(.venv/bin/python -c 'import jax; print(jax.__version__)')"
+          bjx="$(.venv/bin/python -c 'import blackjax; print(blackjax.__version__)')"
+          dfx="$(.venv/bin/python -c 'import diffrax; print(diffrax.__version__)')"
+          echo "RESOLVED jax=${after} (before probe libraries: ${before}) blackjax=${bjx} diffrax=${dfx}"
+          {
+            echo "### any_pytree acceptance — the versions the bar was measured against"
+            echo ""
+            echo "| package | resolved |"
+            echo "| --- | --- |"
+            echo "| **jax** | **${after}** |"
+            echo "| jax, before blackjax/diffrax | ${before} |"
+            echo "| blackjax | ${bjx} |"
+            echo "| diffrax | ${dfx} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${before}" != "${after}" ]; then
+            echo "::error title=a probe library moved jax::blackjax/diffrax resolved jax ${before} -> ${after}. This job would then be measuring the any_pytree acceptance bar against a DIFFERENT jax from every other lane, and a green tick here would quietly mean something else. Fix the pin, or move the whole matrix deliberately."
+            exit 1
+          fi
+      - run: uv pip list
+      - name: the two acceptance tests must RUN — a skip here is the defect
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q -rs --no-header \
+            "tests/test_any_pytree.py::test_h_clean_sugar_hash_equals_hand_declaration" \
+            "tests/test_any_pytree.py::test_h_hard_sugar_hash_equals_hand_declaration" \
+            | tee "${RUNNER_TEMP}/acceptance.log"
+          if grep -q '^SKIPPED' "${RUNNER_TEMP}/acceptance.log"; then
+            echo "::error title=the acceptance tests skipped::This job installs blackjax so that these two RUN. They skipped, so the bar was not measured — and pytest exits 0 on a skip, which is why this is checked rather than trusted."
+            exit 1
+          fi
+          grep -qE '^2 passed' "${RUNNER_TEMP}/acceptance.log"
+      # The whole suite, in the one environment where every optional library
+      # of the acceptance set is present. tests/test_skip_inventory.py is the
+      # second, independent guard that those two RAN: it pins the condition
+      # ("skips iff blackjax is unimportable"), so here, where blackjax is
+      # importable, a skip fails the suite.
+      - run: .venv/bin/python -m pytest -q -rs
+
   reuse:
     name: reuse lint
     runs-on: ubuntu-latest
