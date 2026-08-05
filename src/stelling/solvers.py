@@ -1796,6 +1796,11 @@ def make_solver_verdict(
         ),
         assumptions=assumptions,
         coverage=propagation.coverage.summary(),
+        # the SAME derivation make_verdict uses (shared, so the two
+        # surfaces cannot disagree about whether the field exists — a
+        # field present on one published stamp and absent on the other
+        # is a surface that contradicts itself)
+        top_despite_coverage=_verdict.top_despite_coverage_note(propagation),
     )
     witnesses = tuple(
         r.witness for r in escalation.records if r.witness is not None

@@ -46,11 +46,40 @@ def full_stamp_kwargs():
         transfer_provenance=(("exp", "core"),),
         assumptions=("libm exp faithful",),
         coverage="4 eqns: 4 known (100%)",
+        top_despite_coverage=None,
     )
 
 
 def test_every_contract_field_is_required():
-    for missing in full_stamp_kwargs():
+    # DERIVED FROM THE DATACLASS, never from the kwargs dict. Iterating
+    # `full_stamp_kwargs()` made this test range over the fields someone
+    # remembered to add to a hand-kept dict, which is not the contract:
+    # `top_despite_coverage` landed on Stamp, never reached the dict, and
+    # was the one field of fourteen this test could not see — and no
+    # field added after it would have been seen either.
+    declared = tuple(f.name for f in dataclasses.fields(Stamp))
+    assert set(declared) == set(full_stamp_kwargs()), (
+        "full_stamp_kwargs() has drifted from Stamp's fields; the "
+        "required-field check ranges over the dataclass, so a field "
+        "missing here is a field this test cannot construct"
+    )
+    # the docstring's claim, checked as a claim: "every field is required
+    # — no defaults, so a missing field is a TypeError at construction".
+    # A defaulted field would still pass the loop below for every OTHER
+    # field, so the loop alone does not say this.
+    defaulted = [
+        f.name
+        for f in dataclasses.fields(Stamp)
+        if f.default is not dataclasses.MISSING
+        or f.default_factory is not dataclasses.MISSING
+    ]
+    assert defaulted == [], (
+        f"Stamp fields carry defaults: {defaulted} — the module "
+        f"docstring's 'every field is required — no defaults' is then "
+        f"false, and an assembly site that omits one publishes a "
+        f"silently defaulted value instead of failing"
+    )
+    for missing in declared:
         kwargs = full_stamp_kwargs()
         del kwargs[missing]
         with pytest.raises(TypeError):
@@ -58,17 +87,16 @@ def test_every_contract_field_is_required():
 
 
 def test_empty_fields_fail_loudly_instead_of_defaulting():
-    for field in (
-        "stelling_version",
-        "jax_version",
-        "query_content_hash",
-        "arithmetic_mode",
-        "semantics",
-        "precision_config",
-        "device_class",
-        "nonvacuity",
-        "coverage",
-    ):
+    # also derived: every str-typed field of the contract, including the
+    # `str | None` one whose None is a value and whose "" is not.
+    str_fields = [
+        f.name
+        for f in dataclasses.fields(Stamp)
+        if f.type in ("str", "str | None")
+    ]
+    assert "coverage" in str_fields and "top_despite_coverage" in str_fields
+    assert "assumptions" not in str_fields  # tuple[str, ...] is not a str field
+    for field in str_fields:
         kwargs = full_stamp_kwargs()
         kwargs[field] = ""
         with pytest.raises(StampError):

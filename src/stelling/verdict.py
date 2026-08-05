@@ -51,6 +51,7 @@ __all__ = [
     "Witness",
     "make_verdict",
     "solver_absent",
+    "top_despite_coverage_note",
 ]
 
 ARITHMETIC_MODE_INTERVAL = "interval/f64/outward-1ulp (stelling.interval)"
@@ -209,6 +210,36 @@ class Stamp:
     transfer_provenance: tuple[tuple[str, str], ...]  # (primitive, origin)
     assumptions: tuple[str, ...]
     coverage: str  # the ⊤-coverage summary line
+    # WHAT THE COVERAGE LINE ABOVE DID NOT ESTABLISH, or None when this
+    # particular reading was not available to make.
+    #
+    # The coverage line is a CENSUS: it counts whether each primitive in
+    # the query has a registered transfer. `unknown = 0` therefore means
+    # "every primitive is registered" and reads as "the analysis saw
+    # everything" — which it is not. A registered transfer can run and
+    # return ⊤ on the values it is handed, and no count on that line
+    # moves when it does. This field is populated exactly when the census
+    # recorded no gap AND the propagation still produced a ⊤ box, and it
+    # says only that: what the census did not rule out. It never asserts
+    # that coverage is complete, and its ABSENCE asserts nothing at all —
+    # absence means this reading did not fire, not that the query was
+    # bounded (a ⊤ inside a discarded branch scope, for one, is not
+    # visible to it).
+    #
+    # A separate field, not an addition to the coverage string, because
+    # that string is trend data: `stamp.coverage.split(" eqns")[0]` is
+    # parsed in reproduce.py, in Verdict.render, and across the sweep
+    # scripts. Additive here costs those parsers nothing.
+    #
+    # REQUIRED like every other field, and deliberately NOT defaulted to
+    # None even though None is a legitimate value. This landed with a
+    # default and was the only defaulted field of the fourteen, which
+    # made the module docstring's "no defaults" false and let an assembly
+    # site omit it and publish a stamp that silently reads "this reading
+    # did not fire" — the same defect as the implied solver absence two
+    # doors up. Absence is recorded, never implied: a site with nothing
+    # to disclose passes None and says so.
+    top_despite_coverage: str | None
 
     def __post_init__(self) -> None:
         for f in fields(self):
@@ -271,6 +302,11 @@ class Stamp:
         for a in self.assumptions:
             lines.append(f"assumes: {a}")
         lines.append(f"coverage: {self.coverage}")
+        # rendered immediately under the line it qualifies: a caveat a
+        # reader reaches after the number it is about has already been
+        # read is a caveat that arrives too late
+        if self.top_despite_coverage:
+            lines.append(f"coverage-not-established: {self.top_despite_coverage}")
         return "\n".join(lines)
 
 
@@ -631,6 +667,59 @@ def undecided_cause_note(coverage, obligations) -> tuple[str, ...]:
     )
 
 
+def top_despite_coverage_note(propagation: Propagation) -> str | None:
+    """The stamp's :attr:`Stamp.top_despite_coverage` field, derived from
+    the propagation that ran — or ``None`` when this reading did not fire.
+
+    THE INVERSION, and why the field is worded as one. The coverage line
+    is a membership census: `unknown = 0` says every primitive in the
+    query has a registered transfer, and it is read as "the analysis saw
+    all of it". Measured in the external census of ``jax_md``'s
+    ``space.distance`` (docs/state-0.1.0.md),
+    :func:`stelling.coverage.measure` reports total=14, known=11,
+    transparent=3, unknown=0 while the interval face for the same jaxpr
+    is ⊤. The same split survives into the live counter for a different
+    reason: a decline is counted there, but a transfer that SUCCEEDS and
+    returns an unbounded box is not — ``exp(x) - exp(x)`` over
+    x ∈ [-1000, 1000] counts 4/4 known, nothing fallen to ⊤, and
+    propagates [-inf, inf].
+
+    So this states what was NOT established — that the counts above
+    bounded anything — and never that coverage is complete or correct.
+    Its absence is not the complement of its presence: it fires on the
+    top-level ⊤ boxes :attr:`Propagation.top_boxes` recorded, and a
+    query with none of those has simply not had this particular reading
+    made about it.
+
+    Gated on the census reporting no gap of its own (``unknown``,
+    ``unreached`` and ``inert`` all zero): when the census DOES report
+    one, the coverage line already carries the disclosure and this field
+    would only repeat it under a stronger-sounding name.
+
+    Shared by both assembly paths (:func:`make_verdict` and
+    :func:`stelling.solvers.make_solver_verdict`), so the two surfaces
+    cannot disagree about whether the field exists.
+    """
+    c = propagation.coverage
+    if c.unknown or c.unreached or c.inert:
+        return None
+    if not propagation.top_boxes:
+        return None
+    n = sum(k for _, k in propagation.top_boxes)
+    names = ", ".join(f"{p} ×{k}" for p, k in propagation.top_boxes)
+    return (
+        f"NOT ESTABLISHED — that the coverage line bounded this query. "
+        f"{n} propagated value(s) came out ⊤ (every element [-inf, inf], "
+        f"the widest box there is), at {names}, while the census recorded "
+        f"no equation fallen to ⊤ and none unreached. A registered "
+        f"transfer can return ⊤ on the values it is "
+        f"handed, and the census counts whether a primitive HAS a transfer "
+        f"registered, never what the transfer returned — so the "
+        f"{c.known}/{c.total} figure is not a statement that anything here "
+        f"was bounded, and this verdict does not make one"
+    )
+
+
 def make_verdict(
     closed,
     propagation: Propagation,
@@ -727,6 +816,10 @@ def make_verdict(
         transfer_provenance=tuple((p, "core") for p, _ in propagation.transfers_used),
         assumptions=assumptions,
         coverage=propagation.coverage.summary(),
+        # both facts the reading needs are here — the census's counts and
+        # the walk's ⊤ boxes — and nowhere else: the census itself holds
+        # only the IR and a set of primitive names
+        top_despite_coverage=top_despite_coverage_note(propagation),
     )
     return Verdict(
         status=status,
