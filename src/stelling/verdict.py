@@ -539,6 +539,21 @@ def _approx(exact: str) -> str:
 #
 # Obligations whose slice touches `scatter` are INELIGIBLE FOR VERIFIED until
 # the emission row has been attacked by a distinct-context adversarial auditor.
+# Read "whose slice" literally: the scope is the emitted slice of the
+# obligation the solver actually decided, recorded at emission time on
+# `solvers.ObligationEscalation.barred_on_slice` and unioned at the bar site.
+# It is NOT the whole traced query — a scatter elsewhere in the jaxpr, on an
+# obligation intervals settled, withholds nothing. (Whole-query IS the
+# fail-closed fallback, `_barred_primitives`, when no slice scope was
+# recorded.)
+#
+# THE MEMBERSHIP IS EXACT-NAME, SO `scatter-add` IS NOT UNDER THIS BAR, AND
+# THAT IS DELIBERATE. `scatter-add` is a separate primitive with separate
+# rows, and `design/scatter-rows.md` records a COMPLETED fresh-adversarial-
+# auditor pass over them (2026-07-22, zero UNSOUND). The bar is for the rows
+# that have not had that pass — the static-index `scatter` SET row — not for
+# scatter as a family. A reader who assumed otherwise would over-read every
+# withheld VERIFIED in the ledger.
 #
 # The reason is an asymmetry, not caution in general. A wrong scatter encoding
 # that produces a SPURIOUS witness is caught downstream: every REFUTED witness
@@ -559,7 +574,7 @@ def _approx(exact: str) -> str:
 VERIFIED_BARRED_PRIMITIVES = frozenset({"scatter"})
 
 VERIFIED_BAR_REASON = (
-    "the traced query contains {prims}, whose SMT emission has not yet been "
+    "{where} contains {prims}, whose SMT emission has not yet been "
     "attacked by a distinct-context adversarial auditor. A wrong encoding that "
     "produced a spurious witness would be caught by exact-rational replay; one "
     "that MISSED a violation would mint a false VERIFIED with nothing "
@@ -569,11 +584,15 @@ VERIFIED_BAR_REASON = (
 )
 
 
-def _barred_primitives(closed) -> tuple[str, ...]:
-    """Barred primitives present anywhere in the traced query, innermost
-    scopes included. Deliberately whole-query rather than slice-scoped: a
-    bar that under-fires is worse than one that over-fires, and the slice is
-    not available at this layer.
+def _barred_in_eqns(eqns) -> tuple[str, ...]:
+    """THE BAR'S ONE WALK, rooted at an arbitrary iterable of equations.
+
+    Two roots use it and there is only ever one traversal:
+    :func:`_barred_primitives` roots it at the whole query's top-level
+    equations, and :func:`stelling.solvers.escalate` roots it at ONE
+    obligation's emitted slice (``ObligationSlice.eqns``) to record that
+    obligation's own barred set. Writing a second walk for the slice root
+    would be the exact mistake the docstring below is about.
 
     DESCENT GOES THROUGH :func:`stelling.coverage.sub_jaxprs`, THE CANONICAL
     ACCESSOR, and must not be hand-rolled here. The predecessor descended via
@@ -582,18 +601,22 @@ def _barred_primitives(closed) -> tuple[str, ...]:
     branches as a tuple. Measured: a `scatter` inside a `cond` branch was not
     barred at all, while the same primitive at top level, inside `jit`, and
     inside `scan` all barred correctly. That is the UNDER-firing direction,
-    which this function's own docstring calls the worse one.
+    which is the worse one.
+
+    THE SLICE ROOT NEEDS THE DESCENT JUST AS MUCH AS THE QUERY ROOT, and the
+    reason is measured, not hypothetical: a slice equation can HOLD a barred
+    primitive in a sub-jaxpr. With a synthetic barred set of ``{"add"}`` and a
+    traced ``jax.ops.segment_sum``, the slice's `scatter-add` equation carries
+    ``update_jaxpr = ['add']`` — so the naive flat
+    ``{str(e.primitive) for e in sl.eqns}`` yields ``[]`` where this walk
+    yields ``['add']``. `tests/test_bar_walk_parity.py` pins both roots
+    against `sub_jaxprs`, with that disagreement as its anti-vacuity control.
 
     The lesson is narrower than "descend properly": **do not hand-roll a
     traversal when a canonical accessor exists.** A second implementation of
     a walk is a second thing to keep correct, and this one silently stopped
-    matching. `tests/test_bar_walk_parity.py` asserts the two agree
-    mechanically, in the spirit of the EMISSION == REPLAY census.
+    matching.
     """
-    from stelling.coverage import sub_jaxprs
-
-    if not VERIFIED_BARRED_PRIMITIVES or closed is None:
-        return ()
     # Uses coverage.sub_jaxprs, the SAME nesting walk the coverage tool uses,
     # rather than a private one. The earlier version did
     # `getattr(v, "jaxpr", None)`, which finds a ClosedJaxpr and misses a bare
@@ -603,24 +626,44 @@ def _barred_primitives(closed) -> tuple[str, ...]:
     # this was latent; but a bar with weaker reachability than the coverage
     # tool is a hole in the one guard the unshipped rows rest on, and "latent"
     # is not a reason to keep two walks.
+    from stelling.coverage import sub_jaxprs
+
+    if not VERIFIED_BARRED_PRIMITIVES or eqns is None:
+        return ()
     found, seen = set(), set()
 
-    def walk(jaxpr):
-        if jaxpr is None or id(jaxpr) in seen:
-            return
-        seen.add(id(jaxpr))
-        for eqn in getattr(jaxpr, "eqns", ()):
+    def walk(items):
+        for eqn in items:
             name = str(eqn.primitive)
             if name in VERIFIED_BARRED_PRIMITIVES:
                 found.add(name)
             for inner in sub_jaxprs(eqn):
-                walk(inner)
+                if inner is None or id(inner) in seen:
+                    continue
+                seen.add(id(inner))
+                walk(getattr(inner, "eqns", ()))
 
+    walk(eqns)
+    return tuple(sorted(found))
+
+
+def _barred_primitives(closed) -> tuple[str, ...]:
+    """Barred primitives present anywhere in the traced query, innermost
+    scopes included — the WHOLE-QUERY root of :func:`_barred_in_eqns`.
+
+    This is no longer what the bar normally reads. The bar is slice-scoped
+    (see the block comment above); this function is its FAIL-CLOSED FALLBACK,
+    used when a verdict carries no per-obligation slice scope to union. A bar
+    that under-fires is worse than one that over-fires, so the fallback is
+    deliberately the wider set.
+    """
+    if not VERIFIED_BARRED_PRIMITIVES or closed is None:
+        return ()
+    jaxpr = getattr(closed, "jaxpr", None)
     try:
-        walk(getattr(closed, "jaxpr", None))
+        return _barred_in_eqns(getattr(jaxpr, "eqns", ()))
     except Exception:  # a bar must never be the thing that breaks a verdict
         return tuple(sorted(VERIFIED_BARRED_PRIMITIVES))
-    return tuple(sorted(found))
 
 
 def undecided_cause_note(coverage, obligations) -> tuple[str, ...]:

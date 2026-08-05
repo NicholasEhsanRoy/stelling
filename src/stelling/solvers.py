@@ -62,7 +62,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from typing import Callable
 
@@ -364,6 +364,29 @@ class ObligationEscalation:
     # between the two is exactly a degraded portfolio, and before this
     # field there was no quantity a consumer could read it from.
     answered_by: tuple[str, ...] = ()
+    # The barred primitives (:data:`stelling.verdict.VERIFIED_BARRED_PRIMITIVES`)
+    # found on THIS obligation's emitted slice, sub-jaxprs included — the
+    # scope of the scatter VERIFIED bar, recorded where the slice exists.
+    # Same kind of field as ``answered_by`` above: derived at the one place
+    # that holds the evidence, never re-derived by a consumer.
+    #
+    # RECORDED, NOT RECOMPUTED, and that is the design decision. Recomputing
+    # the slice at the bar site would take `(closed, propagation)` and re-run
+    # `slice_unknown_obligations` — but ``make_solver_verdict`` does not
+    # verify that ``propagation`` is the object ``escalate`` ran on, and a
+    # propagation whose obligations are already ``discharged`` passes every
+    # existing gate while slicing to NOTHING (the slicer only slices
+    # ``unknown`` obligations). The recomputed barred set would be empty and
+    # the bar would see nothing. Measured. A field computed from the slice
+    # that was actually emitted cannot be defeated that way.
+    #
+    # ``None`` MEANS "NO SCOPE RECORDED" AND IS NOT THE SAME AS ``()``. The
+    # default is None precisely so that a record built on some path that
+    # never held a slice cannot silently assert "no barred primitive here":
+    # the bar site treats None as unrecognised and falls back to the
+    # whole-query set. Empty tuple is a positive claim and is only ever
+    # written by the walk.
+    barred_on_slice: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -1435,7 +1458,20 @@ def escalate(
                 witness=None,
                 notes=(f"assert #{item.index}: {reason}",),
             )
-        records.append(record)
+        # THE SCATTER VERIFIED BAR'S SCOPE, RECORDED WHERE THE SLICE EXISTS.
+        # `item` IS the slice that was emitted for this obligation, so this
+        # is the only place the bar's per-obligation question can be answered
+        # from evidence rather than from a re-derivation that a mispaired
+        # propagation could empty out. Descent is the shared walk, not a flat
+        # comprehension: a slice equation can hold a barred primitive in a
+        # sub-jaxpr (`scatter-add` carries `update_jaxpr`).
+        try:
+            on_slice: tuple[str, ...] | None = _verdict._barred_in_eqns(
+                item.eqns
+            )
+        except Exception:  # noqa: BLE001 — leave the scope UNRECORDED, and
+            on_slice = None  # the bar site then falls back to whole-query
+        records.append(replace(record, barred_on_slice=on_slice))
     if propagation.assume_dropped:
         # F7's no-op half, solver side, and it must be ONE-SIDED. Declining
         # escalation outright was the first attempt and it was wrong: it
@@ -1456,6 +1492,7 @@ def escalate(
                 invocations=r.invocations,
                 witness=None,
                 notes=r.notes + (DROPPED_ASSUME_REFUSAL,),
+                barred_on_slice=r.barred_on_slice,  # the slice did not change
             )
             for r in records
         ]
@@ -1702,17 +1739,52 @@ def make_solver_verdict(
     # the ledger: a ledger stamp says an invocation happened, while an
     # OB_DISCHARGED record says an invocation ANSWERED -- and a false VERIFIED
     # can only be minted by an answer.
+    #
+    # AND THE SCOPE IS THE DECIDED OBLIGATION'S SLICE, NOT THE WHOLE QUERY.
+    # Same argument one level finer. A query can carry `scatter` on an
+    # obligation intervals settled while the obligation the SOLVER decided
+    # never touches it -- the emission row the bar exists for was not
+    # consulted, so there is nothing for it to be wrong about. Measured: the
+    # bar's own regression fixture was exactly that shape (solver-decided
+    # slice `['sub','ge']`, the scatter on a different, interval-decided
+    # obligation) and returned UNKNOWN. The scope comes from
+    # `ObligationEscalation.barred_on_slice`, RECORDED at emission time from
+    # the slice that was actually emitted -- see that field for why recording
+    # beats recomputing here.
     solver_decided = escalation is not None and any(
         r.outcome == OB_DISCHARGED and r.invocations
         for r in escalation.records
     )
     if status == "VERIFIED" and solver_decided:
-        barred = _verdict._barred_primitives(closed)
+        try:
+            scoped: set[str] = set()
+            deciding: list[int] = []
+            for r in escalation.records:
+                if r.outcome != OB_DISCHARGED or not r.invocations:
+                    continue
+                if r.barred_on_slice is None:  # no scope recorded
+                    raise ValueError("obligation carries no slice scope")
+                deciding.append(r.index)
+                scoped.update(str(p) for p in r.barred_on_slice)
+            barred = tuple(sorted(scoped))
+            where = "the emitted slice of " + ", ".join(
+                f"assert #{i}" for i in sorted(set(deciding))
+            )
+        except Exception:  # noqa: BLE001 — FAIL CLOSED, never open: an
+            # unreadable scope degrades to the WIDER whole-query set, matching
+            # this module's posture everywhere else the bar can go wrong.
+            barred = _verdict._barred_primitives(closed)
+            where = (
+                "the traced query (no per-obligation slice scope was "
+                "recorded, so the bar fell back to the whole query)"
+            )
         if barred:
             status = "UNKNOWN"
             notes = notes + (
                 "VERIFIED withheld — "
-                + _verdict.VERIFIED_BAR_REASON.format(prims=", ".join(barred)),
+                + _verdict.VERIFIED_BAR_REASON.format(
+                    where=where, prims=", ".join(barred)
+                ),
             )
 
     if status == "VERIFIED" and not nonvacuity.startswith("checked"):

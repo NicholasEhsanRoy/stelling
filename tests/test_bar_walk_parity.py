@@ -25,6 +25,16 @@ something *emittable* (`add`) makes that branch reachable, so the direction the
 bar exists for is exercised for the first time. Without this fixture, both the
 bar and the traversal fix would be "correct by argument only" until the scatter
 row registers, which is exactly when they become load-bearing.
+
+**A THIRD, since the bar became slice-scoped: THE SLICE ROOT.** The bar now
+reads the barred set of the obligation the solver actually decided, computed by
+the SAME walk rooted at that obligation's emitted slice equations rather than at
+the query. Rooting a walk somewhere new is where a hand-rolled flat version
+looks adequate and is not: measured, a `scatter-add` slice equation carries
+`update_jaxpr = ['add']`, so under a synthetic barred set of `{"add"}` the flat
+`{str(e.primitive) for e in sl.eqns}` finds NOTHING where the canonical walk
+finds `add`. That measured disagreement is this module's anti-vacuity control
+for the slice-root parity test — a parity test that cannot fail proves nothing.
 """
 from __future__ import annotations
 
@@ -242,3 +252,150 @@ def test_the_synthetic_bar_does_not_leak(_bar_add):
 
     v = check(q, vacuity_mode="inputs-only", solver_timeout_ms=20000)
     assert not any("VERIFIED withheld" in n for n in v.notes)
+
+
+# ---- the SLICE root: the same walk, rooted at an obligation's slice -------
+
+def _all_primitives_in_eqns(eqns):
+    """The canonical walk, rooted at an arbitrary equation iterable rather
+    than at a jaxpr — `sub_jaxprs` and nothing hand-rolled."""
+    found, seen = set(), []
+
+    def walk(items):
+        for e in items:
+            found.add(str(e.primitive))
+            for sub in sub_jaxprs(e):
+                if id(sub) not in seen:
+                    seen.append(id(sub))
+                    walk(sub.eqns)
+
+    walk(eqns)
+    return found
+
+
+def _flat_primitives_in_eqns(eqns):
+    """THE NAIVE VERSION, re-implemented here so the parity test below has
+    something it can actually fail against: the one-line comprehension a
+    slice-rooted bar invites, which never opens a sub-jaxpr."""
+    return {str(e.primitive) for e in eqns}
+
+
+def _slices_of(build):
+    from stelling.obligation import (
+        DeclinedObligation,
+        slice_unknown_obligations,
+    )
+    from stelling.propagate import interval_env, propagate
+
+    closed = transcribe(jax.make_jaxpr(build)())
+    p = propagate(closed)
+    return [
+        s for s in slice_unknown_obligations(closed, p, interval_env(closed))
+        if not isinstance(s, DeclinedObligation)
+    ]
+
+
+def _segment_sum_relational():
+    """Escalates, and its slice's `scatter-add` equation carries the
+    recorded combiner sub-jaxpr — the case the flat version misses."""
+    import numpy as np
+
+    d = any_array((2,), "float64", (0.0, 1.0))
+    s = jax.ops.segment_sum(
+        d, jnp.asarray(np.array([0, 0], dtype=np.int32)), num_segments=1
+    )
+    return (assert_(s[0] >= d[0]),)
+
+
+def _set_relational():
+    x = any_array((3,), "float64", (0.0, 1.0))
+    return (assert_(x.at[0].set(0.5)[1] - x[1] <= 0.0),)
+
+
+def _plain_relational():
+    x = any_array((3,), "float64", (0.0, 1.0))
+    return (assert_((x + 1.0) - x <= 1.5),)
+
+
+SLICE_SHAPES = [
+    (_segment_sum_relational, "scatter-add slice (carries a sub-jaxpr)"),
+    (_set_relational, "scatter set slice"),
+    (_plain_relational, "flat arithmetic slice"),
+]
+
+
+@pytest.mark.parametrize("build,label", SLICE_SHAPES,
+                         ids=[s[1] for s in SLICE_SHAPES])
+@pytest.mark.parametrize("barred", [frozenset({"add"}), frozenset({"scatter"})],
+                         ids=["synthetic add", "real scatter"])
+def test_slice_root_walk_has_parity_with_the_canonical_accessor(
+    monkeypatch, build, label, barred
+):
+    """The slice-rooted root of the bar's walk must see every primitive
+    `sub_jaxprs` sees from the SAME equations — checked over the barred set's
+    own membership, which is what the bar acts on, and under both the real
+    barred set and a synthetic one that reaches inside a sub-jaxpr."""
+    monkeypatch.setattr(_verdict, "VERIFIED_BARRED_PRIMITIVES", barred)
+    slices = _slices_of(build)
+    assert slices, f"{label}: nothing escalated, so no slice exists to root at"
+    for sl in slices:
+        canonical = _all_primitives_in_eqns(sl.eqns)
+        got = set(_verdict._barred_in_eqns(sl.eqns))
+        assert got == canonical & barred, (
+            f"{label}: the slice-rooted walk found {sorted(got)} where the "
+            f"canonical walk implies {sorted(canonical & barred)} — the two "
+            f"traversals have diverged"
+        )
+
+
+def test_the_slice_parity_test_catches_the_naive_flat_version(monkeypatch):
+    """ANTI-VACUITY (Norm C) for the slice root, on the MEASURED case.
+
+    The flat comprehension is the implementation a slice-scoped bar invites,
+    and on a `scatter-add` slice under a barred set of `{"add"}` it is wrong:
+    the combiner lives in the equation's `update_jaxpr`, not in the slice's
+    own equation list. If it AGREED here, the parity test above could not
+    distinguish the two and would prove nothing.
+    """
+    barred = frozenset({"add"})
+    monkeypatch.setattr(_verdict, "VERIFIED_BARRED_PRIMITIVES", barred)
+    slices = _slices_of(_segment_sum_relational)
+    assert slices, "nothing escalated; the control has no slice to run on"
+    sl = slices[0]
+
+    canonical = _all_primitives_in_eqns(sl.eqns) & barred
+    assert canonical, (
+        "the fixture's slice carries no barred primitive at any depth; the "
+        "control is vacuous"
+    )
+    flat = _flat_primitives_in_eqns(sl.eqns) & barred
+    assert flat != canonical, (
+        f"the NAIVE flat version agrees with the canonical walk on this "
+        f"slice ({sorted(flat)}), so the parity test above cannot "
+        f"distinguish them and proves nothing"
+    )
+    assert set(_verdict._barred_in_eqns(sl.eqns)) == canonical
+
+
+def test_the_bar_reads_the_slice_scope_the_record_carries(monkeypatch):
+    """The record-carrying design at the seam: `escalate` writes the
+    obligation's own barred set onto its record, from the slice it emitted.
+    `None` would mean "no scope recorded" and make the bar fall back to the
+    whole query, so an empty tuple must be a written empty, not a default."""
+    from stelling.propagate import propagate
+    from stelling.solvers import SolverConfig, escalate
+
+    monkeypatch.setattr(_verdict, "VERIFIED_BARRED_PRIMITIVES",
+                        frozenset({"add"}))
+    closed = transcribe(jax.make_jaxpr(_segment_sum_relational)())
+    esc = escalate(closed, propagate(closed), SolverConfig(timeout_ms=20000))
+    assert esc.records
+    for r in esc.records:
+        assert r.barred_on_slice is not None, (
+            "the slice scope was not recorded, so the bar would fall back to "
+            "the whole query on every verdict"
+        )
+    assert any("add" in r.barred_on_slice for r in esc.records), (
+        "the recorded scope missed the combiner sub-jaxpr — the record is "
+        "being written by something other than the canonical walk"
+    )

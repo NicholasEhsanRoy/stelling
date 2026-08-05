@@ -1,20 +1,36 @@
 # SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 # SPDX-License-Identifier: Apache-2.0
 
-"""The scatter-add / stack fidelity gauge — measured discriminating power
-(the L21 instrument, ``stelling.fidelity.gauge``), plus the traced binding
-of the real primitive names. Skipped without jax; the solver-backed gates
+"""The scatter fidelity gauge — measured discriminating power (the L21
+instrument, ``stelling.fidelity.gauge``), plus the traced binding of the
+real primitive names. Skipped without jax; the solver-backed gates
 additionally need the portfolio (both wheels ship in the jax test env).
 
-The subject is the pair of registered transfer rows; the battery is
-hand-built traced jnp programs only (``jax.ops.segment_sum`` with
-duplicate-heavy static segments, ``x.at[idx].add(v)`` with repeated
-indices over a NONZERO operand, the scalar-index sugar, ``jnp.stack``
-compositions, and a small normal-matrix assembly in the segment_sum
-style posed through the standard pipeline). The mutations are the
-mandated six — the set/add confusion above all — and the expected
+The subject is the registered transfer rows and the plan/emission/replay
+bookkeeping underneath them; the battery is hand-built traced jnp
+programs only (``jax.ops.segment_sum`` with duplicate-heavy static
+segments, ``x.at[idx].add(v)`` with repeated indices over a NONZERO
+operand, the scalar-index sugar, ``jnp.stack`` compositions, a small
+normal-matrix assembly in the segment_sum style posed through the
+standard pipeline, and static-index ``x.at[k].set(v)`` cases posed
+relationally so the SET row's routing is load-bearing). The expected
 residual is EMPTY: every mutation must be caught by a named gate, or the
 gauge refuses loudly.
+
+**THE SET ROW IS GAUGED HERE, AND IT IS THE ROW THE VERIFIED BAR EXISTS
+FOR.** ``_scatter_set_plan`` had no mutation in this file while
+``_scatter_add_plan`` had two — so the row still under
+``verdict.VERIFIED_BARRED_PRIMITIVES`` was the one with no fidelity
+gauge, and the row already cleared by a fresh adversarial auditor
+(``design/scatter-rows.md``) was the one with one. That is backwards. The
+audit that cleared the accumulate rows is point-in-time; a gauge is
+continuous, and a row whose correctness rests on an event rather than on
+a standing check has no tripwire between the event and the next change.
+The three SET mutations are re-derived from the audit's description —
+``off_by_one`` writes the wrong position, ``drop_write`` writes nothing,
+``write_all`` writes every position — and each is pinned in the
+MISSED-VIOLATION direction (a REFUTED that becomes ``discharged``), which
+is the direction the bar exists to contain.
 """
 
 from __future__ import annotations
@@ -701,6 +717,77 @@ def gate_budget_boundary(subject):
         return False
 
 
+def _set_row_records(build, subject):
+    """Escalation outcomes for a static-index ``.set`` query, read from
+    ``escalate`` rather than from ``check``. Deliberate: the scatter SET row
+    is under the VERIFIED bar, so ``check`` reports UNKNOWN for a discharged
+    obligation and a gate comparing verdict STATUS would be measuring the
+    bar rather than the row. The record outcome is what the row decides."""
+    from stelling.solvers import SolverConfig, escalate
+
+    with _patched(subject):
+        closed = trace(build)
+        p = propagate(closed)
+        esc = escalate(closed, p, SolverConfig(timeout_ms=10_000))
+    return tuple(r.outcome for r in esc.records)
+
+
+def _set_written_is_below_operand():
+    """FALSE: ``s[0]`` is the written 0.5 and ``x[0]`` may be below it.
+    Interval-undecidable (the difference propagates to [-0.5, 0.5]), so it
+    escalates and the SET row's routing is what answers it."""
+    x = any_array((3,), "float64", (0.0, 1.0))
+    s = x.at[0].set(0.5)
+    return assert_(s[0] - x[0] <= 0.0)
+
+
+def _set_untouched_moved_by_one():
+    """FALSE: element 1 is UNTOUCHED, so ``s[1] - x[1]`` is exactly 0, never
+    ≥ 1. The update's box [2, 3] sits a clear distance above the operand's
+    [0, 1], so any routing that hands element 1 the update instead makes the
+    claim TRUE — the off-by-one and write-everywhere shapes."""
+    x = any_array((3,), "float64", (0.0, 1.0))
+    u = any_array((), "float64", (2.0, 3.0))
+    s = x.at[0].set(u)
+    return assert_(s[1] - x[1] >= 1.0)
+
+
+def _set_untouched_equals_operand():
+    """TRUE, and the other direction: element 1 is untouched, so the
+    difference is exactly 0. A routing that writes there produces a SPURIOUS
+    violation, so this case fails a mutation the two above do not."""
+    x = any_array((3,), "float64", (0.0, 1.0))
+    s = x.at[0].set(0.5)
+    return assert_(s[1] - x[1] <= 0.0)
+
+
+def gate_set_row_agreement(subject):
+    """Gate 7: the static-index scatter SET row routes each output element to
+    the right source. Three relational cases whose hand answers depend on
+    exactly that: two FALSE claims whose refutation requires the write to
+    have landed where it did, and one TRUE claim about an untouched element.
+
+    Posed relationally on purpose — a point-decisive ``.set`` case is settled
+    by the interval transfer, which these mutations do not touch, so it would
+    measure nothing."""
+    try:
+        if _set_row_records(_set_written_is_below_operand, subject) != (
+            "violated-witness",
+        ):
+            return False
+        if _set_row_records(_set_untouched_moved_by_one, subject) != (
+            "violated-witness",
+        ):
+            return False
+        if _set_row_records(_set_untouched_equals_operand, subject) != (
+            "discharged",
+        ):
+            return False
+        return True
+    except Exception:
+        return False
+
+
 GATES = {
     "interval-soundness": gate_interval_soundness,
     "point-box-exactness": gate_point_box_exactness,
@@ -708,6 +795,7 @@ GATES = {
     "unrolled-equivalence": gate_unrolled_equivalence,
     "witness-replay-validity": gate_witness_replay_validity,
     "budget-boundary": gate_budget_boundary,
+    "set-row-agreement": gate_set_row_agreement,
 }
 
 
@@ -741,8 +829,57 @@ def _sum_body_drop_operand(operand_term, update_terms):
     return f"(+ {' '.join(update_terms)})"
 
 
+_REAL_SET_PLAN = OB._scatter_set_plan
+
+
+def _set_plan_off_by_one(eqns, consts, eqn):
+    """WRITES THE WRONG POSITION: the update lands one element along. Built
+    over the real plan so every decline it makes is inherited — a mutation
+    that also relaxes the row's admission would be measuring two things."""
+    routes = _REAL_SET_PLAN(eqns, consts, eqn)
+    n = len(routes)
+    written = [i for i, (op, _src) in enumerate(routes) if op == 2]
+    if not written or n < 2:
+        return routes
+    k = (written[0] + 1) % n
+    return [(2, 0) if i == k else (0, i) for i in range(n)]
+
+
+def _set_plan_drop_write(eqns, consts, eqn):
+    """WRITES NOTHING: every output element aliases the operand, i.e. the
+    result of a DROPPED out-of-range update applied to an in-range one."""
+    return [(0, i) for i in range(len(_REAL_SET_PLAN(eqns, consts, eqn)))]
+
+
+def _set_plan_write_all(eqns, consts, eqn):
+    """WRITES EVERY POSITION: the one scalar update is broadcast over the
+    whole output — `x.at[:].set(v)` where the program wrote one element."""
+    return [(2, 0) for _ in _REAL_SET_PLAN(eqns, consts, eqn)]
+
+
 MUTATIONS = {
     **MUTATIONS,
+    "set-plan-off-by-one-position": {
+        **BASELINE,
+        "__patches__": (
+            (OB, "_scatter_set_plan", _set_plan_off_by_one),
+            (SM, "_scatter_set_plan", _set_plan_off_by_one),
+        ),
+    },
+    "set-plan-drops-the-write": {
+        **BASELINE,
+        "__patches__": (
+            (OB, "_scatter_set_plan", _set_plan_drop_write),
+            (SM, "_scatter_set_plan", _set_plan_drop_write),
+        ),
+    },
+    "set-plan-writes-every-position": {
+        **BASELINE,
+        "__patches__": (
+            (OB, "_scatter_set_plan", _set_plan_write_all),
+            (SM, "_scatter_set_plan", _set_plan_write_all),
+        ),
+    },
     "plan-rotate-groups": {
         **BASELINE,
         "__patches__": (
@@ -771,11 +908,17 @@ MUTATIONS = {
 def test_gauge_catches_every_mutation():
     report = gauge(
         BASELINE, GATES, MUTATIONS, residual={},
-        scope=("BOTH faces of the scatter rows plus the paths downstream of "
-               "them: interval soundness and point-box exactness on the "
-               "transfer, emission agreement, unrolled equivalence, witness "
-               "replay validity, and the element budget. Does not drive any "
-               "other primitive's rows."),
+        scope=("BOTH faces of the scatter-add and stack rows plus the paths "
+               "downstream of them: interval soundness and point-box "
+               "exactness on the transfer, emission agreement, unrolled "
+               "equivalence, witness replay validity, and the element "
+               "budget. ALSO the static-index scatter SET row's routing "
+               "bookkeeping (_scatter_set_plan) across its three consumers "
+               "— slice validation, emission and replay — through "
+               "relational cases the interval transfer cannot settle. Does "
+               "NOT drive the SET row's interval transfer (no SET mutation "
+               "here is transfer-side), and does not drive any other "
+               "primitive's rows."),
     )
     render = report.render()
     print("\n" + render)
@@ -793,3 +936,9 @@ def test_gauge_catches_every_mutation():
     assert len(caught["collapse-duplicates-in-the-plan"]) >= 2, caught
     assert "budget-boundary" in caught["budget-never-fires"]
     assert caught["operand-dropped-from-the-emitted-sum"]
+    # the SET row — the row the VERIFIED bar exists for — has a gauge now,
+    # and the gate that catches its mutations is the SET-row gate rather
+    # than an accumulate gate that happened to notice
+    for name in ("set-plan-off-by-one-position", "set-plan-drops-the-write",
+                 "set-plan-writes-every-position"):
+        assert "set-row-agreement" in caught[name], (name, caught[name])

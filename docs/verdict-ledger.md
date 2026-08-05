@@ -61,6 +61,19 @@ max = 101.0  against the declared bound 100.0  ->  margin +1.0
 
 **What did NOT move, and it belongs in the same entry.** The "holds" side of the
 same sweep is still `UNKNOWN`. `scatter` remains in
-`VERIFIED_BARRED_PRIMITIVES`, so obligations touching it are withheld from
-solver-path `VERIFIED` until the class-level audit completes. A reader who sees
-only the flip above would otherwise reasonably infer the whole table moved.
+`VERIFIED_BARRED_PRIMITIVES`, so an obligation whose EMITTED SLICE carries it is
+withheld from solver-path `VERIFIED` until the class-level audit completes. A
+reader who sees only the flip above would otherwise reasonably infer the whole
+table moved.
+
+Two things the bar's scope does **not** cover, both easy to over-read:
+
+- The membership is **exact-name**, so `scatter-add` — what `segment_sum` and
+  `x.at[idx].add()` lower to — is **not** barred. `design/scatter-rows.md`
+  records a completed fresh-adversarial-auditor pass over the accumulate rows.
+- The scope is the **decided obligation's slice**, not the traced query. A
+  `scatter` elsewhere in the jaxpr, on an obligation interval arithmetic
+  settled, withholds nothing: the emission row was never asked about it. Until
+  `fix/bar-slice-scope` the bar read the whole query and did withhold those,
+  so ledger entries recorded before it may name a withheld `VERIFIED` that this
+  build renders.

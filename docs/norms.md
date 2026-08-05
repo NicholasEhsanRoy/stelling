@@ -200,6 +200,28 @@ reject at least one point, a probe must assert something the cheap layers cannot
 decide — are kept because they are more actionable than this rule; use them first
 and fall back to this when the situation fits none of them.
 
+## Evidence of non-occurrence licenses "unreached", never "unreachable"
+
+**A canary that never fires measures your corpus, not your code.** The section
+above is about an instrument too blind to see the thing. This one is about an
+instrument that saw perfectly and simply was not pointed anywhere the thing
+occurs — and the conclusion drawn from it is the stronger, wrong one.
+
+The scatter emission rows are the standing example. `x.at[idx].add(v)` — the
+idiomatic spelling — never reaches them: it declines earlier on `'add' on dtype
+'int32'`, jax's traced negative-index normalisation refused by the
+integer-overflow posture, a rule with no opinion about scatter. That is a fact
+about a limitation **somewhere else**, and the day someone improves it the rows
+start taking idiomatic traffic overnight with no new test and no signal. This
+project has been bitten twice by that shape: a predicate correct only because of
+a limitation elsewhere.
+
+So the wording is load-bearing. Write *"no corpus query reaches X"* and pin the
+corpus; never write *"X is unreachable"* unless something enforces it. And where
+the reach matters, **build the tripwire**: a test that pins the current set and
+fails when it widens, whose message says what to revisit — not merely that a set
+changed (`tests/test_scatter_emission_reach.py`).
+
 ## Before measuring a constant, read its definition site — and before deciding a question, read its ADJUDICATION site
 
 `ELEMENT_BUDGET = 512` carries a measured table in a comment **directly above the
