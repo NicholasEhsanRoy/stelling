@@ -73,7 +73,7 @@ Two things the bar's scope does **not** cover, both easy to over-read:
   records a completed fresh-adversarial-auditor pass over the accumulate rows.
 - The scope is the **decided obligation's slice**, not the traced query. A
   `scatter` elsewhere in the jaxpr, on an obligation interval arithmetic
-  settled, withholds nothing: the emission row was never asked about it. Until
-  `fix/bar-slice-scope` the bar read the whole query and did withhold those,
-  so ledger entries recorded before it may name a withheld `VERIFIED` that this
+  settled, withholds nothing: the emission row was never asked about it. The
+  bar read the whole query until it was slice-scoped, and did withhold those,
+  so a ledger entry recorded before that may name a withheld `VERIFIED` this
   build renders.
