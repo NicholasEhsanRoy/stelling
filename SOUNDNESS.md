@@ -690,9 +690,18 @@ verdicts:
   nothing has been released.
   **Which prior verdicts are retroactively invalid: none, and the
   direction is the unusual one.** The new fired-set is a subset of the
-  old at every verdict (a slice's equations come from the query, and both
-  scopes use the same walk over the same nesting), and the fallback on any
-  underivable scope is the old whole-query set — so nothing that was
+  old at every verdict, and the guarantee comes from a GUARD rather than
+  from the two walks agreeing: `_bar_scope` computes
+  `whole = _barred_primitives(closed)` — the old whole-query set — first,
+  and returns an empty scope immediately when it is empty, so the
+  re-derivation only ever runs on a query the old bar already fired on.
+  New-fires therefore implies old-fired structurally, whatever the slice
+  walk does. (It is also true that a slice's equations come from the
+  query and both roots use the same walk, which is what makes the new set
+  the RIGHT subset rather than merely a subset; that argument is pinned
+  in `tests/test_bar_walk_parity.py` and is not what the containment
+  rests on.) The fallback on any underivable scope is the old
+  whole-query set — so nothing that was
   VERIFIED becomes UNKNOWN, and no REFUTED, witness or replay path is
   touched at all. What changes is the opposite: a verdict is now VERIFIED
   where it was previously withheld to UNKNOWN, exactly when (i) it was
@@ -731,8 +740,46 @@ verdicts:
   load-bearing for the VERIFIED being withheld; WHAT is on their slices
   comes from the query. Regressions in `tests/test_verified_bar.py`;
   emitted-vs-re-derived slice agreement pinned in
-  `tests/test_bar_walk_parity.py`. 2003 tests passed, 2 skipped, with
-  both solvers and jax installed (1995 passed, 2 skipped before this
-  pass; the 8 added tests are the regressions named above).
+  `tests/test_bar_walk_parity.py`.
+  **Repair pass, and it moves verdicts again — in the same withheld
+  direction as the base, never the other way.** The first implementation
+  of "which obligations the solver decided" was
+  `outcome == OB_DISCHARGED and r.invocations`, while the obligation loop
+  discharged on `outcome == OB_DISCHARGED` alone: one concept, two
+  predicates over one record. A record could give up `invocations`, keep
+  the discharge that earns the VERIFIED, and drop out of the bar's
+  domain. Measured against `8e42934` as control, on a two-obligation
+  query whose scatter obligation is the stripped one: base UNKNOWN, that
+  implementation VERIFIED. The predicate is now the discharging one, in
+  one place. The unification also closes a hole the base itself had:
+  with EVERY record's `invocations` emptied the old gate read "no solver
+  decided anything" and never entered the bar branch at all, so
+  `8e42934` returned VERIFIED there too — it is UNKNOWN on both counts
+  now. Every affected assembly needs a hand-edited `ObligationEscalation`
+  (the one site that emits `OB_DISCHARGED` reaches it only when a backend
+  ANSWERED, and every answering backend was stamped into the ledger
+  before its transport ran), so no verdict produced through `check()` or
+  through an unmodified `escalate()` moves in either direction, and the
+  suite is byte-identical across the change. **What is NOT claimed:** the
+  unification is not a defence against a forged escalation, and
+  `make_solver_verdict` does not attempt one. Its docstring now states
+  the precondition instead — the escalation must be what `escalate()`
+  returned for this query — because `stelling.verdict.Verdict` is public
+  and a plain frozen dataclass, so a caller able to hand-build a record
+  can hand-build the verdict and never call this function at all. The
+  narrower true statement, and the one the mechanism supports: the bar's
+  scope CONTENTS are re-derived from the query and unforgeable, and its
+  DOMAIN cannot disagree with the discharge about the same record.
+  2008 tests passed, 2 skipped, with both solvers and jax installed
+  (1995 passed, 2 skipped before the scoping pass, 2003 after it; the 8
+  tests it added are the regressions named above, and the repair pass
+  adds 5 more — the strip-invocations regression in both shapes, the
+  containment guard cited above, the `cond` premise restated as a
+  behaviour in `tests/test_bar_walk_parity.py`, and the decline-site
+  accounting in `tests/test_scatter_gauge_jax.py`. The parity file's
+  registry-facts test is rebuilt rather than added: its four registry
+  memberships could not be falsified without an import-time census
+  raise, so they are replaced by the reach count the same commit let go
+  stale).
 
 *(no releases yet)*

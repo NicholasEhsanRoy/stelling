@@ -801,14 +801,68 @@ def gate_set_row_agreement(subject):
 # `discharged` — and the full suite stayed green (1995 passed) with only the
 # scatter VERIFIED bar holding the verdict at UNKNOWN. A bar is not a gauge.
 #
-# So admission gets its own gate, over the three declines that carry a
-# soundness argument in their own text: the out-of-range index, and the two
-# non-FILL_OR_DROP modes.
+# So admission gets its own gate, over the declines that carry a soundness
+# argument in their own text.
+#
+# WHICH DECLINES THOSE ARE IS COUNTED, NOT ESTIMATED. `_scatter_set_plan` has
+# TEN `raise _Decline` sites, and an admission gate is only as good as the
+# fraction of them it drives — an unstated fraction is exactly the defect this
+# file's subject is about. The census below is the accounting, in source
+# order, and `test_the_admission_gate_accounts_for_every_decline_site` reads
+# the site count out of the source so the two cannot drift.
+#
+#   #   rule                                    driven here?
+#   1   arity: 3 operands, 1 output             no — malformed IR
+#   2   out_shape != operand_shape              no — malformed IR
+#   3   carries a combiner (update_jaxpr)       no — census fixture only
+#   4   index dtype cannot cover the axis       YES  (dtype-coverage below)
+#   5   outside the measured row form           no — census fixture only
+#   6   mode is not FILL_OR_DROP                YES  (two fixtures, one rule)
+#   7   index not statically derivable          YES  (derivability below)
+#   8   indices decode to != 1 element          no — aval/value mismatch
+#   9   index value is not an integer           no — defensive, after #4
+#   10  index out of range for the axis         YES  (out-of-range below)
+#
+# So FOUR of the ten rules are driven, by FIVE fixtures — `clip` and
+# `promise_in_bounds` are two spellings of rule #6 and expect the same quoted
+# substring. A predecessor of this table said "the admission gate measures
+# three rules"; that was three FIXTURES over two rules, and it named three of
+# the eight undriven sites while leaving five unnamed.
+#
+# The undriven six, each with its reason:
+#   * #1 and #2 are malformed-IR guards. `jax.make_jaxpr` does not emit a
+#     `scatter` with other arity or an output shape contradicting its operand,
+#     so no traced fixture reaches them and a mutation relaxing them would be
+#     inert rather than uncaught.
+#   * #3 and #5 ARE driven by traced fixtures, just not here:
+#     `tests/test_scatter_emission_reach.py` pins `x.at[k].apply(f)` against
+#     "carries a combiner" (#3) and the multi-axis, slice-index and
+#     hand-written-window forms against "outside the measured" (#5), each by
+#     its quoted reason. What that census does NOT do is mutate the rule and
+#     watch something fail, so those two are pinned but not gauged.
+#   * #8 needs a `scatter` whose indices aval says one element and whose
+#     decoded value says another; #9 needs a non-integral value in an index
+#     operand rule #4 has already required to be an exactly-covering integer
+#     dtype. Both are defensive, and neither has a fixture anywhere in this
+#     repo. They are named so a reader knows they are unmeasured.
+#
+# Rule #7 is here because it was MEASURED to be a live unsoundness, not
+# because it completes a table: corrupting it to guess index 0 makes
+# `x.at[jnp.int32(2)].set(2.0)` model a write to element 0 while jax writes
+# element 2, and the whole suite stayed green except
+# `test_supported_primitives_doc` — a line-citation check on a generated page,
+# which fires on the edit's line count and not on the plan starting to lie.
 
 _ADMISSION_DECLINES = (
-    ("out-of-range static index", 7, None, "is out of range"),
-    ("mode='clip'", 0, "clip", "is not FILL_OR_DROP"),
-    ("mode='promise_in_bounds'", 0, "promise_in_bounds", "is not FILL_OR_DROP"),
+    ("out-of-range static index", lambda: _set_query(7, None),
+     "is out of range"),
+    ("mode='clip'", lambda: _set_query(0, "clip"), "is not FILL_OR_DROP"),
+    ("mode='promise_in_bounds'", lambda: _set_query(0, "promise_in_bounds"),
+     "is not FILL_OR_DROP"),
+    ("index not statically derivable", lambda: _traced_index_set_query(),
+     "not statically derivable"),
+    ("index dtype cannot cover the axis", lambda: _int8_index_set_query(),
+     "cannot exactly represent"),
 )
 
 
@@ -826,14 +880,59 @@ def _set_query(index, mode):
     return build
 
 
-def _set_plan_verdict(index, mode, subject):
+def _traced_index_set_query():
+    """RULE #7's fixture: the same `.set` with the index spelled as a jax
+    scalar rather than a Python int.
+
+    `x.at[2]` constant-folds to a literal index column; `x.at[jnp.int32(2)]`
+    does not — jax emits its index-normalisation chain (`lt`, `add`,
+    `select_n`, `broadcast_in_dim`) and `_exact_static_elements` returns None
+    through it. Measured on jax 0.11.0. The write itself is in range and
+    perfectly ordinary, which is the point: the row declines because it cannot
+    SEE the index, not because the program is unusual, and a corruption that
+    guesses one gets a wrong element rather than an obvious failure."""
+
+    def build():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        s = x.at[jnp.int32(2)].set(2.0)
+        return assert_(s[2] - x[2] >= 1.0)
+
+    return build
+
+
+_INT8_DNUMS = jax.lax.ScatterDimensionNumbers(
+    update_window_dims=(), inserted_window_dims=(0,),
+    scatter_dims_to_operand_dims=(0,))
+
+
+def _int8_index_set_query():
+    """RULE #4's fixture, hand-written because the sugar cannot express it.
+
+    `x.at[jnp.int8(3)]` raises inside jax's own index normalisation on a
+    length-200 operand (`Python integer 200 out of bounds for int8`), so the
+    dtype-coverage rule is only reachable through `lax.scatter` directly. The
+    index is 3 and in range; what the rule objects to is that XLA computes the
+    out-of-bounds bound in the INDEX element type, so an in-range-looking
+    update at a position int8 cannot represent is silently DROPPED."""
+
+    def build():
+        x = any_array((200,), "float64", (0.0, 1.0))
+        s = jax.lax.scatter(
+            x, jnp.asarray(np.array([3], dtype=np.int8)), jnp.asarray(2.0),
+            _INT8_DNUMS, mode=jax.lax.GatherScatterMode.FILL_OR_DROP)
+        return assert_(s[1] - x[1] >= 1.0)
+
+    return build
+
+
+def _set_plan_verdict(build, subject):
     """The plan's own answer for one `.set` equation: the quoted decline, or
     the routes it admitted. Read at `_scatter_set_plan` rather than at a
     verdict on purpose — the VERIFIED bar sits downstream of this row and
     would mask an admission change behind an UNKNOWN it was going to return
     anyway."""
     with _patched(subject):
-        closed = trace(_set_query(index, mode))
+        closed = trace(build)
         eqn = next(e for e in closed.jaxpr.eqns if str(e.primitive) == "scatter")
         consts = dict(zip((v.id for v in closed.jaxpr.constvars), closed.consts))
         try:
@@ -849,14 +948,15 @@ def gate_set_row_admission(subject):
     each is checked BY ITS REASON, not merely by declining: an equation that
     stops short for an unrelated reason is not evidence the rule is there.
     The in-range FILL_OR_DROP case must still be admitted, or a gate that
-    declined everything would read as perfect.
+    declined everything would read as perfect. The block comment above says
+    which of the row's ten decline sites this reaches and which it does not.
     """
     try:
-        kind, payload = _set_plan_verdict(0, None, subject)
+        kind, payload = _set_plan_verdict(_set_query(0, None), subject)
         if kind != "admitted" or payload != [(2, 0), (0, 1), (0, 2)]:
             return False  # the covered form must still route, and route right
-        for _label, index, mode, expect in _ADMISSION_DECLINES:
-            kind, payload = _set_plan_verdict(index, mode, subject)
+        for _label, build, expect in _ADMISSION_DECLINES:
+            kind, payload = _set_plan_verdict(build(), subject)
             if kind != "declined" or expect not in payload:
                 return False
         return True
@@ -963,6 +1063,47 @@ def _set_plan_clamp_out_of_range(eqns, consts, eqn):
         return _clamped_routes(eqns, consts, eqn)
 
 
+def _set_plan_guess_a_missing_index(eqns, consts, eqn):
+    """GUESSES INDEX 0 WHEN THE INDEX IS NOT STATICALLY DERIVABLE — rule #7,
+    and the second measured unsoundness in this row after the clamp.
+
+    `x.at[jnp.int32(2)].set(2.0)` normalises through `lt`/`add`/`select_n`,
+    which `_exact_static_elements` cannot fold, so the real plan declines.
+    Guessing 0 instead models `out[0] = update` where jax writes `out[2]`:
+    posed as `s[0] - x[0] >= 1.0` the program VIOLATES (element 0 is
+    untouched, so the difference is 0) while the guessed plan substitutes 2.0
+    and returns `discharged`. A MISSED violation, the direction the bar exists
+    for, and neither routing gate can see it — every routing fixture uses a
+    Python-int index, which folds and never reaches this branch."""
+    try:
+        return _REAL_SET_PLAN(eqns, consts, eqn)
+    except OB._Decline as d:
+        if "not statically derivable" not in str(d):
+            raise
+        n = OB._size(OB._shape_of(eqn.invars[0]))
+        return [(2, 0) if i == 0 else (0, i) for i in range(n)]
+
+
+def _set_plan_ignore_index_dtype(eqns, consts, eqn):
+    """ADMITS AN INDEX DTYPE THAT CANNOT COVER THE OPERAND'S LEADING AXIS —
+    rule #4, whose decline text carries its own soundness argument (XLA
+    computes the out-of-bounds bound in the INDEX element type, so updates at
+    positions the dtype cannot represent are silently DROPPED).
+
+    Not unsound at the gauged index itself — 3 is representable in int8 — for
+    the same reason `_set_plan_admit_any_mode` is not: the case where the rule
+    matters needs a second condition the fixture does not carry. That is the
+    point of gauging it here rather than trusting a downstream check, since
+    there is no downstream check; the rule's only defence would be another
+    rule."""
+    try:
+        return _REAL_SET_PLAN(eqns, consts, eqn)
+    except OB._Decline as d:
+        if "cannot exactly represent" not in str(d):
+            raise
+        return _clamped_routes(eqns, consts, eqn)
+
+
 def _set_plan_admit_any_mode(eqns, consts, eqn):
     """ADMITS `mode='clip'` AND `mode='promise_in_bounds'` as if they were
     FILL_OR_DROP. Not unsound on its own — with an in-range index all three
@@ -1015,6 +1156,20 @@ MUTATIONS = {
             (SM, "_scatter_set_plan", _set_plan_admit_any_mode),
         ),
     },
+    "set-plan-guesses-an-underivable-index": {
+        **BASELINE,
+        "__patches__": (
+            (OB, "_scatter_set_plan", _set_plan_guess_a_missing_index),
+            (SM, "_scatter_set_plan", _set_plan_guess_a_missing_index),
+        ),
+    },
+    "set-plan-ignores-the-index-dtype-bound": {
+        **BASELINE,
+        "__patches__": (
+            (OB, "_scatter_set_plan", _set_plan_ignore_index_dtype),
+            (SM, "_scatter_set_plan", _set_plan_ignore_index_dtype),
+        ),
+    },
     "plan-rotate-groups": {
         **BASELINE,
         "__patches__": (
@@ -1054,15 +1209,23 @@ def test_gauge_catches_every_mutation():
                "consumers (slice validation, emission and replay) through "
                "relational in-range cases the interval transfer cannot "
                "settle; and ADMISSION — whether the row may model the "
-               "equation at all — over the three declines that carry a "
-               "soundness argument, the out-of-range static index and the "
-               "two non-FILL_OR_DROP modes, each checked by its quoted "
-               "reason. Does NOT drive the SET row's interval transfer (no "
-               "SET mutation here is transfer-side), does not reach the "
-               "combiner, dtype-coverage or row-form declines (they are "
-               "unmutated here, so the admission gate measures three rules "
-               "and not the whole admission surface), and does not drive "
-               "any other primitive's rows."),
+               "equation at all. `_scatter_set_plan` has TEN `raise "
+               "_Decline` sites and the admission gate drives FOUR of them, "
+               "with five fixtures (two spellings of the mode rule), each "
+               "checked by its quoted reason: the index dtype's coverage of "
+               "the leading axis, the non-FILL_OR_DROP modes, an index not "
+               "statically derivable, and an out-of-range static index. The "
+               "other six are NOT driven here: arity and the "
+               "operand/output shape contradiction are malformed-IR guards "
+               "no traced fixture reaches; the combiner and row-form "
+               "declines are pinned by traced fixtures in "
+               "tests/test_scatter_emission_reach.py but are not mutated "
+               "anywhere, so they are pinned and not gauged; and the "
+               "indices-decode-to-more-than-one and non-integral-index "
+               "declines are defensive, with no fixture in this repo. Also "
+               "does NOT drive the SET row's interval transfer (no SET "
+               "mutation here is transfer-side), and does not drive any "
+               "other primitive's rows."),
     )
     render = report.render()
     print("\n" + render)
@@ -1092,9 +1255,45 @@ def test_gauge_catches_every_mutation():
     # is the measured unsoundness — the full suite stays green under it —
     # and it must be the ADMISSION gate that catches it, not an accident.
     for name in ("set-plan-clamps-an-out-of-range-index",
-                 "set-plan-admits-any-scatter-mode"):
+                 "set-plan-admits-any-scatter-mode",
+                 "set-plan-guesses-an-underivable-index",
+                 "set-plan-ignores-the-index-dtype-bound"):
         assert caught[name] == ("set-row-admission",), (
             f"{name} is caught by {caught[name]} — if the routing gates now "
             f"see it, the admission gate is no longer the thing measuring "
             f"admission and the scope sentence above is wrong"
         )
+
+
+def test_the_admission_gate_accounts_for_every_decline_site():
+    """THE SCOPE SENTENCE'S OWN NUMBER, READ OUT OF THE SOURCE.
+
+    "the admission gate drives FOUR of TEN decline sites" is the kind of
+    claim this file exists to distrust: it was true when written and nothing
+    made it stay true. A `raise _Decline` added to `_scatter_set_plan` moves
+    the denominator silently, and a reader has no way to notice.
+
+    So the denominator is counted from the function's own source, and the
+    numerator from `_ADMISSION_DECLINES` (five fixtures over four rules —
+    `clip` and `promise_in_bounds` are two spellings of the mode rule, which
+    is why fixtures are not rules and the two numbers are stated separately).
+    """
+    import inspect
+    import re
+
+    src = inspect.getsource(OB._scatter_set_plan)
+    body = src[src.index('"""', src.index('"""') + 3):]  # past the docstring
+    sites = len(re.findall(r"raise _Decline\(", body))
+    assert sites == 10, (
+        f"`_scatter_set_plan` now has {sites} decline sites, not 10. The "
+        f"admission gate's scope sentence in test_gauge_catches_every_"
+        f"mutation and the census comment above _ADMISSION_DECLINES both "
+        f"quote 10 — re-derive which of the new set the gate drives, extend "
+        f"it or name the gap, and update both numbers."
+    )
+    reasons = {expect for _label, _build, expect in _ADMISSION_DECLINES}
+    assert len(_ADMISSION_DECLINES) == 5 and len(reasons) == 4, (
+        f"the admission gate now runs {len(_ADMISSION_DECLINES)} fixture(s) "
+        f"over {len(reasons)} distinct decline reason(s); the scope sentence "
+        f"says five over four"
+    )

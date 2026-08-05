@@ -19,7 +19,7 @@ remember to ask.
 **The firing direction, via a SYNTHETIC barred primitive.** The bar withholds a
 SOLVER-DECIDED VERIFIED, and a fixture reaching that branch needs a barred
 primitive that can be EMITTED. `scatter` is one: measured on this build,
-`"scatter" in obligation._SUPPORTED` is True, six census idioms reach the row
+`"scatter" in obligation._SUPPORTED` is True, seven census idioms reach the row
 (`tests/test_scatter_emission_reach.py`) and `tests/test_verified_bar.py`
 drives a solver-decided scatter obligation end to end. This module said the
 opposite for a while — that `scatter` was absent from the emission set, so the
@@ -184,32 +184,119 @@ def test_the_parity_test_catches_the_old_accessor():
 
 # ---- the firing direction, via a SYNTHETIC barred primitive ---------------
 
-def test_the_registry_facts_this_module_argues_from():
-    """THE DOCSTRING'S PREMISES, ASSERTED.
+# The number words this module's docstring is allowed to spell a count with.
+# A count that drifts out of this map fails loudly rather than silently
+# comparing unequal against a string.
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+}
+
+
+def test_the_docstring_premises_this_module_argues_from():
+    """THE DOCSTRING'S PREMISES — the ones an assertion can actually be the
+    signal for.
 
     This module's docstring used to say `scatter` was absent from the emission
     set, so the bar's protective branch was unreachable. That was false when it
     was written and nothing checked it — a claim of non-occurrence resting on a
     registry membership, in the file whose whole subject is claims that stopped
-    matching their mechanism. The four memberships the corrected text argues
-    from are now read out of the registries themselves.
-    """
-    from stelling import obligation, propagate
+    matching their mechanism.
 
-    assert "scatter" in obligation._SUPPORTED, (
-        "`scatter` is no longer emittable. The docstring above says the bar's "
-        "protective branch is reachable with the REAL barred set, and that is "
-        "why the synthetic `add` fixture is a convenience rather than the only "
-        "way in; re-derive before re-wording"
+    THE FIRST REPAIR ASSERTED FOUR REGISTRY MEMBERSHIPS AND THAT WAS
+    DECORATIVE. Measured, one mutation per assertion:
+
+      * `"scatter" in propagate.TRANSFERS` and `"cond" not in
+        propagate.TRANSFERS` — the falsifying edits raise
+        `RuntimeError: the integer-semantics census must stay total over
+        TRANSFERS` at import. `stelling.verdict` imports `stelling.propagate`,
+        so THIS FILE fails at COLLECTION and the assertions never run; the
+        full suite stops with 30 collection errors and runs nothing at all.
+      * `"scatter" in obligation._SUPPORTED` and `"cond" not in
+        obligation._SUPPORTED` — the same census, emission side, raised from
+        the test's own import statement. Even withdrawing `scatter`
+        CONSISTENTLY (from `_SUPPORTED`, `_INT_SAFE_EMITTED` and
+        `_REPLAY_SUPPORTED` together, which keeps every import-time census
+        total and is the only version that gets as far as running) leaves it
+        one of 14 failures in this file, behind 13 that name the mechanism.
+
+    An assertion whose falsification is already a louder failure somewhere
+    else is not a check; it is a restatement. So the memberships are gone and
+    what is asserted here is the premise NOTHING else measures — the docstring
+    quotes a COUNT, and a count is exactly the kind of claim that goes stale
+    silently. `caac1ee` moved `REACHES_THE_EMISSION_ROW` from six entries to
+    seven, in the same commit that wrote "six census idioms reach the row"
+    into the text above, and nothing noticed.
+
+    The `cond` premise survives, restated as the thing it is actually about:
+    `test_the_bar_finds_a_barred_primitive_nested_in_cond` says the
+    end-to-end version "cannot be written" because a cond-bearing query never
+    reaches the solver. That is a behaviour, not a membership, so it is
+    measured as one.
+    """
+    import re
+
+    from test_scatter_emission_reach import REACHES_THE_EMISSION_ROW
+
+    module_doc = globals()["__doc__"]
+    found = re.findall(r"(\w+) census idioms reach the row", module_doc)
+    assert len(found) == 1, (
+        f"the module docstring no longer states the reach count exactly once "
+        f"({found}); this test reads it from there"
     )
-    assert "scatter" in propagate.TRANSFERS
-    assert "cond" not in obligation._SUPPORTED, (
-        "`cond` became emittable, so the cond-nested under-fire may now be "
-        "reachable end-to-end — see "
+    stated = _NUMBER_WORDS.get(found[0].lower())
+    assert stated is not None, (
+        f"the module docstring spells the reach count {found[0]!r}, which is "
+        f"not a number word this test can read — add it to _NUMBER_WORDS or "
+        f"spell the count with one"
+    )
+    assert stated == len(REACHES_THE_EMISSION_ROW), (
+        f"the docstring above says {found[0]} census idioms reach the scatter "
+        f"emission row; tests/test_scatter_emission_reach.py pins "
+        f"{len(REACHES_THE_EMISSION_ROW)}. One of the two moved — re-derive "
+        f"which, and note that the pin is the measurement and the docstring "
+        f"is the claim about it"
+    )
+
+
+def test_a_cond_bearing_query_never_reaches_the_solver():
+    """The `cond` premise, as a behaviour rather than a registry membership.
+
+    `test_the_bar_finds_a_barred_primitive_nested_in_cond` argues that the
+    end-to-end version of the cond under-fire "cannot be written" because a
+    query containing `cond` can never carry a solver-decided obligation. The
+    registry form of that argument (`"cond" not in obligation._SUPPORTED and
+    not in propagate.TRANSFERS`) cannot be falsified without an import-time
+    census raise, so it could never be the signal. This can: it asks the
+    slicer, and any consistent change that made `cond` emittable or
+    transparent would let the slice through and fail here.
+    """
+    from stelling.obligation import DeclinedObligation, slice_unknown_obligations
+    from stelling.propagate import interval_env, propagate
+
+    def q():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        y = jax.lax.cond(x[0] > 0.5, lambda a: (a + 1.0) - a,
+                         lambda a: (a + 1.0) - a, x)
+        return (assert_(y <= 1.5),)
+
+    closed = transcribe(jax.make_jaxpr(q)())
+    p = propagate(closed)
+    assert any(o.status == "unknown" for o in p.obligations), (
+        "intervals settled the cond query, so nothing would have escalated "
+        "anyway and this test is not measuring the emission set"
+    )
+    sliced = list(slice_unknown_obligations(closed, p, interval_env(closed)))
+    assert sliced and all(isinstance(s, DeclinedObligation) for s in sliced), (
+        "a cond-bearing obligation now slices for escalation, so the "
+        "cond-nested under-fire may be reachable end-to-end — see "
         "test_the_bar_finds_a_barred_primitive_nested_in_cond, whose "
-        "'cannot be written' is derived from exactly this"
+        "'cannot be written' rests on exactly this"
     )
-    assert "cond" not in propagate.TRANSFERS
+    assert all("'cond'" in s.reason for s in sliced), (
+        f"the cond obligation stops short for a reason other than `cond` "
+        f"itself: {[s.reason[:90] for s in sliced]}"
+    )
 
 
 @pytest.fixture

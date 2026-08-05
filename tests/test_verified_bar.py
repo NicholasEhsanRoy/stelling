@@ -192,7 +192,7 @@ def test_a_scatter_OFF_the_decided_slice_withholds_nothing():
     assert not any("VERIFIED withheld" in n for n in v.notes)
 
 
-# ── the scope's PROVENANCE: derived from the query, never read off a record ──
+# ── the scope's PROVENANCE: its CONTENTS derived, its DOMAIN a precondition ──
 #
 # Everything below stamps a verdict through `make_solver_verdict` directly
 # rather than through `check`, because that is the surface the defects were
@@ -200,6 +200,19 @@ def test_a_scatter_OFF_the_decided_slice_withholds_nothing():
 # independent arguments, and it gates their pairing on semantics, ieee,
 # constrained-assume and ledger provenance — but on nothing that ties the
 # escalation to the query.
+#
+# WHAT IS PINNED HERE IS NOT IMMUNITY TO A FORGED ESCALATION, and the section
+# heading used to read as if it were ("never read off a record", full stop).
+# No barred PRIMITIVE is read off a record — that is real, and it is what the
+# deleted `barred_on_slice` field cost. But WHICH obligations the bar is asked
+# about does come from the records, so the bar inherits
+# `make_solver_verdict`'s documented precondition that its escalation came
+# from `escalate()` on this query. Hardening against a violation of it would
+# defend nothing: `stelling.verdict.Verdict` is public and a plain frozen
+# dataclass, so a caller who can hand-build an `ObligationEscalation` can
+# hand-build the VERIFIED and never reach this function. These tests measure
+# what a MISPAIRED honest assembly does, and that the domain cannot disagree
+# with the discharge about one record — not what an adversary cannot do.
 
 VERSIONS = dict(
     stelling_version="0.0.0", jax_version="0.0.0", precision_config="x64"
@@ -307,9 +320,18 @@ def test_no_escalation_field_carries_the_bars_scope():
     record carrying it earned VERIFIED where the genuine scope was
     `('scatter',)`. The repair deletes the field rather than validating it, so
     what is pinned here is the ABSENCE of any such channel: every record field
-    a caller can choose is reset to its default, and the bar must be
-    unmoved — only `index`, `outcome` and `invocations` may reach it, and
-    those are already load-bearing for the VERIFIED being withheld.
+    a caller can choose is reset, and the bar must be unmoved.
+
+    LOAD-BEARING IS EXACTLY `index` AND `outcome`, AND AN EARLIER VERSION OF
+    THIS TEST GOT THAT WRONG. It exempted `invocations` too and called all
+    three "already load-bearing for the VERIFIED being withheld". That was
+    false in the direction that matters: `invocations` was load-bearing for
+    the BAR and not for the discharge, so a record could give it up, keep its
+    obligation `discharged`, and leave the bar's domain — measured, VERIFIED
+    where the whole-query base returned UNKNOWN. The predicate is now the one
+    that discharges (`outcome == OB_DISCHARGED`), so `invocations` carries
+    nothing the bar reads and is emptied here with everything else. See
+    `test_stripping_invocations_cannot_clear_the_bar` for the drift itself.
     """
     import dataclasses
 
@@ -320,7 +342,8 @@ def test_no_escalation_field_carries_the_bars_scope():
         "UNKNOWN"
     ), "the genuine assembly does not bar; the fixture is wrong"
 
-    load_bearing = {"index", "outcome", "invocations"}
+    load_bearing = {"index", "outcome"}
+    emptied = {"detail": "", "witness": None, "notes": (), "invocations": ()}
     defaulted = {
         f.name: f.default
         for f in dataclasses.fields(ObligationEscalation)
@@ -333,14 +356,145 @@ def test_no_escalation_field_carries_the_bars_scope():
         "because a recorded scope is a claim the bar cannot check; if it "
         "returns, the bar must not read it"
     )
+    # every field is accounted for: load-bearing, explicitly emptied, or
+    # reset to its declared default. A new field defaulting to something the
+    # bar reads would otherwise slip through this test unexamined.
+    assert {f.name for f in dataclasses.fields(ObligationEscalation)} == (
+        load_bearing | set(emptied) | set(defaulted)
+    ), "a record field is neither load-bearing, emptied, nor defaulted here"
     stripped = dataclasses.replace(esc, records=tuple(
-        dataclasses.replace(r, detail="", witness=None, notes=(), **defaulted)
-        for r in esc.records
+        dataclasses.replace(r, **emptied, **defaulted) for r in esc.records
     ))
     v = make_solver_verdict(closed, prop, stripped, **VERSIONS)
     assert v.status == "UNKNOWN", (
         f"{v.status}: emptying every non-load-bearing record field cleared "
         f"the bar, so one of them is carrying the scope"
+    )
+
+
+@pytest.mark.parametrize("build,strip,label", [
+    (_scatter_ON_the_decided_slice, 0, "the scatter obligation, alone"),
+    (_two_solver_decided_obligations, 0, "the scatter obligation, of two"),
+])
+def test_stripping_invocations_cannot_clear_the_bar(build, strip, label):
+    """ONE CONCEPT, ONE PREDICATE — the regression for the drift that made
+    `discharging` and `decided` two different tests over one record.
+
+    `make_solver_verdict` discharged an obligation on
+    `record.outcome == OB_DISCHARGED` and took the bar's domain from
+    `outcome == OB_DISCHARGED and r.invocations`. The conjunct looks like a
+    hardening and behaves like a second definition: empty `invocations` on a
+    discharging record and the obligation still discharges — so the VERIFIED
+    still stands — while its slice silently leaves the bar's domain.
+
+    Measured on both shapes, against `8e42934` (whole-query bar) as control:
+
+        fixture                         base      drifted   here
+        one decided obligation          UNKNOWN   VERIFIED  UNKNOWN
+        two, strip the scatter one's    UNKNOWN   VERIFIED  UNKNOWN
+
+    The one-obligation row is the sharper of the two, because it ALSO closes a
+    hole the base had: with every record's `invocations` gone the old
+    `solver_decided` was False and the bar branch was never entered at all, so
+    `8e42934` returned VERIFIED there too. Both rows are UNKNOWN now.
+
+    This is a regression, not a defence. `make_solver_verdict`'s docstring
+    states the precondition — the escalation came from `escalate()` on this
+    query — and a caller who can hand-edit a record can hand-build a
+    `Verdict` and skip this function entirely. What is pinned is that the
+    bar's domain and the discharge cannot disagree about the SAME record.
+    """
+    import dataclasses
+
+    from stelling.solvers import make_solver_verdict
+
+    assert V.VERIFIED_BARRED_PRIMITIVES, "the bar has been lifted"
+    closed, prop, esc = _stamped(build)
+    assert make_solver_verdict(closed, prop, esc, **VERSIONS).status == (
+        "UNKNOWN"
+    ), f"{label}: the genuine assembly does not bar; the fixture is wrong"
+    assert any(r.index == strip and r.invocations for r in esc.records), (
+        f"{label}: record #{strip} carries no invocations to strip, so this "
+        f"test cannot see the drift"
+    )
+
+    forged = dataclasses.replace(esc, records=tuple(
+        dataclasses.replace(r, invocations=()) if r.index == strip else r
+        for r in esc.records
+    ))
+    v = make_solver_verdict(closed, prop, forged, **VERSIONS)
+    assert [o.status for o in v.obligations] == (
+        ["discharged"] * len(v.obligations)
+    ), (
+        f"{label}: emptying `invocations` un-discharged an obligation, so "
+        f"there is no VERIFIED left for the bar to withhold and this test "
+        f"passes for the wrong reason"
+    )
+    assert v.status == "UNKNOWN", (
+        f"{label}: {v.status} — a record kept its discharge and left the "
+        f"bar's domain, so `decided` and `discharged` are two predicates "
+        f"again"
+    )
+    assert any("VERIFIED withheld" in n for n in v.notes)
+
+
+def test_the_containment_guard_short_circuits_before_any_re_slicing(monkeypatch):
+    """SOUNDNESS.md's CONTAINMENT ARGUMENT, pinned at the mechanism it cites.
+
+    The entry says every verdict the slice-scoped bar fires on is one the
+    whole-query bar fired on too, and the reason it gives is structural:
+    `_bar_scope` evaluates `whole = _barred_primitives(closed)` — the old
+    bar's own set — FIRST, and returns an empty scope without re-slicing when
+    it is empty. So "the new bar fired" implies "the whole-query set was
+    non-empty" implies "the old bar fired", with no dependence on the two
+    walks agreeing about anything.
+
+    The weaker argument (a slice's equations come from the query, and both
+    roots use the same walk) is also true and is pinned in
+    `tests/test_bar_walk_parity.py`. It is not what the containment rests on,
+    and the difference is the whole point: it would stop holding the moment
+    the roots disagreed, which is the failure mode this repo keeps finding.
+
+    Asserted as ORDER, not as outcome, and deliberately. Deleting the guard
+    leaves every verdict in this suite unchanged — the re-derivation on a
+    scatter-free query finds nothing on any slice and returns the same empty
+    scope — so an outcome assertion cannot see it and the argument would be
+    unpinned prose. What is observable is that the slicer is never consulted.
+    """
+    import stelling.obligation as _ob
+
+    closed = trace(_scatter_free)
+    assert not V._barred_primitives(closed), (
+        "the fixture's whole-query barred set is non-empty, so the guard "
+        "would not short-circuit and this test measures nothing"
+    )
+
+    calls = []
+    real = _ob.slice_obligation
+
+    def spy(*args, **kwargs):
+        calls.append(args[1] if len(args) > 1 else None)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(_ob, "slice_obligation", spy)
+    assert V._bar_scope(closed, (0,)) == ((), "")
+    assert calls == [], (
+        f"`_bar_scope` re-sliced obligation(s) {calls} on a query whose "
+        f"whole-query barred set is EMPTY. The early return is gone, so the "
+        f"new bar's fired-set is no longer contained in the old one by "
+        f"construction — it now depends on the slice walk finding nothing the "
+        f"query walk missed. SOUNDNESS.md cites the guard; restore it or "
+        f"re-derive the containment."
+    )
+
+    # ANTI-VACUITY: the spy must be reachable at all, or `calls == []` holds
+    # for the trivial reason that nothing ever calls `slice_obligation`.
+    dirty = trace(_scatter_ON_the_decided_slice)
+    assert V._barred_primitives(dirty), "the control query carries nothing"
+    V._bar_scope(dirty, (0,))
+    assert calls, (
+        "`_bar_scope` did not reach `slice_obligation` even on a "
+        "scatter-bearing query, so the assertion above is vacuous"
     )
 
 
@@ -356,8 +510,8 @@ def test_the_note_names_only_the_obligations_whose_slice_carries_it():
     from stelling.solvers import make_solver_verdict
 
     closed, prop, esc = _stamped(_two_solver_decided_obligations)
-    deciding = [r.index for r in esc.records
-                if r.outcome == "discharged" and r.invocations]
+    # the bar's own predicate, verbatim — not a paraphrase of it
+    deciding = [r.index for r in esc.records if r.outcome == "discharged"]
     assert sorted(deciding) == [0, 1], (
         f"the fixture no longer has TWO solver-decided obligations "
         f"({deciding}), so it cannot see the misattribution"

@@ -546,8 +546,12 @@ def _approx(exact: str) -> str:
 # settled, withholds nothing. (Whole-query IS the fail-closed fallback,
 # `_barred_primitives`, whenever that derivation cannot be completed.)
 #
-# THE SCOPE IS DERIVED FROM `closed`, NEVER READ OFF THE ESCALATION, AND THAT
-# IS THE SOUNDNESS PROPERTY. Its predecessor recorded the per-obligation
+# THE SCOPE'S CONTENTS ARE DERIVED FROM `closed`, NEVER READ OFF THE
+# ESCALATION, AND THAT IS THE SOUNDNESS PROPERTY. (Its DOMAIN — which
+# obligations are asked about — does come from the escalation; that is
+# `make_solver_verdict`'s stated precondition, spelled out in its docstring
+# and in :func:`_bar_scope`, and it is not claimed as an immunity here.)
+# The predecessor recorded the per-obligation
 # barred set on `solvers.ObligationEscalation.barred_on_slice` at emission
 # time and trusted it at the bar. Measured, both directions:
 #
@@ -568,7 +572,14 @@ def _approx(exact: str) -> str:
 # comes from the escalation (and is already load-bearing for VERIFIED itself:
 # an index that does not match an unknown obligation leaves it undischarged
 # and there is no VERIFIED to withhold), WHAT is on their slices comes from
-# the query. Re-slicing is not a second implementation of the emitted slice:
+# the query. The anti-correlation is only as good as ONE CONCEPT ON THE
+# ESCALATION SIDE: "the solver decided it" and "the record discharges it" must
+# be the same test, or the load-bearingness above is about a different set
+# than the one the bar takes. They drifted once — `make_solver_verdict` read
+# `outcome == OB_DISCHARGED and r.invocations` for the bar while discharging
+# on `outcome == OB_DISCHARGED` alone, and a record stripped of `invocations`
+# discharged its obligation while leaving the bar's domain. There is now one
+# predicate, in one place. Re-slicing is not a second implementation of the emitted slice:
 # `slice_obligation(closed, index, interval_env(closed))` is verbatim what
 # `slice_unknown_obligations` calls, whose only other argument
 # (`top_primitives`) is documented "message wording only, never admission",
@@ -722,12 +733,32 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
     clause naming where they are)``, derived from ``closed`` alone plus the
     obligation INDICES the solver decided.
 
-    Never reads a scope off the escalation, and the block comment above says
-    what that bought — a recorded scope is a positive claim nothing validates,
-    and `make_solver_verdict` does not bind its escalation to its query, so a
-    read scope was forgeable in one direction and mispairable in the other.
-    Re-slicing out of ``closed`` has neither exposure and keeps the precision:
-    the slices are the ones this query's own obligations produce.
+    Never reads a barred primitive off the escalation, and the block comment
+    above says what that bought — a recorded scope is a positive claim nothing
+    validates, and `make_solver_verdict` does not bind its escalation to its
+    query, so a read scope was forgeable in one direction and mispairable in
+    the other. Re-slicing out of ``closed`` has neither exposure for the
+    scope's CONTENTS, and keeps the precision: the slices are the ones this
+    query's own obligations produce.
+
+    ITS DOMAIN IS STILL SUPPLIED, AND THAT IS A PRECONDITION RATHER THAN AN
+    IMMUNITY. ``decided`` comes from the caller — in practice from
+    `make_solver_verdict` reading `outcome == OB_DISCHARGED` off the
+    escalation's records, the same test that discharges those obligations —
+    and an obligation absent from it is simply not asked about. An earlier
+    wording here said re-slicing had "neither exposure" full stop; that
+    over-read this function's reach. What is true is narrower and worth
+    stating exactly: no field a record can carry names a barred primitive, so
+    the CONTENTS cannot be forged; the DOMAIN rests on
+    `make_solver_verdict`'s documented precondition that its escalation came
+    from `escalate()` on the same query, and a caller who can violate that can
+    hand-build a `Verdict` and skip this function entirely.
+
+    The domain fails safe in the direction that matters most. A stray index
+    (one matching no unknown obligation) does not slice, so the derivation
+    drops to the whole-query set; an EMPTY domain is the one case that
+    silences the bar, and it is empty exactly when no record discharged
+    anything — in which case there is no solver-decided VERIFIED to withhold.
 
     FAILS CLOSED, ALWAYS TOWARD THE WIDER BAR. A decline, a missing
     obligation, or any exception on the re-derivation drops to the whole-query
