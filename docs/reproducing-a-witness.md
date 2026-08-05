@@ -170,7 +170,8 @@ supply the traced query and skip that: a gate with a bypass is not a gate.
 ### A second example, against a real simulation package
 
 Optional, and it costs something — see the warning below. The shape is the
-same; only the target is heavier.
+same, and the target is a real simulation node imported from `maddening`
+rather than anything written for the example.
 
 > **Installing `maddening` will DOWNGRADE your jax.** It pins
 > `jax>=0.4,<0.6`, and stelling is developed against 0.11. Use a separate
@@ -180,17 +181,22 @@ same; only the target is heavier.
 <!-- doc-example: illustrative -->
 ```python
 # myprogram.py — your code. No stelling import here.
-def heat_step_against_bound(T):
-    from mypackage.nodes import HeatNode
+from maddening.nodes.heat import HeatNode
 
-    node = HeatNode("h", timestep=0.1, n_cells=4, thermal_diffusivity=1.0)
-    out = node.update({"temperature": T}, {}, 0.1)["temperature"]
+NODE = HeatNode("h", timestep=0.1, n_cells=4, thermal_diffusivity=1.0)
+
+
+def heat_step_against_bound(T):
+    out = NODE.update({"temperature": T}, {}, 0.1)["temperature"]
     return out, 100.0          # (lhs, rhs) — the two sides of `out <= 100.0`
 ```
 
 <!-- doc-example: illustrative -->
 ```python
 # check_it.py — the harness module.
+import jax
+jax.config.update("jax_enable_x64", True)
+
 from stelling.preconditions import check
 from stelling.reproduce import Subject, write_reproducer
 
@@ -213,7 +219,8 @@ if verdict.witnesses:
     print(write_reproducer(verdict, SUBJECT, "reproducers").path)
 ```
 
-Running the emitted file prints the witness, both sides, and the result:
+`HeatNode` is `maddening`'s own — nothing here stands in for it. Running the
+emitted file:
 
 ```
 == executing YOUR function
@@ -226,7 +233,12 @@ Running the emitted file prints the witness, both sides, and the result:
     [1]  101.0 <= 100.0  is False   (margin +1.0)
     [2]  101.0 <= 100.0  is False   (margin +1.0)
 
+  [jit] lhs = array([ 63.125, 101.   , 101.   ,  63.125], dtype=float32)
+  [jit] rhs = array(100.)
   [jit] asserted: lhs <= rhs   ->  False
+  [jit] FALSE at flat element(s): [1, 2]
+    [1]  101.0 <= 100.0  is False   (margin +1.0)
+    [2]  101.0 <= 100.0  is False   (margin +1.0)
 
 == CONFIRMED
 ```
