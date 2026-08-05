@@ -80,8 +80,27 @@ jobs:
       # untracked file inside an allowlisted directory really would ship. A
       # job that dropped `jax-before.txt` at the repo root would redden that
       # test and the failure would look like nothing to do with this job.
-      - name: resolved jax BEFORE the probe libraries
-        run: .venv/bin/python -c "import jax; print(jax.__version__)" | tee "${RUNNER_TEMP}/jax-before.txt"
+      #
+      # `set -o pipefail` is the point of the block form. GitHub's default
+      # shell is `bash -e {0}` — errexit, and NO pipefail — so in a one-line
+      # `python -c ... | tee file` the pipeline's status is tee's, a failing
+      # import exits 0, and the step passes having written an EMPTY file. The
+      # comparison below would then be rescued only by `"" != "0.11.0"`, i.e.
+      # the guard would be doing the work of its own input's error handling.
+      # The guard's input has to be as protected as the guard.
+      #
+      # jaxlib as well as jax, because jaxlib is the actual XLA build and this
+      # suite is demonstrably XLA-sensitive: the one skip rule in
+      # tests/test_skip_inventory.py that cannot check its own direction
+      # exists precisely because XLA's constant folding varies by build. This
+      # install is not `--no-deps`, so blackjax/diffrax can move jaxlib while
+      # leaving jax alone — which would satisfy a jax-only guard and change
+      # exactly what the guard is there to protect.
+      - name: resolved jax and jaxlib BEFORE the probe libraries
+        run: |
+          set -euo pipefail
+          .venv/bin/python -c "import jax, jaxlib; print(jax.__version__, jaxlib.__version__)" \
+            | tee "${RUNNER_TEMP}/jax-before.txt"
       # PINNED, and the pin has a cost worth stating: a pinned bar stops
       # tracking the live library, which is half the point of testing against
       # a real one. It is pinned anyway because the property is hash EQUALITY
@@ -91,29 +110,29 @@ jobs:
       # would read as a stelling regression. Moving the pin is the deliberate
       # act that re-establishes the bar, and belongs with the probe re-read.
       - run: uv pip install "blackjax==1.6.2" "diffrax==0.7.2"
-      - name: RESOLVED JAX VERSION (a probe library moving jax fails this job)
+      - name: RESOLVED JAX/JAXLIB (a probe library moving either fails this job)
         run: |
           set -euo pipefail
           before="$(cat "${RUNNER_TEMP}/jax-before.txt")"
           # These imports are themselves the check that the install worked: a
           # job that installs blackjax and then silently skips is the exact
           # defect this job exists to close, so absence must fail HERE.
-          after="$(.venv/bin/python -c 'import jax; print(jax.__version__)')"
+          after="$(.venv/bin/python -c 'import jax, jaxlib; print(jax.__version__, jaxlib.__version__)')"
           bjx="$(.venv/bin/python -c 'import blackjax; print(blackjax.__version__)')"
           dfx="$(.venv/bin/python -c 'import diffrax; print(diffrax.__version__)')"
-          echo "RESOLVED jax=${after} (before probe libraries: ${before}) blackjax=${bjx} diffrax=${dfx}"
+          echo "RESOLVED jax/jaxlib=${after} (before probe libraries: ${before}) blackjax=${bjx} diffrax=${dfx}"
           {
             echo "### any_pytree acceptance — the versions the bar was measured against"
             echo ""
             echo "| package | resolved |"
             echo "| --- | --- |"
-            echo "| **jax** | **${after}** |"
-            echo "| jax, before blackjax/diffrax | ${before} |"
+            echo "| **jax jaxlib** | **${after}** |"
+            echo "| jax jaxlib, before blackjax/diffrax | ${before} |"
             echo "| blackjax | ${bjx} |"
             echo "| diffrax | ${dfx} |"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "${before}" != "${after}" ]; then
-            echo "::error title=a probe library moved jax::blackjax/diffrax resolved jax ${before} -> ${after}. This job would then be measuring the any_pytree acceptance bar against a DIFFERENT jax from every other lane, and a green tick here would quietly mean something else. Fix the pin, or move the whole matrix deliberately."
+            echo "::error title=a probe library moved jax or jaxlib::blackjax/diffrax resolved '${before}' -> '${after}' (jax jaxlib). This job would then be measuring the any_pytree acceptance bar against a DIFFERENT build from every other lane, and a green tick here would quietly mean something else. jaxlib counts as much as jax: it is the XLA build, and this suite has a skip rule that exists only because XLA folds differently on different builds. Fix the pin, or move the whole matrix deliberately."
             exit 1
           fi
       - run: uv pip list
@@ -131,9 +150,18 @@ jobs:
           grep -qE '^2 passed' "${RUNNER_TEMP}/acceptance.log"
       # The whole suite, in the one environment where every optional library
       # of the acceptance set is present. tests/test_skip_inventory.py is the
-      # second, independent guard that those two RAN: it pins the condition
-      # ("skips iff blackjax is unimportable"), so here, where blackjax is
-      # importable, a skip fails the suite.
+      # second, independent guard on those two: it pins the condition ("skips
+      # iff blackjax is unimportable"), so here, where blackjax is importable,
+      # a SKIP fails the suite — and, since the pin re-runs any pinned test
+      # this session did not observe, an ERROR or a FAILURE inside that hidden
+      # re-run fails it too rather than reading as "ran". What it does not do
+      # is check the assertions themselves; that is the step above, which is
+      # why both exist.
+      #
+      # Unnarrowed on purpose. The inventory's completeness half withdraws its
+      # claim in a session that did not collect the whole tree, and fails in
+      # one that collected it and then deselected part — so a `-k` or a path
+      # added here would quietly turn the second guard off.
       - run: .venv/bin/python -m pytest -q -rs
 
   reuse:
