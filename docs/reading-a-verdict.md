@@ -226,6 +226,7 @@ Using the render from the [quickstart](quickstart.md#1-the-smallest-harness-that
 | `transfers:` / `provenance:` | which transfer was used per primitive, at what tier, from where |
 | `assumes:` | every assumption the verdict rides on, including the vacuity line (below) |
 | `coverage:` | equations known / ⊤ / transparent / dropped / constrained |
+| `coverage-not-established:` | present only when the line above did **not** bound the query: a ⊤ was propagated anyway (below) |
 | `note:` | the addresses — where and why anything degraded |
 
 `arithmetic` and `semantics` are separate fields on purpose. `arithmetic`
@@ -234,6 +235,55 @@ is the representation; `semantics` is the claim. A default verdict says
 program you actually run — see
 [preconditions.md](preconditions.md#what-this-checks--and-what-it-doesnt-yet)
 for a two-primitive case where that gap is the whole answer.
+
+## `coverage-not-established:` — what the `coverage:` line did not settle
+
+`coverage:` is a **census**. It counts whether each equation's primitive
+has a registered transfer, and `5 known (100%)` means every one of them
+does. It does not count what those transfers *returned*.
+
+A registered transfer can run, succeed, and hand back `[-inf, inf]`.
+Nothing on the `coverage:` line moves when it does. Measured, on
+`exp(x) - exp(x)` over x ∈ [-1000, 1000] — five equations, every
+primitive registered:
+
+```
+coverage: 5 eqns: 5 known (100%)
+coverage-not-established: NOT ESTABLISHED — that the coverage line bounded this query. 1 propagated value(s) came out ⊤ (every element [-inf, inf], the widest box there is), at sub ×1, while the census recorded no equation fallen to ⊤ and none unreached. A registered transfer can return ⊤ on the values it is handed, and the census counts whether a primitive HAS a transfer registered, never what the transfer returned — so the 5/5 figure is not a statement that anything here was bounded, and this verdict does not make one
+```
+
+The `exp` overflowed to `[0, inf]`, and subtracting a box from itself is
+`[-inf, inf]` — interval arithmetic does not know the two operands are
+the same value. 100% coverage, and the analysis knows nothing about the
+result.
+
+Reading the line:
+
+- the leading count is **propagated values**, not equations and not
+  primitives — three ⊤ boxes at two primitives reads `3 propagated
+  value(s) … at sub ×2, add ×1`;
+- the tail after `at` is per-primitive, attributed to the equation that
+  produced each box;
+- `<constant or closure const>` there means a ⊤ that no equation in this
+  jaxpr produced.
+
+The line appears **exactly when** two things hold: the census reported no
+gap of its own (`unknown`, `unreached` and `inert` all zero), and the
+propagation still produced a top-level ⊤ box. When the census *did*
+report a gap, the `coverage:` line already carries the disclosure — a ⊤
+count, an `unreached` count, a `DROPPED` count — and this line would only
+restate it under a stronger-sounding name.
+
+**Its absence asserts nothing.** It is not the complement of its
+presence: a ⊤ inside a `cond` branch that was scoped and discarded is not
+visible to it, and neither is any query whose census had a gap of its
+own. Absence means this particular reading did not fire — never that the
+query was bounded.
+
+It is a separate line rather than an addition to `coverage:` because that
+string is trend data: `stamp.coverage.split(" eqns")[0]` is parsed by
+`reproduce.py` and by the sweep scripts, and the disclosure must not move
+it a byte.
 
 ## `PORTFOLIO DEGRADED` — when a verdict rests on one solver
 
