@@ -50,6 +50,103 @@ assertion held where it ran and the other mode raised, so `DIVERGED` (a
 claim of absence) is not available and nothing was false either. The
 sidecar's `execution.detail` says which. **Read it, not the status.**
 
+## A complete example you can run
+
+Everything below is here. No other package, no fixture, nothing to stand in
+for — `pip install "stelling[jax,z3]"`, two files, and the output is what it
+prints.
+
+<!-- doc-example: illustrative -->
+```python
+# myprogram.py — your code. No stelling import here.
+import jax.numpy as jnp
+
+
+def total_against_budget(rates):
+    """Four rates, scaled by a duty cycle, against a budget."""
+    total = jnp.sum(rates) * 3.0
+    return total, 10.0          # (lhs, rhs) — the two sides of `total <= 10.0`
+```
+
+<!-- doc-example: illustrative -->
+```python
+# check_it.py — the harness module. This one DOES import stelling.
+import jax
+jax.config.update("jax_enable_x64", True)
+
+from stelling.preconditions import check
+from stelling.reproduce import Subject, write_reproducer
+
+from myprogram import total_against_budget
+
+SUBJECT = Subject(
+    name="rate-budget",
+    fn=total_against_budget,
+    relation="<=",
+    declarations=((((4,), "float32", (0.0, 1.0))),),
+    no_precondition_reason="every rate in [0,1] is one the caller can supply",
+)
+
+verdict = check(SUBJECT.harness, vacuity_mode="inputs-only",
+                solver_timeout_ms=60_000)
+print("status:", verdict.status)
+if verdict.witnesses:
+    print("wrote:", write_reproducer(verdict, SUBJECT, "reproducers").path)
+```
+
+Four rates each at most 1, scaled by 3, is at most 12 — so the budget of 10 is
+violable, and interval arithmetic alone cannot decide it (`[0, 12]` straddles
+`10`). The solver settles it:
+
+```
+$ python check_it.py
+status: REFUTED
+wrote: reproducers/reproduce_rate_budget_assert0.py
+```
+
+Now run the emitted file. **Nothing about this step needs stelling** — that is
+the point of it:
+
+```
+$ python reproducers/reproduce_rate_budget_assert0.py
+
+== the witness, exactly as the solver produced it
+  x0[0] = 1
+  x0[1] = 1
+  x0[2] = 1
+  x0[3] = 2/3
+  x0 as float32: array([1.       , 1.       , 1.       , 0.6666667], dtype=float32)
+  NOTE: these exact values are NOT representable in the
+  declared dtype and were rounded to build the array:
+    x0[3] = 2/3
+
+== caller precondition: NONE DECLARED
+  every rate in [0,1] is one the caller can supply
+  So UNREACHABLE was not tested. This run assumes every
+  point of the declared envelope is producible by some caller.
+
+== executing YOUR function
+  myprogram.total_against_budget
+
+  [eager] lhs = array(11., dtype=float32)
+  [eager] rhs = array(10.)
+  [eager] asserted: lhs <= rhs   ->  False
+  [eager] FALSE at flat element(s): [0]
+    [0]  11.0 <= 10.0  is False   (margin +1.0)
+
+  [jit] lhs = array(11., dtype=float32)
+  [jit] rhs = array(10.)
+  [jit] asserted: lhs <= rhs   ->  False
+  [jit] FALSE at flat element(s): [0]
+    [0]  11.0 <= 10.0  is False   (margin +1.0)
+
+== CONFIRMED
+```
+
+The witness is `2/3` — an exact rational the solver produced and `float32`
+cannot hold. The file says so and rounds it rather than quietly substituting a
+different point, and the violation survives the rounding.
+
 ## Factoring your program so a file can call it
 
 A `Subject` names the declarations, an importable callable of them
@@ -69,6 +166,16 @@ callable that first loaded the tool, on every path that reports anything.
 `write_reproducer` always re-traces the subject's own harness and compares
 its content hash with the verdict's stamp. There is deliberately no way to
 supply the traced query and skip that: a gate with a bypass is not a gate.
+
+### A second example, against a real simulation package
+
+Optional, and it costs something — see the warning below. The shape is the
+same; only the target is heavier.
+
+> **Installing `maddening` will DOWNGRADE your jax.** It pins
+> `jax>=0.4,<0.6`, and stelling is developed against 0.11. Use a separate
+> virtualenv for this example unless you want that downgrade in the
+> environment you verify from. The example above needs none of this.
 
 <!-- doc-example: illustrative -->
 ```python
