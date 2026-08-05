@@ -224,11 +224,31 @@ class Propagation:
     # [-inf, inf]. The verdict assemblers pair this with the census's own
     # zero-gap counts to state what the coverage line did NOT establish.
     #
-    # Top-level scope only, and that is the whole claim: sub-jaxpr runs
-    # (jit/custom_jvp wrappers, cond branches) get isolated envs that are
-    # discarded on exit, so a ⊤ inside one is seen here exactly when it
-    # reaches the wrapping equation's outvars — which is when it can
-    # still affect anything.
+    # WHAT THIS DOES NOT SEE, by name rather than by rule. An earlier
+    # version of this comment said "top-level scope only, and that is the
+    # whole claim". The scope half is true; "the whole claim" was an
+    # EXHAUSTIVENESS claim and it was false in four ways, three of them
+    # nothing to do with scope. A list of gaps ranges over a closed set;
+    # a sentence claiming there are no others ranges over everything the
+    # author has not looked at.
+    #
+    #   * A ⊤ inside a sub-jaxpr (jit/custom_jvp wrapper, cond branch)
+    #     that never reaches the wrapping equation's outvars. Those envs
+    #     are isolated and discarded on exit. This one is deliberate.
+    #   * A box that is ⊤ on SOME elements. `_is_top` requires every
+    #     element, so a partly-unbounded array reads as bounded here.
+    #   * A ⊤ that a later constraining `assume` narrows in place. This
+    #     reads the finished env, so what a transfer RETURNED is not what
+    #     is recorded if something overwrote it afterwards.
+    #   * Anything at all when the census reports a gap of its own: the
+    #     assemblers suppress this field then, so a query carrying both an
+    #     unregistered primitive AND registered-transfer ⊤s discloses only
+    #     the former. `scan`, `while` and `iota` are unregistered, so a
+    #     query using lax control flow never receives this disclosure.
+    #
+    # And one it reports that the rationale above would not predict: a
+    # top-level ⊤ bound to a value nothing reads is counted, because this
+    # walks the env rather than the live set.
     top_boxes: tuple[tuple[str, int], ...] = ()
 
     @property
