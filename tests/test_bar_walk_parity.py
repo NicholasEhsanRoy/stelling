@@ -17,18 +17,28 @@ the spirit of the EMISSION == REPLAY census — a review question nobody has to
 remember to ask.
 
 **The firing direction, via a SYNTHETIC barred primitive.** The bar withholds a
-SOLVER-DECIDED VERIFIED. On this build the real barred set is `{"scatter"}` and
-`scatter` is absent from the emission set, so no scatter obligation can ever be
-solver-decided and the bar's protective branch is unreachable — its entire
-behavioural history is over-firing. Monkeypatching the barred set to contain
-something *emittable* (`add`) makes that branch reachable, so the direction the
-bar exists for is exercised for the first time. Without this fixture, both the
-bar and the traversal fix would be "correct by argument only" until the scatter
-row registers, which is exactly when they become load-bearing.
+SOLVER-DECIDED VERIFIED, and a fixture reaching that branch needs a barred
+primitive that can be EMITTED. `scatter` is one: measured on this build,
+`"scatter" in obligation._SUPPORTED` is True, six census idioms reach the row
+(`tests/test_scatter_emission_reach.py`) and `tests/test_verified_bar.py`
+drives a solver-decided scatter obligation end to end. This module said the
+opposite for a while — that `scatter` was absent from the emission set, so the
+protective branch was unreachable and the bar's whole behavioural history was
+over-firing — and that was false when it was written; the correction is worth
+keeping visible, because it is the same defect this file exists to catch, one
+level up: a claim of non-occurrence that nothing checked.
+
+Monkeypatching the barred set to `{"add"}` still earns its place, for two
+reasons that survive the correction. `add` appears INSIDE a sub-jaxpr on a
+real slice (`scatter-add` carries `update_jaxpr`), which is what makes the
+descent observable at all; and it is emittable under enclosing constructs
+where the real barred set cannot be driven — see
+`test_the_bar_finds_a_barred_primitive_nested_in_cond` for the one that is
+genuinely unreachable end-to-end, and why.
 
 **A THIRD, since the bar became slice-scoped: THE SLICE ROOT.** The bar now
-reads the barred set of the obligation the solver actually decided, computed by
-the SAME walk rooted at that obligation's emitted slice equations rather than at
+derives the barred set of the obligation the solver actually decided, by the
+SAME walk rooted at that obligation's emitted slice equations rather than at
 the query. Rooting a walk somewhere new is where a hand-rolled flat version
 looks adequate and is not: measured, a `scatter-add` slice equation carries
 `update_jaxpr = ['add']`, so under a synthetic barred set of `{"add"}` the flat
@@ -174,6 +184,34 @@ def test_the_parity_test_catches_the_old_accessor():
 
 # ---- the firing direction, via a SYNTHETIC barred primitive ---------------
 
+def test_the_registry_facts_this_module_argues_from():
+    """THE DOCSTRING'S PREMISES, ASSERTED.
+
+    This module's docstring used to say `scatter` was absent from the emission
+    set, so the bar's protective branch was unreachable. That was false when it
+    was written and nothing checked it — a claim of non-occurrence resting on a
+    registry membership, in the file whose whole subject is claims that stopped
+    matching their mechanism. The four memberships the corrected text argues
+    from are now read out of the registries themselves.
+    """
+    from stelling import obligation, propagate
+
+    assert "scatter" in obligation._SUPPORTED, (
+        "`scatter` is no longer emittable. The docstring above says the bar's "
+        "protective branch is reachable with the REAL barred set, and that is "
+        "why the synthetic `add` fixture is a convenience rather than the only "
+        "way in; re-derive before re-wording"
+    )
+    assert "scatter" in propagate.TRANSFERS
+    assert "cond" not in obligation._SUPPORTED, (
+        "`cond` became emittable, so the cond-nested under-fire may now be "
+        "reachable end-to-end — see "
+        "test_the_bar_finds_a_barred_primitive_nested_in_cond, whose "
+        "'cannot be written' is derived from exactly this"
+    )
+    assert "cond" not in propagate.TRANSFERS
+
+
 @pytest.fixture
 def _bar_add(monkeypatch):
     """Bar `add` — which IS emittable, unlike `scatter`. That is the whole
@@ -215,10 +253,10 @@ def test_the_bar_finds_a_barred_primitive_nested_in_cond(_bar_add):
 
     The end-to-end version cannot be written: reaching the bar requires a
     SOLVER-DECIDED verdict, and a query containing `cond` can never have one,
-    because `cond` is in NEITHER `TRANSFERS` NOR the emission set. So the
-    under-fire this fixes was unreachable for a SECOND, independent reason
-    beyond `scatter`'s absence — the enclosing construct blocks escalation
-    whatever the barred set contains.
+    because `cond` is in NEITHER `TRANSFERS` NOR the emission set (measured on
+    this build; `scatter` is in both). The enclosing construct blocks
+    escalation whatever the barred set contains, so this under-fire was
+    latent even though the barred primitive itself is emittable.
 
     That is worth stating precisely rather than overclaiming: the defect was
     latent, not live, and its reachability needed a collection-valued jaxpr
@@ -377,25 +415,77 @@ def test_the_slice_parity_test_catches_the_naive_flat_version(monkeypatch):
     assert set(_verdict._barred_in_eqns(sl.eqns)) == canonical
 
 
-def test_the_bar_reads_the_slice_scope_the_record_carries(monkeypatch):
-    """The record-carrying design at the seam: `escalate` writes the
-    obligation's own barred set onto its record, from the slice it emitted.
-    `None` would mean "no scope recorded" and make the bar fall back to the
-    whole query, so an empty tuple must be a written empty, not a default."""
-    from stelling.propagate import propagate
-    from stelling.solvers import SolverConfig, escalate
+@pytest.mark.parametrize("build,label", SLICE_SHAPES,
+                         ids=[s[1] for s in SLICE_SHAPES])
+def test_the_bar_re_derives_the_slice_that_was_actually_emitted(
+    monkeypatch, build, label
+):
+    """THE SEAM THE DERIVED SCOPE RESTS ON, asserted rather than argued.
+
+    `verdict._bar_scope` does not read a scope off the escalation — a record
+    cannot certify its own cleanliness, and nothing binds an escalation to the
+    query it is stamped against. It re-slices the decided obligations out of
+    `closed` instead. That is only sound if the re-derivation is the SAME
+    slice `escalate` emitted, and it is by construction:
+    `slice_unknown_obligations` calls `slice_obligation(closed, index,
+    interval_env(closed))`, and its one further argument is documented
+    "message wording only, never admission".
+
+    "By construction" is exactly the kind of claim that stops being true
+    quietly, so it is measured here on every slice shape, under a synthetic
+    barred set that reaches into a sub-jaxpr as well as the real one.
+    """
+    from stelling.obligation import (
+        DeclinedObligation,
+        slice_obligation,
+        slice_unknown_obligations,
+    )
+    from stelling.propagate import interval_env, propagate
 
     monkeypatch.setattr(_verdict, "VERIFIED_BARRED_PRIMITIVES",
-                        frozenset({"add"}))
-    closed = transcribe(jax.make_jaxpr(_segment_sum_relational)())
-    esc = escalate(closed, propagate(closed), SolverConfig(timeout_ms=20000))
-    assert esc.records
-    for r in esc.records:
-        assert r.barred_on_slice is not None, (
-            "the slice scope was not recorded, so the bar would fall back to "
-            "the whole query on every verdict"
+                        frozenset({"add", "scatter"}))
+    closed = transcribe(jax.make_jaxpr(build)())
+    p = propagate(closed)
+    env = interval_env(closed)
+    emitted = [s for s in slice_unknown_obligations(closed, p, env)
+               if not isinstance(s, DeclinedObligation)]
+    assert emitted, f"{label}: nothing escalated, so nothing is being pinned"
+    for sl in emitted:
+        again = slice_obligation(closed, sl.index, interval_env(closed))
+        assert not isinstance(again, DeclinedObligation), (
+            f"{label}: assert #{sl.index} sliced for escalation but DECLINES "
+            f"on re-derivation ({again.reason}) — the bar would fall back to "
+            f"the whole query on a verdict that has a slice"
         )
-    assert any("add" in r.barred_on_slice for r in esc.records), (
-        "the recorded scope missed the combiner sub-jaxpr — the record is "
-        "being written by something other than the canonical walk"
+        assert _verdict._barred_in_eqns(again.eqns) == (
+            _verdict._barred_in_eqns(sl.eqns)
+        ), (
+            f"{label}: the bar's re-derived slice for assert #{sl.index} "
+            f"carries a different barred set than the one that was emitted — "
+            f"the scope is no longer measuring the slice the solver saw"
+        )
+
+
+def test_the_re_derivation_is_not_vacuous(monkeypatch):
+    """ANTI-VACUITY (Norm C) for the agreement above: at least one of those
+    slices must actually CARRY a barred primitive, or the parity is between
+    two empty sets and would hold under any re-derivation at all."""
+    from stelling.obligation import (
+        DeclinedObligation,
+        slice_unknown_obligations,
+    )
+    from stelling.propagate import interval_env, propagate
+
+    monkeypatch.setattr(_verdict, "VERIFIED_BARRED_PRIMITIVES",
+                        frozenset({"add", "scatter"}))
+    found = set()
+    for build, _label in SLICE_SHAPES:
+        closed = transcribe(jax.make_jaxpr(build)())
+        p = propagate(closed)
+        for sl in slice_unknown_obligations(closed, p, interval_env(closed)):
+            if not isinstance(sl, DeclinedObligation):
+                found.update(_verdict._barred_in_eqns(sl.eqns))
+    assert found, (
+        "no slice in SLICE_SHAPES carries a barred primitive under the "
+        "synthetic set, so the agreement test compares empty against empty"
     )

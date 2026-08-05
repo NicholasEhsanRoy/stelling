@@ -28,6 +28,19 @@ was lifted. Hence a build failure instead.
 never "unreachable".** Nothing below says an idiom CANNOT reach the row.
 Each line says only that on this build, at this commit, it does not — and
 pins that so a change is loud.
+
+**WHAT THIS CENSUS IS NOT.** It is a census of SPELLINGS, not of programs: one
+representative per way of writing a scatter, at one shape, with one dtype. So
+it does not vary the operand rank beyond the two cases listed, the index
+dtype (`_scatter_index_dtype_covers` has its own measured boundary at int8 /
+operand length 128–129 and is tested where that rule lives), the number of
+updated elements, or the enclosing construct — a `.set` inside `scan` is the
+walk's problem, not the reach's, and is pinned in
+`tests/test_bar_walk_parity.py`. Those are deliberate omissions, not
+oversights; what would belong here is a new SPELLING, and the two most
+recently added are the constant-operand `jnp.zeros(n).at[k].set(...)` form
+and the three `.set` variants whose decline is the SET row's own admission
+rule rather than a limit elsewhere.
 """
 from __future__ import annotations
 
@@ -167,6 +180,38 @@ def i_segment_max():
     return (assert_(s[0] - d[0] >= 0.0),)
 
 
+def i_zeros_set_scalar_index():
+    """A CONSTANT operand rather than a declared one — `jnp.zeros(n).at[k]
+    .set(traced)` is how an assembly loop starts, and it reaches. Distinct
+    from `i_set_scalar_index_traced_update` in the half that decides
+    admission: there the operand is a declaration, here it is a const the
+    slicer must carry."""
+    v = any_array((), "float64", (2.0, 3.0))
+    z = jnp.zeros((3,))
+    return (assert_(z.at[0].set(v)[1] - z[1] <= 0.0),)
+
+
+def i_set_clip_mode():
+    x = any_array((3,), "float64", (0.0, 1.0))
+    return (assert_(x.at[0].set(0.5, mode="clip")[1] - x[1] <= 0.0),)
+
+
+def i_set_promise_in_bounds_mode():
+    x = any_array((3,), "float64", (0.0, 1.0))
+    return (assert_(
+        x.at[0].set(0.5, mode="promise_in_bounds")[1] - x[1] <= 0.0),)
+
+
+def i_set_out_of_range_index():
+    """The index is STATIC and out of range, so jax drops the write entirely
+    (measured: `jnp.array([0.,.5,1.]).at[7].set(2.0)` is unchanged). The row
+    declines rather than guessing — and that decline is the one the gauge's
+    admission gate exists for, since a CLIP-style clamp in its place returns
+    `discharged` on a false obligation with the whole suite green."""
+    x = any_array((3,), "float64", (0.0, 1.0))
+    return (assert_(x.at[7].set(0.5)[1] - x[1] <= 0.0),)
+
+
 CENSUS = [
     "x.at[k].set(const), scalar index",
     "x.at[-k].set(const), negative scalar index",
@@ -185,6 +230,10 @@ CENSUS = [
     "x.at[k].max(const)",
     "x.at[k].min(const)",
     "jax.ops.segment_max",
+    "jnp.zeros(n).at[k].set(traced), scalar index",
+    "x.at[k].set(const, mode='clip')",
+    "x.at[k].set(const, mode='promise_in_bounds')",
+    "x.at[k].set(const), OUT-OF-RANGE static index",
 ]
 
 BUILDS = dict(zip(CENSUS, [
@@ -205,6 +254,10 @@ BUILDS = dict(zip(CENSUS, [
     i_max,
     i_min,
     i_segment_max,
+    i_zeros_set_scalar_index,
+    i_set_clip_mode,
+    i_set_promise_in_bounds_mode,
+    i_set_out_of_range_index,
 ]))
 
 # ── THE PIN ──────────────────────────────────────────────────────────────
@@ -218,6 +271,7 @@ REACHES_THE_EMISSION_ROW = frozenset({
     "x.at[k].add(traced), scalar index",
     "jax.ops.segment_sum",
     "jax.lax.scatter_add, hand-written",
+    "jnp.zeros(n).at[k].set(traced), scalar index",
 })
 
 # Why each of the others stops short, quoted from its decline. The FIRST
@@ -235,6 +289,14 @@ STOPS_SHORT_ON = {
     "x.at[k].max(const)": "'scatter-max' is outside the supported emission set",
     "x.at[k].min(const)": "'scatter-min' is outside the supported emission set",
     "jax.ops.segment_max": "non-finite constant",
+    # The SET row's own admission rules, and the only three entries here whose
+    # decline is a soundness argument about scatter rather than a limit
+    # somewhere else. `tests/test_scatter_gauge_jax.py`'s admission gate is
+    # what keeps them from being quietly widened; this pins that they are the
+    # rules actually holding these idioms back.
+    "x.at[k].set(const, mode='clip')": "is not FILL_OR_DROP",
+    "x.at[k].set(const, mode='promise_in_bounds')": "is not FILL_OR_DROP",
+    "x.at[k].set(const), OUT-OF-RANGE static index": "is out of range",
 }
 
 # The subgroup whose decline is OWNED BY ANOTHER PART OF THE SYSTEM: jax

@@ -211,16 +211,74 @@ The scatter emission rows are the standing example. `x.at[idx].add(v)` — the
 idiomatic spelling — never reaches them: it declines earlier on `'add' on dtype
 'int32'`, jax's traced negative-index normalisation refused by the
 integer-overflow posture, a rule with no opinion about scatter. That is a fact
-about a limitation **somewhere else**, and the day someone improves it the rows
-start taking idiomatic traffic overnight with no new test and no signal. This
+about a limitation **somewhere else**, and the day someone improves it those
+rows may start taking idiomatic traffic with no new test and no signal. This
 project has been bitten twice by that shape: a predicate correct only because of
 a limitation elsewhere.
+
+**And the norm cuts the other way too, which this section learned by breaking
+it.** It first said the rows would take idiomatic traffic *overnight*. Measured
+by lifting the rule narrowly — `_INT_OVERFLOW_EMITTED = frozenset()` — all
+three array-index idioms still do not reach: `.at[arr].add` stops on *"index
+data not statically derivable"* and `.at[arr].set` on *"outside the measured
+static-index set row form"*. An unenforced prediction that something WILL be
+reached is the same defect as an unenforced claim that it cannot be, mirrored:
+in both directions the sentence is stronger than anything checking it. Say
+*"one rule stands between here and there"* and name the rule, or measure how
+many do.
 
 So the wording is load-bearing. Write *"no corpus query reaches X"* and pin the
 corpus; never write *"X is unreachable"* unless something enforces it. And where
 the reach matters, **build the tripwire**: a test that pins the current set and
 fails when it widens, whose message says what to revisit — not merely that a set
 changed (`tests/test_scatter_emission_reach.py`).
+
+## Conditional coverage reports as full coverage
+
+**A skipped test is an unverified claim wearing a passing suite's colours.** It
+is worse than a missing test: the count still goes up, the bar stays green, and
+nothing announces the gap. Third member of the family above — an absence of
+observation read as a presence of proof — and the one that hides inside the
+suite's own output.
+
+Two measured instances, and the difference between them is the whole norm.
+
+- **`docs/reproducing-a-witness.md`'s second transcript**, the `maddening`
+  HeatNode example's emitted-file output. The page's own warning says
+  installing `maddening` **downgrades your jax**, so the configuration a
+  release is cut in is exactly the one where the check does not run: the only
+  test asserting those numbers (`101.0` against `100.0`, elements 1 and 2)
+  `importorskip`s `maddening`. But the loss is **disclosed and asserted**.
+  `tests/test_doc_examples.py` marks the blocks illustrative and counts the
+  fence among the *31 plain fences, "HAND-WRITTEN, compared to nothing"*, out
+  of 57 plain fences over the population `README.md` + `docs/*.md`; it then
+  reads that figure back out of its own docstring and compares. So the page is
+  weakly guarded and says so, everywhere, whatever is installed.
+- **`tests/test_any_pytree.py`'s two acceptance tests.** They hold the bar their
+  own docstring sets — content-hash equality between an `any_pytree` sugar
+  declaration and the hand-written original, against a real third-party
+  library's pytrees, *"the acceptance bar for 'faithful sugar'"* — and they
+  `importorskip("blackjax")`. `blackjax` is declared **nowhere**: not in
+  `[dependency-groups] dev` (pre-commit, pytest, reuse), not in either CI job
+  (`.[solvers]` and `.[solvers,jax]`, plus pytest); its only other mention in
+  the tree is a pre-commit hook BANNING the name in `src/stelling` for
+  library-neutrality. **So they have never run in CI**, and they are the only
+  2 skips among the 2005 tests the suite collects under jax and both
+  solvers — the population is the whole suite. Nothing
+  anywhere says the sugar's acceptance bar is unmeasured.
+
+"Weaker guarantee" and "no guarantee" are different facts and must not read the
+same. The first has a fallback; the second has nothing where the claim is made.
+
+**The disposition is DISCLOSURE, NOT ELIMINATION.** A skip is legitimate, and
+several here are load-bearing design: zero required dependencies is a
+commitment, resolver caution is deliberate, and failing CI over a package that
+is never present would only teach people to ignore the failure. What is not
+legitimate is an *undisclosed* skip. So: the skip is visible **where the claim
+is made**, not only in `-rs` output; the disclosure is asserted by something, so
+it cannot drift from the mechanism; and a skip with **no** fallback says so in
+those words, because a reader cannot otherwise tell it from the one that has a
+digest, a pin, or a weaker check standing behind it.
 
 ## Before measuring a constant, read its definition site — and before deciding a question, read its ADJUDICATION site
 

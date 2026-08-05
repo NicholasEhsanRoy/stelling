@@ -540,12 +540,39 @@ def _approx(exact: str) -> str:
 # Obligations whose slice touches `scatter` are INELIGIBLE FOR VERIFIED until
 # the emission row has been attacked by a distinct-context adversarial auditor.
 # Read "whose slice" literally: the scope is the emitted slice of the
-# obligation the solver actually decided, recorded at emission time on
-# `solvers.ObligationEscalation.barred_on_slice` and unioned at the bar site.
-# It is NOT the whole traced query — a scatter elsewhere in the jaxpr, on an
-# obligation intervals settled, withholds nothing. (Whole-query IS the
-# fail-closed fallback, `_barred_primitives`, when no slice scope was
-# recorded.)
+# obligation the solver actually decided, derived by :func:`_bar_scope` from
+# the traced query and the decided obligation's INDEX. It is NOT the whole
+# traced query — a scatter elsewhere in the jaxpr, on an obligation intervals
+# settled, withholds nothing. (Whole-query IS the fail-closed fallback,
+# `_barred_primitives`, whenever that derivation cannot be completed.)
+#
+# THE SCOPE IS DERIVED FROM `closed`, NEVER READ OFF THE ESCALATION, AND THAT
+# IS THE SOUNDNESS PROPERTY. Its predecessor recorded the per-obligation
+# barred set on `solvers.ObligationEscalation.barred_on_slice` at emission
+# time and trusted it at the bar. Measured, both directions:
+#
+#   * `barred_on_slice=()` is a POSITIVE claim ("nothing barred on my slice")
+#     and nothing validated it — a record carrying it earned VERIFIED on a
+#     query whose genuine scope was `('scatter',)`;
+#   * `make_solver_verdict` is public and gates mispairing on semantics, ieee,
+#     constrained-assume and ledger provenance, but NOTHING binds the
+#     escalation to `closed` — a scatter-free escalation stamped against a
+#     scatter-bearing query returned VERIFIED where the whole-query bar it
+#     replaced returned UNKNOWN.
+#
+# Both are closed by deriving instead of reading: `_bar_scope` re-slices the
+# decided obligations out of `closed` itself, through the SAME
+# `slice_obligation` call `escalate` sliced them with, so there is no field
+# to forge and a mispaired `closed` bars exactly as the whole-query bar did.
+# The two inputs stay anti-correlated — WHICH obligations the solver decided
+# comes from the escalation (and is already load-bearing for VERIFIED itself:
+# an index that does not match an unknown obligation leaves it undischarged
+# and there is no VERIFIED to withhold), WHAT is on their slices comes from
+# the query. Re-slicing is not a second implementation of the emitted slice:
+# `slice_obligation(closed, index, interval_env(closed))` is verbatim what
+# `slice_unknown_obligations` calls, whose only other argument
+# (`top_primitives`) is documented "message wording only, never admission",
+# and `tests/test_bar_walk_parity.py` pins the two against each other.
 #
 # THE MEMBERSHIP IS EXACT-NAME, SO `scatter-add` IS NOT UNDER THIS BAR, AND
 # THAT IS DELIBERATE. `scatter-add` is a separate primitive with separate
@@ -573,8 +600,18 @@ def _approx(exact: str) -> str:
 # principal's to lift, after the auditor reports.
 VERIFIED_BARRED_PRIMITIVES = frozenset({"scatter"})
 
+# `{scope}` NAMES EACH OBLIGATION WITH ITS OWN BARRED SET, and the split from
+# `{prims}` is why. The predecessor rendered `{where}` from ALL deciding
+# obligations while `{prims}` was the UNION over them, with nothing
+# intersecting the two: with two solver-decided obligations it rendered "the
+# emitted slice of assert #0, assert #1 contains scatter" while #1's slice was
+# `['add', 'le', 'sub']` — a message claiming a scope its mechanism does not
+# have, which is this repo's own recurring defect. `{scope}` is now built
+# per-obligation by :func:`_bar_scope_phrase` and names only obligations that
+# carry something; `{prims}` is the union, and appears only in a statement
+# about the emission ROWS, which is true of them wherever they were reached.
 VERIFIED_BAR_REASON = (
-    "{where} contains {prims}, whose SMT emission has not yet been "
+    "{scope}. The SMT emission of {prims} has not yet been "
     "attacked by a distinct-context adversarial auditor. A wrong encoding that "
     "produced a spurious witness would be caught by exact-rational replay; one "
     "that MISSED a violation would mint a false VERIFIED with nothing "
@@ -589,10 +626,10 @@ def _barred_in_eqns(eqns) -> tuple[str, ...]:
 
     Two roots use it and there is only ever one traversal:
     :func:`_barred_primitives` roots it at the whole query's top-level
-    equations, and :func:`stelling.solvers.escalate` roots it at ONE
-    obligation's emitted slice (``ObligationSlice.eqns``) to record that
-    obligation's own barred set. Writing a second walk for the slice root
-    would be the exact mistake the docstring below is about.
+    equations, and :func:`_bar_scope` roots it at ONE obligation's emitted
+    slice (``ObligationSlice.eqns``) to derive that obligation's own barred
+    set. Writing a second walk for the slice root would be the exact mistake
+    the docstring below is about.
 
     DESCENT GOES THROUGH :func:`stelling.coverage.sub_jaxprs`, THE CANONICAL
     ACCESSOR, and must not be hand-rolled here. The predecessor descended via
@@ -651,11 +688,14 @@ def _barred_primitives(closed) -> tuple[str, ...]:
     """Barred primitives present anywhere in the traced query, innermost
     scopes included — the WHOLE-QUERY root of :func:`_barred_in_eqns`.
 
-    This is no longer what the bar normally reads. The bar is slice-scoped
-    (see the block comment above); this function is its FAIL-CLOSED FALLBACK,
-    used when a verdict carries no per-obligation slice scope to union. A bar
-    that under-fires is worse than one that over-fires, so the fallback is
-    deliberately the wider set.
+    Two jobs, both in :func:`_bar_scope`. It is the FAIL-CLOSED FALLBACK, used
+    whenever the per-obligation slices cannot be re-derived — a bar that
+    under-fires is worse than one that over-fires, so the fallback is
+    deliberately the wider set. And it is the CHEAP UPPER BOUND that decides
+    whether the re-derivation is worth doing at all: every equation a slice
+    can hold comes from this query at some depth, and this walk descends the
+    same nesting, so an empty whole-query set means every slice's set is empty
+    too and no query without a barred primitive pays for re-slicing.
     """
     if not VERIFIED_BARRED_PRIMITIVES or closed is None:
         return ()
@@ -664,6 +704,69 @@ def _barred_primitives(closed) -> tuple[str, ...]:
         return _barred_in_eqns(getattr(jaxpr, "eqns", ()))
     except Exception:  # a bar must never be the thing that breaks a verdict
         return tuple(sorted(VERIFIED_BARRED_PRIMITIVES))
+
+
+def _bar_scope_phrase(per_obligation) -> str:
+    """The `{scope}` clause: one phrase per obligation, each naming only its
+    OWN barred set, so no obligation is ever named beside a primitive its
+    slice does not carry. See the comment on :data:`VERIFIED_BAR_REASON`."""
+    return "; ".join(
+        f"the emitted slice of assert #{index} contains "
+        + ", ".join(per_obligation[index])
+        for index in sorted(per_obligation)
+    )
+
+
+def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
+    """THE BAR'S SCOPE FOR ONE VERDICT: ``(barred primitives in scope, the
+    clause naming where they are)``, derived from ``closed`` alone plus the
+    obligation INDICES the solver decided.
+
+    Never reads a scope off the escalation, and the block comment above says
+    what that bought — a recorded scope is a positive claim nothing validates,
+    and `make_solver_verdict` does not bind its escalation to its query, so a
+    read scope was forgeable in one direction and mispairable in the other.
+    Re-slicing out of ``closed`` has neither exposure and keeps the precision:
+    the slices are the ones this query's own obligations produce.
+
+    FAILS CLOSED, ALWAYS TOWARD THE WIDER BAR. A decline, a missing
+    obligation, or any exception on the re-derivation drops to the whole-query
+    set rather than to silence — including the case where ``closed`` is not
+    the query the indices came from, which is exactly how that mispairing is
+    caught.
+    """
+    whole = _barred_primitives(closed)
+    if not whole:
+        # nothing barred anywhere in the query, so nothing on any slice of it
+        return (), ""
+    fallback = (
+        whole,
+        "the traced query contains "
+        + ", ".join(whole)
+        + " (the decided obligations' emitted slices could not be re-derived, "
+        "so the bar fell back to the whole query)",
+    )
+    try:
+        from stelling.obligation import DeclinedObligation, slice_obligation
+        from stelling.propagate import interval_env
+
+        env = interval_env(closed)
+        per: dict[int, tuple[str, ...]] = {}
+        for index in sorted(set(decided)):
+            sliced = slice_obligation(closed, index, env)
+            if isinstance(sliced, DeclinedObligation):
+                # the solver decided it, so it sliced; if it does not slice
+                # HERE, `closed` is not the query it was decided on
+                return fallback
+            found = _barred_in_eqns(sliced.eqns)
+            if found:
+                per[index] = found
+    except Exception:  # noqa: BLE001 — a bar must never break a verdict, and
+        return fallback  # it must never go quiet either
+    return (
+        tuple(sorted({p for found in per.values() for p in found})),
+        _bar_scope_phrase(per),
+    )
 
 
 def undecided_cause_note(coverage, obligations) -> tuple[str, ...]:

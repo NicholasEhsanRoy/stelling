@@ -672,4 +672,67 @@ verdicts:
   widen-checked; mode explicit, never defaulted) — the first
   duty-enforced backstop converted to structure for CI (ledger L18).
 
+- **2026-08-06 (pre-release): the scatter VERIFIED bar narrowed from the
+  traced query to the decided obligation's slice — verdicts move, in the
+  WITHHELD → AVAILABLE direction.** Not a defect fix, and it is logged
+  anyway: the policy above is about verdicts moving, not about who was
+  wrong. `verdict.VERIFIED_BARRED_PRIMITIVES` withholds solver-path
+  `VERIFIED` on obligations whose SMT emission has not been through a
+  distinct-context adversarial pass. It fired on whole-query presence of
+  `scatter`, so a verdict resting entirely on obligations the scatter
+  emission row was never asked about was withheld for a row that had not
+  been consulted. It now fires only when a barred primitive is on the
+  EMITTED SLICE of an obligation the solver actually decided, and the
+  scope is derived from the traced query at the bar (re-slicing the
+  decided obligations) rather than read off the escalation record.
+  **Affected versions:** 0.1.0 pre-release only — every build from the
+  bar's introduction to `8e42934` inclusive has the whole-query scope;
+  nothing has been released.
+  **Which prior verdicts are retroactively invalid: none, and the
+  direction is the unusual one.** The new fired-set is a subset of the
+  old at every verdict (a slice's equations come from the query, and both
+  scopes use the same walk over the same nesting), and the fallback on any
+  underivable scope is the old whole-query set — so nothing that was
+  VERIFIED becomes UNKNOWN, and no REFUTED, witness or replay path is
+  touched at all. What changes is the opposite: a verdict is now VERIFIED
+  where it was previously withheld to UNKNOWN, exactly when (i) it was
+  assembled on the solver path with every obligation `discharged` and at
+  least one discharged BY a solver, (ii) the traced query contains
+  `scatter` at some depth, and (iii) no solver-decided obligation's
+  emitted slice contains it. So the honest characterisation is about
+  claims becoming available, not about issued claims becoming wrong — but
+  a reader comparing a recorded `UNKNOWN` against a fresh run still needs
+  this entry, because the two builds disagree and neither is a regression.
+  Obligations whose emitted slice DOES carry `scatter` remain withheld;
+  the bar is not lifted and its removal point is unchanged.
+  **What to re-run:** any recorded solver-path `UNKNOWN` on a
+  scatter-bearing query — re-`check()` it with the same
+  `solver_timeout_ms` and look for a `VERIFIED withheld` note. Its absence
+  where one was recorded is this change and not a new capability. The
+  flagship `HeatNode` sweep is unmoved in both directions (its refuting
+  side is `REFUTED` with a replayed witness; its holds side is settled by
+  intervals and the bar never applied to it) — `docs/verdict-ledger.md`
+  carries the scope note.
+  Same pass, and the reason this entry is not only about precision: the
+  narrowed scope was first implemented by RECORDING the per-obligation
+  barred set on `solvers.ObligationEscalation` and trusting it at the bar,
+  which lost two immunities the whole-query bar had — an empty recorded
+  tuple is a positive claim ("nothing barred on my slice") that nothing
+  validated, and `make_solver_verdict` is public and gates mispairing on
+  semantics, ieee, constrained-assume and ledger provenance but binds the
+  escalation to its `closed` nowhere, so a scatter-free escalation stamped
+  against a scatter-bearing query returned VERIFIED where the whole-query
+  bar returned UNKNOWN (both measured, both against `8e42934` as control).
+  Neither reached a shipped verdict — both need a hand-assembled or
+  mispaired call — and both are closed by deriving the scope from the
+  query instead of reading it, with the deleted field's site left as a
+  comment saying why. One-invariant-two-mechanisms holds: WHICH
+  obligations the solver decided comes from the escalation and is already
+  load-bearing for the VERIFIED being withheld; WHAT is on their slices
+  comes from the query. Regressions in `tests/test_verified_bar.py`;
+  emitted-vs-re-derived slice agreement pinned in
+  `tests/test_bar_walk_parity.py`. 2003 tests passed, 2 skipped, with
+  both solvers and jax installed (1995 passed, 2 skipped before this
+  pass; the 8 added tests are the regressions named above).
+
 *(no releases yet)*

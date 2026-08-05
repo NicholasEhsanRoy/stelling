@@ -76,4 +76,11 @@ Two things the bar's scope does **not** cover, both easy to over-read:
   settled, withholds nothing: the emission row was never asked about it. The
   bar read the whole query until it was slice-scoped, and did withhold those,
   so a ledger entry recorded before that may name a withheld `VERIFIED` this
-  build renders.
+  build renders. The narrowing is logged as a soundness event in
+  `SOUNDNESS.md` — it moves verdicts, in the UNKNOWN → VERIFIED direction, and
+  a reader comparing an older entry to a fresh run needs that entry to know
+  which of the two builds to trust.
+- The scope is **derived from the query**, not read off the escalation: the
+  bar re-slices the decided obligations out of the `ClosedJaxpr` it was handed.
+  So a verdict assembled from a mispaired escalation cannot clear the bar, and
+  no record can assert that its own slice was clean.

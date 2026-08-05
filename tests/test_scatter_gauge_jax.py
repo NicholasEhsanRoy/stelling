@@ -788,6 +788,82 @@ def gate_set_row_agreement(subject):
         return False
 
 
+# -- gate 8: the SET row's ADMISSION, which routing cannot reach ------------
+#
+# The three fixtures above all write index 0. That is the right shape for
+# ROUTING — where does the update land — and it drives nothing about ADMISSION,
+# which is the question of whether the row may model this equation at all.
+# Measured consequence: mutating `_scatter_set_plan`'s out-of-range decline
+# into a CLIP-style clamp (the docstring calls that decline "the soundness
+# check, not a tidiness one") is a real unsoundness — jax DROPS
+# `x.at[7].set(2.0)` on a length-3 array under FILL_OR_DROP, so `s[2] - x[2]
+# >= 1.0` is FALSE, yet the clamped plan brings the obligation back
+# `discharged` — and the full suite stayed green (1995 passed) with only the
+# scatter VERIFIED bar holding the verdict at UNKNOWN. A bar is not a gauge.
+#
+# So admission gets its own gate, over the three declines that carry a
+# soundness argument in their own text: the out-of-range index, and the two
+# non-FILL_OR_DROP modes.
+
+_ADMISSION_DECLINES = (
+    ("out-of-range static index", 7, None, "is out of range"),
+    ("mode='clip'", 0, "clip", "is not FILL_OR_DROP"),
+    ("mode='promise_in_bounds'", 0, "promise_in_bounds", "is not FILL_OR_DROP"),
+)
+
+
+def _set_query(index, mode):
+    """`x.at[index].set(2.0)` posed relationally against an untouched
+    element, so the shape is the one the routing fixtures use and only
+    admission differs."""
+
+    def build():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        s = (x.at[index].set(2.0) if mode is None
+             else x.at[index].set(2.0, mode=mode))
+        return assert_(s[2] - x[2] >= 1.0)
+
+    return build
+
+
+def _set_plan_verdict(index, mode, subject):
+    """The plan's own answer for one `.set` equation: the quoted decline, or
+    the routes it admitted. Read at `_scatter_set_plan` rather than at a
+    verdict on purpose — the VERIFIED bar sits downstream of this row and
+    would mask an admission change behind an UNKNOWN it was going to return
+    anyway."""
+    with _patched(subject):
+        closed = trace(_set_query(index, mode))
+        eqn = next(e for e in closed.jaxpr.eqns if str(e.primitive) == "scatter")
+        consts = dict(zip((v.id for v in closed.jaxpr.constvars), closed.consts))
+        try:
+            return ("admitted", OB._scatter_set_plan(closed.jaxpr.eqns, consts, eqn))
+        except OB._Decline as d:
+            return ("declined", str(d))
+
+
+def gate_set_row_admission(subject):
+    """Gate 8: the static-index scatter SET row admits only what it models.
+
+    Each decline below is a soundness argument in the row's own docstring, and
+    each is checked BY ITS REASON, not merely by declining: an equation that
+    stops short for an unrelated reason is not evidence the rule is there.
+    The in-range FILL_OR_DROP case must still be admitted, or a gate that
+    declined everything would read as perfect.
+    """
+    try:
+        kind, payload = _set_plan_verdict(0, None, subject)
+        if kind != "admitted" or payload != [(2, 0), (0, 1), (0, 2)]:
+            return False  # the covered form must still route, and route right
+        for _label, index, mode, expect in _ADMISSION_DECLINES:
+            kind, payload = _set_plan_verdict(index, mode, subject)
+            if kind != "declined" or expect not in payload:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 GATES = {
     "interval-soundness": gate_interval_soundness,
     "point-box-exactness": gate_point_box_exactness,
@@ -796,6 +872,7 @@ GATES = {
     "witness-replay-validity": gate_witness_replay_validity,
     "budget-boundary": gate_budget_boundary,
     "set-row-agreement": gate_set_row_agreement,
+    "set-row-admission": gate_set_row_admission,
 }
 
 
@@ -857,6 +934,50 @@ def _set_plan_write_all(eqns, consts, eqn):
     return [(2, 0) for _ in _REAL_SET_PLAN(eqns, consts, eqn)]
 
 
+def _clamped_routes(eqns, consts, eqn):
+    """The routes a CLIP-style admission would produce for an out-of-range
+    static index: the index pulled onto the nearest in-range position."""
+    operand_shape = OB._shape_of(eqn.invars[0])
+    k = int(OB._exact_static_elements(eqns, consts, eqn.invars[1])[0])
+    k = min(max(k, 0), operand_shape[0] - 1)
+    n = OB._size(operand_shape)
+    return [(2, 0) if i == k else (0, i) for i in range(n)]
+
+
+def _set_plan_clamp_out_of_range(eqns, consts, eqn):
+    """ADMITS AN OUT-OF-RANGE STATIC INDEX BY CLAMPING IT — the one mutation
+    here that is unsound rather than merely wider, and the one the routing
+    gate cannot see.
+
+    Under FILL_OR_DROP jax DROPS the write (`jnp.array([0.,.5,1.]).at[7]
+    .set(2.0)` is measured unchanged on jax 0.11.0), so the result is the
+    operand and `s[2] - x[2] >= 1.0` is FALSE. Clamping models `mode='clip'`
+    instead, which writes at position 2, and the obligation comes back
+    `discharged`: a MISSED violation, the direction the bar exists for.
+    Everything else the real plan declines is inherited."""
+    try:
+        return _REAL_SET_PLAN(eqns, consts, eqn)
+    except OB._Decline as d:
+        if "is out of range" not in str(d):
+            raise
+        return _clamped_routes(eqns, consts, eqn)
+
+
+def _set_plan_admit_any_mode(eqns, consts, eqn):
+    """ADMITS `mode='clip'` AND `mode='promise_in_bounds'` as if they were
+    FILL_OR_DROP. Not unsound on its own — with an in-range index all three
+    modes write the same element, and the range check still stops the case
+    where CLIP and DROP diverge — so nothing downstream of the row can catch
+    it, and that is the point: an admission rule whose only defence is a
+    second admission rule has no gauge of its own."""
+    try:
+        return _REAL_SET_PLAN(eqns, consts, eqn)
+    except OB._Decline as d:
+        if "is not FILL_OR_DROP" not in str(d):
+            raise
+        return _clamped_routes(eqns, consts, eqn)
+
+
 MUTATIONS = {
     **MUTATIONS,
     "set-plan-off-by-one-position": {
@@ -878,6 +999,20 @@ MUTATIONS = {
         "__patches__": (
             (OB, "_scatter_set_plan", _set_plan_write_all),
             (SM, "_scatter_set_plan", _set_plan_write_all),
+        ),
+    },
+    "set-plan-clamps-an-out-of-range-index": {
+        **BASELINE,
+        "__patches__": (
+            (OB, "_scatter_set_plan", _set_plan_clamp_out_of_range),
+            (SM, "_scatter_set_plan", _set_plan_clamp_out_of_range),
+        ),
+    },
+    "set-plan-admits-any-scatter-mode": {
+        **BASELINE,
+        "__patches__": (
+            (OB, "_scatter_set_plan", _set_plan_admit_any_mode),
+            (SM, "_scatter_set_plan", _set_plan_admit_any_mode),
         ),
     },
     "plan-rotate-groups": {
@@ -912,13 +1047,22 @@ def test_gauge_catches_every_mutation():
                "downstream of them: interval soundness and point-box "
                "exactness on the transfer, emission agreement, unrolled "
                "equivalence, witness replay validity, and the element "
-               "budget. ALSO the static-index scatter SET row's routing "
-               "bookkeeping (_scatter_set_plan) across its three consumers "
-               "— slice validation, emission and replay — through "
-               "relational cases the interval transfer cannot settle. Does "
-               "NOT drive the SET row's interval transfer (no SET mutation "
-               "here is transfer-side), and does not drive any other "
-               "primitive's rows."),
+               "budget. ALSO the static-index scatter SET row "
+               "(_scatter_set_plan) in BOTH of its halves, which are "
+               "separately gauged because they need different fixtures: "
+               "ROUTING — where the update lands — across its three "
+               "consumers (slice validation, emission and replay) through "
+               "relational in-range cases the interval transfer cannot "
+               "settle; and ADMISSION — whether the row may model the "
+               "equation at all — over the three declines that carry a "
+               "soundness argument, the out-of-range static index and the "
+               "two non-FILL_OR_DROP modes, each checked by its quoted "
+               "reason. Does NOT drive the SET row's interval transfer (no "
+               "SET mutation here is transfer-side), does not reach the "
+               "combiner, dtype-coverage or row-form declines (they are "
+               "unmutated here, so the admission gate measures three rules "
+               "and not the whole admission surface), and does not drive "
+               "any other primitive's rows."),
     )
     render = report.render()
     print("\n" + render)
@@ -942,3 +1086,15 @@ def test_gauge_catches_every_mutation():
     for name in ("set-plan-off-by-one-position", "set-plan-drops-the-write",
                  "set-plan-writes-every-position"):
         assert "set-row-agreement" in caught[name], (name, caught[name])
+    # ADMISSION is gauged separately from routing, and the split is not
+    # cosmetic: the routing fixtures all write the in-range index 0, so
+    # every admission rule was outside what they drive. The clamp mutation
+    # is the measured unsoundness — the full suite stays green under it —
+    # and it must be the ADMISSION gate that catches it, not an accident.
+    for name in ("set-plan-clamps-an-out-of-range-index",
+                 "set-plan-admits-any-scatter-mode"):
+        assert caught[name] == ("set-row-admission",), (
+            f"{name} is caught by {caught[name]} — if the routing gates now "
+            f"see it, the admission gate is no longer the thing measuring "
+            f"admission and the scope sentence above is wrong"
+        )
