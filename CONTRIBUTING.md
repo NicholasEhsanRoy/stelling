@@ -8,6 +8,13 @@ pre-commit install
 pytest
 ```
 
+> **`[jax]` here assumes a fresh venv.** It is in this line because a
+> contributor's clean environment needs jax to run the suite. **If you are
+> installing into an environment that already has jax, drop it** — use
+> `".[solvers]" --group dev` instead. The extra exists only to bootstrap an
+> environment with no jax at all, and letting it into a resolver that is
+> already managing your jax can desync CUDA plugin wheels.
+
 ## Sign your commits
 
 Every commit must carry a `Signed-off-by` line (`git commit -s`), certifying

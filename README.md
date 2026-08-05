@@ -221,6 +221,13 @@ pre-commit install                            # SPDX headers, REUSE, import hygi
 pytest
 ```
 
+> **`[jax]` here assumes a fresh venv.** It is in this line because a
+> contributor's clean environment needs jax to run the suite. **If you are
+> installing into an environment that already has jax, drop it** — use
+> `".[solvers]" --group dev` instead. The extra exists only to bootstrap an
+> environment with no jax at all, and letting it into a resolver that is
+> already managing your jax can desync CUDA plugin wheels.
+
 Every source file carries an SPDX header (template in `.license-header.txt`);
 the pre-commit hook inserts it into new files automatically. Commits must be
 signed off (`git commit -s`) — see [CONTRIBUTING.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/CONTRIBUTING.md) and
