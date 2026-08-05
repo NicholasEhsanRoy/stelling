@@ -230,7 +230,16 @@ class Stamp:
     # that string is trend data: `stamp.coverage.split(" eqns")[0]` is
     # parsed in reproduce.py, in Verdict.render, and across the sweep
     # scripts. Additive here costs those parsers nothing.
-    top_despite_coverage: str | None = None
+    #
+    # REQUIRED like every other field, and deliberately NOT defaulted to
+    # None even though None is a legitimate value. This landed with a
+    # default and was the only defaulted field of the fourteen, which
+    # made the module docstring's "no defaults" false and let an assembly
+    # site omit it and publish a stamp that silently reads "this reading
+    # did not fire" — the same defect as the implied solver absence two
+    # doors up. Absence is recorded, never implied: a site with nothing
+    # to disclose passes None and says so.
+    top_despite_coverage: str | None
 
     def __post_init__(self) -> None:
         for f in fields(self):

@@ -735,6 +735,7 @@ def test_the_fragment_comes_off_the_stamp_and_absence_is_none():
         device_class="d", solver=solver_absent("no solver ran"),
         nonvacuity="n", transfer_tiers=(), transfer_provenance=(),
         assumptions=(), coverage="7 eqns: 7 known (100%)",
+        top_despite_coverage=None,
     )
     assert R._fragment_of(stamp) is None
     assert R._equation_count(stamp) == 7
