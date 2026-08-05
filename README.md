@@ -199,6 +199,7 @@ you actually run on. `v.render()` prints the whole stamp.
 | [The harness API](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/harness-api.md) | the import path and every primitive: `any_array`, `any_pytree`, `assert_`, `assume`, `nonvacuity`, `trace` |
 | [Reading a verdict](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reading-a-verdict.md) | the statuses, every stamp line, and the two vacuity instruments |
 | [Preconditions guide](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/preconditions.md) | ready-made obligation templates and posing guidance |
+| [Reproducing a witness](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reproducing-a-witness.md) | emit a runnable file that executes a REFUTED's witness through **your own program, with stelling uninstalled** — the one check that does not trust this tool |
 | [SOUNDNESS.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/SOUNDNESS.md) | what a verdict is permitted to claim |
 | [docs/](https://github.com/NicholasEhsanRoy/stelling/tree/main/docs/) | index, including the project-state and ledger records |
 
