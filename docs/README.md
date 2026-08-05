@@ -17,6 +17,7 @@ harness, a stamped verdict, in four files.
 | [Reading a verdict](reading-a-verdict.md) | the statuses, every stamp line, and the two vacuity instruments |
 | [Checking the preconditions your solver assumes](preconditions.md) | the task guide: ready-made obligation templates, posing guidance, reading a CI verdict |
 | [Reproducing a witness](reproducing-a-witness.md) | emitting a runnable file that executes a REFUTED's witness through your own program, without importing stelling |
+| [Norms](norms.md) | twenty-three rules, each earned by a specific failure and each naming the instances that earned it — the reasoning behind what a contribution is asked for |
 
 ## Records
 

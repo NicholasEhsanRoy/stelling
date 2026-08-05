@@ -24,13 +24,13 @@ Measured over ``README.md`` + ``docs/*.md``, and pinned by
       EXECUTED (exit 0 required)                    29
         marked run-only — output not compared        3
         OUTPUT COMPARED against a fence             26
-    plain ``` fences                                55
+    plain ``` fences                                57
       consumed as an example's claimed output       26
-      HAND-WRITTEN, compared to nothing             29
+      HAND-WRITTEN, compared to nothing             31
 
 So the claim this file earns is: *every runnable example runs, and 26 of
 the 29 have their stdout compared byte for byte after a narrow
-normalisation.* The 29 unattached fences — a render pasted into prose, a
+normalisation.* The 31 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
 
@@ -129,8 +129,8 @@ EXPECTED_INVENTORY = {
     "executed": 29,
     "run_only": 3,
     "compared": 26,
-    "plain_fences": 55,
-    "plain_unattached": 29,
+    "plain_fences": 57,
+    "plain_unattached": 31,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")
