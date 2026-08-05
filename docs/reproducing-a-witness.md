@@ -173,10 +173,17 @@ Optional, and it costs something — see the warning below. The shape is the
 same, and the target is a real simulation node imported from `maddening`
 rather than anything written for the example.
 
-> **Installing `maddening` will DOWNGRADE your jax.** It pins
+> **Installing `maddening` will DOWNGRADE your jax.** `maddening` 0.3.x pins
 > `jax>=0.4,<0.6`, and stelling is developed against 0.11. Use a separate
 > virtualenv for this example unless you want that downgrade in the
 > environment you verify from. The example above needs none of this.
+
+```bash
+pip install maddening==0.3.0
+```
+
+The pin is on `maddening`'s side and is expected to go away in its 0.4, after
+which this example needs no separate environment.
 
 <!-- doc-example: illustrative -->
 ```python
