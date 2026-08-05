@@ -1,5 +1,9 @@
 <img src="https://raw.githubusercontent.com/NicholasEhsanRoy/stelling/main/assets/stelling_logo.png" alt="the stelling wordmark: three cubes arranged as ∴, therefore, beside the name" width="100%">
 
+[![ci](https://github.com/NicholasEhsanRoy/stelling/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/NicholasEhsanRoy/stelling/actions/workflows/ci.yml)
+![python: 3.12, the version CI measures](https://img.shields.io/badge/python-3.12%20tested-blue.svg)
+[![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/NicholasEhsanRoy/stelling/blob/main/LICENSE)
+
 # Stelling
 Inspired by Kani, Stelling is an assertion-based verifier for JAX array
 programs. Today it checks stated box invariants of continuous flows by
