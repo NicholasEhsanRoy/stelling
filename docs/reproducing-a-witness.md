@@ -53,8 +53,17 @@ sidecar's `execution.detail` says which. **Read it, not the status.**
 ## A complete example you can run
 
 Everything below is here. No other package, no fixture, nothing to stand in
-for — `pip install "stelling[jax,z3]"`, two files, and the output is what it
-prints.
+for — `pip install -e ".[solvers]"` from a clone, two files, and the output
+is what it prints. A witness only exists because a solver found one, so the
+solver extra is the part you cannot skip.
+
+Install it into the environment that already has your JAX, and do **not**
+add the `[jax]` extra: this page is about checking a JAX program, so you
+have JAX already, and that extra exists only to bootstrap an environment
+with none — using it puts stelling into a resolver that is currently
+managing your JAX (and, on GPU, its plugin wheels). One backend alone will
+run this page; [choosing a solver backend](choosing-a-solver-backend.md)
+says what you give up by installing only one.
 
 <!-- doc-example: illustrative -->
 ```python

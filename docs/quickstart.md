@@ -25,6 +25,9 @@ pip install -e ".[solvers]"   # optional: adds the SMT step (never touches JAX)
 
 Stelling needs a JAX in the environment to trace a harness; it never
 installs or moves one. `python -m stelling` reports what it can see.
+`[solvers]` installs both SMT backends, which is what the escalation
+portfolio is designed around; if you are considering only one, see
+[choosing a solver backend](choosing-a-solver-backend.md).
 
 ## 1. The smallest harness that says something
 

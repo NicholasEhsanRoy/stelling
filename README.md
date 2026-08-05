@@ -100,11 +100,16 @@ extras, imported lazily on first use, so a bare install never touches the JAX
 
 | extra | installs | notes |
 |---|---|---|
-| `stelling[z3]` | `z3-solver` (MIT) | Z3 backend |
-| `stelling[cvc5]` | `cvc5` (BSD-3-Clause) | cvc5 backend, official PyPI wheels |
-| `stelling[solvers]` | both solvers | the escalation portfolio uses whichever is installed; absence just means UNKNOWNs stay UNKNOWN (`design/solver-integration-build.md`) |
+| `stelling[z3]` | `z3-solver` (MIT) | Z3 backend — the `QF_LRA` (linear) primary |
+| `stelling[cvc5]` | `cvc5` (BSD-3-Clause) | cvc5 backend, official PyPI wheels — the `QF_NRA` (polynomial) primary |
+| `stelling[solvers]` | both solvers | **the one to install.** The escalation portfolio uses whichever is installed; absence just means UNKNOWNs stay UNKNOWN (`design/solver-integration-build.md`) |
 | `stelling[jax]` | `jax` (CPU) | bootstrap **only** — never use it if jax is already installed |
 | `stelling[all]` | = `[solvers]` | deliberately excludes jax |
+
+Installing one backend rather than both does not weaken what a verdict
+claims — it removes the cross-check behind every discharge, and the verdict
+discloses that itself. Measured, in both directions:
+[docs/choosing-a-solver-backend.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/choosing-a-solver-backend.md).
 
 At runtime Stelling always uses whichever JAX is importable in your
 environment — the `[jax]` extra is bootstrap convenience plus a documented
@@ -199,6 +204,7 @@ you actually run on. `v.render()` prints the whole stamp.
 | [The harness API](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/harness-api.md) | the import path and every primitive: `any_array`, `any_pytree`, `assert_`, `assume`, `nonvacuity`, `trace` |
 | [Reading a verdict](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reading-a-verdict.md) | the statuses, every stamp line, and the two vacuity instruments |
 | [Preconditions guide](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/preconditions.md) | ready-made obligation templates and posing guidance |
+| [Choosing a solver backend](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/choosing-a-solver-backend.md) | z3, cvc5, or both — how obligations are routed, what each backend decided, and what one alone costs |
 | [Reproducing a witness](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reproducing-a-witness.md) | emit a runnable file that executes a REFUTED's witness through **your own program, with stelling uninstalled** — the one check that does not trust this tool |
 | [SOUNDNESS.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/SOUNDNESS.md) | what a verdict is permitted to claim |
 | [docs/](https://github.com/NicholasEhsanRoy/stelling/tree/main/docs/) | index, including the project-state and ledger records |
