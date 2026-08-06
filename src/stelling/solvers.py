@@ -1812,14 +1812,33 @@ def make_solver_verdict(
     #     returned VERIFIED with no withheld note on the bar's own fixture.
     #     Ordering cannot see that: the domain really was read first.
     #
-    # Materialising once closes both, and it closes them by making a degenerate
-    # `records` behave EXACTLY like the tuple it yields rather than by choosing
-    # which pass wins. Ordering is kept below as a second, now-REDUNDANT
-    # mechanism — if this line were ever removed, reading the domain first
-    # still costs the discharges rather than the bar, which is the safer of
-    # the two failures. That redundancy is stated because a mutation of the
-    # ordering ALONE is now inert, and an unpinned guard whose comment claims
-    # to be load-bearing is this repo's own recurring defect.
+    # Materialising once makes every later pass see ONE value, so nothing
+    # downstream can disagree with anything else about what the records are.
+    #
+    # IT DOES NOT MAKE A DEGENERATE `records` BEHAVE LIKE "THE TUPLE IT
+    # YIELDS", AND THE VERSION OF THIS SENTENCE THAT SAID SO — "rather than by
+    # choosing which pass wins" — WAS FALSE. One pass at the top IS choosing
+    # pass 1. For a one-shot `records` that happens to be the right choice,
+    # because pass 1 is where the real records are. For a TWO-FACED one it is
+    # the wrong one, and measured on `3e107cf` the misattribution the second
+    # bullet above is about survives in exactly that shape:
+    #
+    #     scatter-free query, `records` empty on pass 1 and real after:
+    #         VERIFIED -> UNKNOWN, obligation `unknown`, and the note is
+    #         the generic undecided-cause line blaming an interval straddle
+    #
+    # which is the defect `SOUNDNESS.md` (2) recorded as closed. It was closed
+    # for the ONE-SHOT shape only.
+    #
+    # SO THE SHAPE IS REFUSED RATHER THAN ABSORBED, one gate below: an
+    # escalation whose LEDGER records solver work and whose `records` came back
+    # empty is not a coherent escalation, and `escalate()` cannot produce one.
+    # Ordering is kept below as a second, now-REDUNDANT mechanism — if this
+    # line were ever removed, reading the domain first still costs the
+    # discharges rather than the bar, which is the safer of the two failures.
+    # That redundancy is stated because a mutation of the ordering ALONE is now
+    # inert (measured: 0 RED), and an unpinned guard whose comment claims to be
+    # load-bearing is this repo's own recurring defect.
     escalation = replace(escalation, records=tuple(escalation.records))
 
     # -- the provenance gate (runs before anything else, unconditionally)
@@ -1827,6 +1846,44 @@ def make_solver_verdict(
     stamped = sum(1 for s in ledger_stamps if s.invoked)
     if escalation.ledger.spawns != stamped:
         raise ProvenanceError(escalation.ledger.spawns, stamped, ledger_stamps)
+
+    # -- THE DEGENERATE-`records` GATE, and it is the ledger that catches it.
+    # One pass fixes WHICH value the assembly sees; it cannot make a wrong
+    # value right. The ledger is a separate field, carried whole, and it is an
+    # independent witness of whether any solver ran: `spawns` is incremented at
+    # the transport-entry boundary and the stamps are appended there. An
+    # escalation that says solvers ran and hands over no record of what they
+    # answered is internally inconsistent, and `escalate()` never builds one —
+    # every spawn belongs to an obligation, and every obligation reaching a
+    # backend gets a record.
+    #
+    # Refusing is the point. Absorbing it produced an UNKNOWN carrying a WRONG
+    # EXPLANATION (the interval-straddle note) on a query whose honest verdict
+    # is VERIFIED — worse than silence, because a reader believes it.
+    #
+    # WHAT IT DOES NOT REACH, stated rather than left to be found: a `records`
+    # whose first pass yields a non-empty STRICT SUBSET. The ledger says work
+    # happened and some record exists, so this gate passes, and the obligations
+    # whose records were dropped come back `unknown` with the same generic
+    # note. Comparing the ledger's invoked stamps against the invocations the
+    # records carry would reach it and would also refuse
+    # `test_stripping_invocations_cannot_clear_the_bar`'s fixture, which is a
+    # deliberate probe of a DIFFERENT invariant; that trade is not taken here.
+    if (escalation.ledger.spawns or ledger_stamps) and not escalation.records:
+        raise MispairedEscalationError(
+            f"incoherent escalation: the ledger records "
+            f"{escalation.ledger.spawns} spawn(s) and {len(ledger_stamps)} "
+            f"stamp(s), so solvers ran, but the supplied `records` came back "
+            f"EMPTY — no obligation outcome at all. `escalate()` cannot "
+            f"produce that (every spawn belongs to an obligation, and every "
+            f"obligation that reaches a backend gets a record), so `records` "
+            f"is a container that does not yield what it holds: a generator, "
+            f"a consumed iterator, or an iterable that answers differently on "
+            f"different passes. Assembling anyway returns UNKNOWN with the "
+            f"generic undecided-cause note, which attributes the verdict to "
+            f"the propagation rather than to the argument that caused it; "
+            f"refusing to emit. Pass the records as a materialised sequence."
+        )
 
     # -- THE QUERY PAIRING GATE. Recomputed from `closed`, never copied, and
     # taken ONCE for the whole function: the stamp's `query_content_hash`
@@ -1971,22 +2028,28 @@ def make_solver_verdict(
             f"escalation was actually produced from."
         )
 
-    # THE BAR'S DOMAIN IS READ BEFORE ANY OTHER PASS OVER `records`, AND THE
-    # ORDER IS LOAD-BEARING. It used to be read at the bar, several passes
-    # later, and a `records` that can only be iterated ONCE — a generator, a
-    # `map`, a consumed iterator — was therefore fully consumed by `by_index`
-    # below before `_bar_domain` ever saw it. `_bar_domain` then returned an
-    # HONEST-EMPTY `{}`, which is the one value that silences the bar (empty
-    # means "no solver decided anything"), and the assembly returned VERIFIED
-    # with no withheld note. Measured, and identical at `eb1ff86`: a one-shot
-    # `records` cleared the scatter bar on the bar's own fixture. The sentinel
-    # could not help — the read SUCCEEDED, it just ran second.
+    # THE BAR'S DOMAIN IS READ BEFORE ANY OTHER PASS OVER `records`, AND THAT
+    # ORDER IS NO LONGER LOAD-BEARING. It used to be read at the bar, several
+    # passes later, and a `records` that can only be iterated ONCE — a
+    # generator, a `map`, a consumed iterator — was therefore fully consumed by
+    # `by_index` below before `_bar_domain` ever saw it. `_bar_domain` then
+    # returned an HONEST-EMPTY `{}`, which is the one value that silences the
+    # bar (empty means "no solver decided anything"), and the assembly returned
+    # VERIFIED with no withheld note. Measured, and identical at `eb1ff86`: a
+    # one-shot `records` cleared the scatter bar on the bar's own fixture. The
+    # sentinel could not help — the read SUCCEEDED, it just ran second.
     #
-    # Reading it FIRST makes that shape fail safe instead: the domain is built
-    # from the one pass there is, and every later pass sees nothing — so no
-    # record discharges any obligation, and there is no VERIFIED left to
-    # withhold. A degenerate `records` now costs the verdict, never the bar.
-    # See `tests/test_verified_bar.py::test_a_ONE_SHOT_records_cannot_silence_the_bar`.
+    # THE SENTENCE THAT STOOD HERE — "AND THE ORDER IS LOAD-BEARING" — WAS
+    # FALSE AS SOON AS `records` WAS MATERIALISED AT THE TOP, and it
+    # contradicted the comment at that materialisation, which already called
+    # the ordering "a second, now-REDUNDANT mechanism". Measured: moving this
+    # line below `by_index` is 0 RED across the whole suite. With one pass
+    # there is one value, so no ordering of the readers can show them different
+    # things — which is exactly why the top comment also says that an unpinned
+    # guard whose comment claims to be load-bearing is this repo's own
+    # recurring defect. The order is kept as the safer arrangement if the
+    # materialisation is ever removed, and it is described as what it is.
+    # See `tests/test_verified_bar.py::test_a_ONE_SHOT_records_behaves_EXACTLY_LIKE_THE_TUPLE_it_yields`.
     decided = _bar_domain(escalation)
     by_index = {r.index: r for r in escalation.records}
     final: list[ObligationReport] = []

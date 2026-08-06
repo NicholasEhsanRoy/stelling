@@ -859,6 +859,20 @@ _SET_MAX_N = 8  # the SET row is rank-1 only (rank >= 2 declines; measured)
 _ADD_MAX_DIM = 3
 _ADD_MAX_RANK = 3
 _ADD_MAX_SIZE = 12  # keeps the sweep's trace count, and its seconds, bounded
+# THE SIXTH INSTANCE OF THE SAME PATTERN, on the axis the three bounds above
+# do not touch: the INDEX COLUMN. A census of `len(ks)` at the ADD row across
+# the whole suite, by instrumentation, at `e35de13` and `3e107cf` alike, finds
+# {1, 2, 3, 4, 6, 254, 255} — 5 absent, and everything in 7..253 absent. The
+# corruption that lived in that hole is `(j if len(ks) - 5 else 0)`, one line,
+# line-neutral, on operand shape (2,) which the bounds above admit: |ks| = 5
+# went `violated-witness` -> `discharged` with the full suite green.
+_ADD_MAX_COLUMN = 6
+# ... and the one-element operand, where every index is forced to 0 and rowsz
+# is 1, so there is exactly ONE column per length and the length is the only
+# free parameter. That is why it can be exhausted this far, and it has to be:
+# `gate_budget_boundary` reaches the row at 254 and 255 on shape (1,), and the
+# census says nothing else in this repo reaches it above 6.
+_ADD_MAX_SINGLE_SEGMENT = 255
 
 
 def _set_space():
@@ -867,19 +881,63 @@ def _set_space():
     return [(n, k) for n in range(1, _SET_MAX_N + 1) for k in range(n)]
 
 
-def _add_space():
-    """Every (operand shape, written index) the accumulate row admits, over
-    shapes of rank 1..`_ADD_MAX_RANK` with dims in 1..`_ADD_MAX_DIM` and at
-    most `_ADD_MAX_SIZE` elements."""
+def _add_shapes():
+    """Every operand shape the accumulate row admits: rank 1..`_ADD_MAX_RANK`,
+    dims in 1..`_ADD_MAX_DIM`, at most `_ADD_MAX_SIZE` elements. A RULE."""
     import itertools
 
-    shapes = [
+    return [
         shape
         for rank in range(1, _ADD_MAX_RANK + 1)
         for shape in itertools.product(range(1, _ADD_MAX_DIM + 1), repeat=rank)
         if math.prod(shape) <= _ADD_MAX_SIZE
     ]
-    return [(shape, k) for shape in shapes for k in range(shape[0])]
+
+
+def _add_space():
+    """Every (operand shape, written index) the accumulate row admits, over
+    shapes of rank 1..`_ADD_MAX_RANK` with dims in 1..`_ADD_MAX_DIM` and at
+    most `_ADD_MAX_SIZE` elements."""
+    return [(shape, k) for shape in _add_shapes() for k in range(shape[0])]
+
+
+def _add_column_space():
+    """Every (operand shape, INDEX COLUMN) the accumulate row admits with a
+    column of more than one element: exhaustive over `range(n)` to the power of
+    the length, for lengths 1..`_ADD_MAX_COLUMN`, over the RANK-1 gauged
+    shapes. A RULE — the whole product space, not the columns someone thought
+    of, because the corruption this bound exists for was keyed on `len(ks)`
+    alone and lived at a length nothing reached.
+
+    RANK 1, and that is an ADMISSION bound as well as a sweep bound. The space
+    is `n ** length`, so exhausting it over every gauged shape is 12510 traces
+    and 80 seconds measured, against 3 for this. What makes the trade
+    defensible rather than convenient is the census: every |ks| > 1 that
+    reaches the row anywhere in the suite is on a rank-1 operand, and the row
+    now DECLINES a multi-index column above rank 1 rather than running
+    ungauged on it."""
+    import itertools
+
+    return [
+        (shape, list(ks))
+        for shape in _add_shapes()
+        if len(shape) == 1
+        for length in range(1, _ADD_MAX_COLUMN + 1)
+        for ks in itertools.product(range(shape[0]), repeat=length)
+    ]
+
+
+def _add_single_segment_space():
+    """Every (operand shape, index column) of the SINGLE-ELEMENT family: the
+    gauged shapes with one element, at every length up to
+    `_ADD_MAX_SINGLE_SEGMENT`. Every index is forced to 0 and `rowsz` is 1, so
+    the length is the only free parameter and `range(n) ** length` is a single
+    point — which is why this one can be exhausted this far."""
+    return [
+        (shape, [0] * length)
+        for shape in _add_shapes() if math.prod(shape) == 1
+        for length in range(1, _ADD_MAX_SINGLE_SEGMENT + 1)
+    ]
 
 
 def test_the_set_plans_k_is_the_programs_k_over_the_whole_AXIS_SPACE():
@@ -1116,6 +1174,194 @@ def _add_plan_for(shape):
         return ("declined", str(d))
 
 
+def _add_plan_for_column(shape, ks):
+    """`_scatter_add_plan`'s answer for a `segment_sum` accumulating `len(ks)`
+    update rows onto `shape` under the static index column `ks`: the groups, or
+    the quoted decline.
+
+    The segment_sum posture rather than `x.at[jnp.array([...])].add(...)`
+    deliberately — the array-index `.at[].add` form declines, and the
+    segment_sum one is the census contact (see the battery above)."""
+    def build():
+        x = any_array(shape, "float64", (0.0, 1.0))
+        u = any_array((len(ks),) + shape[1:], "float64", (2.0, 3.0))
+        s = jax.ops.segment_sum(
+            u, jnp.asarray(np.array(ks, dtype=np.int32)),
+            num_segments=shape[0]) + x
+        return assert_(s.reshape(-1)[0] >= -1e9)
+
+    closed = trace(build)
+    eqn = next(e for e in closed.jaxpr.eqns
+               if str(e.primitive) == "scatter-add")
+    consts = dict(zip((v.id for v in closed.jaxpr.constvars), closed.consts))
+    try:
+        return ("admitted", OB._scatter_add_plan(closed.jaxpr.eqns, consts, eqn))
+    except OB._Decline as d:
+        return ("declined", str(d))
+
+
+def _segment_sum_groups(shape, columns):
+    """THE ORACLE for a whole batch of index columns: jax's own `segment_sum`
+    run on updates that are distinct powers of two, so each output element's
+    value is the SUM of its addends and therefore names the set of them
+    uniquely.
+
+    `int64` rather than `float64` because the column sweep reaches 54 addends
+    (`rowsz` 9 at length 6) and `float64` stops distinguishing them at 53.
+
+    BATCHED with `vmap` over the columns, and that is a cost decision with a
+    number behind it: called once per column, the eager dispatch cost is 4 ms
+    and the sweep spends 52 s in it. Batched, one compilation per (shape,
+    length) covers every column of that group. The computation jax performs is
+    the same one either way — this is not a second implementation of the
+    accumulation, which is the whole point of using jax as the oracle."""
+    length = len(columns[0])
+    rowsz = math.prod(shape[1:])
+    total = length * rowsz
+    uv = jnp.asarray(np.array([2 ** j for j in range(total)],
+                              dtype=np.int64).reshape((length,) + shape[1:]))
+    ids = jnp.asarray(np.array(columns, dtype=np.int32))
+    out = np.asarray(jax.vmap(
+        lambda i: jax.ops.segment_sum(uv, i, num_segments=shape[0])
+    )(ids)).reshape(len(columns), -1)
+    return [
+        [sorted(j for j in range(total) if int(v) >> j & 1) for v in row]
+        for row in out
+    ]
+
+
+def test_the_add_plans_groups_are_the_programs_groups_over_the_COLUMN_SPACE():
+    """THE AXIS THE SHAPE BOUNDS DO NOT TOUCH, gauged as a SPACE.
+
+    `test_the_add_plans_rows_are_the_programs_rows_over_the_SHAPE_SPACE`
+    exhausts the operand shape and every written index — at an index column of
+    ONE. `_scatter_add_plan`'s loop runs over the column, so `len(ks)` and the
+    column's contents were the one axis of the row arithmetic that no sweep
+    varied. Its own comment said so and left it there, which is naming a
+    residual rather than closing it.
+
+    Then it was demonstrated. A census of `len(ks)` at the row across the whole
+    suite reaches `{1, 2, 3, 4, 6, 254, 255}`; one line, line-neutral —
+    `groups[k * rowsz + t].append((j if len(ks) - 5 else 0) * rowsz + t)` — on
+    operand shape (2,), which the shape bounds admit, turned a
+    `violated-witness` into `discharged` at |ks| = 5 and nowhere else, with the
+    full suite green.
+
+    So the column is a SPACE now, exhausted rather than sampled: every column
+    in `range(shape[0]) ** length` for every length up to `_ADD_MAX_COLUMN`,
+    over every gauged shape, against jax's own accumulation. Past that the row
+    DECLINES (`test_nothing_outside_the_swept_space_reaches_either_row`), so
+    the arithmetic cannot execute on a column nothing measured.
+
+    NON-DEGENERACY, on the two axes a column has: the space must reach every
+    length up to the bound (a sweep collapsed to length 1 is the state this
+    test replaced), and it must contain columns with DUPLICATE indices —
+    duplicates are the primitive's defining semantic, and a space of
+    permutations only would never put two updates in one group.
+    """
+    space = _add_column_space()
+    lengths = {len(ks) for _shape, ks in space}
+    assert lengths == set(range(1, _ADD_MAX_COLUMN + 1)), (
+        f"the swept column lengths are {sorted(lengths)}; the space is no "
+        f"longer the rule's, and the corruption this bound exists for was "
+        f"keyed on the length alone"
+    )
+    assert any(len(set(ks)) < len(ks) for _shape, ks in space), (
+        "no column in the space repeats an index, so no group ever receives "
+        "two addends — the space cannot see the accumulate semantics at all"
+    )
+    assert {shape for shape, _ks in space} == {
+        shape for shape in _add_shapes() if len(shape) == 1
+    }, "the column space no longer covers every rank-1 gauged shape"
+    assert {len(shape) for shape, _ks in space} == {1}, (
+        "the column space now reaches above rank 1. That is admissible only "
+        "if admission follows it — the row DECLINES a multi-index column above "
+        "rank 1, and the two must move together"
+    )
+
+    grouped: dict = {}
+    for shape, ks in space:
+        grouped.setdefault((shape, len(ks)), []).append(ks)
+    for (shape, _length), columns in grouped.items():
+        rowsz = math.prod(shape[1:])
+        for ks, observed in zip(columns, _segment_sum_groups(shape, columns)):
+            kind, groups = _add_plan_for_column(shape, ks)
+            assert kind == "admitted", (
+                f"{shape} column {ks}: the ADD row no longer admits its own "
+                f"gauged column space ({groups})"
+            )
+            assert sum(len(g) for g in observed) == len(ks) * rowsz, (
+                f"{shape} column {ks}: the oracle recovered "
+                f"{sum(len(g) for g in observed)} addend(s) where the program "
+                f"supplies {len(ks) * rowsz} — the sentinel values no longer "
+                f"identify their source"
+            )
+            assert [sorted(g) for g in groups] == observed, (
+                f"{shape} column {ks}: `_scatter_add_plan` groups {groups} "
+                f"where jax accumulates {observed}. Every consumer of the plan "
+                f"— slice validation, emission, replay — then models an "
+                f"accumulation the program did not perform"
+            )
+
+
+def test_the_single_segment_column_is_gauged_at_EVERY_length_it_admits():
+    """THE OTHER GAUGED COLUMN FAMILY, and the reason it can be exhausted this
+    far while the general one stops at six.
+
+    On a ONE-ELEMENT operand every index is forced to 0 and `rowsz` is 1, so
+    there is exactly one admissible column per length: the length is the only
+    free parameter, and `range(shape[0]) ** length` is a single point. That is
+    the family `gate_budget_boundary` rides on — 2n + 3 element terms, n = 254
+    slicing at 511 <= 512 and n = 255 declining at 513 — and the `len(ks)`
+    census says it is the only thing in this repo reaching the row above six.
+
+    It is swept rather than assumed BECAUSE the corruption is keyed on the
+    length: `(j if len(ks) - 5 else 0)` collapses every addend onto update 0
+    here exactly as it does on shape (2,), and the shape being degenerate does
+    not make the length degenerate.
+
+    TWO COMPARISONS, and the split is a cost decision with a number behind it.
+    At EVERY length the plan is compared against an expectation written here —
+    a second statement of the routing, independent of `_scatter_add_plan`'s.
+    That expectation is then compared against JAX'S OWN accumulation at the
+    lengths below, rather than at all 255: `segment_sum` is a different SHAPE
+    at every length, so jax compiles once per length, and running the oracle
+    across the whole range costs 51 s (measured) against 1.5 s for the sweep
+    itself. The oracle lengths are a rule rather than a handful — both ends,
+    both sides of the element budget's own boundary (254 slices at 511 <= 512
+    element terms, 255 declines at 513), and a decade in between — and the
+    quantity compared is the SUM the plan predicts, because powers of two stop
+    being distinguishable in float64 long before 255.
+    """
+    space = _add_single_segment_space()
+    assert {len(ks) for _shape, ks in space} == set(
+        range(1, _ADD_MAX_SINGLE_SEGMENT + 1)
+    ), "the swept lengths are no longer every length up to the bound"
+    for shape, ks in space:
+        kind, groups = _add_plan_for_column(shape, ks)
+        assert kind == "admitted", (
+            f"{shape} length {len(ks)}: the ADD row no longer admits the "
+            f"single-segment column space it is gauged over ({groups})"
+        )
+        assert groups == [list(range(len(ks)))], (
+            f"{shape} length {len(ks)}: the plan groups {groups}, so it does "
+            f"not accumulate every update onto the one output element the "
+            f"program has"
+        )
+    for length in (1, 2, 3, 10, 100, 253, 254, _ADD_MAX_SINGLE_SEGMENT):
+        _kind, groups = _add_plan_for_column((1,), [0] * length)
+        addends = np.arange(1.0, length + 1.0, dtype=np.float64)
+        actual = float(np.asarray(jax.ops.segment_sum(
+            jnp.asarray(addends),
+            jnp.zeros(length, np.int32), num_segments=1))[0])
+        predicted = float(sum(addends[j] for j in groups[0]))
+        assert predicted == actual, (
+            f"length {length}: the plan predicts the one output element is "
+            f"{predicted} where jax computes {actual} — the row is modelling "
+            f"an accumulation the program does not perform"
+        )
+
+
 def test_nothing_outside_the_swept_space_reaches_either_row():
     """GUARD THE BOUND — the answer that is NOT "raise the bound".
 
@@ -1147,12 +1393,14 @@ def test_nothing_outside_the_swept_space_reaches_either_row():
     vacuous. The in-space half below is what stops that, and the two sweeps
     themselves would go red if it were violated.
 
-    WHAT IT DOES NOT BOUND, stated because an unstated scope is this repo's
-    own recurring defect: the ADD row's INDEX COLUMN LENGTH. `_add_space`
-    sweeps one written index; `jax.ops.segment_sum` reaches a column of 4 on
-    an operand these bounds admit, and that axis is gauged by the segment-sum
-    mutation battery — a battery, not an exhaustive sweep. Nothing here
-    narrows admission to it.
+    THE INDEX COLUMN IS BOUNDED HERE TOO NOW, and the paragraph that used to
+    end this docstring is why: it named the column as the axis nothing bounded,
+    and naming a residual is not closing one. The census of `len(ks)` at the
+    row — `{1, 2, 3, 4, 6, 254, 255}` across the whole suite, at `e35de13` and
+    `3e107cf` alike — is the demonstration, and `(j if len(ks) - 5 else 0)` is
+    the corruption that lived in the hole at 5. The admitted column space is
+    now the union of the two exhaustively swept families and nothing else:
+    `_add_column_space()` and the single-segment lengths.
     """
     # the two spaces are ONE space, not two numbers that happen to agree
     assert OB._SET_ROW_GAUGED_MAX_LEN == _SET_MAX_N, (
@@ -1166,6 +1414,16 @@ def test_nothing_outside_the_swept_space_reaches_either_row():
         f"the ADD row admits rank/dim/size "
         f"{(OB._ADD_ROW_GAUGED_MAX_RANK, OB._ADD_ROW_GAUGED_MAX_DIM, OB._ADD_ROW_GAUGED_MAX_SIZE)} "
         f"while this file sweeps {(_ADD_MAX_RANK, _ADD_MAX_DIM, _ADD_MAX_SIZE)}"
+    )
+    assert (OB._ADD_ROW_GAUGED_MAX_COLUMN,
+            OB._ADD_ROW_GAUGED_MAX_SINGLE_SEGMENT) == (
+        _ADD_MAX_COLUMN, _ADD_MAX_SINGLE_SEGMENT), (
+        f"the ADD row admits index columns of "
+        f"{(OB._ADD_ROW_GAUGED_MAX_COLUMN, OB._ADD_ROW_GAUGED_MAX_SINGLE_SEGMENT)} "
+        f"while this file sweeps "
+        f"{(_ADD_MAX_COLUMN, _ADD_MAX_SINGLE_SEGMENT)}. Whichever moved, the "
+        f"other must: the gap between them is exactly where the |ks| = 5 "
+        f"corruption lived"
     )
 
     # IN the space: still admitted, and still routed. Without this half a row
@@ -1202,10 +1460,39 @@ def test_nothing_outside_the_swept_space_reaches_either_row():
             f"green through the whole suite in both columns"
         )
 
+    # THE INDEX COLUMN, both sides. In space: the longest general column and
+    # the longest single-segment one are still admitted (without this, a guard
+    # that declined everything would read as perfect). Out of space: one step
+    # past each bound and one far past it.
+    for shape, ks in (((3,), [0, 1, 2, 0, 1, 2]),
+                      ((1,), [0] * _ADD_MAX_SINGLE_SEGMENT)):
+        kind, payload = _add_plan_for_column(shape, ks)
+        assert kind == "admitted", (
+            f"{shape} column of {len(ks)}: the ADD row no longer admits the "
+            f"longest column its own sweep gauges ({payload})"
+        )
+    for shape, length in (((2,), _ADD_MAX_COLUMN + 1),
+                          ((2,), _ADD_MAX_COLUMN + 2),
+                          ((2,), 64),
+                          ((3,), _ADD_MAX_COLUMN + 1),
+                          ((2, 2), 2),  # rank 2, a column of two: ungauged
+                          ((1, 2), 2),
+                          ((3, 2), 3),
+                          ((1,), _ADD_MAX_SINGLE_SEGMENT + 1)):
+        kind, payload = _add_plan_for_column(shape, [0] * length)
+        assert kind == "declined" and "outside the GAUGED" in payload, (
+            f"{shape} column of {length}: the ADD row {kind} an index column "
+            f"nothing gauges ({payload}). A line-neutral mis-route wrong ONLY "
+            f"at |ks| = 5 was measured green through the whole suite, and the "
+            f"census says nothing in this repo reaches the row between 7 and "
+            f"253 — which is exactly why nothing would notice"
+        )
+
     # ... and the shapes just outside really are outside, so the two loops
     # above are not both testing the same side of the boundary
     assert (9,) not in {shape for shape, _ in _add_space()}
     assert 9 not in {n for n, _ in _set_space()}
+    assert _ADD_MAX_COLUMN + 1 not in {len(ks) for _s, ks in _add_column_space()}
 
 
 def test_a_shape_past_the_gauge_costs_the_ANSWER_and_never_the_SOUNDNESS():
@@ -1913,9 +2200,20 @@ def test_the_admission_gate_accounts_for_every_decline_site():
     the denominator silently, and a reader has no way to notice.
 
     So the denominator is counted from the function's own source, and the
-    numerator from `_ADMISSION_DECLINES` (five fixtures over four rules —
-    `clip` and `promise_in_bounds` are two spellings of the mode rule, which
-    is why fixtures are not rules and the two numbers are stated separately).
+    numerator from `_ADMISSION_DECLINES` — fixtures are not rules (`clip` and
+    `promise_in_bounds` are two spellings of the mode rule), which is why the
+    two counts differ and are asserted separately below.
+
+    THE COUNTS ARE NOT RESTATED IN THIS SENTENCE ANY MORE, and that is the
+    repair rather than a tidy-up. The version of it that stood here said "five
+    fixtures over four rules" while the assertion forty-six lines below
+    required six over five: the pass that moved the census updated the table,
+    the scope sentence and both assertions, and missed this one — **a stale
+    false sentence inside the test whose stated purpose is to stop exactly that
+    drift**. Prose that repeats a number is a copy of it, and copies drift. So
+    the numbers live in the assertions, and the number-words that DO remain in
+    this file's census prose are checked against the derived counts by
+    `test_the_censuss_own_prose_agrees_with_the_counts_it_describes`.
 
     COUNTED FROM THE PARSE TREE, NOT FROM THE SPELLING. The first version of
     this test counted `re.findall(r"raise _Decline\\(")` over the source — a
@@ -1964,3 +2262,97 @@ def test_the_admission_gate_accounts_for_every_decline_site():
         f"over {len(reasons)} distinct decline reason(s); the scope sentence "
         f"says six over five"
     )
+
+
+_NUMBER_WORDS = {
+    1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
+    7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven",
+    12: "twelve", 13: "thirteen",
+}
+
+# The census sentences, as PATTERNS over this file's own source: each is a
+# phrase that spells a count in words, with the quantity each capture group
+# must spell. ANCHORED on the whole sentence rather than on the noun, and that
+# is not fussiness — `(\w+) fixtures` alone also matches "THE THREE FIXTURES
+# ABOVE" (routing, not admission) and "that was three FIXTURES over two rules"
+# (a statement about a PREDECESSOR, deliberately frozen). A scan that flagged
+# those would be noise, and noise is how a check gets deleted.
+_CENSUS_PHRASES = (
+    (r"(\w+) of the (\w+) rules are driven, by (\w+) fixtures",
+     ("rules", "sites", "fixtures")),
+    (r"with (\w+) fixtures \(two spellings of the mode rule\)",
+     ("fixtures",)),
+    (r"the admission gate drives (\w+) of (\w+) decline sites",
+     ("rules", "sites")),
+)
+
+
+def test_the_censuss_own_prose_agrees_with_the_counts_it_describes():
+    """THE DRIFT ITSELF, PINNED — because it has now happened twice.
+
+    `test_the_admission_gate_accounts_for_every_decline_site` derives its two
+    numerators and its denominator and asserts them. What it could not do is
+    notice that its OWN docstring, and the census table above
+    `_ADMISSION_DECLINES`, and the scope sentence inside
+    `test_gauge_catches_every_mutation`, all restate those numbers in words —
+    four places for three quantities, updated by hand. The pass that moved the
+    census from five fixtures to six updated three of the four.
+
+    So the words are read out of this file's source and checked against the
+    derived counts. A number spelled in the prose is a claim, and this is the
+    same discipline the file already applies to the row it gauges: derive it,
+    or hold it shut.
+
+    NOT A SPELL-CHECK: only the anchored census phrases are read. "five" means
+    other things in this file, and a scan that flagged all of them would be
+    noise, which is how a check gets deleted.
+    """
+    import ast
+    import inspect
+    import re
+    import textwrap
+    from pathlib import Path
+
+    text = Path(__file__).read_text(encoding="utf-8").lower()
+    src = inspect.getsource(OB._scatter_set_plan)
+    expected = {
+        "fixtures": len(_ADMISSION_DECLINES),
+        "rules": len({e for _label, _build, e in _ADMISSION_DECLINES}),
+        "sites": len([n for n in ast.walk(ast.parse(textwrap.dedent(src)))
+                      if isinstance(n, ast.Raise)]),
+    }
+    def offences(body):
+        found, hits = [], {key: 0 for key in expected}
+        for pattern, kinds in _CENSUS_PHRASES:
+            matches = list(re.finditer(pattern, body))
+            if not matches:
+                found.append(f"no sentence matches {pattern!r}")
+            for match in matches:
+                for word, which in zip(match.groups(), kinds):
+                    hits[which] += 1
+                    if word != _NUMBER_WORDS[expected[which]]:
+                        found.append(
+                            f"{word!r} {which} where the counts derive "
+                            f"{_NUMBER_WORDS[expected[which]]!r} "
+                            f"({expected[which]}), in \"{match.group(0)}\"")
+        found += [f"no phrase reads the {k} count" for k, v in hits.items()
+                  if not v]
+        return found
+
+    assert not offences(text), (
+        "the census prose disagrees with the counts it describes: "
+        + "; ".join(offences(text))
+        + ". A restated number is a copy, and this is the copy drifting — the "
+        "same defect this file's own count test exists to stop, one level up"
+    )
+    # ... and it is not vacuous. The drift this exists for is one word in one
+    # sentence, so that is what is injected: every census phrase, perturbed by
+    # one number-word, must be caught. A check that only fires when a sentence
+    # DISAPPEARS would have missed the sentence that actually went stale.
+    for wrong, right in ((_NUMBER_WORDS[n], _NUMBER_WORDS[expected[k]])
+                         for k in expected
+                         for n in (expected[k] + 1, expected[k] - 1)):
+        assert offences(text.replace(right, wrong)), (
+            f"perturbing the census prose from {right!r} to {wrong!r} is not "
+            f"caught; this check does not read the sentences it claims to"
+        )

@@ -2709,46 +2709,110 @@ def test_a_ONE_SHOT_records_behaves_EXACTLY_LIKE_THE_TUPLE_it_yields(
     )
 
 
-def test_a_TWO_FACED_records_cannot_show_the_bar_one_thing_and_the_loop_ANOTHER():
-    """THE SHAPE ORDERING CANNOT REACH, and the reason the repair is a single
-    pass rather than a pass order.
+@pytest.mark.parametrize("build,honest", [
+    (_scatter_ON_the_decided_slice, "UNKNOWN"),
+    (_scatter_free, "VERIFIED"),
+])
+def test_a_TWO_FACED_records_is_REFUSED_and_not_absorbed(build, honest):
+    """THE SHAPE ORDERING CANNOT REACH — AND THE ONE ONE PASS DID NOT CLOSE
+    EITHER, WHICH IS WHY THIS IS A REFUSAL NOW.
 
     Reading the bar's domain FIRST is a defence against a `records` that runs
     OUT. It is no defence at all against one that CHANGES: an iterable that
     yields nothing on its first pass and the real records on every later one
     shows the bar an honest-empty domain — the one value that skips it — and
     the obligation loop a full set of discharging records. The domain really
-    was read first; it was just read from a different value.
+    was read first; it was just read from a different value. Measured on
+    `e35de13`: VERIFIED, every obligation discharged, no withheld note, on the
+    bar's own fixture.
 
-    Measured on `e35de13`: VERIFIED, every obligation discharged, no withheld
-    note, on the bar's own fixture. With one pass there is one value, so the
-    face the assembly sees is the face the bar sees, whichever it is.
+    ONE PASS CLOSED THAT ONE AND NOT THE OTHER, AND THE COMMENT SAID
+    OTHERWISE. `make_solver_verdict` materialising `records` at the top makes
+    every reader see one value, so the bar and the discharges cannot be told
+    different things. But one pass at the top IS choosing pass 1, and for a
+    two-faced `records` pass 1 is the empty face. Measured on `3e107cf`:
+
+        scatter-free query, `records` empty on pass 1 and real after
+            -> VERIFIED becomes UNKNOWN, obligation `unknown`, carrying
+               "…the propagated interval straddling the asserted bound"
+
+    which is VERBATIM the defect `SOUNDNESS.md` (2) recorded the one-pass
+    repair as closing. It closed it for the ONE-SHOT shape, where pass 1 is
+    where the real records are. The scatter-free arm is parametrised here
+    because it is the row that separates the two: the bar never fires on it, so
+    nothing about the bar is at stake and the whole of what is measured is
+    whether the verdict is honest about why it is UNKNOWN.
+
+    So the shape is REFUSED. The ledger is a separate field carried whole and
+    is an independent witness that solvers ran; an escalation that says they
+    ran and hands over no record of what they answered cannot have come from
+    `escalate()`. Refusing beats absorbing, because absorbing produced a wrong
+    EXPLANATION rather than silence.
+
+    Could-not-fail: replacing an assertion with an expected exception is where
+    shape #3 lives (asserting away the trigger), so the ORIGINAL defect is
+    asserted harder rather than dropped — the refusal is checked to be THIS
+    gate by its own words, the honest assembly is checked to still produce its
+    honest verdict, and the fixture is checked to really carry ledger work,
+    without which the gate would not fire and this would measure nothing.
+    """
+    import dataclasses
+
+    import pytest as _pytest
+
+    from stelling.solvers import MispairedEscalationError, make_solver_verdict
+
+    closed, prop, esc = _stamped(build)
+    real = tuple(esc.records)
+    assert make_solver_verdict(closed, prop, esc, **VERSIONS).status == honest, (
+        f"the genuine assembly is not {honest}; the fixture is wrong and the "
+        f"comparison below measures nothing"
+    )
+    assert esc.ledger.spawns and real, (
+        "the fixture carries no ledger work or no records, so the coherence "
+        "gate below could not fire and this test passes vacuously"
+    )
+
+    two_faced = _TwoFaced((), real)
+    with _pytest.raises(MispairedEscalationError) as exc:
+        make_solver_verdict(
+            closed, prop, dataclasses.replace(esc, records=two_faced),
+            **VERSIONS)
+    assert two_faced.passes >= 1, "the fixture was never iterated at all"
+    assert "incoherent escalation" in str(exc.value) and (
+        "came back" in str(exc.value)
+    ), (
+        f"the assembly refused, but not through the coherence gate: "
+        f"{exc.value}. Some other guard is firing, and the shape this test is "
+        f"about would come back if that guard moved"
+    )
+
+
+def test_a_degenerate_records_with_NO_ledger_work_is_still_assembled():
+    """THE SCOPE OF THE COHERENCE GATE, so it is not read as "empty `records`
+    is refused".
+
+    The nothing-to-escalate shape — no records, no spawns, no stamps — is a
+    legitimate escalation and every other gate in `make_solver_verdict` exempts
+    it explicitly. The coherence gate keys on the LEDGER saying solvers ran, so
+    it must not touch that shape: an interval-only propagation assembled
+    against an empty escalation still returns its honest verdict.
+
+    Without this, the gate would be a rule about `records` being empty rather
+    than about the escalation contradicting itself, and the exemption every
+    neighbouring gate carries would be silently gone.
     """
     import dataclasses
 
     from stelling.solvers import make_solver_verdict
 
-    closed, prop, esc = _stamped(_scatter_ON_the_decided_slice)
-    real = tuple(esc.records)
-    assert make_solver_verdict(closed, prop, esc, **VERSIONS).status == (
-        "UNKNOWN"
-    ), "the genuine assembly does not bar; the fixture is wrong"
-
-    two_faced = _TwoFaced((), real)
-    v = make_solver_verdict(
-        closed, prop, dataclasses.replace(esc, records=two_faced), **VERSIONS)
-    assert two_faced.passes >= 1, "the fixture was never iterated at all"
-    assert v.status != "VERIFIED", (
-        f"{v.status}: a `records` that showed the bar nothing and the "
-        f"obligation loop everything minted a VERIFIED. The assembly is "
-        f"reading `records` more than once, so the bar and the discharges "
-        f"can be told different things about the same run"
-    )
-    assert not any(o.status == "discharged" and o.index == 0
-                   for o in v.obligations), (
-        "the solver-decided obligation discharged off records the bar's "
-        "domain never saw"
-    )
+    closed, prop, esc = _stamped(_scatter_free)
+    empty = dataclasses.replace(
+        esc, records=(), notes=(),
+        ledger=dataclasses.replace(esc.ledger, spawns=0, stamps=()))
+    v = make_solver_verdict(closed, prop, empty, **VERSIONS)
+    assert v.status in ("VERIFIED", "UNKNOWN"), v.status
+    assert not any("incoherent" in n for n in v.notes)
 
 
 @pytest.mark.parametrize("build,strip,label", [
