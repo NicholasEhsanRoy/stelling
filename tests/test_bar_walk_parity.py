@@ -214,11 +214,18 @@ def test_the_docstring_premises_this_module_argues_from():
         full suite stops with 30 collection errors and runs nothing at all.
       * `"scatter" in obligation._SUPPORTED` and `"cond" not in
         obligation._SUPPORTED` — the same census, emission side, raised from
-        the test's own import statement. Even withdrawing `scatter`
-        CONSISTENTLY (from `_SUPPORTED`, `_INT_SAFE_EMITTED` and
-        `_REPLAY_SUPPORTED` together, which keeps every import-time census
-        total and is the only version that gets as far as running) leaves it
-        one of 14 failures in this file, behind 13 that name the mechanism.
+        the test's own import statement. Withdrawing `scatter` from
+        `_SUPPORTED`, `_INT_SAFE_EMITTED` and `_REPLAY_SUPPORTED` together
+        does NOT get as far as running either, and an earlier version of this
+        paragraph said it was "the only version that does": those three keep
+        the int-semantics and replay censuses total, and a FOURTH census —
+        `obligation._assert_emission_classification_censused`, called at
+        import — then refuses the `_INT_SAFE_EMITTED_REASONS` entry for
+        `scatter` as a stale claim ("a stale reason is a soundness claim
+        about nothing"). Withdrawing that fourth registry too does import,
+        and leaves 3 failures in this file, every one of them naming the
+        mechanism (the slice-root parity pair and the emitted-vs-re-derived
+        agreement, on the `scatter set slice` shape). Measured on this build.
 
     An assertion whose falsification is already a louder failure somewhere
     else is not a check; it is a restatement. So the memberships are gone and

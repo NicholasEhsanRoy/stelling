@@ -761,11 +761,50 @@ def _set_untouched_equals_operand():
     return assert_(s[1] - x[1] <= 0.0)
 
 
+def _set_written_at_a_NONZERO_index():
+    """FALSE, and the only fixture here whose answer depends on WHICH index
+    was written rather than on whether anything was.
+
+    ``s = x.at[2].set(u)`` with the update's box [2, 3] a clear distance above
+    the operand's [0, 1]: element 1 is untouched, so ``s[1] - x[1]`` is
+    exactly 0 and never ≥ 1. The claim is FALSE, and a route computed
+    RELATIVE to k — one element before it, say — hands element 1 the update
+    and brings it back `discharged`.
+
+    THE THREE FIXTURES ABOVE CANNOT SEE THAT, AND THE REASON IS ARITHMETIC.
+    They all write k = 0, where every route defined as an offset from k is
+    either out of range or clamped back onto 0 itself. Measured, on the
+    line-neutral corruption ``i == k`` -> ``i == (k - 1 if k > 0 else k)`` in
+    `_scatter_set_plan`, applied to `45cf526` before this fixture existed:
+    ``s = x.at[2].set(u); assert s[1] - x[1] >= 1.0`` went from
+    `violated-witness` to `discharged` — a missed violation, the direction
+    the bar exists for — while the whole scatter/bar screen (the seven
+    `test_scatter*`, `test_verified_bar` and `test_bar_walk_parity` files)
+    stayed green at 80 passed, and the FULL suite under CI's install set
+    stayed green at 2004 passed, 6 skipped. Two tests caught it, both
+    `pytest.importorskip("maddening")`-gated, and CI installs `".[solvers]"`
+    and `".[solvers,jax]"` — never maddening. With this fixture the same
+    corruption is 1 failed, 2007 passed, 6 skipped with no maddening
+    installed.
+    """
+    x = any_array((3,), "float64", (0.0, 1.0))
+    u = any_array((), "float64", (2.0, 3.0))
+    s = x.at[2].set(u)
+    return assert_(s[1] - x[1] >= 1.0)
+
+
 def gate_set_row_agreement(subject):
     """Gate 7: the static-index scatter SET row routes each output element to
-    the right source. Three relational cases whose hand answers depend on
-    exactly that: two FALSE claims whose refutation requires the write to
+    the right source. Four relational cases whose hand answers depend on
+    exactly that: three FALSE claims whose refutation requires the write to
     have landed where it did, and one TRUE claim about an untouched element.
+
+    THE FOURTH WRITES A NONZERO INDEX, and it is not a fourth of the same
+    thing. A fixture set that only ever writes k = 0 gauges "did the update
+    land where the plan said" but not "is the plan's k the program's k",
+    because every mis-route defined relative to k collapses at k = 0. See
+    `_set_written_at_a_NONZERO_index`, and the mutation
+    `set-plan-writes-one-before-the-index` that only it catches.
 
     Posed relationally on purpose — a point-decisive ``.set`` case is settled
     by the interval transfer, which these mutations do not touch, so it would
@@ -776,6 +815,10 @@ def gate_set_row_agreement(subject):
         ):
             return False
         if _set_row_records(_set_untouched_moved_by_one, subject) != (
+            "violated-witness",
+        ):
+            return False
+        if _set_row_records(_set_written_at_a_NONZERO_index, subject) != (
             "violated-witness",
         ):
             return False
@@ -790,9 +833,18 @@ def gate_set_row_agreement(subject):
 
 # -- gate 8: the SET row's ADMISSION, which routing cannot reach ------------
 #
-# The three fixtures above all write index 0. That is the right shape for
-# ROUTING — where does the update land — and it drives nothing about ADMISSION,
-# which is the question of whether the row may model this equation at all.
+# Three of the four fixtures above write index 0, and the fourth exists
+# because that is NOT by itself the right shape for routing. A predecessor of
+# this comment said it was — "the three fixtures above all write index 0, that
+# is the right shape for ROUTING" — and that was measurably false in its own
+# terms: at k = 0 every route defined as an offset from k lands back on 0 or
+# out of range, so the corruption `i == k` -> `i == (k - 1 if k > 0 else k)`
+# is invisible to all three while turning a `violated-witness` into a
+# `discharged` at k = 2. The fourth fixture writes k = 2 for exactly that.
+#
+# What the index-0 fixtures genuinely do not drive is ADMISSION, which is the
+# question of whether the row may model this equation at all — a different
+# question from where the update lands, and the one this gate is for.
 # Measured consequence: mutating `_scatter_set_plan`'s out-of-range decline
 # into a CLIP-style clamp (the docstring calls that decline "the soundness
 # check, not a tidiness one") is a real unsoundness — jax DROPS
@@ -1022,6 +1074,26 @@ def _set_plan_off_by_one(eqns, consts, eqn):
     return [(2, 0) if i == k else (0, i) for i in range(n)]
 
 
+def _set_plan_write_one_before_the_index(eqns, consts, eqn):
+    """WRITES ONE ELEMENT BEFORE THE INDEX, AND WRITES k ITSELF WHEN k IS 0 —
+    the mutation the index-0 routing fixtures cannot see.
+
+    The plan-layer form of the line-neutral source corruption
+    ``[(2, 0) if i == k else (0, i) ...]`` ->
+    ``[(2, 0) if i == (k - 1 if k > 0 else k) else (0, i) ...]``. It differs
+    from `_set_plan_off_by_one` in exactly the way that matters here: that one
+    moves the write for EVERY k, including 0, so the existing fixtures catch
+    it; this one is the identity at k = 0 and wrong everywhere else."""
+    routes = _REAL_SET_PLAN(eqns, consts, eqn)
+    n = len(routes)
+    written = [i for i, (op, _src) in enumerate(routes) if op == 2]
+    if not written:
+        return routes
+    k = written[0]
+    k = k - 1 if k > 0 else k
+    return [(2, 0) if i == k else (0, i) for i in range(n)]
+
+
 def _set_plan_drop_write(eqns, consts, eqn):
     """WRITES NOTHING: every output element aliases the operand, i.e. the
     result of a DROPPED out-of-range update applied to an in-range one."""
@@ -1128,6 +1200,13 @@ MUTATIONS = {
             (SM, "_scatter_set_plan", _set_plan_off_by_one),
         ),
     },
+    "set-plan-writes-one-before-the-index": {
+        **BASELINE,
+        "__patches__": (
+            (OB, "_scatter_set_plan", _set_plan_write_one_before_the_index),
+            (SM, "_scatter_set_plan", _set_plan_write_one_before_the_index),
+        ),
+    },
     "set-plan-drops-the-write": {
         **BASELINE,
         "__patches__": (
@@ -1207,9 +1286,12 @@ def test_gauge_catches_every_mutation():
                "separately gauged because they need different fixtures: "
                "ROUTING — where the update lands — across its three "
                "consumers (slice validation, emission and replay) through "
-               "relational in-range cases the interval transfer cannot "
-               "settle; and ADMISSION — whether the row may model the "
-               "equation at all. `_scatter_set_plan` has TEN `raise "
+               "FOUR relational in-range cases the interval transfer cannot "
+               "settle, three writing index 0 and one writing index 2 "
+               "(index 0 alone cannot see a mis-route defined relative to "
+               "the written index, because every offset from 0 collapses "
+               "onto 0 or out of range); and ADMISSION — whether the row "
+               "may model the equation at all. `_scatter_set_plan` has TEN `raise "
                "_Decline` sites and the admission gate drives FOUR of them, "
                "with five fixtures (two spellings of the mode rule), each "
                "checked by its quoted reason: the index dtype's coverage of "
@@ -1245,10 +1327,27 @@ def test_gauge_catches_every_mutation():
     assert caught["operand-dropped-from-the-emitted-sum"]
     # the SET row — the row the VERIFIED bar exists for — has a gauge now,
     # and the gate that catches its mutations is the SET-row gate rather
-    # than an accumulate gate that happened to notice
+    # than an accumulate gate that happened to notice. Asserted as the EXACT
+    # catcher set, not as membership: the admission gate opens by requiring
+    # the covered in-range form to come back `admitted` AND routed to
+    # [(2,0),(0,1),(0,2)], and deleting that second half is invisible to a
+    # membership assertion — the routing gate still catches these three, so
+    # the screen stays green while the admission gate quietly stops checking
+    # that the form it admits is the form the program wrote.
     for name in ("set-plan-off-by-one-position", "set-plan-drops-the-write",
                  "set-plan-writes-every-position"):
-        assert "set-row-agreement" in caught[name], (name, caught[name])
+        assert caught[name] == ("set-row-agreement", "set-row-admission"), (
+            f"{name} is caught by {caught[name]}. The admission gate's own "
+            f"anti-vacuity clause — the covered form must still route, and "
+            f"route RIGHT — is what makes it see a mis-routed plan; if it no "
+            f"longer does, that clause is gone"
+        )
+    # ... and the one that is invisible at k = 0, which ONLY the nonzero-index
+    # routing fixture can see. Exact, for the same reason: if the admission
+    # gate starts catching it the fixture has stopped being what measures it.
+    assert caught["set-plan-writes-one-before-the-index"] == (
+        "set-row-agreement",
+    ), caught["set-plan-writes-one-before-the-index"]
     # ADMISSION is gauged separately from routing, and the split is not
     # cosmetic: the routing fixtures all write the in-range index 0, so
     # every admission rule was outside what they drive. The clamp mutation
@@ -1277,13 +1376,41 @@ def test_the_admission_gate_accounts_for_every_decline_site():
     numerator from `_ADMISSION_DECLINES` (five fixtures over four rules —
     `clip` and `promise_in_bounds` are two spellings of the mode rule, which
     is why fixtures are not rules and the two numbers are stated separately).
+
+    COUNTED FROM THE PARSE TREE, NOT FROM THE SPELLING. The first version of
+    this test counted `re.findall(r"raise _Decline\\(")` over the source — a
+    denominator that a local alias walks straight past (`_D = _Decline;
+    raise _D(...)` adds a site the regex does not see, which is the same
+    silent-drift defect one level up). What is counted here is `ast.Raise`
+    nodes in the function body, which no spelling of the exception can hide
+    from. That count is only the DECLINE count if every raise in this function
+    is a decline, so that is checked too, by resolving each raised name in the
+    module — and a name it cannot resolve to `_Decline` fails LOUDLY rather
+    than being counted or skipped.
     """
+    import ast
     import inspect
-    import re
+    import textwrap
 
     src = inspect.getsource(OB._scatter_set_plan)
-    body = src[src.index('"""', src.index('"""') + 3):]  # past the docstring
-    sites = len(re.findall(r"raise _Decline\(", body))
+    tree = ast.parse(textwrap.dedent(src))
+    raises = [n for n in ast.walk(tree) if isinstance(n, ast.Raise)]
+    for node in raises:
+        exc = node.exc
+        name = None
+        if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name):
+            name = exc.func.id
+        elif isinstance(exc, ast.Name):
+            name = exc.id
+        assert name is not None and getattr(OB, name, None) is OB._Decline, (
+            f"`_scatter_set_plan` raises something this count cannot resolve "
+            f"to `_Decline` (line {node.lineno} of the function, raising "
+            f"{name!r}). Either it is not a decline — in which case the "
+            f"denominator below is no longer the decline-site count — or it "
+            f"is spelled through a binding this test cannot follow. Resolve "
+            f"it deliberately; do not let the count drift"
+        )
+    sites = len(raises)
     assert sites == 10, (
         f"`_scatter_set_plan` now has {sites} decline sites, not 10. The "
         f"admission gate's scope sentence in test_gauge_catches_every_"

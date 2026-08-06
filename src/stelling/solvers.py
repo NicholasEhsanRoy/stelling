@@ -1537,24 +1537,37 @@ def make_solver_verdict(
 
     That is a contract, not a hole to be plugged, and the reason is that
     plugging it would defend nothing. :class:`stelling.verdict.Verdict`
-    is public, exported in ``verdict.__all__``, and a plain frozen
-    dataclass; a hand-built ``Verdict(status="VERIFIED", …)`` with a
-    fabricated :class:`Stamp` constructs and reports ``VERIFIED`` without
-    passing through this function at all. Anyone able to forge a record
-    can forge the verdict more cheaply, so hardening here buys no
-    guarantee and would only make the weaker door look like the only one.
+    is public, exported in ``verdict.__all__``, and a frozen dataclass
+    whose ``__post_init__`` validates SHAPE and not PROVENANCE — it
+    refuses an unknown status and a stamp/DECLINED mismatch, and asks
+    nothing about where the numbers came from (so does
+    :class:`stelling.verdict.Stamp`'s). A hand-built
+    ``Verdict(status="VERIFIED", …)`` with a fabricated :class:`Stamp`
+    therefore constructs and reports ``VERIFIED`` without passing through
+    this function at all. Anyone able to forge a record can forge the
+    verdict more cheaply, so hardening here buys no guarantee and would
+    only make the weaker door look like the only one.
     **What the gates and the bar protect is an HONEST caller against an
     accidentally mispaired assembly, not this process against its own
     caller.** Consumers needing the stronger property should judge
     through :func:`stelling.preconditions.check`, which owns both sides.
 
-    The scatter VERIFIED bar below rests on exactly this precondition,
-    and only for its DOMAIN: WHICH obligations the solver decided is read
-    off ``escalation.records`` (the same ``outcome == OB_DISCHARGED`` test
+    The scatter VERIFIED bar below rests on this precondition for its
+    DOMAIN: WHICH obligations the solver decided is read off
+    ``escalation.records`` (the same ``outcome == OB_DISCHARGED`` test
     that discharges them), while WHAT is barred on their slices is
-    re-derived from ``closed``. So a wrong ``closed`` widens the bar (the
-    re-slice declines and it falls back to the whole query) and a
-    fabricated record set is already a fabricated verdict.
+    re-derived from ``closed``. **A wrong ``closed`` widens the bar, and
+    the reason is measured rather than assumed.** An earlier version of
+    this paragraph said it widened because the re-slice would decline;
+    it does not decline — an obligation index that exists in the wrong
+    query slices out of it perfectly well. What actually distinguishes
+    the two is the evidence: every recorded invocation carries
+    ``smt2_sha256``, the hash of the exact script that was sent, and
+    :func:`stelling.verdict._evidence_is_about` narrows the bar for an
+    obligation only when re-emitting the slice re-derived from THIS
+    ``closed`` reproduces that hash. A mispaired query re-emits a
+    different script, matches nothing, and gets the whole-query bar. A
+    fabricated record set is, as above, already a fabricated verdict.
 
     ``refinement`` (default None — byte-identical assembly) is the
     :class:`stelling.affine.RefinementReport` of an affine refinement
@@ -1776,9 +1789,15 @@ def make_solver_verdict(
     # THE INDEX SET IS DELIBERATELY A SUPERSET OF WHAT WAS DISCHARGED HERE, and
     # that direction is the safe one. The loop above applies a record only to an
     # obligation that is still `unknown`; this set takes every OB_DISCHARGED
-    # record's index, including one that matched nothing. `_bar_scope` re-slices
-    # by index out of `closed` and falls back to the whole query when an index
-    # does not slice, so a stray index widens the bar and never narrows it.
+    # record's index, including one that matched nothing. A stray index widens
+    # the bar and never narrows it -- but NOT, as a predecessor of this comment
+    # claimed, because it "does not slice". Measured on the bar's own fixture:
+    # index 1 names an obligation INTERVALS decided and slices to
+    # `['broadcast_in_dim','ge','scatter']`; index -1 is Python indexing and
+    # slices the LAST obligation; only index 99 declines. What widens the bar
+    # for all three is that none of them carries a solver invocation whose
+    # recorded script hash re-emits from the obligation it names -- see
+    # `verdict._evidence_is_about`.
     #
     # AND THE SCOPE IS THE DECIDED OBLIGATION'S SLICE, NOT THE WHOLE QUERY.
     # Same argument one level finer. A query can carry `scatter` on an
@@ -1789,24 +1808,26 @@ def make_solver_verdict(
     # slice `['sub','ge']`, the scatter on a different, interval-decided
     # obligation) and returned UNKNOWN.
     #
-    # ONLY THE INDICES COME FROM HERE. `_bar_scope` re-derives what is on
+    # NO BARRED PRIMITIVE COMES FROM HERE. `_bar_scope` re-derives what is on
     # those obligations' slices out of `closed` itself; this function hands it
-    # nothing but the numbers of the obligations the solver decided, and the
-    # numbers are already load-bearing for the VERIFIED being withheld (a
-    # record whose index matches no unknown obligation leaves that obligation
-    # undischarged, so there is no VERIFIED to bar). No barred PRIMITIVE is
-    # read off a record -- the scope's CONTENTS come from `closed` alone. Its
-    # DOMAIN is these indices, and that is a surface, not an immunity: see
-    # `verdict._bar_scope`, the deleted `barred_on_slice` field for what
-    # reading the contents cost, and this function's docstring for the
-    # precondition the domain rests on.
-    decided = (
-        ()
-        if escalation is None
-        else tuple(
-            r.index for r in escalation.records if r.outcome == OB_DISCHARGED
-        )
-    )
+    # the numbers of the obligations the solver decided -- already load-bearing
+    # for the VERIFIED being withheld, since a record whose index matches no
+    # unknown obligation leaves that obligation undischarged and there is no
+    # VERIFIED to bar -- together with the INVOCATION STAMPS those records
+    # carry, which is what lets the bar check that the escalation is evidence
+    # about this query at all rather than about some other one of the same
+    # shape. The stamps are handed over for the WIDENING decision only: no
+    # stamps means no narrowing, so `invocations` cannot clear the bar, and the
+    # domain itself is still `outcome == OB_DISCHARGED` alone -- the same
+    # predicate that discharges, which is the drift this pass will not
+    # reintroduce. See `verdict._bar_scope` and `verdict._evidence_is_about`,
+    # the deleted `barred_on_slice` field for what reading the contents cost,
+    # and this function's docstring for the precondition the domain rests on.
+    decided: dict[int, tuple[SolverStamp, ...]] = {}
+    if escalation is not None:
+        for r in escalation.records:
+            if r.outcome == OB_DISCHARGED:
+                decided[r.index] = decided.get(r.index, ()) + r.invocations
     if status == "VERIFIED" and decided:
         barred, scope = _verdict._bar_scope(closed, decided)
         if barred:

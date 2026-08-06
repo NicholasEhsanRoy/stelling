@@ -567,7 +567,20 @@ def _approx(exact: str) -> str:
 # Both are closed by deriving instead of reading: `_bar_scope` re-slices the
 # decided obligations out of `closed` itself, through the SAME
 # `slice_obligation` call `escalate` sliced them with, so there is no field
-# to forge and a mispaired `closed` bars exactly as the whole-query bar did.
+# to forge.
+#
+# DERIVING FIXED THE CONTENTS AND NOT THE PAIRING, AND THE FIRST REPAIR SAID
+# OTHERWISE. It claimed a mispaired `closed` "bars exactly as the whole-query
+# bar did", on the reasoning that a mispaired index would not slice. Measured
+# false, on two scatter-bearing queries of the SAME SHAPE — one with the
+# scatter on the solver-decided obligation, one with it on an interval-decided
+# one: the first's escalation stamped against the second re-sliced cleanly to
+# `['ge','sub']`, found nothing, and returned VERIFIED where `8e42934`
+# returned UNKNOWN. An index is not evidence about a query. So the narrowing
+# is now earned per obligation by `_evidence_is_about`: the recorded
+# invocation's `smt2_sha256` must re-emit from the slice re-derived out of
+# THIS `closed`, and every other outcome — including every stray index —
+# widens to the whole query.
 # The two inputs stay anti-correlated — WHICH obligations the solver decided
 # comes from the escalation (and is already load-bearing for VERIFIED itself:
 # an index that does not match an unknown obligation leaves it undischarged
@@ -728,10 +741,79 @@ def _bar_scope_phrase(per_obligation) -> str:
     )
 
 
+def _evidence_is_about(sliced, invocations) -> bool:
+    """Is this obligation's SOLVER EVIDENCE evidence about THIS slice?
+
+    The narrowing's whole content is "the emission row was not consulted about
+    the obligations the solver decided", and that is a statement about the
+    RUN the escalation came from, not about ``closed``. Re-slicing ``closed``
+    answers it only if the two are the same query, so the pairing has to be
+    MEASURED rather than assumed — and it can be, without a new field and
+    without trusting anything a record says about itself:
+
+    every solver invocation stamps ``smt2_sha256``, the sha256 of the exact
+    SMT-LIB2 text that was sent (:meth:`stelling.smt.Script.stamp_options`).
+    Emission is a pure function of the slice, the solver flavour and the
+    timeout — so re-emitting the slice we just re-derived out of ``closed``,
+    with the flavour and timeout the stamp itself records, reproduces that
+    hash EXACTLY when the slice is the one the solver answered about, and does
+    not otherwise. Measured on the mispairing this exists for: the same
+    escalation, re-emitted against its own query, matches for both portfolio
+    members; re-emitted against a different scatter-bearing query of the same
+    shape, neither matches.
+
+    THE POLARITY IS THE POINT, AND IT IS WHY THIS IS NOT THE DELETED
+    `barred_on_slice` FIELD COMING BACK. A record cannot use this to CLEAR the
+    bar — a missing stamp, a missing hash, an unrecognised option profile, an
+    emission that raises, and a hash that does not match all return False, and
+    False WIDENS the bar to the whole query. The only way past it is to carry
+    the hash of a script that re-emits, byte for byte, from the query being
+    stamped; and if it does re-emit byte for byte then the emission row's
+    involvement in that answer is exactly what the re-derived slice says it is,
+    which is the case that distinguishes this from its neighbour rather than
+    the one that confirms it.
+
+    ``invocations`` is read here and NOT in the bar's domain, deliberately:
+    the domain is `outcome == OB_DISCHARGED`, the same predicate that
+    discharges (see :func:`stelling.solvers.make_solver_verdict`). A record
+    that gives up its ``invocations`` keeps its discharge, stays in the domain,
+    and loses its narrowing — the drift that made those two different concepts
+    ran the other way.
+    """
+    from stelling.smt import emit
+
+    for stamp in invocations or ():
+        if not getattr(stamp, "invoked", False) or not stamp.name:
+            continue
+        options = dict(stamp.options or ())
+        recorded = options.get("smt2_sha256")
+        # `stamp.name` is used as the emission FLAVOUR: every backend
+        # `stelling.solvers` builds sets `name == flavor` (z3 wheel, cvc5
+        # wheel, cvc5 external binary — the label is what differs), and one
+        # that did not would raise out of `emit`'s option profile and land in
+        # the `continue` below, which widens.
+        #
+        # The timeout is part of the emitted text, so it is part of the hash.
+        # `stelling.smt._options` spells it `:timeout` for z3 and `:tlimit`
+        # for cvc5; a profile spelling it some third way is not recognised
+        # here and therefore does not narrow the bar.
+        timeout = options.get(":timeout") or options.get(":tlimit")
+        if not recorded or not timeout:
+            continue
+        try:
+            script = emit(sliced, stamp.name, int(timeout))
+        except Exception:  # noqa: BLE001 — an unemittable re-derivation is
+            continue  # not evidence of anything, so it does not narrow
+        if script.sha256 == recorded:
+            return True
+    return False
+
+
 def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
     """THE BAR'S SCOPE FOR ONE VERDICT: ``(barred primitives in scope, the
     clause naming where they are)``, derived from ``closed`` alone plus the
-    obligation INDICES the solver decided.
+    obligations the solver decided — ``decided`` maps each such obligation's
+    INDEX to the invocation stamps its record carries.
 
     Never reads a barred primitive off the escalation, and the block comment
     above says what that bought — a recorded scope is a positive claim nothing
@@ -742,58 +824,97 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
     query's own obligations produce.
 
     ITS DOMAIN IS STILL SUPPLIED, AND THAT IS A PRECONDITION RATHER THAN AN
-    IMMUNITY. ``decided`` comes from the caller — in practice from
+    IMMUNITY. The index set comes from the caller — in practice from
     `make_solver_verdict` reading `outcome == OB_DISCHARGED` off the
     escalation's records, the same test that discharges those obligations —
-    and an obligation absent from it is simply not asked about. An earlier
-    wording here said re-slicing had "neither exposure" full stop; that
-    over-read this function's reach. What is true is narrower and worth
-    stating exactly: no field a record can carry names a barred primitive, so
-    the CONTENTS cannot be forged; the DOMAIN rests on
-    `make_solver_verdict`'s documented precondition that its escalation came
-    from `escalate()` on the same query, and a caller who can violate that can
-    hand-build a `Verdict` and skip this function entirely.
+    and an obligation absent from it is simply not asked about. No field a
+    record can carry names a barred primitive, so the CONTENTS cannot be
+    forged; the DOMAIN rests on `make_solver_verdict`'s documented
+    precondition that its escalation came from `escalate()` on the same query,
+    and a caller who can violate that can hand-build a `Verdict` and skip this
+    function entirely.
 
-    The domain fails safe in the direction that matters most. A stray index
-    (one matching no unknown obligation) does not slice, so the derivation
-    drops to the whole-query set; an EMPTY domain is the one case that
-    silences the bar, and it is empty exactly when no record discharged
+    NARROWING IS EARNED PER OBLIGATION, BY :func:`_evidence_is_about`. A
+    re-derived slice narrows the bar only when the recorded invocation's
+    ``smt2_sha256`` re-emits from it. Everything else — no stamps, no hash, an
+    unrecognised option profile, a slice that declines, an exception anywhere —
+    returns the whole-query set. That is the repair for a measured regression,
+    not a hardening: the predecessor of this function narrowed on the INDEX
+    alone, so an escalation produced on one scatter-bearing query and stamped
+    against another of the same shape re-sliced cleanly, found nothing, and
+    returned VERIFIED where the whole-query bar at `8e42934` returned UNKNOWN.
+
+    WHAT A "STRAY INDEX" ACTUALLY DOES — three behaviours, not one, and an
+    earlier wording here claimed the third for all of them ("a stray index
+    does not slice, so the derivation drops to the whole-query set"):
+
+    * an index matching an obligation INTERVALS already decided SLICES
+      perfectly well and contributes its own barred set (measured:
+      `slice_obligation(closed, 1, env)` on the bar's own fixture returns
+      `['broadcast_in_dim', 'ge', 'scatter']`). It is not in the domain
+      because it was not solver-decided, not because it fails to slice;
+    * a NEGATIVE index is Python indexing all the way down: `-1` slices the
+      LAST obligation and would render "the emitted slice of assert #-1";
+    * only an index matching no top-level assert equation at all (`99`)
+      declines — "obligation #99 has no matching top-level stelling_assert
+      equation" — and that is the case the sentence was true of.
+
+    All three end at the whole-query set now, and by the evidence check rather
+    than by the slicer: none of them carries an invocation whose script
+    re-emits from the obligation it names. An EMPTY domain is the one case
+    that silences the bar, and it is empty exactly when no record discharged
     anything — in which case there is no solver-decided VERIFIED to withhold.
 
-    FAILS CLOSED, ALWAYS TOWARD THE WIDER BAR. A decline, a missing
-    obligation, or any exception on the re-derivation drops to the whole-query
-    set rather than to silence — including the case where ``closed`` is not
-    the query the indices came from, which is exactly how that mispairing is
-    caught.
+    FAILS CLOSED, ALWAYS TOWARD THE WIDER BAR: every path that is not a
+    slice-plus-matching-hash returns the whole-query set rather than silence.
     """
     whole = _barred_primitives(closed)
     if not whole:
         # nothing barred anywhere in the query, so nothing on any slice of it
         return (), ""
-    fallback = (
-        whole,
-        "the traced query contains "
-        + ", ".join(whole)
-        + " (the decided obligations' emitted slices could not be re-derived, "
-        "so the bar fell back to the whole query)",
-    )
+
+    def fallback(why: str) -> tuple[tuple[str, ...], str]:
+        return (
+            whole,
+            "the traced query contains "
+            + ", ".join(whole)
+            + f" ({why}, so the bar fell back to the whole query)",
+        )
+
     try:
         from stelling.obligation import DeclinedObligation, slice_obligation
         from stelling.propagate import interval_env
 
+        # a mapping is the contract; anything else lands in the except below
+        # and widens, which is the direction a misread domain must fail in
+        domain = dict(decided)
         env = interval_env(closed)
         per: dict[int, tuple[str, ...]] = {}
-        for index in sorted(set(decided)):
+        for index in sorted(domain):
             sliced = slice_obligation(closed, index, env)
             if isinstance(sliced, DeclinedObligation):
-                # the solver decided it, so it sliced; if it does not slice
-                # HERE, `closed` is not the query it was decided on
-                return fallback
+                return fallback(
+                    f"the decided obligation #{index} does not slice out of "
+                    f"the query being stamped"
+                )
+            if not _evidence_is_about(sliced, domain[index]):
+                # the slice re-derived fine; what is missing is any evidence
+                # that the solver was ever asked THIS question. Narrowing on
+                # it would be narrowing on an index, which is how a mispaired
+                # `closed` cleared this bar.
+                return fallback(
+                    f"no recorded solver invocation for the decided "
+                    f"obligation #{index} re-emits from this query's slice "
+                    f"of it, so the escalation is not evidence about this "
+                    f"query"
+                )
             found = _barred_in_eqns(sliced.eqns)
             if found:
                 per[index] = found
     except Exception:  # noqa: BLE001 — a bar must never break a verdict, and
-        return fallback  # it must never go quiet either
+        return fallback(  # it must never go quiet either
+            "the decided obligations' emitted slices could not be re-derived"
+        )
     return (
         tuple(sorted({p for found in per.values() for p in found})),
         _bar_scope_phrase(per),

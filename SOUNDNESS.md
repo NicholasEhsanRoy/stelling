@@ -765,12 +765,27 @@ verdicts:
   `make_solver_verdict` does not attempt one. Its docstring now states
   the precondition instead — the escalation must be what `escalate()`
   returned for this query — because `stelling.verdict.Verdict` is public
-  and a plain frozen dataclass, so a caller able to hand-build a record
-  can hand-build the verdict and never call this function at all. The
+  and a frozen dataclass whose `__post_init__` validates shape and not
+  provenance, so a caller able to hand-build a record can hand-build the
+  verdict and never call this function at all. The
   narrower true statement, and the one the mechanism supports: the bar's
   scope CONTENTS are re-derived from the query and unforgeable, and its
   DOMAIN cannot disagree with the discharge about the same record.
-  2008 tests passed, 2 skipped, with both solvers and jax installed
+  **Affected versions:** 0.1.0 pre-release only, and the drifted predicate
+  never existed outside a branch — it was introduced with the slice
+  scoping and lived only in the intermediate branch-only states between
+  the scoping commit and this repair (`caac1ee`, inclusive, up to but not
+  including `45cf526`). No tagged build, and no build reachable from
+  `main`, ever carried it.
+  **What to re-run: nothing.** Stated rather than omitted, because the
+  policy requires the clause and "nothing" is an answer to it. Every
+  assembly the drift could move needs a hand-edited
+  `ObligationEscalation`, no such record can come out of `escalate()`,
+  and the suite is byte-identical across the change — so there is no
+  recorded verdict whose value depends on which side of it the build was
+  on.
+  At that pass: 2008 tests passed, 2 skipped, with both solvers and jax
+  installed
   (1995 passed, 2 skipped before the scoping pass, 2003 after it; the 8
   tests it added are the regressions named above, and the repair pass
   adds 5 more — the strip-invocations regression in both shapes, the
@@ -781,5 +796,93 @@ verdicts:
   memberships could not be falsified without an import-time census
   raise, so they are replaced by the reach count the same commit let go
   stale).
+
+- **2026-08-06 (pre-release): the narrowed scatter bar was NOT immune to a
+  mispaired query, and now is — verdicts move, in the AVAILABLE →
+  WITHHELD direction.** The entry above says the narrowed bar keeps the
+  whole-query bar's immunity to an escalation stamped against the wrong
+  `closed`, and gives the mechanism as "the re-slice declines and it
+  falls back to the whole query". **The mechanism is wrong and so is the
+  claim.** An obligation index that names a real obligation of the wrong
+  query slices out of it perfectly well. Measured on two scatter-bearing
+  queries of the SAME SHAPE — one with the scatter on the solver-decided
+  obligation (`ON`), one with it on an interval-decided obligation
+  (`ELSEWHERE`), both two obligations, both `_barred_primitives ==
+  ('scatter',)`:
+
+      ON escalation + ON query         UNKNOWN on 8e42934, caac1ee, 45cf526
+      ON escalation + ELSEWHERE query  UNKNOWN on 8e42934 (whole-query bar)
+                                       VERIFIED on caac1ee and 45cf526
+
+  `_bar_scope(ELSEWHERE, (0,))` re-sliced to `['ge','sub']`, found
+  nothing, and returned `((), '')` — so the bar did not fire and a
+  VERIFIED resting on a solver answer that WAS about a scatter slice was
+  issued. That is the class this file logs as closed one entry above, in
+  the same direction (a false VERIFIED the emission row could have
+  caused), reachable by a narrower door. The prior test of it passed
+  because its fixture is the one arrangement that fails safe: its
+  mispaired index reaches no real obligation of the wrong query, so the
+  re-slice declines and the fallback fires.
+  **The repair keys on the property instead of on the index.** Every
+  solver invocation already stamps `smt2_sha256`, the sha256 of the exact
+  SMT-LIB2 text it was sent, and emission is a pure function of (slice,
+  solver flavour, timeout). So `verdict._evidence_is_about` re-emits the
+  slice re-derived out of the query being stamped, with the flavour and
+  timeout the stamp itself records, and narrows the bar for that
+  obligation only when the hash comes back equal. Measured: the correct
+  pairing reproduces it for both portfolio members; the mispairing
+  reproduces neither. Every other outcome — no stamps, no hash, an
+  unrecognised option profile, an emission that raises, a slice that
+  declines — returns the whole-query set. `invocations` therefore cannot
+  CLEAR the bar, only fail to lift it, which is the opposite polarity
+  from the deleted `barred_on_slice` field and from the
+  `and r.invocations` drift the entry above repairs; the bar's DOMAIN is
+  still `outcome == OB_DISCHARGED` alone.
+  **Affected versions:** 0.1.0 pre-release only — `caac1ee` (the scoping
+  commit) through `45cf526` inclusive, all branch-only. Every build up to
+  and including `8e42934` has the whole-query bar and never had this
+  exposure; nothing has been released.
+  **Which prior verdicts are retroactively invalid: none, and the
+  direction is the ordinary one this time.** Reaching the hole needs a
+  call to the public `make_solver_verdict` pairing an escalation with a
+  query it did not come from — `check()` cannot produce it, and
+  `escalate()` cannot produce a record for a query it was not run on. No
+  verdict in `docs/verdict-ledger.md` is affected. What changes for an
+  HONEST caller is the reverse and it is a withholding: a solver-decided
+  VERIFIED on a scatter-bearing query is now narrowed only when the
+  re-emitted script matches, so any obligation whose invocation was not
+  stamped with a reproducible script hash gets the whole-query bar and
+  reads UNKNOWN where it read VERIFIED. No such case exists in this
+  suite — the scatter-off-the-decided-slice fixture still VERIFIES, and
+  `tests/test_verified_bar.py` asserts the hash equality directly so that
+  a future emission that stopped being a function of its inputs fails
+  loudly instead of silently widening every bar.
+  **What to re-run:** any recorded solver-path VERIFIED on a
+  scatter-bearing query — re-`check()` it with the same
+  `solver_timeout_ms`. A newly-present `VERIFIED withheld` note whose
+  clause says "no recorded solver invocation … re-emits from this query's
+  slice of it" is this change, and it means the narrowing was never
+  established for that verdict rather than that the program changed.
+  Same pass, and NOT a verdict-moving change: the SET row's routing was
+  gauged only at the written index 0, where every mis-route defined as an
+  offset from the index collapses back onto it. The line-neutral
+  corruption `i == k` -> `i == (k - 1 if k > 0 else k)` in
+  `obligation._scatter_set_plan` turned `s = x.at[2].set(u); assert
+  s[1] - x[1] >= 1.0` from `violated-witness` into `discharged` — a
+  MISSED violation on the very row this bar exists for — while the whole
+  suite under CI's install set stayed at 2004 passed, 6 skipped, fully
+  green (the only two tests that caught it are
+  `pytest.importorskip("maddening")`-gated, and CI installs `".[solvers]"`
+  and `".[solvers,jax]"`). A fourth routing fixture at index 2 and the
+  matching gauge mutation close it: the same corruption now fails
+  `test_gauge_catches_every_mutation` with no maddening installed
+  (1 failed, 2007 passed, 6 skipped). No shipped code changed, so no
+  verdict moves and there is nothing to re-run for it.
+  2012 tests passed, 2 skipped with both solvers and jax installed
+  (2008 before this pass; the 4 added are the mispairing regression and
+  its hash direction, and the two fail-closed fallback pins, all in
+  `tests/test_verified_bar.py` — the record-field channel test is
+  rewritten rather than added, because pinning today's field list could
+  not fail for the defect it exists to catch).
 
 *(no releases yet)*

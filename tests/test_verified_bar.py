@@ -32,6 +32,20 @@ escalation to its ``closed`` nowhere, so a scatter-free escalation stamped
 against a scatter-bearing query returned VERIFIED where the whole-query bar
 returned UNKNOWN. The scope is now DERIVED from ``closed`` (re-slicing the
 decided obligations), and both directions are pinned below.
+
+**AND A FIFTH: DERIVING THE CONTENTS DID NOT BIND THE PAIRING.** The repair
+above claimed it did, on the reasoning that a mispaired index would not slice
+— and `test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query`
+agreed, because its mispaired index reaches no real obligation of the wrong
+query. Its NEIGHBOUR does: two scatter-bearing queries of the same shape, the
+escalation of the one whose scatter is on the decided obligation stamped
+against the one whose scatter is elsewhere. That index slices, finds
+`['ge','sub']`, and cleared the bar (measured VERIFIED on `caac1ee` and
+`45cf526`, UNKNOWN on `8e42934`). An index is not evidence about a query, so
+the narrowing is now earned per obligation by re-emitting the slice and
+matching the `smt2_sha256` the recorded invocation carries — see
+``test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar`` and its
+other direction, ``test_the_correct_pairing_still_narrows_and_the_hash_is_why``.
 """
 from __future__ import annotations
 
@@ -252,6 +266,12 @@ def _stamped(build):
                                   SolverConfig(timeout_ms=20000))
 
 
+def _verdict_status(closed, prop, esc):
+    from stelling.solvers import make_solver_verdict
+
+    return make_solver_verdict(closed, prop, esc, **VERSIONS).status
+
+
 def test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query():
     """THE MISPAIRING THE WHOLE-QUERY BAR WAS IMMUNE TO, and the reason the
     scope is derived rather than recorded.
@@ -262,6 +282,15 @@ def test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query():
     directly and returned UNKNOWN here (measured on 8e42934), and a
     slice-scoped bar that reads its scope off the escalation returned
     VERIFIED. Narrowing the scope must not cost this.
+
+    THIS FIXTURE IS THE MISPAIRING THAT FAILS SAFE FOR THE WEAKER REASON, and
+    for a while it was the only one, which is how a live hole stayed green.
+    Its `clean` query has ONE obligation, so the decided index 0 is the only
+    index there is and the `dirty` query's obligation #0 carries the scatter
+    itself — the bar fires whatever mechanism is asked. The arrangement that
+    separates "the index exists here" from "the escalation is about here" is
+    `test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar`, and it is
+    where the mechanism this test cannot see is measured.
     """
     from stelling.solvers import make_solver_verdict
 
@@ -283,6 +312,141 @@ def test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query():
         f"instead of derived from the query it is stamped against"
     )
     assert any("VERIFIED withheld" in n for n in v.notes)
+
+
+def _scatter_ELSEWHERE_same_shape():
+    """THE NEAREST NEIGHBOUR of `_scatter_ON_the_decided_slice`: same shape,
+    same whole-query barred set, scatter on the OTHER obligation.
+
+    Two obligations, #0 solver-decided and #1 settled by intervals, and the
+    query contains `scatter` — exactly as in `_scatter_ON_the_decided_slice`.
+    The one difference is WHERE: here #0 is `y - y >= 0`, whose emitted slice
+    is `['ge','sub']`, and the scatter is on #1. That is what makes the pair
+    able to distinguish "the escalation is about this query" from "the index
+    happens to exist in this query", which no fixture in this file could do
+    before: an index that names an obligation of the wrong query still slices
+    out of it.
+    """
+    x = any_array((3,), "float64", (0.0, 1.0))
+    s = x.at[0].set(0.5)
+    y = any_array((), "float64", (1.0, 2.0))
+    return (assert_(y - y >= 0.0), assert_(s >= 0.0))
+
+
+def test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar():
+    """THE MISPAIRING THE INDEX-ONLY DOMAIN DID NOT CATCH — and the reason
+    the narrowing now has to be earned by evidence rather than by an index.
+
+    `test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query`
+    passes on the arrangement where the mispaired index does not reach a real
+    obligation of the wrong query. This is its neighbour: BOTH queries carry
+    `scatter`, both have two obligations, and the decided index 0 exists in
+    both. So the re-slice does not decline — it succeeds, on the wrong query,
+    and finds `['ge','sub']`.
+
+    Measured, three builds:
+
+        ON esc + ON closed         UNKNOWN  on 8e42934, caac1ee, 45cf526
+        ON esc + ELSEWHERE closed  UNKNOWN  on 8e42934 (whole-query bar)
+                                   VERIFIED on caac1ee and 45cf526
+                                   UNKNOWN  here
+
+    The repair is `verdict._evidence_is_about`: an obligation narrows the bar
+    only when a recorded invocation's `smt2_sha256` re-emits from the slice
+    re-derived out of the query being stamped. Measured on this pair, the
+    correct pairing reproduces the recorded hash for BOTH portfolio members
+    and the mispairing reproduces neither.
+    """
+    from stelling.solvers import make_solver_verdict
+
+    assert V.VERIFIED_BARRED_PRIMITIVES, "the bar has been lifted"
+    on_closed, on_prop, on_esc = _stamped(_scatter_ON_the_decided_slice)
+    el_closed, _, _ = _stamped(_scatter_ELSEWHERE_same_shape)
+
+    # the pair must be indistinguishable to every WEAKER test than the one
+    # this pins, or it does not measure the mechanism it claims to
+    assert V._barred_primitives(on_closed) == V._barred_primitives(el_closed), (
+        "the two queries differ in their whole-query barred set, so a "
+        "whole-query bar would already separate them and this test would not "
+        "be measuring the slice-scoped one"
+    )
+    decided = {r.index: r.invocations
+               for r in on_esc.records if r.outcome == "discharged"}
+    assert set(decided) == {0}, decided
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env
+    again = slice_obligation(el_closed, 0, interval_env(el_closed))
+    assert not isinstance(again, DeclinedObligation), (
+        "the mispaired index DECLINES to slice out of the wrong query, so "
+        "this test is the case the fallback already caught and not the one "
+        "it missed"
+    )
+    assert not (V._barred_in_eqns(again.eqns)), (
+        "the mispaired query's obligation #0 carries a barred primitive on "
+        "its own slice, so the bar would fire for a reason having nothing to "
+        "do with the mispairing"
+    )
+
+    assert make_solver_verdict(on_closed, on_prop, on_esc, **VERSIONS).status == (
+        "UNKNOWN"
+    ), "the correctly-paired assembly does not bar; the fixture is wrong"
+
+    v = make_solver_verdict(el_closed, on_prop, on_esc, **VERSIONS)
+    assert [o.status for o in v.obligations] == ["discharged"] * len(
+        v.obligations
+    ), (
+        "the mispaired assembly did not reach a would-be VERIFIED, so there "
+        "is nothing for the bar to withhold and this test proves nothing"
+    )
+    assert v.status == "UNKNOWN", (
+        f"{v.status}: an escalation produced on a DIFFERENT scatter-bearing "
+        f"query cleared the bar because its index happened to slice out of "
+        f"this one — the narrowing is keyed on the index rather than on "
+        f"whether the escalation is evidence about this query"
+    )
+    assert any("VERIFIED withheld" in n for n in v.notes)
+
+
+def test_the_correct_pairing_still_narrows_and_the_hash_is_why():
+    """THE OTHER DIRECTION of the test above, and the case that distinguishes
+    the repair from a silent revert to the whole-query bar.
+
+    Withholding everything would pass the mispairing test trivially. What must
+    also hold is that an HONEST assembly still narrows — and that the thing
+    permitting it is the measured one: the script the solver was actually
+    sent, re-emitted from this query's slice, hashes the same.
+    """
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env
+    from stelling.smt import emit
+
+    closed, _prop, esc = _stamped(_scatter_OFF_the_decided_slice)
+    (record,) = [r for r in esc.records if r.outcome == "discharged"]
+    sl = slice_obligation(closed, record.index, interval_env(closed))
+    assert not isinstance(sl, DeclinedObligation)
+    assert record.invocations, "no invocation to check the pairing against"
+    matched = []
+    for stamp in record.invocations:
+        opts = dict(stamp.options or ())
+        timeout = opts.get(":timeout") or opts.get(":tlimit")
+        assert timeout, (
+            f"the {stamp.name} stamp records no timeout under a key "
+            f"`_evidence_is_about` reads, so the honest path cannot bind and "
+            f"the bar would widen on every correctly-paired verdict"
+        )
+        matched.append(emit(sl, stamp.name, int(timeout)).sha256
+                       == opts.get("smt2_sha256"))
+    assert all(matched), (
+        f"re-emitting this query's own slice does not reproduce the hash the "
+        f"invocation recorded ({matched}) — emission is no longer a function "
+        f"of (slice, solver, timeout), so the pairing check can never say yes "
+        f"and the bar has silently become the whole-query one again"
+    )
+    assert V._evidence_is_about(sl, record.invocations)
+    assert not V._evidence_is_about(sl, ()), (
+        "an obligation with NO recorded invocation binds, so the check is "
+        "vacuous"
+    )
 
 
 def test_a_mispaired_PROPAGATION_cannot_empty_the_scope_either():
@@ -312,26 +476,154 @@ def test_a_mispaired_PROPAGATION_cannot_empty_the_scope_either():
     )
 
 
-def test_no_escalation_field_carries_the_bars_scope():
-    """A RECORD MUST NOT BE ABLE TO CERTIFY ITS OWN CLEANLINESS.
+def test_the_fallback_is_the_WHOLE_QUERY_SET_and_never_silence():
+    """THE FAIL-CLOSED FALLBACK ITSELF, which nothing measured.
+
+    Every "derive, don't record" argument in this module ends at the same
+    sentence: when the derivation cannot be completed the bar drops to the
+    whole-query set, which is WIDER, rather than to an empty scope, which is
+    silence. Measured before this test existed: replacing both `return
+    fallback` statements in `_bar_scope` with `return (), ""` left the full
+    suite at 2008 passed, 2 skipped — the fallback the design rests on was
+    load-bearing for nothing.
+
+    Both directions are asserted, because the two are different code paths and
+    a test that only calls the function cannot see the verdict move:
+
+    * the derivation itself returns the whole-query set for an index that does
+      not slice;
+    * and a verdict assembled with such a record goes UNKNOWN rather than
+      VERIFIED — a stray `discharged` record is the cheapest way for an
+      honest-but-mispaired assembly to reach this path.
+    """
+    import dataclasses
+
+    from stelling.solvers import make_solver_verdict
+
+    assert V.VERIFIED_BARRED_PRIMITIVES, "the bar has been lifted"
+    closed, prop, esc = _stamped(_scatter_OFF_the_decided_slice)
+    whole = V._barred_primitives(closed)
+    assert whole, "the fixture carries nothing; the fallback is unreachable"
+
+    barred, why = V._bar_scope(closed, {99: ()})
+    assert barred == whole, (
+        f"an index that does not slice returned {barred!r} where the "
+        f"whole-query set is {whole!r} — the derivation fell to SILENCE, not "
+        f"to the wider bar, and every 'fails closed' sentence about this "
+        f"function is false"
+    )
+    assert "fell back to the whole query" in why
+
+    # ... and it moves a verdict, which the call above cannot show
+    assert make_solver_verdict(closed, prop, esc, **VERSIONS).status == (
+        "VERIFIED"
+    ), "the honest assembly does not VERIFY, so nothing here can be withheld"
+    (real,) = [r for r in esc.records if r.outcome == "discharged"]
+    strayed = dataclasses.replace(esc, records=esc.records + (
+        dataclasses.replace(real, index=99),
+    ))
+    v = make_solver_verdict(closed, prop, strayed, **VERSIONS)
+    assert v.status == "UNKNOWN", (
+        f"{v.status}: a discharged record naming an obligation this query "
+        f"does not have left the bar's scope EMPTY instead of falling back "
+        f"to the whole query"
+    )
+    assert any("VERIFIED withheld" in n for n in v.notes)
+
+
+def test_the_fallback_also_holds_when_the_derivation_RAISES(monkeypatch):
+    """The other `return fallback`, and it is a different statement.
+
+    `_bar_scope` wraps the whole re-derivation in `except Exception` with the
+    comment "a bar must never break a verdict, and it must never go quiet
+    either". The first half is pinned by construction — an exception cannot
+    escape. The second half was pinned by nothing: silencing THIS branch alone
+    also left the suite fully green.
+
+    Driven by making the slicer raise, which is the only way to reach a branch
+    whose whole purpose is a failure no fixture produces.
+    """
+    import stelling.obligation as _ob
+
+    assert V.VERIFIED_BARRED_PRIMITIVES, "the bar has been lifted"
+    closed, prop, esc = _stamped(_scatter_OFF_the_decided_slice)
+    whole = V._barred_primitives(closed)
+    assert whole, "the fixture carries nothing; the fallback is unreachable"
+    assert _verdict_status(closed, prop, esc) == "VERIFIED", (
+        "the honest assembly does not VERIFY, so nothing here can be withheld"
+    )
+
+    def boom(*_a, **_k):
+        raise RuntimeError("slicer exploded")
+
+    monkeypatch.setattr(_ob, "slice_obligation", boom)
+    barred, why = V._bar_scope(closed, {0: ()})
+    assert barred == whole, (
+        f"a raising re-derivation returned {barred!r} where the whole-query "
+        f"set is {whole!r} — the except branch goes QUIET, so a bar that "
+        f"cannot compute its scope silently stops being a bar"
+    )
+    assert "could not be re-derived" in why
+    assert _verdict_status(closed, prop, esc) == "UNKNOWN", (
+        "a verdict assembled while the slicer raises came back VERIFIED — "
+        "the except branch is not withholding"
+    )
+
+
+# The values a record field of each declared type can be moved to, chosen so
+# that a field whose NON-default value would clear the bar is probed with it.
+# Keyed on the annotation text rather than on the field name, so a field added
+# tomorrow is probed by this test without anybody remembering to list it — and
+# an annotation not in this map is a LOUD failure below, never a silent skip.
+def _field_probes():
+    from stelling.verdict import solver_absent
+
+    return {
+        "int": (0, 7),
+        "bool": (False, True),
+        "str": ("", "a value no honest record carries"),
+        "tuple[str, ...]": ((), ("a value no honest record carries",)),
+        "tuple[SolverStamp, ...]": ((), (solver_absent("probe"),)),
+        # a NON-NONE witness is what this probes; the bar reads no field of
+        # one, and if that ever changes the sentinel raises here rather than
+        # passing quietly
+        "Witness | None": (None, object()),
+    }
+
+
+def test_no_record_field_can_narrow_the_bars_domain():
+    """A RECORD MUST NOT BE ABLE TO CERTIFY ITS OWN CLEANLINESS — pinned as a
+    CHANNEL, not as a list of today's fields.
 
     The predecessor's `barred_on_slice=()` was a positive claim ("nothing
     barred on my slice") that nothing validated: measured on this fixture, a
     record carrying it earned VERIFIED where the genuine scope was
     `('scatter',)`. The repair deletes the field rather than validating it, so
-    what is pinned here is the ABSENCE of any such channel: every record field
-    a caller can choose is reset, and the bar must be unmoved.
+    what is pinned is the ABSENCE of any such channel.
 
-    LOAD-BEARING IS EXACTLY `index` AND `outcome`, AND AN EARLIER VERSION OF
-    THIS TEST GOT THAT WRONG. It exempted `invocations` too and called all
-    three "already load-bearing for the VERIFIED being withheld". That was
-    false in the direction that matters: `invocations` was load-bearing for
-    the BAR and not for the discharge, so a record could give it up, keep its
-    obligation `discharged`, and leave the bar's domain — measured, VERIFIED
-    where the whole-query base returned UNKNOWN. The predicate is now the one
-    that discharges (`outcome == OB_DISCHARGED`), so `invocations` carries
-    nothing the bar reads and is emptied here with everything else. See
-    `test_stripping_invocations_cannot_clear_the_bar` for the drift itself.
+    THE VERSION OF THIS TEST THAT PINNED A MEMBER LIST COULD NOT FAIL FOR ITS
+    OWN DEFECT, and that is why it was rewritten. It reset every
+    non-load-bearing field **to its declared default** and accounted for the
+    field names — so a new field whose default is inert and whose OTHER value
+    clears the bar was invisible to both halves. Measured: adding
+    `audited_clean: bool = False` to `ObligationEscalation` and `and not
+    r.audited_clean` to the bar's domain, then handing in records with
+    `audited_clean=True`, produced VERIFIED where the honest assembly gives
+    UNKNOWN — with the full suite green, the field-accounting assertion
+    included, because `dataclasses.replace(r, audited_clean=False)` is exactly
+    what the test did.
+
+    So each field is now moved AWAY from what it holds, with the values taken
+    from its declared TYPE. A field of a type `_field_probes` does not know
+    fails this test loudly, which is the only way an enumeration can stay
+    honest about the thing it has not thought of.
+
+    LOAD-BEARING IS EXACTLY `index` AND `outcome`. `invocations` is read by
+    `_evidence_is_about`, but only to PERMIT narrowing — every value of it
+    other than a matching script hash widens the bar — so it is probed here
+    like any other field and the bar must not move. An earlier version
+    exempted it, which was false in the direction that matters; see
+    `test_stripping_invocations_cannot_clear_the_bar` for that drift.
     """
     import dataclasses
 
@@ -342,13 +634,6 @@ def test_no_escalation_field_carries_the_bars_scope():
         "UNKNOWN"
     ), "the genuine assembly does not bar; the fixture is wrong"
 
-    load_bearing = {"index", "outcome"}
-    emptied = {"detail": "", "witness": None, "notes": (), "invocations": ()}
-    defaulted = {
-        f.name: f.default
-        for f in dataclasses.fields(ObligationEscalation)
-        if f.name not in load_bearing and f.default is not dataclasses.MISSING
-    }
     assert "barred_on_slice" not in {
         f.name for f in dataclasses.fields(ObligationEscalation)
     }, (
@@ -356,20 +641,52 @@ def test_no_escalation_field_carries_the_bars_scope():
         "because a recorded scope is a claim the bar cannot check; if it "
         "returns, the bar must not read it"
     )
-    # every field is accounted for: load-bearing, explicitly emptied, or
-    # reset to its declared default. A new field defaulting to something the
-    # bar reads would otherwise slip through this test unexamined.
-    assert {f.name for f in dataclasses.fields(ObligationEscalation)} == (
-        load_bearing | set(emptied) | set(defaulted)
-    ), "a record field is neither load-bearing, emptied, nor defaulted here"
-    stripped = dataclasses.replace(esc, records=tuple(
-        dataclasses.replace(r, **emptied, **defaulted) for r in esc.records
-    ))
-    v = make_solver_verdict(closed, prop, stripped, **VERSIONS)
-    assert v.status == "UNKNOWN", (
-        f"{v.status}: emptying every non-load-bearing record field cleared "
-        f"the bar, so one of them is carrying the scope"
+
+    probes = _field_probes()
+    load_bearing = {"index", "outcome"}
+    fields = [f for f in dataclasses.fields(ObligationEscalation)
+              if f.name not in load_bearing]
+    assert fields, "every field is load-bearing; this test measures nothing"
+    unknown = [f.name for f in fields if str(f.type) not in probes]
+    assert not unknown, (
+        f"record field(s) {unknown} have a type this test does not know how "
+        f"to move ({[str(f.type) for f in fields if f.name in unknown]}). It "
+        f"CANNOT be skipped: the defect this test exists for is a field whose "
+        f"non-default value clears the bar, and an unprobed field is exactly "
+        f"that field. Add the type to `_field_probes` with a value no honest "
+        f"record carries"
     )
+
+    def stamp(**overrides):
+        forged = dataclasses.replace(esc, records=tuple(
+            dataclasses.replace(r, **overrides) for r in esc.records
+        ))
+        return make_solver_verdict(closed, prop, forged, **VERSIONS)
+
+    # one field at a time, at every probe value ...
+    for f in fields:
+        for value in probes[str(f.type)]:
+            v = stamp(**{f.name: value})
+            assert [o.status for o in v.obligations] == (
+                ["discharged"] * len(v.obligations)
+            ), (
+                f"setting {f.name}={value!r} un-discharged an obligation, so "
+                f"there is no VERIFIED left for the bar to withhold and this "
+                f"probe passes for the wrong reason"
+            )
+            assert v.status == "UNKNOWN", (
+                f"{v.status}: a record carrying {f.name}={value!r} cleared "
+                f"the bar. The bar's domain is `outcome == OB_DISCHARGED` and "
+                f"nothing else may narrow it — a field that does is the "
+                f"deleted `barred_on_slice` under another name"
+            )
+    # ... and all of them at once, in both directions
+    for which in (0, 1):
+        v = stamp(**{f.name: probes[str(f.type)][which] for f in fields})
+        assert v.status == "UNKNOWN", (
+            f"{v.status}: moving every non-load-bearing field at once "
+            f"cleared the bar"
+        )
 
 
 @pytest.mark.parametrize("build,strip,label", [
@@ -477,7 +794,7 @@ def test_the_containment_guard_short_circuits_before_any_re_slicing(monkeypatch)
         return real(*args, **kwargs)
 
     monkeypatch.setattr(_ob, "slice_obligation", spy)
-    assert V._bar_scope(closed, (0,)) == ((), "")
+    assert V._bar_scope(closed, {0: ()}) == ((), "")
     assert calls == [], (
         f"`_bar_scope` re-sliced obligation(s) {calls} on a query whose "
         f"whole-query barred set is EMPTY. The early return is gone, so the "
@@ -491,7 +808,7 @@ def test_the_containment_guard_short_circuits_before_any_re_slicing(monkeypatch)
     # for the trivial reason that nothing ever calls `slice_obligation`.
     dirty = trace(_scatter_ON_the_decided_slice)
     assert V._barred_primitives(dirty), "the control query carries nothing"
-    V._bar_scope(dirty, (0,))
+    V._bar_scope(dirty, {0: ()})
     assert calls, (
         "`_bar_scope` did not reach `slice_obligation` even on a "
         "scatter-bearing query, so the assertion above is vacuous"
