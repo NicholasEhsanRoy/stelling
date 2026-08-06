@@ -3429,9 +3429,10 @@ def test_the_budget_cannot_reach_the_SLICE_fingerprint():
 # `2.0**-1022`), 157 EXPONENT (`1e300`), 53 underscore, 1 other, and zero hex,
 # octal or binary. Underscore is the SMALL part; the reflex of grepping digits
 # is wrong by an order of magnitude, not by a rounding error.
-#     The census that produced
-#     these figures walks `ast` over `src/` and `tests/`; the CLAIM about
-#     unsampled budgets is pinned by `test_the_claim_about_unsampled_budgets_reads_the_AST` below.
+#     The census that produced these figures walks the AST of `src/` and
+#     `tests/`; the CLAIM about which budgets the suite drives is pinned by
+#     `test_the_claim_about_unsampled_budgets_reads_the_AST` below, which is a
+#     check rather than a note.
 #
 # So the claim is PINNED rather than restated: the test below derives, from the
 # AST of every test module, which of the values named here is actually used as

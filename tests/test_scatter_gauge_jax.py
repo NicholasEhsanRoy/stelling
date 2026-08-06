@@ -2281,9 +2281,12 @@ _NUMBER_WORDS = {
 # THE LIST HELD THREE OF THEM AND THE DOCSTRING BELOW SAID "four places for
 # three quantities". Both were wrong about this file, which is the drift this
 # test exists to stop, one level up. A search of the FLATTENED source for every
-# sentence restating one of the derived counts finds eight; the five that were
-# not in the list were each measured 0 RED at `faefc48`, perturbed one at a
-# time and run alone:
+# sentence restating one of the derived counts finds one for each pattern in
+# the list below — the number is `len(_CENSUS_PHRASES)` and is deliberately not
+# spelled here, because the paragraph that ends this block asserts it is
+# restated nowhere and the previous pass shipped both sentences at once. The
+# five that were not in the list were each measured 0 RED at `faefc48`,
+# perturbed one at a time and run alone:
 #
 # — quoted with their numbers ELIDED, because a comment that spells one is one
 # more copy to keep correct and this comment is not read by anything:
@@ -2296,7 +2299,13 @@ _NUMBER_WORDS = {
 #
 # against the three that WERE in it, each 2 RED under the same perturbation.
 # The count of places is no longer restated anywhere: it is `len(
-# _CENSUS_PHRASES)` and is derived where it is used.
+# _CENSUS_PHRASES)` and is derived where it is used. THAT SENTENCE SHIPPED
+# ALONGSIDE A RESTATEMENT OF THE SAME COUNT, fourteen lines above it in this
+# comment block — "finds eight" — which is the contradiction this pass
+# resolves, by eliding the number rather than by dropping the claim. A NINTH
+# restatement has since been found and added to the list ("the undriven six",
+# six hundred lines above); had the number stayed here it would have been wrong
+# again by that addition, which is the argument for eliding it.
 #
 # ONE OF THEM IS A DERIVED QUANTITY AND IS NOT A FOURTH THING TO KEEP UPDATED:
 # the "other ... are NOT driven here" phrase counts sites minus rules, computed
@@ -2313,6 +2322,15 @@ _CENSUS_PHRASES = (
     (r"the row's (\w+) decline sites", ("sites",)),
     (r"says (\w+) over (\w+)", ("fixtures", "rules")),
     (r"has (\w+) `raise _decline` sites", ("sites",)),
+    # THE NINTH, and the residue the docstring below predicted in the abstract:
+    # "The undriven six, each with its reason:", written later, six hundred
+    # lines above this list, restating exactly the quantity the list derives
+    # (`sites - rules`) and matched by no pattern here. Perturbed to "seven" at
+    # this branch's tip it is 0 RED — the whole gauge file is 14 passed. It is
+    # ANCHORED on "the undriven" rather than on "undriven", because a frozen
+    # predecessor sentence forty lines above spells "the eight undriven sites"
+    # and is deliberately about a predecessor.
+    (r"the undriven (\w+)", ("undriven",)),
 )
 
 
@@ -2321,12 +2339,21 @@ def _flat(body):
     adjacent string literals joined, a continued `#` comment rejoined, runs of
     whitespace collapsed.
 
-    Not tidiness. Four of the five sentences this list did not read are SPLIT —
-    across two string literals inside a `scope=(...)` argument, or across two
-    comment lines — and a pattern written for a sentence does not match one
-    with a quote, a newline and eight spaces through the middle of it. Reading
-    the source unflattened is why "an anchored pattern" and "the sentences in
-    this file" were two different sets."""
+    Not tidiness, and the count in this paragraph was itself wrong. It said
+    "four of the five sentences this list did not read are SPLIT". MEASURED, by
+    running every pattern in `_CENSUS_PHRASES` against the flattened source and
+    against the raw source: **three** sentences are split — one match of
+    `the other … are not driven here`, and both matches of
+    `has … \\`raise _decline\\` sites` — across two string literals inside a
+    `scope=(...)` argument, or across two comment lines. A pattern written for
+    a sentence does not match one with a quote, a newline and eight spaces
+    through the middle of it, and reading the source unflattened is why "an
+    anchored pattern" and "the sentences in this file" were two different sets.
+
+    THE FLATTENER IS STILL LOAD-BEARING, and that is measured rather than
+    argued from the wrong number: the patterns read **13** number-words with it
+    and **10** without, and `test_the_censuss_own_prose_agrees_with_the_counts_
+    it_describes` hard-fails if it is removed (three patterns match nothing)."""
     import re
 
     body = re.sub(r'"\s*\n\s*"', "", body)
@@ -2363,10 +2390,31 @@ def test_the_censuss_own_prose_agrees_with_the_counts_it_describes():
     every number-word next to a census noun finds 24 occurrences in this file
     of which 18 are about something else — the ROUTING fixtures, the frozen
     predecessor sentences, the regex list itself. Flagging those would be
-    noise, and noise is how a check gets deleted. The residue is therefore
-    real and is named: a NINTH restatement, written later and not added to
-    `_CENSUS_PHRASES`, is not read. What is closed is that the list can no
-    longer claim to read a sentence it does not.
+    noise, and noise is how a check gets deleted.
+
+    **THE NINTH RESTATEMENT THE PREVIOUS PASS PREDICTED IN THE ABSTRACT HAS
+    BEEN FOUND AND IS NOW READ.** That pass wrote "a NINTH restatement, written
+    later and not added to `_CENSUS_PHRASES`, is not read" and left it there.
+    It is `# The undriven six, each with its reason:`, six hundred lines above
+    the list, restating `sites - rules` — the same derived difference the
+    fourth phrase reads — inside the very file this checker parses. Measured at
+    this branch's tip: perturbed to "seven" it is **0 RED**, the whole gauge
+    file 14 passed. It is in the list now, and it is caught.
+
+    **TWO RESIDUES REMAIN, and they are different in kind.**
+
+    * A TENTH is possible and nothing structural forbids it: this reads a list
+      of patterns, and a sentence nobody adds to the list is a sentence nobody
+      reads. The ninth is the demonstration that this is not hypothetical.
+    * `SOUNDNESS.md` is OUT OF SCOPE BY CONSTRUCTION, not by oversight. The
+      checker reads `Path(__file__)` — this module's own source — so a
+      restatement of these counts in the published document is invisible to it
+      at every value. One exists (`SOUNDNESS.md`'s entry for this repair
+      restates the count of restatements) and is 0 RED here whatever it says.
+      Extending the scan to `*.md` is a real option and is not taken in this
+      pass; the reason it is named rather than done is that a prose scan over
+      documents this file does not own is a different check with a different
+      noise profile, and adding it quietly is how a check gets deleted later.
     """
     import ast
     import inspect
