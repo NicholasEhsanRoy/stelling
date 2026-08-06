@@ -2988,7 +2988,7 @@ def test_a_sessionfinish_that_raises_nothing_still_takes_the_exit_code(
     assert "a planted reason nobody disclosed" in output, _tail(proc)
     marker = "written from pytest_unconfigure"
     assert (marker in output) is out_of_band, (
-        f"the banner came {'around' if out_of_band else 'through'} the ordinary "
+        f"the banner came {'through' if out_of_band else 'around'} the ordinary "
         f"route (pytest_terminal_summary, called from inside "
         f"pytest_sessionfinish) when it should have come the other way. "
         f"`_NOTES` is a request and `_DELIVERED` is the receipt; this is what "
