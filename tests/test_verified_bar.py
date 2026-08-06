@@ -1535,6 +1535,45 @@ def test_the_bars_domain_cannot_read_a_new_field():
 #   4 `make_solver_verdict`, AFTER the bar is consulted: `barred = ()`
 #   5 `_bar_domain`, `type(r.index) is not int`, on an `int` SUBCLASS
 #   6 `_bar_scope` reads the token out of the existing `SolverStamp.options`
+#   7 `_bar_scope` skips an obligation whose stamp records a chosen `:timeout`
+#
+# CHANNEL 7 NEEDED NO FORGED RECORD AT ALL, which is what separates it from
+# 1-6: it is driven by a PUBLIC KEYWORD ARGUMENT. `solver_timeout_ms` is
+# carried verbatim into the stamp as `:timeout`, `:timeout` is a member of
+# `_EVIDENCE_OPTION_KEYS` (it has to be — it is part of the emitted text and
+# therefore part of the hash), and NOTHING constrained what the decision did
+# with a whitelisted key's VALUE. Measured on `e35de13`:
+#
+#   check(build, vacuity_mode="inputs-only", solver_timeout_ms=20000)
+#       -> UNKNOWN, "VERIFIED withheld ... assert #0"
+#   check(build, vacuity_mode="inputs-only", solver_timeout_ms=31337)
+#       -> VERIFIED, no note
+#
+# on `_scatter_ON_the_decided_slice`, with the full suite byte-identical to
+# unmutated HEAD in both columns (2044 / 2 and 2040 / 6).
+#
+# Why the six mechanisms already here all missed it, each measured:
+#   * the read LEDGER below attributed the read to `_evidence_options`, the
+#     PROJECTION HELPER, rather than to the function that ASKED for it — so
+#     `_bar_scope` calling the permitted projection logged the already-
+#     permitted pair, and the ledger saw nothing new in EITHER direction;
+#   * `_EVIDENCE_OPTION_KEYS` constrains WHICH KEYS reach the decision and
+#     says nothing about what the decision does with their values;
+#   * `test_the_narrowing_decision_reads_options_in_one_place` scanned for
+#     `.options` / `"options"` / `'options'`, and `_evidence_options(s)`
+#     matches none of the three;
+#   * the type-identity, field-removal and field-probe tests are untouched:
+#     no new field, no new key, no `type()` discrimination.
+#
+# It is closed by TWO anti-correlated mechanisms, and each has its own
+# mutation. STRUCTURALLY, the ledger now attributes an `options` read to the
+# function that asked for it (`_PROJECTIONS` below), so a projection call from
+# anywhere but the one permitted reader is a new pair — and the source scan
+# forbids the call outright in the bar's other functions. BEHAVIOURALLY,
+# `test_the_bars_narrowing_does_not_move_with_a_CALLER_SETTABLE_option_value`
+# pins that the bar's answer does not move under any value a caller can
+# choose, which is the half that reaches a conjunct written INSIDE the one
+# permitted reader, where no site-based mechanism can see it.
 #
 # `test_the_bar_is_consulted_with_exactly_that_domain` does not reach 2, 4 or
 # 6: all three satisfy `len(seen) == 1 and seen[0] == _bar_domain(case)`,
@@ -1555,15 +1594,30 @@ def test_the_bars_domain_cannot_read_a_new_field():
 # after that.
 _COMPREHENSIONS = ("<genexpr>", "<listcomp>", "<dictcomp>", "<setcomp>")
 
+# PURE PROJECTION HELPERS, WHICH ARE NOT THE READER — CHANNEL 7'S MECHANISM.
+# `_evidence_options` exists to project a stamp's option set down to
+# `_EVIDENCE_OPTION_KEYS`; it decides nothing. Attributing the read to IT
+# rather than to the function that ASKED for it is what let channel 7 through:
+# `_bar_scope` calling the permitted projection logged the permitted pair, so
+# the ledger's "nothing new" and "nothing dead" were both satisfied by a
+# reader in a function that had never read a stamp before. The frame walk
+# skips a projection for the same reason it skips a comprehension — neither is
+# the site that decided to look. A projection added under a different name is
+# not skipped, and therefore logs itself as a new pair, which is the direction
+# this must fail in.
+_PROJECTIONS = ("_evidence_options",)
+_TRANSPARENT_FRAMES = _COMPREHENSIONS + _PROJECTIONS
+
 
 def _reading_function() -> str:
-    """The function that performed the attribute read, seen through any
+    """The function that ASKED for the attribute, seen through any
     comprehension frames it went via (a genexpr's own `co_name` would hide
-    which function wrote it)."""
+    which function wrote it) and through any pure projection helper it went
+    via (see `_PROJECTIONS`)."""
     import sys
 
     frame = sys._getframe(2)
-    while frame is not None and frame.f_code.co_name in _COMPREHENSIONS:
+    while frame is not None and frame.f_code.co_name in _TRANSPARENT_FRAMES:
         frame = frame.f_back
     return frame.f_code.co_name if frame is not None else "<unknown>"
 
@@ -1600,11 +1654,13 @@ _ALLOWED_READS = frozenset({
     ("record", "make_solver_verdict", "notes"),
     ("record", "make_solver_verdict", "witness"),
     ("record", "make_solver_verdict", "answered_by"),
-    # the narrowing decision: two stamp attributes, plus `options` read in
-    # ONE function, which projects it to `_EVIDENCE_OPTION_KEYS`
+    # the narrowing decision: two stamp attributes, plus `options` — asked
+    # for by ONE function and projected to `_EVIDENCE_OPTION_KEYS` on the
+    # way. Attributed to the function that ASKED, not to the projection: see
+    # `_PROJECTIONS`, and channel 7 in the block comment above.
     ("stamp", "_evidence_is_about", "invoked"),
     ("stamp", "_evidence_is_about", "name"),
-    ("stamp", "_evidence_options", "options"),
+    ("stamp", "_evidence_is_about", "options"),
 })
 
 
@@ -1717,6 +1773,20 @@ def test_the_narrowing_decision_may_read_only_these_option_keys():
     assert V._evidence_options(V.solver_absent("probe")) == {}
 
 
+def _bar_body(fn) -> str:
+    """One of the bar's functions with its comments and docstring removed —
+    what the source scans below are entitled to read as CODE."""
+    import inspect
+
+    code = "\n".join(
+        line for line in inspect.getsource(fn).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    _, _, after = code.partition('"""')
+    _, _, after = after.partition('"""')  # drop the docstring
+    return after
+
+
 def test_the_narrowing_decision_reads_options_in_one_place():
     """CHANNEL 6, and the second, anti-correlated mechanism for it: the token
     smuggled through the EXISTING `SolverStamp.options`, read not by
@@ -1727,18 +1797,21 @@ def test_the_narrowing_decision_reads_options_in_one_place():
     not reach is caught too. `_render_one_solver` renders the whole option set
     for DISPLAY and is outside the bar entirely, which is why the scan is
     scoped to the bar's own functions rather than to the module.
+
+    THE SECOND SCAN IS CHANNEL 7, AND THE FIRST ONE COULD NOT SEE IT. A
+    conjunct that calls `_evidence_options(s)` — the PERMITTED projection —
+    from inside `_bar_scope` reaches every option value the decision may see
+    while matching none of `.options`, `"options"`, `'options'`. Measured on
+    `e35de13`: `solver_timeout_ms=31337` turned the bar's UNKNOWN into
+    VERIFIED with the full suite green in both columns. So the projection
+    itself is scoped: exactly ONE function in the bar may call it, and it is
+    the one the ledger names.
     """
     import inspect
 
     for fn in (V._bar_scope, V._evidence_is_about, V._barred_in_eqns,
                V._barred_primitives, V._bar_scope_phrase):
-        body = inspect.getsource(fn)
-        code = "\n".join(
-            line for line in body.splitlines()
-            if not line.lstrip().startswith("#")
-        )
-        _, _, after = code.partition('"""')
-        _, _, after = after.partition('"""')  # drop the docstring
+        after = _bar_body(fn)
         # every way of reaching the attribute: `x.options`, and `getattr` /
         # `__dict__` by name. The local `options = _evidence_options(stamp)`
         # is not a read of the attribute and is not matched.
@@ -1751,9 +1824,191 @@ def test_the_narrowing_decision_reads_options_in_one_place():
             f"`_EVIDENCE_OPTION_KEYS`; a second reader reopens the key "
             f"channel without touching either"
         )
+    for fn in (V._bar_scope, V._barred_in_eqns, V._barred_primitives,
+               V._bar_scope_phrase):
+        assert "_evidence_options" not in _bar_body(fn), (
+            f"{fn.__name__} calls `_evidence_options`. That is the permitted "
+            f"PROJECTION, not a permission to read: every whitelisted option "
+            f"value reaches whoever calls it, and a conjunct on one of those "
+            f"VALUES is channel 7 — measured on `e35de13` as a public keyword "
+            f"argument (`solver_timeout_ms=31337`) clearing the bar with the "
+            f"suite green. Exactly one function in the bar may ask for a "
+            f"stamp's options, and `_ALLOWED_READS` names it"
+        )
     assert '"options"' in inspect.getsource(V._evidence_options), (
         "the one permitted reader no longer reads options, so the scan above "
         "passes vacuously"
+    )
+    assert "_evidence_options" in _bar_body(V._evidence_is_about), (
+        "the one permitted CALLER no longer calls the projection, so the "
+        "second scan above passes vacuously"
+    )
+
+
+# -- channel 7: the VALUE of a whitelisted key ------------------------------
+#
+# The budgets swept below. A RULE, not a list of the values a conjunct was
+# imagined to use: powers of ten and their neighbours, the canonical 20000 and
+# the value one above it, a prime in the middle, and the 32-bit ceiling — so a
+# threshold anywhere across seven orders of magnitude has values on both sides
+# of it, and an equality on any round or memorable number is hit.
+#
+# WHAT THIS DOES NOT CLAIM, stated because the fourth could-not-fail shape is
+# exactly "enumerating current members rather than pinning the channel": this
+# is a SAMPLE of an unbounded value space, and a conjunct keyed on a value
+# between two samples survives it. That is why it is not the only mechanism —
+# the read ledger and the source scan above close the SITE structurally, for
+# every value at once, and this closes the one site they cannot reach (a
+# conjunct inside the permitted reader itself) for the values it samples.
+_CALLER_BUDGETS = (
+    1, 9, 10, 99, 100, 999, 1000, 5000, 9999, 10000, 12345, 20000, 20001,
+    31337, 65535, 99999, 100000, 999999, 1000000, 2 ** 31 - 1,
+)
+
+
+def _stamp_recording(sliced, flavour, key, budget):
+    """An HONEST invocation stamp for `sliced`: the two hashes really are the
+    ones emission produces at this flavour and budget, and the budget is
+    recorded under the option key that flavour spells it with. Nothing here is
+    forged — this is the record `escalate` writes."""
+    from stelling.smt import emit
+
+    script = emit(sliced, flavour, budget)
+    return V.SolverStamp(
+        invoked=True, reason="probe", name=flavour, version="0",
+        transport="wheel",
+        options=(("smt2_sha256", script.sha256),
+                 ("slice_sha256", script.slice_sha256),
+                 (key, str(budget))),
+    )
+
+
+def test_the_bars_narrowing_does_not_move_with_a_CALLER_SETTABLE_option_value():
+    """CHANNEL 7: A CONJUNCT ON THE **VALUE** OF A WHITELISTED OPTION KEY.
+
+    `_EVIDENCE_OPTION_KEYS` closed which keys reach the decision. It says
+    nothing about what the decision does with them, and `:timeout` has to be
+    in it — the budget is part of the emitted text, so it is part of the hash
+    the narrowing compares. It is also the caller's own `solver_timeout_ms`,
+    carried verbatim into the stamp. So this channel needs NO forged record
+    and NO new field: it is driven by a public keyword argument. Measured on
+    `e35de13` (`_bar_scope`, `_evidence_options(s).get(":timeout") ==
+    "31337"`): `check(_scatter_ON_the_decided_slice, vacuity_mode=
+    "inputs-only", solver_timeout_ms=31337)` returned VERIFIED with no note
+    where 20000 returns UNKNOWN, full suite byte-identical in both columns.
+
+    WHAT IS PINNED IS THE PROPERTY, NOT THE SPELLING: **the bar's answer is a
+    function of what the evidence is ABOUT — the slice it re-derives and the
+    hashes that slice reproduces — and not of any value the caller chose.**
+    Both directions are swept, because a conjunct can widen as easily as
+    narrow: on the honest pairing the bar must narrow to the decided slice's
+    own barred set at every budget, and on the mispaired one it must fall back
+    to the whole query at every budget.
+
+    Read at `_bar_scope` rather than at `check` deliberately, and the reason
+    is coverage rather than speed: no solver runs, so the budget can be swept
+    over seven orders of magnitude instead of over the three or four values a
+    solver-per-case test could afford.
+    `test_the_bars_verdict_does_not_move_with_the_SOLVER_TIMEOUT` carries the
+    surface arm, where a conjunct outside `_bar_scope` would live.
+
+    Could-not-fail: this is at risk of shape #4 (enumerating members rather
+    than pinning the channel), and `_CALLER_BUDGETS` says so in its own
+    comment. The structural half of the repair — the read ledger's attribution
+    and the source scan — is what covers the values this cannot.
+    """
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env
+
+    assert V.VERIFIED_BARRED_PRIMITIVES, "the bar has been lifted"
+    on_closed = trace(_scatter_ON_the_decided_slice)
+    el_closed = trace(_scatter_ELSEWHERE_same_shape)
+    on_sl = slice_obligation(on_closed, 0, interval_env(on_closed))
+    assert not isinstance(on_sl, DeclinedObligation)
+
+    # the pair the whole-query bar cannot separate, so a narrowing that moves
+    # is really the narrowing moving (the same premise as
+    # `test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar`)
+    assert V._barred_primitives(on_closed) == V._barred_primitives(el_closed)
+    assert V._barred_in_eqns(on_sl.eqns) == ("scatter",)
+
+    seen_narrow = seen_widen = 0
+    for flavour, key in (("z3", ":timeout"), ("cvc5", ":tlimit")):
+        for budget in _CALLER_BUDGETS:
+            stamp = _stamp_recording(on_sl, flavour, key, budget)
+
+            barred, why = V._bar_scope(on_closed, {0: (stamp,)})
+            assert (barred, "assert #0" in why) == (("scatter",), True), (
+                f"{flavour} {key}={budget}: the bar answered {barred!r} / "
+                f"{why!r} on the query the evidence really is about, where "
+                f"every other budget answers ('scatter',). The narrowing "
+                f"moved with a value the CALLER chose — `solver_timeout_ms` "
+                f"is carried into the stamp verbatim, so this is a public "
+                f"keyword argument deciding whether a bar fires"
+            )
+            assert "fell back" not in why
+            seen_narrow += 1
+
+            barred_m, why_m = V._bar_scope(el_closed, {0: (stamp,)})
+            assert "fell back to the whole query" in why_m, (
+                f"{flavour} {key}={budget}: an escalation produced on one "
+                f"query and stamped against another cleared the bar "
+                f"({barred_m!r} / {why_m!r}). The evidence check narrowed on "
+                f"a caller-chosen value instead of on what the evidence is "
+                f"about"
+            )
+            assert barred_m == V._barred_primitives(el_closed)
+            seen_widen += 1
+
+    # ANTI-VACUITY, both halves: the sweep must actually have exercised both
+    # directions, and must span more than one decade — a sweep collapsed to
+    # one budget would pass every assertion above while measuring nothing.
+    assert seen_narrow == seen_widen == 2 * len(_CALLER_BUDGETS) >= 20
+    assert max(_CALLER_BUDGETS) // max(min(_CALLER_BUDGETS), 1) >= 10 ** 6, (
+        "the budget sweep no longer spans six orders of magnitude; it has "
+        "been shrunk back to a list of the values someone thought of"
+    )
+
+
+@pytest.mark.parametrize("budget", [20000, 20001, 31337, 65535])
+def test_the_bars_verdict_does_not_move_with_the_SOLVER_TIMEOUT(budget):
+    """CHANNEL 7 AT THE SURFACE — the arm that reaches a conjunct written
+    anywhere in the assembly rather than inside `_bar_scope`.
+
+    `solver_timeout_ms` is the public keyword argument the channel rides on.
+    Whatever it is set to, a solver-path VERIFIED resting on a slice that
+    carries the barred primitive must be withheld, and one that does not must
+    not be. Every budget here is large enough for these two trivial queries to
+    be answered, so a moving verdict is the bar moving and not the solver
+    timing out — which the `discharged` assertion below makes explicit.
+
+    Deliberately NOT the same read as the test above: that one drives
+    `_bar_scope` with a hand-built stamp and cannot see a conjunct in
+    `make_solver_verdict` or `_bar_domain`; this one drives the whole
+    pipeline, at the price of a narrower sweep.
+    """
+    assert V.VERIFIED_BARRED_PRIMITIVES, "the bar has been lifted"
+    barred = check(_scatter_ON_the_decided_slice,
+                   vacuity_mode="inputs-only", solver_timeout_ms=budget)
+    assert all(o.status == "discharged" for o in barred.obligations), (
+        f"budget {budget} did not decide every obligation, so an UNKNOWN here "
+        f"would not be the bar"
+    )
+    assert barred.status == "UNKNOWN" and [
+        n for n in barred.notes if "VERIFIED withheld" in n and "assert #0" in n
+    ], (
+        f"solver_timeout_ms={budget}: {barred.status}, notes {barred.notes}. "
+        f"A caller-chosen budget decided whether the scatter bar fired"
+    )
+
+    clean = check(_scatter_OFF_the_decided_slice,
+                  vacuity_mode="inputs-only", solver_timeout_ms=budget)
+    assert clean.status == "VERIFIED" and not any(
+        "VERIFIED withheld" in n for n in clean.notes
+    ), (
+        f"solver_timeout_ms={budget}: {clean.status} on a query whose decided "
+        f"slice is scatter-free — the bar moved with the budget in the "
+        f"WIDENING direction, which the barred arm above cannot see"
     )
 
 

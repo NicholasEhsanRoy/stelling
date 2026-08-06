@@ -793,6 +793,20 @@ def _evidence_options(stamp) -> dict[str, str]:
     because a second read site in `_bar_scope` would reopen the channel
     without touching this function or the key set.
 
+    **AND IT HAS EXACTLY ONE PERMITTED CALLER,** :func:`_evidence_is_about`.
+    A projection is not a permission: whoever calls this reaches every
+    whitelisted option value, and two of those values — ``:timeout`` and
+    ``:tlimit`` — are the caller's own ``solver_timeout_ms`` carried verbatim
+    into the stamp. A conjunct on a whitelisted key's VALUE therefore needs no
+    forged record and no new field; it is driven by a public keyword argument.
+    Measured on `e35de13`, with this function called from ``_bar_scope``:
+    ``solver_timeout_ms=31337`` returned VERIFIED where 20000 returns UNKNOWN,
+    with the full suite byte-identical in both columns. The same test file
+    scans for the CALL as well as for the attribute, and the read ledger
+    attributes an ``options`` read to the function that ASKED rather than to
+    this one — a value the whitelist cannot constrain is constrained by
+    keeping the number of places that can see it at one.
+
     Tolerates a mapping or a sequence of pairs (``invocations`` is whatever the
     caller put on the record) and never raises: an unreadable option set
     projects to nothing, which widens."""
