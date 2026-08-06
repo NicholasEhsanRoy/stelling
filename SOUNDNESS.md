@@ -1318,4 +1318,127 @@ verdicts:
   corruption keyed on the index column's length would be the sixth instance
   of the pattern above.
 
+- **2026-08-06 (pre-release, later the same day): the sixth instance of the
+  bounded-sweep pattern closed at the ADD row's INDEX COLUMN, and the bar's
+  narrowing decision stopped holding any option value at all.**
+  A blinded audit of the previous entry, answered here. The previous entry
+  ended by naming the index column as what it had not closed; that is what
+  the first item below closes, and it closes it because naming a residual
+  turned out not to be the same as bounding it.
+  **What changed — the one item that MOVES VERDICTS.** A census of `len(ks)`
+  at `_scatter_add_plan` across the whole suite, taken by instrumentation and
+  identical at `e35de13` and at the previous entry's head, reaches
+  `{1, 2, 3, 4, 6, 254, 255}` — 5 is absent, and so is everything in 7..253.
+  One line, line-neutral, on operand shape `(2,)` which the shape bounds
+  explicitly admit —
+  `groups[k * rowsz + t].append((j if len(ks) - 5 else 0) * rowsz + t)` —
+  turns a `violated-witness` into `discharged` at |ks| = 5 and nowhere else,
+  a MISSED violation with the full suite green; keyed on 7 instead of 5 it
+  does the same thing inside the 7..253 hole. So the column is bounded the
+  way the shape was: the ADMITTED column space is the union of three
+  EXHAUSTIVELY swept families and nothing else — one index over every gauged
+  shape; every column of `range(n)` to the power of the length, for lengths
+  up to 6, on a RANK-1 operand; and the single-element operand at every
+  length up to 255, where every index is forced to 0 and the length is the
+  only free parameter. `tests/test_scatter_gauge_jax.py` pins those bounds
+  EQUAL to the source's in both directions, as it already does for rank, dim
+  and size. Measured with the corruptions applied on top: keyed on 5 the
+  branch is still reachable and the sweep catches it (2 RED); keyed on 7 the
+  branch is UNREACHABLE — the obligation comes back `unknown` — where at the
+  previous head it came back `discharged`.
+  **Which prior verdicts are retroactively invalid: none, and this is not an
+  unsoundness fix.** Nothing that was VERIFIED becomes REFUTED or vice versa.
+  As with the shape bounds, obligations past the column bound move from
+  ANSWERED to UNDECIDED, which is a verdict move to UNKNOWN and is logged as
+  one. It costs REFUTATIONS as well as discharges. Blast radius inside this
+  repository is ZERO, measured rather than assumed: the census above is the
+  evidence, and a RE-census after the guard finds nothing reaching the row
+  outside the gauged column space — 821 distinct `(|ks|, distinct, shape)`
+  keys over 2675 calls, zero of them outside. The support itself is no longer
+  `{1, 2, 3, 4, 6, 254, 255}` and is not claimed to be: the new sweep drives
+  the row at every length in the gauged space, which is what "gauged" now
+  means. Outside the gauge file the row is still reached only at
+  |ks| ∈ {1, 2, 3, 4}. `|ks| = 256` reaches the plan and DECLINES, which is
+  the guard firing.
+  **What to re-run:** any recorded verdict over a harness whose
+  `jax.ops.segment_sum` (or `x.at[column].add(...)`) accumulates MORE THAN
+  ONE update index onto an operand of rank 2 or 3, or more than six onto a
+  multi-element operand, AND whose obligations were decided by the SOLVER
+  rather than by intervals. Those verdicts are not wrong; this build returns
+  UNKNOWN where they returned an answer. The interval TRANSFER is untouched,
+  so verdicts intervals settled are unaffected.
+  **Affected versions:** 0.1.0 pre-release only; branch-only, nothing
+  released. The corruption is reachable on every build in this repository's
+  history through the previous entry's head.
+  **Three further items this pass, none of them verdict-moving:**
+  **(1)** The seventh channel's repair was measured INCOMPLETE. The previous
+  entry closed "a conjunct on the VALUE of a whitelisted option key" with two
+  site mechanisms plus a budget sweep — but the one function permitted to see
+  option values WAS the narrowing decision, so both site mechanisms were
+  satisfied by construction and the whole defence rested on the sweep, which
+  is a sample and reaches only the two of four whitelisted keys a caller can
+  set. Three line-neutral corruptions, each with the full suite BYTE-IDENTICAL
+  to unmutated in both columns: a module global stashed in
+  `_evidence_is_about` and read in `_bar_scope` keyed on `"30000"`
+  (`solver_timeout_ms=30000` → VERIFIED with no withheld note, where 20000,
+  29999, 30001 and 31337 all return UNKNOWN — and the IDENTICAL mutation
+  keyed on `"31337"`, which the sweep samples, is 2 RED, so the only
+  difference is the constant); and conjuncts on the VALUES of `smt2_sha256`
+  and `slice_sha256`, keys the sweep never varies at all. **Not answered by
+  widening the sweep.** The narrowing decision now consumes a BOOLEAN and
+  binds no recorded value, so no conjunct on any value is expressible there
+  at any value; the value zone is one four-line function whose two halves
+  cannot AIM (`_evidence_options` is handed no query, `_reproduced_evidence`
+  is handed no record, so neither can compute the mapping a false narrowing
+  would have to produce); and the reproduction is built by
+  `Script.stamp_options`, the same derivation the record is built from,
+  pinned by substitution rather than by two readings agreeing. What is left
+  is pinned TOTALLY over the source rather than sampled over values: no
+  string OR numeric literal outside the read ledger's own attribute names, no
+  comparison against a literal, no `global`/`globals()` smuggling. Six
+  mutants are RED against it, including the derived-quantity dodge
+  (`not (budget % 30000)`, which has no comparison in it at all and which the
+  sweep does not reach). Its stated limit: it constrains what may be WRITTEN
+  on that path, not every predicate Python can express — a discriminator
+  spelled as a method call on a value is not matched — which is why the
+  budget sweep is kept as corroboration. The sentence that sweep carried,
+  "an equality on any round or memorable number is hit", was FALSE and is
+  corrected rather than answered by adding values to the list.
+  **(2)** The previous entry's item (2) said one pass over `records` closed
+  the misattributing note. It closed it for the ONE-SHOT shape only. Measured
+  on a SCATTER-FREE query with a `records` that is empty on its first pass and
+  real afterwards: an honest VERIFIED becomes UNKNOWN carrying "…the
+  propagated interval straddling the asserted bound" — verbatim the defect
+  that entry recorded as closed. One pass at the top IS choosing pass 1, and
+  the comment claiming it worked "rather than by choosing which pass wins"
+  was wrong about its own mechanism. The shape is now REFUSED rather than
+  absorbed: the ledger is a separate field and an independent witness that
+  solvers ran, so an escalation whose ledger carries work and whose `records`
+  came back empty raises instead of assembling. What that does NOT reach — a
+  first pass yielding a non-empty STRICT SUBSET — is stated at the gate, with
+  the reason the stronger check is not taken.
+  **(3)** Two comments in `make_solver_verdict` contradicted each other: the
+  top called the bar-domain ordering "a second, now-REDUNDANT mechanism", the
+  bottom said "THE ORDER IS LOAD-BEARING". Measured: moving the domain read
+  below `by_index` is 0 RED. The bottom sentence was the false one and is
+  corrected — which is exactly the shape the top one names, an unpinned guard
+  whose comment claims to be load-bearing. Also: `solvers.py` cited a test
+  the previous pass had renamed away, the only dangling `::test_*` reference
+  in `src/`; it is repointed, and
+  `test_every_test_cited_in_core_prose_still_exists` makes the next one red.
+  And a stale false sentence inside the test whose stated purpose is to stop
+  census drift — "(five fixtures over four rules)", forty-six lines above an
+  assertion requiring six over five — is gone rather than corrected: that
+  sentence no longer restates the counts, and the three that remain are read
+  out of the file's own source and checked against the derived counts.
+  At this pass: 2064 passed, 2 skipped with both solvers, jax and maddening
+  installed; 2060 passed, 6 skipped under CI's install set
+  (`.[solvers,jax]`, no maddening). Before it: 2055 / 2 and 2051 / 6.
+  **What this pass did NOT close, named rather than left implied:** the value
+  zone's source pin reads `ast.Compare` nodes and literals, so a discriminator
+  spelled as a method call on a recorded value is not matched by it; the
+  coherence gate does not see a `records` whose first pass yields a non-empty
+  strict subset; and the ADD row's column sweep stops at rank 1, so a
+  multi-index column above rank 1 is DECLINED rather than gauged.
+
 *(no releases yet)*

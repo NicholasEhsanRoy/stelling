@@ -66,9 +66,27 @@ rows do not run ungauged — they refuse, and the obligation comes back
 `unknown`. That costs answers (see `SOUNDNESS.md`, 2026-08-06) and it is the
 only reading of **yes** that a bounded sweep can honestly support.
 
-The bound guards the SHAPE space and not the ADD row's index-column length:
-`jax.ops.segment_sum` reaches a column of 4 on an operand these bounds admit,
-and that axis is gauged by a mutation battery rather than an exhaustive sweep.
+**The INDEX COLUMN is inside the guarded space too, as of the round after
+this one.** The paragraph that stood here said the bound guarded the shape and
+not the ADD row's column length, that `jax.ops.segment_sum` reaches a column of
+4 on an admitted operand, and that the axis was gauged by a mutation battery
+rather than an exhaustive sweep. Naming a residual is not closing one, and this
+one was then demonstrated: a census of `len(ks)` at the row across the whole
+suite reaches `{1, 2, 3, 4, 6, 254, 255}` — 5 absent, 7..253 absent — and a
+line-neutral mis-route wrong only at a column of 5 turned a `violated-witness`
+into `discharged` with the suite green. The admitted column space is now the
+union of three exhaustively swept families and nothing else: one index over
+every gauged shape; every column of `range(n)` to the power of the length, for
+lengths up to 6, on a RANK-1 operand; and the single-element operand at every
+length up to 255, where every index is forced to 0 and the length is the only
+free parameter. Outside that the row refuses.
+
+What the column bound gives up, stated because a narrowing that is not stated
+is a silent one: a multi-index `segment_sum` onto an operand of rank 2 or 3 —
+normal-matrix assembly, say — now declines. Exhausting `n ** length` over every
+gauged shape is 12510 traces and 80 seconds against 3 for the rank-1 family,
+and the census says nothing in this repository reaches the row with more than
+one index on a higher-rank operand.
 
 ## What this table says that the earlier numbers did not
 
