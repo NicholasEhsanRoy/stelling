@@ -24,13 +24,73 @@ Two report streams are needed, because skips arrive by two routes:
   This is the shape the zero-dep CI job is built on, and a recorder that
   watched only the first stream would see none of it.
 
+**An xfail arrives down the first of those streams and is not a skip**, and
+the difference between "not a skip" and "not recorded" is a route this
+recorder was blind to for two commits:
+
+    @pytest.mark.xfail(run=False, reason="a planted reason nobody disclosed")
+    def test_planted_never_runs():
+        assert False        # appended to tests/test_affine.py
+
+    pytest -q -rs   ->  2010 passed, 2 skipped, 1 xfailed, EXIT 0, no banner
+                        and the claim MADE     (measured at b277083)
+
+``xfail(run=False)`` raises ``XFailed`` in SETUP, so its report is
+``report.skipped`` with ``wasxfail`` set. The recorder returned on ``wasxfail``
+and recorded nothing at all — and the pin then went on to certify, positively,
+"no undisclosed skip in this session" about a session containing a test that
+never ran. ``pytest.xfail("…")`` in a body is the same shape one phase later,
+and ``pytest.skip()`` with that same string in that same place is exit 1.
+So an xfail is recorded, in :data:`XFAILED` and not in :data:`SKIPPED`, and the
+completeness claim is WITHDRAWN on it — withdrawn and not failed, because
+``N xfailed`` is in pytest's own summary line exactly as ``N deselected`` is,
+and that is the cut this pin makes everywhere else. An ``xpassed`` report
+(``wasxfail`` set, outcome PASSED) is a test that ran and passed, and is
+recorded as having run.
+
+The same plant here is ``2021 passed, 3 skipped, 1 xfailed``, EXIT 0, and the
+extra skip is the pin withdrawing and saying why.
+
+**The whole taxonomy was then re-walked for anything else pytest DISCLOSES
+that this recorder drops**, by driving one test of every shape past it and
+printing the channels — measured, not read off the docs:
+
+=================================  ==================  =====================
+what pytest reports                channel here        can it hide a skip?
+=================================  ==================  =====================
+passed                             ``RAN``             no
+failed                             ``RAN``             no (session is red)
+skipped: marker / skipif           ``SKIPPED``         no
+skipped: fixture ``importorskip``  ``SKIPPED``         no
+skipped: ``pytest.skip()`` in body ``SKIPPED``         no
+skipped: in TEARDOWN               ``SKIPPED``         no
+skipped: a parametrised case       ``SKIPPED``         no
+skipped: module-level gate         ``SKIPPED`` (file)  no
+skipped: ``allow_module_level``    ``SKIPPED`` (file)  no
+xfailed: ``run=False``             ``XFAILED``         no — WAS the route
+xfailed: ``pytest.xfail()``        ``XFAILED``         no — was the sibling
+xfailed: marker + a real failure   ``XFAILED``         no
+xpassed (and strict xpass)         ``RAN``             no
+deselected                         ``DESELECTED``      no
+ERROR in setup                     ``STARTED`` only    no — `N errors`, red
+ERROR in teardown                  ``RAN``             no
+a collection ERROR                 —                   no — exit 2, or red
+a file with no tests               not in SEEN_FILES   no — reads as unseen
+=================================  ==================  =====================
+
+One row has no outcome channel: a test whose SETUP errored is in ``STARTED``
+and nowhere else. It is accounted for (so the order check does not fire on it)
+and it cannot hide anything, because pytest reports ``N errors`` and the
+session is non-zero. That is the whole of what the walk found.
+
 Two more things are recorded, and neither of them is an outcome.
 
 **How much of the suite this session was allowed to look at.** The inventory's
 completeness half claims something about THE SUITE's skip set, and a session
 narrowed by ``-k``, by an explicit path or by ``--lf`` can only support a claim
 about what it collected. Nothing in pytest's report distinguishes the two —
-``1927 passed, 2 skipped`` reads exactly like a whole run — so the scope is
+``1927 passed, 2 skipped`` (measured at 384597e, with an undisclosed skip
+planted and ``-k "not verdict"``) reads exactly like a whole run — so the scope is
 recorded here, where the collection is, and asserted there, where the claim is.
 
 **Whether the pin got to see the whole session.** Scope is not the only way
@@ -103,6 +163,16 @@ SKIPPED: dict[str, str] = {}
 # is half of what the inventory asserts, so passing is recorded too.
 RAN: set[str] = set()
 
+# nodeid -> xfail reason, for every test pytest counted as ``xfailed``. An
+# xfail is NOT a skip and is deliberately not in ``SKIPPED``: no rule, pin or
+# MEASURED entry has to excuse it and none of them can. But it is a test that
+# handed back no verdict this pin can read — with ``run=False`` it never
+# started — so the completeness claim withdraws on it. Kept separate from
+# ``SKIPPED`` so that the two never get confused for one another again: the
+# early return that used to stand here dropped the report entirely and let the
+# claim be MADE over a test that never ran.
+XFAILED: dict[str, str] = {}
+
 # nodeids that entered their runtest protocol at all — setup counts, and so
 # does an error in it. "The session did not silently drop you" is a weaker and
 # different question from ``RAN``, and it is the one the order check asks.
@@ -154,7 +224,9 @@ _TESTS = pathlib.Path(__file__).resolve().parent
 #
 # Not cosmetic. ``files_the_suite_has`` used a bare ``rglob``, so a file pytest
 # would never open counted as part of "the suite" and the two disagreed. Both
-# directions were measured on the whole tree:
+# directions were measured on the whole tree AT bd1fa04, whose clean suite is
+# ``1993 passed, 2 skipped`` — the numbers below are that suite's and not this
+# one's:
 #
 # * ``tests/build/test_zz_helper.py`` — a unique basename in a directory
 #   pytest prunes — put a file in the suite that no session can ever collect,
@@ -334,9 +406,37 @@ def pytest_configure(config) -> None:
 
 
 def pytest_runtest_logreport(report) -> None:
+    """Sort one report into the channel that describes it.
+
+    The ``wasxfail`` arm used to be ``return``, which is the difference
+    between "an xfail is not a skip" — true — and "an xfail is not anything",
+    which let a session containing a test that never ran certify that it
+    contained no undisclosed skip. Measured shapes, on the installed pytest,
+    rather than reasoned from the docs:
+
+    ================================  =======  ========  =========
+    shape                             when     outcome   wasxfail
+    ================================  =======  ========  =========
+    ``xfail(run=False)``              setup    skipped   set
+    ``pytest.xfail()`` in the body    call     skipped   set
+    ``xfail`` marker, test failed     call     skipped   set
+    ``xfail`` marker, test passed     call     passed    set
+    ================================  =======  ========  =========
+
+    The first three are what pytest counts as ``xfailed`` and are recorded as
+    such; the last is ``xpassed``, a test that ran and passed, and is recorded
+    as having RUN. Nothing here distinguishes the second row from the third,
+    and nothing needs to: both handed back an expected-failure instead of a
+    verdict, and the claim withdraws on either.
+    """
     STARTED.add(report.nodeid)
-    if getattr(report, "wasxfail", None) is not None:
-        return  # an xfail is reported as skipped and is not one
+    wasxfail = getattr(report, "wasxfail", None)
+    if wasxfail is not None:
+        if report.skipped:
+            XFAILED.setdefault(report.nodeid, str(wasxfail))
+        elif report.when == "call":
+            RAN.add(report.nodeid)  # xpassed: the body ran, and it passed
+        return
     if report.skipped:
         SKIPPED.setdefault(report.nodeid, _reason(report.longrepr))
     elif report.when == "call":
@@ -463,7 +563,7 @@ def pytest_runtestloop(session):
     return result
 
 
-def _nothing_was_meant_to_run(config) -> bool:
+def _no_call_phase_in_this_mode(config) -> bool:
     """``--collect-only`` / ``--setup-only`` / ``--setup-plan``.
 
     Read off the INVOCATION rather than inferred from an empty :data:`RAN`,
@@ -473,11 +573,28 @@ def _nothing_was_meant_to_run(config) -> bool:
     from the effect conflated them, and
     ``pytest --ignore=tests/test_skip_inventory.py -k <only skipping tests>``
     with an undisclosed skip planted was `1 skipped, 1983 deselected`, exit 0,
-    with nothing printed.
+    with nothing printed (measured at bd1fa04).
 
-    These three modes run no call phase at all, so a ``pytest.skip()`` in a
-    test body cannot fire in them and "no undisclosed skip in this session" is
-    not a claim they are entitled to make.
+    These three modes run no call phase, so a ``pytest.skip()`` in a test BODY
+    cannot fire in them and "no undisclosed skip in this session" is not a
+    claim any of them is entitled to make.
+
+    **That is where the reason used to stop, and it was too narrow by one
+    phase.** ``--setup-only`` EXECUTES fixture setup — that is the whole point
+    of it — so a ``pytest.skip()`` in a FIXTURE fires under it, is reported,
+    and is recorded here. With a fixture-level
+    ``pytest.skip("a planted reason nobody disclosed")`` in
+    ``tests/test_affine.py``, measured at b277083::
+
+        pytest --setup-only -k uses_the_gate   1 skipped, 2012 deselected,
+                                               EXIT 0, nothing printed
+        pytest -k uses_the_gate                EXIT 1, banner naming the skip
+
+    The plant was SELECTED, the skip FIRED, and the recorder HAD it. So this
+    predicate no longer gates the guard's silence; it gates the CLAIM. A
+    no-call-phase session still gets its disclosure half checked, and still
+    fails loudly on a skip it saw and cannot explain — it just may not certify
+    the suite.
     """
     return any(
         getattr(config.option, name, False)
@@ -494,8 +611,9 @@ def _close_the_session(session) -> None:
     ran or skipped something at all.
 
     **What this guard is not allowed to do is fall silent**, which is what two
-    of its early returns used to do. Both were measured, on the whole tree,
-    with ``pytest.skip("a planted reason nobody disclosed")`` planted in
+    of its early returns used to do. Both were measured AT bd1fa04 (clean
+    suite ``1993 passed, 2 skipped``), on the whole tree, with
+    ``pytest.skip("a planted reason nobody disclosed")`` planted in
     ``tests/test_affine.py``:
 
     * ``pytest --ignore=tests/test_skip_inventory.py`` — the pin's own file is
@@ -519,17 +637,43 @@ def _close_the_session(session) -> None:
     and ``the_claim_this_session_can_make`` answers the scope question itself,
     in the one place the answer is written down.
 
-    One silence is kept, deliberately, and it is the only one: a session that
-    did not collect the whole tree and has nothing else to report says nothing.
-    ``pytest tests/test_affine.py`` is the commonest invocation there is, and a
-    banner naming the 82 files it did not run is a cost on every developer for
-    news they already have. It still FAILS loudly if a skip it did see is
-    undisclosed, which is the half that was actually missing.
+    Two silences are kept, deliberately, and they are the only two. A session
+    that did not collect the whole tree and has nothing else to report says
+    nothing: ``pytest tests/test_affine.py`` is the commonest invocation there
+    is, and a banner naming the 82 files it did not run is a cost on every
+    developer for news they already have. And a session that ran no call phase
+    at all (``--collect-only`` and friends) says nothing when it has nothing to
+    say, for the same reason. Both still FAIL loudly if a skip they DID see is
+    undisclosed, which is the half that was actually missing — the second of
+    them measurably so: ``pytest --setup-only`` executes fixture setup, and a
+    ``pytest.skip()`` in a fixture used to vanish into
+    :func:`_no_call_phase_in_this_mode`'s early return.
+
+    **What the silences may not do is swallow a shortfall pytest cannot
+    report.** They used to, because the decision function answered the SCOPE
+    questions in the wrong order: ``unseen`` and ``filtered_out`` — both
+    WITHDRAWALS, both silenced here — were tested before ``still_owed``, the
+    undisclosed drop that keeps the failure. Measured at b277083 with a plugin
+    that removes one item from ``items[:]`` and never calls
+    ``pytest_deselected``::
+
+        whole tree                        2008 passed, 3 skipped, EXIT 1, banner
+        --ignore=tests/test_square_row.py 1991 passed, 3 skipped, EXIT 0, SILENT
+        pytest tests/test_affine.py       40 passed,              EXIT 0, SILENT
+        -k "not test_op_add"              2007 p, 3 s, 1 desel,   EXIT 0, SILENT
+
+    Any narrowing at all bought a silent pass on the one shortfall the whole
+    mechanism exists for. The order is fixed where it is made, in
+    ``the_claim_this_session_can_make``: the undisclosed drop is decided
+    BEFORE either withdrawal. The same four commands here::
+
+        whole tree                        2020 passed, 3 skipped, EXIT 1, banner
+        --ignore=tests/test_square_row.py 2003 passed, 3 skipped, EXIT 1, banner
+        pytest tests/test_affine.py       40 passed,              EXIT 1, banner
+        -k "not test_op_add"              2019 p, 3 s, 1 desel,   EXIT 1, banner
     """
     if CLAIM_MADE:
         return  # the pin ran with a complete record and said its piece
-    if _nothing_was_meant_to_run(session.config):
-        return
     # There is deliberately no "and nothing ran" return here. The old
     # `if not RAN: return` is the second silent route above; narrowing it to
     # `not RAN and not SKIPPED` would only have moved it, and would have left a
@@ -549,11 +693,12 @@ def _close_the_session(session) -> None:
         # is reasoned, not measured, because xdist is not installed here.
         return
 
+    no_call_phase = _no_call_phase_in_this_mode(session.config)
     try:
         import test_skip_inventory as inventory
 
         verdict, message = inventory.the_claim_this_session_can_make(
-            at_session_end=True
+            at_session_end=True, no_call_phase=no_call_phase
         )
     except Exception as exc:  # the pin is what says what a skip means
         verdict = "failed"
@@ -561,8 +706,10 @@ def _close_the_session(session) -> None:
             f"the completeness pin could not be consulted at the end of a "
             f"session it was not part of: {exc!r}"
         )
-    if verdict == "withdrawn" and unseen_files():
-        return  # the developer narrowed collection; that is not news
+    if verdict == "withdrawn" and (no_call_phase or unseen_files()):
+        # the developer narrowed collection, or asked for a mode that runs
+        # nothing; neither is news. A FAILED verdict is never silenced here.
+        return
     _NOTES.append((verdict, message or "no undisclosed skip in this session."))
     if verdict == "failed":
         # The pytest-cov idiom: the exit code follows `session.testsfailed`,
