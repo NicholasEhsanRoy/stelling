@@ -849,8 +849,19 @@ def pytest_unconfigure(config) -> None:
         # The ordinary route to the screen is `pytest_terminal_summary`, and it
         # is called from inside `pytest_sessionfinish` — which is over. A
         # verdict formed or un-printed after that point has to write itself.
+        #
+        # The provenance line is not decoration. "The banner appeared" and "the
+        # banner appeared BECAUSE THE ORDINARY ROUTE WAS GONE" are different
+        # observations, and a case that cannot tell them apart cannot tell a
+        # session with a note-clearing plugin from a session without one.
         title = _TITLES.get(verdict, verdict)
-        sys.stderr.write(f"\n{'=' * 12} {title} {'=' * 12}\n{message}\n")
+        sys.stderr.write(
+            f"\n{'=' * 12} {title} {'=' * 12}\n"
+            "(written from pytest_unconfigure: pytest_terminal_summary, which "
+            "pytest calls from inside pytest_sessionfinish, did not deliver "
+            "this verdict)\n"
+            f"{message}\n"
+        )
         sys.stderr.flush()
         _DELIVERED.append(verdict)
 
