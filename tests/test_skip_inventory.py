@@ -53,13 +53,15 @@ Four shapes of disclosure, in descending strength:
 Anything a session skips that none of the four covers is a failure, with the
 ways to fix it named in the message.
 
-**Scope.** The completeness half claims something about *the suite*, and it
-can only claim it about a session that collected the suite. A session narrowed
-by ``-k``, by an explicit path, or by ``--lf`` reports the same green line as a
-whole one, so the scope is recorded in ``tests/conftest.py`` and checked here
-before the claim is made — see
-:func:`test_no_session_skip_is_undisclosed`, which withdraws the claim rather
-than making it vacuously.
+**Scope, and it is asserted rather than assumed.** The completeness half
+claims something about *the suite*, and it can only claim it about a session
+that collected the suite. A session narrowed by an explicit path, by ``--lf``
+or by ``-k`` prints a green line that reads exactly like a whole run's, so the
+scope is recorded in ``tests/conftest.py``, where the collection is, and
+checked in :func:`test_no_session_skip_is_undisclosed`, where the claim is:
+a session that never collected the tree WITHDRAWS the claim (it skips, saying
+what it did not see), and one that collected the tree and then deselected part
+of it FAILS. Whatever the session did see is checked either way.
 
 The session's outcomes come from ``tests/conftest.py``, which records them as
 pytest reports them; see there for why this cannot be a static read of the
@@ -642,6 +644,36 @@ def test_no_rule_is_broader_than_the_reason_it_discloses():
             "not need a pattern; one that has none cannot be bounded here"
         )
         assert not rule.matches("anything at all " * 5), rule.pattern
+
+    # The other edge of the same bound. A pattern tight enough to exclude the
+    # decoys must still cover every reason the site can actually emit, or a
+    # runner whose XLA folds differently reads as drift — which is the exact
+    # thing this rule exists to prevent. The form names come from the source,
+    # so adding a form with a comma or a bracket in its name fails HERE, where
+    # the pattern is, rather than on someone else's machine.
+    forms = re.findall(
+        r'^\s*\("([^"]+)",\s*lambda u, w',
+        (TESTS / "test_three_rows_acceptance.py").read_text(),
+        re.M,
+    )
+    assert len(forms) >= 9, (
+        f"only {len(forms)} contraction forms found in "
+        f"test_three_rows_acceptance.py — the shape this reads has changed "
+        f"and the check below has gone vacuous"
+    )
+    uncovered = [
+        name
+        for name in forms
+        if not any(
+            r.matches(f"{name}: XLA did not contract this form on this build")
+            for r in RULES
+        )
+    ]
+    assert not uncovered, (
+        "contraction form(s) whose XLA skip no rule excuses — on a build "
+        "where XLA does not fold these, the suite would report inventory "
+        "drift that is nothing of the kind:\n  " + "\n  ".join(uncovered)
+    )
 
 
 def _body_of(nodeid: str) -> str | None:
