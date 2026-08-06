@@ -616,7 +616,21 @@ def _outcome(nodeid: str) -> tuple[str, str]:
 #     pytest tests/test_affine.py         40 passed,              EXIT 0, SILENT
 #     -k "not test_op_add"                2007 p, 3 s, 1 d,       EXIT 0, SILENT
 #
-# All four are EXIT 1 with a banner here.
+# All four are EXIT 1 with a banner at a80d60c, and re-driven at a76ca51 with a
+# plugin that removes the first non-pin item from `items[:]` and never calls
+# `pytest_deselected`:
+#
+#     whole tree                          2033 passed, 3 skipped, EXIT 1, banner
+#     --ignore=tests/test_square_row.py   2016 passed, 3 skipped, EXIT 1, banner
+#     pytest tests/test_affine.py         40 passed,              EXIT 1, banner
+#     -k "not test_op_add"                2032 p, 3 s, 1 desel,   EXIT 1, banner
+#
+# "here" was the label on that sentence until this pass, and a word that means
+# whichever tree the file happens to be sitting in is a label that goes stale
+# without anybody editing it — the same defect as an unlabelled count, one
+# level down, in a sentence with no number in it at all. The EXIT and BANNER
+# columns are what the block is FOR and they are size-independent; the counts
+# are the tree's and are labelled as the tree's.
 #
 # The session is interrogated, and the answers differ because the mistakes
 # differ:
@@ -1652,29 +1666,39 @@ def test_no_session_skip_is_undisclosed():
 # produced is not checked at its surface, and the surface is what a developer
 # sees.
 #
-# WHAT THIS NET IS AND IS NOT, RE-DERIVED RATHER THAN ASSERTED. The commit that
-# built it said "twenty mutations, each caught by the case written for it and
-# by no other". The second half of that is false and was measured to be false.
-# Re-derived over 33 mutations of the shipped mechanism — 27 of the code as it
-# stands and 6 put-backs of what earlier commits removed — every one is caught,
-# and they produce 28 DISTINCT case-signatures, not 33.
+# WHAT THIS NET IS AND IS NOT. The commit that built it said "twenty
+# mutations, each caught by the case written for it and by no other". The
+# second half of that is false and was measured to be false: mutations of this
+# mechanism COLLIDE, and the collisions are named below.
 #
-# THAT SENTENCE IS NOT CHECKABLE FROM THIS TREE, AND SAYING SO IS PART OF IT.
-# The 33 mutations were applied in a working tree and written down nowhere
-# here, so "33 caught, 28 signatures" is a report of work done and not evidence
-# a reader can re-run: nothing in this repository names the 33, and a reader who
-# derived their own 33 would be checking a different claim. What IS checkable is
-# the part below — five pairs, each two named edits to code that ships, each
-# re-derivable in a few minutes. Treat the totals as provenance and the pairs as
-# the finding.
+# THERE IS NO TOTAL HERE, AND ITS ABSENCE IS THE POINT. Two versions of this
+# comment carried one — "twenty", then "33 caught, 28 signatures" — and both
+# were counts of work done in a working tree that is not in this repository. A
+# reader cannot re-run a number; a reader who derived their own thirty-three
+# mutations would be checking a different claim; and annotating the total with
+# "not checkable from this tree" leaves it sitting in the tree as an assertion
+# that has to be accepted on provenance. §53 says record the FAILURES and not
+# the totals, and deleting them obeys that more exactly than labelling them
+# did. What is left is what a reader can drive: named pairs, each two named
+# edits to code that ships, each re-derivable in a few minutes.
 #
-# Five pairs are indistinguishable by which cases fail:
+# Six pairs are indistinguishable by which cases fail:
 #
 #   the wasxfail report dropped          | the XFAILED withdrawal removed
 #   the `unseen` withdrawal removed      | `unseen_files()` forced empty
 #   the `filtered_out` answer removed    | `DESELECTED` never filled
 #   the no-call-phase withdrawal removed | the guard never silencing it
 #   `USER_FILTERS` never filled          | the `-k` failure put back
+#   `_OUR_FAILURES` ignored in the       | `pytest_unconfigure` never
+#     already-red carve-out              |   re-assigning `session.exitstatus`
+#
+# The sixth was derived when the anchor moved to `pytest_unconfigure` and is
+# the same shape as the first four: one invariant — "the anchor gives the exit
+# code back" — at two sites, the carve-out that decides whether to act and the
+# assignment that acts. Both fail exactly
+# `exit-zero-from-a-plugins-own-sessionfinish`,
+# `exit-zero-from-a-tryfirst-sessionfinish` and both halves of
+# `…raises_nothing_still_takes_the_exit_code`.
 #
 # The first four pairs are one invariant at two sites — the recorder's end and
 # the decision's end. The defence offered for them was that a signature naming
