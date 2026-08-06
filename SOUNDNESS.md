@@ -1514,8 +1514,17 @@ verdicts:
   the stash needed); default arguments are forbidden in both closures and the
   signature is scanned by the literal rules; and the closures may import only a
   named list, because a function-level import binds a LOCAL and is invisible to
-  the closure walk. All six mutants are RED, each to one of those three general
-  rules and none to a rule written for it.
+  the closure walk. All six mutants are RED. **The sentence that stood here
+  said "each to one of those three general rules and none to a rule written for
+  it", and that is false on two counts** — `PREREG_BAR13.md` scored the same
+  clause honestly as **P1.c partial**, and the published document did not.
+  Re-derived by running each mutant at `9fc44dd` and reading which assertion
+  fires: the DEFAULT-ARGUMENT mutant is 1 RED, to the DEFAULTS rule alone
+  ("`_evidence_reproduces` now has a DEFAULT ARGUMENT"), which is a FOURTH rule
+  added for that mutant and not one of the three; the mutable-default mutant
+  dies to the same rule; and the `Script.stamp_options` mutant dies to
+  `test_the_stamps_own_derivation_is_the_HONEST_one`, a test that exists only
+  because of it. Three of the six die to the general rules; three do not.
   **(2) "PINNED BY SUBSTITUTION RATHER THAN BY TWO READINGS AGREEING" DOES NOT
   CONSTRAIN THE SUBSTITUTED FUNCTION AT ALL.** `_reproduced_evidence` claimed
   that corrupting `Script.stamp_options` "corrupts EMISSION — which the
@@ -1589,10 +1598,18 @@ verdicts:
   one_thing_and_the_loop_ANOTHER`, whose direct successor is the parametrised
   refusal test, so no coverage is lost — the statement is what was wrong). And
   "exactly three integers moved in `tests/`" does not reproduce: per-file
-  multisets of numeric literals across all four commits give **0 removed and
-  112 added in `tests/`** (105 `int`, 7 `float`) and **0 removed and 5 added in
-  `src/`**. Zero literals changed value anywhere, which is STRONGER than the
-  claim it replaces.
+  multisets of numeric literals **over the same range, `3e107cf..faefc48`**,
+  give **0 removed and 112 added in `tests/`** (105 `int`, 7 `float`) and
+  **0 removed and 5 added in `src/`**. The range is named here because the
+  sentence beside it names one and this one did not, and the figures are
+  range-specific: over **`faefc48..9fc44dd`**, this branch's own four commits,
+  the same measurement gives **34 added / 0 removed in `tests/`** and
+  **4 added / 2 removed in `src/`** — both removals the literal `0`, from a
+  deleted line rather than from a constant that moved. "No `src/` constant
+  changed value" is the claim that survives at every range, and it is
+  CONFIRMED tree-wide rather than per-file: over `faefc48..HEAD`, 192
+  module-level assignments in `src/`, 31 numeric-bearing, **0 changed, 0 added,
+  0 removed**.
   **(8) THE CAPABILITY CLAIM IS SCOPED TO WHAT WAS MEASURED**, and the pattern
   most likely to meet the bound is named — see the entry above, which now says
   "across the PYTEST-DRIVEN TREE", records that `corpus/run_census.py` never
@@ -1607,11 +1624,159 @@ verdicts:
   discriminator spelled as a METHOD CALL on a recorded value
   (`.startswith(...)`, a hash, a length test) is not matched by it — the
   closure rules above do not reach that either, and the budget sweep is kept as
-  corroboration for exactly that reason; the coherence gate still does not
-  REFUSE a `records` whose first pass yields a non-empty strict subset, it only
-  refuses to misattribute the result; the census drift test still cannot see a
-  restatement nobody adds to its list; and the ADD row's column sweep still
-  stops at rank 1, so a multi-index column above rank 1 is DECLINED rather than
-  gauged.
+  corroboration for exactly that reason; **and the axis the method call is only
+  one instance of: the zone may spell no constant and is HANDED four, so any
+  predicate over a recorded value whose constants come from
+  `_EVIDENCE_*_KEYS` is invisible to every rule in the pass — closing the CALL
+  axis is what left the PREDICATE axis open, and it was open at the meeting
+  point itself**; the DECISION's loop filters `rule != "literal"`, so a string
+  constant inside any call there matches nothing; the coherence gate still does
+  not REFUSE a `records` whose first pass yields a non-empty strict subset, it
+  only refuses to misattribute the result; the census drift test still cannot
+  see a restatement nobody adds to its list; and the ADD row's column sweep
+  still stops at rank 1, so a multi-index column above rank 1 is DECLINED
+  rather than gauged.
+
+- **2026-08-06 (pre-release): the value zone was closed under CALL and left
+  open under PREDICATE, because it is HANDED its constants.** A blinded audit
+  of the entry above, answered here. **No item in this entry moves a verdict**:
+  nothing that was VERIFIED, REFUTED or UNKNOWN changes status, no bound moves,
+  no numeric constant changes in `src/` (192 module-level assignments, 31
+  numeric-bearing, 0 changed / 0 added / 0 removed over `faefc48..HEAD`), and
+  the scatter bar is where it was. What changes is what the tree can be
+  corrupted into saying, and what six of its own sentences claimed.
+  **Which prior verdicts are retroactively invalid: none.** **Affected
+  versions:** 0.1.0 pre-release only; branch-only, nothing released.
+  **What to re-run:** nothing. There is no behavioural change at all — the one
+  `src/` edit hoists a fallback message to a module constant, byte-identical in
+  what it renders.
+  **(1) THE PREDICATE AXIS WAS WIDE OPEN, AT THE MEETING POINT ITSELF, AND THE
+  REASON IS THE SHAPE OF THE PIN.** The source pin forbids the value zone to
+  SPELL a string, and then the module hands it `_EVIDENCE_OPTION_KEYS`,
+  `_EVIDENCE_BUDGET_KEYS` and `_EVIDENCE_DERIVED_KEYS` as enumerated immutable
+  constants — so every string a conjunct needs, for exactly the keys that
+  matter, is already in scope under a permitted name. The literal rule is
+  near-vacuous for those keys. Six line-neutral corruptions, each MEASURED LIVE
+  at `faefc48` (2064 passed / 2 skipped and 2060 / 6, byte-identical to
+  unmutated in both columns) and each 0 RED at `9fc44dd`: three lines inside
+  `_evidence_reproduces` itself — `if set(_EVIDENCE_BUDGET_KEYS) <=
+  set(recorded): return True` — with no literal, no comparison against one, no
+  module-level mutable, no helper, no default argument, no import, no `global`,
+  no smuggler, and no method call on a recorded value, so it is not the residue
+  the entry above disclosed; the same predicate in a literal-free NESTED `def`;
+  `_whitelisted.__kwdefaults__ = out`, a mutable carrier on a zone FUNCTION,
+  which the immutability rule never reached because that branch runs only for
+  names the module does not define; the same carrier USED across the two
+  `_whitelisted` calls; and two in the DECISION, where the loop filters
+  `rule != "literal"` so a string constant inside any call matches nothing —
+  `str(closed).count("stelling_backdoor")`, and a per-stamp variant on the two
+  budget spellings. Against the mispaired pair the bar exists for, with a stamp
+  forging a second budget spelling, four of the six take `('scatter',)` to
+  `()`: the bar lifted. Unmutated, forged or honest, all four rows stay
+  `('scatter',)`.
+  **The repair is five rules, and none is written for a spelling.** A CONSTANT
+  READER LEDGER — each enumerated constant is read by exactly one function,
+  asserted in both directions, the way `_ALLOWED_READS` ledgers record
+  ATTRIBUTES — after which a predicate at the meeting point has no constant to
+  key on. A SHAPE PIN on `_evidence_reproduces`, the one function where a
+  recorded value and the re-derivation are both in scope: no branch, no loop,
+  no nested definition, one `return`, of `bool(...) and ... == ...`. Those two
+  are INDEPENDENT, measured by disabling each and re-running: the first mutant
+  is RED to either alone. The decision's literal exemption is narrowed from a
+  rule NAME to a POSITION — message text, in an f-string, a `+`, or a
+  `"sep".join(...)` — and the decision may now spell no number at all, which it
+  never did. A `call-literal`/`attr-literal` rule catches a literal handed to a
+  method on a value, which is most of the method-call residue the entry above
+  disclosed and left open. And a `dynamic` rule for `__import__`/`eval`/`exec`/
+  `compile`, which bind no `ast.Import` node and so were invisible to the
+  import allow-list. All six new mutants and all six published ones are RED.
+  **(2) THE IMMUTABILITY RULE WAS FALSE AS WRITTEN, IN TWO PLACES.** *"Every
+  module-level name the closure reads must be enumerated AND immutable"* never
+  applied the immutability half to the zone's own function objects, which are
+  mutable; and `_IMMUTABLE` includes `tuple`, checked SHALLOW, so a tuple
+  containing a list would pass (no exploitable instance today — all four
+  enumerated constants are frozensets or tuples of `str`, which is why the
+  check is deepened rather than a constant changed). Both are closed, with a
+  source rule (no assignment to an attribute anywhere in either closure) and a
+  runtime one (no `__defaults__`, `__kwdefaults__` or `__dict__` on any
+  function in the closure) kept together because neither reaches the other's
+  case. A zone member that is not a plain FUNCTION — a class, whose methods the
+  `__code__` walk silently skips — is an offence now rather than a hole, and
+  where the walk stops is named in the docstring: attribute/method dispatch, a
+  decorator's wrapper, and objects with no `__code__`.
+  **(3) THE STRONGEST STATEMENT ABOUT `_evidence_budget` IS ONE LINE AND
+  NEITHER TEST MADE IT.** `inspect.signature(slice_fingerprint)` is
+  `(sl) -> 'str'`: the budget is not an argument, so there is no value of it to
+  sample. Added. The pre-registered exhaustive sweep it replaced was also not
+  expensive, which was the reason given for substituting twelve points:
+  `1..60000` costs **9.5 s at load average 6.00**, and gives distinct
+  `slice_sha256` 1, distinct `smt2_sha256` 60000, empty reproductions 0,
+  reproductions equal to the neighbour's record 0. The substitution's standing
+  is restated accurately — stronger in the generality of its argument, WEAKER
+  in the sample supporting its premise — and its neighbour-pair half is kept
+  because the sweep did not have it. The `True` row is labelled as what it is:
+  `isinstance(budget, int)` admits it and `emit(sl, "z3", True)` emits
+  `(set-option :timeout True)`, a script no solver accepts, but
+  `_evidence_budget` CANNOT return a bool (`int(text)` never yields one —
+  measured), so reaching it needs `int` itself corrupted.
+  **(4) THE SAME GREP BLINDNESS, THREE LINES ABOVE THE CORRECTION.**
+  `_CALLER_BUDGETS`' comment corrected "an equality on any round number is hit"
+  by naming 30000 as absent from the tuple — and in the same sentence listed
+  "2000, 15000, 25000, 50000 or 60000", read as values the suite does not
+  drive. **Four of the six are live solver budgets**: 2000 at about twenty
+  sites, 15000 at `tests/test_array_emission.py:1391`, and 30000 and 60000
+  spelled `30_000`/`60_000` so that `grep -rn '60000'` finds only prose. The
+  claim is derived now, off the AST, from BUDGET POSITIONS rather than from
+  every number — 50000 appears as fixture arithmetic and is not one. Measured
+  tree-wide: **542 numeric instances in `src/` and `tests/` are spelled in a
+  form a digit-grep for their own value misses**, over 136 distinct forms — 331
+  COMPUTED, 157 EXPONENT, 53 underscore, 1 other, and zero hex, octal or
+  binary. Underscore is the small part.
+  **(5) THE NINTH RESTATEMENT, FOUND.** The census entry above named "a NINTH
+  restatement, written later and not added to the list" as a residue and left
+  it there. It is `# The undriven six, each with its reason:` in
+  `tests/test_scatter_gauge_jax.py`, restating `sites - rules` inside the file
+  the checker parses; perturbed to "seven" at `9fc44dd` it is 0 RED with the
+  whole gauge file green. It is read now. Two records with it: `_flat`'s "four
+  of the five sentences … are SPLIT" is **three**, measured by running every
+  pattern against the raw source as well as the flattened one (the flattener
+  stays — 13 number-words with it against 10, and removing it hard-fails); and
+  the block comment restated the count of places as "eight" **fourteen lines
+  above** asserting that "the count of places is no longer restated anywhere",
+  both shipped in one pass. The number is elided and the claim kept.
+  **(6) FOUR RESIDUES, THREE CLOSED AND ONE DISCLOSED.** The citation
+  resolver's semantic is "a `FunctionDef` of that name exists in the AST",
+  which is strictly weaker than "the cited test runs": two of the seven shapes
+  where that differs are closed — nested inside another function, and inside a
+  non-`Test*` class, which was one of the branch's own ACCEPTED rows and which
+  pytest does not collect because `pyproject.toml` sets no `python_classes` —
+  and the other five are rows in the anti-vacuity table now, so the gap is
+  measured rather than described (all 13 in-tree citations resolve at module
+  level, checked before the change). `docs/gauge-coverage.md`'s `m-assembly`
+  claim, which nothing reddened, gets a test that pins both halves of the
+  asymmetry. The `scratchpad` `WITHHELD` entry says what it actually does: the
+  sdist `include` list is what keeps it out, and the entry exempts the entire
+  `scratchpad/` SUBTREE from the untracked-file check. And a number-word scan
+  over `*.md` is NOT added: `SOUNDNESS.md`'s own restatements of these counts
+  are outside the census checker by construction, and that is named rather than
+  left to look covered.
+  At this pass: 2070 passed, 2 skipped with both solvers, jax and maddening
+  installed; 2066 passed, 6 skipped under CI's install set
+  (`.[solvers,jax]`, no maddening). Before it: 2068 / 2 and 2064 / 6.
+  **What this pass did NOT close, named rather than left implied:** a predicate
+  in the value zone that needs NO constant at all is still not matched —
+  `len(recorded) > len(reproduced)` has no `Constant` in either operand, and
+  `sorted(_EVIDENCE_OPTION_KEYS).pop()` drops a key by position rather than by
+  name; the meeting point's shape pin means neither can be written where both
+  sides are in scope, and a constant-free predicate cannot AIM at a chosen
+  record, but neither of those is a rule that catches it. The decision still
+  permits a string literal handed to a call on a bare NAME, because the honest
+  fallback builds its message that way and the callee's own body is inside the
+  scanned closure. The citation resolver still answers "defined" for five
+  shapes pytest never runs. The census drift test still reads a LIST of
+  patterns, so a tenth restatement nobody adds to it is a tenth restatement
+  nobody reads — the ninth is the demonstration that this is not hypothetical.
+  And the coherence gate and the ADD row's column bound are where the entry
+  above left them.
 
 *(no releases yet)*
