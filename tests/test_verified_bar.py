@@ -287,6 +287,32 @@ def _verdict_status(closed, prop, esc):
     return make_solver_verdict(closed, prop, esc, **VERSIONS).status
 
 
+def _past_the_pairing_gate(esc, closed):
+    """The mispaired escalation with its recorded query hash OVERWRITTEN to
+    the query it is about to be stamped against — i.e. the pairing gate
+    deliberately satisfied by hand.
+
+    EVERY BAR MISPAIRING TEST BELOW GOES THROUGH THIS, and it is not a
+    weakening: it is what keeps them measuring the BAR. Since the query
+    pairing gate landed (`solvers.make_solver_verdict`, the fourth
+    `MispairedEscalationError`), a genuinely mispaired assembly does not reach
+    the bar at all — it raises. A test that just asserted the raise would have
+    stopped measuring `_bar_scope` entirely, which is could-not-fail shape #7:
+    a fixture that never reaches the guard's condition. So the gate is
+    bypassed HERE, explicitly and in one place, and the bar is measured as the
+    SECOND, anti-correlated mechanism it is: the gate keys on the query's
+    content hash, the bar on the decided slice's fingerprint and script, and
+    neither derives from the other.
+
+    That the gate itself fires on these same fixtures WITHOUT this bypass is
+    `test_the_pairing_gate_refuses_the_mispairing_the_bar_only_narrows` and
+    `test_the_pairing_gate_closes_the_SCATTER_FREE_row`.
+    """
+    import dataclasses
+
+    return dataclasses.replace(esc, query_sha256=closed.content_hash())
+
+
 def test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query():
     """THE MISPAIRING THE WHOLE-QUERY BAR WAS IMMUNE TO, and the reason the
     scope is derived rather than recorded.
@@ -320,7 +346,8 @@ def test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query():
         "VERIFIED"
     ), "the correctly-paired assembly does not VERIFY; the fixture is wrong"
 
-    v = make_solver_verdict(dirty, prop, esc, **VERSIONS)
+    v = make_solver_verdict(dirty, prop, _past_the_pairing_gate(esc, dirty),
+                            **VERSIONS)
     assert v.status == "UNKNOWN", (
         f"{v.status}: an escalation carrying no scatter cleared the bar on a "
         f"query that does — the bar's scope is being read off the escalation "
@@ -478,7 +505,9 @@ def test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar(
         "UNKNOWN"
     ), "the correctly-paired assembly does not bar; the fixture is wrong"
 
-    v = make_solver_verdict(el_closed, on_prop, on_esc, **VERSIONS)
+    v = make_solver_verdict(el_closed, on_prop,
+                            _past_the_pairing_gate(on_esc, el_closed),
+                            **VERSIONS)
     assert [o.status for o in v.obligations] == ["discharged"] * len(
         v.obligations
     ), (
@@ -526,11 +555,15 @@ def test_the_collision_could_mint_a_VERIFIED_on_a_REFUTED_query():
             eb1ff86  VERIFIED   <- a false VERIFIED on a REFUTED query
             here     UNKNOWN
 
-    The whole-query bar was a backstop against a mispaired assembly on any
-    scatter-bearing query, and the byte-collision removed it for exactly the
-    shape where the script hash cannot tell the two slices apart. That is the
-    project's own thesis defect — a minted VERIFIED with nothing downstream to
-    catch it — reachable through the public `make_solver_verdict`.
+    Since the query pairing gate landed this mispairing no longer reaches the
+    bar at all — it raises `MispairedEscalationError` — so the assembly below
+    goes through `_past_the_pairing_gate`, which satisfies the gate by hand
+    and leaves the bar as the thing being measured. The `here UNKNOWN` row is
+    the bar's, and it is the row that would still hold if the gate were
+    deleted. The whole-query bar's apparent immunity on this shape was never a
+    mechanism: it covered scatter-bearing queries only, and the same false
+    VERIFIED rides a scatter-free query on every build — see
+    `test_the_pairing_gate_closes_the_SCATTER_FREE_row`.
     """
     from stelling.obligation import DeclinedObligation, slice_obligation
     from stelling.propagate import interval_env
@@ -556,7 +589,9 @@ def test_the_collision_could_mint_a_VERIFIED_on_a_REFUTED_query():
         "already separates them and this test is not measuring the collision"
     )
 
-    v = make_solver_verdict(el_closed, on_prop, on_esc, **VERSIONS)
+    v = make_solver_verdict(el_closed, on_prop,
+                            _past_the_pairing_gate(on_esc, el_closed),
+                            **VERSIONS)
     assert [o.status for o in v.obligations] == ["discharged"] * len(
         v.obligations
     ), "no would-be VERIFIED was reached, so there is nothing to withhold"
@@ -567,6 +602,23 @@ def test_the_collision_could_mint_a_VERIFIED_on_a_REFUTED_query():
         f"the shape whose emitted script does not distinguish the slices"
     )
     assert any("VERIFIED withheld" in n for n in v.notes)
+
+
+def _scatter_free_TRUE_two_obligations():
+    """NO BARRED PRIMITIVE ANYWHERE, two obligations, both solver-decided,
+    both true. The pair below is the same mispairing as the scatter fixtures
+    on a query no version of the bar has ever looked at."""
+    x = any_array((3,), "float64", (0.0, 1.0))
+    y = any_array((), "float64", (1.0, 2.0))
+    return (assert_(x[1] - x[1] <= 0.0), assert_(y + 1.0 - y <= 1.0))
+
+
+def _scatter_free_REFUTED_two_obligations():
+    """Its twin with #1 made FALSE: `y + 1 - y` is exactly 1.0, never ≤ 0.5.
+    Same #0, same declared inputs, no scatter."""
+    x = any_array((3,), "float64", (0.0, 1.0))
+    y = any_array((), "float64", (1.0, 2.0))
+    return (assert_(x[1] - x[1] <= 0.0), assert_(y + 1.0 - y <= 0.5))
 
 
 def _scatter_ELSEWHERE_identical_decided_slice():
@@ -585,44 +637,57 @@ def _scatter_ELSEWHERE_identical_decided_slice_TRUE():
     return (assert_(x[1] - x[1] <= 0.0), assert_(s >= 0.0))
 
 
-def test_the_LIMIT_of_this_bar_when_the_decided_slice_is_genuinely_the_same():
-    """WHAT THE SLICE-SCOPED BAR DOES NOT DO, ASSERTED SO IT CANNOT BE
-    OVER-READ — and this test passes by measuring a PERMISSIVE outcome, which
-    is deliberate and explained.
+def test_the_pairing_gate_refuses_the_mispairing_the_bar_only_narrows():
+    """WHAT THE BAR DOES NOT DO, AND WHAT NOW DOES IT — this test was
+    `test_the_LIMIT_of_this_bar_when_the_decided_slice_is_genuinely_the_same`,
+    which asserted the PERMISSIVE outcome and instructed its successor to
+    rewrite it around whatever started catching the general mispairing. That
+    is the query pairing gate, and this is the rewrite.
 
-    `test_the_collision_could_mint_a_VERIFIED_on_a_REFUTED_query` shows the
-    bar catching a mispaired assembly whose decided slices merely emit the
-    same BYTES. Here the two queries' obligation #0 is the same expression, so
-    the slices are the same by every measure there is — same script, same
-    fingerprint. The bar's own question ("was the unaudited `scatter` row
-    involved in what the solver decided?") is answered correctly for both:
-    NO. So it narrows, and the mispaired assembly returns VERIFIED on a query
-    whose honest verdict is REFUTED.
+    THE FRAMING THE OLD VERSION HAD WRONG, corrected because it was measured
+    and not argued. It said the false VERIFIED here was "the cost of scoping
+    the bar at all" — that the whole-query bar had BACKSTOPPED
+    `make_solver_verdict`'s pairing precondition and a narrowed bar could not.
+    The backstop was real but it was a COINCIDENCE OF SCOPE, not a mechanism:
+    it only ever covered queries that carry a barred primitive. The same false
+    VERIFIED, from the same mispairing, is reachable on a query with NO
+    SCATTER ANYWHERE — where every version of the bar, whole-query included,
+    is silent — on every build including `8e42934`. That is
+    `test_the_pairing_gate_closes_the_SCATTER_FREE_row`, and it is why the
+    correct statement is not "scoping cost a backstop" but **scoping revealed
+    that `make_solver_verdict` never bound its three arguments to one query.**
 
-    THAT IS NOT A HOLE IN THE KEY; IT IS THE COST OF SCOPING THE BAR AT ALL,
-    and it is measured rather than argued:
+        mispaired assembly, IDENTICAL decided slice, REFUTED query
+            8e42934  UNKNOWN (the whole-query bar, for an unrelated reason)
+            caac1ee / 45cf526 / eb1ff86 / f5280cf   VERIFIED
+            here     MispairedEscalationError
 
-        8e42934 (whole-query bar)  UNKNOWN — every mispaired assembly on a
-                                   scatter-bearing query was withheld, for a
-                                   reason having nothing to do with the row
-        caac1ee / 45cf526 / eb1ff86 / here   VERIFIED
+        the SAME mispairing on a SCATTER-FREE query
+            8e42934 / eb1ff86 / f5280cf   VERIFIED  (no bar fires at all)
+            here     MispairedEscalationError
 
-    The false claim comes from the mispaired PROPAGATION deciding obligation
-    #1, which no part of the bar reads and `make_solver_verdict`'s docstring
-    states as a precondition rather than an immunity. The whole-query bar
-    BACKSTOPPED that precondition by accident on scatter-bearing queries; a
-    narrowed bar does not, and no version of "which slice did the solver
-    answer about" can, because the question is about a different obligation.
+    WHAT THE GATE KEYS ON, AND WHY IT IS NOT THE BAR AGAIN: `escalate` records
+    `ClosedJaxpr.content_hash()` of the query it ran on, and assembly
+    recomputes it from the `closed` it is handed. Here the two queries differ
+    only in obligation #1 (`s >= 0.0` vs `s >= 0.5`) — an obligation the bar
+    never reads, whose slices are identical by every measure the bar has, and
+    the content hash separates them. Asserted below, so a hash that stopped
+    covering the whole query would fail here rather than pass quietly.
 
-    IF THIS TEST EVER FAILS, do not delete it: something has started catching
-    the general mispairing, which is a stronger property than this file has
-    ever claimed. Say so in `SOUNDNESS.md` and rewrite this test around what
-    the new mechanism does.
+    THE BAR IS STILL LOAD-BEARING and this test does not replace it: it fires
+    on a correctly-paired query whose decided slice carries the unaudited row,
+    which no pairing gate can see. The two are anti-correlated by
+    construction — whole-query content hash vs per-slice fingerprint plus
+    script — and the tests above measure the bar with the gate deliberately
+    bypassed (`_past_the_pairing_gate`) so that neither can hide the other's
+    failure.
     """
+    import dataclasses
+
     from stelling.obligation import slice_obligation
     from stelling.propagate import interval_env
     from stelling.smt import emit, slice_fingerprint
-    from stelling.solvers import make_solver_verdict
+    from stelling.solvers import MispairedEscalationError, make_solver_verdict
 
     on_closed, on_prop, on_esc = _stamped(
         _scatter_ELSEWHERE_identical_decided_slice_TRUE)
@@ -631,26 +696,254 @@ def test_the_LIMIT_of_this_bar_when_the_decided_slice_is_genuinely_the_same():
 
     assert make_solver_verdict(el_closed, el_prop, el_esc, **VERSIONS).status == (
         "REFUTED"
-    ), "the mispaired query is not false, so there is no cost to measure"
+    ), "the mispaired query is not false, so there is no false VERIFIED here"
     assert make_solver_verdict(on_closed, on_prop, on_esc, **VERSIONS).status == (
         "VERIFIED"
     ), (
-        "the honest twin does not VERIFY — the narrowing this test measures "
-        "the cost of is not happening, so the cost is not this one"
+        "the honest twin does not VERIFY, so the mispaired assembly could not "
+        "have minted a VERIFIED either and this test measures nothing"
     )
 
-    # the two decided slices are the same by every measure the bar has
+    # the two decided slices are the same by every measure the BAR has — this
+    # is what makes the bar powerless here and the gate necessary
     on_sl = slice_obligation(on_closed, 0, interval_env(on_closed))
     el_sl = slice_obligation(el_closed, 0, interval_env(el_closed))
     assert emit(on_sl, "z3", 20000).sha256 == emit(el_sl, "z3", 20000).sha256
     assert slice_fingerprint(on_sl) == slice_fingerprint(el_sl)
     assert V._barred_in_eqns(on_sl.eqns) == () == V._barred_in_eqns(el_sl.eqns)
 
-    v = make_solver_verdict(el_closed, on_prop, on_esc, **VERSIONS)
+    # ... and the QUERY hash is not the same, which is the gate's whole key
+    assert on_closed.content_hash() != el_closed.content_hash(), (
+        "the two queries have the same content hash, so the pairing gate "
+        "cannot separate them and this fixture cannot measure it"
+    )
+    assert on_esc.query_sha256 == on_closed.content_hash(), (
+        "`escalate` did not record the query it ran on, so the gate has "
+        "nothing to compare and passes vacuously"
+    )
+
+    with pytest.raises(MispairedEscalationError) as exc:
+        make_solver_verdict(el_closed, on_prop, on_esc, **VERSIONS)
+    assert "not the same query" in str(exc.value)
+
+    # NON-VACUITY, and it is the half that matters: with the gate satisfied by
+    # hand the assembly goes through and returns exactly the false VERIFIED
+    # this gate exists to refuse. So the refusal above is the gate firing, not
+    # some unrelated guard, and not a blanket refusal of mispaired shapes.
+    forged = dataclasses.replace(on_esc, query_sha256=el_closed.content_hash())
+    v = make_solver_verdict(el_closed, on_prop, forged, **VERSIONS)
     assert v.status == "VERIFIED", (
-        f"{v.status}: the bar now withholds a mispaired assembly whose "
-        f"decided slice is genuinely identical. That is STRONGER than "
-        f"anything documented — see this docstring's last paragraph"
+        f"{v.status}: with the pairing hash forged to match, the assembly no "
+        f"longer reaches the false VERIFIED — so the refusal above is not "
+        f"this gate and this test is measuring something else"
+    )
+
+
+def test_the_pairing_gate_closes_the_SCATTER_FREE_row():
+    """THE ROW THAT SETTLES WHAT THE WHOLE-QUERY BAR ACTUALLY WAS. Its
+    "backstop" covered scatter-bearing queries only, so it was a coincidence
+    of scope; the identical false VERIFIED rides a query with no barred
+    primitive anywhere, where no version of the bar has ever fired.
+
+    Two queries, neither carrying `scatter`, agreeing on obligation #0 and
+    differing on #1 (`y + 1 - y <= 1.0`, true, vs `<= 0.5`, false). Stamp the
+    true one's propagation and escalation against the false one and every
+    obligation comes back `discharged`: VERIFIED on a REFUTED query, measured
+    on `8e42934`, `eb1ff86` and `f5280cf` alike.
+
+    This is the test that makes the P1 claim falsifiable. If the bar were the
+    mechanism, this row would be UNKNOWN somewhere in that list; it is
+    VERIFIED everywhere, which is why the repair is a pairing gate and not a
+    wider bar. `V._barred_primitives` is asserted empty on both queries below
+    so the fixture cannot silently acquire a scatter and start passing for the
+    bar's reason.
+    """
+    import dataclasses
+
+    from stelling.solvers import MispairedEscalationError, make_solver_verdict
+
+    on_closed, on_prop, on_esc = _stamped(_scatter_free_TRUE_two_obligations)
+    el_closed, el_prop, el_esc = _stamped(_scatter_free_REFUTED_two_obligations)
+
+    assert V._barred_primitives(on_closed) == () == V._barred_primitives(
+        el_closed
+    ), (
+        "a barred primitive has appeared in one of these queries, so the bar "
+        "can fire here and this row no longer isolates the pairing gate"
+    )
+    assert make_solver_verdict(on_closed, on_prop, on_esc, **VERSIONS).status == (
+        "VERIFIED"
+    ), "the honest twin does not VERIFY; the fixture is wrong"
+    assert make_solver_verdict(el_closed, el_prop, el_esc, **VERSIONS).status == (
+        "REFUTED"
+    ), "the mispaired query is not false, so nothing minted here is a lie"
+
+    with pytest.raises(MispairedEscalationError):
+        make_solver_verdict(el_closed, on_prop, on_esc, **VERSIONS)
+
+    # and the same non-vacuity control: forge the hash and the false VERIFIED
+    # comes right back, so the gate is the only thing standing here
+    forged = dataclasses.replace(on_esc, query_sha256=el_closed.content_hash())
+    v = make_solver_verdict(el_closed, on_prop, forged, **VERSIONS)
+    assert v.status == "VERIFIED" and not any(
+        "VERIFIED withheld" in n for n in v.notes
+    ), (
+        f"{v.status}: with the pairing hash forged the assembly did not mint "
+        f"the false VERIFIED, so this row is being closed by something other "
+        f"than the pairing gate"
+    )
+
+
+def test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation():
+    """THE RESIDUE, STATED AND MEASURED rather than left for the next audit.
+
+    The gate binds two of `make_solver_verdict`'s three arguments: `closed`
+    and `escalation`. It does NOT bind `propagation`, and the reason is
+    mechanical — `Propagation` is defined in `stelling.propagate`, which this
+    repair was required to leave at zero line delta, so there is no field on
+    it to record the query in.
+
+    What is left open, exactly: an assembly of (query A, propagation of query
+    B, escalation of query A). The obligations come from B, the discharges
+    from A by index. Measured below — it assembles, and the gate does not stop
+    it. What is NOT left open is the shape that actually mints a false
+    VERIFIED out of a cached escalation, because the discharges have to come
+    from somewhere and the gate refuses them.
+
+    Kept as a live measurement rather than a comment so that closing it later
+    is a test that goes red, not an archaeology exercise. IF THIS TEST FAILS
+    because the assembly no longer returns VERIFIED, the residue has been
+    closed: say so in `SOUNDNESS.md` and rewrite this around the mechanism
+    that closed it, exactly as its predecessor instructed."""
+    from stelling.solvers import MispairedEscalationError, make_solver_verdict
+
+    true_closed, true_prop, true_esc = _stamped(_scatter_free_TRUE_two_obligations)
+    false_closed, false_prop, false_esc = _stamped(
+        _scatter_free_REFUTED_two_obligations)
+
+    assert false_prop != true_prop, "the two propagations are equal; nothing to mix"
+    assert make_solver_verdict(
+        false_closed, false_prop, false_esc, **VERSIONS
+    ).status == "REFUTED", "the false query is not false; the fixture is wrong"
+
+    # THE COVERED DIRECTION: the escalation is the thing that discharges, and
+    # it cannot travel to another query.
+    with pytest.raises(MispairedEscalationError):
+        make_solver_verdict(false_closed, false_prop, true_esc, **VERSIONS)
+
+    # THE RESIDUE, MEASURED: the propagation can. Obligations come from the
+    # FALSE query, the discharges from the TRUE query's escalation by index,
+    # and the stamp names the TRUE query — a verdict reporting the false
+    # query's obligations as discharged under the true query's hash.
+    v = make_solver_verdict(true_closed, false_prop, true_esc, **VERSIONS)
+    assert v.status == "VERIFIED", (
+        f"{v.status}: the mixed-propagation assembly no longer VERIFIES — "
+        f"see this docstring's last paragraph before changing this line"
+    )
+    assert v.stamp.query_content_hash == true_closed.content_hash(), (
+        "the stamp does not name the query it was assembled against, which "
+        "would be a different defect from the one this test discloses"
+    )
+    assert [o.source_info for o in v.obligations] == [
+        o.source_info for o in false_prop.obligations
+    ], (
+        "the reported obligations are no longer the mispaired propagation's, "
+        "so the misattribution this test measures is not happening"
+    )
+
+
+def test_every_escalate_return_site_records_the_query():
+    """THE GATE'S COVERAGE, PINNED AT ITS PRODUCER — a return path out of
+    `escalate` that forgot `query_sha256` is an escalation the gate cannot
+    check, and the empty default makes that a SILENT hole rather than a loud
+    one on every path except the one the gate refuses.
+
+    Pinned by construction, not by listing today's paths: every `return
+    Escalation(` in `stelling/solvers.py` must pass `query_sha256`, counted
+    off the source, and each REACHABLE path is then driven and asserted to
+    carry this query's own hash. A new return site that omits it fails the
+    count; a site that passes a WRONG value fails the drives.
+    """
+    import inspect
+
+    from stelling import solvers as S
+
+    src = inspect.getsource(S.escalate)
+    sites = []
+    for start in range(len(src)):
+        if not src.startswith("return Escalation(", start):
+            continue
+        i = start + len("return Escalation(")
+        depth = 1
+        while depth:
+            depth += {"(": 1, ")": -1}.get(src[i], 0)
+            i += 1
+        sites.append(src[start:i])
+    assert len(sites) >= 5, (
+        f"found {len(sites)} `return Escalation(` site(s) in escalate(); the "
+        f"scan has stopped matching the source and this test is vacuous"
+    )
+    missing = [i for i, body in enumerate(sites) if "query_sha256" not in body]
+    assert not missing, (
+        f"`return Escalation(` site(s) {missing} in escalate() do not record "
+        f"`query_sha256`. An escalation without it cannot be paired to a "
+        f"query, and the gate's default-empty refusal only fires once it "
+        f"reaches assembly — every path must carry it at birth"
+    )
+
+    # ... and the reachable paths, driven
+    from stelling.propagate import propagate
+    from stelling.solvers import SolverConfig, escalate
+
+    def _nothing_unknown():
+        x = any_array((), "float64", (1.0, 2.0))
+        return assert_(x - x <= 0.0)  # intervals settle it; no escalation work
+
+    for build, label in (
+        (_scatter_ON_the_decided_slice, "solver work"),
+        (_nothing_unknown, "nothing to escalate"),
+    ):
+        closed = trace(build)
+        esc = escalate(closed, propagate(closed), SolverConfig(timeout_ms=20000))
+        assert esc.query_sha256 == closed.content_hash(), (
+            f"{label}: escalate() recorded {esc.query_sha256!r} for a query "
+            f"hashing to {closed.content_hash()!r}"
+        )
+
+
+def test_the_pairing_gate_costs_no_additional_hash():
+    """THE COST, AS A MECHANISM RATHER THAN AS A TIMING. `make_solver_verdict`
+    already took `closed.content_hash()` for the stamp; the gate compares that
+    same value, so binding the escalation to the query adds ZERO hashes to
+    assembly. Counted, not timed — a timing would be a flaky way to assert a
+    structural property, and the structural property is the claim.
+
+    `escalate` pays one hash, once per escalation, which is measured in
+    `SOUNDNESS.md` against the solver work it sits beside.
+    """
+    from stelling import ir
+    from stelling.solvers import make_solver_verdict
+
+    closed, prop, esc = _stamped(_scatter_ON_the_decided_slice)
+
+    calls = []
+    real = ir.ClosedJaxpr.content_hash
+
+    def counted(self):
+        calls.append(id(self))
+        return real(self)
+
+    ir.ClosedJaxpr.content_hash = counted
+    try:
+        v = make_solver_verdict(closed, prop, esc, **VERSIONS)
+    finally:
+        ir.ClosedJaxpr.content_hash = real
+
+    assert v.stamp.query_content_hash == real(closed)
+    assert len(calls) == 1, (
+        f"assembly took {len(calls)} content_hash() call(s); the gate and the "
+        f"stamp must share one. Taking it twice is a real cost on every "
+        f"verdict and the two could drift"
     )
 
 

@@ -393,12 +393,30 @@ class Escalation:
     stamp an escalation against a propagation of the other semantics in
     EITHER direction (the symmetric mispairing gate): obligation details
     and refusal reasons would be misattributed across the semantics
-    boundary."""
+    boundary.
+
+    ``query_sha256`` records WHICH QUERY :func:`escalate` was called on —
+    :meth:`stelling.ir.ClosedJaxpr.content_hash` of the ``closed`` it
+    received, taken at every one of this function's return sites.
+    :func:`make_solver_verdict` refuses to stamp an escalation carrying
+    work against a ``closed`` that does not reproduce it (the query
+    pairing gate). It is the same trust model as ``semantics`` above and
+    as the ``smt2_sha256``/``slice_sha256`` the invocation stamps carry:
+    a hand-built record can hold any value, and this defends an honest
+    caller against an accidentally mispaired assembly — the realistic
+    mechanism being a CACHED escalation, which is one of the two uses
+    :mod:`stelling.ir`'s own module docstring names ``content_hash`` for
+    ("proof caching and the z3-vs-cvc5 *did both solvers see the same
+    query* check"). Empty means "not recorded by this library", and the
+    gate refuses that too when the escalation carries work: an absent
+    hash is exactly the shape a stale cache entry from before this field
+    existed has."""
 
     records: tuple[ObligationEscalation, ...]
     notes: tuple[str, ...] = ()
     ledger: _Ledger = field(default_factory=_Ledger)
     semantics: str = "real"
+    query_sha256: str = ""
 
     @property
     def invocations(self) -> tuple[SolverStamp, ...]:
@@ -1324,6 +1342,29 @@ def _dispatch_obligation(
 # -- escalation over a propagated query ---------------------------------------
 
 
+def _query_sha256(closed) -> str:
+    """:meth:`stelling.ir.ClosedJaxpr.content_hash` of ``closed``, or ``""``
+    if it cannot be taken.
+
+    ONE DERIVATION, TWO READERS, and that is the point: :func:`escalate`
+    records it on the :class:`Escalation` and :func:`make_solver_verdict`
+    recomputes it from the ``closed`` it is handed, so the two are compared
+    rather than copied. The hash is the IR's own semantic content hash —
+    stable across processes, insensitive to ``source_info``/``debug_info``,
+    and named in :mod:`stelling.ir`'s module docstring as existing for
+    caching and for the "did both solvers see the same query" check. This
+    is that check, one layer up.
+
+    NEVER RAISES, and the empty string is not a pass: it is the value the
+    pairing gate REFUSES when the escalation carries work, so a ``closed``
+    whose hash cannot be taken fails loudly at assembly rather than
+    silently pairing with anything."""
+    try:
+        return str(closed.content_hash())
+    except Exception:  # noqa: BLE001 — an unhashable query is refused, not excused
+        return ""
+
+
 def escalate(
     closed: ir.ClosedJaxpr,
     propagation: Propagation,
@@ -1349,10 +1390,18 @@ def escalate(
     before — a drop over-approximates, so emission over the declared box
     remains faithful to the propagated semantics.
     """
+    # WHICH QUERY THIS ESCALATION IS ABOUT, recorded once, at the top, and
+    # attached to every return below — including the ones that do no work.
+    # A return site that forgot it would be an escalation the pairing gate
+    # cannot check, so the derivation is hoisted rather than repeated:
+    # `tests/test_verified_bar.py::test_every_escalate_return_site_records_the_query`
+    # asserts every path out of this function carries it.
+    query_sha256 = _query_sha256(closed)
     unknown = [o for o in propagation.obligations if o.status == "unknown"]
     if not unknown:
         return Escalation(
-            records=(), notes=(), semantics=propagation.semantics
+            records=(), notes=(), semantics=propagation.semantics,
+            query_sha256=query_sha256,
         )
     if propagation.semantics == "ieee":
         # guard 2, mechanism 1: an ieee-mode propagation refuses solver
@@ -1374,6 +1423,7 @@ def escalate(
             ),
             notes=(IEEE_SEMANTICS_REFUSAL,),
             semantics=propagation.semantics,
+            query_sha256=query_sha256,
         )
     if propagation.coverage.constrained:
         # checked before solver availability: the refusal is semantic and
@@ -1395,6 +1445,7 @@ def escalate(
             ),
             notes=(CONSTRAINED_ASSUME_REFUSAL,),
             semantics=propagation.semantics,
+            query_sha256=query_sha256,
         )
     backends, missing = _backends_for(config)
     if not backends:
@@ -1414,6 +1465,7 @@ def escalate(
             ),
             notes=(INSTALL_HINT,),
             semantics=propagation.semantics,
+            query_sha256=query_sha256,
         )
     env = interval_env(closed)
     ledger = _Ledger()
@@ -1478,7 +1530,7 @@ def escalate(
         ]
     return Escalation(
         records=tuple(records), notes=(), ledger=ledger,
-        semantics=propagation.semantics,
+        semantics=propagation.semantics, query_sha256=query_sha256,
     )
 
 
@@ -1679,6 +1731,45 @@ def make_solver_verdict(
     stamped = sum(1 for s in ledger_stamps if s.invoked)
     if escalation.ledger.spawns != stamped:
         raise ProvenanceError(escalation.ledger.spawns, stamped, ledger_stamps)
+
+    # -- THE QUERY PAIRING GATE. Recomputed from `closed`, never copied, and
+    # taken ONCE for the whole function: the stamp's `query_content_hash`
+    # below is this same value, so the gate costs no additional hash.
+    query_hash = _query_sha256(closed)
+    carries_work = bool(
+        escalation.records
+        or escalation.notes
+        or escalation.ledger.spawns
+        or ledger_stamps
+    )
+    if carries_work and escalation.query_sha256 != query_hash:
+        raise MispairedEscalationError(
+            f"mispaired escalation: the supplied escalation was produced by "
+            f"escalate() on the query "
+            f"{escalation.query_sha256 or '<unrecorded>'}, but the query "
+            f"being stamped hashes to {query_hash or '<unhashable>'} — the "
+            f"two are not the same query, so this escalation's outcomes are "
+            f"answers about a program other than the one the verdict would "
+            f"claim; refusing to emit. An OB_DISCHARGED record from another "
+            f"run discharges an obligation here by INDEX alone, so a "
+            f"mispaired assembly can mint VERIFIED on a query whose honest "
+            f"verdict is REFUTED. Assemble the verdict from the propagation "
+            f"and escalation this query actually produced."
+        )
+
+    # THE BAR IS NOT THIS GATE, AND THE HISTORY IS WHY BOTH EXIST. Until this
+    # gate, `make_solver_verdict` never bound its three arguments to one
+    # query, and the whole-query scatter bar hid that on exactly one class of
+    # query — scatter-bearing ones — by withholding every VERIFIED on them for
+    # an unrelated reason. Scoping the bar to the decided obligation's slice
+    # did not COST that backstop so much as REVEAL that it was a coincidence
+    # of scope: the identical false VERIFIED was reachable on a SCATTER-FREE
+    # query, where the bar never fires, on every build including `8e42934`.
+    # Measured, both rows, on this branch's own fixtures. The bar answers "was
+    # the unaudited emission row involved in what the solver decided"; this
+    # gate answers "is this escalation about this query at all". Neither
+    # substitutes for the other, and only one of them was ever load-bearing
+    # for the pairing.
 
     # -- the symmetric semantics-pairing gate: an escalation may only be
     # stamped against a propagation of the semantics it was produced
@@ -1995,7 +2086,9 @@ def make_solver_verdict(
     stamp = Stamp(
         stelling_version=stelling_version,
         jax_version=jax_version,
-        query_content_hash=closed.content_hash(),
+        # the SAME hash the pairing gate above compared — taken once per
+        # assembly, so binding the escalation to the query costs nothing here
+        query_content_hash=query_hash,
         arithmetic_mode=arithmetic_mode,
         semantics=semantics,
         precision_config=precision_config,
