@@ -2277,6 +2277,30 @@ _NUMBER_WORDS = {
 # ABOVE" (routing, not admission) and "that was three FIXTURES over two rules"
 # (a statement about a PREDECESSOR, deliberately frozen). A scan that flagged
 # those would be noise, and noise is how a check gets deleted.
+#
+# THE LIST HELD THREE OF THEM AND THE DOCSTRING BELOW SAID "four places for
+# three quantities". Both were wrong about this file, which is the drift this
+# test exists to stop, one level up. A search of the FLATTENED source for every
+# sentence restating one of the derived counts finds eight; the five that were
+# not in the list were each measured 0 RED at `faefc48`, perturbed one at a
+# time and run alone:
+#
+# — quoted with their numbers ELIDED, because a comment that spells one is one
+# more copy to keep correct and this comment is not read by anything:
+#
+#     "the admission gate drives ... of them"            0 RED
+#     "The other ... are NOT driven here"                0 RED
+#     "the row's ... decline sites"                      0 RED
+#     f"says ... over ..."                               0 RED
+#     "`_scatter_set_plan` has ... `raise _Decline`"     0 RED  (two places)
+#
+# against the three that WERE in it, each 2 RED under the same perturbation.
+# The count of places is no longer restated anywhere: it is `len(
+# _CENSUS_PHRASES)` and is derived where it is used.
+#
+# ONE OF THEM IS A DERIVED QUANTITY AND IS NOT A FOURTH THING TO KEEP UPDATED:
+# the "other ... are NOT driven here" phrase counts sites minus rules, computed
+# below rather than listed, so it moves when either of its two inputs does.
 _CENSUS_PHRASES = (
     (r"(\w+) of the (\w+) rules are driven, by (\w+) fixtures",
      ("rules", "sites", "fixtures")),
@@ -2284,7 +2308,30 @@ _CENSUS_PHRASES = (
      ("fixtures",)),
     (r"the admission gate drives (\w+) of (\w+) decline sites",
      ("rules", "sites")),
+    (r"the admission gate drives (\w+) of them", ("rules",)),
+    (r"the other (\w+) are not driven here", ("undriven",)),
+    (r"the row's (\w+) decline sites", ("sites",)),
+    (r"says (\w+) over (\w+)", ("fixtures", "rules")),
+    (r"has (\w+) `raise _decline` sites", ("sites",)),
 )
+
+
+def _flat(body):
+    """This file's source with the seams a restatement hides in closed up:
+    adjacent string literals joined, a continued `#` comment rejoined, runs of
+    whitespace collapsed.
+
+    Not tidiness. Four of the five sentences this list did not read are SPLIT —
+    across two string literals inside a `scope=(...)` argument, or across two
+    comment lines — and a pattern written for a sentence does not match one
+    with a quote, a newline and eight spaces through the middle of it. Reading
+    the source unflattened is why "an anchored pattern" and "the sentences in
+    this file" were two different sets."""
+    import re
+
+    body = re.sub(r'"\s*\n\s*"', "", body)
+    body = re.sub(r"\n\s*#", " ", body)
+    return re.sub(r"\s+", " ", body)
 
 
 def test_the_censuss_own_prose_agrees_with_the_counts_it_describes():
@@ -2294,18 +2341,32 @@ def test_the_censuss_own_prose_agrees_with_the_counts_it_describes():
     numerators and its denominator and asserts them. What it could not do is
     notice that its OWN docstring, and the census table above
     `_ADMISSION_DECLINES`, and the scope sentence inside
-    `test_gauge_catches_every_mutation`, all restate those numbers in words —
-    four places for three quantities, updated by hand. The pass that moved the
-    census from five fixtures to six updated three of the four.
+    `test_gauge_catches_every_mutation`, all restate those numbers in words,
+    updated by hand. The pass that moved the census from five fixtures to six
+    left one of them stale.
 
     So the words are read out of this file's source and checked against the
     derived counts. A number spelled in the prose is a claim, and this is the
     same discipline the file already applies to the row it gauges: derive it,
     or hold it shut.
 
-    NOT A SPELL-CHECK: only the anchored census phrases are read. "five" means
-    other things in this file, and a scan that flagged all of them would be
-    noise, which is how a check gets deleted.
+    **AND THE LIST OF PLACES WAS ITSELF A RESTATEMENT, AND IT WAS WRONG.** The
+    sentence that stood here said "four places for three quantities". There are
+    `len(_CENSUS_PHRASES)` of them and the list read three: the block comment
+    above `_CENSUS_PHRASES` has the five that were 0 RED at `faefc48`, each
+    measured by perturbing that occurrence ALONE. The old anti-vacuity control
+    could not have found them — `text.replace(right, wrong)` perturbs every
+    occurrence at once, so one unread sentence is masked by every read one. The
+    control below perturbs ONE capture group of ONE match at a time.
+
+    NOT A SPELL-CHECK, and this is measured rather than asserted: a scan for
+    every number-word next to a census noun finds 24 occurrences in this file
+    of which 18 are about something else — the ROUTING fixtures, the frozen
+    predecessor sentences, the regex list itself. Flagging those would be
+    noise, and noise is how a check gets deleted. The residue is therefore
+    real and is named: a NINTH restatement, written later and not added to
+    `_CENSUS_PHRASES`, is not read. What is closed is that the list can no
+    longer claim to read a sentence it does not.
     """
     import ast
     import inspect
@@ -2313,7 +2374,7 @@ def test_the_censuss_own_prose_agrees_with_the_counts_it_describes():
     import textwrap
     from pathlib import Path
 
-    text = Path(__file__).read_text(encoding="utf-8").lower()
+    text = _flat(Path(__file__).read_text(encoding="utf-8").lower())
     src = inspect.getsource(OB._scatter_set_plan)
     expected = {
         "fixtures": len(_ADMISSION_DECLINES),
@@ -2321,6 +2382,9 @@ def test_the_censuss_own_prose_agrees_with_the_counts_it_describes():
         "sites": len([n for n in ast.walk(ast.parse(textwrap.dedent(src)))
                       if isinstance(n, ast.Raise)]),
     }
+    # the fourth phrase counts what the gate does NOT drive, which is not a
+    # fourth quantity to keep correct — it is the difference of two above
+    expected["undriven"] = expected["sites"] - expected["rules"]
     def offences(body):
         found, hits = [], {key: 0 for key in expected}
         for pattern, kinds in _CENSUS_PHRASES:
@@ -2345,14 +2409,27 @@ def test_the_censuss_own_prose_agrees_with_the_counts_it_describes():
         + ". A restated number is a copy, and this is the copy drifting — the "
         "same defect this file's own count test exists to stop, one level up"
     )
-    # ... and it is not vacuous. The drift this exists for is one word in one
-    # sentence, so that is what is injected: every census phrase, perturbed by
-    # one number-word, must be caught. A check that only fires when a sentence
-    # DISAPPEARS would have missed the sentence that actually went stale.
-    for wrong, right in ((_NUMBER_WORDS[n], _NUMBER_WORDS[expected[k]])
-                         for k in expected
-                         for n in (expected[k] + 1, expected[k] - 1)):
-        assert offences(text.replace(right, wrong)), (
-            f"perturbing the census prose from {right!r} to {wrong!r} is not "
-            f"caught; this check does not read the sentences it claims to"
-        )
+    # ... and it is not vacuous, PER OCCURRENCE. The drift this exists for is
+    # one word in one sentence, so that is what is injected — and it is
+    # injected into ONE match of ONE pattern at a time. The control that stood
+    # here perturbed `text.replace(right, wrong)`, which rewrites every
+    # occurrence at once: a sentence the list does not read is then masked by
+    # every sentence it does, which is exactly how five of them stayed 0 RED
+    # while this test passed.
+    checked = 0
+    for pattern, kinds in _CENSUS_PHRASES:
+        for match in re.finditer(pattern, text):
+            for group, which in enumerate(kinds, start=1):
+                lo, hi = match.span(group)
+                wrong = _NUMBER_WORDS[expected[which] + 1]
+                assert offences(text[:lo] + wrong + text[hi:]), (
+                    f"perturbing the {which} count alone, in "
+                    f"\"{match.group(0)}\", is not caught; this check does "
+                    f"not read the sentence it claims to"
+                )
+                checked += 1
+    assert checked >= sum(len(kinds) for _p, kinds in _CENSUS_PHRASES), (
+        f"only {checked} number-word(s) were perturbed individually, and "
+        f"there are {len(_CENSUS_PHRASES)} phrase(s) to read; a phrase that "
+        f"matches nothing is reported above but must also be counted here"
+    )

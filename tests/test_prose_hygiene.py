@@ -72,6 +72,25 @@ _TEST_REF = re.compile(r"(tests/[A-Za-z0-9_./]+\.py)::(test_[A-Za-z0-9_]+)(\*?)"
 _TESTS = Path(__file__).resolve().parent
 
 
+def _defined_test_names(text):
+    """Every function DEFINED in a test file's source, parsed rather than
+    grepped — or None when the file does not parse at all.
+
+    `ast.walk` rather than a scan of `tree.body`, so a test nested inside a
+    class or another function still counts as defined."""
+    import ast
+
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    return {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
 def test_every_test_cited_in_core_prose_still_exists():
     """A COMMENT THAT NAMES A TEST IS A CLAIM ABOUT WHAT HOLDS IT SHUT, and a
     renamed test turns it into a claim about nothing.
@@ -84,10 +103,25 @@ def test_every_test_cited_in_core_prose_still_exists():
     `solvers.py`'s citation of the old name behind. It was the only dangling
     one, and it was found by reading rather than by anything running.
 
-    Resolved by SOURCE rather than by collection: `def <name>` in the cited
-    file. A collection-based check would go quiet in the zero-dep column, where
-    the jax-only files never collect — and the citations are in prose that
-    ships either way.
+    Resolved by SOURCE rather than by collection: a `FunctionDef` of that name
+    in the cited file. A collection-based check would go quiet in the zero-dep
+    column, where the jax-only files never collect — and the citations are in
+    prose that ships either way.
+
+    **PARSED, NOT GREPPED, AND THE DIFFERENCE WAS MEASURED.** `f"def {name}("
+    in body` is a raw substring test over file TEXT, so anything that spells
+    those characters satisfies it — including the two most ordinary ways a test
+    stops existing. Driven at `faefc48`:
+
+        the cited family renamed away entirely     1 failed  (not vacuous)
+        the family gone, one `# def test_…(`       1 PASSED
+        the exact citation's `def` commented out   1 PASSED
+        the `def` gone, a string-literal mention   1 PASSED
+
+    Commenting a test out is how a test most often stops existing, and it
+    defeated this check completely. `ast.parse` is equally independent of
+    collection — it reads the file and imports nothing — so the reason this
+    docstring gives for avoiding collection costs nothing here.
     """
     dangling = []
     for path in sorted(_SRC.rglob("*.py")):
@@ -98,9 +132,15 @@ def test_every_test_cited_in_core_prose_still_exists():
                 if not target.is_file():
                     dangling.append(f"{path.name}:{lineno}: no such file {rel}")
                     continue
-                body = target.read_text(encoding="utf-8")
-                found = (f"def {name}" in body if star
-                         else f"def {name}(" in body)
+                defined = _defined_test_names(
+                    target.read_text(encoding="utf-8"))
+                if defined is None:
+                    dangling.append(
+                        f"{path.name}:{lineno}: {rel} does not parse, so it "
+                        f"defines no test at all")
+                    continue
+                found = (any(d.startswith(name) for d in defined) if star
+                         else name in defined)
                 if not found:
                     dangling.append(
                         f"{path.name}:{lineno}: {rel}::{name}{star}")
@@ -119,4 +159,32 @@ def test_every_test_cited_in_core_prose_still_exists():
     assert len(cited) >= 5, (
         f"only {len(cited)} test citation(s) found in src/stelling; the "
         f"pattern has stopped matching how they are written"
+    )
+    # ... and the RESOLVER is not satisfied by text that only LOOKS like a
+    # definition. These are the three rows that were green at `faefc48`,
+    # written out rather than described, plus the honest shape it must accept
+    # and the two forms `ast.walk` reaches that a `tree.body` scan would not.
+    for label, source, name, present in (
+        ("commented out", "# def test_gone(x):\n#     pass\n", "test_gone",
+         False),
+        ("string literal", '_X = "def test_gone(x)"\n', "test_gone", False),
+        ("in a docstring", '"""cites def test_gone( here"""\n', "test_gone",
+         False),
+        ("really defined", "def test_gone(x):\n    pass\n", "test_gone", True),
+        ("inside a class",
+         "class T:\n    def test_gone(self):\n        pass\n", "test_gone",
+         True),
+        ("decorated", "@mark\ndef test_gone(x):\n    pass\n", "test_gone",
+         True),
+    ):
+        defined = _defined_test_names(source)
+        assert defined is not None and (name in defined) is present, (
+            f"the citation resolver disagrees with the {label!r} source about "
+            f"whether {name!r} is defined. Every 'False' row here was MEASURED "
+            f"green against the substring test this replaced — commenting a "
+            f"test out is the most common way a test stops existing, and it "
+            f"satisfied `f\"def {{name}}(\" in body`"
+        )
+    assert _defined_test_names("def broken(:\n") is None, (
+        "a file that does not parse is being reported as defining tests"
     )
