@@ -162,7 +162,36 @@ jobs:
       # claim in a session that did not collect the whole tree, and fails in
       # one that collected it and then deselected part — so a `-k` or a path
       # added here would quietly turn the second guard off.
-      - run: .venv/bin/python -m pytest -q -rs
+      - name: the skip-inventory verdict, asserted off the exit code
+        # THE EXIT CODE IS A LAST-WRITER-WINS CHANNEL. `session.exitstatus` is
+        # whatever the last hook to touch it left there, and `pytest_cmdline_main`
+        # as a wrapper returns over all of them — so a green tick on the step
+        # above is only as trustworthy as every plugin in the environment. The
+        # conftest writes its verdict to the path named here on the way out, and
+        # this step reads it: a plugin can re-assign an exit code, but it cannot
+        # un-write a file whose path it does not know about.
+        #
+        # ABSENCE IS THE SIGNAL THIS BUYS, and it is the half no exit code can
+        # give. A run in which tests/conftest.py was ignored, filtered out or
+        # never reached leaves no file at all, and that is a failure here rather
+        # than a pass — which is exactly the shape of the defect the whole pin
+        # exists for: a check that was silently dropped and a summary line
+        # byte-identical to a clean one.
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q -rs
+          verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. A 'failed' verdict is an undisclosed skip or a silently dropped item; 'withdrawn' means this session was not entitled to claim the suite, and an unnarrowed CI run must be."
+            exit 1
+          fi
 
   reuse:
     name: reuse lint
