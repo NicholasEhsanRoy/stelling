@@ -2481,3 +2481,63 @@ def test_the_censuss_own_prose_agrees_with_the_counts_it_describes():
         f"there are {len(_CENSUS_PHRASES)} phrase(s) to read; a phrase that "
         f"matches nothing is reported above but must also be counted here"
     )
+
+
+def test_the_m_assembly_fixture_DECLINES_at_its_own_declared_shapes():
+    """THE BEHAVIOUR `docs/gauge-coverage.md` NOW CLAIMS, WHICH NOTHING PINNED.
+
+    That document says the column bound's cost is not hypothetical: this
+    file's own `m-assembly` fixture — `jax.ops.segment_sum` over per-point
+    (2, 2) blocks, a rank-3 operand with an index column of 3 — is refused
+    through the slicing face at its own declared shapes, while the same
+    accumulation flattened to a rank-1 operand is admitted. That was a
+    measurement written into prose and left there: a documentation change
+    nothing reddens if it stops being true, which is the shape of claim this
+    project's own history is about.
+
+    Both halves are here, and the ASYMMETRY is the claim. Either one alone
+    proves nothing: a refusal with no admitted neighbour could be the fixture
+    being malformed, and an admission with no refused neighbour says nothing
+    about the bound.
+
+    The in-tree `m-assembly` cases stay green because they are settled by the
+    interval transfer and never reach the row — which is exactly why this
+    needed posing through the slicing face by hand.
+    """
+    import jax.numpy as jnp
+
+    import stelling.obligation as OB
+    from stelling.propagate import interval_env
+
+    specs = [((3,), (0.4, 0.6)), ((3,), (-0.05, 0.05))]
+    query = _traced_value_query(v_m, specs)
+    sliced = OB.slice_obligation(query, 0, interval_env(query))
+    assert isinstance(sliced, OB.DeclinedObligation), (
+        "the `m-assembly` fixture now SLICES at its own declared shapes; "
+        "`docs/gauge-coverage.md` says it is refused, and names it as the "
+        "shape of program most likely to meet the column bound"
+    )
+    assert "outside the GAUGED accumulate column space" in sliced.reason, (
+        f"`m-assembly` is refused for some other reason: {sliced.reason!r}. "
+        f"The document's claim is about the COLUMN BOUND, and a refusal from "
+        f"a different guard would leave that claim unmeasured"
+    )
+    assert "(2, 2, 2)" in sliced.reason and "3 element(s)" in sliced.reason, (
+        f"the reason no longer names the rank-3 operand and the index column "
+        f"of 3 that the document quotes: {sliced.reason!r}"
+    )
+
+    # ... and the same accumulation flattened to rank 1 IS admitted, which is
+    # what makes the refusal a statement about the bound rather than about the
+    # fixture.
+    def flattened(dx, _dy):
+        return jax.ops.segment_sum(dx * dx, jnp.asarray(OWNER), num_segments=2)
+
+    flat = _traced_value_query(flattened, specs)
+    flat_sliced = OB.slice_obligation(flat, 0, interval_env(flat))
+    assert not isinstance(flat_sliced, OB.DeclinedObligation), (
+        f"the rank-1 flattening is refused too "
+        f"({getattr(flat_sliced, 'reason', '')!r}), so the document's "
+        f"'while the same accumulation flattened to a rank-1 operand is "
+        f"admitted' is false and the bound is not where it says it is"
+    )

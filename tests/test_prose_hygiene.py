@@ -73,22 +73,68 @@ _TESTS = Path(__file__).resolve().parent
 
 
 def _defined_test_names(text):
-    """Every function DEFINED in a test file's source, parsed rather than
-    grepped — or None when the file does not parse at all.
+    """Every function a test file DEFINES WHERE PYTEST WOULD COLLECT IT, parsed
+    rather than grepped — or None when the file does not parse at all.
 
-    `ast.walk` rather than a scan of `tree.body`, so a test nested inside a
-    class or another function still counts as defined."""
+    **WHAT THIS SEMANTIC IS, EXACTLY, because it is weaker than the sentence a
+    reader takes from a citation.** The claim a `path::name` citation makes is
+    "this guard is pinned by a test that RUNS". What is checked is "a
+    `FunctionDef` of that name exists at a place pytest collects from". Those
+    are not the same, and the gap is enumerable:
+
+        inside `if False:`                    reported defined, never runs
+        in a never-taken `except`/`else`      reported defined, never runs
+        defined and then `del`'d              reported defined, never runs
+        rebound to a non-test                 reported defined, never runs
+        under `if TYPE_CHECKING:`             reported defined, never runs
+
+    Five shapes, each stated rather than left to be found. They share a
+    property that makes them a smaller risk than the two below: every one of
+    them is a deliberate act on the cited test itself, whereas the two this
+    pass CLOSED are the ordinary ways a test stops existing.
+
+    The two closed here were a `tree.body` scan's blind spots turned into a
+    checker's blind spots by `ast.walk`:
+
+    * NESTED IN ANOTHER FUNCTION. A helper's inner `def test_x` is not
+      collected by pytest and never was, and `ast.walk` reported it defined;
+    * INSIDE A NON-`Test*` CLASS. `class T: def test_gone(self)` was an
+      ACCEPTED row of this test's own anti-vacuity block, asserted `True`, and
+      `pyproject.toml` sets no `python_classes`, so pytest's default
+      `Test*` prefix means that class is not collected either. The row is
+      corrected: a method counts only when its class would be collected.
+
+    So: module level, or a method of a `class Test…`. `ast.walk`'s reach is
+    kept for finding the definition and thrown away for judging it."""
     import ast
 
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return None
-    return {
-        node.name
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    out = set()
+
+    def add(body, in_test_class):
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                out.add(node.name)
+                # a `def` inside a `def` is not collected, so its body is not
+                # walked for collectable names either
+            elif isinstance(node, ast.ClassDef):
+                if node.name.startswith("Test"):
+                    add(node.body, True)
+            elif hasattr(node, "body"):
+                # `if`/`try`/`with`/`for` at module scope: pytest collects
+                # whatever the module ends up defining, and this checker
+                # cannot know which branch runs — see the docstring
+                add(node.body, in_test_class)
+                add(getattr(node, "orelse", []), in_test_class)
+                add(getattr(node, "finalbody", []), in_test_class)
+                for handler in getattr(node, "handlers", []):
+                    add(handler.body, in_test_class)
+
+    add(tree.body, False)
+    return out
 
 
 def test_every_test_cited_in_core_prose_still_exists():
@@ -171,11 +217,32 @@ def test_every_test_cited_in_core_prose_still_exists():
         ("in a docstring", '"""cites def test_gone( here"""\n', "test_gone",
          False),
         ("really defined", "def test_gone(x):\n    pass\n", "test_gone", True),
-        ("inside a class",
+        # CORRECTED. This row asserted True and was one of the branch's own
+        # accepted shapes. `pyproject.toml` sets no `python_classes`, so
+        # pytest's default `Test*` prefix means `class T` is not collected and
+        # the cited test does not run.
+        ("inside a non-Test class",
          "class T:\n    def test_gone(self):\n        pass\n", "test_gone",
+         False),
+        ("inside a Test class",
+         "class TestX:\n    def test_gone(self):\n        pass\n", "test_gone",
          True),
+        # ... and a `def` inside a `def` is not collected either
+        ("nested in a function",
+         "def helper():\n    def test_gone(x):\n        pass\n", "test_gone",
+         False),
         ("decorated", "@mark\ndef test_gone(x):\n    pass\n", "test_gone",
          True),
+        # ... and the shapes this resolver STILL answers "defined" for, listed
+        # here so the gap is a measured row rather than a sentence. Each is a
+        # deliberate act on the cited test itself; see the docstring.
+        ("under `if False:`", "if False:\n    def test_gone(x):\n        pass\n",
+         "test_gone", True),
+        ("under TYPE_CHECKING",
+         "if TYPE_CHECKING:\n    def test_gone(x):\n        pass\n",
+         "test_gone", True),
+        ("defined then deleted",
+         "def test_gone(x):\n    pass\ndel test_gone\n", "test_gone", True),
     ):
         defined = _defined_test_names(source)
         assert defined is not None and (name in defined) is present, (

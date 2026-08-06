@@ -76,7 +76,18 @@ WITHHELD = {
         "per-branch audit working notes (pre-registrations, measurement logs). "
         "Tracked, because a pre-registration that can be edited after the fact "
         "is not one; withheld, because it is a record of how this repository "
-        "was checked and not part of the library a user installs"
+        "was checked and not part of the library a user installs. WHAT KEEPS "
+        "IT OUT OF THE SDIST IS NOT THIS ENTRY: membership here is not a "
+        "build exclusion at all — `[tool.hatch.build.targets.sdist].include` "
+        "is, and `/scratchpad` is not in it, which "
+        "`test_an_arbitrary_new_file_does_not_ship` establishes by "
+        "intervention rather than by naming a path. AND IT HAS ONE "
+        "CONSEQUENCE THE OTHER ENTRIES DO NOT: "
+        "`test_no_untracked_file_anywhere_would_ship` skips on "
+        "`path.split('/', 1)[0] in WITHHELD`, so this entry exempts the whole "
+        "`scratchpad/` SUBTREE from the untracked-file check, not just the "
+        "directory. Harmless while nothing inside it would ship, and stated "
+        "because 'harmless today' is a reason to write it down"
     ),
 }
 
