@@ -847,12 +847,17 @@ verdicts:
   `and r.invocations` drift the entry above repairs; the bar's DOMAIN is
   still `outcome == OB_DISCHARGED` alone.
   **Affected versions:** 0.1.0 pre-release only — `caac1ee` (the scoping
-  commit) through `eb1ff86` inclusive, all branch-only. `45cf526` and
-  `eb1ff86` were originally logged here as the end of the range; they are
-  not, because the hash-keyed repair does not close the shape (below).
-  Builds up to and including `8e42934` have the whole-query bar, and the
-  mispairings in this entry and the next both measure UNKNOWN there;
-  nothing has been released.
+  commit) through `eb1ff86` inclusive, all branch-only. The end of the
+  range was originally logged as `45cf526`; it is `eb1ff86`, because the
+  hash-keyed repair at `45cf526` does not close the shape (below). *(A
+  previous correction here read "`45cf526` and `eb1ff86` were originally
+  logged here as the end of the range; they are not". Both halves were
+  wrong: `eb1ff86` was never in the old text — `git show eb1ff86:SOUNDNESS.md`
+  reads "through `45cf526` inclusive" — and saying `eb1ff86` is not the end
+  of the range contradicts the clause two lines above, which is the range
+  that is correct.)* Builds up to and including `8e42934` have the
+  whole-query bar, and the mispairings in this entry and the next both
+  measure UNKNOWN there; nothing has been released.
   **Which prior verdicts are retroactively invalid: none, and the
   direction is the ordinary one this time.** Reaching the hole needs a
   call to the public `make_solver_verdict` pairing an escalation with a
@@ -1068,5 +1073,140 @@ verdicts:
   the four-behaviour stray-index pin, the fingerprint-walk parity over five
   nesting shapes plus its old-accessor control, and the SET plan's per-k
   sweep at four axis lengths with its escalation-surface twin.
+
+- **2026-08-06 (pre-release, later the same day): `make_solver_verdict`
+  never bound its three arguments to one query, and the scatter bar was
+  never what stood in for that.** The entry above records the mispaired
+  false VERIFIED as "the cost of scoping the bar"; it is corrected in
+  place, and this entry is the repair.
+  **What the defect was.** `make_solver_verdict(closed, propagation,
+  escalation)` had four gates — ledger provenance, the symmetric semantics
+  pairing, the ieee refusal, the constrained-assume refusal — and none of
+  them asked whether the escalation came from `closed` at all. An
+  `OB_DISCHARGED` record discharges an obligation by INDEX, so an
+  escalation produced on query A, assembled against query B, discharges
+  B's obligations and returns VERIFIED on a query whose honest verdict is
+  REFUTED. The whole-query bar looked like a backstop for that, but only on
+  queries carrying a barred primitive — the only ones any version of the
+  bar inspects. Measured on this branch, on a query with **no `scatter`
+  anywhere**, where no version of the bar has ever fired:
+
+  | mispairing on a REFUTED query | 8e42934 | eb1ff86 | f5280cf | here |
+  |---|---|---|---|---|
+  | identical decided slice, scatter-bearing | UNKNOWN | VERIFIED | VERIFIED | refused |
+  | **scatter-FREE** | **VERIFIED** | **VERIFIED** | **VERIFIED** | refused |
+
+  So the bar's immunity was a coincidence of scope, not a mechanism, and
+  the finding is not a cost of scoping.
+  **The repair** is a fifth gate, the QUERY PAIRING GATE: `escalate`
+  records `ir.ClosedJaxpr.content_hash()` of the query it ran on at every
+  one of its five return sites, assembly recomputes it from the `closed` it
+  is handed, and a mismatch raises `MispairedEscalationError`. Same trust
+  model as the gates beside it and as the record-carried
+  `smt2_sha256`/`slice_sha256` — it defends an honest caller against an
+  accidentally mispaired assembly, the realistic mechanism being a CACHED
+  escalation, which is one of the two uses `stelling.ir`'s own module
+  docstring names `content_hash` for. It costs no additional hash at
+  assembly (the stamp already took that one; the gate compares the same
+  value, asserted by counting the calls rather than by timing), and one
+  hash per `escalate` — measured on an idle machine at 0.112 ms against an
+  89.3 ms two-obligation escalation, 0.125% of it.
+  **What it does NOT bind: `propagation`.** `Propagation` lives in
+  `stelling.propagate`, held at zero line delta this pass, so there is no
+  field on it to record the query in. The residue — this query, ANOTHER
+  query's propagation, this query's escalation — assembles to VERIFIED with
+  the other query's obligations reported under this query's hash, and is a
+  live test rather than a comment
+  (`test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`).
+  **Four more, same pass, none of them verdict-moving through `check()`:**
+  **(1)** the "a record cannot certify itself" pin saw ONE SPELLING. Six
+  channels each turned the bar's UNKNOWN into VERIFIED with the full suite
+  green in both columns: a key read out of `SolverStamp.options` (no new
+  field anywhere), a conjunct at the CALL SITE before the bar, a
+  `getattr`-with-default inside `_bar_domain`, a conjunct at the call site
+  AFTER the bar, `type(r.index) is not int` exploited with an `int`
+  subclass (no new field, no new key), and the token smuggled through
+  `options` and read in `_bar_scope`. Removing a record's fields catches
+  the first access form only — measured: plain attribute and `@property`
+  yes; `getattr` with a default, a `hasattr` guard and `__dict__.get` no —
+  and pins the invariant at one producer while the same conjunct one
+  function over does the same job. The pin is now a READ LEDGER over the
+  whole assembly (every attribute access on a record or a stamp is logged
+  with the function that made it, and the allow-list is asserted in both
+  directions), a WHITELIST PROJECTION of `options` down to four named keys
+  with the key set asserted exactly, and a type-identity invariance
+  property for the one channel that reads nothing new.
+  **(2)** `_bar_domain`'s outer `except` was driven by nothing, so the
+  sentinel's truthiness — its whole mechanism — was unpinned: `__bool__`
+  returning `False` turned an unreadable escalation's UNKNOWN into
+  VERIFIED, suite green.
+  **(3)** a silencing path that never reached the sentinel: a `records`
+  iterable that can be consumed once was exhausted by the obligation loop
+  before the domain was read, so `_bar_domain` returned an honest-empty
+  `{}` and the bar was skipped — VERIFIED with no withheld note, identical
+  at `eb1ff86`. Closed by ORDER: the domain is read on the first pass, so a
+  degenerate `records` costs the discharges rather than the bar.
+  **(4)** the SET/ADD route sweep exhausted k and SAMPLED n. Two
+  line-neutral corruptions walk through it, each a `violated-witness`
+  turned `discharged`, both green in both columns: `i == (k if n != 6 else
+  0)` in `_scatter_set_plan`, and `groups[k*rowsz + t] -> groups[k*rowsz]`
+  in `_scatter_add_plan`, whose row arithmetic was ungauged above rank 1
+  entirely. Both sweeps now range over a SPACE built by a rule, with the
+  space asserted to be the rule's.
+  **Affected versions:** 0.1.0 pre-release only — the pairing hole is
+  present in EVERY build in this repository's history up to and including
+  `f5280cf`, and on the scatter-free shape that includes `8e42934` and
+  everything before it; all branch-only, nothing released. The five other
+  items are branch-only over `caac1ee`…`f5280cf` except (3), which is
+  present from `eb1ff86`.
+  **Which prior verdicts are retroactively invalid: none.** Reaching any
+  of these needs a call to the public `make_solver_verdict` pairing an
+  escalation, a propagation or a hand-edited record with a query it did not
+  come from. `stelling.preconditions.check` cannot mispair: its one
+  pipeline binds `closed` and `prop` as locals off a single `trace`, and
+  passes those same two to `escalate` and then to `make_solver_verdict`.
+  `make_solver_verdict` is not in `stelling.__all__` and is not an
+  attribute of the package at all; measured, its only mentions outside the
+  library and its tests are three internal `design/` notes, this file, and
+  the paragraph in `docs/verdict-ledger.md` that discloses this very
+  defect — no README, tutorial or API page reaches it. And no verdict in
+  `docs/verdict-ledger.md` was assembled any other way than through
+  `check()`. What is NOT claimed: that a downstream caller cannot have
+  mispaired one.
+  **What to re-run:** any recorded solver-path VERIFIED assembled through
+  `make_solver_verdict` directly rather than through `check()` — re-run it
+  on this build; a mispaired pair now raises `MispairedEscalationError`
+  instead of returning a verdict, so the re-run either reproduces the
+  verdict or names the mispairing. Verdicts from `check()` need no re-run.
+  At this pass: 2044 passed, 2 skipped with both solvers, jax and maddening
+  installed; 2040 passed, 6 skipped under CI's install set (`.[solvers,jax]`,
+  no maddening). Before it: 2035 / 2 and 2031 / 6.
+  **Record-keeping corrections, made because this file's subject is claims
+  that stopped being true:**
+  * the previous pass's SOUNDNESS.md corrections are claimed by `ed183e8`'s
+    commit message and are not in it — `git show --stat ed183e8` touches
+    `docs/verdict-ledger.md`, `smt.py` and two test files and no
+    `SOUNDNESS.md`. They are in `114b846`, whose own message never mentions
+    them. Commit messages cannot be edited without rewriting the audited
+    base, so the correction is here.
+  * `docs/norms.md`'s skip disclosure claimed the two `blackjax` skips were
+    "the ONLY skips the suite reports under jax and both solvers — two of
+    them". Under exactly that install set there are SIX (2 blackjax + 4
+    maddening), which this file recorded four files away. Corrected, and
+    the replacement names its install set.
+  * this file's four-element policy (what changed / which versions / which
+    verdicts invalid / what to re-run) is met BY NAME by 4 of its 17 log
+    entries — the four dated 2026-08-06. The other 13, all dated
+    2026-07-18 to 2026-07-21, state their substance in prose without the
+    labels; SEVEN of those lack "what to re-run" by substance as well,
+    namely *the stamp contract gained the semantics field*, *the stamp
+    contract gained the nonvacuity field*, *degrade-don't-crash completed
+    for the escalation layer*, *the solver escalation layer landed*, *three
+    censused registry rows landed*, *bounded static-shape array emission
+    landed*, and *the I1 residual superseded*. Not fixed here — this pass
+    fixed the entries it touched and states the rest rather than leaving
+    the standard re-affirmed and unmet. Cited by headline rather than by
+    line number, because a line number in this file is a claim that goes
+    stale on the next edit, which is this file's own subject.
 
 *(no releases yet)*

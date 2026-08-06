@@ -968,6 +968,45 @@ def test_the_pairing_gate_costs_no_additional_hash():
     )
 
 
+def test_the_public_path_cannot_mispair_and_the_gate_never_fires_on_it():
+    """THE REACHABILITY CLAIM THIS ENTRY RESTS ON, DRIVEN RATHER THAN
+    ARGUED. `SOUNDNESS.md` says no recorded verdict is retroactively invalid
+    because `stelling.preconditions.check` derives all three artifacts from
+    one trace and cannot mispair. That is a claim about code, so it is
+    measured here: the public path runs, and the escalation it built carries
+    this query's own hash.
+
+    Both directions, because the first alone would also hold if the gate had
+    silently stopped being reachable: `check` must produce a verdict at all,
+    and the gate must be SATISFIED rather than absent — an escalation whose
+    `query_sha256` is empty would pass no gate and produce the same verdict.
+    """
+    import dataclasses
+
+    from stelling.propagate import propagate
+    from stelling.solvers import SolverConfig, escalate
+
+    v = check(_scatter_ON_the_decided_slice, vacuity_mode="inputs-only",
+              solver_timeout_ms=20000)
+    assert v.status in ("UNKNOWN", "VERIFIED", "REFUTED"), v.status
+    assert v.stamp.query_content_hash == trace(
+        _scatter_ON_the_decided_slice).content_hash(), (
+        "`check` stamped a query hash that re-tracing the same harness does "
+        "not reproduce, so the pairing gate's key is not stable across the "
+        "public path and honest verdicts would start being refused"
+    )
+
+    # the gate is satisfied, not absent
+    closed = trace(_scatter_ON_the_decided_slice)
+    prop = propagate(closed)
+    esc = escalate(closed, prop, SolverConfig(timeout_ms=20000))
+    assert esc.query_sha256 == closed.content_hash() != ""
+    assert dataclasses.replace(esc, query_sha256="").query_sha256 == "", (
+        "the field cannot be cleared, so the gate below is not testing what "
+        "it thinks"
+    )
+
+
 def test_the_bar_scope_itself_widens_on_the_colliding_pair():
     """The same defect one layer down, at `_bar_scope` rather than at the
     assembled verdict — so that deleting the `_evidence_is_about` call is not
@@ -1342,8 +1381,11 @@ def test_no_record_field_can_narrow_the_bars_domain():
 
     LOAD-BEARING IS EXACTLY `index` AND `outcome`. `invocations` is read by
     `_evidence_is_about`, but only to PERMIT narrowing — every value of it
-    other than a matching script hash widens the bar — so it is probed here
-    like any other field and the bar must not move. An earlier version
+    that does not reproduce BOTH the recorded script hash and the recorded
+    slice fingerprint widens the bar — so it is probed here like any other
+    field and the bar must not move. (This sentence said "a matching script
+    hash" and was stale by one hash from the commit that added the second
+    conjunct.) An earlier version
     exempted it, which was false in the direction that matters; see
     `test_stripping_invocations_cannot_clear_the_bar` for that drift.
     """

@@ -262,13 +262,28 @@ Two measured instances, and the difference between them is the whole norm.
   `[dependency-groups] dev` (pre-commit, pytest, reuse), not in either CI job
   (`.[solvers]` and `.[solvers,jax]`, plus pytest); its only other mention in
   the tree is a pre-commit hook BANNING the name in `src/stelling` for
-  library-neutrality. **So they have never run in CI**, and they are the ONLY
-  skips the suite reports under jax and both solvers — two of them, and the
-  population is the whole suite. (An absolute test count stood here and was
-  already stale when it was written, which is this file's own subject: the
-  claim that carries the argument is "the only two", and that is the one
-  worth stating.) Nothing anywhere says the sugar's acceptance bar is
+  library-neutrality. **So they have never run in CI.** Under CI's own
+  install set (`.[solvers,jax]`) the suite reports **six** skips, of which
+  these two are the `blackjax` pair; the other four are
+  `importorskip("maddening")`, which CI does not install either
+  (`test_dot_general_interval.py`, `test_reproduce_acceptance.py` twice,
+  `test_verified_bar.py`). With `maddening` also installed, the suite reports
+  two — these. Nothing anywhere says the sugar's acceptance bar is
   unmeasured.
+
+  *(That sentence has now been wrong in both directions, which is why it
+  names its install set. It first carried an absolute test count, exact when
+  written at `caac1ee` — whose own message records 2003 passed + 2 skipped =
+  2005 collected — and stale by `eb1ff86`. The replacement dropped the count
+  and asserted "the ONLY skips the suite reports under jax and both solvers —
+  two of them", along with a parenthetical calling the old number "already
+  stale when it was written". Both halves were false: the count was exact
+  when written, and under exactly the install set that phrase names there are
+  six skips, not two — the same tree's `SOUNDNESS.md` records
+  `2031 passed, 6 skipped under CI's install set` four files away. A
+  stale-but-once-true number had been replaced by a false claim, in the file
+  whose subject is stale claims. A statement that names the install set it
+  was measured under can be re-run; one that does not cannot.)*
 
 "Weaker guarantee" and "no guarantee" are different facts and must not read the
 same. The first has a fallback; the second has nothing where the claim is made.

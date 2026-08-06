@@ -85,9 +85,31 @@ def test_golden_script_z3_flavor():
     from stelling.smt import slice_fingerprint, slice_primitive_walk
     sl = sole_slice(q)
     assert script.slice_sha256 == slice_fingerprint(sl)
+    # THE FLAT COMPARISON HOLDS HERE ONLY BECAUSE THIS GOLDEN SLICE HAS NO
+    # SUB-JAXPRS, and that is a property of the fixture rather than of the
+    # walk. `slice_primitive_walk` DESCENDS -- a `cond` branch or a
+    # `scatter-add` combiner contributes equations the flat list on the right
+    # does not have -- so this line would be false on any nested slice, and it
+    # is asserted as an equality on THIS slice rather than as a rule. The walk
+    # against nesting is pinned in `tests/test_bar_walk_parity.py`; what is
+    # measured here is only that the fingerprint tracks the PRIMITIVES and not
+    # the emitted text.
+    assert not any(P_sub(e) for e in sl.eqns), (
+        "the golden slice has acquired a sub-jaxpr, so the flat comparison "
+        "below is no longer the walk's own answer -- move it to "
+        "tests/test_bar_walk_parity.py rather than relaxing it"
+    )
     assert [s.split(":", 1)[1] for s in slice_primitive_walk(sl.eqns)] == [
         str(e.primitive) for e in sl.eqns
     ]
+
+
+def P_sub(eqn):
+    """Does this equation hold a sub-jaxpr? Through `coverage.sub_jaxprs`, the
+    canonical accessor, so the check cannot drift from the walk it guards."""
+    from stelling.coverage import sub_jaxprs
+
+    return any(inner is not None for inner in sub_jaxprs(eqn))
 
 
 def test_cvc5_nra_options_pin_coverings_and_disable_nl_ext():
