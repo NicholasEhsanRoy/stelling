@@ -34,10 +34,30 @@ _MODULE_SCOPE_IMPORT = re.compile(
 _SKIP = re.compile(r"importorskip\(\s*[\"'](" + "|".join(HEAVY) + r")[\"']")
 
 
-def _offenders():
+def _scanned():
+    """Every file in ``tests/`` that pytest imports for itself.
+
+    ``conftest.py`` is in scope and is the WORST case, not an edge one: pytest
+    imports it before collection, in every environment, and an ImportError
+    there is a usage error — pytest exits 4 having collected nothing at all.
+    A test module that fails to import is exit 2 with the other modules'
+    results still on the screen. Measured, both.
+
+    It was out of scope only because there was no ``tests/conftest.py`` until
+    the skip inventory needed one; the file it added imports nothing but the
+    standard library, and this is what keeps that true.
+    """
     here = pathlib.Path(__file__).parent
+    files = sorted(here.glob("test_*.py"))
+    conftest = here / "conftest.py"
+    if conftest.exists():
+        files.append(conftest)
+    return files
+
+
+def _offenders():
     bad = []
-    for path in sorted(here.glob("test_*.py")):
+    for path in _scanned():
         if path.name == pathlib.Path(__file__).name:
             continue
         guarded: dict[str, int] = {}
@@ -85,5 +105,8 @@ def test_the_checker_can_actually_see_an_offender():
 
 def test_at_least_one_module_is_actually_scanned():
     """A glob that matched nothing would also report zero offenders."""
-    here = pathlib.Path(__file__).parent
-    assert len(list(here.glob("test_*.py"))) > 20
+    scanned = _scanned()
+    assert len(scanned) > 20
+    # and the conftest specifically, since it is the file whose failure is
+    # total and the one the glob used to miss
+    assert pathlib.Path(__file__).parent / "conftest.py" in scanned
