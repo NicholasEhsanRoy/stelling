@@ -834,6 +834,27 @@ def _set_plan_routes(n, k):
 # follows sweeps a SPACE defined by a rule, asserts the space is the rule's
 # (so shrinking it back to a list is itself a failure), and states what the
 # space does not reach. The oracle stays jax's own execution.
+#
+# AND SWEEPING A SPACE BY A RULE WAS STILL NOT ENOUGH, WHICH IS THE FIFTH
+# INSTANCE OF ONE PATTERN. Two more line-neutral corruptions walked straight
+# past this file, both a `violated-witness` turned `discharged`, both with the
+# full suite green in BOTH columns (2044 / 2 and 2040 / 6) on `e35de13`:
+#
+#   * `i == (k if n != 9 else 0)` in the SET row — `_set_space` stops at 8 and
+#     the surface at 6, so n = 9 is gauged by nothing;
+#   * `groups[(k if operand_shape[0] < 4 else 0) * rowsz + t]` in the ADD row
+#     — `_add_space`'s dims stop at 3, so it contains NO axis of length >= 4,
+#     and the non-degeneracy clause below was on `rowsz`, the TRAILING
+#     product, which structurally cannot see a LEADING-axis-keyed corruption.
+#
+# RAISING THE BOUNDS IS THE MOVE THIS PROJECT HAS NOW WATCHED FAIL FOUR TIMES
+# (k = {0} -> {0,2}; field probes by name -> by type; an arity family 2 -> 3
+# -> 8, where the escape sat at EXACTLY the declared ceiling). So the bounds
+# below are not raised — they are GUARDED: `stelling.obligation` now DECLINES
+# any shape outside them, and `test_nothing_outside_the_swept_space_reaches_
+# either_row` pins the two spaces EQUAL in both directions. Past the bound the
+# rows do not run ungauged; they refuse, and the obligation comes back
+# `unknown` instead of `discharged` or `violated-witness`.
 _SET_MAX_N = 8  # the SET row is rank-1 only (rank >= 2 declines; measured)
 _ADD_MAX_DIM = 3
 _ADD_MAX_RANK = 3
@@ -873,7 +894,10 @@ def test_the_set_plans_k_is_the_programs_k_over_the_whole_AXIS_SPACE():
     COVERAGE, stated because a sweep that does not say what it covers is a
     sample wearing a rule's clothes:
 
-    * axis length: EXHAUSTED for 1 <= n <= 8. Not swept above 8.
+    * axis length: EXHAUSTED for 1 <= n <= 8. Not swept above 8, and — since
+      `test_nothing_outside_the_swept_space_reaches_either_row` — not
+      ADMITTED above 8 either, so "not swept" no longer means "runs
+      ungauged".
     * written index: EXHAUSTED, every k of every one of those axes.
     * rank: 1 ONLY, and that is the row's own boundary rather than this
       test's. Measured here: `x.at[1].set(v)` on an operand of shape (3, 2),
@@ -975,16 +999,25 @@ def test_the_add_plans_rows_are_the_programs_rows_over_the_SHAPE_SPACE():
     * written index: EXHAUSTED, every k of the leading axis of every shape.
     * NOT covered: dims above 3, rank above 3, operands above 12 elements, and
       multiple index columns (`x.at[jnp.array([0, 2])].add(...)` is a
-      different form, gauged by the segment-sum battery above).
+      different form, gauged by the segment-sum battery above). The first
+      three are no longer ADMITTED either — see
+      `test_nothing_outside_the_swept_space_reaches_either_row`. The fourth
+      still is, and that is stated rather than closed.
 
-    NON-DEGENERACY IS ASSERTED, not assumed: the space must contain shapes of
-    rank >= 2, and `rowsz` (the product of the trailing axes — the quantity
-    that is 1 at rank 1 and is what went ungauged) must take at least three
-    distinct values across it. Shrinking the space back below that fails here.
+    NON-DEGENERACY IS ASSERTED, not assumed, ON BOTH AXES OF THE INDEX
+    EXPRESSION. `groups[k * rowsz + t]` has two ungaugeable directions and the
+    first version of this clause guarded only one: `rowsz` (the product of the
+    TRAILING axes — 1 at rank 1, which is what went ungauged) and `k`'s own
+    axis, the LEADING one. A corruption keyed on the leading axis is invisible
+    to a `rowsz` clause however wide that clause is, and one was measured:
+    `groups[(k if operand_shape[0] < 4 else 0) * rowsz + t]`, green through
+    the whole suite in both columns. Both must vary across the space now, and
+    shrinking either back fails here.
     """
     space = _add_space()
     ranks = {len(shape) for shape, _ in space}
     rowsizes = {math.prod(shape[1:]) for shape, _ in space}
+    leading = {shape[0] for shape, _ in space}
     assert ranks == set(range(1, _ADD_MAX_RANK + 1)), (
         f"the swept ranks are {sorted(ranks)}; the space is no longer the "
         f"rule's"
@@ -994,6 +1027,17 @@ def test_the_add_plans_rows_are_the_programs_rows_over_the_SHAPE_SPACE():
         f"it is 1 and every row-index expression collapses — a space that "
         f"does not vary it cannot see the row arithmetic at all, which is "
         f"exactly the state this test was written to end"
+    )
+    assert len(leading - {1}) >= 2, (
+        f"the LEADING axis takes values {sorted(leading)} across the space. "
+        f"It is the axis `k` indexes, and the `rowsz` clause above cannot see "
+        f"it: a corruption keyed on the leading axis alone was measured green "
+        f"through the whole suite in both columns"
+    )
+    assert leading == set(range(1, _ADD_MAX_DIM + 1)), (
+        f"the swept leading axes are {sorted(leading)}, not every length the "
+        f"rule admits — the space has been narrowed back to a sample on the "
+        f"one axis the non-degeneracy clause above was blind to"
     )
 
     for shape, k in space:
@@ -1035,6 +1079,166 @@ def test_the_add_plans_rows_are_the_programs_rows_over_the_SHAPE_SPACE():
             f"validation, emission, replay — then models an accumulation the "
             f"program did not perform"
         )
+
+
+def _set_plan_for(n, k=0):
+    """`_scatter_set_plan`'s answer for `x.at[k].set(u)` on a length-`n`
+    operand: the routes, or the quoted decline."""
+    def build():
+        x = any_array((n,), "float64", (0.0, 1.0))
+        u = any_array((), "float64", (2.0, 3.0))
+        return assert_(x.at[k].set(u)[0] >= -1e9)
+
+    closed = trace(build)
+    eqn = next(e for e in closed.jaxpr.eqns if str(e.primitive) == "scatter")
+    consts = dict(zip((v.id for v in closed.jaxpr.constvars), closed.consts))
+    try:
+        return ("admitted", OB._scatter_set_plan(closed.jaxpr.eqns, consts, eqn))
+    except OB._Decline as d:
+        return ("declined", str(d))
+
+
+def _add_plan_for(shape):
+    """`_scatter_add_plan`'s answer for `x.at[0].add(u)` on `shape`: the
+    groups, or the quoted decline."""
+    def build():
+        x = any_array(shape, "float64", (0.0, 1.0))
+        u = any_array(shape[1:], "float64", (2.0, 3.0))
+        return assert_(x.at[0].add(u).reshape(-1)[0] >= -1e9)
+
+    closed = trace(build)
+    eqn = next(e for e in closed.jaxpr.eqns
+               if str(e.primitive) == "scatter-add")
+    consts = dict(zip((v.id for v in closed.jaxpr.constvars), closed.consts))
+    try:
+        return ("admitted", OB._scatter_add_plan(closed.jaxpr.eqns, consts, eqn))
+    except OB._Decline as d:
+        return ("declined", str(d))
+
+
+def test_nothing_outside_the_swept_space_reaches_either_row():
+    """GUARD THE BOUND — the answer that is NOT "raise the bound".
+
+    Both sweeps above are exhaustive over a space and blind one step past it,
+    and two line-neutral corruptions were measured living in that step: SET
+    wrong only at n = 9, ADD wrong only at a leading axis of 4 or more, each a
+    `violated-witness` turned `discharged` with the full suite green in both
+    columns. This project has watched "raise the bound" fail four times
+    already — the last time the escape sat at EXACTLY the new ceiling — so
+    the repair is not a larger number.
+
+    **The ADMITTED space must not exceed the GAUGED space.** Past these bounds
+    the rows DECLINE, so the routing code cannot execute on a shape nothing
+    measured: the corrupted branch is unreachable rather than uncaught, and a
+    row that silently starts admitting one FAILS HERE instead of running
+    ungauged. This is the same discipline the rank-2 decline assertion in
+    `test_the_set_plans_k_is_the_programs_k_over_the_whole_AXIS_SPACE` already
+    applied to rank, extended to the two axes that had no such assertion.
+
+    PINNED IN BOTH DIRECTIONS, which is what makes it a guard rather than a
+    restatement: the sweep bound and the admission bound are asserted EQUAL
+    (so widening admission without widening the sweep is red, and shrinking
+    the sweep below admission is red), everything INSIDE the space must still
+    be admitted (so a row that declined everything could not read as perfect),
+    and everything just OUTSIDE must decline BY ITS REASON.
+
+    Could-not-fail: the shape to avoid here is #3, asserting away its own
+    trigger — a guard that declined the swept space too would make both sweeps
+    vacuous. The in-space half below is what stops that, and the two sweeps
+    themselves would go red if it were violated.
+
+    WHAT IT DOES NOT BOUND, stated because an unstated scope is this repo's
+    own recurring defect: the ADD row's INDEX COLUMN LENGTH. `_add_space`
+    sweeps one written index; `jax.ops.segment_sum` reaches a column of 4 on
+    an operand these bounds admit, and that axis is gauged by the segment-sum
+    mutation battery — a battery, not an exhaustive sweep. Nothing here
+    narrows admission to it.
+    """
+    # the two spaces are ONE space, not two numbers that happen to agree
+    assert OB._SET_ROW_GAUGED_MAX_LEN == _SET_MAX_N, (
+        f"the SET row admits up to {OB._SET_ROW_GAUGED_MAX_LEN} while this "
+        f"file sweeps to {_SET_MAX_N}. Whichever moved, the other must: the "
+        f"gap between them is exactly where the n = 9 corruption lived"
+    )
+    assert (OB._ADD_ROW_GAUGED_MAX_RANK, OB._ADD_ROW_GAUGED_MAX_DIM,
+            OB._ADD_ROW_GAUGED_MAX_SIZE) == (
+        _ADD_MAX_RANK, _ADD_MAX_DIM, _ADD_MAX_SIZE), (
+        f"the ADD row admits rank/dim/size "
+        f"{(OB._ADD_ROW_GAUGED_MAX_RANK, OB._ADD_ROW_GAUGED_MAX_DIM, OB._ADD_ROW_GAUGED_MAX_SIZE)} "
+        f"while this file sweeps {(_ADD_MAX_RANK, _ADD_MAX_DIM, _ADD_MAX_SIZE)}"
+    )
+
+    # IN the space: still admitted, and still routed. Without this half a row
+    # that declined everything would pass the decline assertions below.
+    for n, k in _set_space():
+        kind, payload = _set_plan_for(n, k)
+        assert kind == "admitted" and payload == [
+            (2, 0) if j == k else (0, j) for j in range(n)
+        ], f"n={n} k={k}: the SET row no longer admits its own gauged space ({payload})"
+    for shape, _k in _add_space():
+        kind, payload = _add_plan_for(shape)
+        assert kind == "admitted", (
+            f"{shape}: the ADD row no longer admits its own gauged space "
+            f"({payload})"
+        )
+
+    # JUST OUTSIDE: declines, by its reason. One step past each bound and one
+    # far past it, because a guard written as `== N + 1` is not a bound.
+    for n in (_SET_MAX_N + 1, _SET_MAX_N + 2, 64, 200):
+        kind, payload = _set_plan_for(n, k=0)
+        assert kind == "declined" and "outside the GAUGED" in payload, (
+            f"n={n}: the SET row {kind} an axis length nothing gauges "
+            f"({payload}). A line-neutral mis-route wrong only at n = 9 was "
+            f"measured green through the whole suite in both columns; the "
+            f"only thing standing between that and a missed violation is "
+            f"this decline"
+        )
+    for shape in ((_ADD_MAX_DIM + 1,), (_ADD_MAX_DIM + 1, 2), (1, 5), (9,),
+                  (3, 3, 2), (2, 2, 2, 2), (1, 1, 1, 1)):
+        kind, payload = _add_plan_for(shape)
+        assert kind == "declined" and "outside the GAUGED" in payload, (
+            f"{shape}: the ADD row {kind} a shape nothing gauges ({payload}). "
+            f"A corruption keyed on a LEADING axis of 4 or more was measured "
+            f"green through the whole suite in both columns"
+        )
+
+    # ... and the shapes just outside really are outside, so the two loops
+    # above are not both testing the same side of the boundary
+    assert (9,) not in {shape for shape, _ in _add_space()}
+    assert 9 not in {n for n, _ in _set_space()}
+
+
+def test_a_shape_past_the_gauge_costs_the_ANSWER_and_never_the_SOUNDNESS():
+    """THE SURFACE OF THE BOUND GUARD, and its price, measured.
+
+    A decline is not free: an obligation the row will not model is not sliced,
+    not emitted and never solver-decided, so it comes back `unknown`. That
+    costs REFUTATIONS as well as discharges — at n = 9 a false claim about an
+    untouched element used to come back `violated-witness` and now comes back
+    `unknown`. The direction is the safe one (an ungauged route can mint a
+    missed violation; an `unknown` cannot mint anything), and it is recorded
+    in SOUNDNESS.md rather than left as a silent narrowing.
+
+    Read at `escalate`, for the reason `_set_row_records` gives: the VERIFIED
+    bar sits downstream and would report UNKNOWN either way.
+    """
+    def build_at(n):
+        def build():
+            x = any_array((n,), "float64", (0.0, 1.0))
+            u = any_array((), "float64", (2.0, 3.0))
+            s = x.at[2].set(u)
+            return assert_(s[0] - x[0] >= 1.0)  # FALSE: element 0 is untouched
+        return build
+
+    assert _set_row_records(build_at(_SET_MAX_N), {}) == ("violated-witness",), (
+        "the gauged bound itself stopped refuting, so the comparison below "
+        "measures a broken fixture rather than the guard"
+    )
+    assert _set_row_records(build_at(_SET_MAX_N + 1), {}) == ("unknown",), (
+        "one past the gauge the row must DECLINE, leaving the obligation "
+        "undecided. A `violated-witness` here means the ungauged routing ran; "
+        "a `discharged` means it ran and was wrong"
+    )
 
 
 def test_every_untouched_element_still_refutes_over_the_SURFACE_SPACE():
@@ -1160,7 +1364,7 @@ def gate_set_row_agreement(subject):
 # argument in their own text.
 #
 # WHICH DECLINES THOSE ARE IS COUNTED, NOT ESTIMATED. `_scatter_set_plan` has
-# TEN `raise _Decline` sites, and an admission gate is only as good as the
+# ELEVEN `raise _Decline` sites, and an admission gate is only as good as the
 # fraction of them it drives — an unstated fraction is exactly the defect this
 # file's subject is about. The census below is the accounting, in source
 # order, and `test_the_admission_gate_accounts_for_every_decline_site` reads
@@ -1177,12 +1381,23 @@ def gate_set_row_agreement(subject):
 #   8   indices decode to != 1 element          no — aval/value mismatch
 #   9   index value is not an integer           no — defensive, after #4
 #   10  index out of range for the axis         YES  (out-of-range below)
+#   11  axis longer than the GAUGE              YES  (past-the-gauge below)
 #
-# So FOUR of the ten rules are driven, by FIVE fixtures — `clip` and
+# So FIVE of the eleven rules are driven, by SIX fixtures — `clip` and
 # `promise_in_bounds` are two spellings of rule #6 and expect the same quoted
 # substring. A predecessor of this table said "the admission gate measures
 # three rules"; that was three FIXTURES over two rules, and it named three of
 # the eight undriven sites while leaving five unnamed.
+#
+# RULE #11 IS THE BOUND GUARD, and it is counted here rather than hidden
+# behind a helper on purpose. The obvious way to add a decline without moving
+# this number is to raise it from a called function — which is exactly the
+# "local alias walks straight past" drift the count test's own docstring
+# warns about, one level up. The number moved; the table and both assertions
+# moved with it. Its own two-directional pin is
+# `test_nothing_outside_the_swept_space_reaches_either_row`; the fixture below
+# is what makes the ADMISSION GATE drive it, so a mutation that deletes the
+# bound is caught by the gauge screen as well as by that test.
 #
 # The undriven six, each with its reason:
 #   * #1 and #2 are malformed-IR guards. `jax.make_jaxpr` does not emit a
@@ -1218,6 +1433,8 @@ _ADMISSION_DECLINES = (
      "not statically derivable"),
     ("index dtype cannot cover the axis", lambda: _int8_index_set_query(),
      "cannot exactly represent"),
+    ("axis longer than the gauged space", lambda: _past_the_gauge_set_query(),
+     "outside the GAUGED"),
 )
 
 
@@ -1251,6 +1468,24 @@ def _traced_index_set_query():
         x = any_array((3,), "float64", (0.0, 1.0))
         s = x.at[jnp.int32(2)].set(2.0)
         return assert_(s[2] - x[2] >= 1.0)
+
+    return build
+
+
+def _past_the_gauge_set_query():
+    """RULE #11's fixture: an ordinary in-range `.set` on an operand ONE
+    LONGER than the route sweep exhausts.
+
+    Nothing about the write is unusual — index 2 of a length-9 array, static,
+    in range, FILL_OR_DROP — which is the point: the row declines because the
+    routing at that length is gauged by nothing, not because the program is
+    odd. A line-neutral mis-route wrong only at n = 9 was measured green
+    through the whole suite in both columns on `e35de13`."""
+
+    def build():
+        x = any_array((_SET_MAX_N + 1,), "float64", (0.0, 1.0))
+        s = x.at[2].set(2.0)
+        return assert_(s[0] - x[0] >= 1.0)
 
     return build
 
@@ -1304,7 +1539,8 @@ def gate_set_row_admission(subject):
     stops short for an unrelated reason is not evidence the rule is there.
     The in-range FILL_OR_DROP case must still be admitted, or a gate that
     declined everything would read as perfect. The block comment above says
-    which of the row's ten decline sites this reaches and which it does not.
+    which of the row's eleven decline sites this reaches and which it
+    does not.
     """
     try:
         kind, payload = _set_plan_verdict(_set_query(0, None), subject)
@@ -1594,12 +1830,13 @@ def test_gauge_catches_every_mutation():
                "(index 0 alone cannot see a mis-route defined relative to "
                "the written index, because every offset from 0 collapses "
                "onto 0 or out of range); and ADMISSION — whether the row "
-               "may model the equation at all. `_scatter_set_plan` has TEN `raise "
-               "_Decline` sites and the admission gate drives FOUR of them, "
-               "with five fixtures (two spellings of the mode rule), each "
+               "may model the equation at all. `_scatter_set_plan` has ELEVEN `raise "
+               "_Decline` sites and the admission gate drives FIVE of them, "
+               "with six fixtures (two spellings of the mode rule), each "
                "checked by its quoted reason: the index dtype's coverage of "
                "the leading axis, the non-FILL_OR_DROP modes, an index not "
-               "statically derivable, and an out-of-range static index. The "
+               "statically derivable, an out-of-range static index, and an "
+               "axis longer than the gauged route space. The "
                "other six are NOT driven here: arity and the "
                "operand/output shape contradiction are malformed-IR guards "
                "no traced fixture reaches; the combiner and row-form "
@@ -1670,7 +1907,7 @@ def test_gauge_catches_every_mutation():
 def test_the_admission_gate_accounts_for_every_decline_site():
     """THE SCOPE SENTENCE'S OWN NUMBER, READ OUT OF THE SOURCE.
 
-    "the admission gate drives FOUR of TEN decline sites" is the kind of
+    "the admission gate drives FIVE of ELEVEN decline sites" is the kind of
     claim this file exists to distrust: it was true when written and nothing
     made it stay true. A `raise _Decline` added to `_scatter_set_plan` moves
     the denominator silently, and a reader has no way to notice.
@@ -1714,16 +1951,16 @@ def test_the_admission_gate_accounts_for_every_decline_site():
             f"it deliberately; do not let the count drift"
         )
     sites = len(raises)
-    assert sites == 10, (
-        f"`_scatter_set_plan` now has {sites} decline sites, not 10. The "
+    assert sites == 11, (
+        f"`_scatter_set_plan` now has {sites} decline sites, not 11. The "
         f"admission gate's scope sentence in test_gauge_catches_every_"
         f"mutation and the census comment above _ADMISSION_DECLINES both "
-        f"quote 10 — re-derive which of the new set the gate drives, extend "
+        f"quote 11 — re-derive which of the new set the gate drives, extend "
         f"it or name the gap, and update both numbers."
     )
     reasons = {expect for _label, _build, expect in _ADMISSION_DECLINES}
-    assert len(_ADMISSION_DECLINES) == 5 and len(reasons) == 4, (
+    assert len(_ADMISSION_DECLINES) == 6 and len(reasons) == 5, (
         f"the admission gate now runs {len(_ADMISSION_DECLINES)} fixture(s) "
         f"over {len(reasons)} distinct decline reason(s); the scope sentence "
-        f"says five over four"
+        f"says six over five"
     )

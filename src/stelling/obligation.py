@@ -946,6 +946,62 @@ def _exact_static_elements(eqns, consts, atom):
     return read(atom)
 
 
+# ── THE GAUGED SPACE OF THE TWO SCATTER ROWS, AND WHY ADMISSION STOPS THERE ──
+#
+# A BOUNDED SWEEP IS BLIND JUST PAST ITS BOUND, AND THIS PROJECT HAS NOW
+# WATCHED THAT COST IT FIVE TIMES. A route gauge sampling k = {0} then {0, 2};
+# field probes by name then by type; an arity family widened 2 -> 3 and then
+# 3 -> 8, where the escape sat at EXACTLY the declared ceiling; and the two
+# route corruptions this pair of constants answers. Each time the reflex was
+# to raise the bound, and each time the next corruption was written one step
+# past the new one. Measured on `e35de13`, both line-neutral, both a
+# `violated-witness` turned `discharged` — a MISSED violation, the direction
+# the VERIFIED bar exists for — and both with the FULL SUITE GREEN in both
+# columns (2044 / 2 and 2040 / 6):
+#
+#   * `i == (k if n != 9 else 0)` in the SET row. `_set_space` exhausts
+#     1 <= n <= 8 and the surface sweeps n in 3..6, so n = 9 is gauged by
+#     nothing: `x=(9,); s=x.at[2].set(u); assert s[0]-x[0] >= 1.0` went
+#     `violated-witness` -> `discharged`, while n = 8 and n = 10 stayed honest.
+#   * `groups[(k if operand_shape[0] < 4 else 0) * rowsz + t]` in the ADD row.
+#     `_add_space`'s dims stop at 3, so it contains NO axis of length >= 4,
+#     and the sweep's non-degeneracy clause was on `rowsz` — the TRAILING
+#     product — which structurally cannot see a LEADING-axis-keyed corruption.
+#     `(2,2)` and `(3,2)` stayed `violated-witness`; `(4,2)`, `(5,2)` and
+#     `(6,2)` went `discharged`.
+#
+# So the answer is not a larger number. It is that THE ADMITTED SPACE MUST NOT
+# EXCEED THE GAUGED SPACE: past these bounds the two rows DECLINE, so the
+# routing code cannot execute on a shape nothing measured. A declined
+# obligation does not slice, does not emit and is never solver-decided — it
+# stays undischarged and the verdict is UNKNOWN — so this fails toward the
+# same side every other decline in this module does. It is not free: it costs
+# REFUTATIONS as well as discharges past the bound, which SOUNDNESS.md records
+# rather than leaving as a silent narrowing.
+#
+# The sweeps that define these numbers are
+# `tests/test_scatter_gauge_jax.py::_set_space` and `::_add_space`, and that
+# file asserts its bounds EQUAL to the four below in both directions: widening
+# admission without widening the sweep is red, and shrinking the sweep below
+# admission is red. That is the whole mechanism — one identifiable place, so
+# widening the rows is a deliberate act with a gauge attached.
+#
+# WHAT THIS DOES NOT BOUND, said because an unstated scope is this repo's own
+# recurring defect: the ADD row's INDEX COLUMN LENGTH. `_add_space` sweeps a
+# single written index (`x.at[k].add(u)`), while `jax.ops.segment_sum` reaches
+# an index column of 4 on an operand these bounds admit. That axis is gauged
+# by the segment-sum mutation battery in the same file, which is a battery and
+# not an exhaustive sweep, and nothing here narrows admission to it.
+#
+# The interval TRANSFER is deliberately untouched: it has its own row
+# arithmetic and its own gauge, and bounding it here would turn a bounded
+# emission into a ⊤ box for no measured reason.
+_SET_ROW_GAUGED_MAX_LEN = 8
+_ADD_ROW_GAUGED_MAX_RANK = 3
+_ADD_ROW_GAUGED_MAX_DIM = 3
+_ADD_ROW_GAUGED_MAX_SIZE = 12
+
+
 def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
     """Per-OUTPUT-element ``(operand position, source flat element)`` routes for
     a static-index ``scatter`` SET equation — deliberately the same shape
@@ -971,7 +1027,12 @@ def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
       under ``FILL_OR_DROP`` an out-of-range update is DROPPED, so the
       program's result is ``out = operand`` — emitting substitution would
       assert the update landed, which is a false model. The transfer declines
-      the same case for the same reason.
+      the same case for the same reason;
+    * an operand LONGER THAN THE GAUGE (:data:`_SET_ROW_GAUGED_MAX_LEN`). The
+      routes below are exhaustively gauged against jax's own execution for
+      every ``(n, k)`` up to that length and by nothing past it, and a
+      line-neutral mis-route wrong ONLY at n = 9 was measured green through
+      the whole suite. See the block comment above the constants.
 
     ``unique_indices`` and ``indices_are_sorted`` are deliberately NOT relied
     on: they are caller promises jax does not verify, and the covered form
@@ -1069,6 +1130,15 @@ def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
             f"DROPPED, so the result is the operand unchanged rather than a "
             f"substitution, and that is never guessed"
         )
+    if operand_shape[0] > _SET_ROW_GAUGED_MAX_LEN:
+        raise _Decline(
+            f"'scatter' operand axis {operand_shape[0]} is outside the GAUGED "
+            f"static-index set row space (1..{_SET_ROW_GAUGED_MAX_LEN}): the "
+            f"route sweep exhausts every (length, written index) up to that "
+            f"bound and measures nothing past it, and a route nothing gauged "
+            f"is never guessed — a bounded sweep is blind just past its "
+            f"bound, so admission stops where the gauge does"
+        )
     n = _size(operand_shape)
     return [(2, 0) if i == k else (0, i) for i in range(n)]
 
@@ -1088,8 +1158,13 @@ def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
     the one form oracle, shared with the propagation transfer), on
     indices that are not statically derivable from constants through
     structural routing (traced/dynamic indices), on non-integral index
-    values, and on out-of-range indices (mode-dependent drop/clamp,
-    never guessed).
+    values, on out-of-range indices (mode-dependent drop/clamp, never
+    guessed), and on an operand SHAPE OUTSIDE THE GAUGE
+    (:data:`_ADD_ROW_GAUGED_MAX_RANK` / ``_DIM`` / ``_SIZE``) — the group
+    arithmetic below is gauged against jax's own accumulation over exactly
+    that shape space, and a line-neutral corruption keyed on a LEADING axis
+    of 4 or more was measured green through the whole suite. See the block
+    comment above the constants.
     """
     from stelling.propagate import (
         _check_unique_indices_promise,
@@ -1173,6 +1248,22 @@ def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
     # oracle the transfer uses — promise-violated duplicates are
     # implementation-defined and decline at both layers identically
     _check_unique_indices_promise(eqn.params_dict(), ks, _Decline)
+    if (
+        len(operand_shape) > _ADD_ROW_GAUGED_MAX_RANK
+        or any(d > _ADD_ROW_GAUGED_MAX_DIM for d in operand_shape)
+        or _size(operand_shape) > _ADD_ROW_GAUGED_MAX_SIZE
+    ):
+        raise _Decline(
+            f"'scatter-add' operand shape {operand_shape} is outside the "
+            f"GAUGED accumulate row space (rank at most "
+            f"{_ADD_ROW_GAUGED_MAX_RANK}, every axis at most "
+            f"{_ADD_ROW_GAUGED_MAX_DIM}, at most "
+            f"{_ADD_ROW_GAUGED_MAX_SIZE} elements): the shape sweep exhausts "
+            f"that space against jax's own accumulation and measures nothing "
+            f"past it, and a row arithmetic nothing gauged is never guessed — "
+            f"a bounded sweep is blind just past its bound, so admission "
+            f"stops where the gauge does"
+        )
     rowsz = _size(operand_shape[1:])
     groups: list[list[int]] = [[] for _ in range(_size(operand_shape))]
     for j, k in enumerate(ks):

@@ -21,7 +21,7 @@ generation time:
 - `stelling.obligation._INT_OVERFLOW_EMITTED` (`src/stelling/obligation.py:201`, 10 entries) — emission-side integer-semantics census: emitted primitives that compute a new numeric value (integer dtypes decline)
 - `stelling.obligation._INT_SAFE_EMITTED` (`src/stelling/obligation.py:225`, 24 entries) — emission-side integer-semantics census: emitted primitives recorded int-safe
 - `stelling.obligation._INT_SAFE_EMITTED_REASONS` (`src/stelling/obligation.py:251`, 24 entries) — per-primitive written soundness reasons for the int-safe classification (reproduced in the appendix below)
-- `stelling.obligation._REPLAY_SUPPORTED` (`src/stelling/obligation.py:2070`, 34 entries) — the exact-rational replay surface: primitives the solver-free witness replay can evaluate
+- `stelling.obligation._REPLAY_SUPPORTED` (`src/stelling/obligation.py:2161`, 34 entries) — the exact-rational replay surface: primitives the solver-free witness replay can evaluate
 - `stelling.obligation._SCALAR_STRUCT_FMT` (`src/stelling/obligation.py:143`, 12 entries) — the scalar literal decoder — keyed by numpy dtype code, not by primitive
 - `stelling.coverage.DEFAULT_TRANSPARENT` (`src/stelling/coverage.py:54`, 4 entries) — call wrappers descended into (sub-jaxpr walked) instead of transferred
 
@@ -159,7 +159,7 @@ In the emission set but in neither transfer registry (3): `not`, `stelling_assum
 
 In the transfer registries but not in the emission set (15): `abs`, `add_any`, `copy`, `exp`, `gather`, `pow`, `reduce_or`, `rem`, `sign`, `split`, `sqrt`, `stelling_any`, `stelling_assert`, `stop_gradient`, `unstack`.
 
-An unsupported primitive in a slice declines with the message "primitive {prim!r} is outside the supported emission set" (src/stelling/obligation.py:1431). The module docstring's recorded decline classes are: "Everything else — over-budget slices, transcendentals, unknown primitives, possibly-zero divisor elements, non-float input declarations, obligations that cannot be mapped one-to-one onto top-level asserts — **declines**, with the primitive and form (and, for the budget, the count and the budget) quoted, and the obligation stays UNKNOWN." (src/stelling/obligation.py:36) Per-primitive recorded reasons:
+An unsupported primitive in a slice declines with the message "primitive {prim!r} is outside the supported emission set" (src/stelling/obligation.py:1522). The module docstring's recorded decline classes are: "Everything else — over-budget slices, transcendentals, unknown primitives, possibly-zero divisor elements, non-float input declarations, obligations that cannot be mapped one-to-one onto top-level asserts — **declines**, with the primitive and form (and, for the budget, the count and the budget) quoted, and the obligation stays UNKNOWN." (src/stelling/obligation.py:36) Per-primitive recorded reasons:
 
 - `abs` — no primitive-specific recorded reason
 - `add_any` — no primitive-specific recorded reason
@@ -180,7 +180,7 @@ An unsupported primitive in a slice declines with the message "primitive {prim!r
 ### Emission set vs replay surface
 
 The emission set and the replay surface are equal (34 primitives, both directions). The code records
-this as an invariant: "Replay is what makes REFUTED self-certifying: a solver model is only ever promoted to a Witness after this module re-derives the violation in exact rational arithmetic, independently of the solver." (src/stelling/obligation.py:2052) And: "Measured 2026-07-26: the two sets are currently EQUAL, in both directions. That equality is an invariant to preserve, not a coincidence to note" (src/stelling/obligation.py:2059). It is asserted at import with the message "the exact-rational replay must cover exactly the emission set, or a witness can be produced that replay cannot independently confirm" (src/stelling/obligation.py:2078).
+this as an invariant: "Replay is what makes REFUTED self-certifying: a solver model is only ever promoted to a Witness after this module re-derives the violation in exact rational arithmetic, independently of the solver." (src/stelling/obligation.py:2143) And: "Measured 2026-07-26: the two sets are currently EQUAL, in both directions. That equality is an invariant to preserve, not a coincidence to note" (src/stelling/obligation.py:2150). It is asserted at import with the message "the exact-rational replay must cover exactly the emission set, or a witness can be produced that replay cannot independently confirm" (src/stelling/obligation.py:2169).
 
 The replay path's scalar literal decoder is keyed by numpy dtype code
 (`stelling.obligation._SCALAR_STRUCT_FMT`, 12 codes), not by primitive: "scalar decoders for size-1 ir.Array literals/consts (numpy dtype .str)" (src/stelling/obligation.py:142).
@@ -193,7 +193,7 @@ overflow-guarded, 21 non-computing AND int-safe, and
 none is classified differently by the two censuses.
 
 Where both apply, the recorded relationship between the two guards
-is: "SMT-LIB2 Reals are unbounded; jax integers wrap. Emitting a computed integer as a Real would let the solver prove a claim the program falsifies, so integer dtypes decline here — the emission is stricter than the transfer on purpose." (src/stelling/obligation.py:1531) The transfer-side census's recorded charter is: "So the classification is mechanised instead of remembered. Every registered transfer is either COMPUTING — it can produce a numeric value its operands did not contain, so it carries the overflow-reachability guard — or NON-COMPUTING, with the reason recorded here." (src/stelling/propagate.py:2831) The emission-side census's totality rule is: "Every emittable primitive is classified, and the union must be total over `_SUPPORTED`." (src/stelling/obligation.py:222).
+is: "SMT-LIB2 Reals are unbounded; jax integers wrap. Emitting a computed integer as a Real would let the solver prove a claim the program falsifies, so integer dtypes decline here — the emission is stricter than the transfer on purpose." (src/stelling/obligation.py:1622) The transfer-side census's recorded charter is: "So the classification is mechanised instead of remembered. Every registered transfer is either COMPUTING — it can produce a numeric value its operands did not contain, so it carries the overflow-reachability guard — or NON-COMPUTING, with the reason recorded here." (src/stelling/propagate.py:2831) The emission-side census's totality rule is: "Every emittable primitive is classified, and the union must be total over `_SUPPORTED`." (src/stelling/obligation.py:222).
 
 Censused on the transfer side only (not emitted, 15): `abs`, `add_any`, `copy`, `exp`, `gather`, `pow`, `reduce_or`, `rem`, `sign`, `split`, `sqrt`, `stelling_any`, `stelling_assert`, `stop_gradient`, `unstack`. Censused on the emission side only (no transfer, 3): `not`, `stelling_assume`, `xor`.
 
