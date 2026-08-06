@@ -493,6 +493,82 @@ def test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar(
     assert any("VERIFIED withheld" in n for n in v.notes)
 
 
+def _scatter_ELSEWHERE_and_actually_REFUTED():
+    """`_scatter_ELSEWHERE_same_shape` with its SECOND obligation made FALSE.
+
+    #0 is the byte-colliding `x[1] - x[1] <= 0` again; #1 is `s >= 0.5`, which
+    fails at `x = [0, 0, 0]` (then `s = [0.5, 0, 0]`). Checked honestly this
+    query is REFUTED — so a VERIFIED stamped on it is not a withheld claim
+    becoming available, it is a FALSE claim.
+    """
+    x = any_array((3,), "float64", (0.0, 1.0))
+    s = x.at[0].set(0.5)
+    return (assert_(x[1] - x[1] <= 0.0), assert_(s >= 0.5))
+
+
+def test_the_collision_could_mint_a_VERIFIED_on_a_REFUTED_query():
+    """WHAT THE COLLISION ACTUALLY COSTS, and the case that settles whether
+    the narrowing was a policy slip or a soundness defect.
+
+    The mispairing tests above show the bar clearing on a query the escalation
+    is not about. On its own that could be read as harmless: the script hash
+    does pin the TEXT, so an `unsat` about that text is an `unsat` about the
+    obligation this query's own slice emits. What it does not pin is the rest
+    of the verdict — the obligations the mispaired PROPAGATION decided.
+
+    So here the mispaired query's second obligation is FALSE. Measured:
+
+        EL checked honestly                REFUTED (all four builds)
+        ON escalation+propagation, EL query
+            8e42934  UNKNOWN   (the whole-query bar)
+            caac1ee  VERIFIED
+            45cf526  VERIFIED
+            eb1ff86  VERIFIED   <- a false VERIFIED on a REFUTED query
+            here     UNKNOWN
+
+    The whole-query bar was a backstop against a mispaired assembly on any
+    scatter-bearing query, and the byte-collision removed it for exactly the
+    shape where the script hash cannot tell the two slices apart. That is the
+    project's own thesis defect — a minted VERIFIED with nothing downstream to
+    catch it — reachable through the public `make_solver_verdict`.
+    """
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env
+    from stelling.smt import emit
+    from stelling.solvers import make_solver_verdict
+
+    assert V.VERIFIED_BARRED_PRIMITIVES, "the bar has been lifted"
+    on_closed, on_prop, on_esc = _stamped(_scatter_ON_the_decided_slice)
+    el_closed, el_prop, el_esc = _stamped(_scatter_ELSEWHERE_and_actually_REFUTED)
+
+    # the claim that makes this a FALSE verified rather than a withheld one
+    assert make_solver_verdict(el_closed, el_prop, el_esc, **VERSIONS).status == (
+        "REFUTED"
+    ), "the mispaired query is not actually false, so nothing here is a lie"
+
+    # and the collision is what removes the backstop: only the fingerprint
+    # separates the two obligation #0 slices
+    on_sl = slice_obligation(on_closed, 0, interval_env(on_closed))
+    el_sl = slice_obligation(el_closed, 0, interval_env(el_closed))
+    assert not isinstance(el_sl, DeclinedObligation)
+    assert emit(on_sl, "z3", 20000).sha256 == emit(el_sl, "z3", 20000).sha256, (
+        "the two slices no longer emit the same script, so the script hash "
+        "already separates them and this test is not measuring the collision"
+    )
+
+    v = make_solver_verdict(el_closed, on_prop, on_esc, **VERSIONS)
+    assert [o.status for o in v.obligations] == ["discharged"] * len(
+        v.obligations
+    ), "no would-be VERIFIED was reached, so there is nothing to withhold"
+    assert v.status == "UNKNOWN", (
+        f"{v.status}: a mispaired assembly issued this verdict on a query "
+        f"whose honest verdict is REFUTED. The whole-query bar at `8e42934` "
+        f"returned UNKNOWN here; the narrowing has removed that backstop for "
+        f"the shape whose emitted script does not distinguish the slices"
+    )
+    assert any("VERIFIED withheld" in n for n in v.notes)
+
+
 def test_the_bar_scope_itself_widens_on_the_colliding_pair():
     """The same defect one layer down, at `_bar_scope` rather than at the
     assembled verdict — so that deleting the `_evidence_is_about` call is not

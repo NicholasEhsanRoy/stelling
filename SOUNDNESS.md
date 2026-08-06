@@ -929,6 +929,21 @@ verdicts:
                                        VERIFIED on caac1ee, 45cf526, eb1ff86
 
   `_evidence_is_about` returned True and `_bar_scope` returned `((), '')`.
+  **AND IT IS A FALSE VERIFIED, NOT A MERELY PREMATURE ONE.** The script hash
+  does pin the TEXT, so an `unsat` about it is an `unsat` about the obligation
+  this query's own slice emits; what it does not pin is the rest of the
+  verdict, and in particular the obligations the mispaired PROPAGATION
+  decided. With the ELSEWHERE query's SECOND obligation made false
+  (`s >= 0.5`, which fails at `x = [0,0,0]`), the same assembly gives:
+
+      ELSEWHERE checked honestly       REFUTED on all four builds
+      ON escalation + ELSEWHERE query  UNKNOWN  on 8e42934
+                                       VERIFIED on caac1ee, 45cf526, eb1ff86
+
+  The whole-query bar was a backstop against a mispaired assembly on ANY
+  scatter-bearing query; the byte-collision removed it for exactly the shape
+  where the emitted script cannot tell the two slices apart, and what came
+  through was a VERIFIED on a REFUTED query.
   **The regression test for the entry above could not see this, because
   its fixture built away its own trigger:** it said "the one difference is
   WHERE" while also introducing a fresh scalar input and a different
@@ -956,11 +971,16 @@ verdicts:
   `eb1ff86` inclusive, all branch-only, nothing released. Builds up to and
   including `8e42934` have the whole-query bar and measure UNKNOWN on this
   mispairing.
-  **Which prior verdicts are retroactively invalid: none.** Reaching it
-  needs a call to the public `make_solver_verdict` pairing an escalation
-  with a query it did not come from; `check()` cannot produce that and
-  `escalate()` cannot produce a record for a query it was not run on. No
-  verdict in `docs/verdict-ledger.md` is affected.
+  **Which prior verdicts are retroactively invalid: none, and this clause is
+  doing more work than usual, so it says what it rests on.** The defect
+  produces a false VERIFIED, but reaching it needs a call to the public
+  `make_solver_verdict` pairing an escalation with a query it did not come
+  from; `check()` cannot produce that and `escalate()` cannot produce a record
+  for a query it was not run on. No verdict in `docs/verdict-ledger.md` is
+  affected, and every verdict in this repo's own history was assembled through
+  `check()`. What is NOT claimed: that a downstream caller of
+  `make_solver_verdict` cannot have mispaired one. Anyone who has should
+  re-run per the clause below.
   **What to re-run:** any recorded solver-path VERIFIED on a
   scatter-bearing query — re-`check()` with the same `solver_timeout_ms`
   and look for a `VERIFIED withheld` note whose clause says "no recorded
