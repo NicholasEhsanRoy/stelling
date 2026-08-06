@@ -158,3 +158,79 @@ written as a claim about the mechanism.
 ---
 
 # OUTCOMES — appended after the fact; nothing above this line is edited
+
+All figures below were driven on this machine: python 3.12.3, pytest 9.1.1,
+24 cores, `JAX_PLATFORMS=cpu`, `PYTHONPATH=<worktree>/src` verified to resolve
+inside the worktree before every comparison. Where a wall figure appears, the
+load average is beside it.
+
+## Clause by clause
+
+| clause | verdict | what was measured |
+|---|---|---|
+| R1a | **MET, with one deviation** | at `1b1c843`, `tests/test_affine.py` + planted skip: no plugin EXIT 1 / 1 banner; `-p exit0finish` EXIT 0 / 0; `-p sf_tryfirst` EXIT 0 / 0; `-p exit0finish -p unconf` EXIT **1** / 0 banners, with an uncaught `_pytest.outcomes.Exit` traceback. **DEVIATION:** the audit reported 99 for the last one. `pytest.exit(returncode=99)` raised from `pytest_unconfigure` escapes `_ensure_unconfigure`, `wrap_session`'s `finally` and `config._main` uncaught, and the process ends 1. Reported as measured. |
+| R1b | **MET** | at the tip, same plant: all four are EXIT **1** with **1 banner** naming the skip. |
+| R1c | **MET** | whole tree at the tip with a planted failure: `-x`→1, `--maxfail=1`→1, `--sw`→2, `KeyboardInterrupt`→2, **0 banners each**. |
+| R1d | **MET** | a plugin assigning `session.exitstatus = 97` from `pytest_unconfigure` → **EXIT 97**. |
+| R1e | **MET** | marker order is `MARKER-SESSIONFINISH-RAN` then `MARKER-UNCONFIGURE-RAN`; on `exit0start` and `exit0configure` only `MARKER-UNCONFIGURE-RAN` prints. |
+| R2a | **MET** | `pytest.exit(returncode=0)` from `pytest_sessionstart` → EXIT 0, 0 banners, no sessionfinish marker. Same from `pytest_configure`. |
+| R2b | **MET** | the scoping sentence is deleted; `pytest_unconfigure`'s docstring states the off-by-one and names it. |
+| R2c | **MET** | `test_the_anchor_arrives_where_pytest_sessionfinish_is_never_called`; FAILS with the exit plugin stripped. |
+| R3a | **MET** | `assign0`: EXIT 0, banner printed, **0 `Exit:` lines**. `assign0clear`: EXIT 0, 0 banners; `diff` vs the unplugged session is exactly the five banner lines (and the timing digit). |
+| R3b | **MET** | corrected in the `pytest_sessionfinish` docstring and stated in the commit message. |
+| R3c | **MET** | `test_a_sessionfinish_that_raises_nothing_still_takes_the_exit_code`, both variants. |
+| R4a | **MET, re-derived rather than guessed** | `ae3231e` (the repair commit) is `1713 passed, 2 skipped`; its base `1614b18` — the tree the corruption was driven against — is **`1696 passed, 2 skipped`**, exact. Labelled `1614b18`. |
+| R4b | **MET** | re-driven at `a76ca51` with a plugin removing the first non-pin item from `items[:]`: 2033 / 2016 / 40 / 2032 passed, all four EXIT 1 with a banner. |
+| R5a | **MET** | the totals paragraph is deleted; six named pairs remain, the sixth derived in this pass. |
+| R5b | **MET** | `scratchpad/PREREG_SIR6.md` is in the tree; `WITHHELD["scratchpad"]` added; `test_every_root_entry_is_a_decision` passes. |
+| R6a | **MET (the audit reproduces)** | at `1b1c843`, row 1 with its plugin stripped: **1 passed**. Rows 2 and 4 with their triggers stripped: **1 failed** each. |
+| R6b | **MET** | row 1 now asserts the `Exit:` line and **fails** with the plugin stripped. Every new case was probed the same way: 7 strips, 7 failures, no survivors. |
+| R7a | **MET** | `STELLING_SKIP_INVENTORY_VERDICT`; the choice against (b) and (c) is written in `_write_the_verdict_somewhere_last_writer_wins_cannot_reach`. |
+| R7b | **MET** | file says `verdict=failed` under `exit0finish`, `sf_tryfirst`, `exit0finish+unconf`, `assign0`, `assign0clear`, `cmdline98` (EXIT 98) and `unconf_trylast` (EXIT 0). |
+| R7c | **MET, and driven** | a plugin reading the same variable deletes the file; `test_the_verdict_file_is_not_adversary_proof_and_this_is_the_limit` asserts it is GONE. |
+| R8a | **MET** | `git diff --stat a80d60c HEAD -- src/ docs/` is empty. |
+| R8b | **MET** | both cwds **2035 passed, 2 skipped, EXIT 0**; 2037 collected; normalised id sets md5-identical (`bbde35d8d7e6b1930fb4d1a32cde99eb`); **+8 / −0** against `1b1c843`, every addition a test written here. |
+
+Wall: 146.03 s from the repo root (load average 11.74 / 9.61 / 9.84 at the
+end), 173.55 s from `tests/` (11.91 / 9.19 / 9.54). Baseline at `1b1c843` was
+140.49 s and 151.37 s at comparable load; the difference is eight new
+subprocess sessions plus load, and is not offered as a measurement of
+anything.
+
+## Prose claims, scored
+
+| # | verdict | the falsifying observation, run |
+|---|---|---|
+| W1 | **HELD** | marker order is sessionfinish → unconfigure; an assignment of 97 made from `pytest_unconfigure` arrives as EXIT 97. |
+| W2 | **HELD, and it is the important one** | a `pytest_cmdline_main` wrapper returning 98 gives EXIT 98 with the banner on screen; a `trylast` `pytest_unconfigure` assigning 0 gives EXIT 0 with the banner on screen. Both at `1b1c843` and at the tip. Two cases in the tree now assert the attacker's exit code first, so the demonstration cannot rot into a mechanism that happens to win. |
+| W3 | **HELD** | `MARKER-SESSIONFINISH-RAN` does not print on either route. |
+| W4 | **HELD** | EXIT 0 at `1b1c843`, and `grep "Exit: "` over the whole output is 0. |
+| W5 | **HELD** | seven attacks, seven `verdict=failed` files. |
+| W6 | **HELD as a limit** | the deleting plugin removes the file; the limit is not understated. |
+| W7 | **HELD** | four aborts, four non-zero exits, zero banners. |
+| W8 | **HELD** | id diff is +8 / −0, additions only, ids md5-identical across cwds. |
+| W9 | **HELD** | the file on that route reads `verdict=withdrawn`, which is what an empty record supports. |
+
+## Declared misses and deviations
+
+1. **R1a deviates from the audit's figure for one route.** `-p exit0finish -p
+   unconf` arrives 1 here, not 99, and by a different mechanism (an uncaught
+   `Exit`). The substantive claim — that the route was NOT closed at
+   `1b1c843` — reproduces: 0 banners.
+2. **A collision was found and is recorded rather than smoothed.** Of six
+   mutations driven against the new mechanism, all six are caught and two
+   share a signature: `_OUR_FAILURES` ignored in the already-red carve-out,
+   and `pytest_unconfigure` never re-assigning `session.exitstatus`. It is
+   written into the pairs table as the sixth pair. No total is claimed.
+3. **The anchor is not the last one and the tree says so.** This is not a miss
+   against the prereg — W2 registered it — but it is the honest headline: the
+   exit code is still beatable after this pass, by design, and the verdict
+   file is the answer.
+4. **`pytest_unconfigure`'s reliability claim is scoped to this pytest.**
+   9.1.1, read from `_pytest/main.py` and driven. Nothing here is upstream.
+5. **Process note.** A trigger-strip probe script called `git checkout --` on
+   files carrying uncommitted work and reverted it; the work was re-applied
+   from scratch and committed before the probes were re-run. One difference
+   between the two applications was caught (an inverted `through`/`around` in
+   a failure message) and fixed in its own commit. No measurement in this
+   document was taken from the reverted state.
