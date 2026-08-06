@@ -27,7 +27,7 @@ answer must not be a claim the verdict's own inputs can make about
 themselves. A predecessor recorded the per-obligation barred set on
 ``solvers.ObligationEscalation.barred_on_slice`` and the bar read it;
 measured, that lost BOTH immunities the whole-query bar had — an empty tuple
-is a positive claim nothing validated, and ``make_solver_verdict`` binds its
+is a positive claim nothing validated, and ``make_solver_verdict`` bound its
 escalation to its ``closed`` nowhere, so a scatter-free escalation stamped
 against a scatter-bearing query returned VERIFIED where the whole-query bar
 returned UNKNOWN. The scope is now DERIVED from ``closed`` (re-slicing the
@@ -61,6 +61,27 @@ carry — see ``test_the_script_hash_alone_cannot_separate_these_two_slices``,
 parametrisations, ``test_the_bar_scope_itself_widens_on_the_colliding_pair``,
 and the other direction,
 ``test_the_correct_pairing_still_narrows_and_the_hash_is_why``.
+
+**AND A SEVENTH, WHICH IS NOT A PROPERTY OF THE BAR AT ALL.** Every repair
+above narrows or widens a bar; none of them binds
+``make_solver_verdict``'s arguments to one query, and nothing else did
+either. The file used to record that as "the cost of scoping the bar" —
+that a whole-query bar had backstopped the pairing by accident and a scoped
+one could not. That backstop covered scatter-bearing queries ONLY, because
+those are the only ones any version of the bar looks at: the identical
+mispaired VERIFIED on a REFUTED query rides a query with **no barred
+primitive anywhere**, on every build including `8e42934`. So the finding is
+not a cost of scoping — it is that the three arguments were never bound.
+They are bound now for two of the three, by the QUERY PAIRING GATE
+(``escalate`` records the query's content hash; assembly recomputes it and
+refuses a mismatch). See
+``test_the_pairing_gate_closes_the_SCATTER_FREE_row`` — the row that
+settles which statement is true —
+``test_the_pairing_gate_refuses_the_mispairing_the_bar_only_narrows``, and
+``test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`` for
+the residue. The bar's own mispairing tests satisfy the gate by hand
+(``_past_the_pairing_gate``) so that neither mechanism can hide the other's
+failure.
 """
 from __future__ import annotations
 
@@ -974,6 +995,57 @@ def test_the_bar_scope_itself_widens_on_the_colliding_pair():
         f"solver answered. Narrowing is keyed on the emitted text again"
     )
     assert "fell back to the whole query" in why, why
+
+
+def test_a_wrong_closed_does_NOT_reliably_widen_the_bar():
+    """THE COUNTEREXAMPLE TO A SENTENCE THAT STOOD BOLDED IN
+    `make_solver_verdict`'s DOCSTRING: *"A wrong ``closed`` widens the bar,
+    and the reason is measured rather than assumed."* It does not, and this
+    is the measurement that says so.
+
+    On the identical-decided-slice pairing the bar goes SILENT on the wrong
+    query: `_bar_scope(wrong, decided)` is `((), '')` — narrowed to nothing,
+    empty reason — while `_barred_primitives(wrong)` is `('scatter',)`. The
+    query carries the barred primitive and the bar withholds nothing.
+
+    The claim was not merely unproven; it was the third bolded generalisation
+    in that paragraph's history, each naming a real mechanism ("the re-slice
+    would decline", "the evidence widens it") and then quantifying it over
+    every wrong `closed`. The mechanism is real and NARROW: a wrong `closed`
+    widens the bar exactly when the evidence check can see the mispairing,
+    which the control below shows it sometimes can. Pairing is now the query
+    pairing gate's job, not the bar's.
+
+    This test exists so the sentence cannot come back. If the bar ever does
+    widen here, the docstring changed something real and should say what.
+    """
+    on_closed, _on_prop, on_esc = _stamped(
+        _scatter_ELSEWHERE_identical_decided_slice_TRUE)
+    wrong_closed = trace(_scatter_ELSEWHERE_identical_decided_slice)
+    decided = {r.index: r.invocations
+               for r in on_esc.records if r.outcome == "discharged"}
+    assert set(decided) == {0}, decided
+
+    assert V._barred_primitives(wrong_closed) == ("scatter",), (
+        "the wrong query carries no barred primitive, so a silent bar there "
+        "is correct and this test measures nothing"
+    )
+    assert V._bar_scope(wrong_closed, decided) == ((), ""), (
+        f"{V._bar_scope(wrong_closed, decided)!r}: the bar now widens on a "
+        f"wrong `closed` for this pairing. That is STRONGER than what "
+        f"`make_solver_verdict`'s docstring claims — say what changed"
+    )
+
+    # THE CONTROL, so this is not read as "a wrong closed never widens": when
+    # the escalation's decided slice DOES carry the barred primitive, the
+    # evidence check fails on the wrong query and the fallback fires.
+    on2_closed, _p2, on2_esc = _stamped(_scatter_ON_the_decided_slice)
+    d2 = {r.index: r.invocations
+          for r in on2_esc.records if r.outcome == "discharged"}
+    assert V._bar_scope(wrong_closed, d2)[0] == ("scatter",), (
+        "the widening direction does not happen on ANY pairing, so the "
+        "docstring's mechanism is not merely over-generalised but absent"
+    )
 
 
 def test_the_correct_pairing_still_narrows_and_the_hash_is_why():

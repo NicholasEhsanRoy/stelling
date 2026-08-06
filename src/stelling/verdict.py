@@ -813,18 +813,28 @@ def _evidence_is_about(sliced, invocations) -> bool:
       decided come from the paired propagation, which nothing here reads.
       Measured: when the two queries' decided slices are genuinely the same
       expression, both hashes match, the bar narrows correctly (the barred row
-      really was not involved), and a mispaired assembly returns VERIFIED on a
-      query whose honest verdict is REFUTED — `8e42934`'s whole-query bar
-      returned UNKNOWN there, by accident, because it withheld EVERY
-      scatter-bearing query. See
-      `tests/test_verified_bar.py::test_the_LIMIT_of_this_bar_when_the_decided_slice_is_genuinely_the_same`.
-      No definition of "which slice did the solver answer about" can close
-      that: the false claim is about a DIFFERENT obligation.
+      really was not involved), and the assembly reaches VERIFIED on a query
+      whose honest verdict is REFUTED. No definition of "which slice did the
+      solver answer about" can close that: the false claim is about a
+      DIFFERENT obligation.
 
     So what this function is for is the bar's question — was the unaudited
-    emission row involved in what the solver decided — and provenance beyond
-    that is `make_solver_verdict`'s stated precondition, which a whole-query
-    bar happened to backstop and a scoped one does not.
+    emission row involved in what the solver decided — and the pairing itself
+    is not its job and never was. THE VERSION OF THIS PARAGRAPH THAT SAID A
+    WHOLE-QUERY BAR "HAPPENED TO BACKSTOP" THE PAIRING AND A SCOPED ONE DOES
+    NOT WAS MEASURING ONE CLASS OF QUERY AND GENERALISING. That backstop
+    covered scatter-bearing queries only, because those are the only ones any
+    version of the bar looks at. The identical mispaired VERIFIED on a REFUTED
+    query is reachable with NO BARRED PRIMITIVE ANYWHERE, on every build
+    including `8e42934` — so the true statement is not "scoping cost a
+    backstop" but **scoping revealed that `make_solver_verdict` never bound
+    its three arguments to one query.** It does now, by the query hash
+    (:func:`stelling.solvers.make_solver_verdict`'s fourth
+    :exc:`~stelling.solvers.MispairedEscalationError`), which is a different
+    key from either of this function's and covers the whole query rather than
+    one slice. See
+    `tests/test_verified_bar.py::test_the_pairing_gate_closes_the_SCATTER_FREE_row`,
+    which is the row that settles which of the two statements is true.
 
     THE POLARITY IS THE POINT, AND IT IS WHY THIS IS NOT THE DELETED
     `barred_on_slice` FIELD COMING BACK. A record cannot use either hash to
@@ -889,11 +899,14 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
 
     Never reads a barred primitive off the escalation, and the block comment
     above says what that bought — a recorded scope is a positive claim nothing
-    validates, and `make_solver_verdict` does not bind its escalation to its
-    query, so a read scope was forgeable in one direction and mispairable in
-    the other. Re-slicing out of ``closed`` has neither exposure for the
-    scope's CONTENTS, and keeps the precision: the slices are the ones this
-    query's own obligations produce.
+    validates, and at the time this was written `make_solver_verdict` did not
+    bind its escalation to its query at all, so a read scope was forgeable in
+    one direction and mispairable in the other. The pairing is bound now, by
+    the query pairing gate one layer up; the CONTENTS are still derived here,
+    because a gate on the whole query says nothing about which slice a
+    recorded invocation answered. Re-slicing out of ``closed`` has neither
+    exposure for the scope's CONTENTS, and keeps the precision: the slices are
+    the ones this query's own obligations produce.
 
     ITS DOMAIN IS STILL SUPPLIED, AND THAT IS A PRECONDITION RATHER THAN AN
     IMMUNITY. The index set comes from the caller — in practice from

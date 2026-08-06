@@ -967,23 +967,53 @@ verdicts:
   both are record-carried, as `smt2_sha256` already was. Adding a conjunct
   can only make narrowing RARER, so no bar fires less than it did at
   `eb1ff86`.
-  **AND A COST THIS FILE HAD NOT STATED, WHICH BELONGS TO THE SCOPING RATHER
-  THAN TO EITHER KEY.** Narrowing the bar to the decided obligation's slice
-  gave up a backstop the whole-query bar provided by accident. When the two
+  **AND A FINDING THIS FILE FIRST RECORDED AS A "COST OF SCOPING", WHICH IT
+  IS NOT — CORRECTED HERE, AND THE CORRECTION IS THE MEASUREMENT.** The
+  original wording said narrowing the bar to the decided obligation's slice
+  "gave up a backstop the whole-query bar provided by accident": when the two
   queries' decided slices are the SAME EXPRESSION — not merely byte-colliding
   — both hashes match, the bar narrows correctly (the barred row really was
   not involved), and the mispaired assembly returns VERIFIED on a query whose
-  honest verdict is REFUTED. Measured: UNKNOWN on `8e42934`; VERIFIED on
-  `caac1ee`, `45cf526`, `eb1ff86` and after this repair. The false claim comes
-  from the mispaired PROPAGATION deciding an interval obligation, which no
-  part of the bar reads and `make_solver_verdict` states as a precondition
-  rather than an immunity — and no definition of "which slice did the solver
-  answer about" can close it, because the false claim is about a DIFFERENT
-  obligation. It is asserted rather than left implicit, in
-  `tests/test_verified_bar.py::test_the_LIMIT_of_this_bar_when_the_decided_slice_is_genuinely_the_same`,
-  so the entries above cannot be read as saying the bar defends mispairing in
-  general. Consumers needing that property should judge through
-  `stelling.preconditions.check`, which owns both sides.
+  honest verdict is REFUTED (UNKNOWN on `8e42934`; VERIFIED on `caac1ee`,
+  `45cf526`, `eb1ff86`, `f5280cf`). Everything in that sentence is true except
+  what it attributes the loss to. The whole-query bar's immunity covered
+  queries carrying a barred primitive — the only ones ANY version of the bar
+  looks at — so it was a coincidence of scope and not a mechanism. Measured on
+  this branch: the identical mispaired VERIFIED, on a query whose honest
+  verdict is REFUTED, is reachable with **no barred primitive anywhere**, on
+  every build including `8e42934`:
+
+  | mispairing on a REFUTED query | 8e42934 | eb1ff86 | f5280cf | here |
+  |---|---|---|---|---|
+  | identical decided slice, scatter-bearing | UNKNOWN | VERIFIED | VERIFIED | refused |
+  | **scatter-FREE** | **VERIFIED** | **VERIFIED** | **VERIFIED** | refused |
+
+  So the correct statement is not "scoping cost a backstop" but **scoping
+  revealed that `make_solver_verdict` never bound its three arguments to one
+  query.** The repair is a fourth `MispairedEscalationError`, the QUERY
+  PAIRING GATE: `escalate` records `ir.ClosedJaxpr.content_hash()` of the
+  query it ran on, at every one of its five return sites, and assembly
+  recomputes it from the `closed` it is handed and refuses the pair when they
+  differ. Same trust model as the three gates beside it and as the
+  record-carried `smt2_sha256`/`slice_sha256` — it defends an honest caller
+  against an accidentally mispaired assembly, the realistic mechanism being a
+  CACHED escalation, which is one of the two uses `stelling.ir`'s module
+  docstring names `content_hash` for. Costs nothing at assembly (the stamp
+  already took that hash; the gate compares the same value, asserted by
+  counting the calls), one hash in `escalate`.
+  **What the gate does NOT bind: `propagation`.** `Propagation` lives in
+  `stelling.propagate`, which this pass leaves at zero line delta, so there is
+  no field on it to record the query in. The residue — (this query, ANOTHER
+  query's propagation, this query's escalation) — assembles to VERIFIED with
+  the other query's obligations reported under this query's hash. It is a live
+  test, not a comment:
+  `tests/test_verified_bar.py::test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`.
+  The bar and the gate are anti-correlated and both stay: the gate keys on the
+  whole query's content hash, the bar on one slice's fingerprint and script,
+  and the bar's own mispairing regressions now satisfy the gate by hand
+  (`_past_the_pairing_gate`) so neither can hide the other's failure.
+  Consumers needing more should judge through
+  `stelling.preconditions.check`, which owns all three sides.
   **Affected versions:** 0.1.0 pre-release only — `caac1ee` through
   `eb1ff86` inclusive, all branch-only, nothing released. Builds up to and
   including `8e42934` have the whole-query bar and measure UNKNOWN on this

@@ -370,9 +370,10 @@ class ObligationEscalation:
     # actually emitted, and the bar trusted it. Two measured holes, both
     # absent from the whole-query bar that preceded it: an empty tuple is a
     # positive claim ("nothing barred on my slice") that nothing validated,
-    # and `make_solver_verdict` never binds its escalation to its `closed`,
-    # so a scatter-free escalation stamped against a scatter-bearing query
-    # went VERIFIED where the whole-query bar went UNKNOWN. A record cannot
+    # and `make_solver_verdict` did not bind its escalation to its `closed`
+    # at all until the query pairing gate landed — so a scatter-free
+    # escalation stamped against a scatter-bearing query went VERIFIED where
+    # the whole-query bar went UNKNOWN. A record cannot
     # certify its own cleanliness; the scope's CONTENTS are derived at the bar
     # from the query instead — `stelling.verdict._bar_scope`, which re-slices
     # the decided obligations out of `closed` and so has neither exposure for
@@ -1646,14 +1647,29 @@ def make_solver_verdict(
 ) -> Verdict:
     """Assemble a verdict from interval propagation plus solver escalation.
 
-    **PRECONDITION — the caller's, and it is not checked here.**
-    ``escalation`` must be the object :func:`escalate` returned for THIS
-    ``closed`` and ``propagation``, unmodified. The gates below refuse
-    several specific mispairings — divergent ledger provenance, a
-    semantics mix in either direction, an ieee or constrained-assume
-    propagation paired with an escalation carrying solver work — and they
-    are the mispairings that arise from assembling a verdict out of the
-    wrong RUN. None of them, and nothing else here, verifies that the
+    **PRECONDITION — the caller's, and it is now checked for two of the
+    three arguments.** ``escalation`` must be the object :func:`escalate`
+    returned for THIS ``closed`` and ``propagation``, unmodified. The
+    gates below refuse several specific mispairings — divergent ledger
+    provenance, a semantics mix in either direction, an ieee or
+    constrained-assume propagation paired with an escalation carrying
+    solver work, and **an escalation produced on a DIFFERENT query** —
+    and they are the mispairings that arise from assembling a verdict out
+    of the wrong RUN.
+
+    **WHAT THE QUERY PAIRING GATE DOES AND DOES NOT BIND.** It binds
+    ``closed`` to ``escalation``, by the query content hash
+    :func:`escalate` recorded, and that is the leg the discharges travel
+    on: an ``OB_DISCHARGED`` record from another run discharges an
+    obligation here by INDEX alone, which is how a mispaired assembly
+    minted VERIFIED on a query whose honest verdict is REFUTED. It does
+    NOT bind ``propagation``, which carries no query hash. The residue is
+    an assembly of (this query, ANOTHER query's propagation, this query's
+    escalation): the obligations reported are the other query's, the
+    stamp names this one, and it is measured rather than argued in
+    `tests/test_verified_bar.py::test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`.
+
+    None of the gates, and nothing else here, verifies that the
     records were produced by this library at all. A caller who
     hand-assembles an :class:`ObligationEscalation` is stating the
     outcome, and the assembly believes it: an ``OB_DISCHARGED`` record
@@ -1681,12 +1697,23 @@ def make_solver_verdict(
     DOMAIN: WHICH obligations the solver decided is read off
     ``escalation.records`` (the same ``outcome == OB_DISCHARGED`` test
     that discharges them), while WHAT is barred on their slices is
-    re-derived from ``closed``. **A wrong ``closed`` widens the bar, and
-    the reason is measured rather than assumed.** An earlier version of
-    this paragraph said it widened because the re-slice would decline;
-    it does not decline — an obligation index that exists in the wrong
-    query slices out of it perfectly well. What actually distinguishes
-    the two is the evidence: every recorded invocation carries
+    re-derived from ``closed``. **A wrong ``closed`` does NOT reliably
+    widen the bar — that claim stood here bolded and is false, and the
+    counterexample is one function over.** Measured on the
+    identical-decided-slice pairing: ``_bar_scope(wrong_closed, decided)``
+    returns ``((), '')`` — narrowed to NOTHING, empty reason — while
+    ``_barred_primitives(wrong_closed)`` is ``('scatter',)``. The bar goes
+    SILENT there, on a query that carries the barred primitive. It widens
+    when the mispairing is one the evidence check can see, and the two
+    earlier versions of this paragraph each named a mechanism ("the
+    re-slice would decline", then "the evidence widens it") and then
+    generalised it to every wrong ``closed``. What the evidence check
+    actually does is narrower and is stated where it lives, in
+    :func:`stelling.verdict._evidence_is_about`. **The pairing itself is
+    not the bar's job: it is the query pairing gate above, which refuses
+    the assembly outright.** What distinguishes the slices, when the
+    assembly is reached at all, is the evidence: every recorded
+    invocation carries
     ``smt2_sha256``, the hash of the exact script that was sent, AND
     ``slice_sha256``, the fingerprint of the slice that script was
     emitted from, and :func:`stelling.verdict._evidence_is_about` narrows
