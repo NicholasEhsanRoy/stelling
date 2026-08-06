@@ -1508,6 +1508,77 @@ def _nonvacuity_summary(checks: tuple[ObligationReport, ...]) -> str:
     return "undecided — a membership condition could not be decided"
 
 
+class _UnreadableBarDomain:
+    """The sentinel `_bar_domain` returns when it cannot read the escalation.
+
+    Truthy, so the bar branch is ENTERED, and not a mapping, so
+    `verdict._bar_scope`'s `dict(decided)` raises into its own `except` and
+    falls back to the whole-query set. An empty dict would have been the
+    silencing answer — the bar branch is guarded on `decided` being non-empty,
+    because an empty domain legitimately means "no solver decided anything" —
+    so an unreadable escalation must not be spelled the same way as an honest
+    empty one."""
+
+    __slots__ = ()
+
+    def __bool__(self) -> bool:
+        return True
+
+
+_BAR_DOMAIN_UNREADABLE = _UnreadableBarDomain()
+
+
+def _bar_domain(escalation) -> dict[int, tuple[SolverStamp, ...]] | object:
+    """THE BAR'S DOMAIN: which obligations the solver decided, and the
+    invocation stamps their records carry. ONE PLACE, and that is the point.
+
+    Reads exactly TWO fields off a record to decide membership — ``outcome``
+    and ``index`` — plus ``invocations``, which is carried across for
+    `verdict._evidence_is_about` and can only ever fail to lift the bar.
+    Nothing else about a record may enter this decision: a record that could
+    certify its own cleanliness is the deleted `barred_on_slice` field under
+    another name, and the defect is not confined to a field that NAMES a
+    barred primitive. Measured, on `eb1ff86`: adding `audit_token: str = ""`
+    to `ObligationEscalation` and `and r.audit_token != "clean"` here produced
+    VERIFIED for a record carrying `audit_token='clean'` on the bar's own
+    fixture, with the full suite green — the field-probe test that was meant to
+    catch it moves each field to two values of its declared TYPE, which
+    EXHAUSTS `bool` and merely SAMPLES `str`.
+
+    So the channel is pinned by construction rather than by probing values:
+    `tests/test_verified_bar.py` calls this with a record object that HAS no
+    attribute but `index`, `outcome` and `invocations`, so a conjunct on any
+    new field of any type raises `AttributeError` here instead of passing
+    quietly at every value nobody thought to probe.
+
+    AND IT MUST NOT RAISE. "A bar must never break a verdict" was true of
+    `_bar_scope`'s body and false of the read that feeds it: at `eb1ff86` a
+    record whose ``invocations`` is a `list` raised `TypeError` out of
+    `make_solver_verdict` (`tuple + list`), from OUTSIDE `_bar_scope`'s
+    protective `try`. It is tolerated here — a list of stamps is stamps —
+    and anything genuinely unreadable returns :data:`_BAR_DOMAIN_UNREADABLE`,
+    which widens rather than raising and rather than silencing.
+    """
+    if escalation is None:
+        return {}
+    try:
+        decided: dict[int, tuple[SolverStamp, ...]] = {}
+        for r in escalation.records:
+            if r.outcome != OB_DISCHARGED:
+                continue
+            try:
+                stamps = tuple(r.invocations)
+            except TypeError:
+                # not iterable at all: no stamps means no narrowing, which is
+                # the widening direction, so this is a loss of precision and
+                # never of the bar
+                stamps = ()
+            decided[r.index] = decided.get(r.index, ()) + stamps
+        return decided
+    except Exception:  # noqa: BLE001 — an unreadable escalation widens
+        return _BAR_DOMAIN_UNREADABLE
+
+
 def make_solver_verdict(
     closed: ir.ClosedJaxpr,
     propagation: Propagation,
@@ -1562,12 +1633,17 @@ def make_solver_verdict(
     it does not decline — an obligation index that exists in the wrong
     query slices out of it perfectly well. What actually distinguishes
     the two is the evidence: every recorded invocation carries
-    ``smt2_sha256``, the hash of the exact script that was sent, and
-    :func:`stelling.verdict._evidence_is_about` narrows the bar for an
-    obligation only when re-emitting the slice re-derived from THIS
-    ``closed`` reproduces that hash. A mispaired query re-emits a
-    different script, matches nothing, and gets the whole-query bar. A
-    fabricated record set is, as above, already a fabricated verdict.
+    ``smt2_sha256``, the hash of the exact script that was sent, AND
+    ``slice_sha256``, the fingerprint of the slice that script was
+    emitted from, and :func:`stelling.verdict._evidence_is_about` narrows
+    the bar for an obligation only when re-emitting the slice re-derived
+    from THIS ``closed`` reproduces BOTH. **The second is not a belt on
+    the first.** A mispaired query does not necessarily re-emit a
+    different script — the barred row emits no text, so a scatter-bearing
+    slice and a scatter-free one reading the same untouched element emit
+    byte for byte the same thing, which is exactly how `eb1ff86` cleared
+    this bar. Only the slice fingerprint separates that pair. A fabricated
+    record set is, as above, already a fabricated verdict.
 
     ``refinement`` (default None — byte-identical assembly) is the
     :class:`stelling.affine.RefinementReport` of an affine refinement
@@ -1794,9 +1870,14 @@ def make_solver_verdict(
     # claimed, because it "does not slice". Measured on the bar's own fixture:
     # index 1 names an obligation INTERVALS decided and slices to
     # `['broadcast_in_dim','ge','scatter']`; index -1 is Python indexing and
-    # slices the LAST obligation; only index 99 declines. What widens the bar
-    # for all three is that none of them carries a solver invocation whose
-    # recorded script hash re-emits from the obligation it names -- see
+    # slices the LAST obligation; index 99 declines; and index -3 (or lower)
+    # raises IndexError out of `slice_obligation`, which `_bar_scope`'s outer
+    # `except` turns into the same whole-query set. That FOURTH behaviour is
+    # named because the version of this comment that listed three read as a
+    # closed enumeration and was not one -- the same shape of claim this file
+    # keeps having to correct. What widens the bar for the first three is that
+    # none of them carries a solver invocation whose recorded script hash AND
+    # slice fingerprint both re-emit from the obligation it names -- see
     # `verdict._evidence_is_about`.
     #
     # AND THE SCOPE IS THE DECIDED OBLIGATION'S SLICE, NOT THE WHOLE QUERY.
@@ -1823,11 +1904,16 @@ def make_solver_verdict(
     # reintroduce. See `verdict._bar_scope` and `verdict._evidence_is_about`,
     # the deleted `barred_on_slice` field for what reading the contents cost,
     # and this function's docstring for the precondition the domain rests on.
-    decided: dict[int, tuple[SolverStamp, ...]] = {}
-    if escalation is not None:
-        for r in escalation.records:
-            if r.outcome == OB_DISCHARGED:
-                decided[r.index] = decided.get(r.index, ()) + r.invocations
+    #
+    # THE READ ITSELF LIVES IN `_bar_domain`, ONE PLACE, and it is a function
+    # rather than four lines here so that a test can hand it a record with no
+    # other field and watch a conjunct on a new field RAISE. Enumerating the
+    # values a field could hold does not close that channel; `str` has too
+    # many. It also has to be a place that cannot raise: the `tuple + list`
+    # this loop used to be raised `TypeError` out of this function from
+    # OUTSIDE `_bar_scope`'s protective `try`, so "a bar must never break a
+    # verdict" did not cover the whole path feeding the bar.
+    decided = _bar_domain(escalation)
     if status == "VERIFIED" and decided:
         barred, scope = _verdict._bar_scope(closed, decided)
         if barred:

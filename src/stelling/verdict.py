@@ -578,9 +578,24 @@ def _approx(exact: str) -> str:
 # `['ge','sub']`, found nothing, and returned VERIFIED where `8e42934`
 # returned UNKNOWN. An index is not evidence about a query. So the narrowing
 # is now earned per obligation by `_evidence_is_about`: the recorded
-# invocation's `smt2_sha256` must re-emit from the slice re-derived out of
-# THIS `closed`, and every other outcome — including every stray index —
-# widens to the whole query.
+# invocation's `smt2_sha256` AND its `slice_sha256` must both re-emit from the
+# slice re-derived out of THIS `closed`.
+#
+# THE SECOND HASH IS NOT BELT-AND-BRACES; THE FIRST ONE ALONE WAS MEASURED
+# INSUFFICIENT. `eb1ff86` narrowed on the script hash alone, and a script hash
+# cannot say which slice produced it: the static-index `scatter` SET row emits
+# NO line (`smt.emit`, the `prim == "scatter"` branch), so an untouched element
+# aliases the operand's term and `s[1] - x[1] <= 0` emits byte for byte what
+# `x[1] - x[1] <= 0` emits — same sha, barred sets `('scatter',)` and `()`.
+# On that pair `eb1ff86` returned VERIFIED where `8e42934` returns UNKNOWN.
+# `smt.slice_fingerprint` is the quantity the text cannot carry, and it is
+# derived from the slice's primitives and nesting rather than from its output.
+#
+# An earlier version of this paragraph ended "and every other outcome —
+# including every stray index — widens to the whole query". The second clause
+# was the false one: a stray index whose slice happens to emit the recorded
+# script NARROWED, which is the hole above. What is true, and all that is
+# claimed now, is that every outcome other than BOTH hashes matching widens.
 # The two inputs stay anti-correlated — WHICH obligations the solver decided
 # comes from the escalation (and is already load-bearing for VERIFIED itself:
 # an index that does not match an unknown obligation leaves it undischarged
@@ -748,30 +763,66 @@ def _evidence_is_about(sliced, invocations) -> bool:
     the obligations the solver decided", and that is a statement about the
     RUN the escalation came from, not about ``closed``. Re-slicing ``closed``
     answers it only if the two are the same query, so the pairing has to be
-    MEASURED rather than assumed — and it can be, without a new field and
-    without trusting anything a record says about itself:
+    MEASURED rather than assumed. TWO recorded quantities are checked, and
+    they are checked because ONE OF THEM IS NOT ENOUGH — the reason is the
+    defect this function's predecessor shipped with, so it is stated first:
 
-    every solver invocation stamps ``smt2_sha256``, the sha256 of the exact
-    SMT-LIB2 text that was sent (:meth:`stelling.smt.Script.stamp_options`).
-    Emission is a pure function of the slice, the solver flavour and the
-    timeout — so re-emitting the slice we just re-derived out of ``closed``,
-    with the flavour and timeout the stamp itself records, reproduces that
-    hash EXACTLY when the slice is the one the solver answered about, and does
-    not otherwise. Measured on the mispairing this exists for: the same
-    escalation, re-emitted against its own query, matches for both portfolio
-    members; re-emitted against a different scatter-bearing query of the same
-    shape, neither matches.
+    **A SCRIPT HASH CANNOT WITNESS WHICH SLICE PRODUCED IT.** Emission IS a
+    pure function of ``(slice, flavour, timeout)``; what the guard needs is
+    the converse, *equal script implies equal slice*, and that is FALSE — false
+    for exactly the primitive under the bar. The static-index ``scatter`` SET
+    form emits no line at all (``smt.emit``'s ``prim == "scatter"`` branch
+    routes terms and appends nothing), so an element the write did not touch
+    aliases the operand's term and a scatter-bearing slice emits byte for byte
+    what a scatter-free slice reading the same element emits. Measured, jax
+    0.11.0, x64, ``s = x.at[0].set(0.5)``::
+
+        assert s[1] - x[1] <= 0   slice barred ('scatter',)  sha 2896a0f2…
+        assert x[1] - x[1] <= 0   slice barred ()            sha 2896a0f2…
+
+    On that pair the predecessor of this function returned True for an
+    escalation produced on the FIRST query and stamped against the SECOND, and
+    ``_bar_scope`` narrowed to ``((), '')`` — VERIFIED where `8e42934`'s
+    whole-query bar returns UNKNOWN.
+
+    So the second quantity comes from THE SLICE rather than from its text:
+    :func:`stelling.smt.slice_fingerprint`, the sha256 of the slice's primitive
+    names with their nesting depth, recorded as ``slice_sha256`` beside
+    ``smt2_sha256`` on every invocation. Both must reproduce from the slice
+    re-derived out of ``closed``, at the flavour and timeout the stamp itself
+    records.
+
+    WHAT EACH ONE PROVES, EXACTLY:
+
+    * ``smt2_sha256`` matching proves the TEXT the solver answered about is
+      the text THIS slice emits. That is what makes the answer transferable at
+      all — an ``unsat`` on that text is an ``unsat`` about this obligation's
+      encoding.
+    * ``slice_sha256`` matching proves the emission ran on a slice with the
+      same primitive topology as this one, hence with the SAME BARRED SET.
+      That is the bar's actual question, and it is the one the text cannot
+      answer.
+
+    WHAT NEITHER PROVES: that the record is honest. Both are carried by the
+    escalation, so a fabricated record can carry any pair of values it likes —
+    as it can already carry a fabricated ``outcome``. The bound on that is not
+    these hashes, it is the first bullet: a record that does not reproduce the
+    script hash gets no narrowing at all, and a record that does reproduce it
+    has, by that fact, supplied a text that this query's own slice emits.
+    Provenance beyond that is `make_solver_verdict`'s stated precondition, not
+    a property of this function.
 
     THE POLARITY IS THE POINT, AND IT IS WHY THIS IS NOT THE DELETED
-    `barred_on_slice` FIELD COMING BACK. A record cannot use this to CLEAR the
-    bar — a missing stamp, a missing hash, an unrecognised option profile, an
-    emission that raises, and a hash that does not match all return False, and
-    False WIDENS the bar to the whole query. The only way past it is to carry
-    the hash of a script that re-emits, byte for byte, from the query being
-    stamped; and if it does re-emit byte for byte then the emission row's
-    involvement in that answer is exactly what the re-derived slice says it is,
-    which is the case that distinguishes this from its neighbour rather than
-    the one that confirms it.
+    `barred_on_slice` FIELD COMING BACK. A record cannot use either hash to
+    CLEAR the bar — a missing stamp, a missing hash, a missing fingerprint, an
+    unrecognised option profile, an emission that raises, and either hash
+    failing to match all return False, and False WIDENS the bar to the whole
+    query. Adding the second conjunct can only make narrowing RARER than the
+    predecessor's, which is why the change cannot make a bar fire less than it
+    did. `barred_on_slice` ran the other way: it was a positive claim about
+    barred primitives that nothing recomputed. Nothing here names a barred
+    primitive; the barred set is still `_barred_in_eqns` over ``closed``'s own
+    re-derived slice.
 
     ``invocations`` is read here and NOT in the bar's domain, deliberately:
     the domain is `outcome == OB_DISCHARGED`, the same predicate that
@@ -783,10 +834,17 @@ def _evidence_is_about(sliced, invocations) -> bool:
     from stelling.smt import emit
 
     for stamp in invocations or ():
+        # `not stamp.name` is UNCONSTRUCTIBLE for a real stamp and is kept as
+        # a duck-type guard, not as a live branch: `SolverStamp.__post_init__`
+        # refuses an `invoked=True` stamp with an empty name, so no
+        # `SolverStamp` can reach it. It survives only because `invocations`
+        # is whatever the caller put on the record, and an object without a
+        # usable name must widen rather than reach `emit` with it.
         if not getattr(stamp, "invoked", False) or not stamp.name:
             continue
         options = dict(stamp.options or ())
         recorded = options.get("smt2_sha256")
+        recorded_slice = options.get("slice_sha256")
         # `stamp.name` is used as the emission FLAVOUR: every backend
         # `stelling.solvers` builds sets `name == flavor` (z3 wheel, cvc5
         # wheel, cvc5 external binary — the label is what differs), and one
@@ -798,13 +856,13 @@ def _evidence_is_about(sliced, invocations) -> bool:
         # for cvc5; a profile spelling it some third way is not recognised
         # here and therefore does not narrow the bar.
         timeout = options.get(":timeout") or options.get(":tlimit")
-        if not recorded or not timeout:
+        if not recorded or not recorded_slice or not timeout:
             continue
         try:
             script = emit(sliced, stamp.name, int(timeout))
         except Exception:  # noqa: BLE001 — an unemittable re-derivation is
             continue  # not evidence of anything, so it does not narrow
-        if script.sha256 == recorded:
+        if script.sha256 == recorded and script.slice_sha256 == recorded_slice:
             return True
     return False
 
@@ -835,38 +893,56 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
     function entirely.
 
     NARROWING IS EARNED PER OBLIGATION, BY :func:`_evidence_is_about`. A
-    re-derived slice narrows the bar only when the recorded invocation's
-    ``smt2_sha256`` re-emits from it. Everything else — no stamps, no hash, an
-    unrecognised option profile, a slice that declines, an exception anywhere —
-    returns the whole-query set. That is the repair for a measured regression,
-    not a hardening: the predecessor of this function narrowed on the INDEX
-    alone, so an escalation produced on one scatter-bearing query and stamped
-    against another of the same shape re-sliced cleanly, found nothing, and
-    returned VERIFIED where the whole-query bar at `8e42934` returned UNKNOWN.
+    re-derived slice narrows the bar only when the recorded invocation
+    reproduces BOTH its ``smt2_sha256`` and its ``slice_sha256`` from it.
+    Everything else — no stamps, no hash, no fingerprint, an unrecognised
+    option profile, a slice that declines, an exception anywhere — returns the
+    whole-query set. That is the repair for TWO measured regressions, not a
+    hardening. The first predecessor narrowed on the INDEX alone, so an
+    escalation produced on one scatter-bearing query and stamped against
+    another of the same shape re-sliced cleanly, found nothing, and returned
+    VERIFIED where the whole-query bar at `8e42934` returned UNKNOWN. The
+    second narrowed on the SCRIPT HASH alone, which does not distinguish
+    slices: the barred row emits no text, so `s[1] - x[1] <= 0` (barred
+    `('scatter',)`) and `x[1] - x[1] <= 0` (barred `()`) hash the same script,
+    and the same mispairing cleared the bar again. See
+    :func:`_evidence_is_about` for what each hash does and does not prove.
 
-    WHAT A "STRAY INDEX" ACTUALLY DOES — three behaviours, not one, and an
+    WHAT A "STRAY INDEX" ACTUALLY DOES — FOUR behaviours, not one, and an
     earlier wording here claimed the third for all of them ("a stray index
-    does not slice, so the derivation drops to the whole-query set"):
+    does not slice, so the derivation drops to the whole-query set"). A later
+    one listed three and presented them as the whole space, which is the same
+    mistake one item shorter:
 
     * an index matching an obligation INTERVALS already decided SLICES
       perfectly well and contributes its own barred set (measured:
       `slice_obligation(closed, 1, env)` on the bar's own fixture returns
       `['broadcast_in_dim', 'ge', 'scatter']`). It is not in the domain
       because it was not solver-decided, not because it fails to slice;
-    * a NEGATIVE index is Python indexing all the way down: `-1` slices the
-      LAST obligation and would render "the emitted slice of assert #-1";
-    * only an index matching no top-level assert equation at all (`99`)
-      declines — "obligation #99 has no matching top-level stelling_assert
-      equation" — and that is the case the sentence was true of.
+    * a NEGATIVE index within range is Python indexing all the way down: `-1`
+      slices the LAST obligation and would render "the emitted slice of assert
+      #-1";
+    * an index matching no top-level assert equation at all (`99`) declines —
+      "obligation #99 has no matching top-level stelling_assert equation" —
+      and that is the case the sentence was true of;
+    * a negative index PAST the start (`-3` on the bar's two-obligation
+      fixture, and anything below it) raises `IndexError` out of
+      `slice_obligation` rather than declining, and is caught by this
+      function's outer `except` — the same whole-query set by a different
+      door. It is named because "three behaviours" was being read as a closed
+      enumeration and it was not one; the list above is the four that have
+      been MEASURED, and it is not claimed to be closed either.
 
-    All three end at the whole-query set now, and by the evidence check rather
-    than by the slicer: none of them carries an invocation whose script
-    re-emits from the obligation it names. An EMPTY domain is the one case
-    that silences the bar, and it is empty exactly when no record discharged
-    anything — in which case there is no solver-decided VERIFIED to withhold.
+    All four end at the whole-query set, and the first three by the evidence
+    check rather than by the slicer: none of them carries an invocation whose
+    script AND slice fingerprint both re-emit from the obligation it names. An
+    EMPTY domain is the one case that silences the bar, and it is empty
+    exactly when no record discharged anything — in which case there is no
+    solver-decided VERIFIED to withhold.
 
     FAILS CLOSED, ALWAYS TOWARD THE WIDER BAR: every path that is not a
-    slice-plus-matching-hash returns the whole-query set rather than silence.
+    slice-plus-both-matching-hashes returns the whole-query set rather than
+    silence.
     """
     whole = _barred_primitives(closed)
     if not whole:
@@ -904,9 +980,9 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
                 # `closed` cleared this bar.
                 return fallback(
                     f"no recorded solver invocation for the decided "
-                    f"obligation #{index} re-emits from this query's slice "
-                    f"of it, so the escalation is not evidence about this "
-                    f"query"
+                    f"obligation #{index} reproduces both this query's slice "
+                    f"of it and the script that slice emits, so the "
+                    f"escalation is not evidence about this query"
                 )
             found = _barred_in_eqns(sliced.eqns)
             if found:

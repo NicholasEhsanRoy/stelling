@@ -74,7 +74,72 @@ from stelling.obligation import (
     _STRUCTURAL,
 )
 
-__all__ = ["Script", "emit", "rational"]
+__all__ = [
+    "Script", "emit", "rational", "slice_fingerprint", "slice_primitive_walk",
+]
+
+
+def slice_primitive_walk(eqns) -> tuple[str, ...]:
+    """EVERY primitive name on these equations, innermost scopes included, each
+    tagged with its nesting depth — the slice's PRIMITIVE TOPOLOGY.
+
+    Deliberately the SAME traversal shape as
+    :func:`stelling.verdict._barred_in_eqns`, through the same canonical
+    accessor (:func:`stelling.coverage.sub_jaxprs`) and with the same
+    identity-keyed ``seen`` dedup, and that is a load-bearing correspondence
+    rather than a stylistic one: :func:`slice_fingerprint` is what the scatter
+    VERIFIED bar narrows on, and it may only do so if **equal fingerprint
+    implies equal barred set**. That implication holds exactly because this
+    walk visits every equation the bar's walk visits and records its name, so
+    two slices that hash equal here have the same primitive multiset and
+    therefore the same intersection with any barred set.
+    ``tests/test_bar_walk_parity.py`` pins the containment directly, with a
+    barred primitive nested inside a ``cond`` branch as its anti-vacuity case —
+    the shape a hand-rolled descent has already been measured to miss here.
+    """
+    from stelling.coverage import sub_jaxprs
+
+    out: list[str] = []
+    seen: set[int] = set()
+
+    def walk(items, depth: int) -> None:
+        for eqn in items:
+            out.append(f"{depth}:{eqn.primitive}")
+            for inner in sub_jaxprs(eqn):
+                if inner is None or id(inner) in seen:
+                    continue
+                seen.add(id(inner))
+                walk(getattr(inner, "eqns", ()), depth + 1)
+
+    walk(eqns or (), 0)
+    return tuple(out)
+
+
+def slice_fingerprint(sl) -> str:
+    """The sha256 of :func:`slice_primitive_walk` over a slice's equations —
+    the quantity that identifies WHICH SLICE was emitted from, as opposed to
+    :attr:`Script.sha256`, which identifies what text came out.
+
+    THE TWO ARE DIFFERENT BECAUSE EMISSION IS LOSSY, and lossy for precisely
+    the primitive the VERIFIED bar is about. The static-index ``scatter`` SET
+    form appends no line at all (see the ``prim == "scatter"`` branch of
+    :func:`emit`): every output element's term IS its source element's term.
+    So for an element the write did not touch, ``s[i]`` aliases the operand's
+    term and a scatter-BEARING slice emits byte for byte what a scatter-FREE
+    slice reading the same element emits. Measured on jax 0.11.0, x64::
+
+        s = x.at[0].set(0.5)
+        assert s[1] - x[1] <= 0   slice barred ('scatter',)  sha 2896a0f2…
+        assert x[1] - x[1] <= 0   slice barred ()            sha 2896a0f2…
+
+    A script hash therefore cannot witness that the emission of this answer
+    did not run the barred row; this can, and it is what
+    :func:`stelling.verdict._evidence_is_about` adds to the script hash rather
+    than replacing it with. What each one buys is spelled out there.
+    """
+    return hashlib.sha256(
+        "\n".join(slice_primitive_walk(getattr(sl, "eqns", ()))).encode("utf-8")
+    ).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -86,13 +151,25 @@ class Script:
     text: str
     options: tuple[tuple[str, str], ...]  # the emitted (set-option ...) pairs
     sha256: str
+    # The fingerprint of the SLICE this text came out of. Defaulted so a
+    # hand-built Script (tests, downstream tooling) stays constructible; an
+    # empty value is not a claim of anything and never narrows the bar.
+    slice_sha256: str = ""
 
     def stamp_options(self) -> tuple[tuple[str, str], ...]:
         """The option set as the stamp records it: the exact emitted
-        ``set-option`` pairs, the ``set-logic``, and the script hash."""
+        ``set-option`` pairs, the ``set-logic``, the script hash, and the
+        SLICE fingerprint.
+
+        The last two are not two spellings of one fact. ``smt2_sha256``
+        identifies the TEXT the solver answered about; ``slice_sha256``
+        identifies the SLICE that text was emitted from, which the text alone
+        cannot — see :func:`slice_fingerprint`. Neither is emitted into the
+        script, so neither moves ``smt2_sha256``."""
         return self.options + (
             ("set-logic", self.logic),
             ("smt2_sha256", self.sha256),
+            ("slice_sha256", self.slice_sha256),
         )
 
 
@@ -666,4 +743,5 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
         text=text,
         options=options,
         sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        slice_sha256=slice_fingerprint(sl),
     )
