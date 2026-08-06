@@ -81,6 +81,16 @@ Two things the bar's scope does **not** cover, both easy to over-read:
   a reader comparing an older entry to a fresh run needs that entry to know
   which of the two builds to trust.
 - The scope is **derived from the query**, not read off the escalation: the
-  bar re-slices the decided obligations out of the `ClosedJaxpr` it was handed.
-  So a verdict assembled from a mispaired escalation cannot clear the bar, and
-  no record can assert that its own slice was clean.
+  bar re-slices the decided obligations out of the `ClosedJaxpr` it was handed,
+  and no record can assert that its own slice was clean.
+- Narrowing to that slice is **earned per obligation**, by reproducing BOTH
+  the script hash and the slice fingerprint the recorded invocation carries.
+  Deriving the scope alone did not bind the escalation to the query, and
+  neither did the script hash: the barred row emits no text, so a
+  scatter-bearing slice can emit byte for byte what a scatter-free one emits
+  (measured, `SOUNDNESS.md`). Both mispairings cleared the bar until the
+  fingerprint was added. What that buys is bounded and stated there: a
+  mispaired escalation gets the whole-query bar, but the hashes are carried by
+  the record, so this is a defence against an accidentally mispaired assembly
+  and not against a fabricated one — a caller who can fabricate a record can
+  fabricate the verdict.

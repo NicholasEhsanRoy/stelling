@@ -76,6 +76,18 @@ def test_golden_script_z3_flavor():
     assert script.sha256 == hashlib.sha256(script.text.encode()).hexdigest()
     assert ("smt2_sha256", script.sha256) in script.stamp_options()
     assert ("set-logic", "QF_NRA") in script.stamp_options()
+    # the slice fingerprint rides in the STAMP and never in the TEXT: it is
+    # what the scatter VERIFIED bar keys its narrowing on, and putting it in
+    # the script would move every recorded `smt2_sha256` in the project
+    assert ("slice_sha256", script.slice_sha256) in script.stamp_options()
+    assert script.slice_sha256 and "slice_sha256" not in script.text
+    # and it is a function of the slice's primitives, not of the text
+    from stelling.smt import slice_fingerprint, slice_primitive_walk
+    sl = sole_slice(q)
+    assert script.slice_sha256 == slice_fingerprint(sl)
+    assert [s.split(":", 1)[1] for s in slice_primitive_walk(sl.eqns)] == [
+        str(e.primitive) for e in sl.eqns
+    ]
 
 
 def test_cvc5_nra_options_pin_coverings_and_disable_nl_ext():

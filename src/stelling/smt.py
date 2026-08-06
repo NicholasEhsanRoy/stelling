@@ -136,6 +136,14 @@ def slice_fingerprint(sl) -> str:
     did not run the barred row; this can, and it is what
     :func:`stelling.verdict._evidence_is_about` adds to the script hash rather
     than replacing it with. What each one buys is spelled out there.
+
+    SCOPE OF THE GUARANTEE: this is compared WITHIN ONE PROCESS — the
+    escalation's slice and the bar's re-derived slice both come from the same
+    ``ClosedJaxpr`` object, so the ``seen`` dedup (identity-keyed, exactly as
+    in the bar's walk) visits the same sub-jaxprs both times. It is not
+    offered as a cross-process or cross-version identifier. A stamp carried
+    into a different process is not guaranteed to reproduce it, and the
+    consequence of that is a WIDER bar, never a narrower one.
     """
     return hashlib.sha256(
         "\n".join(slice_primitive_walk(getattr(sl, "eqns", ()))).encode("utf-8")

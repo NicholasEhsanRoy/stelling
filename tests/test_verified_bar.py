@@ -654,6 +654,53 @@ def test_the_fallback_is_the_WHOLE_QUERY_SET_and_never_silence():
     assert any("VERIFIED withheld" in n for n in v.notes)
 
 
+def test_what_a_stray_index_ACTUALLY_DOES_all_four_of_them():
+    """The stray-index enumeration, MEASURED rather than asserted.
+
+    `_bar_scope`'s docstring and `make_solver_verdict`'s block comment both
+    enumerate what a stray index does. The enumeration has been wrong twice —
+    first "a stray index does not slice" (one behaviour, and the wrong one),
+    then a list of three presented as the whole space. There is a fourth: an
+    index past the START of the list raises `IndexError` out of
+    `slice_obligation` rather than declining, and reaches the whole-query set
+    through `_bar_scope`'s outer `except` instead of through a `fallback`
+    call. No soundness difference — it is named because "three behaviours"
+    was being read as closed and was not, and this test is what makes the
+    enumeration a measurement.
+
+    NOT PRESENTED AS EXHAUSTIVE EITHER. What is asserted is that each listed
+    behaviour is the one claimed, and that every one of them ends at the
+    whole-query set.
+    """
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env
+
+    closed = trace(_scatter_ON_the_decided_slice)
+    env = interval_env(closed)
+    whole = V._barred_primitives(closed)
+    assert whole, "the fixture carries nothing barred; this measures nothing"
+
+    # 1. an index intervals decided slices perfectly well
+    sl = slice_obligation(closed, 1, env)
+    assert not isinstance(sl, DeclinedObligation)
+    assert V._barred_in_eqns(sl.eqns) == ("scatter",)
+    # 2. a negative index within range is Python indexing
+    assert not isinstance(slice_obligation(closed, -1, env), DeclinedObligation)
+    # 3. an index matching no assert equation DECLINES
+    assert isinstance(slice_obligation(closed, 99, env), DeclinedObligation)
+    # 4. and one past the start RAISES rather than declining
+    with pytest.raises(IndexError):
+        slice_obligation(closed, -3, env)
+
+    for index in (1, -1, 99, -3):
+        barred, why = V._bar_scope(closed, {index: ()})
+        assert barred == whole, (
+            f"index {index} narrowed the bar to {barred!r} instead of "
+            f"falling back to the whole-query set {whole!r}"
+        )
+        assert "fell back to the whole query" in why
+
+
 def test_the_fallback_also_holds_when_the_derivation_RAISES(monkeypatch):
     """The other `return fallback`, and it is a different statement.
 
