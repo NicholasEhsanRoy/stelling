@@ -45,6 +45,17 @@ looks adequate and is not: measured, a `scatter-add` slice equation carries
 `{str(e.primitive) for e in sl.eqns}` finds NOTHING where the canonical walk
 finds `add`. That measured disagreement is this module's anti-vacuity control
 for the slice-root parity test — a parity test that cannot fail proves nothing.
+
+**A FOURTH, since the bar's narrowing became slice-keyed: THE FINGERPRINT
+WALK.** `smt.slice_primitive_walk` records every primitive name on a slice with
+its nesting depth, and `smt.slice_fingerprint` hashes that; the bar narrows only
+when a recorded invocation reproduces it. That is only a legitimate key if
+**equal fingerprint implies equal barred set**, which holds exactly when the
+fingerprint walk visits everything the bar's walk visits. It is a third
+traversal of the same shape, so it is a third thing that can silently stop
+matching — the lesson `_barred_in_eqns`'s own docstring draws. See
+`test_the_fingerprint_walk_sees_everything_the_bar_walk_sees`, whose
+anti-vacuity control is the same `cond` nesting that broke the first walk.
 """
 from __future__ import annotations
 
@@ -147,6 +158,76 @@ def test_bar_walk_has_parity_with_the_canonical_accessor(build, label):
     assert barred == expected, (
         f"{label}: the bar found {sorted(barred)} where the canonical walk "
         f"implies {sorted(expected)} — the two traversals have diverged"
+    )
+
+
+@pytest.mark.parametrize("build,label", SHAPES, ids=[s[1] for s in SHAPES])
+def test_the_fingerprint_walk_sees_everything_the_bar_walk_sees(build, label):
+    """THE KEY'S PREMISE: equal fingerprint implies equal barred set.
+
+    The bar narrows an obligation only when the recorded invocation
+    reproduces `smt.slice_fingerprint` of the re-derived slice. That is a
+    legitimate key for a question about BARRED PRIMITIVES only if the walk
+    the fingerprint hashes records every primitive the bar's walk can find —
+    otherwise two slices could hash equal with different barred sets, which is
+    precisely the failure the script hash has (`scatter` emits no text, so the
+    SCRIPT cannot tell those two slices apart).
+
+    Checked as an identity rather than a containment, because the containment
+    direction alone would pass for a walk that records extra names it never
+    reaches.
+    """
+    from stelling import smt as _smt
+
+    closed = transcribe(jax.make_jaxpr(build)())
+    eqns = closed.jaxpr.eqns
+    names = {s.split(":", 1)[1] for s in _smt.slice_primitive_walk(eqns)}
+    assert set(_verdict._barred_in_eqns(eqns)) == (
+        names & _verdict.VERIFIED_BARRED_PRIMITIVES
+    ), (
+        f"{label}: the bar walks to {sorted(_verdict._barred_in_eqns(eqns))} "
+        f"while the fingerprint walk records {sorted(names)} — the two "
+        f"traversals have diverged, so a fingerprint match no longer implies "
+        f"an equal barred set and the bar's key proves nothing about it"
+    )
+    # and it is not vacuous on this shape: the canonical accessor agrees, and
+    # for the nested shapes a flat walk would not reach the primitive at all
+    assert names == _all_primitives_via_canonical(closed), (
+        f"{label}: the fingerprint walk and the canonical accessor disagree"
+    )
+
+
+def test_the_fingerprint_walk_would_catch_the_old_accessor():
+    """ANTI-VACUITY for the test above, in the same shape that broke the first
+    walk: a barred primitive inside a `cond` branch.
+
+    A fingerprint walk descending the old way misses it, so the two walks
+    would agree on a scatter-free NAME SET while the bar's walk found
+    `scatter` — the identity above would fail. If this control ever stops
+    failing, the fixture no longer nests anything and the parity test above
+    is measuring a flat query."""
+    from stelling import smt as _smt
+
+    closed = transcribe(jax.make_jaxpr(_in_cond)())
+    eqns = closed.jaxpr.eqns
+
+    def old_walk(items):
+        found = set()
+        for eqn in items:
+            found.add(str(eqn.primitive))
+            for v in eqn.params_dict().values():
+                inner = getattr(v, "jaxpr", None)  # the defect
+                if inner is not None:
+                    found |= old_walk(getattr(inner, "eqns", ()))
+        return found
+
+    canonical = {s.split(":", 1)[1] for s in _smt.slice_primitive_walk(eqns)}
+    assert old_walk(eqns) != canonical, (
+        "the OLD descent records the same names as the fingerprint walk on "
+        "this query, so the parity test above cannot distinguish them"
+    )
+    assert canonical & _verdict.VERIFIED_BARRED_PRIMITIVES, (
+        "the fixture carries no barred primitive; the control is vacuous"
     )
 
 

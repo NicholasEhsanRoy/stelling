@@ -793,6 +793,108 @@ def _set_written_at_a_NONZERO_index():
     return assert_(s[1] - x[1] >= 1.0)
 
 
+def _set_plan_routes(n, k):
+    """`_scatter_set_plan`'s routes for `x.at[k].set(u)` on a length-`n`
+    operand, taken from a real traced query."""
+    def build():
+        x = any_array((n,), "float64", (0.0, 1.0))
+        u = any_array((), "float64", (2.0, 3.0))
+        return assert_(x.at[k].set(u) >= 0.0)
+
+    closed = trace(build)
+    eqn = next(e for e in closed.jaxpr.eqns if str(e.primitive) == "scatter")
+    consts = dict(zip((v.id for v in closed.jaxpr.constvars), closed.consts))
+    return OB._scatter_set_plan(closed.jaxpr.eqns, consts, eqn), eqn
+
+
+@pytest.mark.parametrize("n", [3, 4, 5, 8])
+def test_the_set_plans_k_is_the_programs_k_for_EVERY_k(n):
+    """THE PROPERTY, NOT MORE SAMPLES: for every writable index of the axis,
+    the plan routes exactly the element the program writes.
+
+    SAMPLING k DOES NOT PIN THIS, and the history is the argument. The routing
+    fixtures wrote k = 0 only, and `i == k` -> `i == (k - 1 if k > 0 else k)`
+    was invisible to all of them because every offset from 0 clamps or leaves
+    the range; `_set_written_at_a_NONZERO_index` added k = 2 and caught that
+    one. The gauged set was then {0, 2}, which is still a set of samples, and
+    two more line-neutral corruptions walk straight between them — measured on
+    `eb1ff86`, each a `violated-witness` turned `discharged` (a MISSED
+    violation, the direction the bar exists for) with the FULL suite green
+    under CI's install set:
+
+        i == (0 if k == 1 else k)   `x.at[1].set(u); assert s[0]-x[0] >= 1.0`
+        i == (0 if k > 2 else k)    `x.at[3].set(u)`, same shape, same flip
+
+    Adding a k = 1 fixture and a k = 3 fixture would move the sample set to
+    {0, 1, 2, 3} and leave `i == (0 if k == 4 else k)` alive. So this sweeps
+    EVERY k of the axis, at four axis lengths, and the expectation is not a
+    second copy of the rule: it is checked against jax's own execution of the
+    same `.set` on sentinel values, which is what makes it an oracle rather
+    than a restatement. The surface direction — the same corruption seen as a
+    verdict rather than as a plan — is
+    `test_every_untouched_element_still_refutes_at_every_k`.
+    """
+    for k in range(n):
+        routes, eqn = _set_plan_routes(n, k)
+        # invars are (operand, indices, updates); the plan's positions index
+        # exactly that tuple, which the row's docstring states and the shipped
+        # emission relies on
+        assert len(eqn.invars) == 3, eqn.invars
+        expected = [(2, 0) if j == k else (0, j) for j in range(n)]
+
+        # THE ORACLE: run the real program on values that identify their own
+        # source, and confirm `expected` describes what jax actually does. If
+        # this half fails, `expected` is wrong and the comparison below would
+        # have been a rule compared against itself.
+        xs = np.arange(1.0, n + 1.0, dtype=np.float64) * 10.0
+        uv = np.float64(-7.0)
+        operands = [xs, np.full(1, 1e9, dtype=np.float64), np.array([uv])]
+        actual = np.asarray(jnp.asarray(xs).at[k].set(jnp.asarray(uv)))
+        predicted = np.array(
+            [operands[op].reshape(-1)[src] for op, src in expected]
+        )
+        assert np.array_equal(predicted, actual), (
+            f"n={n} k={k}: the expected routes {expected} predict "
+            f"{list(predicted)} where jax computes {list(actual)} — the "
+            f"expectation, not the plan, is the wrong one"
+        )
+
+        assert routes == expected, (
+            f"n={n} k={k}: `_scatter_set_plan` routes {routes} where the "
+            f"program writes element {k} ({expected}). The plan's k is not "
+            f"the program's k at this index, so every consumer of it — slice "
+            f"validation, emission, replay — models a write the program did "
+            f"not make"
+        )
+
+
+@pytest.mark.parametrize("n", [3, 4])
+def test_every_untouched_element_still_refutes_at_every_k(n):
+    """The same property at the SURFACE, so it is not pinned only at its
+    producer: for every k, and every element the write did NOT touch, the
+    false claim `s[j] - x[j] >= 1` must still come back `violated-witness`.
+
+    Any plan that routes element j to the update instead of to the operand
+    brings that claim back `discharged` — a missed violation. Read at
+    `escalate` rather than at `check` for the reason `_set_row_records` gives:
+    the VERIFIED bar sits downstream and would return UNKNOWN either way.
+    """
+    for k in range(n):
+        def build(n=n, k=k):
+            x = any_array((n,), "float64", (0.0, 1.0))
+            u = any_array((), "float64", (2.0, 3.0))
+            s = x.at[k].set(u)
+            return tuple(assert_(s[j] - x[j] >= 1.0)
+                         for j in range(n) if j != k)
+
+        outcomes = _set_row_records(build, {})
+        assert outcomes == ("violated-witness",) * (n - 1), (
+            f"n={n} k={k}: untouched elements gave {outcomes}. A "
+            f"`discharged` here is the missed-violation direction: the row "
+            f"handed an untouched element the update's box"
+        )
+
+
 def gate_set_row_agreement(subject):
     """Gate 7: the static-index scatter SET row routes each output element to
     the right source. Four relational cases whose hand answers depend on

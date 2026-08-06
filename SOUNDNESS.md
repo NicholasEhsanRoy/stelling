@@ -742,7 +742,10 @@ verdicts:
   emitted-vs-re-derived slice agreement pinned in
   `tests/test_bar_walk_parity.py`.
   **Repair pass, and it moves verdicts again — in the same withheld
-  direction as the base, never the other way.** The first implementation
+  direction as the base, never the other way. Which prior verdicts are
+  retroactively invalid: none, for the reason spelled out at the end of
+  this paragraph** (the policy above requires the clause by name, and this
+  paragraph had its substance without its label). The first implementation
   of "which obligations the solver decided" was
   `outcome == OB_DISCHARGED and r.invocations`, while the obligation loop
   discharged on `outcome == OB_DISCHARGED` alone: one concept, two
@@ -823,15 +826,20 @@ verdicts:
   because its fixture is the one arrangement that fails safe: its
   mispaired index reaches no real obligation of the wrong query, so the
   re-slice declines and the fallback fires.
-  **The repair keys on the property instead of on the index.** Every
+  **The repair keys on the property instead of on the index — and its
+  FIRST version keyed on the wrong property. The paragraph that follows
+  is what was believed; the entry below it is what was measured.** Every
   solver invocation already stamps `smt2_sha256`, the sha256 of the exact
   SMT-LIB2 text it was sent, and emission is a pure function of (slice,
   solver flavour, timeout). So `verdict._evidence_is_about` re-emits the
   slice re-derived out of the query being stamped, with the flavour and
   timeout the stamp itself records, and narrows the bar for that
-  obligation only when the hash comes back equal. Measured: the correct
-  pairing reproduces it for both portfolio members; the mispairing
-  reproduces neither. Every other outcome — no stamps, no hash, an
+  obligation only when the hash comes back equal. Measured on the pair
+  above: the correct pairing reproduces it for both portfolio members;
+  that mispairing reproduces neither. **What was NOT measured, and is
+  false, is the general claim — "the mispairing reproduces neither" is
+  true of that fixture and not of the shape it stands for.** See the
+  entry below. Every other outcome — no stamps, no hash, an
   unrecognised option profile, an emission that raises, a slice that
   declines — returns the whole-query set. `invocations` therefore cannot
   CLEAR the bar, only fail to lift it, which is the opposite polarity
@@ -839,9 +847,12 @@ verdicts:
   `and r.invocations` drift the entry above repairs; the bar's DOMAIN is
   still `outcome == OB_DISCHARGED` alone.
   **Affected versions:** 0.1.0 pre-release only — `caac1ee` (the scoping
-  commit) through `45cf526` inclusive, all branch-only. Every build up to
-  and including `8e42934` has the whole-query bar and never had this
-  exposure; nothing has been released.
+  commit) through `eb1ff86` inclusive, all branch-only. `45cf526` and
+  `eb1ff86` were originally logged here as the end of the range; they are
+  not, because the hash-keyed repair does not close the shape (below).
+  Builds up to and including `8e42934` have the whole-query bar, and the
+  mispairings in this entry and the next both measure UNKNOWN there;
+  nothing has been released.
   **Which prior verdicts are retroactively invalid: none, and the
   direction is the ordinary one this time.** Reaching the hole needs a
   call to the public `make_solver_verdict` pairing an escalation with a
@@ -862,7 +873,10 @@ verdicts:
   `solver_timeout_ms`. A newly-present `VERIFIED withheld` note whose
   clause says "no recorded solver invocation … re-emits from this query's
   slice of it" is this change, and it means the narrowing was never
-  established for that verdict rather than that the program changed.
+  established for that verdict rather than that the program changed. (The
+  entry below re-words that clause; from that pass on it reads "…
+  reproduces both this query's slice of it and the script that slice
+  emits".)
   Same pass, and NOT a verdict-moving change: the SET row's routing was
   gauged only at the written index 0, where every mis-route defined as an
   offset from the index collapses back onto it. The line-neutral
@@ -884,5 +898,99 @@ verdicts:
   `tests/test_verified_bar.py` — the record-field channel test is
   rewritten rather than added, because pinning today's field list could
   not fail for the defect it exists to catch).
+
+- **2026-08-06 (pre-release): the script hash does not identify the slice
+  that produced it, so the mispairing above was NOT closed by keying on it
+  — verdicts move again, AVAILABLE → WITHHELD.** The entry above narrows
+  the bar for an obligation when re-emitting the slice re-derived out of
+  the query being stamped reproduces the recorded `smt2_sha256`, and
+  claims "the mispairing reproduces neither". Emission IS a pure function
+  of (slice, flavour, timeout); what the guard needs is the CONVERSE,
+  *equal script implies equal slice*, **and that is false for exactly the
+  primitive under the bar.** The static-index `scatter` SET row appends no
+  line at all (`smt.emit`, the `prim == "scatter"` branch: element k's
+  term IS the update's, every other element's term IS the operand's), so
+  for an element the write did not touch, `s[i]` aliases the operand's
+  term. Measured, jax 0.11.0, x64, `s = x.at[0].set(0.5)`:
+
+      slice of `s[1] - x[1] <= 0`   barred ('scatter',)   sha 2896a0f2…
+      slice of `x[1] - x[1] <= 0`   barred ()             sha 2896a0f2…   collides
+      slice of `s[0] - x[0] >= 0`   barred ('scatter',)   sha 2de5e041…
+      slice of `x[0] - x[0] >= 0`   barred ()             sha 2f2e0ed8…   no collision
+
+  So the same mispairing survives, one fixture over. With the ELSEWHERE
+  query differing from the ON query ONLY in where the scatter sits (`x[1]`
+  where the other reads `s[1]`, same inputs, same predicate, same second
+  obligation):
+
+      ON escalation + ON query         UNKNOWN on 8e42934, caac1ee,
+                                       45cf526, eb1ff86
+      ON escalation + ELSEWHERE query  UNKNOWN on 8e42934 (whole-query bar)
+                                       VERIFIED on caac1ee, 45cf526, eb1ff86
+
+  `_evidence_is_about` returned True and `_bar_scope` returned `((), '')`.
+  **The regression test for the entry above could not see this, because
+  its fixture built away its own trigger:** it said "the one difference is
+  WHERE" while also introducing a fresh scalar input and a different
+  predicate, and it was that — not the scatter's location — that made the
+  two scripts differ. Sharpest evidence: at `eb1ff86`, deleting the
+  `_evidence_is_about` call from `_bar_scope` entirely reddens exactly one
+  test, the one whose fixture cannot exhibit the defect (measured: 1
+  failed, 2011 passed, 2 skipped).
+  **The repair takes the key from the SLICE, because no script-derived
+  quantity can work — emission is lossy for precisely the barred
+  primitive.** `smt.slice_fingerprint` hashes the slice's primitive names
+  with their nesting depth, walked through the same canonical accessor
+  (`coverage.sub_jaxprs`) the bar's own walk uses, and rides in the stamp
+  as `slice_sha256` beside `smt2_sha256`. `_evidence_is_about` now
+  requires BOTH. What each one proves, exactly: the script hash proves the
+  TEXT the solver answered about is the text this slice emits, which is
+  what makes the answer transferable; the slice fingerprint proves the
+  emission ran on a slice with the same primitive topology, hence the same
+  BARRED SET, which is the bar's actual question and the one the text
+  cannot answer. **What neither proves:** that the record is honest —
+  both are record-carried, as `smt2_sha256` already was. Adding a conjunct
+  can only make narrowing RARER, so no bar fires less than it did at
+  `eb1ff86`.
+  **Affected versions:** 0.1.0 pre-release only — `caac1ee` through
+  `eb1ff86` inclusive, all branch-only, nothing released. Builds up to and
+  including `8e42934` have the whole-query bar and measure UNKNOWN on this
+  mispairing.
+  **Which prior verdicts are retroactively invalid: none.** Reaching it
+  needs a call to the public `make_solver_verdict` pairing an escalation
+  with a query it did not come from; `check()` cannot produce that and
+  `escalate()` cannot produce a record for a query it was not run on. No
+  verdict in `docs/verdict-ledger.md` is affected.
+  **What to re-run:** any recorded solver-path VERIFIED on a
+  scatter-bearing query — re-`check()` with the same `solver_timeout_ms`
+  and look for a `VERIFIED withheld` note whose clause says "no recorded
+  solver invocation … reproduces both this query's slice of it and the
+  script that slice emits". Its presence means the narrowing was never
+  established for that verdict.
+  Same pass, three more, none of them verdict-moving through `check()`:
+  **(1)** the SET row's routing was gauged at index 0 and then at {0, 2},
+  which is still a sample. Two line-neutral corruptions walk between the
+  samples — `i == (0 if k == 1 else k)` and `i == (0 if k > 2 else k)` in
+  `obligation._scatter_set_plan` — each turning a `violated-witness` into
+  a `discharged` (a MISSED violation, the direction the bar exists for)
+  with the full suite green under CI's install set at 2008 passed, 6
+  skipped. The property is now pinned instead of sampled: every k of the
+  axis at four axis lengths, against jax's own execution of the same
+  `.set` as the oracle, plus the same sweep at the escalation surface.
+  **(2)** the bar's domain is read in one place, `solvers._bar_domain`,
+  handed a record with no field but `index`, `outcome` and `invocations`,
+  so a conjunct on a new field of ANY type raises instead of evaluating.
+  The field-probe test it supplements moves each field to two values of
+  its declared type, which EXHAUSTS `bool` and merely SAMPLES `str`:
+  measured on `eb1ff86`, `audit_token: str = ""` plus
+  `and r.audit_token != "clean"` in the domain is UNKNOWN at both probe
+  values and VERIFIED at `'clean'`, full suite green.
+  **(3)** "a bar must never break a verdict" did not cover the read that
+  feeds the bar: at `eb1ff86` a record whose `invocations` is a `list`
+  raised `TypeError` out of `make_solver_verdict` (`tuple + list`), from
+  outside `_bar_scope`'s protective `try`. `_bar_domain` tolerates it, and
+  an unreadable escalation widens to the whole-query set rather than
+  raising or silencing the bar. `45cf526` tolerated the same record, so
+  this is a regression the branch introduced and the branch removes.
 
 *(no releases yet)*

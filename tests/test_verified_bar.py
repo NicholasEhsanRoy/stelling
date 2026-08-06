@@ -39,13 +39,28 @@ above claimed it did, on the reasoning that a mispaired index would not slice
 agreed, because its mispaired index reaches no real obligation of the wrong
 query. Its NEIGHBOUR does: two scatter-bearing queries of the same shape, the
 escalation of the one whose scatter is on the decided obligation stamped
-against the one whose scatter is elsewhere. That index slices, finds
-`['ge','sub']`, and cleared the bar (measured VERIFIED on `caac1ee` and
-`45cf526`, UNKNOWN on `8e42934`). An index is not evidence about a query, so
-the narrowing is now earned per obligation by re-emitting the slice and
-matching the `smt2_sha256` the recorded invocation carries — see
-``test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar`` and its
-other direction, ``test_the_correct_pairing_still_narrows_and_the_hash_is_why``.
+against the one whose scatter is elsewhere. That index slices, finds no
+barred primitive, and cleared the bar (measured VERIFIED on `caac1ee` and
+`45cf526`, UNKNOWN on `8e42934`). An index is not evidence about a query.
+
+**AND A SIXTH: THE SCRIPT HASH IS NOT EVIDENCE ABOUT A SLICE.** The fifth
+repair re-emitted the re-derived slice and matched the `smt2_sha256` the
+invocation records. Emission IS a pure function of (slice, flavour, timeout);
+the converse is what the guard needed, and it is FALSE for the one primitive
+under the bar. The static-index `scatter` SET row emits NO line, so an
+untouched element aliases the operand's term and `s[1] - x[1] <= 0` emits byte
+for byte what `x[1] - x[1] <= 0` emits — same sha, barred sets `('scatter',)`
+and `()`. The fixture that was supposed to catch this **built away its own
+trigger**: it said "the one difference is WHERE" while also introducing a
+fresh input and a different predicate, and it was THAT which made the hashes
+differ. Rebuilt to differ only in where the scatter sits, it returns VERIFIED
+on `eb1ff86`. The narrowing now also requires `slice_sha256`, the fingerprint
+of the slice's own primitives and nesting, which the emitted text cannot
+carry — see ``test_the_script_hash_alone_cannot_separate_these_two_slices``,
+``test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar`` in both
+parametrisations, ``test_the_bar_scope_itself_widens_on_the_colliding_pair``,
+and the other direction,
+``test_the_correct_pairing_still_narrows_and_the_hash_is_why``.
 """
 from __future__ import annotations
 
@@ -315,17 +330,37 @@ def test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query():
 
 
 def _scatter_ELSEWHERE_same_shape():
-    """THE NEAREST NEIGHBOUR of `_scatter_ON_the_decided_slice`: same shape,
-    same whole-query barred set, scatter on the OTHER obligation.
+    """THE NEAREST NEIGHBOUR of `_scatter_ON_the_decided_slice`, and the
+    difference is WHERE THE SCATTER SITS AND NOTHING ELSE.
 
-    Two obligations, #0 solver-decided and #1 settled by intervals, and the
-    query contains `scatter` — exactly as in `_scatter_ON_the_decided_slice`.
-    The one difference is WHERE: here #0 is `y - y >= 0`, whose emitted slice
-    is `['ge','sub']`, and the scatter is on #1. That is what makes the pair
-    able to distinguish "the escalation is about this query" from "the index
-    happens to exist in this query", which no fixture in this file could do
-    before: an index that names an obligation of the wrong query still slices
-    out of it.
+    Same declared inputs, same two obligations, same predicate on #0, same
+    `s >= 0` on #1. The single edit is that #0 reads `x[1]` where
+    `_scatter_ON_the_decided_slice` reads `s[1]` — so the scatter is on #1
+    alone, and #0's emitted slice carries none.
+
+    THE PREDECESSOR OF THIS FIXTURE BUILT AWAY ITS OWN TRIGGER. It said "the
+    one difference is WHERE" while ALSO introducing a fresh scalar input `y`
+    and a different predicate (`y - y >= 0`), and it was that difference — not
+    the scatter's location — that made the two queries emit different scripts.
+    So the test below passed on `eb1ff86`, whose narrowing keyed on the script
+    hash alone, while the defect it was written for was live: with the fixture
+    differing only in WHERE, `eb1ff86` returns VERIFIED. See
+    `test_the_script_hash_alone_cannot_separate_these_two_slices`, which
+    measures the byte-equality that makes this the hard case.
+    """
+    x = any_array((3,), "float64", (0.0, 1.0))
+    s = x.at[0].set(0.5)
+    return (assert_(x[1] - x[1] <= 0.0), assert_(s >= 0.0))
+
+
+def _scatter_ELSEWHERE_different_predicate():
+    """The WEAKER neighbour, kept because it separates the two keys.
+
+    Same arrangement as `_scatter_ELSEWHERE_same_shape` — scatter on #1, #0
+    solver-decided and scatter-free — but #0 is a different claim over a fresh
+    input, so its emitted slice (`['ge','sub']`) emits a DIFFERENT script.
+    That difference is enough for the script hash alone, which is why this
+    shape was green on `eb1ff86` while its sibling above was not.
     """
     x = any_array((3,), "float64", (0.0, 1.0))
     s = x.at[0].set(0.5)
@@ -333,35 +368,87 @@ def _scatter_ELSEWHERE_same_shape():
     return (assert_(y - y >= 0.0), assert_(s >= 0.0))
 
 
-def test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar():
-    """THE MISPAIRING THE INDEX-ONLY DOMAIN DID NOT CATCH — and the reason
-    the narrowing now has to be earned by evidence rather than by an index.
+def test_the_script_hash_alone_cannot_separate_these_two_slices():
+    """THE COLLISION, AS A MEASUREMENT — the premise the bar's key rests on.
+
+    `_evidence_is_about` re-emits the re-derived slice and compares hashes.
+    That can only witness WHICH SLICE was emitted from if emission is
+    injective, and it is not: the static-index `scatter` SET row appends no
+    line, so an element the write did not touch aliases the operand's term.
+    Here the scatter-BEARING slice of `_scatter_ON_the_decided_slice`#0 and
+    the scatter-FREE slice of `_scatter_ELSEWHERE_same_shape`#0 emit the same
+    bytes, and their barred sets differ.
+
+    If this test ever goes red because the two scripts stopped colliding, the
+    bar has not been repaired — the fixture has drifted back to the shape that
+    could not fail, and `test_a_mispaired_query_that_still_SLICES...` is again
+    passing for the weaker reason.
+    """
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env
+    from stelling.smt import emit, slice_fingerprint
+
+    on_closed = trace(_scatter_ON_the_decided_slice)
+    el_closed = trace(_scatter_ELSEWHERE_same_shape)
+    on_sl = slice_obligation(on_closed, 0, interval_env(on_closed))
+    el_sl = slice_obligation(el_closed, 0, interval_env(el_closed))
+    assert not isinstance(on_sl, DeclinedObligation)
+    assert not isinstance(el_sl, DeclinedObligation)
+
+    assert V._barred_in_eqns(on_sl.eqns) == ("scatter",)
+    assert V._barred_in_eqns(el_sl.eqns) == ()
+    assert emit(on_sl, "z3", 20000).sha256 == emit(el_sl, "z3", 20000).sha256, (
+        "the two slices no longer emit byte-identical scripts, so the script "
+        "hash WOULD separate them and the mispairing test below is measuring "
+        "the weaker key"
+    )
+    assert slice_fingerprint(on_sl) != slice_fingerprint(el_sl), (
+        "the slice fingerprint does not separate a scatter-bearing slice from "
+        "a scatter-free one, so the bar's key distinguishes nothing that the "
+        "script hash did not already"
+    )
+
+
+@pytest.mark.parametrize("elsewhere,key", [
+    (_scatter_ELSEWHERE_same_shape, "the slice fingerprint"),
+    (_scatter_ELSEWHERE_different_predicate, "the script hash"),
+])
+def test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar(
+    elsewhere, key
+):
+    """THE MISPAIRING THE INDEX-ONLY DOMAIN DID NOT CATCH — and, in its first
+    parametrisation, the one the SCRIPT-HASH-ONLY narrowing did not catch
+    either.
 
     `test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query`
     passes on the arrangement where the mispaired index does not reach a real
-    obligation of the wrong query. This is its neighbour: BOTH queries carry
-    `scatter`, both have two obligations, and the decided index 0 exists in
-    both. So the re-slice does not decline — it succeeds, on the wrong query,
-    and finds `['ge','sub']`.
+    obligation of the wrong query. These are its neighbours: BOTH queries
+    carry `scatter`, both have two obligations, and the decided index 0 exists
+    in both. So the re-slice does not decline — it succeeds, on the wrong
+    query, and finds no barred primitive.
 
-    Measured, three builds:
+    THE TWO PARAMETRISATIONS NEED DIFFERENT KEYS, which is why both are here.
 
-        ON esc + ON closed         UNKNOWN  on 8e42934, caac1ee, 45cf526
-        ON esc + ELSEWHERE closed  UNKNOWN  on 8e42934 (whole-query bar)
-                                   VERIFIED on caac1ee and 45cf526
-                                   UNKNOWN  here
+        elsewhere = same shape (scatter's LOCATION is the only difference)
+            8e42934 UNKNOWN | caac1ee VERIFIED | 45cf526 VERIFIED
+            eb1ff86 VERIFIED | here UNKNOWN
+            separated only by `slice_sha256`; the two scripts are byte-equal
+
+        elsewhere = different predicate (a fresh input and another claim)
+            8e42934 UNKNOWN | caac1ee VERIFIED | 45cf526 VERIFIED
+            eb1ff86 UNKNOWN | here UNKNOWN
+            separated by `smt2_sha256` already
 
     The repair is `verdict._evidence_is_about`: an obligation narrows the bar
-    only when a recorded invocation's `smt2_sha256` re-emits from the slice
-    re-derived out of the query being stamped. Measured on this pair, the
-    correct pairing reproduces the recorded hash for BOTH portfolio members
-    and the mispairing reproduces neither.
+    only when a recorded invocation reproduces BOTH the script hash and the
+    slice fingerprint from the slice re-derived out of the query being
+    stamped.
     """
     from stelling.solvers import make_solver_verdict
 
     assert V.VERIFIED_BARRED_PRIMITIVES, "the bar has been lifted"
     on_closed, on_prop, on_esc = _stamped(_scatter_ON_the_decided_slice)
-    el_closed, _, _ = _stamped(_scatter_ELSEWHERE_same_shape)
+    el_closed, _, _ = _stamped(elsewhere)
 
     # the pair must be indistinguishable to every WEAKER test than the one
     # this pins, or it does not measure the mechanism it claims to
@@ -400,11 +487,39 @@ def test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar():
     )
     assert v.status == "UNKNOWN", (
         f"{v.status}: an escalation produced on a DIFFERENT scatter-bearing "
-        f"query cleared the bar because its index happened to slice out of "
-        f"this one — the narrowing is keyed on the index rather than on "
-        f"whether the escalation is evidence about this query"
+        f"query cleared the bar. This arrangement is separated by {key}, so "
+        f"that is the part of `_evidence_is_about` that has stopped working"
     )
     assert any("VERIFIED withheld" in n for n in v.notes)
+
+
+def test_the_bar_scope_itself_widens_on_the_colliding_pair():
+    """The same defect one layer down, at `_bar_scope` rather than at the
+    assembled verdict — so that deleting the `_evidence_is_about` call is not
+    a one-test edit.
+
+    Not a duplicate of the parametrised test above: that one can only see the
+    bar through a VERIFIED that may be withheld for some other reason, and
+    this one reads the scope directly. Both must move together, because both
+    are downstream of the same call.
+    """
+    on_closed, _on_prop, on_esc = _stamped(_scatter_ON_the_decided_slice)
+    el_closed = trace(_scatter_ELSEWHERE_same_shape)
+    decided = {r.index: r.invocations
+               for r in on_esc.records if r.outcome == "discharged"}
+    assert set(decided) == {0}, decided
+
+    honest, honest_why = V._bar_scope(on_closed, decided)
+    assert honest == ("scatter",) and "assert #0" in honest_why, (
+        f"the honestly-paired scope is {honest!r}; the fixture is wrong"
+    )
+    barred, why = V._bar_scope(el_closed, decided)
+    assert barred == ("scatter",), (
+        f"_bar_scope narrowed to {barred!r} on a query the escalation is not "
+        f"about, whose obligation #0 emits the SAME script as the one the "
+        f"solver answered. Narrowing is keyed on the emitted text again"
+    )
+    assert "fell back to the whole query" in why, why
 
 
 def test_the_correct_pairing_still_narrows_and_the_hash_is_why():
@@ -412,20 +527,21 @@ def test_the_correct_pairing_still_narrows_and_the_hash_is_why():
     the repair from a silent revert to the whole-query bar.
 
     Withholding everything would pass the mispairing test trivially. What must
-    also hold is that an HONEST assembly still narrows — and that the thing
-    permitting it is the measured one: the script the solver was actually
-    sent, re-emitted from this query's slice, hashes the same.
+    also hold is that an HONEST assembly still narrows — and that the things
+    permitting it are the measured ones: BOTH the script the solver was
+    actually sent and the fingerprint of the slice it came out of, re-derived
+    from this query, reproduce what the invocation recorded.
     """
     from stelling.obligation import DeclinedObligation, slice_obligation
     from stelling.propagate import interval_env
-    from stelling.smt import emit
+    from stelling.smt import emit, slice_fingerprint
 
     closed, _prop, esc = _stamped(_scatter_OFF_the_decided_slice)
     (record,) = [r for r in esc.records if r.outcome == "discharged"]
     sl = slice_obligation(closed, record.index, interval_env(closed))
     assert not isinstance(sl, DeclinedObligation)
     assert record.invocations, "no invocation to check the pairing against"
-    matched = []
+    matched, fingerprinted = [], []
     for stamp in record.invocations:
         opts = dict(stamp.options or ())
         timeout = opts.get(":timeout") or opts.get(":tlimit")
@@ -436,11 +552,18 @@ def test_the_correct_pairing_still_narrows_and_the_hash_is_why():
         )
         matched.append(emit(sl, stamp.name, int(timeout)).sha256
                        == opts.get("smt2_sha256"))
+        fingerprinted.append(slice_fingerprint(sl) == opts.get("slice_sha256"))
     assert all(matched), (
         f"re-emitting this query's own slice does not reproduce the hash the "
         f"invocation recorded ({matched}) — emission is no longer a function "
         f"of (slice, solver, timeout), so the pairing check can never say yes "
         f"and the bar has silently become the whole-query one again"
+    )
+    assert all(fingerprinted), (
+        f"the stamp does not carry this slice's fingerprint ({fingerprinted}) "
+        f"— the second conjunct of `_evidence_is_about` can never say yes, so "
+        f"every correctly-paired verdict on a scatter-bearing query now gets "
+        f"the whole-query bar"
     )
     assert V._evidence_is_about(sl, record.invocations)
     assert not V._evidence_is_about(sl, ()), (
@@ -570,11 +693,27 @@ def test_the_fallback_also_holds_when_the_derivation_RAISES(monkeypatch):
     )
 
 
-# The values a record field of each declared type can be moved to, chosen so
-# that a field whose NON-default value would clear the bar is probed with it.
-# Keyed on the annotation text rather than on the field name, so a field added
-# tomorrow is probed by this test without anybody remembering to list it — and
-# an annotation not in this map is a LOUD failure below, never a silent skip.
+# The values a record field of each declared type can be moved to. Keyed on
+# the annotation text rather than on the field name, so a field added tomorrow
+# is probed by this test without anybody remembering to list it — and an
+# annotation not in this map is a LOUD failure below, never a silent skip.
+#
+# WHAT TWO VALUES BUY DEPENDS ENTIRELY ON THE TYPE, and an earlier version of
+# this comment said they were "chosen so that a field whose NON-default value
+# would clear the bar is probed with it" as though that were true of all of
+# them. For `bool` it is: the two probes EXHAUST the type, so a conjunct on a
+# new bool field is caught whichever way it points — that is how the
+# `audited_clean` mutant this test was rewritten for is caught. For `str`,
+# `int` and the tuples they are a SAMPLE of an unbounded space, and a sample
+# cannot pin a channel. Measured on `eb1ff86`: `audit_token: str = ""` plus
+# `and r.audit_token != "clean"` in the bar's domain is UNKNOWN at both probe
+# values and VERIFIED at `'clean'`, full suite green.
+#
+# So the channel is pinned by `test_the_bars_domain_cannot_read_a_new_field`,
+# which hands the domain a record that HAS no other field; this sweep stays
+# for what it does do — it exercises the whole assembly at each probe value,
+# which the construction test cannot, and it is the loud failure for a field
+# of a type nobody has thought about.
 def _field_probes():
     from stelling.verdict import solver_absent
 
@@ -617,6 +756,16 @@ def test_no_record_field_can_narrow_the_bars_domain():
     from its declared TYPE. A field of a type `_field_probes` does not know
     fails this test loudly, which is the only way an enumeration can stay
     honest about the thing it has not thought of.
+
+    THAT REWRITE MOVED THE ENUMERATION FROM NAMES TO TYPES; IT DID NOT PIN THE
+    CHANNEL, and the difference is measurable. Two probe values exhaust `bool`
+    and merely sample `str`: `audit_token: str = ""` on the record plus
+    `and r.audit_token != "clean"` in the bar's domain is UNKNOWN at both
+    probes and VERIFIED at `'clean'`, with the full suite green. This test
+    still earns its place — it drives the WHOLE assembly at each value, which
+    a construction test cannot — but the channel itself is pinned next door,
+    by `test_the_bars_domain_cannot_read_a_new_field`, which removes the
+    fields rather than guessing their values.
 
     LOAD-BEARING IS EXACTLY `index` AND `outcome`. `invocations` is read by
     `_evidence_is_about`, but only to PERMIT narrowing — every value of it
@@ -689,6 +838,122 @@ def test_no_record_field_can_narrow_the_bars_domain():
         )
 
 
+class _OnlyThreeFields:
+    """A record with `index`, `outcome`, `invocations` AND NOTHING ELSE.
+
+    `__slots__` is the whole mechanism: reading any other attribute raises
+    `AttributeError`, so a conjunct on a field of ANY type — `str`, `int`, a
+    tuple, something not thought of — cannot silently evaluate. This is what
+    an enumeration of probe VALUES cannot do, because `str` has more values
+    than a test can list."""
+
+    __slots__ = ("index", "outcome", "invocations")
+
+    def __init__(self, index, outcome, invocations=()):
+        self.index = index
+        self.outcome = outcome
+        self.invocations = invocations
+
+
+class _JustRecords:
+    __slots__ = ("records",)
+
+    def __init__(self, records):
+        self.records = records
+
+
+def test_the_bars_domain_cannot_read_a_new_field():
+    """PIN THE CHANNEL BY REMOVING IT, not by guessing what would flow down
+    it. The bar's domain is `outcome == OB_DISCHARGED`, keyed by `index`, and
+    carries `invocations` across for the widening check — three fields, and
+    the record it is handed here HAS no fourth.
+
+    THE DEFECT THIS IS FOR IS MEASURED, not imagined. On `eb1ff86`, adding
+    `audit_token: str = ""` to `ObligationEscalation` and
+    `and r.audit_token != "clean"` to the domain filter produced VERIFIED for
+    a record carrying `audit_token='clean'` on the bar's own fixture, with the
+    full suite green — including
+    `test_no_record_field_can_narrow_the_bars_domain`, whose two `str` probes
+    (`''` and `'a value no honest record carries'`) both left the bar firing.
+    Two values exhaust `bool`; they sample `str`.
+
+    Under this test the same conjunct raises `AttributeError` inside
+    `_bar_domain`, which widens to the sentinel rather than returning a
+    domain, and the equality below fails.
+    """
+    from stelling.solvers import OB_DISCHARGED, _bar_domain
+
+    stamps = (V.solver_absent("probe"),)
+    records = (
+        _OnlyThreeFields(0, OB_DISCHARGED, stamps),
+        _OnlyThreeFields(1, "unknown", ()),
+        _OnlyThreeFields(2, OB_DISCHARGED, ()),
+    )
+    domain = _bar_domain(_JustRecords(records))
+    assert domain == {0: stamps, 2: ()}, (
+        f"the bar's domain came back {domain!r} from a record carrying "
+        f"nothing but `index`, `outcome` and `invocations`. Either the "
+        f"domain now reads a fourth field — which is the deleted "
+        f"`barred_on_slice` under another name, whatever its type — or its "
+        f"membership test is no longer `outcome == OB_DISCHARGED`"
+    )
+    # and it is not vacuous: the outcome really is what selects
+    assert _bar_domain(_JustRecords((_OnlyThreeFields(0, "unknown", stamps),))) == {}
+
+
+def test_the_bar_is_consulted_with_exactly_that_domain(monkeypatch):
+    """The surface half: `make_solver_verdict` must hand `_bar_scope` what
+    `_bar_domain` returns and nothing else.
+
+    Without this, the test above pins an invariant at its producer and never
+    at the place it matters — a conjunct written at the CALL SITE rather than
+    inside `_bar_domain` would leave that test green. Checked on the honest
+    assembly and on every `_field_probes` assignment, so a call-site conjunct
+    keyed on any probed value moves the captured domain away from the
+    computed one.
+    """
+    import dataclasses
+
+    from stelling.solvers import _bar_domain, make_solver_verdict
+
+    closed, prop, esc = _stamped(_scatter_ON_the_decided_slice)
+    seen: list = []
+    real = V._bar_scope
+
+    def spy(c, decided):
+        seen.append(decided)
+        return real(c, decided)
+
+    monkeypatch.setattr(V, "_bar_scope", spy)
+
+    probes = _field_probes()
+    load_bearing = {"index", "outcome"}
+    from stelling.solvers import ObligationEscalation
+    fields = [f for f in dataclasses.fields(ObligationEscalation)
+              if f.name not in load_bearing]
+    cases = [esc] + [
+        dataclasses.replace(esc, records=tuple(
+            dataclasses.replace(r, **{f.name: probes[str(f.type)][which]})
+            for r in esc.records
+        ))
+        for f in fields for which in (0, 1)
+    ]
+    for case in cases:
+        seen.clear()
+        make_solver_verdict(closed, prop, case, **VERSIONS)
+        assert len(seen) == 1, (
+            f"the bar was consulted {len(seen)} time(s); a domain that came "
+            f"back empty means some conjunct removed every discharged record "
+            f"from it between `_bar_domain` and the call"
+        )
+        assert seen[0] == _bar_domain(case), (
+            f"`make_solver_verdict` handed the bar {seen[0]!r} where "
+            f"`_bar_domain` returns {_bar_domain(case)!r} — the domain is "
+            f"being filtered at the call site, outside the one place the "
+            f"channel is pinned"
+        )
+
+
 @pytest.mark.parametrize("build,strip,label", [
     (_scatter_ON_the_decided_slice, 0, "the scatter obligation, alone"),
     (_two_solver_decided_obligations, 0, "the scatter obligation, of two"),
@@ -751,6 +1016,47 @@ def test_stripping_invocations_cannot_clear_the_bar(build, strip, label):
         f"{label}: {v.status} — a record kept its discharge and left the "
         f"bar's domain, so `decided` and `discharged` are two predicates "
         f"again"
+    )
+    assert any("VERIFIED withheld" in n for n in v.notes)
+
+
+@pytest.mark.parametrize("invocations,label", [
+    ([], "an empty list"),
+    (None, "None"),
+    (7, "not iterable at all"),
+])
+def test_a_bar_must_never_BREAK_a_verdict_either(invocations, label):
+    """"A bar must never break a verdict" has to cover the whole path FEEDING
+    the bar, and at `eb1ff86` it did not.
+
+    `_bar_scope` wraps its own body in `except Exception`. The read that
+    builds its domain sat OUTSIDE that `try`, in `make_solver_verdict`, and
+    was spelled `decided.get(r.index, ()) + r.invocations` — so a record whose
+    `invocations` is a plain `list` raised `TypeError` out of the public
+    assembly function. `45cf526` tolerated the same record.
+
+    Both directions are required here. A tolerated shape must produce a
+    verdict, and an untolerated one must WIDEN — never raise, and never go
+    quiet, because an empty domain is how "no solver decided anything" is
+    spelled and that silences the bar.
+    """
+    import dataclasses
+
+    from stelling.solvers import make_solver_verdict
+
+    closed, prop, esc = _stamped(_scatter_ON_the_decided_slice)
+    forged = dataclasses.replace(esc, records=tuple(
+        dataclasses.replace(r, invocations=(
+            list(r.invocations) if invocations == [] else invocations
+        ))
+        for r in esc.records
+    ))
+    v = make_solver_verdict(closed, prop, forged, **VERSIONS)
+    assert [o.status for o in v.obligations] == (
+        ["discharged"] * len(v.obligations)
+    ), f"{label}: nothing left to withhold, so this proves nothing"
+    assert v.status == "UNKNOWN", (
+        f"{label}: {v.status} — a record shape the bar cannot read cleared it"
     )
     assert any("VERIFIED withheld" in n for n in v.notes)
 
