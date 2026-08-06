@@ -3280,23 +3280,63 @@ def test_the_budget_cannot_reach_the_SLICE_fingerprint():
     own `:timeout` says nothing about that.
 
     What forbids it is that `slice_sha256` is a function of the SLICE and the
-    budget is not one of its inputs. Both halves are measured here:
+    budget is not one of its inputs. Three halves, and the FIRST is the one
+    neither this test nor the sweep it replaced was making:
 
-    * budget-INVARIANCE — one distinct `slice_sha256` across twelve budgets
-      spanning 1..60000, including `True`, which `isinstance(budget, int)`
-      admits and which is therefore a value a corrupted `_evidence_budget`
-      could actually return;
-    * and that it SEPARATES the bar's own neighbour pair, whose `smt2_sha256`
-      is EQUAL and whose `slice_sha256` differs. That is the case where the
-      script hash cannot tell the two apart, so the fingerprint is the whole of
-      what does.
+    * **STRUCTURAL. `slice_fingerprint` takes the slice and nothing else.**
+      `inspect.signature` is `(sl) -> 'str'`: the budget is not an argument, so
+      there is no value of it to sample. One line, no sampling, and it is the
+      whole claim — everything below is a behavioural cross-check of a fact the
+      signature already settles;
+    * budget-INVARIANCE, measured over the budgets below;
+    * and that the fingerprint SEPARATES the bar's own neighbour pair, whose
+      `smt2_sha256` is EQUAL and whose `slice_sha256` differs. That is the case
+      where the script hash cannot tell the two apart, so the fingerprint is
+      the whole of what does. This half is a real addition the pre-registered
+      sweep did not have, and it is kept for that reason.
 
-    Together those are stronger than any sweep over budgets: if no budget moves
-    `slice_sha256` and the two slices' fingerprints differ, then NO budget —
-    sampled or not — makes one slice's reproduction equal the other's record.
+    **WHAT THE SUBSTITUTION ACTUALLY BOUGHT, stated without the flattery it was
+    offered with.** The pre-registered check was an exhaustive sweep of
+    `1..60000`; this is twelve points. The conclusion holds either way, but
+    "strictly stronger" is not true of it: it is stronger in the GENERALITY of
+    its argument and WEAKER in the sample supporting its premise — twelve
+    points where the sweep was sixty thousand. Nor was the sweep expensive,
+    which was the reason given for dropping it. MEASURED, in this worktree:
+    `1..60000` costs **9.5 s at load average 6.00**, and gives distinct
+    `slice_sha256` **1**, distinct `smt2_sha256` **60000**, empty
+    reproductions **0**, reproductions equal to the neighbour's record **0**.
+    The twelve points are kept because the signature pin above makes the sample
+    a cross-check rather than the argument; the honest statement is that the
+    sample got smaller and the argument got better, not that nothing was given
+    up.
+
+    **AND THE `True` CASE IS PARTLY ARTEFACTUAL.** `isinstance(budget, int)`
+    admits `True`, so `_reproduced_evidence` will emit at it — and what it
+    emits is `(set-option :timeout True)`, a malformed script no solver
+    accepts. But `_evidence_budget` CANNOT return a bool: it returns
+    `int(text)`, and `int` never yields one (measured:
+    `{type(int(s)) is bool for s in ('0','1','2','-1')} == {False}`; a recorded
+    `True` comes back as `1`). So a `True` reaching here needs `int` itself
+    corrupted, which is outside every rule in this file — the row is kept as
+    the boundary of `isinstance`'s admission, and it is labelled as that rather
+    than as a value the zone can produce.
     """
+    import inspect
+
     from stelling.obligation import DeclinedObligation, slice_obligation
     from stelling.propagate import interval_env
+    from stelling.smt import slice_fingerprint
+
+    # THE STRUCTURAL HALF, and the strongest statement available: the budget is
+    # not an argument, so no sweep over it can be the argument either.
+    assert list(inspect.signature(slice_fingerprint).parameters) == ["sl"], (
+        f"`slice_fingerprint` now takes "
+        f"{list(inspect.signature(slice_fingerprint).parameters)}. The bound "
+        f"on `_evidence_budget` is that the budget cannot REACH the slice "
+        f"fingerprint; a second parameter is that bound gone, whatever the "
+        f"body then does with it, and every behavioural row below becomes a "
+        f"sample of a space that no longer has one point"
+    )
 
     budgets = (1, 2, 10, 999, 20000, 20001, 29999, 30000, 31337, 60000,
                True, 4294967295)
@@ -3361,10 +3401,43 @@ def test_the_budget_cannot_reach_the_SLICE_fingerprint():
 #
 # THE SENTENCE THAT USED TO END THAT PARAGRAPH — "and an equality on any round
 # or memorable number is hit" — IS FALSE, and was measured false. 30000 is not
-# in this tuple, and neither are 2000, 15000, 25000, 50000 or 60000.
+# in this tuple, and neither are 2000, 15000, 25000 or 50000.
 # Corruption 8a keyed on "30000" is 0 RED in this file; the IDENTICAL
 # corruption keyed on "31337", which is in the tuple, is 2 RED. The only
 # difference is the constant. Both measurements are in the block comment above.
+#
+# **FOUR OF THE VALUES THAT LIST NAMED ARE LIVE SOLVER BUDGETS, AND THE REASON
+# IS THE BLINDNESS THE THREE LINES ABOVE JUST CORRECTED FOR 30000.** "Not in
+# this tuple" is true of every one of them; "therefore unsampled" is false of
+# four. `60_000` drives a solver at eight sites —
+# `tests/test_dropped_assume.py:65,104,120,127`,
+# `tests/test_membership_idiom_hint.py:864,866`,
+# `tests/test_reproduce_acceptance.py:70`,
+# `tests/test_square_acceptance_jaxfluids.py:62` — and `60000` is in
+# `test_the_budget_cannot_reach_the_SLICE_fingerprint`'s own sweep. `2000` is a
+# budget at about twenty sites and `15000` at
+# `tests/test_array_emission.py:1391`; only 25000 and 50000 are genuinely
+# undriven. 60000 and 30000 read as absent because `grep -rn '60000'` finds
+# only prose: the sites spell them with an underscore. The same trap in the
+# other direction is three lines below, where `_CALLER_BUDGETS` ends
+# `2 ** 31 - 1` and a grep for `2147483647` finds four unrelated files and not
+# this tuple.
+#
+# NOT A CURIOSITY, AND MEASURED TREE-WIDE: 542 numeric instances in `src/` and
+# `tests/` are spelled in a form that a digit-grep for their own value misses,
+# across 136 distinct forms — 331 COMPUTED (`2 ** 31 - 1`, `-(2**53)`,
+# `2.0**-1022`), 157 EXPONENT (`1e300`), 53 underscore, 1 other, and zero hex,
+# octal or binary. Underscore is the SMALL part; the reflex of grepping digits
+# is wrong by an order of magnitude, not by a rounding error.
+#     The census that produced
+#     these figures walks `ast` over `src/` and `tests/`; the CLAIM about
+#     unsampled budgets is pinned by `test_the_claim_about_unsampled_budgets_reads_the_AST` below.
+#
+# So the claim is PINNED rather than restated: the test below derives, from the
+# AST of every test module, which of the values named here is actually used as
+# a solver budget anywhere in the suite. A sentence about what the suite does
+# not sample is a claim about the suite, and this file's own history is that
+# such claims drift.
 #
 # THE TUPLE IS NOT WIDENED IN RESPONSE, and that is the point rather than an
 # omission. Adding 30000 would answer a demonstration with the reflex this
@@ -3385,6 +3458,162 @@ _CALLER_BUDGETS = (
     1, 9, 10, 99, 100, 999, 1000, 5000, 9999, 10000, 12345, 20000, 20001,
     31337, 65535, 99999, 100000, 999999, 1000000, 2 ** 31 - 1,
 )
+
+# The values the comment above names as OUTSIDE this tuple, split by whether
+# the SUITE drives a solver at them anywhere else. Derived from the AST below,
+# not from a grep — `60_000` and `30_000` are why, and the split is not the one
+# the sentence implied: FOUR of the six are live solver budgets in this tree.
+_NOT_IN_THE_TUPLE = (2000, 15000, 25000, 30000, 50000, 60000)
+_DRIVEN_ELSEWHERE = (2000, 15000, 30000, 60000)
+
+# How a solver budget is spelled at a call site. Enumerated because the census
+# below has to be about BUDGETS rather than about every number in the tree —
+# 50000 appears in `test_three_rows_acceptance.py` as `... * 100000 + 50000`,
+# which is a fixture's arithmetic and not a timeout.
+_BUDGET_KEYWORDS = ("timeout_ms", "solver_timeout_ms")
+_BUDGET_EMITTERS = ("emit", "_emit")
+
+
+def _numeric_values(tree):
+    """Every numeric value a module's source names, INCLUDING the ones a
+    digit-grep cannot see: `60_000`, `1e2`, `2 ** 31 - 1`.
+
+    Constant-folded off the AST, so the underscore, the exponent and the
+    arithmetic are all just spellings. `ast.literal_eval` is not enough — it
+    refuses `**` — so a numeric subtree is compiled with an empty builtins
+    namespace after being checked to contain nothing but numeric constants and
+    arithmetic operators."""
+    import ast
+
+    ops = (ast.BinOp, ast.UnaryOp, ast.operator, ast.unaryop,
+           ast.expr_context)
+    out = set()
+
+    def numeric(node):
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Constant):
+                if type(sub.value) not in (int, float):
+                    return False
+            elif not isinstance(sub, ops):
+                return False
+        return True
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            out.add(node.value)
+        elif isinstance(node, (ast.BinOp, ast.UnaryOp)) and numeric(node):
+            try:
+                value = eval(  # noqa: S307 — arithmetic over checked constants
+                    compile(ast.Expression(node), "<census>", "eval"),
+                    {"__builtins__": {}}, {})
+            except Exception:  # noqa: BLE001
+                continue
+            if type(value) in (int, float):
+                out.add(value)
+    return out
+
+
+def _budget_values(tree):
+    """Every numeric value this module hands a solver as a BUDGET.
+
+    Three spellings, because a census of "every number" would answer a
+    different question: `timeout_ms=`/`solver_timeout_ms=` keywords, an
+    assignment to a name spelling TIMEOUT, and `emit(slice, flavour, budget)`'s
+    third positional argument."""
+    import ast
+
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg in _BUDGET_KEYWORDS:
+            out |= _numeric_values(node.value)
+        elif isinstance(node, ast.Assign):
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if any("TIMEOUT" in n.upper() for n in names):
+                out |= _numeric_values(node.value)
+        elif isinstance(node, ast.Call):
+            name = getattr(node.func, "attr", getattr(node.func, "id", None))
+            if name in _BUDGET_EMITTERS and len(node.args) >= 3:
+                out |= _numeric_values(node.args[2])
+    return out
+
+
+def test_the_claim_about_unsampled_budgets_reads_the_AST():
+    """THE SAME GREP BLINDNESS THE BLOCK ABOVE JUST CORRECTED, THREE LINES
+    BELOW THE CORRECTION.
+
+    `_CALLER_BUDGETS`' comment named 30000 as absent from the tuple and then
+    listed "2000, 15000, 25000, 50000 or 60000" beside it — read, and written,
+    as a list of values the suite does not drive a solver at. **Four of the six
+    are live solver budgets in this tree**, and one of them is the value the
+    correction three lines above was about:
+
+        2000    ~20 sites, `SolverConfig(timeout_ms=2000)`
+        15000   `tests/test_array_emission.py:1391`, `_emit(…, "z3", 15000)`
+        30000   `30_000`, already corrected in `SOUNDNESS.md`
+        60000   `60_000`, eight sites, plus this file's own fingerprint sweep
+
+    `60_000` and `30_000` read as absent because `grep -rn '60000'` returns
+    only prose: the sites spell them with an underscore, and `grep` is a text
+    tool. 25000 and 50000 really are unreached as budgets — 50000 is in
+    `tests/test_three_rows_acceptance.py` as `… * 100000 + 50000`, a fixture's
+    arithmetic, which is why this census reads BUDGET POSITIONS rather than
+    every number.
+
+    So the claim is derived instead of restated, off the AST of every test
+    module, with `60_000`, `1e2` and `2 ** 31 - 1` all folded to their values.
+    A sentence about what a suite does not sample is a claim about the suite,
+    and it goes stale the moment someone writes the value in a form the
+    sentence's author would not have grepped for.
+
+    NOT A SPELL-CHECK OF THE COMMENT, and the difference matters: this reads
+    the VALUES, so it stays true when the prose is rewritten and fails when the
+    suite changes under it — which is the direction that matters.
+    """
+    import ast
+    from pathlib import Path
+
+    here = Path(__file__).resolve().parent
+    budgets = set()
+    for path in sorted(here.glob("test_*.py")):
+        budgets |= _budget_values(ast.parse(
+            path.read_text(encoding="utf-8")))
+    assert len(budgets) >= 10, (
+        f"the budget census found only {sorted(budgets)}; the spellings in "
+        f"`_BUDGET_KEYWORDS`/`_BUDGET_EMITTERS` have stopped matching how this "
+        f"suite drives a solver, and every row below would then be vacuous"
+    )
+
+    for value in _NOT_IN_THE_TUPLE:
+        assert value not in _CALLER_BUDGETS, (
+            f"{value} IS in `_CALLER_BUDGETS` now, so the comment above it "
+            f"says something false about its own tuple"
+        )
+    for value in _DRIVEN_ELSEWHERE:
+        assert value in budgets, (
+            f"{value} is named as DRIVEN elsewhere in the suite and is no "
+            f"longer a solver budget anywhere in `tests/`. If the site went "
+            f"away, the comment above `_CALLER_BUDGETS` is claiming a "
+            f"corroboration it no longer has"
+        )
+    unreached = [v for v in _NOT_IN_THE_TUPLE if v not in _DRIVEN_ELSEWHERE]
+    still = [v for v in unreached if v in budgets]
+    assert not still, (
+        f"{still} are named as unsampled by the suite and are now driven by "
+        f"it. That is the `60_000` defect exactly: the value entered the tree "
+        f"in a spelling a digit-grep does not find, and the sentence claiming "
+        f"it is unsampled stayed"
+    )
+    # ... and the reader is not a grep: it must see every spelling that
+    # defeated one. Measured tree-wide at this commit: 542 numeric instances in
+    # `src/` and `tests/` are written in a form a digit-grep for their own
+    # value misses — 331 computed, 157 exponent, 53 underscore, 0 hex/octal.
+    folded = _numeric_values(ast.parse(
+        "A = 60_000\nB = 1e2\nC = 2 ** 31 - 1\nD = -(2**53)\nE = 0x10\n"))
+    for value in (60000, 100.0, 2147483647, -9007199254740992, 16):
+        assert value in folded, (
+            f"the AST reader misses {value}; it is a grep with more steps, "
+            f"and the blindness this test exists for is still open"
+        )
 
 
 def _stamp_recording(sliced, flavour, key, budget):
