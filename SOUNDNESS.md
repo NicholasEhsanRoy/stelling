@@ -1209,4 +1209,113 @@ verdicts:
     line number, because a line number in this file is a claim that goes
     stale on the next edit, which is this file's own subject.
 
+- **2026-08-06 (pre-release): the two scatter rows now DECLINE outside the
+  space they are gauged on, and the bar gained a seventh closed channel.**
+  A blinded audit of the previous entry's repairs, answered here.
+  **What changed — the one item that MOVES VERDICTS.** The SET and ADD route
+  sweeps are exhaustive over a space and blind one step past it, and two
+  more line-neutral corruptions were measured living in that step, each a
+  `violated-witness` turned `discharged` (a MISSED violation) with the full
+  suite green in both columns: `i == (k if n != 9 else 0)` in
+  `_scatter_set_plan`, where the sweep exhausts n ≤ 8; and
+  `groups[(k if operand_shape[0] < 4 else 0) * rowsz + t]` in
+  `_scatter_add_plan`, where the sweep's dims stop at 3 so no axis of length
+  ≥ 4 exists in it — and where the non-degeneracy clause was on `rowsz`, the
+  TRAILING product, which structurally cannot see a leading-axis-keyed
+  corruption. This is the FIFTH instance of one pattern in this repository
+  (a route gauge sampling k = {0} then {0,2}; field probes by name then by
+  type; an arity family widened 2 → 3 → 8, where the escape sat at exactly
+  the declared ceiling), and raising the bound has now failed four times.
+  So the bounds are not raised: **admission is narrowed to the gauged
+  space.** `stelling.obligation` declines a SET operand longer than 8 and a
+  scatter-add operand outside rank ≤ 3 / every axis ≤ 3 / ≤ 12 elements, and
+  `tests/test_scatter_gauge_jax.py` pins the two spaces EQUAL in both
+  directions, so widening admission without widening the sweep is red. The
+  corrupted branches are then unreachable rather than uncaught — measured:
+  with both corruptions applied on top of this change, n = 9 and (4,2) come
+  back `unknown`, and with the guard removed they come back `discharged`
+  again. The interval TRANSFER is untouched; only the emission/slicing face
+  declines.
+  **Which prior verdicts are retroactively invalid: none, and this is not
+  an unsoundness fix.** Nothing that was VERIFIED becomes REFUTED or vice
+  versa. What changes is that some obligations that used to be ANSWERED are
+  now UNDECIDED: past those bounds a solver-path `discharged` and a
+  `violated-witness` both become `unknown`, so the verdict becomes UNKNOWN.
+  A verdict that moves to UNKNOWN is still a verdict move under this file's
+  policy, so it is logged. It costs REFUTATIONS as well as discharges, which
+  is stated rather than buried:
+  `test_a_shape_past_the_gauge_costs_the_ANSWER_and_never_the_SOUNDNESS`
+  pins exactly that at n = 8 versus n = 9. Blast radius inside this
+  repository is ZERO, measured rather than assumed — a census of every
+  operand shape reaching either row across the whole suite finds SET at
+  1..8 (plus one (200,) that already declined on the int8 index-dtype rule)
+  and ADD entirely inside rank 3 / dim 3 / 12 elements.
+  **What to re-run:** any recorded verdict over a harness that writes
+  `x.at[k].set(v)` on an axis longer than 8, or `x.at[k].add(u)` /
+  `jax.ops.segment_sum` on an operand outside rank ≤ 3 / dim ≤ 3 / 12
+  elements, AND whose obligations were decided by the SOLVER rather than by
+  intervals. Those verdicts are not wrong, but this build will return
+  UNKNOWN where they returned an answer, and the difference is a disclosure
+  about what was gauged rather than a correction. Verdicts whose
+  obligations intervals settled are unaffected — the transfer is untouched.
+  **Affected versions:** 0.1.0 pre-release only; branch-only, nothing
+  released. Both corruptions are reachable on every build in this
+  repository's history through `e35de13`.
+  **Three further items this pass, none of them verdict-moving:**
+  **(1)** A SEVENTH certify-itself channel, and the first that needs no
+  forged record at all: a conjunct on the **VALUE** of a whitelisted option
+  key, driven by a public keyword argument. `solver_timeout_ms` is carried
+  verbatim into the stamp as `:timeout`; `:timeout` must be in
+  `_EVIDENCE_OPTION_KEYS` (the budget is part of the emitted text and
+  therefore part of the hash the narrowing compares); and nothing
+  constrained what the decision did with a whitelisted key's value.
+  Measured: `check(..., solver_timeout_ms=31337)` returned VERIFIED with no
+  note where 20000 returns UNKNOWN, with the full suite byte-identical in
+  both columns. The read ledger missed it because it attributed the read to
+  the PROJECTION HELPER rather than to the function that asked, so calling
+  the permitted projection from `_bar_scope` logged an already-permitted
+  pair. Closed by two anti-correlated mechanisms: the ledger now attributes
+  an `options` read to the function that ASKED (and the source scan forbids
+  the projection CALL outside the one permitted reader), and the bar's
+  answer is pinned INVARIANT under every caller-settable option value over
+  seven orders of magnitude. Four spellings are red, and the split is the
+  evidence: three are caught by both mechanisms, and one — the same
+  conjunct written inside the permitted reader — by the property pin alone.
+  **(2)** The previous entry's item (3) recorded that ordering the bar's
+  domain first meant "a degenerate `records` costs the discharges rather
+  than the bar". Measured, that is broader than it reads, and the ordering
+  was not the whole closure either. On a SCATTER-FREE query — one the bar
+  never touches — a one-shot `records` turned an honest VERIFIED into
+  UNKNOWN, carrying the generic undecided-cause note, which attributes the
+  UNKNOWN to an interval straddle: a wrong explanation rather than silence.
+  And a TWO-FACED `records` (empty on the first pass, real on every later
+  one) showed the bar an honest-empty domain and the obligation loop a full
+  set of discharging records — VERIFIED, no withheld note, on the bar's own
+  fixture, which ordering cannot see. Both close with ONE PASS over
+  `records`, taken at the top of assembly: a degenerate `records` now
+  behaves exactly like the tuple it yields. Ordering is kept as a
+  now-redundant second mechanism and the comment says so, because a
+  mutation of the ordering alone is inert.
+  **(3)** `Escalation.query_sha256`'s docstring said the pairing gate
+  refuses an empty hash "too". It did not, in the one case where it
+  matters: both legs come from `_query_sha256`, which returns `""` when
+  `ClosedJaxpr.content_hash()` raises, so an unhashable query and an
+  unrecorded escalation compared EQUAL and the gate passed. The refusal
+  came from `Stamp.__post_init__` one layer later. The gate now refuses an
+  empty hash on either leg, so the sentence is true where it stands, and
+  both docstrings say where the refusal happens and that they were wrong
+  before. Also stated correctly and left alone: `carries_work == False`
+  bypasses the gate entirely, and an inert escalation contributes nothing
+  (measured UNKNOWN off the propagation alone).
+  At this pass: 2055 passed, 2 skipped with both solvers, jax and maddening
+  installed; 2051 passed, 6 skipped under CI's install set
+  (`.[solvers,jax]`, no maddening). Before it: 2044 / 2 and 2040 / 6.
+  **What this pass did NOT close, named rather than left implied:** the ADD
+  row's INDEX COLUMN LENGTH. `_add_space` sweeps a single written index,
+  while `jax.ops.segment_sum` reaches an index column of 4 on an operand
+  the new bounds admit; that axis is gauged by a mutation battery rather
+  than by an exhaustive sweep, and admission is not narrowed to it. A
+  corruption keyed on the index column's length would be the sixth instance
+  of the pattern above.
+
 *(no releases yet)*

@@ -46,6 +46,30 @@ transfer-side figures are a different population at a different date and are
 not restated here. `docs/supported-primitives.md` is generated from the live
 registries and is the current count of both.
 
+## "Gauged" is a claim about a SPACE, not about a row
+
+A row is gauged over the shapes something measured it on, and a sweep is blind
+one step past its bound. This project has now measured five corruptions living
+in that step — two of them in the scatter rows, each a `violated-witness`
+turned `discharged` with the whole suite green in both columns, and each
+keyed on a shape the sweep does not contain (a SET axis of 9, an ADD leading
+axis of 4). Raising the bound has failed four times; the fourth escape sat at
+exactly the newly declared ceiling.
+
+So for these two rows the table's **yes** now means something stricter than
+"a sweep exists": the ADMITTED space equals the GAUGED space. The static-index
+`scatter` SET row declines an operand axis longer than 8, and the
+`scatter-add` accumulate row declines an operand outside rank ≤ 3 / every axis
+≤ 3 / at most 12 elements, with `tests/test_scatter_gauge_jax.py` pinning the
+source bounds equal to the sweep's in both directions. Past those bounds the
+rows do not run ungauged — they refuse, and the obligation comes back
+`unknown`. That costs answers (see `SOUNDNESS.md`, 2026-08-06) and it is the
+only reading of **yes** that a bounded sweep can honestly support.
+
+The bound guards the SHAPE space and not the ADD row's index-column length:
+`jax.ops.segment_sum` reaches a column of 4 on an operand these bounds admit,
+and that axis is gauged by a mutation battery rather than an exhaustive sweep.
+
 ## What this table says that the earlier numbers did not
 
 - **"35 of 39 transfers gauged, zero survivors"** was a *transfer-face* figure.
