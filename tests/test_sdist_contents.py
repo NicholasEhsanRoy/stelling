@@ -62,6 +62,14 @@ WITHHELD = {
         "internal release working document, deliberately untracked — this is the "
         "file whose leak motivated the allowlist"
     ),
+    "scratchpad": (
+        "per-session working directory: the pre-registration a repair pass "
+        "writes before it measures anything. It is a record of what was "
+        "PREDICTED, so it is kept in the tree it registers AGAINST — a "
+        "registration a reader cannot reach from the repository it constrains "
+        "is not a registration — and it is not distributed, because an sdist "
+        "is the library and not its audit trail"
+    ),
     "dist": "build output",
     "build": "build output",
     ".venv": "local environment",
