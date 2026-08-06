@@ -1029,5 +1029,14 @@ verdicts:
   an unreadable escalation widens to the whole-query set rather than
   raising or silencing the bar. `45cf526` tolerated the same record, so
   this is a regression the branch introduced and the branch removes.
+  At this pass: 2035 passed, 2 skipped with both solvers, jax and maddening
+  installed; 2031 passed, 6 skipped under CI's install set (`.[solvers,jax]`,
+  no maddening). Before it: 2012 / 2 and 2008 / 6. The 23 added tests are the
+  collision measurement and its two mispairing parametrisations, the
+  `_bar_scope`-level widening, the false-VERIFIED regression, the documented
+  scoping LIMIT, the domain-channel pair, the three `invocations`-shape pins,
+  the four-behaviour stray-index pin, the fingerprint-walk parity over five
+  nesting shapes plus its old-accessor control, and the SET plan's per-k
+  sweep at four axis lengths with its escalation-surface twin.
 
 *(no releases yet)*
