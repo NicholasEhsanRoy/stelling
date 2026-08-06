@@ -1245,8 +1245,10 @@ verdicts:
   policy, so it is logged. It costs REFUTATIONS as well as discharges, which
   is stated rather than buried:
   `test_a_shape_past_the_gauge_costs_the_ANSWER_and_never_the_SOUNDNESS`
-  pins exactly that at n = 8 versus n = 9. Blast radius inside this
-  repository is ZERO, measured rather than assumed — a census of every
+  pins exactly that at n = 8 versus n = 9. Blast radius across the
+  PYTEST-DRIVEN TREE is ZERO, measured rather than assumed (the scope is the
+  instrument's — see the next entry's item on what a census of the suite can
+  and cannot reach) — a census of every
   operand shape reaching either row across the whole suite finds SET at
   1..8 (plus one (200,) that already declined on the int8 index-dtype rule)
   and ADD entirely inside rank 3 / dim 3 / 12 elements.
@@ -1350,11 +1352,30 @@ verdicts:
   unsoundness fix.** Nothing that was VERIFIED becomes REFUTED or vice versa.
   As with the shape bounds, obligations past the column bound move from
   ANSWERED to UNDECIDED, which is a verdict move to UNKNOWN and is logged as
-  one. It costs REFUTATIONS as well as discharges. Blast radius inside this
-  repository is ZERO, measured rather than assumed: the census above is the
-  evidence, and a RE-census after the guard finds nothing reaching the row
-  outside the gauged column space — 821 distinct `(|ks|, distinct, shape)`
-  keys over 2675 calls, zero of them outside. The support itself is no longer
+  one. It costs REFUTATIONS as well as discharges. Blast radius **across the
+  PYTEST-DRIVEN TREE** is ZERO, measured rather than assumed — and the scope
+  is stated because it is the instrument's, not the repository's: the census
+  above is the evidence, and a RE-census after the guard finds nothing
+  reaching the row outside the gauged column space — 821 distinct
+  `(|ks|, distinct, shape)` keys over 2675 calls, zero of them outside. What
+  the instrument could not see is anything pytest does not run. `corpus/`'s
+  scripts are driven by hand; `corpus/run_census.py` in particular imports
+  only `stelling.census` and `stelling._jax_compat` and walks jaxprs to
+  classify primitives, so it never reaches the accumulate row at all — checked
+  rather than assumed, and stated either way.
+  **AND THE PATTERN MOST LIKELY TO MEET THE BOUND IS NAMED**, because a
+  narrowing whose cost is given only in the abstract is given in the abstract.
+  `tests/test_scatter_gauge_jax.py`'s own header lists "a small normal-matrix
+  assembly in the segment_sum style" among the programs this file exists to
+  gauge, and that assembly's natural spelling — `jax.ops.segment_sum` over
+  per-point (2, 2) blocks, i.e. a RANK-3 operand with an index column longer
+  than one — is exactly what now declines. Measured on that file's own
+  `m-assembly` fixture at its own declared shapes: the slicing face refuses
+  with *"'scatter-add' index column of 3 element(s) on operand (2, 2, 2) is
+  outside the GAUGED accumulate column space"*, while the SAME accumulation
+  flattened to a rank-1 operand is admitted. It costs no test here because the
+  in-tree `m-assembly` cases are settled by the interval transfer and never
+  reach the row; a downstream harness that escalates one gets UNKNOWN. The support itself is no longer
   `{1, 2, 3, 4, 6, 254, 255}` and is not claimed to be: the new sweep drives
   the row at every length in the gauged space, which is what "gauged" now
   means. Outside the gauge file the row is still reached only at
@@ -1392,7 +1413,13 @@ verdicts:
   is handed no record, so neither can compute the mapping a false narrowing
   would have to produce); and the reproduction is built by
   `Script.stamp_options`, the same derivation the record is built from,
-  pinned by substitution rather than by two readings agreeing. What is left
+  pinned by substitution rather than by two readings agreeing.
+  *(THE TWO CLAIMS IN THAT SENTENCE ARE BOTH CORRECTED BY THE NEXT ENTRY, and
+  the wording is left standing because a log that edits itself is not one. The
+  four lines call a FIFTH function, which was in no enumeration anywhere, and
+  a signature says what a function is HANDED rather than what it can REACH;
+  and "pinned by substitution" constrains the substituted function's behaviour
+  not at all. Both were measured live.)* What is left
   is pinned TOTALLY over the source rather than sampled over values: no
   string OR numeric literal outside the read ledger's own attribute names, no
   comparison against a literal, no `global`/`globals()` smuggling. Six
@@ -1440,5 +1467,151 @@ verdicts:
   coherence gate does not see a `records` whose first pass yields a non-empty
   strict subset; and the ADD row's column sweep stops at rank 1, so a
   multi-index column above rank 1 is DECLINED rather than gauged.
+
+- **2026-08-06 (pre-release): the value zone is closed under CALL, and three
+  checks that were satisfied by TEXT rather than by code.** A blinded audit of
+  the entry above, answered here. **No item in this entry moves a verdict**:
+  nothing that was VERIFIED, REFUTED or UNKNOWN changes status, no bound moves,
+  no numeric constant changes, and the scatter bar is where it was. What
+  changes is what the tree can be corrupted into saying, and what four of its
+  own sentences claimed.
+  **Which prior verdicts are retroactively invalid: none.** **Affected
+  versions:** 0.1.0 pre-release only; branch-only, nothing released.
+  **What to re-run:** nothing. The one behavioural change is the WORDING of the
+  cause note on an UNKNOWN whose escalation arrived incomplete; no verdict, no
+  obligation status and no bar decision moves.
+  **(1) THE VALUE ZONE WAS NOT CLOSED UNDER CALL, and the repair that closed
+  channel 8 is what opened this.** That repair split the narrowing into a value
+  zone of four named functions, pinned their source TOTALLY, and pinned the two
+  halves' signatures so that "neither can AIM". It also added a fifth function,
+  `_whitelisted`, called once per SIDE of `recorded == reproduced` — and that
+  one was in no enumeration anywhere: not in the four names the source pin
+  parsed, not in the read ledger's transparent frames (it is handed a plain
+  `dict` and reads no attribute, so the ledger never sees it at all), not among
+  the five functions the one-place scan reads. Four line-neutral corruptions,
+  each MEASURED LIVE at `faefc48` with the full suite byte-identical to
+  unmutated (2064 passed / 2 skipped), each turning the bar's fallback into a
+  narrowing on a MISPAIRED assembly at exactly one budget while every other
+  budget falls back:
+  a module-level `list` stashed in `_whitelisted` and returned on the second
+  call — no `global` statement, no `globals()`, no literal in either pinned
+  function, and NEITHER pinned signature touched; a DEFAULT ARGUMENT on
+  `_evidence_reproduces`, which `_fn_body_ast` never walked (`tree.body[0].
+  body` is the body and nothing else); a SEVENTH module-level helper called
+  from the zone, which the six-name pin does not parse; and a conjunct inside
+  `stelling.smt.Script.stamp_options`. Two further spellings the audit did not
+  name are also live: a module-level `dict` written in `_whitelisted` and read
+  in `_reproduced_evidence`, and a MUTABLE DEFAULT on `_whitelisted`, which
+  introduces no module-level name at all.
+  **The repair is the CLASS, not the six spellings.** The value zone is no
+  longer a tuple of names; it is DERIVED as the transitive closure, over the
+  compiled code objects, of every module-level name of `stelling.verdict` that
+  `_evidence_reproduces` can reach — and the same for the DECISION from
+  `_bar_scope`. Every rule runs over the derived set, so a helper on the path
+  is inside the pin the moment it is written; every module-level name either
+  closure reads must be enumerated AND immutable (a `frozenset` or a `tuple`
+  cannot carry a value from one call to the next, which is the whole of what
+  the stash needed); default arguments are forbidden in both closures and the
+  signature is scanned by the literal rules; and the closures may import only a
+  named list, because a function-level import binds a LOCAL and is invisible to
+  the closure walk. All six mutants are RED, each to one of those three general
+  rules and none to a rule written for it.
+  **(2) "PINNED BY SUBSTITUTION RATHER THAN BY TWO READINGS AGREEING" DOES NOT
+  CONSTRAIN THE SUBSTITUTED FUNCTION AT ALL.** `_reproduced_evidence` claimed
+  that corrupting `Script.stamp_options` "corrupts EMISSION — which the
+  byte-level emission tests hold". It does not: `stamp_options` appends
+  `set-logic`/`smt2_sha256`/`slice_sha256` to an ALREADY EMITTED `Script` and
+  contributes not one byte to `Script.text`, so the scripts real solvers answer
+  about are byte-identical either way. Measured: a conjunct there leaves
+  `tests/test_smt_emission.py` and `tests/test_verified_bar.py` both fully
+  green, because the substitution test only checks that a DIFFERENT
+  `stamp_options` MOVES the answer and never that the honest one is honest. The
+  claim is corrected and the honest OUTPUT is now pinned twice — structurally
+  (one `return`, no branch, no comparison, no call) and behaviourally (the
+  exact tuple, against an expectation re-derived from the script's own TEXT and
+  SLICE). One incidental correction with it: 30000 IS reached in this tree —
+  `tests/test_solver_acceptance.py` runs at `SolverConfig(timeout_ms=30_000)`,
+  spelled with an underscore — so the `stamp_options` conjunct keyed there is
+  1 RED. Re-keyed one millisecond away it is 0 RED across the whole suite. The
+  budget SWEEP still does not sample it, which is the claim that mattered.
+  **(3) `_evidence_budget`'s BOUND HOLDS, AND THE ARGUMENT FOR IT DID NOT.**
+  The docstring said: the recorded budget is itself in the compared set, so a
+  wrong budget puts a wrong `:timeout` in the reproduction, the equality fails,
+  the bar widens. Every step is true and it is an argument about an HONEST
+  record — it says a wrong budget disagrees with the budget THIS record names.
+  What actually forbids a mispaired narrowing is that the budget cannot reach
+  `slice_sha256` AT ALL: measured invariant over twelve budgets spanning
+  1..60000 including `True` (which `isinstance(budget, int)` admits), while
+  `smt2_sha256` moves at every one of them; and the bar's own neighbour pair
+  has EQUAL `smt2_sha256` and DIFFERENT `slice_sha256`. Those two together are
+  stronger than any sweep: no budget, sampled or not, can turn one slice's
+  reproduction into another slice's record.
+  **(4) THE COHERENCE GATE'S RESIDUE VIOLATED THE GATE'S OWN JUSTIFICATION.**
+  That justification is that absorbing a degenerate `records` produced "an
+  UNKNOWN carrying a WRONG EXPLANATION … worse than silence, because a reader
+  believes it". Measured at `faefc48` on a SCATTER-FREE query with two
+  solver-decided obligations and a `records` whose first pass is a non-empty
+  strict subset: honest VERIFIED, observed UNKNOWN, carrying verbatim "…the
+  propagated interval straddling the asserted bound". The residue is
+  soundness-harmless (a dropped record leaves its obligation `unknown`, which
+  can never mint VERIFIED) and is still NOT refused — the comparison that would
+  refuse it also refuses a deliberate probe of a different invariant. It is
+  CLASSIFIED instead: the ledger witnesses invoked runs the records do not
+  account for, and the note says the outcome did not arrive. Statuses,
+  verdicts and bar decisions are unchanged; only the sentence moves.
+  **(5) THE CITATION CHECK WAS FALSELY SATISFIABLE, and not only by globs.**
+  `f"def {name}(" in body` is a raw substring test over file TEXT. Measured at
+  `faefc48`: the cited family renamed away is 1 failed (not vacuous), but the
+  family gone with one `# def test_…(` COMMENT left behind is 1 PASSED, the
+  exact citation's own `def` commented out is 1 PASSED, and the `def` gone with
+  only a string-literal mention left is 1 PASSED. Commenting a test out is how
+  a test most often stops existing. Resolved by `ast.parse` + `FunctionDef`
+  names, which is equally independent of collection — the reason the docstring
+  gave for avoiding collection — and all three rows are now RED.
+  **(6) THE CENSUS PROSE CARRIED MORE RESTATEMENTS THAN IT READ.** The drift
+  test read three sentences and its docstring said "four places for three
+  quantities". A search of the flattened source finds eight, and the five it
+  did not read were each 0 RED at `faefc48`, perturbed one at a time: "the
+  admission gate drives … of them", "The other … are NOT driven here", "the
+  row's … decline sites", `f"says … over …"`, and "`_scatter_set_plan` has …
+  `raise _Decline`" in two places. All eight are read now, one of them against
+  a DERIVED difference rather than a fourth quantity; the source is flattened
+  first, because four of the five were unread partly because they are split
+  across two string literals or two comment lines; and the anti-vacuity control
+  perturbs ONE capture group of ONE match at a time, where
+  `text.replace(right, wrong)` rewrote every occurrence at once and so could
+  never see the gap. The residue is named: a NINTH restatement, written later
+  and not added to the list, is still not read — a general number-word scan was
+  measured at 24 occurrences of which 18 are about something else.
+  **(7) TWO RECORD CORRECTIONS, both re-derived.** The previous pass's
+  "+9 tests, 0 removed" is false: the collected-id diff `3e107cf..faefc48` is
+  **10 added and 1 removed** (`test_a_TWO_FACED_records_cannot_show_the_bar_
+  one_thing_and_the_loop_ANOTHER`, whose direct successor is the parametrised
+  refusal test, so no coverage is lost — the statement is what was wrong). And
+  "exactly three integers moved in `tests/`" does not reproduce: per-file
+  multisets of numeric literals across all four commits give **0 removed and
+  112 added in `tests/`** (105 `int`, 7 `float`) and **0 removed and 5 added in
+  `src/`**. Zero literals changed value anywhere, which is STRONGER than the
+  claim it replaces.
+  **(8) THE CAPABILITY CLAIM IS SCOPED TO WHAT WAS MEASURED**, and the pattern
+  most likely to meet the bound is named — see the entry above, which now says
+  "across the PYTEST-DRIVEN TREE", records that `corpus/run_census.py` never
+  reaches the row, and states that the gauge file's own `m-assembly` fixture,
+  at its own declared shapes, DECLINES through the slicing face while the same
+  accumulation flattened to rank 1 is admitted.
+  At this pass: 2068 passed, 2 skipped with both solvers, jax and
+  maddening installed; 2064 passed, 6 skipped under CI's install set
+  (`.[solvers,jax]`, no maddening). Before it: 2064 / 2 and 2060 / 6.
+  **What this pass did NOT close, named rather than left implied:** the value
+  zone's source pin still reads `ast.Compare` nodes and literals, so a
+  discriminator spelled as a METHOD CALL on a recorded value
+  (`.startswith(...)`, a hash, a length test) is not matched by it — the
+  closure rules above do not reach that either, and the budget sweep is kept as
+  corroboration for exactly that reason; the coherence gate still does not
+  REFUSE a `records` whose first pass yields a non-empty strict subset, it only
+  refuses to misattribute the result; the census drift test still cannot see a
+  restatement nobody adds to its list; and the ADD row's column sweep still
+  stops at rank 1, so a multi-index column above rank 1 is DECLINED rather than
+  gauged.
 
 *(no releases yet)*

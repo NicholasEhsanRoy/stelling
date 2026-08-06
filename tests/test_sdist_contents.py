@@ -72,6 +72,12 @@ WITHHELD = {
     "__pycache__": "bytecode cache",
     ".pdm-build": "build backend scratch",
     "uv.lock": "a lock file pins an environment; a library must not ship one",
+    "scratchpad": (
+        "per-branch audit working notes (pre-registrations, measurement logs). "
+        "Tracked, because a pre-registration that can be edited after the fact "
+        "is not one; withheld, because it is a record of how this repository "
+        "was checked and not part of the library a user installs"
+    ),
 }
 
 

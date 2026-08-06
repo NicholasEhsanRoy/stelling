@@ -85,8 +85,23 @@ What the column bound gives up, stated because a narrowing that is not stated
 is a silent one: a multi-index `segment_sum` onto an operand of rank 2 or 3 —
 normal-matrix assembly, say — now declines. Exhausting `n ** length` over every
 gauged shape is 12510 traces and 80 seconds against 3 for the rank-1 family,
-and the census says nothing in this repository reaches the row with more than
-one index on a higher-rank operand.
+and the census says nothing **in the pytest-driven tree** reaches the row with
+more than one index on a higher-rank operand. That scope is the census's, not
+the repository's: `corpus/` is driven by hand, and `corpus/run_census.py`
+classifies primitives out of jaxprs without ever reaching the row.
+
+**And "normal-matrix assembly, say" is not hypothetical here.**
+`tests/test_scatter_gauge_jax.py`'s own header names "a small normal-matrix
+assembly in the segment_sum style" among the programs it gauges, and its
+`m-assembly` fixture is that program: `jax.ops.segment_sum` over per-point
+(2, 2) blocks, which is a rank-3 operand with an index column of 3. Posed
+through the slicing face at the fixture's own declared shapes it now refuses —
+*"index column of 3 element(s) on operand (2, 2, 2) is outside the GAUGED
+accumulate column space"* — while the same accumulation flattened to a rank-1
+operand is admitted. Nothing in the tree fails, because the in-tree
+`m-assembly` cases are settled by the interval transfer and never reach the
+row. A downstream harness that escalates one gets UNKNOWN, and that is the
+shape of program most likely to meet this bound.
 
 ## What this table says that the earlier numbers did not
 
