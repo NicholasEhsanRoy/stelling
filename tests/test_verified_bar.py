@@ -2015,9 +2015,21 @@ def _value_zone_offences(nodes, allow):
     out = []
     for node in nodes:
         for sub in ast.walk(node):
-            if isinstance(sub, ast.Constant) and isinstance(
-                    sub.value, (str, bytes)) and sub.value not in allow:
-                out.append(("literal", repr(sub.value)))
+            if isinstance(sub, ast.Constant):
+                value = sub.value
+                if isinstance(value, (str, bytes)):
+                    if value not in allow:
+                        out.append(("literal", repr(value)))
+                elif not (value is None or value is Ellipsis
+                          or isinstance(value, bool)):
+                    # NUMBERS TOO, and this is not tidiness. A conjunct on a
+                    # DERIVED quantity of the budget dodges the comparison rule
+                    # without any comparison at all — `if not (budget % 30000)`
+                    # is a `UnaryOp` over a `BinOp` — and 30000 is not a budget
+                    # the sweep samples. Measured: that exact line minted the
+                    # same false narrowing as 8a. The zone needs no number of
+                    # its own, so it may not spell one.
+                    out.append(("literal", repr(value)))
             if isinstance(sub, ast.Compare):
                 for side in [sub.left, *sub.comparators]:
                     for inner in ast.walk(side):
@@ -2123,6 +2135,9 @@ def test_the_evidence_path_cannot_name_a_VALUE():
         ("8c-slice", 'def f(recorded_slice, script):\n'
                      '    return recorded_slice == "0" * 64\n'),
         ("global-stmt", 'def f(v):\n    global _T\n    _T = v\n'),
+        # the DERIVED-quantity spelling, which has no comparison in it at all
+        ("8d-derived", 'def f(recorded):\n'
+                       '    return not (_evidence_budget(recorded) % 30000)\n'),
     ):
         body = ast.parse(textwrap.dedent(src)).body[0].body
         assert _value_zone_offences(body, allow), (
