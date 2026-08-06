@@ -363,3 +363,108 @@ def test_f6_tuple_render_never_doubles_a_reason():
 def test_f7_empty_only_is_rejected_at_config_validation():
     with pytest.raises(ValueError, match="empty portfolio"):
         SolverConfig(timeout_ms=100, only=())
+
+
+# --- F4-wheel: the crashed run, on the transport that never received F4 -------
+#
+# `_make_run_cvc5_binary` has refused a crashed run since F4. `_run_cvc5_wheel`
+# did not, and the shape is transport-specific: the driver prints `answer` and
+# THEN walks the model through native `getValue`, so a death in there leaves the
+# answer on stdout with no `end`.
+#
+# These drive a REAL child through a REAL pipe and kill it for real, because the
+# whole defect lives in what block buffering does or does not flush — a mocked
+# CompletedProcess cannot exhibit it. The `small` case is the reason it survived
+# review: it is already safe, and it is the only size a hand-written fixture
+# reaches for.
+
+_WHEEL_CHILD = (
+    "import os, sys, signal\n"
+    "mode = sys.argv[1]\n"
+    "print('version 1.3.4')\n"
+    "print('answer sat')\n"
+    "if mode == 'big':\n"
+    "    [print(f'value x{i} {i}/1') for i in range(4000)]\n"
+    "if mode == 'clean':\n"
+    "    print('value x0 0/1'); print('end'); sys.exit(0)\n"
+    "if mode == 'end_then_die':\n"
+    "    print('end'); sys.stdout.flush(); os.kill(os.getpid(), signal.SIGKILL)\n"
+    "if mode == 'no_end_exit_zero':\n"
+    "    sys.stdout.flush(); sys.exit(0)\n"
+    "os.kill(os.getpid(), signal.SIGKILL)\n"
+)
+
+
+def _wheel_child(monkeypatch, tmp_path, mode):
+    """Route the wheel transport's spawn at a child we control, killed for real."""
+    import subprocess
+    import sys as _sys
+
+    script = tmp_path / "fake_driver.py"
+    script.write_text(_WHEEL_CHILD)
+    real_run = subprocess.run
+
+    def route(argv, **kw):
+        return real_run(
+            [_sys.executable, str(script), mode],
+            input=kw.get("input", ""),
+            capture_output=True,
+            text=True,
+            timeout=kw.get("timeout", 60),
+        )
+
+    monkeypatch.setattr(subprocess, "run", route)
+    monkeypatch.setattr(solvers, "_cvc5_wheel_version", lambda: "1.3.4")
+    return solvers._run_cvc5_wheel("(check-sat)\n(get-model)\n", 60.0)
+
+
+def test_f4wheel_a_child_that_answered_then_died_is_not_a_verdict(
+    monkeypatch, tmp_path
+):
+    """THE DEFECT. A 4000-term model flushes the pipe, so `answer sat` gets
+    through while `end` does not. Before the guard this returned sat with 3570
+    model values harvested from a dead process — a witness that cannot
+    reproduce, behind a definitive REFUTED."""
+    r = _wheel_child(monkeypatch, tmp_path, "big")
+    assert r.answer == "failed"
+    assert r.values == ()  # not one value taken from the corpse
+    assert "not complete" in r.detail and "ABSENT" in r.detail
+
+
+def test_f4wheel_a_small_model_was_always_caught_and_that_is_why_it_survived(
+    monkeypatch, tmp_path
+):
+    """The same death, below the buffer: stdout never flushes, so the parent
+    sees nothing and the pre-existing protocol check catches it. Pinned because
+    it is the measurement that explains the miss, not because it was broken."""
+    r = _wheel_child(monkeypatch, tmp_path, "small")
+    assert r.answer == "failed"
+    assert "protocol violation" in r.detail
+
+
+def test_f4wheel_the_terminator_tell_fires_when_the_exit_code_cannot(
+    monkeypatch, tmp_path
+):
+    """Exit 0, terminator absent. `returncode` is blind here; `end` is not."""
+    r = _wheel_child(monkeypatch, tmp_path, "no_end_exit_zero")
+    assert r.answer == "failed"
+    assert "ABSENT" in r.detail
+
+
+def test_f4wheel_the_exit_code_tell_fires_when_the_terminator_cannot(
+    monkeypatch, tmp_path
+):
+    """Terminator present, then death. `end` is blind here; `returncode` is not.
+    With the one above, this is why the guard reads two tells and not one:
+    neither is derived from the other, and each covers the other's blind spot."""
+    r = _wheel_child(monkeypatch, tmp_path, "end_then_die")
+    assert r.answer == "failed"
+    assert "terminator present" in r.detail
+
+
+def test_f4wheel_a_healthy_run_is_untouched(monkeypatch, tmp_path):
+    """Cry-wolf floor: the guard must not cost a clean sat its model."""
+    r = _wheel_child(monkeypatch, tmp_path, "clean")
+    assert r.answer == "sat"
+    assert r.values == (("x0", "0/1"),)
+    assert r.detail == ""
