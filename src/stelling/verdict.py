@@ -639,6 +639,20 @@ def _approx(exact: str) -> str:
 # principal's to lift, after the auditor reports.
 VERIFIED_BARRED_PRIMITIVES = frozenset({"scatter"})
 
+# THE FAIL-CLOSED FALLBACK'S ONE REASON THAT IS NOT AN f-STRING, named here
+# rather than spelled inside :func:`_bar_scope`, for the same reason
+# :data:`_EVIDENCE_BUDGET_KEYS` is named rather than spelled inside
+# :func:`_evidence_budget`: the DECISION may no longer carry a string constant
+# in a position that could drive it. Its two other fallback reasons interpolate
+# the obligation index and are f-strings already; this one interpolates
+# nothing, so it would be a bare `Constant` handed to a call — which is exactly
+# `M9X`'s shape (``str(closed).count("stelling_backdoor")``, live at `faefc48`
+# and 0 RED at `9fc44dd`). A module constant is read by the closure walk and
+# ledgered to one reader; a literal inside a call was read by nothing.
+# `tests/test_verified_bar.py::test_the_evidence_path_cannot_name_a_VALUE`
+_BAR_UNDERIVABLE = ("the decided obligations' emitted slices could not be "
+                    "re-derived")
+
 # `{scope}` NAMES EACH OBLIGATION WITH ITS OWN BARRED SET, and the split from
 # `{prims}` is why. The predecessor rendered `{where}` from ALL deciding
 # obligations while `{prims}` was the UNION over them, with nothing
@@ -1312,9 +1326,7 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
             if found:
                 per[index] = found
     except Exception:  # noqa: BLE001 — a bar must never break a verdict, and
-        return fallback(  # it must never go quiet either
-            "the decided obligations' emitted slices could not be re-derived"
-        )
+        return fallback(_BAR_UNDERIVABLE)  # it must never go quiet either
     return (
         tuple(sorted({p for found in per.values() for p in found})),
         _bar_scope_phrase(per),

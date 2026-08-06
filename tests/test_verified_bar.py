@@ -2044,10 +2044,64 @@ _EVIDENCE_DECISION = ("_bar_scope", "_bar_scope_phrase", "_barred_in_eqns",
 # module-level `list` mutated through `.append()` / `.pop()` carries a value
 # from one call to the next, and every other rule in this file is silent about
 # it. A `frozenset` or a `tuple` cannot carry anything.
-_EVIDENCE_ZONE_CONSTANTS = ("VERIFIED_BARRED_PRIMITIVES",
+_EVIDENCE_ZONE_CONSTANTS = ("VERIFIED_BARRED_PRIMITIVES", "_BAR_UNDERIVABLE",
                             "_EVIDENCE_BUDGET_KEYS", "_EVIDENCE_DERIVED_KEYS",
                             "_EVIDENCE_OPTION_KEYS")
 _IMMUTABLE = (frozenset, tuple, str, bytes, int, float, type(None))
+
+# WHICH FUNCTION MAY READ EACH ONE, AND THE REASON THIS LEDGER EXISTS AT ALL.
+#
+# The source pin forbids the value zone to SPELL a string, and then the module
+# hands it `_EVIDENCE_OPTION_KEYS`, `_EVIDENCE_BUDGET_KEYS` and
+# `_EVIDENCE_DERIVED_KEYS` as enumerated immutable constants — so every string
+# a conjunct needs, for exactly the keys that matter, is already in scope under
+# a permitted name. MEASURED at `faefc48`, live with the full suite
+# byte-identical in both columns and 0 RED at `9fc44dd`:
+#
+#     if set(_EVIDENCE_BUDGET_KEYS) <= set(recorded):
+#         return True
+#
+# three lines inside `_evidence_reproduces` itself. No literal, no comparison
+# against a literal, no module-level mutable, no helper, no default argument,
+# no import, no `global`, no smuggler — and no method call on a recorded value
+# either, so it is not the residue this file already disclosed. Against the
+# mispaired pair the bar exists for, with a stamp forging a second budget
+# spelling, it takes `('scatter',)` to `()`: the bar lifted. The same predicate
+# in a literal-free NESTED `def` (`M6v2`) is the same measurement.
+#
+# So the constants are ledgered the way the record ATTRIBUTES already are.
+# Each one has exactly ONE function whose job needs it, asserted in BOTH
+# directions — nothing else may read it, and a pair here that never happens is
+# a padded list, which is how a real read hides. After this, a predicate
+# written at the meeting point has no constant available to key on at all.
+_EVIDENCE_CONSTANT_READERS = frozenset({
+    # the whitelist projection, applied to both sides of the comparison
+    ("_EVIDENCE_OPTION_KEYS", "_whitelisted"),
+    # the one function that turns a recorded value into an argument
+    ("_EVIDENCE_BUDGET_KEYS", "_evidence_budget"),
+    # the gate that refuses an empty derived hash rather than comparing it
+    ("_EVIDENCE_DERIVED_KEYS", "_reproduced_evidence"),
+    # the bar's own domain, on the DECISION side
+    ("VERIFIED_BARRED_PRIMITIVES", "_barred_in_eqns"),
+    ("VERIFIED_BARRED_PRIMITIVES", "_barred_primitives"),
+    # ... and the one fallback reason that interpolates nothing, hoisted out of
+    # `_bar_scope` so the decision carries no bare string constant in a
+    # position a call could consume
+    ("_BAR_UNDERIVABLE", "_bar_scope"),
+})
+
+# The names a literal may spell in either closure, over and above the record
+# attributes `_ALLOWED_READS` permits: the two jaxpr fields the barred-set
+# derivation walks. Enumerated rather than exempted, and asserted to be USED,
+# so `getattr(x, "…")` cannot become a channel by being called an attribute.
+_JAXPR_FIELDS = ("eqns", "jaxpr")
+
+# The forms that reach code the closure walk cannot follow. `__import__` binds
+# no `ast.Import` node, so the import allow-list never sees it; `eval`/`exec`/
+# `compile` reach source that no rule in this file has parsed. MEASURED at
+# `faefc48`: `__import__("stelling.obligation")` at the top of `_bar_scope` is
+# live in both columns and 0 RED at `9fc44dd`.
+_DYNAMIC = ("__import__", "eval", "exec", "compile", "importlib")
 
 # The only things either closure may IMPORT. A function-level `from x import
 # y` binds a LOCAL, so it is invisible to the closure walk below — which is how
@@ -2104,23 +2158,100 @@ def _reachable_closure(entry, namespace):
     return seen
 
 
+def _deeply_immutable(obj):
+    """`_IMMUTABLE`, applied THROUGH a container rather than to its type.
+
+    `isinstance(obj, tuple)` is a shallow test, and a `tuple` whose element is
+    a `list` carries a value from one call to the next exactly as a
+    module-level `list` does — `.append()` on it needs no `global` statement
+    and no `globals()` call. No enumerated constant is that shape today (all
+    four are frozensets or tuples of `str`), which is why this is a rule and
+    not a bug report: the shallow version says a thing it does not check."""
+    if not isinstance(obj, _IMMUTABLE):
+        return False
+    if isinstance(obj, (tuple, frozenset)):
+        return all(_deeply_immutable(item) for item in obj)
+    return True
+
+
+def _function_carriers(fn):
+    """The MUTABLE state a plain function object carries in its own right.
+
+    THE IMMUTABILITY RULE WAS FALSE AS WRITTEN, and this is the half that made
+    it false. `_closure_offences` reaches the immutability branch only for
+    names the module does NOT define — so the zone's own function objects,
+    which are mutable, were never checked at all. MEASURED at `faefc48`:
+    `_whitelisted.__kwdefaults__ = out`, one line inside `_whitelisted`, is
+    green through the whole suite in both columns and 0 RED at `9fc44dd`, and
+    no source rule sees it. The same carrier USED — stash on the first of the
+    two calls, hand back on the second — takes the mispaired pair's
+    `('scatter',)` to `()`.
+
+    `__defaults__` and `__kwdefaults__` in particular are NOT covered by
+    `_fn_defaults_ast`: that reads the SOURCE signature, and these are set at
+    run time on a function whose source has no default at all."""
+    out = []
+    if getattr(fn, "__defaults__", None):
+        out.append("__defaults__")
+    if getattr(fn, "__kwdefaults__", None):
+        out.append("__kwdefaults__")
+    if getattr(fn, "__dict__", None):
+        out.append(f"__dict__ {sorted(fn.__dict__)}")
+    return out
+
+
 def _closure_offences(entry, namespace, module_name, zone, constants):
     """Every way the closure from `entry` reaches something the pin does not
     cover. Returns a list of (rule, detail).
 
     Written over an explicit namespace so it can be driven against a synthetic
     module in the anti-vacuity block below — a checker measured only against
-    the code it was written for is could-not-fail shape #3."""
+    the code it was written for is could-not-fail shape #3.
+
+    **WHERE THE WALK STOPS, named rather than left to be discovered.** The
+    closure is read off `__code__` objects, so it does not follow: an
+    attribute or method dispatch (`emit(...).stamp_options()` is reached by
+    the zone and is pinned by `test_the_stamps_own_derivation_is_the_HONEST_
+    one`, not by anything here); a decorator, where the walk sees the
+    WRAPPER's code object and not the wrapped one; and any object with no
+    `__code__`. That last one used to be a silent pass — a class in the zone
+    would have had every one of its methods skipped — so it is an offence now
+    (`not-a-function`) rather than a hole."""
+    import types
+
     out = []
     for name in sorted(_reachable_closure(entry, namespace)):
         obj = namespace[name]
         if getattr(obj, "__module__", None) == module_name:
             if name not in zone:
                 out.append(("calls-out", name))
+            elif not isinstance(obj, types.FunctionType):
+                # a class, a functools wrapper, an instance with `__call__`:
+                # the `__code__` walk skips its methods, so the closure it
+                # reports would be a strict subset of the real one
+                out.append(("not-a-function", f"{name} is a "
+                                              f"{type(obj).__name__}"))
+            else:
+                for carrier in _function_carriers(obj):
+                    out.append(("function-carrier", f"{name}.{carrier}"))
         elif name not in constants:
             out.append(("unenumerated", name))
-        elif not isinstance(obj, _IMMUTABLE):
+        elif not _deeply_immutable(obj):
             out.append(("mutable", f"{name} is a {type(obj).__name__}"))
+    return out
+
+
+def _constant_reader_pairs(entry, namespace, constants):
+    """Every `(constant, reading function)` the closure from `entry` actually
+    makes, read off the same compiled code objects the closure walk uses."""
+    out = set()
+    for name in sorted(_reachable_closure(entry, namespace)):
+        obj = namespace[name]
+        if not hasattr(obj, "__code__"):
+            continue
+        for reached in _module_names_reachable(obj, namespace):
+            if reached in constants:
+                out.add((reached, name))
     return out
 
 
@@ -2174,18 +2305,57 @@ def _fn_imports(fn):
     return out
 
 
-def _value_zone_offences(nodes, allow):
+def _prose_positions(nodes):
+    """Every `ast.Constant` node in `nodes` that can only be building a
+    MESSAGE, by its position in the tree rather than by what it says.
+
+    THE DECISION USED TO BE EXEMPT FROM THE LITERAL RULE ENTIRELY — the loop
+    filtered `rule != "literal"` — and the reason given was that it carries
+    f-string message text. It does; it also carried, at `faefc48` and 0 RED at
+    `9fc44dd`, `if str(closed).count("stelling_backdoor"): return ((), '')` at
+    the top of `_bar_scope`, and a two-literal variant keyed per stamp that
+    takes the mispaired pair's `('scatter',)` to `()`. A blanket exemption for
+    a class of position is not the same thing as an exemption for every
+    position, and this is the difference measured.
+
+    A prose position is: a literal part of an f-string; an operand of `+` or
+    `%`; the receiver of `"sep".join(...)` and friends; and the empty string,
+    which can discriminate nothing. Everything else in the decision is subject
+    to the literal rule, exactly as the value zone is."""
+    import ast
+
+    ok = set()
+    for node in nodes:
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.JoinedStr):
+                ok.update(id(p) for p in sub.values)
+            elif isinstance(sub, ast.BinOp) and isinstance(
+                    sub.op, (ast.Add, ast.Mod)):
+                ok.update(id(s) for s in (sub.left, sub.right))
+            elif isinstance(sub, ast.Attribute):
+                ok.add(id(sub.value))
+            elif isinstance(sub, ast.Constant) and sub.value == "":
+                ok.add(id(sub))
+    return ok
+
+
+def _value_zone_offences(nodes, allow, prose=False):
     """Every way the three corruptions of channel 8 have to be SPELLED, found
-    in a parsed function body. Returns a list of (rule, detail)."""
+    in a parsed function body. Returns a list of (rule, detail).
+
+    `prose=True` is the DECISION's one remaining relaxation: a string constant
+    in a message-building position is permitted. Numbers are not, in either —
+    the decision spells none."""
     import ast
 
     out = []
+    permitted = _prose_positions(nodes) if prose else set()
     for node in nodes:
         for sub in ast.walk(node):
             if isinstance(sub, ast.Constant):
                 value = sub.value
                 if isinstance(value, (str, bytes)):
-                    if value not in allow:
+                    if value not in allow and id(sub) not in permitted:
                         out.append(("literal", repr(value)))
                 elif not (value is None or value is Ellipsis
                           or isinstance(value, bool)):
@@ -2207,6 +2377,56 @@ def _value_zone_offences(nodes, allow):
                 out.append(("global-statement", ", ".join(sub.names)))
             if isinstance(sub, ast.Name) and sub.id in _SMUGGLERS:
                 out.append(("smuggler", sub.id))
+            if isinstance(sub, ast.Name) and sub.id in _DYNAMIC:
+                # `__import__` binds no `ast.Import` node, so `_fn_imports`
+                # and the import allow-list never see it; `eval`/`exec`/
+                # `compile` reach source no rule here has parsed
+                out.append(("dynamic", sub.id))
+            if isinstance(sub, ast.Attribute) and sub.attr in _DYNAMIC:
+                out.append(("dynamic", f".{sub.attr}"))
+            if isinstance(sub, ast.Call):
+                out += _call_literal_offences(sub, allow)
+    return out
+
+
+def _call_literal_offences(call, allow):
+    """A literal handed to a call that is DRIVEN BY A VALUE, which is the
+    residue this file disclosed and the hole the decision's exemption left.
+
+    Two shapes:
+
+    * a literal argument to a method on a non-literal receiver —
+      `str(closed).count("stelling_backdoor")`,
+      `recorded.get(k).startswith("30000")`. That is a predicate on a value,
+      spelled with a constant, and neither the literal rule (switched off in
+      the decision) nor the comparison rule (there is no `ast.Compare`) sees
+      it. `"sep".join(...)` is not this: its receiver IS the literal;
+    * an attribute NAME handed to `getattr`/`hasattr` that the ledger does not
+      permit. `getattr` with a bare `Name` function was outside both rules.
+
+    WHAT IS STILL PERMITTED, said rather than left to be found: a literal
+    argument to a call on a bare `Name` that is not one of those two —
+    `fallback("…")` builds the decision's own message. The callee is either a
+    builtin constructor, which cannot discriminate without a `Compare` this
+    file does catch, or a function whose own body is inside the scanned
+    closure and is parsed by every rule here."""
+    import ast
+
+    out = []
+    args = [*call.args, *(kw.value for kw in call.keywords)]
+    fn = call.func
+    if isinstance(fn, ast.Name) and fn.id in ("getattr", "hasattr"):
+        for arg in args[1:2]:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                if arg.value not in allow:
+                    out.append(("attr-literal", repr(arg.value)))
+    elif isinstance(fn, ast.Attribute) and not isinstance(fn.value,
+                                                          ast.Constant):
+        for arg in args:
+            if isinstance(arg, ast.Constant) and isinstance(
+                    arg.value, (str, bytes, int, float)):
+                out.append(("call-literal",
+                            f".{fn.attr}({arg.value!r})"))
     return out
 
 
@@ -2239,12 +2459,35 @@ def test_the_evidence_path_cannot_name_a_VALUE():
       `globals().__setitem__("_BSTASH", ...)`, chosen to keep the read inside
       the permitted reader and out of the ledger.
 
-    WHAT IT DOES NOT CLAIM, said because could-not-fail shape #4 is exactly
-    "enumerating current members rather than pinning the channel": this
-    constrains what may be WRITTEN on the path, not every predicate Python can
-    express. A discriminator spelled as a method call on a value —
-    `recorded.get(k).startswith(...)`, a hash of it, a length test that dodges
-    `ast.Compare` — is not matched.
+    A FOURTH RULE, AND THE ONE THE THREE ABOVE MADE NECESSARY: a literal
+    handed to a method call on a non-literal receiver (`call-literal`), or to
+    `getattr`/`hasattr` under a name the ledger does not permit
+    (`attr-literal`). That is most of the "method call on a value" residue
+    this docstring used to disclose and leave open — `recorded.get(k).
+    startswith("30000")` needs the literal, and the literal is now seen.
+
+    **AND THE DECISION IS NO LONGER EXEMPT FROM THE LITERAL RULE.** The loop
+    below filtered `rule != "literal"`, so a string constant inside ANY call
+    matched nothing there. Measured at `faefc48`, live in both columns and 0
+    RED at `9fc44dd`: `if str(closed).count("stelling_backdoor"): return ((),
+    '')` at the top of `_bar_scope`, and a per-stamp variant on two budget
+    spellings that takes the mispaired pair's `('scatter',)` to `()`. The
+    exemption is narrowed to what it was justified by — MESSAGE TEXT, by
+    POSITION (`_prose_positions`) rather than by rule name — and the decision
+    may now spell no number at all, which it never did.
+
+    WHAT IT STILL DOES NOT CLAIM, said because could-not-fail shape #4 is
+    exactly "enumerating current members rather than pinning the channel":
+    this constrains what may be WRITTEN on the path, not every predicate
+    Python can express. What is left, after the four rules and the constant
+    ledger in `::test_the_value_zone_is_CLOSED_UNDER_CALL`, is a predicate
+    that needs NO constant at all: `if len(recorded) > len(reproduced)` has no
+    `Constant` in either operand, and `sorted(_EVIDENCE_OPTION_KEYS).pop()`
+    drops a key by position rather than by name. Neither is reached here.
+    Two things bound that residue rather than close it — the meeting point
+    itself is shape-pinned, so such a predicate cannot be written at the one
+    place both sides are in scope; and a constant-free predicate cannot AIM at
+    a chosen record, because aiming is what a constant is for.
 
     **THE BUDGET SWEEP DOES NOT CORROBORATE THAT RESIDUE, and the sentence
     that said it did is corrected here.** A sweep is a sample; a conjunct keyed
@@ -2301,30 +2544,42 @@ def test_the_evidence_path_cannot_name_a_VALUE():
             f"ledger entry or a named constant at module scope — and it "
             f"should be argued in the commit rather than done quietly"
         )
-    # The DECISION may not name anything at all — but it does carry f-string
-    # message text, so only the comparison and smuggling rules apply. Derived
-    # too, and for the same reason: `8a` wrote its conjunct in `_bar_scope`,
-    # and a helper `_bar_scope` calls is that corruption one call deeper.
+    # The DECISION may not name anything at all — but it does carry message
+    # text, so the literal rule is relaxed BY POSITION rather than switched
+    # off. Derived too, and for the same reason: `8a` wrote its conjunct in
+    # `_bar_scope`, and a helper `_bar_scope` calls is that corruption one call
+    # deeper.
+    decision_allow = set(allow) | set(_JAXPR_FIELDS)
     for name in decision:
         if not hasattr(getattr(V, name), "__code__"):
             continue
         assert not _fn_defaults_ast(getattr(V, name)), (
             f"`{name}` DECIDES and now has a default argument"
         )
-        offences = [
-            (rule, detail)
-            for rule, detail in _value_zone_offences(
-                _fn_body_ast(getattr(V, name))
-                + _fn_defaults_ast(getattr(V, name)), allow)
-            if rule != "literal"
-        ]
+        offences = _value_zone_offences(
+            _fn_body_ast(getattr(V, name))
+            + _fn_defaults_ast(getattr(V, name)), decision_allow, prose=True)
         assert not offences, (
             f"`{name}` DECIDES whether the bar narrows and now spells "
             f"{offences}. A comparison against a literal there is corruption "
             f"8a's shape exactly — it read a stashed budget out of a module "
             f"global and compared it to \"30000\", with every other mechanism "
-            f"in this file green"
+            f"in this file green; a literal inside a CALL there is `M9X`, "
+            f"`str(closed).count(\"…\")`, which was 0 RED at `9fc44dd` with "
+            f"the whole suite green. If the constant is MESSAGE TEXT it needs "
+            f"to be in an f-string, a `+`, or a `\"sep\".join(...)`, which is "
+            f"where the honest ones already are"
         )
+    # ... and the relaxation really is narrower than the exemption it replaces:
+    # the decision spells NO number, so the prose relaxation is about strings
+    # and nothing else.
+    for name in decision:
+        fn = getattr(V, name)
+        if not hasattr(fn, "__code__"):
+            continue
+        numeric = [d for r, d in _value_zone_offences(
+            _fn_body_ast(fn), decision_allow, prose=True) if r == "literal"]
+        assert not numeric, (name, numeric)
 
     # ANTI-VACUITY: the checker must actually catch each of the three
     # corruptions. Measured against their real spellings, parsed rather than
@@ -2345,6 +2600,12 @@ def test_the_evidence_path_cannot_name_a_VALUE():
         # the DERIVED-quantity spelling, which has no comparison in it at all
         ("8d-derived", 'def f(recorded):\n'
                        '    return not (_evidence_budget(recorded) % 30000)\n'),
+        # the METHOD-CALL residue this file used to disclose and leave open
+        ("8f-method", 'def f(recorded):\n'
+                      '    return recorded.get("x").startswith("30000")\n'),
+        # an attribute name smuggled past `getattr`'s bare-`Name` function
+        ("8g-getattr", 'def f(s):\n'
+                       '    return getattr(s, "_stash", None)\n'),
     ):
         body = ast.parse(textwrap.dedent(src)).body[0].body
         assert _value_zone_offences(body, allow), (
@@ -2357,6 +2618,53 @@ def test_the_evidence_path_cannot_name_a_VALUE():
         ast.parse('def f(s):\n'
                   '    return dict(getattr(s, "options", None) or ())\n'
                   ).body[0].body, allow)
+
+    # THE DECISION'S ROWS, which the `rule != "literal"` filter dropped. Each
+    # was 0 RED at `9fc44dd` with the whole suite green, and the second one
+    # MINTS: it takes the mispaired pair's `('scatter',)` to `()`.
+    for label, src in (
+        ("M9X-count", 'def f(closed):\n'
+                      '    if str(closed).count("stelling_backdoor"):\n'
+                      "        return ((), '')\n"),
+        ("M9mint-per-stamp",
+         'def f(decided):\n'
+         '    _ss = [str(s) for v in (decided or {}).values()'
+         ' for s in (v or ())]\n'
+         '    if any(t.count(":tlimit") and t.count(":timeout")'
+         ' for t in _ss):\n'
+         "        return ((), '')\n"),
+        ("M9imp-dynamic", 'def f(closed):\n'
+                          '    return __import__("stelling.obligation")\n'),
+    ):
+        body = ast.parse(textwrap.dedent(src)).body[0].body
+        assert _value_zone_offences(body, decision_allow, prose=True), (
+            f"the decision's source pin does not catch {label}; the literal "
+            f"exemption is switched off by rule name again"
+        )
+    # ... and the prose relaxation admits every shape the honest decision uses,
+    # and nothing else. Written out rather than described.
+    honest_prose = (
+        'def f(barred, i):\n'
+        '    head = "the traced query contains " + ", ".join(barred)\n'
+        '    tail = f"the emitted slice of assert #{i} contains {barred}"\n'
+        '    if not barred:\n'
+        "        return ((), '')\n"
+        '    return ((head,), tail)\n'
+    )
+    assert not _value_zone_offences(
+        ast.parse(textwrap.dedent(honest_prose)).body[0].body,
+        decision_allow, prose=True), _value_zone_offences(
+            ast.parse(textwrap.dedent(honest_prose)).body[0].body,
+            decision_allow, prose=True)
+    # ... but the relaxation is about POSITION, not about strings: the same
+    # literal moved into a call is still caught, and a NUMBER is caught
+    # wherever it stands.
+    assert _value_zone_offences(
+        ast.parse('def f(b):\n    return b.count("the traced query contains ")'
+                  '\n').body[0].body, decision_allow, prose=True)
+    assert _value_zone_offences(
+        ast.parse('def f(b):\n    return b[3]\n').body[0].body,
+        decision_allow, prose=True)
 
     # AND THE SIGNATURE, which is the half `tree.body[0].body` never returned.
     # `8e` is 0 RED at `faefc48` against every rule above: the body holds no
@@ -2418,6 +2726,53 @@ def test_the_value_zone_is_CLOSED_UNDER_CALL():
     The same three run over the DECISION's closure, since `8a` wrote its
     conjunct in `_bar_scope` and a helper `_bar_scope` calls is that corruption
     one call deeper.
+
+    **RULE 2 WAS FALSE AS WRITTEN, IN TWO PLACES, AND BOTH ARE MEASURED.**
+
+    * *"every module-level name … must be enumerated AND immutable"* did not
+      apply the immutability half to names the module DEFINES — that branch is
+      only reached when `__module__` is something else — so the zone's own
+      function objects, which are mutable, were never checked. At `faefc48`,
+      live in both columns and 0 RED at `9fc44dd`:
+      `_whitelisted.__kwdefaults__ = out`, one line, a carrier on a zone
+      function that no source rule sees. `__kwdefaults__` is not
+      `_fn_defaults_ast`' business either: that reads the SOURCE signature,
+      and this is set at run time on a function whose source has no default.
+      The same carrier USED across the two `_whitelisted` calls mints the
+      narrowing on the mispaired pair. Rule 2 now checks
+      `__defaults__`/`__kwdefaults__`/`__dict__` on every function in the
+      closure, and a member that is not a plain function at all — a class,
+      whose methods the `__code__` walk would silently skip — is an offence;
+    * `_IMMUTABLE` includes `tuple`, and `isinstance` is SHALLOW: a tuple
+      containing a list carries a value exactly as a module-level list does.
+      No enumerated constant is that shape today, which is why the check is
+      deepened rather than a constant changed.
+
+    **AND A FOURTH RULE, because the zone is HANDED its constants.** Rules 1–3
+    say what the zone may reach; the source pin says it may spell no literal.
+    Between them they left the predicate axis wide open, since
+    `_EVIDENCE_OPTION_KEYS`, `_EVIDENCE_BUDGET_KEYS` and
+    `_EVIDENCE_DERIVED_KEYS` put every string that matters in scope under a
+    permitted name. Measured at `faefc48`, live in both columns and 0 RED at
+    `9fc44dd`, three lines inside `_evidence_reproduces` itself::
+
+        if set(_EVIDENCE_BUDGET_KEYS) <= set(recorded):
+            return True
+
+    — and the mispaired pair's `('scatter',)` becomes `()`. So:
+
+    4. each enumerated constant is read by exactly ONE function, ledgered in
+       `_EVIDENCE_CONSTANT_READERS` and asserted in BOTH directions, the way
+       `_ALLOWED_READS` ledgers record ATTRIBUTES. A predicate at the meeting
+       point then has no constant available to key on.
+
+    5. and the MEETING POINT itself is shape-pinned. `_evidence_reproduces` is
+       the only function in which a recorded value and the re-derivation are
+       both in scope; it is four lines; its body may hold no branch, no loop,
+       no nested definition and exactly one `return`, of `bool(...) and
+       ... == ...`. Rules 4 and 5 are independent — each kills the mutant
+       above on its own — which is the difference between closing a class and
+       adding a rule per spelling.
     """
     ns = vars(V)
     for entry, written, allowed_imports, label in (
@@ -2457,6 +2812,93 @@ def test_the_value_zone_is_CLOSED_UNDER_CALL():
                 f"— every module the path may call out to is named, and the "
                 f"VALUE ZONE's list is the shorter of the two on purpose"
             )
+        # RULE 4: the constant ledger, in both directions over the DERIVED
+        # closure. `extra` is a function reading a constant that is not its
+        # business — which is the whole of what `M10both` needed. `dead` is a
+        # ledger entry that never happens, which is how a real read hides in a
+        # padded list.
+        pairs = _constant_reader_pairs(entry, ns, _EVIDENCE_ZONE_CONSTANTS)
+        extra = pairs - _EVIDENCE_CONSTANT_READERS
+        assert not extra, (
+            f"in the {label}, {sorted(extra)} read an enumerated constant "
+            f"that is not that function's business. The zone may spell no "
+            f"literal, so its constants ARE its literals: "
+            f"`set(_EVIDENCE_BUDGET_KEYS) <= set(recorded)` inside "
+            f"`_evidence_reproduces` is a predicate on a recorded value with "
+            f"no literal, no comparison against one, no global and no helper "
+            f"— measured live at `faefc48` and 0 RED at `9fc44dd`, minting "
+            f"the narrowing on the mispaired pair. If the read is honest it "
+            f"needs a ledger entry, argued in the commit"
+        )
+    dead = _EVIDENCE_CONSTANT_READERS - (
+        _constant_reader_pairs(_EVIDENCE_DECISION_ENTRY, ns,
+                               _EVIDENCE_ZONE_CONSTANTS)
+        | _constant_reader_pairs(_EVIDENCE_VALUE_ZONE_ENTRY, ns,
+                                 _EVIDENCE_ZONE_CONSTANTS))
+    assert not dead, (
+        f"`_EVIDENCE_CONSTANT_READERS` permits {sorted(dead)}, which never "
+        f"happens. A padded ledger is how a real read hides — the same "
+        f"argument `_ALLOWED_READS` is asserted in both directions for"
+    )
+
+    # RULE 5: THE MEETING POINT'S SHAPE. This is the one function where a
+    # recorded value and the re-derivation are both in scope, and it is four
+    # lines. Anything ADDED to it is a predicate at the only place a predicate
+    # could aim, whatever it is spelled with — which is why this is a shape pin
+    # and not another rule about constants. `M10both` and `M6v2` are each RED
+    # here as well as to rule 4, independently.
+    import ast as _ast
+    import textwrap
+
+    body = _fn_body_ast(V._evidence_reproduces)
+    banned = [type(n).__name__ for stmt in body for n in _ast.walk(stmt)
+              if isinstance(n, (_ast.If, _ast.For, _ast.While, _ast.Try,
+                                _ast.With, _ast.FunctionDef, _ast.Lambda,
+                                _ast.ListComp, _ast.SetComp, _ast.DictComp,
+                                _ast.GeneratorExp, _ast.IfExp))]
+    assert not banned, (
+        f"`_evidence_reproduces` now contains {banned}. It is the ONE place "
+        f"a recorded value and the re-derivation are both in scope, so a "
+        f"branch, a loop, a nested `def` or a comprehension there is a "
+        f"predicate at the only site that could aim — `M10both` and `M6v2` "
+        f"are exactly that, and both were 0 RED at `9fc44dd` with the whole "
+        f"suite green. If the composition genuinely needs to change, change "
+        f"this pin in the same commit and say why"
+    )
+    returns = [n for stmt in body for n in _ast.walk(stmt)
+               if isinstance(n, _ast.Return)]
+    assert len(returns) == 1, (
+        f"`_evidence_reproduces` has {len(returns)} `return`s. An early one "
+        f"is how `M10both` narrows without touching the comparison"
+    )
+    expr = returns[0].value
+    assert (isinstance(expr, _ast.BoolOp) and isinstance(expr.op, _ast.And)
+            and len(expr.values) == 2
+            and isinstance(expr.values[0], _ast.Call)
+            and isinstance(expr.values[1], _ast.Compare)
+            and len(expr.values[1].ops) == 1
+            and isinstance(expr.values[1].ops[0], _ast.Eq)), (
+        f"`_evidence_reproduces` no longer returns `bool(...) and ... == "
+        f"...`; it returns {_ast.dump(expr)[:160]}. The narrowing IS that "
+        f"equality — a reproduction that exists, and a record equal to it"
+    )
+    # ... and the shape pin is not vacuous: the honest body must satisfy it
+    # while each measured spelling of the mutant does not.
+    for label, src in (
+        ("M10both", 'def f(sliced, stamp):\n'
+                    '    recorded = _evidence_options(stamp)\n'
+                    '    if set(_EVIDENCE_BUDGET_KEYS) <= set(recorded):\n'
+                    '        return True\n'
+                    '    return bool(recorded) and recorded == recorded\n'),
+        ("M6v2", 'def f(sliced, stamp):\n'
+                 '    def _both(rec):\n'
+                 '        return set(_EVIDENCE_BUDGET_KEYS) <= set(rec)\n'
+                 '    return bool(stamp) and stamp == stamp\n'),
+    ):
+        tree = _ast.parse(textwrap.dedent(src)).body[0]
+        assert any(isinstance(n, (_ast.If, _ast.FunctionDef))
+                   for stmt in tree.body for n in _ast.walk(stmt)), label
+
     # ... and the two lists really are different, or the sentence above is
     # decoration: the zone may not reach the slicing entry points.
     assert set(_EVIDENCE_ZONE_IMPORTS) < set(_EVIDENCE_DECISION_IMPORTS), (
@@ -2467,8 +2909,6 @@ def test_the_value_zone_is_CLOSED_UNDER_CALL():
     # ANTI-VACUITY, against a SYNTHETIC module rather than against the code
     # this was written for: a checker measured only on the shape it already
     # passes is could-not-fail shape #3.
-    import textwrap
-
     for label, src, zone in (
         # M1: no `global`, no `globals()`, no literal, no signature change
         ("module-level list", 'LAST = []\n'
@@ -2512,6 +2952,58 @@ def test_the_value_zone_is_CLOSED_UNDER_CALL():
                          '    return w(raw)\n'), fake)
     assert not _closure_offences("f", fake, "fake.module", ("f", "w"),
                                  ("KEYS",))
+
+    # THE THREE ROWS RULE 2 USED TO PASS, each measured before it was closed.
+    # `M7inert`/`M7live` are the first: a carrier on a zone FUNCTION, which the
+    # `__module__ == module_name` branch never checked.
+    fake = {"__name__": "fake.module"}
+    exec(textwrap.dedent('def w(raw):\n    return raw\n'  # noqa: S102
+                         'def f(raw):\n    return w(raw)\n'), fake)
+    assert not _closure_offences("f", fake, "fake.module", ("f", "w"), ())
+    fake["w"].__kwdefaults__ = {"held": {}}
+    assert [r for r, _d in _closure_offences("f", fake, "fake.module",
+                                             ("f", "w"), ())
+            ] == ["function-carrier"], (
+        "a `__kwdefaults__` carrier on a zone function is not caught; that is "
+        "`M7inert`, live at `faefc48` and 0 RED at `9fc44dd`, and the same "
+        "carrier used across the two `_whitelisted` calls MINTS"
+    )
+    fake["w"].__kwdefaults__ = None
+    fake["w"].stash = {}
+    assert [r for r, _d in _closure_offences("f", fake, "fake.module",
+                                             ("f", "w"), ())
+            ] == ["function-carrier"], "a `__dict__` carrier is not caught"
+    del fake["w"].stash
+
+    # ... a tuple whose element is a list: `isinstance(obj, tuple)` says
+    # immutable and `.append()` on the element says otherwise
+    fake = {"__name__": "fake.module", "KEYS": ("a", [])}
+    exec(textwrap.dedent('def f(raw):\n    return KEYS\n'), fake)  # noqa: S102
+    assert isinstance(fake["KEYS"], _IMMUTABLE), (
+        "the shallow test no longer passes this, so the row below measures "
+        "nothing"
+    )
+    assert [r for r, _d in _closure_offences("f", fake, "fake.module", ("f",),
+                                             ("KEYS",))] == ["mutable"], (
+        "a tuple CONTAINING a list is not caught; `_IMMUTABLE` is a shallow "
+        "isinstance test and rule 2 says 'immutable'"
+    )
+
+    # ... and a zone member that is not a plain function, whose methods the
+    # `__code__` walk would silently skip
+    fake = {"__name__": "fake.module"}
+    exec(textwrap.dedent('class W:\n'  # noqa: S102
+                         '    def project(self, raw):\n'
+                         '        return raw\n'
+                         'def f(raw):\n'
+                         '    return W().project(raw)\n'), fake)
+    assert [r for r, _d in _closure_offences("f", fake, "fake.module",
+                                             ("f", "W"), ())
+            ] == ["not-a-function"], (
+        "a CLASS in the zone passes rule 1 and has every method skipped by "
+        "the `__code__` walk, which is the closure reporting a strict subset "
+        "of what the path can reach"
+    )
 
 
 def test_the_reproduction_is_handed_no_record():
