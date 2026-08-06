@@ -82,6 +82,29 @@ SKIP channel, the recorder dropped it, and the claim was MADE over a test that
 never ran. pytest discloses it — ``1 xfailed`` — so the answer is the same one
 ``N deselected`` gets: WITHDRAWN. See :data:`conftest.XFAILED`.
 
+**A ninth and a tenth are not that kind of thing at all, and the difference is
+worth more than the two routes are.** The first eight are questions about a
+REPORT — which channel does this outcome arrive down, and does the recorder
+read that channel. These two record the skip perfectly, in
+``conftest.SKIPPED``, under its right nodeid and its right reason, and then
+nobody looks:
+
+* ``pytest.exit(reason, returncode=0)`` from inside the run loop. ``Exit``
+  propagates through the recorder's ``pytest_runtestloop`` wrapper, so the
+  session-end decision never runs, and pytest assigns the process exit code
+  from the returncode, which overrides the one the decision would have set.
+  Measured at a80d60c, same tree, same plant, one ``-p`` apart: byte-identical
+  summary lines, exit 1 with a banner and exit 0 with nothing.
+* an undisclosed skip in THIS FILE, after this pin has already claimed. The
+  pin runs last among FILES, not among TESTS; the guard that would catch it is
+  disarmed by the pin's own claim. Measured at a80d60c on the whole tree:
+  ``2022 passed, 3 skipped``, exit 0, no banner, the planted skip on screen.
+
+Both are answered in ``tests/conftest.py`` — ``pytest_sessionfinish`` and
+``_close_the_session`` respectively. The general lesson is about the taxonomy
+and not about the two entries: a table of channels bounds what can be
+MISREPORTED and says nothing about whether anybody read it.
+
 So both are recorded in ``tests/conftest.py``, where the collection and the
 run are, and the whole decision is made in
 :func:`the_claim_this_session_can_make`, where the claim is. Four answers, one
@@ -339,9 +362,10 @@ def _contraction_form_names() -> tuple[str, ...]:
 #          legitimate=lambda: True)
 #
 # — the same idiom the XLA rule uses, pointed at a module full of skips nobody
-# disclosed. Measured with `pytest.skip("we will get back to this one after
-# the release")` planted in test_affine.py, a string appearing NOWHERE in this
-# file: `1993 passed, 3 skipped`, exit 0. `reasons` is a runtime value and
+# disclosed. Measured at bd1fa04 with `pytest.skip("we will get back to this
+# one after the release")` planted in test_affine.py, a string appearing
+# NOWHERE in this file: the planted skip on the screen, no rule here naming it,
+# and the whole suite EXIT 0. `reasons` is a runtime value and
 # nothing required it to be literals, so "the reason must be typed where a
 # reviewer sees it" was prose, not a bound. It is a bound now.
 _DERIVED_REASONS = frozenset(
@@ -571,8 +595,9 @@ def _outcome(nodeid: str) -> tuple[str, str]:
 #
 # What pytest's own report does and does not tell apart from a whole run is the
 # thing this taxonomy turns on, and it was got wrong once. It DOES disclose a
-# deselection — `98 passed, 1926 deselected` is not `2022 passed, 2 skipped`,
-# and it never was. It discloses an xfail too, in the same line. What it cannot
+# deselection — a line reading `<n> passed, <m> deselected` is not one reading
+# `<n'> passed, <k> skipped`, and it never was, whatever the suite's size is on
+# the day. It discloses an xfail too, in the same line. What it cannot
 # disclose is a run in a different ORDER, or items removed by a plugin that
 # never called `pytest_deselected`: those print a green that is byte-identical
 # to a clean whole run's. So the shortfalls that pytest already reports are
@@ -608,23 +633,42 @@ def _outcome(nodeid: str) -> tuple[str, str]:
 #
 #     This used to FAIL when the filter was the developer's own, on the stated
 #     grounds that such a session "would print a green indistinguishable from a
-#     whole run". That premise is false, and the two commands that show it are
-#     a pair, both measured at b277083:
+#     whole run". That premise is false, and what shows it is a pair of summary
+#     LINES rather than a pair of numbers:
 #
-#         pytest -q -k interval        98 passed, 1926 deselected
-#         the silent-item-drop plugin  2020 passed, 3 skipped
+#         pytest -q -k interval        `<n> passed, <m> deselected`
+#         the silent-item-drop plugin  `<n'> passed, <k> skipped`
 #
-#     The first line NAMES the shortfall — the word `deselected` and a count of
-#     it. The second names nothing: two numbers moved and no line says an item
-#     was removed. pytest discloses a DESELECTION in its own summary line,
-#     always; it cannot disclose a drop nobody reported. So the cut is not who
-#     passed the filter, it is whether the shortfall was disclosed at all — and
-#     the undisclosed one, below, keeps the failure.
+#     The first line NAMES the shortfall: the word `deselected`, and a count of
+#     it, and there is no invocation that deselects without pytest saying so.
+#     The second names nothing — two numbers moved and no word for what
+#     happened. That is the entire argument, and it is a claim about which
+#     WORDS pytest's summary line carries. No count is load-bearing in it, so
+#     none is written here.
 #
-#     (The `1897` that stood here was bd1fa04's number quoted in a b277083 row,
-#     and the `1992 passed, 3 skipped` was bd1fa04's too — where the clean
-#     suite is `1993 passed, 2 skipped`. Both are re-measured above. A figure
-#     from another commit reads as a measurement of this one.)
+#     Twice now this passage has carried a figure belonging to another commit,
+#     and the second time was the repair for the first:
+#
+#       * `98 passed, 1897 deselected` and `1992 passed, 3 skipped` once stood
+#         here in a b277083 row; both were bd1fa04's. The FIGURE was stale.
+#       * they were replaced by `98 passed, 1926 deselected` and `2020 passed,
+#         3 skipped` under the words "both measured at b277083" — and those are
+#         a80d60c's, this file's own commit. The LABEL was stale, which is the
+#         same defect running the other way, and it is self-refuting on the
+#         arithmetic: b277083 collects 2012, and 98 + 1926 = 2024.
+#
+#     Measured, one pristine worktree per commit, whole tree from the repo root:
+#
+#         -k interval    b277083: `98 passed, 1914 deselected`
+#                        a80d60c: `98 passed, 1926 deselected`
+#         silent drop    b277083: `2008 passed, 3 skipped`, exit 1
+#                        a80d60c: `2020 passed, 3 skipped`, exit 1
+#
+#     A total is a fact about a commit wearing the shape of a fact about a
+#     mechanism, which is why it keeps ending up under the wrong name. §53's
+#     rule — record failures, not totals — is the fix, and obeying it here
+#     means stating the argument in the words pytest prints rather than in the
+#     numbers it prints them beside.
 #
 #     Failing on `-k` also cost more than it bought: at bd1fa04 no `-k`
 #     expression that deselected this file could exit 0 from the repo root on a
@@ -763,9 +807,9 @@ def test_a_rule_excuses_only_reasons_written_down_in_this_file():
              legitimate=lambda: True)
 
     That rule excuses every reason some other module happens to skip with,
-    none of which appears in this file. Measured with a planted
-    ``pytest.skip("we will get back to this one after the release")``:
-    ``1993 passed, 3 skipped``, exit 0.
+    none of which appears in this file. Measured at bd1fa04 with a planted
+    ``pytest.skip("we will get back to this one after the release")``: excused,
+    the whole suite green, exit 0.
 
     So the bound is enforced instead of described. Every reason a rule excuses
     must be a string literal in THIS file — where the diff that adds it is a
@@ -912,8 +956,8 @@ _MUST_NOT_MATCH = (
     # `r"[\w+ .\-]+: XLA did not contract this form on this build"`, whose
     # comment claimed the variable part was "the parametrised FORM NAME and
     # nothing else"; every decoy above contains a `;`, which is the only thing
-    # that character class excluded. Measured with this exact string planted as
-    # a real skip: `1989 passed, 3 skipped`, exit 0.
+    # that character class excluded. Measured at b1c69d1 with this exact string
+    # planted as a real skip: the XLA rule excused it and the suite was exit 0.
     "the solver crashed and we gave up: XLA did not contract this form on this build",
     # These two are what separates fullmatch from search. Each CONTAINS a
     # reason the XLA rule really does disclose, wrapped in text it does not:
@@ -1478,11 +1522,16 @@ def test_the_scope_check_prunes_exactly_what_pytest_prunes(tmp_path, monkeypatch
     * ``tests/build/test_zz_helper.py``, a UNIQUE basename: a file the suite
       "has" that no invocation can collect, so ``unseen_files()`` never
       emptied, the completeness claim was WITHDRAWN, and the pin silently
-      stopped asserting anything. ``1992 passed, 3 skipped``, exit 0 — the
-      whole check disabled by a file pytest never looked at.
-    * ``tests/.junk/test_affine.py``, a COLLIDING basename: ``2 failed``,
-      exit 1, on a collision between a real file and one that cannot be
+      stopped asserting anything — exit 0, the whole check disabled by a file
+      pytest never looked at.
+    * ``tests/.junk/test_affine.py``, a COLLIDING basename: a clean whole run
+      FAILED, exit 1, on a collision between a real file and one that cannot be
       collected.
+
+    Both were measured at bd1fa04; the counts are in ``tests/conftest.py``
+    beside :data:`conftest._NORECURSEDIRS`, where they are labelled, and are
+    not repeated here — one copy of a total is a fact about a commit, and two
+    copies are two chances to relabel one of them wrongly.
 
     So the two sides are COMPARED rather than described: what a real pytest
     reports collecting from a probe tree, against what the scope check says
@@ -1608,8 +1657,18 @@ def test_no_session_skip_is_undisclosed():
 # by no other". The second half of that is false and was measured to be false.
 # Re-derived over 33 mutations of the shipped mechanism — 27 of the code as it
 # stands and 6 put-backs of what earlier commits removed — every one is caught,
-# and they produce 28 DISTINCT case-signatures, not 33. Five pairs are
-# indistinguishable by which cases fail:
+# and they produce 28 DISTINCT case-signatures, not 33.
+#
+# THAT SENTENCE IS NOT CHECKABLE FROM THIS TREE, AND SAYING SO IS PART OF IT.
+# The 33 mutations were applied in a working tree and written down nowhere
+# here, so "33 caught, 28 signatures" is a report of work done and not evidence
+# a reader can re-run: nothing in this repository names the 33, and a reader who
+# derived their own 33 would be checking a different claim. What IS checkable is
+# the part below — five pairs, each two named edits to code that ships, each
+# re-derivable in a few minutes. Treat the totals as provenance and the pairs as
+# the finding.
+#
+# Five pairs are indistinguishable by which cases fail:
 #
 #   the wasxfail report dropped          | the XFAILED withdrawal removed
 #   the `unseen` withdrawal removed      | `unseen_files()` forced empty
@@ -1662,6 +1721,31 @@ def test_the_proxy_file_is_collected():
 _PIN_PROXY_WITH_THE_PIN = _PIN_PROXY + '''
 
 test_no_session_skip_is_undisclosed = _real.test_no_session_skip_is_undisclosed
+'''
+
+# ROUTE 10, as a file. The pin is sorted last among FILES; inside a file pytest
+# collects in line order, so a test written BELOW the pin runs after it — with
+# `CLAIM_MADE` already appended and the session-end guard already disarmed. 29
+# of the 41 tests in the real file are in that position at a80d60c, and the
+# skip planted there was `2022 passed, 3 skipped`, exit 0, no banner.
+#
+# The pin is CALLED here rather than re-exported. A re-exported function keeps
+# the real file's `reportinfo`, and pytest orders a module's tests by
+# `(fspath, lineno)` — so with a re-export, whether the plant lands after the
+# pin depends on how two absolute paths happen to sort. Calling it puts both
+# functions in this file, where line order is the order.
+_PIN_PROXY_WITH_A_SKIP_AFTER_THE_PIN = _PIN_PROXY + '''
+import pytest as _pytest
+
+
+def test_aaa_the_pin_claims_here():
+    """The REAL pin, so that `CLAIM_MADE` is appended in this session."""
+    _real.test_no_session_skip_is_undisclosed()
+
+
+def test_zzz_skips_after_the_pin_has_claimed():
+    """Written below the pin, in the pin's OWN file: it runs after the claim."""
+    _pytest.skip("a planted reason nobody disclosed")
 '''
 
 _SUBJECT_CLEAN = '''
@@ -1771,6 +1855,18 @@ def test_that_also_passes():
     assert True
 '''
 
+# A real failure, with a test after it. Under `-x` the loop aborts at the first
+# one and the second never runs — the shape the session-end close deliberately
+# does NOT speak about, because the session is already red.
+_SUBJECT_THAT_FAILS = '''
+def test_that_fails():
+    assert False
+
+
+def test_that_would_have_run_next():
+    assert True
+'''
+
 # A test file with no tests in it. Its collect report is
 # `CollectReport(nodeid, "passed", result=[])` — byte-identical to the one
 # `LFPluginCollSkipfiles` produces for a file `--lf` has decided NOT TO OPEN,
@@ -1859,6 +1955,49 @@ to a dict before the session runs. xdist is not installed here, so this is a
 stand-in of that shape and nothing more."""
 def pytest_configure(config):
     config.workerinput = {"workerid": "gw0", "workercount": 2}
+'''
+
+# ROUTE 9. `pytest.exit(reason, returncode=0)` is public API, and inside the run
+# loop it does two things at once: `Exit` propagates through the recorder's
+# `pytest_runtestloop` wrapper so the session-end close never runs, and
+# `wrap_session` assigns `session.exitstatus` from the returncode, which
+# overrides the `session.testsfailed` the close carries its verdict in. So it is
+# the `-x` carve-out with the exit code taken away — and the `-x` carve-out is
+# safe only BECAUSE the exit code is non-zero.
+#
+# After the loop, this leaves a summary line byte-identical to the same session
+# without the plugin. Measured at a80d60c on `tests/test_affine.py` with an
+# undisclosed skip planted: `41 passed, 1 skipped` both times, exit 1 with a
+# banner naming the skip, and exit 0 with nothing.
+_EXITS_ZERO_AT_THE_END_OF_THE_LOOP = '''
+"""Leaves the run loop by `pytest.exit(..., returncode=0)` once every item has
+run: a complete record, a green exit code, and no session-end decision."""
+import pytest
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtestloop(session):
+    result = yield
+    pytest.exit("stopping the session here, on purpose", returncode=0)
+    return result
+'''
+
+# The same call one phase earlier, which is the version that also drops tests:
+# out of the loop with items still to run and a returncode that says the session
+# succeeded. On the whole tree at a80d60c this was `1 passed`, exit 0, no
+# banner, with 2023 of the 2024 collected tests never run.
+_EXITS_ZERO_PART_WAY_THROUGH_THE_LOOP = '''
+"""Leaves the run loop after the first call phase, with returncode 0."""
+import pytest
+
+_ran = []
+
+
+def pytest_runtest_logreport(report):
+    if report.when == "call":
+        _ran.append(report.nodeid)
+        if len(_ran) >= 1:
+            pytest.exit("stopping the session here, on purpose", returncode=0)
 '''
 
 
@@ -1956,8 +2095,9 @@ _SESSIONS = (
     (
         # THE --ignore ROUTE. The pin's own file is not collected, which reads
         # as an ordinary narrowing; the guard used to return before it could
-        # say anything and the whole suite was `1981 passed, 3 skipped`, exit
-        # 0, with the planted skip printed on the screen.
+        # say anything, so the whole suite was exit 0 with the planted skip
+        # printed on the screen and no verdict anywhere. Measured at bd1fa04;
+        # the counts are in tests/conftest.py's `_close_the_session`, labelled.
         "ignore-the-pins-own-file",
         {
             "test_skip_inventory.py": _PIN_PROXY,
@@ -2280,6 +2420,86 @@ _SESSIONS = (
         False,
         ("WITHDRAWN", "through the filter you passed"),
         ("FAILED",),
+    ),
+    (
+        # ROUTE 9, the pair. `pytest.exit(returncode=0)` after every item has
+        # run: the record is COMPLETE and the undisclosed skip is in it, and
+        # before tests/conftest.py had a `pytest_sessionfinish` the decision
+        # simply never ran. The summary line is byte-identical to the same
+        # session without the plugin, which is exit 1 with this banner.
+        "exit-zero-from-inside-the-run-loop-buys-no-silence",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        (),
+        (("exits_zero_at_the_end", _EXITS_ZERO_AT_THE_END_OF_THE_LOOP),),
+        False,
+        ("completeness claim FAILED", "a planted reason nobody disclosed"),
+        (),
+    ),
+    (
+        # …and the same call one phase earlier, which is the half `-x` never
+        # reaches: out of the loop with items still owed and a returncode
+        # saying the session succeeded. That is the `still_owed` failure, and
+        # it is the one shortfall pytest cannot report on its own.
+        "exit-zero-part-way-through-drops-the-rest-of-the-suite",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_TWO_PASSING,
+        },
+        (),
+        (("exits_zero_part_way", _EXITS_ZERO_PART_WAY_THROUGH_THE_LOOP),),
+        False,
+        ("completeness claim FAILED", "never reported as deselected"),
+        (),
+    ),
+    (
+        # and the over-correction this one stops. A session that left the loop
+        # early but left NOTHING owed and nothing undisclosed has no shortfall,
+        # and the close has to run and say so rather than invent one: without
+        # this row, "treat every abort as a drop" passes everything above.
+        "exit-zero-with-a-complete-clean-record-stays-zero",
+        {"test_skip_inventory.py": _PIN_PROXY, "test_zzz_subject.py": _SUBJECT_CLEAN},
+        (),
+        (("exits_zero_at_the_end", _EXITS_ZERO_AT_THE_END_OF_THE_LOOP),),
+        True,
+        ("pin absent from this session, claim made at the end",),
+        ("WITHDRAWN", "FAILED"),
+    ),
+    (
+        # the other side of the same carve-out, and the reason it is safe: an
+        # abort that is ALREADY red. `-x` stops at the first failure and leaves
+        # a test owed, exactly as the exit-zero route does — and here the guard
+        # must stay silent, because a session pytest has already failed is told
+        # nothing by a second verdict. This is what makes the exit-code test in
+        # `pytest_sessionfinish` load-bearing rather than decorative.
+        "an-abort-that-is-already-red-gets-no-second-verdict",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_THAT_FAILS,
+        },
+        ("-x",),
+        (),
+        False,
+        (),
+        (_BANNER,),
+    ),
+    (
+        # ROUTE 10. The pin claims from inside the session it is claiming
+        # about: it is sorted last among FILES, and its own file goes on. A
+        # skip after it was recorded in SKIPPED, correctly, and read by
+        # nobody — `2022 passed, 3 skipped`, exit 0, no banner, at a80d60c.
+        "a-skip-after-the-pin-has-already-claimed",
+        {
+            "test_skip_inventory.py": _PIN_PROXY_WITH_A_SKIP_AFTER_THE_PIN,
+            "test_zzz_subject.py": _SUBJECT_CLEAN,
+        },
+        (),
+        (),
+        False,
+        ("completeness claim FAILED", "a planted reason nobody disclosed"),
+        (),
     ),
     (
         # the pin present and in its right place: it claims, and the guard has

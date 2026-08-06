@@ -48,8 +48,10 @@ and that is the cut this pin makes everywhere else. An ``xpassed`` report
 (``wasxfail`` set, outcome PASSED) is a test that ran and passed, and is
 recorded as having run.
 
-The same plant here is ``2021 passed, 3 skipped, 1 xfailed``, EXIT 0, and the
-extra skip is the pin withdrawing and saying why.
+The same plant at a80d60c is ``2021 passed, 3 skipped, 1 xfailed``, EXIT 0, and
+the extra skip is the pin withdrawing and saying why. (A count with no commit
+beside it is a fact about one tree wearing the shape of a fact about the
+mechanism; ``here`` was the label until the suite grew under it.)
 
 **The whole taxonomy was then re-walked for anything else pytest DISCLOSES
 that this recorder drops**, by driving one test of every shape past it and
@@ -81,7 +83,31 @@ a file with no tests               not in SEEN_FILES   no — reads as unseen
 One row has no outcome channel: a test whose SETUP errored is in ``STARTED``
 and nowhere else. It is accounted for (so the order check does not fire on it)
 and it cannot hide anything, because pytest reports ``N errors`` and the
-session is non-zero. That is the whole of what the walk found.
+session is non-zero — which is a claim about the EXIT CODE, and is therefore
+only as good as the exit code is, a dependence :func:`pytest_sessionfinish`
+takes seriously and this row inherits. That is the whole of what the walk
+found.
+
+**And the whole of what that walk COULD find, which is less than it looks.**
+The table asks one question — *what channel does this report land in* — so
+every route it can see is a report shape. Two routes are not report shapes. In
+both the skip is recorded in :data:`SKIPPED` exactly as it should be, and
+nothing ever reads it: the DECISION does not run. Both were exit 0 and silent
+when this table was complete and correct.
+
+* ``pytest.exit(reason, returncode=0)`` from inside the run loop. ``Exit``
+  propagates through :func:`pytest_runtestloop`'s ``yield``, so the close is
+  skipped, and ``wrap_session`` assigns ``session.exitstatus`` from the
+  returncode, which overrides the ``testsfailed`` the close would have set.
+  Answered by :func:`pytest_sessionfinish`, which is where pytest guarantees to
+  arrive; see there for the measurement and for the hole that is left.
+* an undisclosed skip in the pin's own file, AFTER the pin has claimed. The pin
+  runs last among files, not among tests. Answered by :func:`_close_the_session`
+  re-asking rather than returning on :data:`CLAIM_MADE`; see there.
+
+The lesson is about the shape of the taxonomy and not about these two entries:
+a table of channels bounds what can be MISREPORTED, and says nothing about
+whether anybody looked.
 
 Two more things are recorded, and neither of them is an outcome.
 
@@ -211,6 +237,12 @@ CLAIM_MADE: list[str] = []
 # (verdict, message) the session-end guard wants printed. Terminal summary
 # only; the verdict itself is carried by ``session.testsfailed``.
 _NOTES: list[tuple[str, str]] = []
+
+# Set the first time :func:`_close_the_session` runs, so that the two places
+# that call it — the end of the run loop, and :func:`pytest_sessionfinish` for
+# the sessions that never reach the end of the run loop — cannot both make the
+# claim. Not a lock: the ordinary path sets it and the backstop reads it.
+_CLOSED: list[bool] = []
 
 _INVENTORY_MODULE = "test_skip_inventory.py"
 
@@ -522,6 +554,18 @@ def pytest_runtestloop(session):
     ``yield`` and skips the close: an aborted session is a narrowed one and has
     nothing to claim.
 
+    **That carve-out is safe for exactly one reason, and it is not the one the
+    sentence above gives.** It is not that an aborted session has nothing to
+    say; it is that every abort listed there leaves ``session.testsfailed > 0``
+    or an ``ExitCode`` that is not ``OK``, so the session is already red and a
+    banner would add nothing a reader does not have. Take the exit code away and
+    the carve-out becomes a hole — which is precisely what
+    ``pytest.exit(reason, returncode=0)`` does, and why
+    :func:`pytest_sessionfinish` below exists. The setup-error row of the
+    taxonomy at the top of this file leans on the same fact (``N errors``, and
+    the session is non-zero), so it inherits the same single point of failure
+    and is disclosed there too.
+
     **This hook used to re-sort ``session.items`` on the way in, and no longer
     does.** The sort was there to beat a ``wrapper=True, tryfirst=True``
     ``pytest_collection_modifyitems`` (``NFPlugin``, pytest-randomly), which
@@ -561,6 +605,75 @@ def pytest_runtestloop(session):
     result = yield
     _close_the_session(session)
     return result
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """The loop is not the only way out of a session, and one of the others
+    keeps the exit code.
+
+    ``pytest.exit(reason, returncode=0)`` raises ``Exit`` from wherever it is
+    called. Inside the run loop that means two things at once, and the second is
+    the one the taxonomy at the top of this file cannot see:
+
+    * it propagates through :func:`pytest_runtestloop`'s ``yield``, so
+      :func:`_close_the_session` never runs — the skips this session saw are in
+      :data:`SKIPPED`, correctly recorded, and nothing reads them;
+    * ``_pytest.main.wrap_session`` catches it and assigns
+      ``session.exitstatus = exc.returncode``, which OVERRIDES the
+      ``session.testsfailed`` that ``_main`` would otherwise have turned into
+      ``ExitCode.TESTS_FAILED``. So the pytest-cov idiom the guard below uses to
+      carry a verdict cannot reach the exit code on this path at all.
+
+    Measured at a80d60c, same worktree, same plant, one ``-p`` apart::
+
+        pytest -q -rs tests/test_affine.py         41 passed, 1 skipped  EXIT 1
+                                                   and a banner naming the skip
+        pytest -q -rs -p <exit0> tests/test_affine.py
+                                                   41 passed, 1 skipped  EXIT 0
+                                                   and no banner at all
+
+    Byte-identical summary lines, opposite verdicts. On the whole tree, exiting
+    after the first call phase: ``1 passed``, exit 0, no banner, 2023 of the
+    2024 collected tests never run. ``pytest.exit`` is public API — the same
+    class of thing as "a plugin that drops items", which is already one of the
+    closed routes.
+
+    So the close is anchored where pytest guarantees to arrive. ``wrap_session``
+    calls ``pytest_sessionfinish`` from a ``finally`` and RETURNS
+    ``session.exitstatus`` afterwards, which makes this the last point at which
+    a verdict can still reach the reader and the shell, on every way out of a
+    session that got as far as ``pytest_sessionstart``.
+
+    **The carve-out is kept, and stated as what it is.** This does nothing when
+    the session is already going to be non-zero: ``-x`` and ``--maxfail`` arrive
+    as ``ExitCode.TESTS_FAILED``, ``--sw`` and an interrupt as
+    ``ExitCode.INTERRUPTED``, an internal error as ``ExitCode.INTERNAL_ERROR``,
+    and a session that is red says everything a banner would. What is left is
+    exactly the abort that claims success, and that one is judged like any
+    other complete-or-incomplete record: an ``Exit`` mid-loop leaves collected
+    tests neither started nor deselected, which is the ``still_owed`` failure.
+
+    **KNOWN AND OPEN, and it is the same shape one level out.** This rests on
+    ``session.exitstatus``, so it is defeated by a plugin that raises
+    ``pytest.exit(returncode=0)`` from its own ``pytest_sessionfinish``: pytest
+    catches that in ``wrap_session``, re-assigns the exit code, and abandons the
+    rest of the hook chain — including this hook if it had not run yet, and
+    including the terminal summary that prints the banner. There is no hook
+    after the last hook. What can be said is that the shortfall stops being
+    silent from the pin's side: a run in which this hook does not run at all is
+    a run in which pytest itself writes ``Exit: <reason>`` to stderr.
+    """
+    if _CLOSED:
+        return  # the run loop finished and the claim was made there
+    if hasattr(session.config, "workerinput"):
+        return  # a distributed worker claims nothing; see _close_the_session
+    if exitstatus != pytest.ExitCode.OK or session.testsfailed:
+        return  # already red: an aborted session that says so needs no banner
+    _close_the_session(session)
+    if session.testsfailed:
+        # `_main` has already returned, so the idiom the guard uses cannot be
+        # read any more; this is the assignment `wrap_session` returns.
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 def _no_call_phase_in_this_mode(config) -> bool:
@@ -665,15 +778,49 @@ def _close_the_session(session) -> None:
     Any narrowing at all bought a silent pass on the one shortfall the whole
     mechanism exists for. The order is fixed where it is made, in
     ``the_claim_this_session_can_make``: the undisclosed drop is decided
-    BEFORE either withdrawal. The same four commands here::
+    BEFORE either withdrawal. The same four commands at a80d60c::
 
         whole tree                        2020 passed, 3 skipped, EXIT 1, banner
         --ignore=tests/test_square_row.py 2003 passed, 3 skipped, EXIT 1, banner
         pytest tests/test_affine.py       40 passed,              EXIT 1, banner
         -k "not test_op_add"              2019 p, 3 s, 1 desel,   EXIT 1, banner
+
+    The counts in the second block are a80d60c's and are labelled as such
+    rather than as "here", which is what they used to say: the suite grows, and
+    a figure whose label is the tree it happens to be sitting in is a figure
+    that goes wrong without anybody editing it. What the two blocks are FOR is
+    the EXIT and the BANNER columns, which is what §53 means by recording
+    failures rather than totals — those four cells are the finding, and they
+    are the same at any suite size.
     """
-    if CLAIM_MADE:
-        return  # the pin ran with a complete record and said its piece
+    _CLOSED.append(True)
+    # What the pin said, if it got to say anything — NOT a reason to stay quiet.
+    #
+    # This used to be `if CLAIM_MADE: return`, and the gap in it is that the pin
+    # makes its claim from inside the session it is claiming about. It runs last
+    # among FILES, not among TESTS: its own module still has tests after it (29
+    # of the 41 in it, at a80d60c), and every one of them runs with the claim
+    # already made and the guard already disarmed. Measured on the whole tree at
+    # a80d60c, with `pytest.skip("a planted reason nobody disclosed")` appended
+    # to `tests/test_skip_inventory.py` so that it fires after the pin:
+    #
+    #     pytest -q -rs   ->  2022 passed, 3 skipped, EXIT 0, no banner, and the
+    #                         planted skip printed on the screen
+    #
+    # The skip was recorded in `SKIPPED` exactly as it should have been. Nothing
+    # read it. That is not a report shape the taxonomy above could have caught —
+    # the report landed in the right channel — it is the DECISION not running,
+    # and the same line of code as the `--ignore` route this guard was written
+    # for. So the claim is re-asked here, over the record as it finally stands,
+    # and the guard stays quiet only when the answer is the one the pin already
+    # delivered.
+    #
+    # The corner that leaves, deliberately: a session in which the pin ALREADY
+    # failed and a second undisclosed skip lands afterwards is not told about
+    # the second one, because the verdict did not change. It is already red and
+    # already says undisclosed skips are present; fixing the first and re-running
+    # names the second.
+    already = CLAIM_MADE[-1] if CLAIM_MADE else ""
     # There is deliberately no "and nothing ran" return here. The old
     # `if not RAN: return` is the second silent route above; narrowing it to
     # `not RAN and not SKIPPED` would only have moved it, and would have left a
@@ -706,6 +853,8 @@ def _close_the_session(session) -> None:
             f"the completeness pin could not be consulted at the end of a "
             f"session it was not part of: {exc!r}"
         )
+    if already and verdict == already:
+        return  # the pin said this already, and nothing has changed since
     if verdict == "withdrawn" and (no_call_phase or unseen_files()):
         # the developer narrowed collection, or asked for a mode that runs
         # nothing; neither is news. A FAILED verdict is never silenced here.
