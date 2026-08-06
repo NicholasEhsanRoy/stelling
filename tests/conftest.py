@@ -653,15 +653,29 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     other complete-or-incomplete record: an ``Exit`` mid-loop leaves collected
     tests neither started nor deselected, which is the ``still_owed`` failure.
 
-    **KNOWN AND OPEN, and it is the same shape one level out.** This rests on
-    ``session.exitstatus``, so it is defeated by a plugin that raises
-    ``pytest.exit(returncode=0)`` from its own ``pytest_sessionfinish``: pytest
-    catches that in ``wrap_session``, re-assigns the exit code, and abandons the
-    rest of the hook chain — including this hook if it had not run yet, and
-    including the terminal summary that prints the banner. There is no hook
-    after the last hook. What can be said is that the shortfall stops being
-    silent from the pin's side: a run in which this hook does not run at all is
-    a run in which pytest itself writes ``Exit: <reason>`` to stderr.
+    **KNOWN AND OPEN, and it is this same route one level out.** Both halves of
+    what happens here — the exit code and the banner — are defeated by a plugin
+    that raises ``pytest.exit(returncode=0)`` from its OWN
+    ``pytest_sessionfinish``. ``wrap_session`` catches that and re-assigns
+    ``session.exitstatus`` from the returncode, undoing the assignment below;
+    and the terminal reporter's own ``pytest_sessionfinish`` is a WRAPPER around
+    every ordinary one, so an ``Exit`` raised inside it never reaches the code
+    after its ``yield`` and ``pytest_terminal_summary`` is never called at all —
+    whichever order the two ordinary hookimpls ran in. Measured, on
+    ``tests/test_affine.py`` with an undisclosed skip planted::
+
+        no plugin                      EXIT 1, banner naming the skip
+        + exit0 from a sessionfinish   EXIT 0, no banner
+
+    There is no hook after the last hook, so this is not closable from here, and
+    it is written down rather than left to be found. What is true is that it
+    does not produce the byte-identical green this whole mechanism exists to
+    end: pytest itself writes ``Exit: <reason>`` on the way out.
+
+    So, plainly: this fix RESTS ON THE EXIT CODE, exactly as the ``-x``
+    carve-out and the setup-error row of the taxonomy do. What breaks all three
+    is the same thing — anything that assigns the process exit code after the
+    verdict has been formed.
     """
     if _CLOSED:
         return  # the run loop finished and the claim was made there

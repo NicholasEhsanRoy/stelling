@@ -1677,12 +1677,35 @@ def test_no_session_skip_is_undisclosed():
 #   `USER_FILTERS` never filled          | the `-k` failure put back
 #
 # The first four pairs are one invariant at two sites — the recorder's end and
-# the decision's end — and a signature that names the invariant rather than the
-# line is the right resolution of them, not a defect. The fifth is not: those
-# two fail the SAME two cases on DIFFERENT assertions inside them (the wording
-# assertion and the exit-code assertion), which the case id alone does not
-# carry. So the honest claim is: every mutation is caught, and the case that
-# catches it names the invariant, not the line.
+# the decision's end. The defence offered for them was that a signature naming
+# the invariant rather than the line is the right resolution, and half of that
+# is measured while the other half was restatement. Here is the measured half:
+# the suite DOES separate two sites of one invariant as soon as they differ
+# observably. Removing the `still_owed` FAILURE from the decision and forcing
+# the recorder's `pending_items()` to return `[]` are both "the undisclosed
+# drop stops being noticed", and they do NOT collide —
+#
+#   the `still_owed` failure removed  items-dropped-without-being-reported,
+#                                     an-ignored-file-does-not-swallow-…,
+#                                     a-filter-does-not-swallow-…,
+#                                     exit-zero-part-way-through-…
+#   `pending_items()` forced empty    those four, AND pin-reordered-to-the-front
+#
+# — because the second also destroys the DEFERRAL, and a case asserts on that.
+# So the four collisions are places where no behavioural case could tell the
+# two sites apart, not places where nothing tried to.
+#
+# What none of that establishes is that the lost localisation is free, and the
+# sentence that used to stand here asserted it by restating the collision as a
+# virtue. It is dropped rather than defended. A collision means a red suite
+# names an invariant and leaves the reader to find which of two lines broke it.
+# That is a real cost; it is paid because the alternative is a case that
+# asserts on a line number, which is worse.
+#
+# The fifth pair is not of that kind at all: those two fail the SAME two cases
+# on DIFFERENT assertions inside them (the wording assertion and the exit-code
+# assertion), which the case id alone does not carry — so not even the
+# invariant-naming defence applies to it.
 
 _PIN_PROXY = '''
 """Stands in for this module in the miniature sessions: the guard's counterpart.
