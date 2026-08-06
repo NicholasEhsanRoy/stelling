@@ -1538,12 +1538,14 @@ def _bar_domain(escalation) -> dict[int, tuple[SolverStamp, ...]] | object:
     Nothing else about a record may enter this decision: a record that could
     certify its own cleanliness is the deleted `barred_on_slice` field under
     another name, and the defect is not confined to a field that NAMES a
-    barred primitive. Measured, on `eb1ff86`: adding `audit_token: str = ""`
-    to `ObligationEscalation` and `and r.audit_token != "clean"` here produced
-    VERIFIED for a record carrying `audit_token='clean'` on the bar's own
-    fixture, with the full suite green — the field-probe test that was meant to
-    catch it moves each field to two values of its declared TYPE, which
-    EXHAUSTS `bool` and merely SAMPLES `str`.
+    barred primitive. Measured, on `eb1ff86` (where this read was four lines
+    in `make_solver_verdict`) and again here: adding `audit_token: str = ""`
+    to `ObligationEscalation` and `and r.audit_token != "clean"` to this
+    filter gives UNKNOWN at `''` and at `'a value no honest record carries'`
+    and VERIFIED at `'clean'`, and at `eb1ff86` the full suite stayed green —
+    the field-probe test that was meant to catch it moves each field to two
+    values of its declared TYPE, which EXHAUSTS `bool` and merely SAMPLES
+    `str`.
 
     So the channel is pinned by construction rather than by probing values:
     `tests/test_verified_bar.py` calls this with a record object that HAS no

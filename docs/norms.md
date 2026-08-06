@@ -262,10 +262,13 @@ Two measured instances, and the difference between them is the whole norm.
   `[dependency-groups] dev` (pre-commit, pytest, reuse), not in either CI job
   (`.[solvers]` and `.[solvers,jax]`, plus pytest); its only other mention in
   the tree is a pre-commit hook BANNING the name in `src/stelling` for
-  library-neutrality. **So they have never run in CI**, and they are the only
-  2 skips among the 2005 tests the suite collects under jax and both
-  solvers — the population is the whole suite. Nothing
-  anywhere says the sugar's acceptance bar is unmeasured.
+  library-neutrality. **So they have never run in CI**, and they are the ONLY
+  skips the suite reports under jax and both solvers — two of them, and the
+  population is the whole suite. (An absolute test count stood here and was
+  already stale when it was written, which is this file's own subject: the
+  claim that carries the argument is "the only two", and that is the one
+  worth stating.) Nothing anywhere says the sugar's acceptance bar is
+  unmeasured.
 
 "Weaker guarantee" and "no guarantee" are different facts and must not read the
 same. The first has a fallback; the second has nothing where the claim is made.
