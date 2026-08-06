@@ -1474,6 +1474,304 @@ def test_the_bars_domain_cannot_read_a_new_field():
     assert _bar_domain(_JustRecords((_OnlyThreeFields(0, "unknown", stamps),))) == {}
 
 
+# -- the channel, pinned by OBSERVATION rather than by removal ---------------
+#
+# `test_the_bars_domain_cannot_read_a_new_field` removes the fields, which is
+# the right idea and reaches exactly one access form. Measured on this branch,
+# against a `__slots__` record carrying only `index`, `outcome`,
+# `invocations`: a plain attribute read is caught, and so is a `@property`;
+# `getattr(r, "audit_token", "")`, a `hasattr` guard and `r.__dict__.get(...)`
+# are NOT — they evaluate to the default and pass. And it pins the invariant at
+# ONE PRODUCER, `_bar_domain`, while the same conjunct written at the CALL SITE
+# or one function over does the same job. Six channels were measured on this
+# branch, each flipping the bar's UNKNOWN to VERIFIED with the full suite
+# green:
+#
+#   1 `_evidence_is_about` reads `options.get("audited_clean")`  (no new field)
+#   2 `make_solver_verdict`, one line after `_bar_domain`: `decided = {}`
+#   3 `_bar_domain`, `getattr(r, "audit_token", "") == "clean"`
+#   4 `make_solver_verdict`, AFTER the bar is consulted: `barred = ()`
+#   5 `_bar_domain`, `type(r.index) is not int`, on an `int` SUBCLASS
+#   6 `_bar_scope` reads the token out of the existing `SolverStamp.options`
+#
+# `test_the_bar_is_consulted_with_exactly_that_domain` does not reach 2, 4 or
+# 6: all three satisfy `len(seen) == 1 and seen[0] == _bar_domain(case)`,
+# because a conjunct keyed on an UNPROBED value changes nothing at the values
+# it probes. That is the same gap the branch identified inside `_bar_domain`
+# and left standing at the call site.
+#
+# So the pin here is a READ LEDGER. Every record and every invocation stamp
+# reaching the assembly is wrapped in an observer that records
+# (reading function, attribute name) for EVERY attribute access — plain,
+# property, `getattr` with a default, `hasattr`, `__dict__`, all of them go
+# through `__getattribute__` — and the whole of `make_solver_verdict` is then
+# driven. A read that is not in the allow-list below is a new channel whatever
+# it is called, whatever its type, and wherever it is written. Channels 2, 3, 4
+# and 6 are all new (function, attribute) pairs. Channel 1 is a new KEY rather
+# than a new attribute and is closed by `verdict._EVIDENCE_OPTION_KEYS`;
+# channel 5 reads nothing new at all and is closed by the type-invariance test
+# after that.
+_COMPREHENSIONS = ("<genexpr>", "<listcomp>", "<dictcomp>", "<setcomp>")
+
+
+def _reading_function() -> str:
+    """The function that performed the attribute read, seen through any
+    comprehension frames it went via (a genexpr's own `co_name` would hide
+    which function wrote it)."""
+    import sys
+
+    frame = sys._getframe(2)
+    while frame is not None and frame.f_code.co_name in _COMPREHENSIONS:
+        frame = frame.f_back
+    return frame.f_code.co_name if frame is not None else "<unknown>"
+
+
+class _Watched:
+    """A transparent proxy that logs `(kind, reading function, attribute)` for
+    every attribute access, then delegates."""
+
+    def __init__(self, inner, log, kind):
+        object.__setattr__(self, "_watch", (inner, log, kind))
+
+    def __getattribute__(self, name):
+        inner, log, kind = object.__getattribute__(self, "_watch")
+        if name == "_watch":
+            return (inner, log, kind)
+        log.add((kind, _reading_function(), name))
+        return getattr(inner, name)
+
+
+# EXACTLY the reads the assembly makes off a record or an invocation stamp.
+# Asserted in both directions: nothing outside it (a new channel), and nothing
+# in it that never happens (a padded list would let a real read hide).
+_ALLOWED_READS = frozenset({
+    # the bar's domain: the discharging predicate, its key, and the stamps
+    # carried across for the WIDENING decision
+    ("record", "_bar_domain", "outcome"),
+    ("record", "_bar_domain", "index"),
+    ("record", "_bar_domain", "invocations"),
+    # verdict assembly proper — the obligation loop, the notes, the
+    # witnesses, the redundancy surface
+    ("record", "make_solver_verdict", "index"),
+    ("record", "make_solver_verdict", "outcome"),
+    ("record", "make_solver_verdict", "detail"),
+    ("record", "make_solver_verdict", "notes"),
+    ("record", "make_solver_verdict", "witness"),
+    ("record", "make_solver_verdict", "answered_by"),
+    # the narrowing decision: two stamp attributes, plus `options` read in
+    # ONE function, which projects it to `_EVIDENCE_OPTION_KEYS`
+    ("stamp", "_evidence_is_about", "invoked"),
+    ("stamp", "_evidence_is_about", "name"),
+    ("stamp", "_evidence_options", "options"),
+})
+
+
+def _watched_escalation(esc, log):
+    import dataclasses
+
+    return dataclasses.replace(esc, records=tuple(
+        _Watched(
+            dataclasses.replace(r, invocations=tuple(
+                _Watched(s, log, "stamp") for s in r.invocations)),
+            log, "record",
+        )
+        for r in esc.records
+    ))
+
+
+def test_nothing_in_the_assembly_reads_a_field_it_is_not_allowed_to():
+    """THE CHANNEL, PINNED AT THE SURFACE AND NOT ONLY AT ITS PRODUCER.
+
+    See the block comment above for the six measured channels and for why
+    removing fields from a record reaches only one of the access forms. This
+    drives the WHOLE of `make_solver_verdict` — the call site included, and
+    `_bar_scope` and `_evidence_is_about` with it — and fails on any attribute
+    read that is not in `_ALLOWED_READS`.
+
+    Both arrangements are driven, because the bar reaches different code in
+    each: the honest one bars through the decided slice's own barred set, the
+    mispaired one through the evidence check's fallback, and a conjunct
+    written for the second is invisible to the first.
+    """
+    from stelling.solvers import make_solver_verdict
+
+    log: set = set()
+
+    closed, prop, esc = _stamped(_scatter_ON_the_decided_slice)
+    v = make_solver_verdict(closed, prop, _watched_escalation(esc, log),
+                            **VERSIONS)
+    assert v.status == "UNKNOWN", (
+        f"{v.status}: the watched assembly does not reach the bar, so this "
+        f"test never drives the code the channels live in"
+    )
+
+    el_closed = trace(_scatter_ELSEWHERE_same_shape)
+    mispaired = _watched_escalation(
+        _past_the_pairing_gate(esc, el_closed), log)
+    v2 = make_solver_verdict(el_closed, prop, mispaired, **VERSIONS)
+    assert v2.status == "UNKNOWN", v2.status
+
+    extra = log - _ALLOWED_READS
+    assert not extra, (
+        f"the assembly read {sorted(extra)} off a record or an invocation "
+        f"stamp. Every entry is a new channel by which a record could certify "
+        f"its own cleanliness — the deleted `barred_on_slice` under another "
+        f"name, at another site, or through another access form. If the read "
+        f"is legitimate, adding it to `_ALLOWED_READS` is the whole cost, and "
+        f"it should be argued in the commit rather than done quietly"
+    )
+    dead = _ALLOWED_READS - log
+    assert not dead, (
+        f"`_ALLOWED_READS` permits {sorted(dead)}, which this test never "
+        f"observed. A permitted read that never happens is padding, and "
+        f"padding is where a real read hides"
+    )
+
+
+def test_the_narrowing_decision_may_read_only_these_option_keys():
+    """CHANNEL 1: `SolverStamp.options` is a record-carried `dict[str, str]`
+    that the narrowing decision reads, and nothing constrained WHICH keys.
+
+    A conjunct on a key no honest stamp carries needs no new field anywhere —
+    it is invisible to `test_the_bars_domain_cannot_read_a_new_field`, which
+    removes fields, and to `test_no_record_field_can_narrow_the_bars_domain`,
+    which probes their values. Measured on this branch:
+    `options.get("audited_clean") == "yes"` in `_evidence_is_about` turns the
+    mispaired assembly's UNKNOWN into VERIFIED with the full suite green.
+
+    Closed by PROJECTION. `_evidence_options` returns a mapping whose keys are
+    a subset of `_EVIDENCE_OPTION_KEYS`, so a key outside that set cannot
+    reach the decision at all. Both halves are pinned: the set is asserted
+    exactly (widening it is the cost of reopening the channel), and the
+    projection is asserted to drop arbitrary keys rather than the ones this
+    test happened to think of.
+    """
+    assert V._EVIDENCE_OPTION_KEYS == frozenset({
+        "smt2_sha256", "slice_sha256", ":timeout", ":tlimit",
+    }), (
+        f"the narrowing decision may now read {sorted(V._EVIDENCE_OPTION_KEYS)} "
+        f"out of a stamp's options. Each added key is a value the record "
+        f"supplies and the bar believes — state what it is for"
+    )
+
+    honest = (("smt2_sha256", "a"), ("slice_sha256", "b"), (":timeout", "1"))
+    poison = tuple(
+        (name, "yes") for name in (
+            "audited_clean", "audit_token", "barred_on_slice", "clean",
+            "x" * 200, "", ":timeout ", "SMT2_SHA256",
+        )
+    )
+    projected = V._evidence_options(
+        V.SolverStamp(invoked=True, reason="probe", name="z3",
+                      version="0", transport="wheel",
+                      options=honest + poison))
+    assert set(projected) <= V._EVIDENCE_OPTION_KEYS, (
+        f"the projection let {sorted(set(projected) - V._EVIDENCE_OPTION_KEYS)} "
+        f"through; it is not a whitelist"
+    )
+    assert projected == dict(honest), projected
+
+    # and it is not vacuous: the keys the decision DOES need survive
+    assert V._evidence_options(V.solver_absent("probe")) == {}
+
+
+def test_the_narrowing_decision_reads_options_in_one_place():
+    """CHANNEL 6, and the second, anti-correlated mechanism for it: the token
+    smuggled through the EXISTING `SolverStamp.options`, read not by
+    `_evidence_is_about` but by `_bar_scope`, which is handed the stamps.
+
+    The read ledger catches that as a new `(function, attribute)` pair. This
+    catches it in the source, so a reader added where the ledger's fixture does
+    not reach is caught too. `_render_one_solver` renders the whole option set
+    for DISPLAY and is outside the bar entirely, which is why the scan is
+    scoped to the bar's own functions rather than to the module.
+    """
+    import inspect
+
+    for fn in (V._bar_scope, V._evidence_is_about, V._barred_in_eqns,
+               V._barred_primitives, V._bar_scope_phrase):
+        body = inspect.getsource(fn)
+        code = "\n".join(
+            line for line in body.splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        _, _, after = code.partition('"""')
+        _, _, after = after.partition('"""')  # drop the docstring
+        # every way of reaching the attribute: `x.options`, and `getattr` /
+        # `__dict__` by name. The local `options = _evidence_options(stamp)`
+        # is not a read of the attribute and is not matched.
+        reads = [form for form in (".options", '"options"', "'options'")
+                 if form in after]
+        assert not reads, (
+            f"{fn.__name__} reads `options` directly (as {reads}). The "
+            f"narrowing decision reads a stamp's option set in ONE place, "
+            f"`_evidence_options`, which projects it to "
+            f"`_EVIDENCE_OPTION_KEYS`; a second reader reopens the key "
+            f"channel without touching either"
+        )
+    assert '"options"' in inspect.getsource(V._evidence_options), (
+        "the one permitted reader no longer reads options, so the scan above "
+        "passes vacuously"
+    )
+
+
+class _EqualButNotInt(int):
+    """Equal to its value, `type()` is not `int`. Channel 5's exploit."""
+
+
+class _EqualButNotStr(str):
+    """Equal to its value, `type()` is not `str`."""
+
+
+def test_the_bars_decision_does_not_look_at_the_TYPE_of_a_record_field():
+    """CHANNEL 5: a conjunct that reads NO new field and adds NO new key —
+    `type(r.index) is not int` in the bar's domain, cleared by handing it an
+    `int` SUBCLASS. Measured on this branch: UNKNOWN becomes VERIFIED, full
+    suite green, and every field-removal and field-probe test stays green
+    because nothing new is read and no value is unusual.
+
+    What is pinned is the property that closes it: **the bar's domain is a
+    function of the VALUES of `index` and `outcome`, not of their runtime
+    types.** A subclass that compares equal must produce the same domain and
+    the same verdict. That covers every type-identity discrimination — `type(…)
+    is`, `is not`, `__class__`, a `type(...).__name__` check — rather than the
+    one spelling this test's fixture uses.
+    """
+    import dataclasses
+
+    from stelling.solvers import _bar_domain, make_solver_verdict
+
+    closed, prop, esc = _stamped(_scatter_ON_the_decided_slice)
+    honest = make_solver_verdict(closed, prop, esc, **VERSIONS)
+    assert honest.status == "UNKNOWN", "the genuine assembly does not bar"
+
+    subclassed = dataclasses.replace(esc, records=tuple(
+        dataclasses.replace(r, index=_EqualButNotInt(r.index),
+                            outcome=_EqualButNotStr(r.outcome))
+        for r in esc.records
+    ))
+    # the fixture really does present a different TYPE at an equal VALUE
+    assert [type(r.index) for r in subclassed.records] != [
+        type(r.index) for r in esc.records
+    ]
+    assert all(r.index == s.index and r.outcome == s.outcome
+               for r, s in zip(subclassed.records, esc.records))
+
+    assert _bar_domain(subclassed) == _bar_domain(esc), (
+        "the bar's domain moved when the records' fields changed TYPE at the "
+        "same VALUE — the domain is discriminating on `type()`, which no "
+        "field-removal or value-probe test can see"
+    )
+    v = make_solver_verdict(closed, prop, subclassed, **VERSIONS)
+    assert v.status == "UNKNOWN", (
+        f"{v.status}: an `int`/`str` subclass carrying the same values as an "
+        f"honest record cleared the bar"
+    )
+    assert [o.status for o in v.obligations] == (
+        ["discharged"] * len(v.obligations)
+    ), "the subclass un-discharged an obligation; the probe passes vacuously"
+
+
 def test_the_bar_is_consulted_with_exactly_that_domain(monkeypatch):
     """The surface half: `make_solver_verdict` must hand `_bar_scope` what
     `_bar_domain` returns and nothing else.
@@ -1525,6 +1823,132 @@ def test_the_bar_is_consulted_with_exactly_that_domain(monkeypatch):
             f"being filtered at the call site, outside the one place the "
             f"channel is pinned"
         )
+
+
+class _InvocationsThatRaise:
+    """A record whose ``invocations`` raises something `_bar_domain`'s INNER
+    guard does not catch, so the OUTER `except` is the one that runs.
+
+    Everything else on it is an honest value, so the assembly proceeds
+    normally and the only thing that changes is that the bar's domain cannot
+    be built."""
+
+    def __init__(self, record):
+        self.index = record.index
+        self.outcome = record.outcome
+        self.detail = record.detail
+        self.witness = record.witness
+        self.notes = record.notes
+        self.answered_by = record.answered_by
+
+    @property
+    def invocations(self):
+        raise ValueError("this record's stamps cannot be read")
+
+
+def test_an_UNREADABLE_domain_widens_the_bar_and_the_sentinel_is_why():
+    """THE OUTER `except` OF `_bar_domain`, WHICH NOTHING DROVE.
+
+    `_bar_domain` has two guards. The inner `except TypeError` around
+    `tuple(r.invocations)` is exercised three times over
+    (`test_a_bar_must_never_BREAK_a_verdict_either`). The OUTER one — the one
+    that returns `_BAR_DOMAIN_UNREADABLE` — was driven by nothing at all, and
+    so neither was the sentinel it returns.
+
+    That left the sentinel's TRUTHINESS unpinned, and truthiness is its whole
+    mechanism: the bar branch is guarded on `decided` being non-empty, because
+    an empty domain honestly means "no solver decided anything". Measured on
+    this branch: `__bool__` returning `False` instead of `True` turns this
+    UNKNOWN into VERIFIED, with no withheld note and the full suite green. The
+    docstring said the sentinel "widens rather than silencing"; nothing
+    checked it.
+
+    Both halves are asserted, because either alone could pass for the wrong
+    reason: that the unreadable escalation really does reach the sentinel
+    (otherwise the assembly below is measuring an ordinary domain), and that
+    the assembled verdict is withheld with the whole-query reason.
+    """
+    import dataclasses
+
+    from stelling.solvers import (
+        _BAR_DOMAIN_UNREADABLE,
+        _bar_domain,
+        make_solver_verdict,
+    )
+
+    closed, prop, esc = _stamped(_scatter_ON_the_decided_slice)
+    unreadable = dataclasses.replace(esc, records=tuple(
+        _InvocationsThatRaise(r) for r in esc.records))
+
+    assert _bar_domain(unreadable) is _BAR_DOMAIN_UNREADABLE, (
+        "the record does not reach `_bar_domain`'s outer `except`, so this "
+        "test drives the sentinel path in name only"
+    )
+    v = make_solver_verdict(closed, prop, unreadable, **VERSIONS)
+    assert [o.status for o in v.obligations] == (
+        ["discharged"] * len(v.obligations)
+    ), (
+        "the unreadable record un-discharged an obligation, so there is no "
+        "VERIFIED for the bar to withhold and this test passes vacuously"
+    )
+    assert v.status == "UNKNOWN", (
+        f"{v.status}: an escalation whose domain could not be read cleared "
+        f"the bar. The sentinel is truthy so the bar branch is ENTERED and "
+        f"`_bar_scope` widens to the whole query; a falsy sentinel is spelled "
+        f"the same way as an honest empty domain, which SILENCES the bar"
+    )
+    assert any("VERIFIED withheld" in n for n in v.notes)
+    assert any("fell back to the whole query" in n for n in v.notes), (
+        "the bar fired but not through the fallback, so the sentinel is not "
+        "what produced this UNKNOWN"
+    )
+
+
+def test_a_ONE_SHOT_records_cannot_silence_the_bar():
+    """THE OTHER WAY PAST THE SENTINEL, WHICH DOES NOT GO THROUGH IT AT ALL.
+
+    `_UnreadableBarDomain` defends against a `records` that cannot be READ. It
+    says nothing about one that can be read ONCE. `make_solver_verdict` walks
+    `escalation.records` several times, and while the bar's domain was built
+    at the bar — several passes down — a generator, a `map`, or any consumed
+    iterator was exhausted by the obligation loop first. `_bar_domain` then
+    returned an HONEST-EMPTY `{}`, which is exactly the value that means "no
+    solver decided anything" and skips the bar. Measured on this branch, and
+    identical at `eb1ff86`: VERIFIED, with no withheld note, on the bar's own
+    fixture — a silencing path that never touched the sentinel.
+
+    The repair is ordering, not a new guard: the domain is read on the FIRST
+    pass, so a one-shot `records` costs the DISCHARGES rather than the bar.
+    Both are asserted — a status of UNKNOWN alone would also hold if the bar
+    fired, and the point is that no would-be VERIFIED is reached at all.
+    """
+    import dataclasses
+
+    from stelling.solvers import make_solver_verdict
+
+    closed, prop, esc = _stamped(_scatter_ON_the_decided_slice)
+    assert make_solver_verdict(closed, prop, esc, **VERSIONS).status == (
+        "UNKNOWN"
+    ), "the genuine assembly does not bar; the fixture is wrong"
+
+    one_shot = dataclasses.replace(esc, records=iter(tuple(esc.records)))
+    v = make_solver_verdict(closed, prop, one_shot, **VERSIONS)
+    assert v.status == "UNKNOWN", (
+        f"{v.status}: a `records` that can only be iterated once cleared the "
+        f"bar — the domain is being read after some earlier pass has consumed "
+        f"it, so it comes back honest-empty and the bar is skipped"
+    )
+    assert [o.status for o in v.obligations] != (
+        ["discharged"] * len(v.obligations)
+    ), (
+        "every obligation still discharged from a `records` that was already "
+        "consumed by the bar's domain. Something is holding the records "
+        "twice, which would put the bar back at the mercy of pass ORDER"
+    )
+    assert not any("VERIFIED withheld" in n for n in v.notes), (
+        "the bar fired on a verdict that never reached VERIFIED; harmless, "
+        "but it means this test is not measuring the ordering it claims to"
+    )
 
 
 @pytest.mark.parametrize("build,strip,label", [

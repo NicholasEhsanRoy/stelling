@@ -1570,7 +1570,25 @@ class _UnreadableBarDomain:
     silencing answer — the bar branch is guarded on `decided` being non-empty,
     because an empty domain legitimately means "no solver decided anything" —
     so an unreadable escalation must not be spelled the same way as an honest
-    empty one."""
+    empty one.
+
+    **THE TRUTHINESS IS THE MECHANISM, AND FOR A WHILE NOTHING DROVE IT.** The
+    outer `except` this sentinel comes out of was reached by no test in the
+    repo — the three `invocations`-shape probes exercise only the INNER
+    `except TypeError` — so `__bool__` returning `False` instead of `True`
+    turned an unreadable escalation's UNKNOWN into VERIFIED, with no withheld
+    note and the full suite green. Both halves are now driven by
+    `tests/test_verified_bar.py::test_an_UNREADABLE_domain_widens_the_bar_and_the_sentinel_is_why`.
+
+    **AND IT DOES NOT COVER EVERY WAY THE DOMAIN CAN COME BACK EMPTY**, which
+    the flat claim "widens rather than silencing" read as if it did. A
+    `records` that can be iterated ONCE is READABLE; it is just readable once,
+    and while the domain was built several passes into `make_solver_verdict` an
+    earlier pass had already consumed it, so `_bar_domain` returned an
+    honest-empty `{}` and the bar was skipped — a silencing path that never
+    reached this sentinel. That is closed by ORDER (the domain is read on the
+    first pass) rather than by anything here; see the comment at the read
+    site."""
 
     __slots__ = ()
 
@@ -1887,6 +1905,23 @@ def make_solver_verdict(
             f"escalation was actually produced from."
         )
 
+    # THE BAR'S DOMAIN IS READ BEFORE ANY OTHER PASS OVER `records`, AND THE
+    # ORDER IS LOAD-BEARING. It used to be read at the bar, several passes
+    # later, and a `records` that can only be iterated ONCE — a generator, a
+    # `map`, a consumed iterator — was therefore fully consumed by `by_index`
+    # below before `_bar_domain` ever saw it. `_bar_domain` then returned an
+    # HONEST-EMPTY `{}`, which is the one value that silences the bar (empty
+    # means "no solver decided anything"), and the assembly returned VERIFIED
+    # with no withheld note. Measured, and identical at `eb1ff86`: a one-shot
+    # `records` cleared the scatter bar on the bar's own fixture. The sentinel
+    # could not help — the read SUCCEEDED, it just ran second.
+    #
+    # Reading it FIRST makes that shape fail safe instead: the domain is built
+    # from the one pass there is, and every later pass sees nothing — so no
+    # record discharges any obligation, and there is no VERIFIED left to
+    # withhold. A degenerate `records` now costs the verdict, never the bar.
+    # See `tests/test_verified_bar.py::test_a_ONE_SHOT_records_cannot_silence_the_bar`.
+    decided = _bar_domain(escalation)
     by_index = {r.index: r for r in escalation.records}
     final: list[ObligationReport] = []
     for ob in propagation.obligations:
@@ -2032,8 +2067,9 @@ def make_solver_verdict(
     # many. It also has to be a place that cannot raise: the `tuple + list`
     # this loop used to be raised `TypeError` out of this function from
     # OUTSIDE `_bar_scope`'s protective `try`, so "a bar must never break a
-    # verdict" did not cover the whole path feeding the bar.
-    decided = _bar_domain(escalation)
+    # verdict" did not cover the whole path feeding the bar. `decided` is
+    # computed at the TOP of the obligation loop, not here: see the comment
+    # there for the one-shot `records` shape that ordering closes.
     if status == "VERIFIED" and decided:
         barred, scope = _verdict._bar_scope(closed, decided)
         if barred:

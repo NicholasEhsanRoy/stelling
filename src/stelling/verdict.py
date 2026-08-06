@@ -756,6 +756,53 @@ def _bar_scope_phrase(per_obligation) -> str:
     )
 
 
+# THE ONLY KEYS THE NARROWING DECISION MAY READ OUT OF A STAMP'S `options`,
+# and the frozen set is the mechanism rather than the documentation of one.
+#
+# `SolverStamp.options` is a record-carried `dict[str, str]` — the exact emitted
+# option set — and the bar's narrowing decision reads it. Nothing constrained
+# WHICH keys, so a conjunct keyed on a key no honest stamp carries
+# (`options.get("audited_clean") == "yes"`) was a record certifying its own
+# cleanliness with NO NEW FIELD ANYWHERE, invisible to every test that removes
+# fields or probes their values. Measured on this branch: with that conjunct in
+# `_evidence_is_about`, the mispaired assembly the bar withholds comes back
+# VERIFIED, full suite green in both columns.
+#
+# The channel is closed by PROJECTION, not by inspection: `_evidence_options`
+# returns a mapping whose keys are a subset of this set, so a key outside it
+# cannot reach the decision at all, whatever it is called and whatever it
+# holds. Adding a member here is therefore the whole cost of opening the
+# channel again, and `tests/test_verified_bar.py` asserts this set EXACTLY.
+_EVIDENCE_OPTION_KEYS = frozenset({
+    "smt2_sha256",  # the hash of the exact script that was sent
+    "slice_sha256",  # the fingerprint of the slice it was emitted from
+    ":timeout",  # z3's spelling of the budget, which is part of the text
+    ":tlimit",  # cvc5's
+})
+
+
+def _evidence_options(stamp) -> dict[str, str]:
+    """THE ONE READ of ``SolverStamp.options`` anywhere in the bar, and a
+    WHITELIST PROJECTION rather than a copy.
+
+    Returns only :data:`_EVIDENCE_OPTION_KEYS`, so the narrowing decision
+    downstream is a function of four named quantities and cannot be a function
+    of a fifth. That this is the ONLY reader is not left to convention: the
+    bar's functions are scanned for other reads by
+    `tests/test_verified_bar.py::test_the_narrowing_decision_reads_options_in_one_place`,
+    because a second read site in `_bar_scope` would reopen the channel
+    without touching this function or the key set.
+
+    Tolerates a mapping or a sequence of pairs (``invocations`` is whatever the
+    caller put on the record) and never raises: an unreadable option set
+    projects to nothing, which widens."""
+    try:
+        raw = dict(getattr(stamp, "options", None) or ())
+    except Exception:  # noqa: BLE001 — an unreadable option set is no evidence
+        return {}
+    return {key: raw[key] for key in _EVIDENCE_OPTION_KEYS if key in raw}
+
+
 def _evidence_is_about(sliced, invocations) -> bool:
     """Is this obligation's SOLVER EVIDENCE evidence about THIS slice?
 
@@ -866,7 +913,9 @@ def _evidence_is_about(sliced, invocations) -> bool:
         # usable name must widen rather than reach `emit` with it.
         if not getattr(stamp, "invoked", False) or not stamp.name:
             continue
-        options = dict(stamp.options or ())
+        # the projection, NOT `dict(stamp.options)`: see `_evidence_options`
+        # and `_EVIDENCE_OPTION_KEYS` for the channel that spelling opened
+        options = _evidence_options(stamp)
         recorded = options.get("smt2_sha256")
         recorded_slice = options.get("slice_sha256")
         # `stamp.name` is used as the emission FLAVOUR: every backend
