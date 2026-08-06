@@ -2830,7 +2830,9 @@ def test_the_session_end_guard_answers_every_shortfall(
 # the thing: `session.exitstatus` is a LAST-WRITER-WINS channel, so any
 # mechanism carrying its verdict there is beatable by whatever writes last —
 # and `pytest_cmdline_main` as a wrapper returns over `wrap_session` entirely,
-# beyond which lie `config._main`, `console_main`, `atexit` and `os._exit`.
+# beyond which lie `config._main`, `console_main`, `atexit` and `os._exit` —
+# the first of those is driven below, the last two are read off pytest's own
+# source and are not measured anywhere in this repository.
 # Moving the anchor from `pytest_sessionfinish` to `pytest_unconfigure` buys
 # the four routes that exist; it cannot buy the last word, and the previous
 # commit's "there is no hook after the last hook" was that mistake in one

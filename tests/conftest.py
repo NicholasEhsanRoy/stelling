@@ -819,6 +819,14 @@ def pytest_unconfigure(config) -> None:
     with the banner still on the screen. Moving the anchor here buys the four
     routes that exist; it does not and cannot buy the last word.
 
+    Two of those four later points were DRIVEN and two were READ: the
+    ``pytest_cmdline_main`` wrapper and the ``trylast`` unconfigure are the two
+    above; ``atexit`` and ``os._exit`` are read off ``_pytest.config._main``
+    and ``_console_main`` and are not measured here. The distinction is kept
+    because collapsing it is the exact mistake this docstring is a repair
+    for — a sentence that reasons its way past a measurement, in the same
+    paragraph as one, reads like the measurement.
+
     **So the verdict is also carried off ``session.exitstatus`` entirely**, by
     :func:`_write_the_verdict_somewhere_last_writer_wins_cannot_reach`. See
     there for which of the three available channels was picked and why.
