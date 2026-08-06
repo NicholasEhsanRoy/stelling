@@ -2023,8 +2023,160 @@ def pytest_runtest_logreport(report):
             pytest.exit("stopping the session here, on purpose", returncode=0)
 '''
 
+# --- the same call ONE LEVEL OUT: from a plugin's own pytest_sessionfinish ---
+#
+# This was the disclosed-and-open hole under the two above. `wrap_session`
+# catches the `Exit` in the very `finally` that called the hook and re-assigns
+# `session.exitstatus` from the returncode; and the terminal reporter's own
+# `pytest_sessionfinish` is a WRAPPER around every ordinary one, so an `Exit`
+# raised inside the chain never reaches the code after its `yield` and
+# `pytest_terminal_summary` is never called — whichever order the ordinary
+# hookimpls ran in. Both halves went, one `-p` apart. Measured at 1b1c843 on
+# `tests/test_affine.py` with an undisclosed skip planted: EXIT 1 with a banner
+# without it, EXIT 0 with nothing with it; and the same again with `tryfirst`,
+# which is the other hookimpl order.
+#
+# Answered by `tests/conftest.py`'s `pytest_unconfigure`: `wrap_session` calls
+# `config._ensure_unconfigure()` AFTER `pytest_sessionfinish` and BEFORE it
+# reads `session.exitstatus`.
+_EXITS_ZERO_FROM_A_PLUGINS_SESSIONFINISH = '''
+"""Raises `Exit` from a plugin's own pytest_sessionfinish: the hook the
+session-end guard used to be anchored in, defeated from inside its own chain."""
+import pytest
 
-def _run_a_miniature_session(tmp_path, files, argv=(), plugins=(), modules=()):
+
+def pytest_sessionfinish(session, exitstatus):
+    pytest.exit("stopping from a plugin sessionfinish", returncode=0)
+'''
+
+_EXITS_ZERO_FROM_A_TRYFIRST_SESSIONFINISH = '''
+"""The same, ordered ahead of every ordinary hookimpl rather than behind."""
+import pytest
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_sessionfinish(session, exitstatus):
+    pytest.exit("stopping from a tryfirst sessionfinish", returncode=0)
+'''
+
+# --- and the defeat that does not raise at all -------------------------------
+#
+# The version of this file one commit ago carried a consolation: the
+# sessionfinish defeat "does not produce the byte-identical green this whole
+# mechanism exists to end, because pytest itself writes `Exit: <reason>` on the
+# way out". True of the two above. False of this one, which is a single
+# assignment and raises nothing — measured at 1b1c843, same plant: EXIT 0, the
+# banner still printed, and NO `Exit:` line anywhere in the output.
+_ASSIGNS_EXIT_ZERO_WITHOUT_RAISING = '''
+"""Assigns session.exitstatus = 0 from a pytest_sessionfinish and raises
+nothing, so pytest has no `Exit:` to report and nothing looks unusual."""
+
+
+def pytest_sessionfinish(session, exitstatus):
+    session.exitstatus = 0
+'''
+
+# …and the whole of it: the exit code AND the note list, which is exactly the
+# byte-identical green. At 1b1c843 this was EXIT 0 with zero banners, and the
+# `diff` against the same session without the plugin was exactly the banner
+# lines and nothing else.
+_ASSIGNS_EXIT_ZERO_AND_CLEARS_THE_NOTES = '''
+"""The whole defeat in two lines: un-assign the exit code, and empty the note
+list before anything prints it."""
+
+
+def pytest_sessionfinish(session, exitstatus):
+    session.exitstatus = 0
+    import conftest
+
+    conftest._NOTES.clear()
+'''
+
+# --- the two that beat the new anchor too, and are supposed to ---------------
+#
+# `session.exitstatus` is last-writer-wins. These are here so that the tree
+# carries the DEMONSTRATION rather than the assertion: `pytest_cmdline_main` as
+# a wrapper returns over `wrap_session` entirely, and a `trylast`
+# `pytest_unconfigure` runs after the anchor. Neither is a bug to be fixed;
+# both are what "every anchor has a later one" means, and the verdict FILE is
+# the answer to them.
+_RETURNS_98_FROM_A_CMDLINE_MAIN_WRAPPER = '''
+"""Returns over wrap_session itself, which is later than every hook in it."""
+import pytest
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_cmdline_main(config):
+    yield
+    return 98
+'''
+
+_ASSIGNS_EXIT_ZERO_FROM_A_TRYLAST_UNCONFIGURE = '''
+"""Runs after the anchor, in the anchor's own hook."""
+import pytest
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    session = config.pluginmanager.get_plugin("session")
+    if session is not None:
+        session.exitstatus = 0
+'''
+
+# --- the fifth zero-arriving abort, which is not a report shape or a decision -
+#
+# `initstate = 2` is assigned only AFTER pytest_sessionstart returns, so a
+# session that leaves FROM that hook has `if initstate >= 2` False and
+# pytest_sessionfinish is never called at all. Nothing is owed on this route —
+# nothing was collected — which is exactly why the check has to be that the
+# ANCHOR ARRIVED rather than that it said something.
+_EXITS_ZERO_FROM_SESSIONSTART = '''
+"""pytest.exit from inside pytest_sessionstart: the hook after it never runs."""
+import pytest
+
+
+def pytest_sessionstart(session):
+    pytest.exit("stopping from sessionstart", returncode=0)
+'''
+
+_MARKS_WHICH_HOOKS_RAN = '''
+"""Prints from both hooks, so that "never called at all" is observed rather
+than inferred from a missing banner."""
+import sys
+
+
+def pytest_sessionfinish(session, exitstatus):
+    sys.stderr.write("MARKER-SESSIONFINISH-RAN\\n")
+    sys.stderr.flush()
+
+
+def pytest_unconfigure(config):
+    sys.stderr.write("MARKER-UNCONFIGURE-RAN\\n")
+    sys.stderr.flush()
+'''
+
+# The stated limit of the verdict file, as a plugin rather than as a sentence.
+_DELETES_THE_VERDICT_FILE = '''
+"""Reads the same environment variable the conftest reads, and unlinks what it
+finds there. The file defends against plugins that know nothing about this pin;
+this one knows."""
+import os
+import pathlib
+
+import pytest
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    destination = os.environ.get("STELLING_SKIP_INVENTORY_VERDICT")
+    if destination:
+        pathlib.Path(destination).unlink(missing_ok=True)
+'''
+
+
+def _run_a_miniature_session(
+    tmp_path, files, argv=(), plugins=(), modules=(), env_extra=None
+):
     """A whole pytest session over a tree of `files`, with the REAL conftest.
 
     `files` is {relative path under tests/: source}. Plugin modules are written
@@ -2043,6 +2195,13 @@ def _run_a_miniature_session(tmp_path, files, argv=(), plugins=(), modules=()):
     ``z3.py`` makes ``find_spec("z3")`` succeed in every lane there is, so both
     cases are non-vacuous everywhere and neither consults a clock.
 
+    ``env_extra`` is {name: value} added to the child's environment, and it
+    exists for one variable: ``STELLING_SKIP_INVENTORY_VERDICT``, the channel
+    that is NOT ``session.exitstatus``. It is passed rather than set on this
+    process because the cases that need it are cases where the child's exit
+    code and the child's screen are both under attack, and a variable this
+    process exported would be inherited by every other miniature session too.
+
     Nothing is installed: these are files under ``tmp_path``, on the child
     process's ``PYTHONPATH``, gone when the test ends.
     """
@@ -2059,6 +2218,7 @@ def _run_a_miniature_session(tmp_path, files, argv=(), plugins=(), modules=()):
         (tmp_path / f"{name}.py").write_text(source)
 
     env = {**os.environ, "REAL_PIN": str(pathlib.Path(__file__).resolve())}
+    env.update(env_extra or {})
     env["PYTHONPATH"] = os.pathsep.join(
         [str(tmp_path), *([os.environ["PYTHONPATH"]] if "PYTHONPATH" in os.environ else [])]
     )
@@ -2450,6 +2610,17 @@ _SESSIONS = (
         # before tests/conftest.py had a `pytest_sessionfinish` the decision
         # simply never ran. The summary line is byte-identical to the same
         # session without the plugin, which is exit 1 with this banner.
+        #
+        # THE THIRD `says` ENTRY IS THE ONE THAT MAKES THIS ROW ITS OWN ID.
+        # Without it the row passed with its plugin REMOVED — a trigger-strip
+        # probe at 1b1c843 says so — because `EXIT != 0`, "completeness claim
+        # FAILED" and the skip reason are all three satisfied by the
+        # undisclosed skip ALONE. The row was still sensitive to the plugin
+        # (put `SF_GONE` in the conftest with the plugin present and it fails),
+        # so it was not a could-not-fail shape; but its id promised a
+        # discrimination its assertions did not make. `Exit:` is the line
+        # pytest writes only when a session left by `pytest.exit`, so asserting
+        # it is asserting that the route this row is named for was taken.
         "exit-zero-from-inside-the-run-loop-buys-no-silence",
         {
             "test_skip_inventory.py": _PIN_PROXY,
@@ -2458,7 +2629,11 @@ _SESSIONS = (
         (),
         (("exits_zero_at_the_end", _EXITS_ZERO_AT_THE_END_OF_THE_LOOP),),
         False,
-        ("completeness claim FAILED", "a planted reason nobody disclosed"),
+        (
+            "completeness claim FAILED",
+            "a planted reason nobody disclosed",
+            "Exit: stopping the session here, on purpose",
+        ),
         (),
     ),
     (
@@ -2489,6 +2664,51 @@ _SESSIONS = (
         True,
         ("pin absent from this session, claim made at the end",),
         ("WITHDRAWN", "FAILED"),
+    ),
+    (
+        # ROUTE 11 — the hole the two above used to leave, one level out. The
+        # `Exit` comes from a PLUGIN's own `pytest_sessionfinish`, which is the
+        # hook the guard used to be anchored in: `wrap_session` re-assigns
+        # `session.exitstatus` from the returncode in the very `finally` that
+        # called the hook, and the terminal reporter's `pytest_sessionfinish`
+        # is a wrapper around every ordinary one, so `pytest_terminal_summary`
+        # never runs either. EXIT 0, no banner, at 1b1c843. The anchor is now
+        # `pytest_unconfigure`, which `wrap_session` calls AFTER the hook and
+        # BEFORE it reads `session.exitstatus`.
+        "exit-zero-from-a-plugins-own-sessionfinish",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        (),
+        (("exits_zero_at_finish", _EXITS_ZERO_FROM_A_PLUGINS_SESSIONFINISH),),
+        False,
+        (
+            "completeness claim FAILED",
+            "a planted reason nobody disclosed",
+            "Exit: stopping from a plugin sessionfinish",
+        ),
+        (),
+    ),
+    (
+        # the same, ahead of every ordinary hookimpl instead of behind them.
+        # A separate row because the previous commit's reasoning about this
+        # route turned on the hookimpl ORDER, and an ordering claim asserted at
+        # one order only is an ordering claim nothing is holding.
+        "exit-zero-from-a-tryfirst-sessionfinish",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        (),
+        (("exits_zero_tryfirst", _EXITS_ZERO_FROM_A_TRYFIRST_SESSIONFINISH),),
+        False,
+        (
+            "completeness claim FAILED",
+            "a planted reason nobody disclosed",
+            "Exit: stopping from a tryfirst sessionfinish",
+        ),
+        (),
     ),
     (
         # the other side of the same carve-out, and the reason it is safe: an
@@ -2578,6 +2798,266 @@ def test_the_session_end_guard_answers_every_shortfall(
             f"the reader was told {sentence!r}, which is not what this "
             f"session did.\n\n{_tail(proc)}"
         )
+
+
+# --- the channel that is not the exit code -----------------------------------
+#
+# EVERY ANCHOR HAS A LATER ONE. That is not a concession, it is the shape of
+# the thing: `session.exitstatus` is a LAST-WRITER-WINS channel, so any
+# mechanism carrying its verdict there is beatable by whatever writes last —
+# and `pytest_cmdline_main` as a wrapper returns over `wrap_session` entirely,
+# beyond which lie `config._main`, `console_main`, `atexit` and `os._exit`.
+# Moving the anchor from `pytest_sessionfinish` to `pytest_unconfigure` buys
+# the four routes that exist; it cannot buy the last word, and the previous
+# commit's "there is no hook after the last hook" was that mistake in one
+# sentence.
+#
+# So the two cases below are DEMONSTRATIONS RATHER THAN DEFECTS: they assert
+# that the attacker gets the exit code it asked for, and that the verdict
+# arrives anyway, by a channel the attacker did not write to.
+
+_BEATS_THE_EXIT_CODE = (
+    (
+        # after the anchor, in the anchor's own hook
+        "a-trylast-unconfigure-assigning-zero",
+        ("beats_by_unconfigure", _ASSIGNS_EXIT_ZERO_FROM_A_TRYLAST_UNCONFIGURE),
+        0,
+    ),
+    (
+        # outside every hook `wrap_session` calls, by returning over it
+        "a-cmdline-main-wrapper-returning-98",
+        ("beats_by_cmdline_main", _RETURNS_98_FROM_A_CMDLINE_MAIN_WRAPPER),
+        98,
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "plugin,exit_code_the_attacker_chose",
+    [case[1:] for case in _BEATS_THE_EXIT_CODE],
+    ids=[case[0] for case in _BEATS_THE_EXIT_CODE],
+)
+def test_the_verdict_leaves_by_a_channel_the_exit_code_cannot_be_taken_from(
+    tmp_path, plugin, exit_code_the_attacker_chose
+):
+    """The exit code goes; the verdict does not.
+
+    Both halves are asserted, and the first half is the point. If the attacker
+    did NOT get the exit code it asked for, this case would be measuring a
+    mechanism that happens to win rather than a channel that does not depend on
+    winning — so the exit code is pinned to the attacker's number, and the file
+    is what has to carry the verdict out.
+    """
+    verdict_file = tmp_path / "verdict.txt"
+    proc = _run_a_miniature_session(
+        tmp_path,
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        plugins=(plugin,),
+        env_extra={"STELLING_SKIP_INVENTORY_VERDICT": str(verdict_file)},
+    )
+    assert proc.returncode == exit_code_the_attacker_chose, (
+        f"the attacker did not get the exit code it asked for "
+        f"({exit_code_the_attacker_chose}), so this case is no longer "
+        f"demonstrating that the exit code is takeable and the assertion below "
+        f"proves nothing.\n\n{_tail(proc)}"
+    )
+    assert verdict_file.exists(), (
+        "no verdict file: the one channel that does not go through "
+        f"`session.exitstatus` did not get written.\n\n{_tail(proc)}"
+    )
+    written = verdict_file.read_text()
+    assert written.startswith("verdict=failed\n"), (
+        "the verdict file did not carry the shortfall. It is the whole answer "
+        "to a last-writer-wins exit code, and a channel that agrees with the "
+        f"channel it exists to replace is not one.\n\n{written}\n\n{_tail(proc)}"
+    )
+    assert "a planted reason nobody disclosed" in written, (
+        "the verdict file says FAILED and does not say WHY, which is the same "
+        f"defect as an exit code with no banner.\n\n{written}"
+    )
+
+
+# --- the defeat that raises nothing, and why it is not a `_SESSIONS` row -----
+#
+# `def pytest_sessionfinish(session, exitstatus): session.exitstatus = 0` is
+# the whole attack. At 1b1c843 it was EXIT 0 with the banner still on the
+# screen and NO `Exit:` line anywhere; add `_NOTES.clear()` and it was EXIT 0
+# with zero banners, whose `diff` against the same session unplugged was
+# exactly the banner lines and nothing else. That falsifies the consolation
+# both the docstring and the commit message carried — "it does not produce the
+# byte-identical green this mechanism exists to end, because pytest itself
+# writes `Exit: <reason>`". It does when the plugin RAISES. This one does not.
+#
+# NOT a `_SESSIONS` row, and the reason is the defect this pass was sent to fix
+# one file up. A row can assert the exit code, the banner and the absence of
+# `Exit:` — and ALL THREE are satisfied by the same session with the plugin
+# REMOVED, so the row would carry an id promising a discrimination its
+# assertions never make. What distinguishes the two sessions is the exit code
+# AS IT STOOD when the anchor read it, and that is only visible in the verdict
+# file, which records it before the anchor repairs it.
+
+_RAISES_NOTHING = (
+    (
+        "assigns-zero-and-leaves-the-notes",
+        ("assigns_exit_zero", _ASSIGNS_EXIT_ZERO_WITHOUT_RAISING),
+        # the note list survives, so the ordinary route delivers the banner and
+        # the out-of-band writer must NOT fire
+        False,
+    ),
+    (
+        "assigns-zero-and-clears-the-notes",
+        ("assigns_and_clears", _ASSIGNS_EXIT_ZERO_AND_CLEARS_THE_NOTES),
+        # `_NOTES` is emptied before anything prints it, so the only thing left
+        # that can reach the reader is the anchor writing the banner itself
+        True,
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "plugin,out_of_band",
+    [case[1:] for case in _RAISES_NOTHING],
+    ids=[case[0] for case in _RAISES_NOTHING],
+)
+def test_a_sessionfinish_that_raises_nothing_still_takes_the_exit_code(
+    tmp_path, plugin, out_of_band
+):
+    """Both halves, and the first one is what makes the second mean anything.
+
+    ``exitstatus=`` in the verdict file is the exit code as the anchor found
+    it, recorded before the anchor repairs it. Pinning it to 0 is pinning that
+    the attack LANDED; without that, this case passes on a session that never
+    had a plugin at all and asserts nothing.
+    """
+    verdict_file = tmp_path / "verdict.txt"
+    proc = _run_a_miniature_session(
+        tmp_path,
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        plugins=(plugin,),
+        env_extra={"STELLING_SKIP_INVENTORY_VERDICT": str(verdict_file)},
+    )
+    output = proc.stdout + proc.stderr
+    written = verdict_file.read_text()
+
+    assert "\nexitstatus=0\n" in written, (
+        "the exit code was NOT zero when the anchor read it, so this plugin "
+        "did not take it away and the rest of this case is measuring a session "
+        f"with nothing wrong with it.\n\n{written}\n\n{_tail(proc)}"
+    )
+    assert "Exit:" not in output, (
+        "pytest wrote an `Exit:` line, so this is the RAISING defeat and not "
+        "the one-line one — and the consolation that used to stand in "
+        "`tests/conftest.py` (`the defeat always leaves Exit: behind`) would be "
+        f"true after all.\n\n{_tail(proc)}"
+    )
+    assert proc.returncode != 0, (
+        "the exit code was taken and not given back: this is the byte-identical "
+        f"green the whole mechanism exists to end.\n\n{_tail(proc)}"
+    )
+    assert "completeness claim FAILED" in output, _tail(proc)
+    assert "a planted reason nobody disclosed" in output, _tail(proc)
+    marker = "written from pytest_unconfigure"
+    assert (marker in output) is out_of_band, (
+        f"the banner came {'around' if out_of_band else 'through'} the ordinary "
+        f"route (pytest_terminal_summary, called from inside "
+        f"pytest_sessionfinish) when it should have come the other way. "
+        f"`_NOTES` is a request and `_DELIVERED` is the receipt; this is what "
+        f"tells them apart.\n\n{_tail(proc)}"
+    )
+
+
+def test_the_verdict_file_is_not_adversary_proof_and_this_is_the_limit(tmp_path):
+    """The stated limit, driven rather than asserted in prose.
+
+    The file defends against the class this mechanism actually meets: a plugin
+    that re-assigns an exit code, clears a note list, or exits a session early
+    while knowing nothing about this pin. It does NOT defend against a plugin
+    that has read ``tests/conftest.py``, because that plugin can read the same
+    environment variable. A limit written down and never driven is a limit
+    nobody knows the size of, so here is its size: the file is gone.
+    """
+    verdict_file = tmp_path / "verdict.txt"
+    proc = _run_a_miniature_session(
+        tmp_path,
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        plugins=(("deletes_the_verdict", _DELETES_THE_VERDICT_FILE),),
+        env_extra={"STELLING_SKIP_INVENTORY_VERDICT": str(verdict_file)},
+    )
+    assert not verdict_file.exists(), (
+        "the verdict file survived a plugin written to delete it, which means "
+        "the limit stated in `tests/conftest.py` understates what the channel "
+        f"does — and an understated limit is the more dangerous kind.\n\n"
+        f"{_tail(proc)}"
+    )
+    # …and ABSENCE is itself the signal, which is the reason this channel was
+    # picked over the two alternatives. The exit code and the banner are both
+    # still there, because deleting the file is not the same attack.
+    assert proc.returncode != 0, _tail(proc)
+    assert "completeness claim FAILED" in proc.stdout + proc.stderr, _tail(proc)
+
+
+def test_the_anchor_arrives_where_pytest_sessionfinish_is_never_called(tmp_path):
+    """The FIFTH zero-arriving abort, and it is outside the mechanism entirely.
+
+    ``pytest.exit(reason, returncode=0)`` from inside ``pytest_sessionstart``.
+    In ``wrap_session``, ``initstate = 2`` is assigned only AFTER that hook
+    returns, so the ``finally``'s ``if initstate >= 2`` is False and
+    ``pytest_sessionfinish`` is never called AT ALL — not called late, not
+    called with the wrong exit status: not called. Measured at 1b1c843 with a
+    marker plugin printing from both hooks::
+
+        marker only               EXIT 1  SESSIONFINISH-RAN, UNCONFIGURE-RAN
+        marker + exit0 at start   EXIT 0  UNCONFIGURE-RAN only
+
+    **What is checked here is that the ANCHOR ARRIVED, and not that it said
+    something**, because there is nothing for it to say: a session that leaves
+    from ``pytest_sessionstart`` has collected nothing, so ``SKIPPED``, ``RAN``
+    and ``DESELECTED`` are all empty and the honest verdict is a withdrawal.
+    Nothing was hidden on this route. What was wrong was the sentence — the
+    previous docstring scoped itself to "every way out of a session that got as
+    far as ``pytest_sessionstart``", and a session that exits FROM that hook
+    got that far and was not covered. Off by one.
+    """
+    verdict_file = tmp_path / "verdict.txt"
+    proc = _run_a_miniature_session(
+        tmp_path,
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        plugins=(
+            ("marks_which_hooks_ran", _MARKS_WHICH_HOOKS_RAN),
+            ("exits_zero_from_sessionstart", _EXITS_ZERO_FROM_SESSIONSTART),
+        ),
+        env_extra={"STELLING_SKIP_INVENTORY_VERDICT": str(verdict_file)},
+    )
+    output = proc.stdout + proc.stderr
+    assert "MARKER-SESSIONFINISH-RAN" not in output, (
+        "pytest_sessionfinish RAN on a session that exited from "
+        "pytest_sessionstart, so this case is no longer the route it is named "
+        f"for and proves nothing about the anchor.\n\n{_tail(proc)}"
+    )
+    assert "MARKER-UNCONFIGURE-RAN" in output, _tail(proc)
+    assert verdict_file.exists(), (
+        "the anchor did not arrive on the one way out of a session that skips "
+        f"pytest_sessionfinish entirely.\n\n{_tail(proc)}"
+    )
+    written = verdict_file.read_text()
+    assert written.startswith("verdict=withdrawn\n"), (
+        "a session that exited before collection has an EMPTY record — nothing "
+        "ran, nothing skipped, nothing was deselected — so the only honest "
+        "answer is a withdrawal. Anything else here would be the guard "
+        f"inventing a shortfall out of an absence.\n\n{written}"
+    )
 
 
 def test_the_pin_makes_its_own_claim_when_it_is_ordered_last(tmp_path):
