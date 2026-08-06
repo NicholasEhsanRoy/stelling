@@ -803,14 +803,28 @@ def _evidence_is_about(sliced, invocations) -> bool:
       That is the bar's actual question, and it is the one the text cannot
       answer.
 
-    WHAT NEITHER PROVES: that the record is honest. Both are carried by the
-    escalation, so a fabricated record can carry any pair of values it likes —
-    as it can already carry a fabricated ``outcome``. The bound on that is not
-    these hashes, it is the first bullet: a record that does not reproduce the
-    script hash gets no narrowing at all, and a record that does reproduce it
-    has, by that fact, supplied a text that this query's own slice emits.
-    Provenance beyond that is `make_solver_verdict`'s stated precondition, not
-    a property of this function.
+    WHAT NEITHER PROVES, and this is the part that must not be over-read:
+
+    * **that the record is honest.** Both hashes are carried by the
+      escalation, so a fabricated record can carry any pair of values it
+      likes — as it can already carry a fabricated ``outcome``.
+    * **that the REST of the verdict is about this query.** Even an honest
+      pair speaks only for the obligation it stamps. The obligations INTERVALS
+      decided come from the paired propagation, which nothing here reads.
+      Measured: when the two queries' decided slices are genuinely the same
+      expression, both hashes match, the bar narrows correctly (the barred row
+      really was not involved), and a mispaired assembly returns VERIFIED on a
+      query whose honest verdict is REFUTED — `8e42934`'s whole-query bar
+      returned UNKNOWN there, by accident, because it withheld EVERY
+      scatter-bearing query. See
+      `tests/test_verified_bar.py::test_the_LIMIT_of_this_bar_when_the_decided_slice_is_genuinely_the_same`.
+      No definition of "which slice did the solver answer about" can close
+      that: the false claim is about a DIFFERENT obligation.
+
+    So what this function is for is the bar's question — was the unaudited
+    emission row involved in what the solver decided — and provenance beyond
+    that is `make_solver_verdict`'s stated precondition, which a whole-query
+    bar happened to backstop and a scoped one does not.
 
     THE POLARITY IS THE POINT, AND IT IS WHY THIS IS NOT THE DELETED
     `barred_on_slice` FIELD COMING BACK. A record cannot use either hash to

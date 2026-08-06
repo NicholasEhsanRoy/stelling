@@ -93,4 +93,9 @@ Two things the bar's scope does **not** cover, both easy to over-read:
   mispaired escalation gets the whole-query bar, but the hashes are carried by
   the record, so this is a defence against an accidentally mispaired assembly
   and not against a fabricated one — a caller who can fabricate a record can
-  fabricate the verdict.
+  fabricate the verdict. **And scoping the bar cost a backstop:** where the
+  two queries' decided slices are the same expression, the bar narrows
+  correctly and a mispaired assembly can still issue VERIFIED on a query that
+  is REFUTED. The whole-query bar withheld that by accident; nothing about
+  "which slice did the solver answer about" can withhold it on purpose, and
+  `SOUNDNESS.md` logs it.

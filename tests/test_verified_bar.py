@@ -569,6 +569,91 @@ def test_the_collision_could_mint_a_VERIFIED_on_a_REFUTED_query():
     assert any("VERIFIED withheld" in n for n in v.notes)
 
 
+def _scatter_ELSEWHERE_identical_decided_slice():
+    """`_scatter_ELSEWHERE_and_actually_REFUTED` with obligation #0 the SAME
+    EXPRESSION as the query it will be mispaired with — not merely one that
+    emits the same bytes. Its #1 is the false `s >= 0.5`."""
+    x = any_array((3,), "float64", (0.0, 1.0))
+    s = x.at[0].set(0.5)
+    return (assert_(x[1] - x[1] <= 0.0), assert_(s >= 0.5))
+
+
+def _scatter_ELSEWHERE_identical_decided_slice_TRUE():
+    """Its honest twin: same #0, and a #1 that holds."""
+    x = any_array((3,), "float64", (0.0, 1.0))
+    s = x.at[0].set(0.5)
+    return (assert_(x[1] - x[1] <= 0.0), assert_(s >= 0.0))
+
+
+def test_the_LIMIT_of_this_bar_when_the_decided_slice_is_genuinely_the_same():
+    """WHAT THE SLICE-SCOPED BAR DOES NOT DO, ASSERTED SO IT CANNOT BE
+    OVER-READ — and this test passes by measuring a PERMISSIVE outcome, which
+    is deliberate and explained.
+
+    `test_the_collision_could_mint_a_VERIFIED_on_a_REFUTED_query` shows the
+    bar catching a mispaired assembly whose decided slices merely emit the
+    same BYTES. Here the two queries' obligation #0 is the same expression, so
+    the slices are the same by every measure there is — same script, same
+    fingerprint. The bar's own question ("was the unaudited `scatter` row
+    involved in what the solver decided?") is answered correctly for both:
+    NO. So it narrows, and the mispaired assembly returns VERIFIED on a query
+    whose honest verdict is REFUTED.
+
+    THAT IS NOT A HOLE IN THE KEY; IT IS THE COST OF SCOPING THE BAR AT ALL,
+    and it is measured rather than argued:
+
+        8e42934 (whole-query bar)  UNKNOWN — every mispaired assembly on a
+                                   scatter-bearing query was withheld, for a
+                                   reason having nothing to do with the row
+        caac1ee / 45cf526 / eb1ff86 / here   VERIFIED
+
+    The false claim comes from the mispaired PROPAGATION deciding obligation
+    #1, which no part of the bar reads and `make_solver_verdict`'s docstring
+    states as a precondition rather than an immunity. The whole-query bar
+    BACKSTOPPED that precondition by accident on scatter-bearing queries; a
+    narrowed bar does not, and no version of "which slice did the solver
+    answer about" can, because the question is about a different obligation.
+
+    IF THIS TEST EVER FAILS, do not delete it: something has started catching
+    the general mispairing, which is a stronger property than this file has
+    ever claimed. Say so in `SOUNDNESS.md` and rewrite this test around what
+    the new mechanism does.
+    """
+    from stelling.obligation import slice_obligation
+    from stelling.propagate import interval_env
+    from stelling.smt import emit, slice_fingerprint
+    from stelling.solvers import make_solver_verdict
+
+    on_closed, on_prop, on_esc = _stamped(
+        _scatter_ELSEWHERE_identical_decided_slice_TRUE)
+    el_closed, el_prop, el_esc = _stamped(
+        _scatter_ELSEWHERE_identical_decided_slice)
+
+    assert make_solver_verdict(el_closed, el_prop, el_esc, **VERSIONS).status == (
+        "REFUTED"
+    ), "the mispaired query is not false, so there is no cost to measure"
+    assert make_solver_verdict(on_closed, on_prop, on_esc, **VERSIONS).status == (
+        "VERIFIED"
+    ), (
+        "the honest twin does not VERIFY — the narrowing this test measures "
+        "the cost of is not happening, so the cost is not this one"
+    )
+
+    # the two decided slices are the same by every measure the bar has
+    on_sl = slice_obligation(on_closed, 0, interval_env(on_closed))
+    el_sl = slice_obligation(el_closed, 0, interval_env(el_closed))
+    assert emit(on_sl, "z3", 20000).sha256 == emit(el_sl, "z3", 20000).sha256
+    assert slice_fingerprint(on_sl) == slice_fingerprint(el_sl)
+    assert V._barred_in_eqns(on_sl.eqns) == () == V._barred_in_eqns(el_sl.eqns)
+
+    v = make_solver_verdict(el_closed, on_prop, on_esc, **VERSIONS)
+    assert v.status == "VERIFIED", (
+        f"{v.status}: the bar now withholds a mispaired assembly whose "
+        f"decided slice is genuinely identical. That is STRONGER than "
+        f"anything documented — see this docstring's last paragraph"
+    )
+
+
 def test_the_bar_scope_itself_widens_on_the_colliding_pair():
     """The same defect one layer down, at `_bar_scope` rather than at the
     assembled verdict — so that deleting the `_evidence_is_about` call is not

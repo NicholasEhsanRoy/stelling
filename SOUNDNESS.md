@@ -967,6 +967,23 @@ verdicts:
   both are record-carried, as `smt2_sha256` already was. Adding a conjunct
   can only make narrowing RARER, so no bar fires less than it did at
   `eb1ff86`.
+  **AND A COST THIS FILE HAD NOT STATED, WHICH BELONGS TO THE SCOPING RATHER
+  THAN TO EITHER KEY.** Narrowing the bar to the decided obligation's slice
+  gave up a backstop the whole-query bar provided by accident. When the two
+  queries' decided slices are the SAME EXPRESSION — not merely byte-colliding
+  — both hashes match, the bar narrows correctly (the barred row really was
+  not involved), and the mispaired assembly returns VERIFIED on a query whose
+  honest verdict is REFUTED. Measured: UNKNOWN on `8e42934`; VERIFIED on
+  `caac1ee`, `45cf526`, `eb1ff86` and after this repair. The false claim comes
+  from the mispaired PROPAGATION deciding an interval obligation, which no
+  part of the bar reads and `make_solver_verdict` states as a precondition
+  rather than an immunity — and no definition of "which slice did the solver
+  answer about" can close it, because the false claim is about a DIFFERENT
+  obligation. It is asserted rather than left implicit, in
+  `tests/test_verified_bar.py::test_the_LIMIT_of_this_bar_when_the_decided_slice_is_genuinely_the_same`,
+  so the entries above cannot be read as saying the bar defends mispairing in
+  general. Consumers needing that property should judge through
+  `stelling.preconditions.check`, which owns both sides.
   **Affected versions:** 0.1.0 pre-release only — `caac1ee` through
   `eb1ff86` inclusive, all branch-only, nothing released. Builds up to and
   including `8e42934` have the whole-query bar and measure UNKNOWN on this
