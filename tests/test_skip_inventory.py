@@ -39,7 +39,9 @@ Four shapes of disclosure, in descending strength:
 2. :data:`RULES` — a skip *reason* that any test may legitimately carry, with
    the condition that makes it legitimate. Reason-keyed rather than
    test-keyed because "needs z3" governs a dozen tests and enumerating them
-   would rot on the first rename.
+   would rot on the first rename. A rule excuses the EXACT reasons it names
+   and there is no pattern language, because every bound on a pattern turned
+   out to be a list of the ways somebody had already been broad.
 3. :data:`DECLARED_OPTIONAL_DEPENDENCIES` — the libraries stelling's tests may
    gate on with ``importorskip``. A gate on anything else is undisclosed and
    fails here.
@@ -53,15 +55,24 @@ Four shapes of disclosure, in descending strength:
 Anything a session skips that none of the four covers is a failure, with the
 ways to fix it named in the message.
 
-**Scope, and it is asserted rather than assumed.** The completeness half
+**Scope and ORDER, asserted rather than assumed.** The completeness half
 claims something about *the suite*, and it can only claim it about a session
-that collected the suite. A session narrowed by an explicit path, by ``--lf``
-or by ``-k`` prints a green line that reads exactly like a whole run's, so the
-scope is recorded in ``tests/conftest.py``, where the collection is, and
-checked in :func:`test_no_session_skip_is_undisclosed`, where the claim is:
-a session that never collected the tree WITHDRAWS the claim (it skips, saying
-what it did not see), and one that collected the tree and then deselected part
-of it FAILS. Whatever the session did see is checked either way.
+that collected the suite, ran it, and ran it before this pin. A session
+narrowed by an explicit path, by ``--lf`` or by ``-k`` prints a green line that
+reads exactly like a whole run's — and so does a whole run in a different
+ORDER, which is the one that bites, because this pin reads outcomes and a pin
+that runs first has no outcomes to read. ``pytest --nf``, an installed
+pytest-randomly, a plugin that drops items from ``items[:]``, and
+``--deselect tests/test_skip_inventory.py`` were each measured to hold an
+undisclosed skip at exit 0 while the completeness half looked green.
+
+So both are recorded in ``tests/conftest.py``, where the collection and the
+run are, and the whole decision is made in
+:func:`the_claim_this_session_can_make`, where the claim is. Five answers, one
+per shortfall, listed above that function. Whatever the session did see is
+checked either way, and the one case the pin cannot report on — it was
+reordered early, filtered out, or deselected — is made by the conftest at the
+end of the session, which is the one place an ``items`` filter cannot reach.
 
 The session's outcomes come from ``tests/conftest.py``, which records them as
 pytest reports them; see there for why this cannot be a static read of the
@@ -79,6 +90,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import os
 import pathlib
 import re
 import shutil
@@ -88,12 +100,37 @@ from typing import Callable
 
 import pytest
 
-from conftest import DESELECTED, RAN, SEEN_FILES, SKIPPED, _reason
+from conftest import (
+    CLAIM_MADE,
+    RAN,
+    SEEN_FILES,
+    SKIPPED,
+    USER_FILTERS,
+    _reason,
+    colliding_basenames,
+    deselected_items,
+    pending_items,
+    unseen_files,
+)
 
 from stelling import _optional
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 TESTS = REPO / "tests"
+
+# This module, by the substring the recorder keys on. The pin's own module gets
+# excluded from two questions — "is anything still owed?" and "was evidence
+# deselected?" — because deselecting the pin removes the CLAIM (which
+# tests/conftest.py then makes at the end of the session) while deselecting
+# anything else removes the EVIDENCE, and nothing recovers a test that never
+# ran.
+_THIS_MODULE = "test_skip_inventory.py"
+
+# Reasons this file's own pin skipped with, this session. The pin withdraws by
+# skipping, and its withdrawal is a skip like any other to the recorder: the
+# session-end check would otherwise read the pin's own "claim withdrawn" as an
+# undisclosed skip and fail the session for it.
+_OWN_WITHDRAWALS: set[str] = set()
 
 
 def _importable(name: str) -> bool:
@@ -209,27 +246,65 @@ PINNED = (
 @dataclasses.dataclass(frozen=True)
 class Rule:
     when: str  # the condition, in prose — this is the disclosure
-    reasons: frozenset[str] = frozenset()
-    pattern: str = ""
+    reasons: frozenset[str]  # the EXACT reasons, and there is no other channel
     # Returns True when a skip carrying this reason is legitimate RIGHT NOW.
     # None means the condition is not computable from outside the test; such a
     # rule discloses the skip but cannot check its direction, and must say why.
     legitimate: Callable[[], bool] | None = None
 
     def matches(self, reason: str) -> bool:
-        """FULLMATCH, not search: a pattern describes the WHOLE reason.
+        """Exact membership. A rule excuses what it NAMES and nothing else.
 
-        ``re.search`` let a pattern excuse any reason that merely CONTAINED
-        what it disclosed — ``"totally other cause; XLA did not contract this
-        form on this build"`` was covered by the XLA rule, and widening a
-        pattern to ``r"."`` disclosed the entire suite. A rule that cannot
-        check its own direction must at least be unable to reach beyond the
-        reason it was written for; anchoring is how. Breadth is bounded
-        further by ``test_no_rule_is_broader_than_the_reason_it_discloses``.
+        This used to accept a regex, and every attempt to bound the regex was
+        bounded in turn by a list of decoy strings — which is not a bound, it
+        is a list. Three of them, in order, each defeated:
+
+        * ``re.search`` excused anything that CONTAINED the disclosed reason,
+          so ``"totally other cause; XLA did not contract this form on this
+          build"`` was covered;
+        * ``re.fullmatch`` fixed that and ``r".*"`` walked through it, so a
+          decoy list was added;
+        * the decoy list was passed unchanged by ``pattern=r"skip: .*"``,
+          which excuses every reason beginning ``"skip: "`` and resembles
+          none of the decoys. Measured: it passed all three halves.
+
+        A pattern is a way to excuse text nobody wrote down. So there is no
+        pattern. The one rule whose variable part is genuinely variable — the
+        parametrised XLA form name — enumerates it by READING THE FORM NAMES
+        out of the module that emits them, so its excuse set is still exactly
+        the set of reasons that site can produce. See
+        ``test_a_rule_can_only_excuse_a_reason_someone_wrote_down``.
         """
-        if reason in self.reasons:
-            return True
-        return bool(self.pattern) and re.fullmatch(self.pattern, reason) is not None
+        return reason in self.reasons
+
+
+# The one genuinely variable reason in the suite, and the enumeration of it.
+#
+# `tests/test_three_rows_acceptance.py` skips with
+# `f"{name}: XLA did not contract this form on this build"`, where `name` is
+# the parametrised contraction form ("nested jit", "broadcast+slice+squeeze",
+# …). The names are READ OUT of that module rather than described by a regex,
+# because a regex for "a form name" is a regex for "some prose", and the one
+# that shipped — `r"[\w+ .\-]+: XLA did not contract this form on this build"`
+# — admitted any punctuation-free prefix at all. Measured: a skip reading
+# "the solver crashed and we gave up: XLA did not contract this form on this
+# build" was excused, and the whole suite stayed green with it planted.
+#
+# Reading the source gets both edges at once: nothing but a real form name is
+# excused, and every real form name IS excused — so a runner whose XLA folds
+# differently does not read as inventory drift, and a form added with a comma
+# in its name needs no pattern change at all.
+_FORM_TABLE = TESTS / "test_three_rows_acceptance.py"
+_XLA_SUFFIX = ": XLA did not contract this form on this build"
+
+
+def _contraction_form_names() -> tuple[str, ...]:
+    """The parametrised form names, from the module that emits the skip."""
+    if not _FORM_TABLE.exists():
+        return ()
+    return tuple(
+        re.findall(r'^\s*\("([^"]+)",\s*lambda u, w', _FORM_TABLE.read_text(), re.M)
+    )
 
 
 RULES = (
@@ -288,13 +363,12 @@ RULES = (
             "the test. Disclosed so that a runner whose XLA folds differently "
             "does not read as inventory drift"
         ),
-        # The variable part is the parametrised FORM NAME and nothing else:
-        # `f"{name}: XLA did not contract this form on this build"` at
-        # tests/test_three_rows_acceptance.py, where the names are things like
-        # "broadcast+slice+squeeze" and "nested jit". Spelling that prefix out
-        # is the point — the permission to be unverifiable must not also be a
-        # permission to match arbitrary text that happens to end this way.
-        pattern=r"[\w+ .\-]+: XLA did not contract this form on this build",
+        # The variable part is the parametrised FORM NAME and nothing else,
+        # which is now a statement about the code and not about a regex: the
+        # names come from the site that emits them.
+        reasons=frozenset(
+            f"{name}{_XLA_SUFFIX}" for name in _contraction_form_names()
+        ),
         legitimate=None,
     ),
 )
@@ -449,40 +523,50 @@ def _outcome(nodeid: str) -> tuple[str, str]:
     return _from_session(nodeid) or _from_a_run_of_its_own(nodeid)
 
 
-# --- how much of the suite this session was allowed to look at ---------------
+# --- what THIS session is in a position to claim ------------------------------
 #
-# The completeness half below claims that THE SUITE's skip set is disclosed.
-# A session can only support that claim about tests it collected, and pytest's
-# report does not distinguish `1986 passed, 2 skipped` from `1927 passed, 2
-# skipped, 60 deselected` in any way the claim can read. So the scope is
-# checked, and there are exactly two ways to fall short of it — which get
-# different answers, because they are different mistakes:
+# The completeness half claims that THE SUITE's skip set is disclosed, and a
+# session can only support that about tests it collected AND ran AND ran before
+# this pin did. pytest's report tells none of those apart from a whole run:
+# `1986 passed, 2 skipped` and `1927 passed, 2 skipped, 60 deselected` and a
+# whole tree run in a different ORDER all print the same kind of green.
 #
-#   * the session never collected the whole tree (`pytest tests/test_x.py`,
-#     `--lf`, `--ignore`, a shard). Ordinary development, and the developer
-#     never asked about the suite. The claim is WITHDRAWN — the test skips,
-#     saying which files it never saw. Making this case fail would break
-#     `pytest tests/test_skip_inventory.py`, which is worse than the hole it
-#     would close.
+# So the session is interrogated, and the answers differ because the mistakes
+# differ:
 #
-#   * the session collected the whole tree and then DESELECTED part of it
-#     (`-k`, `-m`, `--deselect`). This one is a full-suite invocation with a
-#     filter: it looked at every file, ran this pin, and would otherwise print
-#     a green indistinguishable from a whole run while the deselected tests
-#     skipped unobserved. That FAILS.
+#   * it never collected the whole tree (`pytest tests/test_x.py`, `--lf`,
+#     `--ignore`, a shard). Ordinary development; nobody asked about the suite.
+#     WITHDRAWN — the pin skips, saying which files it never saw. Failing here
+#     would break `pytest tests/test_skip_inventory.py`, which is worse than
+#     the hole it closes.
+#
+#   * it collected the whole tree and then deselected part of it THROUGH A
+#     FILTER THE DEVELOPER PASSED (`-k`, `-m`, `--deselect`). A full-suite
+#     invocation with a filter: it looked at every file, ran this pin, and
+#     would print a green indistinguishable from a whole run while the
+#     deselected tests skipped unobserved. FAILS, and now says which filter.
+#
+#   * it collected the whole tree and something else deselected part of it —
+#     `--sw`, which deselects the prefix it already ran, or a plugin.
+#     WITHDRAWN. Measured before this split existed: plant a transient
+#     failure, `--sw`, fix it, `--sw` again, and a CLEAN tree gave `1 failed,
+#     827 passed, 1163 deselected` telling the developer to drop a filter they
+#     had not passed. `_pytest/stepwise.py` calls `pytest_deselected` exactly
+#     as `-k` does, so the EFFECT cannot tell them apart and the invocation
+#     is read instead.
+#
+#   * it ran this pin before the rest of the session (`--nf`, a reordering
+#     plugin). Nothing is missing; the pin is merely early. The claim is
+#     DEFERRED to tests/conftest.py, which makes it when the loop is over.
+#
+#   * something dropped collected tests without reporting them deselected.
+#     Then the session's own summary is wrong, not just this pin's, and the
+#     end of the session FAILS: `N passed` while N+3 were collected is not a
+#     narrowing, it is a session that lied about what it did.
 #
 # Deliberately not a minimum-collection floor. A floor is a constant that has
 # to be raised as the suite grows and quietly stops biting as it shrinks, and
-# it cannot tell the two cases above apart — the second one collects the whole
-# tree, so any floor it clears is a floor `-k` clears too.
-
-
-def _files_the_suite_has() -> set[str]:
-    return {path.name for path in TESTS.glob("test_*.py")}
-
-
-def _files_this_session_saw() -> set[str]:
-    return set(SEEN_FILES)
+# it cannot tell any of these apart — every one of them collects the tree.
 
 
 # --- the assertions ----------------------------------------------------------
@@ -541,14 +625,14 @@ def test_every_rule_states_the_condition_it_discloses():
     assert not silent, (
         "these skip rules disclose a reason without saying under what "
         "condition it is legitimate:\n  "
-        + "\n  ".join(sorted(r.pattern or ", ".join(sorted(r.reasons)) for r in silent))
+        + "\n  ".join(sorted(", ".join(sorted(r.reasons)) for r in silent))
     )
     unchecked = [rule for rule in RULES if rule.legitimate is None]
     assert len(unchecked) <= 1, (
         "more than one skip rule has given up on checking its own direction. "
         "Each of these discloses a skip without being able to contradict it, "
         "which is the weak form this file exists to avoid:\n  "
-        + "\n  ".join(sorted(r.pattern or ", ".join(sorted(r.reasons)) for r in unchecked))
+        + "\n  ".join(sorted(", ".join(sorted(r.reasons)) for r in unchecked))
     )
 
 
@@ -566,14 +650,27 @@ def test_the_import_gate_wording_is_the_one_pytest_actually_emits():
     assert _reason(("t.py", 3, "Skipped: could not import 'x'")) == "could not import 'x'"
 
 
-# Reasons no rule in this file has any business excusing. Half of them are
+# Reasons no rule in this file has any business excusing. Some of them are
 # real skip reasons from elsewhere in the suite (a rule that swallowed one
 # would silently take over another shape's disclosure); the rest are the
-# shapes a widened pattern produces.
+# shapes a widened pattern produces. Fourteen of them (the commit that added
+# this list said eleven and there were thirteen; there is now one more, below).
+# The list is the SECOND net — the first is that a rule cannot express breadth
+# at all, which
+# is what ``test_a_rule_can_only_excuse_a_reason_someone_wrote_down`` pins. A
+# decoy list on its own bounds nothing: `pattern=r"skip: .*"` passed every
+# entry below unchanged.
 _MUST_NOT_MATCH = (
     "a totally undisclosed reason nobody wrote down",
     "totally other cause; XLA did not contract this form on this build",
     "XLA did not contract this form on this build, and also something else",
+    # The prose prefix. The shipped pattern was
+    # `r"[\w+ .\-]+: XLA did not contract this form on this build"`, whose
+    # comment claimed the variable part was "the parametrised FORM NAME and
+    # nothing else"; every decoy above contains a `;`, which is the only thing
+    # that character class excluded. Measured with this exact string planted as
+    # a real skip: `1989 passed, 3 skipped`, exit 0.
+    "the solver crashed and we gave up: XLA did not contract this form on this build",
     # These two are what separates fullmatch from search. Each CONTAINS a
     # reason the XLA rule really does disclose, wrapped in text it does not:
     # under `re.search` both were excused, and an unverifiable rule that can
@@ -605,16 +702,80 @@ _MUST_MATCH = (
 )
 
 
+def test_a_rule_can_only_excuse_a_reason_someone_wrote_down():
+    """The bound on breadth, as a property OF THE RULE rather than a list.
+
+    Three bounds were tried here and each was defeated by the next rule
+    somebody could have written: ``re.search`` → ``re.fullmatch`` → a list of
+    decoy strings. The decoy list is the shape this project calls
+    "enumerating current members rather than pinning the channel", and it was
+    measured to fail exactly that way: ``Rule(when="…", pattern=r"skip: .*",
+    legitimate=lambda: True)`` excuses every reason beginning ``"skip: "`` and
+    passed all three halves of the old breadth test — decoys, must-match, form
+    names — at ``7 passed, 1 skipped``.
+
+    The channel is the matcher. A rule excuses a FINITE, ENUMERATED set of
+    exact strings, so the most a bad rule can do is excuse a reason its author
+    typed out in this file where a reviewer reads it. That is what disclosure
+    means here, and a pattern is precisely the way to excuse text nobody typed.
+
+    So this asserts the shape, not a corpus:
+
+    * a rule has no field a pattern could live in;
+    * every rule names at least one reason, or it excuses nothing and is a
+      comment;
+    * matching is exact — every neighbour of every declared reason is
+      REJECTED, which is what fails if ``matches`` is ever loosened back into
+      a prefix, a substring or a regex.
+
+    The one rule whose reasons are genuinely variable (the parametrised XLA
+    form name) stays inside this by reading the names out of the module that
+    emits them, which is the same enumeration with the author taken out of it.
+    """
+    fields = {f.name for f in dataclasses.fields(Rule)}
+    assert fields == {"when", "reasons", "legitimate"}, (
+        f"Rule's fields are now {sorted(fields)}. If one of them is a matcher "
+        f"— a regex, a prefix, a callable — then a rule's excuse set stops "
+        f"being enumerable and nothing below bounds it: that is how "
+        f"`pattern=r'skip: .*'` passed the decoy list, the must-match list and "
+        f"the form-name list at once. Disclose reasons by naming them."
+    )
+    for rule in RULES:
+        assert rule.reasons, (
+            f"the rule for {rule.when[:60]!r} names no reason, so it excuses "
+            f"nothing and discloses nothing"
+        )
+        for reason in rule.reasons:
+            assert isinstance(reason, str) and reason.strip(), rule.when
+            assert rule.matches(reason)
+            neighbours = (
+                reason + " ",
+                " " + reason,
+                reason + ".",
+                reason[:-1],
+                reason + " and then the run gave up",
+                "a different failure happened first; " + reason,
+                reason.upper() if reason.upper() != reason else reason + "!",
+            )
+            for neighbour in neighbours:
+                assert not rule.matches(neighbour), (
+                    f"the rule for {rule.when[:60]!r} excuses {neighbour!r}, "
+                    f"which is not a reason it names. Matching has been "
+                    f"loosened past exact membership, and a rule that can be "
+                    f"reached by adding a prefix or a suffix bounds nothing."
+                )
+
+
 def test_no_rule_is_broader_than_the_reason_it_discloses():
-    """A permission to be unverifiable must not also be a permission to be
-    unbounded.
+    """The second net: a corpus of reasons no rule may excuse.
 
     ``matches`` used ``re.search``, so a pattern excused anything that
     CONTAINED it: the one rule that cannot check its own direction covered
     ``"totally other cause; XLA did not contract this form on this build"``
     unmutated, and widening it to ``r"."`` disclosed the entire suite while
-    the suite stayed green. Anchoring (``fullmatch``) fixes the first; this
-    test is what fixes the second, because ``r".*"`` is still anchored.
+    the suite stayed green. Anchoring fixed the first, this fixed the second,
+    and neither reaches a rule that is broad in a shape nobody listed — which
+    is why the test above pins the matcher itself and this one now backs it up.
     """
     over_broad = [
         f"{decoy!r} is excused by the rule for: {rule.when[:60]}"
@@ -634,45 +795,36 @@ def test_no_rule_is_broader_than_the_reason_it_discloses():
         "matches them any more, so the rules have gone inert and the check "
         "above proves nothing:\n  " + "\n  ".join(unmatched)
     )
-    # And the shape of the bound itself: no rule may be satisfiable by a
-    # reason it does not name, which for the unverifiable one means its
-    # variable part is a form NAME and not arbitrary prose.
-    unverifiable = [r for r in RULES if r.legitimate is None]
-    for rule in unverifiable:
-        assert rule.pattern, (
-            "an unverifiable rule that disclosed only literal reasons would "
-            "not need a pattern; one that has none cannot be bounded here"
-        )
-        assert not rule.matches("anything at all " * 5), rule.pattern
-
-    # The other edge of the same bound. A pattern tight enough to exclude the
-    # decoys must still cover every reason the site can actually emit, or a
-    # runner whose XLA folds differently reads as drift — which is the exact
-    # thing this rule exists to prevent. The form names come from the source,
-    # so adding a form with a comma or a bracket in its name fails HERE, where
-    # the pattern is, rather than on someone else's machine.
-    forms = re.findall(
-        r'^\s*\("([^"]+)",\s*lambda u, w',
-        (TESTS / "test_three_rows_acceptance.py").read_text(),
-        re.M,
-    )
+    # The other edge of the same bound. Excusing only what it names must still
+    # mean excusing every reason the site can actually emit, or a runner whose
+    # XLA folds differently reads as drift — which is the exact thing that rule
+    # exists to prevent. The names are read out of the source, so this half is
+    # satisfied BY CONSTRUCTION and is here for the way the construction can
+    # break: the extraction going inert. That is the assertion with the teeth
+    # in it, and it is why the count is checked before the coverage.
+    forms = _contraction_form_names()
     assert len(forms) >= 9, (
         f"only {len(forms)} contraction forms found in "
-        f"test_three_rows_acceptance.py — the shape this reads has changed "
-        f"and the check below has gone vacuous"
+        f"{_FORM_TABLE.name} — the shape this reads has changed, so the XLA "
+        f"rule's reasons are now derived from a shorter list (or an empty "
+        f"one) and a build that does not fold those forms would read as "
+        f"inventory drift"
     )
-    uncovered = [
-        name
-        for name in forms
-        if not any(
-            r.matches(f"{name}: XLA did not contract this form on this build")
-            for r in RULES
-        )
-    ]
-    assert not uncovered, (
-        "contraction form(s) whose XLA skip no rule excuses — on a build "
-        "where XLA does not fold these, the suite would report inventory "
-        "drift that is nothing of the kind:\n  " + "\n  ".join(uncovered)
+    assert set(forms) <= {
+        reason[: -len(_XLA_SUFFIX)]
+        for rule in RULES
+        for reason in rule.reasons
+        if reason.endswith(_XLA_SUFFIX)
+    }, "a contraction form whose XLA skip no rule excuses"
+    # and the derivation is of the REASON, not merely of a name: the string the
+    # site formats has to be the string a rule holds.
+    assert any(
+        rule.matches(f"{forms[0]}{_XLA_SUFFIX}") for rule in RULES
+    ), f"no rule excuses the reason test_three_rows_acceptance.py emits for {forms[0]!r}"
+    assert f'pytest.skip(f"{{name}}{_XLA_SUFFIX}")' in _FORM_TABLE.read_text(), (
+        f"{_FORM_TABLE.name} no longer emits its skip as "
+        f'`pytest.skip(f"{{name}}{_XLA_SUFFIX}")`, so the reasons derived from '
+        f"its form names are no longer the reasons it can produce"
     )
 
 
@@ -776,30 +928,19 @@ def test__importable_agrees_with_the_installed_importorskip(tmp_path, monkeypatc
     assert _importable("_probe_broken")
 
 
-def test_no_session_skip_is_undisclosed():
-    """The completeness half: everything this session skipped is covered by a
-    pin, a rule, a declared optional-dependency gate, or a MEASURED entry —
-    and every gate that fired had a dependency that really is absent.
+def _skips_this_session_cannot_explain() -> tuple[list[str], list[str]]:
+    """(undisclosed, contradicted) over everything the session skipped so far.
 
-    Scoped, and it says so. The claim is about the SUITE's skip set, so the
-    session has to have collected the suite; see the two failure modes above.
+    Worth running on whatever the session saw, however narrow it was; the
+    CLAIM is a separate and larger question, answered in
+    :func:`the_claim_this_session_can_make`.
     """
-    # Anti-vacuity, and it has to be about the RECORDER, not about this module.
-    # The old form asserted that some test in this file had run — which its own
-    # module satisfies, so it fired only when this test was the first thing in
-    # the session and then blamed a conftest that was demonstrably loaded. The
-    # file set is populated by the collection hook for EVERY invocation shape,
-    # including a single-nodeid one, so an empty one means the plugin is not
-    # there.
-    assert SEEN_FILES, (
-        "the outcome recorder collected nothing — tests/conftest.py is not "
-        "loaded, so there is no session to read"
-    )
-
     undisclosed: list[str] = []
     contradicted: list[str] = []
 
     for nodeid, reason in sorted(SKIPPED.items()):
+        if reason in _OWN_WITHDRAWALS and _THIS_MODULE in nodeid:
+            continue  # this pin's own withdrawal, emitted a moment ago
         gate = _IMPORT_GATE.match(reason)
         if gate:
             dep = gate.group(1)
@@ -822,38 +963,84 @@ def test_no_session_skip_is_undisclosed():
                 f"{nodeid}: skipped as {reason!r}, but its disclosed condition "
                 f"({rule.when}) does not hold here"
             )
+    return undisclosed, contradicted
 
-    assert not undisclosed, (
-        "undisclosed skip(s) — this suite's skip set is pinned, by condition, "
-        "in tests/test_skip_inventory.py:\n  "
-        + "\n  ".join(undisclosed)
-        + "\n\nFor each one: make it not skip, or disclose it here. A named "
-        "test skipping on a named dependency is a PINNED entry (both "
-        "directions get asserted). A reason any test may carry is a RULES "
-        "entry, with the condition that makes it legitimate. A new "
-        "`importorskip` gate needs its library in "
-        "DECLARED_OPTIONAL_DEPENDENCIES, which is a decision about the "
-        "project's dependencies and not a formality. A skip whose condition is "
-        "a measurement the test makes on its own subject is a MEASURED entry, "
-        "test-keyed and exact. A skip nothing asserts is how two acceptance "
-        "tests ran in no CI job for the project's whole life."
-    )
-    assert not contradicted, (
-        "skip(s) whose disclosed condition is FALSE here — the test skipped "
-        "anyway:\n  "
-        + "\n  ".join(contradicted)
-        + "\n\nThis is the other direction of the same drift: a gate that "
-        "fires when the thing it gates on is present tests nothing and says "
-        "so in green."
-    )
 
-    # --- and only NOW, the scope. The checks above are worth running on
+_UNDISCLOSED_ADVICE = (
+    "\n\nFor each one: make it not skip, or disclose it here. A named test "
+    "skipping on a named dependency is a PINNED entry (both directions get "
+    "asserted). A reason any test may carry is a RULES entry, with the exact "
+    "reason and the condition that makes it legitimate. A new `importorskip` "
+    "gate needs its library in DECLARED_OPTIONAL_DEPENDENCIES, which is a "
+    "decision about the project's dependencies and not a formality. A skip "
+    "whose condition is a measurement the test makes on its own subject is a "
+    "MEASURED entry, test-keyed and exact. A skip nothing asserts is how two "
+    "acceptance tests ran in no CI job for the project's whole life."
+)
+
+
+def the_claim_this_session_can_make(at_session_end: bool = False) -> tuple[str, str]:
+    """What this session supports, and whether it holds. The whole decision.
+
+    Returns ``(verdict, message)`` with verdict one of:
+
+    * ``"made"`` — the claim was evaluated against a complete record and holds;
+    * ``"failed"`` — evaluated and broken, or the session hid its own evidence;
+    * ``"withdrawn"`` — the session cannot support the claim, and says what it
+      did not see;
+    * ``"deferred"`` — the pin ran early, so the END of the session will make
+      the claim instead (never returned when ``at_session_end``).
+
+    Called from exactly two places, deliberately: :func:`test_no_session_skip_is_undisclosed`,
+    which is the ordinary surface and gets a nodeid and a proper failure, and
+    ``tests/conftest.py``'s session-end guard, for the sessions where the pin
+    was reordered, filtered or deselected out of making it. One decision, two
+    callers, so the two cannot drift apart.
+    """
+    undisclosed, contradicted = _skips_this_session_cannot_explain()
+    if undisclosed:
+        return "failed", (
+            "undisclosed skip(s) — this suite's skip set is pinned, by "
+            "condition, in tests/test_skip_inventory.py:\n  "
+            + "\n  ".join(undisclosed)
+            + _UNDISCLOSED_ADVICE
+        )
+    if contradicted:
+        return "failed", (
+            "skip(s) whose disclosed condition is FALSE here — the test "
+            "skipped anyway:\n  "
+            + "\n  ".join(contradicted)
+            + "\n\nThis is the other direction of the same drift: a gate that "
+            "fires when the thing it gates on is present tests nothing and "
+            "says so in green."
+        )
+    # and only NOW the size of the claim. The checks above are worth running on
     # whatever the session saw; the CLAIM is not the same size as the checks,
-    # and this is where the difference gets stated instead of assumed.
-    deselected = list(DESELECTED)
-    unseen = sorted(_files_the_suite_has() - _files_this_session_saw())
+    # and the difference gets stated rather than assumed.
+    return _what_this_session_is_in_a_position_to_claim(at_session_end)
+
+
+def _what_this_session_is_in_a_position_to_claim(
+    at_session_end: bool = False,
+) -> tuple[str, str]:
+    """The scope-and-order half, on its own — nothing here reads a SKIP.
+
+    Separate from the disclosure half above because the two answer different
+    questions and are asserted from different places: this one has no opinion
+    about whether the session's skips are covered, only about whether the
+    session is one that could support the claim at all.
+    """
+    collisions = colliding_basenames()
+    if collisions:
+        return "failed", (
+            "two test files under tests/ share a basename "
+            f"({', '.join(collisions)}), and a basename is the only key a "
+            "nodeid reliably gives back — so the scope check would read one "
+            "file as collected when the other was. Rename one."
+        )
+    unseen = unseen_files()
     if unseen:
-        pytest.skip(
+        return "withdrawn", (
             "the completeness pin is WITHDRAWN, not passed: this session "
             f"never collected {len(unseen)} of the suite's test files "
             f"({', '.join(unseen[:4])}"
@@ -862,17 +1049,222 @@ def test_no_session_skip_is_undisclosed():
             "these files' was. Everything it DID see is disclosed. Run the "
             "whole suite for the claim."
         )
-    assert not deselected, (
-        f"this session collected every test file and then DESELECTED "
-        f"{len(deselected)} test(s), so the skips inside them went "
-        f"unobserved — and the run would otherwise have printed a green "
-        f"indistinguishable from a whole one. The completeness pin cannot be "
-        f"made from a filtered session; that is exactly the invocation an "
-        f"undisclosed skip survives.\n\nFirst few: "
-        + ", ".join(deselected[:5])
-        + (", …" if len(deselected) > 5 else "")
-        + "\n\nDrop the -k/-m/--deselect filter to make the claim. If you are "
-        "iterating on this file, run it by PATH "
-        "(`pytest tests/test_skip_inventory.py`) — a session that never "
-        "collected the tree withdraws the claim instead of failing."
+    filtered_out = deselected_items(_THIS_MODULE)
+    if filtered_out and USER_FILTERS:
+        return "failed", (
+            f"this session collected every test file and then DESELECTED "
+            f"{len(filtered_out)} test(s) through the filter you passed "
+            f"({', '.join(USER_FILTERS)}), so the skips inside them went "
+            f"unobserved — and the run would otherwise have printed a green "
+            f"indistinguishable from a whole one. The completeness pin cannot "
+            f"be made from a filtered session; that is exactly the invocation "
+            f"an undisclosed skip survives.\n\nFirst few: "
+            + ", ".join(filtered_out[:5])
+            + (", …" if len(filtered_out) > 5 else "")
+            + "\n\nDrop the filter to make the claim. If you are iterating on "
+            "this file, run it by PATH (`pytest tests/test_skip_inventory.py`) "
+            "— a session that never collected the tree withdraws the claim "
+            "instead of failing."
+        )
+    if filtered_out:
+        return "withdrawn", (
+            "the completeness pin is WITHDRAWN, not passed: this session "
+            f"collected the whole tree and then deselected {len(filtered_out)} "
+            f"test(s) — and no -k, -m or --deselect was passed, so it was "
+            f"`--sw`, `--lf`, or a plugin. The skips inside those tests went "
+            f"unobserved and the claim cannot be made from what is left. "
+            f"Everything this session DID observe is disclosed.\n\nFirst few: "
+            + ", ".join(filtered_out[:5])
+            + (", …" if len(filtered_out) > 5 else "")
+        )
+    still_owed = pending_items(_THIS_MODULE)
+    if still_owed and not at_session_end:
+        return "deferred", (
+            "the completeness pin is WITHDRAWN here and made at the END of "
+            f"this session instead: {len(still_owed)} collected test(s) had "
+            f"not run when it did, so it is not looking at the session, it is "
+            f"looking at a prefix of it. Either the run is in a different "
+            f"ORDER (`--nf` and pytest-randomly both re-sort `items` from a "
+            f"`wrapper=True, tryfirst=True` hookimpl, which lands after every "
+            f"ordinary one) or items were removed from it without being "
+            f"reported deselected. tests/conftest.py says which, in a summary "
+            f"section, once the loop is over — unless this is a distributed "
+            f"worker, which runs a share of the session and claims nothing."
+        )
+    if still_owed:
+        return "failed", (
+            f"{len(still_owed)} collected test(s) never ran and were never "
+            f"reported as deselected, so this session's own summary line is "
+            f"short by that many and nothing said so. `pytest_deselected` is "
+            f"how a plugin discloses that it removed items; a plugin that "
+            f"filters `items[:]` without calling it produces a summary "
+            f"byte-identical to a clean whole run.\n\nFirst few: "
+            + ", ".join(still_owed[:5])
+            + (", …" if len(still_owed) > 5 else "")
+        )
+    return "made", ""
+
+
+def test_the_scope_key_is_lossy_in_exactly_one_way_and_it_is_checked(
+    tmp_path, monkeypatch
+):
+    """The comparison key is a BASENAME, because a nodeid gives back no more.
+
+    Two consequences, and neither may be left to chance. A test file one
+    directory down still has to be inside the scope check — the glob used to
+    stop at the top level, so ``tests/sub/test_x.py`` would have been invisible
+    to it and a session that never collected it would have claimed the suite
+    anyway. And two files sharing a basename would collapse into one key, so
+    the session could read one as collected when it was the other; that cannot
+    be prevented by a key that has no directory in it, so it is DETECTED, and
+    the completeness claim fails while it is true.
+
+    Exercised against a tree of its own because the real ``tests/`` has neither
+    a subdirectory nor a collision, which is precisely how a check for them
+    goes quietly inert.
+    """
+    import conftest
+
+    (tmp_path / "test_top.py").write_text("")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "test_nested.py").write_text("")
+    monkeypatch.setattr(conftest, "_TESTS", tmp_path)
+
+    assert conftest.files_the_suite_has() == {"test_top.py", "test_nested.py"}, (
+        "a test file one directory down is outside the scope check, so a "
+        "session that never collected it would still claim the suite"
+    )
+    assert conftest.colliding_basenames() == []
+
+    (tmp_path / "sub" / "test_top.py").write_text("")
+    assert conftest.colliding_basenames() == ["test_top.py"]
+    # the scope half on its own: what this session's skips were is a different
+    # question and would otherwise answer this one, whichever way it went
+    verdict, message = _what_this_session_is_in_a_position_to_claim()
+    assert verdict == "failed" and "share a basename" in message, (
+        "two files share a basename and the completeness claim did not fail "
+        f"on it — the session cannot tell which of them it collected: "
+        f"{verdict}, {message[:200]}"
+    )
+
+
+def test_no_session_skip_is_undisclosed():
+    """The completeness half: everything this session skipped is covered by a
+    pin, a rule, a declared optional-dependency gate, or a MEASURED entry —
+    and every gate that fired had a dependency that really is absent.
+
+    Scoped and ORDERED, and it says which. The claim is about the SUITE's skip
+    set, so the session has to have collected the suite and to have run it
+    before this pin; see the five cases above for what each shortfall gets.
+    """
+    # Anti-vacuity, and it has to be about the RECORDER, not about this module.
+    # The old form asserted that some test in this file had run — which its own
+    # module satisfies, so it fired only when this test was the first thing in
+    # the session and then blamed a conftest that was demonstrably loaded. The
+    # file set is populated by the collection hook for EVERY invocation shape,
+    # including a single-nodeid one, so an empty one means the plugin is not
+    # there.
+    assert SEEN_FILES, (
+        "the outcome recorder collected nothing — tests/conftest.py is not "
+        "loaded, so there is no session to read"
+    )
+
+    verdict, message = the_claim_this_session_can_make()
+    if verdict != "deferred":
+        # Whatever happens next, the claim has been made HERE and the
+        # session-end guard in tests/conftest.py must not make it again.
+        CLAIM_MADE.append(verdict)
+    if verdict in ("withdrawn", "deferred"):
+        _OWN_WITHDRAWALS.add(message)
+        pytest.skip(message)
+    assert verdict == "made", message
+
+
+_GUARD_STUB = '''
+"""Stands in for this module in the session below: the guard's counterpart.
+
+Carries a test of its own so that its FILE is collected — an empty module
+yields no items, and a file that yields nothing is a file this session cannot
+prove it collected. What it does not carry is the completeness pin, which is
+the situation being reproduced.
+"""
+import os
+
+
+def test_the_stub_file_is_collected():
+    assert True
+
+
+def the_claim_this_session_can_make(at_session_end=False):
+    assert at_session_end, "the guard must say which caller it is"
+    return os.environ["STUB_VERDICT"], "the stub's message"
+'''
+
+_GUARD_SUBJECT = '''
+import pytest
+
+
+def test_that_passes():
+    assert True
+
+
+def test_that_skips_undisclosed():
+    pytest.skip("a planted reason nobody disclosed")
+'''
+
+
+@pytest.mark.parametrize(
+    "verdict,expect_zero", [("failed", False), ("made", True)]
+)
+def test_the_session_end_guard_reports_from_a_session_without_the_pin(
+    tmp_path, verdict, expect_zero
+):
+    """The one mechanism this file cannot exercise on itself.
+
+    ``--deselect tests/test_skip_inventory.py``, and a plugin that drops the
+    pin's items from ``items[:]`` without calling ``pytest_deselected``, both
+    remove the pin from the session — so no assertion inside it can fire, and
+    both were measured at exit 0 with an undisclosed skip planted. What closes
+    them is ``tests/conftest.py`` making the claim after the loop, in the one
+    place an ``items`` filter cannot reach.
+
+    That path therefore runs in no ordinary session, including this one. So it
+    is run here, in a session of its own: the REAL conftest, a stub standing in
+    for this module, and a two-test subject. The stub is the point — this is
+    about the wiring (does the guard consult the pin, does a failed verdict
+    reach the exit code, does the reader see it), not about the verdict, which
+    is what the rest of this file is.
+    """
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "conftest.py").write_text((TESTS / "conftest.py").read_text())
+    (tests / "test_skip_inventory.py").write_text(_GUARD_STUB)
+    (tests / "test_subject.py").write_text(_GUARD_SUBJECT)
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
+        cwd=tmp_path,
+        env={**os.environ, "STUB_VERDICT": verdict},
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert "2 passed, 1 skipped" in proc.stdout, (
+        f"the subject session did not run as expected:\n\n{_tail(proc)}"
+    )
+    assert (proc.returncode == 0) is expect_zero, (
+        f"a {verdict!r} verdict from the completeness pin left pytest exiting "
+        f"{proc.returncode} in a session where every test passed. A session "
+        f"that dropped the pin and hid a skip has to be non-zero, and one that "
+        f"dropped the pin and hid nothing has to be zero.\n\n{_tail(proc)}"
+    )
+    assert "the stub's message" in proc.stdout, (
+        "the guard did not consult the pin at the end of a session the pin was "
+        f"not part of, or did not print what it got back:\n\n{_tail(proc)}"
+    )
+    assert "skip inventory:" in proc.stdout, (
+        "the guard's verdict is not visible to the reader; a session that "
+        "silently dropped the completeness check printed a summary "
+        "byte-identical to a clean whole run, and that is the half of this "
+        f"repair a green exit code does not carry.\n\n{_tail(proc)}"
     )
