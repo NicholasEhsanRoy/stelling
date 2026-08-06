@@ -62,7 +62,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from typing import Callable
 
@@ -411,7 +411,21 @@ class Escalation:
     query* check"). Empty means "not recorded by this library", and the
     gate refuses that too when the escalation carries work: an absent
     hash is exactly the shape a stale cache entry from before this field
-    existed has."""
+    existed has. **That sentence was false in one case until this
+    build**, and the case is named because it is the one where the
+    refusal matters most: BOTH legs run through :func:`_query_sha256`,
+    which returns ``""`` when
+    :meth:`stelling.ir.ClosedJaxpr.content_hash` RAISES, so an unhashable
+    ``closed`` and an unrecorded escalation compared EQUAL and the gate
+    passed. Measured on `e35de13`: the refusal then came from
+    :class:`stelling.verdict.Stamp`'s own emptiness check one layer
+    later, which is loud but is not this gate. The gate now refuses an
+    empty hash on either leg. Note also that ``carries_work`` is a real
+    exemption and not a formality: an escalation with no records, no
+    notes, no spawns and no stamps bypasses this gate entirely, and that
+    is harmless because it contributes nothing an assembly could
+    misattribute — measured, such a pairing returns UNKNOWN off the
+    propagation alone."""
 
     records: tuple[ObligationEscalation, ...]
     notes: tuple[str, ...] = ()
@@ -1359,7 +1373,14 @@ def _query_sha256(closed) -> str:
     NEVER RAISES, and the empty string is not a pass: it is the value the
     pairing gate REFUSES when the escalation carries work, so a ``closed``
     whose hash cannot be taken fails loudly at assembly rather than
-    silently pairing with anything."""
+    silently pairing with anything. **The gate has to refuse it
+    EXPLICITLY, and until this build it did not.** Both legs come from
+    here, so an unhashable ``closed`` and an escalation that recorded
+    nothing both produce ``""`` and an equality test passes them:
+    measured on `e35de13`, that assembly reached
+    :class:`stelling.verdict.Stamp` and was refused there
+    ("stamp field 'query_content_hash' is empty") rather than at the
+    gate. Two absences are not a match, and the gate now says so."""
     try:
         return str(closed.content_hash())
     except Exception:  # noqa: BLE001 — an unhashable query is refused, not excused
@@ -1771,6 +1792,36 @@ def make_solver_verdict(
     :exc:`MispairedEscalationError` (the refusal invariant's second,
     anti-correlated mechanism; audit F3).
     """
+    # -- ONE PASS OVER `records`, TAKEN HERE AND NOWHERE ELSE.
+    #
+    # This function walks `escalation.records` five times, and the field's
+    # declared type is a tuple — but it is whatever the caller put there, and
+    # a `records` that can be iterated ONCE (a generator, a `map`, a consumed
+    # iterator) made those five passes see five different things. Ordering the
+    # bar's domain first made that FAIL SAFE and did not make it CORRECT, and
+    # two measurements on `e35de13` say so:
+    #
+    #   * on a SCATTER-FREE query — one the bar never touches — a one-shot
+    #     `records` turned an honest VERIFIED into UNKNOWN, and the note it
+    #     carried was the generic undecided-cause line, which attributes the
+    #     UNKNOWN to "the propagated interval straddling the asserted bound".
+    #     That is not silence, it is a WRONG EXPLANATION of a verdict the
+    #     caller's own argument shape caused;
+    #   * a TWO-FACED `records` — empty on the first pass, real on the rest —
+    #     showed the bar nothing and the obligation loop everything, and
+    #     returned VERIFIED with no withheld note on the bar's own fixture.
+    #     Ordering cannot see that: the domain really was read first.
+    #
+    # Materialising once closes both, and it closes them by making a degenerate
+    # `records` behave EXACTLY like the tuple it yields rather than by choosing
+    # which pass wins. Ordering is kept below as a second, now-REDUNDANT
+    # mechanism — if this line were ever removed, reading the domain first
+    # still costs the discharges rather than the bar, which is the safer of
+    # the two failures. That redundancy is stated because a mutation of the
+    # ordering ALONE is now inert, and an unpinned guard whose comment claims
+    # to be load-bearing is this repo's own recurring defect.
+    escalation = replace(escalation, records=tuple(escalation.records))
+
     # -- the provenance gate (runs before anything else, unconditionally)
     ledger_stamps = tuple(escalation.ledger.stamps)
     stamped = sum(1 for s in ledger_stamps if s.invoked)
@@ -1780,6 +1831,17 @@ def make_solver_verdict(
     # -- THE QUERY PAIRING GATE. Recomputed from `closed`, never copied, and
     # taken ONCE for the whole function: the stamp's `query_content_hash`
     # below is this same value, so the gate costs no additional hash.
+    #
+    # AN EMPTY HASH IS REFUSED ON ITS OWN, NOT ONLY WHEN IT DIFFERS. Both legs
+    # go through `_query_sha256`, which returns "" when `content_hash()`
+    # raises — so a `closed` that cannot be hashed and an escalation that
+    # recorded nothing COMPARED EQUAL and the gate passed. Measured on
+    # `e35de13`: the refusal then came from `Stamp.__post_init__`
+    # ("stamp field 'query_content_hash' is empty") one layer later, which is
+    # loud but is not this gate, and the field's own docstring claimed this
+    # gate refused it. Equality is not the property wanted; "this escalation
+    # is about this query, and both of them said so" is, and an empty string
+    # says nothing.
     query_hash = _query_sha256(closed)
     carries_work = bool(
         escalation.records
@@ -1787,16 +1849,20 @@ def make_solver_verdict(
         or escalation.ledger.spawns
         or ledger_stamps
     )
-    if carries_work and escalation.query_sha256 != query_hash:
+    if carries_work and (
+        not query_hash or escalation.query_sha256 != query_hash
+    ):
         raise MispairedEscalationError(
             f"mispaired escalation: the supplied escalation was produced by "
             f"escalate() on the query "
             f"{escalation.query_sha256 or '<unrecorded>'}, but the query "
             f"being stamped hashes to {query_hash or '<unhashable>'} — the "
-            f"two are not the same query, so this escalation's outcomes are "
-            f"answers about a program other than the one the verdict would "
-            f"claim; refusing to emit. An OB_DISCHARGED record from another "
-            f"run discharges an obligation here by INDEX alone, so a "
+            f"two are not the same query (an UNHASHABLE query is refused "
+            f"whatever the escalation recorded: two empty strings are not a "
+            f"match, they are two absences), so this escalation's outcomes "
+            f"are answers about a program other than the one the verdict "
+            f"would claim; refusing to emit. An OB_DISCHARGED record from "
+            f"another run discharges an obligation here by INDEX alone, so a "
             f"mispaired assembly can mint VERIFIED on a query whose honest "
             f"verdict is REFUTED. Assemble the verdict from the propagation "
             f"and escalation this query actually produced."

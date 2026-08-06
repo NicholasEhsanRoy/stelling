@@ -932,6 +932,63 @@ def test_every_escalate_return_site_records_the_query():
         )
 
 
+class _Unhashable:
+    """A `closed` in every respect except that `content_hash()` RAISES —
+    which is what `_query_sha256` turns into `""`."""
+
+    def __init__(self, inner):
+        object.__setattr__(self, "_inner", inner)
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_inner"), name)
+
+    def content_hash(self):
+        raise RuntimeError("this query's content hash cannot be taken")
+
+
+@pytest.mark.parametrize("recorded", ["", "an-honest-looking-hash"])
+def test_the_pairing_gate_refuses_an_EMPTY_hash_and_not_only_a_DIFFERENT_one(
+    recorded,
+):
+    """THE LEG WHERE EQUALITY WAS NOT THE PROPERTY WANTED.
+
+    Both sides of the gate come from `_query_sha256`, which returns `""` when
+    `ClosedJaxpr.content_hash()` raises. So a `closed` that cannot be hashed
+    and an escalation that recorded nothing produced the SAME value, the
+    equality test passed, and the gate — whose own field docstring said "the
+    gate refuses that too" — refused nothing. Measured on `e35de13`: the
+    refusal came from `Stamp.__post_init__` ("stamp field
+    'query_content_hash' is empty") one layer later. Loud, but not this gate,
+    and not what the docstring claimed.
+
+    Two absences are not a match. Both parametrisations must raise
+    `MispairedEscalationError` FROM THE GATE, and the second (a real recorded
+    hash against an unhashable query) is the control: it already raised
+    before, so a repair that somehow only fixed the first would still be
+    visible as an asymmetry here.
+    """
+    import dataclasses
+
+    from stelling.solvers import MispairedEscalationError, make_solver_verdict
+
+    closed, prop, esc = _stamped(_scatter_free)
+    assert esc.query_sha256, "the fixture's escalation recorded no hash"
+    blinded = _Unhashable(closed)
+    from stelling.solvers import _query_sha256
+
+    assert _query_sha256(blinded) == "", (
+        "the blinded query still hashes, so this test never reaches the "
+        "empty-hash leg it is about"
+    )
+
+    with pytest.raises(MispairedEscalationError) as exc:
+        make_solver_verdict(blinded, prop,
+                            dataclasses.replace(esc, query_sha256=recorded),
+                            **VERSIONS)
+    assert "unhashable" in str(exc.value), str(exc.value)
+    assert "StampError" not in type(exc.value).__name__
+
+
 def test_the_pairing_gate_costs_no_additional_hash():
     """THE COST, AS A MECHANISM RATHER THAN AS A TIMING. `make_solver_verdict`
     already took `closed.content_hash()` for the stamp; the gate compares that
@@ -2201,50 +2258,132 @@ def test_an_UNREADABLE_domain_widens_the_bar_and_the_sentinel_is_why():
     )
 
 
-def test_a_ONE_SHOT_records_cannot_silence_the_bar():
-    """THE OTHER WAY PAST THE SENTINEL, WHICH DOES NOT GO THROUGH IT AT ALL.
+class _TwoFaced:
+    """A `records` that shows one face to the FIRST reader and another to
+    every later one. Ordering cannot defend against this — the domain really
+    is read first, it is just read from a different value."""
+
+    def __init__(self, first, later):
+        self.first, self.later, self.passes = first, later, 0
+
+    def __iter__(self):
+        self.passes += 1
+        return iter(self.first if self.passes == 1 else self.later)
+
+
+@pytest.mark.parametrize("build,expected,withheld", [
+    (_scatter_ON_the_decided_slice, "UNKNOWN", True),
+    (_scatter_free, "VERIFIED", False),
+])
+def test_a_ONE_SHOT_records_behaves_EXACTLY_LIKE_THE_TUPLE_it_yields(
+    build, expected, withheld
+):
+    """THE OTHER WAY PAST THE SENTINEL, WHICH DOES NOT GO THROUGH IT AT ALL —
+    AND THE COST OF THE FIRST REPAIR FOR IT.
 
     `_UnreadableBarDomain` defends against a `records` that cannot be READ. It
     says nothing about one that can be read ONCE. `make_solver_verdict` walks
-    `escalation.records` several times, and while the bar's domain was built
-    at the bar — several passes down — a generator, a `map`, or any consumed
+    `escalation.records` five times, and while the bar's domain was built at
+    the bar — several passes down — a generator, a `map`, or any consumed
     iterator was exhausted by the obligation loop first. `_bar_domain` then
     returned an HONEST-EMPTY `{}`, which is exactly the value that means "no
-    solver decided anything" and skips the bar. Measured on this branch, and
-    identical at `eb1ff86`: VERIFIED, with no withheld note, on the bar's own
-    fixture — a silencing path that never touched the sentinel.
+    solver decided anything" and skips the bar. Measured on `eb1ff86` and on
+    `f5280cf`: VERIFIED, with no withheld note, on the bar's own fixture — a
+    silencing path that never touched the sentinel.
 
-    The repair is ordering, not a new guard: the domain is read on the FIRST
-    pass, so a one-shot `records` costs the DISCHARGES rather than the bar.
-    Both are asserted — a status of UNKNOWN alone would also hold if the bar
-    fired, and the point is that no would-be VERIFIED is reached at all.
+    THE FIRST REPAIR WAS ORDERING, AND ITS PRICE WAS UNDISCLOSED. Reading the
+    domain first made the bar's fixture fail safe, and the claim recorded for
+    it was "a degenerate `records` costs the discharges, never the bar". That
+    is broader than it reads. Measured on `e35de13`, on a SCATTER-FREE query —
+    one the bar never touches, so nothing about the bar is at stake — a
+    one-shot `records` turned an honest VERIFIED into UNKNOWN, and the only
+    note it carried was the generic undecided-cause line, which attributes the
+    UNKNOWN to "the propagated interval straddling the asserted bound". Not
+    silence: a WRONG EXPLANATION of a verdict the argument's shape caused.
+
+    So the repair is now ONE PASS, taken at the top: a degenerate `records`
+    behaves exactly like the tuple it yields, and nothing downstream can
+    disagree with anything else about what the records are. Both arms are
+    parametrised here because they fail in opposite directions — the barred
+    query must still bar (with the discharges intact, which the ordering
+    repair could not deliver) and the scatter-free query must still VERIFY.
+
+    Could-not-fail: replacing an assertion is where shape #3 (asserting away
+    its own trigger) lives, so the ORIGINAL defect is asserted harder than
+    before rather than dropped — `withheld` is checked, and the barred arm now
+    requires every obligation to discharge, which is what makes its UNKNOWN
+    the bar and not an accident.
+    """
+    import dataclasses
+
+    from stelling.solvers import make_solver_verdict
+
+    closed, prop, esc = _stamped(build)
+    honest = make_solver_verdict(closed, prop, esc, **VERSIONS)
+    assert honest.status == expected, (
+        f"the genuine assembly is {honest.status}, not {expected}; the "
+        f"fixture is wrong and the comparison below measures nothing"
+    )
+
+    one_shot = dataclasses.replace(esc, records=iter(tuple(esc.records)))
+    v = make_solver_verdict(closed, prop, one_shot, **VERSIONS)
+    assert v.status == expected, (
+        f"{v.status} where the same records as a tuple give {expected}. A "
+        f"`records` that can only be iterated once is being read by some "
+        f"passes and not others — which silences the bar when the obligation "
+        f"loop wins the race, and costs an honest VERIFIED when the bar does"
+    )
+    assert [o.status for o in v.obligations] == [
+        o.status for o in honest.obligations
+    ], (
+        f"{[o.status for o in v.obligations]} vs "
+        f"{[o.status for o in honest.obligations]}: a one-shot `records` "
+        f"changed which obligations were decided"
+    )
+    assert any("VERIFIED withheld" in n for n in v.notes) is withheld, (
+        f"withheld-note presence moved on a one-shot `records`: {v.notes}"
+    )
+
+
+def test_a_TWO_FACED_records_cannot_show_the_bar_one_thing_and_the_loop_ANOTHER():
+    """THE SHAPE ORDERING CANNOT REACH, and the reason the repair is a single
+    pass rather than a pass order.
+
+    Reading the bar's domain FIRST is a defence against a `records` that runs
+    OUT. It is no defence at all against one that CHANGES: an iterable that
+    yields nothing on its first pass and the real records on every later one
+    shows the bar an honest-empty domain — the one value that skips it — and
+    the obligation loop a full set of discharging records. The domain really
+    was read first; it was just read from a different value.
+
+    Measured on `e35de13`: VERIFIED, every obligation discharged, no withheld
+    note, on the bar's own fixture. With one pass there is one value, so the
+    face the assembly sees is the face the bar sees, whichever it is.
     """
     import dataclasses
 
     from stelling.solvers import make_solver_verdict
 
     closed, prop, esc = _stamped(_scatter_ON_the_decided_slice)
+    real = tuple(esc.records)
     assert make_solver_verdict(closed, prop, esc, **VERSIONS).status == (
         "UNKNOWN"
     ), "the genuine assembly does not bar; the fixture is wrong"
 
-    one_shot = dataclasses.replace(esc, records=iter(tuple(esc.records)))
-    v = make_solver_verdict(closed, prop, one_shot, **VERSIONS)
-    assert v.status == "UNKNOWN", (
-        f"{v.status}: a `records` that can only be iterated once cleared the "
-        f"bar — the domain is being read after some earlier pass has consumed "
-        f"it, so it comes back honest-empty and the bar is skipped"
+    two_faced = _TwoFaced((), real)
+    v = make_solver_verdict(
+        closed, prop, dataclasses.replace(esc, records=two_faced), **VERSIONS)
+    assert two_faced.passes >= 1, "the fixture was never iterated at all"
+    assert v.status != "VERIFIED", (
+        f"{v.status}: a `records` that showed the bar nothing and the "
+        f"obligation loop everything minted a VERIFIED. The assembly is "
+        f"reading `records` more than once, so the bar and the discharges "
+        f"can be told different things about the same run"
     )
-    assert [o.status for o in v.obligations] != (
-        ["discharged"] * len(v.obligations)
-    ), (
-        "every obligation still discharged from a `records` that was already "
-        "consumed by the bar's domain. Something is holding the records "
-        "twice, which would put the bar back at the mercy of pass ORDER"
-    )
-    assert not any("VERIFIED withheld" in n for n in v.notes), (
-        "the bar fired on a verdict that never reached VERIFIED; harmless, "
-        "but it means this test is not measuring the ordering it claims to"
+    assert not any(o.status == "discharged" and o.index == 0
+                   for o in v.obligations), (
+        "the solver-decided obligation discharged off records the bar's "
+        "domain never saw"
     )
 
 
