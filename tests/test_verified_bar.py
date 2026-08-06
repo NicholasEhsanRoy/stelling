@@ -2189,11 +2189,20 @@ def _function_carriers(fn):
 
     `__defaults__` and `__kwdefaults__` in particular are NOT covered by
     `_fn_defaults_ast`: that reads the SOURCE signature, and these are set at
-    run time on a function whose source has no default at all."""
+    run time on a function whose source has no default at all.
+
+    NOT truthiness: an EMPTY carrier is still a carrier, and
+    `_whitelisted.__kwdefaults__ = {}` on the first of the two calls is
+    indistinguishable, to a truthiness test, from never having been set. This
+    check is also ORDER-DEPENDENT — it sees a carrier installed at import time
+    or by an earlier test, and not one installed on a call this process has not
+    made yet. The order-independent half is the `attribute-assign` rule in
+    `_value_zone_offences`, which reads the SOURCE; the two are kept because
+    neither reaches the other's case."""
     out = []
-    if getattr(fn, "__defaults__", None):
+    if getattr(fn, "__defaults__", None) is not None:
         out.append("__defaults__")
-    if getattr(fn, "__kwdefaults__", None):
+    if getattr(fn, "__kwdefaults__", None) is not None:
         out.append("__kwdefaults__")
     if getattr(fn, "__dict__", None):
         out.append(f"__dict__ {sorted(fn.__dict__)}")
@@ -2377,6 +2386,32 @@ def _value_zone_offences(nodes, allow, prose=False):
                 out.append(("global-statement", ", ".join(sub.names)))
             if isinstance(sub, ast.Name) and sub.id in _SMUGGLERS:
                 out.append(("smuggler", sub.id))
+            if isinstance(sub, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                targets = (sub.targets if isinstance(sub, ast.Assign)
+                           else [sub.target])
+                for tgt in targets:
+                    # `x.y = v` and `x.y[k] = v`. NOT `d[k] = v` on a plain
+                    # local: a subscript assignment to a MODULE-level mapping
+                    # is already `unenumerated`/`mutable` by the name it needs,
+                    # and `per[index] = found` is the honest decision's own
+                    # accumulator.
+                    if isinstance(tgt, ast.Attribute) or (
+                            isinstance(tgt, ast.Subscript)
+                            and isinstance(tgt.value, ast.Attribute)):
+                        # A CARRIER WRITTEN ONTO AN OBJECT. `_whitelisted.
+                        # __kwdefaults__ = out` is a module-level mutable that
+                        # needs no module-level NAME: the mutable is the zone's
+                        # own function object, which `_closure_offences` never
+                        # checked because it only reached the immutability
+                        # branch for names the module does not define. Live at
+                        # `faefc48`, 0 RED at `9fc44dd`, and the same carrier
+                        # used across the two `_whitelisted` calls mints the
+                        # narrowing on the mispaired pair. The runtime check in
+                        # `_function_carriers` sees a carrier installed at
+                        # import time; this sees one installed on any call, in
+                        # any order, on any object.
+                        out.append(("attribute-assign",
+                                    ast.dump(tgt)[:60]))
             if isinstance(sub, ast.Name) and sub.id in _DYNAMIC:
                 # `__import__` binds no `ast.Import` node, so `_fn_imports`
                 # and the import allow-list never see it; `eval`/`exec`/
@@ -2606,6 +2641,15 @@ def test_the_evidence_path_cannot_name_a_VALUE():
         # an attribute name smuggled past `getattr`'s bare-`Name` function
         ("8g-getattr", 'def f(s):\n'
                        '    return getattr(s, "_stash", None)\n'),
+        # M7: a carrier written onto a zone FUNCTION, which needs no
+        # module-level name at all
+        ("M7inert", 'def f(raw):\n'
+                    '    out = dict(raw)\n'
+                    '    f.__kwdefaults__ = out\n'
+                    '    return out\n'),
+        ("M7dict", 'def f(raw):\n'
+                   '    f.stash = raw\n'
+                   '    return raw\n'),
     ):
         body = ast.parse(textwrap.dedent(src)).body[0].body
         assert _value_zone_offences(body, allow), (
