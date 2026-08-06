@@ -565,6 +565,7 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     values: list[tuple[str, str]] = []
     nonrational = False
     error = ""
+    complete = False
     for line in proc.stdout.splitlines():
         parts = line.split(maxsplit=2)
         if not parts:
@@ -577,6 +578,8 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
             values.append((parts[1], parts[2]))
         elif parts[0] == "opaque":
             nonrational = True
+        elif parts[0] == "end":
+            complete = True
         elif parts[0] == "error":
             error = line[len("error "):]
     if error:
@@ -587,6 +590,36 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
             version=version,
             detail=f"cvc5 driver protocol violation; stdout: "
             f"{_quote(proc.stdout)!r}, stderr: {_quote(proc.stderr)!r}",
+        )
+    # THE CRASHED CHILD. The driver answers BEFORE it walks the model, so a
+    # death inside cvc5's native `getValue` leaves `answer sat` on stdout with
+    # no terminator. This is the wheel transport's form of the crashed run the
+    # binary transport refuses at `_make_run_cvc5_binary` ("audit F4"); the
+    # wheel never received it.
+    #
+    # WHY IT SURVIVED: stdout to a pipe is block-buffered, so a killed child
+    # usually loses everything it wrote and the parent correctly sees a
+    # protocol violation. It is only once the model is large enough to flush
+    # that the answer gets through without the terminator. MEASURED, real
+    # child, real SIGKILL: a 2-line model leaves 0 lines through and is caught;
+    # a 4000-term model leaves 3572 lines through, `answer sat` present, `end`
+    # absent — and this function returned sat with 3570 model values harvested
+    # from a dead process. Small fixtures cannot reach it, which is why no test
+    # did. A truncated model is worse than no model: it is a witness that does
+    # not reproduce, behind a definitive REFUTED.
+    #
+    # TWO TELLS, because each alone has a blind spot. `end` is positive
+    # evidence the driver ran to completion and is what catches a death that
+    # somehow exits zero; `returncode` catches a death that somehow emitted the
+    # terminator. Neither is derived from the other.
+    if not complete or proc.returncode != 0:
+        return _RawResult(
+            answer="failed",
+            version=version,
+            detail=f"cvc5 driver answered {answer!r} but the run is not "
+            f"complete (exit {proc.returncode}; terminator "
+            f"{'present' if complete else 'ABSENT'}); refusing to rely on a "
+            f"crashed run. stderr: {_quote(proc.stderr)!r}",
         )
     return _RawResult(
         answer=answer,
