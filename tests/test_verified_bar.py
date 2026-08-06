@@ -1593,6 +1593,8 @@ def test_the_bars_domain_cannot_read_a_new_field():
 #   5 `_bar_domain`, `type(r.index) is not int`, on an `int` SUBCLASS
 #   6 `_bar_scope` reads the token out of the existing `SolverStamp.options`
 #   7 `_bar_scope` skips an obligation whose stamp records a chosen `:timeout`
+#   8 the SAME conjunct written inside the permitted reader, on a value the
+#     sweep does not sample — three spellings, measured on `3e107cf`
 #
 # CHANNEL 7 NEEDED NO FORGED RECORD AT ALL, which is what separates it from
 # 1-6: it is driven by a PUBLIC KEYWORD ARGUMENT. `solver_timeout_ms` is
@@ -1631,6 +1633,54 @@ def test_the_bars_domain_cannot_read_a_new_field():
 # pins that the bar's answer does not move under any value a caller can
 # choose, which is the half that reaches a conjunct written INSIDE the one
 # permitted reader, where no site-based mechanism can see it.
+#
+# CHANNEL 8 IS WHAT THAT SPLIT ACTUALLY LEFT OPEN, and it is the reason the
+# permitted reader is no longer the DECISION. On `3e107cf` the one function
+# allowed to see option values was `_evidence_is_about` — the function that
+# decides whether the bar narrows — so both site mechanisms were satisfied by
+# construction and the whole defence rested on the sweep. The sweep is a
+# SAMPLE, and it can only reach the two of the four whitelisted keys that a
+# caller can set. Three line-neutral corruptions, each measured at `3e107cf`
+# with the full suite BYTE-IDENTICAL to unmutated in both columns
+# (2055 passed / 2 skipped and 2051 / 6):
+#
+#   8a `_evidence_is_about` stashes its projected budget in a module global;
+#      `_bar_scope` zeroes `found` when that global is "30000". No new
+#      (function, attribute) pair — the read stays in the one permitted
+#      reader — and `_bar_scope`'s body carries no `.options`, no "options"
+#      and no `_evidence_options`, so neither scan matches. Driven through the
+#      public API on `_scatter_ON_the_decided_slice`:
+#
+#          solver_timeout_ms=20000 -> UNKNOWN, "VERIFIED withheld ... #0"
+#          solver_timeout_ms=29999 -> UNKNOWN, withheld
+#          solver_timeout_ms=30000 -> VERIFIED, NO withheld note
+#          solver_timeout_ms=30001 -> UNKNOWN, withheld
+#          solver_timeout_ms=31337 -> UNKNOWN, withheld
+#
+#      THE ISOLATING CONTROL is the identical mutation keyed on "31337",
+#      which is 2 RED in this file. The only difference is the constant. So
+#      the sentence `_CALLER_BUDGETS` used to carry — "an equality on any
+#      round or memorable number is hit" — was FALSE, and is corrected there;
+#   8b a conjunct on the VALUE of `smt2_sha256` inside `_evidence_is_about`,
+#      and
+#   8c the same on `slice_sha256`. Both keys are whitelisted, both values are
+#      record-supplied, and the sweep varies NEITHER — it varies 2 of the 4
+#      keys. Driven with the pairing gate satisfied by hand
+#      (`_past_the_pairing_gate`, as every mispairing test here does) and the
+#      hash forged to "0"*64: VERIFIED with no withheld note, where the
+#      unmutated build returns UNKNOWN with the whole-query fallback. That is
+#      channel 1's threat model — a record certifying its own cleanliness —
+#      reached through a whitelisted key's VALUE rather than through a new key.
+#
+# THE REPAIR IS NOT A WIDER SWEEP. `_CALLER_BUDGETS` says why in its own
+# comment, and this project has watched "raise the bound" fail on six other
+# axes. The narrowing DECISION now consumes a boolean: `_evidence_is_about`
+# binds no recorded value and may not call the projection (both scans cover it
+# now), and the value zone is one four-line function, `_evidence_reproduces`,
+# whose two halves cannot aim — `_evidence_options` never sees the query,
+# `_reproduced_evidence` never sees the record. What is left is covered by
+# `test_the_evidence_path_cannot_name_a_VALUE`, which is TOTAL over the source
+# rather than a sample over values.
 #
 # `test_the_bar_is_consulted_with_exactly_that_domain` does not reach 2, 4 or
 # 6: all three satisfy `len(seen) == 1 and seen[0] == _bar_domain(case)`,
@@ -1711,13 +1761,16 @@ _ALLOWED_READS = frozenset({
     ("record", "make_solver_verdict", "notes"),
     ("record", "make_solver_verdict", "witness"),
     ("record", "make_solver_verdict", "answered_by"),
-    # the narrowing decision: two stamp attributes, plus `options` — asked
-    # for by ONE function and projected to `_EVIDENCE_OPTION_KEYS` on the
-    # way. Attributed to the function that ASKED, not to the projection: see
-    # `_PROJECTIONS`, and channel 7 in the block comment above.
+    # the narrowing DECISION, which reads only what it needs to skip a stamp
+    # it cannot use — and no option value at all
     ("stamp", "_evidence_is_about", "invoked"),
     ("stamp", "_evidence_is_about", "name"),
-    ("stamp", "_evidence_is_about", "options"),
+    # ... and the one function that holds a recorded VALUE: the flavour it
+    # re-emits at, plus `options` projected to `_EVIDENCE_OPTION_KEYS` on the
+    # way. Attributed to the function that ASKED, not to the projection: see
+    # `_PROJECTIONS`, and channels 7 and 8 in the block comment above.
+    ("stamp", "_evidence_reproduces", "name"),
+    ("stamp", "_evidence_reproduces", "options"),
 })
 
 
@@ -1863,6 +1916,17 @@ def test_the_narrowing_decision_reads_options_in_one_place():
     VERIFIED with the full suite green in both columns. So the projection
     itself is scoped: exactly ONE function in the bar may call it, and it is
     the one the ledger names.
+
+    **AND THE PERMITTED CALLER IS NO LONGER THE DECISION.** On `3e107cf` it
+    was `_evidence_is_about` — the function that decides whether the bar
+    narrows — so a conjunct on a whitelisted key's VALUE was expressible at the
+    decision itself and neither of these scans could say a word about it (both
+    are about SITES, and that site was permitted). `_evidence_is_about` now
+    joins the forbidden list; the permitted caller is `_evidence_reproduces`,
+    which returns a boolean and decides nothing else. See channel 8 in the
+    block comment above for the three corruptions that measures, and
+    `test_the_evidence_path_cannot_name_a_VALUE` for the half that reaches
+    inside the permitted caller.
     """
     import inspect
 
@@ -1870,7 +1934,7 @@ def test_the_narrowing_decision_reads_options_in_one_place():
                V._barred_primitives, V._bar_scope_phrase):
         after = _bar_body(fn)
         # every way of reaching the attribute: `x.options`, and `getattr` /
-        # `__dict__` by name. The local `options = _evidence_options(stamp)`
+        # `__dict__` by name. The local `recorded = _evidence_options(stamp)`
         # is not a read of the attribute and is not matched.
         reads = [form for form in (".options", '"options"', "'options'")
                  if form in after]
@@ -1881,24 +1945,294 @@ def test_the_narrowing_decision_reads_options_in_one_place():
             f"`_EVIDENCE_OPTION_KEYS`; a second reader reopens the key "
             f"channel without touching either"
         )
-    for fn in (V._bar_scope, V._barred_in_eqns, V._barred_primitives,
-               V._bar_scope_phrase):
+    for fn in (V._bar_scope, V._evidence_is_about, V._barred_in_eqns,
+               V._barred_primitives, V._bar_scope_phrase):
         assert "_evidence_options" not in _bar_body(fn), (
             f"{fn.__name__} calls `_evidence_options`. That is the permitted "
             f"PROJECTION, not a permission to read: every whitelisted option "
             f"value reaches whoever calls it, and a conjunct on one of those "
             f"VALUES is channel 7 — measured on `e35de13` as a public keyword "
             f"argument (`solver_timeout_ms=31337`) clearing the bar with the "
-            f"suite green. Exactly one function in the bar may ask for a "
-            f"stamp's options, and `_ALLOWED_READS` names it"
+            f"suite green, and on `3e107cf` again at 30000, a budget the "
+            f"sweep does not sample. Exactly one function in the bar may ask "
+            f"for a stamp's options, it is NOT the one that decides, and "
+            f"`_ALLOWED_READS` names it"
         )
     assert '"options"' in inspect.getsource(V._evidence_options), (
         "the one permitted reader no longer reads options, so the scan above "
         "passes vacuously"
     )
-    assert "_evidence_options" in _bar_body(V._evidence_is_about), (
+    assert "_evidence_options" in _bar_body(V._evidence_reproduces), (
         "the one permitted CALLER no longer calls the projection, so the "
         "second scan above passes vacuously"
+    )
+    # ... and the permitted caller is not the decision: if `_bar_scope` ever
+    # consulted it directly, the value zone and the narrowing would be one
+    # function again and the scan above would be measuring nothing.
+    assert "_evidence_reproduces" not in _bar_body(V._bar_scope), (
+        "`_bar_scope` calls `_evidence_reproduces` directly. The decision "
+        "consults `_evidence_is_about`, which consults the value zone — "
+        "collapsing the two puts a recorded value back in the frame that "
+        "decides"
+    )
+
+
+# -- channel 8: the value zone's own source, pinned TOTALLY ------------------
+#
+# The functions a recorded option value can be reached from, and the ones that
+# DECIDE. Split because the two carry different rules: the value zone may name
+# an attribute (it has to read one), the decision may name nothing at all.
+_EVIDENCE_VALUE_ZONE = ("_evidence_options", "_evidence_budget",
+                        "_reproduced_evidence", "_evidence_reproduces")
+_EVIDENCE_DECISION = ("_evidence_is_about", "_bar_scope")
+
+# The forms that smuggle a value out of the zone without returning it. `8a`
+# used `globals().__setitem__(...)`; a `global` statement does the same job.
+_SMUGGLERS = ("globals", "vars", "setattr", "locals")
+
+
+def _fn_body_ast(fn):
+    """One function's body as AST, with its docstring dropped — a docstring is
+    a `str` constant and every rule below is about constants."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    body = tree.body[0].body
+    if (body and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        body = body[1:]
+    return body
+
+
+def _value_zone_offences(nodes, allow):
+    """Every way the three corruptions of channel 8 have to be SPELLED, found
+    in a parsed function body. Returns a list of (rule, detail)."""
+    import ast
+
+    out = []
+    for node in nodes:
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Constant) and isinstance(
+                    sub.value, (str, bytes)) and sub.value not in allow:
+                out.append(("literal", repr(sub.value)))
+            if isinstance(sub, ast.Compare):
+                for side in [sub.left, *sub.comparators]:
+                    for inner in ast.walk(side):
+                        if isinstance(inner, ast.Constant) and isinstance(
+                                inner.value, (str, bytes, int, float)):
+                            out.append(("compare-literal", repr(inner.value)))
+            if isinstance(sub, (ast.Global, ast.Nonlocal)):
+                out.append(("global-statement", ", ".join(sub.names)))
+            if isinstance(sub, ast.Name) and sub.id in _SMUGGLERS:
+                out.append(("smuggler", sub.id))
+    return out
+
+
+def test_the_evidence_path_cannot_name_a_VALUE():
+    """CHANNEL 8, AND THE HALF NO SITE-BASED MECHANISM COULD REACH.
+
+    The read ledger and the two source scans are about SITES: which function
+    may ask for a stamp's options. They said nothing at all about a conjunct
+    written INSIDE the permitted one, and on `3e107cf` the permitted one was
+    the decision itself. The only cover was
+    `test_the_bars_narrowing_does_not_move_with_a_CALLER_SETTABLE_option_value`,
+    which is a SAMPLE over one of the two value axes it can reach: 30000
+    survives it, 31337 does not, and the only difference is the constant.
+
+    **So this pin is over the SOURCE, and it is total.** Every one of the three
+    measured corruptions has to be spelled one of four ways, and none of the
+    four is available to the repaired code:
+
+    * a string literal that is not an attribute name the READ LEDGER already
+      permits — `"0" * 64`, `"30000"`, a smuggled option key. The allow-list is
+      derived from `_ALLOWED_READS` rather than written out here, so adding a
+      literal means adding a ledger entry, which is itself pinned in both
+      directions;
+    * a comparison against a literal of any type, anywhere in either operand's
+      subtree — which is how 8a reads its stashed global and how 8b/8c read a
+      hash. The decision functions are covered by this rule too, because 8a
+      wrote its conjunct in `_bar_scope`;
+    * a `global`/`nonlocal` statement, or a call through `globals()` / `vars()`
+      / `setattr()` / `locals()` — 8a's actual spelling was
+      `globals().__setitem__("_BSTASH", ...)`, chosen to keep the read inside
+      the permitted reader and out of the ledger.
+
+    WHAT IT DOES NOT CLAIM, said because could-not-fail shape #4 is exactly
+    "enumerating current members rather than pinning the channel": this
+    constrains what may be WRITTEN on the path, not every predicate Python can
+    express. A discriminator spelled as a method call on a value —
+    `recorded.get(k).startswith(...)`, a hash of it, a length test that dodges
+    `ast.Compare` — is not matched. That residue is why the budget sweep below
+    is KEPT as corroboration rather than deleted, and why the value zone is
+    also made unable to AIM: `_evidence_options` is handed no query and
+    `_reproduced_evidence` is handed no record, so neither can compute the
+    mapping a false narrowing would have to produce (`::test_the_reproduction_
+    is_handed_no_record`).
+    """
+    allow = {attr for _kind, _fn, attr in _ALLOWED_READS}
+    assert "options" in allow and "invoked" in allow and "name" in allow, (
+        f"the ledger no longer permits the attribute names the value zone "
+        f"reaches for ({sorted(allow)}); this pin's allow-list is derived "
+        f"from it and would now forbid an honest read"
+    )
+
+    for name in _EVIDENCE_VALUE_ZONE:
+        offences = _value_zone_offences(_fn_body_ast(getattr(V, name)), allow)
+        assert not offences, (
+            f"`{name}` is on the path a recorded option VALUE reaches, and it "
+            f"now spells {offences}. Every measured spelling of channel 8 is "
+            f"one of these: a literal the record can be compared against, a "
+            f"comparison against a literal, or a module global carrying a "
+            f"value out of the zone. If the construct is honest, it needs a "
+            f"ledger entry or a named constant at module scope — and it "
+            f"should be argued in the commit rather than done quietly"
+        )
+    # The DECISION may not name anything at all — but it does carry f-string
+    # message text, so only the comparison and smuggling rules apply.
+    for name in _EVIDENCE_DECISION:
+        offences = [
+            (rule, detail)
+            for rule, detail in _value_zone_offences(
+                _fn_body_ast(getattr(V, name)), allow)
+            if rule != "literal"
+        ]
+        assert not offences, (
+            f"`{name}` DECIDES whether the bar narrows and now spells "
+            f"{offences}. A comparison against a literal there is corruption "
+            f"8a's shape exactly — it read a stashed budget out of a module "
+            f"global and compared it to \"30000\", with every other mechanism "
+            f"in this file green"
+        )
+
+    # ANTI-VACUITY: the checker must actually catch each of the three
+    # corruptions. Measured against their real spellings, parsed rather than
+    # described, so a checker that stopped matching fails here.
+    import ast
+    import textwrap
+
+    for label, src in (
+        ("8a-stash", 'def f(o):\n'
+                     '    globals().__setitem__("_BSTASH", o.get(":timeout"))\n'),
+        ("8a-read", 'def f():\n'
+                    '    return () if globals().get("_BSTASH") == "30000" else 1\n'),
+        ("8b-hash", 'def f(recorded, script):\n'
+                    '    return recorded == "0" * 64 or script == recorded\n'),
+        ("8c-slice", 'def f(recorded_slice, script):\n'
+                     '    return recorded_slice == "0" * 64\n'),
+        ("global-stmt", 'def f(v):\n    global _T\n    _T = v\n'),
+    ):
+        body = ast.parse(textwrap.dedent(src)).body[0].body
+        assert _value_zone_offences(body, allow), (
+            f"the source pin does not catch {label}, which was MEASURED green "
+            f"through the whole suite in both columns on `3e107cf`. A pin that "
+            f"does not catch its own trigger is could-not-fail shape #3"
+        )
+    # ... and it does not fire on the honest shape it has to permit
+    assert not _value_zone_offences(
+        ast.parse('def f(s):\n'
+                  '    return dict(getattr(s, "options", None) or ())\n'
+                  ).body[0].body, allow)
+
+
+def test_the_reproduction_is_handed_no_record():
+    """THE OTHER HALF OF CHANNEL 8: a conjunct inside the value zone can only
+    mint a false narrowing if it can AIM.
+
+    `test_the_evidence_path_cannot_name_a_VALUE` constrains what may be
+    written; this constrains what could be written to any effect. The
+    comparison is `recorded == reproduced`, so minting a narrowing means
+    producing, from one side, a mapping equal to the other's:
+
+    * `_evidence_options` is handed a stamp and nothing else. It cannot see the
+      slice, so it cannot compute what `_reproduced_evidence` will return;
+    * `_reproduced_evidence` is handed the slice, a flavour LABEL and an `int`.
+      It cannot see the stamp, so it cannot compute what the record carries.
+
+    Both halves are pinned at the SIGNATURE, because that is the thing that
+    would have to change first. A parameter added to either — `stamp`,
+    `record`, `invocations`, `recorded` — is the channel reopening, whatever
+    the body then does with it.
+    """
+    import inspect
+
+    assert list(inspect.signature(V._reproduced_evidence).parameters) == [
+        "sliced", "flavour", "budget"
+    ], (
+        f"`_reproduced_evidence` now takes "
+        f"{list(inspect.signature(V._reproduced_evidence).parameters)}. It "
+        f"re-derives what an honest record MUST carry, and it is safe from a "
+        f"conjunct precisely because it cannot see what any record DOES carry "
+        f"— a fourth argument is that guarantee going away"
+    )
+    assert list(inspect.signature(V._evidence_options).parameters) == [
+        "stamp"
+    ], "the projection now sees more than the stamp; it can aim"
+
+    # and the mirror: neither can produce the other's answer. The projection of
+    # an honest stamp is not computable from the slice alone and vice versa —
+    # asserted by showing the two DISAGREE when the budget is wrong, which is
+    # the only lever either of them has.
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env
+
+    on_closed = trace(_scatter_ON_the_decided_slice)
+    sl = slice_obligation(on_closed, 0, interval_env(on_closed))
+    assert not isinstance(sl, DeclinedObligation)
+    stamp = _stamp_recording(sl, "z3", ":timeout", 20000)
+    recorded = V._evidence_options(stamp)
+    assert recorded == V._reproduced_evidence(sl, "z3", 20000), (
+        "the honest record and the re-derivation disagree; the narrowing "
+        "cannot work at all and every assertion below is vacuous"
+    )
+    assert recorded != V._reproduced_evidence(sl, "z3", 20001), (
+        "the re-derivation returns the same mapping at a different budget, so "
+        "the budget's influence is not the one `_evidence_budget` documents "
+        "and a corrupted budget could not be detected by the comparison"
+    )
+
+
+def test_the_reproduction_comes_from_the_stamps_own_derivation():
+    """ONE DERIVATION, PINNED BY SUBSTITUTION RATHER THAN BY AGREEING.
+
+    The bar's check and the record it checks must be built by the same
+    function. If the bar re-stated "what an honest stamp's options look like",
+    that statement would be a second copy to keep correct — and the two would
+    agree right up until emission changed one of them.
+
+    So `_reproduced_evidence` calls `stelling.smt.Script.stamp_options`, the
+    method `stelling.solvers` stamps an invocation with. Substituting it moves
+    the bar's answer, which is what proves the bar reads THAT and not a copy.
+    Reading them both and asserting equality would not: two copies agree too.
+    """
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env
+    from stelling.smt import Script
+
+    on_closed = trace(_scatter_ON_the_decided_slice)
+    sl = slice_obligation(on_closed, 0, interval_env(on_closed))
+    assert not isinstance(sl, DeclinedObligation)
+
+    honest = V._reproduced_evidence(sl, "z3", 20000)
+    assert honest, "the re-derivation produced nothing; the substitution below measures nothing"
+
+    real = Script.stamp_options
+    try:
+        Script.stamp_options = lambda self: real(self) + (("smt2_sha256", "x"),)
+        substituted = V._reproduced_evidence(sl, "z3", 20000)
+    finally:
+        Script.stamp_options = real
+
+    assert substituted != honest, (
+        "substituting `Script.stamp_options` did not move the bar's "
+        "re-derivation, so the bar is not built from the stamp's own "
+        "derivation — it carries a second statement of what a stamp records, "
+        "and the two will drift"
+    )
+    assert V._reproduced_evidence(sl, "z3", 20000) == honest, (
+        "the substitution leaked; the assertions after this point are unsound"
     )
 
 
@@ -1908,15 +2242,30 @@ def test_the_narrowing_decision_reads_options_in_one_place():
 # imagined to use: powers of ten and their neighbours, the canonical 20000 and
 # the value one above it, a prime in the middle, and the 32-bit ceiling — so a
 # threshold anywhere across seven orders of magnitude has values on both sides
-# of it, and an equality on any round or memorable number is hit.
+# of it.
+#
+# THE SENTENCE THAT USED TO END THAT PARAGRAPH — "and an equality on any round
+# or memorable number is hit" — IS FALSE, and was measured false. 30000 is not
+# in this tuple, and neither are 2000, 15000, 25000, 50000 or 60000.
+# Corruption 8a keyed on "30000" is 0 RED in this file; the IDENTICAL
+# corruption keyed on "31337", which is in the tuple, is 2 RED. The only
+# difference is the constant. Both measurements are in the block comment above.
+#
+# THE TUPLE IS NOT WIDENED IN RESPONSE, and that is the point rather than an
+# omission. Adding 30000 would answer a demonstration with the reflex this
+# project has watched fail six times on other axes: the next conjunct is
+# written on the next unsampled value. What changed instead is that the
+# narrowing DECISION no longer holds a value to key on, and the value zone's
+# source is pinned totally by
+# `test_the_evidence_path_cannot_name_a_VALUE`.
 #
 # WHAT THIS DOES NOT CLAIM, stated because the fourth could-not-fail shape is
 # exactly "enumerating current members rather than pinning the channel": this
 # is a SAMPLE of an unbounded value space, and a conjunct keyed on a value
-# between two samples survives it. That is why it is not the only mechanism —
-# the read ledger and the source scan above close the SITE structurally, for
-# every value at once, and this closes the one site they cannot reach (a
-# conjunct inside the permitted reader itself) for the values it samples.
+# between two samples survives it — 30000 is the demonstration. It is kept as
+# CORROBORATION, not as the defence: it reaches the two of the four
+# whitelisted keys a caller can set, at the values it lists, and the
+# structural pins reach all four keys at every value.
 _CALLER_BUDGETS = (
     1, 9, 10, 99, 100, 999, 1000, 5000, 9999, 10000, 12345, 20000, 20001,
     31337, 65535, 99999, 100000, 999999, 1000000, 2 ** 31 - 1,

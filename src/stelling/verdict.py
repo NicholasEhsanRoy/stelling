@@ -773,12 +773,40 @@ def _bar_scope_phrase(per_obligation) -> str:
 # cannot reach the decision at all, whatever it is called and whatever it
 # holds. Adding a member here is therefore the whole cost of opening the
 # channel again, and `tests/test_verified_bar.py` asserts this set EXACTLY.
+#
+# AND A WHITELIST ON KEYS CONSTRAINS NOTHING ABOUT VALUES. That half was
+# measured open on `3e107cf` and is what the split below repairs;
+# :func:`_evidence_reproduces` carries the three corruptions and the argument.
 _EVIDENCE_OPTION_KEYS = frozenset({
     "smt2_sha256",  # the hash of the exact script that was sent
     "slice_sha256",  # the fingerprint of the slice it was emitted from
     ":timeout",  # z3's spelling of the budget, which is part of the text
     ":tlimit",  # cvc5's
 })
+
+# THE TWO WHOSE VALUES EMISSION *DERIVES*. Re-emitting this query's own slice
+# recomputes both out of the slice, so a record cannot choose them — it can
+# only match, or fail to match, what the re-derivation produces. They are also
+# the two the narrowing has no meaning without, which is why an EMPTY one is
+# refused rather than compared (see :func:`_reproduced_evidence`).
+_EVIDENCE_DERIVED_KEYS = frozenset({"smt2_sha256", "slice_sha256"})
+
+# ... AND THE TWO IT *ECHOES*: the caller's own `solver_timeout_ms`, under the
+# spelling its flavour uses. Named here rather than spelled inside
+# `_evidence_budget` so that the one function which turns a recorded value into
+# an argument contains no string literal at all — see
+# `tests/test_verified_bar.py::test_the_evidence_path_cannot_name_a_VALUE`.
+_EVIDENCE_BUDGET_KEYS = (":timeout", ":tlimit")
+
+
+def _whitelisted(raw) -> dict[str, str]:
+    """:data:`_EVIDENCE_OPTION_KEYS` out of any mapping, and nothing else.
+
+    Applied to BOTH sides of the narrowing comparison — the record's own option
+    set and the one the re-derivation produces — so the two are projected by
+    ONE function. Two projections that agree today are two things to keep
+    agreeing; this is one thing."""
+    return {key: raw[key] for key in _EVIDENCE_OPTION_KEYS if key in raw}
 
 
 def _evidence_options(stamp) -> dict[str, str]:
@@ -793,7 +821,17 @@ def _evidence_options(stamp) -> dict[str, str]:
     because a second read site in `_bar_scope` would reopen the channel
     without touching this function or the key set.
 
-    **AND IT HAS EXACTLY ONE PERMITTED CALLER,** :func:`_evidence_is_about`.
+    **IT CANNOT AIM, AND THAT IS WHY THE VALUE CHANNEL IS NOT CLOSED HERE.**
+    This function is handed a stamp and nothing else — no slice, no ``closed``,
+    no re-derivation. Whatever a conjunct written here did with the values it
+    reads, it could not compute the mapping it would have to return to mint a
+    false narrowing, because that mapping is a function of the QUERY and this
+    function never sees the query. :func:`_reproduced_evidence` is safe from
+    the other side by the mirror argument — it never sees the record — and
+    between them that is why the comparison in :func:`_evidence_reproduces` can
+    be one ``==`` over two mappings rather than four reads of two values.
+
+    **AND IT HAS EXACTLY ONE PERMITTED CALLER,** :func:`_evidence_reproduces`.
     A projection is not a permission: whoever calls this reaches every
     whitelisted option value, and two of those values — ``:timeout`` and
     ``:tlimit`` — are the caller's own ``solver_timeout_ms`` carried verbatim
@@ -814,7 +852,150 @@ def _evidence_options(stamp) -> dict[str, str]:
         raw = dict(getattr(stamp, "options", None) or ())
     except Exception:  # noqa: BLE001 — an unreadable option set is no evidence
         return {}
-    return {key: raw[key] for key in _EVIDENCE_OPTION_KEYS if key in raw}
+    return _whitelisted(raw)
+
+
+def _evidence_budget(recorded) -> int | None:
+    """THE ONE RAW RECORDED VALUE THAT REACHES THE RE-DERIVATION, named rather
+    than left implicit, with its influence bounded BY CONSTRUCTION.
+
+    Emission is a pure function of ``(slice, flavour, timeout)``, so re-deriving
+    what an honest record must carry needs the budget that record names. There
+    is no caller-independent substitute — the bar cannot guess a number the
+    caller chose — so the budget is not kept out of the bar. Its INFLUENCE is
+    bounded instead, and the bound is structural rather than sampled:
+
+    **whatever this returns is used for exactly one thing** — as
+    :func:`stelling.smt.emit`'s ``timeout_ms`` — **and the option set emission
+    then produces is compared for EQUALITY against the record's own, the
+    recorded budget included.** So any budget other than the recorded one puts
+    a different value under ``:timeout``/``:tlimit`` in the reproduction, the
+    equality fails, and the bar WIDENS. The worst a conjunct written here can
+    do is refuse to narrow, which is the safe direction; it cannot mint a
+    narrowing, because minting one would mean returning the budget the record
+    already names, which is what an honest reading returns anyway.
+
+    Contains no string literal: the two spellings live in
+    :data:`_EVIDENCE_BUDGET_KEYS`, so the source pin in
+    `tests/test_verified_bar.py::test_the_evidence_path_cannot_name_a_VALUE`
+    needs no exemption for this function.
+
+    Never raises: an absent, empty or unparseable budget returns None, which
+    :func:`_reproduced_evidence` turns into no reproduction, which widens."""
+    for key in _EVIDENCE_BUDGET_KEYS:
+        text = recorded.get(key)
+        if text:
+            try:
+                return int(text)
+            except Exception:  # noqa: BLE001 — an unreadable budget is not a
+                return None  # budget, and guessing one would re-emit a lie
+    return None
+
+
+def _reproduced_evidence(sliced, flavour, budget) -> dict[str, str]:
+    """WHAT AN HONEST INVOCATION'S WHITELISTED OPTIONS MUST BE, re-derived from
+    THIS query's own slice: the canonical, caller-independent projection the
+    narrowing decision is a function of.
+
+    **IT IS HANDED NO STAMP AND NO RECORD.** Its three arguments are the slice
+    (derived from ``closed``), the flavour LABEL, and the budget already
+    reduced to an ``int``. Nothing it can be keyed on tells it what any record
+    carries, so a conjunct written here cannot aim: minting a false narrowing
+    means returning a mapping EQUAL to the record's, and this function cannot
+    see the record's. The signature is pinned for exactly that reason —
+    `tests/test_verified_bar.py::test_the_reproduction_is_handed_no_record`.
+
+    **BUILT BY THE SAME FUNCTION THE RECORD IS BUILT BY.**
+    :meth:`stelling.smt.Script.stamp_options` is what
+    :func:`stelling.solvers.escalate` stamps an invocation's options with, and
+    it is what this calls. Not a bar-side re-statement of "what an honest stamp
+    carries": there is ONE derivation, so the record and the check cannot
+    drift, and corrupting it corrupts EMISSION — which the byte-level emission
+    tests hold and which would change the scripts real solvers answer about.
+    Pinned by SUBSTITUTION rather than by two readings agreeing
+    (`::test_the_reproduction_comes_from_the_stamps_own_derivation`).
+
+    Returns ``{}`` — which never equals a projection carrying either derived
+    hash, so it never narrows — when the flavour is unusable, the budget is not
+    a number, emission raises, or either :data:`_EVIDENCE_DERIVED_KEYS` value
+    comes back empty. That last one is the gate `218f969` added: a hand-built
+    :class:`stelling.smt.Script` defaults ``slice_sha256`` to ``""``, and two
+    empty strings comparing equal is not a reproduction of anything."""
+    from stelling.smt import emit
+
+    if not flavour or not isinstance(budget, int):
+        return {}
+    try:
+        reproduced = _whitelisted(dict(emit(sliced, flavour, budget).stamp_options()))
+    except Exception:  # noqa: BLE001 — an unemittable re-derivation is not
+        return {}  # evidence of anything, so it does not narrow
+    if any(not reproduced.get(key) for key in _EVIDENCE_DERIVED_KEYS):
+        return {}
+    return reproduced
+
+
+def _evidence_reproduces(sliced, stamp) -> bool:
+    """THE ONE PLACE A RECORDED OPTION VALUE AND THE RE-DERIVATION MEET — and
+    everything that leaves it is a BOOLEAN.
+
+    THE DEFECT THIS SHAPE EXISTS FOR. :data:`_EVIDENCE_OPTION_KEYS` constrains
+    WHICH keys reach the narrowing and says nothing about their VALUES, and the
+    narrowing itself used to read those values. Three line-neutral corruptions
+    were measured on `3e107cf`, each with the full suite byte-identical to
+    unmutated in both columns (2055 passed / 2 skipped, 2051 / 6):
+
+    * ``_evidence_is_about`` stashing its projected budget in a module global,
+      and ``_bar_scope`` zeroing the barred set when that global is
+      ``"30000"``. No new ``(function, attribute)`` pair, and ``_bar_scope``'s
+      body carries no ``.options``, no ``"options"`` and no
+      ``_evidence_options`` — so neither the read ledger nor either source scan
+      sees it, and 30000 is not one of the budgets the sweep samples. Through
+      the public API: ``solver_timeout_ms=30000`` returned VERIFIED with no
+      withheld note where 20000, 29999, 30001 and 31337 all returned UNKNOWN.
+      The isolating control is the IDENTICAL mutation keyed on ``"31337"``,
+      which is 2 RED — **the only difference is the constant**;
+    * a conjunct on the VALUE of ``smt2_sha256``, and
+    * one on the value of ``slice_sha256``. Both live at the site the budget
+      sweep is supposed to own, both key on whitelisted keys whose values are
+      record-supplied and which the sweep never varies at all, and both turned
+      the mispaired assembly's UNKNOWN into VERIFIED with no withheld note
+      (measured with the pairing gate satisfied by hand, as the bar's own
+      mispairing tests do).
+
+    THE REPAIR IS NOT A WIDER SWEEP. A sample is a sample, and this project has
+    watched that answer fail six times on other axes. The narrowing decision —
+    :func:`_evidence_is_about` and :func:`_bar_scope` — now consumes a BOOLEAN
+    and binds no recorded value at all, so no conjunct on any value is
+    EXPRESSIBLE there, at any value, without a read the source scan and the
+    read ledger both see. The two functions this one composes cannot aim, each
+    for the reason its own docstring gives: :func:`_evidence_options` never
+    sees the query, :func:`_reproduced_evidence` never sees the record.
+
+    What is left is this function, which holds both sides for exactly as long
+    as it takes to compare them, and it is covered by a pin that is TOTAL over
+    the source rather than a sample over values:
+    `tests/test_verified_bar.py::test_the_evidence_path_cannot_name_a_VALUE`.
+    That pin constrains what may be WRITTEN here — no string literal outside
+    the attribute names the read ledger already permits, no comparison against
+    a literal, no module-global smuggling. It does not claim to reach every
+    predicate expressible in Python: a discriminator spelled as a method call
+    on a value (``.startswith(...)``) is not a comparison and is not matched.
+    That residue is stated rather than hidden, and it is why the budget sweep
+    is kept as corroboration instead of being deleted.
+
+    WHAT THE COMPARISON IS. The record's whitelisted option set must equal, key
+    for key and value for value, the whitelisted option set the re-derivation
+    produces. That is strictly stronger than the two-hash equality it replaces:
+    a record carrying BOTH ``:timeout`` and ``:tlimit`` used to narrow on
+    whichever the reader looked at first, and now matches neither. Honest
+    records are unaffected — :func:`stelling.smt._options` emits one spelling
+    per flavour — and both sides go through :func:`_whitelisted`, so a key
+    outside the whitelist cannot make the two differ either."""
+    recorded = _evidence_options(stamp)
+    reproduced = _reproduced_evidence(
+        sliced, getattr(stamp, "name", None), _evidence_budget(recorded)
+    )
+    return bool(reproduced) and recorded == reproduced
 
 
 def _evidence_is_about(sliced, invocations) -> bool:
@@ -915,9 +1096,16 @@ def _evidence_is_about(sliced, invocations) -> bool:
     that gives up its ``invocations`` keeps its discharge, stays in the domain,
     and loses its narrowing — the drift that made those two different concepts
     ran the other way.
-    """
-    from stelling.smt import emit
 
+    **AND IT HOLDS NO RECORDED VALUE.** This is the DECISION, and the whole of
+    what it sees about a stamp is one boolean from
+    :func:`_evidence_reproduces`. Reading the two hashes and the budget HERE is
+    what made a conjunct on a whitelisted key's VALUE expressible at the
+    narrowing itself, invisible to the read ledger, to both source scans and to
+    the budget sweep at once — three such corruptions are recorded, with their
+    measurements, on :func:`_evidence_reproduces`. Widening the sweep is not
+    the repair; not binding the values is.
+    """
     for stamp in invocations or ():
         # `not stamp.name` is UNCONSTRUCTIBLE for a real stamp and is kept as
         # a duck-type guard, not as a live branch: `SolverStamp.__post_init__`
@@ -927,29 +1115,11 @@ def _evidence_is_about(sliced, invocations) -> bool:
         # usable name must widen rather than reach `emit` with it.
         if not getattr(stamp, "invoked", False) or not stamp.name:
             continue
-        # the projection, NOT `dict(stamp.options)`: see `_evidence_options`
-        # and `_EVIDENCE_OPTION_KEYS` for the channel that spelling opened
-        options = _evidence_options(stamp)
-        recorded = options.get("smt2_sha256")
-        recorded_slice = options.get("slice_sha256")
-        # `stamp.name` is used as the emission FLAVOUR: every backend
-        # `stelling.solvers` builds sets `name == flavor` (z3 wheel, cvc5
-        # wheel, cvc5 external binary — the label is what differs), and one
-        # that did not would raise out of `emit`'s option profile and land in
-        # the `continue` below, which widens.
-        #
-        # The timeout is part of the emitted text, so it is part of the hash.
-        # `stelling.smt._options` spells it `:timeout` for z3 and `:tlimit`
-        # for cvc5; a profile spelling it some third way is not recognised
-        # here and therefore does not narrow the bar.
-        timeout = options.get(":timeout") or options.get(":tlimit")
-        if not recorded or not recorded_slice or not timeout:
-            continue
-        try:
-            script = emit(sliced, stamp.name, int(timeout))
-        except Exception:  # noqa: BLE001 — an unemittable re-derivation is
-            continue  # not evidence of anything, so it does not narrow
-        if script.sha256 == recorded and script.slice_sha256 == recorded_slice:
+        # A BOOLEAN, and deliberately nothing else. `stamp.name` is the
+        # emission FLAVOUR and the budget is part of the emitted text, so both
+        # have to reach the re-derivation — but neither reaches THIS function,
+        # which is the one that decides. See `_evidence_reproduces`.
+        if _evidence_reproduces(sliced, stamp):
             return True
     return False
 
