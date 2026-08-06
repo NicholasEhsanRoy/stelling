@@ -350,7 +350,10 @@ def test_the_fold_declines_what_it_cannot_do_exactly():
 # that the emitted text CHANGED under monkeypatch — which measures the
 # battery's own sensitivity and never the rule's value. Measured
 # consequence of that gap: corrupting `max` to return its second operand
-# left the WHOLE SUITE GREEN (1696 passed), and on
+# left the WHOLE SUITE GREEN — `1696 passed, 2 skipped` AT 1614b18, which is
+# the tree the corruption was driven against and is a fact about that tree and
+# not about this rule; the finding is the GREEN, and it is the same at any
+# suite size — and on
 # `jnp.maximum(a + b, a - b) * v <= 2.0` turned a correct REFUTED into a
 # FALSE VERIFIED on a full two-backend portfolio with no degradation flag
 # — the discharge direction, the one with no replay backstop.
