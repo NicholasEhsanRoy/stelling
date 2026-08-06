@@ -53,20 +53,35 @@ written:
   nothing enforces it). Its summary line was byte-identical to a clean run.
 * ``--deselect tests/test_skip_inventory.py``, which removes the pin outright.
 
-So the order is made robust and then CHECKED, because robust-and-unchecked is
-what the first two routes already defeated:
+A fifth and a sixth, found after the first four were closed and closed by the
+same mechanism:
 
-* :func:`pytest_runtestloop` re-sorts ``session.items`` after collection is
-  completely over, which is later than any ``pytest_collection_modifyitems``
-  wrapper can reach;
+* ``--ignore=tests/test_skip_inventory.py`` (and ``--ignore-glob``, and the
+  same thing through ``PYTEST_ADDOPTS``). The pin's own file is never
+  collected, which reads as an ordinary narrowing — so the guard below neither
+  claimed, nor withdrew, nor printed.
+* the same, plus a ``-k`` that selects only tests which skip: nothing reaches
+  a call phase, so an empty ``RAN`` was read as "nothing ran".
+
+So the order is CHECKED rather than trusted, and the claim is made from a
+place no invocation can remove:
+
 * :func:`pending_items` lets the pin ask, at the moment it runs, whether the
-  session still owed anything — so an ordering hook that lost a fight becomes
-  a withdrawal instead of a silent pass;
+  session still owed anything — so an ordering hook that won a fight becomes a
+  deferral instead of a silent pass;
 * and if the pin never made its claim — reordered too early, filtered out of
-  ``items``, or deselected — the same claim is made HERE, at the end of the
-  session, where the record is complete. That is the one place an ``items``
-  filter cannot reach, because removing a conftest is not something a filter
-  can do.
+  ``items``, deselected, or ignored — the same claim is made HERE, at the end
+  of the session, where the record is complete. That is the one place an
+  ``items`` filter cannot reach, because removing a conftest is not something
+  a filter can do.
+
+:func:`pytest_collection_modifyitems` puts the pin last, which is where every
+other plugin does its ordering and inside the window pytest-xdist builds its
+index map from. It is a convenience, not the mechanism: something that
+re-sorts after it makes the pin DEFER, and the deferral is answered below. An
+earlier version also re-sorted inside :func:`pytest_runtestloop`, which is
+after xdist freezes that map; see there for the two measurements that took it
+back out.
 
 The session's skips are recorded as pytest reports them; see
 ``tests/test_skip_inventory.py`` for what is done with them, and for why this
@@ -75,6 +90,8 @@ cannot be a static read of the tree.
 
 from __future__ import annotations
 
+import fnmatch
+import os
 import pathlib
 
 import pytest
@@ -128,6 +145,38 @@ _NOTES: list[tuple[str, str]] = []
 _INVENTORY_MODULE = "test_skip_inventory.py"
 
 _TESTS = pathlib.Path(__file__).resolve().parent
+
+# The directory patterns pytest itself refuses to recurse into. Replaced in
+# :func:`pytest_configure` by the value THIS invocation carries, so a project
+# that sets ``norecursedirs`` in its ini gets its own answer rather than this
+# one; the literal below is pytest's documented default, and it is what the
+# scope check uses if it is ever asked before configure.
+#
+# Not cosmetic. ``files_the_suite_has`` used a bare ``rglob``, so a file pytest
+# would never open counted as part of "the suite" and the two disagreed. Both
+# directions were measured on the whole tree:
+#
+# * ``tests/build/test_zz_helper.py`` — a unique basename in a directory
+#   pytest prunes — put a file in the suite that no session can ever collect,
+#   so the completeness claim was WITHDRAWN on a clean whole run and the pin
+#   silently stopped asserting anything. ``1992 passed, 3 skipped``, exit 0.
+# * ``tests/.junk/test_affine.py`` — a COLLIDING basename in a pruned
+#   directory — made a clean whole run FAIL on "two test files share a
+#   basename". ``2 failed``, exit 1.
+#
+# Neither file was collectable; a scratch directory, a stale build tree or a
+# vendored checkout under ``tests/`` is enough for either.
+_NORECURSEDIRS: tuple[str, ...] = (
+    "*.egg",
+    ".*",
+    "_darcs",
+    "build",
+    "CVS",
+    "dist",
+    "node_modules",
+    "venv",
+    "{arch}",
+)
 
 
 def _file_of(nodeid: str) -> str:
@@ -185,24 +234,78 @@ def deselected_items(excluding: str = "") -> list[str]:
     return [nodeid for nodeid in DESELECTED if not (excluding and excluding in nodeid)]
 
 
+def _pytest_would_prune(directory: pathlib.Path, pattern: str) -> bool:
+    """``_pytest.pathlib.fnmatch_ex``, which is what ``norecursedirs`` is
+    matched with: a pattern containing no separator is matched against the
+    directory's NAME, and one containing a separator against its whole path.
+
+    Reimplemented rather than imported because it is private, and pinned
+    against the real thing by
+    ``test_the_scope_check_prunes_exactly_what_pytest_prunes``, which builds a
+    tree and asks an actual pytest what it collected.
+    """
+    if os.sep not in pattern and "/" not in pattern:
+        return fnmatch.fnmatch(directory.name, pattern)
+    if directory.is_absolute() and not os.path.isabs(pattern):
+        pattern = f"*{os.sep}{pattern}"
+    return fnmatch.fnmatch(str(directory), pattern)
+
+
+def collectable_test_files() -> list[pathlib.Path]:
+    """Every test file under ``tests/`` that pytest would actually open.
+
+    ``rglob`` rather than ``glob`` because a future ``tests/sub/test_x.py``
+    must not fall out of the scope check by living one directory down — and
+    then ``norecursedirs`` on top of it, because ``rglob`` alone walks into
+    ``.tox/``, ``build/``, ``dist/``, ``node_modules/``, ``venv/`` and every
+    dot-directory, none of which pytest will ever collect. A file in one of
+    those is not part of the suite by the only definition that matters here:
+    no invocation can collect it, so no session can ever be complete with
+    respect to it. See :data:`_NORECURSEDIRS` for the two measured failures.
+    """
+    return [
+        path
+        for path in sorted(_TESTS.rglob("test_*.py"))
+        if not _in_a_pruned_directory(path)
+    ]
+
+
+def _in_a_pruned_directory(path: pathlib.Path) -> bool:
+    """Is ``path`` under a directory pytest will not recurse into?
+
+    Both sides resolved, because the callers reach ``tests/`` by different
+    routes — this module's own ``__file__`` and another module's — and a path
+    that is not relative to the root cannot be pruned by it.
+    """
+    root = _TESTS.resolve()
+    try:
+        relative = path.resolve().relative_to(root)
+    except ValueError:
+        return False
+    directory = root
+    for part in relative.parts[:-1]:
+        directory = directory / part
+        if any(_pytest_would_prune(directory, p) for p in _NORECURSEDIRS):
+            return True
+    return False
+
+
 def files_the_suite_has() -> set[str]:
-    """Every test file under ``tests/``, by basename.
+    """Every collectable test file under ``tests/``, by basename.
 
     Basenames because that is all a nodeid reliably gives back — they are
-    relative to rootdir, which moves with the invocation. ``rglob`` rather than
-    ``glob`` because a future ``tests/sub/test_x.py`` must not fall out of the
-    scope check by living one directory down. The key is therefore lossy in
-    exactly one way, and that way is checked rather than assumed: two files
-    with the same basename in different directories would collapse into one, so
-    :func:`colliding_basenames` names them and the pin fails.
+    relative to rootdir, which moves with the invocation. The key is therefore
+    lossy in exactly one way, and that way is checked rather than assumed: two
+    files with the same basename in different directories would collapse into
+    one, so :func:`colliding_basenames` names them and the pin fails.
     """
-    return {path.name for path in _TESTS.rglob("test_*.py")}
+    return {path.name for path in collectable_test_files()}
 
 
 def colliding_basenames() -> list[str]:
-    """Basenames belonging to more than one file under ``tests/``."""
+    """Basenames belonging to more than one collectable file under ``tests/``."""
     counts: dict[str, int] = {}
-    for path in _TESTS.rglob("test_*.py"):
+    for path in collectable_test_files():
         counts[path.name] = counts.get(path.name, 0) + 1
     return sorted(name for name, count in counts.items() if count > 1)
 
@@ -217,6 +320,11 @@ def unseen_files() -> list[str]:
 
 def pytest_configure(config) -> None:
     """The selection filters, read off the invocation that carried them."""
+    global _NORECURSEDIRS
+    try:
+        _NORECURSEDIRS = tuple(config.getini("norecursedirs"))
+    except (ValueError, KeyError):  # pragma: no cover - pytest always has it
+        pass
     if getattr(config.option, "keyword", ""):
         USER_FILTERS.append(f"-k {config.option.keyword!r}")
     if getattr(config.option, "markexpr", ""):
@@ -288,8 +396,11 @@ def pytest_collection_modifyitems(items) -> None:
     ``trylast`` is deliberate and is NOT what makes the order safe: it only
     orders this against other non-wrapper hookimpls, while a
     ``wrapper=True, tryfirst=True`` one (``NFPlugin``, pytest-randomly) re-sorts
-    after all of them regardless. :func:`pytest_runtestloop` is what holds, and
-    the pin checks the result rather than trusting either of them.
+    after all of them regardless. Nothing makes the order safe. What holds is
+    that the pin CHECKS it — :func:`pending_items` — and that the session-end
+    guard makes the claim when the pin could not. This sort is here so that in
+    an ordinary session the verdict carries the pin's own nodeid instead of
+    arriving as a terminal summary section.
 
     The file set is taken here as well. This hook may run before or after the
     builtin ``-k``/``-m`` filtering depending on plugin registration order, so
@@ -303,25 +414,75 @@ def pytest_collection_modifyitems(items) -> None:
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
 def pytest_runtestloop(session):
-    """Order the pin last where no ``items`` hook can reach it, then close up.
-
-    Everything that reorders or filters a session does it from
-    ``pytest_collection_modifyitems``. By the time this hook is entered
-    collection is over and ``session.items`` is the list the loop will walk, so
-    the sort here survives a ``wrapper=True, tryfirst=True`` reorder that beats
-    the collection hook — measured against ``--nf`` and against a stand-in for
-    pytest-randomly, both of which ran the pin first before this existed.
+    """Close the session up where the record is finally complete.
 
     After the loop the session's record is complete, and this is the only point
     at which that is true. An exception on the way out — ``-x``, ``--maxfail``,
     ``--sw`` stopping at its failure, an interrupt — propagates through the
     ``yield`` and skips the close: an aborted session is a narrowed one and has
     nothing to claim.
+
+    **This hook used to re-sort ``session.items`` on the way in, and no longer
+    does.** The sort was there to beat a ``wrapper=True, tryfirst=True``
+    ``pytest_collection_modifyitems`` (``NFPlugin``, pytest-randomly), which
+    re-orders after every ordinary collection hookimpl. Two measurements took
+    it out:
+
+    * a re-derived 2x2x2 mutation matrix over (this sort, :func:`pending_items`,
+      the session-end guard) x the four ordering routes, discounting REDs that
+      are only the guard's own self-test failing when the guard is removed:
+      the check and the guard together close all four routes with this sort
+      absent, and the sort alone closes only the reordering ones. What the
+      sort bought was that the pin CLAIMED rather than DEFERRED — a nicer
+      nodeid for the verdict, not the verdict.
+    * against that, a cost. pytest-xdist freezes an index -> nodeid map at
+      ``pytest_collection_finish`` and resolves work indices against
+      ``session.items`` at run time. Sorting ``session.items`` HERE is after
+      that point, so with any re-sorting plugin also present the two disagree.
+      Measured with a stand-in that freezes the map exactly where
+      ``xdist/remote.py`` sends it and resolves indices exactly where it
+      resolves them, on a ten-item tree, all four cells:
+
+          sort present + an NFPlugin-shaped re-sorter   10/10 mismatched
+          sort present + no re-sorter                    0/10
+          sort absent  + an NFPlugin-shaped re-sorter    0/10
+          sort absent  + no re-sorter                    0/10
+
+      xdist is not installed here, so whether the installed xdist indexes into
+      ``session.items`` as its source says, and whether a controller would
+      surface the desync, are UNVERIFIED. But the sort was buying a nodeid,
+      and this is workers running tests the controller thinks are other tests.
+
+    So the ordering is left to :func:`pytest_collection_modifyitems`, which
+    sorts where every other plugin sorts and inside the window xdist's map is
+    built from; when something re-sorts after it, the pin DEFERS and the claim
+    is made below.
     """
-    session.items.sort(key=lambda item: _INVENTORY_MODULE in item.nodeid)
     result = yield
     _close_the_session(session)
     return result
+
+
+def _nothing_was_meant_to_run(config) -> bool:
+    """``--collect-only`` / ``--setup-only`` / ``--setup-plan``.
+
+    Read off the INVOCATION rather than inferred from an empty :data:`RAN`,
+    which is the same channel :data:`USER_FILTERS` is read from and for the
+    same reason: a session in which every collected test SKIPPED also has an
+    empty ``RAN``, and that one has skips to judge and no tests owed. Inferring
+    from the effect conflated them, and
+    ``pytest --ignore=tests/test_skip_inventory.py -k <only skipping tests>``
+    with an undisclosed skip planted was `1 skipped, 1983 deselected`, exit 0,
+    with nothing printed.
+
+    These three modes run no call phase at all, so a ``pytest.skip()`` in a
+    test body cannot fire in them and "no undisclosed skip in this session" is
+    not a claim they are entitled to make.
+    """
+    return any(
+        getattr(config.option, name, False)
+        for name in ("collectonly", "setuponly", "setupplan")
+    )
 
 
 def _close_the_session(session) -> None:
@@ -329,21 +490,64 @@ def _close_the_session(session) -> None:
 
     Deliberately narrow: this is not a second copy of the pin, it is the same
     check called from the only place a filtered session cannot remove. It runs
-    only when the pin did not run it, and only when the session is one the
-    claim could be made from at all.
+    only when the pin did not run it, and only when the session is one that
+    ran or skipped something at all.
+
+    **What this guard is not allowed to do is fall silent**, which is what two
+    of its early returns used to do. Both were measured, on the whole tree,
+    with ``pytest.skip("a planted reason nobody disclosed")`` planted in
+    ``tests/test_affine.py``:
+
+    * ``pytest --ignore=tests/test_skip_inventory.py`` — the pin's own file is
+      not collected, so ``unseen_files()`` named it, "narrowed session" was the
+      classification, and the guard returned before it could say anything.
+      ``1981 passed, 3 skipped``, exit 0, the planted skip on the screen and
+      no verdict anywhere. Same via ``--ignore-glob`` and via
+      ``PYTEST_ADDOPTS``. That is the sibling of
+      ``--deselect tests/test_skip_inventory.py``, which was closed, and it was
+      QUIETER than the byte-identical green the whole repair was written to
+      end.
+    * ``--ignore=tests/test_skip_inventory.py -k <an expression selecting only
+      tests that skip>`` — nothing reached its call phase, ``RAN`` was empty,
+      and "nothing ran" was inferred from the effect. ``1 skipped, 1983
+      deselected``, exit 0.
+
+    The scope of a session and the DISCLOSURE of its skips are different
+    questions, and only the first one is narrowed by narrowing the invocation.
+    Whatever a session saw, it is in a position to say whether those skips were
+    disclosed — so the pin is consulted for every session that saw anything,
+    and ``the_claim_this_session_can_make`` answers the scope question itself,
+    in the one place the answer is written down.
+
+    One silence is kept, deliberately, and it is the only one: a session that
+    did not collect the whole tree and has nothing else to report says nothing.
+    ``pytest tests/test_affine.py`` is the commonest invocation there is, and a
+    banner naming the 82 files it did not run is a cost on every developer for
+    news they already have. It still FAILS loudly if a skip it did see is
+    undisclosed, which is the half that was actually missing.
     """
     if CLAIM_MADE:
         return  # the pin ran with a complete record and said its piece
-    if not RAN:
-        return  # --collect-only, --setup-plan, an empty selection: nothing ran
+    if _nothing_was_meant_to_run(session.config):
+        return
+    # There is deliberately no "and nothing ran" return here. The old
+    # `if not RAN: return` is the second silent route above; narrowing it to
+    # `not RAN and not SKIPPED` would only have moved it, and would have left a
+    # branch that suppresses the verdict for a session which selected nothing
+    # (`pytest -k <matches nothing>`) — a session pytest already reports as
+    # "no tests ran". It withdraws through the ordinary scope answer instead,
+    # which is checked at the surface by
+    # `test_the_session_end_guard_answers_every_shortfall[a-filter-that-selects-nothing]`.
     if hasattr(session.config, "workerinput"):
         # A pytest-xdist worker runs a share of the session, not the suite, and
         # reports its own share only. xdist is not installed here, so this is
         # the documented worker marker and a stand-in plugin of the same shape
-        # is all that has been measured against it.
+        # is all that has been measured against it. KNOWN AND OPEN: with the
+        # pin and an undisclosed skip on different workers, both workers exit
+        # 0 and nothing is printed. The controller sees every worker's reports
+        # and its own collection, so it is the place that could answer — that
+        # is reasoned, not measured, because xdist is not installed here.
         return
-    if unseen_files():
-        return  # narrowed session: the claim is withdrawn, and correctly so
 
     try:
         import test_skip_inventory as inventory
@@ -357,6 +561,8 @@ def _close_the_session(session) -> None:
             f"the completeness pin could not be consulted at the end of a "
             f"session it was not part of: {exc!r}"
         )
+    if verdict == "withdrawn" and unseen_files():
+        return  # the developer narrowed collection; that is not news
     _NOTES.append((verdict, message or "no undisclosed skip in this session."))
     if verdict == "failed":
         # The pytest-cov idiom: the exit code follows `session.testsfailed`,

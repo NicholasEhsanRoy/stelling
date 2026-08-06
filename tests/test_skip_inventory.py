@@ -41,7 +41,17 @@ Four shapes of disclosure, in descending strength:
    test-keyed because "needs z3" governs a dozen tests and enumerating them
    would rot on the first rename. A rule excuses the EXACT reasons it names
    and there is no pattern language, because every bound on a pattern turned
-   out to be a list of the ways somebody had already been broad.
+   out to be a list of the ways somebody had already been broad; and the
+   reasons it names must be written **in this file**, because ``reasons`` is
+   an ordinary Python value and a rule that computed it out of another
+   module's source excused everything that module skipped with while this
+   file said nothing.
+
+   What that guarantees, exactly: a skip is excused only by a string typed on
+   the disclosure surface, next to a condition in prose, in the diff a
+   reviewer reads. It does not guarantee the condition is true or that anyone
+   checked — ``legitimate=lambda: True`` is a legal rule and this file will
+   honour it. Disclosure is legibility, not justification.
 3. :data:`DECLARED_OPTIONAL_DEPENDENCIES` — the libraries stelling's tests may
    gate on with ``importorskip``. A gate on anything else is undisclosed and
    fails here.
@@ -68,11 +78,13 @@ undisclosed skip at exit 0 while the completeness half looked green.
 
 So both are recorded in ``tests/conftest.py``, where the collection and the
 run are, and the whole decision is made in
-:func:`the_claim_this_session_can_make`, where the claim is. Five answers, one
+:func:`the_claim_this_session_can_make`, where the claim is. Four answers, one
 per shortfall, listed above that function. Whatever the session did see is
-checked either way, and the one case the pin cannot report on — it was
-reordered early, filtered out, or deselected — is made by the conftest at the
-end of the session, which is the one place an ``items`` filter cannot reach.
+checked either way — that half is the same size in every session, and it is
+the half that catches an undisclosed skip in a narrowed one. The cases the pin
+cannot report on at all (it was reordered early, filtered out, deselected, or
+``--ignore``d) are answered by the conftest at the end of the session, which is
+the one place an invocation cannot reach.
 
 The session's outcomes come from ``tests/conftest.py``, which records them as
 pytest reports them; see there for why this cannot be a static read of the
@@ -88,6 +100,7 @@ in no other lane, and until it was disclosed this file reported it as drift.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import importlib
 import os
@@ -307,6 +320,28 @@ def _contraction_form_names() -> tuple[str, ...]:
     )
 
 
+# THE ONE DERIVATION. Every other reason in this file is a literal typed here;
+# these are read out of the module that emits them, because the form names are
+# genuinely variable. It is hoisted out of the rule and given a name so that
+# ``test_a_rule_excuses_only_reasons_written_down_in_this_file`` can tell "the
+# declared derivation" from "some other module's source", which is the shape
+# that walked through the bound this file claimed to have:
+#
+#     Rule(when="…read out of the module that emits them…",
+#          reasons=frozenset(_reasons_declared_by(TESTS / "test_affine.py")),
+#          legitimate=lambda: True)
+#
+# — the same idiom the XLA rule uses, pointed at a module full of skips nobody
+# disclosed. Measured with `pytest.skip("we will get back to this one after
+# the release")` planted in test_affine.py, a string appearing NOWHERE in this
+# file: `1993 passed, 3 skipped`, exit 0. `reasons` is a runtime value and
+# nothing required it to be literals, so "the reason must be typed where a
+# reviewer sees it" was prose, not a bound. It is a bound now.
+_DERIVED_REASONS = frozenset(
+    f"{name}{_XLA_SUFFIX}" for name in _contraction_form_names()
+)
+
+
 RULES = (
     Rule(
         when="neither solver wheel is installed",
@@ -366,9 +401,7 @@ RULES = (
         # The variable part is the parametrised FORM NAME and nothing else,
         # which is now a statement about the code and not about a regex: the
         # names come from the site that emits them.
-        reasons=frozenset(
-            f"{name}{_XLA_SUFFIX}" for name in _contraction_form_names()
-        ),
+        reasons=_DERIVED_REASONS,
         legitimate=None,
     ),
 )
@@ -527,11 +560,18 @@ def _outcome(nodeid: str) -> tuple[str, str]:
 #
 # The completeness half claims that THE SUITE's skip set is disclosed, and a
 # session can only support that about tests it collected AND ran AND ran before
-# this pin did. pytest's report tells none of those apart from a whole run:
-# `1986 passed, 2 skipped` and `1927 passed, 2 skipped, 60 deselected` and a
-# whole tree run in a different ORDER all print the same kind of green.
+# this pin did.
 #
-# So the session is interrogated, and the answers differ because the mistakes
+# What pytest's own report does and does not tell apart from a whole run is the
+# thing this taxonomy turns on, and it was got wrong once. It DOES disclose a
+# deselection — `98 passed, 1897 deselected` is not `2010 passed, 2 skipped`,
+# and it never was. What it cannot disclose is a run in a different ORDER, or
+# items removed by a plugin that never called `pytest_deselected`: those print
+# a green that is byte-identical to a clean whole run's. So the shortfalls that
+# pytest already reports are WITHDRAWN here, and the ones it cannot report are
+# FAILED.
+#
+# The session is interrogated, and the answers differ because the mistakes
 # differ:
 #
 #   * it never collected the whole tree (`pytest tests/test_x.py`, `--lf`,
@@ -540,20 +580,32 @@ def _outcome(nodeid: str) -> tuple[str, str]:
 #     would break `pytest tests/test_skip_inventory.py`, which is worse than
 #     the hole it closes.
 #
-#   * it collected the whole tree and then deselected part of it THROUGH A
-#     FILTER THE DEVELOPER PASSED (`-k`, `-m`, `--deselect`). A full-suite
-#     invocation with a filter: it looked at every file, ran this pin, and
-#     would print a green indistinguishable from a whole run while the
-#     deselected tests skipped unobserved. FAILS, and now says which filter.
+#   * it collected the whole tree and then DESELECTED part of it — `-k`, `-m`,
+#     `--deselect`, `--sw`, `--lf`, a plugin. WITHDRAWN, naming the filter if
+#     the developer passed one and saying it was not a filter if they did not.
 #
-#   * it collected the whole tree and something else deselected part of it —
-#     `--sw`, which deselects the prefix it already ran, or a plugin.
-#     WITHDRAWN. Measured before this split existed: plant a transient
-#     failure, `--sw`, fix it, `--sw` again, and a CLEAN tree gave `1 failed,
-#     827 passed, 1163 deselected` telling the developer to drop a filter they
-#     had not passed. `_pytest/stepwise.py` calls `pytest_deselected` exactly
-#     as `-k` does, so the EFFECT cannot tell them apart and the invocation
-#     is read instead.
+#     This used to FAIL when the filter was the developer's own, on the stated
+#     grounds that such a session "would print a green indistinguishable from a
+#     whole run". That premise is false, and the two commands that show it are
+#     a pair: `pytest -q -k interval` prints `98 passed, 1897 deselected` and
+#     the silent-item-drop plugin prints `1992 passed, 3 skipped`. pytest
+#     discloses a DESELECTION in its own summary line, always; it cannot
+#     disclose a drop nobody reported. So the cut is not who passed the filter,
+#     it is whether the shortfall was disclosed at all — and the undisclosed
+#     one, below, keeps the failure.
+#
+#     Failing on `-k` also cost more than it bought: at bd1fa04 no `-k`
+#     expression that deselected this file could exit 0 from the repo root on a
+#     CLEAN tree (`-k interval`: exit 1, where b1c69d1 and 8ef8f75 are exit 0),
+#     which is the commonest invocation a developer has. The disclosure half
+#     above is unaffected and still bites: `-k "not verdict"` with an
+#     undisclosed skip inside the selected set FAILS, because that skip was
+#     observed.
+#
+#     `USER_FILTERS` is still read off `config.option` rather than inferred
+#     from `pytest_deselected` — `_pytest/stepwise.py` calls that hook exactly
+#     as `-k` does, so the EFFECT cannot tell them apart, and the message says
+#     which happened.
 #
 #   * it ran this pin before the rest of the session (`--nf`, a reordering
 #     plugin). Nothing is missing; the pin is merely early. The claim is
@@ -619,19 +671,158 @@ def test_pinned_skips_track_their_condition_in_this_environment():
             )
 
 
-def test_every_rule_states_the_condition_it_discloses():
-    """A rule with no condition is a blanket permission slip."""
-    silent = [rule for rule in RULES if not rule.when.strip()]
-    assert not silent, (
-        "these skip rules disclose a reason without saying under what "
-        "condition it is legitimate:\n  "
-        + "\n  ".join(sorted(", ".join(sorted(r.reasons)) for r in silent))
+class _StringLiterals(ast.NodeVisitor):
+    """Every string literal in a module's source, f-strings excluded.
+
+    An f-string's fixed fragments are not reasons anybody wrote down — they are
+    halves of one — so recursing into ``JoinedStr`` would let a rule excuse a
+    string that appears in this file only as a piece of some other string.
+    """
+
+    def __init__(self) -> None:
+        self.found: set[str] = set()
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if isinstance(node.value, str):
+            self.found.add(node.value)
+
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> None:
+        return
+
+
+def _string_literals_in(path: pathlib.Path) -> set[str]:
+    visitor = _StringLiterals()
+    visitor.visit(ast.parse(path.read_text()))
+    return visitor.found
+
+
+def test_a_rule_excuses_only_reasons_written_down_in_this_file():
+    """The bound the file CLAIMED and did not have: ``reasons`` is a runtime
+    value, and nothing required it to be literals.
+
+    ``Rule.matches`` is exact membership, so a rule's excuse set is finite and
+    enumerable — but enumerable is not the same as WRITTEN DOWN, and the
+    difference is a one-line rule using the same idiom the XLA rule already
+    uses::
+
+        Rule(when="…read out of the module that emits them…",
+             reasons=frozenset(_reasons_declared_by(TESTS / "test_affine.py")),
+             legitimate=lambda: True)
+
+    That rule excuses every reason some other module happens to skip with,
+    none of which appears in this file. Measured with a planted
+    ``pytest.skip("we will get back to this one after the release")``:
+    ``1993 passed, 3 skipped``, exit 0.
+
+    So the bound is enforced instead of described. Every reason a rule excuses
+    must be a string literal in THIS file — where the diff that adds it is a
+    diff to the disclosure surface and a reviewer reads it — or one of the
+    reasons produced by the single declared derivation,
+    :data:`_DERIVED_REASONS`, whose channel is pinned separately by
+    ``test_no_rule_is_broader_than_the_reason_it_discloses`` (the count of
+    forms, the containment, and the exact ``pytest.skip`` literal at the site).
+
+    What this does NOT bound, stated rather than implied: an author who types
+    a reason here and writes ``legitimate=lambda: True`` next to it has
+    disclosed it, and this file will excuse it. That is what disclosure means —
+    the guarantee is that the excuse is legible in one file, not that it is
+    justified. The two nets below narrow the laziest version of it.
+    """
+    literals = _string_literals_in(pathlib.Path(__file__))
+    stray = [
+        f"{reason!r} (rule for {rule.when[:50]!r})"
+        for rule in RULES
+        for reason in sorted(rule.reasons)
+        if reason not in literals and reason not in _DERIVED_REASONS
+    ]
+    assert not stray, (
+        "skip rule(s) excusing a reason that is not written in this file and "
+        "did not come from the one declared derivation:\n  "
+        + "\n  ".join(stray)
+        + "\n\n`reasons` is an ordinary Python value, so it can be computed "
+        "from anything — including another module's source, which excuses "
+        "every skip that module happens to carry while this file, the "
+        "disclosure surface, says nothing. Type the reason out here, or add "
+        "the derivation to _DERIVED_REASONS where its channel gets pinned."
     )
-    unchecked = [rule for rule in RULES if rule.legitimate is None]
+    # Anti-vacuity, both halves. The derivation has to be real (an empty one
+    # would make the clause above trivially satisfiable by anything claiming
+    # to be derived), and it has to still be the XLA rule's.
+    assert _DERIVED_REASONS, (
+        "_DERIVED_REASONS is empty, so the exemption above admits nothing and "
+        "would equally admit a rule that derived its reasons from anywhere"
+    )
+    assert _DERIVED_REASONS <= {r for rule in RULES for r in rule.reasons}, (
+        "_DERIVED_REASONS is no longer the reason set of any rule, so the "
+        "derivation named here and the derivation in use have come apart"
+    )
+    # and MEASURED, whose whole bound is enumeration, is held to the same thing
+    off_file = [e.nodeid for e in MEASURED if e.reason not in literals]
+    assert not off_file, (
+        "MEASURED entries whose reason is not a literal in this file:\n  "
+        + "\n  ".join(off_file)
+    )
+
+
+def _cannot_read_its_environment(predicate) -> bool:
+    """A zero-argument callable that references no name at all.
+
+    Such a callable cannot look at anything: no global, no closure cell, no
+    attribute. Whatever it returns, it returns in every environment, so it is
+    ``legitimate=None`` wearing a callable and belongs in the same budget.
+    ``lambda: True`` and ``lambda: 1 == 1`` are both caught by it.
+
+    A NET, and it says so: ``lambda: bool(os) or True`` reads a name and walks
+    past. What bounds a rule is that its reason is written down here; this
+    stops the laziest way of pretending to check a direction.
+    """
+    code = getattr(predicate, "__code__", None)
+    if code is None:
+        return False
+    return code.co_argcount == 0 and not code.co_names and not code.co_freevars
+
+
+def test_every_rule_states_the_condition_it_discloses():
+    """A rule with no condition is a blanket permission slip.
+
+    ``when`` used to be checked with ``.strip()``, which a single character
+    passes — so ``Rule(when="x", reasons=frozenset({"<an exact reason>"}),
+    legitimate=lambda: True)`` disclosed nothing and excused a planted skip.
+    Both halves of that rule are now floored: a condition has to read like a
+    condition, and a ``legitimate`` that cannot look at anything counts against
+    the same budget as no ``legitimate`` at all.
+
+    These are FLOORS, not bounds — a determined author writes four plausible
+    words and a predicate that names something. The bound is
+    ``test_a_rule_excuses_only_reasons_written_down_in_this_file``: whatever
+    the rule says, the reason it excuses is in this file's diff.
+    """
+    silent = [
+        rule
+        for rule in RULES
+        if len(rule.when.split()) < 4 or len(rule.when.strip()) < 15
+    ]
+    assert not silent, (
+        "these skip rules disclose a reason without saying, in words, under "
+        "what condition it is legitimate:\n  "
+        + "\n  ".join(
+            sorted(f"{r.when!r}: {', '.join(sorted(r.reasons))}" for r in silent)
+        )
+        + "\n\n`when` IS the disclosure for every rule whose direction cannot "
+        "be checked, and it is the thing a reviewer reads for the ones that "
+        "can. A placeholder there is a blanket permission slip."
+    )
+    unchecked = [
+        rule
+        for rule in RULES
+        if rule.legitimate is None or _cannot_read_its_environment(rule.legitimate)
+    ]
     assert len(unchecked) <= 1, (
         "more than one skip rule has given up on checking its own direction. "
         "Each of these discloses a skip without being able to contradict it, "
-        "which is the weak form this file exists to avoid:\n  "
+        "which is the weak form this file exists to avoid (a `legitimate` that "
+        "reads no name is counted here: it returns the same answer in every "
+        "environment, which is what `legitimate=None` means):\n  "
         + "\n  ".join(sorted(", ".join(sorted(r.reasons)) for r in unchecked))
     )
 
@@ -718,6 +909,14 @@ def test_a_rule_can_only_excuse_a_reason_someone_wrote_down():
     exact strings, so the most a bad rule can do is excuse a reason its author
     typed out in this file where a reviewer reads it. That is what disclosure
     means here, and a pattern is precisely the way to excuse text nobody typed.
+
+    Finite and enumerated is only half of it, and this test only ever asserted
+    that half: ``reasons`` is a runtime value, so a rule could ENUMERATE by
+    computing — ``frozenset(_reasons_declared_by(TESTS / "test_affine.py"))``
+    passes everything below and excuses reasons that appear nowhere here. The
+    other half is
+    ``test_a_rule_excuses_only_reasons_written_down_in_this_file``, and the
+    sentence above is true because that test is there.
 
     So this asserts the shape, not a corpus:
 
@@ -994,8 +1193,15 @@ def the_claim_this_session_can_make(at_session_end: bool = False) -> tuple[str, 
     Called from exactly two places, deliberately: :func:`test_no_session_skip_is_undisclosed`,
     which is the ordinary surface and gets a nodeid and a proper failure, and
     ``tests/conftest.py``'s session-end guard, for the sessions where the pin
-    was reordered, filtered or deselected out of making it. One decision, two
-    callers, so the two cannot drift apart.
+    was reordered, filtered, deselected or ``--ignore``d out of making it. One
+    decision, two callers, so the two cannot drift apart.
+
+    Note the ORDER of the two halves, which is load-bearing and is what makes
+    the guard worth consulting from a narrowed session at all: the disclosure
+    half runs FIRST and is the same size whatever the session's scope was. A
+    session that saw one file can still say whether that file's skips were
+    disclosed, and saying so is the whole of what
+    ``--ignore=tests/test_skip_inventory.py`` was hiding.
     """
     undisclosed, contradicted = _skips_this_session_cannot_explain()
     if undisclosed:
@@ -1050,32 +1256,22 @@ def _what_this_session_is_in_a_position_to_claim(
             "whole suite for the claim."
         )
     filtered_out = deselected_items(_THIS_MODULE)
-    if filtered_out and USER_FILTERS:
-        return "failed", (
-            f"this session collected every test file and then DESELECTED "
-            f"{len(filtered_out)} test(s) through the filter you passed "
-            f"({', '.join(USER_FILTERS)}), so the skips inside them went "
-            f"unobserved — and the run would otherwise have printed a green "
-            f"indistinguishable from a whole one. The completeness pin cannot "
-            f"be made from a filtered session; that is exactly the invocation "
-            f"an undisclosed skip survives.\n\nFirst few: "
-            + ", ".join(filtered_out[:5])
-            + (", …" if len(filtered_out) > 5 else "")
-            + "\n\nDrop the filter to make the claim. If you are iterating on "
-            "this file, run it by PATH (`pytest tests/test_skip_inventory.py`) "
-            "— a session that never collected the tree withdraws the claim "
-            "instead of failing."
-        )
     if filtered_out:
+        blame = (
+            f"through the filter you passed ({', '.join(USER_FILTERS)})"
+            if USER_FILTERS
+            else "and no -k, -m or --deselect was passed, so it was `--sw`, "
+            "`--lf`, or a plugin"
+        )
         return "withdrawn", (
             "the completeness pin is WITHDRAWN, not passed: this session "
             f"collected the whole tree and then deselected {len(filtered_out)} "
-            f"test(s) — and no -k, -m or --deselect was passed, so it was "
-            f"`--sw`, `--lf`, or a plugin. The skips inside those tests went "
-            f"unobserved and the claim cannot be made from what is left. "
-            f"Everything this session DID observe is disclosed.\n\nFirst few: "
+            f"test(s) {blame}. The skips inside those tests went unobserved "
+            f"and the claim cannot be made from what is left. Everything this "
+            f"session DID observe is disclosed.\n\nFirst few: "
             + ", ".join(filtered_out[:5])
             + (", …" if len(filtered_out) > 5 else "")
+            + "\n\nRun the suite without the filter for the claim."
         )
     still_owed = pending_items(_THIS_MODULE)
     if still_owed and not at_session_end:
@@ -1148,6 +1344,92 @@ def test_the_scope_key_is_lossy_in_exactly_one_way_and_it_is_checked(
     )
 
 
+_PRUNED_DIRECTORIES = (".junk", "build", "dist", "node_modules", "venv", "sample.egg")
+
+
+def test_the_scope_check_prunes_exactly_what_pytest_prunes(tmp_path, monkeypatch):
+    """A file pytest will never open is not part of the suite.
+
+    The scope key globbed recursively with nothing subtracted, so anything at
+    all under ``tests/`` counted as a file the suite has — including the
+    directories pytest itself refuses to recurse into (``norecursedirs``:
+    every dot-directory, ``build``, ``dist``, ``node_modules``, ``venv``,
+    ``*.egg``, …). A scratch directory, a stale build tree or a vendored
+    checkout under ``tests/`` is enough, and both directions were measured on
+    the real tree with a CLEAN whole run:
+
+    * ``tests/build/test_zz_helper.py``, a UNIQUE basename: a file the suite
+      "has" that no invocation can collect, so ``unseen_files()`` never
+      emptied, the completeness claim was WITHDRAWN, and the pin silently
+      stopped asserting anything. ``1992 passed, 3 skipped``, exit 0 — the
+      whole check disabled by a file pytest never looked at.
+    * ``tests/.junk/test_affine.py``, a COLLIDING basename: ``2 failed``,
+      exit 1, on a collision between a real file and one that cannot be
+      collected.
+
+    So the two sides are COMPARED rather than described: what a real pytest
+    reports collecting from a probe tree, against what the scope check says
+    that tree has. Not a list of directory names — those are pytest's to
+    change, and the ini value this invocation carries is what gets used and
+    what is handed to the probe.
+    """
+    import conftest
+
+    body = "def test_x():\n    assert True\n"
+    (tmp_path / "test_top.py").write_text(body)
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "test_nested.py").write_text(body)
+    for name in _PRUNED_DIRECTORIES:
+        directory = tmp_path / name
+        directory.mkdir()
+        # one unique basename, which a broken pruning adds to the file set,
+        # and one colliding, which a broken pruning turns into a collision.
+        safe = re.sub(r"\W", "_", name)
+        (directory / f"test_only_inside_{safe}.py").write_text(body)
+        (directory / "test_top.py").write_text(body)
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--collect-only",
+            "-o",
+            "norecursedirs=" + " ".join(conftest._NORECURSEDIRS),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    collected = {
+        pathlib.PurePosixPath(line.split("::", 1)[0]).name
+        for line in proc.stdout.splitlines()
+        if "::" in line
+    }
+    assert collected == {"test_top.py", "test_nested.py"}, (
+        "the probe tree did not collect what this test is about, so the "
+        f"comparison below would prove nothing:\n\n{_tail(proc)}"
+    )
+
+    monkeypatch.setattr(conftest, "_TESTS", tmp_path)
+    assert conftest.files_the_suite_has() == collected, (
+        "the scope check and pytest disagree about which files the suite has. "
+        f"pytest collected {sorted(collected)}; the scope check says "
+        f"{sorted(conftest.files_the_suite_has())}. A file only the scope "
+        "check can see is a file no session can ever collect, so the "
+        "completeness claim can never be made again."
+    )
+    assert conftest.colliding_basenames() == [], (
+        "a basename collision was reported against a file pytest will not "
+        f"collect: {conftest.colliding_basenames()}. That fails a clean whole "
+        "run for a directory pytest never enters."
+    )
+
+
 def test_no_session_skip_is_undisclosed():
     """The completeness half: everything this session skipped is covered by a
     pin, a rule, a declared optional-dependency gate, or a MEASURED entry —
@@ -1155,7 +1437,7 @@ def test_no_session_skip_is_undisclosed():
 
     Scoped and ORDERED, and it says which. The claim is about the SUITE's skip
     set, so the session has to have collected the suite and to have run it
-    before this pin; see the five cases above for what each shortfall gets.
+    before this pin; see the four cases above for what each shortfall gets.
     """
     # Anti-vacuity, and it has to be about the RECORDER, not about this module.
     # The old form asserted that some test in this file had run — which its own
@@ -1180,27 +1462,75 @@ def test_no_session_skip_is_undisclosed():
     assert verdict == "made", message
 
 
-_GUARD_STUB = '''
-"""Stands in for this module in the session below: the guard's counterpart.
+# --- the mechanisms no ordinary session exercises ----------------------------
+#
+# Everything below runs pytest sessions of its own, because the paths being
+# checked are the ones that only exist when this pin is NOT in the session, or
+# is in it in the wrong place. There is no way to reach them from inside a
+# session this file is part of.
+#
+# The previous version of this stood a STUB in for the decision function —
+# `the_claim_this_session_can_make` returning whatever an environment variable
+# said. That tested the wiring (does the guard consult the pin, does a failed
+# verdict reach the exit code, does the reader see it) and NOTHING about the
+# decision, so a survey of the mechanism's fourteen arms found ten of them
+# invisible: the `unseen` withdrawal, both `filtered_out` answers, both
+# `still_owed` answers, the USER_FILTERS discrimination, all four early
+# returns in `_close_the_session`, `DESELECTED` never being filled, and the
+# collection hook's sort. Every one of those could be deleted with the whole
+# suite still green.
+#
+# So the sessions below load the REAL decision function out of this very file
+# and drive it, once per shortfall, and assert on what a reader gets: the exit
+# code and the terminal summary. An invariant checked only where it is
+# produced is not checked at its surface, and the surface is what a developer
+# sees.
 
-Carries a test of its own so that its FILE is collected — an empty module
-yields no items, and a file that yields nothing is a file this session cannot
-prove it collected. What it does not carry is the completeness pin, which is
-the situation being reproduced.
+_PIN_PROXY = '''
+"""Stands in for this module in the miniature sessions: the guard's counterpart.
+
+Loads the REAL decision function out of the real file, under another name, so
+that the session-end guard consults the code that ships rather than a stub
+that agrees with it. `import conftest` inside it binds to the MINIATURE
+conftest, which pytest has already imported under that name, so the decision
+is made against this session's record.
+
+Carries a test of its own so that its FILE is collected — a module that yields
+nothing is a module the session cannot prove it collected.
 """
+import importlib.util
 import os
+import pathlib
+import sys
+
+_spec = importlib.util.spec_from_file_location(
+    "_the_real_pin", pathlib.Path(os.environ["REAL_PIN"])
+)
+_real = importlib.util.module_from_spec(_spec)
+sys.modules["_the_real_pin"] = _real
+_spec.loader.exec_module(_real)
+
+the_claim_this_session_can_make = _real.the_claim_this_session_can_make
 
 
-def test_the_stub_file_is_collected():
+def test_the_proxy_file_is_collected():
     assert True
-
-
-def the_claim_this_session_can_make(at_session_end=False):
-    assert at_session_end, "the guard must say which caller it is"
-    return os.environ["STUB_VERDICT"], "the stub's message"
 '''
 
-_GUARD_SUBJECT = '''
+# The proxy PLUS the real completeness pin, re-exported so that pytest collects
+# it here under this file's name. For the cases about a session the pin IS part
+# of: whether it claims or defers, and whether the guard then keeps quiet.
+_PIN_PROXY_WITH_THE_PIN = _PIN_PROXY + '''
+
+test_no_session_skip_is_undisclosed = _real.test_no_session_skip_is_undisclosed
+'''
+
+_SUBJECT_CLEAN = '''
+def test_that_passes():
+    assert True
+'''
+
+_SUBJECT_UNDISCLOSED = '''
 import pytest
 
 
@@ -1212,59 +1542,406 @@ def test_that_skips_undisclosed():
     pytest.skip("a planted reason nobody disclosed")
 '''
 
+# A module-level gate on something that cannot exist, so it fires in every
+# environment. It skips at COLLECTION, which is what makes it the subject for
+# the --collect-only case: that session records a skip and runs nothing.
+_SUBJECT_GATED = '''
+import pytest
 
-@pytest.mark.parametrize(
-    "verdict,expect_zero", [("failed", False), ("made", True)]
-)
-def test_the_session_end_guard_reports_from_a_session_without_the_pin(
-    tmp_path, verdict, expect_zero
-):
-    """The one mechanism this file cannot exercise on itself.
+pytest.importorskip("_no_such_module_anywhere_at_all")
 
-    ``--deselect tests/test_skip_inventory.py``, and a plugin that drops the
-    pin's items from ``items[:]`` without calling ``pytest_deselected``, both
-    remove the pin from the session — so no assertion inside it can fire, and
-    both were measured at exit 0 with an undisclosed skip planted. What closes
-    them is ``tests/conftest.py`` making the claim after the loop, in the one
-    place an ``items`` filter cannot reach.
 
-    That path therefore runs in no ordinary session, including this one. So it
-    is run here, in a session of its own: the REAL conftest, a stub standing in
-    for this module, and a two-test subject. The stub is the point — this is
-    about the wiring (does the guard consult the pin, does a failed verdict
-    reach the exit code, does the reader see it), not about the verdict, which
-    is what the rest of this file is.
+def test_never_runs():
+    assert True
+'''
+
+_DESELECTS_LIKE_STEPWISE = '''
+"""Deselects through the hook with no -k/-m/--deselect on the command line.
+`_pytest/stepwise.py` and `--lf` call `pytest_deselected` exactly like this,
+which is why the EFFECT cannot tell them apart from a filter the developer
+passed and the INVOCATION is read instead."""
+def pytest_collection_modifyitems(config, items):
+    doomed = [i for i in items if i.name == "test_that_passes"]
+    if doomed:
+        items[:] = [i for i in items if i not in doomed]
+        config.hook.pytest_deselected(items=doomed)
+'''
+
+_DROPS_WITHOUT_SAYING_SO = '''
+"""Drops items from `items[:]` and never calls `pytest_deselected`. The
+hookspec says a plugin that removes items must report them; nothing enforces
+it, and the summary line of a session that did this is byte-identical to a
+clean whole run's."""
+def pytest_collection_modifyitems(items):
+    items[:] = [i for i in items if i.name != "test_that_passes"]
+'''
+
+_REORDERS_AFTER_EVERYONE = '''
+"""`NFPlugin`'s shape, which is also pytest-randomly's: wrapper=True,
+tryfirst=True, so it re-sorts `items` AFTER every non-wrapper
+pytest_collection_modifyitems hookimpl, including the conftest's. Puts the pin
+FIRST, which is what --nf does when the pin's file is the freshly-saved one."""
+import pytest
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_collection_modifyitems(items):
+    result = yield
+    items.sort(key=lambda item: "test_skip_inventory.py" not in item.nodeid)
+    return result
+'''
+
+_LOOKS_LIKE_AN_XDIST_WORKER = '''
+"""The documented worker marker: `xdist/remote.py` sets `config.workerinput`
+to a dict before the session runs. xdist is not installed here, so this is a
+stand-in of that shape and nothing more."""
+def pytest_configure(config):
+    config.workerinput = {"workerid": "gw0", "workercount": 2}
+'''
+
+
+def _run_a_miniature_session(tmp_path, files, argv=(), plugins=()):
+    """A whole pytest session over a tree of `files`, with the REAL conftest.
+
+    `files` is {relative path under tests/: source}. Plugin modules are written
+    at the root and loaded with `-p`, which is how an installed plugin arrives.
     """
     tests = tmp_path / "tests"
     tests.mkdir()
     (tests / "conftest.py").write_text((TESTS / "conftest.py").read_text())
-    (tests / "test_skip_inventory.py").write_text(_GUARD_STUB)
-    (tests / "test_subject.py").write_text(_GUARD_SUBJECT)
+    for relative, source in files.items():
+        path = tests / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source)
+    for name, source in plugins:
+        (tmp_path / f"{name}.py").write_text(source)
 
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
+    env = {**os.environ, "REAL_PIN": str(pathlib.Path(__file__).resolve())}
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(tmp_path), *([os.environ["PYTHONPATH"]] if "PYTHONPATH" in os.environ else [])]
+    )
+    # `-rfsE`: `s` because a WITHDRAWN or DEFERRED verdict from the pin is
+    # delivered as a skip REASON and a bare `-q` prints the count without the
+    # sentence, and `fE` because `-r` replaces the default report characters
+    # rather than adding to them — asking for skips alone silently drops the
+    # failure lines, which is how the nodeid a verdict lands on stops being
+    # visible to the assertions below.
+    argument_list = [
+        sys.executable, "-m", "pytest", "-q", "-rfsE", "-p", "no:cacheprovider"
+    ]
+    for name, _ in plugins:
+        argument_list += ["-p", name]
+    argument_list += [*argv, "tests"]
+    return subprocess.run(
+        argument_list,
         cwd=tmp_path,
-        env={**os.environ, "STUB_VERDICT": verdict},
+        env=env,
         capture_output=True,
         text=True,
         timeout=300,
     )
-    assert "2 passed, 1 skipped" in proc.stdout, (
-        f"the subject session did not run as expected:\n\n{_tail(proc)}"
-    )
+
+
+_BANNER = "skip inventory:"
+
+# (id, files, argv, plugins, exit-zero, must appear, must NOT appear)
+#
+# One row per shortfall the decision function can reach and per early return
+# the guard has, plus the two ordering mechanisms. The `says` column is the
+# sentence the reader gets, which is the half a green exit code does not carry.
+_SESSIONS = (
+    (
+        # the guard's ordinary job: pin gone, record complete, nothing wrong
+        "made",
+        {"test_skip_inventory.py": _PIN_PROXY, "test_zzz_subject.py": _SUBJECT_CLEAN},
+        (),
+        (),
+        True,
+        ("pin absent from this session, claim made at the end",),
+        ("WITHDRAWN", "FAILED"),
+    ),
+    (
+        # …and the same session with a skip nobody disclosed in it
+        "undisclosed",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        (),
+        (),
+        False,
+        ("completeness claim FAILED", "a planted reason nobody disclosed"),
+        (),
+    ),
+    (
+        # THE --ignore ROUTE. The pin's own file is not collected, which reads
+        # as an ordinary narrowing; the guard used to return before it could
+        # say anything and the whole suite was `1981 passed, 3 skipped`, exit
+        # 0, with the planted skip printed on the screen.
+        "ignore-the-pins-own-file",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        ("--ignore=tests/test_skip_inventory.py",),
+        (),
+        False,
+        ("completeness claim FAILED", "a planted reason nobody disclosed"),
+        (),
+    ),
+    (
+        # the same, by the glob spelling
+        "ignore-glob",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        ("--ignore-glob=*skip_inventory*",),
+        (),
+        False,
+        ("completeness claim FAILED",),
+        (),
+    ),
+    (
+        # …and the sibling underneath it: nothing reaches a call phase, so RAN
+        # is empty and "nothing ran" was inferred from the effect.
+        "nothing-ran-but-something-skipped",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        ("--ignore=tests/test_skip_inventory.py", "-k", "test_that_skips_undisclosed"),
+        (),
+        False,
+        ("completeness claim FAILED", "a planted reason nobody disclosed"),
+        (),
+    ),
+    (
+        # a narrowed session with nothing else wrong says nothing at all, on
+        # purpose: `pytest tests/test_x.py` is the commonest invocation there
+        # is and a banner naming what it did not run is not news.
+        "narrowed-and-quiet",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_CLEAN,
+            "test_zzz_other.py": _SUBJECT_CLEAN,
+        },
+        ("--ignore=tests/test_zzz_other.py",),
+        (),
+        True,
+        (),
+        (_BANNER,),
+    ),
+    (
+        # deselection through a filter the developer passed: WITHDRAWN, naming
+        # the filter. It used to FAIL, which is why no -k expression could exit
+        # 0 from the repo root on a clean tree.
+        "deselected-by-a-user-filter",
+        {"test_skip_inventory.py": _PIN_PROXY, "test_zzz_subject.py": _SUBJECT_CLEAN},
+        ("-k", "not test_that_passes"),
+        (),
+        True,
+        ("WITHDRAWN", "through the filter you passed", "-k 'not test_that_passes'"),
+        ("FAILED",),
+    ),
+    (
+        # deselection by something that is not a filter: same verdict, and the
+        # message has to say so — this is the --sw false failure's channel.
+        "deselected-by-something-that-is-not-a-filter",
+        {"test_skip_inventory.py": _PIN_PROXY, "test_zzz_subject.py": _SUBJECT_CLEAN},
+        (),
+        (("deselects_like_stepwise", _DESELECTS_LIKE_STEPWISE),),
+        True,
+        ("WITHDRAWN", "no -k, -m or --deselect was passed"),
+        ("through the filter you passed", "FAILED"),
+    ),
+    (
+        # items removed and never reported. THIS one keeps the failure: pytest
+        # discloses a deselection in its own summary line and cannot disclose
+        # a drop nobody reported.
+        "items-dropped-without-being-reported",
+        {"test_skip_inventory.py": _PIN_PROXY, "test_zzz_subject.py": _SUBJECT_CLEAN},
+        (),
+        (("drops_without_saying_so", _DROPS_WITHOUT_SAYING_SO),),
+        False,
+        ("completeness claim FAILED", "never reported as deselected"),
+        (),
+    ),
+    (
+        # the pin reordered to the front: it DEFERS rather than claiming, and
+        # the end of the session answers.
+        "pin-reordered-to-the-front",
+        {
+            "test_skip_inventory.py": _PIN_PROXY_WITH_THE_PIN,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        (),
+        (("reorders_after_everyone", _REORDERS_AFTER_EVERYONE),),
+        False,
+        ("made at the END of this session instead", "completeness claim FAILED"),
+        (),
+    ),
+    (
+        # Two files with one basename, which is the key's single lossy axis.
+        # The subdirectory is a PACKAGE on purpose: without an `__init__.py`
+        # pytest refuses the second file outright ("import file mismatch",
+        # exit 2) and the collision never reaches this check, so the shape
+        # worth checking is the one pytest imports happily and the basename
+        # key cannot tell apart.
+        "colliding-basenames",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_CLEAN,
+            "sub/__init__.py": "",
+            "sub/test_zzz_subject.py": _SUBJECT_CLEAN,
+        },
+        (),
+        (),
+        False,
+        ("completeness claim FAILED", "share a basename"),
+        (),
+    ),
+    (
+        # …and the same two basenames with the second one somewhere pytest will
+        # not go, plus a unique basename in another such place. Neither is part
+        # of the suite, because no invocation can collect either.
+        "files-pytest-will-never-collect",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_CLEAN,
+            ".junk/test_zzz_subject.py": _SUBJECT_CLEAN,
+            "build/test_only_in_build.py": _SUBJECT_CLEAN,
+        },
+        (),
+        (),
+        True,
+        ("pin absent from this session, claim made at the end",),
+        ("WITHDRAWN", "FAILED"),
+    ),
+    (
+        # a distributed worker claims nothing, and this is the KNOWN OPEN hole:
+        # the skip is real, the worker is green, and only a controller could
+        # say so. Asserted as it is, not as it should be.
+        "an-xdist-worker-claims-nothing",
+        {
+            "test_skip_inventory.py": _PIN_PROXY,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
+        (),
+        (("looks_like_an_xdist_worker", _LOOKS_LIKE_AN_XDIST_WORKER),),
+        True,
+        (),
+        (_BANNER,),
+    ),
+    (
+        # --collect-only runs no call phase, so no `pytest.skip()` in a test
+        # body can fire and "no undisclosed skip in this session" is not a
+        # claim it is entitled to make. The subject skips at COLLECTION, so
+        # this session has a skip on record and still must not claim.
+        "collect-only-claims-nothing",
+        {"test_skip_inventory.py": _PIN_PROXY, "test_zzz_subject.py": _SUBJECT_GATED},
+        ("--collect-only",),
+        (),
+        True,
+        (),
+        (_BANNER,),
+    ),
+    (
+        # a filter that selects nothing at all. Nothing runs and nothing skips,
+        # which is the state the old `if not RAN: return` was really aiming at
+        # — and it withdraws through the ordinary scope answer like every other
+        # deselection rather than through a branch of its own. pytest's own
+        # "no tests ran" is what makes this non-zero; the banner is what says
+        # the completeness claim did not happen.
+        "a-filter-that-selects-nothing",
+        {"test_skip_inventory.py": _PIN_PROXY, "test_zzz_subject.py": _SUBJECT_CLEAN},
+        ("-k", "nothing_matches_this_expression"),
+        (),
+        False,
+        ("WITHDRAWN", "through the filter you passed"),
+        ("FAILED",),
+    ),
+    (
+        # the pin present and in its right place: it claims, and the guard has
+        # to stay out of the way rather than claim a second time.
+        "pin-present-and-last",
+        {
+            "test_skip_inventory.py": _PIN_PROXY_WITH_THE_PIN,
+            "test_zzz_subject.py": _SUBJECT_CLEAN,
+        },
+        (),
+        (),
+        True,
+        (),
+        (_BANNER,),
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "files,argv,plugins,expect_zero,says,does_not_say",
+    [case[1:] for case in _SESSIONS],
+    ids=[case[0] for case in _SESSIONS],
+)
+def test_the_session_end_guard_answers_every_shortfall(
+    tmp_path, files, argv, plugins, expect_zero, says, does_not_say
+):
+    """One session per shortfall, driving the REAL decision function.
+
+    The exit code and the terminal summary, because those are what a developer
+    gets. A verdict that reaches neither is the defect this whole file exists
+    to close: a session that dropped the completeness check used to print a
+    summary line byte-identical to a clean whole run's.
+    """
+    proc = _run_a_miniature_session(tmp_path, files, argv, plugins)
+    output = proc.stdout + proc.stderr
+
     assert (proc.returncode == 0) is expect_zero, (
-        f"a {verdict!r} verdict from the completeness pin left pytest exiting "
-        f"{proc.returncode} in a session where every test passed. A session "
-        f"that dropped the pin and hid a skip has to be non-zero, and one that "
-        f"dropped the pin and hid nothing has to be zero.\n\n{_tail(proc)}"
+        f"pytest exited {proc.returncode} where exit-zero was expected to be "
+        f"{expect_zero}. A session that hid a skip has to be non-zero, and a "
+        f"legitimate narrowing has to stay zero — the second half is why "
+        f"`pytest -k …` and `pytest tests/test_x.py` have to keep "
+        f"working.\n\n{_tail(proc)}"
     )
-    assert "the stub's message" in proc.stdout, (
-        "the guard did not consult the pin at the end of a session the pin was "
-        f"not part of, or did not print what it got back:\n\n{_tail(proc)}"
+    for sentence in says:
+        assert sentence in output, (
+            f"the reader was not told {sentence!r}. The verdict has to reach "
+            f"the terminal summary; an exit code alone does not say WHICH "
+            f"shortfall this session had, and five of them share an exit "
+            f"code.\n\n{_tail(proc)}"
+        )
+    for sentence in does_not_say:
+        assert sentence not in output, (
+            f"the reader was told {sentence!r}, which is not what this "
+            f"session did.\n\n{_tail(proc)}"
+        )
+
+
+def test_the_pin_makes_its_own_claim_when_it_is_ordered_last(tmp_path):
+    """The collection hook's sort, at the surface: WHERE the verdict lands.
+
+    Collection order is alphabetical by file, so without
+    ``pytest_collection_modifyitems`` moving it, this module runs before
+    ``test_zzz_subject.py`` and reads a session that has not happened yet.
+    Nothing goes green either way — the session-end guard catches it — so the
+    thing that distinguishes the sort from its absence is not the exit code
+    but the NODEID the failure carries, and a mechanism whose only effect is
+    invisible is a mechanism nothing is holding.
+    """
+    proc = _run_a_miniature_session(
+        tmp_path,
+        {
+            "test_skip_inventory.py": _PIN_PROXY_WITH_THE_PIN,
+            "test_zzz_subject.py": _SUBJECT_UNDISCLOSED,
+        },
     )
-    assert "skip inventory:" in proc.stdout, (
-        "the guard's verdict is not visible to the reader; a session that "
-        "silently dropped the completeness check printed a summary "
-        "byte-identical to a clean whole run, and that is the half of this "
-        f"repair a green exit code does not carry.\n\n{_tail(proc)}"
+    output = proc.stdout + proc.stderr
+    assert proc.returncode != 0, _tail(proc)
+    assert "test_skip_inventory.py::test_no_session_skip_is_undisclosed" in output, (
+        "the pin did not fail at its own nodeid, so it did not run last: the "
+        f"collection hook is no longer ordering it.\n\n{_tail(proc)}"
+    )
+    assert "made at the END of this session instead" not in output, (
+        "the pin DEFERRED in an ordinary session — it ran before the tests it "
+        f"reads, which is what the collection hook's sort is for.\n\n{_tail(proc)}"
     )
