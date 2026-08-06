@@ -805,7 +805,25 @@ def _whitelisted(raw) -> dict[str, str]:
     Applied to BOTH sides of the narrowing comparison — the record's own option
     set and the one the re-derivation produces — so the two are projected by
     ONE function. Two projections that agree today are two things to keep
-    agreeing; this is one thing."""
+    agreeing; this is one thing.
+
+    **AND IT SEES BOTH SIDES, WHICH IS WHY THE VALUE ZONE IS CLOSED UNDER
+    CALL.** When this function was added, the zone was an ENUMERATION of four
+    names and this was not one of them: not in the source pin's list, not in
+    the read ledger's transparent frames (it is handed a plain ``dict`` and
+    reads no attribute, so the ledger never sees it at all), and not among the
+    functions the one-place scan reads. It could spell anything, and it is
+    called once per side. A module-level ``list`` stashed here on the first
+    call and returned on the second mints the narrowing at one chosen budget
+    with NEITHER pinned signature touched — measured live, full suite
+    byte-identical in both columns.
+
+    The repair is not to add this name to a list. The zone is now DERIVED as
+    the transitive closure of what :func:`_evidence_reproduces` can call, so a
+    helper on this path is inside the pin the moment it is written; every
+    module-level name the closure reads must be enumerated AND immutable; and
+    the closure may import nothing but the one emission entry point it
+    re-derives with. `tests/test_verified_bar.py::test_the_value_zone_is_CLOSED_UNDER_CALL`."""
     return {key: raw[key] for key in _EVIDENCE_OPTION_KEYS if key in raw}
 
 
@@ -863,17 +881,37 @@ def _evidence_budget(recorded) -> int | None:
     what an honest record must carry needs the budget that record names. There
     is no caller-independent substitute — the bar cannot guess a number the
     caller chose — so the budget is not kept out of the bar. Its INFLUENCE is
-    bounded instead, and the bound is structural rather than sampled:
+    bounded instead, and the bound is structural rather than sampled.
 
-    **whatever this returns is used for exactly one thing** — as
-    :func:`stelling.smt.emit`'s ``timeout_ms`` — **and the option set emission
-    then produces is compared for EQUALITY against the record's own, the
-    recorded budget included.** So any budget other than the recorded one puts
-    a different value under ``:timeout``/``:tlimit`` in the reproduction, the
-    equality fails, and the bar WIDENS. The worst a conjunct written here can
-    do is refuse to narrow, which is the safe direction; it cannot mint a
-    narrowing, because minting one would mean returning the budget the record
-    already names, which is what an honest reading returns anyway.
+    **THE BOUND HOLDS. THE ARGUMENT THAT USED TO BE WRITTEN HERE DID NOT, AND
+    THE DIFFERENCE MATTERS.** That argument was: whatever this returns is used
+    only as :func:`stelling.smt.emit`'s ``timeout_ms``, and the recorded budget
+    is itself in the compared set, so a wrong budget puts a wrong
+    ``:timeout``/``:tlimit`` in the reproduction, the equality fails, and the
+    bar widens. Every step of that is true, and it is a statement about an
+    HONEST record — it says a wrong budget disagrees with the budget THIS
+    record names. The threat is a record that names whatever it likes: the
+    question is not "does the reproduction still match the record it came
+    from", it is "can a value returned here turn a reproduction of THIS slice
+    into something equal to the projection of a record about a DIFFERENT
+    query". Budget-versus-``:timeout`` self-consistency does not answer that.
+
+    **WHAT ACTUALLY FORBIDS IT: the budget cannot reach ``slice_sha256`` at
+    all.** ``slice_sha256`` is :func:`stelling.smt.slice_fingerprint` of the
+    slice, and emission's ``timeout_ms`` is not one of its inputs — measured
+    invariant over twelve budgets spanning 1..60000, including ``True``, which
+    :func:`_reproduced_evidence`'s ``isinstance(budget, int)`` admits. It is
+    also in :data:`_EVIDENCE_DERIVED_KEYS`, so an empty one is refused rather
+    than compared, and it is in :data:`_EVIDENCE_OPTION_KEYS`, so it is part of
+    the equality. Two different slices therefore differ in a component NO value
+    this function can return is able to move — the bar's own neighbour pair has
+    EQUAL ``smt2_sha256`` and DIFFERENT ``slice_sha256``, which is the case
+    that separates the two arguments. The worst a conjunct written here can do
+    is put a wrong budget in the reproduction, which breaks the ``:timeout``
+    equality and WIDENS; it cannot make this slice's reproduction reproduce
+    another slice's record, at any budget.
+    `tests/test_verified_bar.py::test_the_budget_cannot_reach_the_SLICE_fingerprint`
+    pins both halves.
 
     Contains no string literal: the two spellings live in
     :data:`_EVIDENCE_BUDGET_KEYS`, so the source pin in
@@ -910,10 +948,23 @@ def _reproduced_evidence(sliced, flavour, budget) -> dict[str, str]:
     :func:`stelling.solvers.escalate` stamps an invocation's options with, and
     it is what this calls. Not a bar-side re-statement of "what an honest stamp
     carries": there is ONE derivation, so the record and the check cannot
-    drift, and corrupting it corrupts EMISSION — which the byte-level emission
-    tests hold and which would change the scripts real solvers answer about.
-    Pinned by SUBSTITUTION rather than by two readings agreeing
-    (`::test_the_reproduction_comes_from_the_stamps_own_derivation`).
+    drift.
+
+    **THE SENTENCE THAT USED TO FINISH THAT PARAGRAPH WAS FALSE.** It said
+    "corrupting it corrupts EMISSION — which the byte-level emission tests hold
+    and which would change the scripts real solvers answer about". It does not:
+    ``stamp_options`` appends ``set-logic``/``smt2_sha256``/``slice_sha256`` to
+    an ALREADY EMITTED :class:`stelling.smt.Script` and contributes not one
+    byte to ``Script.text``. Measured: a conjunct inside it leaves
+    `tests/test_smt_emission.py` and `tests/test_verified_bar.py` both fully
+    green, because
+    `::test_the_reproduction_comes_from_the_stamps_own_derivation` checks only
+    that SUBSTITUTING it MOVES the answer and never checks that the honest one
+    is honest — "pinned by substitution rather than by two readings agreeing"
+    constrains the substituted function's behaviour not at all. So its honest
+    OUTPUT is pinned as well, structurally and by an independently derived
+    expectation:
+    `::test_the_stamps_own_derivation_is_the_HONEST_one`.
 
     Returns ``{}`` — which never equals a projection carrying either derived
     hash, so it never narrows — when the flavour is unusable, the budget is not
@@ -971,17 +1022,30 @@ def _evidence_reproduces(sliced, stamp) -> bool:
     for the reason its own docstring gives: :func:`_evidence_options` never
     sees the query, :func:`_reproduced_evidence` never sees the record.
 
-    What is left is this function, which holds both sides for exactly as long
-    as it takes to compare them, and it is covered by a pin that is TOTAL over
-    the source rather than a sample over values:
-    `tests/test_verified_bar.py::test_the_evidence_path_cannot_name_a_VALUE`.
-    That pin constrains what may be WRITTEN here — no string literal outside
-    the attribute names the read ledger already permits, no comparison against
-    a literal, no module-global smuggling. It does not claim to reach every
-    predicate expressible in Python: a discriminator spelled as a method call
-    on a value (``.startswith(...)``) is not a comparison and is not matched.
-    That residue is stated rather than hidden, and it is why the budget sweep
-    is kept as corroboration instead of being deleted.
+    What is left is this function AND EVERYTHING IT CAN CALL — which is not
+    the same thing, and the difference was the next defect. The pin is TOTAL
+    over the source rather than a sample over values
+    (`tests/test_verified_bar.py::test_the_evidence_path_cannot_name_a_VALUE`),
+    and it now runs over the DERIVED closure of what this function reaches
+    rather than over a written list of four names
+    (`tests/test_verified_bar.py::test_the_value_zone_is_CLOSED_UNDER_CALL`).
+    Between them: no string literal outside the attribute names the read ledger
+    already permits, no comparison against a literal, no module-global
+    smuggling, no default argument, no module-level MUTABLE anywhere in the
+    closure, no helper outside it, no import that hides one.
+
+    It does not claim to reach every predicate expressible in Python: a
+    discriminator spelled as a method call on a value (``.startswith(...)``) is
+    not a comparison and is not matched. **That residue is stated rather than
+    hidden — and the sentence that used to say the budget sweep CORROBORATES it
+    was wrong.** A sweep is a sample; a conjunct keyed outside the sample is
+    invisible to it at every value it does not draw. Measured: two corruptions
+    keyed on the recorded ``:timeout`` at 30000 — a default argument on this
+    function, and a seventh helper called from it — are 0 RED across the whole
+    suite INCLUDING the sweep, at exactly the value the sweep's own comment
+    names as unsampled. The sweep is kept because a BEHAVIOURAL check
+    anti-correlated with a source check is worth having, not because it
+    corroborates this residue. Nothing corroborates this residue.
 
     WHAT THE COMPARISON IS. The record's whitelisted option set must equal, key
     for key and value for value, the whitelisted option set the re-derivation
@@ -1257,7 +1321,8 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
     )
 
 
-def undecided_cause_note(coverage, obligations) -> tuple[str, ...]:
+def undecided_cause_note(coverage, obligations, unaccounted_runs=0
+                         ) -> tuple[str, ...]:
     """One note classifying what the coverage instrument measured about a
     verdict that carries undecided obligation(s) — or () when none is
     undecided (docs/proposed-decline-messages.md #1: an UNKNOWN whose
@@ -1269,11 +1334,51 @@ def undecided_cause_note(coverage, obligations) -> tuple[str, ...]:
     an interval straddle is compatible with BOTH a precision near-miss
     and a genuine violation, and the note says so rather than pick one.
     Shared by both assembly paths (interval-only and solver), so the two
-    cannot drift."""
+    cannot drift.
+
+    ``unaccounted_runs`` IS THE THIRD SITUATION, AND IT IS THE ONE THE
+    COMPLETE-COVERAGE BRANCH USED TO MISATTRIBUTE. That branch reasons by
+    elimination: coverage is complete, therefore what remains is the interval.
+    The elimination is only valid if the escalation actually arrived. When the
+    solver path can see that it did not — the ledger witnesses invoked runs
+    that no supplied record accounts for — the obligation is undecided because
+    its OUTCOME went missing, and "the propagated interval straddling the
+    asserted bound" is a wrong explanation of a verdict the argument's shape
+    caused. `stelling.solvers.make_solver_verdict` REFUSES the degenerate
+    `records` it can prove degenerate (an empty one against a working ledger);
+    what it cannot refuse without also refusing a deliberate probe of a
+    different invariant is a non-empty STRICT SUBSET, and that residue lands
+    here. It is soundness-harmless — a dropped record leaves its obligation
+    ``unknown``, which can never mint VERIFIED — but silence about the cause is
+    not the same as a wrong cause, and this branch is what keeps the two apart.
+    The interval-only path never passes it: there is no ledger there.
+
+    `tests/test_verified_bar.py::test_a_STRICT_SUBSET_records_does_not_blame_the_INTERVAL`."""
     if not any(o.status == "unknown" for o in obligations):
         return ()
     c = coverage
-    if c.unknown == 0 and c.unreached == 0 and c.inert == 0:
+    parts = []
+    if c.unknown:
+        names = ", ".join(f"{n} ×{k}" for n, k in c.unknown_primitives)
+        parts.append(f"{c.unknown} equation(s) fell to ⊤ ({names})")
+    if c.unreached:
+        parts.append(f"{c.unreached} equation(s) unreached")
+    if c.inert:
+        parts.append(f"{c.inert} constraint(s) dropped")
+    if unaccounted_runs:
+        return (
+            f"undecided obligation(s), and the ESCALATION IS INCOMPLETE: the "
+            f"ledger witnesses {unaccounted_runs} invoked solver run(s) that "
+            f"no supplied record accounts for, so at least one obligation is "
+            f"undecided because its outcome did not arrive — not because of "
+            f"anything the propagation measured, and this verdict says "
+            f"nothing about whether a solver could have settled it. `records` "
+            f"is a container that does not yield the same thing on every "
+            f"pass; pass it as a materialised sequence and re-run"
+            + (f" (coverage also reports: {'; '.join(parts)})" if parts
+               else ""),
+        )
+    if not parts:
         return (
             f"undecided obligation(s), and transfer coverage is not the "
             f"cause: {c.known}/{c.total} equations ran a registered "
@@ -1285,14 +1390,6 @@ def undecided_cause_note(coverage, obligations) -> tuple[str, ...]:
             f"quotes the straddle where a top-level comparison produced "
             f"it)",
         )
-    parts = []
-    if c.unknown:
-        names = ", ".join(f"{n} ×{k}" for n, k in c.unknown_primitives)
-        parts.append(f"{c.unknown} equation(s) fell to ⊤ ({names})")
-    if c.unreached:
-        parts.append(f"{c.unreached} equation(s) unreached")
-    if c.inert:
-        parts.append(f"{c.inert} constraint(s) dropped")
     return (
         "undecided obligation(s) with coverage gaps in the query: "
         + "; ".join(parts)

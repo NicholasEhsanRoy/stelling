@@ -1676,11 +1676,20 @@ def test_the_bars_domain_cannot_read_a_new_field():
 # comment, and this project has watched "raise the bound" fail on six other
 # axes. The narrowing DECISION now consumes a boolean: `_evidence_is_about`
 # binds no recorded value and may not call the projection (both scans cover it
-# now), and the value zone is one four-line function, `_evidence_reproduces`,
-# whose two halves cannot aim — `_evidence_options` never sees the query,
-# `_reproduced_evidence` never sees the record. What is left is covered by
+# now), and the value zone is `_evidence_reproduces` AND EVERYTHING IT CALLS.
+#
+# THAT LAST CLAUSE IS A CORRECTION. The sentence here said "the value zone is
+# one four-line function, `_evidence_reproduces`, whose two halves cannot aim
+# — `_evidence_options` never sees the query, `_reproduced_evidence` never
+# sees the record". The four lines call a FIFTH function, `_whitelisted`, once
+# per side, and a signature says what a function is HANDED rather than what it
+# can REACH: a module-level `list` inside `_whitelisted` mints the narrowing
+# with neither signature touched, measured live at `faefc48` with the suite
+# byte-identical in both columns. What is left is covered by
 # `test_the_evidence_path_cannot_name_a_VALUE`, which is TOTAL over the source
-# rather than a sample over values.
+# rather than a sample over values, and by
+# `test_the_value_zone_is_CLOSED_UNDER_CALL`, which computes what "the source"
+# means instead of listing it.
 #
 # `test_the_bar_is_consulted_with_exactly_that_domain` does not reach 2, 4 or
 # 6: all three satisfy `len(seen) == 1 and seen[0] == _bar_domain(case)`,
@@ -1771,6 +1780,17 @@ _ALLOWED_READS = frozenset({
     # `_PROJECTIONS`, and channels 7 and 8 in the block comment above.
     ("stamp", "_evidence_reproduces", "name"),
     ("stamp", "_evidence_reproduces", "options"),
+    # ... and the reader that CLASSIFIES rather than decides. It counts the
+    # ledger's invoked stamps the records do not account for, and the count
+    # reaches exactly one thing: which sentence
+    # `stelling.verdict.undecided_cause_note` writes about an obligation that
+    # is ALREADY undecided. It cannot discharge, cannot refute, cannot narrow
+    # and cannot widen — `test_a_STRICT_SUBSET_records_does_not_blame_the_
+    # INTERVAL` pins that the statuses do not move. It is in this ledger and
+    # not exempted from it because "it only writes a note" is exactly what
+    # every channel here would have said first.
+    ("record", "_unaccounted_solver_runs", "invocations"),
+    ("stamp", "_unaccounted_solver_runs", "invoked"),
 })
 
 
@@ -1982,29 +2002,176 @@ def test_the_narrowing_decision_reads_options_in_one_place():
 # The functions a recorded option value can be reached from, and the ones that
 # DECIDE. Split because the two carry different rules: the value zone may name
 # an attribute (it has to read one), the decision may name nothing at all.
-_EVIDENCE_VALUE_ZONE = ("_evidence_options", "_evidence_budget",
-                        "_reproduced_evidence", "_evidence_reproduces")
-_EVIDENCE_DECISION = ("_evidence_is_about", "_bar_scope")
+#
+# NEITHER IS AN ENUMERATION ANY MORE, AND `_whitelisted` IS WHY. The repair
+# that closed channel 8 added it — `_EVIDENCE_OPTION_KEYS` out of a mapping,
+# called once per SIDE of `recorded == reproduced` — and it landed in no list
+# anywhere: not in the four names this tuple used to hold, so the source pin
+# never parsed it; not in `_TRANSPARENT_FRAMES`, but it is handed a plain
+# `dict` and reads no attribute, so the READ LEDGER never sees it either; and
+# not among the five functions `test_the_narrowing_decision_reads_options_in_
+# one_place` scans. It may spell anything, and it sees both sides. MEASURED at
+# `faefc48`: a module-level `list` and four lines inside it — stash the
+# record's projection on the first call, return it on the second — mints the
+# narrowing at one chosen budget with NEITHER pinned signature touched and the
+# full suite byte-identical in both columns.
+#
+# So the sets below are DERIVED: the transitive closure, over the compiled code
+# objects, of every module-level name of `stelling.verdict` the entry point can
+# reach. The tuples are checked AGAINST the derivation in both directions, so a
+# seventh helper is red at the moment it is written rather than at the moment
+# someone remembers to list it — and every rule in this section runs over the
+# DERIVED set, so it is covered even while it is red. "Pinned by a list of
+# current members" is could-not-fail shape #4, and that is exactly what a
+# four-name tuple was.
+_EVIDENCE_VALUE_ZONE_ENTRY = "_evidence_reproduces"
+_EVIDENCE_DECISION_ENTRY = "_bar_scope"
+
+# What the derivation must produce. Adding a name here is not bookkeeping: it
+# puts a function on the path a recorded option value reaches, and every rule
+# below then applies to its body.
+_EVIDENCE_VALUE_ZONE = ("_evidence_budget", "_evidence_options",
+                        "_evidence_reproduces", "_reproduced_evidence",
+                        "_whitelisted")
+# ... and the DECISION's own closure, which is the value zone plus these. `8a`
+# wrote its conjunct in `_bar_scope`; a helper `_bar_scope` calls is the same
+# corruption one call deeper, so the decision is closed under call too.
+_EVIDENCE_DECISION = ("_bar_scope", "_bar_scope_phrase", "_barred_in_eqns",
+                      "_barred_primitives", "_evidence_is_about")
+
+# The module-level DATA either closure may reach, and it MUST BE IMMUTABLE.
+# M1's spelling needs no `global` statement and no `globals()` call at all: a
+# module-level `list` mutated through `.append()` / `.pop()` carries a value
+# from one call to the next, and every other rule in this file is silent about
+# it. A `frozenset` or a `tuple` cannot carry anything.
+_EVIDENCE_ZONE_CONSTANTS = ("VERIFIED_BARRED_PRIMITIVES",
+                            "_EVIDENCE_BUDGET_KEYS", "_EVIDENCE_DERIVED_KEYS",
+                            "_EVIDENCE_OPTION_KEYS")
+_IMMUTABLE = (frozenset, tuple, str, bytes, int, float, type(None))
+
+# The only things either closure may IMPORT. A function-level `from x import
+# y` binds a LOCAL, so it is invisible to the closure walk below — which is how
+# a helper in another module would be reached without appearing at module
+# scope. The VALUE ZONE gets one: the emission entry point the reproduction is
+# re-derived with, which is the whole reason it may call out of the module at
+# all. The DECISION additionally re-slices the query, which is what it is FOR;
+# those are named rather than waved at, and they are not available to the zone.
+_EVIDENCE_ZONE_IMPORTS = (("stelling.smt", "emit"),)
+_EVIDENCE_DECISION_IMPORTS = _EVIDENCE_ZONE_IMPORTS + (
+    ("stelling.obligation", "DeclinedObligation"),
+    ("stelling.obligation", "slice_obligation"),
+    ("stelling.propagate", "interval_env"),
+    ("stelling.coverage", "sub_jaxprs"),
+)
 
 # The forms that smuggle a value out of the zone without returning it. `8a`
 # used `globals().__setitem__(...)`; a `global` statement does the same job.
 _SMUGGLERS = ("globals", "vars", "setattr", "locals")
 
 
-def _fn_body_ast(fn):
-    """One function's body as AST, with its docstring dropped — a docstring is
-    a `str` constant and every rule below is about constants."""
+def _module_names_reachable(fn, namespace):
+    """Every name of `namespace` that this function — or any function, lambda
+    or comprehension nested inside it — can reach.
+
+    Read off the COMPILED code objects rather than the source: a nested `def`
+    carries its own code object and its own `co_names`, so this does not have
+    to re-implement Python's scoping rules to see one. `co_names` also holds
+    attribute names, which is the safe direction — a name that is not a module
+    global is filtered out by `namespace`, and one that collides with a module
+    global demands enumeration it did not need."""
+    import types
+
+    seen, todo = set(), [fn.__code__]
+    while todo:
+        code = todo.pop()
+        seen.update(n for n in code.co_names if n in namespace)
+        todo.extend(c for c in code.co_consts if isinstance(c, types.CodeType))
+    return seen
+
+
+def _reachable_closure(entry, namespace):
+    """The transitive closure of `_module_names_reachable` from one entry
+    point — what "closed under CALL" has to be computed over."""
+    seen, frontier = {entry}, [entry]
+    while frontier:
+        obj = namespace[frontier.pop()]
+        if not hasattr(obj, "__code__"):
+            continue
+        for name in _module_names_reachable(obj, namespace):
+            if name not in seen:
+                seen.add(name)
+                frontier.append(name)
+    return seen
+
+
+def _closure_offences(entry, namespace, module_name, zone, constants):
+    """Every way the closure from `entry` reaches something the pin does not
+    cover. Returns a list of (rule, detail).
+
+    Written over an explicit namespace so it can be driven against a synthetic
+    module in the anti-vacuity block below — a checker measured only against
+    the code it was written for is could-not-fail shape #3."""
+    out = []
+    for name in sorted(_reachable_closure(entry, namespace)):
+        obj = namespace[name]
+        if getattr(obj, "__module__", None) == module_name:
+            if name not in zone:
+                out.append(("calls-out", name))
+        elif name not in constants:
+            out.append(("unenumerated", name))
+        elif not isinstance(obj, _IMMUTABLE):
+            out.append(("mutable", f"{name} is a {type(obj).__name__}"))
+    return out
+
+
+def _fn_tree(fn):
+    """One function's `ast.FunctionDef`."""
     import ast
     import inspect
     import textwrap
 
-    tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
-    body = tree.body[0].body
+    return ast.parse(textwrap.dedent(inspect.getsource(fn))).body[0]
+
+
+def _fn_body_ast(fn):
+    """One function's body as AST, with its docstring dropped — a docstring is
+    a `str` constant and every rule below is about constants."""
+    import ast
+
+    body = _fn_tree(fn).body
     if (body and isinstance(body[0], ast.Expr)
             and isinstance(body[0].value, ast.Constant)
             and isinstance(body[0].value.value, str)):
         body = body[1:]
     return body
+
+
+def _fn_defaults_ast(fn):
+    """A function's DEFAULT ARGUMENT expressions — which `_fn_body_ast` does
+    not return and never did.
+
+    `tree.body[0].body` is the body and nothing else, so a discriminator
+    parked in the signature was outside every rule in this file.
+    MEASURED at `faefc48`: `def _evidence_reproduces(sliced, stamp,
+    _m=("30000",))` is 0 RED — no `Constant` in the body, and the comparison
+    that reads `_m` has a `Call` on the left and a `Name` on the right, so
+    neither the literal rule nor the comparison rule matches."""
+    args = _fn_tree(fn).args
+    return [d for d in (*args.defaults, *args.kw_defaults) if d is not None]
+
+
+def _fn_imports(fn):
+    """Every `(module, name)` a function imports, `name` None for a plain
+    `import x`."""
+    import ast
+
+    out = []
+    for node in ast.walk(_fn_tree(fn)):
+        if isinstance(node, ast.Import):
+            out += [(alias.name, None) for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            out += [(node.module, alias.name) for alias in node.names]
+    return out
 
 
 def _value_zone_offences(nodes, allow):
@@ -2077,12 +2244,25 @@ def test_the_evidence_path_cannot_name_a_VALUE():
     constrains what may be WRITTEN on the path, not every predicate Python can
     express. A discriminator spelled as a method call on a value —
     `recorded.get(k).startswith(...)`, a hash of it, a length test that dodges
-    `ast.Compare` — is not matched. That residue is why the budget sweep below
-    is KEPT as corroboration rather than deleted, and why the value zone is
-    also made unable to AIM: `_evidence_options` is handed no query and
-    `_reproduced_evidence` is handed no record, so neither can compute the
-    mapping a false narrowing would have to produce (`::test_the_reproduction_
-    is_handed_no_record`).
+    `ast.Compare` — is not matched.
+
+    **THE BUDGET SWEEP DOES NOT CORROBORATE THAT RESIDUE, and the sentence
+    that said it did is corrected here.** A sweep is a sample; a conjunct keyed
+    outside the sample is invisible to it at every value it does not draw.
+    Measured at `faefc48`: a default argument on `_evidence_reproduces` and a
+    seventh helper called from it, both keyed on the recorded `:timeout` at
+    30000, are 0 RED across the whole suite INCLUDING the sweep — at exactly
+    the value `_CALLER_BUDGETS`' own comment names as unsampled. The sweep is
+    kept because a behavioural check anti-correlated with a source check is
+    worth having. Nothing corroborates the method-call residue.
+
+    AND THE SIGNATURE PIN IS NOT THE OTHER HALF EITHER: `_evidence_options` is
+    handed no query and `_reproduced_evidence` no record, but the two halves
+    run in one process one after the other and both call `_whitelisted`, so
+    aiming needs a CHANNEL rather than an argument
+    (`::test_the_reproduction_is_handed_no_record` says what it does and does
+    not establish). The channel is closed by
+    `::test_the_value_zone_is_CLOSED_UNDER_CALL`.
     """
     allow = {attr for _kind, _fn, attr in _ALLOWED_READS}
     assert "options" in allow and "invoked" in allow and "name" in allow, (
@@ -2091,8 +2271,27 @@ def test_the_evidence_path_cannot_name_a_VALUE():
         f"from it and would now forbid an honest read"
     )
 
-    for name in _EVIDENCE_VALUE_ZONE:
-        offences = _value_zone_offences(_fn_body_ast(getattr(V, name)), allow)
+    # over the DERIVED closure, not over the written tuple: a helper added to
+    # the path is parsed by this pin at the moment it is written, not at the
+    # moment someone remembers to list it
+    zone = sorted(_reachable_closure(_EVIDENCE_VALUE_ZONE_ENTRY, vars(V)))
+    decision = sorted(
+        set(_reachable_closure(_EVIDENCE_DECISION_ENTRY, vars(V))) - set(zone))
+    for name in zone:
+        if not hasattr(getattr(V, name), "__code__"):
+            continue  # a constant, covered by the closure test's own rules
+        # THE SIGNATURE IS PART OF THE SOURCE. A default argument is where the
+        # discriminator goes once the body is pinned, and `_fn_body_ast` never
+        # walked one.
+        assert not _fn_defaults_ast(getattr(V, name)), (
+            f"`{name}` now has a DEFAULT ARGUMENT. The zone needs none, and a "
+            f"default is a value bound at definition time that every rule "
+            f"here used to be blind to — measured 0 RED at `faefc48` as "
+            f"`_evidence_reproduces(sliced, stamp, _m=(\"30000\",))`"
+        )
+        offences = _value_zone_offences(
+            _fn_body_ast(getattr(V, name))
+            + _fn_defaults_ast(getattr(V, name)), allow)
         assert not offences, (
             f"`{name}` is on the path a recorded option VALUE reaches, and it "
             f"now spells {offences}. Every measured spelling of channel 8 is "
@@ -2103,12 +2302,20 @@ def test_the_evidence_path_cannot_name_a_VALUE():
             f"should be argued in the commit rather than done quietly"
         )
     # The DECISION may not name anything at all — but it does carry f-string
-    # message text, so only the comparison and smuggling rules apply.
-    for name in _EVIDENCE_DECISION:
+    # message text, so only the comparison and smuggling rules apply. Derived
+    # too, and for the same reason: `8a` wrote its conjunct in `_bar_scope`,
+    # and a helper `_bar_scope` calls is that corruption one call deeper.
+    for name in decision:
+        if not hasattr(getattr(V, name), "__code__"):
+            continue
+        assert not _fn_defaults_ast(getattr(V, name)), (
+            f"`{name}` DECIDES and now has a default argument"
+        )
         offences = [
             (rule, detail)
             for rule, detail in _value_zone_offences(
-                _fn_body_ast(getattr(V, name)), allow)
+                _fn_body_ast(getattr(V, name))
+                + _fn_defaults_ast(getattr(V, name)), allow)
             if rule != "literal"
         ]
         assert not offences, (
@@ -2151,6 +2358,161 @@ def test_the_evidence_path_cannot_name_a_VALUE():
                   '    return dict(getattr(s, "options", None) or ())\n'
                   ).body[0].body, allow)
 
+    # AND THE SIGNATURE, which is the half `tree.body[0].body` never returned.
+    # `8e` is 0 RED at `faefc48` against every rule above: the body holds no
+    # `Constant` at all, and the `Compare` reading the default has a `Call` on
+    # the left and a `Name` on the right.
+    for label, src in (
+        ("8e-default", 'def f(sliced, stamp, _m=("30000",)):\n'
+                       '    return _evidence_budget(stamp) == _m[0]\n'),
+        ("8e-kwonly", 'def f(sliced, *, _m="30000"):\n'
+                      '    return _evidence_budget(sliced) == _m\n'),
+    ):
+        tree = ast.parse(textwrap.dedent(src)).body[0]
+        defaults = [d for d in (*tree.args.defaults, *tree.args.kw_defaults)
+                    if d is not None]
+        assert defaults and _value_zone_offences(defaults, allow), (
+            f"the source pin does not read {label}'s SIGNATURE, so a "
+            f"discriminator parked in a default argument is outside every "
+            f"rule in this test — which is what it was at `faefc48`"
+        )
+
+
+def test_the_value_zone_is_CLOSED_UNDER_CALL():
+    """THE CLASS `test_the_evidence_path_cannot_name_a_VALUE` LEFT OPEN, and
+    the one the four-name tuple could not have closed.
+
+    A pin over a LIST of functions constrains those functions. It says nothing
+    about what they call. Three measured consequences at `faefc48`, each live
+    with the full suite byte-identical to unmutated in both columns:
+
+    * `_whitelisted` — added by the repair itself, called once per SIDE of
+      `recorded == reproduced`, and in NO enumeration anywhere. Not in the
+      four names the source pin parsed; not in `_TRANSPARENT_FRAMES`, and it
+      reads no attribute (it is handed a plain `dict`), so the read ledger
+      never sees it; not among the five functions the one-place scan reads. A
+      module-level `list`, and four lines in it, stash the record's projection
+      on the first call and return it on the second — the narrowing minted at
+      one chosen budget, with NEITHER pinned signature touched. That is the
+      measurement that separates "the two halves cannot aim" from "the two
+      halves' SIGNATURES cannot aim";
+    * a SEVENTH helper, `_budget_ok(recorded)`, called from the zone: outside
+      six names, therefore outside every rule;
+    * a helper reached by a function-level `from ... import ...`, which binds a
+      LOCAL and so never appears at module scope at all.
+
+    So the zone is not a list. It is the transitive closure of what the
+    comparison can CALL, and the rules are:
+
+    1. every callable in the closure that `stelling.verdict` defines must be in
+       `_EVIDENCE_VALUE_ZONE` — and the pin above runs over the DERIVED set, so
+       a new one is covered while it is red rather than after;
+    2. every other module-level name the closure reads must be enumerated in
+       `_EVIDENCE_ZONE_CONSTANTS` **and be immutable**. This is the rule
+       `_LAST = []` dies on, and it needs no `global` statement and no
+       `globals()` call to be spelled — `.append()` on a module-level list is
+       an ordinary attribute call;
+    3. the closure may import only its own allow-list, because a
+       function-level import is invisible to rules 1 and 2.
+
+    The same three run over the DECISION's closure, since `8a` wrote its
+    conjunct in `_bar_scope` and a helper `_bar_scope` calls is that corruption
+    one call deeper.
+    """
+    ns = vars(V)
+    for entry, written, allowed_imports, label in (
+        (_EVIDENCE_VALUE_ZONE_ENTRY, set(_EVIDENCE_VALUE_ZONE),
+         _EVIDENCE_ZONE_IMPORTS, "value zone"),
+        (_EVIDENCE_DECISION_ENTRY,
+         set(_EVIDENCE_DECISION) | set(_EVIDENCE_VALUE_ZONE),
+         _EVIDENCE_DECISION_IMPORTS, "decision"),
+    ):
+        offences = _closure_offences(entry, ns, V.__name__, written,
+                                     _EVIDENCE_ZONE_CONSTANTS)
+        assert not offences, (
+            f"the {label}'s closure from `{entry}` reaches {offences}. "
+            f"`calls-out` is a function on the path a recorded option value "
+            f"takes that no rule in this file parses; `unenumerated` and "
+            f"`mutable` are a module-level object it can read or WRITE, which "
+            f"is how a value crosses from one side of `recorded == "
+            f"reproduced` to the other without a `global` statement, without "
+            f"`globals()`, and without either pinned signature changing"
+        )
+        derived = {n for n in _reachable_closure(entry, ns)
+                   if getattr(ns[n], "__module__", None) == V.__name__}
+        assert derived == written, (
+            f"the {label} DERIVES {sorted(derived)} and the tuple in this "
+            f"file says {sorted(written)}. The derivation is the pin; the "
+            f"tuple is the argued membership. They disagreeing means a "
+            f"function joined or left the path a recorded option value "
+            f"reaches without anyone saying so"
+        )
+        for name in sorted(derived):
+            imports = _fn_imports(getattr(V, name))
+            bad = [i for i in imports if i not in allowed_imports]
+            assert not bad, (
+                f"`{name}` in the {label} imports {bad}, which is not in "
+                f"{list(allowed_imports)}. A function-level import binds a "
+                f"LOCAL, so the closure walk above cannot see what it reached "
+                f"— every module the path may call out to is named, and the "
+                f"VALUE ZONE's list is the shorter of the two on purpose"
+            )
+    # ... and the two lists really are different, or the sentence above is
+    # decoration: the zone may not reach the slicing entry points.
+    assert set(_EVIDENCE_ZONE_IMPORTS) < set(_EVIDENCE_DECISION_IMPORTS), (
+        "the value zone's import allow-list is no longer a strict subset of "
+        "the decision's, so 'the shorter of the two' is not true"
+    )
+
+    # ANTI-VACUITY, against a SYNTHETIC module rather than against the code
+    # this was written for: a checker measured only on the shape it already
+    # passes is could-not-fail shape #3.
+    import textwrap
+
+    for label, src, zone in (
+        # M1: no `global`, no `globals()`, no literal, no signature change
+        ("module-level list", 'LAST = []\n'
+                              'def f(raw):\n'
+                              '    LAST.append(raw)\n'
+                              '    return LAST.pop(0)\n', ("f",)),
+        # M5: a different container, written in one function and read in
+        # another — the spelling M1 does not use
+        ("module-level dict", 'SEEN = {}\n'
+                              'def g(raw):\n'
+                              '    SEEN.update(raw)\n'
+                              'def f(raw):\n'
+                              '    g(raw)\n'
+                              '    return SEEN\n', ("f", "g")),
+        # M3: a seventh helper
+        ("helper outside the zone", 'def budget_ok(r):\n'
+                                    '    return r\n'
+                                    'def f(raw):\n'
+                                    '    return budget_ok(raw)\n', ("f",)),
+        # M6: the helper is NESTED, so nothing new appears at module scope —
+        # but its code object is walked, so what it reaches is still seen
+        ("nested def", 'LAST = []\n'
+                       'def f(raw):\n'
+                       '    def inner():\n'
+                       '        return LAST\n'
+                       '    return inner()\n', ("f",)),
+    ):
+        fake = {"__name__": "fake.module"}
+        exec(textwrap.dedent(src), fake)  # noqa: S102 — a fixture, not input
+        assert _closure_offences("f", fake, "fake.module", zone, ()), (
+            f"the closure check does not catch {label}; the value zone is "
+            f"closed against four spellings rather than against the class"
+        )
+    # ... and it permits the honest shape: an immutable module constant and a
+    # helper that IS in the zone
+    fake = {"__name__": "fake.module"}
+    exec(textwrap.dedent('KEYS = frozenset({"a"})\n'  # noqa: S102
+                         'def w(raw):\n'
+                         '    return {k: raw[k] for k in KEYS if k in raw}\n'
+                         'def f(raw):\n'
+                         '    return w(raw)\n'), fake)
+    assert not _closure_offences("f", fake, "fake.module", ("f", "w"),
+                                 ("KEYS",))
+
 
 def test_the_reproduction_is_handed_no_record():
     """THE OTHER HALF OF CHANNEL 8: a conjunct inside the value zone can only
@@ -2170,6 +2532,25 @@ def test_the_reproduction_is_handed_no_record():
     would have to change first. A parameter added to either — `stamp`,
     `record`, `invocations`, `recorded` — is the channel reopening, whatever
     the body then does with it.
+
+    **WHAT THIS DOES NOT ESTABLISH, corrected because it was offered as
+    establishing it.** These two assertions were written as the argument that
+    "the value zone's two halves cannot AIM". They are not that argument, and
+    the difference was MEASURED: at `faefc48` a module-level `list` inside
+    `_whitelisted` — which BOTH halves call — stashes the record's projection
+    on the first call and returns it on the second, minting the narrowing at
+    one chosen budget with neither signature below touched and the full suite
+    byte-identical in both columns. A signature says what a function is HANDED.
+    It says nothing about what the function can REACH, and reaching is enough:
+    the two halves ran in one process, in one order, one after the other.
+
+    What these assertions do establish is the narrow thing they check — that
+    neither half is handed the other's input DIRECTLY, so aiming needs a
+    channel rather than an argument. The channel is what
+    `::test_the_value_zone_is_CLOSED_UNDER_CALL` closes: no module-level
+    mutable anywhere in the closure, no helper outside the pin, no import that
+    hides one. The two are anti-correlated and both are needed; neither is the
+    other.
     """
     import inspect
 
@@ -2221,6 +2602,19 @@ def test_the_reproduction_comes_from_the_stamps_own_derivation():
     method `stelling.solvers` stamps an invocation with. Substituting it moves
     the bar's answer, which is what proves the bar reads THAT and not a copy.
     Reading them both and asserting equality would not: two copies agree too.
+
+    **AND THAT IS ALL IT PROVES.** "Pinned by substitution rather than by two
+    readings agreeing" does not constrain the substituted function's behaviour
+    at all — this test checks only that swapping `stamp_options` MOVES the
+    answer, never that the honest one is honest. The gap was measured: a
+    conjunct inside `stamp_options` leaves `tests/test_smt_emission.py` and
+    this whole file green, because `stamp_options` runs AFTER emission and
+    contributes not one byte to `Script.text`, so the byte-level emission tests
+    cannot see it either. The claim in `_reproduced_evidence`'s docstring that
+    "corrupting it corrupts EMISSION" was false and is corrected there. Its
+    honest OUTPUT is pinned by
+    `::test_the_stamps_own_derivation_is_the_HONEST_one`, which is the
+    anti-correlated half of this one.
     """
     from stelling.obligation import DeclinedObligation, slice_obligation
     from stelling.propagate import interval_env
@@ -2248,6 +2642,176 @@ def test_the_reproduction_comes_from_the_stamps_own_derivation():
     )
     assert V._reproduced_evidence(sl, "z3", 20000) == honest, (
         "the substitution leaked; the assertions after this point are unsound"
+    )
+
+
+def test_the_stamps_own_derivation_is_the_HONEST_one():
+    """THE HALF SUBSTITUTION CANNOT REACH: what `stamp_options` RETURNS.
+
+    `::test_the_reproduction_comes_from_the_stamps_own_derivation` proves the
+    bar reads `Script.stamp_options` and not a copy of it. That is a statement
+    about which function runs. A conjunct written INSIDE that function is a
+    statement about what it returns, and nothing checked it:
+
+    * the byte-level emission tests cannot see one. `stamp_options` appends
+      `set-logic` / `smt2_sha256` / `slice_sha256` to an ALREADY EMITTED
+      `Script` and contributes nothing to `Script.text`, so the scripts real
+      solvers answer about are byte-identical either way. Measured at
+      `faefc48`: a conjunct there leaves `tests/test_smt_emission.py` and this
+      file both fully green;
+    * the substitution test cannot see one either, by construction — it asserts
+      that a DIFFERENT `stamp_options` gives a different answer, which a
+      corrupted honest one also does.
+
+    And `stamp_options` builds BOTH sides of the bar's comparison: the record
+    (through `stelling.solvers.escalate`) and the reproduction. A conjunct
+    there moves them together.
+
+    So it is pinned twice, and the two are anti-correlated:
+
+    STRUCTURALLY — the method is one `return` of the emitted options plus three
+    named pairs. No branch, no comparison, no call. A conjunct has to be
+    spelled as one of those, so this is total over the source rather than a
+    sample over inputs;
+
+    BEHAVIOURALLY — the exact tuple, against an expectation derived HERE from
+    the script's own text and slice rather than from the method being checked.
+    A structural pin alone would miss a corrupted `Script.sha256`; this one
+    re-hashes the text.
+    """
+    import ast
+    import hashlib
+    import inspect
+    import textwrap
+
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env
+    from stelling.smt import Script, emit, slice_fingerprint
+
+    # -- structural: one return, no branch, no comparison, no call
+    tree = ast.parse(textwrap.dedent(
+        inspect.getsource(Script.stamp_options))).body[0]
+    body = [n for n in tree.body
+            if not (isinstance(n, ast.Expr)
+                    and isinstance(n.value, ast.Constant))]
+    assert len(body) == 1 and isinstance(body[0], ast.Return), (
+        f"`Script.stamp_options` is no longer a single `return`; it now runs "
+        f"{[type(n).__name__ for n in body]}. It builds BOTH sides of the "
+        f"bar's narrowing comparison, so a branch in it moves them together"
+    )
+    forbidden = [type(n).__name__ for n in ast.walk(body[0])
+                 if isinstance(n, (ast.If, ast.IfExp, ast.Compare, ast.Call,
+                                   ast.BoolOp, ast.Await))]
+    assert not forbidden, (
+        f"`Script.stamp_options` now spells {forbidden}. A conjunct on what "
+        f"the stamp records has to be one of these, and neither the emission "
+        f"tests nor the substitution test can see it"
+    )
+
+    # -- behavioural: the exact tuple, expectation derived from the TEXT
+    on_closed = trace(_scatter_ON_the_decided_slice)
+    sl = slice_obligation(on_closed, 0, interval_env(on_closed))
+    assert not isinstance(sl, DeclinedObligation)
+
+    for flavour, budget in (("z3", 20000), ("cvc5", 20000), ("z3", 31337)):
+        script = emit(sl, flavour, budget)
+        expected = tuple(script.options) + (
+            ("set-logic", script.logic),
+            ("smt2_sha256",
+             hashlib.sha256(script.text.encode("utf-8")).hexdigest()),
+            ("slice_sha256", slice_fingerprint(sl)),
+        )
+        assert script.stamp_options() == expected, (
+            f"`stamp_options()` on the {flavour}/{budget} script is\n"
+            f"  {script.stamp_options()}\nand the derivation from the "
+            f"script's own TEXT and SLICE is\n  {expected}\n"
+            f"The stamp records something the emission did not produce, and "
+            f"the bar compares that recording against itself on both sides"
+        )
+        # and it is a function of the script alone: no state between calls
+        assert script.stamp_options() == script.stamp_options()
+
+
+def test_the_budget_cannot_reach_the_SLICE_fingerprint():
+    """WHAT ACTUALLY BOUNDS `_evidence_budget`, measured — because the
+    argument its docstring used to carry bounds something else.
+
+    That argument: the recorded budget is itself in the compared set, so a
+    wrong budget puts a wrong `:timeout` in the reproduction, the equality
+    fails, and the bar widens. True, and a statement about an HONEST record —
+    it says a wrong budget disagrees with the budget THIS record names. The
+    threat is a record about a DIFFERENT query, and self-consistency with its
+    own `:timeout` says nothing about that.
+
+    What forbids it is that `slice_sha256` is a function of the SLICE and the
+    budget is not one of its inputs. Both halves are measured here:
+
+    * budget-INVARIANCE — one distinct `slice_sha256` across twelve budgets
+      spanning 1..60000, including `True`, which `isinstance(budget, int)`
+      admits and which is therefore a value a corrupted `_evidence_budget`
+      could actually return;
+    * and that it SEPARATES the bar's own neighbour pair, whose `smt2_sha256`
+      is EQUAL and whose `slice_sha256` differs. That is the case where the
+      script hash cannot tell the two apart, so the fingerprint is the whole of
+      what does.
+
+    Together those are stronger than any sweep over budgets: if no budget moves
+    `slice_sha256` and the two slices' fingerprints differ, then NO budget —
+    sampled or not — makes one slice's reproduction equal the other's record.
+    """
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env
+
+    budgets = (1, 2, 10, 999, 20000, 20001, 29999, 30000, 31337, 60000,
+               True, 4294967295)
+
+    on_closed = trace(_scatter_ON_the_decided_slice)
+    sl = slice_obligation(on_closed, 0, interval_env(on_closed))
+    assert not isinstance(sl, DeclinedObligation)
+
+    reproductions = [V._reproduced_evidence(sl, "z3", b) for b in budgets]
+    assert all(reproductions), (
+        f"the re-derivation came back empty at some budget in {budgets}; the "
+        f"invariance below would then be an invariance of nothing"
+    )
+    fingerprints = {r["slice_sha256"] for r in reproductions}
+    assert len(fingerprints) == 1, (
+        f"`slice_sha256` takes {len(fingerprints)} values over {len(budgets)} "
+        f"budgets, so the budget DOES reach the slice fingerprint and "
+        f"`_evidence_budget`'s stated bound is the wrong one"
+    )
+    scripts = {r["smt2_sha256"] for r in reproductions}
+    assert len(scripts) == len(budgets), (
+        f"`smt2_sha256` takes {len(scripts)} values over {len(budgets)} "
+        f"budgets; the budget is supposed to be part of the emitted text, and "
+        f"if it is not then the `:timeout` equality is the only thing a wrong "
+        f"budget breaks"
+    )
+
+    # ... and the fingerprint is what separates the pair the script hash
+    # cannot: the ELSEWHERE fixture's #0 emits the SAME bytes as the ON one's.
+    el_closed = trace(_scatter_ELSEWHERE_identical_decided_slice)
+    el = slice_obligation(el_closed, 0, interval_env(el_closed))
+    assert not isinstance(el, DeclinedObligation)
+    neighbour = V._reproduced_evidence(el, "z3", 20000)
+    here = V._reproduced_evidence(sl, "z3", 20000)
+    assert neighbour and here
+    assert neighbour["smt2_sha256"] == here["smt2_sha256"], (
+        "the neighbour pair no longer emits the same script, so this is not "
+        "the case where the fingerprint is doing the work and the assertion "
+        "below proves nothing about it"
+    )
+    assert neighbour["slice_sha256"] != here["slice_sha256"], (
+        "the two slices share a `slice_sha256` as well as a `smt2_sha256`, so "
+        "nothing in the compared set separates them and the bound on "
+        "`_evidence_budget` does not hold at all"
+    )
+    # which closes it for EVERY budget, sampled or not: the fingerprint the
+    # comparison requires is one the budget cannot move.
+    assert all(r["slice_sha256"] != neighbour["slice_sha256"]
+               for r in reproductions), (
+        "some budget produced this slice's reproduction carrying the "
+        "NEIGHBOUR's fingerprint"
     )
 
 
@@ -2785,6 +3349,105 @@ def test_a_TWO_FACED_records_is_REFUSED_and_not_absorbed(build, honest):
         f"the assembly refused, but not through the coherence gate: "
         f"{exc.value}. Some other guard is firing, and the shape this test is "
         f"about would come back if that guard moved"
+    )
+
+
+class _StrictSubsetFirst:
+    """A `records` whose FIRST pass is a non-empty STRICT SUBSET of the real
+    records, and the whole set on every later one. The residue the coherence
+    gate states it does not reach: the ledger says work happened and some
+    record exists, so the gate passes."""
+
+    def __init__(self, real):
+        self.real, self.passes = tuple(real), 0
+
+    def __iter__(self):
+        self.passes += 1
+        return iter(self.real[:1] if self.passes == 1 else self.real)
+
+
+def test_a_STRICT_SUBSET_records_does_not_blame_the_INTERVAL():
+    """THE GATE'S RESIDUE, AND THE ARGUMENT THE GATE IS JUSTIFIED BY.
+
+    The coherence gate refuses a `records` that comes back EMPTY against a
+    working ledger, and the reason its comment gives is that absorbing one
+    produced "an UNKNOWN carrying a WRONG EXPLANATION (the interval-straddle
+    note) on a query whose honest verdict is VERIFIED — worse than silence,
+    because a reader believes it".
+
+    The residue it names — a first pass yielding a non-empty STRICT SUBSET —
+    does exactly that. Measured at `faefc48` on a SCATTER-FREE query with two
+    solver-decided obligations, one record dropped on pass 1:
+
+        honest: VERIFIED, both obligations discharged
+        observed: UNKNOWN, obligation #1 `unknown`, and the only note about
+                  the cause read "…the propagated interval straddling the
+                  asserted bound"
+
+    A gate justified by an argument that its own residue violates is the
+    argument being wrong about its scope. The residue is soundness-harmless — a
+    dropped record leaves its obligation `unknown`, which can never mint
+    VERIFIED — and it is NOT refused here, because the comparison that would
+    refuse it also refuses
+    `::test_stripping_invocations_cannot_clear_the_bar`'s deliberate probe.
+    The same comparison CLASSIFIES instead: the ledger witnesses invoked runs
+    the records do not account for, so the note says the outcome did not
+    arrive.
+
+    Scatter-free is the row that isolates it: the bar never fires there, so
+    nothing about the bar is at stake and the whole of what is measured is
+    whether the verdict is honest about WHY it is undecided.
+    """
+    import dataclasses
+
+    from stelling.solvers import make_solver_verdict
+
+    closed, prop, esc = _stamped(_scatter_free_TRUE_two_obligations)
+    honest = make_solver_verdict(closed, prop, esc, **VERSIONS)
+    assert honest.status == "VERIFIED" and len(esc.records) > 1, (
+        f"the fixture is {honest.status} with {len(esc.records)} record(s); a "
+        f"non-empty STRICT subset needs at least two, and the misattribution "
+        f"is only a misattribution against an honest VERIFIED"
+    )
+    assert esc.ledger.spawns, "no ledger work, so the classifier sees nothing"
+
+    subset = _StrictSubsetFirst(esc.records)
+    v = make_solver_verdict(
+        closed, prop, dataclasses.replace(esc, records=subset), **VERSIONS)
+    assert subset.passes >= 1, "the fixture was never iterated"
+
+    # the residue is still a residue: it is absorbed, not refused, and it
+    # costs the ANSWER rather than the soundness
+    assert v.status == "UNKNOWN" and any(
+        o.status == "unknown" for o in v.obligations), (
+        f"{v.status}: the strict subset no longer costs the answer, so this "
+        f"test is measuring a shape that no longer exists"
+    )
+    assert not any(o.status in ("violated-witness", "violated-over-set")
+                   for o in v.obligations), (
+        "a dropped record turned an obligation into a REFUTATION"
+    )
+
+    # ... and the verdict does not blame the propagation for it
+    assert not any("straddling the asserted bound" in n for n in v.notes), (
+        f"the verdict still carries the interval-straddle note, which is the "
+        f"explanation the coherence gate's own comment calls worse than "
+        f"silence: {[n for n in v.notes if 'straddling' in n]}"
+    )
+    assert any("ESCALATION IS INCOMPLETE" in n for n in v.notes), (
+        f"the misattributing note is gone but nothing replaced it. Silence is "
+        f"better than a wrong cause and worse than the right one, and the "
+        f"ledger knows the right one: {v.notes}"
+    )
+
+    # the classifier is not firing on the HONEST assembly, or every UNKNOWN in
+    # the suite would carry this sentence and it would mean nothing
+    assert not any("ESCALATION IS INCOMPLETE" in n for n in honest.notes)
+    closed2, prop2, esc2 = _stamped(_scatter_ON_the_decided_slice)
+    v2 = make_solver_verdict(closed2, prop2, esc2, **VERSIONS)
+    assert not any("ESCALATION IS INCOMPLETE" in n for n in v2.notes), (
+        f"an honest escalation is being told its outcomes went missing: "
+        f"{v2.notes}"
     )
 
 

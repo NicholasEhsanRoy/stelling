@@ -1673,6 +1673,39 @@ def _bar_domain(escalation) -> dict[int, tuple[SolverStamp, ...]] | object:
         return _BAR_DOMAIN_UNREADABLE
 
 
+def _unaccounted_solver_runs(escalation, ledger_stamps) -> int:
+    """How many INVOKED solver runs the ledger witnesses that the supplied
+    ``records`` do not account for. Zero for every escalation ``escalate()``
+    builds, and zero whenever the records carry at least as much invocation as
+    the ledger does.
+
+    NOT A GATE, AND DELIBERATELY NOT ONE. The degenerate-`records` gate above
+    refuses what it can prove came from nowhere — a ledger with work against an
+    EMPTY `records`. It stops short of comparing the ledger's invoked stamps
+    against the records' invocations because that comparison also refuses
+    `tests/test_verified_bar.py::test_stripping_invocations_cannot_clear_the_bar`,
+    which strips invocations on purpose to probe a different invariant. The
+    same comparison is safe to CLASSIFY with: it decides which sentence the
+    verdict writes about a still-undecided obligation, never whether the
+    verdict is emitted and never what any obligation's status is.
+
+    Counts INVOKED stamps on both sides, because an un-invoked stamp is a
+    recorded non-run and witnesses nothing. Never raises and never returns a
+    negative: an unreadable escalation yields 0, which is the quiet direction,
+    and the only thing lost is one classifying sentence."""
+    try:
+        witnessed = sum(1 for s in ledger_stamps if s.invoked)
+        accounted = sum(
+            1
+            for r in escalation.records
+            for s in r.invocations
+            if s.invoked
+        )
+        return max(witnessed - accounted, 0)
+    except Exception:  # noqa: BLE001 — a note must never break a verdict
+        return 0
+
+
 def make_solver_verdict(
     closed: ir.ClosedJaxpr,
     propagation: Propagation,
@@ -1861,14 +1894,29 @@ def make_solver_verdict(
     # EXPLANATION (the interval-straddle note) on a query whose honest verdict
     # is VERIFIED — worse than silence, because a reader believes it.
     #
-    # WHAT IT DOES NOT REACH, stated rather than left to be found: a `records`
+    # WHAT IT DOES NOT REFUSE, stated rather than left to be found: a `records`
     # whose first pass yields a non-empty STRICT SUBSET. The ledger says work
     # happened and some record exists, so this gate passes, and the obligations
-    # whose records were dropped come back `unknown` with the same generic
-    # note. Comparing the ledger's invoked stamps against the invocations the
-    # records carry would reach it and would also refuse
-    # `test_stripping_invocations_cannot_clear_the_bar`'s fixture, which is a
-    # deliberate probe of a DIFFERENT invariant; that trade is not taken here.
+    # whose records were dropped come back `unknown`. Comparing the ledger's
+    # invoked stamps against the invocations the records carry would REFUSE it
+    # and would also refuse `test_stripping_invocations_cannot_clear_the_bar`'s
+    # fixture, which is a deliberate probe of a DIFFERENT invariant; that trade
+    # is not taken.
+    #
+    # BUT THE RESIDUE IS NOT LEFT CARRYING THE NOTE THIS GATE EXISTS TO STOP.
+    # The justification above is "absorbing it produced an UNKNOWN carrying a
+    # WRONG EXPLANATION", and measured on `faefc48` the strict-subset residue
+    # emitted that explanation verbatim: scatter-free query, `records` yielding
+    # one of two records on pass 1 — honest verdict VERIFIED, observed UNKNOWN
+    # carrying "…the propagated interval straddling the asserted bound". A gate
+    # justified by an argument its own residue violates is the argument being
+    # wrong about its scope, so the same comparison that is too strong to
+    # REFUSE with is used to CLASSIFY: `_unaccounted_solver_runs` below counts
+    # the ledger's invoked stamps the records do not account for, and
+    # `stelling.verdict.undecided_cause_note` says the outcome went missing
+    # instead of blaming the propagation. Classifying is not refusing — the
+    # stripped-invocations probe keeps its verdict and its bar, and gains one
+    # true sentence about why its obligation is undecided.
     if (escalation.ledger.spawns or ledger_stamps) and not escalation.records:
         raise MispairedEscalationError(
             f"incoherent escalation: the ledger records "
@@ -2094,7 +2142,8 @@ def make_solver_verdict(
     # (post-escalation — solver-decided ones need no cause), from the one
     # shared derivation in stelling.verdict so the two paths cannot drift
     notes = notes + _verdict.undecided_cause_note(
-        propagation.coverage, obligations
+        propagation.coverage, obligations,
+        _unaccounted_solver_runs(escalation, ledger_stamps),
     )
     # THE SCATTER VERIFIED BAR (stelling.verdict.VERIFIED_BARRED_PRIMITIVES).
     # Scoped to the SOLVER path deliberately, and this scoping is the whole
