@@ -279,3 +279,17 @@ because jax inserts an explicit `broadcast_in_dim` for the rank promotion
 and the recursion drops on the unrecognised producer. The class is
 therefore bounded by what jax lowers without a rank change; the gate
 covers both shapes regardless.
+
+### Final state, re-measured at the branch tip
+
+`pytest -q -ra -p no:randomly`, both series, at `27ed70f`:
+jax 0.11.0 `2235 passed, 2 skipped, 22 warnings in 148.02s`;
+jax 0.10.2 `2235 passed, 2 skipped, 22 warnings in 147.96s` (run
+concurrently; load average 0.35 / 1.30 / 1.72 at completion, 24 cores,
+with other sessions' pytest on the same box). `pytest --collect-only -q`:
+2237 ids on each series, `diff` empty; against `c20f38e`'s 2153, +84 and
+−0 (70 in `tests/test_size0_assume.py`, 14 in
+`tests/test_assume_constrain.py`).
+
+The lab is committed at `scratchpad/sz0_lab/`; the paths quoted above
+(`/home/nick/MSF/.wt-sz0/lab/…`) are where it was run from.
