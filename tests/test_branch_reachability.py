@@ -272,6 +272,38 @@ def test_a_shared_branch_body_is_certified_per_occurrence():
     ]
 
 
+def test_the_nonvacuity_failed_face_is_withheld_on_the_same_rule():
+    """FAILED says "the stated point is NOT in the declared set (harness
+    defect)" — the strongest sentence the nonvacuity face has, and it
+    rests on the same reachability. Same rule, all three positions."""
+    from stelling.harness import nonvacuity
+
+    def mk(guard):
+        def h():
+            x = any_array((3,), "float64", (-1.0, 1.0))
+            a = assert_(x > -9.0)
+            b = jax.lax.cond(
+                guard(x), lambda v: nonvacuity(v > 5.0), lambda v: v > 0.0, x
+            )
+            return a, b
+
+        return h
+
+    def checks(h):
+        return [c.status for c in propagate(trace(h)).nonvacuity_checks]
+
+    # unreachable branch: withheld
+    assert checks(mk(lambda x: x[0] - x[0] > 0.0)) == ["unknown"]
+    # reachable branch (witnessed at the corner): unmoved
+    assert checks(mk(lambda x: x[0] > 0.0)) == ["violated-over-set"]
+    # top level: never touched
+    def top():
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return assert_(x > -9.0), nonvacuity(x > 5.0)
+
+    assert checks(top) == ["violated-over-set"]
+
+
 def test_an_obligation_inside_a_jit_wrapper_is_unmoved():
     # jit is a TRANSPARENT primitive: it is descended into and executes
     # unconditionally, so nothing here is branch-scoped.

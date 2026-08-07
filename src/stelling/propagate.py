@@ -4374,6 +4374,9 @@ class _Propagator:
         # ``unforced_depth > 0`` — the candidates for withholding, paired
         # with the identity a probe run can certify.
         self.branch_violations: list[tuple[int, tuple]] = []
+        # the same, for nonvacuity conditions: their definite face is the
+        # FAILED stamp sentence, which is the same claim class.
+        self.branch_nonvacuity_violations: list[tuple[int, tuple]] = []
         # (cond equation, branch index) for every branch currently open.
         # The equation identity is the object itself: the probe runs walk
         # the SAME `ir` query object the real run walked, so identity is
@@ -6589,6 +6592,12 @@ class _Propagator:
                 )
             )
         if eqn.primitive == "stelling_nonvacuity":
+            if self.unforced_depth == 0:
+                # same witness recording as the assert above: this
+                # membership condition is reached by a chain of forced
+                # conds, so a pinned probe run that gets here has found a
+                # point of the declared box that evaluates it.
+                self.certain_reached.add(self._reach_key(eqn))
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
             if status == "unknown":
                 # the assert's hint, on the face that needs it MOST: an
@@ -6646,6 +6655,15 @@ class _Propagator:
                     "membership condition definitely false over the "
                     "precondition-narrowed superset WITHHELD from FAILED "
                     "(precondition satisfiability uncertified; see notes)"
+                )
+            if status == "violated-over-set" and self.unforced_depth:
+                # the same class as the assert candidate above, on the
+                # face that makes the strongest claim: FAILED says "the
+                # stated point is NOT in the declared set (harness
+                # defect)", and a membership condition inside a branch no
+                # point of the box reaches supports no such sentence.
+                self.branch_nonvacuity_violations.append(
+                    (len(self.nonvacuity_checks), self._reach_key(eqn))
                 )
             self.nonvacuity_checks.append(
                 ObligationReport(
@@ -6862,32 +6880,42 @@ def _withhold_uncertified_branch_refutations(closed, p, *, assume_mode, semantic
     Runs the witness search ONCE, and only when the walk actually recorded
     a branch-scoped violation: a query with none pays nothing.
     """
+    work = [
+        (p.obligations, p.branch_violations, "violation", "REFUTED"),
+        (
+            p.nonvacuity_checks,
+            p.branch_nonvacuity_violations,
+            "nonvacuity FAILED face",
+            "FAILED",
+        ),
+    ]
     candidates = [
-        (i, vid)
-        for i, vid in p.branch_violations
-        if p.obligations[i].status == "violated-over-set"
+        (sink, i, key, what, face)
+        for sink, recorded, what, face in work
+        for i, key in recorded
+        if sink[i].status == "violated-over-set"
     ]
     if not candidates:
         return
     certified = _reachability_witnesses(
         closed, p, assume_mode=assume_mode, semantics=semantics
     )
-    for i, vid in candidates:
-        if vid in certified:
+    for sink, i, key, what, face in candidates:
+        if key in certified:
             continue
-        o = p.obligations[i]
+        o = sink[i]
         where = o.source_info[-1] if o.source_info else "unknown location"
         p.notes.append(
-            f"violation WITHHELD from REFUTED at {where}: "
+            f"{what} WITHHELD from {face} at {where}: "
             f"{UNCERTIFIED_REACHABILITY_REFUSAL}"
         )
-        p.obligations[i] = dataclasses.replace(
+        sink[i] = dataclasses.replace(
             o,
             status="unknown",
             detail=(
-                "definite violation inside a branch whose reachability is "
-                "UNCERTIFIED, withheld from REFUTED (see notes); no "
-                "definite status is claimed in either direction"
+                f"definite violation inside a branch whose reachability is "
+                f"UNCERTIFIED, withheld from {face} (see notes); no "
+                f"definite status is claimed in either direction"
             ),
         )
 
