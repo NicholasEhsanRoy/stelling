@@ -59,7 +59,21 @@ _OPTIONAL: dict[str, _Optional] = {
 # `propagate._is_add_combiner` tested `isinstance(v, ir.ClosedJaxpr)`, which
 # is a fact about the jax that produced the param and not about the combiner
 # (0.11 merged the two classes; 0.10 has not), so every `.at[].add` row
-# declined on 0.10 — ten tests, VERIFIED silently becoming UNKNOWN.
+# declined on 0.10 — VERIFIED becoming UNKNOWN.
+#
+# TEN TESTS FAILED; NINE OF THEM WERE THIS. Measured by applying the
+# `_is_add_combiner` hunk alone: nine go green, and `test_doc_example`
+# [quickstart.md:37] does not — it is the `jit.inline` param, a different
+# cause with its own fix. An earlier commit message and an earlier version of
+# this comment said "ten tests, every one scatter-shaped"; that was not
+# measured, and it is wrong.
+#
+# NOR WAS IT SILENT — and the truth is worse than silence. The coverage line
+# disclosed the loss (`1 ⊤ (scatter-add ×1)`), but the note read
+# `'scatter-add' has no sound rule for params {...}`, which blames the
+# caller's program. There WAS a sound rule; the oracle misread the container.
+# The direction is safe — VERIFIED → UNKNOWN, never the reverse — so this was
+# capability loss, not unsoundness. What it cost was a true reason.
 TESTED_JAX_SERIES = ("0.10", "0.11")
 
 
