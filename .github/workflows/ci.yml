@@ -10,6 +10,38 @@ on:
 permissions:
   contents: read
 
+# THE THREE LANES BELOW ARE THE ONES A BRANCH PROTECTION RULE CAN REQUIRE, and
+# until this commit they were the only pytest steps in either workflow that ran
+# `pytest -q` and read nothing but its exit code.
+#
+# That is backwards. The argument for the separate channel is written out in
+# full at the `acceptance-any-pytree` step below — `session.exitstatus` is
+# last-writer-wins, and a run in which `tests/conftest.py` was ignored, filtered
+# out or never reached leaves the summary line byte-identical to a clean one —
+# and it was applied only to the two acceptance jobs, which the comments here
+# say explicitly must NOT be required checks, plus the release gate. So the
+# strongest assertion in the repo sat on the jobs whose red does not block, and
+# the jobs whose green does was taken on trust.
+#
+# The verdict was measured in all three of these environments before the
+# assertion was added, so none of them is being asked for something it does not
+# already produce:
+#
+#   jax 0.11.0   2296 passed, 2 skipped     verdict=made
+#   jax 0.10.2   2296 passed, 2 skipped     verdict=made
+#   no jax       1185 passed, 85 skipped    verdict=made
+#
+# (the third measured in an interpreter that genuinely does not have jax, not
+# with an import hook, since `stelling._optional.available` asks `find_spec`.)
+#
+# `rm -f` before the run is not tidiness. The step's whole claim is that
+# ABSENCE is a failure signal, and absence only means "this session did not
+# write one" if nothing else could have left the file there. Driven, with a
+# stand-in pytest that writes no verdict and a file already at the path: the
+# step exits 0 with `verdict=made` on a session that wrote nothing. GitHub's
+# hosted runners give each job a fresh RUNNER_TEMP, so this is inert there
+# today; it is one line, it fails closed, and it makes the sentence true
+# without depending on that.
 jobs:
   test-no-jax:
     name: tests (solvers only, jax uninstalled)
@@ -21,7 +53,23 @@ jobs:
       - run: uv pip install -e ".[solvers]" pytest
       - name: assert jax is absent
         run: .venv/bin/python -c "import importlib.util, sys; sys.exit(1 if importlib.util.find_spec('jax') else 0)"
-      - run: .venv/bin/python -m pytest -q
+      - name: pytest, with the skip-inventory verdict asserted off a file channel
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          .venv/bin/python -m pytest -q -ra
+          verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. A 'failed' verdict is an undisclosed skip or a silently dropped item; 'withdrawn' means this session was not entitled to claim the suite, and an unnarrowed CI run must be."
+            exit 1
+          fi
       - run: .venv/bin/python -m stelling
 
   # The FLOATING lane: `[jax]` is `jax>=0.5`, so this resolves whatever jax
@@ -46,7 +94,24 @@ jobs:
       - run: uv pip install -e ".[solvers,jax]" pytest
       - name: RESOLVED jax (floating — whatever is newest)
         run: .venv/bin/python -c "import jax, jaxlib; print('jax', jax.__version__, 'jaxlib', jaxlib.__version__)"
-      - run: .venv/bin/python -m pytest -q
+      # The verdict channel; see the block above `jobs:` for why it is here.
+      - name: pytest, with the skip-inventory verdict asserted off a file channel
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          .venv/bin/python -m pytest -q -ra
+          verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. A 'failed' verdict is an undisclosed skip or a silently dropped item; 'withdrawn' means this session was not entitled to claim the suite, and an unnarrowed CI run must be."
+            exit 1
+          fi
 
   # The PINNED lane, and the reason it exists is a measured gap, not tidiness.
   #
@@ -94,7 +159,24 @@ jobs:
               *) echo "::error title=the 0.10 lane did not get 0.10::${name} resolved to '${ver}'. This job exists to test the jax 0.10 series that TESTED_JAX_SERIES claims; on any other series it is a duplicate of the floating lane wearing a 0.10 name. Fix the pin, or narrow TESTED_JAX_SERIES to the series CI actually runs."; exit 1 ;;
             esac
           done
-      - run: .venv/bin/python -m pytest -q
+      # The verdict channel; see the block above `jobs:` for why it is here.
+      - name: pytest, with the skip-inventory verdict asserted off a file channel
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          .venv/bin/python -m pytest -q -ra
+          verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. A 'failed' verdict is an undisclosed skip or a silently dropped item; 'withdrawn' means this session was not entitled to claim the suite, and an unnarrowed CI run must be."
+            exit 1
+          fi
 
   # The two any_pytree acceptance tests hold the bar for "faithful sugar" —
   # a sugar declaration must trace to a content-hash-IDENTICAL query to the
@@ -198,10 +280,19 @@ jobs:
             exit 1
           fi
       - run: uv pip list
+      # `-ra` rather than `-rs`, for the reason spelled out at the reproducer
+      # step below: it is a superset, so the SKIPPED lines the grep depends on
+      # are still emitted, and a FAILED / ERROR / xpassed line shows up in the
+      # same summary instead of being silently absent from it. Driven, on one
+      # failing and one skipping test: `-rs` prints the SKIPPED line and NOT
+      # the `FAILED …` line; `-ra` prints both. The exit code is 1 either way,
+      # so this is legibility and not a false green — but a reader who has to
+      # scroll for the failure is a reader who mistakes it for something else,
+      # which has happened here.
       - name: the two acceptance tests must RUN — a skip here is the defect
         run: |
           set -euo pipefail
-          .venv/bin/python -m pytest -q -rs --no-header \
+          .venv/bin/python -m pytest -q -ra --no-header \
             "tests/test_any_pytree.py::test_h_clean_sugar_hash_equals_hand_declaration" \
             "tests/test_any_pytree.py::test_h_hard_sugar_hash_equals_hand_declaration" \
             | tee "${RUNNER_TEMP}/acceptance.log"
@@ -243,7 +334,12 @@ jobs:
           STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
         run: |
           set -euo pipefail
-          .venv/bin/python -m pytest -q -rs
+          # ABSENCE is only a signal if nothing else could have supplied the
+          # file; see the block above `jobs:`. Driven: with a file already at
+          # this path and a pytest that writes none, the step exits 0 on a
+          # session that wrote nothing.
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          .venv/bin/python -m pytest -q -ra
           verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
           if [ ! -f "${verdict}" ]; then
             echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
@@ -495,6 +591,9 @@ jobs:
           STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
         run: |
           set -euo pipefail
+          # See the identical line in the any_pytree lane: absence is only a
+          # signal if nothing else could have supplied the file.
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
           .venv/bin/python -m pytest -q -ra
           verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
           if [ ! -f "${verdict}" ]; then

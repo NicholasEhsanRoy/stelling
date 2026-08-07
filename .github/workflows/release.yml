@@ -47,7 +47,17 @@ jobs:
           STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/verdict.txt
         run: |
           set -euo pipefail
-          .venv/bin/python -m pytest -q -rs
+          # ABSENCE is the signal this step buys, and it is only a signal if
+          # nothing else could have left a file here. Driven, under `bash -e`
+          # with the environment faked: with a verdict file already at the path
+          # and a pytest that writes none, the step exits 0 on a session that
+          # wrote nothing — a publish riding on an earlier run's verdict.
+          rm -f "${RUNNER_TEMP}/verdict.txt"
+          # `-ra`, not `-rs`. Driven on one failing and one skipping test:
+          # `-rs` prints the SKIPPED line and omits `FAILED <nodeid>`, so the
+          # publish log of a red suite does not name what failed. `-ra` is a
+          # superset and the exit code is 1 either way.
+          .venv/bin/python -m pytest -q -ra
           verdict="${RUNNER_TEMP}/verdict.txt"
           if [ ! -f "${verdict}" ]; then
             echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the recorder was ignored, filtered out or never loaded — and pytest's own exit code cannot report that."
