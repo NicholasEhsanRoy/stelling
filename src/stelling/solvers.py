@@ -619,11 +619,12 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     #
     # But 8192 is the DEFAULT threshold, not a floor: it is ZERO when the child
     # is unbuffered. Under `PYTHONUNBUFFERED=1` (standard in Docker images and
-    # CI), `python -u`, or any per-line flush, a 2-value model leaks
-    # `answer sat` at 51 bytes. The child is spawned with no `env=`, so it
-    # inherits whatever the ambient environment says. So the earlier reading
-    # that "small fixtures cannot reach it" was an artifact of one buffering
-    # regime, not a property of the defect.
+    # CI) or any per-line flush, everything written before the death is
+    # through — MEASURED, a 2-value model puts all 51 bytes of its stdout
+    # through, `answer sat` among them. This function spawns with no `env=`,
+    # so the child inherits whatever the ambient environment says. The earlier
+    # reading that "small fixtures cannot reach it" was therefore an artifact
+    # of one buffering regime, not a property of the defect.
     #
     # REACHABILITY is not exotic either way: `smt.py` emits one
     # `(declare-const … Real)` per input ELEMENT, so a single (32,32) array is
