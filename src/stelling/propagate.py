@@ -5089,31 +5089,56 @@ class _Propagator:
                     ASSUME_DROP_NOTE.format(where=where) + f" ({reasons})"
                     + self._membership_hint_for(eqn.invars[0])
                 )
-                # F7's NO-OP HALF. The narrowing path sets `uncertified` when
-                # it constrains an over-approximated variable; a DROPPED
-                # assume never reached that branch, so neither the interval
-                # withhold nor solvers.py's decline-when-constrained ever
-                # engaged — both are conditioned on the assume having TAKEN
-                # EFFECT, and an assume that no-ops is invisible to both.
-                #
-                # A dropped assume means the query ran over a SUPERSET of the
-                # intended set, so the disposition is ONE-SIDED, exactly as
-                # F7 already is (it gates `violated-over-set` only, and
-                # nothing withholds `discharged`):
-                #
-                #   VERIFIED over a superset IMPLIES VERIFIED over the subset
-                #                                       -> keep, disclose
-                #   REFUTED  over a superset does NOT   -> withhold; the
-                #                                          witness may lie
-                #                                          outside the set
-                #
-                # Measured before this: `assume(jnp.all(x >= 0))` over
-                # x in [-10, 10]^3 asserting sum(x) >= 0 returned REFUTED with
-                # the replay-confirmed witness [0, 0, -1], which violates the
-                # dropped precondition. Two-sided would over-fire the way the
-                # scatter bar did for its whole history.
-                self.uncertified = True
-                self.assume_dropped = True
+            # F7's NO-OP HALF. The narrowing path sets `uncertified` when it
+            # constrains an over-approximated variable; a DROPPED assume never
+            # reached that branch, so neither the interval withhold nor
+            # solvers.py's decline-when-constrained ever engaged — both are
+            # conditioned on the assume having TAKEN EFFECT, and an assume
+            # that no-ops is invisible to both.
+            #
+            # A dropped assume means the query ran over a SUPERSET of the
+            # intended set, so the disposition is ONE-SIDED, exactly as F7
+            # already is (it gates `violated-over-set` only, and nothing
+            # withholds `discharged`):
+            #
+            #   VERIFIED over a superset IMPLIES VERIFIED over the subset
+            #                                       -> keep, disclose
+            #   REFUTED  over a superset does NOT   -> withhold; the witness
+            #                                          may lie outside the set
+            #
+            # Measured before this: `assume(jnp.all(x >= 0))` over
+            # x in [-10, 10]^3 asserting sum(x) >= 0 returned REFUTED with the
+            # replay-confirmed witness [0, 0, -1], which violates the dropped
+            # precondition. Two-sided would over-fire the way the scatter bar
+            # did for its whole history.
+            #
+            # THE NOTE GATE IS NOT THE FLAG GATE. They were one `if` until a
+            # branch-scoped unsatisfiable conjunct walked between them.
+            # `_unsatisfiable` degrades inside a cond branch (audit F2: the
+            # assume is branch-scoped and the other branch is real), so it
+            # appends to `vacuous` and NOT to `dropped` — and `dropped or not
+            # vacuous` is then FALSE. Nothing narrowed, the assume was not
+            # applied, and neither flag was set: the query refuted over the
+            # DECLARED box with the assume contributing nothing.
+            #
+            # Measured at 9efea6f AND at 3afbf01, x ∈ [-1,1]^3,
+            # `cond(x[0] > 0, yes, no)` with `yes: assume(v >= 2.);
+            # assert_(v > 5.)` -> REFUTED, witnesses=(); deleting the assume
+            # gives the same REFUTED, and the same assume at top level RAISES
+            # UnsatisfiableAssumptionError. All three detection sites reach
+            # this (empty meet, strict-boundary collapse, definitely-false
+            # constant comparison), and the run's own note already says
+            # "obligations in this branch may be vacuous under the branch's
+            # precondition" while the verdict says REFUTED.
+            #
+            # The mixed-conjunction path above already spells the rule:
+            # `if restricting or vacuous:` — vacuous is never harmless,
+            # because a branch-scoped unsatisfiable conjunct IS the assumed
+            # region being empty in that branch. Here nothing narrowed at
+            # all, so every reason to withhold that the mixed path has, this
+            # path has; the flags are unconditional.
+            self.uncertified = True
+            self.assume_dropped = True
 
     def _conjunct_certainly_true(self, atom: ir.Atom) -> bool:
         """Whether this assumed conjunct's OWN value is definitely true at

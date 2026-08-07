@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 # SPDX-License-Identifier: Apache-2.0
 
-"""REFUTED over a superset of the assumed region, on the two paths that
+"""REFUTED over a superset of the assumed region, on the three paths that
 still emitted it.
 
 `tests/test_dropped_assume.py` pins F7's no-op half for an assume that
-dropped WHOLLY. Two paths reached a definite REFUTED without ever passing
+dropped WHOLLY. Three paths reached a definite REFUTED without ever passing
 through it.
 
 **A — a drop beside a narrowing.** `_assume_constrain` routes on whether
@@ -23,7 +23,24 @@ at `refine=None` (the interval leg judged the violation and withheld it)
 and **REFUTED at `refine="affine"`** — the same violation re-minted from
 the same declared boxes.
 
-Both are wrong for one reason: the assumed region is EMPTY, so the
+**D — a branch-scoped unsatisfiable assume.** Inside a possibly-untaken
+`lax.cond` branch, `_unsatisfiable` must NOT raise: the assume is
+branch-scoped and the other branch is real (audit F2). It degrades to a
+branch-local vacuity note, appending to `vacuous` and NOT to `dropped` —
+and the whole-drop guard read `if dropped or not vacuous:`, which is then
+FALSE, so the note and the flags were gated together and NEITHER flag was
+set. Measured at `9efea6f` AND at the branch tip `3afbf01`, `x ∈ [-1,1]^3`,
+`cond(x[0] > 0, yes, no)` with `yes: assume(v >= 2.); assert_(v > 5.)`:
+**REFUTED, witnesses=()** — identical to the same query with the assume
+deleted, while the same assume at top level RAISES
+`UnsatisfiableAssumptionError`. The assume changed nothing at all, and the
+run's own note said "obligations in this branch MAY BE VACUOUS under the
+branch's precondition" beside the word REFUTED. All three detection sites
+reach it (empty meet, strict-boundary collapse, definitely-false constant
+comparison). The mixed path's `if restricting or vacuous:` already had the
+rule; the `else:` path was edited around and never received it.
+
+All three are wrong for one reason: the assumed region is EMPTY, so the
 conditional claim is vacuously TRUE. A definite violation over a superset
 is a refutation only if the assumed region is non-empty, and a dropped
 conjunct is exactly the part of the precondition whose satisfiability was
@@ -155,6 +172,76 @@ def _assert_before_assume():
     o = assert_(x > 5.0)
     assume(jnp.all(x >= 2.0))
     return (o,)
+
+
+# -- D harnesses: the assume lives inside a possibly-untaken cond branch -----
+#
+# `lax.cond(x[0] > 0, yes, no, x)`. Oracle over 59 269 points (50 000 uniform
+# in [-1,1]^3 + all 8 corners + a 21^3 grid): 29 337 take the `yes` branch,
+# and of those the number satisfying the branch's assume is **0** for every
+# construction below — the branch precondition is EMPTY, so every obligation
+# inside `yes` is vacuously true and REFUTED is wrong. The control's assert
+# is violated at all 29 337, so its REFUTED is right.
+
+
+def _in_branch(assume_body, claim=lambda v: v > 5.0):
+    """`yes` carries the assume and the obligation; `no` is inert filler."""
+    def h():
+        x = any_array((3,), "float64", (-1.0, 1.0))
+
+        def yes(v):
+            if assume_body is not None:
+                assume_body(v)
+            return assert_(claim(v))
+
+        def no(v):
+            return assert_(v > -5.0)
+
+        return (jax.lax.cond(x[0] > 0.0, yes, no, x),)
+    return h
+
+
+# each of the three `_unsatisfiable` detection sites, reached under a branch
+_branch_empty_meet = _in_branch(lambda v: assume(v >= 2.0))
+_branch_strict_collapse = _in_branch(lambda v: assume(v > 1.0))
+_branch_no_assume = _in_branch(None)                      # the control
+_branch_verified = _in_branch(lambda v: assume(v >= 2.0), lambda v: v > -5.0)
+
+
+def _branch_const_false():
+    """The third site: a definitely-false CONSTANT comparison (both sides
+    point intervals), which needs a degenerate declaration to reach."""
+    k = any_array((), "float64", (1.0, 1.0))     # point box [1, 1]
+    x = any_array((3,), "float64", (-1.0, 1.0))
+
+    def yes(v):
+        assume(k >= 2.0)                          # point vs point: def. FALSE
+        return assert_(v > 5.0)
+
+    def no(v):
+        return assert_(v > -5.0)
+
+    return (jax.lax.cond(x[0] > 0.0, yes, no, x),)
+
+
+def _branch_mixed_vacuous():
+    """narrowed NON-empty, `dropped` EMPTY, `vacuous` non-empty.
+
+    The only shape that reaches `or vacuous` in `if restricting or vacuous:`
+    on the mixed path — full-suite mutation found that operand uncovered.
+    `v >= -1.` is the declared lower bound (narrows nothing, but routes the
+    assume to the `if narrowed:` arm); `v > 1.` collapses onto the boundary.
+    """
+    x = any_array((3,), "float64", (-1.0, 1.0))
+
+    def yes(v):
+        assume((v >= -1.0) & (v > 1.0))           # branch region EMPTY
+        return assert_(v > 5.0)
+
+    def no(v):
+        return assert_(v > -5.0)
+
+    return (jax.lax.cond(x[0] > 0.0, yes, no, x),)
 
 
 def _run(h, **kw):
@@ -341,6 +428,98 @@ def test_an_unconstrained_refutation_is_untouched_by_either_guard():
         return (assert_(x >= 5.0),)
     assert _run(h, refine=None).status == "REFUTED"
     assert _run(h, refine="affine").status == "REFUTED"
+
+
+# -- D: the branch-scoped unsatisfiable assume -------------------------------
+
+_DETECTORS = [
+    ("empty-meet", _branch_empty_meet),
+    ("strict-boundary-collapse", _branch_strict_collapse),
+    ("definitely-false-constant", _branch_const_false),
+]
+_DETECTOR_IDS = [n for n, _ in _DETECTORS]
+
+
+@pytest.mark.parametrize("name,h", _DETECTORS, ids=_DETECTOR_IDS)
+def test_a_branch_scoped_unsatisfiable_assume_no_longer_refutes(name, h):
+    """All three `_unsatisfiable` detection sites, each under a cond branch.
+
+    Parametrised rather than written once because the three sites append to
+    `vacuous` from three different places in `_classify_assumed_pred`, and a
+    fix that reached only the one this branch happened to probe would leave
+    the other two live.
+    """
+    assert _run(h).status == "UNKNOWN", (
+        f"{name}: no point of the declared box that takes this branch "
+        f"satisfies the branch's assume, so every obligation inside it is "
+        f"vacuously true and REFUTED is wrong"
+    )
+    p = _prop(h)
+    assert p.assume_dropped is True
+    assert all(o.status != "violated-over-set" for o in p.obligations)
+
+
+@pytest.mark.parametrize("name,h", _DETECTORS, ids=_DETECTOR_IDS)
+def test_the_branch_vacuity_note_and_the_verdict_now_agree(name, h):
+    """The defect's signature was a run that said both things at once: the
+    F2 note "obligations in this branch may be vacuous" beside REFUTED.
+    Whichever note fires, the obligation must be withheld."""
+    p = _prop(h)
+    assert any(
+        "may be vacuous under the branch's precondition" in n
+        or "constraint DROPPED" in n
+        for n in p.notes
+    )
+    assert any("WITHHELD from REFUTED" in n for n in p.notes)
+
+
+def test_the_branch_assume_now_changes_something():
+    """The whole defect in one line: at `9efea6f` and at `3afbf01` these two
+    verdicts were EQUAL, so the assume contributed nothing whatever."""
+    assert _run(_branch_no_assume).status == "REFUTED"
+    assert _run(_branch_empty_meet).status == "UNKNOWN"
+
+
+def test_the_branch_control_still_refutes_on_both_legs():
+    """Don't close the bad path by blunting the good one."""
+    assert _run(_branch_no_assume, refine=None).status == "REFUTED"
+    assert _run(_branch_no_assume, refine="affine").status == "REFUTED"
+    assert _prop(_branch_no_assume).assume_dropped is False
+
+
+def test_the_branch_withhold_is_ONE_SIDED():
+    """A discharge inside the branch still discharges: VERIFIED over a
+    superset implies VERIFIED over the subset, and the flag must not touch
+    it. This is the direction the fix must NOT move."""
+    v = _run(_branch_verified)
+    assert v.status == "VERIFIED"
+    assert _prop(_branch_verified).assume_dropped is True
+
+
+def test_the_same_assume_at_top_level_still_RAISES():
+    """The F2 degradation is what makes D possible, and it is correct: the
+    branch-local case must stay a note, the whole-domain case a refusal.
+    Pinned so a later fix cannot "close D" by re-raising under a branch."""
+    def top():
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        assume(x >= 2.0)
+        return (assert_(x > 5.0),)
+    with pytest.raises(P.UnsatisfiableAssumptionError):
+        _prop(top)
+
+
+def test_a_vacuous_conjunct_beside_a_narrowing_withholds():
+    """`or vacuous` on the MIXED path — `restricting` is empty here (nothing
+    was dropped at all), so that operand is the only thing setting the
+    flags. Delete it and this returns REFUTED."""
+    p = _prop(_branch_mixed_vacuous)
+    assert p.coverage.constrained == 1, (
+        "this harness is only a test of the MIXED path while a conjunct "
+        "actually narrows; if that stops holding the test is testing "
+        "something else"
+    )
+    assert p.assume_dropped is True
+    assert _run(_branch_mixed_vacuous).status == "UNKNOWN"
 
 
 # -- C: reserved ------------------------------------------------------------
