@@ -1925,9 +1925,9 @@ verdicts:
   corpus covers A and B only: every row is a straight-line harness, so it
   is blind to D by construction, and D's cost is not in those figures.
   **D's cost was first measured on an instrument that could not see it,
-  and the figure this entry shipped was false.** That corpus — 216 rows,
-  3 branch guards × 6 branch-scoped assumes × 6 obligations × `refine` ∈
-  {None, affine} — reported `wrong-REFUTED 12 → 0` beside `CORRECT
+  and the figure this entry shipped was false.** That instrument — 216
+  rows, 3 branch guards × 6 branch-scoped assumes × 6 obligations ×
+  `refine` ∈ {None, affine} — reported `wrong-REFUTED 12 → 0` beside `CORRECT
   66 → 66`, and the entry read that as *"D's fix costs zero legitimate
   refutations, because the only rows it touches are the vacuous ones"*.
   **Both halves were false.** The two flags the fix makes unconditional
@@ -2043,8 +2043,8 @@ verdicts:
   lines in the cond handler): on the same 1296 rows it re-opens **0** of
   the 24 wrong REFUTEDs, recovers **144 of the 168**, and additionally
   refutes 216 rows that `3afbf01` was already losing to the same leak,
-  every one of them CORRECT — 1104 CORRECT / 192 UNKNOWN / 0 wrong of
-  either kind. The 24 it still withholds are the rows whose only definite
+  every one of them CORRECT — 1104 CORRECT / 192 CONSERVATIVE / 0 wrong
+  of either kind. The 24 it still withholds are the rows whose only definite
   violation lies INSIDE the vacuous branch, which is the case the withhold
   is for. It is **not** a drop-in and is not adopted here:
   it leaves the solver and affine legs whole-run (they read
