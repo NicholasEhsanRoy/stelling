@@ -2199,4 +2199,93 @@ verdicts:
   Constructions: `tests/test_vacuous_refutation.py`; pre-registration and
   outcomes: `scratchpad/PREREG_REF1.md`.
 
+- **2026-08-07 (pre-release): two sub-jaxpr defects closed — a REFUTED
+  from a branch nothing certified is reachable, and an obligation the
+  analysis never looked at.** Both moves are **towards UNKNOWN**: nothing
+  became VERIFIED, and nothing became REFUTED that was not before.
+
+  **(1) Refuting inside a branch presumed a reachability that nothing
+  certified.** The `cond` transfer runs every branch the index interval
+  ADMITS and judged each branch's obligations over the whole declared
+  box. Admitting is not certifying: interval arithmetic
+  over-approximates, so `cond(x[0] - x[0] > 0., yes, no)` over
+  `x ∈ [-1,1]^3` admits both legs while the guard is false at every
+  point, and `yes: assert_(v > 5.)` returned **REFUTED** on a query that
+  is true everywhere — the shape the entry above recorded as live on
+  `main`. The general rule, and not the `x - x` shape: **a definite
+  violation found inside a branch the analysis only admits is withheld
+  from REFUTED**, reported `unknown`, with
+  `propagate.UNCERTIFIED_REACHABILITY_REFUSAL` naming why. It is *not*
+  reported `discharged` — an unreachable obligation is vacuously true,
+  and vacuous truth is a different claim, reserved.
+
+  A branch is certified reachable in exactly two ways, both sound and
+  both sufficient rather than necessary: the index box FORCES it (then it
+  runs whenever the cond runs), or a **point witness** reaches it —
+  propagation re-run with every declaration pinned to a single point of
+  its own declared box, where a singleton index box there means the real
+  program takes that branch at that point. The witness search is
+  deterministic (a verdict must not depend on a seed), runs at most 16
+  extra propagations and only when a branch-scoped violation is actually
+  on the table, and certifies nothing at all when a constraining assume
+  is in force, because a point of the declared box need not lie in the
+  narrowed admitted set.
+
+  **Retroactively invalid:** any REFUTED whose refuting obligation sat
+  inside a `cond`/`switch` branch the index interval did not force.
+  Re-run: such a query now returns UNKNOWN with the reason in its notes.
+  A REFUTED from a top-level obligation, from a forced branch, or from a
+  branch some point of the declared box reaches, is unaffected.
+
+  **Measured cost**, on a 736-harness corpus x 3 legs (`refine=None`,
+  `refine="affine"`, `vacuity_mode="inputs-only"`), scored **per
+  obligation** against a numpy oracle that never calls stelling: **183**
+  obligations left `violated-over-set` that the oracle finds are
+  evaluated at **zero** of the sampled points — every unsound refutation
+  in the corpus, removed — and **216** left it that the oracle confirms
+  are really violated somewhere, which is honest withholding. Every one
+  of those 216 has a guard the analysis cannot evaluate at a point: 144
+  route through `sin`, which has no registered transfer; 24 sit under
+  `jax.lax.switch`, which clamps its index through the unregistered
+  `clamp` — **so no `switch` branch can currently be forced or witnessed,
+  and none can refute**, pinned by
+  `test_no_switch_branch_can_refute_while_clamp_is_unregistered`, which a
+  `clamp` transfer would flip; the remaining 48 have a satisfiable guard
+  whose true region is about 1% of the box, which the finite witness grid
+  misses. Of the corpus's **750** sound branch-scoped refutations,
+  **534** were KEPT, so the rule did not degenerate into "never refute
+  inside a branch"; the 537 top-level ones are untouched.
+
+  **(2) An obligation inside a `scan`/`while` body was silently dropped.**
+  The body IS transcribed — the `stelling_assert` equation is in the IR —
+  and propagation never descends into it, so the obligation was never
+  collected, never judged and never mentioned: `obligations = 0`,
+  `notes = ()`. A user's check then read as "could not decide" when
+  nothing had looked. Worse, and measured: one true top-level assert
+  beside one false assert inside a `scan` stamped **VERIFIED**. Every
+  `stelling_assert`/`stelling_nonvacuity` inside a sub-jaxpr no transfer
+  descends into (`scan`, `while`, any unregistered primitive with a body,
+  and every decline path) is now recorded as an obligation with status
+  `unknown` whose detail says **NOT EXAMINED**, plus a note naming its
+  source location and the primitive that swallowed it. `unknown`, never
+  `discharged`: an unexamined check must not be able to complete a
+  VERIFIED.
+
+  **Retroactively invalid:** any VERIFIED on a query with an `assert_`
+  inside a `scan`/`while` body, or inside any sub-jaxpr the coverage line
+  reported `unreached`. Re-run: such a query now returns UNKNOWN and
+  lists the obligation. The corpus measured **9** such VERIFIED rows, all
+  removed, and **12** further VERIFIED rows that the oracle finds sound
+  also moved to UNKNOWN — the check they omitted happened to be true, and
+  stelling still had not looked at it.
+
+  A whole-query DECLINE was considered and rejected: it discards the
+  judgments the analysis *did* make on the rest of the query, and
+  DECLINED means "the query could not be read", which is false here — it
+  was read, and one obligation was not examined. Naming the obligation
+  says exactly that, and the obligation count stops lying.
+
+  Constructions: `tests/test_branch_reachability.py`; pre-registration,
+  corpus design and outcomes: `scratchpad/PREREG_REACH.md`.
+
 *(no releases yet)*
