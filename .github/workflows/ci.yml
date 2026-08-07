@@ -255,6 +255,258 @@ jobs:
             exit 1
           fi
 
+  # THE REPRODUCER ACCEPTANCE SURFACE — 18 tests that ran in NO CI job.
+  #
+  # Measured, by enumerating every gate in the suite: no test is skipped
+  # everywhere, but 18 ran nowhere in CI, because neither library they gate on
+  # was named in any extra or any workflow. They are not a corner: they are the
+  # whole of `docs/reproducing-a-witness.md`'s acceptance — the tests that emit
+  # a reproducer, run it OUTSIDE the repo with stelling unimportable, and
+  # require it to print CONFIRMED against the real third-party library. That
+  # document is the release's lead artifact, and its bar was measured only ever
+  # on a developer's machine.
+  #
+  # 14 gate on `jaxfluids` (all of tests/test_square_acceptance_jaxfluids.py,
+  # plus the WENO5 half of tests/test_reproduce_acceptance.py); 4 gate on
+  # `maddening` (the flagship HeatNode witness, and two bar/interval tests).
+  #
+  # TEST dependencies, not runtime ones — so they live here and NOT in
+  # pyproject.toml. `[jax]` there is bootstrap-only and `all` deliberately
+  # equals `solvers` precisely so the reflexive extra never drags jax into a
+  # managed environment; a heavy CFD solver in a runtime extra would be a
+  # far worse version of the same mistake. `[dependency-groups] dev` is wrong
+  # too, for the reason already written above for blackjax: no contributor
+  # needs a compressible two-phase flow solver to run the unit tests.
+  #
+  # ── jaxfluids: NOT ON PyPI, so a git pin, and a COMMIT rather than a tag ──
+  # Measured: https://pypi.org/simple/jaxfluids/ is 404, as is `jax-fluids`.
+  # The project ships only from GitHub. Its published tags stop at
+  # `JAX-Fluids-v0.2.1` (0c75fdc), but the tree these tests were verified
+  # against is 4a65628 — past that tag, with `__version__` still reading
+  # "0.2.1". So there is no version to pin and the tag is a DIFFERENT tree;
+  # the commit SHA is the only pin that names what was actually measured.
+  # `test_the_target_is_the_library_function_and_still_uses_jnp_square` reads
+  # the target's source and fails if upstream rewrites it, which is what makes
+  # moving this pin a deliberate, checkable act rather than a silent drift.
+  #
+  # Installed WITH its dependencies, on purpose: jaxfluids pulls flax and optax,
+  # both of which depend on jax and could therefore move it. That is exactly
+  # what the before/after guard below is for, and `--no-deps` here would hide
+  # the hazard rather than measure it. (Measured: they do not move it, on
+  # either series. jaxfluids also needs pyyaml at import — its `input_manager`
+  # does `import yaml` — which arrives as one of those dependencies.)
+  #
+  # ── maddening: on PyPI, but its jax pin makes --no-deps MANDATORY ────────
+  # `maddening==0.3.1` declares `jax<0.6,>=0.4`. A plain `uv pip install
+  # maddening==0.3.1` in this job DOWNGRADES jax and exits 0 — measured with
+  # `--dry-run` against the resolved environment: jax 0.11.0 -> 0.5.3 and
+  # jaxlib 0.11.0 -> 0.5.3. That is not hypothetical tidiness; it is the exact
+  # defect already found in MADDENING's own ci.yml, where a job that pins 0.11
+  # actually tests 0.5.3 and reports green. Hence `--no-deps`, and hence the
+  # assertion below, which would catch it if the flag were ever dropped.
+  #
+  # `--no-deps` also skips maddening's numpy and pyyaml. numpy arrives with
+  # jax; pyyaml arrives with jaxfluids. Measured: the 4 tests import and pass
+  # with pyyaml absent, so nothing here depends on that coincidence, but a
+  # future split of this job into two should re-check it rather than assume.
+  #
+  # THIS WORKAROUND HAS AN EXPIRY. When MADDENING lifts `jax<0.6` — planned
+  # immediately after stelling 0.1.0 — `--no-deps` and this paragraph should
+  # be deleted and the install folded into an ordinary pinned one. Until then
+  # the flag is load-bearing and must not be removed for looking untidy.
+  #
+  # ── BOTH SERIES, deliberately ────────────────────────────────────────────
+  # The lane above (any_pytree) runs one series; this one runs two, and the
+  # difference is not inconsistency. These tests EXECUTE a solver's witness
+  # back through the library and compare the result to the library's own
+  # recomputation by exact float equality
+  # (`ok_side["execution"]["lhs"] == [float(b1)]`), in float64, through XLA.
+  # That is the most build-sensitive assertion in the suite, and this repo
+  # already carries a skip rule that exists only because XLA folds differently
+  # on different builds. `TESTED_JAX_SERIES` claims 0.10 AND 0.11; a lane that
+  # measured the reproducer bar on one of them would leave the other claimed
+  # rather than measured, which is the very gap `test-jax-0-10` was added to
+  # close. Measured cost: the 18 take ~10s per series, so it is cheap.
+  #
+  # NOT A REQUIRED CHECK, for the reason written above for any_pytree and one
+  # more that is stronger here: this lane fetches from a third-party GitHub
+  # repository at a commit, so an upstream force-push, a deleted branch or a
+  # GitHub outage can redden it on a day stelling did not change. Loud — no
+  # `continue-on-error` — but it must not block a merge. Leave it OUT of the
+  # required list in branch protection (a repo setting, not this file).
+  acceptance-reproducer:
+    name: reproducer acceptance (jaxfluids + maddening, jax ${{ matrix.series }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Each series must report its own verdict: if 0.10 fails, the floating
+      # lane's result is still wanted, and vice versa.
+      fail-fast: false
+      matrix:
+        include:
+          - series: floating
+            extras: solvers,jax
+            pin: ""
+            expect: ""
+          - series: "0.10"
+            extras: solvers
+            pin: "jax>=0.10,<0.11"
+            expect: "0.10"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # Python is PINNED here where every other lane takes the runner default,
+      # because this lane cannot afford to inherit it: jaxfluids' setup.py
+      # declares `python_requires=">=3.11"` while stelling declares ">=3.10",
+      # so the two projects do not agree on what a valid interpreter is. 3.12
+      # is the version every pin in this job was verified against.
+      - run: uv venv --python 3.12
+      # Matrix values go through `env:` rather than straight into the script.
+      # `.[solvers,jax]` needs its quotes (brackets are a glob), and a value
+      # interpolated into a `run:` body is expanded before bash ever sees it.
+      - name: install stelling and the jax series under test
+        env:
+          EXTRAS: ${{ matrix.extras }}
+          PIN: ${{ matrix.pin }}
+        run: |
+          set -euo pipefail
+          # `${PIN:-}`, not `${PIN}`: `set -u` treats an UNSET variable as an
+          # error, and the floating entry's `pin` is the empty string. Whether
+          # Actions exports an empty `env:` value or omits the variable
+          # entirely is runner behaviour that cannot be driven locally, so the
+          # two cases are made indistinguishable here rather than assumed.
+          if [ -n "${PIN:-}" ]; then
+            uv pip install -e ".[${EXTRAS}]" "${PIN}" pytest
+          else
+            uv pip install -e ".[${EXTRAS}]" pytest
+          fi
+      # Scratch goes in RUNNER_TEMP, never the checkout: the last step runs the
+      # whole suite and tests/test_sdist_contents.py fails closed on untracked
+      # paths, so a file dropped at the repo root would redden a test that has
+      # nothing to do with this job.
+      #
+      # `set -o pipefail` is why this is a block. GitHub's default shell is
+      # `bash -e {0}` — errexit, no pipefail — so in `python -c ... | tee file`
+      # the status is tee's, a failing import exits 0, and the step passes
+      # having written an EMPTY file.
+      - name: RESOLVED jax and jaxlib, and the series must be the one asked for
+        env:
+          EXPECT: ${{ matrix.expect }}
+        run: |
+          set -euo pipefail
+          .venv/bin/python -c "import jax, jaxlib; print(jax.__version__, jaxlib.__version__)" \
+            | tee "${RUNNER_TEMP}/jax-before.txt"
+          # Same argument as test-jax-0-10: the whole point of a pinned entry
+          # is WHICH series it runs, so that is the thing it must not take on
+          # trust. A resolver that quietly handed this entry a 0.11 wheel would
+          # leave it green while duplicating the floating entry under a 0.10
+          # name. The floating entry declares no expectation and is skipped.
+          read -r jax_v jaxlib_v < "${RUNNER_TEMP}/jax-before.txt"
+          # `${EXPECT:-}` for the same reason as `${PIN:-}` above: the floating
+          # entry declares no expectation, and an omitted variable must read as
+          # "no expectation", not abort the step under `set -u`.
+          if [ -n "${EXPECT:-}" ]; then
+            for pair in "jax:${jax_v}" "jaxlib:${jaxlib_v}"; do
+              name="${pair%%:*}"; ver="${pair#*:}"
+              case "${ver}" in
+                "${EXPECT}".*) ;;
+                *) echo "::error title=the ${EXPECT} entry did not get ${EXPECT}::${name} resolved to '${ver}'. This matrix entry exists to measure the reproducer acceptance on the ${EXPECT} series; on any other series it is a duplicate of the floating entry wearing a ${EXPECT} name. Fix the pin, or narrow TESTED_JAX_SERIES to the series CI actually runs."; exit 1 ;;
+              esac
+            done
+          fi
+      - name: install the acceptance libraries, pinned
+        run: |
+          set -euo pipefail
+          # jaxfluids: from git, because it is not on PyPI; at a commit,
+          # because its tags name a different tree. See the block above.
+          uv pip install \
+            "jaxfluids @ git+https://github.com/tumaer/JAXFLUIDS@4a6562808d3e153fbc3a02643665dd3caa134e05"
+          # maddening: --no-deps is LOAD-BEARING. Without it this silently
+          # downgrades jax to 0.5.3. See the block above before touching it.
+          uv pip install --no-deps "maddening==0.3.1"
+      - name: RESOLVED JAX/JAXLIB (an acceptance library moving either fails this job)
+        run: |
+          set -euo pipefail
+          before="$(cat "${RUNNER_TEMP}/jax-before.txt")"
+          # These imports are themselves the check that the installs worked: a
+          # job that installs jaxfluids and then silently skips is the exact
+          # defect this job exists to close, so absence must fail HERE.
+          after="$(.venv/bin/python -c 'import jax, jaxlib; print(jax.__version__, jaxlib.__version__)')"
+          jfl="$(.venv/bin/python -c 'import jaxfluids; print(jaxfluids.__version__)' 2>/dev/null)"
+          mdn="$(.venv/bin/python -c 'import maddening; print(maddening.__version__)')"
+          echo "RESOLVED jax/jaxlib=${after} (before the acceptance libraries: ${before}) jaxfluids=${jfl} maddening=${mdn}"
+          {
+            echo "### reproducer acceptance — the versions the bar was measured against"
+            echo ""
+            echo "| package | resolved |"
+            echo "| --- | --- |"
+            echo "| **jax jaxlib** | **${after}** |"
+            echo "| jax jaxlib, before jaxfluids/maddening | ${before} |"
+            echo "| jaxfluids | ${jfl} (git 4a65628) |"
+            echo "| maddening | ${mdn} (--no-deps) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${before}" != "${after}" ]; then
+            echo "::error title=an acceptance library moved jax or jaxlib::jaxfluids/maddening resolved '${before}' -> '${after}' (jax jaxlib). The most likely cause by far is that --no-deps was dropped from the maddening install, which downgrades jax to 0.5.3 and exits 0; the other is that flax or optax moved it. Either way this job would be measuring the reproducer acceptance against a DIFFERENT build from every other lane. jaxlib counts as much as jax: it is the XLA build, and these tests compare executed float64 values to the library's own recomputation by exact equality."
+            exit 1
+          fi
+      - run: uv pip list
+      # `-ra` rather than `-rs`: it is a superset, so the SKIPPED lines the
+      # grep below depends on are still emitted, and an ERROR or an xpass shows
+      # up in the same summary instead of being silently absent from it.
+      - name: the 18 acceptance tests must RUN — a skip here is the defect
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q -ra --no-header \
+            tests/test_square_acceptance_jaxfluids.py \
+            "tests/test_reproduce_acceptance.py::test_weno5_dependencies_present[jaxfluids]" \
+            tests/test_reproduce_acceptance.py::test_weno5_reproducer_runs_outside_the_repo_and_CONFIRMS \
+            tests/test_reproduce_acceptance.py::test_the_weno5_reproducer_calls_jaxfluids_and_not_a_copy_of_it \
+            tests/test_reproduce_acceptance.py::test_every_confirmed_publishes_sides_that_violate_the_relation \
+            tests/test_reproduce_acceptance.py::test_heatnode_reproducer_runs_outside_the_repo_and_CONFIRMS \
+            tests/test_reproduce_acceptance.py::test_the_heatnode_verdict_is_the_ledgers_verdict \
+            tests/test_dot_general_interval.py::test_contract_4_conservative_projection_verifies \
+            tests/test_verified_bar.py::test_the_bar_does_not_touch_interval_only_verdicts \
+            | tee "${RUNNER_TEMP}/reproducer.log"
+          if grep -q '^SKIPPED' "${RUNNER_TEMP}/reproducer.log"; then
+            echo "::error title=the acceptance tests skipped::This job installs jaxfluids and maddening so that these 18 RUN. At least one skipped, so the reproducer bar was not measured — and pytest exits 0 on a skip, which is why this is checked rather than trusted. A lane that installs a library and then silently skips is worse than no lane: it reads as coverage."
+            exit 1
+          fi
+          # The exact count, so that a test SILENTLY DESELECTED — a renamed
+          # nodeid above, a `-k` added, a gate changed — fails here instead of
+          # passing with fewer tests. 10 of these come from selecting the whole
+          # of test_square_acceptance_jaxfluids.py, so adding a test to that
+          # file is expected to fail this line: update the number deliberately.
+          if ! grep -qE '^18 passed' "${RUNNER_TEMP}/reproducer.log"; then
+            echo "::error title=not 18 passed::The reproducer acceptance is 18 tests: 14 gated on jaxfluids and 4 on maddening. A different number means one was renamed, deselected or added — see the log above and update this count deliberately rather than relaxing the check."
+            exit 1
+          fi
+      # The whole suite, in the one environment where jaxfluids and maddening
+      # are both present. tests/test_skip_inventory.py is the second,
+      # independent guard: it pins each gate's condition, so here, where both
+      # libraries are importable, a SKIP of any of the 18 fails the suite too.
+      # Unnarrowed on purpose — the inventory's completeness half withdraws its
+      # claim in a session that did not collect the whole tree, so a `-k` or a
+      # path added here would quietly turn the second guard off.
+      - name: the skip-inventory verdict, asserted off a file channel
+        # THE EXIT CODE IS A LAST-WRITER-WINS CHANNEL, and absence is the
+        # signal this buys: a run in which tests/conftest.py was ignored,
+        # filtered out or never reached leaves no file at all, and that is a
+        # failure here rather than a pass. See the identical step above.
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q -ra
+          verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. A 'failed' verdict is an undisclosed skip or a silently dropped item; 'withdrawn' means this session was not entitled to claim the suite, and an unnarrowed CI run must be."
+            exit 1
+          fi
+
   reuse:
     name: reuse lint
     runs-on: ubuntu-latest
