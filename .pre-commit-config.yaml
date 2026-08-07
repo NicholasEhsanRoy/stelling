@@ -20,13 +20,74 @@ repos:
       - id: reuse
   - repo: local
     hooks:
-      - id: jax-import-hygiene
-        name: jax only in _jax_compat; private jax modules banned
+      # THE STAGED BLOB IS WHAT GETS COMMITTED, and `insert SPDX headers`
+      # above does not look at it. That hook is a FIXER: it reads and rewrites
+      # the WORKING TREE. Measured, on a header-less file that had been added:
+      #
+      #   pre-commit run insert-license --files f   Failed  (worktree rewritten)
+      #   git status --short f                      AM
+      #   git show :f                               X = 1     <- no header
+      #   pre-commit run insert-license --files f   Passed
+      #   git show :f                               X = 1     <- still no header
+      #
+      # So "Passed" was compatible with a header-less blob being the thing
+      # committed. The `git commit` path itself is safe — pre-commit stashes
+      # unstaged changes there, so the fixer sees the INDEX content and fails
+      # again (driven: `pre-commit run` with no `--files` reports Failed with
+      # the worktree already fixed) — but `--files` and `--all-files` do not
+      # stash, and those are the invocations a developer uses to CHECK.
+      #
+      # This reads the one channel the fixer never touches: `git show :<path>`.
+      # It fires on the DIVERGENCE — worktree has the header, index does not —
+      # and not on "the index has no header", because the latter would redden
+      # the twelve deliberately header-less `scratchpad/**` files that
+      # REUSE.toml now annotates instead of headering.
+      #
+      # NOT a replacement for `reuse lint`, which is the control that runs
+      # where `--no-verify` cannot reach. A pre-commit hook is a client-side
+      # courtesy: 14e34a2 landed 12 header-less `.py` files squarely inside
+      # the fixer's `files:` regex, with the config byte-identical and the
+      # hook installed, and re-running the pinned fixer over those exact blobs
+      # rewrites all 12 — so the hook did not run, and no hook can promise it
+      # will.
+      - id: staged-spdx-header
+        name: the SPDX header must be in the blob you are COMMITTING, not just the worktree
         language: system
         entry: >-
-          bash -c 'set -e;
-          ! grep -rnE "^[[:space:]]*(import jax\b|from jax\b)" src --include="*.py" | grep -v _jax_compat.py;
-          ! grep -rn "jax\._src" src --include="*.py"'
+          bash -c 'rc=0;
+          for f in "$@"; do
+          git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || continue;
+          head -5 -- "$f" 2>/dev/null | grep -q "SPDX-License-Identifier" || continue;
+          git show ":$f" 2>/dev/null | head -5 | grep -q "SPDX-License-Identifier" && continue;
+          echo "$f: the WORKING TREE carries the SPDX header and the STAGED blob does not." >&2;
+          echo "    the fixer above corrected the file on disk; you are committing the old blob." >&2;
+          echo "    git add -- $f" >&2;
+          rc=1;
+          done; exit $rc' --
+        files: \.(py|pyi|sh|toml|ya?ml)$
+      - id: jax-import-hygiene
+        name: jax only in _jax_compat; private jax modules banned
+        # TWO checks, combined through `rc` rather than through `set -e`.
+        # They were `! grep …; ! grep …` under `set -e`, and bash documents
+        # that errexit is IGNORED when a command's return value is inverted
+        # with `!` — so the FIRST check could not fail this hook, and the
+        # hook's status was the second check's alone. Measured, with a bare
+        # `import jax` planted under `src/` outside `_jax_compat.py`:
+        #
+        #   pre-commit run jax-import-hygiene --all-files   Passed   (exit 0)
+        #
+        # …with the offending line printed in the output. It went Failed only
+        # once `jax._src` was ALSO present. The first half of this hook's own
+        # name had never been enforceable.
+        # `tests/test_import_hygiene.py::test_jax_imported_only_in_compat_module`
+        # is the independent guard that did hold; this makes the local one
+        # hold too, and reports BOTH violations instead of the second only.
+        language: system
+        entry: >-
+          bash -c 'rc=0;
+          if grep -rnE "^[[:space:]]*(import jax\b|from jax\b)" src --include="*.py" | grep -v _jax_compat.py; then rc=1; fi;
+          if grep -rn "jax\._src" src --include="*.py"; then rc=1; fi;
+          exit $rc'
         pass_filenames: false
         always_run: true
       - id: library-identifier-hygiene
