@@ -390,15 +390,38 @@ of paths than when C8 was scored.
 
 **C11 — MET as scored, with one correction to what it proves.** The
 discriminant's docstring advertised "three refusals, each load-bearing".
-Full-suite mutation at `ab4b9b5` (2180 tests, `<W>/sweep.sh`) shows two of
-the three change no outcome: the **non-bool** refusal is unreachable in
-effect (jax promotes `bool & int32` to an *int32* `and`, so
-`_classify_assumed_pred` refuses the whole tree at the top, before the
-recursion that fills `harmless`), and the **maybe-NaN under ieee** refusal
-is dead (`_ieee_cmp` returns flag `False` on comparison outputs and
-degrades a would-be definite TRUE to `BOOL_UNKNOWN` on a flagged operand,
-so a flagged bool is `[0, 1]`, never `[1, 1]`). The docstring now says so.
+**All three change no outcome.** Full-suite mutation at `ab4b9b5` (2180
+tests, `<W>/sweep.sh`) deletes each in turn and reddens nothing; an
+instrumented full-suite run (`<W>/P1_pre/instr.py`, recording every
+`_conjunct_certainly_true` call as `(dtype, ieee_flagged, size0,
+answer)`) says why, over all 93 calls the method receives:
+
+* **non-bool** — unreachable in effect. jax promotes `bool & int32` to an
+  *int32* `and`, so `_classify_assumed_pred` refuses the whole tree at the
+  top, before the recursion that fills `harmless`. `int32` reaches the
+  discriminant twice and **never** inside an assume that narrowed, so its
+  answer is never read.
+* **maybe-NaN under ieee** — dead. `_ieee_cmp` returns flag `False` on
+  comparison outputs and degrades a would-be definite TRUE to
+  `BOOL_UNKNOWN` on a flagged operand, so a flagged bool is `[0, 1]`,
+  never `[1, 1]`. All 10 flagged calls already answer False on their own.
+* **size-0** — never asked. `size0` is False in **all 93** calls. An
+  `and`'s operands must broadcast, so a zero-element conjunct forces every
+  sibling to be zero-element too, and a zero-element comparison takes the
+  `point_a and point_b` arm (both `all()`s vacuously true) and drops
+  without narrowing, leaving `harmless` unread.
+
+The docstring now carries the measurement instead of the assessment.
 C11's measured cost figures are untouched by this.
+
+**Not a registered clause, but the same defect class, found while
+scoring C11**: the **attribution fail-safe** (`harmless = [False] *
+len(dropped)`) had no test at all — mutation reddened 0 of 2180. It is
+now driven directly by
+`test_the_attribution_fail_safe_refuses_a_misaligned_verdict`, and the
+first version of that pin did not bite either: it appended the bogus
+entry, and a salvaging `[:len(dropped)]` still read the right value at
+index 0. It inserts at the front now. Verified both ways.
 
 **What this re-scoring does NOT revisit**: C2, C3, C4, C5, C9, C10 and the
 hard boundary were re-read and not re-measured; the corpus tooling they
@@ -407,3 +430,31 @@ so their figures are carried forward as reported, not independently
 re-confirmed. The `reduce_and` look-through the audit identifies as
 recovering ~90% of the lost refutations is a separate spike and is not
 touched here.
+
+## Mutation ledger for this pass
+
+Every mutation is one edit to the frozen tree, then the FULL suite. The
+`test_committed_page_matches_live_registries` failure marked (doc) is an
+artifact of the method, not a pin: any mutation that changes
+`propagate.py`'s line count moves a line the generated page cites.
+`<W>/sweep.sh`, `<W>/sweep2.sh`.
+
+| mutation | substantive failures | what it establishes |
+|---|---|---|
+| none | 0 (2185 p / 2 s) | baseline |
+| the D fix re-gated with the note | **8** (+doc) | the fourth mechanism is closed and all three detectors are covered |
+| `if restricting or vacuous:` → `if restricting:` | **1** | `or vacuous`, previously uncovered by all 2171 tests, is pinned |
+| `_classify_assumed_pred`'s `and` bool guard deleted | **1** (+doc) | the reachable non-bool refusal is pinned by its disclosed reason |
+| the attribution fail-safe salvages instead of refusing | **1** | the fail-safe is pinned (0 before this pass, and 0 again for the first version of the pin) |
+| `_conjunct_certainly_true` dtype gate deleted | 0 (+doc) | unreachable in effect — documented, not pinned |
+| `_conjunct_certainly_true` ieee maybe-NaN gate deleted | 0 (+doc) | dead — documented, not pinned |
+| `_conjunct_certainly_true` size-0 gate deleted | 0 | never asked — documented, not pinned |
+| `_conjunct_certainly_true` → `return True` | **10** (+doc) | the discriminant as a whole is well covered |
+| the affine leg's `propagation.assume_dropped` guard neutralised | **5** | the extended ordering pin BITES: `[affine-leg/refine-affine]` and `test_the_two_legs_do_not_yet_agree_on_assume_ordering` both redden |
+
+The last row is the one that matters for the forthcoming query-scoping
+change. The `interval-leg/*` cells assert equality to `"REFUTED"`, so any
+move reddens them by construction; the affine cells needed the measurement,
+because "UNKNOWN" could also have meant the leg going dark. It does not:
+the no-assume control still refutes, and switching the guard off brings the
+REFUTED back.
