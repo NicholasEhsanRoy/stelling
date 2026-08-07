@@ -611,11 +611,14 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
         )
     except OSError as e:
         return _RawResult(answer="not-run", version=version, detail=str(e))
+    lines = proc.stdout.splitlines()
     answer = ""
+    answers = 0
     values: list[tuple[str, str]] = []
     nonrational = False
+    opaques = 0
     error = ""
-    for line in proc.stdout.splitlines():
+    for line in lines:
         parts = line.split(maxsplit=2)
         if not parts:
             continue
@@ -623,20 +626,117 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
             version = parts[1]
         elif parts[0] == "answer" and len(parts) >= 2:
             answer = parts[1]
+            answers += 1
         elif parts[0] == "value" and len(parts) == 3:
             values.append((parts[1], parts[2]))
         elif parts[0] == "opaque":
             nonrational = True
+            opaques += 1
         elif parts[0] == "error":
             error = line[len("error "):]
     if error:
         return _RawResult(answer="failed", version=version, detail=_quote(error))
-    if answer not in ("sat", "unsat", "unknown"):
+    # EXACTLY ONE `answer`. The driver emits one; a second one means the stream
+    # is not the conversation this parser thinks it is. Without this, a stdout
+    # carrying `answer sat`, a value, then `answer unsat` was read as unsat
+    # while KEEPING the value harvested under the earlier sat — a model from
+    # one answer attached to another (MEASURED at base and before this line:
+    # `unsat` with 1 value). Input names are `x{k}` / `x{k}_{i}` by
+    # construction (`obligation.py`), so no model line can begin with the token
+    # `answer` and this cannot cry wolf on a healthy run.
+    if answer not in ("sat", "unsat", "unknown") or answers != 1:
         return _RawResult(
             answer="failed",
             version=version,
             detail=f"cvc5 driver protocol violation; stdout: "
             f"{_quote(proc.stdout)!r}, stderr: {_quote(proc.stderr)!r}",
+        )
+    # THE CRASHED CHILD. The driver answers BEFORE it walks the model, so a
+    # death inside cvc5's native `getValue` leaves `answer sat` on stdout with
+    # no terminator. This is the wheel transport's form of the crashed run the
+    # binary transport refuses at `_make_run_cvc5_binary` ("audit F4"); the
+    # wheel never received it.
+    #
+    # WHY IT SURVIVED — and the boundary is the PIPE BUFFER, not the model
+    # size. stdout to a pipe is block-buffered at `io.DEFAULT_BUFFER_SIZE`
+    # (8192), so a killed child below that loses everything it wrote and the
+    # parent correctly sees a protocol violation above. MEASURED, real child,
+    # real SIGKILL, bisected: 493 value lines = 8186 bytes written = 0 bytes
+    # through, caught as a protocol violation; 494 lines = 8203 written = 8202
+    # through, `answer sat` present, and this function returned sat with 494
+    # values from a dead process. Also measured at 4000 terms: 3572 lines
+    # through, 3570 values harvested. A 2-value model leaves 0 lines through.
+    #
+    # But 8192 is the DEFAULT threshold, not a floor: it is ZERO when the child
+    # is unbuffered. Under `PYTHONUNBUFFERED=1` (standard in Docker images and
+    # CI) or any per-line flush, everything written before the death is
+    # through — MEASURED, a 2-value model puts all 51 bytes of its stdout
+    # through, `answer sat` among them. This function spawns with no `env=`,
+    # so the child inherits whatever the ambient environment says. The earlier
+    # reading that "small fixtures cannot reach it" was therefore an artifact
+    # of one buffering regime, not a property of the defect.
+    #
+    # REACHABILITY is not exotic either way: `smt.py` emits one
+    # `(declare-const … Real)` per input ELEMENT, so a single (32,32) array is
+    # 1024 consts ≈ 17360 bytes of driver stdout, well over the buffer — and an
+    # OOM kill is a SIGKILL that needs no cvc5 bug at all.
+    #
+    # WHAT THE HARM ACTUALLY IS (driven end-to-end, not reasoned): a truncated
+    # model does NOT yield an unreproducible witness. `_require_valid_refutation`
+    # routes every refutation through `witness_is_valid` (box membership AND
+    # exact-rational violation), so a truncated model either raises
+    # `EmissionInfidelityError` loudly (measured: the completed point satisfied
+    # the predicate) or produces a witness that genuinely does reproduce
+    # (measured: REFUTED, replay passed). The harm is that A CRASHED RUN
+    # SILENTLY BECAME AN ACCEPTED ANSWER: the values the child never lived to
+    # write are filled by `_complete_values` from the declared box, so the
+    # reported witness is part fabrication and part corpse, and nothing in the
+    # verdict says the solver died. (The fill itself is disclosed as a
+    # don't-care note and does reach the render; the death was not disclosed
+    # anywhere.)
+    #
+    # TWO TELLS, because each alone has a blind spot. The terminator is
+    # positive evidence the driver ran to completion and is what catches a
+    # death that somehow exits zero; `returncode` catches a death that somehow
+    # emitted the terminator. Neither is derived from the other.
+    #
+    # THE TERMINATOR IS STRICT, because a token-prefix match let BOTH tells go
+    # blind at once — precisely what "two tells" is supposed to prevent. Native
+    # C++ output goes raw to fd 1 and bypasses Python's buffer, so a child that
+    # writes `end of the resource limit` and exits 0 used to satisfy a
+    # `parts[0] == "end"` test with no driver terminator at all (MEASURED: sat,
+    # 1 value, at base AND under the first version of this guard). Requiring
+    # the terminator to be the LAST line closes that, and with it two further
+    # shapes that were accepted identically before and after that first version
+    # (MEASURED at both): `end` followed by more values (sat, 3 values, two
+    # written AFTER the terminator) and a truncated trailing line (sat, the
+    # partial line silently dropped). Cry-wolf cost: none — `opaque x0 end` and
+    # `value end 1/1` never false-triggered, because their first token is
+    # `opaque`/`value`, and every healthy shape still passes.
+    #
+    # The count in `end <count>` is the driver's own tally of the model lines
+    # it wrote, checked against what this parser actually parsed, so the
+    # terminator asserts "the walk finished" rather than only "the driver
+    # reached its last statement". A short walk is CONSTRUCTED, not observed
+    # from cvc5 — stated as a constructed shape rather than a measured cvc5
+    # bug — but it is the only reading of *complete* the word supports.
+    #
+    # DELIBERATE BEHAVIOUR CHANGE, beyond the crashed-sat case: a child with a
+    # complete protocol that exits nonzero is now `failed` where it previously
+    # returned its answer (MEASURED: a clean `answer sat` + terminator + exit 1
+    # returned sat with its model at base, returns failed here). That direction
+    # is deliberate and matches the binary transport's F4 policy — a nonzero
+    # exit is not a transport this layer will discharge OR refute on, and the
+    # cost is UNKNOWN, never a flipped verdict.
+    complete = bool(lines) and lines[-1] == f"end {len(values) + opaques}"
+    if not complete or proc.returncode != 0:
+        return _RawResult(
+            answer="failed",
+            version=version,
+            detail=f"cvc5 driver answered {answer!r} but the run is not "
+            f"complete (exit {proc.returncode}; terminator "
+            f"{'present' if complete else 'ABSENT'}); refusing to rely on a "
+            f"crashed run. stderr: {_quote(proc.stderr)!r}",
         )
     return _RawResult(
         answer=answer,
