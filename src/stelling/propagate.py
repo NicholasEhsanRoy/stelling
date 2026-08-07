@@ -4041,10 +4041,27 @@ _NONFINITE_BOUND_REASON = (
 
 def _finite_point(box: iv.IntervalArray | None) -> bool:
     """Every element is a degenerate finite interval (``lo == hi``,
-    finite) — the shape of a usable assume bound."""
+    finite) — the shape of a usable assume bound.
+
+    Zero-element boxes answer True vacuously, which is why assume
+    classification cannot lean on this predicate alone to recognise a
+    size-0 predicate: `_atom_element_count` is the one that does."""
     return box is not None and all(
         lo == hi and math.isfinite(lo) for lo, hi in zip(box.los, box.his)
     )
+
+
+def _atom_element_count(atom: ir.Atom) -> int:
+    """How many elements this atom's abstract value carries.
+
+    Read from the STATIC aval shape, not from a propagated box: assume
+    classification must be able to say "this predicate has no elements"
+    before it has read any interval, and an atom whose box is missing
+    (an unbound var, an undecodable literal) still has a shape."""
+    n = 1
+    for d in atom.aval.shape:
+        n *= d
+    return n
 
 
 def _subnormal_const_literal(atom: ir.Atom) -> bool:
@@ -5035,6 +5052,55 @@ class _Propagator:
         dropped: list[str],
         vacuous: list[str],
     ) -> None:
+        if _atom_element_count(atom) == 0:
+            # THE VACUOUS-PREDICATE GATE. `assume` reads its predicate
+            # universally, and a universal over NO elements is true at
+            # every point of the declared set: a zero-element predicate
+            # admits the whole domain and states nothing about its own
+            # subterms. So nothing below this node may narrow, certify
+            # satisfiability, or raise the unsatisfiable-precondition
+            # oracle — the node is disclosed as an unconstraining drop and
+            # the recursion stops here.
+            #
+            # Without this, `assume((k >= 0.5) & (z >= 2.0))` with `z`
+            # declared at shape (0,) narrowed `k` to [0.5, 1.0] — a SUBSET
+            # of its declared [-1, 1] — and minted VERIFIED for `k > 0`,
+            # while the assume admitted every k including -1. jax
+            # broadcasts the rank-0 `k >= 0.5` against the size-0 sibling
+            # to `bool[0]`, so the `and`'s truth implies nothing about the
+            # rank-0 conjunct, and the `and` recursion below classified it
+            # as if standing alone. Ten constructions of that shape
+            # returned VERIFIED over a strict subset (measured against
+            # dense independent sampling), and the drop note said "a
+            # superset" while the narrowing had gone the other way.
+            #
+            # The rule is general and the gate is where the rule lives:
+            # `all(A & B)` implies `all(A)` only if every element of `A`
+            # survives the broadcast into the output, and over numpy/jax
+            # broadcasting that fails exactly when the output has zero
+            # elements and `A` does not. Measured over all 256 ordered
+            # pairs from a 16-shape set (rank 0-3, unit axes, zero axes):
+            # 31 pairs lose an operand element, every one of them with a
+            # zero-size output, and no size-0 operand ever broadcasts to a
+            # nonzero-size output. That second half is why the gate at
+            # this ONE node covers the whole tree: a size-0 node forces
+            # every ancestor size-0, so the root check and the per-node
+            # check cannot disagree, and a leaf is covered by the same
+            # line.
+            #
+            # It also closes the opposite-direction face: a satisfiable
+            # `bool[0]` assume whose sibling conjunct has an empty meet
+            # (`(k >= 2.0) & (z >= 2.0)` on k in [-1, 1]) used to raise
+            # UnsatisfiableAssumptionError — "harness defect; nothing was
+            # verified" — about a precondition that is true everywhere.
+            dropped.append(
+                f"the assumed predicate has shape "
+                f"{tuple(atom.aval.shape)} with zero elements: a universal "
+                f"over no elements is true at every point of the declared "
+                f"set, so it constrains nothing and licenses no narrowing "
+                f"of the values it is written about"
+            )
+            return
         if isinstance(atom, ir.Literal):
             dropped.append(
                 f"predicate is a literal ({atom.val!r}), not a traced comparison"
