@@ -244,3 +244,36 @@ principal has not ruled on.
 
 The residual disjointness §26.1 reports **reproduces**: AFF4 leaves A
 standing, F3E leaves B standing, and neither alone is sufficient.
+
+## C9, re-scored at the final tip `4d72f2b` (append-only correction)
+
+The C9 table above was scored at `13f5b2f`, three commits before the tip.
+Re-run at the tip, **sequentially, one lane at a time on a quiet machine**
+(the load average is printed with each, because a loaded run is what made
+the first attempt unreadable):
+
+```
+tip: 4d72f2b
+=== stelling-jax  (jax 0.11.0)   load 1.05 ===  2169 passed, 2 skipped  (162.08s)
+=== stelling-jax010 (jax 0.10.2) load 3.80 ===  2169 passed, 2 skipped  (160.32s)
+main 9efea6f (jax 0.11.0)        load ~1    ==  2149 passed, 2 skipped  (149.30s)
+```
+
+Both skips are the same two on every tree and both lanes
+(`blackjax` absent). `--collect-only -q`: **2151 ids at `9efea6f`, 2171 at
+the tip, +20 / −0**, and the tip's id set is byte-identical between 0.11.0
+and 0.10.2.
+
+**One thing I got wrong twice, recorded because it cost the most time
+here.** `docs/supported-primitives.md` cites `propagate.py:LINE` and is
+generated. I regenerated it after the first `src/` commit and then added
+lines above the cited one in a later commit without rerunning the
+generator, so `test_committed_page_matches_live_registries` failed in both
+lanes. I first read that failure as the load-dependent solver flake
+HANDOFF5 §13.2 records — because the run was at load 7 and took 326s
+against a 150s nominal — and it was nothing of the kind: it was
+deterministic, and `-rs` was hiding the `FAILED` line that would have said
+so (`-rs` requests skip reasons ONLY; it suppresses the failure summary
+that `-ra` would print). **A slow run at high load is not evidence for a
+flake**, and a filtered summary is not a summary. Regenerate after every
+`propagate.py` edit, and read failures with `-ra`.
