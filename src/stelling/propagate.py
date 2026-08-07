@@ -4919,7 +4919,19 @@ class _Propagator:
         narrowed: list[tuple[int, iv.IntervalArray, bool, bool]] = []
         dropped: list[str] = []
         vacuous: list[str] = []
-        self._apply_assumed_pred(eqn.invars[0], where, narrowed, dropped, vacuous)
+        harmless: list[bool] = []
+        self._apply_assumed_pred(eqn.invars[0], where, narrowed, dropped,
+                                 vacuous, harmless)
+        if len(harmless) != len(dropped):
+            # FAIL-SAFE, not a belt-and-braces check. `harmless[i]` is only
+            # meaningful as the verdict on `dropped[i]`; if the two ever
+            # came apart, an index could carry another conjunct's verdict
+            # and a RESTRICTING drop could read as harmless — the one
+            # direction that produces a wrong REFUTED. Attribution lost is
+            # therefore attribution refused: every drop counts as
+            # restricting, which is exactly the behaviour of not having the
+            # discriminant at all.
+            harmless = [False] * len(dropped)
         for desc in vacuous:
             # audit F2: the branch-scoped unsatisfiability disclosure
             self.notes.append(
@@ -4984,10 +4996,86 @@ class _Propagator:
                 # reached NO hint at all before — `assume((x >= lo) &
                 # jnp.all(x <= hi))` narrows on the first conjunct and dropped
                 # the second in silence.
+                # "a superset" is the general case and stops being TRUE
+                # once the drop is known to be a no-op: a conjunct that is
+                # definitely true over the boxes in force excluded nothing,
+                # so the set constrained without it IS the assumed region.
+                # Saying "superset" there would be a false statement in the
+                # one sentence whose job is to say what was given up — and
+                # the reader would have no way to tell it from the case
+                # where the region really did widen, which is the case that
+                # withholds every refutation.
+                widened = "a superset"
+                if i < len(harmless) and harmless[i]:
+                    widened = (
+                        "NOT a superset: this conjunct is definitely TRUE "
+                        "over the boxes in force, so it excluded nothing "
+                        "and dropping it widened nothing"
+                    )
                 self.notes.append(
                     f"assume conjunct DROPPED at {where}: constraining "
-                    f"proceeded without this conjunct — a superset ({reason})"
+                    f"proceeded without this conjunct — {widened} ({reason})"
                     + (self._membership_hint_for(eqn.invars[0]) if i == 0 else "")
+                )
+            # a conjunct whose own value is definitely TRUE over the boxes
+            # in force restricted nothing, so its absence widened nothing
+            # (:meth:`_conjunct_certainly_true`). Only the rest put the
+            # assumed region's non-emptiness in doubt. `vacuous` is never
+            # harmless: a branch-scoped unsatisfiable conjunct is the
+            # region being EMPTY in that branch, which is the very thing
+            # being guarded against.
+            restricting = [
+                r for i, r in enumerate(dropped)
+                if not (i < len(harmless) and harmless[i])
+            ]
+            if restricting or vacuous:
+                # F7's NO-OP HALF, on the MIXED-CONJUNCTION path. The `else:`
+                # branch below applies exactly this rule to an assume that
+                # dropped WHOLLY; this branch reached it for no conjunct at
+                # all, because `narrowed` being non-empty routed the whole
+                # assume here — so `assume((x >= lo) & jnp.all(x >= hi))`
+                # narrowed on a conjunct that may narrow NOTHING (the note
+                # two lines up can read "already within the assumed region")
+                # and then refuted over a set the note itself calls "a
+                # SUPERSET".
+                #
+                # The rule is the branch's own: the superset is one-sided.
+                # A definite violation over it is a violation at every point
+                # of the intended region, which is a refutation only if that
+                # region is NON-EMPTY — and a dropped conjunct is exactly the
+                # part of the precondition whose satisfiability was not
+                # established. Measured on `main` at 9efea6f:
+                # `assume((x >= -1.) & jnp.all(x >= 2.))` over x in [-1,1]^3
+                # asserting `x > 5.` returned REFUTED with witnesses=(), and
+                # the assumed region is EMPTY — the implication is vacuously
+                # TRUE. `x >= -1.` IS the declared lower bound; it narrows
+                # nothing, and its mere presence flipped a correct UNKNOWN
+                # into a wrong REFUTED.
+                #
+                # Same two flags, same reasons, as the whole-drop path:
+                # `uncertified` withholds the interval leg's
+                # `violated-over-set`, `assume_dropped` reaches the solver
+                # leg's DROPPED_ASSUME_REFUSAL (which the constrained-assume
+                # refusal already covers here, but the flag is the record of
+                # WHY, and the affine leg reads it).
+                self.uncertified = True
+                self.assume_dropped = True
+                self.notes.append(
+                    f"precondition satisfiability UNCERTIFIED at {where}: "
+                    f"{len(restricting) + len(vacuous)} conjunct(s) of this "
+                    f"assume were dropped, so the narrowed set is a "
+                    f"SUPERSET of the assumed region and that region was "
+                    f"not shown non-empty — the conditional claim may be "
+                    f"vacuous, and every definite violation is withheld "
+                    f"from REFUTED"
+                )
+                self.assumptions.add(
+                    "precondition satisfiability uncertified: a constraining "
+                    "assume dropped at least one conjunct, so the narrowed "
+                    "set is a superset of the assumed region and that region "
+                    "was not shown non-empty — the conditional claim may be "
+                    "vacuous; the inert-mode control is the visibility "
+                    "instrument"
                 )
         else:
             self.counter.record_inert(eqn.primitive)
@@ -5001,31 +5089,155 @@ class _Propagator:
                     ASSUME_DROP_NOTE.format(where=where) + f" ({reasons})"
                     + self._membership_hint_for(eqn.invars[0])
                 )
-                # F7's NO-OP HALF. The narrowing path sets `uncertified` when
-                # it constrains an over-approximated variable; a DROPPED
-                # assume never reached that branch, so neither the interval
-                # withhold nor solvers.py's decline-when-constrained ever
-                # engaged — both are conditioned on the assume having TAKEN
-                # EFFECT, and an assume that no-ops is invisible to both.
-                #
-                # A dropped assume means the query ran over a SUPERSET of the
-                # intended set, so the disposition is ONE-SIDED, exactly as
-                # F7 already is (it gates `violated-over-set` only, and
-                # nothing withholds `discharged`):
-                #
-                #   VERIFIED over a superset IMPLIES VERIFIED over the subset
-                #                                       -> keep, disclose
-                #   REFUTED  over a superset does NOT   -> withhold; the
-                #                                          witness may lie
-                #                                          outside the set
-                #
-                # Measured before this: `assume(jnp.all(x >= 0))` over
-                # x in [-10, 10]^3 asserting sum(x) >= 0 returned REFUTED with
-                # the replay-confirmed witness [0, 0, -1], which violates the
-                # dropped precondition. Two-sided would over-fire the way the
-                # scatter bar did for its whole history.
-                self.uncertified = True
-                self.assume_dropped = True
+            # F7's NO-OP HALF. The narrowing path sets `uncertified` when it
+            # constrains an over-approximated variable; a DROPPED assume never
+            # reached that branch, so neither the interval withhold nor
+            # solvers.py's decline-when-constrained ever engaged — both are
+            # conditioned on the assume having TAKEN EFFECT, and an assume
+            # that no-ops is invisible to both.
+            #
+            # A dropped assume means the query ran over a SUPERSET of the
+            # intended set, so the disposition is ONE-SIDED, exactly as F7
+            # already is (it gates `violated-over-set` only, and nothing
+            # withholds `discharged`):
+            #
+            #   VERIFIED over a superset IMPLIES VERIFIED over the subset
+            #                                       -> keep, disclose
+            #   REFUTED  over a superset does NOT   -> withhold; the witness
+            #                                          may lie outside the set
+            #
+            # Measured before this: `assume(jnp.all(x >= 0))` over
+            # x in [-10, 10]^3 asserting sum(x) >= 0 returned REFUTED with the
+            # replay-confirmed witness [0, 0, -1], which violates the dropped
+            # precondition. Two-sided would over-fire the way the scatter bar
+            # did for its whole history.
+            #
+            # THE NOTE GATE IS NOT THE FLAG GATE. They were one `if` until a
+            # branch-scoped unsatisfiable conjunct walked between them.
+            # `_unsatisfiable` degrades inside a cond branch (audit F2: the
+            # assume is branch-scoped and the other branch is real), so it
+            # appends to `vacuous` and NOT to `dropped` — and `dropped or not
+            # vacuous` is then FALSE. Nothing narrowed, the assume was not
+            # applied, and neither flag was set: the query refuted over the
+            # DECLARED box with the assume contributing nothing.
+            #
+            # Measured at 9efea6f AND at 3afbf01, x ∈ [-1,1]^3,
+            # `cond(x[0] > 0, yes, no)` with `yes: assume(v >= 2.);
+            # assert_(v > 5.)` -> REFUTED, witnesses=(); deleting the assume
+            # gives the same REFUTED, and the same assume at top level RAISES
+            # UnsatisfiableAssumptionError. All three detection sites reach
+            # this (empty meet, strict-boundary collapse, definitely-false
+            # constant comparison), and the run's own note already says
+            # "obligations in this branch may be vacuous under the branch's
+            # precondition" while the verdict says REFUTED.
+            #
+            # The mixed-conjunction path above already spells the rule:
+            # `if restricting or vacuous:` — vacuous is never harmless,
+            # because a branch-scoped unsatisfiable conjunct IS the assumed
+            # region being empty in that branch. Here nothing narrowed at
+            # all, so every reason to withhold that the mixed path has, this
+            # path has; the flags are unconditional.
+            self.uncertified = True
+            self.assume_dropped = True
+
+    def _conjunct_certainly_true(self, atom: ir.Atom) -> bool:
+        """Whether this assumed conjunct's OWN value is definitely true at
+        every point of the boxes in force — in which case dropping it
+        removed nothing and introduced no superset.
+
+        A predicate whose box is ``[1, 1]`` on every element is true at
+        every point of that box, so ``{x : others ∧ this} == {x : others}``:
+        the conjunct is a no-op, the narrowed set is not widened by its
+        absence, and a definite violation over that set is a violation at
+        every point of the assumed region — a refutation, not a possibly
+        vacuous one.
+
+        **What this does NOT rest on.** An earlier version of this
+        docstring justified the step by "the propagated boxes
+        over-approximate the reachable values". **That premise is false
+        here**, and this method is one of the few places it can be. The
+        conjuncts of one ``assume`` are classified in sequence and each
+        narrowing is written straight back —
+        ``self.env[target_atom.id] = new`` in :meth:`_classify_cmp` is the
+        one env writer in this file that makes a box *smaller* than the
+        values reaching that point. A conjunct read after a sibling
+        narrowed its variable is read against a box that is deliberately
+        NOT an over-approximation of the reachable set.
+
+        **What it does rest on**, in order:
+
+        1. The box still over-approximates the *assumed region*, which is
+           the only set the conclusion quantifies over. Every narrowing is
+           a meet with the CLOSED half-space (chosen deliberately in
+           :meth:`_classify_cmp` — the strict form would under-approximate,
+           binding rule 1), so it can only remove points that no point of
+           the assumed region occupies.
+        2. Emptiness — the case where ``[1, 1]`` is true but useless — is
+           closed by an INDEPENDENT gate, not by anything here: the F7
+           exactness decision on the ``narrowed`` tuple below
+           (``exactness.certifies_nonemptiness(...)``, with audit F8's
+           definitely-true half). A narrowing whose target is neither
+           exact-declared nor definitely-true over its box sets
+           ``uncertified``, and ``uncertified`` withholds every
+           ``violated-over-set`` from REFUTED regardless of what this
+           method answers. Measured, three rows: a sibling narrowing an
+           exact declared input does not raise it; the same narrowing on
+           ``y = x * 2.`` does; the same again with the predicate
+           definitely true over ``y``'s box does not.
+
+        So an INDETERMINATE box (⊤ included) and a definitely-FALSE one
+        both answer no, and reading a transfer output rather than only a
+        declaration is safe: a wider box makes ``[1, 1]`` harder to reach,
+        never easier.
+
+        Three refusals below. **None of the three was measured to change
+        an outcome**, and they are kept as cheap belt-and-braces rather
+        than as the guarantees they read like. Deleting any one of them
+        reddens no test in the suite, and an instrumented full-suite run
+        recorded all 93 calls this method receives as
+        ``(dtype, ieee_flagged, size0, answer)``: ``size0`` is False in
+        every one, ``int32`` appears twice and never inside an assume that
+        narrowed (so its answer is never read), and every
+        ``ieee_flagged=True`` call already answers False on its own.
+
+        * **non-bool** (measured unreachable IN EFFECT). ``and`` on
+          integer operands is bit arithmetic and its ``[1, 1]`` means the
+          integer one — but jax promotes ``bool & int32`` to an *int32*
+          ``and``, so a non-bool operand promotes the whole tree and
+          :meth:`_classify_assumed_pred` refuses it at the top with
+          "'and' on non-bool operands is bit arithmetic, not conjunction",
+          before the recursion that fills ``harmless`` is ever entered.
+          That top-level refusal is the reachable one and is what
+          ``test_a_non_bool_and_is_refused_as_a_conjunction_and_says_so``
+          pins; deleting this gate reddens no test in the suite.
+        * **maybe-NaN under ieee** (measured DEAD). ``_ieee_cmp`` already
+          returns flag ``False`` on comparison outputs and degrades a
+          would-be definite TRUE to ``BOOL_UNKNOWN`` whenever an operand
+          is flagged, and ``_ieee_bool_logic`` reads a flagged bool as
+          ⊤-maybe-NaN. A flagged bool is therefore ``[0, 1]``, never
+          ``[1, 1]``, so the final ``all(...)`` would already answer no.
+        * **size-0** (measured UNREACHED; 0 of 93 calls). ``all()`` over
+          no elements is vacuously true, and treating that as
+          certainly-true would be defensible; it answers no instead,
+          because a withhold is sound whatever the answer and a
+          zero-element assume is not worth a second rule. It is never
+          asked: an ``and``'s operands must broadcast, so a zero-element
+          conjunct forces every sibling conjunct to be zero-element too,
+          and a zero-element comparison takes the ``point_a and point_b``
+          arm of :meth:`_classify_cmp` (both ``all()``s are vacuously
+          true) and drops without narrowing — leaving ``narrowed`` empty
+          and ``harmless`` unread.
+        """
+        if getattr(atom.aval, "dtype", None) != "bool":
+            return False
+        if self.semantics == "ieee" and self.read_flag(atom):
+            return False
+        box = self._quiet_interval(atom)
+        if box is None or not len(box.los):
+            return False
+        return all(
+            (lo, hi) == iv.BOOL_TRUE for lo, hi in zip(box.los, box.his)
+        )
 
     def _apply_assumed_pred(
         self,
@@ -5034,6 +5246,52 @@ class _Propagator:
         narrowed: list[tuple[int, iv.IntervalArray, bool, bool]],
         dropped: list[str],
         vacuous: list[str],
+        harmless: list[bool] | None = None,
+    ) -> None:
+        """Classify one assumed conjunct, and record whether each drop it
+        produced was a NO-OP drop.
+
+        ``harmless`` runs parallel to ``dropped``: entry *i* says whether
+        the conjunct that produced ``dropped[i]`` was certainly true, so a
+        caller can tell "this assume ran over a superset" from "this
+        assume dropped something that was not restricting anything". The
+        recursion fills it leaf-first and each call only ever extends it
+        to match ``dropped``, so a conjunct's reason and its verdict stay
+        on the same index no matter how deep the ``and`` tree goes.
+        """
+        n_before = len(dropped)
+        self._classify_assumed_pred(atom, where, narrowed, dropped, vacuous,
+                                    harmless)
+        if harmless is None or len(dropped) <= len(harmless):
+            # every drop below this node was attributed by the recursive
+            # call that produced it; nothing here is this atom's own
+            return
+        # the drops this call added itself (a leaf classification) all
+        # belong to THIS conjunct, and stand or fall with its own value.
+        # A parent `and` needs no upgrade pass: a sound `and` transfer
+        # cannot return [1, 1] from an operand that was not [1, 1], so a
+        # certainly-true parent has only certainly-true children, already
+        # marked by their own calls.
+        #
+        # `n_before == len(harmless)` here, because every call returns with
+        # the two lists the same length — which is what puts this atom's
+        # verdict on exactly its own reasons. Not asserted: an assert is
+        # stripped under `-O`, and a misalignment could mark a RESTRICTING
+        # drop harmless, which is the unsound direction. The caller's read
+        # is fail-safe instead (a missing entry reads as not-harmless), and
+        # the one arithmetic below cannot over-extend.
+        harmless.extend(
+            [self._conjunct_certainly_true(atom)] * (len(dropped) - len(harmless))
+        )
+
+    def _classify_assumed_pred(
+        self,
+        atom: ir.Atom,
+        where: str,
+        narrowed: list[tuple[int, iv.IntervalArray, bool, bool]],
+        dropped: list[str],
+        vacuous: list[str],
+        harmless: list[bool] | None = None,
     ) -> None:
         if isinstance(atom, ir.Literal):
             dropped.append(
@@ -5059,7 +5317,8 @@ class _Propagator:
                 )
                 return
             for conj in producer.invars:
-                self._apply_assumed_pred(conj, where, narrowed, dropped, vacuous)
+                self._apply_assumed_pred(conj, where, narrowed, dropped,
+                                         vacuous, harmless)
             return
         if prim not in _ASSUME_CMPS:
             dropped.append(

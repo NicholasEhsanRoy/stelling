@@ -1866,4 +1866,245 @@ verdicts:
   cannot tell which series a lane ran. Before this, the honest floor was
   `jax>=0.11`.
 
+- **2026-08-07 (pre-release): REFUTED over a superset of the assumed
+  region — three paths, all wrong; A and B closed, D closed FOR ONE TRACE
+  ORDER ONLY; verdicts move REFUTED → UNKNOWN and in no other
+  direction.** F7's one-sided rule — *VERIFIED
+  over a superset implies VERIFIED over the subset, so keep it; REFUTED
+  over a superset does not, so withhold it* — was implemented on the
+  whole-drop path and reached by none of three others.
+  **(A)** `propagate._assume_constrain` routes on whether ANY conjunct
+  narrowed, so a conjunction that narrows on one conjunct and drops
+  another took the `if narrowed:` branch, where the drop earned a note
+  calling the result "a SUPERSET" and then refuted over it — setting
+  neither `uncertified` (the interval withhold) nor `assume_dropped` (the
+  solver and affine legs' marking).
+  **(B)** `affine.refine_propagation` declines wholly on
+  `coverage.constrained`, which a DROPPED assume never raises, so the
+  refinement re-minted a violation the interval leg had already judged and
+  withheld — the same query returning UNKNOWN at `refine=None` and
+  REFUTED at `refine="affine"`.
+  **(D)** an assume whose only content is a **branch-scoped
+  unsatisfiable** conjunct. Inside a possibly-untaken `lax.cond` branch
+  `_unsatisfiable` must not raise (the assume is branch-scoped and the
+  other branch is real, audit F2): it degrades to a branch-local vacuity
+  note, appending to `vacuous` and NOT to `dropped`. The whole-drop guard
+  read `if dropped or not vacuous:` — false in exactly that case — so the
+  note and the two flags were gated *together* and neither flag was set.
+  `x ∈ [-1,1]^3`, `cond(x[0] > 0, yes, no)` with `yes: assume(v >= 2.);
+  assert_(v > 5.)` returned **REFUTED, witnesses=()** — identical to the
+  same query with the assume deleted, while the same assume at top level
+  RAISES `UnsatisfiableAssumptionError`. The run's own note said
+  "obligations in this branch MAY BE VACUOUS under the branch's
+  precondition" beside that REFUTED. All three detection sites reached it
+  (empty meet, strict-boundary collapse, definitely-false constant
+  comparison). **This one was live on `main` at `9efea6f` and still live
+  at `3afbf01` after A and B were closed** — the earlier pass's
+  instrument could not reach it, because every corpus row was a
+  straight-line harness and D needs a `cond`. The fix is the rule the
+  mixed path already carried (`if restricting or vacuous:`): the note gate
+  is not the flag gate.
+  **Which verdicts are retroactively invalid**: any REFUTED on a query
+  whose assumed region is EMPTY and whose assume dropped a conjunct or
+  was branch-scoped-unsatisfiable — the implication is then vacuously
+  TRUE and the tool said the author's correct program was broken. All
+  three carry `witnesses=()`: the refutation is set-level, so there is no
+  concrete point to check the precondition against, which is why none had
+  a user-visible tell. The measured
+  exemplar, verbatim at `9efea6f`, x ∈ [-1,1]^3, `assert_(x > 5.)`:
+  `assume(jnp.all(x >= 2.))` → UNKNOWN, but
+  `assume((x >= -1.) & jnp.all(x >= 2.))` → **REFUTED** — and `x >= -1.`
+  IS the declared lower bound, narrowing nothing (the propagator's own
+  note reads "already within the assumed region"). **Cost, as a class
+  with its sample size, not as a list**: over 2844 corpus rows (1710
+  harnesses × `refine` ∈ {None, affine}) whose ground truth comes from a
+  numpy oracle — 50 000 samples plus every corner plus a grid, stelling
+  never consulted — **128 wrong REFUTEDs closed and 118 legitimate
+  REFUTEDs lost, every move REFUTED → UNKNOWN; zero VERIFIED moved in
+  either direction, and zero wrong VERIFIEDs before or after.** That
+  corpus covers A and B only: every row is a straight-line harness, so it
+  is blind to D by construction, and D's cost is not in those figures.
+  **D's cost was first measured on an instrument that could not see it,
+  and the figure this entry shipped was false.** That instrument — 216
+  rows, 3 branch guards × 6 branch-scoped assumes × 6 obligations ×
+  `refine` ∈ {None, affine} — reported `wrong-REFUTED 12 → 0` beside `CORRECT
+  66 → 66`, and the entry read that as *"D's fix costs zero legitimate
+  refutations, because the only rows it touches are the vacuous ones"*.
+  **Both halves were false.** The two flags the fix makes unconditional
+  are `_Propagator` state, **whole-run and trace-order-scoped, not
+  path-scoped**: `uncertified` is set where the assume is walked and read
+  where each obligation is walked, and `assume_dropped` has no order in it
+  at all. They withhold refutations with nothing to do with the vacuous
+  branch. The instrument could not have reported that, for three
+  independent reasons, each sufficient alone. **(i)** every row's sibling
+  branch carried `assert_(v > -1e9)` — an obligation **unfalsifiable over
+  the declared box**, so the sibling could never be why a row refuted.
+  **(ii)** the harness returned only the `cond`: **no obligation existed
+  outside a branch**. **(iii)** the oracle was `admitted = taken & asm(P)`
+  — *truth over the points that TAKE the branch and satisfy its assume* —
+  so **an obligation outside the vacuous branch was never scored**. The
+  stated cause was the instrument's premise, not a finding of it.
+
+  **Re-measured on a corpus built to see it.** 1296 rows: 3 guards × 2
+  branch SIDES for the assume × 6 branch-scoped assumes (incl. a
+  no-assume control) × 2 claims in the assumed branch × 3 **falsifiable**
+  claims in the sibling × 3 positions for a **top-level** obligation
+  outside any cond {absent, traced before the cond, traced after it} ×
+  `refine` ∈ {None, affine}; oracle 59 269 numpy points (50 000 uniform +
+  8 corners + a 21³ grid), stelling never consulted, and **every**
+  obligation scored over the points the **declaration** admits.
+
+  | tree | REFUTED | UNKNOWN | VERIFIED | wrong-REFUTED | wrong-VERIFIED |
+  |---|---|---|---|---|---|
+  | `9efea6f` | 864 | 360 | 72 | 24 | 0 |
+  | `3afbf01` | 864 | 360 | 72 | 24 | 0 |
+  | `6237e07` | 672 | 552 | 72 | **0** | 0 |
+
+  **On this corpus, `3afbf01 → 6237e07` closes 24 wrong REFUTEDs and
+  costs 168 correct ones.** 192 rows move, every one REFUTED → UNKNOWN;
+  VERIFIED unchanged at 72; wrong-VERIFIED 0 → 0; and the three ledgers
+  are row-for-row identical on jax 0.11.0 and 0.10.2 (0 disagreements in
+  1296). **72 of the 168 are provably not the vacuous branch's**: in
+  those rows the assumed branch's own claim is `v > -5.`, true at every
+  point of the declared box, so no refutation could have originated there
+  — what was withheld is a top-level obligation's or a sibling branch's.
+  **That figure is scoped to this corpus of 1296 rows of this shape**; it
+  is not a rate over jax programs, and the shape mix (half the rows put
+  the assume in the false branch, two thirds carry a top-level
+  obligation) is chosen to REACH the defect, so it over-samples it by
+  construction. What generalises is not 168: it is that the number is not
+  zero and cannot be, because the withhold is not path-scoped.
+
+  **The verdict depends on the textual position of unrelated code.**
+  Measured at `6237e07`, both `refine` legs, both series, one program per
+  row and nothing else varied:
+
+  | probe | `3afbf01` | `6237e07` |
+  |---|---|---|
+  | top-level obligation traced BEFORE the cond | REFUTED | **REFUTED** |
+  | the SAME obligation traced AFTER the cond | REFUTED | **UNKNOWN** |
+  | unsat assume in the FALSE branch, refutable claim in the TRUE one | REFUTED | **UNKNOWN** |
+  | unsat assume in the TRUE branch, refutable claim in the FALSE one | REFUTED | **REFUTED** |
+
+  jax lowers `lax.cond(p, t, f, x)` to `branches=(false_fn, true_fn)` —
+  read back off the jaxpr, the branch names print as `['no', 'yes']` — so
+  the false branch is walked first, and **an unsatisfiable assume in the
+  false branch poisons the true branch while the same assume in the true
+  branch does not poison the false one.** In the corpus that asymmetry is
+  the whole of the loss among rows with no top-level obligation: with a
+  trivially-true claim in the assumed branch, 12 rows are lost with the
+  assume in the false branch and **0** with it in the true branch. The
+  decisive row is a `cond` whose `yes` branch has **no assume** and
+  asserts `v > 5.`, and whose `no` branch carries the unsatisfiable
+  assume beside a trivially-true claim: 99 827 of 200 008 sampled points
+  take `yes` and every one of them violates the claim; `3afbf01` says
+  REFUTED and `6237e07` says UNKNOWN, and **the run's own note names the
+  branch that has no assume in it** — `violation WITHHELD from REFUTED at
+  … (h.<locals>.yes)`, beside a vacuity note that names `no`.
+
+  **The solver leg has no order in it at all, and the corpus above cannot
+  see that either** — it runs no solver. `assume_dropped` is a whole-run
+  boolean read once at the end of escalation, so a top-level obligation
+  refuted by a **replay-confirmed concrete witness** is withheld by an
+  unsatisfiable assume inside an unrelated `cond` branch, in BOTH trace
+  positions. Measured with `solver_timeout_ms=4000`, z3 5.0.0, on a cond
+  that carries the assume and no assert (so the obligation slices still
+  map): `assert_(x.sum() > 0.5)` over `x ∈ [-1,1]^3` is REFUTED with a
+  witness at `3afbf01` whether it is traced before or after the cond, and
+  UNKNOWN at `6237e07` in both. This one is not reachable when the cond
+  contains an assert — escalation declines those queries outright
+  (*"asserts nested in sub-jaxprs cannot be mapped to slices"*) — which is
+  why the branch's own corpus never met it.
+
+  **D is closed for ONE TRACE ORDER.** With the assume traced AFTER the
+  `assert_` *inside the same branch*, 36 of 36 rows (3 guards × 6
+  branch-scoped assumes × 2 `refine` legs) still REFUTE at `6237e07`,
+  identically to `9efea6f` and `3afbf01`, and **20 of those 36 refute
+  over a branch precondition satisfied by 0 of 59 269 sampled points**.
+  That is the same ordering question the "Still standing" paragraph
+  below records, reaching D's own shape; the headline for D is closed
+  *for the order the fix sees*, and the earlier word "closed" contradicted
+  the paragraph two sentences later.
+
+  **A ledger weaker than its own pre-registration is a defect of its own
+  kind.** `PREREG_REF1` scopes every cost figure to the corpus that
+  produced it ("on this corpus", with the command beside it); this entry
+  dropped the scope and generalised — and then generalised a number the
+  instrument was structurally unable to produce. The pre-registration was
+  honest and the shipped document was not, which is why the correction
+  here is not only the number. The three blind spots above are written
+  down in `scratchpad/PREREG_REF1.md` beside the corpus so the next
+  reader does not re-derive the zero from the same tool.
+
+  **The 168 is not intrinsic to closing D.** A path-scoped withhold —
+  `uncertified` saved and restored across each `cond` branch, as `env`,
+  `exact`, `nan` and `taint` already are, and only where the selector
+  admits more than one branch — was measured (uncommitted prototype, four
+  lines in the cond handler): on the same 1296 rows it re-opens **0** of
+  the 24 wrong REFUTEDs, recovers **144 of the 168**, and additionally
+  refutes 216 rows that `3afbf01` was already losing to the same leak,
+  every one of them CORRECT — 1104 CORRECT / 192 CONSERVATIVE / 0 wrong
+  of either kind. The 24 it still withholds are the rows whose only definite
+  violation lies INSIDE the vacuous branch, which is the case the withhold
+  is for. It is **not** a drop-in and is not adopted here:
+  it leaves the solver and affine legs whole-run (they read
+  `assume_dropped`, which is also the disclosure surface, so path-scoping
+  them means replacing a boolean with a per-obligation marking), and the
+  `len(possible) > 1` guard is load-bearing — without it the prototype
+  re-opens a wrong REFUTED whenever the selector is definite, because a
+  branch that is always taken is not a branch. And the argument for it —
+  *a sibling branch is a disjoint set, so a sibling assume cannot bear on
+  it* — is **not** plain correctness: refuting inside a branch already
+  assumes that branch is REACHABLE, and the analysis never certifies that.
+  Measured, with no assume anywhere, at `9efea6f`, `3afbf01`, `6237e07`
+  and `main` at `c20f38e` alike:
+  `cond(x[0] - x[0] > 0., yes, no)` over `x ∈ [-1,1]^3` with
+  `yes: assert_(v > 5.)` and `no: assert_(v > -5.)` returns **REFUTED**,
+  and the guard is false at every point — interval subtraction is
+  correlation-blind, so `x[0] - x[0]` is `[-2, 2]`, the selector is
+  undetermined, and `yes` is walked. **The query is TRUE.** That is a
+  wrong REFUTED of its own class, independent of assumes and of D, and it
+  is live on `main`; it is recorded here because path-scoping inherits it
+  rather than introduces it. Reported, not implemented:
+  the scope of an `assume` is the principal's to rule on, and a concurrent
+  `propagate.py` change makes a second one here a collision.
+
+  `test_the_branch_withhold_is_ONE_SIDED` pins that a discharge inside a
+  vacuous branch still discharges. The loss
+  is real: nothing at the interval level establishes that a dropped
+  conjunct is SATISFIABLE, so a genuine refutation over a non-empty
+  region is withheld alongside the vacuous ones
+  (`test_the_cost_of_the_withhold_is_pinned_where_it_falls`). It is not
+  charged where it is not owed: `_conjunct_certainly_true` keeps the
+  refutation when the dropped conjunct's own box is definitely TRUE over
+  the boxes in force, because such a conjunct restricted nothing and its
+  absence widened nothing — that recovered 20 of the 60 verdicts the
+  plain withhold cost on the relational corpus, with 0 unsound
+  restorations. **Still standing**: an `assume` traced AFTER the
+  `assert_` it should constrain still refutes over an empty region at the
+  interval leg (60 of the corpus's rows). That is a question about what
+  an `assume` SCOPES OVER, not about superset judging. The principal has
+  ruled it **query-scoped**; implementing that uniformly is a separate
+  change with its own pre-registration, and none of it is done here.
+  **The two legs do not yet agree on it, and this branch moved one of
+  them.** The affine guard keys on `propagation.assume_dropped`, a
+  whole-run flag with no order in it, while the interval withhold reads
+  `uncertified` at assert time — so the affine leg is already
+  query-scoped and the interval leg is still order-scoped. Measured
+  (`refine=None` / `refine="affine"`) on an assert traced before a
+  wholly-dropped assume over an empty region: interval-decided
+  `REFUTED / REFUTED` at both `9efea6f` and the branch; affine-decided
+  `UNKNOWN / REFUTED` at `9efea6f` but `UNKNOWN / UNKNOWN` on the branch,
+  with the no-assume control still `UNKNOWN / REFUTED` on both. The
+  direction is REFUTED → UNKNOWN and agrees with the ruling, but it
+  arrived as a side effect of B's guard rather than as a decision, and it
+  falsifies PREREG_REF1's scored C7 (see its re-scoring). All four cells
+  are now pinned by
+  `test_an_assume_after_the_assert_is_pinned_on_BOTH_legs`, and the
+  disagreement itself by
+  `test_the_two_legs_do_not_yet_agree_on_assume_ordering`, so the
+  forthcoming query-scoping change lands loudly wherever it touches.
+  Constructions: `tests/test_vacuous_refutation.py`; pre-registration and
+  outcomes: `scratchpad/PREREG_REF1.md`.
+
 *(no releases yet)*
