@@ -4922,6 +4922,16 @@ class _Propagator:
         harmless: list[bool] = []
         self._apply_assumed_pred(eqn.invars[0], where, narrowed, dropped,
                                  vacuous, harmless)
+        if len(harmless) != len(dropped):
+            # FAIL-SAFE, not a belt-and-braces check. `harmless[i]` is only
+            # meaningful as the verdict on `dropped[i]`; if the two ever
+            # came apart, an index could carry another conjunct's verdict
+            # and a RESTRICTING drop could read as harmless — the one
+            # direction that produces a wrong REFUTED. Attribution lost is
+            # therefore attribution refused: every drop counts as
+            # restricting, which is exactly the behaviour of not having the
+            # discriminant at all.
+            harmless = [False] * len(dropped)
         for desc in vacuous:
             # audit F2: the branch-scoped unsatisfiability disclosure
             self.notes.append(
@@ -5186,9 +5196,15 @@ class _Propagator:
         # A parent `and` needs no upgrade pass: a sound `and` transfer
         # cannot return [1, 1] from an operand that was not [1, 1], so a
         # certainly-true parent has only certainly-true children, already
-        # marked by their own calls (n_before is kept for exactly that
-        # invariant to be readable).
-        assert n_before <= len(harmless)  # noqa: S101 — index invariant
+        # marked by their own calls.
+        #
+        # `n_before == len(harmless)` here, because every call returns with
+        # the two lists the same length — which is what puts this atom's
+        # verdict on exactly its own reasons. Not asserted: an assert is
+        # stripped under `-O`, and a misalignment could mark a RESTRICTING
+        # drop harmless, which is the unsound direction. The caller's read
+        # is fail-safe instead (a missing entry reads as not-harmless), and
+        # the one arithmetic below cannot over-extend.
         harmless.extend(
             [self._conjunct_certainly_true(atom)] * (len(dropped) - len(harmless))
         )
