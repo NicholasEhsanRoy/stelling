@@ -332,3 +332,14 @@ NOT in the declared set (harness defect)`. Same class, same construction;
 withheld on the same rule and by the same witness
 (`test_the_nonvacuity_failed_face_is_withheld_on_the_same_rule`). The
 top-level and witnessed FAILED faces are unchanged.
+
+### Erratum on the baseline section above (not edited; corrected here)
+
+The pre-rule baseline paragraph estimated the REFUTE_SOUND split as
+"441 top-level, ~207 forced-branch, ~639 admitted-branch". Those were
+read off a partial by-guard table before the `reg_sat`/`narrow_sat`
+families were added and before the role map existed. Measured with the
+role map on the same `evidence_BASELINE.json`: **537 top-level, 750
+branch-scoped** (of which 534 survive the fix). The direction of the
+argument is unchanged and the conclusion is stronger, not weaker: a bare
+"withhold in every branch" rule would have cost all 750.
