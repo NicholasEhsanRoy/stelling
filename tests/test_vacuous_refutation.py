@@ -46,12 +46,15 @@ is a refutation only if the assumed region is non-empty, and a dropped
 conjunct is exactly the part of the precondition whose satisfiability was
 never established.
 
-NOT covered here, deliberately: an `assume` traced AFTER the `assert_` it
+NOT fixed here, deliberately: an `assume` traced AFTER the `assert_` it
 should constrain. That is a question about what an `assume` SCOPES OVER,
-not about superset judging, and it is reserved to the principal
-(`scratchpad/PREREG_REF1.md`, clause C7). `test_an_assume_after_the_assert
-_is_the_reserved_ordering_question` pins the CURRENT behaviour so a ruling
-either way lands loudly.
+not about superset judging. The principal has since RULED it QUERY-scoped;
+implementing that uniformly is a separate change with its own
+pre-registration. This file only pins the current behaviour, on BOTH legs
+— and the two legs do not agree: the affine guard keys on
+`propagation.assume_dropped` (a whole-run flag, so query-scoped) while the
+interval withhold reads `uncertified` at assert time (order-scoped). See
+the C section.
 """
 from __future__ import annotations
 
@@ -168,10 +171,32 @@ def _affine_reachable_verified():
 
 
 def _assert_before_assume():
+    """Decided at the INTERVAL leg (`x > 5.` is definitely false on the box)."""
     x = any_array((3,), "float64", (-1.0, 1.0))
     o = assert_(x > 5.0)
     assume(jnp.all(x >= 2.0))
     return (o,)
+
+
+def _assert_before_assume_affine():
+    """The same ordering, decided at the AFFINE leg instead.
+
+    `x - x` is [-2, 2] as a box and exactly 0 as an affine form, so the
+    interval leg cannot decide it and the refinement is what judges it.
+    Without this harness the ordering pin runs entirely on the interval
+    leg and is blind to the half that actually moved on this branch.
+    """
+    x = any_array((3,), "float64", (-1.0, 1.0))
+    o = assert_(x - x >= 0.5)
+    assume(jnp.all(x >= 2.0))
+    return (o,)
+
+
+def _affine_control_no_assume():
+    """The same obligation with no assume at all — the affine leg's own
+    control, so a withhold cannot be confused with the leg going dark."""
+    x = any_array((3,), "float64", (-1.0, 1.0))
+    return (assert_(x - x >= 0.5),)
 
 
 # -- D harnesses: the assume lives inside a possibly-untaken cond branch -----
@@ -347,17 +372,53 @@ def test_an_indeterminate_dropped_conjunct_does_NOT():
     assert _prop(_restricting_relational).assume_dropped is True
 
 
-def test_the_discriminant_refuses_a_non_bool_operand():
-    """An integer `and`'s box of [1,1] is the integer one, not truth."""
+def test_a_non_bool_and_is_refused_as_a_conjunction_and_says_so():
+    """Replaces `test_the_discriminant_refuses_a_non_bool_operand`, which
+    could not fail.
+
+    That test named `_conjunct_certainly_true`'s dtype gate and then
+    asserted `assume_dropped is True` — which on this harness comes from
+    the whole-drop `else:` path, and that path never consults `harmless`
+    at all. It stayed green under `_conjunct_certainly_true -> return
+    True` and under deleting the dtype gate outright.
+
+    The refusal that IS reachable, and IS load-bearing, lives one level up
+    in `_classify_assumed_pred`: jax's `&` is bitwise, so a non-bool `and`
+    is not the logical connective and must not be recursed into as one.
+    Pinned by its disclosed REASON, because that is its whole effect —
+    the verdict is withheld either way.
+
+    The dtype gate inside `_conjunct_certainly_true` is unreachable in
+    effect, and the second assertion here is why: jax promotes `bool &
+    int32` to an int32 `and`, so a non-bool operand promotes the WHOLE
+    tree and is refused at the top, never reaching the recursion where
+    `harmless` is filled. If jax's promotion ever changed, this assertion
+    is what would say so.
+    """
     def h():
         i = any_array((3,), "int32", (1, 1))
         assume(i & i)                 # bit arithmetic on non-bool operands
         return (assert_(i > 5),)
-    p = _prop(h)
-    assert p.assume_dropped is True, (
-        "a non-bool `and` whose box is [1,1] must not be read as "
-        "certainly-true; its [1,1] means the integer one"
+    note = next(n for n in _prop(h).notes if "constraint DROPPED" in n)
+    assert "'and' on non-bool operands is bit arithmetic, not conjunction" \
+        in note
+
+    def mixed():
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        i = any_array((3,), "int32", (1, 1))
+        assume((x >= 0.5) & (i & i))
+        return (assert_(x > 5.0),)
+    cj = transcribe(jax.make_jaxpr(mixed)())
+    dtypes = [
+        [v.aval.dtype for v in e.invars]
+        for e in cj.jaxpr.eqns if e.primitive == "and"
+    ]
+    assert dtypes and all("bool" not in d for d in dtypes), (
+        f"a non-bool operand must promote the whole `and` tree, which is "
+        f"what makes _conjunct_certainly_true's dtype gate unreachable in "
+        f"effect; jax produced {dtypes}"
     )
+    assert _prop(mixed).coverage.constrained == 0
 
 
 @pytest.mark.parametrize("semantics", ["real", "ieee"])
@@ -522,19 +583,63 @@ def test_a_vacuous_conjunct_beside_a_narrowing_withholds():
     assert _run(_branch_mixed_vacuous).status == "UNKNOWN"
 
 
-# -- C: reserved ------------------------------------------------------------
+# -- C: the ordering rule, and the two legs that do not yet agree on it ------
+#
+# The principal has RULED: an `assume` is QUERY-scoped — it constrains the
+# whole query, not only the obligations traced after it. Implementing that
+# uniformly is a separate change with its own pre-registration; this branch
+# implements none of it and only pins what the tree does today, on BOTH legs,
+# so that change lands loudly wherever it touches.
+#
+# What the tree does today is not one thing. The affine guard keys on
+# `propagation.assume_dropped`, a whole-run flag with no order in it, while
+# the interval withhold reads `uncertified` at assert time — so the affine
+# leg is already query-scoped and the interval leg is still order-scoped.
+# Measured (`refine=None` / `refine="affine"`):
+#
+#     assert-before-assume, interval-decided   REFUTED / REFUTED
+#     assert-before-assume, affine-decided     UNKNOWN / UNKNOWN
+#     the same, no assume at all (control)     UNKNOWN / REFUTED
+#
+# The affine row read UNKNOWN / **REFUTED** at `9efea6f`, so this branch DID
+# move an ordering row (PREREG_REF1 C7 is false at the tip; see its
+# re-scoring). The direction is REFUTED → UNKNOWN, and it is the direction
+# the ruling wants, but it arrived as a side effect of the mechanism-B guard
+# rather than as a decision.
 
-def test_an_assume_after_the_assert_is_the_reserved_ordering_question():
-    """NOT a claim that this verdict is right.
+_ORDERING_ROWS = [
+    ("interval-leg/refine-none", _assert_before_assume, None, "REFUTED"),
+    ("interval-leg/refine-affine", _assert_before_assume, "affine", "REFUTED"),
+    ("affine-leg/refine-none", _assert_before_assume_affine, None, "UNKNOWN"),
+    ("affine-leg/refine-affine", _assert_before_assume_affine, "affine",
+     "UNKNOWN"),
+]
 
-    Nothing in `assume`'s or `assert_`'s docstring makes an assume
-    order-scoped; forward-only narrowing is stated in `propagate`'s module
-    docstring as a propagation fact. Whether an `assume` constrains the
-    obligations traced BEFORE it is a semantics choice reserved to the
-    principal (PREREG_REF1 C7), so this pass deliberately left it alone.
 
-    The oracle says this region is EMPTY, so under a query-scoped reading
-    this REFUTED is wrong. Pinned as CURRENT BEHAVIOUR so a ruling either
-    way changes a test rather than sliding through.
+@pytest.mark.parametrize(
+    "name,h,refine,expected", _ORDERING_ROWS,
+    ids=[r[0] for r in _ORDERING_ROWS],
+)
+def test_an_assume_after_the_assert_is_pinned_on_BOTH_legs(
+    name, h, refine, expected
+):
+    """CURRENT BEHAVIOUR, not a claim that any of these four is right.
+
+    The oracle says this region is EMPTY (no point of [-1,1]^3 satisfies
+    `x >= 2`), so under the query-scoped ruling every REFUTED here is
+    wrong and will change. The predecessor of this test ran only
+    `refine=None` on the interval-decided harness — one of these four
+    cells — and was blind to the affine cell that actually moved.
     """
-    assert _run(_assert_before_assume).status == "REFUTED"
+    assert _run(h, refine=refine).status == expected
+
+
+def test_the_two_legs_do_not_yet_agree_on_assume_ordering():
+    """The inconsistency as a fact rather than as prose. Disclosed, not
+    decided: resolving it is the forthcoming query-scoping change."""
+    # the affine leg withholds under an assume traced AFTER the assert...
+    assert _run(_assert_before_assume_affine, refine="affine").status == "UNKNOWN"
+    # ...and it is the assume doing that, not the leg going dark
+    assert _run(_affine_control_no_assume, refine="affine").status == "REFUTED"
+    # the interval leg does not withhold on the same ordering
+    assert _run(_assert_before_assume, refine=None).status == "REFUTED"
