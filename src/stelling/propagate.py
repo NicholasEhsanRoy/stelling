@@ -4986,9 +4986,25 @@ class _Propagator:
                 # reached NO hint at all before — `assume((x >= lo) &
                 # jnp.all(x <= hi))` narrows on the first conjunct and dropped
                 # the second in silence.
+                # "a superset" is the general case and stops being TRUE
+                # once the drop is known to be a no-op: a conjunct that is
+                # definitely true over the boxes in force excluded nothing,
+                # so the set constrained without it IS the assumed region.
+                # Saying "superset" there would be a false statement in the
+                # one sentence whose job is to say what was given up — and
+                # the reader would have no way to tell it from the case
+                # where the region really did widen, which is the case that
+                # withholds every refutation.
+                widened = "a superset"
+                if i < len(harmless) and harmless[i]:
+                    widened = (
+                        "NOT a superset: this conjunct is definitely TRUE "
+                        "over the boxes in force, so it excluded nothing "
+                        "and dropping it widened nothing"
+                    )
                 self.notes.append(
                     f"assume conjunct DROPPED at {where}: constraining "
-                    f"proceeded without this conjunct — a superset ({reason})"
+                    f"proceeded without this conjunct — {widened} ({reason})"
                     + (self._membership_hint_for(eqn.invars[0]) if i == 0 else "")
                 )
             # a conjunct whose own value is definitely TRUE over the boxes

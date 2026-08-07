@@ -243,6 +243,16 @@ def test_a_definitely_true_dropped_conjunct_still_refutes():
     assert p.assume_dropped is False, "and must NOT mark the run uncertified"
 
 
+def test_the_drop_note_stops_saying_superset_when_it_is_not_one():
+    """The disclosure has to distinguish the two, or a reader cannot tell
+    the drop that kept the refutation from the drop that withheld it."""
+    harmless = "\n".join(_prop(_harmless_relational).notes)
+    assert "NOT a superset" in harmless
+    restricting = "\n".join(_prop(_restricting_relational).notes)
+    assert "— a superset" in restricting
+    assert "NOT a superset" not in restricting
+
+
 def test_an_indeterminate_dropped_conjunct_does_NOT():
     """The other face. Without this the discriminant could return True
     unconditionally and every test above still pass."""
