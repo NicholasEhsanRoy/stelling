@@ -200,3 +200,135 @@ REFUTED -> UNKNOWN; or a bucket NOT predicted here moving.
 ---
 
 ## OUTCOMES (appended after the fact; nothing above this rule is edited)
+
+All numbers below come from
+`scratchpad/reach/run.py <out.json> 300` then `analyze.py` / `ledger.py`,
+run under `JAX_PLATFORMS=cpu PYTHONPATH=<worktree>/src` with
+`/home/nick/venvs/stelling-jax/bin/python` (`stelling.__file__` verified
+`/home/nick/MSF/.wt-reach/w1/src/stelling/__init__.py`). Raw evidence is
+kept outside the worktree at `/home/nick/MSF/.wt-reach/`
+(`evidence_BASELINE.json`, `evidence_AFTER.json`, `LEDGER.txt`,
+`DEEP_BASELINE.txt`, `DEEP_AFTER.txt`, the pytest and `--collect-only`
+transcripts).
+
+### After, measured on `148d3cb`
+
+```
+PER-OBLIGATION (4389 rows)          PER-QUERY (2208 rows)
+  DISCHARGE_SOUND         1338        REFUTED_SOUND      921
+  DISCHARGE_VACUOUS        147        VERIFIED_SOUND     291
+  REFUTE_ON_UNREACHABLE      0        UNKNOWN            996
+  REFUTE_SOUND            1071        FALSE_REFUTED        0
+  SWALLOWED_FALSE            0        FALSE_VERIFIED       0
+  SWALLOWED_TRUE             0
+  UNKNOWN_ON_FALSE        1488
+  UNKNOWN_ON_TRUE           18
+  UNKNOWN_ON_UNREACHABLE   330
+```
+
+### Cost ledger (paired, per obligation then per query)
+
+```
+  183  violated-over-set -> unknown   [REFUTE_ON_UNREACHABLE]  UNSOUND, removed
+  216  violated-over-set -> unknown   [REFUTE_SOUND]           honestly withheld
+   24  <absent>          -> unknown   [SWALLOWED_FALSE]        now examined-and-named
+   18  <absent>          -> unknown   [SWALLOWED_TRUE]         now examined-and-named
+    3  <absent>          -> unknown   [scan inside an unreachable cond branch]
+  violated-over-set -> discharged : 0      unknown -> discharged      : 0
+  discharged -> anything          : 0      unknown -> violated        : 0
+  queries INTO VERIFIED           : 0      queries UNKNOWN -> REFUTED : 0
+   60 FALSE_REFUTED -> UNKNOWN     9 FALSE_VERIFIED -> UNKNOWN
+  192 REFUTED_SOUND -> UNKNOWN    12 VERIFIED_SOUND -> UNKNOWN
+```
+
+### Claim by claim
+
+**C1 — MET.** `REFUTE_ON_UNREACHABLE` 183 -> **0**, on every leg and in
+every family: `hidden_f`(48) `hidden_t`(48) `top_hid_f`(48) three
+`cond`-in-`cond` shapes (9) and three `switch` families (30). The
+falsifier ranged over guards with no `x - x` in them at all
+(`top_hid_f` = `sin(x*0) > 0`, `sw_hid` = `int32(floor(c-c))`), so a
+cancellation-special-case fix would have failed it.
+
+**C2 — MET, both halves.** Soundness: zero rows certified by the witness
+have oracle `n_exec == 0` (there are no `REFUTE_*` unsound rows left at
+all). Power: `sat`, `reg_sat`, `hidden_f`/`no`, `hidden_t`/`yes`,
+`n_cc_sat_sat` did not move — 0 rows lost in those buckets. Positive
+control: **534** branch-scoped REFUTE_SOUND rows survive (baseline 750),
+against 537 top-level ones (baseline 537, unmoved), so the rule did not
+degenerate into "never refute inside a branch".
+
+**C3 — MET.** 0 obligations moved `violated-over-set -> discharged`; 0
+queries moved into VERIFIED.
+
+**C4 — MET, established before the fix.** `scratchpad/repro2.py` on
+`c4133f8`: the scan body's `stelling_assert` is in the IR
+(`all prims: stelling_any, scan, gt, stelling_assert`), `obligations = 0`,
+`notes = ()`. Pinned by
+`test_the_scan_body_assert_is_in_the_ir_and_used_to_vanish`.
+
+**C5 — MET.** All 42 swallowed rows are now listed with status `unknown`,
+detail beginning `NOT EXAMINED`, and a note naming both the source
+location and the primitive (`'scan'` / `'while'`).
+
+**C6 — MET, with its positive control.** `FALSE_VERIFIED` 9 -> **0**. The
+deep oracle (>= 20 180 points per case, `deep_verified.py`) finds, on
+`c4133f8`, 3 VERIFIED cases with a violating point and 20 REFUTED cases
+with none; on the branch, **0 and 0**. The instrument can see both
+failures, so the zeros are measured.
+
+**C7 — MET, with its positive control.** Every moved query is
+FALSE_REFUTED/FALSE_VERIFIED -> UNKNOWN (69) or SOUND -> UNKNOWN (204).
+0 into VERIFIED, 0 from UNKNOWN into REFUTED. The ledger is non-empty.
+
+**C8 — MET.** (a) `j_jit_top` unmoved on all three legs. (b) top-level
+REFUTE_SOUND 537 -> 537, DISCHARGE_SOUND 1338 -> 1338 — no top-level
+obligation changed status anywhere in the corpus. (c) `lit_true`,
+`lit_false`, `iv_true`, `iv_false` branch obligations: 0 moved.
+
+**C9 — MET, with its positive control.** `_count_propagators` = 1 with no
+candidate and 17 with one (`test_the_witness_search_is_not_run_without_a_candidate`
+/ `..._does_run_when_there_is_a_candidate`). Wall: 0.051 ms/propagate
+with no candidate, 2.296 ms with one, 200 iterations each, load average
+3.77 on 24 cores.
+
+**C10 — MET.** jax 0.11.0: **2293 passed, 2 skipped** (baseline 2271/2
+plus the 22 tests this branch adds). jax 0.10.2: **2293 passed, 2
+skipped**. `--collect-only`: 2273 -> 2295 on both series, id diff is
+exactly the 22 added `tests/test_branch_reachability.py` ids and nothing
+removed; the two series collect identical id sets.
+
+**C11 — MISSED as written; its CLASS held.** The class prediction was
+right — every one of the 216 honestly-withheld rows has a guard the
+analysis cannot evaluate at a point — but the enumeration of buckets was
+not exhaustive. Predicted and observed: `top_sat` (96), `top_hid_f`/`no`
+(48), `narrow_sat` (48). **Not predicted and observed: 24 `switch`
+rows.** The cause is the same as `sin` and I did not look for it:
+`jax.lax.switch` clamps its index through `clamp`, which has no
+registered transfer, so **no `switch` branch can be forced or witnessed
+and none can refute**. Recorded as a measured capability cost with a
+named remedy, and pinned by
+`test_no_switch_branch_can_refute_while_clamp_is_unregistered` so
+registering a `clamp` transfer flips it.
+
+### One defect found while fixing, not in the pre-registration
+
+The reachability certificate was first keyed on the assert's **outvar
+id**. Measured afterwards: jax caches traced branch jaxprs, so
+`lax.cond(p, f, f, x)` gives both branches the same body and the
+transcriber gives both asserts the same outvar id (10 and 10) — the
+witness for the branch that IS taken then certified the occurrence in the
+branch that never is, and both refuted. The key is now the chain of
+`(cond, branch)` choices plus the equation, and the construction is
+`test_a_shared_branch_body_is_certified_per_occurrence`. Corpus effect:
+none (no corpus case shares a branch body), so the unit test is the only
+thing standing between this hole and a future reader.
+
+### One adjacent instance closed, also not pre-registered
+
+A `nonvacuity` condition inside an unreachable branch still stamped
+`FAILED — a membership condition is definitely false: the stated point is
+NOT in the declared set (harness defect)`. Same class, same construction;
+withheld on the same rule and by the same witness
+(`test_the_nonvacuity_failed_face_is_withheld_on_the_same_rule`). The
+top-level and witnessed FAILED faces are unchanged.
