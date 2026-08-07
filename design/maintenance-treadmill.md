@@ -26,12 +26,29 @@ actually lives):
 
 - `scan` gained `ft_in`/`ft_out` — a new `flattree.FTTuple` structural
   type (the flat-tree redesign arriving in jax) — and **lost**
-  `num_consts`/`num_carry`/`linear`. Any consumer relying on scan's carry
+  `num_consts`/`num_carry`. Any consumer relying on scan's carry
   layout breaks; our interrogation classifier now reports
-  `layout-unknown` on 0.11 rather than guessing.
+  `layout-unknown` on 0.11 rather than guessing. (An earlier version of
+  this line also listed `linear` as lost in this bump. It was not: driven
+  over six scan forms — plain, with consts, `length=`-only, tuple carry,
+  under `grad`, `fori_loop` — `linear` is absent on **0.10.2 as well**,
+  and `linear=` appears at no `scan_p.bind` site in 0.10.2's own
+  `jax._src.lax.control_flow.loops`. It was lost in some earlier series;
+  this bump did not lose it.)
 - `Jaxpr` and `ClosedJaxpr` **merged into one class**: isinstance
-  distinctions across that boundary silently changed meaning (caught by a
-  test that pinned 0.10 behaviour; made series-tolerant).
+  distinctions across that boundary silently changed meaning. **This was
+  recorded here as "made series-tolerant" and it was not.** What the bump
+  actually did was make ONE TEST tolerant and leave its consumers behind:
+  `propagate._is_add_combiner` and two `remat2` body readers
+  (`propagate`'s transparent descent and `obligation`'s slice validator)
+  went on testing the *closed* shape only. On 0.10 that reads as "no
+  combiner" and "no body", so **every `.at[].add` row declined on 0.10**
+  — VERIFIED silently becoming UNKNOWN — and every remat'd wrapper was
+  left opaque. Nothing caught it for three weeks because there was no
+  0.10 lane to catch it with (see below). The repairs are `76140c2`
+  (structural combiner read) and `9735576` (one canonical accessor,
+  `coverage.call_body`), both **after** this bump, both prompted by the
+  lane and not by the bump.
 - `convert_element_type.new_dtype` is now a `numpy.dtypes.*` instance
   (benign — still an `np.dtype` subclass).
 
@@ -48,10 +65,24 @@ Fences need fences.
 **Ecosystem lag: zero.** All seven corpus libraries installed and traced
 on 0.11.0 on day one.
 
-**Cost of this bump:** one 4-line transcription rule (FTTuple → structural
-text), two test adjustments, one interrogation guard; under an hour
-wall-clock including re-verification of both series. `TESTED_JAX_SERIES`
-is now `("0.10", "0.11")`.
+**Cost of this bump, as first recorded:** one 4-line transcription rule
+(FTTuple → structural text), two test adjustments, one interrogation
+guard; under an hour wall-clock "including re-verification of both
+series".
+
+**Cost of this bump, corrected 2026-08-07 — the re-verification of the
+older series had not happened.** Every jax CI job installed
+`.[solvers,jax]`, whose floor is `jax>=0.5`, so every job resolved the
+NEWEST jax: whatever `TESTED_JAX_SERIES` said, CI exercised **one**
+series, and 0.10 rested on a developer's run. When 0.10 finally got a
+lane of its own (`1053714`), the suite on a real 0.10.2 failed **ten
+tests** — nine of them the one `_is_add_combiner` container bug above,
+the tenth `jit`'s `inline` param. So the honest cost is the hour, **plus**
+three consumer repairs and a CI lane, found three weeks later. The
+generalisable part is not the hour: it is that *the bump's own cost cannot
+be measured on the series the bump moves to*. `TESTED_JAX_SERIES` is now
+`("0.10", "0.11")`, and each entry now has a lane — an entry with no lane
+is a claim, not a test.
 
 ## The rates — two, not one
 
@@ -62,19 +93,31 @@ Scales with the registry:
 |---|---|---|---|
 | 0.10 → 0.11 | 1 (`unstack`) | 0 | `slice`+`squeeze` → `unstack` |
 
+"New" here means **new to the census**, not new to jax: measured,
+`jnp.unstack` traces to an `unstack` primitive on 0.10.2 as well. What
+moved is blackjax's lowering, which is why the same row is filed as a
+lowering shift. A registry gains an entry either way, so the cost is the
+same — but the distinction matters for anyone reading this column as a
+jax changelog.
+
 **Structural churn** — costs no registry entries and **invalidates
 analyses**. Scales with the number of analyses stelling owns, so the
 denominator is part of the measurement:
 
 | bump | changes | analyses broken / owned |
 |---|---|---|
-| 0.10 → 0.11 | scan layout params removed; `Jaxpr`/`ClosedJaxpr` merged | **1 / ~2** — the counter-vs-carry classifier now reports `layout-unknown` on 0.11; the census/coverage counting survived |
+| 0.10 → 0.11 | scan layout params removed; `Jaxpr`/`ClosedJaxpr` merged | **2 / ~2** (was recorded 1 / ~2) — the counter-vs-carry classifier reports `layout-unknown` on 0.11; and the `Jaxpr`/`ClosedJaxpr` merge broke the transfer-and-emission path on the OLD series in three places. The census/coverage counting survived |
 
-The denominator is the honest part: "~4 lines, under an hour" was measured
-at the single moment in this project's life when there is almost nothing
-to break — and one of roughly two owned analyses broke anyway. Merged into
-one number, this slope would lie at Stage 2, when twenty analyses exist
-and the same structural bump costs a week. Track the ratio, not the LOC.
+**Why the recorded figure was 1 and the measured figure is 2.** A
+structural change breaks an analysis on the series you are *not* running.
+At the time of the bump only 0.11 was running, so the merge looked
+absorbed; it was not, and the 0.10 lane later billed for it. The
+denominator is the honest part: "~4 lines, under an hour" was measured at
+the single moment in this project's life when there is almost nothing to
+break — and **both** of roughly two owned analyses broke, one of them
+invisibly. Merged into one number, this slope would lie at Stage 2, when
+twenty analyses exist and the same structural bump costs a week. Track the
+ratio, not the LOC — and do not read a ratio taken on one lane.
 
 **There is a third speed, and no instrument here reaches it (recorded
 2026-07-18).** The census measures *structural* churn — primitives
