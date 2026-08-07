@@ -5069,7 +5069,7 @@ class _Propagator:
             # broadcasts the rank-0 `k >= 0.5` against the size-0 sibling
             # to `bool[0]`, so the `and`'s truth implies nothing about the
             # rank-0 conjunct, and the `and` recursion below classified it
-            # as if standing alone. Ten constructions of that shape
+            # as if standing alone. Eleven constructions of that shape
             # returned VERIFIED over a strict subset (measured against
             # dense independent sampling), and the drop note said "a
             # superset" while the narrowing had gone the other way.
