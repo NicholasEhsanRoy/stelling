@@ -1867,8 +1867,8 @@ verdicts:
   `jax>=0.11`.
 
 - **2026-08-07 (pre-release): REFUTED over a superset of the assumed
-  region — three paths, all wrong; A and B closed, D closed **for one
-  trace order only**; verdicts move REFUTED → UNKNOWN and in no other
+  region — three paths, all wrong; A and B closed, D closed FOR ONE TRACE
+  ORDER ONLY; verdicts move REFUTED → UNKNOWN and in no other
   direction.** F7's one-sided rule — *VERIFIED
   over a superset implies VERIFIED over the subset, so keep it; REFUTED
   over a superset does not, so withhold it* — was implemented on the
