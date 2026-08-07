@@ -181,6 +181,38 @@ CONSTRAINED_AFFINE_DECLINE = (
     "solver escalation applies under constraining assumes)"
 )
 
+# The OTHER half of the same refusal, and the one that was missing. A
+# DROPPED assume does not raise `coverage.constrained` at all — it is not
+# present as a constraint — so the guard above never sees it, and the
+# refinement judges over declared boxes that are a SUPERSET of the assumed
+# region with nothing recording that they are.
+#
+# The disposition is ONE-SIDED, and declining wholly would be the wrong
+# shape: `solvers.py` already tried that on its own leg and reverted it,
+# because a discharge over a superset implies a discharge over the
+# intended set and suppressing those costs real verdicts for nothing.
+# Only VIOLATIONS are withheld, exactly as `escalate()` does under
+# `propagation.assume_dropped`.
+#
+# Measured on 9efea6f: `assume(jnp.all(x >= 2.))` over x in [-1,1]^3
+# asserting `x >= 5.` returns UNKNOWN at refine=None — the interval leg
+# judged the violation and WITHHELD it, since the assumed region is empty
+# and the refutation would be vacuous — and REFUTED at refine="affine",
+# which re-minted the same violation from the same declared boxes and
+# called it "definitely false over the declared box". The refinement is a
+# refinement OF the interval judgment; it may not restore what that
+# judgment withheld on a soundness ground it cannot see.
+DROPPED_ASSUME_AFFINE_REFUSAL = (
+    "violation WITHHELD from REFUTED: the propagation DROPPED an assume, "
+    "so the declared boxes this refinement judges over are a superset of "
+    "the assumed region and a definite violation over them need not be a "
+    "violation anywhere the precondition holds (the assumed region may be "
+    "empty, making the claim vacuously true). A discharge over a superset "
+    "still implies a discharge over the intended set and is kept — the "
+    "same one-sided disposition the solver escalation applies under a "
+    "dropped assume"
+)
+
 _FR0 = Fraction(0)
 
 
@@ -1025,6 +1057,20 @@ def refine_propagation(
         elif decision.status == "unknown":
             undecided.append(item.index)
             notes.append(f"assert #{item.index}: {decision.detail}")
+        elif (
+            decision.status == "violated-over-set" and propagation.assume_dropped
+        ):
+            # the one-sided dropped-assume refusal (see
+            # DROPPED_ASSUME_AFFINE_REFUSAL). Recorded as UNDECIDED rather
+            # than as a decline: the refinement RAN and separated the
+            # obligation — what it could not establish is that the region
+            # it separated over is the region the query is about. The
+            # obligation keeps the interval leg's own status and detail,
+            # which is where the withhold is already explained.
+            undecided.append(item.index)
+            notes.append(
+                f"assert #{item.index}: {DROPPED_ASSUME_AFFINE_REFUSAL}"
+            )
         else:
             decisions[item.index] = (decision.status, decision.detail)
             if decision.status == "discharged":
