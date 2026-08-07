@@ -14,7 +14,17 @@ stdout in a line protocol::
     answer <sat|unsat|unknown>
     value <name> <exact rational p/q>        (sat only, one per declared const)
     opaque <name> <raw term text>            (sat, non-rational model value)
-    end
+    end <count of value+opaque lines written>
+
+``end <count>`` is the terminator, and the parent requires it to be the
+**last line** of stdout and to state the number of model lines the parent
+actually parsed. A bare token would only say "the driver reached its last
+statement"; the count says "and it wrote exactly this much model", which is
+what *complete* has to mean if a crashed or truncated run is to be refused
+(``solvers._run_cvc5_wheel``). Driver and parent ship in the same package
+and are read together — change one and you must change the other; a
+mismatch degrades every run to UNKNOWN with the terminator quoted, which
+is the safe direction but is still a break.
 
 Why a child process at all, measured on cvc5 1.3.4: the wheel's
 ``checkSat`` holds the GIL for the entire check, so an in-process thread
@@ -67,6 +77,7 @@ def main() -> int:
             print("error script produced no check-sat answer", file=out)
             return 0
         print(f"answer {answer}", file=out)
+        written = 0
         if answer == "sat":
             for term in sm.getDeclaredTerms():
                 value = solver.getValue(term)
@@ -75,7 +86,8 @@ def main() -> int:
                 else:
                     raw = str(value).replace("\n", " ")
                     print(f"opaque {term} {raw}", file=out)
-        print("end", file=out)
+                written += 1
+        print(f"end {written}", file=out)
         return 0
     except Exception as e:  # noqa: BLE001 — the parent quotes this, never crashes
         msg = str(e).replace("\n", " ")
