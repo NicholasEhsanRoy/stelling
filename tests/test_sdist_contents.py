@@ -21,6 +21,36 @@ Two tests, in the order they matter:
    either allowlisted or listed here as deliberately withheld. It cannot be
    neither. This one needs no build backend, so it runs everywhere and fails
    closed when someone adds a file and does not think about distribution.
+
+**The intervention is performed on a COPY of the tree, and it did not used to
+be.** ``test_an_arbitrary_new_file_does_not_ship`` wrote
+``zz_sdist_allowlist_probe.txt`` into the REPO ROOT of the checkout it was
+running in, which is shared state, and two of the tests in this same file read
+that root. Driven — two suite runs, one checkout, 0.4s apart::
+
+    run A   7 passed
+    run B   2 failed
+            test_no_untracked_file_anywhere_would_ship  (saw A's probe)
+            test_an_arbitrary_new_file_does_not_ship    ("probe path is
+                                                          already taken")
+
+The first of those is a spurious RED in a test that has nothing to do with
+this one. The second is worse than it looks: the racing run's ``finally``
+unlinks the probe, so a build that started before the unlink and read the tree
+after it sees no probe — and the old test would have passed, having observed
+nothing at all. Which is the second defect:
+
+**the old test passed when the probe was never created.** Driven, by replacing
+``probe.write_text(...)`` with ``pass``::
+
+    pytest tests/test_sdist_contents.py::test_an_arbitrary_new_file_does_not_ship
+    1 passed
+
+Nothing in it re-read that the intervention had happened, so ``leaked == []``
+could not tell "the allowlist held" from "there was nothing to hold out". Both
+are answered below: the tree under test is a private copy, and the build is
+made to prove it can SEE an untracked file before its silence about one is
+believed.
 """
 
 from __future__ import annotations
@@ -62,14 +92,6 @@ WITHHELD = {
         "internal release working document, deliberately untracked — this is the "
         "file whose leak motivated the allowlist"
     ),
-    "scratchpad": (
-        "per-session working directory: the pre-registration a repair pass "
-        "writes before it measures anything. It is a record of what was "
-        "PREDICTED, so it is kept in the tree it registers AGAINST — a "
-        "registration a reader cannot reach from the repository it constrains "
-        "is not a registration — and it is not distributed, because an sdist "
-        "is the library and not its audit trail"
-    ),
     "dist": "build output",
     "build": "build output",
     ".venv": "local environment",
@@ -80,8 +102,16 @@ WITHHELD = {
     "__pycache__": "bytecode cache",
     ".pdm-build": "build backend scratch",
     "uv.lock": "a lock file pins an environment; a library must not ship one",
+    # NOTE the key above: `scratchpad` appeared TWICE in this dict, with two
+    # different reasons, and Python keeps the last — so the earlier reason was
+    # dead text that read like a decision. The two are merged here.
     "scratchpad": (
-        "per-branch audit working notes (pre-registrations, measurement logs). "
+        "per-session working directory, and per-branch audit working notes: "
+        "the pre-registration a repair pass writes before it measures "
+        "anything, its probes, and its measurement logs. It is a record of "
+        "what was PREDICTED, so it is kept in the tree it registers AGAINST — "
+        "a registration a reader cannot reach from the repository it "
+        "constrains is not a registration. "
         "Tracked, because a pre-registration that can be edited after the fact "
         "is not one; withheld, because it is a record of how this repository "
         "was checked and not part of the library a user installs. WHAT KEEPS "
@@ -103,7 +133,16 @@ WITHHELD = {
 def test_every_allowlist_entry_exists() -> None:
     """An allowlist that names a deleted path rots silently and stops
     protecting the thing it was written for."""
-    missing = sorted(e for e in _allowlist() if not (REPO / e).exists())
+    allow = _allowlist()
+    # An EMPTY include list is a shape this test used to pass over in silence:
+    # `missing` would be empty and the assertion below would be vacuous. A
+    # missing table raises KeyError in `_allowlist` and is already loud; an
+    # empty one has to be said out loud here.
+    assert allow, (
+        "pyproject's sdist allowlist is empty — this test would then be "
+        "asserting nothing about anything"
+    )
+    missing = sorted(e for e in allow if not (REPO / e).exists())
     assert not missing, (
         "pyproject's sdist allowlist names paths that no longer exist:\n  "
         + "\n  ".join(missing)
@@ -242,38 +281,111 @@ def test_no_untracked_file_anywhere_would_ship() -> None:
     )
 
 
+# Names pytest's own tmp copy never needs and hatchling never reads. `.git` is
+# in here because a worktree's `.git` is a FILE and copying it produces a tree
+# that git commands would follow back out of the copy; the rest are caches and
+# build output that make the copy large for nothing. `.gitignore` is NOT here:
+# hatchling reads it, and a copy without it would build under different rules
+# from the repository, which is the one thing the copy must not do.
+_NOT_COPIED = (
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+)
+
+
+def _tree_to_build(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A private copy of the repository, for interventions that must not be
+    performed on the checkout the suite is running in.
+
+    Measured, at 33fd1f8: 0.01s and 5.3 MiB with the exclusions above.
+    """
+    staged = tmp_path / "tree"
+    shutil.copytree(REPO, staged, ignore=shutil.ignore_patterns(*_NOT_COPIED), symlinks=True)
+    assert (staged / "pyproject.toml").is_file(), "the copy is not a source tree"
+    assert (staged / "src" / "stelling" / "__init__.py").is_file()
+    return staged
+
+
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build an sdist")
 def test_an_arbitrary_new_file_does_not_ship(tmp_path: pathlib.Path) -> None:
     """THE property, established by intervention rather than by naming a file.
 
     Break it: replace the allowlist with hatchling's default (delete the
-    ``[tool.hatch.build.targets.sdist]`` table) and this fails.
+    ``[tool.hatch.build.targets.sdist]`` table) and this fails. Driven, on a
+    copy exactly like the one built here: the probe appears in the tarball.
+
+    **Two things this test could not previously say, and now must.**
+
+    It ran the intervention on the REPO ROOT of the live checkout, so two suite
+    runs against one checkout raced — `test_no_untracked_file_anywhere_would_ship`
+    saw the other run's probe and failed, and this test hit "probe path is
+    already taken". The tree built here is therefore a copy nothing else can
+    see.
+
+    And it never re-read that the intervention had happened. Driven, with
+    ``probe.write_text`` replaced by ``pass``: ``1 passed``. An absence proves
+    nothing unless the thing was there to be found, so the probe's existence is
+    asserted before AND after the build (a build that ran over a tree without
+    it observed nothing), and a SECOND probe is dropped inside an allowlisted
+    directory where the root allowlist does not reach — that one MUST ship.
+    It is the positive control: it fails if the build stops reading this tree
+    (from git, from a cache, from an unpacked copy) or stops seeing untracked
+    files at all, which are exactly the conditions under which the first
+    probe's absence would mean nothing.
     """
-    probe = REPO / "zz_sdist_allowlist_probe.txt"
-    assert not probe.exists(), "probe path is already taken"
+    staged = _tree_to_build(tmp_path)
+    probe = staged / "zz_sdist_allowlist_probe.txt"
+    assert not probe.exists(), "probe path is already taken in a fresh copy"
     probe.write_text("this file must never reach an artefact\n")
-    try:
-        proc = subprocess.run(
-            ["uv", "build", "--offline", "--sdist", "--out-dir", str(tmp_path), str(REPO)],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        assert proc.returncode == 0, f"sdist build failed:\n{proc.stderr}"
-        built = sorted(tmp_path.glob("*.tar.gz"))
-        assert len(built) == 1, f"expected one sdist, got {built}"
-        with tarfile.open(built[0]) as tf:
-            names = tf.getnames()
-        # the control must be able to see something, or its zero is vacuous
-        assert any(n.endswith("/pyproject.toml") for n in names), (
-            "the built sdist does not even contain pyproject.toml — this test is "
-            "not looking at a real artefact"
-        )
-        leaked = [n for n in names if n.endswith(probe.name)]
-        assert not leaked, (
-            f"an arbitrary untracked file reached the sdist: {leaked}. The sdist "
-            "allowlist is not holding; hatchling's default ships everything that "
-            "is not gitignored."
-        )
-    finally:
-        probe.unlink(missing_ok=True)
+    # inside `/docs`, which IS allowlisted: the root allowlist has root-level
+    # granularity and hatchling then takes what is not gitignored, so this one
+    # is expected to ship and its absence would mean the build saw neither.
+    positive = staged / "docs" / "zz_sdist_positive_control.txt"
+    assert not positive.exists(), "positive-control path is already taken"
+    positive.write_text("an untracked file inside an allowlisted directory ships\n")
+    assert probe.is_file() and positive.is_file(), (
+        "the intervention did not happen — nothing below could distinguish "
+        "'the allowlist held' from 'there was nothing to hold out'"
+    )
+
+    out = tmp_path / "dist"
+    proc = subprocess.run(
+        ["uv", "build", "--offline", "--sdist", "--out-dir", str(out), str(staged)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert proc.returncode == 0, f"sdist build failed:\n{proc.stderr}"
+    assert probe.is_file(), (
+        "the probe vanished while the sdist was being built — hatchling did "
+        "not necessarily read a tree containing it, so its absence from the "
+        "artefact says nothing"
+    )
+    built = sorted(out.glob("*.tar.gz"))
+    assert len(built) == 1, f"expected one sdist, got {built}"
+    with tarfile.open(built[0]) as tf:
+        names = tf.getnames()
+    # the control must be able to see something, or its zero is vacuous
+    assert any(n.endswith("/pyproject.toml") for n in names), (
+        "the built sdist does not even contain pyproject.toml — this test is "
+        "not looking at a real artefact"
+    )
+    assert [n for n in names if n.endswith(positive.name)], (
+        "the POSITIVE control did not ship. An untracked file inside the "
+        "allowlisted /docs must reach the sdist; that it did not means this "
+        "build is not reading the tree the probe was dropped in, and the "
+        "probe's absence below would be vacuous rather than reassuring."
+    )
+    leaked = [n for n in names if n.endswith(probe.name)]
+    assert not leaked, (
+        f"an arbitrary untracked file reached the sdist: {leaked}. The sdist "
+        "allowlist is not holding; hatchling's default ships everything that "
+        "is not gitignored."
+    )
