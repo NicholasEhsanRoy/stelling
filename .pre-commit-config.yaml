@@ -54,7 +54,9 @@ repos:
         name: the SPDX header must be in the blob you are COMMITTING, not just the worktree
         language: system
         entry: >-
-          bash -c 'rc=0;
+          bash -c 'git rev-parse --git-dir >/dev/null 2>&1 ||
+          { echo "staged-spdx-header: no git index to read; this hook checked NOTHING." >&2; exit 1; };
+          rc=0;
           for f in "$@"; do
           git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || continue;
           head -5 -- "$f" 2>/dev/null | grep -q "SPDX-License-Identifier" || continue;
