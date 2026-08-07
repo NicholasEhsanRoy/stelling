@@ -369,7 +369,12 @@ jobs:
           PIN: ${{ matrix.pin }}
         run: |
           set -euo pipefail
-          if [ -n "${PIN}" ]; then
+          # `${PIN:-}`, not `${PIN}`: `set -u` treats an UNSET variable as an
+          # error, and the floating entry's `pin` is the empty string. Whether
+          # Actions exports an empty `env:` value or omits the variable
+          # entirely is runner behaviour that cannot be driven locally, so the
+          # two cases are made indistinguishable here rather than assumed.
+          if [ -n "${PIN:-}" ]; then
             uv pip install -e ".[${EXTRAS}]" "${PIN}" pytest
           else
             uv pip install -e ".[${EXTRAS}]" pytest
@@ -396,7 +401,10 @@ jobs:
           # leave it green while duplicating the floating entry under a 0.10
           # name. The floating entry declares no expectation and is skipped.
           read -r jax_v jaxlib_v < "${RUNNER_TEMP}/jax-before.txt"
-          if [ -n "${EXPECT}" ]; then
+          # `${EXPECT:-}` for the same reason as `${PIN:-}` above: the floating
+          # entry declares no expectation, and an omitted variable must read as
+          # "no expectation", not abort the step under `set -u`.
+          if [ -n "${EXPECT:-}" ]; then
             for pair in "jax:${jax_v}" "jaxlib:${jaxlib_v}"; do
               name="${pair%%:*}"; ver="${pair#*:}"
               case "${ver}" in
