@@ -83,6 +83,21 @@ hashes, refusal text — is compared byte for byte, and
 :func:`test_normalisation_is_narrow` pins that the normaliser touches
 nothing else.
 
+**One further neutralisation, and it is NOT in the normaliser.** A verdict
+stamps the jax version that produced it, and a query content hash is a
+function of that version (measured: jax 0.11 replaced ``jit``'s boolean
+``inline`` param with an ``Inline`` enum, and that one param is the entire
+difference between the 0.10.2 and 0.11.0 renders of
+``docs/quickstart.md``'s block). A doc therefore cannot be a byte-exact
+transcript of two jax series at once. So :func:`test_doc_example` compares
+a transcript byte for byte — hash included — when the running jax is the
+jax the doc names, and neutralises exactly two lines, the stamp and the
+``query <hash>``, when it is not. Every other line stays compared, so an
+off-series lane still measures that the verdict is otherwise identical.
+The limit that buys: **on a series other than the one a doc names, that
+doc's query hash is not verified here.** It is verified on the lane whose
+series the doc names, which is the reason a doc names one.
+
 Blocks that opt into a solver (they pass ``solver_timeout_ms``) are
 skipped when no backend is installed, since their output is about an
 escalation that cannot happen. Those examples are unverified in a
@@ -290,6 +305,63 @@ def normalise(text: str) -> list[str]:
     return keep
 
 
+# --- a recorded transcript belongs to the jax series that produced it ---
+#
+# A verdict stamp carries the jax version that produced it, and the query
+# content hash is a FUNCTION of that version. Measured on
+# ``docs/quickstart.md``'s block, jax 0.10.2 vs 0.11.0: jax 0.11 replaced
+# ``jit``'s boolean ``inline`` param with an ``Inline`` enum, so the same
+# harness traces to ``inline=False`` on 0.10.2 and ``inline=Inline.AUTO``
+# on 0.11.0. Those two lines — the stamp and the hash — are the ONLY
+# divergence in the entire verdict between the two series; the transcribed
+# IR is otherwise byte-identical.
+#
+# stelling deliberately does NOT normalise that away in the transcriber.
+# The param genuinely changed, ``Inline`` carries four further states that
+# 0.10 cannot express, and rewriting AUTO to False would both falsify the
+# record and move every 0.11 query hash. The hash is honestly
+# series-dependent, so a doc cannot be a byte-exact transcript of more
+# than one series at once.
+#
+# Hence: a recorded transcript is compared byte for byte — INCLUDING its
+# hash — whenever the running jax is the jax the doc names. On any other
+# series those two lines, and only those two, are neutralised on both
+# sides; everything else stays byte-for-byte, so this still measures that
+# the verdict is otherwise identical across the series.
+#
+# Deliberately NOT part of normalise(): that function's promise, pinned by
+# test_normalisation_is_narrow, is that it never eats a hash, and the
+# promise stays literally true.
+#
+# THE LIMIT, STATED: on a jax series other than the one a doc names, this
+# file does not verify that doc's query hash. A stelling change that moved
+# a hash while moving no other line of the verdict would pass here on that
+# lane — and fail on the lane whose series the doc names, which is the
+# reason a doc names one.
+_STAMP_JAX = re.compile(r"^(stelling \S+ \| jax )(\S+)$")
+_QUERY_HASH = re.compile(r"^query [0-9a-f]{64}$")
+
+
+def claimed_jax_version(lines: list[str]) -> str | None:
+    """The jax version a normalised verdict stamps itself with, if any."""
+    for line in lines:
+        m = _STAMP_JAX.match(line)
+        if m:
+            return m.group(2)
+    return None
+
+
+def neutralise_series_stamp(lines: list[str]) -> list[str]:
+    """Blank the two lines a jax series change is allowed to move."""
+    out = []
+    for line in lines:
+        line = _STAMP_JAX.sub(r"\1<version>", line)
+        if _QUERY_HASH.match(line):
+            line = "query <hash: series-dependent>"
+        out.append(line)
+    return out
+
+
 def run_block(source: str, tmp_path: pathlib.Path) -> subprocess.CompletedProcess:
     script = tmp_path / "block.py"
     script.write_text(source, encoding="utf-8")
@@ -407,8 +479,28 @@ def test_doc_example(path, block, tmp_path):
     if block.claimed is None:
         return
     want, got = normalise(block.claimed), normalise(r.stdout)
+    doc_jax, run_jax = claimed_jax_version(want), claimed_jax_version(got)
+    off_series = (
+        want != got
+        and doc_jax is not None
+        and run_jax is not None
+        and doc_jax != run_jax
+    )
+    if off_series:
+        # not this doc's series: its stamp and its query hash are the two
+        # lines the series is allowed to move (see the note above). Every
+        # other line is still compared byte for byte.
+        want, got = neutralise_series_stamp(want), neutralise_series_stamp(got)
     assert want == got, (
-        f"{path.name}:{block.line} — printed output does not match the doc\n"
+        f"{path.name}:{block.line} — printed output does not match the doc"
+        + (
+            f"\n(running jax {run_jax}, doc recorded on jax {doc_jax}: the "
+            f"stamp and query-hash lines were neutralised, so this failure "
+            f"is in the SERIES-INDEPENDENT part of the verdict)"
+            if off_series
+            else ""
+        )
+        + "\n"
         + "\n".join(
             difflib.unified_diff(want, got, "doc claims", "actual", lineterm="")
         )
@@ -521,5 +613,46 @@ def test_normalisation_is_narrow():
         "query 628a25efd4417f44966443e7275a31b7c437cc45ddb6b42efcadb59308171765",
         "assert #0: discharged — definitely true for all 8 element(s)",
         "hand declaration       5 eqns  hash 93bfe936574a4195",
+        # the stamp and the hash are series-dependent, but the NORMALISER
+        # is not what neutralises them — that gate lives in
+        # test_doc_example and fires only off-series. Pinned here so a
+        # future edit cannot quietly move it into the always-on path.
+        "stelling 0.1.0 | jax 0.11.0",
     ):
         assert normalise(line) == [line]
+
+
+def test_the_series_gate_neutralises_two_lines_and_no_others():
+    """The off-series gate must blank the stamp and the query hash — and
+    leave every other line of a verdict alone. A gate that ate a status or
+    a coverage line would make an off-series lane measure nothing."""
+    verdict = [
+        "== VERIFIED",
+        "  9 equations verified",
+        "stelling 0.1.0 | jax 0.11.0",
+        "query 628a25efd4417f44966443e7275a31b7c437cc45ddb6b42efcadb59308171765",
+        "coverage: 9 eqns: 8 known (89%); 1 transparent",
+    ]
+    assert neutralise_series_stamp(verdict) == [
+        "== VERIFIED",
+        "  9 equations verified",
+        "stelling 0.1.0 | jax <version>",
+        "query <hash: series-dependent>",
+        "coverage: 9 eqns: 8 known (89%); 1 transparent",
+    ]
+    # the stelling version is NOT neutralised — only jax's
+    assert neutralise_series_stamp(["stelling 9.9.9 | jax 0.11.0"]) == [
+        "stelling 9.9.9 | jax <version>"
+    ]
+    # a hash that is not the query stamp is untouched
+    assert neutralise_series_stamp(["hand declaration  5 eqns  hash 93bfe936"]) == [
+        "hand declaration  5 eqns  hash 93bfe936"
+    ]
+
+
+def test_the_series_gate_reads_the_version_out_of_the_transcript():
+    """No jax version is hardcoded here: the doc names its own series, and
+    a transcript with no stamp gets no gate at all (so a stamp-less block
+    is always compared at full strength)."""
+    assert claimed_jax_version(["== VERIFIED", "stelling 0.1.0 | jax 0.10.2"]) == "0.10.2"
+    assert claimed_jax_version(["== VERIFIED", "coverage: 9 eqns"]) is None
