@@ -458,3 +458,35 @@ move reddens them by construction; the affine cells needed the measurement,
 because "UNKNOWN" could also have meant the leg going dark. It does not:
 the no-assume control still refutes, and switching the guard off brings the
 REFUTED back.
+
+## The independent cond corpus (mechanism D's own instrument)
+
+Built for this pass because the original instrument cannot reach D.
+`<W>/condcorpus.py`: 3 branch guards x 6 branch-scoped assumes (including
+a no-assume control) x 6 obligations x `refine` in {None, affine} = **216
+rows**. Ground truth from the same oracle discipline as the original —
+59 269 numpy points (50 000 uniform in [-1,1]^3 + 8 corners + a 21^3
+grid), stelling never consulted — with truth taken over the points that
+TAKE the branch AND satisfy its assume.
+
+```
+9efea6f  main        CONSERVATIVE 138  CORRECT 66  WRONG-REFUTED 12
+3afbf01  branch tip  CONSERVATIVE 138  CORRECT 66  WRONG-REFUTED 12
+a30158c  this pass   CONSERVATIVE 150  CORRECT 66  WRONG-REFUTED  0
+```
+
+Identical at `main` and at the branch tip — D survived the pass that
+closed A and B, which is the direct measurement behind C1's falsification.
+
+Against **both** baselines the ledger is the same, and it is one-sided:
+
+```
+   12  REFUTED  -> UNKNOWN    (WRONG-REFUTED -> CONSERVATIVE)
+```
+
+with no other move at all. REFUTED 18 -> 6, **VERIFIED 60 -> 60**,
+wrong-VERIFIED 0 -> 0, **CORRECT 66 -> 66**. Every one of the 12 moved
+rows has oracle `n_sat == 0`: the assumed region is empty and the
+implication is vacuously true. **D's fix costs zero legitimate
+refutations on this corpus**, because the only rows it touches are the
+vacuous ones — which is what "the assume changed nothing at all" meant.

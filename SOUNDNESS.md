@@ -1923,10 +1923,18 @@ verdicts:
   either direction, and zero wrong VERIFIEDs before or after.** That
   corpus covers A and B only: every row is a straight-line harness, so it
   is blind to D by construction, and D's cost is not in those figures.
-  D's fix is one-sided by inspection and by test — it sets two withhold
-  flags on a path that previously set neither, touching nothing else —
-  and `test_the_branch_withhold_is_ONE_SIDED` pins that a discharge
-  inside the vacuous branch still discharges. The loss
+  **D was measured on its own corpus**: 216 rows (3 branch guards × 6
+  branch-scoped assumes, including a no-assume control × 6 obligations ×
+  `refine` ∈ {None, affine}), same oracle discipline — 59 269 numpy
+  points, stelling never consulted, truth taken over the points that TAKE
+  the branch and satisfy its assume. Identical at `9efea6f` and
+  `3afbf01`, confirming D survived the pass that closed A and B:
+  **wrong-REFUTED 12 → 0, every move REFUTED → UNKNOWN, and every moved
+  row has oracle `n_sat == 0`.** VERIFIED 60 → 60, wrong-VERIFIED 0 → 0,
+  and **CORRECT 66 → 66 — D's fix costs zero legitimate refutations**,
+  because the only rows it touches are the vacuous ones.
+  `test_the_branch_withhold_is_ONE_SIDED` pins that a discharge inside a
+  vacuous branch still discharges. The loss
   is real: nothing at the interval level establishes that a dropped
   conjunct is SATISFIABLE, so a genuine refutation over a non-empty
   region is withheld alongside the vacuous ones
