@@ -5,6 +5,20 @@
 # The publish action generates PEP 740 attestations by default; do not
 # disable them. Requires a (pending) Trusted Publisher configured on PyPI
 # for this repository + workflow + environment.
+#
+# TWO GATES STAND BETWEEN A TAG AND PyPI, because this is the one workflow
+# whose mistakes are immutable: a release on PyPI cannot be unpublished, only
+# yanked, and a yanked file still resolves for anyone who pins it.
+#
+#   1. THE SUITE, on the tagged tree. `ci` runs on pushes to main and on pull
+#      requests — neither of which is this event. A GitHub Release can be cut
+#      from any commit, tag or branch, so "ci was green" is a statement about
+#      some other tree unless it is re-established here.
+#   2. THE TAG AND THE ARTIFACT MUST AGREE. The version is read from
+#      `src/stelling/__init__.py` by hatchling; the tag is typed by a human in
+#      a web form. Nothing connects them. Tagging `v0.2.0` on a tree that still
+#      says `0.1.0` publishes `stelling-0.1.0` under a release called v0.2.0 —
+#      silently, and permanently.
 
 name: release
 on:
@@ -15,7 +29,39 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: the suite, on the tagged tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      - run: uv pip install -e ".[solvers,jax]" pytest
+      # Unnarrowed, and with the skip-inventory verdict asserted off a channel
+      # the exit code cannot reach — same reasoning as the `ci` workflow. A
+      # publish must not ride on a session that silently dropped its checks.
+      - name: pytest, with the skip-inventory verdict asserted separately
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/verdict.txt
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q -rs
+          verdict="${RUNNER_TEMP}/verdict.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the recorder was ignored, filtered out or never loaded — and pytest's own exit code cannot report that."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the completeness claim was not made::Refusing to publish on a session that could not claim the suite."
+            exit 1
+          fi
+      - run: .venv/bin/python -m stelling
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,13 +69,41 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v6
       - run: uv build
+      # `tag_name` is attacker-influenced in the general case, so it goes
+      # through the environment rather than being interpolated into the shell.
+      # The comparison is against the BUILT ARTIFACT's name, not against
+      # `__version__` read from the source: the filename is what gets uploaded,
+      # so it is the thing that has to agree with the tag.
+      - name: the tag and the artifact must agree
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          wheel="$(ls dist/*.whl)"
+          version="$(basename "${wheel}" | cut -d- -f2)"
+          echo "tag=${TAG} artifact version=${version}"
+          if [ "${TAG}" != "v${version}" ] && [ "${TAG}" != "${version}" ]; then
+            echo "::error title=tag and artifact disagree::The release is tagged '${TAG}' but the built artifact is version '${version}'. Publishing would put '${version}' on PyPI permanently, under a release that says otherwise. Fix __version__ or the tag; do not re-run this job until they match."
+            exit 1
+          fi
+      # A last look at what would ship, in the log, before it becomes immutable.
+      # tests/test_sdist_contents.py already holds the allowlist shut; this is
+      # here so the record of a release includes the file list it published.
+      - name: the sdist manifest, for the record
+        run: |
+          set -euo pipefail
+          sdist="$(ls dist/*.tar.gz)"
+          echo "### sdist contents (${sdist})" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tar tzf "${sdist}" | sed 's|^[^/]*/||' | sort >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
   publish:
-    needs: build
+    needs: [test, build]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
