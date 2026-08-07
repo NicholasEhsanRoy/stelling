@@ -22,6 +22,25 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Nicholas Ehsan Roy"
 SPDX-License-Identifier = "Apache-2.0"
 
+# The scratchpad is tracked evidence, not shipped code: `/scratchpad` is absent
+# from the sdist allowlist in pyproject.toml and carries a WITHHELD entry in
+# tests/test_sdist_contents.py, so nothing under it reaches a consumer. It holds
+# pre-registrations, probes and raw evidence in whatever form the measurement
+# produced — .py, .gitignore, and formats such as .json or .csv that cannot
+# carry a comment at all. The `insert SPDX headers` pre-commit hook is not
+# sufficient cover here on two counts, both of which have actually been hit:
+# it matches only \.(py|pyi|sh|toml|ya?ml)$, so e8f4838 landed a .gitignore it
+# could never have reached; and it only helps when it is run, so 14e34a2 landed
+# 12 header-less .py files that are squarely inside its scope. This entry makes
+# a new evidence file compliant on arrival whatever its extension. `aggregate`
+# (not `override`) means the many scratchpad files that do carry inline headers
+# keep them.
+[[annotations]]
+path = ["scratchpad/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Nicholas Ehsan Roy"
+SPDX-License-Identifier = "Apache-2.0"
+
 [[annotations]]
 path = ["DCO"]
 precedence = "aggregate"
