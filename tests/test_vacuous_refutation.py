@@ -392,9 +392,13 @@ def test_the_attribution_fail_safe_refuses_a_misaligned_verdict(monkeypatch):
     def desync(self, atom, where, narrowed, dropped, vacuous, harmless=None):
         real(self, atom, where, narrowed, dropped, vacuous, harmless)
         if harmless is not None and dropped:
-            # one entry too many: the lists come apart and index i no
-            # longer names conjunct i
-            harmless.append(True)
+            # one entry too many, AT THE FRONT: the lists come apart and
+            # index 0 now carries a verdict that is not conjunct 0's.
+            # Appending instead would be too weak a probe — a salvaging
+            # `harmless[:len(dropped)]` would still read the right value at
+            # index 0 by luck, and this test would pass against the very
+            # behaviour it exists to forbid.
+            harmless.insert(0, True)
 
     monkeypatch.setattr(P._Propagator, "_apply_assumed_pred", desync)
     # `_restricting_relational`'s drop REALLY widens (a ∈ [0,10], b ∈ [5,6],
