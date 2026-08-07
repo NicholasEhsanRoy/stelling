@@ -141,6 +141,7 @@ is that module's docstring.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from operator import index as _op_index
 import struct
@@ -4209,6 +4210,93 @@ def _bool_status(b: iv.IntervalArray, *, constrained: bool = False) -> tuple[str
     return "unknown", f"undecided for {n - n_true}/{n} element(s)"
 
 
+# The two primitives that STATE something. Found inside a sub-jaxpr the
+# analysis never descends into, each is an unexamined claim rather than an
+# undecided one, and :meth:`_Propagator._record_unexamined` says so.
+_UNEXAMINABLE_OBLIGATIONS = frozenset({"stelling_assert", "stelling_nonvacuity"})
+
+# ---------------------------------------------------------------------------
+# Reachability witnesses for branch-scoped refutations.
+#
+# Refuting inside a branch presumes a reachability that nothing certifies.
+# The index interval ADMITTING branch i is not evidence that branch i runs:
+# interval arithmetic over-approximates, so `x - x > 0` admits both legs of
+# a cond whose guard is false at every point of the declared box, and a
+# definite violation found in the leg that never executes is not a violation
+# of the program.
+#
+# What DOES certify a branch is a point of the declared box that takes it.
+# Interval propagation over a box pinned to a single point brackets the
+# program's values AT that point, so a cond whose index box is a singleton
+# there is a cond whose real index at that point is determined — and an
+# assert reached under a chain of such conds is an assert the program
+# really evaluates somewhere in the declared box.
+#
+# The grid below is that witness search. It is DETERMINISTIC by
+# construction (a verdict must not depend on a seed), SUFFICIENT rather
+# than necessary (a satisfiable guard whose true region the grid misses
+# simply goes uncertified, and its refutation is withheld), and it is
+# never consulted unless a branch-scoped violation is actually on the
+# table — a query without one runs exactly the propagation it ran before.
+_PROBE_ANCHORS = (0.0, 1.0, 0.5)  # every element at lo / at hi / at the middle
+_PROBE_COUNT = 16
+# golden-ratio conjugate and its R2 companion: a low-discrepancy pair, so
+# successive probes spread over the box instead of clustering
+_PROBE_STRIDE = 0.6180339887498949
+_PROBE_ELEMENT_STRIDE = 0.7548776662466927
+# a declaration with an infinite endpoint has no fractions; it gets a
+# ladder of finite magnitudes instead
+_PROBE_LADDER = (0.0, 1.0, -1.0, 1000.0, -1000.0, 0.001, -0.001, 1e6, -1e6)
+
+
+def _probe_fraction(k: int, element: int) -> float:
+    """Where in its declared interval probe ``k`` puts element ``element``.
+
+    The first probes are the plain anchors — every element at the same
+    end — because the guards that matter most (``x[0] > 0`` over a box
+    straddling zero) are witnessed by a corner. Later probes vary per
+    element so a guard relating two elements of one array can still be
+    witnessed.
+    """
+    if k < len(_PROBE_ANCHORS):
+        return _PROBE_ANCHORS[k]
+    return (
+        (k + 1) * _PROBE_STRIDE + element * _PROBE_ELEMENT_STRIDE
+    ) % 1.0
+
+
+def _probe_point(k: int, shape, lo: float, hi: float, dtype: str, base: int):
+    """A point of the declared box ``[lo, hi]^shape``, as flat values.
+
+    ``base`` offsets the per-element index by the declaration's position,
+    so two declarations are not pinned to the same fraction. Integer and
+    boolean declarations are pinned to integers: a non-integral point is
+    not a member of their declared set, and a witness that is not a member
+    certifies nothing.
+    """
+    n = 1
+    for d in shape:
+        n *= d
+    vals = []
+    for j in range(n):
+        f = _probe_fraction(k, base + j)
+        if lo == -math.inf or hi == math.inf:
+            v = _PROBE_LADDER[k % len(_PROBE_LADDER)]
+            if lo != -math.inf:
+                v = lo + abs(v)
+            elif hi != math.inf:
+                v = hi - abs(v)
+        else:
+            v = lo + f * (hi - lo)
+        if _is_integer_dtype(dtype) or dtype == "bool":
+            v = float(math.floor(v + 0.5))
+        v = min(max(v, lo), hi)
+        if not math.isfinite(v):
+            return None
+        vals.append(v)
+    return vals
+
+
 class _Propagator:
     def __init__(self, assume_mode: str, semantics: str = "real") -> None:
         self.assume_mode = assume_mode
@@ -4262,6 +4350,43 @@ class _Propagator:
         # scopes (jit) inherit the current value: they execute
         # unconditionally, so at depth 0 the raise stands.
         self.branch_depth = 0
+        # > 0 while executing a cond branch the index interval only
+        # ADMITS. Deliberately NOT the same counter as ``branch_depth``,
+        # which counts every branch: a branch the index box FORCES runs
+        # whenever the cond runs, so a definite violation found there is a
+        # violation of the program, while one found under an admitted-only
+        # branch presumes a reachability nothing has certified.
+        self.unforced_depth = 0
+        # (branch path, assert equation) keys this walk reached with
+        # ``unforced_depth == 0`` — under a chain of conds every one of
+        # which the index box FORCED. On a point-pinned probe run this set
+        # IS the reachability certificate: the real program evaluates that
+        # assert, by that route, at that point of the declared box.
+        #
+        # The key is the PATH and not the assert's outvar id, because the
+        # id is not unique to a dynamic occurrence. Measured: jax caches
+        # traced branch jaxprs, so `lax.cond(p, f, f, x)` gives both
+        # branches the SAME body and the transcriber gives both asserts
+        # the same outvar id (10 and 10) — an id-keyed certificate would
+        # let a witness for one branch certify an occurrence in another.
+        self.certain_reached: set[tuple] = set()
+        # (obligation index, path key) for every violation recorded while
+        # ``unforced_depth > 0`` — the candidates for withholding, paired
+        # with the identity a probe run can certify.
+        self.branch_violations: list[tuple[int, tuple]] = []
+        # the same, for nonvacuity conditions: their definite face is the
+        # FAILED stamp sentence, which is the same claim class.
+        self.branch_nonvacuity_violations: list[tuple[int, tuple]] = []
+        # (cond equation, branch index) for every branch currently open.
+        # The equation identity is the object itself: the probe runs walk
+        # the SAME `ir` query object the real run walked, so identity is
+        # stable across them and needs no synthetic numbering.
+        self._branch_path: list[tuple[int, int]] = []
+        # probe index, or None on a real run. When set, every declaration's
+        # box is replaced by a single POINT of that box (:func:`_probe_point`),
+        # which is what turns propagation into a witness evaluator.
+        self.pin: int | None = None
+        self._pin_ordinal = 0
         # set once any assume narrows: violated-over-set details are then
         # judged over the precondition-narrowed set, and must say so
         # (audit F4)
@@ -4888,7 +5013,111 @@ class _Propagator:
             j = stack.pop()
             for e in j.eqns:
                 self.counter.record_unreached(e.primitive)
+                # THE choke point for "this sub-jaxpr was never analysed",
+                # and therefore the one place an obligation inside one can
+                # be caught. `scan`, `while` and every other unregistered
+                # primitive carrying a body route through here; so do the
+                # decline paths (a transfer that refused this form, a
+                # refused shape). An assert down there is transcribed —
+                # it IS in the IR — and nothing ever propagated a box to
+                # its predicate.
+                if e.primitive in _UNEXAMINABLE_OBLIGATIONS:
+                    self._record_unexamined(e, eqn.primitive)
                 stack.extend(sub_jaxprs(e))
+
+    def _reach_key(self, eqn: ir.JaxprEqn) -> tuple:
+        """The identity of one DYNAMIC occurrence of an assert equation:
+        the chain of (cond, branch) choices that led here, then the
+        equation itself. Two occurrences of a shared branch body differ
+        in the chain even when they share every var id."""
+        return (tuple(self._branch_path), id(eqn))
+
+    def _pinned(self, eqn: ir.JaxprEqn, outs):
+        """This declaration's box, collapsed to one point of itself.
+
+        Sound as a witness because the point is a MEMBER of the declared
+        set: integer and boolean declarations are pinned to integers, and
+        a declaration whose probe point cannot be formed keeps its full
+        box (which simply fails to force any downstream branch — the
+        certificate is withheld, never faked). Under ieee the subnormal
+        haze is re-applied: a hazed point box is a sound hull of both
+        flush semantics, so any forcing conclusion drawn from it still
+        holds.
+        """
+        params = eqn.params_dict()
+        base = self._pin_ordinal
+        pinned = []
+        for out, box in zip(eqn.outvars, outs):
+            self._pin_ordinal += box.size
+            vals = _probe_point(
+                self.pin,
+                box.shape,
+                float(params["lo"]),
+                float(params["hi"]),
+                out.aval.dtype,
+                base,
+            )
+            if vals is None:
+                pinned.append(box)
+                continue
+            try:
+                point = iv.from_values(box.shape, vals)
+            except iv.IntervalError:
+                pinned.append(box)
+                continue
+            if self.semantics == "ieee":
+                point = iv.subnormal_haze(point)[0]
+            pinned.append(point)
+        return pinned
+
+    def _record_unexamined(self, eqn: ir.JaxprEqn, swallower: str) -> None:
+        """Record an obligation the analysis never looked at.
+
+        A dropped obligation is indistinguishable from an undecided one:
+        the user writes a check, the tool never examines it, and the
+        verdict says UNKNOWN — or, measured on ``c4133f8`` with one true
+        top-level assert beside a false one inside a ``scan``, says
+        **VERIFIED**. So the obligation is recorded rather than dropped.
+        It is recorded ``unknown``, never ``discharged``: the analysis
+        has no evidence in either direction, and an unexamined check must
+        not be able to complete a VERIFIED.
+
+        The detail and the note both name the SOURCE LOCATION of the
+        assert and the PRIMITIVE that swallowed it, because "unknown"
+        alone is exactly the word the reader would misread.
+        """
+        where = eqn.source_info[-1] if eqn.source_info else "unknown location"
+        kind = (
+            "obligation"
+            if eqn.primitive == "stelling_assert"
+            else "nonvacuity condition"
+        )
+        sink = (
+            self.obligations
+            if eqn.primitive == "stelling_assert"
+            else self.nonvacuity_checks
+        )
+        sink.append(
+            ObligationReport(
+                index=len(sink),
+                status="unknown",
+                detail=(
+                    f"NOT EXAMINED: this {kind} sits inside the sub-jaxpr "
+                    f"of {swallower!r}, which propagation does not descend "
+                    f"into — no box ever reached its predicate. This is not "
+                    f"an undecided {kind}, it is an unexamined one"
+                ),
+                source_info=eqn.source_info,
+            )
+        )
+        self.notes.append(
+            f"{kind} at {where} was NOT EXAMINED: it sits inside a "
+            f"{swallower!r} sub-jaxpr that no transfer descends into, so "
+            f"nothing was ever propagated to its predicate. It is recorded "
+            f"unknown rather than dropped — a dropped {kind} is "
+            f"indistinguishable from an undecided one, and it would let a "
+            f"VERIFIED stand over a check nobody made"
+        )
 
     # -- constraining assume --------------------------------------------------
 
@@ -5989,7 +6218,21 @@ class _Propagator:
             # switches the unsatisfiability posture from raise to a
             # branch-local note. Conservative even for a definite
             # single-branch selector: not raising is always sound.
+            #
+            # `unforced_depth` is the OTHER counter, and it is not the same
+            # question. A singleton `possible` means the index box admits
+            # exactly one branch, so every point of the declared set that
+            # reaches this cond takes it: that branch runs whenever the cond
+            # runs, and a definite violation inside it refutes. A `possible`
+            # with two or more members means the analysis ADMITS each of
+            # them and has certified none — `x - x > 0` is admitted both
+            # ways while the guard is false at every point of the box — so a
+            # violation found inside is withheld from REFUTED unless a
+            # witness certifies the branch (see _reachability_witnesses).
+            forced = len(possible) == 1
             self.branch_depth += 1
+            if not forced:
+                self.unforced_depth += 1
             try:
                 for i in sorted(possible):
                     b = branches[i]
@@ -5997,12 +6240,16 @@ class _Propagator:
                     self.exact = exactness.ExactSet()
                     self.nan = {}
                     self.taint = {}
-                    results.append(
-                        self.run(
-                            b.jaxpr, list(b.consts), operands, op_flags,
-                            op_taints,
+                    self._branch_path.append((id(eqn), i))
+                    try:
+                        results.append(
+                            self.run(
+                                b.jaxpr, list(b.consts), operands, op_flags,
+                                op_taints,
+                            )
                         )
-                    )
+                    finally:
+                        self._branch_path.pop()
                     if ieee:
                         branch_flags.append(
                             [self.read_flag(o) for o in b.jaxpr.outvars]
@@ -6012,6 +6259,8 @@ class _Propagator:
                         )
             finally:
                 self.branch_depth -= 1
+                if not forced:
+                    self.unforced_depth -= 1
                 self.env = outer_env
                 self.exact = outer_exact
                 self.nan = outer_nan
@@ -6180,6 +6429,15 @@ class _Propagator:
             )
             return
         outs, out_flags = result if ieee else (result, None)
+        if self.pin is not None and eqn.primitive == "stelling_any":
+            # PROBE RUN: the declaration's box collapses to one point OF
+            # THAT BOX. Everything downstream is then a bracket of the
+            # program's values at that point, which is what lets a cond
+            # with a singleton index box certify its branch. Applied to
+            # the transfer's output rather than by rewriting the query so
+            # the content hash, the coverage counts and every other
+            # instrument see the query the caller actually wrote.
+            outs = self._pinned(eqn, outs)
         if (
             ieee
             and eqn.primitive == "reduce_sum"
@@ -6252,6 +6510,12 @@ class _Propagator:
                 )
             )
         if eqn.primitive == "stelling_assert":
+            if self.unforced_depth == 0:
+                # every cond between this assert and the top of the query
+                # had a FORCED index, so reaching this equation by this
+                # path means the program reaches it too. On a pinned probe
+                # run that is a witness; on a real run it is unread.
+                self.certain_reached.add(self._reach_key(eqn))
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
             if status == "unknown":
                 # the undecided detail quotes the straddle it was judged
@@ -6310,6 +6574,15 @@ class _Propagator:
                     "superset WITHHELD from REFUTED (precondition "
                     "satisfiability uncertified; see notes)"
                 )
+            if status == "violated-over-set" and self.unforced_depth:
+                # a definite violation inside a branch the analysis only
+                # ADMITS. Recorded as a candidate rather than decided here:
+                # the certificate is a witness search over the whole query
+                # (propagate() runs it, once, and only if a candidate
+                # exists), which cannot run from inside this walk.
+                self.branch_violations.append(
+                    (len(self.obligations), self._reach_key(eqn))
+                )
             self.obligations.append(
                 ObligationReport(
                     index=len(self.obligations),
@@ -6319,6 +6592,12 @@ class _Propagator:
                 )
             )
         if eqn.primitive == "stelling_nonvacuity":
+            if self.unforced_depth == 0:
+                # same witness recording as the assert above: this
+                # membership condition is reached by a chain of forced
+                # conds, so a pinned probe run that gets here has found a
+                # point of the declared box that evaluates it.
+                self.certain_reached.add(self._reach_key(eqn))
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
             if status == "unknown":
                 # the assert's hint, on the face that needs it MOST: an
@@ -6376,6 +6655,15 @@ class _Propagator:
                     "membership condition definitely false over the "
                     "precondition-narrowed superset WITHHELD from FAILED "
                     "(precondition satisfiability uncertified; see notes)"
+                )
+            if status == "violated-over-set" and self.unforced_depth:
+                # the same class as the assert candidate above, on the
+                # face that makes the strongest claim: FAILED says "the
+                # stated point is NOT in the declared set (harness
+                # defect)", and a membership condition inside a branch no
+                # point of the box reaches supports no such sentence.
+                self.branch_nonvacuity_violations.append(
+                    (len(self.nonvacuity_checks), self._reach_key(eqn))
                 )
             self.nonvacuity_checks.append(
                 ObligationReport(
@@ -6542,6 +6830,96 @@ def interval_env(
     return dict(p.env)
 
 
+# The sentence the withheld obligation and its note both quote, so a reader
+# who meets one meets the same claim as a reader who meets the other.
+UNCERTIFIED_REACHABILITY_REFUSAL = (
+    "a definite violation was found inside a cond/switch branch that the "
+    "analysis only ADMITS — the index interval allows the branch, which is "
+    "not evidence that any point of the declared set takes it (`x - x > 0` "
+    "is admitted both ways while it is false everywhere) — and no point of "
+    "the declared box was found that reaches this obligation. Refuting "
+    "inside a branch presumes a reachability that nothing certifies, so "
+    "the violation is WITHHELD from REFUTED. No claim is made in the other "
+    "direction either: an unreachable obligation is vacuously true, and "
+    "vacuous truth is not what VERIFIED means here"
+)
+
+
+def _reachability_witnesses(closed, p, *, assume_mode, semantics):
+    """Assert outvar ids the program provably reaches somewhere in the box.
+
+    Each probe is one propagation of the SAME query with every declaration
+    pinned to a single point of its own declared box. An assert reached on
+    such a run under a chain of forced conds is an assert the program
+    evaluates at that point — a witness, not an over-approximation.
+
+    Returns the empty set (certifying nothing, so every candidate is
+    withheld) when the run being certified is not judging the declared box:
+    a constraining assume narrows the admitted set, and a point of the box
+    outside the narrowed region is not a witness for it. A probe that
+    raises certifies nothing either — the safe direction throughout is
+    withholding.
+    """
+    if p.any_constrained or p.assume_dropped:
+        return frozenset()
+    found: set[int] = set()
+    for k in range(_PROBE_COUNT):
+        probe = _Propagator(assume_mode, semantics)
+        probe.pin = k
+        try:
+            probe.run(closed.jaxpr, list(closed.consts), [])
+        except Exception:  # noqa: BLE001 — a failed probe certifies nothing
+            continue
+        found |= probe.certain_reached
+    return frozenset(found)
+
+
+def _withhold_uncertified_branch_refutations(closed, p, *, assume_mode, semantics):
+    """Withhold REFUTED from violations in branches nothing certifies.
+
+    Runs the witness search ONCE, and only when the walk actually recorded
+    a branch-scoped violation: a query with none pays nothing.
+    """
+    work = [
+        (p.obligations, p.branch_violations, "violation", "REFUTED"),
+        (
+            p.nonvacuity_checks,
+            p.branch_nonvacuity_violations,
+            "nonvacuity FAILED face",
+            "FAILED",
+        ),
+    ]
+    candidates = [
+        (sink, i, key, what, face)
+        for sink, recorded, what, face in work
+        for i, key in recorded
+        if sink[i].status == "violated-over-set"
+    ]
+    if not candidates:
+        return
+    certified = _reachability_witnesses(
+        closed, p, assume_mode=assume_mode, semantics=semantics
+    )
+    for sink, i, key, what, face in candidates:
+        if key in certified:
+            continue
+        o = sink[i]
+        where = o.source_info[-1] if o.source_info else "unknown location"
+        p.notes.append(
+            f"{what} WITHHELD from {face} at {where}: "
+            f"{UNCERTIFIED_REACHABILITY_REFUSAL}"
+        )
+        sink[i] = dataclasses.replace(
+            o,
+            status="unknown",
+            detail=(
+                f"definite violation inside a branch whose reachability is "
+                f"UNCERTIFIED, withheld from {face} (see notes); no "
+                f"definite status is claimed in either direction"
+            ),
+        )
+
+
 def propagate(
     closed: ir.ClosedJaxpr,
     *,
@@ -6581,6 +6959,9 @@ def propagate(
             f"via any_array), got {len(closed.jaxpr.invars)} free invar(s)"
         )
     p.run(closed.jaxpr, list(closed.consts), [])
+    _withhold_uncertified_branch_refutations(
+        closed, p, assume_mode=assume_mode, semantics=semantics
+    )
     assumptions = set(p.assumptions)
     if semantics == "ieee":
         # the mode-wide stamped assumptions: how ieee endpoints are
