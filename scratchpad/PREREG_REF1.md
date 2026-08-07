@@ -738,3 +738,56 @@ stelling/src` — `main` — and reported a **series-dependent** result for the
 and asserted, both lanes agree. `2>/dev/null` on a script that prints
 `stelling.__file__` to stderr is how the check got thrown away; verify the
 path in the same breath as the measurement, not in a line you then silence.
+## CORRECTION (appended 2026-08-07 by an independent pass, not by C11's author)
+
+**C11's size-0 finding was wrong, and the mutation-ledger row that
+records it is wrong.** Both said the `_conjunct_certainly_true` size-0
+refusal is never asked and changes no outcome. Both were read off a
+population that cannot show otherwise.
+
+The reasoning given — "an `and`'s operands must broadcast, so a
+zero-element conjunct forces every sibling to be zero-element too" — does
+not hold. Broadcast forces the zero-element shape onto the **output**,
+not onto the siblings: `bool[]` against `bool[0]` is a legal pair whose
+result is `bool[0]`. A rank-0 sibling of a size-0 conjunct is therefore
+read as a standalone comparison, and it narrows.
+
+The instrument's population was the SUITE, and **the suite contains no
+size-0 assume at all** — its size-0 declarations all flow into `assert_`
+or a `jnp.all` reduction. Re-instrumented on `main` at `c20f38e` at the
+adjacent `_apply_assumed_pred` site: 264 calls, atom shapes `()`, `(1,)`,
+`(2,)`, `(3,)`, `(5,)`, `size0` in **0 of 264**. The same absence, one
+site over, for the same reason: nothing in the suite exercises it.
+
+Re-measured over a 21-construction sweep that DOES put a size-0 value in
+an assume (`JAX_PLATFORMS=cpu JAX_ENABLE_X64=1`, jax 0.11.0):
+
+| claim | as recorded | re-measured |
+|---|---|---|
+| size-0 calls | 0 of 93 | **36 of 38** |
+| deleting the size-0 gate | "never asked", 0 failures | **0 test failures, but 4 verdict rows flip UNKNOWN → REFUTED** |
+
+The flipping row is `assume((k >= 0.5) & (z >= 2.0)); assert_(k < 0.0)`
+with `k` declared `[-1, 1]` and `z` declared at shape `(0,)`, in all four
+(vacuity mode × refine) configurations. So "documented, not pinned" holds
+— the suite still does not pin it — but "never asked" does not, and
+neither does "changes no outcome".
+
+**The flipped REFUTED is SOUND**, so the refusal is not buying a
+soundness guarantee: a size-0 conjunct forces the whole assumed predicate
+to `bool[0]`, which admits every point of the declared box, so a witness
+drawn from any narrowed subset is admitted. Independent numpy sampling of
+that construction: 100 006 points, 100 006 admitted, 50 267 violating.
+
+**Why the sweep exists at all.** The same broadcast fact is a live
+**wrong VERIFIED** on `main` and on this branch: with `z` at shape `(0,)`,
+`assume((k >= 0.5) & (z >= 2.0))` narrows `k` to `[0.5, 1.0]` — a SUBSET
+of its declared `[-1, 1]` — and `assert_(k > 0.0)` returns VERIFIED, while
+the assume admits every `k` including `-1`. Eleven constructions of that
+shape were measured VERIFIED-over-a-subset on this branch's tip
+(`6237e07`) as well as on `main` (`c20f38e`). The fix is the
+vacuous-predicate gate at the top of the classification recursion, on
+branch `fix/size0-vacuous-conjunct-narrowing` (cut from `c20f38e`, so it
+is mergeable independently of this one). With that gate grafted onto this
+branch's source the sweep shows zero wrong VERIFIEDs, and the size-0
+refusal's answer stops being read for any verdict.

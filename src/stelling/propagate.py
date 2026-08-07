@@ -5207,15 +5207,24 @@ class _Propagator:
         declaration is safe: a wider box makes ``[1, 1]`` harder to reach,
         never easier.
 
-        Three refusals below. **None of the three was measured to change
-        an outcome**, and they are kept as cheap belt-and-braces rather
-        than as the guarantees they read like. Deleting any one of them
-        reddens no test in the suite, and an instrumented full-suite run
-        recorded all 93 calls this method receives as
+        Three refusals below. Deleting any one of them reddens no test in
+        the suite, and an instrumented full-suite run recorded all 93
+        calls this method receives as
         ``(dtype, ieee_flagged, size0, answer)``: ``size0`` is False in
         every one, ``int32`` appears twice and never inside an assume that
         narrowed (so its answer is never read), and every
         ``ieee_flagged=True`` call already answers False on its own.
+
+        **That instrument's population is the SUITE, and the suite has no
+        size-0 assume in it** — every size-0 declaration it contains flows
+        into an ``assert_`` or a ``jnp.all`` reduction. "0 of 93" is
+        therefore a fact about the tests, not about the method, and the
+        earlier reading of it here ("measured UNREACHED … never asked")
+        was wrong. Re-measured over 21 constructions that DO put a size-0
+        value in an assume: 36 of the 38 calls this method receives are
+        size-0, and deleting the size-0 refusal changes an outcome (see
+        that bullet). The other two refusals' readings survive the
+        re-measurement unchanged.
 
         * **non-bool** (measured unreachable IN EFFECT). ``and`` on
           integer operands is bit arithmetic and its ``[1, 1]`` means the
@@ -5233,17 +5242,37 @@ class _Propagator:
           is flagged, and ``_ieee_bool_logic`` reads a flagged bool as
           ⊤-maybe-NaN. A flagged bool is therefore ``[0, 1]``, never
           ``[1, 1]``, so the final ``all(...)`` would already answer no.
-        * **size-0** (measured UNREACHED; 0 of 93 calls). ``all()`` over
-          no elements is vacuously true, and treating that as
-          certainly-true would be defensible; it answers no instead,
-          because a withhold is sound whatever the answer and a
-          zero-element assume is not worth a second rule. It is never
-          asked: an ``and``'s operands must broadcast, so a zero-element
-          conjunct forces every sibling conjunct to be zero-element too,
-          and a zero-element comparison takes the ``point_a and point_b``
-          arm of :meth:`_classify_cmp` (both ``all()``s are vacuously
-          true) and drops without narrowing — leaving ``narrowed`` empty
-          and ``harmless`` unread.
+        * **size-0** (measured REACHED, and it moves a verdict). ``all()``
+          over no elements is vacuously true; this refusal answers no
+          instead, and that answer is read. Measured over the 21-case
+          sibling sweep: 36 of 38 calls arrive with a ``bool[0]`` atom,
+          and deleting the refusal flips ``assume((k >= 0.5) & (z >=
+          2.0)); assert_(k < 0.0)`` — with ``k`` declared ``[-1, 1]`` and
+          ``z`` at shape ``(0,)`` — from UNKNOWN to REFUTED in all four
+          (vacuity mode × refine) configurations, while reddening no
+          test.
+
+          The argument this bullet used to give for unreachability is
+          **false**: an ``and``'s operands must broadcast, but broadcast
+          forces the zero-element shape onto the OUTPUT, not onto the
+          siblings — ``bool[]`` against ``bool[0]`` is a legal pair whose
+          result is ``bool[0]``. So a rank-0 sibling of a size-0 conjunct
+          is read as a standalone comparison and CAN narrow.
+
+          That is the same defect the vacuous-predicate gate at the top
+          of :meth:`_apply_assumed_pred` exists to stop, and with that
+          gate in force nothing below a ``bool[0]`` predicate narrows, so
+          ``narrowed`` is empty and this method's answer is not read for
+          the verdict. The refusal is kept regardless: withholding is
+          sound whatever the answer.
+
+          The flipped REFUTED above is, on inspection, SOUND — a size-0
+          conjunct forces the whole assumed predicate to ``bool[0]``,
+          which admits every point of the declared box, so a witness
+          drawn from any narrowed subset is admitted. The refusal
+          therefore costs a refutation rather than buying a soundness
+          guarantee, which is the opposite of how the sentence above
+          used to read.
         """
         if getattr(atom.aval, "dtype", None) != "bool":
             return False
