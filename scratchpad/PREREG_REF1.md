@@ -125,3 +125,122 @@ Withholding (UNKNOWN) is the only direction I will move a verdict in.
 ---
 
 # OUTCOMES (append-only)
+
+Scored at `13f5b2f`. Every figure carries the command that produced it;
+`<W>` = `/tmp/claude-1000/-home-nick-MSF-stelling/e443f4ad-79d3-43d4-bc29-87a910409ae6/scratchpad`,
+`<PY>` = `/home/nick/venvs/stelling-jax/bin/python`, and every run exported
+`JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 PYTHONPATH=<W>/wt-ref1/src` after
+`<PY> -c "import stelling; print(stelling.__file__)"` resolved inside the
+worktree.
+
+**C1 — MET, with one correction to its own wording.** Three mechanisms,
+each independently reachable, attributed by
+`<PY> <W>/work/mech2.py <W>/work/base.json`:
+
+```
+  64  A dropped conjunct inside a CONSTRAINED assume
+   6  B affine re-mint (interval had withheld)
+  60  C forward-scoping (assume traced after the assert)
+```
+
+The correction: "three defects" is not how they divide. HANDOFF5 §15.1's
+#1 and #2 are both A (see C3); its #3 is B; and C is not in that list at
+all. **Two are bugs and one is a semantics choice.**
+
+**C2 — MET.** `truth of every wrong REFUTED: Counter({'VACUOUS': 130})`
+across 2268 rows, and `('NO_CE', 'REFUTED')` does not occur in either
+corpus at any commit measured. Emptiness is the necessary condition for a
+wrong REFUTED here, not a mechanism: a superset that contains a *non-empty*
+assumed region cannot yield a wrong set-level refutation, because a
+predicate definitely false over the superset is false at every point of
+the region too.
+
+**C3 — MET.** `NARROW2+ALL_LE_02` (jointly empty; neither conjunct false
+alone) and `RED+EMPTY_ALL` (a definitely-false conjunct) are both
+mechanism A, both REFUTED at `9efea6f`, both UNKNOWN at `8106a55`, closed
+by one edit at one site.
+`tests/test_vacuous_refutation.py::test_a_jointly_empty_region_moves_WITH
+_the_definitely_false_conjunct`.
+
+**C4 — MET.** 0 mechanism-A rows remain
+(`<PY> <W>/work/mech2.py <W>/work/fixAB.json` prints only the 60 C rows).
+
+**C5 — MET.** 0 mechanism-B rows remain, at `refine="affine"`, with and
+without `solver_timeout_ms=4000`
+(`<PY> <W>/work/rivals.py`, the REPRODUCER block: all eight
+timeout × refine combinations UNKNOWN).
+
+**C6 — MET.** Over both corpora, 2844 rows: **every** move is
+`REFUTED -> UNKNOWN` (128 wrong + 118 right). VERIFIED totals unchanged
+(580 -> 580 and 192 -> 192); WRONG-VERIFIED 0 -> 0.
+`<PY> <W>/work/ledger.py`.
+
+**C7 — MET.** The 60 mechanism-C rows are byte-identical before and after;
+`h_pre` is REFUTED at `9efea6f` and REFUTED at `13f5b2f`
+(`<PY> <W>/work/probe_branches.py`). Pinned as current behaviour by
+`test_an_assume_after_the_assert_is_the_reserved_ordering_question`.
+
+**C8 — MET.** `grep -n "self.uncertified = True" src/stelling/propagate.py`
+returns three sites: 4967 (inside `if narrowed:`, so
+`coverage.constrained >= 1`), 5035 (mixed drop, sets `assume_dropped`),
+5089 (whole drop, sets `assume_dropped`). No fourth, and none on a path
+where both proxies are false.
+
+**C9 — MET.**
+
+| tree | jax | result |
+|---|---|---|
+| `9efea6f` | 0.11.0 | 2149 passed, 2 skipped |
+| `13f5b2f` | 0.11.0 | see the table in the report |
+| `13f5b2f` | 0.10.2 | 2168 passed, 2 skipped |
+
+`--collect-only -q` id diff `9efea6f` → branch: **+19, −0**, and the
+branch's id set is **identical between 0.11.0 and 0.10.2** (`diff`
+returns nothing).
+
+**C10 — MET.** The ledger is in the report and in `SOUNDNESS.md`, stated
+as a class with its sample size (2844 rows), including the 118 legitimate
+REFUTEDs the fix costs.
+
+**C11 — MET.** Cost measured first, without the discriminant: 60
+legitimate REFUTEDs lost on the relational corpus
+(`<W>/work/rel_fixA.json`), of which the `DISJOINT`+`REL` class is a drop
+whose own box is `[1,1]`, measured at the drop site by
+`<PY> <W>/work/boxes.py`. With the discriminant that cost is **40**, and
+wrong REFUTEDs closed stays 48 — **20 restored, 0 unsound restorations**
+(`<W>/work/rel_fixA2.json`). The discriminant restores nothing on any
+`VACUOUS` row. Two-sided pin:
+`test_a_definitely_true_dropped_conjunct_still_refutes` /
+`test_an_indeterminate_dropped_conjunct_does_NOT`.
+
+**The hard boundary — HELD.** Neither reach-back pass was implemented, and
+no verdict was moved to VERIFIED. Every verdict this branch moves goes
+REFUTED → UNKNOWN.
+
+## A measured correction to HANDOFF5 §26.3
+
+§26.3 describes AFF4 and F3E as having "**opposite semantics postures**"
+on the reach-back pass. Measured on the ordering row `h_pre` (assert
+before a wholly-dropped assume over an EMPTY region), by running all four
+trees (`<PY> <W>/work/probe_branches.py`):
+
+| tree | A (mixed drop) | B (affine re-mint) | C (ordering) |
+|---|---|---|---|
+| `9efea6f` main | REFUTED | REFUTED | REFUTED |
+| AFF4 `20598ce` | **REFUTED** | UNKNOWN | UNKNOWN |
+| F3E `7dbb25f` | UNKNOWN | **REFUTED** | UNKNOWN |
+| this branch | UNKNOWN | UNKNOWN | **REFUTED** |
+
+The postures differ **in prose only**. AFF4's `rescope_preconditions`
+docstring says the question is "RESERVED FOR THE PRINCIPAL" and then takes
+the set-scoped direction anyway; F3E's `withhold_possibly_vacuous` calls
+the alternative "not a defensible split" and takes the same direction.
+**On the row that distinguishes them, both branches behave identically.**
+So the merge trap §26.3 warns about is not two semantics fighting — it is
+two implementations of the *same* unratified decision, which is why their
+union is silent. This branch implements neither, which is why it has no
+trap: the only rows on which it differs from both is exactly the row the
+principal has not ruled on.
+
+The residual disjointness §26.1 reports **reproduces**: AFF4 leaves A
+standing, F3E leaves B standing, and neither alone is sufficient.
