@@ -567,10 +567,20 @@ def conditioning_2x2_field(shape, dtype, theta_range, kappa, transform) -> Contr
     family the same pair REFUTES with a concrete witness — which is the
     point.
 
-    Family assembly must stay on supported primitives: build stacked
-    entries with ``jnp.concatenate`` over ``reshape``\\ d pieces —
-    measured on jax 0.11.0, ``jnp.stack`` traces to a ``stack`` primitive
-    with no transfer row, which would send the whole family to ⊤.
+    Family assembly must stay on supported primitives — but ``jnp.stack``
+    is now one of them, and this paragraph used to say otherwise. It read
+    "measured on jax 0.11.0, ``jnp.stack`` traces to a ``stack`` primitive
+    with no transfer row, which would send the whole family to ⊤", and
+    directed callers to ``jnp.concatenate`` over ``reshape``\\ d pieces
+    instead. The trace half is still true on both tested series; the
+    consequence is not. ``stack`` acquired exact real and ieee transfers,
+    SMT emission and a replay row in the scatter-add/stack build
+    (``design/scatter-rows.md``). Measured on jax 0.10.2 and 0.11.0
+    alike, a two-entry family assembled with ``jnp.stack`` reports
+    ``10 eqns: 10 known (100%)`` and VERIFIED — no ⊤ at all. Either
+    assembly is fine; check :doc:`the supported-primitives page
+    <supported-primitives>` rather than this sentence, because that page
+    is generated from the live registries and this sentence was not.
 
     Vacuity, the emission budget, and never-on solver defaults are
     inherited unchanged through :func:`check_contract`.

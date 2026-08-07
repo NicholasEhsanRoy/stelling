@@ -1,9 +1,12 @@
 # Transparent primitives
 
 **Status:** design note, normative for the Stage-0/1 interpreter. Evidence
-verified against jax 0.10.2 on 2026-07-16; re-verify on every jax series
-bump (the `TESTED_JAX_SERIES` constant in `stelling/_optional.py` is the
-forcing function).
+first verified against jax 0.10.2 on 2026-07-16; re-driven on **both**
+tested series 2026-08-07 and the container column corrected (below).
+Re-verify on every jax series bump (the `TESTED_JAX_SERIES` constant in
+`stelling/_optional.py` is the forcing function) — and re-verify it *per
+series*, because the first bump's finding was that a cell of this table
+moves, not that the table as a whole survived.
 
 ## The problem
 
@@ -18,14 +21,38 @@ own demo.
 The correct transfer function for this class is: **descend into the
 sub-jaxpr with the current environment**, not ⊤.
 
-## The class, as verified on jax 0.10.2
+## The class, as verified on jax 0.10.2 **and** 0.11.0
 
-| primitive | sub-jaxpr param | other params of note |
-|---|---|---|
-| `jit` | `jaxpr` (`ClosedJaxpr`) | shardings/layouts hold `UnspecifiedValue` (zero-payload sentinel), `ctx_mesh` holds an empty `Mesh` (sentinel; non-empty raises) |
-| `custom_jvp_call` | `call_jaxpr` (`ClosedJaxpr`) | `jvp_jaxpr_fun` is a `WrappedFun` thunk → `OpaqueParam` |
-| `custom_vjp_call` | `call_jaxpr` (`ClosedJaxpr`) | `fwd_jaxpr_thunk`, `bwd` (`WrappedFun`), `out_trees` (function) → `OpaqueParam` |
-| `remat2` | `jaxpr` (**open** `Jaxpr`, not Closed) | `policy` is `None`, or a callable when user-supplied → `OpaqueParam` |
+The container column is **per series**, and that is the whole point of it.
+jax 0.11 merged `Jaxpr` and `ClosedJaxpr` into one class —
+`ClosedJaxpr is Jaxpr` is `False` on 0.10.2 and `True` on 0.11.0 — so a
+container named here is a fact about the jax that produced the param, never
+a fact about the callee. Both columns below were driven on both
+interpreters (`scratchpad/SERIES_CLAIM_SWEEP.md` §A).
+
+| primitive | sub-jaxpr param | container: 0.10.2 → 0.11.0 | other params of note |
+|---|---|---|---|
+| `jit` | `jaxpr` | `ClosedJaxpr` → merged class | shardings/layouts hold `UnspecifiedValue` (zero-payload sentinel), `ctx_mesh` holds an empty `Mesh` (sentinel; non-empty raises); `inline` is a `bool` on 0.10 and an `Inline` enum on 0.11 — the one param that moves the query hash |
+| `custom_jvp_call` | `call_jaxpr` | `ClosedJaxpr` → merged class | `jvp_jaxpr_fun` is a `WrappedFun` thunk → `OpaqueParam` |
+| `custom_vjp_call` | `call_jaxpr` | `ClosedJaxpr` → merged class | `fwd_jaxpr_thunk`, `bwd` (`WrappedFun`), `out_trees` (function) → `OpaqueParam` |
+| `remat2` | `jaxpr` | **open `Jaxpr`, not Closed** → merged class | `policy` is `None`, or a callable when user-supplied → `OpaqueParam` |
+
+**`remat2` is the single cell that moves, and an earlier version of this
+table stated its 0.10 shape as though it held on every series.** It does
+not: on 0.11 the two classes are one object, so "open `Jaxpr`, not Closed"
+is not a distinction that can be drawn at all, and `isinstance(v,
+ClosedJaxpr)` answers `True` for `remat2`'s body there and `False` on 0.10.
+Measured, same `x.at[0].add(5.0)` and same `jax.checkpoint`: the transcribed
+param is `ir.Jaxpr` on 0.10.2 and `ir.ClosedJaxpr` on 0.11.0.
+
+**So no consumer may read this table's container column as a type test.**
+The canonical accessors are `stelling.coverage.call_body` (a wrapper's
+callee, closed) and `stelling.coverage.sub_jaxprs` (nesting); both accept
+either container by construction, and `call_body`'s docstring carries the
+same measurement as executable-adjacent prose. Every hand-rolled
+`isinstance(v, ir.ClosedJaxpr)` that has been written against this class so
+far was a latent series bug, and three of them shipped — see
+`design/maintenance-treadmill.md`.
 
 Not observed on 0.10 but expected in other series: `closed_call` /
 `core.call` (older series), and `custom_lin` (grad-of-custom_vjp in some

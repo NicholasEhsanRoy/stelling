@@ -46,6 +46,7 @@ if str(_SRC) not in sys.path:
 from stelling import coverage as _cov  # noqa: E402
 from stelling import obligation as _ob  # noqa: E402
 from stelling import propagate as _pr  # noqa: E402
+from stelling._optional import TESTED_JAX_SERIES  # noqa: E402
 
 PAGE = _DOCS / "supported-primitives.md"
 
@@ -61,6 +62,15 @@ _TEST = "tests/test_supported_primitives_doc.py"
 
 def _norm(text: str) -> str:
     return " ".join(text.split())
+
+
+def _series_phrase() -> str:
+    """``TESTED_JAX_SERIES`` as prose — derived, so the page cannot name a
+    series scope the constant does not."""
+    xs = [f"`{s}`" for s in TESTED_JAX_SERIES]
+    if len(xs) == 1:
+        return xs[0]
+    return ", ".join(xs[:-1]) + " and " + xs[-1]
 
 
 def _lines(rel: str) -> list[str]:
@@ -306,7 +316,22 @@ def generate() -> str:
     w("Recorded role: " + _q(_COVERAGE,
       "The wrapper primitives whose correct transfer is "
       "descend-into-sub-jaxpr, per design/transparent-primitives.md "
-      "(verified on jax 0.10.2).") + ".")
+      "(membership verified on every tested jax series: "
+      "0.10.2 and 0.11.0).") + ".")
+    w("")
+    # The provenance scope is DERIVED from TESTED_JAX_SERIES, never typed:
+    # a generated page that names one series while the constant names two
+    # is the exact defect this line closes. If a series is added to the
+    # constant without re-driving this set, the sentence below starts
+    # claiming it — which is the forcing function, in the same place as
+    # every other claim on this page.
+    w(f"Membership is stable across every tested series "
+      f"({_series_phrase()}). The **container** a member's body arrives in "
+      f"is not: `remat2` carries an open `Jaxpr` on jax 0.10 and, since "
+      f"0.11 merged `Jaxpr` and `ClosedJaxpr` into one class, a "
+      f"`ClosedJaxpr` there. Consumers must reach a body through "
+      f"`stelling.coverage.call_body` — an `isinstance` test against "
+      f"either class alone reads as \"no body\" on the other series.")
     overlap = transparent & set(universe)
     if overlap:
         w("")
