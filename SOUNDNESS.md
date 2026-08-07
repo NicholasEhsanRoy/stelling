@@ -1866,4 +1866,57 @@ verdicts:
   cannot tell which series a lane ran. Before this, the honest floor was
   `jax>=0.11`.
 
+- **2026-08-07 (pre-release): REFUTED over a superset of the assumed
+  region — two paths, both wrong, both closed; verdicts move REFUTED →
+  UNKNOWN and in no other direction.** F7's one-sided rule — *VERIFIED
+  over a superset implies VERIFIED over the subset, so keep it; REFUTED
+  over a superset does not, so withhold it* — was implemented on the
+  whole-drop path and reached by neither of two others. **(A)
+  `propagate._assume_constrain` routes on whether ANY conjunct narrowed,
+  so a conjunction that narrows on one conjunct and drops another took
+  the `if narrowed:` branch, where the drop earned a note calling the
+  result "a SUPERSET" and then refuted over it — setting neither
+  `uncertified` (the interval withhold) nor `assume_dropped` (the solver
+  and affine legs' marking). **(B)** `affine.refine_propagation` declines
+  wholly on `coverage.constrained`, which a DROPPED assume never raises,
+  so the refinement re-minted a violation the interval leg had already
+  judged and withheld — the same query returning UNKNOWN at `refine=None`
+  and REFUTED at `refine="affine"`.
+  **Which verdicts are retroactively invalid**: any REFUTED on a query
+  whose assumed region is EMPTY and whose assume dropped a conjunct —
+  the implication is then vacuously TRUE and the tool said the author's
+  correct program was broken. Both carry `witnesses=()`: the refutation
+  is set-level, so there is no concrete point to check the precondition
+  against, which is why neither had a user-visible tell. The measured
+  exemplar, verbatim at `9efea6f`, x ∈ [-1,1]^3, `assert_(x > 5.)`:
+  `assume(jnp.all(x >= 2.))` → UNKNOWN, but
+  `assume((x >= -1.) & jnp.all(x >= 2.))` → **REFUTED** — and `x >= -1.`
+  IS the declared lower bound, narrowing nothing (the propagator's own
+  note reads "already within the assumed region"). **Cost, as a class
+  with its sample size, not as a list**: over 2844 corpus rows (1710
+  harnesses × `refine` ∈ {None, affine}) whose ground truth comes from a
+  numpy oracle — 50 000 samples plus every corner plus a grid, stelling
+  never consulted — **128 wrong REFUTEDs closed and 118 legitimate
+  REFUTEDs lost, every move REFUTED → UNKNOWN; zero VERIFIED moved in
+  either direction, and zero wrong VERIFIEDs before or after.** The loss
+  is real: nothing at the interval level establishes that a dropped
+  conjunct is SATISFIABLE, so a genuine refutation over a non-empty
+  region is withheld alongside the vacuous ones
+  (`test_the_cost_of_the_withhold_is_pinned_where_it_falls`). It is not
+  charged where it is not owed: `_conjunct_certainly_true` keeps the
+  refutation when the dropped conjunct's own box is definitely TRUE over
+  the boxes in force, because such a conjunct restricted nothing and its
+  absence widened nothing — that recovered 20 of the 60 verdicts the
+  plain withhold cost on the relational corpus, with 0 unsound
+  restorations. **Still standing, deliberately**: an `assume` traced
+  AFTER the `assert_` it should constrain still refutes over an empty
+  region (60 of the corpus's rows). That is a question about what an
+  `assume` SCOPES OVER — nothing in `assume`'s or `assert_`'s docstring
+  makes it order-scoped — not about superset judging, and it is reserved.
+  Current behaviour is pinned by
+  `test_an_assume_after_the_assert_is_the_reserved_ordering_question` so a
+  ruling either way lands loudly. Constructions:
+  `tests/test_vacuous_refutation.py`; pre-registration and outcomes:
+  `scratchpad/PREREG_REF1.md`.
+
 *(no releases yet)*
