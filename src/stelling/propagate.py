@@ -5145,38 +5145,77 @@ class _Propagator:
         every point of the boxes in force — in which case dropping it
         removed nothing and introduced no superset.
 
-        The soundness direction is the usual one, run backwards. The
-        propagated boxes over-approximate the reachable values, so a
-        predicate whose box is ``[1, 1]`` on every element is true
-        everywhere in the over-approximation, hence true everywhere in the
-        true assumed region. ``{x : others ∧ this} == {x : others}``: the
-        conjunct is a no-op, the narrowed set is not widened by its
+        A predicate whose box is ``[1, 1]`` on every element is true at
+        every point of that box, so ``{x : others ∧ this} == {x : others}``:
+        the conjunct is a no-op, the narrowed set is not widened by its
         absence, and a definite violation over that set is a violation at
         every point of the assumed region — a refutation, not a possibly
         vacuous one.
 
-        Over-approximation is the SAFE side here, which is why this may
-        read a transfer output rather than only a declaration: a wider box
-        makes ``[1, 1]`` harder to reach, never easier. An INDETERMINATE
-        box (⊤ included) and a definitely-FALSE one both answer no — the
-        false case is the caller's business (an unsatisfiable precondition
-        has its own loud refusal where the classifier can see it, and is a
-        withhold here where it cannot).
+        **What this does NOT rest on.** An earlier version of this
+        docstring justified the step by "the propagated boxes
+        over-approximate the reachable values". **That premise is false
+        here**, and this method is one of the few places it can be. The
+        conjuncts of one ``assume`` are classified in sequence and each
+        narrowing is written straight back —
+        ``self.env[target_atom.id] = new`` in :meth:`_classify_cmp` is the
+        one env writer in this file that makes a box *smaller* than the
+        values reaching that point. A conjunct read after a sibling
+        narrowed its variable is read against a box that is deliberately
+        NOT an over-approximation of the reachable set.
 
-        Three refusals, each load-bearing:
+        **What it does rest on**, in order:
 
-        * **non-bool.** ``and`` on integer operands is bit arithmetic, and
-          its box ``[1, 1]`` means the integer one, not truth. The dtype
-          gate is what keeps that out.
-        * **maybe-NaN under ieee.** A comparison side that may be NaN is
-          FALSIFIED at runtime while real-arithmetic endpoints still say
-          ``[1, 1]``; the neighbouring classification path already drops
-          for exactly this reason ("NaN falsifies the comparison — the
-          assumed comparison is not certified true").
-        * **size-0.** ``all()`` over no elements is vacuously true, and
-          treating that as certainly-true would be defensible; it answers
-          no instead, because a withhold is sound whatever the answer and
-          a zero-element assume is not worth a second rule.
+        1. The box still over-approximates the *assumed region*, which is
+           the only set the conclusion quantifies over. Every narrowing is
+           a meet with the CLOSED half-space (chosen deliberately in
+           :meth:`_classify_cmp` — the strict form would under-approximate,
+           binding rule 1), so it can only remove points that no point of
+           the assumed region occupies.
+        2. Emptiness — the case where ``[1, 1]`` is true but useless — is
+           closed by an INDEPENDENT gate, not by anything here: the F7
+           exactness decision on the ``narrowed`` tuple below
+           (``exactness.certifies_nonemptiness(...)``, with audit F8's
+           definitely-true half). A narrowing whose target is neither
+           exact-declared nor definitely-true over its box sets
+           ``uncertified``, and ``uncertified`` withholds every
+           ``violated-over-set`` from REFUTED regardless of what this
+           method answers. Measured, three rows: a sibling narrowing an
+           exact declared input does not raise it; the same narrowing on
+           ``y = x * 2.`` does; the same again with the predicate
+           definitely true over ``y``'s box does not.
+
+        So an INDETERMINATE box (⊤ included) and a definitely-FALSE one
+        both answer no, and reading a transfer output rather than only a
+        declaration is safe: a wider box makes ``[1, 1]`` harder to reach,
+        never easier.
+
+        Three refusals below. **Only the third is load-bearing**; the
+        other two were measured to change no outcome, and are kept as
+        cheap belt-and-braces rather than as the guarantees they read
+        like:
+
+        * **non-bool** (measured unreachable IN EFFECT). ``and`` on
+          integer operands is bit arithmetic and its ``[1, 1]`` means the
+          integer one — but jax promotes ``bool & int32`` to an *int32*
+          ``and``, so a non-bool operand promotes the whole tree and
+          :meth:`_classify_assumed_pred` refuses it at the top with
+          "'and' on non-bool operands is bit arithmetic, not conjunction",
+          before the recursion that fills ``harmless`` is ever entered.
+          That top-level refusal is the reachable one and is what
+          ``test_a_non_bool_and_is_refused_as_a_conjunction_and_says_so``
+          pins; deleting this gate reddens no test in the suite.
+        * **maybe-NaN under ieee** (measured DEAD). ``_ieee_cmp`` already
+          returns flag ``False`` on comparison outputs and degrades a
+          would-be definite TRUE to ``BOOL_UNKNOWN`` whenever an operand
+          is flagged, and ``_ieee_bool_logic`` reads a flagged bool as
+          ⊤-maybe-NaN. A flagged bool is therefore ``[0, 1]``, never
+          ``[1, 1]``, so the final ``all(...)`` would already answer no.
+        * **size-0** (load-bearing). ``all()`` over no elements is
+          vacuously true, and treating that as certainly-true would be
+          defensible; it answers no instead, because a withhold is sound
+          whatever the answer and a zero-element assume is not worth a
+          second rule.
         """
         if getattr(atom.aval, "dtype", None) != "bool":
             return False
