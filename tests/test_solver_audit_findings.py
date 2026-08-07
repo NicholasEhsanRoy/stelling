@@ -15,6 +15,8 @@ real-portfolio F5 case, which skips when the wheels are absent.
 from __future__ import annotations
 
 import math
+import os
+import subprocess
 from fractions import Fraction
 
 import pytest
@@ -370,13 +372,17 @@ def test_f7_empty_only_is_rejected_at_config_validation():
 # `_make_run_cvc5_binary` has refused a crashed run since F4. `_run_cvc5_wheel`
 # did not, and the shape is transport-specific: the driver prints `answer` and
 # THEN walks the model through native `getValue`, so a death in there leaves the
-# answer on stdout with no `end`.
+# answer on stdout with no terminator.
 #
-# These drive a REAL child through a REAL pipe and kill it for real, because the
-# whole defect lives in what block buffering does or does not flush — a mocked
-# CompletedProcess cannot exhibit it. The `small` case is the reason it survived
-# review: it is already safe, and it is the only size a hand-written fixture
-# reaches for.
+# WHAT A MOCK CAN AND CANNOT DO. A mocked `CompletedProcess` fully exhibits the
+# DEFECT — `test_f4wheel_a_mock_exhibits_the_defect_it_cannot_explain` drives it
+# and gets sat with 3570 values out of a returncode of -9. What a mock cannot
+# show is the EXPLANATION: why a real killed child usually loses its output and
+# sometimes does not. That is a fact about pipe buffering, so the tests that
+# claim it spawn a real child, kill it for real, and PIN THE ENVIRONMENT the
+# child runs in — because the buffering threshold is `PYTHONUNBUFFERED`'s to
+# change, and an ambient environment variable must never decide whether a test
+# passes.
 
 _WHEEL_CHILD = (
     "import os, sys, signal\n"
@@ -385,33 +391,79 @@ _WHEEL_CHILD = (
     "print('answer sat')\n"
     "if mode == 'big':\n"
     "    [print(f'value x{i} {i}/1') for i in range(4000)]\n"
+    "if mode == 'small':\n"
+    "    print('value x0 0/1'); print('value x1 1/1')\n"
     "if mode == 'clean':\n"
-    "    print('value x0 0/1'); print('end'); sys.exit(0)\n"
+    "    print('value x0 0/1'); print('end 1'); sys.exit(0)\n"
+    "if mode == 'clean_no_values':\n"
+    "    print('end 0'); sys.exit(0)\n"
+    "if mode == 'clean_opaque_named_end':\n"
+    "    print('opaque x0 end'); print('end 1'); sys.exit(0)\n"
+    "if mode == 'clean_value_named_end':\n"
+    "    print('value end 1/1'); print('end 1'); sys.exit(0)\n"
+    "if mode == 'clean_mixed':\n"
+    "    print('value x0 0/1'); print('opaque x1 (root 2)')\n"
+    "    print('end 2'); sys.exit(0)\n"
+    "if mode == 'clean_but_exit_1':\n"
+    "    print('value x0 0/1'); print('end 1'); sys.exit(1)\n"
+    "if mode == 'both_tells_blind':\n"
+    "    print('value x0 0/1'); sys.stdout.flush()\n"
+    "    os.write(1, b'end of the resource limit\\n'); os._exit(0)\n"
+    "if mode == 'end_early_then_more':\n"
+    "    print('value x0 0/1'); print('end 1')\n"
+    "    print('value x1 1/1'); print('value x2 2/1'); sys.exit(0)\n"
+    "if mode == 'answer_twice':\n"
+    "    print('value x0 0/1'); print('answer unsat'); print('end 1')\n"
+    "    sys.exit(0)\n"
+    "if mode == 'partial_last_line':\n"
+    "    print('value x0 0/1'); print('end 1')\n"
+    "    sys.stdout.write('value x1 1'); sys.exit(0)\n"
+    "if mode == 'short_walk':\n"
+    "    print('value x0 0/1'); print('value x1 1/1'); print('end 3')\n"
+    "    sys.exit(0)\n"
     "if mode == 'end_then_die':\n"
-    "    print('end'); sys.stdout.flush(); os.kill(os.getpid(), signal.SIGKILL)\n"
+    "    print('end 0'); sys.stdout.flush(); os.kill(os.getpid(), signal.SIGKILL)\n"
     "if mode == 'no_end_exit_zero':\n"
     "    sys.stdout.flush(); sys.exit(0)\n"
     "os.kill(os.getpid(), signal.SIGKILL)\n"
 )
 
 
-def _wheel_child(monkeypatch, tmp_path, mode):
-    """Route the wheel transport's spawn at a child we control, killed for real."""
-    import subprocess
+_REAL_SPAWN = subprocess.run  # pristine: two calls in one test must not nest
+
+
+def _wheel_child(monkeypatch, tmp_path, mode, *, buffered=None, seen=None):
+    """Route the wheel transport's spawn at a child we control, killed for real.
+
+    ``buffered`` pins the child's stdout buffering instead of inheriting it:
+    True forces block buffering (``PYTHONUNBUFFERED`` cleared), False forces
+    none. ``None`` inherits the ambient environment, which is what production
+    does — `_run_cvc5_wheel` spawns with no ``env=``.
+    """
     import sys as _sys
 
     script = tmp_path / "fake_driver.py"
     script.write_text(_WHEEL_CHILD)
-    real_run = subprocess.run
+    env = None
+    if buffered is not None:
+        env = dict(os.environ)
+        env.pop("PYTHONUNBUFFERED", None)
+        if not buffered:
+            env["PYTHONUNBUFFERED"] = "1"
 
     def route(argv, **kw):
-        return real_run(
+        proc = _REAL_SPAWN(
             [_sys.executable, str(script), mode],
             input=kw.get("input", ""),
             capture_output=True,
             text=True,
             timeout=kw.get("timeout", 60),
+            env=env,
         )
+        if seen is not None:
+            seen["stdout"] = proc.stdout
+            seen["returncode"] = proc.returncode
+        return proc
 
     monkeypatch.setattr(subprocess, "run", route)
     monkeypatch.setattr(solvers, "_cvc5_wheel_version", lambda: "1.3.4")
@@ -421,31 +473,104 @@ def _wheel_child(monkeypatch, tmp_path, mode):
 def test_f4wheel_a_child_that_answered_then_died_is_not_a_verdict(
     monkeypatch, tmp_path
 ):
-    """THE DEFECT. A 4000-term model flushes the pipe, so `answer sat` gets
-    through while `end` does not. Before the guard this returned sat with 3570
-    model values harvested from a dead process — a witness that cannot
-    reproduce, behind a definitive REFUTED."""
-    r = _wheel_child(monkeypatch, tmp_path, "big")
+    """THE DEFECT. A 4000-term model overruns the pipe buffer, so `answer sat`
+    gets through while the terminator does not. Before the guard this returned
+    sat with 3570 model values harvested from a dead process."""
+    seen = {}
+    r = _wheel_child(monkeypatch, tmp_path, "big", buffered=True, seen=seen)
+    assert seen["returncode"] == -9
+    assert "answer sat" in seen["stdout"]  # the answer really did get through
     assert r.answer == "failed"
     assert r.values == ()  # not one value taken from the corpse
     assert "not complete" in r.detail and "ABSENT" in r.detail
 
 
-def test_f4wheel_a_small_model_was_always_caught_and_that_is_why_it_survived(
+def test_f4wheel_the_boundary_is_the_pipe_buffer_not_the_model_size(
     monkeypatch, tmp_path
 ):
-    """The same death, below the buffer: stdout never flushes, so the parent
-    sees nothing and the pre-existing protocol check catches it. Pinned because
-    it is the measurement that explains the miss, not because it was broken."""
+    """WHY IT SURVIVED, and the correction to the first reading of it.
+
+    The same two-value model, the same real SIGKILL, twice — the only thing
+    that differs is the child's stdout buffering, which is an ENVIRONMENT
+    variable's to decide:
+
+    * block-buffered (the default): nothing is flushed, the parent sees an
+      empty stdout, and the PRE-EXISTING protocol check catches it. This half
+      pins that pre-existing check and nothing the crashed-child guard added.
+    * unbuffered (`PYTHONUNBUFFERED=1`, standard in Docker images and CI;
+      equally `python -u` or any per-line flush): `answer sat` is through at
+      51 bytes and only the crashed-child guard catches it.
+
+    So the boundary is `io.DEFAULT_BUFFER_SIZE` (8192) by default and ZERO when
+    the child is unbuffered — not a property of the model size. `_run_cvc5_wheel`
+    spawns with no `env=`, so production inherits whichever regime it is run in;
+    these two pin both rather than assume either.
+    """
+    buffered_seen, unbuffered_seen = {}, {}
+    blocked = _wheel_child(
+        monkeypatch, tmp_path, "small", buffered=True, seen=buffered_seen
+    )
+    leaked = _wheel_child(
+        monkeypatch, tmp_path, "small", buffered=False, seen=unbuffered_seen
+    )
+
+    assert buffered_seen["stdout"] == ""  # the whole model died in the buffer
+    assert blocked.answer == "failed"
+    assert "protocol violation" in blocked.detail
+
+    # unbuffered, EVERYTHING the child wrote before dying is through — all 51
+    # bytes of it, `answer sat` among them, four lines short of the terminator
+    assert unbuffered_seen["stdout"] == (
+        "version 1.3.4\nanswer sat\nvalue x0 0/1\nvalue x1 1/1\n"
+    )
+    assert len(unbuffered_seen["stdout"]) == 51
+    assert leaked.answer == "failed"
+    assert "ABSENT" in leaked.detail  # the new guard, not the old check
+
+    # whichever regime, no value survives the child
+    assert blocked.values == () and leaked.values == ()
+
+
+def test_f4wheel_a_killed_child_is_never_a_verdict_in_any_environment(
+    monkeypatch, tmp_path
+):
+    """The invariant that must not depend on how the machine is configured:
+    spawned exactly as production spawns — no `env=`, ambient environment
+    inherited — a killed child yields `failed` and no values, and this test
+    does not care which of the two nets caught it."""
     r = _wheel_child(monkeypatch, tmp_path, "small")
     assert r.answer == "failed"
-    assert "protocol violation" in r.detail
+    assert r.values == ()
+
+
+def test_f4wheel_a_mock_exhibits_the_defect_it_cannot_explain(monkeypatch):
+    """A mocked `CompletedProcess` DOES exhibit the defect — the earlier claim
+    that it could not was wrong, and it is what motivated a real-child fixture
+    that then went environment-fragile. What a mock cannot exhibit is the
+    buffering EXPLANATION: it is handed a stdout, so it cannot show why a real
+    child's stdout is sometimes empty and sometimes not."""
+    argv = ["python", "-m", "stelling._cvc5_driver"]
+    stdout = "version 1.3.4\nanswer sat\n" + "".join(
+        f"value x{i} {i}/1\n" for i in range(3570)
+    )
+    assert len(stdout.splitlines()) == 3572
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda a, **kw: subprocess.CompletedProcess(argv, -9, stdout, ""),
+    )
+    monkeypatch.setattr(solvers, "_cvc5_wheel_version", lambda: "1.3.4")
+    r = solvers._run_cvc5_wheel("(check-sat)\n(get-model)\n", 60.0)
+    assert r.answer == "failed"
+    assert r.values == ()
+    assert "ABSENT" in r.detail
 
 
 def test_f4wheel_the_terminator_tell_fires_when_the_exit_code_cannot(
     monkeypatch, tmp_path
 ):
-    """Exit 0, terminator absent. `returncode` is blind here; `end` is not."""
+    """Exit 0, terminator absent. `returncode` is blind here; the terminator
+    is not."""
     r = _wheel_child(monkeypatch, tmp_path, "no_end_exit_zero")
     assert r.answer == "failed"
     assert "ABSENT" in r.detail
@@ -454,17 +579,152 @@ def test_f4wheel_the_terminator_tell_fires_when_the_exit_code_cannot(
 def test_f4wheel_the_exit_code_tell_fires_when_the_terminator_cannot(
     monkeypatch, tmp_path
 ):
-    """Terminator present, then death. `end` is blind here; `returncode` is not.
-    With the one above, this is why the guard reads two tells and not one:
-    neither is derived from the other, and each covers the other's blind spot."""
+    """Terminator present, then death. The terminator is blind here;
+    `returncode` is not. With the one above, this is why the guard reads two
+    tells and not one: neither is derived from the other, and each covers the
+    other's blind spot."""
     r = _wheel_child(monkeypatch, tmp_path, "end_then_die")
     assert r.answer == "failed"
     assert "terminator present" in r.detail
 
 
-def test_f4wheel_a_healthy_run_is_untouched(monkeypatch, tmp_path):
-    """Cry-wolf floor: the guard must not cost a clean sat its model."""
-    r = _wheel_child(monkeypatch, tmp_path, "clean")
-    assert r.answer == "sat"
-    assert r.values == (("x0", "0/1"),)
+def test_f4wheel_a_prefix_terminator_let_both_tells_go_blind_at_once(
+    monkeypatch, tmp_path
+):
+    """THE HOLE IN "TWO TELLS". While the terminator was a token-prefix test
+    (`line.split()[0] == "end"`), a child writing `end of the resource limit`
+    RAW TO FD 1 — the shape native C++ output takes, bypassing Python's
+    buffer — and exiting 0 defeated both tells simultaneously, which is
+    exactly what two tells is supposed to make impossible. Measured before
+    this fix, at base AND at the first version of the guard: sat, 1 value.
+    The terminator must be the LAST line, so the prefix no longer counts."""
+    seen = {}
+    r = _wheel_child(monkeypatch, tmp_path, "both_tells_blind", seen=seen)
+    assert seen["returncode"] == 0  # the exit-code tell really is blind
+    assert seen["stdout"].splitlines()[-1] == "end of the resource limit"
+    assert r.answer == "failed"
+    assert r.values == ()
+    assert "ABSENT" in r.detail
+
+
+def test_f4wheel_values_written_after_the_terminator_are_refused(
+    monkeypatch, tmp_path
+):
+    """Terminator, then two more values. Measured identically at base and at
+    the first version of the guard: sat with 3 values, two of them written
+    AFTER the run claimed to be over."""
+    r = _wheel_child(monkeypatch, tmp_path, "end_early_then_more")
+    assert r.answer == "failed"
+    assert r.values == ()
+    assert "ABSENT" in r.detail
+
+
+def test_f4wheel_a_truncated_trailing_line_is_refused(monkeypatch, tmp_path):
+    """A trailing line cut off mid-write. Measured identically at base and at
+    the first version of the guard: sat, and the partial line silently
+    dropped — the drop is invisible precisely because the parser skips a
+    `value` line it cannot split into three."""
+    r = _wheel_child(monkeypatch, tmp_path, "partial_last_line")
+    assert r.answer == "failed"
+    assert r.values == ()
+    assert "ABSENT" in r.detail
+
+
+def test_f4wheel_a_second_answer_line_is_a_protocol_violation(
+    monkeypatch, tmp_path
+):
+    """Two `answer` lines. Measured identically at base and at the first
+    version of the guard: `unsat`, CARRYING a value harvested under the
+    earlier `answer sat` — a model from one answer attached to another. The
+    terminator cannot see this (the stream ends correctly), so it takes its
+    own check."""
+    r = _wheel_child(monkeypatch, tmp_path, "answer_twice")
+    assert r.answer == "failed"
+    assert r.values == ()
+    assert "protocol violation" in r.detail
+
+
+def test_f4wheel_a_short_model_walk_is_refused(monkeypatch, tmp_path):
+    """`end <count>` is the driver's own tally of the model lines it wrote,
+    checked against what the parser parsed, so `complete` means the walk
+    finished rather than that the driver reached its last statement. This
+    shape is CONSTRUCTED — it is not an observed cvc5 bug — but it is the
+    only reading of "complete" the word supports."""
+    r = _wheel_child(monkeypatch, tmp_path, "short_walk")
+    assert r.answer == "failed"
+    assert r.values == ()
+    assert "ABSENT" in r.detail
+
+
+def test_f4wheel_a_complete_protocol_that_exits_nonzero_is_refused(
+    monkeypatch, tmp_path
+):
+    """DELIBERATE TIGHTENING, beyond the crashed-sat case. A clean protocol —
+    answer, model, terminator — that exits 1 returned sat with its model at
+    base (measured); it is `failed` now. A nonzero exit is not a transport
+    this layer will discharge OR refute on, matching the binary transport's
+    F4 policy. The cost is UNKNOWN, never a flipped verdict."""
+    r = _wheel_child(monkeypatch, tmp_path, "clean_but_exit_1")
+    assert r.answer == "failed"
+    assert r.values == ()
+    assert "exit 1" in r.detail and "terminator present" in r.detail
+
+
+@pytest.mark.parametrize(
+    "mode,answer,values,nonrational",
+    [
+        ("clean", "sat", (("x0", "0/1"),), False),
+        ("clean_no_values", "sat", (), False),
+        # the two shapes a prefix test would have to worry about, and does not:
+        # their FIRST token is `opaque`/`value`, and now their last line is the
+        # real terminator anyway
+        ("clean_opaque_named_end", "sat", (), True),
+        ("clean_value_named_end", "sat", (("end", "1/1"),), False),
+        ("clean_mixed", "sat", (("x0", "0/1"),), True),
+    ],
+)
+def test_f4wheel_every_healthy_shape_is_still_accepted(
+    monkeypatch, tmp_path, mode, answer, values, nonrational
+):
+    """CRY-WOLF FLOOR. The strict terminator, the count and the single-answer
+    check must not cost a healthy run its model — including a model line whose
+    own text is `end`."""
+    r = _wheel_child(monkeypatch, tmp_path, mode)
+    assert r.answer == answer
+    assert r.values == values
+    assert r.nonrational is nonrational
     assert r.detail == ""
+
+
+@pytest.mark.skipif(
+    not _optional.available("cvc5"), reason="needs the cvc5 wheel"
+)
+def test_f4wheel_the_real_driver_and_this_parser_agree_on_the_terminator(
+    tmp_path,
+):
+    """DRIVER/PARENT COMPATIBILITY. `end <count>` couples the two modules, so
+    pin that the real driver's real stdout satisfies the real parser — a bare
+    `end` from a stale driver would degrade every run to UNKNOWN, which is the
+    safe direction but still a break."""
+    import sys as _sys
+
+    script = (
+        "(set-option :produce-models true)\n"
+        "(set-logic QF_NRA)\n"
+        "(declare-const x0 Real)\n"
+        "(assert (<= 1 x0))\n"
+        "(assert (<= x0 2))\n"
+        "(check-sat)\n"
+        "(get-model)\n"
+    )
+    proc = subprocess.run(
+        [_sys.executable, "-m", "stelling._cvc5_driver"],
+        input=script,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    lines = proc.stdout.splitlines()
+    assert lines[-1] == "end 1", proc.stdout  # one declared const, one model line
+    assert "answer sat" in lines
