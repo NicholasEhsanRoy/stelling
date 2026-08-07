@@ -49,6 +49,7 @@ from stelling.harness import (  # noqa: E402
 )
 from stelling.preconditions import check  # noqa: E402
 from stelling.propagate import (  # noqa: E402
+    UNCERTIFIED_REACHABILITY_REFUSAL,
     _INT_DTYPE_BOUNDS,
     _is_integer_dtype,
     _PROBE_COUNT,
@@ -426,24 +427,47 @@ def test_the_certificate_is_withheld_while_a_precondition_narrows():
     A probe is a point of the DECLARED box; once an assume narrows the
     admitted set, a point of the box is not necessarily a point of what is
     being judged, so the search certifies nothing and every branch-scoped
-    violation is withheld. Without the gate the corner `x = (1, 1, 1)`
-    certifies this branch and the obligation refutes.
+    violation is withheld. Without the gate the corner `c = 1.0` certifies
+    this branch and the obligation refutes.
+
+    The assume constrains the DECLARATION and not a slice of one, which
+    matters: constraining an over-approximated intermediate withholds the
+    same refutation through a different door (the precondition's own
+    satisfiability), and a test that went through that door would stay
+    green with the gate deleted. Measured — that is exactly what the first
+    version of this test did.
     """
 
     def h():
+        c = any_array((), "float64", (-1.0, 1.0))
         x = any_array((3,), "float64", (-1.0, 1.0))
-        assume(x[0] > -0.5)
+        assume(c > -0.5)
         return jax.lax.cond(
-            x[1] > 0.0,
+            c > 0.0,
             lambda v: assert_(v > 5.0),
             lambda v: assert_(v > -9.0),
             x,
         )
 
-    assert sorted(statuses(h)) == ["discharged", "unknown"]
-    # the positive control: the SAME guard with no assume refutes, so the
-    # 'unknown' above is the gate and not an unwitnessable guard
-    assert "violated-over-set" in statuses(_cond(lambda x: x[1] > 0.0))
+    p = propagate(trace(h))
+    assert sorted(o.status for o in p.obligations) == ["discharged", "unknown"]
+    # ... and withheld by THIS rule, not by the precondition-satisfiability
+    # rule that would keep this test green with the gate gone
+    assert any(UNCERTIFIED_REACHABILITY_REFUSAL in n for n in p.notes), p.notes
+
+    def unassumed():
+        # the positive control: the same guard, no assume, refutes — so the
+        # 'unknown' above is the gate and not an unwitnessable guard
+        c = any_array((), "float64", (-1.0, 1.0))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            c > 0.0,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    assert "violated-over-set" in statuses(unassumed)
 
 
 def test_a_nonvacuity_condition_inside_a_scan_is_recorded_unexamined():
