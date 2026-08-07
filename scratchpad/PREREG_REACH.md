@@ -357,3 +357,47 @@ to the other's root scan. Re-run serially: **2293 passed, 2 skipped**
 than quietly dropped: a green obtained by re-running is not the same
 evidence as a green obtained first time, and the reason has to travel
 with it.
+
+---
+
+## Amendment, 2026-08-08: C5 as worded is falsified, and the exception is
+## deliberate
+
+Appended by branch `fix/probe-membership` (`scratchpad/PREREG_PROBE.md`).
+Nothing above this rule is edited.
+
+**C5 said:** *"Every `stelling_assert` inside a sub-jaxpr that propagation
+does not descend into is recorded as an obligation with status `unknown`."*
+
+**It is not true, and it was not true when C5 was marked MET.** A `cond` or
+`switch` branch the index interval EXCLUDES is a sub-jaxpr propagation does
+not descend into, and its obligations are dropped: no obligation, no note.
+Measured on `688e829`, `cond(c > 0., yes, no)` with `c` declared over
+`[1, 2]` gives **2 asserts in the IR, 1 obligation, 0 named, `notes = ()`**.
+On the `reach` corpus, one 128-case subset holds **288** such rows.
+
+**C5's falsifier could not see them**, and that is the transferable lesson:
+it ranged over *"a corpus case whose oracle sees an obligation at line L
+executed"* — and an obligation in a branch no point of the box takes is
+exactly one the oracle never executes. The instrument's universe was the
+executed set, so the one class that could have caught this
+(`SWALLOWED_UNREACHED` in `scratchpad/reach/analyze.py`) was **dead code**:
+`all_lines = set(n_exec) | set(n_false)` with `n_false ⊆ n_exec`. That
+analyzer now takes its universe from the case SOURCE; on the same 128-case
+JSON the class goes from 0 rows to 288.
+
+**The exception is kept, and here is the statement C5 should have carried.**
+An index-excluded branch is not *unexamined* — it is *proved untaken*. The
+index box over-approximates the true index set, so a branch outside it runs
+at no point of the declared set and its obligation is vacuously true.
+Recording it `unknown` would claim an ignorance the analysis does not have,
+and it is not free: on the 336-case `probe` corpus, naming them costs **28
+of 28** VERIFIED queries and removes **zero** unsound rows — the oracle
+finds no dropped obligation that is ever false, before or after. The
+coverage denominator still counts them, `SOUNDNESS.md` states the exception,
+and `test_an_index_excluded_branch_is_deliberately_dropped` pins it.
+
+**So C5 stands as: every obligation inside a sub-jaxpr propagation does not
+descend into is recorded `unknown` — EXCEPT one inside a branch the index
+interval excludes, which is dropped because it is proved untaken.** The
+audit's finding was that the drop was silent, not that it was wrong.

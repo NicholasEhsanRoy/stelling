@@ -2288,4 +2288,106 @@ verdicts:
   Constructions: `tests/test_branch_reachability.py`; pre-registration,
   corpus design and outcomes: `scratchpad/PREREG_REACH.md`.
 
+- **2026-08-08 (pre-release): the reachability certificate certified with
+  points that are not in the declared set — a live wrong REFUTED — and its
+  probe grid collapsed on wide boxes.** Both are defects in the witness
+  search added by the entry above; the direction of the first fix is
+  **REFUTED → UNKNOWN**, and nothing here moves anything toward VERIFIED.
+
+  **(1) A witness that is not a member certifies nothing, and the probe
+  points were not members.** `_probe_point` rounded an integer
+  declaration to an integer and then clamped the result to `[lo, hi]`,
+  which put the non-integral endpoint straight back. The declared set of
+  an integer or boolean declaration is the set of that dtype's VALUES in
+  the interval — stelling says so itself when it refuses `int32
+  (0.2, 0.8)`: "int32 represents the integers ... and the interval
+  contains none of them" — so `any_array((), "int32", (0.2, 2.8))`
+  declares `{1, 2}`. Probes pinned it to `0.2` and to `2.8`, and `i < 1`
+  and `i > 2`, **false at every member**, were certified reached and
+  stamped **REFUTED**. Reproduced on jax 0.11.0 and 0.10.2.
+
+  The declared set is bounded twice, and only the first bound was ever
+  applied: `int8 (-1e9, 1e9)` declares `[-128, 127]`, and
+  `k.astype(f64) < -200.0` — false at every int8 value — REFUTED over it.
+  The clamp now goes INTO the member set before rounding, using both the
+  interval's endpoints rounded inward and the dtype's own range. A box
+  holding no value of its dtype yields no probe at all: no member, no
+  witness, and a probe that cannot be formed leaves the declaration at
+  its full box, which certifies nothing. `any_array` refuses such a
+  declaration at the door, so that path is reachable only through
+  hand-built IR — the safe answer there is "no point", never "some
+  point".
+
+  Normalising the bounds at `any_array` instead — recording `int32
+  (0.2, 2.8)` as `[1, 2]` — was considered and rejected. It is the wider
+  change (`any_array` is the public surface, and the recorded box travels
+  into every message, the SMT emission and the exactness claims), and it
+  moves the propagated box in the NARROWING direction, which is the
+  direction that can manufacture a VERIFIED: a declaration bound would
+  then be load-bearing for discharge, not only for a witness. Fixing the
+  probe can only ever change which branches are certified, and the
+  certificate's only effect is to rewrite `violated-over-set` into
+  `unknown`.
+
+  **Retroactively invalid:** any REFUTED whose refuting obligation sat
+  inside a `cond`/`switch` branch certified by a probe over an integer or
+  boolean declaration — that is, any REFUTED on a query with an integer
+  declaration whose branch guard was not already forced by the index
+  interval. Re-run: such a query now returns UNKNOWN unless a real member
+  witnesses the branch. Float declarations are unaffected by this half.
+
+  **(2) The probe grid degenerated on wide boxes.** `lo + f*(hi - lo)`
+  overflows to `+inf` when the box is wider than half the float range:
+  measured on `[-1e308, 1e308]`, 15 of the 16 probes collapsed onto `hi`
+  and the 16th was NaN, so a guard satisfied only at the low end was
+  never witnessed and its violation was withheld. The fraction is now
+  computed as a convex combination, which never forms the difference and
+  keeps 16 distinct points (`lo` at f=0 and `hi` at f=1, exactly).
+
+  **Retroactively invalid:** an UNKNOWN on a query whose branch guard is
+  satisfiable only on the low side of a very wide declared box may now be
+  REFUTED. No VERIFIED is affected — the certificate cannot discharge.
+
+  **Measured cost**, on a NEW 336-case corpus over ten declarations x 2
+  legs, scored **per obligation** against a numpy oracle that never calls
+  stelling and that samples MEMBERS (the previous oracle sampled
+  `uniform(lo, hi)`, which agreed with the defect that `0.2` was an int32
+  point — this defect was invisible to it): **18** obligations moved
+  `violated-over-set → unknown`, every one of them a refutation the
+  oracle finds is evaluated at **zero** points of the declared set, and
+  **8** moved `unknown → violated-over-set`, every one confirmed really
+  violated by the oracle (the wide-box witnesses). **0** obligations
+  became `discharged`; **0** queries moved into VERIFIED; **0** sound
+  refutations were lost. Unsound obligation rows in the corpus: **18 → 0**.
+
+  **(3) An index-EXCLUDED `cond`/`switch` branch is dropped, not
+  recorded — deliberately.** When the index interval excludes a branch,
+  the walk counts its equations unreached and does not collect its
+  obligations. That is a silent drop, and as literally worded it
+  contradicts clause **C5** of `scratchpad/PREREG_REACH.md` ("every
+  `stelling_assert` inside a sub-jaxpr propagation does not descend into
+  is recorded ... `unknown`"); C5's own falsifier could not see it,
+  because it ranged only over obligations the oracle saw executed. It is
+  kept, and this is the statement C5 lacked: an index-excluded branch is
+  not unexamined, it is PROVED untaken. The index box over-approximates
+  the true index set, so a branch outside it is taken at no point of the
+  declared set, and its obligation is vacuously true. Recording it
+  `unknown` would assert an ignorance the analysis does not have, and it
+  is not free: measured on the same corpus, naming them costs **28 of 28**
+  VERIFIED queries and removes **zero** unsound rows (the oracle finds no
+  dropped obligation that is ever false — `SWALLOWED_FALSE` is 0 before
+  and after). The coverage denominator still counts them, and
+  `test_an_index_excluded_branch_is_deliberately_dropped` pins the
+  behaviour so it can never become silent again.
+
+  **(4) The swallowing primitive named in a NOT EXAMINED obligation is now
+  the innermost one.** An assert inside a `while` inside a `scan` was
+  reported against `'scan'` while its source location pointed into the
+  `while`; the two disagreed and the message sent the reader to the wrong
+  construct. Message-only: no verdict flips.
+
+  Constructions: `tests/test_probe_witness.py`; pre-registration, corpus
+  design and outcomes: `scratchpad/PREREG_PROBE.md`, corpus
+  `scratchpad/probe/`.
+
 *(no releases yet)*
