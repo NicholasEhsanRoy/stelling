@@ -711,11 +711,28 @@ def _barred_in_eqns(eqns) -> tuple[str, ...]:
     # rather than a private one. The earlier version did
     # `getattr(v, "jaxpr", None)`, which finds a ClosedJaxpr and misses a bare
     # `ir.Jaxpr`, a jaxpr held inside a tuple, and a `NamedTupleParam` field —
-    # so a transparent primitive storing its body in any of those forms would
-    # have made the bar UNDER-fire. No such primitive exists on jax 0.11.0, so
-    # this was latent; but a bar with weaker reachability than the coverage
-    # tool is a hole in the one guard the unshipped rows rest on, and "latent"
-    # is not a reason to keep two walks.
+    # so a transparent primitive storing its body in any of those forms made
+    # the bar UNDER-fire.
+    #
+    # THIS COMMENT USED TO SAY "no such primitive exists on jax 0.11.0, so
+    # this was latent". That is true of 0.11 and FALSE of the other tested
+    # series, which is the wrong series to scope a bar's reachability to.
+    # Measured on 0.10.2, where `ClosedJaxpr is Jaxpr` is False: the
+    # predecessor walk finds 0 sub-jaxprs where `sub_jaxprs` finds 1, for
+    # BOTH `scatter-add` (its `update_jaxpr` combiner) and `remat2` (its
+    # body). End to end, a `scatter` inside `jax.checkpoint`: this function
+    # returns ('scatter',) on both series, the predecessor returned
+    # ('scatter',) on 0.11.0 and () on 0.10.2 — the same primitive inside
+    # `jax.jit` barred correctly on both, which is what makes it a container
+    # bug and not a descent bug. So the hole was LIVE on 0.10 and latent only
+    # on 0.11; the migration to the canonical accessor had already closed it
+    # before the 0.10 lane existed to fail on it.
+    #
+    # The lesson survives the correction and is now load-bearing rather than
+    # decorative: a bar with weaker reachability than the coverage tool is a
+    # hole in the one guard the unshipped rows rest on, "latent" is not a
+    # reason to keep two walks, and a latency claim scoped to one jax series
+    # is not a latency claim at all.
     from stelling.coverage import sub_jaxprs
 
     if not VERIFIED_BARRED_PRIMITIVES or eqns is None:
