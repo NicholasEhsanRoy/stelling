@@ -207,3 +207,166 @@ exceed 1, or the zero above is measuring a search that never runs.
 ---
 
 ## Outcomes
+
+All measurements below ran with `JAX_PLATFORMS=cpu` and the worktree's own
+`PYTHONPATH`, `stelling.__file__` printed and checked before every
+comparison. Baseline is `/home/nick/MSF/.wt-probe/base` at `688e829`;
+branch is `/home/nick/MSF/.wt-probe/main`.
+
+### Errata, recorded before the clauses
+
+**E1 — D1's "second face", as written above, is WRONG, and the correction
+is measured.** `int8 (-1e9, 1e9)` with the guard `k < -200` does REFUTE at
+baseline, but not for the stated reason: jax wraps the Python literal into
+int8, so the traced program compares against **56**, the guard is
+satisfiable at real members, and the refutation is SOUND. The dtype-range
+face is real and reachable through a float cast, which is what keeps the
+literal out of int8:
+
+```
+int8 (-1e9, 1e9), guard `k.astype(f64) < -200.0`
+  baseline  jax 0.11.0 / 0.10.2:  ['discharged', 'violated-over-set']   <- wrong REFUTED
+  branch    jax 0.11.0 / 0.10.2:  ['discharged', 'unknown']
+control `k.astype(f64) < -100.0` (true at the member -128): REFUTED on both
+```
+
+The claim in D1 stands with that construction substituted; the original
+sentence would have been a reasoned-not-run finding, and it was wrong.
+
+**E2 — the corpus's first sampler pinned a declaration to one member.** A
+stride scheme (`cand[n][(j*(1+2t)) % len]`) held a 3-member `int32`
+declaration at its first member for every point, and the oracle then called
+two genuinely reachable branches unreachable. Found by inspecting the
+4 residual `REFUTE_ON_UNREACHABLE` rows of an early after-run, fixed to a
+mixed-radix enumeration with the smallest declaration varying fastest plus
+150 independent draws, and every clause below is scored on the fixed
+instrument. Recorded rather than quietly re-run: an instrument that can
+manufacture the finding it is measuring has to be named.
+
+### Outcomes
+
+**C1 — MET.** Baseline, both series (`attack_member.py`): `int32 (0.2, 2.8)`
+with `i < 1` and with `i > 2` both stamp `violated-over-set` / **REFUTED**.
+The oracle enumerates the declared set **exhaustively** — `_members` returns
+`{1, 2}`, both of them — and finds the branch obligation executed at **0**
+of 730 sampled points. Six of the corpus's ten declarations are enumerated
+exhaustively (`i_frac` 2 members, `i_frac2` 3, `i_int` 4, `i_one` 1,
+`u8_neg` 4, `b_bool` 2), so for those the word "unreachable" is exact and
+not a sampling statement.
+
+**C2 — MET.** `test_every_probe_point_it_can_form_is_a_member`, 13 dtypes
+(11 integer/boolean + `float32` + `float64`) x 215 bound pairs x 16 probe
+indices: every returned value is finite, inside `[lo, hi]`, integral when
+the dtype is integral or boolean, and inside the dtype's own range.
+
+**C3 — MET.** `_probe_point` returns `None` for `int32 [0.2, 0.8]`,
+`int64 [-0.5, -0.2]` and `bool [2, 3]`, and the sweep asserts `None` for
+EVERY pair the exact-integer specification calls empty. End to end, on
+hand-built IR (the only route — `any_array` refuses a memberless
+declaration): the branch violation is WITHHELD, while the same guard over
+`int32 [0, 3]` still refutes. Positive control against a vacuous C2: the
+sweep asserts `formed >= 16 * inhabited`, i.e. every probe of every
+inhabited pair really was formed.
+
+**C4 — MET.** Paired ledger, 336 cases x 2 legs: **0** obligations became
+`discharged`, **0** queries moved into VERIFIED. `DISCHARGE_SOUND` 678 →
+678 and `DISCHARGE_VACUOUS` 68 → 68, unchanged.
+
+**C5 — MET, with its positive control.** After: `FALSE_VERIFIED` **0**,
+unsound obligation rows **0**. The instrument can see unsoundness: the
+baseline has **18** `REFUTE_ON_UNREACHABLE` rows and **18** `FALSE_REFUTED`
+queries, so the zero is a measured move and not an inert corpus.
+
+**C6 — MET, with its positive control.** Every moved obligation is in one
+of the two admitted classes and nothing else moved:
+
+```
+REFUTE_ON_UNREACHABLE  -> UNKNOWN_ON_UNREACHABLE   18
+UNKNOWN_ON_FALSE       -> REFUTE_SOUND              8
+total moved obligations: 26     became discharged: 0
+per query:  FALSE_REFUTED -> UNKNOWN  18      UNKNOWN -> REFUTED_SOUND  8
+```
+
+**0** `REFUTE_SOUND` rows were lost — the capability cost this clause exists
+to bound is zero on this corpus — and the 8 gains are the wide-box
+witnesses of D2, each confirmed really violated by the oracle.
+
+**C7 — MET; the alternative was measured, not argued.** Built in its own
+worktree (`/home/nick/MSF/.wt-probe/alt-name`, `_record_unexamined` added to
+the excluded-branch walk) and run over the same corpus:
+
+```
+SWALLOWED_UNREACHED -> UNKNOWN_ON_UNREACHABLE   64
+per query:  VERIFIED_SOUND -> UNKNOWN           28      (of 28)
+unsound rows: 0 -> 0
+```
+
+Naming costs **every** VERIFIED in the corpus and removes **zero** unsound
+rows. The falsifier — a measured cost of zero queries — is not met, so the
+documented exception stands: `SOUNDNESS.md` entry (3) and the amendment
+appended to `PREREG_REACH.md`, pinned by
+`test_an_index_excluded_branch_is_deliberately_dropped`. Positive control:
+the corpus contains 28 VERIFIED queries with an index-excluded branch, so
+the measurement was not vacuous.
+
+**C8 — MET.** `test_a_wide_box_keeps_sixteen_distinct_probes` on
+`[-1e308, 1e308]`, `[0, 1e308]`, `[-1e308, 0]`, `[-1e300, 1e300]` and
+`[-1, 1]`: 16 distinct finite points inside the box, `lo` and `hi` among
+them exactly. Baseline on `[-1e308, 1e308]`: **2** distinct values (15
+probes on `hi`, one `None`). End to end, `w < -1e307` moves WITHHELD →
+REFUTED while the control `w - w > 0` on the same box stays withheld.
+
+**C9 — MET.** assert inside `while` inside `scan`: detail names `'while'`
+(baseline: `'scan'`), the note agrees with the detail, and the source
+location is unchanged. An assert directly under a `scan` still names
+`'scan'`.
+
+**C10 — MET, and wider than pre-registered: 10 mutations, all redden.**
+Each in its own `git worktree` under `/home/nick/MSF/.wt-probe/mut/`, built
+by string replacement, `__pycache__` cleared, run with `python -B`,
+`stelling.__file__` asserted to be the mutant's:
+
+```
+M6_no_integer_rounding     12 failed   M6b_clamp_to_raw_box      14 failed
+M6c_no_dtype_range_clamp   13 failed   M8_no_assume_gate          1 failed
+M9_probe_count_3            1 failed   M12_assert_only            1 failed
+M18_no_branch_index         1 failed   N23_id_only_key            1 failed
+F4_overflow_grid           15 failed   F5_outermost_swallower     1 failed
+unmutated control:                                              55 passed
+```
+
+The `_PROBE_COUNT` test is a requirement and not a value: `x[1] - x[0] > 1.0`
+is `0` at all three anchors, `0.49` at probe 3 and `1.51` at probe 4.
+
+**C10 erratum — the first M8 test was inert and stayed green.** It assumed
+over `x[0]`, a SLICE of a declaration; that is an over-approximated
+intermediate, so the refutation was withheld by the precondition's own
+satisfiability rule before the reachability gate was consulted
+(`branch_violations` was empty — there was no candidate). Rewritten to
+constrain the declaration itself, and it now asserts the withholding note is
+the reachability one. This is the second time in this branch that a control
+was satisfied through the wrong door; both are recorded.
+
+**C11 — MET.** jax 0.11.0: **2329 passed, 2 skipped** in 135.05 s. jax
+0.10.2: **2329 passed, 2 skipped** in 137.84 s, run serially after it (the
+`PREREG_REACH.md` lesson about concurrent runs in one worktree). Baseline
+collects 2298 ids on both series; the branch collects 2331 on both. The two
+series' id sets are byte-identical (`diff` empty) on baseline and on branch;
+`comm` shows **0** ids removed and **33** added, all in
+`tests/test_probe_witness.py`.
+
+**C12 — MET, with its positive control.** Propagator constructions: **1**
+with no candidate, **17** with one, on baseline and on branch alike. Wall,
+200 iterations each: no candidate 0.027 → 0.025 ms/propagate, with
+candidate 1.504 → 1.430 ms/propagate (baseline → branch), load average 3.85
+on 24 cores. The witness search costs what it cost.
+
+### The residual this branch did NOT fix
+
+`_probe_point` rounds to an integer for integer dtypes and clamps for float
+dtypes, but it never rounds to the declared FLOAT format: a `float32`
+declaration can be pinned to a binary64 value that is not a float32, which
+is the same "not a member" shape as D1. **SUSPECTED, not measured** — no
+construction in this branch turns it into a wrong verdict, and unlike the
+integer case the fix needs a real float-format rounding rather than a
+clamp. It is named here so the next reader does not have to re-derive it.
