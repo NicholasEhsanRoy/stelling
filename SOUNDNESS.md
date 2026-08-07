@@ -672,4 +672,59 @@ verdicts:
   widen-checked; mode explicit, never defaulted) — the first
   duty-enforced backstop converted to structure for CI (ledger L18).
 
+- **2026-08-07 (pre-release): the cvc5 WHEEL transport now refuses a
+  crashed run — F4's rule, on the transport that never received it.**
+  `_make_run_cvc5_binary` has refused a crashed run since F4;
+  `_run_cvc5_wheel` did not, and the shape is transport-specific: the
+  child driver prints `answer` and THEN walks the model through native
+  `getValue`, so a death in there leaves `answer sat` on stdout with no
+  terminator, and the parent harvested the partial model as a verdict.
+  **Measured, real child, real SIGKILL, bisected:** the boundary is the
+  8192-byte pipe buffer, not the model size — 493 value lines (8186
+  bytes written) leave 0 bytes through and were correctly caught as a
+  protocol violation; 494 lines (8203 written) leave 8202 through and
+  returned **sat with 494 values from a dead process**. At 4000 terms:
+  3572 lines through, 3570 values harvested. And 8192 is a default, not
+  a floor — under `PYTHONUNBUFFERED=1` (standard in Docker images and
+  CI) the threshold is **zero**: a 2-value model puts all 51 bytes
+  through. Reachability is ordinary: `smt.py` emits one
+  `(declare-const … Real)` per input ELEMENT, so a single (32,32) array
+  is 1024 consts ≈ 17360 bytes of driver stdout, and an OOM kill is a
+  SIGKILL that needs no cvc5 bug at all. **Direction of movement: toward
+  UNKNOWN, only.** A crashed run that produced `sat` now produces
+  `failed` → UNKNOWN; the same for `unsat` and `unknown` from a crashed
+  child. Nothing moves toward VERIFIED or REFUTED, and no healthy run
+  moves at all — five healthy shapes (empty model, values, opaque,
+  mixed, and a model value whose own text is `end`) are byte-identical
+  before and after, as are the timeout, `OSError` and internal-`error`
+  paths, the whole binary transport, and z3. **A deliberate tightening
+  rides along:** a child with a complete protocol that exits **nonzero**
+  returned its answer with its model before (measured: clean `answer
+  sat` + terminator + exit 1 → sat) and is `failed` → UNKNOWN now,
+  matching the binary transport's F4 policy that a nonzero exit is not a
+  transport this layer will discharge OR refute on. **What the harm
+  actually was**, driven end-to-end rather than reasoned: a truncated
+  model does NOT yield an unreproducible witness — every refutation
+  routes through `_require_valid_refutation` → `witness_is_valid` (box
+  membership AND exact-rational violation), so a truncated model either
+  raises `EmissionInfidelityError` loudly (measured, when the completed
+  point satisfied the predicate) or yields a witness that genuinely does
+  reproduce (measured: REFUTED, replay passed). The harm is that **a
+  crashed run silently became an accepted answer**, with the values the
+  child never lived to write supplied by `_complete_values` from the
+  declared box — the fill was disclosed as a don't-care note and reached
+  the render, but the death was disclosed nowhere. Same pass, three
+  further refusals in the same class, each measured accepted before:
+  the terminator was a token-prefix test, so a child writing `end of the
+  resource limit` raw to fd 1 (the shape native C++ output takes,
+  bypassing Python's buffer) and exiting 0 defeated **both tells at
+  once** — it is now required to be the last line of stdout and to carry
+  the driver's own count of the model lines it wrote; values written
+  AFTER the terminator, and a truncated trailing line silently dropped,
+  fall to the same rule; and a second `answer` line, which used to be
+  read as the new answer while KEEPING the value harvested under the
+  first, is now a protocol violation. Cry-wolf cost measured at zero.
+  Every construction is a permanent regression test
+  (`tests/test_solver_audit_findings.py`, the `f4wheel` block).
+
 *(no releases yet)*
