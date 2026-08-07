@@ -238,6 +238,40 @@ def test_a_branch_the_guard_forces_the_other_way_still_refutes():
     assert "violated-over-set" in statuses(h)
 
 
+def test_a_shared_branch_body_is_certified_per_occurrence():
+    """jax caches traced branch jaxprs, so `cond(p, f, f, x)` gives both
+    branches the SAME body — and the transcriber gives both asserts the
+    same outvar id. Keying the certificate on that id would let the
+    witness for the branch that IS taken certify the occurrence in the
+    branch that never is. The key is the (cond, branch) path instead.
+    """
+
+    def f(v):
+        return assert_(v > 5.0)
+
+    def h():
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        # guard is 0 > 0: branch 0 runs at every point, branch 1 at none
+        return jax.lax.cond(x[0] - x[0] > 0.0, f, f, x)
+
+    cj = trace(h)
+    ids = []
+    from stelling.coverage import sub_jaxprs
+
+    stack = [cj.jaxpr]
+    while stack:
+        j = stack.pop()
+        for e in j.eqns:
+            if e.primitive == "stelling_assert":
+                ids.append(e.outvars[0].id)
+            stack.extend(sub_jaxprs(e))
+    assert len(ids) == 2 and len(set(ids)) == 1, ids  # the collision is real
+    assert [o.status for o in propagate(cj).obligations] == [
+        "violated-over-set",  # branch 0: taken everywhere, really violated
+        "unknown",  # branch 1: never taken, withheld
+    ]
+
+
 def test_an_obligation_inside_a_jit_wrapper_is_unmoved():
     # jit is a TRANSPARENT primitive: it is descended into and executes
     # unconditionally, so nothing here is branch-scoped.

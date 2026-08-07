@@ -4357,16 +4357,28 @@ class _Propagator:
         # violation of the program, while one found under an admitted-only
         # branch presumes a reachability nothing has certified.
         self.unforced_depth = 0
-        # outvar ids of ``stelling_assert`` equations this walk reached
-        # with ``unforced_depth == 0`` — under a chain of conds every one
-        # of which the index box FORCED. On a point-pinned probe run this
-        # set IS the reachability certificate: the real program evaluates
-        # that assert at that point of the declared box.
-        self.certain_reached: set[int] = set()
-        # (obligation index, assert outvar id) for every violation recorded
-        # while ``unforced_depth > 0`` — the candidates for withholding,
-        # paired with the identity a probe run can certify.
-        self.branch_violations: list[tuple[int, int]] = []
+        # (branch path, assert equation) keys this walk reached with
+        # ``unforced_depth == 0`` — under a chain of conds every one of
+        # which the index box FORCED. On a point-pinned probe run this set
+        # IS the reachability certificate: the real program evaluates that
+        # assert, by that route, at that point of the declared box.
+        #
+        # The key is the PATH and not the assert's outvar id, because the
+        # id is not unique to a dynamic occurrence. Measured: jax caches
+        # traced branch jaxprs, so `lax.cond(p, f, f, x)` gives both
+        # branches the SAME body and the transcriber gives both asserts
+        # the same outvar id (10 and 10) — an id-keyed certificate would
+        # let a witness for one branch certify an occurrence in another.
+        self.certain_reached: set[tuple] = set()
+        # (obligation index, path key) for every violation recorded while
+        # ``unforced_depth > 0`` — the candidates for withholding, paired
+        # with the identity a probe run can certify.
+        self.branch_violations: list[tuple[int, tuple]] = []
+        # (cond equation, branch index) for every branch currently open.
+        # The equation identity is the object itself: the probe runs walk
+        # the SAME `ir` query object the real run walked, so identity is
+        # stable across them and needs no synthetic numbering.
+        self._branch_path: list[tuple[int, int]] = []
         # probe index, or None on a real run. When set, every declaration's
         # box is replaced by a single POINT of that box (:func:`_probe_point`),
         # which is what turns propagation into a witness evaluator.
@@ -5009,6 +5021,13 @@ class _Propagator:
                 if e.primitive in _UNEXAMINABLE_OBLIGATIONS:
                     self._record_unexamined(e, eqn.primitive)
                 stack.extend(sub_jaxprs(e))
+
+    def _reach_key(self, eqn: ir.JaxprEqn) -> tuple:
+        """The identity of one DYNAMIC occurrence of an assert equation:
+        the chain of (cond, branch) choices that led here, then the
+        equation itself. Two occurrences of a shared branch body differ
+        in the chain even when they share every var id."""
+        return (tuple(self._branch_path), id(eqn))
 
     def _pinned(self, eqn: ir.JaxprEqn, outs):
         """This declaration's box, collapsed to one point of itself.
@@ -6218,12 +6237,16 @@ class _Propagator:
                     self.exact = exactness.ExactSet()
                     self.nan = {}
                     self.taint = {}
-                    results.append(
-                        self.run(
-                            b.jaxpr, list(b.consts), operands, op_flags,
-                            op_taints,
+                    self._branch_path.append((id(eqn), i))
+                    try:
+                        results.append(
+                            self.run(
+                                b.jaxpr, list(b.consts), operands, op_flags,
+                                op_taints,
+                            )
                         )
-                    )
+                    finally:
+                        self._branch_path.pop()
                     if ieee:
                         branch_flags.append(
                             [self.read_flag(o) for o in b.jaxpr.outvars]
@@ -6486,11 +6509,10 @@ class _Propagator:
         if eqn.primitive == "stelling_assert":
             if self.unforced_depth == 0:
                 # every cond between this assert and the top of the query
-                # had a FORCED index, so reaching this equation on this
-                # walk means the program reaches it too. On a pinned probe
+                # had a FORCED index, so reaching this equation by this
+                # path means the program reaches it too. On a pinned probe
                 # run that is a witness; on a real run it is unread.
-                for out in eqn.outvars:
-                    self.certain_reached.add(out.id)
+                self.certain_reached.add(self._reach_key(eqn))
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
             if status == "unknown":
                 # the undecided detail quotes the straddle it was judged
@@ -6556,7 +6578,7 @@ class _Propagator:
                 # (propagate() runs it, once, and only if a candidate
                 # exists), which cannot run from inside this walk.
                 self.branch_violations.append(
-                    (len(self.obligations), eqn.outvars[0].id)
+                    (len(self.obligations), self._reach_key(eqn))
                 )
             self.obligations.append(
                 ObligationReport(
