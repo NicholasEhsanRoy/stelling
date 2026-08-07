@@ -2056,8 +2056,9 @@ verdicts:
   *a sibling branch is a disjoint set, so a sibling assume cannot bear on
   it* — is **not** plain correctness: refuting inside a branch already
   assumes that branch is REACHABLE, and the analysis never certifies that.
-  Measured, with no assume anywhere and at every tree from `9efea6f` to
-  `6237e07`: `cond(x[0] - x[0] > 0., yes, no)` over `x ∈ [-1,1]^3` with
+  Measured, with no assume anywhere, at `9efea6f`, `3afbf01`, `6237e07`
+  and `main` at `c20f38e` alike:
+  `cond(x[0] - x[0] > 0., yes, no)` over `x ∈ [-1,1]^3` with
   `yes: assert_(v > 5.)` and `no: assert_(v > -5.)` returns **REFUTED**,
   and the guard is false at every point — interval subtraction is
   correlation-blind, so `x[0] - x[0]` is `[-2, 2]`, the selector is

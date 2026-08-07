@@ -706,3 +706,35 @@ path-scoped prototype         1104       192            0         0
 Branch scope is therefore a **different** question from the trace-order
 one the principal has ruled on, and it is a semantics choice too, not a
 repair. Reserved.
+
+## Both series, and two mistakes of mine that the record should carry
+
+Everything above is measured on **both** lanes. `condcorpus2` is row-for-row
+identical between `stelling-jax` (0.11.0) and `stelling-jax010` (0.10.2) at
+`9efea6f`, `3afbf01`, `6237e07` **and** the path-scoped prototype — 0
+disagreements in 1296 at each — and the four trace-order probes, the four
+soundness probes and the assume-after-assert sweep all agree across lanes.
+This branch's own suite: **2185 passed, 2 skipped** on 0.11.0 and **2185
+passed, 2 skipped** on 0.10.2; `--collect-only -q` gives 2187 ids, byte
+identical between lanes, **+36 / -0** against `9efea6f` and **+0 / -0**
+against `6237e07` (this branch adds no test — it is documentation only).
+
+**Mistake 1 — I broke the prototype while editing it and the corpus could
+not tell me.** A scripted string replacement dropped `self.taint =
+outer_taint` from the cond handler's `finally`, so the first prototype run
+also stopped restoring IEEE taint across branches. The corpus is run under
+`semantics="real"`, where taint is never read, so **all 1296 rows were
+identical with and without the bug** — and the full suite passed too. Caught
+only by reading the diff back before quoting it. Re-measured after the fix:
+0 rows changed, so the numbers above stand. A corpus that cannot distinguish
+two versions of the instrument is not evidence that they are the same.
+
+**Mistake 2 — the PYTHONPATH trap, exactly as written down.** One combined
+command ran `./run.sh` (which exports and verifies the path itself) and then
+two probe scripts in the same shell invocation, forgetting that the export
+lives inside `run.sh`. The probes resolved `stelling` to `/home/nick/MSF/
+stelling/src` — `main` — and reported a **series-dependent** result for the
+`len(possible) > 1` guard that does not exist. Re-run with the path exported
+and asserted, both lanes agree. `2>/dev/null` on a script that prints
+`stelling.__file__` to stderr is how the check got thrown away; verify the
+path in the same breath as the measurement, not in a line you then silence.
