@@ -34,7 +34,25 @@ dependencies = []
 [project.optional-dependencies]
 # [jax] is bootstrap-only, for environments with no jax at all. If you already
 # have jax, do not install this extra — stelling must stay out of your resolver.
-jax = ["jax>=0.5"]
+#
+# THE FLOOR IS THE VERIFIED FLOOR. It was `>=0.5`, which was wrong twice over
+# and measurably so.
+#
+#   * On 0.5.x stelling produces no useful verdicts at all. `pjit` was renamed
+#     to `jit` at 0.7.0, and `jit` is what `coverage.DEFAULT_TRANSPARENT`
+#     descends into; on 0.5.1 the checker abstains and every contract comes
+#     back UNKNOWN.
+#   * 0.6–0.9 were never run. `dynamic_slice` became `slice` at 0.9.2, and
+#     stelling has a `slice` transfer and no `dynamic_slice`.
+#
+# `TESTED_JAX_SERIES` in `stelling/_optional.py` is the claim this floor must
+# match, and it is a claim about a lane that RUNS, not about a range someone
+# hopes works: `ci.yml` carries `test-jax-0-10` pinning the series and
+# asserting the series it actually resolved. Widen this only after adding the
+# lane, never before — and note the direction of the risk, which is not
+# obvious: an untested series does not produce wrong answers, it produces
+# quiet UNKNOWNs whose stated reason blames the caller's program.
+jax = ["jax>=0.10"]
 z3 = ["z3-solver>=4.13"]
 cvc5 = ["cvc5>=1.2"]
 solvers = ["stelling[z3,cvc5]"]
