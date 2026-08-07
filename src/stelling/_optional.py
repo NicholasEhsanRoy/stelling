@@ -40,9 +40,40 @@ _OPTIONAL: dict[str, _Optional] = {
 # deliberately NOT derived from the [jax] extra floor in pyproject.toml: the
 # floor is loose bootstrap metadata, while this constant is the honest runtime
 # claim. Update it only when CI actually verifies a new series.
+#
 # 0.11 verified 2026-07-17: full suite + census re-run; the series bump
 # changed scan's params (ft_in/ft_out flattree metadata, layout params gone)
 # and merged Jaxpr/ClosedJaxpr — see design/maintenance-treadmill.md.
+#
+# EACH ENTRY HAS ITS OWN CI LANE, and until 2026-08-07 one of them did not.
+# Every jax job installed `.[solvers,jax]`, whose floor is `jax>=0.5`, so
+# every job resolved the NEWEST jax: whatever this tuple said, CI only ever
+# exercised one series, and 0.10 rested on a developer's re-verification run.
+# `test-jax-0-10` in .github/workflows/ci.yml now pins `jax>=0.10,<0.11` and
+# asserts the resolved series, so a second entry here is a second lane there.
+# The rule that follows: an entry with no lane is a claim, not a test — add
+# the lane with the entry, or do not add the entry.
+#
+# Running the suite on a real 0.10.2 found the mirror image of the 0.11 bump,
+# which is the failure mode to expect from any code written on one series:
+# `propagate._is_add_combiner` tested `isinstance(v, ir.ClosedJaxpr)`, which
+# is a fact about the jax that produced the param and not about the combiner
+# (0.11 merged the two classes; 0.10 has not), so every `.at[].add` row
+# declined on 0.10 — VERIFIED becoming UNKNOWN.
+#
+# TEN TESTS FAILED; NINE OF THEM WERE THIS. Measured by applying the
+# `_is_add_combiner` hunk alone: nine go green, and `test_doc_example`
+# [quickstart.md:37] does not — it is the `jit.inline` param, a different
+# cause with its own fix. An earlier commit message and an earlier version of
+# this comment said "ten tests, every one scatter-shaped"; that was not
+# measured, and it is wrong.
+#
+# NOR WAS IT SILENT — and the truth is worse than silence. The coverage line
+# disclosed the loss (`1 ⊤ (scatter-add ×1)`), but the note read
+# `'scatter-add' has no sound rule for params {...}`, which blames the
+# caller's program. There WAS a sound rule; the oracle misread the container.
+# The direction is safe — VERIFIED → UNKNOWN, never the reverse — so this was
+# capability loss, not unsoundness. What it cost was a true reason.
 TESTED_JAX_SERIES = ("0.10", "0.11")
 
 

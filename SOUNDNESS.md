@@ -1832,5 +1832,38 @@ verdicts:
   first, is now a protocol violation. Cry-wolf cost measured at zero.
   Every construction is a permanent regression test
   (`tests/test_solver_audit_findings.py`, the `f4wheel` block).
+- **2026-08-07 (pre-release): jax 0.10 was in `TESTED_JAX_SERIES` and did
+  not work — verdicts move, in the UNKNOWN → VERIFIED direction, on 0.10
+  only.** `jex_core.ClosedJaxpr is jex_core.Jaxpr` is `False` on 0.10.2 and
+  `True` on 0.11.0 (0.11 merged the two classes), so `isinstance(v,
+  ir.ClosedJaxpr)` is a fact about the jax that produced a param rather than
+  about the param. `propagate._is_add_combiner` and two `remat2` body readers
+  tested the closed shape only. Measured at `8ef8f75` on 0.10.2, same source
+  and same harness as 0.11.0: `x.at[0].add(5.0)` VERIFIED at `6 eqns: 6 known
+  (100%)` on 0.11 and UNKNOWN at `4 known (67%); 1 ⊤ (scatter-add ×1)` on
+  0.10; `jax.checkpoint` VERIFIED on 0.11 and UNKNOWN on 0.10. Ten tests
+  failed on 0.10; **nine** were this (measured by applying the combiner hunk
+  alone), the tenth being a `jit.inline` param with its own cause. The
+  direction was always safe — VERIFIED → UNKNOWN, never the reverse, so this
+  was capability loss and not unsoundness — but it was **not silent and not
+  honest**: the coverage line disclosed the ⊤ while the note read
+  `'scatter-add' has no sound rule for params {…}`, blaming the caller's
+  program when a sound rule existed and the oracle had misread the container.
+  Fixed structurally, with no version branching: `_is_add_combiner` accepts
+  both containers, and one canonical `coverage.call_body` replaces two
+  hand-rolled body walks — the fact was already written down in
+  `test_remat_jaxpr_param_transcribes`, which was made series-tolerant during
+  the 0.11 bump while **its two consumers were not**. **Nothing moves on
+  0.11**: query hashes byte-identical at base and tip on both series
+  (`3c15c4f5…` / `4dc49e99…`), the 0.11 arm behaviourally the old code over
+  864 differential `ClosedJaxpr` shapes with 0 disagreements, and +7 tests /
+  0 removed. Normalising `Inline.AUTO → False` was **refused**: it moves every
+  0.11 query hash (proved — the rewrite turns the quickstart's `628a25ef…`
+  into exactly the 0.10 `f32f4860…`), and `Inline` has 5 members of which 4
+  are unexpressible on 0.10. A CI lane now pins the **series**
+  `jax>=0.10,<0.11` and asserts the series it resolved, because
+  `test_tested_jax_series_is_silent` passes on 0.11 too — the suite alone
+  cannot tell which series a lane ran. Before this, the honest floor was
+  `jax>=0.11`.
 
 *(no releases yet)*

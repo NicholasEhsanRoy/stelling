@@ -149,7 +149,13 @@ from dataclasses import dataclass
 from stelling import exactness
 from stelling import interval as iv
 from stelling import ir
-from stelling.coverage import DEFAULT_TRANSPARENT, Coverage, CoverageCounter, sub_jaxprs
+from stelling.coverage import (
+    DEFAULT_TRANSPARENT,
+    Coverage,
+    CoverageCounter,
+    call_body,
+    sub_jaxprs,
+)
 
 __all__ = [
     "IEEE_TRANSFERS",
@@ -1602,17 +1608,35 @@ _SCATTER_ADD_CORE = {
 
 def _is_add_combiner(update_jaxpr) -> bool:
     """Whether a ``scatter-add`` equation's recorded combining function is
-    the measured single-``add`` form: a :class:`stelling.ir.ClosedJaxpr`
-    with no consts, two scalar invars, and exactly one ``add`` equation
-    combining them into the single outvar (measured on jax 0.11.0 — every
-    traced ``scatter-add`` carries exactly this). The primitive NAME
-    declares the accumulate semantic; a recorded combiner that
-    contradicts the name is malformed IR and the form oracle refuses it
-    rather than trusting either self-description."""
-    if not isinstance(update_jaxpr, ir.ClosedJaxpr):
+    the measured single-``add`` form: no consts, two scalar invars, and
+    exactly one ``add`` equation combining them into the single outvar
+    (measured on jax 0.10.2 and 0.11.0 — every traced ``scatter-add``
+    carries exactly this). The primitive NAME declares the accumulate
+    semantic; a recorded combiner that contradicts the name is malformed
+    IR and the form oracle refuses it rather than trusting either
+    self-description.
+
+    Read STRUCTURALLY, across BOTH jaxpr container shapes, because the
+    container is a jax-series artifact and not a semantic difference. jax
+    0.10 records this param as a bare ``Jaxpr``, which stelling
+    transcribes to :class:`stelling.ir.Jaxpr`; jax 0.11 merged ``Jaxpr``
+    and ``ClosedJaxpr`` into one class, so the identical combiner now
+    satisfies ``isinstance(v, jex_core.ClosedJaxpr)`` first and
+    transcribes to :class:`stelling.ir.ClosedJaxpr` closed over an empty
+    const tuple. Measured: the same ``x.at[0].add(5.0)`` yields
+    ``update_jaxpr`` as ``ir.Jaxpr`` on 0.10.2 and ``ir.ClosedJaxpr`` on
+    0.11.0. An ``isinstance`` test against either class alone therefore
+    reads as "no combiner" on the other series and silently declines a
+    genuine ``.at[].add`` — which is exactly how this was found. Both
+    shapes are held to the SAME emptiness requirement: a closed form must
+    carry no consts, an open one no constvars."""
+    if isinstance(update_jaxpr, ir.ClosedJaxpr):
+        consts, j = update_jaxpr.consts, update_jaxpr.jaxpr
+    elif isinstance(update_jaxpr, ir.Jaxpr):
+        consts, j = update_jaxpr.constvars, update_jaxpr
+    else:
         return False
-    j = update_jaxpr.jaxpr
-    if update_jaxpr.consts or len(j.invars) != 2 or len(j.outvars) != 1:
+    if consts or len(j.invars) != 2 or len(j.outvars) != 1:
         return False
     if len(j.eqns) != 1:
         return False
@@ -5464,9 +5488,10 @@ class _Propagator:
                     self._bind_refused(out)
                 return
         if eqn.primitive in DEFAULT_TRANSPARENT:
-            inner = next(
-                (v for _, v in eqn.params if isinstance(v, ir.ClosedJaxpr)), None
-            )
+            # coverage.call_body, the canonical accessor: a wrapper's body
+            # is a bare Jaxpr for remat2 on jax 0.10 and a ClosedJaxpr on
+            # 0.11, and that is a fact about the series, not the callee.
+            inner = call_body(eqn)
             ins = [self.read(a) for a in eqn.invars]
             if inner is not None and len(inner.jaxpr.invars) == len(ins):
                 self.counter.record_transparent(eqn.primitive)

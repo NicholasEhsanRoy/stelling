@@ -167,6 +167,52 @@ class CoverageCounter:
         )
 
 
+def call_body(eqn: ir.JaxprEqn) -> ir.ClosedJaxpr | None:
+    """The body a transparent call wrapper carries, closed, or None.
+
+    THE CANONICAL ACCESSOR for a wrapper's callee, for the same reason
+    :func:`sub_jaxprs` is the canonical one for nesting: every descent that
+    hand-rolled ``isinstance(v, ir.ClosedJaxpr)`` was reading a fact about
+    the jax that produced the param, not about the callee.
+
+    Measured across the two tested series, all four members of
+    :data:`DEFAULT_TRANSPARENT`::
+
+        primitive          param         jax 0.10.2    jax 0.11.0
+        jit                jaxpr         ClosedJaxpr   ClosedJaxpr
+        remat2             jaxpr         Jaxpr         ClosedJaxpr
+        custom_jvp_call    call_jaxpr    ClosedJaxpr   ClosedJaxpr
+        custom_vjp_call    call_jaxpr    ClosedJaxpr   ClosedJaxpr
+
+    ``remat2`` is the single cell that moves, and it moves because jax 0.11
+    merged ``Jaxpr`` and ``ClosedJaxpr`` into one class — so on 0.11 no
+    transcribed param is ever a bare :class:`stelling.ir.Jaxpr` at all. A
+    ``ClosedJaxpr``-only test therefore found nothing for ``remat2`` on
+    0.10 and the wrapper was left opaque: measured end to end, a
+    ``jax.checkpoint`` harness that is VERIFIED on 0.11 came back UNKNOWN
+    on 0.10 with "transparent 'remat2' could not be inlined (no sub-jaxpr
+    ...)". Safe in direction — the wrapper is refused, not misread — but a
+    capability that silently depends on the jax series.
+
+    A bare jaxpr is closed over an EMPTY const tuple, which is lossless:
+    it has no consts of its own, and if it carries ``constvars`` the
+    callers' ``len(constvars) == len(consts)`` guard then refuses the
+    inline, which is the correct answer for a body whose consts are not
+    available to bind.
+
+    ``ClosedJaxpr`` is preferred over a bare ``Jaxpr`` when an equation
+    somehow holds both, so that this cannot change which param is chosen
+    on any input the previous code already handled.
+    """
+    for _, v in eqn.params:
+        if isinstance(v, ir.ClosedJaxpr):
+            return v
+    for _, v in eqn.params:
+        if isinstance(v, ir.Jaxpr):
+            return ir.ClosedJaxpr(jaxpr=v, consts=())
+    return None
+
+
 def sub_jaxprs(eqn: ir.JaxprEqn) -> Iterable[ir.Jaxpr]:
     """Yield every sub-jaxpr held in this equation's params, however nested."""
     pending = [v for _, v in eqn.params]
