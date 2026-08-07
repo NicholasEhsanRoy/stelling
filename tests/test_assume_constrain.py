@@ -1792,3 +1792,138 @@ def test_certified_nonvacuity_failed_keeps_the_exact_sentence():
         "FAILED — a membership condition is definitely false: the stated "
         "point is NOT in the declared set (harness defect, not a box fact)"
     )
+
+
+# --- the zero-element predicate: vacuously true, so it constrains nothing -----
+#
+# `assume` reads its predicate universally, and a universal over NO
+# elements is true at every point of the declared set. The `and`
+# recursion used to classify each conjunct as if it stood alone, so
+# `and(x >= 2, bool[0])` — whose value jax broadcasts to `bool[0]` —
+# narrowed x to a SUBSET of its declaration while the assume admitted the
+# whole box. Every wrong VERIFIED in that class came through here; the
+# end-to-end reproductions live in tests/test_size0_assume.py.
+
+
+def _size0_conjunction(order="var_first", cmp="ge", k=2.0):
+    """and(x cmp k, z >= 5) with z declared at shape (0,) — the `and`
+    broadcasts to bool[0], exactly as jax does."""
+    x, z, p1, p2, c, aout = (
+        var(0), var(1, f64((0,))), var(2, boolav()), var(3, boolav((0,))),
+        var(4, boolav((0,))), var(5, boolav((0,))),
+    )
+    conj = [p1, p2] if order == "var_first" else [p2, p1]
+    return close(
+        [
+            any_eqn(x, 0.0, 4.0),
+            any_eqn(z, 0.0, 4.0, shape=(0,)),
+            eqn(cmp, [x, lit(k)], p1),
+            eqn("ge", [z, lit(5.0, aval=f64())], p2),
+            eqn("and", conj, c),
+            eqn("stelling_assume", [c], aout),
+        ],
+        [aout],
+    )
+
+
+@pytest.mark.parametrize("order", ["var_first", "size0_first"])
+@pytest.mark.parametrize("cmp", CMPS)
+def test_a_zero_element_conjunction_narrows_nothing(order, cmp):
+    q = _size0_conjunction(order, cmp)
+    env = interval_env(q, assume_mode="constrain")
+    assert (env[0].los[0], env[0].his[0]) == (0.0, 4.0)  # declared, untouched
+    p = propagate(q)
+    assert p.coverage.constrained == 0 and p.coverage.inert == 1
+    assert not any(n.startswith("assume CONSTRAINED") for n in p.notes)
+    assert any("zero elements" in n for n in p.notes)
+
+
+def test_the_same_conjunction_at_a_NONZERO_shape_still_narrows():
+    """The control that makes the test above falsifiable: only the size-0
+    shape is what stops the narrowing, not the conjunction shape."""
+    x, z, p1, p2, c, aout = (
+        var(0), var(1, f64((1,))), var(2, boolav()), var(3, boolav((1,))),
+        var(4, boolav((1,))), var(5, boolav((1,))),
+    )
+    q = close(
+        [
+            any_eqn(x, 0.0, 4.0),
+            any_eqn(z, 0.0, 4.0, shape=(1,)),
+            eqn("ge", [x, lit(2.0)], p1),
+            eqn("ge", [z, lit(1.0, aval=f64())], p2),
+            eqn("and", [p1, p2], c),
+            eqn("stelling_assume", [c], aout),
+        ],
+        [aout],
+    )
+    env = interval_env(q, assume_mode="constrain")
+    assert (env[0].los[0], env[0].his[0]) == (2.0, 4.0)
+    assert (env[1].los[0], env[1].his[0]) == (1.0, 4.0)
+
+
+def test_a_zero_element_conjunction_does_not_mint_a_harness_defect():
+    """`x >= 5` is impossible on [0, 4] — but the assume it sits inside is
+    bool[0] and therefore TRUE at every point of the declared box, so the
+    precondition is satisfiable and the loud refusal would be false."""
+    q = _size0_conjunction(cmp="ge", k=5.0)
+    p = propagate(q)  # must not raise
+    assert p.coverage.inert == 1
+    assert any("zero elements" in n for n in p.notes)
+    # control: the same conjunct with a NONZERO sibling is a genuine
+    # unsatisfiable precondition and still raises
+    x, p1, aout = var(0), var(1, boolav()), var(2, boolav())
+    alone = close(
+        [
+            any_eqn(x, 0.0, 4.0),
+            eqn("ge", [x, lit(5.0)], p1),
+            eqn("stelling_assume", [p1], aout),
+        ],
+        [aout],
+    )
+    with pytest.raises(UnsatisfiableAssumptionError):
+        propagate(alone)
+
+
+def test_a_zero_element_conjunct_blocks_narrowing_at_every_tree_depth():
+    # and(and(x >= 2, x <= 3), bool[0]) — the size-0 sibling is a whole
+    # subtree away from the conjuncts that would have cut x
+    x, z = var(0), var(1, f64((0,)))
+    p1, p2, p3 = var(2, boolav()), var(3, boolav()), var(4, boolav((0,)))
+    c1, c2, aout = var(5, boolav()), var(6, boolav((0,))), var(7, boolav((0,)))
+    q = close(
+        [
+            any_eqn(x, 0.0, 4.0),
+            any_eqn(z, 0.0, 4.0, shape=(0,)),
+            eqn("ge", [x, lit(2.0)], p1),
+            eqn("le", [x, lit(3.0)], p2),
+            eqn("and", [p1, p2], c1),
+            eqn("ge", [z, lit(5.0, aval=f64())], p3),
+            eqn("and", [c1, p3], c2),
+            eqn("stelling_assume", [c2], aout),
+        ],
+        [aout],
+    )
+    env = interval_env(q, assume_mode="constrain")
+    assert (env[0].los[0], env[0].his[0]) == (0.0, 4.0)
+    # and the same tree WITHOUT the size-0 arm does narrow (test above:
+    # test_nested_conjunction_recursion) — this one only removes it
+    p = propagate(q)
+    assert p.coverage.constrained == 0 and p.coverage.dropped_conjuncts == 0
+
+
+def test_a_bare_zero_element_predicate_is_dropped_with_the_zero_reason():
+    # no `and` at all: the assume's own operand is bool[0]
+    z, p1, aout = var(0, f64((0,))), var(1, boolav((0,))), var(2, boolav((0,)))
+    q = close(
+        [
+            any_eqn(z, 0.0, 4.0, shape=(0,)),
+            eqn("ge", [z, lit(5.0, aval=f64())], p1),
+            eqn("stelling_assume", [p1], aout),
+        ],
+        [aout],
+    )
+    p = propagate(q)
+    assert p.coverage.inert == 1
+    reason = next(n for n in p.notes if "assume constraint DROPPED" in n)
+    assert "zero elements" in reason
+    assert "constrains nothing" in reason
