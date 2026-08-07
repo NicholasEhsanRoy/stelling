@@ -23,7 +23,7 @@ generation time:
 - `stelling.obligation._INT_SAFE_EMITTED_REASONS` (`src/stelling/obligation.py:251`, 24 entries) — per-primitive written soundness reasons for the int-safe classification (reproduced in the appendix below)
 - `stelling.obligation._REPLAY_SUPPORTED` (`src/stelling/obligation.py:2234`, 34 entries) — the exact-rational replay surface: primitives the solver-free witness replay can evaluate
 - `stelling.obligation._SCALAR_STRUCT_FMT` (`src/stelling/obligation.py:143`, 12 entries) — the scalar literal decoder — keyed by numpy dtype code, not by primitive
-- `stelling.coverage.DEFAULT_TRANSPARENT` (`src/stelling/coverage.py:54`, 4 entries) — call wrappers descended into (sub-jaxpr walked) instead of transferred
+- `stelling.coverage.DEFAULT_TRANSPARENT` (`src/stelling/coverage.py:57`, 4 entries) — call wrappers descended into (sub-jaxpr walked) instead of transferred
 
 Regenerate with `python docs/gen_supported_primitives.py`. The drift gate
 `tests/test_supported_primitives_doc.py` regenerates this page and fails
@@ -91,7 +91,9 @@ a member of that registry.
 
 `stelling.coverage.DEFAULT_TRANSPARENT` (4 members): `custom_jvp_call`, `custom_vjp_call`, `jit`, `remat2`.
 
-Recorded role: "The wrapper primitives whose correct transfer is descend-into-sub-jaxpr, per design/transparent-primitives.md (verified on jax 0.10.2)." (src/stelling/coverage.py:52).
+Recorded role: "The wrapper primitives whose correct transfer is descend-into-sub-jaxpr, per design/transparent-primitives.md (membership verified on every tested jax series: 0.10.2 and 0.11.0)." (src/stelling/coverage.py:52).
+
+Membership is stable across every tested series (`0.10` and `0.11`). The **container** a member's body arrives in is not: `remat2` carries an open `Jaxpr` on jax 0.10 and, since 0.11 merged `Jaxpr` and `ClosedJaxpr` into one class, a `ClosedJaxpr` there. Consumers must reach a body through `stelling.coverage.call_body` — an `isinstance` test against either class alone reads as "no body" on the other series.
 
 No member of this set appears in any of the registries above.
 

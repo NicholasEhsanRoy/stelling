@@ -50,7 +50,10 @@ from typing import Iterable
 from stelling import ir
 
 # The wrapper primitives whose correct transfer is descend-into-sub-jaxpr,
-# per design/transparent-primitives.md (verified on jax 0.10.2).
+# per design/transparent-primitives.md (membership verified on every tested
+# jax series: 0.10.2 and 0.11.0). The membership is series-stable; the
+# CONTAINER each member's body arrives in is not, and remat2's moves --
+# reach a body through call_body, never through an isinstance test.
 DEFAULT_TRANSPARENT = frozenset({"jit", "custom_jvp_call", "custom_vjp_call", "remat2"})
 
 
