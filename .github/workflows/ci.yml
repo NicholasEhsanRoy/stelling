@@ -24,6 +24,18 @@ jobs:
       - run: .venv/bin/python -m pytest -q
       - run: .venv/bin/python -m stelling
 
+  # The FLOATING lane: `[jax]` is `jax>=0.5`, so this resolves whatever jax
+  # is newest. That is deliberate — it is the lane that meets a new series
+  # first — but it means this job alone can only ever test ONE series, and
+  # which one is decided by PyPI rather than by this file. Job id and name
+  # are left alone on purpose: they may be named in branch protection, which
+  # is a repo setting and not visible from here.
+  #
+  # It is self-policing about drifting off the tested set:
+  # tests/test_transcribe.py::test_tested_jax_series_is_silent fails the
+  # moment the resolved jax is outside TESTED_JAX_SERIES. What it CANNOT do
+  # is notice that the other claimed series went untested — that is what the
+  # job below is for.
   test-jax:
     name: tests (solvers + jax)
     runs-on: ubuntu-latest
@@ -32,6 +44,56 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
       - run: uv pip install -e ".[solvers,jax]" pytest
+      - name: RESOLVED jax (floating — whatever is newest)
+        run: .venv/bin/python -c "import jax, jaxlib; print('jax', jax.__version__, 'jaxlib', jaxlib.__version__)"
+      - run: .venv/bin/python -m pytest -q
+
+  # The PINNED lane, and the reason it exists is a measured gap, not tidiness.
+  #
+  # `stelling._optional.TESTED_JAX_SERIES` claims ("0.10", "0.11") — that BOTH
+  # series are verified. But every jax lane in this workflow installed
+  # `.[solvers,jax]`, whose floor is `jax>=0.5`, so every one of them resolved
+  # the newest jax and the 0.10 half of that claim rested on a developer's
+  # one-off re-verification run, never on CI. A constant asserting two series
+  # while the machine only ever checks one is exactly the kind of unbacked
+  # claim this project does not ship.
+  #
+  # So: pin the SERIES, not a point release. `jax>=0.10,<0.11` tracks the
+  # newest 0.10 patch, which is what "0.10 is tested" should mean — a new
+  # 0.10.x that breaks transcription is a thing this lane SHOULD catch, and a
+  # frozen `==0.10.2` would hide it.
+  #
+  # jaxlib is left to resolve from jax rather than pinned separately
+  # (measured: jax 0.10.2 pulls jaxlib 0.10.2), but it is CHECKED below,
+  # because jaxlib is the actual XLA build and this suite is XLA-sensitive.
+  #
+  # The series check is not ceremony. `test_tested_jax_series_is_silent` only
+  # asserts the resolved jax is in TESTED_JAX_SERIES — it passes on 0.11 too.
+  # Without the assertion below, a resolver that quietly handed this job a
+  # 0.11 wheel would leave it GREEN while testing nothing the floating lane
+  # had not already tested, and the second series would go back to being
+  # claimed rather than measured. The whole point of this job is which series
+  # it runs, so that is the thing it must not take on trust.
+  test-jax-0-10:
+    name: tests (solvers + jax 0.10 series)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      - run: uv pip install -e ".[solvers]" "jax>=0.10,<0.11" pytest
+      - name: RESOLVED jax must really be the 0.10 series
+        run: |
+          set -euo pipefail
+          read -r jax_v jaxlib_v < <(.venv/bin/python -c "import jax, jaxlib; print(jax.__version__, jaxlib.__version__)")
+          echo "RESOLVED jax=${jax_v} jaxlib=${jaxlib_v}"
+          for pair in "jax:${jax_v}" "jaxlib:${jaxlib_v}"; do
+            name="${pair%%:*}"; ver="${pair#*:}"
+            case "${ver}" in
+              0.10.*) ;;
+              *) echo "::error title=the 0.10 lane did not get 0.10::${name} resolved to '${ver}'. This job exists to test the jax 0.10 series that TESTED_JAX_SERIES claims; on any other series it is a duplicate of the floating lane wearing a 0.10 name. Fix the pin, or narrow TESTED_JAX_SERIES to the series CI actually runs."; exit 1 ;;
+            esac
+          done
       - run: .venv/bin/python -m pytest -q
 
   reuse:
