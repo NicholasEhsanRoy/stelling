@@ -740,3 +740,33 @@ def test_scatter_int8_boundary_writes_and_drops_as_the_decline_states():
 
     assert float(write(128)[5]) == 7.0  # lands
     assert float(write(129)[5]) == 0.0  # silently dropped
+
+
+def test_a_remat_wrapper_is_descended_on_every_tested_series():
+    """`jax.checkpoint` must be inlined, not left opaque.
+
+    The regression this pins is invisible to a single-series lane. jax 0.11
+    merged `Jaxpr` and `ClosedJaxpr` into one class, so on 0.11 `remat2`'s
+    body param transcribes to `ir.ClosedJaxpr`; on 0.10 it is still a bare
+    `ir.Jaxpr`. Both descents — the propagation's and the obligation
+    slice's — tested `isinstance(v, ir.ClosedJaxpr)`, so on 0.10 they found
+    no body and refused the wrapper. Measured before the fix: this harness
+    was VERIFIED on 0.11.0 and UNKNOWN on 0.10.2, with the note
+    "transparent 'remat2': arity mismatch or no sub-jaxpr; ⊤".
+
+    Asserted through COVERAGE rather than through the status, because the
+    status alone would also pass if the body were never reached but the
+    obligation happened to discharge from the operands.
+    """
+    def h():
+        x = any_array((4,), "float64", (1.0, 2.0))
+        return assert_(jax.checkpoint(lambda y: y * 2.0 + 1.0)(x) > 2.0)
+
+    p = run(h)
+    assert p.coverage.transparent >= 1, "the remat2 wrapper was not descended"
+    assert p.coverage.unknown == 0, (
+        f"nothing should fall to ⊤ here; got {p.coverage.unknown_primitives}"
+    )
+    assert p.coverage.unreached == 0, "the remat body must be reached"
+    assert p.obligations[0].status == "discharged"
+    assert not any("remat2" in n for n in p.notes), f"wrapper refused: {p.notes}"

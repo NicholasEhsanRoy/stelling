@@ -64,7 +64,7 @@ from typing import Mapping
 
 from stelling import interval as iv
 from stelling import ir
-from stelling.coverage import DEFAULT_TRANSPARENT
+from stelling.coverage import DEFAULT_TRANSPARENT, call_body
 from stelling.propagate import (
     _EXACT_CONVERSIONS,
     _INT_DTYPE_BOUNDS,
@@ -1318,14 +1318,11 @@ class _Slicer:
         quoted."""
         for eqn in eqns:
             if eqn.primitive in DEFAULT_TRANSPARENT:
-                inner = next(
-                    (
-                        v
-                        for _, v in eqn.params
-                        if isinstance(v, ir.ClosedJaxpr)
-                    ),
-                    None,
-                )
+                # coverage.call_body, the canonical accessor — see the note
+                # there: remat2's body is a bare Jaxpr on jax 0.10 and a
+                # ClosedJaxpr on 0.11, so a ClosedJaxpr-only test left every
+                # remat'd wrapper opaque on 0.10 and declined the slice.
+                inner = call_body(eqn)
                 if (
                     inner is not None
                     and len(inner.jaxpr.invars) == len(eqn.invars)

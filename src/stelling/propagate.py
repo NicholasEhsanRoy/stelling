@@ -149,7 +149,13 @@ from dataclasses import dataclass
 from stelling import exactness
 from stelling import interval as iv
 from stelling import ir
-from stelling.coverage import DEFAULT_TRANSPARENT, Coverage, CoverageCounter, sub_jaxprs
+from stelling.coverage import (
+    DEFAULT_TRANSPARENT,
+    Coverage,
+    CoverageCounter,
+    call_body,
+    sub_jaxprs,
+)
 
 __all__ = [
     "IEEE_TRANSFERS",
@@ -5482,9 +5488,10 @@ class _Propagator:
                     self._bind_refused(out)
                 return
         if eqn.primitive in DEFAULT_TRANSPARENT:
-            inner = next(
-                (v for _, v in eqn.params if isinstance(v, ir.ClosedJaxpr)), None
-            )
+            # coverage.call_body, the canonical accessor: a wrapper's body
+            # is a bare Jaxpr for remat2 on jax 0.10 and a ClosedJaxpr on
+            # 0.11, and that is a fact about the series, not the callee.
+            inner = call_body(eqn)
             ins = [self.read(a) for a in eqn.invars]
             if inner is not None and len(inner.jaxpr.invars) == len(ins):
                 self.counter.record_transparent(eqn.primitive)
