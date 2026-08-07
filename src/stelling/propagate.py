@@ -5190,10 +5190,15 @@ class _Propagator:
         declaration is safe: a wider box makes ``[1, 1]`` harder to reach,
         never easier.
 
-        Three refusals below. **Only the third is load-bearing**; the
-        other two were measured to change no outcome, and are kept as
-        cheap belt-and-braces rather than as the guarantees they read
-        like:
+        Three refusals below. **None of the three was measured to change
+        an outcome**, and they are kept as cheap belt-and-braces rather
+        than as the guarantees they read like. Deleting any one of them
+        reddens no test in the suite, and an instrumented full-suite run
+        recorded all 93 calls this method receives as
+        ``(dtype, ieee_flagged, size0, answer)``: ``size0`` is False in
+        every one, ``int32`` appears twice and never inside an assume that
+        narrowed (so its answer is never read), and every
+        ``ieee_flagged=True`` call already answers False on its own.
 
         * **non-bool** (measured unreachable IN EFFECT). ``and`` on
           integer operands is bit arithmetic and its ``[1, 1]`` means the
@@ -5211,11 +5216,17 @@ class _Propagator:
           is flagged, and ``_ieee_bool_logic`` reads a flagged bool as
           ⊤-maybe-NaN. A flagged bool is therefore ``[0, 1]``, never
           ``[1, 1]``, so the final ``all(...)`` would already answer no.
-        * **size-0** (load-bearing). ``all()`` over no elements is
-          vacuously true, and treating that as certainly-true would be
-          defensible; it answers no instead, because a withhold is sound
-          whatever the answer and a zero-element assume is not worth a
-          second rule.
+        * **size-0** (measured UNREACHED; 0 of 93 calls). ``all()`` over
+          no elements is vacuously true, and treating that as
+          certainly-true would be defensible; it answers no instead,
+          because a withhold is sound whatever the answer and a
+          zero-element assume is not worth a second rule. It is never
+          asked: an ``and``'s operands must broadcast, so a zero-element
+          conjunct forces every sibling conjunct to be zero-element too,
+          and a zero-element comparison takes the ``point_a and point_b``
+          arm of :meth:`_classify_cmp` (both ``all()``s are vacuously
+          true) and drops without narrowing — leaving ``narrowed`` empty
+          and ``harmless`` unread.
         """
         if getattr(atom.aval, "dtype", None) != "bool":
             return False

@@ -372,6 +372,41 @@ def test_an_indeterminate_dropped_conjunct_does_NOT():
     assert _prop(_restricting_relational).assume_dropped is True
 
 
+def test_the_attribution_fail_safe_refuses_a_misaligned_verdict(monkeypatch):
+    """`harmless[i]` is only meaningful as the verdict on `dropped[i]`.
+
+    If the two ever came apart, an index could carry another conjunct's
+    verdict and a RESTRICTING drop could read as harmless — the one
+    direction that produces a wrong REFUTED. `_assume_constrain` therefore
+    throws the whole attribution away rather than salvage part of it:
+    attribution lost is attribution refused.
+
+    Nothing in the suite drives that branch — full-suite mutation of the
+    fail-safe reddened 0 of 2180 tests, because the invariant it guards
+    holds everywhere the recursion is exercised. A fail-safe for an
+    invariant that holds is exactly the thing that rots unnoticed, so it
+    is driven here directly.
+    """
+    real = P._Propagator._apply_assumed_pred
+
+    def desync(self, atom, where, narrowed, dropped, vacuous, harmless=None):
+        real(self, atom, where, narrowed, dropped, vacuous, harmless)
+        if harmless is not None and dropped:
+            # one entry too many: the lists come apart and index i no
+            # longer names conjunct i
+            harmless.append(True)
+
+    monkeypatch.setattr(P._Propagator, "_apply_assumed_pred", desync)
+    # `_restricting_relational`'s drop REALLY widens (a ∈ [0,10], b ∈ [5,6],
+    # so `a <= b` is indeterminate). Misread as harmless it restores the
+    # wrong REFUTED.
+    assert _prop(_restricting_relational).assume_dropped is True, (
+        "a misaligned attribution must be refused wholesale, not indexed "
+        "into — reading harmless[0] here marks a restricting drop harmless"
+    )
+    assert _run(_restricting_relational).status == "UNKNOWN"
+
+
 def test_a_non_bool_and_is_refused_as_a_conjunction_and_says_so():
     """Replaces `test_the_discriminant_refuses_a_non_bool_operand`, which
     could not fail.
