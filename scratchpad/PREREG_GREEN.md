@@ -180,3 +180,190 @@ cleared.
 ---
 
 <!-- ================== OUTCOMES: append only, below this line ================== -->
+
+# OUTCOMES
+
+Appended after the fact. Nothing above the rule line was edited.
+Baseline `33fd1f8`, measured in two worktrees run in parallel (separate
+checkouts, which is the point of defect B):
+
+    jax 0.11.0   2296 passed, 2 skipped, exit 0, 154.65s   load avg 3.06
+    jax 0.10.2   2296 passed, 2 skipped, exit 0, 152.28s   (same window)
+    reuse 6.2.0  283/283, exit 0
+    --collect-only: 2298 ids, byte-identical between the two series
+
+Branch tip, same arrangement:
+
+    jax 0.11.0   2296 passed, 2 skipped, exit 0, 157.65s   load avg 2.69
+    jax 0.10.2   2296 passed, 2 skipped, exit 0, 155.54s   (same window)
+    verdict=made on both
+    reuse 6.2.0  284/284, exit 0   (the extra file is this one)
+    --collect-only: 2298 ids, identical across series AND to the baseline
+
+## A — insert-license
+
+**CONFIRMED, exactly as described.**
+
+    printf 'X = 1\n' > scratchpad/zz_hookprobe.py; git add …
+    pre-commit run insert-license --files …   Failed
+    git status --short                        AM
+    git show :scratchpad/zz_hookprobe.py      X = 1
+    pre-commit run insert-license --files …   Passed
+    git show :scratchpad/zz_hookprobe.py      X = 1
+
+* **A1 falsifier NOT satisfied.** The second run did not stash and did not
+  re-read the index: `Passed`. My account stands.
+* **A2 falsifier NOT satisfied.** The index blob was header-less at every
+  point.
+* **A3 CONFIRMED as predicted.** `pre-commit run` with no `--files` — the
+  path `hook-impl` takes — stashes (`Stashing unstaged files to …`) and
+  reports `Failed` with the worktree already fixed. The `git commit` path
+  bites; `--files` and `--all-files` are the ones that lie.
+* **A4.** Falsifier NOT satisfied: the pinned `insert-license` v1.5.6, run
+  over the exact blobs `14e34a2` committed (extracted with `git show
+  14e34a2:<path>` into a fresh repo with that commit's own config and
+  `.license-header.txt`), rewrote **all 13** of them. So the hook would have
+  fired; that it did not run stands. Ruled OUT by measurement: `core.hooksPath`
+  unset; `.git/hooks/pre-commit` present, dated 2026-07-16, `INSTALL_PYTHON`
+  resolvable; and the branch reflog records the entry as `commit:`, not a
+  rebase or cherry-pick (which do not run this hook). What is left is
+  `--no-verify` / `SKIP=`, which leaves no trace anywhere — **UNDECIDABLE, as
+  pre-registered.** 13 not 12: `scratchpad/reach/cases.py` was removed in the
+  very next commit, leaving the 12 still in the tree.
+* **A5 falsifier NOT satisfied**, and the backstop was measured rather than
+  assumed: a header-less file dropped at `src/zz_no_header.py` takes
+  `reuse lint` from `283/283 exit 0` to `exit 1`, and removing it restores it.
+
+**Fix.** `staged-spdx-header`, a local hook reading `git show :<path>` — the
+one channel a worktree fixer cannot touch. Reddening: the sequence above, at
+the second run. Restoring: `git add`. Scoped to the DIVERGENCE, so the twelve
+deliberately header-less `scratchpad/**` files that REUSE.toml annotates are
+left alone. Hardened afterwards: outside a git repository the loop skipped
+every file and returned 0, i.e. the fix had the defect it was fixing; it now
+exits 1 saying it checked nothing.
+
+**Not claimed.** This does not stop `--no-verify`. Nothing client-side can.
+`reuse lint` in CI is the control that runs where `-n` cannot reach, and since
+`33fd1f8` it does not require headers under `scratchpad/**` — by design, not
+by accident, and left alone as instructed.
+
+## B — the sdist probe
+
+* **B1 CONFIRMED, and it is TWO tests, not one.** With the probe present at
+  the root, `test_every_root_entry_is_a_decision` AND
+  `test_no_untracked_file_anywhere_would_ship` both fail; both pass on removal.
+  The real race, two runs 0.4s apart in one checkout: `7 passed` /
+  `2 failed` (`test_no_untracked_file_anywhere_would_ship` and
+  `test_an_arbitrary_new_file_does_not_ship`, the latter on "probe path is
+  already taken").
+* **B2 CONFIRMED — there is a false GREEN in it.** Predicted and found: with
+  `probe.write_text` replaced by `pass`, `1 passed`. The control passed having
+  observed nothing. The other two candidates were predicted NOT to be false
+  greens and were not: an absent/broken build is caught by `returncode == 0`,
+  `len(built) == 1` and the `pyproject.toml` assert. The docstring's own
+  break-it recipe was predicted to bite and does — deleting
+  `[tool.hatch.build.targets.sdist]` leaks
+  `stelling-0.1.0/zz_sdist_allowlist_probe.txt` into the tarball, both from
+  the real repo and (checked separately, because it is the new arrangement)
+  from the staged copy. The "hatchling builds from the git INDEX" rival is
+  refuted by the same measurement.
+* **B3 CONFIRMED.** `WITHHELD` carried `"scratchpad"` twice; Python kept the
+  last and the first reason was dead text. Merged.
+* One thing I did **not** pre-register and found: `test_every_allowlist_entry_exists`
+  is vacuous on an EMPTY include list. `include = []` -> was `1 passed`, now
+  `1 failed`.
+
+**Fix.** The intervention moved to a private copy (0.01s, 5.3 MiB), and the
+build made to prove it can SEE an untracked file — a second probe inside the
+allowlisted `/docs` that MUST ship — before its silence about the first is
+believed. Reddening, each restored to green: probe never created; positive
+control never created; probe unlinked before the build; allowlist table
+deleted; `include = []`. Race replayed three times on the fixed test:
+`7 passed` / `7 passed` every round, nothing left at the root.
+
+## The sweep
+
+**S1 CONFIRMED — the largest find, and not one I was handed.**
+`jax-import-hygiene` was `! grep A; ! grep B` under `set -e`, and bash ignores
+errexit on a `!`-inverted command (driven directly: `bash -c 'set -e; ! true;
+echo REACHED'` prints REACHED and exits 0). So the FIRST check could not fail
+the hook. With a bare `import jax` planted under `src/` outside `_jax_compat.py`
+and no `jax._src` anywhere: **`Passed`, exit 0**, with the offending line
+printed in the output. It went `Failed` only once `jax._src` was also present.
+The falsifier — "the hook reports Failed on such a file" — was NOT satisfied.
+Fixed by combining through `rc`; both halves now redden and both are reported.
+The property itself was never uncovered: `tests/test_import_hygiene.py::
+test_jax_imported_only_in_compat_module` is the independent guard that held.
+
+**S2 falsifier NOT satisfied.** `library-identifier-hygiene` has one statement,
+so its status propagates. Planted `# uses lineax here` in `src/stelling/`:
+`Failed`, exit 1; removed: `Passed`. CLEARED.
+
+**S3 CONFIRMED by construction, REASONED-ONLY.** `dco` is
+`if: github.event_name == 'pull_request'` and the workflow also runs on
+`push: branches: [main]`, where the job does not run at all. Not changed —
+running `dco-check` on a push has no PR range to check, so this changes what
+the job means. Written up instead. A related, also reasoned-only point:
+`pipx run dco-check` is unpinned, and a checker that finds no commits to check
+exits 0 the same way one that finds only signed-off commits does. Neither is
+drivable here (no network).
+
+**S4 CONFIRMED and FIXED.** `test-no-jax`, `test-jax`, `test-jax-0-10` — the
+only three lanes a branch protection rule can require — ran `pytest -q` and
+read nothing but the exit code, while the two jobs that DO assert the verdict
+are the two the file says must not be required. Measured verdict=made in all
+three environments before adding the assertion, including a genuinely jax-less
+interpreter (`1185 passed, 85 skipped`), built by symlinking the shared venv's
+site-packages minus jax/jaxlib rather than by an import hook, because
+`stelling._optional.available` asks `find_spec` and a raising hook is a
+different observation from an absent package.
+
+**S5 CONFIRMED, and it is legibility, not a false green.** On one failing and
+one skipping test: `-rs` prints the SKIPPED line and omits `FAILED <nodeid>`;
+`-ra` prints both; exit 1 either way, so the falsifier ("`-rs` also loses the
+non-zero exit") was NOT satisfied. Changed to `-ra` in `release.yml` and in the
+any_pytree step; the `grep -q '^SKIPPED'` still fires, driven.
+
+**S6 falsifier NOT satisfied.** Every pipe in a guard in both workflows is
+inside a `set -euo pipefail` block. Measured what that buys, on the real step
+body: with `pipefail`, a failing import gives exit 1 and an empty file; with
+`set -eu` alone, **exit 0 and an empty file** — the repo's own comment, driven.
+
+**S7 falsifier NOT satisfied.** `read -r a b < <(…)` in `test-jax-0-10` fails
+closed in all five drives, including "python prints nothing and exits 0".
+
+**S8 falsifier NOT satisfied.** No narrowed pytest invocation can silently
+select 0: the two acceptance steps assert `^2 passed` / `^18 passed`, and a
+0-collected run is exit 5 through `set -e`. Driven.
+
+**S9 REASONED-ONLY.** CI lints with `fsfe/reuse-action@v5` (5.1.1);
+`.pre-commit-config.yaml` pins `reuse-tool` `v6.2.0`. Two different linters
+guard one property. Only 6.2.0 is installed here and installing 5.1.1 needs the
+network, so this is stated and not measured.
+
+**S10 CONFIRMED, one instance**, and not the one I expected: not a test
+asserting presence, but `test_every_allowlist_entry_exists` asserting over a
+set that can be empty. Fixed with a non-vacuity assert that reddens on
+`include = []`.
+
+**S11 falsifier NOT satisfied.** `acceptance-any-pytree` asserts before==after
+and never asserts WHICH series it resolved — correct, it is the floating
+series by design, and the file says so. Cleared with the note.
+
+**Not pre-registered, found while driving: the stale verdict file.** The
+verdict steps argue that ABSENCE is the signal. Absence is only a signal if
+nothing else could have supplied the file. Driven, with a verdict file already
+at the path and a stand-in pytest that writes none: **exit 0** on a session
+that wrote nothing. Inert on hosted runners (fresh `RUNNER_TEMP` per job) and
+closed anyway with one `rm -f`, which is exit 1 in the same drive.
+
+## Cleared, each shown to redden on demand
+
+`test-jax-0-10` series guard (5 drives) · any_pytree "must RUN" (6) · the
+verdict steps, old and new (6 each) · release tag-vs-artifact (5) · the
+reproducer install/series/before-after guards (6+4) · the any_pytree
+before/after guards (4) · the release sdist manifest (2) · `assert jax is
+absent` (2, against a real jax-less interpreter and a real jax one) ·
+`library-identifier-hygiene` (2) · `reuse lint` (2) · conftest with the pin
+made unimportable (verdict=failed, exit 1) and with the conftest removed
+(no file at all).
