@@ -1034,6 +1034,116 @@ def test_flag_survives_a_transparent_jit_scope():
     assert propagate(q).obligations[0].status == "discharged"
 
 
+# --- an inner scope must GIVE THE OUTER TAINT BACK ----------------------------
+#
+# The four `self.<x> = outer_<x>` restores in the `finally` of the transparent
+# call and of `cond` were covered three-quarters of the way. `env` is read by
+# every following equation and `exact`/`nan` have their own pins; the product
+# taint had none, and BOTH `self.taint = outer_taint` lines could be replaced
+# by `pass` with the whole suite still at `2271 passed, 2 skipped` on jax
+# 0.11.0 (measured, twice: one mutant per line, whole suite each time).
+#
+# What the mutant does is not cosmetic and it is not conservative. `self.taint`
+# is swapped for a FRESH dict at scope entry, so without the restore the outer
+# scope keeps the INNER one — every taint recorded before the scope is gone
+# from it. A product computed before a `jit`/`cond` and consumed after it then
+# reads as untainted, the ieee contraction guard never fires on it, and the
+# obligation comes back DISCHARGED where it must come back `unknown`. That is
+# the false-VERIFIED direction: the mutant is unsound, not merely imprecise.
+#
+# Pinned through the OUTCOME rather than through the attribute: the harness
+# below builds one query in three shapes that differ only by what sits between
+# the multiply and the reduction — nothing, a `jit`, a `cond` — and the pin is
+# that all three agree. `reduce_sum` over a product-derived array is the
+# cheapest observable the taint has: it declines with a quoted reason (audit
+# UNSOUND 5), so the taint's presence is legible in `notes` and in the verdict
+# at once, with no assertion about propagate's internals.
+
+
+def _product_then_scope_then_sum(scope):
+    """`p = x*x`, then `scope`, then `sum(p)` — the sum is what reads the taint.
+
+    ``scope`` is ``"none"``, ``"jit"`` (the DEFAULT_TRANSPARENT path) or
+    ``"cond"`` (the branch path). The scope's own result is never used: the
+    question is whether `p`'s taint, recorded BEFORE it, survives it.
+    """
+    ident_a = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(), invars=(var(20),), outvars=(var(20),), eqns=()
+        )
+    )
+    ident_b = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(), invars=(var(21),), outvars=(var(21),), eqns=()
+        )
+    )
+    vec = aval((2,))
+    x, p, w = var(0, vec), var(1, vec), var(2)
+    sel, cx, cout = var(3, I32), var(4), var(5)
+    s, pred, out = var(6), var(7, BOOL), var(8, BOOL)
+    eqns = [
+        any_eqn(x, 1.0, 2.0, shape=(2,)),
+        eqn("mul", [x, x], p),  # the taint source
+        any_eqn(cx, 1.0, 2.0),
+    ]
+    if scope == "jit":
+        eqns.append(eqn("jit", [cx], cout, params=[("jaxpr", ident_a)]))
+    elif scope == "cond":
+        eqns += [
+            any_eqn(w, 0.0, 0.0),
+            eqn(
+                "convert_element_type", [w], sel,
+                params=[("new_dtype", "int32")],
+            ),
+            eqn(
+                "cond", [sel, cx], cout,
+                params=[("branches", (ident_a, ident_b))],
+            ),
+        ]
+    eqns += [
+        eqn("reduce_sum", [p], s, params=[("axes", (0,))]),
+        eqn("le", [s, lit(100.0)], pred),
+    ]
+    return assert_query(eqns, pred, out)
+
+
+def _taint_was_still_there(scope):
+    """(status, did the reduction decline) for one shape of the harness."""
+    r = propagate(_product_then_scope_then_sum(scope), semantics="ieee")
+    declined = any(
+        n.startswith("'reduce_sum' declined this form")
+        and "product-derived array" in n
+        for n in r.notes
+    )
+    return r.obligations[0].status, declined
+
+
+def test_the_product_taint_is_recorded_at_all_without_any_scope():
+    # the control the other two are read against: with nothing between the
+    # multiply and the reduction, the taint reaches the reduction, the
+    # reduction declines with its quoted reason, and `le(⊤, 100.0)` is
+    # `unknown`. If this row ever goes green-by-discharge the two below stop
+    # meaning anything, so it is asserted rather than assumed.
+    assert _taint_was_still_there("none") == ("unknown", True)
+
+
+def test_a_transparent_scope_gives_the_outer_product_taint_back():
+    # `propagate.py`'s `self.taint = outer_taint` in the DEFAULT_TRANSPARENT
+    # finally. Replace it with `pass` and this test is the only one in the
+    # suite that reddens: the reduction stops declining and the obligation
+    # DISCHARGES — a verdict of VERIFIED over a form whose fused rounding was
+    # never modelled.
+    assert _taint_was_still_there("jit") == _taint_was_still_there("none")
+    assert _taint_was_still_there("jit") == ("unknown", True)
+
+
+def test_a_cond_gives_the_outer_product_taint_back():
+    # the same restore in the `cond` finally, which swaps `self.taint` once per
+    # possible branch. Same mutant, same false discharge.
+    assert _taint_was_still_there("cond") == _taint_was_still_there("none")
+    assert _taint_was_still_there("cond") == ("unknown", True)
+
+
 # --- literals -----------------------------------------------------------------
 
 
