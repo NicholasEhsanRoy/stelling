@@ -62,7 +62,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from typing import Callable
 
@@ -364,6 +364,24 @@ class ObligationEscalation:
     # between the two is exactly a degraded portfolio, and before this
     # field there was no quantity a consumer could read it from.
     answered_by: tuple[str, ...] = ()
+    # NO `barred_on_slice` FIELD, DELIBERATELY, AND THIS IS WHERE IT WAS.
+    # A predecessor recorded the scatter VERIFIED bar's per-obligation scope
+    # here, computed in escalate()'s dispatch loop from the slice that was
+    # actually emitted, and the bar trusted it. Two measured holes, both
+    # absent from the whole-query bar that preceded it: an empty tuple is a
+    # positive claim ("nothing barred on my slice") that nothing validated,
+    # and `make_solver_verdict` did not bind its escalation to its `closed`
+    # at all until the query pairing gate landed — so a scatter-free
+    # escalation stamped against a scatter-bearing query went VERIFIED where
+    # the whole-query bar went UNKNOWN. A record cannot
+    # certify its own cleanliness; the scope's CONTENTS are derived at the bar
+    # from the query instead — `stelling.verdict._bar_scope`, which re-slices
+    # the decided obligations out of `closed` and so has neither exposure for
+    # them. What a record still supplies is the bar's DOMAIN, through `index`
+    # and `outcome` — the same two fields that discharge the obligation in the
+    # first place, so a record cannot leave the bar's domain without also
+    # giving up the discharge it needs for there to be a VERIFIED at all. See
+    # `make_solver_verdict`'s docstring for the precondition that rests on.
 
 
 @dataclass(frozen=True)
@@ -376,12 +394,44 @@ class Escalation:
     stamp an escalation against a propagation of the other semantics in
     EITHER direction (the symmetric mispairing gate): obligation details
     and refusal reasons would be misattributed across the semantics
-    boundary."""
+    boundary.
+
+    ``query_sha256`` records WHICH QUERY :func:`escalate` was called on —
+    :meth:`stelling.ir.ClosedJaxpr.content_hash` of the ``closed`` it
+    received, taken at every one of this function's return sites.
+    :func:`make_solver_verdict` refuses to stamp an escalation carrying
+    work against a ``closed`` that does not reproduce it (the query
+    pairing gate). It is the same trust model as ``semantics`` above and
+    as the ``smt2_sha256``/``slice_sha256`` the invocation stamps carry:
+    a hand-built record can hold any value, and this defends an honest
+    caller against an accidentally mispaired assembly — the realistic
+    mechanism being a CACHED escalation, which is one of the two uses
+    :mod:`stelling.ir`'s own module docstring names ``content_hash`` for
+    ("proof caching and the z3-vs-cvc5 *did both solvers see the same
+    query* check"). Empty means "not recorded by this library", and the
+    gate refuses that too when the escalation carries work: an absent
+    hash is exactly the shape a stale cache entry from before this field
+    existed has. **That sentence was false in one case until this
+    build**, and the case is named because it is the one where the
+    refusal matters most: BOTH legs run through :func:`_query_sha256`,
+    which returns ``""`` when
+    :meth:`stelling.ir.ClosedJaxpr.content_hash` RAISES, so an unhashable
+    ``closed`` and an unrecorded escalation compared EQUAL and the gate
+    passed. Measured on `e35de13`: the refusal then came from
+    :class:`stelling.verdict.Stamp`'s own emptiness check one layer
+    later, which is loud but is not this gate. The gate now refuses an
+    empty hash on either leg. Note also that ``carries_work`` is a real
+    exemption and not a formality: an escalation with no records, no
+    notes, no spawns and no stamps bypasses this gate entirely, and that
+    is harmless because it contributes nothing an assembly could
+    misattribute — measured, such a pairing returns UNKNOWN off the
+    propagation alone."""
 
     records: tuple[ObligationEscalation, ...]
     notes: tuple[str, ...] = ()
     ledger: _Ledger = field(default_factory=_Ledger)
     semantics: str = "real"
+    query_sha256: str = ""
 
     @property
     def invocations(self) -> tuple[SolverStamp, ...]:
@@ -1307,6 +1357,36 @@ def _dispatch_obligation(
 # -- escalation over a propagated query ---------------------------------------
 
 
+def _query_sha256(closed) -> str:
+    """:meth:`stelling.ir.ClosedJaxpr.content_hash` of ``closed``, or ``""``
+    if it cannot be taken.
+
+    ONE DERIVATION, TWO READERS, and that is the point: :func:`escalate`
+    records it on the :class:`Escalation` and :func:`make_solver_verdict`
+    recomputes it from the ``closed`` it is handed, so the two are compared
+    rather than copied. The hash is the IR's own semantic content hash —
+    stable across processes, insensitive to ``source_info``/``debug_info``,
+    and named in :mod:`stelling.ir`'s module docstring as existing for
+    caching and for the "did both solvers see the same query" check. This
+    is that check, one layer up.
+
+    NEVER RAISES, and the empty string is not a pass: it is the value the
+    pairing gate REFUSES when the escalation carries work, so a ``closed``
+    whose hash cannot be taken fails loudly at assembly rather than
+    silently pairing with anything. **The gate has to refuse it
+    EXPLICITLY, and until this build it did not.** Both legs come from
+    here, so an unhashable ``closed`` and an escalation that recorded
+    nothing both produce ``""`` and an equality test passes them:
+    measured on `e35de13`, that assembly reached
+    :class:`stelling.verdict.Stamp` and was refused there
+    ("stamp field 'query_content_hash' is empty") rather than at the
+    gate. Two absences are not a match, and the gate now says so."""
+    try:
+        return str(closed.content_hash())
+    except Exception:  # noqa: BLE001 — an unhashable query is refused, not excused
+        return ""
+
+
 def escalate(
     closed: ir.ClosedJaxpr,
     propagation: Propagation,
@@ -1332,10 +1412,18 @@ def escalate(
     before — a drop over-approximates, so emission over the declared box
     remains faithful to the propagated semantics.
     """
+    # WHICH QUERY THIS ESCALATION IS ABOUT, recorded once, at the top, and
+    # attached to every return below — including the ones that do no work.
+    # A return site that forgot it would be an escalation the pairing gate
+    # cannot check, so the derivation is hoisted rather than repeated:
+    # `tests/test_verified_bar.py::test_every_escalate_return_site_records_the_query`
+    # asserts every path out of this function carries it.
+    query_sha256 = _query_sha256(closed)
     unknown = [o for o in propagation.obligations if o.status == "unknown"]
     if not unknown:
         return Escalation(
-            records=(), notes=(), semantics=propagation.semantics
+            records=(), notes=(), semantics=propagation.semantics,
+            query_sha256=query_sha256,
         )
     if propagation.semantics == "ieee":
         # guard 2, mechanism 1: an ieee-mode propagation refuses solver
@@ -1357,6 +1445,7 @@ def escalate(
             ),
             notes=(IEEE_SEMANTICS_REFUSAL,),
             semantics=propagation.semantics,
+            query_sha256=query_sha256,
         )
     if propagation.coverage.constrained:
         # checked before solver availability: the refusal is semantic and
@@ -1378,6 +1467,7 @@ def escalate(
             ),
             notes=(CONSTRAINED_ASSUME_REFUSAL,),
             semantics=propagation.semantics,
+            query_sha256=query_sha256,
         )
     backends, missing = _backends_for(config)
     if not backends:
@@ -1397,6 +1487,7 @@ def escalate(
             ),
             notes=(INSTALL_HINT,),
             semantics=propagation.semantics,
+            query_sha256=query_sha256,
         )
     env = interval_env(closed)
     ledger = _Ledger()
@@ -1461,7 +1552,7 @@ def escalate(
         ]
     return Escalation(
         records=tuple(records), notes=(), ledger=ledger,
-        semantics=propagation.semantics,
+        semantics=propagation.semantics, query_sha256=query_sha256,
     )
 
 
@@ -1491,6 +1582,130 @@ def _nonvacuity_summary(checks: tuple[ObligationReport, ...]) -> str:
     return "undecided — a membership condition could not be decided"
 
 
+class _UnreadableBarDomain:
+    """The sentinel `_bar_domain` returns when it cannot read the escalation.
+
+    Truthy, so the bar branch is ENTERED, and not a mapping, so
+    `verdict._bar_scope`'s `dict(decided)` raises into its own `except` and
+    falls back to the whole-query set. An empty dict would have been the
+    silencing answer — the bar branch is guarded on `decided` being non-empty,
+    because an empty domain legitimately means "no solver decided anything" —
+    so an unreadable escalation must not be spelled the same way as an honest
+    empty one.
+
+    **THE TRUTHINESS IS THE MECHANISM, AND FOR A WHILE NOTHING DROVE IT.** The
+    outer `except` this sentinel comes out of was reached by no test in the
+    repo — the three `invocations`-shape probes exercise only the INNER
+    `except TypeError` — so `__bool__` returning `False` instead of `True`
+    turned an unreadable escalation's UNKNOWN into VERIFIED, with no withheld
+    note and the full suite green. Both halves are now driven by
+    `tests/test_verified_bar.py::test_an_UNREADABLE_domain_widens_the_bar_and_the_sentinel_is_why`.
+
+    **AND IT DOES NOT COVER EVERY WAY THE DOMAIN CAN COME BACK EMPTY**, which
+    the flat claim "widens rather than silencing" read as if it did. A
+    `records` that can be iterated ONCE is READABLE; it is just readable once,
+    and while the domain was built several passes into `make_solver_verdict` an
+    earlier pass had already consumed it, so `_bar_domain` returned an
+    honest-empty `{}` and the bar was skipped — a silencing path that never
+    reached this sentinel. That is closed by ORDER (the domain is read on the
+    first pass) rather than by anything here; see the comment at the read
+    site."""
+
+    __slots__ = ()
+
+    def __bool__(self) -> bool:
+        return True
+
+
+_BAR_DOMAIN_UNREADABLE = _UnreadableBarDomain()
+
+
+def _bar_domain(escalation) -> dict[int, tuple[SolverStamp, ...]] | object:
+    """THE BAR'S DOMAIN: which obligations the solver decided, and the
+    invocation stamps their records carry. ONE PLACE, and that is the point.
+
+    Reads exactly TWO fields off a record to decide membership — ``outcome``
+    and ``index`` — plus ``invocations``, which is carried across for
+    `verdict._evidence_is_about` and can only ever fail to lift the bar.
+    Nothing else about a record may enter this decision: a record that could
+    certify its own cleanliness is the deleted `barred_on_slice` field under
+    another name, and the defect is not confined to a field that NAMES a
+    barred primitive. Measured, on `eb1ff86` (where this read was four lines
+    in `make_solver_verdict`) and again here: adding `audit_token: str = ""`
+    to `ObligationEscalation` and `and r.audit_token != "clean"` to this
+    filter gives UNKNOWN at `''` and at `'a value no honest record carries'`
+    and VERIFIED at `'clean'`, and at `eb1ff86` the full suite stayed green —
+    the field-probe test that was meant to catch it moves each field to two
+    values of its declared TYPE, which EXHAUSTS `bool` and merely SAMPLES
+    `str`.
+
+    So the channel is pinned by construction rather than by probing values:
+    `tests/test_verified_bar.py` calls this with a record object that HAS no
+    attribute but `index`, `outcome` and `invocations`, so a conjunct on any
+    new field of any type raises `AttributeError` here instead of passing
+    quietly at every value nobody thought to probe.
+
+    AND IT MUST NOT RAISE. "A bar must never break a verdict" was true of
+    `_bar_scope`'s body and false of the read that feeds it: at `eb1ff86` a
+    record whose ``invocations`` is a `list` raised `TypeError` out of
+    `make_solver_verdict` (`tuple + list`), from OUTSIDE `_bar_scope`'s
+    protective `try`. It is tolerated here — a list of stamps is stamps —
+    and anything genuinely unreadable returns :data:`_BAR_DOMAIN_UNREADABLE`,
+    which widens rather than raising and rather than silencing.
+    """
+    if escalation is None:
+        return {}
+    try:
+        decided: dict[int, tuple[SolverStamp, ...]] = {}
+        for r in escalation.records:
+            if r.outcome != OB_DISCHARGED:
+                continue
+            try:
+                stamps = tuple(r.invocations)
+            except TypeError:
+                # not iterable at all: no stamps means no narrowing, which is
+                # the widening direction, so this is a loss of precision and
+                # never of the bar
+                stamps = ()
+            decided[r.index] = decided.get(r.index, ()) + stamps
+        return decided
+    except Exception:  # noqa: BLE001 — an unreadable escalation widens
+        return _BAR_DOMAIN_UNREADABLE
+
+
+def _unaccounted_solver_runs(escalation, ledger_stamps) -> int:
+    """How many INVOKED solver runs the ledger witnesses that the supplied
+    ``records`` do not account for. Zero for every escalation ``escalate()``
+    builds, and zero whenever the records carry at least as much invocation as
+    the ledger does.
+
+    NOT A GATE, AND DELIBERATELY NOT ONE. The degenerate-`records` gate above
+    refuses what it can prove came from nowhere — a ledger with work against an
+    EMPTY `records`. It stops short of comparing the ledger's invoked stamps
+    against the records' invocations because that comparison also refuses
+    `tests/test_verified_bar.py::test_stripping_invocations_cannot_clear_the_bar`,
+    which strips invocations on purpose to probe a different invariant. The
+    same comparison is safe to CLASSIFY with: it decides which sentence the
+    verdict writes about a still-undecided obligation, never whether the
+    verdict is emitted and never what any obligation's status is.
+
+    Counts INVOKED stamps on both sides, because an un-invoked stamp is a
+    recorded non-run and witnesses nothing. Never raises and never returns a
+    negative: an unreadable escalation yields 0, which is the quiet direction,
+    and the only thing lost is one classifying sentence."""
+    try:
+        witnessed = sum(1 for s in ledger_stamps if s.invoked)
+        accounted = sum(
+            1
+            for r in escalation.records
+            for s in r.invocations
+            if s.invoked
+        )
+        return max(witnessed - accounted, 0)
+    except Exception:  # noqa: BLE001 — a note must never break a verdict
+        return 0
+
+
 def make_solver_verdict(
     closed: ir.ClosedJaxpr,
     propagation: Propagation,
@@ -1503,6 +1718,85 @@ def make_solver_verdict(
     refinement=None,
 ) -> Verdict:
     """Assemble a verdict from interval propagation plus solver escalation.
+
+    **PRECONDITION — the caller's, and it is now checked for two of the
+    three arguments.** ``escalation`` must be the object :func:`escalate`
+    returned for THIS ``closed`` and ``propagation``, unmodified. The
+    gates below refuse several specific mispairings — divergent ledger
+    provenance, a semantics mix in either direction, an ieee or
+    constrained-assume propagation paired with an escalation carrying
+    solver work, and **an escalation produced on a DIFFERENT query** —
+    and they are the mispairings that arise from assembling a verdict out
+    of the wrong RUN.
+
+    **WHAT THE QUERY PAIRING GATE DOES AND DOES NOT BIND.** It binds
+    ``closed`` to ``escalation``, by the query content hash
+    :func:`escalate` recorded, and that is the leg the discharges travel
+    on: an ``OB_DISCHARGED`` record from another run discharges an
+    obligation here by INDEX alone, which is how a mispaired assembly
+    minted VERIFIED on a query whose honest verdict is REFUTED. It does
+    NOT bind ``propagation``, which carries no query hash. The residue is
+    an assembly of (this query, ANOTHER query's propagation, this query's
+    escalation): the obligations reported are the other query's, the
+    stamp names this one, and it is measured rather than argued in
+    `tests/test_verified_bar.py::test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`.
+
+    None of the gates, and nothing else here, verifies that the
+    records were produced by this library at all. A caller who
+    hand-assembles an :class:`ObligationEscalation` is stating the
+    outcome, and the assembly believes it: an ``OB_DISCHARGED`` record
+    discharges its obligation, and an all-discharged verdict is
+    ``VERIFIED``.
+
+    That is a contract, not a hole to be plugged, and the reason is that
+    plugging it would defend nothing. :class:`stelling.verdict.Verdict`
+    is public, exported in ``verdict.__all__``, and a frozen dataclass
+    whose ``__post_init__`` validates SHAPE and not PROVENANCE — it
+    refuses an unknown status and a stamp/DECLINED mismatch, and asks
+    nothing about where the numbers came from (so does
+    :class:`stelling.verdict.Stamp`'s). A hand-built
+    ``Verdict(status="VERIFIED", …)`` with a fabricated :class:`Stamp`
+    therefore constructs and reports ``VERIFIED`` without passing through
+    this function at all. Anyone able to forge a record can forge the
+    verdict more cheaply, so hardening here buys no guarantee and would
+    only make the weaker door look like the only one.
+    **What the gates and the bar protect is an HONEST caller against an
+    accidentally mispaired assembly, not this process against its own
+    caller.** Consumers needing the stronger property should judge
+    through :func:`stelling.preconditions.check`, which owns both sides.
+
+    The scatter VERIFIED bar below rests on this precondition for its
+    DOMAIN: WHICH obligations the solver decided is read off
+    ``escalation.records`` (the same ``outcome == OB_DISCHARGED`` test
+    that discharges them), while WHAT is barred on their slices is
+    re-derived from ``closed``. **A wrong ``closed`` does NOT reliably
+    widen the bar — that claim stood here bolded and is false, and the
+    counterexample is one function over.** Measured on the
+    identical-decided-slice pairing: ``_bar_scope(wrong_closed, decided)``
+    returns ``((), '')`` — narrowed to NOTHING, empty reason — while
+    ``_barred_primitives(wrong_closed)`` is ``('scatter',)``. The bar goes
+    SILENT there, on a query that carries the barred primitive. It widens
+    when the mispairing is one the evidence check can see, and the two
+    earlier versions of this paragraph each named a mechanism ("the
+    re-slice would decline", then "the evidence widens it") and then
+    generalised it to every wrong ``closed``. What the evidence check
+    actually does is narrower and is stated where it lives, in
+    :func:`stelling.verdict._evidence_is_about`. **The pairing itself is
+    not the bar's job: it is the query pairing gate above, which refuses
+    the assembly outright.** What distinguishes the slices, when the
+    assembly is reached at all, is the evidence: every recorded
+    invocation carries
+    ``smt2_sha256``, the hash of the exact script that was sent, AND
+    ``slice_sha256``, the fingerprint of the slice that script was
+    emitted from, and :func:`stelling.verdict._evidence_is_about` narrows
+    the bar for an obligation only when re-emitting the slice re-derived
+    from THIS ``closed`` reproduces BOTH. **The second is not a belt on
+    the first.** A mispaired query does not necessarily re-emit a
+    different script — the barred row emits no text, so a scatter-bearing
+    slice and a scatter-free one reading the same untouched element emit
+    byte for byte the same thing, which is exactly how `eb1ff86` cleared
+    this bar. Only the slice fingerprint separates that pair. A fabricated
+    record set is, as above, already a fabricated verdict.
 
     ``refinement`` (default None — byte-identical assembly) is the
     :class:`stelling.affine.RefinementReport` of an affine refinement
@@ -1531,11 +1825,167 @@ def make_solver_verdict(
     :exc:`MispairedEscalationError` (the refusal invariant's second,
     anti-correlated mechanism; audit F3).
     """
+    # -- ONE PASS OVER `records`, TAKEN HERE AND NOWHERE ELSE.
+    #
+    # This function walks `escalation.records` five times, and the field's
+    # declared type is a tuple — but it is whatever the caller put there, and
+    # a `records` that can be iterated ONCE (a generator, a `map`, a consumed
+    # iterator) made those five passes see five different things. Ordering the
+    # bar's domain first made that FAIL SAFE and did not make it CORRECT, and
+    # two measurements on `e35de13` say so:
+    #
+    #   * on a SCATTER-FREE query — one the bar never touches — a one-shot
+    #     `records` turned an honest VERIFIED into UNKNOWN, and the note it
+    #     carried was the generic undecided-cause line, which attributes the
+    #     UNKNOWN to "the propagated interval straddling the asserted bound".
+    #     That is not silence, it is a WRONG EXPLANATION of a verdict the
+    #     caller's own argument shape caused;
+    #   * a TWO-FACED `records` — empty on the first pass, real on the rest —
+    #     showed the bar nothing and the obligation loop everything, and
+    #     returned VERIFIED with no withheld note on the bar's own fixture.
+    #     Ordering cannot see that: the domain really was read first.
+    #
+    # Materialising once makes every later pass see ONE value, so nothing
+    # downstream can disagree with anything else about what the records are.
+    #
+    # IT DOES NOT MAKE A DEGENERATE `records` BEHAVE LIKE "THE TUPLE IT
+    # YIELDS", AND THE VERSION OF THIS SENTENCE THAT SAID SO — "rather than by
+    # choosing which pass wins" — WAS FALSE. One pass at the top IS choosing
+    # pass 1. For a one-shot `records` that happens to be the right choice,
+    # because pass 1 is where the real records are. For a TWO-FACED one it is
+    # the wrong one, and measured on `3e107cf` the misattribution the second
+    # bullet above is about survives in exactly that shape:
+    #
+    #     scatter-free query, `records` empty on pass 1 and real after:
+    #         VERIFIED -> UNKNOWN, obligation `unknown`, and the note is
+    #         the generic undecided-cause line blaming an interval straddle
+    #
+    # which is the defect `SOUNDNESS.md` (2) recorded as closed. It was closed
+    # for the ONE-SHOT shape only.
+    #
+    # SO THE SHAPE IS REFUSED RATHER THAN ABSORBED, one gate below: an
+    # escalation whose LEDGER records solver work and whose `records` came back
+    # empty is not a coherent escalation, and `escalate()` cannot produce one.
+    # Ordering is kept below as a second, now-REDUNDANT mechanism — if this
+    # line were ever removed, reading the domain first still costs the
+    # discharges rather than the bar, which is the safer of the two failures.
+    # That redundancy is stated because a mutation of the ordering ALONE is now
+    # inert (measured: 0 RED), and an unpinned guard whose comment claims to be
+    # load-bearing is this repo's own recurring defect.
+    escalation = replace(escalation, records=tuple(escalation.records))
+
     # -- the provenance gate (runs before anything else, unconditionally)
     ledger_stamps = tuple(escalation.ledger.stamps)
     stamped = sum(1 for s in ledger_stamps if s.invoked)
     if escalation.ledger.spawns != stamped:
         raise ProvenanceError(escalation.ledger.spawns, stamped, ledger_stamps)
+
+    # -- THE DEGENERATE-`records` GATE, and it is the ledger that catches it.
+    # One pass fixes WHICH value the assembly sees; it cannot make a wrong
+    # value right. The ledger is a separate field, carried whole, and it is an
+    # independent witness of whether any solver ran: `spawns` is incremented at
+    # the transport-entry boundary and the stamps are appended there. An
+    # escalation that says solvers ran and hands over no record of what they
+    # answered is internally inconsistent, and `escalate()` never builds one —
+    # every spawn belongs to an obligation, and every obligation reaching a
+    # backend gets a record.
+    #
+    # Refusing is the point. Absorbing it produced an UNKNOWN carrying a WRONG
+    # EXPLANATION (the interval-straddle note) on a query whose honest verdict
+    # is VERIFIED — worse than silence, because a reader believes it.
+    #
+    # WHAT IT DOES NOT REFUSE, stated rather than left to be found: a `records`
+    # whose first pass yields a non-empty STRICT SUBSET. The ledger says work
+    # happened and some record exists, so this gate passes, and the obligations
+    # whose records were dropped come back `unknown`. Comparing the ledger's
+    # invoked stamps against the invocations the records carry would REFUSE it
+    # and would also refuse `test_stripping_invocations_cannot_clear_the_bar`'s
+    # fixture, which is a deliberate probe of a DIFFERENT invariant; that trade
+    # is not taken.
+    #
+    # BUT THE RESIDUE IS NOT LEFT CARRYING THE NOTE THIS GATE EXISTS TO STOP.
+    # The justification above is "absorbing it produced an UNKNOWN carrying a
+    # WRONG EXPLANATION", and measured on `faefc48` the strict-subset residue
+    # emitted that explanation verbatim: scatter-free query, `records` yielding
+    # one of two records on pass 1 — honest verdict VERIFIED, observed UNKNOWN
+    # carrying "…the propagated interval straddling the asserted bound". A gate
+    # justified by an argument its own residue violates is the argument being
+    # wrong about its scope, so the same comparison that is too strong to
+    # REFUSE with is used to CLASSIFY: `_unaccounted_solver_runs` below counts
+    # the ledger's invoked stamps the records do not account for, and
+    # `stelling.verdict.undecided_cause_note` says the outcome went missing
+    # instead of blaming the propagation. Classifying is not refusing — the
+    # stripped-invocations probe keeps its verdict and its bar, and gains one
+    # true sentence about why its obligation is undecided.
+    if (escalation.ledger.spawns or ledger_stamps) and not escalation.records:
+        raise MispairedEscalationError(
+            f"incoherent escalation: the ledger records "
+            f"{escalation.ledger.spawns} spawn(s) and {len(ledger_stamps)} "
+            f"stamp(s), so solvers ran, but the supplied `records` came back "
+            f"EMPTY — no obligation outcome at all. `escalate()` cannot "
+            f"produce that (every spawn belongs to an obligation, and every "
+            f"obligation that reaches a backend gets a record), so `records` "
+            f"is a container that does not yield what it holds: a generator, "
+            f"a consumed iterator, or an iterable that answers differently on "
+            f"different passes. Assembling anyway returns UNKNOWN with the "
+            f"generic undecided-cause note, which attributes the verdict to "
+            f"the propagation rather than to the argument that caused it; "
+            f"refusing to emit. Pass the records as a materialised sequence."
+        )
+
+    # -- THE QUERY PAIRING GATE. Recomputed from `closed`, never copied, and
+    # taken ONCE for the whole function: the stamp's `query_content_hash`
+    # below is this same value, so the gate costs no additional hash.
+    #
+    # AN EMPTY HASH IS REFUSED ON ITS OWN, NOT ONLY WHEN IT DIFFERS. Both legs
+    # go through `_query_sha256`, which returns "" when `content_hash()`
+    # raises — so a `closed` that cannot be hashed and an escalation that
+    # recorded nothing COMPARED EQUAL and the gate passed. Measured on
+    # `e35de13`: the refusal then came from `Stamp.__post_init__`
+    # ("stamp field 'query_content_hash' is empty") one layer later, which is
+    # loud but is not this gate, and the field's own docstring claimed this
+    # gate refused it. Equality is not the property wanted; "this escalation
+    # is about this query, and both of them said so" is, and an empty string
+    # says nothing.
+    query_hash = _query_sha256(closed)
+    carries_work = bool(
+        escalation.records
+        or escalation.notes
+        or escalation.ledger.spawns
+        or ledger_stamps
+    )
+    if carries_work and (
+        not query_hash or escalation.query_sha256 != query_hash
+    ):
+        raise MispairedEscalationError(
+            f"mispaired escalation: the supplied escalation was produced by "
+            f"escalate() on the query "
+            f"{escalation.query_sha256 or '<unrecorded>'}, but the query "
+            f"being stamped hashes to {query_hash or '<unhashable>'} — the "
+            f"two are not the same query (an UNHASHABLE query is refused "
+            f"whatever the escalation recorded: two empty strings are not a "
+            f"match, they are two absences), so this escalation's outcomes "
+            f"are answers about a program other than the one the verdict "
+            f"would claim; refusing to emit. An OB_DISCHARGED record from "
+            f"another run discharges an obligation here by INDEX alone, so a "
+            f"mispaired assembly can mint VERIFIED on a query whose honest "
+            f"verdict is REFUTED. Assemble the verdict from the propagation "
+            f"and escalation this query actually produced."
+        )
+
+    # THE BAR IS NOT THIS GATE, AND THE HISTORY IS WHY BOTH EXIST. Until this
+    # gate, `make_solver_verdict` never bound its three arguments to one
+    # query, and the whole-query scatter bar hid that on exactly one class of
+    # query — scatter-bearing ones — by withholding every VERIFIED on them for
+    # an unrelated reason. Scoping the bar to the decided obligation's slice
+    # did not COST that backstop so much as REVEAL that it was a coincidence
+    # of scope: the identical false VERIFIED was reachable on a SCATTER-FREE
+    # query, where the bar never fires, on every build including `8e42934`.
+    # Measured, both rows, on this branch's own fixtures. The bar answers "was
+    # the unaudited emission row involved in what the solver decided"; this
+    # gate answers "is this escalation about this query at all". Neither
+    # substitutes for the other, and only one of them was ever load-bearing
+    # for the pairing.
 
     # -- the symmetric semantics-pairing gate: an escalation may only be
     # stamped against a propagation of the semantics it was produced
@@ -1626,6 +2076,29 @@ def make_solver_verdict(
             f"escalation was actually produced from."
         )
 
+    # THE BAR'S DOMAIN IS READ BEFORE ANY OTHER PASS OVER `records`, AND THAT
+    # ORDER IS NO LONGER LOAD-BEARING. It used to be read at the bar, several
+    # passes later, and a `records` that can only be iterated ONCE — a
+    # generator, a `map`, a consumed iterator — was therefore fully consumed by
+    # `by_index` below before `_bar_domain` ever saw it. `_bar_domain` then
+    # returned an HONEST-EMPTY `{}`, which is the one value that silences the
+    # bar (empty means "no solver decided anything"), and the assembly returned
+    # VERIFIED with no withheld note. Measured, and identical at `eb1ff86`: a
+    # one-shot `records` cleared the scatter bar on the bar's own fixture. The
+    # sentinel could not help — the read SUCCEEDED, it just ran second.
+    #
+    # THE SENTENCE THAT STOOD HERE — "AND THE ORDER IS LOAD-BEARING" — WAS
+    # FALSE AS SOON AS `records` WAS MATERIALISED AT THE TOP, and it
+    # contradicted the comment at that materialisation, which already called
+    # the ordering "a second, now-REDUNDANT mechanism". Measured: moving this
+    # line below `by_index` is 0 RED across the whole suite. With one pass
+    # there is one value, so no ordering of the readers can show them different
+    # things — which is exactly why the top comment also says that an unpinned
+    # guard whose comment claims to be load-bearing is this repo's own
+    # recurring defect. The order is kept as the safer arrangement if the
+    # materialisation is ever removed, and it is described as what it is.
+    # See `tests/test_verified_bar.py::test_a_ONE_SHOT_records_behaves_EXACTLY_LIKE_THE_TUPLE_it_yields`.
+    decided = _bar_domain(escalation)
     by_index = {r.index: r for r in escalation.records}
     final: list[ObligationReport] = []
     for ob in propagation.obligations:
@@ -1669,7 +2142,8 @@ def make_solver_verdict(
     # (post-escalation — solver-decided ones need no cause), from the one
     # shared derivation in stelling.verdict so the two paths cannot drift
     notes = notes + _verdict.undecided_cause_note(
-        propagation.coverage, obligations
+        propagation.coverage, obligations,
+        _unaccounted_solver_runs(escalation, ledger_stamps),
     )
     # THE SCATTER VERIFIED BAR (stelling.verdict.VERIFIED_BARRED_PRIMITIVES).
     # Scoped to the SOLVER path deliberately, and this scoping is the whole
@@ -1702,17 +2176,87 @@ def make_solver_verdict(
     # the ledger: a ledger stamp says an invocation happened, while an
     # OB_DISCHARGED record says an invocation ANSWERED -- and a false VERIFIED
     # can only be minted by an answer.
-    solver_decided = escalation is not None and any(
-        r.outcome == OB_DISCHARGED and r.invocations
-        for r in escalation.records
-    )
-    if status == "VERIFIED" and solver_decided:
-        barred = _verdict._barred_primitives(closed)
+    #
+    # AND IT IS THE SAME PREDICATE THAT DISCHARGES, LITERALLY: `record.outcome
+    # == OB_DISCHARGED`, the test the obligation loop above makes. A
+    # predecessor wrote `... and r.invocations` here and nowhere else, which
+    # made "discharging" and "decided" two different concepts over one record.
+    # Measured on the two-obligation fixture: strip `invocations` from the
+    # scatter obligation's discharging record and the obligation still
+    # discharged -- so the VERIFIED still stood -- while its slice dropped out
+    # of the bar's domain and the verdict went VERIFIED where `8e42934`
+    # returned UNKNOWN. The extra conjunct was not a second check on the same
+    # thing; it was a second definition of it, and the wider one won where it
+    # mattered. It is gone rather than hardened: with one predicate there is no
+    # second one to drift from. Nothing is lost -- exactly one of the eleven
+    # `ObligationEscalation(` sites emits OB_DISCHARGED (the `unsat` branch of
+    # `_dispatch_obligation`), it reaches that branch only because a backend
+    # ANSWERED, and every answering backend was stamped into the ledger before
+    # its transport ran, so an honest OB_DISCHARGED record always carries
+    # invocations and the conjunct never excluded one.
+    #
+    # THE INDEX SET IS DELIBERATELY A SUPERSET OF WHAT WAS DISCHARGED HERE, and
+    # that direction is the safe one. The loop above applies a record only to an
+    # obligation that is still `unknown`; this set takes every OB_DISCHARGED
+    # record's index, including one that matched nothing. A stray index widens
+    # the bar and never narrows it -- but NOT, as a predecessor of this comment
+    # claimed, because it "does not slice". Measured on the bar's own fixture:
+    # index 1 names an obligation INTERVALS decided and slices to
+    # `['broadcast_in_dim','ge','scatter']`; index -1 is Python indexing and
+    # slices the LAST obligation; index 99 declines; and index -3 (or lower)
+    # raises IndexError out of `slice_obligation`, which `_bar_scope`'s outer
+    # `except` turns into the same whole-query set. That FOURTH behaviour is
+    # named because the version of this comment that listed three read as a
+    # closed enumeration and was not one -- the same shape of claim this file
+    # keeps having to correct. What widens the bar for the first three is that
+    # none of them carries a solver invocation whose recorded script hash AND
+    # slice fingerprint both re-emit from the obligation it names -- see
+    # `verdict._evidence_is_about`.
+    #
+    # AND THE SCOPE IS THE DECIDED OBLIGATION'S SLICE, NOT THE WHOLE QUERY.
+    # Same argument one level finer. A query can carry `scatter` on an
+    # obligation intervals settled while the obligation the SOLVER decided
+    # never touches it -- the emission row the bar exists for was not
+    # consulted, so there is nothing for it to be wrong about. Measured: the
+    # bar's own regression fixture was exactly that shape (solver-decided
+    # slice `['sub','ge']`, the scatter on a different, interval-decided
+    # obligation) and returned UNKNOWN.
+    #
+    # NO BARRED PRIMITIVE COMES FROM HERE. `_bar_scope` re-derives what is on
+    # those obligations' slices out of `closed` itself; this function hands it
+    # the numbers of the obligations the solver decided -- already load-bearing
+    # for the VERIFIED being withheld, since a record whose index matches no
+    # unknown obligation leaves that obligation undischarged and there is no
+    # VERIFIED to bar -- together with the INVOCATION STAMPS those records
+    # carry, which is what lets the bar check that the escalation is evidence
+    # about this query at all rather than about some other one of the same
+    # shape. The stamps are handed over for the WIDENING decision only: no
+    # stamps means no narrowing, so `invocations` cannot clear the bar, and the
+    # domain itself is still `outcome == OB_DISCHARGED` alone -- the same
+    # predicate that discharges, which is the drift this pass will not
+    # reintroduce. See `verdict._bar_scope` and `verdict._evidence_is_about`,
+    # the deleted `barred_on_slice` field for what reading the contents cost,
+    # and this function's docstring for the precondition the domain rests on.
+    #
+    # THE READ ITSELF LIVES IN `_bar_domain`, ONE PLACE, and it is a function
+    # rather than four lines here so that a test can hand it a record with no
+    # other field and watch a conjunct on a new field RAISE. Enumerating the
+    # values a field could hold does not close that channel; `str` has too
+    # many. It also has to be a place that cannot raise: the `tuple + list`
+    # this loop used to be raised `TypeError` out of this function from
+    # OUTSIDE `_bar_scope`'s protective `try`, so "a bar must never break a
+    # verdict" did not cover the whole path feeding the bar. `decided` is
+    # computed at the TOP of the obligation loop, not here: see the comment
+    # there for the one-shot `records` shape that ordering closes.
+    if status == "VERIFIED" and decided:
+        barred, scope = _verdict._bar_scope(closed, decided)
         if barred:
             status = "UNKNOWN"
             notes = notes + (
                 "VERIFIED withheld — "
-                + _verdict.VERIFIED_BAR_REASON.format(prims=", ".join(barred)),
+                + _verdict.VERIFIED_BAR_REASON.format(
+                    scope=scope, prims=", ".join(barred)
+                ),
             )
 
     if status == "VERIFIED" and not nonvacuity.startswith("checked"):
@@ -1783,7 +2327,9 @@ def make_solver_verdict(
     stamp = Stamp(
         stelling_version=stelling_version,
         jax_version=jax_version,
-        query_content_hash=closed.content_hash(),
+        # the SAME hash the pairing gate above compared — taken once per
+        # assembly, so binding the escalation to the query costs nothing here
+        query_content_hash=query_hash,
         arithmetic_mode=arithmetic_mode,
         semantics=semantics,
         precision_config=precision_config,

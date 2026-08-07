@@ -672,4 +672,1111 @@ verdicts:
   widen-checked; mode explicit, never defaulted) — the first
   duty-enforced backstop converted to structure for CI (ledger L18).
 
+- **2026-08-06 (pre-release): the scatter VERIFIED bar narrowed from the
+  traced query to the decided obligation's slice — verdicts move, in the
+  WITHHELD → AVAILABLE direction.** Not a defect fix, and it is logged
+  anyway: the policy above is about verdicts moving, not about who was
+  wrong. `verdict.VERIFIED_BARRED_PRIMITIVES` withholds solver-path
+  `VERIFIED` on obligations whose SMT emission has not been through a
+  distinct-context adversarial pass. It fired on whole-query presence of
+  `scatter`, so a verdict resting entirely on obligations the scatter
+  emission row was never asked about was withheld for a row that had not
+  been consulted. It now fires only when a barred primitive is on the
+  EMITTED SLICE of an obligation the solver actually decided, and the
+  scope is derived from the traced query at the bar (re-slicing the
+  decided obligations) rather than read off the escalation record.
+  **Affected versions:** 0.1.0 pre-release only — every build from the
+  bar's introduction to `8e42934` inclusive has the whole-query scope;
+  nothing has been released.
+  **Which prior verdicts are retroactively invalid: none, and the
+  direction is the unusual one.** The new fired-set is a subset of the
+  old at every verdict, and the guarantee comes from a GUARD rather than
+  from the two walks agreeing: `_bar_scope` computes
+  `whole = _barred_primitives(closed)` — the old whole-query set — first,
+  and returns an empty scope immediately when it is empty, so the
+  re-derivation only ever runs on a query the old bar already fired on.
+  New-fires therefore implies old-fired structurally, whatever the slice
+  walk does. (It is also true that a slice's equations come from the
+  query and both roots use the same walk, which is what makes the new set
+  the RIGHT subset rather than merely a subset; that argument is pinned
+  in `tests/test_bar_walk_parity.py` and is not what the containment
+  rests on.) The fallback on any underivable scope is the old
+  whole-query set — so nothing that was
+  VERIFIED becomes UNKNOWN, and no REFUTED, witness or replay path is
+  touched at all. What changes is the opposite: a verdict is now VERIFIED
+  where it was previously withheld to UNKNOWN, exactly when (i) it was
+  assembled on the solver path with every obligation `discharged` and at
+  least one discharged BY a solver, (ii) the traced query contains
+  `scatter` at some depth, and (iii) no solver-decided obligation's
+  emitted slice contains it. So the honest characterisation is about
+  claims becoming available, not about issued claims becoming wrong — but
+  a reader comparing a recorded `UNKNOWN` against a fresh run still needs
+  this entry, because the two builds disagree and neither is a regression.
+  Obligations whose emitted slice DOES carry `scatter` remain withheld;
+  the bar is not lifted and its removal point is unchanged.
+  **What to re-run:** any recorded solver-path `UNKNOWN` on a
+  scatter-bearing query — re-`check()` it with the same
+  `solver_timeout_ms` and look for a `VERIFIED withheld` note. Its absence
+  where one was recorded is this change and not a new capability. The
+  flagship `HeatNode` sweep is unmoved in both directions (its refuting
+  side is `REFUTED` with a replayed witness; its holds side is settled by
+  intervals and the bar never applied to it) — `docs/verdict-ledger.md`
+  carries the scope note.
+  Same pass, and the reason this entry is not only about precision: the
+  narrowed scope was first implemented by RECORDING the per-obligation
+  barred set on `solvers.ObligationEscalation` and trusting it at the bar,
+  which lost two immunities the whole-query bar had — an empty recorded
+  tuple is a positive claim ("nothing barred on my slice") that nothing
+  validated, and `make_solver_verdict` is public and gates mispairing on
+  semantics, ieee, constrained-assume and ledger provenance but binds the
+  escalation to its `closed` nowhere, so a scatter-free escalation stamped
+  against a scatter-bearing query returned VERIFIED where the whole-query
+  bar returned UNKNOWN (both measured, both against `8e42934` as control).
+  Neither reached a shipped verdict — both need a hand-assembled or
+  mispaired call — and both are closed by deriving the scope from the
+  query instead of reading it, with the deleted field's site left as a
+  comment saying why. One-invariant-two-mechanisms holds: WHICH
+  obligations the solver decided comes from the escalation and is already
+  load-bearing for the VERIFIED being withheld; WHAT is on their slices
+  comes from the query. Regressions in `tests/test_verified_bar.py`;
+  emitted-vs-re-derived slice agreement pinned in
+  `tests/test_bar_walk_parity.py`.
+  **Repair pass, and it moves verdicts again — in the same withheld
+  direction as the base, never the other way. Which prior verdicts are
+  retroactively invalid: none, for the reason spelled out at the end of
+  this paragraph** (the policy above requires the clause by name, and this
+  paragraph had its substance without its label). The first implementation
+  of "which obligations the solver decided" was
+  `outcome == OB_DISCHARGED and r.invocations`, while the obligation loop
+  discharged on `outcome == OB_DISCHARGED` alone: one concept, two
+  predicates over one record. A record could give up `invocations`, keep
+  the discharge that earns the VERIFIED, and drop out of the bar's
+  domain. Measured against `8e42934` as control, on a two-obligation
+  query whose scatter obligation is the stripped one: base UNKNOWN, that
+  implementation VERIFIED. The predicate is now the discharging one, in
+  one place. The unification also closes a hole the base itself had:
+  with EVERY record's `invocations` emptied the old gate read "no solver
+  decided anything" and never entered the bar branch at all, so
+  `8e42934` returned VERIFIED there too — it is UNKNOWN on both counts
+  now. Every affected assembly needs a hand-edited `ObligationEscalation`
+  (the one site that emits `OB_DISCHARGED` reaches it only when a backend
+  ANSWERED, and every answering backend was stamped into the ledger
+  before its transport ran), so no verdict produced through `check()` or
+  through an unmodified `escalate()` moves in either direction, and the
+  suite is byte-identical across the change. **What is NOT claimed:** the
+  unification is not a defence against a forged escalation, and
+  `make_solver_verdict` does not attempt one. Its docstring now states
+  the precondition instead — the escalation must be what `escalate()`
+  returned for this query — because `stelling.verdict.Verdict` is public
+  and a frozen dataclass whose `__post_init__` validates shape and not
+  provenance, so a caller able to hand-build a record can hand-build the
+  verdict and never call this function at all. The
+  narrower true statement, and the one the mechanism supports: the bar's
+  scope CONTENTS are re-derived from the query and unforgeable, and its
+  DOMAIN cannot disagree with the discharge about the same record.
+  **Affected versions:** 0.1.0 pre-release only, and the drifted predicate
+  never existed outside a branch — it was introduced with the slice
+  scoping and lived only in the intermediate branch-only states between
+  the scoping commit and this repair (`caac1ee`, inclusive, up to but not
+  including `45cf526`). No tagged build, and no build reachable from
+  `main`, ever carried it.
+  **What to re-run: nothing.** Stated rather than omitted, because the
+  policy requires the clause and "nothing" is an answer to it. Every
+  assembly the drift could move needs a hand-edited
+  `ObligationEscalation`, no such record can come out of `escalate()`,
+  and the suite is byte-identical across the change — so there is no
+  recorded verdict whose value depends on which side of it the build was
+  on.
+  At that pass: 2008 tests passed, 2 skipped, with both solvers and jax
+  installed
+  (1995 passed, 2 skipped before the scoping pass, 2003 after it; the 8
+  tests it added are the regressions named above, and the repair pass
+  adds 5 more — the strip-invocations regression in both shapes, the
+  containment guard cited above, the `cond` premise restated as a
+  behaviour in `tests/test_bar_walk_parity.py`, and the decline-site
+  accounting in `tests/test_scatter_gauge_jax.py`. The parity file's
+  registry-facts test is rebuilt rather than added: its four registry
+  memberships could not be falsified without an import-time census
+  raise, so they are replaced by the reach count the same commit let go
+  stale).
+
+- **2026-08-06 (pre-release): the narrowed scatter bar was NOT immune to a
+  mispaired query, and now is — verdicts move, in the AVAILABLE →
+  WITHHELD direction.** The entry above says the narrowed bar keeps the
+  whole-query bar's immunity to an escalation stamped against the wrong
+  `closed`, and gives the mechanism as "the re-slice declines and it
+  falls back to the whole query". **The mechanism is wrong and so is the
+  claim.** An obligation index that names a real obligation of the wrong
+  query slices out of it perfectly well. Measured on two scatter-bearing
+  queries of the SAME SHAPE — one with the scatter on the solver-decided
+  obligation (`ON`), one with it on an interval-decided obligation
+  (`ELSEWHERE`), both two obligations, both `_barred_primitives ==
+  ('scatter',)`:
+
+      ON escalation + ON query         UNKNOWN on 8e42934, caac1ee, 45cf526
+      ON escalation + ELSEWHERE query  UNKNOWN on 8e42934 (whole-query bar)
+                                       VERIFIED on caac1ee and 45cf526
+
+  `_bar_scope(ELSEWHERE, (0,))` re-sliced to `['ge','sub']`, found
+  nothing, and returned `((), '')` — so the bar did not fire and a
+  VERIFIED resting on a solver answer that WAS about a scatter slice was
+  issued. That is the class this file logs as closed one entry above, in
+  the same direction (a false VERIFIED the emission row could have
+  caused), reachable by a narrower door. The prior test of it passed
+  because its fixture is the one arrangement that fails safe: its
+  mispaired index reaches no real obligation of the wrong query, so the
+  re-slice declines and the fallback fires.
+  **The repair keys on the property instead of on the index — and its
+  FIRST version keyed on the wrong property. The paragraph that follows
+  is what was believed; the entry below it is what was measured.** Every
+  solver invocation already stamps `smt2_sha256`, the sha256 of the exact
+  SMT-LIB2 text it was sent, and emission is a pure function of (slice,
+  solver flavour, timeout). So `verdict._evidence_is_about` re-emits the
+  slice re-derived out of the query being stamped, with the flavour and
+  timeout the stamp itself records, and narrows the bar for that
+  obligation only when the hash comes back equal. Measured on the pair
+  above: the correct pairing reproduces it for both portfolio members;
+  that mispairing reproduces neither. **What was NOT measured, and is
+  false, is the general claim — "the mispairing reproduces neither" is
+  true of that fixture and not of the shape it stands for.** See the
+  entry below. Every other outcome — no stamps, no hash, an
+  unrecognised option profile, an emission that raises, a slice that
+  declines — returns the whole-query set. `invocations` therefore cannot
+  CLEAR the bar, only fail to lift it, which is the opposite polarity
+  from the deleted `barred_on_slice` field and from the
+  `and r.invocations` drift the entry above repairs; the bar's DOMAIN is
+  still `outcome == OB_DISCHARGED` alone.
+  **Affected versions:** 0.1.0 pre-release only — `caac1ee` (the scoping
+  commit) through `eb1ff86` inclusive, all branch-only. The end of the
+  range was originally logged as `45cf526`; it is `eb1ff86`, because the
+  hash-keyed repair at `45cf526` does not close the shape (below). *(A
+  previous correction here read "`45cf526` and `eb1ff86` were originally
+  logged here as the end of the range; they are not". Both halves were
+  wrong: `eb1ff86` was never in the old text — `git show eb1ff86:SOUNDNESS.md`
+  reads "through `45cf526` inclusive" — and saying `eb1ff86` is not the end
+  of the range contradicts the clause two lines above, which is the range
+  that is correct.)* Builds up to and including `8e42934` have the
+  whole-query bar, and the mispairings in this entry and the next both
+  measure UNKNOWN there; nothing has been released.
+  **Which prior verdicts are retroactively invalid: none, and the
+  direction is the ordinary one this time.** Reaching the hole needs a
+  call to the public `make_solver_verdict` pairing an escalation with a
+  query it did not come from — `check()` cannot produce it, and
+  `escalate()` cannot produce a record for a query it was not run on. No
+  verdict in `docs/verdict-ledger.md` is affected. What changes for an
+  HONEST caller is the reverse and it is a withholding: a solver-decided
+  VERIFIED on a scatter-bearing query is now narrowed only when the
+  re-emitted script matches, so any obligation whose invocation was not
+  stamped with a reproducible script hash gets the whole-query bar and
+  reads UNKNOWN where it read VERIFIED. No such case exists in this
+  suite — the scatter-off-the-decided-slice fixture still VERIFIES, and
+  `tests/test_verified_bar.py` asserts the hash equality directly so that
+  a future emission that stopped being a function of its inputs fails
+  loudly instead of silently widening every bar.
+  **What to re-run:** any recorded solver-path VERIFIED on a
+  scatter-bearing query — re-`check()` it with the same
+  `solver_timeout_ms`. A newly-present `VERIFIED withheld` note whose
+  clause says "no recorded solver invocation … re-emits from this query's
+  slice of it" is this change, and it means the narrowing was never
+  established for that verdict rather than that the program changed. (The
+  entry below re-words that clause; from that pass on it reads "…
+  reproduces both this query's slice of it and the script that slice
+  emits".)
+  Same pass, and NOT a verdict-moving change: the SET row's routing was
+  gauged only at the written index 0, where every mis-route defined as an
+  offset from the index collapses back onto it. The line-neutral
+  corruption `i == k` -> `i == (k - 1 if k > 0 else k)` in
+  `obligation._scatter_set_plan` turned `s = x.at[2].set(u); assert
+  s[1] - x[1] >= 1.0` from `violated-witness` into `discharged` — a
+  MISSED violation on the very row this bar exists for — while the whole
+  suite under CI's install set stayed at 2004 passed, 6 skipped, fully
+  green (the only two tests that caught it are
+  `pytest.importorskip("maddening")`-gated, and CI installs `".[solvers]"`
+  and `".[solvers,jax]"`). A fourth routing fixture at index 2 and the
+  matching gauge mutation close it: the same corruption now fails
+  `test_gauge_catches_every_mutation` with no maddening installed
+  (1 failed, 2007 passed, 6 skipped). No shipped code changed, so no
+  verdict moves and there is nothing to re-run for it.
+  2012 tests passed, 2 skipped with both solvers and jax installed
+  (2008 before this pass; the 4 added are the mispairing regression and
+  its hash direction, and the two fail-closed fallback pins, all in
+  `tests/test_verified_bar.py` — the record-field channel test is
+  rewritten rather than added, because pinning today's field list could
+  not fail for the defect it exists to catch).
+
+- **2026-08-06 (pre-release): the script hash does not identify the slice
+  that produced it, so the mispairing above was NOT closed by keying on it
+  — verdicts move again, AVAILABLE → WITHHELD.** The entry above narrows
+  the bar for an obligation when re-emitting the slice re-derived out of
+  the query being stamped reproduces the recorded `smt2_sha256`, and
+  claims "the mispairing reproduces neither". Emission IS a pure function
+  of (slice, flavour, timeout); what the guard needs is the CONVERSE,
+  *equal script implies equal slice*, **and that is false for exactly the
+  primitive under the bar.** The static-index `scatter` SET row appends no
+  line at all (`smt.emit`, the `prim == "scatter"` branch: element k's
+  term IS the update's, every other element's term IS the operand's), so
+  for an element the write did not touch, `s[i]` aliases the operand's
+  term. Measured, jax 0.11.0, x64, `s = x.at[0].set(0.5)`:
+
+      slice of `s[1] - x[1] <= 0`   barred ('scatter',)   sha 2896a0f2…
+      slice of `x[1] - x[1] <= 0`   barred ()             sha 2896a0f2…   collides
+      slice of `s[0] - x[0] >= 0`   barred ('scatter',)   sha 2de5e041…
+      slice of `x[0] - x[0] >= 0`   barred ()             sha 2f2e0ed8…   no collision
+
+  So the same mispairing survives, one fixture over. With the ELSEWHERE
+  query differing from the ON query ONLY in where the scatter sits (`x[1]`
+  where the other reads `s[1]`, same inputs, same predicate, same second
+  obligation):
+
+      ON escalation + ON query         UNKNOWN on 8e42934, caac1ee,
+                                       45cf526, eb1ff86
+      ON escalation + ELSEWHERE query  UNKNOWN on 8e42934 (whole-query bar)
+                                       VERIFIED on caac1ee, 45cf526, eb1ff86
+
+  `_evidence_is_about` returned True and `_bar_scope` returned `((), '')`.
+  **AND IT IS A FALSE VERIFIED, NOT A MERELY PREMATURE ONE.** The script hash
+  does pin the TEXT, so an `unsat` about it is an `unsat` about the obligation
+  this query's own slice emits; what it does not pin is the rest of the
+  verdict, and in particular the obligations the mispaired PROPAGATION
+  decided. With the ELSEWHERE query's SECOND obligation made false
+  (`s >= 0.5`, which fails at `x = [0,0,0]`), the same assembly gives:
+
+      ELSEWHERE checked honestly       REFUTED on all four builds
+      ON escalation + ELSEWHERE query  UNKNOWN  on 8e42934
+                                       VERIFIED on caac1ee, 45cf526, eb1ff86
+
+  The whole-query bar was a backstop against a mispaired assembly on ANY
+  scatter-bearing query; the byte-collision removed it for exactly the shape
+  where the emitted script cannot tell the two slices apart, and what came
+  through was a VERIFIED on a REFUTED query.
+  **The regression test for the entry above could not see this, because
+  its fixture built away its own trigger:** it said "the one difference is
+  WHERE" while also introducing a fresh scalar input and a different
+  predicate, and it was that — not the scatter's location — that made the
+  two scripts differ. Sharpest evidence: at `eb1ff86`, deleting the
+  `_evidence_is_about` call from `_bar_scope` entirely reddens exactly one
+  test, the one whose fixture cannot exhibit the defect (measured: 1
+  failed, 2011 passed, 2 skipped).
+  **The repair takes the key from the SLICE, because no script-derived
+  quantity can work — emission is lossy for precisely the barred
+  primitive.** `smt.slice_fingerprint` hashes the slice's primitive names
+  with their nesting depth, walked through the same canonical accessor
+  (`coverage.sub_jaxprs`) the bar's own walk uses, and rides in the stamp
+  as `slice_sha256` beside `smt2_sha256`. `_evidence_is_about` now
+  requires BOTH. What each one proves, exactly: the script hash proves the
+  TEXT the solver answered about is the text this slice emits, which is
+  what makes the answer transferable; the slice fingerprint proves the
+  emission ran on a slice with the same primitive topology, hence the same
+  BARRED SET, which is the bar's actual question and the one the text
+  cannot answer. **What neither proves:** that the record is honest —
+  both are record-carried, as `smt2_sha256` already was. Adding a conjunct
+  can only make narrowing RARER, so no bar fires less than it did at
+  `eb1ff86`.
+  **AND A FINDING THIS FILE FIRST RECORDED AS A "COST OF SCOPING", WHICH IT
+  IS NOT — CORRECTED HERE, AND THE CORRECTION IS THE MEASUREMENT.** The
+  original wording said narrowing the bar to the decided obligation's slice
+  "gave up a backstop the whole-query bar provided by accident": when the two
+  queries' decided slices are the SAME EXPRESSION — not merely byte-colliding
+  — both hashes match, the bar narrows correctly (the barred row really was
+  not involved), and the mispaired assembly returns VERIFIED on a query whose
+  honest verdict is REFUTED (UNKNOWN on `8e42934`; VERIFIED on `caac1ee`,
+  `45cf526`, `eb1ff86`, `f5280cf`). Everything in that sentence is true except
+  what it attributes the loss to. The whole-query bar's immunity covered
+  queries carrying a barred primitive — the only ones ANY version of the bar
+  looks at — so it was a coincidence of scope and not a mechanism. Measured on
+  this branch: the identical mispaired VERIFIED, on a query whose honest
+  verdict is REFUTED, is reachable with **no barred primitive anywhere**, on
+  every build including `8e42934`:
+
+  | mispairing on a REFUTED query | 8e42934 | eb1ff86 | f5280cf | here |
+  |---|---|---|---|---|
+  | identical decided slice, scatter-bearing | UNKNOWN | VERIFIED | VERIFIED | refused |
+  | **scatter-FREE** | **VERIFIED** | **VERIFIED** | **VERIFIED** | refused |
+
+  So the correct statement is not "scoping cost a backstop" but **scoping
+  revealed that `make_solver_verdict` never bound its three arguments to one
+  query.** The repair is a fourth `MispairedEscalationError`, the QUERY
+  PAIRING GATE: `escalate` records `ir.ClosedJaxpr.content_hash()` of the
+  query it ran on, at every one of its five return sites, and assembly
+  recomputes it from the `closed` it is handed and refuses the pair when they
+  differ. Same trust model as the three gates beside it and as the
+  record-carried `smt2_sha256`/`slice_sha256` — it defends an honest caller
+  against an accidentally mispaired assembly, the realistic mechanism being a
+  CACHED escalation, which is one of the two uses `stelling.ir`'s module
+  docstring names `content_hash` for. Costs nothing at assembly (the stamp
+  already took that hash; the gate compares the same value, asserted by
+  counting the calls), one hash in `escalate`.
+  **What the gate does NOT bind: `propagation`.** `Propagation` lives in
+  `stelling.propagate`, which this pass leaves at zero line delta, so there is
+  no field on it to record the query in. The residue — (this query, ANOTHER
+  query's propagation, this query's escalation) — assembles to VERIFIED with
+  the other query's obligations reported under this query's hash. It is a live
+  test, not a comment:
+  `tests/test_verified_bar.py::test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`.
+  The bar and the gate are anti-correlated and both stay: the gate keys on the
+  whole query's content hash, the bar on one slice's fingerprint and script,
+  and the bar's own mispairing regressions now satisfy the gate by hand
+  (`_past_the_pairing_gate`) so neither can hide the other's failure.
+  Consumers needing more should judge through
+  `stelling.preconditions.check`, which owns all three sides.
+  **Affected versions:** 0.1.0 pre-release only — `caac1ee` through
+  `eb1ff86` inclusive, all branch-only, nothing released. Builds up to and
+  including `8e42934` have the whole-query bar and measure UNKNOWN on this
+  mispairing.
+  **Which prior verdicts are retroactively invalid: none, and this clause is
+  doing more work than usual, so it says what it rests on.** The defect
+  produces a false VERIFIED, but reaching it needs a call to the public
+  `make_solver_verdict` pairing an escalation with a query it did not come
+  from; `check()` cannot produce that and `escalate()` cannot produce a record
+  for a query it was not run on. No verdict in `docs/verdict-ledger.md` is
+  affected, and every verdict in this repo's own history was assembled through
+  `check()`. What is NOT claimed: that a downstream caller of
+  `make_solver_verdict` cannot have mispaired one. Anyone who has should
+  re-run per the clause below.
+  **What to re-run:** any recorded solver-path VERIFIED on a
+  scatter-bearing query — re-`check()` with the same `solver_timeout_ms`
+  and look for a `VERIFIED withheld` note whose clause says "no recorded
+  solver invocation … reproduces both this query's slice of it and the
+  script that slice emits". Its presence means the narrowing was never
+  established for that verdict.
+  Same pass, three more, none of them verdict-moving through `check()`:
+  **(1)** the SET row's routing was gauged at index 0 and then at {0, 2},
+  which is still a sample. Two line-neutral corruptions walk between the
+  samples — `i == (0 if k == 1 else k)` and `i == (0 if k > 2 else k)` in
+  `obligation._scatter_set_plan` — each turning a `violated-witness` into
+  a `discharged` (a MISSED violation, the direction the bar exists for)
+  with the full suite green under CI's install set at 2008 passed, 6
+  skipped. The property is now pinned instead of sampled: every k of the
+  axis at four axis lengths, against jax's own execution of the same
+  `.set` as the oracle, plus the same sweep at the escalation surface.
+  **(2)** the bar's domain is read in one place, `solvers._bar_domain`,
+  handed a record with no field but `index`, `outcome` and `invocations`,
+  so a conjunct on a new field of ANY type raises instead of evaluating.
+  The field-probe test it supplements moves each field to two values of
+  its declared type, which EXHAUSTS `bool` and merely SAMPLES `str`:
+  measured on `eb1ff86`, `audit_token: str = ""` plus
+  `and r.audit_token != "clean"` in the domain is UNKNOWN at both probe
+  values and VERIFIED at `'clean'`, full suite green.
+  **(3)** "a bar must never break a verdict" did not cover the read that
+  feeds the bar: at `eb1ff86` a record whose `invocations` is a `list`
+  raised `TypeError` out of `make_solver_verdict` (`tuple + list`), from
+  outside `_bar_scope`'s protective `try`. `_bar_domain` tolerates it, and
+  an unreadable escalation widens to the whole-query set rather than
+  raising or silencing the bar. `45cf526` tolerated the same record, so
+  this is a regression the branch introduced and the branch removes.
+  At this pass: 2035 passed, 2 skipped with both solvers, jax and maddening
+  installed; 2031 passed, 6 skipped under CI's install set (`.[solvers,jax]`,
+  no maddening). Before it: 2012 / 2 and 2008 / 6. The 23 added tests are the
+  collision measurement and its two mispairing parametrisations, the
+  `_bar_scope`-level widening, the false-VERIFIED regression, the documented
+  scoping LIMIT, the domain-channel pair, the three `invocations`-shape pins,
+  the four-behaviour stray-index pin, the fingerprint-walk parity over five
+  nesting shapes plus its old-accessor control, and the SET plan's per-k
+  sweep at four axis lengths with its escalation-surface twin.
+
+- **2026-08-06 (pre-release, later the same day): `make_solver_verdict`
+  never bound its three arguments to one query, and the scatter bar was
+  never what stood in for that.** The entry above records the mispaired
+  false VERIFIED as "the cost of scoping the bar"; it is corrected in
+  place, and this entry is the repair.
+  **What the defect was.** `make_solver_verdict(closed, propagation,
+  escalation)` had four gates — ledger provenance, the symmetric semantics
+  pairing, the ieee refusal, the constrained-assume refusal — and none of
+  them asked whether the escalation came from `closed` at all. An
+  `OB_DISCHARGED` record discharges an obligation by INDEX, so an
+  escalation produced on query A, assembled against query B, discharges
+  B's obligations and returns VERIFIED on a query whose honest verdict is
+  REFUTED. The whole-query bar looked like a backstop for that, but only on
+  queries carrying a barred primitive — the only ones any version of the
+  bar inspects. Measured on this branch, on a query with **no `scatter`
+  anywhere**, where no version of the bar has ever fired:
+
+  | mispairing on a REFUTED query | 8e42934 | eb1ff86 | f5280cf | here |
+  |---|---|---|---|---|
+  | identical decided slice, scatter-bearing | UNKNOWN | VERIFIED | VERIFIED | refused |
+  | **scatter-FREE** | **VERIFIED** | **VERIFIED** | **VERIFIED** | refused |
+
+  So the bar's immunity was a coincidence of scope, not a mechanism, and
+  the finding is not a cost of scoping.
+  **The repair** is a fifth gate, the QUERY PAIRING GATE: `escalate`
+  records `ir.ClosedJaxpr.content_hash()` of the query it ran on at every
+  one of its five return sites, assembly recomputes it from the `closed` it
+  is handed, and a mismatch raises `MispairedEscalationError`. Same trust
+  model as the gates beside it and as the record-carried
+  `smt2_sha256`/`slice_sha256` — it defends an honest caller against an
+  accidentally mispaired assembly, the realistic mechanism being a CACHED
+  escalation, which is one of the two uses `stelling.ir`'s own module
+  docstring names `content_hash` for. It costs no additional hash at
+  assembly (the stamp already took that one; the gate compares the same
+  value, asserted by counting the calls rather than by timing), and one
+  hash per `escalate` — measured on an idle machine at 0.112 ms against an
+  89.3 ms two-obligation escalation, 0.125% of it.
+  **What it does NOT bind: `propagation`.** `Propagation` lives in
+  `stelling.propagate`, held at zero line delta this pass, so there is no
+  field on it to record the query in. The residue — this query, ANOTHER
+  query's propagation, this query's escalation — assembles to VERIFIED with
+  the other query's obligations reported under this query's hash, and is a
+  live test rather than a comment
+  (`test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`).
+  **Four more, same pass, none of them verdict-moving through `check()`:**
+  **(1)** the "a record cannot certify itself" pin saw ONE SPELLING. Six
+  channels each turned the bar's UNKNOWN into VERIFIED with the full suite
+  green in both columns: a key read out of `SolverStamp.options` (no new
+  field anywhere), a conjunct at the CALL SITE before the bar, a
+  `getattr`-with-default inside `_bar_domain`, a conjunct at the call site
+  AFTER the bar, `type(r.index) is not int` exploited with an `int`
+  subclass (no new field, no new key), and the token smuggled through
+  `options` and read in `_bar_scope`. Removing a record's fields catches
+  the first access form only — measured: plain attribute and `@property`
+  yes; `getattr` with a default, a `hasattr` guard and `__dict__.get` no —
+  and pins the invariant at one producer while the same conjunct one
+  function over does the same job. The pin is now a READ LEDGER over the
+  whole assembly (every attribute access on a record or a stamp is logged
+  with the function that made it, and the allow-list is asserted in both
+  directions), a WHITELIST PROJECTION of `options` down to four named keys
+  with the key set asserted exactly, and a type-identity invariance
+  property for the one channel that reads nothing new.
+  **(2)** `_bar_domain`'s outer `except` was driven by nothing, so the
+  sentinel's truthiness — its whole mechanism — was unpinned: `__bool__`
+  returning `False` turned an unreadable escalation's UNKNOWN into
+  VERIFIED, suite green.
+  **(3)** a silencing path that never reached the sentinel: a `records`
+  iterable that can be consumed once was exhausted by the obligation loop
+  before the domain was read, so `_bar_domain` returned an honest-empty
+  `{}` and the bar was skipped — VERIFIED with no withheld note, identical
+  at `eb1ff86`. Closed by ORDER: the domain is read on the first pass, so a
+  degenerate `records` costs the discharges rather than the bar.
+  **(4)** the SET/ADD route sweep exhausted k and SAMPLED n. Two
+  line-neutral corruptions walk through it, each a `violated-witness`
+  turned `discharged`, both green in both columns: `i == (k if n != 6 else
+  0)` in `_scatter_set_plan`, and `groups[k*rowsz + t] -> groups[k*rowsz]`
+  in `_scatter_add_plan`, whose row arithmetic was ungauged above rank 1
+  entirely. Both sweeps now range over a SPACE built by a rule, with the
+  space asserted to be the rule's.
+  **Affected versions:** 0.1.0 pre-release only — the pairing hole is
+  present in EVERY build in this repository's history up to and including
+  `f5280cf`, and on the scatter-free shape that includes `8e42934` and
+  everything before it; all branch-only, nothing released. The five other
+  items are branch-only over `caac1ee`…`f5280cf` except (3), which is
+  present from `eb1ff86`.
+  **Which prior verdicts are retroactively invalid: none.** Reaching any
+  of these needs a call to the public `make_solver_verdict` pairing an
+  escalation, a propagation or a hand-edited record with a query it did not
+  come from. `stelling.preconditions.check` cannot mispair: its one
+  pipeline binds `closed` and `prop` as locals off a single `trace`, and
+  passes those same two to `escalate` and then to `make_solver_verdict`.
+  `make_solver_verdict` is not in `stelling.__all__` and is not an
+  attribute of the package at all; measured, its only mentions outside the
+  library and its tests are three internal `design/` notes, this file, and
+  the paragraph in `docs/verdict-ledger.md` that discloses this very
+  defect — no README, tutorial or API page reaches it. And no verdict in
+  `docs/verdict-ledger.md` was assembled any other way than through
+  `check()`. What is NOT claimed: that a downstream caller cannot have
+  mispaired one.
+  **What to re-run:** any recorded solver-path VERIFIED assembled through
+  `make_solver_verdict` directly rather than through `check()` — re-run it
+  on this build; a mispaired pair now raises `MispairedEscalationError`
+  instead of returning a verdict, so the re-run either reproduces the
+  verdict or names the mispairing. Verdicts from `check()` need no re-run.
+  At this pass: 2044 passed, 2 skipped with both solvers, jax and maddening
+  installed; 2040 passed, 6 skipped under CI's install set (`.[solvers,jax]`,
+  no maddening). Before it: 2035 / 2 and 2031 / 6.
+  **Record-keeping corrections, made because this file's subject is claims
+  that stopped being true:**
+  * the previous pass's SOUNDNESS.md corrections are claimed by `ed183e8`'s
+    commit message and are not in it — `git show --stat ed183e8` touches
+    `docs/verdict-ledger.md`, `smt.py` and two test files and no
+    `SOUNDNESS.md`. They are in `114b846`, whose own message never mentions
+    them. Commit messages cannot be edited without rewriting the audited
+    base, so the correction is here.
+  * `docs/norms.md`'s skip disclosure claimed the two `blackjax` skips were
+    "the ONLY skips the suite reports under jax and both solvers — two of
+    them". Under exactly that install set there are SIX (2 blackjax + 4
+    maddening), which this file recorded four files away. Corrected, and
+    the replacement names its install set.
+  * this file's four-element policy (what changed / which versions / which
+    verdicts invalid / what to re-run) is met BY NAME by 4 of its 17 log
+    entries — the four dated 2026-08-06. The other 13, all dated
+    2026-07-18 to 2026-07-21, state their substance in prose without the
+    labels; SEVEN of those lack "what to re-run" by substance as well,
+    namely *the stamp contract gained the semantics field*, *the stamp
+    contract gained the nonvacuity field*, *degrade-don't-crash completed
+    for the escalation layer*, *the solver escalation layer landed*, *three
+    censused registry rows landed*, *bounded static-shape array emission
+    landed*, and *the I1 residual superseded*. Not fixed here — this pass
+    fixed the entries it touched and states the rest rather than leaving
+    the standard re-affirmed and unmet. Cited by headline rather than by
+    line number, because a line number in this file is a claim that goes
+    stale on the next edit, which is this file's own subject.
+
+- **2026-08-06 (pre-release): the two scatter rows now DECLINE outside the
+  space they are gauged on, and the bar gained a seventh closed channel.**
+  A blinded audit of the previous entry's repairs, answered here.
+  **What changed — the one item that MOVES VERDICTS.** The SET and ADD route
+  sweeps are exhaustive over a space and blind one step past it, and two
+  more line-neutral corruptions were measured living in that step, each a
+  `violated-witness` turned `discharged` (a MISSED violation) with the full
+  suite green in both columns: `i == (k if n != 9 else 0)` in
+  `_scatter_set_plan`, where the sweep exhausts n ≤ 8; and
+  `groups[(k if operand_shape[0] < 4 else 0) * rowsz + t]` in
+  `_scatter_add_plan`, where the sweep's dims stop at 3 so no axis of length
+  ≥ 4 exists in it — and where the non-degeneracy clause was on `rowsz`, the
+  TRAILING product, which structurally cannot see a leading-axis-keyed
+  corruption. This is the FIFTH instance of one pattern in this repository
+  (a route gauge sampling k = {0} then {0,2}; field probes by name then by
+  type; an arity family widened 2 → 3 → 8, where the escape sat at exactly
+  the declared ceiling), and raising the bound has now failed four times.
+  So the bounds are not raised: **admission is narrowed to the gauged
+  space.** `stelling.obligation` declines a SET operand longer than 8 and a
+  scatter-add operand outside rank ≤ 3 / every axis ≤ 3 / ≤ 12 elements, and
+  `tests/test_scatter_gauge_jax.py` pins the two spaces EQUAL in both
+  directions, so widening admission without widening the sweep is red. The
+  corrupted branches are then unreachable rather than uncaught — measured:
+  with both corruptions applied on top of this change, n = 9 and (4,2) come
+  back `unknown`, and with the guard removed they come back `discharged`
+  again. The interval TRANSFER is untouched; only the emission/slicing face
+  declines.
+  **Which prior verdicts are retroactively invalid: none, and this is not
+  an unsoundness fix.** Nothing that was VERIFIED becomes REFUTED or vice
+  versa. What changes is that some obligations that used to be ANSWERED are
+  now UNDECIDED: past those bounds a solver-path `discharged` and a
+  `violated-witness` both become `unknown`, so the verdict becomes UNKNOWN.
+  A verdict that moves to UNKNOWN is still a verdict move under this file's
+  policy, so it is logged. It costs REFUTATIONS as well as discharges, which
+  is stated rather than buried:
+  `test_a_shape_past_the_gauge_costs_the_ANSWER_and_never_the_SOUNDNESS`
+  pins exactly that at n = 8 versus n = 9. Blast radius across the
+  PYTEST-DRIVEN TREE is ZERO, measured rather than assumed (the scope is the
+  instrument's — see the next entry's item on what a census of the suite can
+  and cannot reach) — a census of every
+  operand shape reaching either row across the whole suite finds SET at
+  1..8 (plus one (200,) that already declined on the int8 index-dtype rule)
+  and ADD entirely inside rank 3 / dim 3 / 12 elements.
+  **What to re-run:** any recorded verdict over a harness that writes
+  `x.at[k].set(v)` on an axis longer than 8, or `x.at[k].add(u)` /
+  `jax.ops.segment_sum` on an operand outside rank ≤ 3 / dim ≤ 3 / 12
+  elements, AND whose obligations were decided by the SOLVER rather than by
+  intervals. Those verdicts are not wrong, but this build will return
+  UNKNOWN where they returned an answer, and the difference is a disclosure
+  about what was gauged rather than a correction. Verdicts whose
+  obligations intervals settled are unaffected — the transfer is untouched.
+  **Affected versions:** 0.1.0 pre-release only; branch-only, nothing
+  released. Both corruptions are reachable on every build in this
+  repository's history through `e35de13`.
+  **Three further items this pass, none of them verdict-moving:**
+  **(1)** A SEVENTH certify-itself channel, and the first that needs no
+  forged record at all: a conjunct on the **VALUE** of a whitelisted option
+  key, driven by a public keyword argument. `solver_timeout_ms` is carried
+  verbatim into the stamp as `:timeout`; `:timeout` must be in
+  `_EVIDENCE_OPTION_KEYS` (the budget is part of the emitted text and
+  therefore part of the hash the narrowing compares); and nothing
+  constrained what the decision did with a whitelisted key's value.
+  Measured: `check(..., solver_timeout_ms=31337)` returned VERIFIED with no
+  note where 20000 returns UNKNOWN, with the full suite byte-identical in
+  both columns. The read ledger missed it because it attributed the read to
+  the PROJECTION HELPER rather than to the function that asked, so calling
+  the permitted projection from `_bar_scope` logged an already-permitted
+  pair. Closed by two anti-correlated mechanisms: the ledger now attributes
+  an `options` read to the function that ASKED (and the source scan forbids
+  the projection CALL outside the one permitted reader), and the bar's
+  answer is pinned INVARIANT under every caller-settable option value over
+  seven orders of magnitude. Four spellings are red, and the split is the
+  evidence: three are caught by both mechanisms, and one — the same
+  conjunct written inside the permitted reader — by the property pin alone.
+  **(2)** The previous entry's item (3) recorded that ordering the bar's
+  domain first meant "a degenerate `records` costs the discharges rather
+  than the bar". Measured, that is broader than it reads, and the ordering
+  was not the whole closure either. On a SCATTER-FREE query — one the bar
+  never touches — a one-shot `records` turned an honest VERIFIED into
+  UNKNOWN, carrying the generic undecided-cause note, which attributes the
+  UNKNOWN to an interval straddle: a wrong explanation rather than silence.
+  And a TWO-FACED `records` (empty on the first pass, real on every later
+  one) showed the bar an honest-empty domain and the obligation loop a full
+  set of discharging records — VERIFIED, no withheld note, on the bar's own
+  fixture, which ordering cannot see. Both close with ONE PASS over
+  `records`, taken at the top of assembly: a degenerate `records` now
+  behaves exactly like the tuple it yields. Ordering is kept as a
+  now-redundant second mechanism and the comment says so, because a
+  mutation of the ordering alone is inert.
+  **(3)** `Escalation.query_sha256`'s docstring said the pairing gate
+  refuses an empty hash "too". It did not, in the one case where it
+  matters: both legs come from `_query_sha256`, which returns `""` when
+  `ClosedJaxpr.content_hash()` raises, so an unhashable query and an
+  unrecorded escalation compared EQUAL and the gate passed. The refusal
+  came from `Stamp.__post_init__` one layer later. The gate now refuses an
+  empty hash on either leg, so the sentence is true where it stands, and
+  both docstrings say where the refusal happens and that they were wrong
+  before. Also stated correctly and left alone: `carries_work == False`
+  bypasses the gate entirely, and an inert escalation contributes nothing
+  (measured UNKNOWN off the propagation alone).
+  At this pass: 2055 passed, 2 skipped with both solvers, jax and maddening
+  installed; 2051 passed, 6 skipped under CI's install set
+  (`.[solvers,jax]`, no maddening). Before it: 2044 / 2 and 2040 / 6.
+  **What this pass did NOT close, named rather than left implied:** the ADD
+  row's INDEX COLUMN LENGTH. `_add_space` sweeps a single written index,
+  while `jax.ops.segment_sum` reaches an index column of 4 on an operand
+  the new bounds admit; that axis is gauged by a mutation battery rather
+  than by an exhaustive sweep, and admission is not narrowed to it. A
+  corruption keyed on the index column's length would be the sixth instance
+  of the pattern above.
+
+- **2026-08-06 (pre-release, later the same day): the sixth instance of the
+  bounded-sweep pattern closed at the ADD row's INDEX COLUMN, and the bar's
+  narrowing decision stopped holding any option value at all.**
+  A blinded audit of the previous entry, answered here. The previous entry
+  ended by naming the index column as what it had not closed; that is what
+  the first item below closes, and it closes it because naming a residual
+  turned out not to be the same as bounding it.
+  **What changed — the one item that MOVES VERDICTS.** A census of `len(ks)`
+  at `_scatter_add_plan` across the whole suite, taken by instrumentation and
+  identical at `e35de13` and at the previous entry's head, reaches
+  `{1, 2, 3, 4, 6, 254, 255}` — 5 is absent, and so is everything in 7..253.
+  One line, line-neutral, on operand shape `(2,)` which the shape bounds
+  explicitly admit —
+  `groups[k * rowsz + t].append((j if len(ks) - 5 else 0) * rowsz + t)` —
+  turns a `violated-witness` into `discharged` at |ks| = 5 and nowhere else,
+  a MISSED violation with the full suite green; keyed on 7 instead of 5 it
+  does the same thing inside the 7..253 hole. So the column is bounded the
+  way the shape was: the ADMITTED column space is the union of three
+  EXHAUSTIVELY swept families and nothing else — one index over every gauged
+  shape; every column of `range(n)` to the power of the length, for lengths
+  up to 6, on a RANK-1 operand; and the single-element operand at every
+  length up to 255, where every index is forced to 0 and the length is the
+  only free parameter. `tests/test_scatter_gauge_jax.py` pins those bounds
+  EQUAL to the source's in both directions, as it already does for rank, dim
+  and size. Measured with the corruptions applied on top: keyed on 5 the
+  branch is still reachable and the sweep catches it (2 RED); keyed on 7 the
+  branch is UNREACHABLE — the obligation comes back `unknown` — where at the
+  previous head it came back `discharged`.
+  **Which prior verdicts are retroactively invalid: none, and this is not an
+  unsoundness fix.** Nothing that was VERIFIED becomes REFUTED or vice versa.
+  As with the shape bounds, obligations past the column bound move from
+  ANSWERED to UNDECIDED, which is a verdict move to UNKNOWN and is logged as
+  one. It costs REFUTATIONS as well as discharges. Blast radius **across the
+  PYTEST-DRIVEN TREE** is ZERO, measured rather than assumed — and the scope
+  is stated because it is the instrument's, not the repository's: the census
+  above is the evidence, and a RE-census after the guard finds nothing
+  reaching the row outside the gauged column space — 821 distinct
+  `(|ks|, distinct, shape)` keys over 2675 calls, zero of them outside. What
+  the instrument could not see is anything pytest does not run. `corpus/`'s
+  scripts are driven by hand; `corpus/run_census.py` in particular imports
+  only `stelling.census` and `stelling._jax_compat` and walks jaxprs to
+  classify primitives, so it never reaches the accumulate row at all — checked
+  rather than assumed, and stated either way.
+  **AND THE PATTERN MOST LIKELY TO MEET THE BOUND IS NAMED**, because a
+  narrowing whose cost is given only in the abstract is given in the abstract.
+  `tests/test_scatter_gauge_jax.py`'s own header lists "a small normal-matrix
+  assembly in the segment_sum style" among the programs this file exists to
+  gauge, and that assembly's natural spelling — `jax.ops.segment_sum` over
+  per-point (2, 2) blocks, i.e. a RANK-3 operand with an index column longer
+  than one — is exactly what now declines. Measured on that file's own
+  `m-assembly` fixture at its own declared shapes: the slicing face refuses
+  with *"'scatter-add' index column of 3 element(s) on operand (2, 2, 2) is
+  outside the GAUGED accumulate column space"*, while the SAME accumulation
+  flattened to a rank-1 operand is admitted. It costs no test here because the
+  in-tree `m-assembly` cases are settled by the interval transfer and never
+  reach the row; a downstream harness that escalates one gets UNKNOWN. The support itself is no longer
+  `{1, 2, 3, 4, 6, 254, 255}` and is not claimed to be: the new sweep drives
+  the row at every length in the gauged space, which is what "gauged" now
+  means. Outside the gauge file the row is still reached only at
+  |ks| ∈ {1, 2, 3, 4}. `|ks| = 256` reaches the plan and DECLINES, which is
+  the guard firing.
+  **What to re-run:** any recorded verdict over a harness whose
+  `jax.ops.segment_sum` (or `x.at[column].add(...)`) accumulates MORE THAN
+  ONE update index onto an operand of rank 2 or 3, or more than six onto a
+  multi-element operand, AND whose obligations were decided by the SOLVER
+  rather than by intervals. Those verdicts are not wrong; this build returns
+  UNKNOWN where they returned an answer. The interval TRANSFER is untouched,
+  so verdicts intervals settled are unaffected.
+  **Affected versions:** 0.1.0 pre-release only; branch-only, nothing
+  released. The corruption is reachable on every build in this repository's
+  history through the previous entry's head.
+  **Three further items this pass, none of them verdict-moving:**
+  **(1)** The seventh channel's repair was measured INCOMPLETE. The previous
+  entry closed "a conjunct on the VALUE of a whitelisted option key" with two
+  site mechanisms plus a budget sweep — but the one function permitted to see
+  option values WAS the narrowing decision, so both site mechanisms were
+  satisfied by construction and the whole defence rested on the sweep, which
+  is a sample and reaches only the two of four whitelisted keys a caller can
+  set. Three line-neutral corruptions, each with the full suite BYTE-IDENTICAL
+  to unmutated in both columns: a module global stashed in
+  `_evidence_is_about` and read in `_bar_scope` keyed on `"30000"`
+  (`solver_timeout_ms=30000` → VERIFIED with no withheld note, where 20000,
+  29999, 30001 and 31337 all return UNKNOWN — and the IDENTICAL mutation
+  keyed on `"31337"`, which the sweep samples, is 2 RED, so the only
+  difference is the constant); and conjuncts on the VALUES of `smt2_sha256`
+  and `slice_sha256`, keys the sweep never varies at all. **Not answered by
+  widening the sweep.** The narrowing decision now consumes a BOOLEAN and
+  binds no recorded value, so no conjunct on any value is expressible there
+  at any value; the value zone is one four-line function whose two halves
+  cannot AIM (`_evidence_options` is handed no query, `_reproduced_evidence`
+  is handed no record, so neither can compute the mapping a false narrowing
+  would have to produce); and the reproduction is built by
+  `Script.stamp_options`, the same derivation the record is built from,
+  pinned by substitution rather than by two readings agreeing.
+  *(THE TWO CLAIMS IN THAT SENTENCE ARE BOTH CORRECTED BY THE NEXT ENTRY, and
+  the wording is left standing because a log that edits itself is not one. The
+  four lines call a FIFTH function, which was in no enumeration anywhere, and
+  a signature says what a function is HANDED rather than what it can REACH;
+  and "pinned by substitution" constrains the substituted function's behaviour
+  not at all. Both were measured live.)* What is left
+  is pinned TOTALLY over the source rather than sampled over values: no
+  string OR numeric literal outside the read ledger's own attribute names, no
+  comparison against a literal, no `global`/`globals()` smuggling. Six
+  mutants are RED against it, including the derived-quantity dodge
+  (`not (budget % 30000)`, which has no comparison in it at all and which the
+  sweep does not reach). Its stated limit: it constrains what may be WRITTEN
+  on that path, not every predicate Python can express — a discriminator
+  spelled as a method call on a value is not matched — which is why the
+  budget sweep is kept as corroboration. The sentence that sweep carried,
+  "an equality on any round or memorable number is hit", was FALSE and is
+  corrected rather than answered by adding values to the list.
+  **(2)** The previous entry's item (2) said one pass over `records` closed
+  the misattributing note. It closed it for the ONE-SHOT shape only. Measured
+  on a SCATTER-FREE query with a `records` that is empty on its first pass and
+  real afterwards: an honest VERIFIED becomes UNKNOWN carrying "…the
+  propagated interval straddling the asserted bound" — verbatim the defect
+  that entry recorded as closed. One pass at the top IS choosing pass 1, and
+  the comment claiming it worked "rather than by choosing which pass wins"
+  was wrong about its own mechanism. The shape is now REFUSED rather than
+  absorbed: the ledger is a separate field and an independent witness that
+  solvers ran, so an escalation whose ledger carries work and whose `records`
+  came back empty raises instead of assembling. What that does NOT reach — a
+  first pass yielding a non-empty STRICT SUBSET — is stated at the gate, with
+  the reason the stronger check is not taken.
+  **(3)** Two comments in `make_solver_verdict` contradicted each other: the
+  top called the bar-domain ordering "a second, now-REDUNDANT mechanism", the
+  bottom said "THE ORDER IS LOAD-BEARING". Measured: moving the domain read
+  below `by_index` is 0 RED. The bottom sentence was the false one and is
+  corrected — which is exactly the shape the top one names, an unpinned guard
+  whose comment claims to be load-bearing. Also: `solvers.py` cited a test
+  the previous pass had renamed away, the only dangling `::test_*` reference
+  in `src/`; it is repointed, and
+  `test_every_test_cited_in_core_prose_still_exists` makes the next one red.
+  And a stale false sentence inside the test whose stated purpose is to stop
+  census drift — "(five fixtures over four rules)", forty-six lines above an
+  assertion requiring six over five — is gone rather than corrected: that
+  sentence no longer restates the counts, and the three that remain are read
+  out of the file's own source and checked against the derived counts.
+  At this pass: 2064 passed, 2 skipped with both solvers, jax and maddening
+  installed; 2060 passed, 6 skipped under CI's install set
+  (`.[solvers,jax]`, no maddening). Before it: 2055 / 2 and 2051 / 6.
+  **What this pass did NOT close, named rather than left implied:** the value
+  zone's source pin reads `ast.Compare` nodes and literals, so a discriminator
+  spelled as a method call on a recorded value is not matched by it; the
+  coherence gate does not see a `records` whose first pass yields a non-empty
+  strict subset; and the ADD row's column sweep stops at rank 1, so a
+  multi-index column above rank 1 is DECLINED rather than gauged.
+
+- **2026-08-06 (pre-release): the value zone is closed under CALL, and three
+  checks that were satisfied by TEXT rather than by code.** A blinded audit of
+  the entry above, answered here. **No item in this entry moves a verdict**:
+  nothing that was VERIFIED, REFUTED or UNKNOWN changes status, no bound moves,
+  no numeric constant changes, and the scatter bar is where it was. What
+  changes is what the tree can be corrupted into saying, and what four of its
+  own sentences claimed.
+  **Which prior verdicts are retroactively invalid: none.** **Affected
+  versions:** 0.1.0 pre-release only; branch-only, nothing released.
+  **What to re-run:** nothing. The one behavioural change is the WORDING of the
+  cause note on an UNKNOWN whose escalation arrived incomplete; no verdict, no
+  obligation status and no bar decision moves.
+  **(1) THE VALUE ZONE WAS NOT CLOSED UNDER CALL, and the repair that closed
+  channel 8 is what opened this.** That repair split the narrowing into a value
+  zone of four named functions, pinned their source TOTALLY, and pinned the two
+  halves' signatures so that "neither can AIM". It also added a fifth function,
+  `_whitelisted`, called once per SIDE of `recorded == reproduced` — and that
+  one was in no enumeration anywhere: not in the four names the source pin
+  parsed, not in the read ledger's transparent frames (it is handed a plain
+  `dict` and reads no attribute, so the ledger never sees it at all), not among
+  the five functions the one-place scan reads. Four line-neutral corruptions,
+  each MEASURED LIVE at `faefc48` with the full suite byte-identical to
+  unmutated (2064 passed / 2 skipped), each turning the bar's fallback into a
+  narrowing on a MISPAIRED assembly at exactly one budget while every other
+  budget falls back:
+  a module-level `list` stashed in `_whitelisted` and returned on the second
+  call — no `global` statement, no `globals()`, no literal in either pinned
+  function, and NEITHER pinned signature touched; a DEFAULT ARGUMENT on
+  `_evidence_reproduces`, which `_fn_body_ast` never walked (`tree.body[0].
+  body` is the body and nothing else); a SEVENTH module-level helper called
+  from the zone, which the six-name pin does not parse; and a conjunct inside
+  `stelling.smt.Script.stamp_options`. Two further spellings the audit did not
+  name are also live: a module-level `dict` written in `_whitelisted` and read
+  in `_reproduced_evidence`, and a MUTABLE DEFAULT on `_whitelisted`, which
+  introduces no module-level name at all.
+  **The repair is the CLASS, not the six spellings.** The value zone is no
+  longer a tuple of names; it is DERIVED as the transitive closure, over the
+  compiled code objects, of every module-level name of `stelling.verdict` that
+  `_evidence_reproduces` can reach — and the same for the DECISION from
+  `_bar_scope`. Every rule runs over the derived set, so a helper on the path
+  is inside the pin the moment it is written; every module-level name either
+  closure reads must be enumerated AND immutable (a `frozenset` or a `tuple`
+  cannot carry a value from one call to the next, which is the whole of what
+  the stash needed); default arguments are forbidden in both closures and the
+  signature is scanned by the literal rules; and the closures may import only a
+  named list, because a function-level import binds a LOCAL and is invisible to
+  the closure walk. All six mutants are RED. **The sentence that stood here
+  said "each to one of those three general rules and none to a rule written for
+  it", and that is false on two counts** — `PREREG_BAR13.md` scored the same
+  clause honestly as **P1.c partial**, and the published document did not.
+  Re-derived by running each mutant at `9fc44dd` and reading which assertion
+  fires: the DEFAULT-ARGUMENT mutant is 1 RED, to the DEFAULTS rule alone
+  ("`_evidence_reproduces` now has a DEFAULT ARGUMENT"), which is a FOURTH rule
+  added for that mutant and not one of the three; the mutable-default mutant
+  dies to the same rule; and the `Script.stamp_options` mutant dies to
+  `test_the_stamps_own_derivation_is_the_HONEST_one`, a test that exists only
+  because of it. Three of the six die to the general rules; three do not.
+  **(2) "PINNED BY SUBSTITUTION RATHER THAN BY TWO READINGS AGREEING" DOES NOT
+  CONSTRAIN THE SUBSTITUTED FUNCTION AT ALL.** `_reproduced_evidence` claimed
+  that corrupting `Script.stamp_options` "corrupts EMISSION — which the
+  byte-level emission tests hold". It does not: `stamp_options` appends
+  `set-logic`/`smt2_sha256`/`slice_sha256` to an ALREADY EMITTED `Script` and
+  contributes not one byte to `Script.text`, so the scripts real solvers answer
+  about are byte-identical either way. Measured: a conjunct there leaves
+  `tests/test_smt_emission.py` and `tests/test_verified_bar.py` both fully
+  green, because the substitution test only checks that a DIFFERENT
+  `stamp_options` MOVES the answer and never that the honest one is honest. The
+  claim is corrected and the honest OUTPUT is now pinned twice — structurally
+  (one `return`, no branch, no comparison, no call) and behaviourally (the
+  exact tuple, against an expectation re-derived from the script's own TEXT and
+  SLICE). One incidental correction with it: 30000 IS reached in this tree —
+  `tests/test_solver_acceptance.py` runs at `SolverConfig(timeout_ms=30_000)`,
+  spelled with an underscore — so the `stamp_options` conjunct keyed there is
+  1 RED. Re-keyed one millisecond away it is 0 RED across the whole suite. The
+  budget SWEEP still does not sample it, which is the claim that mattered.
+  **(3) `_evidence_budget`'s BOUND HOLDS, AND THE ARGUMENT FOR IT DID NOT.**
+  The docstring said: the recorded budget is itself in the compared set, so a
+  wrong budget puts a wrong `:timeout` in the reproduction, the equality fails,
+  the bar widens. Every step is true and it is an argument about an HONEST
+  record — it says a wrong budget disagrees with the budget THIS record names.
+  What actually forbids a mispaired narrowing is that the budget cannot reach
+  `slice_sha256` AT ALL: measured invariant over twelve budgets spanning
+  1..60000 including `True` (which `isinstance(budget, int)` admits), while
+  `smt2_sha256` moves at every one of them; and the bar's own neighbour pair
+  has EQUAL `smt2_sha256` and DIFFERENT `slice_sha256`. Those two together are
+  stronger than any sweep: no budget, sampled or not, can turn one slice's
+  reproduction into another slice's record.
+  **(4) THE COHERENCE GATE'S RESIDUE VIOLATED THE GATE'S OWN JUSTIFICATION.**
+  That justification is that absorbing a degenerate `records` produced "an
+  UNKNOWN carrying a WRONG EXPLANATION … worse than silence, because a reader
+  believes it". Measured at `faefc48` on a SCATTER-FREE query with two
+  solver-decided obligations and a `records` whose first pass is a non-empty
+  strict subset: honest VERIFIED, observed UNKNOWN, carrying verbatim "…the
+  propagated interval straddling the asserted bound". The residue is
+  soundness-harmless (a dropped record leaves its obligation `unknown`, which
+  can never mint VERIFIED) and is still NOT refused — the comparison that would
+  refuse it also refuses a deliberate probe of a different invariant. It is
+  CLASSIFIED instead: the ledger witnesses invoked runs the records do not
+  account for, and the note says the outcome did not arrive. Statuses,
+  verdicts and bar decisions are unchanged; only the sentence moves.
+  **(5) THE CITATION CHECK WAS FALSELY SATISFIABLE, and not only by globs.**
+  `f"def {name}(" in body` is a raw substring test over file TEXT. Measured at
+  `faefc48`: the cited family renamed away is 1 failed (not vacuous), but the
+  family gone with one `# def test_…(` COMMENT left behind is 1 PASSED, the
+  exact citation's own `def` commented out is 1 PASSED, and the `def` gone with
+  only a string-literal mention left is 1 PASSED. Commenting a test out is how
+  a test most often stops existing. Resolved by `ast.parse` + `FunctionDef`
+  names, which is equally independent of collection — the reason the docstring
+  gave for avoiding collection — and all three rows are now RED.
+  **(6) THE CENSUS PROSE CARRIED MORE RESTATEMENTS THAN IT READ.** The drift
+  test read three sentences and its docstring said "four places for three
+  quantities". A search of the flattened source finds eight, and the five it
+  did not read were each 0 RED at `faefc48`, perturbed one at a time: "the
+  admission gate drives … of them", "The other … are NOT driven here", "the
+  row's … decline sites", `f"says … over …"`, and "`_scatter_set_plan` has …
+  `raise _Decline`" in two places. All eight are read now, one of them against
+  a DERIVED difference rather than a fourth quantity; the source is flattened
+  first, because four of the five were unread partly because they are split
+  across two string literals or two comment lines; and the anti-vacuity control
+  perturbs ONE capture group of ONE match at a time, where
+  `text.replace(right, wrong)` rewrote every occurrence at once and so could
+  never see the gap. The residue is named: a NINTH restatement, written later
+  and not added to the list, is still not read — a general number-word scan was
+  measured at 24 occurrences of which 18 are about something else.
+  **(7) TWO RECORD CORRECTIONS, both re-derived.** The previous pass's
+  "+9 tests, 0 removed" is false: the collected-id diff `3e107cf..faefc48` is
+  **10 added and 1 removed** (`test_a_TWO_FACED_records_cannot_show_the_bar_
+  one_thing_and_the_loop_ANOTHER`, whose direct successor is the parametrised
+  refusal test, so no coverage is lost — the statement is what was wrong). And
+  "exactly three integers moved in `tests/`" does not reproduce: per-file
+  multisets of numeric literals **over the same range, `3e107cf..faefc48`**,
+  give **0 removed and 112 added in `tests/`** (105 `int`, 7 `float`) and
+  **0 removed and 5 added in `src/`**. The range is named here because the
+  sentence beside it names one and this one did not, and the figures are
+  range-specific: over **`faefc48..9fc44dd`**, this branch's own four commits,
+  the same measurement gives **34 added / 0 removed in `tests/`** and
+  **4 added / 2 removed in `src/`** — both removals the literal `0`, from a
+  deleted line rather than from a constant that moved. "No `src/` constant
+  changed value" is the claim that survives at every range, and it is
+  CONFIRMED tree-wide rather than per-file: over `faefc48..HEAD`, 192
+  module-level assignments in `src/`, 31 numeric-bearing, **0 changed, 0 added,
+  0 removed**.
+  **(8) THE CAPABILITY CLAIM IS SCOPED TO WHAT WAS MEASURED**, and the pattern
+  most likely to meet the bound is named — see the entry above, which now says
+  "across the PYTEST-DRIVEN TREE", records that `corpus/run_census.py` never
+  reaches the row, and states that the gauge file's own `m-assembly` fixture,
+  at its own declared shapes, DECLINES through the slicing face while the same
+  accumulation flattened to rank 1 is admitted.
+  At this pass: 2068 passed, 2 skipped with both solvers, jax and
+  maddening installed; 2064 passed, 6 skipped under CI's install set
+  (`.[solvers,jax]`, no maddening). Before it: 2064 / 2 and 2060 / 6.
+  **What this pass did NOT close, named rather than left implied:** the value
+  zone's source pin still reads `ast.Compare` nodes and literals, so a
+  discriminator spelled as a METHOD CALL on a recorded value
+  (`.startswith(...)`, a hash, a length test) is not matched by it — the
+  closure rules above do not reach that either, and the budget sweep is kept as
+  corroboration for exactly that reason; **and the axis the method call is only
+  one instance of: the zone may spell no constant and is HANDED four, so any
+  predicate over a recorded value whose constants come from
+  `_EVIDENCE_*_KEYS` is invisible to every rule in the pass — closing the CALL
+  axis is what left the PREDICATE axis open, and it was open at the meeting
+  point itself**; the DECISION's loop filters `rule != "literal"`, so a string
+  constant inside any call there matches nothing; the coherence gate still does
+  not REFUSE a `records` whose first pass yields a non-empty strict subset, it
+  only refuses to misattribute the result; the census drift test still cannot
+  see a restatement nobody adds to its list; and the ADD row's column sweep
+  still stops at rank 1, so a multi-index column above rank 1 is DECLINED
+  rather than gauged.
+
+- **2026-08-06 (pre-release): the value zone was closed under CALL and left
+  open under PREDICATE, because it is HANDED its constants.** A blinded audit
+  of the entry above, answered here. **No item in this entry moves a verdict**:
+  nothing that was VERIFIED, REFUTED or UNKNOWN changes status, no bound moves,
+  no numeric constant changes in `src/` (192 module-level assignments, 31
+  numeric-bearing, 0 changed / 0 added / 0 removed over `faefc48..HEAD`), and
+  the scatter bar is where it was. What changes is what the tree can be
+  corrupted into saying, and what six of its own sentences claimed.
+  **Which prior verdicts are retroactively invalid: none.** **Affected
+  versions:** 0.1.0 pre-release only; branch-only, nothing released.
+  **What to re-run:** nothing. There is no behavioural change at all — the one
+  `src/` edit hoists a fallback message to a module constant, byte-identical in
+  what it renders.
+  **(1) THE PREDICATE AXIS WAS WIDE OPEN, AT THE MEETING POINT ITSELF, AND THE
+  REASON IS THE SHAPE OF THE PIN.** The source pin forbids the value zone to
+  SPELL a string, and then the module hands it `_EVIDENCE_OPTION_KEYS`,
+  `_EVIDENCE_BUDGET_KEYS` and `_EVIDENCE_DERIVED_KEYS` as enumerated immutable
+  constants — so every string a conjunct needs, for exactly the keys that
+  matter, is already in scope under a permitted name. The literal rule is
+  near-vacuous for those keys. Six line-neutral corruptions, each MEASURED LIVE
+  at `faefc48` (2064 passed / 2 skipped and 2060 / 6, byte-identical to
+  unmutated in both columns) and each 0 RED at `9fc44dd`: three lines inside
+  `_evidence_reproduces` itself — `if set(_EVIDENCE_BUDGET_KEYS) <=
+  set(recorded): return True` — with no literal, no comparison against one, no
+  module-level mutable, no helper, no default argument, no import, no `global`,
+  no smuggler, and no method call on a recorded value, so it is not the residue
+  the entry above disclosed; the same predicate in a literal-free NESTED `def`;
+  `_whitelisted.__kwdefaults__ = out`, a mutable carrier on a zone FUNCTION,
+  which the immutability rule never reached because that branch runs only for
+  names the module does not define; the same carrier USED across the two
+  `_whitelisted` calls; and two in the DECISION, where the loop filters
+  `rule != "literal"` so a string constant inside any call matches nothing —
+  `str(closed).count("stelling_backdoor")`, and a per-stamp variant on the two
+  budget spellings. Against the mispaired pair the bar exists for, with a stamp
+  forging a second budget spelling, four of the six take `('scatter',)` to
+  `()`: the bar lifted. Unmutated, forged or honest, all four rows stay
+  `('scatter',)`.
+  **The repair is five rules, and none is written for a spelling.** A CONSTANT
+  READER LEDGER — each enumerated constant is read by exactly one function,
+  asserted in both directions, the way `_ALLOWED_READS` ledgers record
+  ATTRIBUTES — after which a predicate at the meeting point has no constant to
+  key on. A SHAPE PIN on `_evidence_reproduces`, the one function where a
+  recorded value and the re-derivation are both in scope: no branch, no loop,
+  no nested definition, one `return`, of `bool(...) and ... == ...`. Those two
+  are INDEPENDENT, measured by disabling each and re-running: the first mutant
+  is RED to either alone. The decision's literal exemption is narrowed from a
+  rule NAME to a POSITION — message text, in an f-string, a `+`, or a
+  `"sep".join(...)` — and the decision may now spell no number at all, which it
+  never did. A `call-literal`/`attr-literal` rule catches a literal handed to a
+  method on a value, which is most of the method-call residue the entry above
+  disclosed and left open. And a `dynamic` rule for `__import__`/`eval`/`exec`/
+  `compile`, which bind no `ast.Import` node and so were invisible to the
+  import allow-list. All six new mutants and all six published ones are RED.
+  **(2) THE IMMUTABILITY RULE WAS FALSE AS WRITTEN, IN TWO PLACES.** *"Every
+  module-level name the closure reads must be enumerated AND immutable"* never
+  applied the immutability half to the zone's own function objects, which are
+  mutable; and `_IMMUTABLE` includes `tuple`, checked SHALLOW, so a tuple
+  containing a list would pass (no exploitable instance today — all four
+  enumerated constants are frozensets or tuples of `str`, which is why the
+  check is deepened rather than a constant changed). Both are closed, with a
+  source rule (no assignment to an attribute anywhere in either closure) and a
+  runtime one (no `__defaults__`, `__kwdefaults__` or `__dict__` on any
+  function in the closure) kept together because neither reaches the other's
+  case. A zone member that is not a plain FUNCTION — a class, whose methods the
+  `__code__` walk silently skips — is an offence now rather than a hole, and
+  where the walk stops is named in the docstring: attribute/method dispatch, a
+  decorator's wrapper, and objects with no `__code__`.
+  **(3) THE STRONGEST STATEMENT ABOUT `_evidence_budget` IS ONE LINE AND
+  NEITHER TEST MADE IT.** `inspect.signature(slice_fingerprint)` is
+  `(sl) -> 'str'`: the budget is not an argument, so there is no value of it to
+  sample. Added. The pre-registered exhaustive sweep it replaced was also not
+  expensive, which was the reason given for substituting twelve points:
+  `1..60000` costs **9.5 s at load average 6.00**, and gives distinct
+  `slice_sha256` 1, distinct `smt2_sha256` 60000, empty reproductions 0,
+  reproductions equal to the neighbour's record 0. The substitution's standing
+  is restated accurately — stronger in the generality of its argument, WEAKER
+  in the sample supporting its premise — and its neighbour-pair half is kept
+  because the sweep did not have it. The `True` row is labelled as what it is:
+  `isinstance(budget, int)` admits it and `emit(sl, "z3", True)` emits
+  `(set-option :timeout True)`, a script no solver accepts, but
+  `_evidence_budget` CANNOT return a bool (`int(text)` never yields one —
+  measured), so reaching it needs `int` itself corrupted.
+  **(4) THE SAME GREP BLINDNESS, THREE LINES ABOVE THE CORRECTION.**
+  `_CALLER_BUDGETS`' comment corrected "an equality on any round number is hit"
+  by naming 30000 as absent from the tuple — and in the same sentence listed
+  "2000, 15000, 25000, 50000 or 60000", read as values the suite does not
+  drive. **Four of the six are live solver budgets**: 2000 at about twenty
+  sites, 15000 at `tests/test_array_emission.py:1391`, and 30000 and 60000
+  spelled `30_000`/`60_000` so that `grep -rn '60000'` finds only prose. The
+  claim is derived now, off the AST, from BUDGET POSITIONS rather than from
+  every number — 50000 appears as fixture arithmetic and is not one. Measured
+  tree-wide: **542 numeric instances in `src/` and `tests/` are spelled in a
+  form a digit-grep for their own value misses**, over 136 distinct forms — 331
+  COMPUTED, 157 EXPONENT, 53 underscore, 1 other, and zero hex, octal or
+  binary. Underscore is the small part.
+  **(5) THE NINTH RESTATEMENT, FOUND.** The census entry above named "a NINTH
+  restatement, written later and not added to the list" as a residue and left
+  it there. It is `# The undriven six, each with its reason:` in
+  `tests/test_scatter_gauge_jax.py`, restating `sites - rules` inside the file
+  the checker parses; perturbed to "seven" at `9fc44dd` it is 0 RED with the
+  whole gauge file green. It is read now. Two records with it: `_flat`'s "four
+  of the five sentences … are SPLIT" is **three**, measured by running every
+  pattern against the raw source as well as the flattened one (the flattener
+  stays — 13 number-words with it against 10, and removing it hard-fails); and
+  the block comment restated the count of places as "eight" **fourteen lines
+  above** asserting that "the count of places is no longer restated anywhere",
+  both shipped in one pass. The number is elided and the claim kept.
+  **(6) FOUR RESIDUES, THREE CLOSED AND ONE DISCLOSED.** The citation
+  resolver's semantic is "a `FunctionDef` of that name exists in the AST",
+  which is strictly weaker than "the cited test runs": two of the seven shapes
+  where that differs are closed — nested inside another function, and inside a
+  non-`Test*` class, which was one of the branch's own ACCEPTED rows and which
+  pytest does not collect because `pyproject.toml` sets no `python_classes` —
+  and the other five are rows in the anti-vacuity table now, so the gap is
+  measured rather than described (all 13 in-tree citations resolve at module
+  level, checked before the change). `docs/gauge-coverage.md`'s `m-assembly`
+  claim, which nothing reddened, gets a test that pins both halves of the
+  asymmetry. The `scratchpad` `WITHHELD` entry says what it actually does: the
+  sdist `include` list is what keeps it out, and the entry exempts the entire
+  `scratchpad/` SUBTREE from the untracked-file check. And a number-word scan
+  over `*.md` is NOT added: `SOUNDNESS.md`'s own restatements of these counts
+  are outside the census checker by construction, and that is named rather than
+  left to look covered.
+  At this pass: 2070 passed, 2 skipped with both solvers, jax and maddening
+  installed; 2066 passed, 6 skipped under CI's install set
+  (`.[solvers,jax]`, no maddening). Before it: 2068 / 2 and 2064 / 6.
+  **What this pass did NOT close, named rather than left implied:** a predicate
+  in the value zone that needs NO constant at all is still not matched —
+  `len(recorded) > len(reproduced)` has no `Constant` in either operand, and
+  `sorted(_EVIDENCE_OPTION_KEYS).pop()` drops a key by position rather than by
+  name; the meeting point's shape pin means neither can be written where both
+  sides are in scope, and a constant-free predicate cannot AIM at a chosen
+  record, but neither of those is a rule that catches it. The decision still
+  permits a string literal handed to a call on a bare NAME, because the honest
+  fallback builds its message that way and the callee's own body is inside the
+  scanned closure. The citation resolver still answers "defined" for five
+  shapes pytest never runs. The census drift test still reads a LIST of
+  patterns, so a tenth restatement nobody adds to it is a tenth restatement
+  nobody reads — the ninth is the demonstration that this is not hypothetical.
+  And the coherence gate and the ADD row's column bound are where the entry
+  above left them.
+
 *(no releases yet)*

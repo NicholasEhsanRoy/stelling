@@ -46,6 +46,63 @@ transfer-side figures are a different population at a different date and are
 not restated here. `docs/supported-primitives.md` is generated from the live
 registries and is the current count of both.
 
+## "Gauged" is a claim about a SPACE, not about a row
+
+A row is gauged over the shapes something measured it on, and a sweep is blind
+one step past its bound. This project has now measured five corruptions living
+in that step — two of them in the scatter rows, each a `violated-witness`
+turned `discharged` with the whole suite green in both columns, and each
+keyed on a shape the sweep does not contain (a SET axis of 9, an ADD leading
+axis of 4). Raising the bound has failed four times; the fourth escape sat at
+exactly the newly declared ceiling.
+
+So for these two rows the table's **yes** now means something stricter than
+"a sweep exists": the ADMITTED space equals the GAUGED space. The static-index
+`scatter` SET row declines an operand axis longer than 8, and the
+`scatter-add` accumulate row declines an operand outside rank ≤ 3 / every axis
+≤ 3 / at most 12 elements, with `tests/test_scatter_gauge_jax.py` pinning the
+source bounds equal to the sweep's in both directions. Past those bounds the
+rows do not run ungauged — they refuse, and the obligation comes back
+`unknown`. That costs answers (see `SOUNDNESS.md`, 2026-08-06) and it is the
+only reading of **yes** that a bounded sweep can honestly support.
+
+**The INDEX COLUMN is inside the guarded space too, as of the round after
+this one.** The paragraph that stood here said the bound guarded the shape and
+not the ADD row's column length, that `jax.ops.segment_sum` reaches a column of
+4 on an admitted operand, and that the axis was gauged by a mutation battery
+rather than an exhaustive sweep. Naming a residual is not closing one, and this
+one was then demonstrated: a census of `len(ks)` at the row across the whole
+suite reaches `{1, 2, 3, 4, 6, 254, 255}` — 5 absent, 7..253 absent — and a
+line-neutral mis-route wrong only at a column of 5 turned a `violated-witness`
+into `discharged` with the suite green. The admitted column space is now the
+union of three exhaustively swept families and nothing else: one index over
+every gauged shape; every column of `range(n)` to the power of the length, for
+lengths up to 6, on a RANK-1 operand; and the single-element operand at every
+length up to 255, where every index is forced to 0 and the length is the only
+free parameter. Outside that the row refuses.
+
+What the column bound gives up, stated because a narrowing that is not stated
+is a silent one: a multi-index `segment_sum` onto an operand of rank 2 or 3 —
+normal-matrix assembly, say — now declines. Exhausting `n ** length` over every
+gauged shape is 12510 traces and 80 seconds against 3 for the rank-1 family,
+and the census says nothing **in the pytest-driven tree** reaches the row with
+more than one index on a higher-rank operand. That scope is the census's, not
+the repository's: `corpus/` is driven by hand, and `corpus/run_census.py`
+classifies primitives out of jaxprs without ever reaching the row.
+
+**And "normal-matrix assembly, say" is not hypothetical here.**
+`tests/test_scatter_gauge_jax.py`'s own header names "a small normal-matrix
+assembly in the segment_sum style" among the programs it gauges, and its
+`m-assembly` fixture is that program: `jax.ops.segment_sum` over per-point
+(2, 2) blocks, which is a rank-3 operand with an index column of 3. Posed
+through the slicing face at the fixture's own declared shapes it now refuses —
+*"index column of 3 element(s) on operand (2, 2, 2) is outside the GAUGED
+accumulate column space"* — while the same accumulation flattened to a rank-1
+operand is admitted. Nothing in the tree fails, because the in-tree
+`m-assembly` cases are settled by the interval transfer and never reach the
+row. A downstream harness that escalates one gets UNKNOWN, and that is the
+shape of program most likely to meet this bound.
+
 ## What this table says that the earlier numbers did not
 
 - **"35 of 39 transfers gauged, zero survivors"** was a *transfer-face* figure.

@@ -946,6 +946,113 @@ def _exact_static_elements(eqns, consts, atom):
     return read(atom)
 
 
+# ── THE GAUGED SPACE OF THE TWO SCATTER ROWS, AND WHY ADMISSION STOPS THERE ──
+#
+# A BOUNDED SWEEP IS BLIND JUST PAST ITS BOUND, AND THIS PROJECT HAS NOW
+# WATCHED THAT COST IT FIVE TIMES. A route gauge sampling k = {0} then {0, 2};
+# field probes by name then by type; an arity family widened 2 -> 3 and then
+# 3 -> 8, where the escape sat at EXACTLY the declared ceiling; and the two
+# route corruptions this pair of constants answers. Each time the reflex was
+# to raise the bound, and each time the next corruption was written one step
+# past the new one. Measured on `e35de13`, both line-neutral, both a
+# `violated-witness` turned `discharged` — a MISSED violation, the direction
+# the VERIFIED bar exists for — and both with the FULL SUITE GREEN in both
+# columns (2044 / 2 and 2040 / 6):
+#
+#   * `i == (k if n != 9 else 0)` in the SET row. `_set_space` exhausts
+#     1 <= n <= 8 and the surface sweeps n in 3..6, so n = 9 is gauged by
+#     nothing: `x=(9,); s=x.at[2].set(u); assert s[0]-x[0] >= 1.0` went
+#     `violated-witness` -> `discharged`, while n = 8 and n = 10 stayed honest.
+#   * `groups[(k if operand_shape[0] < 4 else 0) * rowsz + t]` in the ADD row.
+#     `_add_space`'s dims stop at 3, so it contains NO axis of length >= 4,
+#     and the sweep's non-degeneracy clause was on `rowsz` — the TRAILING
+#     product — which structurally cannot see a LEADING-axis-keyed corruption.
+#     `(2,2)` and `(3,2)` stayed `violated-witness`; `(4,2)`, `(5,2)` and
+#     `(6,2)` went `discharged`.
+#
+# So the answer is not a larger number. It is that THE ADMITTED SPACE MUST NOT
+# EXCEED THE GAUGED SPACE: past these bounds the two rows DECLINE, so the
+# routing code cannot execute on a shape nothing measured. A declined
+# obligation does not slice, does not emit and is never solver-decided — it
+# stays undischarged and the verdict is UNKNOWN — so this fails toward the
+# same side every other decline in this module does. It is not free: it costs
+# REFUTATIONS as well as discharges past the bound, which SOUNDNESS.md records
+# rather than leaving as a silent narrowing.
+#
+# The sweeps that define these numbers are
+# `tests/test_scatter_gauge_jax.py::_set_space` and `::_add_space`, and that
+# file asserts its bounds EQUAL to the four below in both directions: widening
+# admission without widening the sweep is red, and shrinking the sweep below
+# admission is red. That is the whole mechanism — one identifiable place, so
+# widening the rows is a deliberate act with a gauge attached.
+#
+# THE SIXTH INSTANCE WAS THE ADD ROW'S INDEX COLUMN LENGTH, and the paragraph
+# that used to stand here named it and left it open: "`_add_space` sweeps a
+# single written index, while `jax.ops.segment_sum` reaches an index column of
+# 4 on an operand these bounds admit; that axis is gauged by the segment-sum
+# mutation battery, which is a battery and not an exhaustive sweep, and nothing
+# here narrows admission to it." Naming a residual is not closing it, and this
+# one was then demonstrated. A census of `len(ks)` at this row across the whole
+# suite, by instrumentation, at `e35de13` and at `3e107cf` alike:
+#
+#     |ks| reaching the row:  {1, 2, 3, 4, 6, 254, 255}
+#
+# — 5 is absent, and so is everything in 7..253. One line, line-neutral:
+#
+#     groups[k * rowsz + t].append((j if len(ks) - 5 else 0) * rowsz + t)
+#
+# On operand shape `(2,)`, which these bounds explicitly admit, driven through
+# `escalate`: |ks| in {2,3,4,6,7,8} stayed `violated-witness` (honest) and
+# |ks| = 5 went `discharged` — a MISSED violation, with the full suite green.
+#
+# So the index column is bounded the way the shape is: THE ADMITTED COLUMN
+# SPACE IS THE GAUGED COLUMN SPACE, and it is the union of two families that
+# are each swept EXHAUSTIVELY rather than sampled —
+#
+#   * a single written index, over every gauged SHAPE — the sweep that already
+#     existed (`tests/test_scatter_gauge_jax.py::_add_space`);
+#   * every column of length 1..`_ADD_ROW_GAUGED_MAX_COLUMN` on a RANK-1
+#     operand (`::_add_column_space`, exhaustive over `range(n) ** length`,
+#     checked against jax's own accumulation); and
+#   * the SINGLE-ELEMENT operand at every column length up to
+#     `_ADD_ROW_GAUGED_MAX_SINGLE_SEGMENT`. On a one-element operand every
+#     index is forced to 0 and `rowsz` is 1, so there is exactly ONE column per
+#     length and the length is the only free parameter — which is why it can be
+#     exhausted to 255 at all. This is the family the per-obligation element
+#     budget's own boundary gate rides on (`gate_budget_boundary`: 2n + 3 terms,
+#     n = 254 slices at 511 <= 512 and n = 255 declines at 513), and the census
+#     above says it is the ONLY thing in this repo that reaches the row with
+#     |ks| > 6. It is accounted for rather than declined by accident.
+#
+# WHY THE COLUMN SWEEP STOPS AT RANK 1, which is an admission bound and not
+# just a sweep bound: the column space is `n ** length`, so exhausting it over
+# every gauged shape costs 12510 traces and 80 seconds — measured, against 3
+# for the rank-1 family. The census is what makes the trade defensible rather
+# than convenient: every |ks| > 1 that reaches this row anywhere in the suite
+# is on a RANK-1 operand. So the row declines a multi-index column above rank
+# 1, which nothing here reaches, instead of running the arithmetic on a space
+# a 3-second sweep could not cover.
+#
+# WHAT THAT COSTS, stated rather than left to be discovered: a `segment_sum`
+# accumulating several update ROWS onto a rank-2 operand — normal-matrix
+# assembly, say — now declines, and so does any column longer than
+# `_ADD_ROW_GAUGED_MAX_COLUMN` on a multi-element operand. The direction is
+# the same one every other decline here fails in: the obligation is not
+# sliced, not emitted and never solver-decided, so it comes back `unknown`
+# rather than wrong. It costs REFUTATIONS as well as discharges, which
+# SOUNDNESS.md records.
+#
+# The interval TRANSFER is deliberately untouched: it has its own row
+# arithmetic and its own gauge, and bounding it here would turn a bounded
+# emission into a ⊤ box for no measured reason.
+_SET_ROW_GAUGED_MAX_LEN = 8
+_ADD_ROW_GAUGED_MAX_RANK = 3
+_ADD_ROW_GAUGED_MAX_DIM = 3
+_ADD_ROW_GAUGED_MAX_SIZE = 12
+_ADD_ROW_GAUGED_MAX_COLUMN = 6
+_ADD_ROW_GAUGED_MAX_SINGLE_SEGMENT = 255
+
+
 def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
     """Per-OUTPUT-element ``(operand position, source flat element)`` routes for
     a static-index ``scatter`` SET equation — deliberately the same shape
@@ -971,7 +1078,12 @@ def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
       under ``FILL_OR_DROP`` an out-of-range update is DROPPED, so the
       program's result is ``out = operand`` — emitting substitution would
       assert the update landed, which is a false model. The transfer declines
-      the same case for the same reason.
+      the same case for the same reason;
+    * an operand LONGER THAN THE GAUGE (:data:`_SET_ROW_GAUGED_MAX_LEN`). The
+      routes below are exhaustively gauged against jax's own execution for
+      every ``(n, k)`` up to that length and by nothing past it, and a
+      line-neutral mis-route wrong ONLY at n = 9 was measured green through
+      the whole suite. See the block comment above the constants.
 
     ``unique_indices`` and ``indices_are_sorted`` are deliberately NOT relied
     on: they are caller promises jax does not verify, and the covered form
@@ -1069,6 +1181,15 @@ def _scatter_set_plan(eqns, consts, eqn) -> list[tuple[int, int]]:
             f"DROPPED, so the result is the operand unchanged rather than a "
             f"substitution, and that is never guessed"
         )
+    if operand_shape[0] > _SET_ROW_GAUGED_MAX_LEN:
+        raise _Decline(
+            f"'scatter' operand axis {operand_shape[0]} is outside the GAUGED "
+            f"static-index set row space (1..{_SET_ROW_GAUGED_MAX_LEN}): the "
+            f"route sweep exhausts every (length, written index) up to that "
+            f"bound and measures nothing past it, and a route nothing gauged "
+            f"is never guessed — a bounded sweep is blind just past its "
+            f"bound, so admission stops where the gauge does"
+        )
     n = _size(operand_shape)
     return [(2, 0) if i == k else (0, i) for i in range(n)]
 
@@ -1088,8 +1209,18 @@ def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
     the one form oracle, shared with the propagation transfer), on
     indices that are not statically derivable from constants through
     structural routing (traced/dynamic indices), on non-integral index
-    values, and on out-of-range indices (mode-dependent drop/clamp,
-    never guessed).
+    values, on out-of-range indices (mode-dependent drop/clamp, never
+    guessed), on an operand SHAPE OUTSIDE THE GAUGE
+    (:data:`_ADD_ROW_GAUGED_MAX_RANK` / ``_DIM`` / ``_SIZE``) — the group
+    arithmetic below is gauged against jax's own accumulation over exactly
+    that shape space, and a line-neutral corruption keyed on a LEADING axis
+    of 4 or more was measured green through the whole suite — and on an INDEX
+    COLUMN outside the gauge (:data:`_ADD_ROW_GAUGED_MAX_COLUMN` /
+    ``_SINGLE_SEGMENT``), which is the same argument on the axis the shape
+    bounds do not touch: a census of ``len(ks)`` at this row across the whole
+    suite reaches ``{1, 2, 3, 4, 6, 254, 255}``, and a mis-route wrong ONLY at
+    a column of 5 was likewise green. See the block comment above the
+    constants.
     """
     from stelling.propagate import (
         _check_unique_indices_promise,
@@ -1173,6 +1304,42 @@ def _scatter_add_plan(eqns, consts, eqn) -> list[list[int]]:
     # oracle the transfer uses — promise-violated duplicates are
     # implementation-defined and decline at both layers identically
     _check_unique_indices_promise(eqn.params_dict(), ks, _Decline)
+    if (
+        len(operand_shape) > _ADD_ROW_GAUGED_MAX_RANK
+        or any(d > _ADD_ROW_GAUGED_MAX_DIM for d in operand_shape)
+        or _size(operand_shape) > _ADD_ROW_GAUGED_MAX_SIZE
+    ):
+        raise _Decline(
+            f"'scatter-add' operand shape {operand_shape} is outside the "
+            f"GAUGED accumulate row space (rank at most "
+            f"{_ADD_ROW_GAUGED_MAX_RANK}, every axis at most "
+            f"{_ADD_ROW_GAUGED_MAX_DIM}, at most "
+            f"{_ADD_ROW_GAUGED_MAX_SIZE} elements): the shape sweep exhausts "
+            f"that space against jax's own accumulation and measures nothing "
+            f"past it, and a row arithmetic nothing gauged is never guessed — "
+            f"a bounded sweep is blind just past its bound, so admission "
+            f"stops where the gauge does"
+        )
+    if not (
+        len(ks) == 1
+        or (len(operand_shape) == 1
+            and len(ks) <= _ADD_ROW_GAUGED_MAX_COLUMN)
+        or (_size(operand_shape) == 1
+            and len(ks) <= _ADD_ROW_GAUGED_MAX_SINGLE_SEGMENT)
+    ):
+        raise _Decline(
+            f"'scatter-add' index column of {len(ks)} element(s) on operand "
+            f"{operand_shape} is outside the GAUGED accumulate column space "
+            f"(one index on any gauged shape; at most "
+            f"{_ADD_ROW_GAUGED_MAX_COLUMN} on a rank-1 operand; at most "
+            f"{_ADD_ROW_GAUGED_MAX_SINGLE_SEGMENT} on a single-element "
+            f"operand, where every index is forced to 0 and the length is the "
+            f"only free parameter): the column sweep exhausts that space "
+            f"against jax's own accumulation and measures nothing past it, "
+            f"and a row arithmetic nothing gauged is never guessed — a "
+            f"line-neutral mis-route wrong ONLY at a column of 5 was measured "
+            f"green through the whole suite"
+        )
     rowsz = _size(operand_shape[1:])
     groups: list[list[int]] = [[] for _ in range(_size(operand_shape))]
     for j, k in enumerate(ks):
