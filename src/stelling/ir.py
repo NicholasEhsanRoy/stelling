@@ -615,6 +615,17 @@ def _validate_jaxpr(jaxpr: Jaxpr, where: str) -> None:
 # census reports which primitives it reached, and a primitive absent from this
 # table is simply unconstrained here).
 #
+# RE-DRIVEN ON THE OTHER TESTED SERIES 2026-08-07, because a required-key
+# table measured on one series is a load-path refusal aimed at the other.
+# 21 forms on jax 0.10.2 reached 18 of the 19 entries (all but
+# `stelling_any`, which is stelling's own and never jax-traced): every
+# required key present, and the key set constant per primitive, exactly as
+# on 0.11.0. This table is series-stable so far — which is a measurement
+# and not a guarantee, so re-drive it per series rather than assuming the
+# result travels. `scan` is the standing counterexample to assuming: its
+# key set is disjoint across these two series (`num_consts`/`num_carry`
+# vs `ft_in`/`ft_out`), and it is not in this table.
+#
 # WHY THIS EXISTS, and it is the opposite of the defect it closes. Readers were
 # taught to test key PRESENCE rather than `.get()`, because a key present with
 # value None is a real jax form whose meaning differs from absence — for
