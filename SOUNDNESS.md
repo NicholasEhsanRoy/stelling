@@ -1865,5 +1865,97 @@ verdicts:
   `test_tested_jax_series_is_silent` passes on 0.11 too — the suite alone
   cannot tell which series a lane ran. Before this, the honest floor was
   `jax>=0.11`.
+- **2026-08-07 (pre-release): a zero-element assumed predicate narrowed
+  the declared box to a SUBSET and minted VERIFIED over it — a WRONG
+  VERIFIED, reachable from the public API with two `any_array` calls.**
+  Direction: **wrong VERIFIED → UNKNOWN**. This is the unsound direction,
+  not capability loss; every affected verdict was false.
+
+  `assume` reads its predicate universally, and jax broadcasts an `and`
+  whose operand is size-0 to `bool[0]`: a universal over no elements,
+  true at every point, admitting the ENTIRE declared box. The `and`
+  recursion in `propagate._apply_assumed_pred` nonetheless classified
+  each conjunct as if it stood alone, so
+
+      k = any_array((),   "float64", (-1.0, 1.0))
+      z = any_array((0,), "float64", (-1.0, 1.0))
+      assume((k >= 0.5) & (z >= 2.0))
+      return (assert_(k > 0.0),)
+
+  narrowed `k` to `[0.5, 1.0]` and returned **VERIFIED** with the note
+  `assume conjunct DROPPED … a superset` — while the narrowing had gone
+  the other way. The one-sidedness the whole design rests on ("a proof
+  over a superset is a proof over the subset") does not hold for a
+  subset: independent dense sampling of the declared box, with no
+  stelling in the loop, found 50 231 of 100 006 admitted points
+  violating; `k = -1.0` is admitted by the declaration, admitted by the
+  assume, and violates. The control with the assume removed returns
+  UNKNOWN, so the assume was the whole of the false claim.
+
+  **Which verdicts are retroactively invalid.** Any VERIFIED from a
+  harness whose `assume` predicate has zero elements — i.e. any `assume`
+  whose predicate array is `bool[0]`, which happens whenever ANY operand
+  anywhere in its `&` tree is size-0, because a size-0 operand forces
+  every enclosing `and` output to be size-0 (measured over all 256
+  ordered pairs from a 16-shape set: 31 pairs lose an operand element,
+  all 31 with a zero-size output, and no size-0 operand ever broadcasts
+  to a nonzero-size output). It does not require a size-0 *declaration*:
+  a comparison of a rank-0 against a size-0 value is itself `bool[0]`.
+  Eleven constructions were measured VERIFIED-over-a-subset: size-0 in
+  either operand position, nested at either depth, mixed with `|`, shape
+  `(1,)` against `(0,)`, a rank-2 unit axis against a zero axis, a size-0
+  comparison of nonzero operands, `eq` and `le` narrowings, and one
+  inside a `cond` branch — each in both `vacuity_mode`s, at both `refine`
+  depths, and under both semantics.
+
+  **The rule now in the code.** A conjunct may be treated as separately
+  assumed only if the predicate it belongs to actually constrains:
+  `all(A & B)` implies `all(A)` only when every element of `A` survives
+  the broadcast into the output. So a predicate node with zero elements
+  licenses no narrowing, no satisfiability claim, and no
+  unsatisfiable-precondition refusal, and the classification stops
+  there — at the root, at every `and` node, and at every leaf.
+
+  **The same root cause also minted false LOUD refusals**, in the
+  opposite direction: `assume((k >= 2.0) & (z >= 2.0))` on `k` declared
+  `[-1, 1]` raised `UnsatisfiableAssumptionError` — "harness defect;
+  nothing was verified" — about a precondition that is `bool[0]` and
+  therefore true at every point of the declared box. Both the empty-meet
+  and the strict-boundary-collapse refusals did this. They no longer
+  fire on a zero-element predicate.
+
+  **Cost, measured, every unit of it confirmed unsound.** Across the 21
+  swept constructions × 2 vacuity modes × 2 refine depths (84 rows): 44
+  rows VERIFIED → UNKNOWN, every one with a violating admitted point in
+  the independent oracle; 8 rows `UnsatisfiableAssumptionError` →
+  UNKNOWN, both constructions satisfiable; 4 rows REFUTED → UNKNOWN,
+  the only genuine capability loss (that refutation was sound — a
+  witness drawn from the subset is still inside the admitted set — and
+  it is withheld because the drop machinery cannot yet tell an exact
+  drop from a widening one). 28 rows unchanged, **0 moves into
+  VERIFIED**, and no post-fix VERIFIED anywhere in the sweep has a
+  violating admitted point. The existing suite is unmoved: 2151 passed /
+  2 skipped on jax 0.11.0 and on 0.10.2, the only red being the
+  generated `docs/supported-primitives.md` line-number citation, which is
+  regenerated.
+
+  **Why no test caught it.** An instrumented full-suite run recorded 264
+  calls into assume classification with atom shapes `()`, `(1,)`, `(2,)`,
+  `(3,)`, `(5,)` — `size0` in **0 of 264**. The suite's size-0
+  declarations all flow into `assert_` or a `jnp.all` reduction; none
+  reaches an `assume` operand. A prior instrument at the adjacent
+  `_conjunct_certainly_true` site read the same absence over 93 calls and
+  concluded the size-0 branch was unreachable; it was measuring a suite
+  with no size-0 assume in it.
+
+  **What to re-run:** any recorded VERIFIED whose harness passes a
+  possibly-empty shape to `any_array`, or compares values of different
+  ranks inside an `assume`. Re-`check()` it: a `zero elements … it
+  constrains nothing` note where a `assume CONSTRAINED … narrowed var`
+  note used to be is this change, and the old VERIFIED was false. Every
+  construction is a permanent regression test
+  (`tests/test_size0_assume.py`, and the jax-free half in
+  `tests/test_assume_constrain.py`); all 70 of the former fail on the
+  parent commit's source.
 
 *(no releases yet)*
