@@ -277,3 +277,133 @@ so (`-rs` requests skip reasons ONLY; it suppresses the failure summary
 that `-ra` would print). **A slow run at high load is not evidence for a
 flake**, and a filtered summary is not a summary. Regenerate after every
 `propagate.py` edit, and read failures with `-ra`.
+
+---
+
+# RE-SCORING at `ab4b9b5` (append-only; a later, blinded pass)
+
+Written by a different agent, working from a blinded audit of the branch
+and from its own measurements. Nothing above the outcomes rule is edited.
+Same protocol as above: `<W>` =
+`/tmp/claude-1000/-home-nick-MSF-stelling/e443f4ad-79d3-43d4-bc29-87a910409ae6/scratchpad`,
+`<PY>` = `/home/nick/venvs/stelling-jax/bin/python`, every run exported
+`JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 PYTHONPATH=<W>/P1_tip/src` after
+`<PY> -c "import stelling; print(stelling.__file__)"` resolved inside the
+worktree.
+
+**C1 — FALSIFIED. There is a fourth path, and it was live on `main`.**
+
+An assume whose only content is a **branch-scoped unsatisfiable** conjunct
+(mechanism **D**). Inside a possibly-untaken `lax.cond` branch,
+`_unsatisfiable` degrades rather than raising (audit F2, correctly), so it
+appends to `vacuous` and NOT to `dropped`; the whole-drop guard read
+`if dropped or not vacuous:`, which is FALSE in exactly that case, and the
+note and the two flags were gated together. Reproduced at **both** commits
+(`<PY> <W>/repro_p1.py`, `<PY> <W>/repro_p1b.py`), x in [-1,1]^3:
+
+```
+                          9efea6f     3afbf01
+branch/assume+assert      REFUTED     REFUTED    witnesses=(), assume_dropped=False
+branch/assert only        REFUTED     REFUTED    <- the assume changed nothing
+top level, same assume    RAISE       RAISE      UnsatisfiableAssumptionError
+```
+
+All three `_unsatisfiable` detection sites reach it: empty meet
+(`propagate.py:5404` at 3afbf01), strict-boundary collapse (`:5432`),
+definitely-false constant comparison (`:5302`). Oracle over 59 269 points
+(50 000 uniform + 8 corners + a 21^3 grid): 29 337 take the branch, **0**
+of them satisfy the assume — the region is EMPTY and the implication is
+vacuously TRUE.
+
+**The falsifier was narrower than the claim it was attached to.** C1 claims
+"exactly three independently reachable code paths **on `main`**"; its
+falsifier admits "a fourth path found by any later run of **the same
+instrument**". The instrument is `scratchpad/work/corpus.py`, whose axes
+are 9 assert shapes x 3 assume-composition styles x 42 conjunct sets —
+no control-flow axis. D is gated on `_Propagator.branch_depth`, and
+`grep -n branch_depth src/stelling/propagate.py` returns exactly one
+increment, inside the `cond` handler. **A straight-line corpus cannot
+reach D by construction**, so no run of that instrument could ever have
+falsified C1. A falsifier that the instrument cannot produce is not a
+falsifier; it is a restatement. The lesson is not "the corpus was too
+small" — it is that a claim quantified over a whole file was tested by an
+instrument whose own description named the axes it varied, and control
+flow was not among them.
+
+Closed at `ab4b9b5` by separating the note gate from the flag gate;
+`test_a_branch_scoped_unsatisfiable_assume_no_longer_refutes` covers all
+three detection sites.
+
+**C6 and C7 — MET, but neither can distinguish this fix from doing
+nothing.** C6 asks that REFUTED counts be monotonically non-increasing and
+WRONG-VERIFIED stay 0; C7 asks that 60 rows be unchanged. **Both are
+satisfied by the empty change**, and C6 is also satisfied by a change that
+returns UNKNOWN for every row in the corpus. Only C4 and C5 ("zero
+mechanism-A / mechanism-B rows remain") require anything to move, and they
+too are satisfied by a blanket UNKNOWN. **No clause of this
+pre-registration would fail a maximally-conservative no-op-everything
+change**; what would fail it is the test suite (C9), which pins many
+REFUTEDs. That is worth recording because the report reads as though the
+eleven clauses jointly constrained the outcome, and they did not — C9 was
+carrying more of the weight than its wording suggests.
+
+**C7 — FALSE at the tip. A reserved row MOVED.** The scored outcome says
+"the 60 mechanism-C rows are byte-identical before and after". They are
+not, at `refine="affine"`. The affine guard keys on
+`propagation.assume_dropped`, a whole-run flag with no order in it, while
+the interval withhold reads `uncertified` at assert time — so the two legs
+scope an assume differently, and the branch changed the query-scoped one.
+Measured (`<PY> <W>/probe_p3.py`), an assert traced BEFORE a wholly-dropped
+assume over an empty region:
+
+```
+                                  refine=None   refine="affine"
+affine-decided,  9efea6f            UNKNOWN        REFUTED
+affine-decided,  3afbf01            UNKNOWN        UNKNOWN     <- MOVED
+affine-decided,  no assume at all    UNKNOWN        REFUTED     <- leg still works
+interval-decided, 9efea6f/3afbf01    REFUTED        REFUTED
+```
+
+The direction is REFUTED -> UNKNOWN, so the registered hard boundary
+("withholding is the only direction I will move a verdict in") HELD. What
+did not hold is C7's own scored claim of no movement. The probe that
+scored it, `probe_branches.py`, and the pin,
+`test_an_assume_after_the_assert_is_the_reserved_ordering_question`, both
+ran at `refine=None` only — **blind to the exact half that moved**. The
+pin is now `test_an_assume_after_the_assert_is_pinned_on_BOTH_legs`, four
+cells, and the leg disagreement itself is pinned by
+`test_the_two_legs_do_not_yet_agree_on_assume_ordering`.
+
+The principal has since ruled the question **query-scoped**. Implementing
+that uniformly is a separate change with its own pre-registration; none of
+it is done here.
+
+**C8 — line numbers STALE, substance HOLDS.** The scored outcome cites
+4967 / 5035 / 5089. At `3afbf01` the three sites are **4977 / 5061 /
+5115**; at `ab4b9b5`, **4977 / 5061 / 5140**. The drift is this branch's
+own later commits moving lines under a figure quoted from an earlier one —
+the same trap the C9 re-scoring records for `docs/supported-primitives.md`,
+one file over. The substance is unaffected and is now stronger: site 5140
+was inside `if dropped or not vacuous:` and is now unconditional, so
+`assume_dropped or coverage.constrained` is total on a strictly larger set
+of paths than when C8 was scored.
+
+**C11 — MET as scored, with one correction to what it proves.** The
+discriminant's docstring advertised "three refusals, each load-bearing".
+Full-suite mutation at `ab4b9b5` (2180 tests, `<W>/sweep.sh`) shows two of
+the three change no outcome: the **non-bool** refusal is unreachable in
+effect (jax promotes `bool & int32` to an *int32* `and`, so
+`_classify_assumed_pred` refuses the whole tree at the top, before the
+recursion that fills `harmless`), and the **maybe-NaN under ieee** refusal
+is dead (`_ieee_cmp` returns flag `False` on comparison outputs and
+degrades a would-be definite TRUE to `BOOL_UNKNOWN` on a flagged operand,
+so a flagged bool is `[0, 1]`, never `[1, 1]`). The docstring now says so.
+C11's measured cost figures are untouched by this.
+
+**What this re-scoring does NOT revisit**: C2, C3, C4, C5, C9, C10 and the
+hard boundary were re-read and not re-measured; the corpus tooling they
+cite (`<W>/work/`) was destroyed with the scratchpad before this pass ran,
+so their figures are carried forward as reported, not independently
+re-confirmed. The `reduce_and` look-through the audit identifies as
+recovering ~90% of the lost refutations is a separate spike and is not
+touched here.

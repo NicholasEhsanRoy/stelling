@@ -1867,27 +1867,49 @@ verdicts:
   `jax>=0.11`.
 
 - **2026-08-07 (pre-release): REFUTED over a superset of the assumed
-  region — two paths, both wrong, both closed; verdicts move REFUTED →
+  region — three paths, all wrong, all closed; verdicts move REFUTED →
   UNKNOWN and in no other direction.** F7's one-sided rule — *VERIFIED
   over a superset implies VERIFIED over the subset, so keep it; REFUTED
   over a superset does not, so withhold it* — was implemented on the
-  whole-drop path and reached by neither of two others. **(A)
-  `propagate._assume_constrain` routes on whether ANY conjunct narrowed,
-  so a conjunction that narrows on one conjunct and drops another took
-  the `if narrowed:` branch, where the drop earned a note calling the
-  result "a SUPERSET" and then refuted over it — setting neither
-  `uncertified` (the interval withhold) nor `assume_dropped` (the solver
-  and affine legs' marking). **(B)** `affine.refine_propagation` declines
-  wholly on `coverage.constrained`, which a DROPPED assume never raises,
-  so the refinement re-minted a violation the interval leg had already
-  judged and withheld — the same query returning UNKNOWN at `refine=None`
-  and REFUTED at `refine="affine"`.
+  whole-drop path and reached by none of three others.
+  **(A)** `propagate._assume_constrain` routes on whether ANY conjunct
+  narrowed, so a conjunction that narrows on one conjunct and drops
+  another took the `if narrowed:` branch, where the drop earned a note
+  calling the result "a SUPERSET" and then refuted over it — setting
+  neither `uncertified` (the interval withhold) nor `assume_dropped` (the
+  solver and affine legs' marking).
+  **(B)** `affine.refine_propagation` declines wholly on
+  `coverage.constrained`, which a DROPPED assume never raises, so the
+  refinement re-minted a violation the interval leg had already judged and
+  withheld — the same query returning UNKNOWN at `refine=None` and
+  REFUTED at `refine="affine"`.
+  **(D)** an assume whose only content is a **branch-scoped
+  unsatisfiable** conjunct. Inside a possibly-untaken `lax.cond` branch
+  `_unsatisfiable` must not raise (the assume is branch-scoped and the
+  other branch is real, audit F2): it degrades to a branch-local vacuity
+  note, appending to `vacuous` and NOT to `dropped`. The whole-drop guard
+  read `if dropped or not vacuous:` — false in exactly that case — so the
+  note and the two flags were gated *together* and neither flag was set.
+  `x ∈ [-1,1]^3`, `cond(x[0] > 0, yes, no)` with `yes: assume(v >= 2.);
+  assert_(v > 5.)` returned **REFUTED, witnesses=()** — identical to the
+  same query with the assume deleted, while the same assume at top level
+  RAISES `UnsatisfiableAssumptionError`. The run's own note said
+  "obligations in this branch MAY BE VACUOUS under the branch's
+  precondition" beside that REFUTED. All three detection sites reached it
+  (empty meet, strict-boundary collapse, definitely-false constant
+  comparison). **This one was live on `main` at `9efea6f` and still live
+  at `3afbf01` after A and B were closed** — the earlier pass's
+  instrument could not reach it, because every corpus row was a
+  straight-line harness and D needs a `cond`. The fix is the rule the
+  mixed path already carried (`if restricting or vacuous:`): the note gate
+  is not the flag gate.
   **Which verdicts are retroactively invalid**: any REFUTED on a query
-  whose assumed region is EMPTY and whose assume dropped a conjunct —
-  the implication is then vacuously TRUE and the tool said the author's
-  correct program was broken. Both carry `witnesses=()`: the refutation
-  is set-level, so there is no concrete point to check the precondition
-  against, which is why neither had a user-visible tell. The measured
+  whose assumed region is EMPTY and whose assume dropped a conjunct or
+  was branch-scoped-unsatisfiable — the implication is then vacuously
+  TRUE and the tool said the author's correct program was broken. All
+  three carry `witnesses=()`: the refutation is set-level, so there is no
+  concrete point to check the precondition against, which is why none had
+  a user-visible tell. The measured
   exemplar, verbatim at `9efea6f`, x ∈ [-1,1]^3, `assert_(x > 5.)`:
   `assume(jnp.all(x >= 2.))` → UNKNOWN, but
   `assume((x >= -1.) & jnp.all(x >= 2.))` → **REFUTED** — and `x >= -1.`
@@ -1898,7 +1920,13 @@ verdicts:
   numpy oracle — 50 000 samples plus every corner plus a grid, stelling
   never consulted — **128 wrong REFUTEDs closed and 118 legitimate
   REFUTEDs lost, every move REFUTED → UNKNOWN; zero VERIFIED moved in
-  either direction, and zero wrong VERIFIEDs before or after.** The loss
+  either direction, and zero wrong VERIFIEDs before or after.** That
+  corpus covers A and B only: every row is a straight-line harness, so it
+  is blind to D by construction, and D's cost is not in those figures.
+  D's fix is one-sided by inspection and by test — it sets two withhold
+  flags on a path that previously set neither, touching nothing else —
+  and `test_the_branch_withhold_is_ONE_SIDED` pins that a discharge
+  inside the vacuous branch still discharges. The loss
   is real: nothing at the interval level establishes that a dropped
   conjunct is SATISFIABLE, so a genuine refutation over a non-empty
   region is withheld alongside the vacuous ones
@@ -1908,15 +1936,31 @@ verdicts:
   the boxes in force, because such a conjunct restricted nothing and its
   absence widened nothing — that recovered 20 of the 60 verdicts the
   plain withhold cost on the relational corpus, with 0 unsound
-  restorations. **Still standing, deliberately**: an `assume` traced
-  AFTER the `assert_` it should constrain still refutes over an empty
-  region (60 of the corpus's rows). That is a question about what an
-  `assume` SCOPES OVER — nothing in `assume`'s or `assert_`'s docstring
-  makes it order-scoped — not about superset judging, and it is reserved.
-  Current behaviour is pinned by
-  `test_an_assume_after_the_assert_is_the_reserved_ordering_question` so a
-  ruling either way lands loudly. Constructions:
-  `tests/test_vacuous_refutation.py`; pre-registration and outcomes:
-  `scratchpad/PREREG_REF1.md`.
+  restorations. **Still standing**: an `assume` traced AFTER the
+  `assert_` it should constrain still refutes over an empty region at the
+  interval leg (60 of the corpus's rows). That is a question about what
+  an `assume` SCOPES OVER, not about superset judging. The principal has
+  ruled it **query-scoped**; implementing that uniformly is a separate
+  change with its own pre-registration, and none of it is done here.
+  **The two legs do not yet agree on it, and this branch moved one of
+  them.** The affine guard keys on `propagation.assume_dropped`, a
+  whole-run flag with no order in it, while the interval withhold reads
+  `uncertified` at assert time — so the affine leg is already
+  query-scoped and the interval leg is still order-scoped. Measured
+  (`refine=None` / `refine="affine"`) on an assert traced before a
+  wholly-dropped assume over an empty region: interval-decided
+  `REFUTED / REFUTED` at both `9efea6f` and the branch; affine-decided
+  `UNKNOWN / REFUTED` at `9efea6f` but `UNKNOWN / UNKNOWN` on the branch,
+  with the no-assume control still `UNKNOWN / REFUTED` on both. The
+  direction is REFUTED → UNKNOWN and agrees with the ruling, but it
+  arrived as a side effect of B's guard rather than as a decision, and it
+  falsifies PREREG_REF1's scored C7 (see its re-scoring). All four cells
+  are now pinned by
+  `test_an_assume_after_the_assert_is_pinned_on_BOTH_legs`, and the
+  disagreement itself by
+  `test_the_two_legs_do_not_yet_agree_on_assume_ordering`, so the
+  forthcoming query-scoping change lands loudly wherever it touches.
+  Constructions: `tests/test_vacuous_refutation.py`; pre-registration and
+  outcomes: `scratchpad/PREREG_REF1.md`.
 
 *(no releases yet)*
