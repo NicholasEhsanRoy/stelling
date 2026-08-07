@@ -92,6 +92,47 @@ on 0.10.2, so it cannot have been lost in it. CONFIRMED.
 | `int4`/`uint4` exist | `hasattr(jnp, …)` | True | True |
 | `jnp.roll` traces to a `jit` equation (`transparent-primitives.md:14`) | `jax.make_jaxpr` | `jit`+`concatenate`+`slice` | same |
 
+## D2. Numeric / IEEE claims — one probe, diffed byte for byte
+
+`probe_numeric.py` and `probe_ftz.py` drive every concrete value claim in
+`interval.py`, `propagate.py` and `obligation.py` and print a normalised
+table. `diff` of the two series' output, banner line excluded, is **empty**:
+
+```
+diff n_0.11.0.txt n_0.10.2.txt   -> no output
+```
+
+Covered, all identical on both: the three association orders of `a+b+c+d`
+at ±1e308 (`nan` / `0.0` / `+inf`, each matching its own jaxpr order);
+`lax.max`/`lax.min` propagating NaN in both operand orders; `pow(NaN,0)=1`
+and `pow(1,NaN)=1`; `pow(base,0)=1` for base ∈ {0, −3, 2.5, ±inf};
+`float32(1e-45) > 0` False; `5e-324 > 0` False and `5e-324 == 1e-320`
+True; f64/f32 subnormal flush in arithmetic, comparisons and libm, eager
+**and** jit; f32→f64 convert exactness; `int4`/`uint4` ranges and wrap,
+eager and jit; `jnp.square` as its own primitive; `select_n(-1)` → case 0.
+
+The int8 index claim (`obligation.py:1138`, `propagate.py:1438`) is the
+sharpest of these and is sound on both: `lax.scatter_add` with an int8
+index column writes at operand length **128** (`5.0`) and drops at **129**
+(`0.0`), identically on 0.10.2 and 0.11.0.
+
+One probe artifact worth recording so nobody re-finds it as a bug: under
+jit, `x * 1.0` returns the subnormal unflushed, because XLA simplifies the
+identity multiply away and no arithmetic is emitted. `x * 2.0`, `x + x`,
+`sqrt(x)` and a genuine underflow all flush under jit. The FTZ/DAZ claim
+is sound; `x * 1.0` is not a test of it.
+
+## D3. Other claims driven and found SOUND
+
+| claim | measurement | result (both series) |
+|---|---|---|
+| `ir.py:613` `_REQUIRED_PARAMS` — "keys jax supplies on EVERY equation" | 21 traced forms, 18 of 19 entries reached, key sets compared | every required key present; key set constant per primitive |
+| `_jax_compat.py:443` — no dtype reaches the `finfo`-raises admit | 38 dtypes from `jnp`/`np`/`ml_dtypes` through `jnp.finfo` | 19 raise on **each** series — same set, and all are integer/bool/object dtypes the earlier branch already returns on |
+| `_jax_compat.py:833` — every concrete context rejects a negative extent | `jnp.zeros((-2,-2))`, `jnp.ones((-1,))`, `jnp.empty((-3,))`, `reshape((-2,2))`, `lax.reshape` | rejected on both (0.11 raises `MLIRError` for `jnp.empty`, 0.10 `TypeError` — different type, same refusal) |
+| zero-size shapes stay legal, `jnp.all` vacuously True | `jnp.zeros((0,))` | legal, `all() == True`, both |
+| `docs/preconditions.md:192`, `docs/harness-api.md:73` "Measured on jax 0.11.0" | the blocks under them are output-compared by `test_doc_examples.py` | pass on both lanes |
+| the `custom_vjp` lying-`fwd` hazard (`transparent-primitives.md:128`, `founding.md:77`) | lying `fwd` returning `cos` where `f` returns `sin` | `f(x)=0.29552`, `value_and_grad` value `=0.95534`, grad jaxpr holds only `cos`/`mul` — identical, no raise, both |
+
 ## E. Series facts that are genuinely one-sided (correctly scoped)
 
 | | 0.10.2 | 0.11.0 |
@@ -101,3 +142,40 @@ on 0.10.2, so it cannot have been lost in it. CONFIRMED.
 
 These are why a recorded verdict transcript is series-bound; the docs that
 say so are right.
+
+## F. The doc-stamp gap — reproduced, then closed
+
+The off-series escape in `test_doc_examples.py` neutralises the stamp and
+the query hash whenever the running jax is not the jax the doc names. It
+is keyed on the doc's own text, so a doc naming a series **no lane runs**
+escaped on every lane at once.
+
+Reproduced before the fix — `docs/quickstart.md` stamped `jax 0.7.3`, every
+`query <sha>` overwritten with `d`×64:
+
+| | 0.10.2 lane | 0.11.0 lane |
+|---|---|---|
+| forged stamp + forged hashes, before | **37 passed** | **37 passed** |
+| forged stamp + forged hashes, after | 1 failed, 38 passed | 1 failed, 38 passed |
+| hash forged, stamp left at `0.11.0` | 39 passed (neutralised) | **1 failed** (`quickstart.md:37`) |
+
+The third row is the designed limit and is unchanged — it is only honest
+while every stamped series has a lane, which is now enforced by
+`test_every_documented_stamp_names_a_tested_series` rather than assumed.
+
+## G. Found by this sweep but NOT a series defect
+
+`contracts.py:572` told callers to avoid `jnp.stack` for family assembly
+because `stack` had no transfer row and the family would fall to ⊤. Stale
+on **both** series: `stack` carries exact real and ieee transfers, SMT
+emission and a replay row. Measured on both — a two-entry `jnp.stack`
+family reports `10 eqns: 10 known (100%)`, VERIFIED, zero ⊤. Corrected,
+and labelled a staleness defect rather than a series one.
+
+## H. Not touched — inside the concurrent repair's territory
+
+`design/constraining-assume.md:174` ("verified 0.11.0 throughout. Result:
+F1 VERIFIED / F2 UNKNOWN / F3 …") is a single-series claim of exactly the
+audited shape, but re-driving it means exercising `assume` semantics that
+another agent is mid-repair on (`propagate.py`, `test_assume_constrain.py`).
+Left alone deliberately; reported rather than measured.
