@@ -131,7 +131,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from stelling._optional import available
+from stelling._optional import TESTED_JAX_SERIES, available, jax_series_tested
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SRC = REPO / "src"
@@ -338,6 +338,18 @@ def normalise(text: str) -> list[str]:
 # a hash while moving no other line of the verdict would pass here on that
 # lane — and fail on the lane whose series the doc names, which is the
 # reason a doc names one.
+#
+# WHICH MAKES "THE LANE WHOSE SERIES THE DOC NAMES" LOAD-BEARING, AND IT
+# WAS NOT ENFORCED. The escape above is keyed on the doc's own stamp, so a
+# doc naming a series NO lane runs escaped on every lane at once and its
+# hash was then verified nowhere. Measured, before the guard below existed:
+# stamping `docs/quickstart.md` with `jax 0.7.3` and overwriting every
+# `query <sha>` line with `d`×64 passed 37/37 on BOTH lanes. Benign as
+# found — the file named 0.11.0, which has a lane — but it is the same
+# shape as the defect this whole pass is about: a claim with no lane
+# behind it. `test_every_documented_stamp_names_a_tested_series` is the
+# fence, and it is deliberately NOT inside the off-series branch: a block
+# that skips (no solver installed) must not take its stamp with it.
 _STAMP_JAX = re.compile(r"^(stelling \S+ \| jax )(\S+)$")
 _QUERY_HASH = re.compile(r"^query [0-9a-f]{64}$")
 
@@ -656,3 +668,46 @@ def test_the_series_gate_reads_the_version_out_of_the_transcript():
     is always compared at full strength)."""
     assert claimed_jax_version(["== VERIFIED", "stelling 0.1.0 | jax 0.10.2"]) == "0.10.2"
     assert claimed_jax_version(["== VERIFIED", "coverage: 9 eqns"]) is None
+
+
+def test_every_documented_stamp_names_a_tested_series():
+    """A doc may only stamp a jax series that has a CI lane.
+
+    THE HOLE THIS CLOSES. ``test_doc_example`` neutralises the stamp and
+    the query hash whenever the running jax is not the jax the doc names.
+    That escape is keyed on the doc's own text, so a doc naming a series
+    NOBODY runs took the escape on every lane simultaneously and its hash
+    was verified nowhere. Measured before this existed: ``quickstart.md``
+    stamped ``jax 0.7.3`` with every ``query <sha>`` line overwritten by
+    ``d``×64 passed 37/37 on the 0.10.2 lane AND the 0.11.0 lane.
+
+    With this test, a stamp is only escapable if some lane is obliged to
+    check it — which is what makes "fails on the lane whose series the doc
+    names" a true sentence rather than a hopeful one.
+
+    Scans the RAW text of every doc, not just executed blocks: a block
+    that skips (no solver installed) must not carry its stamp out of
+    range, and an illustrative fence still makes a claim to a reader.
+    """
+    offenders = []
+    for path in _doc_files():
+        for n, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            m = _STAMP_JAX.match(line.strip())
+            if m and not jax_series_tested(m.group(2)):
+                offenders.append(f"{path.name}:{n} stamps jax {m.group(2)}")
+    assert not offenders, (
+        "a documented verdict stamps a jax series with no CI lane, so its "
+        "query hash is compared on no lane at all — re-record the block on "
+        f"a tested series (TESTED_JAX_SERIES = {TESTED_JAX_SERIES}):\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_the_stamp_fence_rejects_an_untested_series():
+    """The fence's own anti-vacuity control: it must actually reject."""
+    assert not jax_series_tested("0.7.3")
+    assert all(jax_series_tested(f"{s}.0") for s in TESTED_JAX_SERIES)
+    # and the regex it leans on finds the version it is given
+    assert _STAMP_JAX.match("stelling 0.1.0 | jax 0.7.3").group(2) == "0.7.3"
