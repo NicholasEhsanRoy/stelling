@@ -343,3 +343,17 @@ role map on the same `evidence_BASELINE.json`: **537 top-level, 750
 branch-scoped** (of which 534 survive the fix). The direction of the
 argument is unchanged and the conclusion is stronger, not weaker: a bare
 "withhold in every branch" rule would have cost all 750.
+
+### Note on how C10's jax 0.10.2 number was obtained
+
+The first jax 0.10.2 run recorded `1 failed, 2292 passed`, at
+`tests/test_sdist_contents.py::test_every_root_entry_is_a_decision`,
+complaining about a root path `zz_sdist_allowlist_probe.txt`. That file is
+created and deleted by `test_sdist_contents.py` itself
+(`tests/test_sdist_contents.py:252`) and the two series were running
+**concurrently in the same worktree**, so one run's probe file was visible
+to the other's root scan. Re-run serially: **2293 passed, 2 skipped**
+(`/home/nick/MSF/.wt-reach/pytest_FINAL2_jax010.txt`). Recorded rather
+than quietly dropped: a green obtained by re-running is not the same
+evidence as a green obtained first time, and the reason has to travel
+with it.
