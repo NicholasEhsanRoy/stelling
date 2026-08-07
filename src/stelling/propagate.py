@@ -4265,18 +4265,63 @@ def _probe_fraction(k: int, element: int) -> float:
     ) % 1.0
 
 
+def _member_bounds(lo: float, hi: float, dtype: str):
+    """``[lo, hi]`` narrowed until its own endpoints are MEMBERS of the
+    declared set, or ``(None, None)`` when the set is empty.
+
+    The declared set of an integer or boolean declaration is the set of
+    that dtype's VALUES inside ``[lo, hi]`` — stelling says so itself when
+    it refuses `int32 (0.2, 0.8)`: "int32 represents the integers ... and
+    the interval contains none of them". So the set declared by
+    `int32 (0.2, 2.8)` is `{1, 2}`, and `0.2` is not in it. TWO
+    constraints, and the clamp needs both: the interval's own endpoints
+    rounded INWARD to integers, and the dtype's representable range (an
+    `int8` declared over `(-1e9, 1e9)` declares `[-128, 127]`, nothing
+    wider).
+
+    Returning the pair rather than clamping in place is what lets the
+    caller round toward an integer and then clamp INTO the member set —
+    clamping to the raw `[lo, hi]` after rounding puts the non-integral
+    endpoint straight back, which is the defect this exists to close.
+    """
+    if not _is_integer_dtype(dtype):
+        return lo, hi
+    m_lo = float(math.ceil(lo)) if lo != -math.inf else -math.inf
+    m_hi = float(math.floor(hi)) if hi != math.inf else math.inf
+    d_lo, d_hi = _INT_DTYPE_BOUNDS.get(dtype, (None, None))
+    if d_lo is not None:
+        # int64/uint64 end where binary64 goes inexact: `float(2**63 - 1)`
+        # rounds UP to 2**63, which is not an int64 value. Step back onto
+        # the largest float that the dtype really holds — the clamp must
+        # land on a member, not near one.
+        f_lo, f_hi = float(d_lo), float(d_hi)
+        if f_lo < d_lo:
+            f_lo = math.nextafter(f_lo, math.inf)
+        if f_hi > d_hi:
+            f_hi = math.nextafter(f_hi, -math.inf)
+        m_lo, m_hi = max(m_lo, f_lo), min(m_hi, f_hi)
+    if m_lo > m_hi:
+        return None, None
+    return m_lo, m_hi
+
+
 def _probe_point(k: int, shape, lo: float, hi: float, dtype: str, base: int):
     """A point of the declared box ``[lo, hi]^shape``, as flat values.
 
     ``base`` offsets the per-element index by the declaration's position,
     so two declarations are not pinned to the same fraction. Integer and
-    boolean declarations are pinned to integers: a non-integral point is
-    not a member of their declared set, and a witness that is not a member
-    certifies nothing.
+    boolean declarations are pinned to integers OF THE BOX
+    (:func:`_member_bounds`): a non-integral point is not a member of
+    their declared set, and a witness that is not a member certifies
+    nothing. A box holding no value of its dtype yields ``None`` — no
+    member, no witness.
     """
     n = 1
     for d in shape:
         n *= d
+    m_lo, m_hi = _member_bounds(lo, hi, dtype)
+    if m_lo is None:
+        return None
     vals = []
     for j in range(n):
         f = _probe_fraction(k, base + j)
@@ -4287,10 +4332,17 @@ def _probe_point(k: int, shape, lo: float, hi: float, dtype: str, base: int):
             elif hi != math.inf:
                 v = hi - abs(v)
         else:
-            v = lo + f * (hi - lo)
+            # NOT `lo + f * (hi - lo)`: on a box wider than half the float
+            # range `hi - lo` overflows to +inf, `0 * inf` is NaN and
+            # every other fraction saturates — measured on
+            # `[-1e308, 1e308]`, 15 of the 16 probes collapse onto `hi`
+            # and the 16th is no probe at all. The convex combination
+            # never forms the difference, so the grid stays 16 points
+            # wide; it still returns `lo` at f=0 and `hi` at f=1 exactly.
+            v = lo * (1.0 - f) + hi * f
         if _is_integer_dtype(dtype) or dtype == "bool":
             v = float(math.floor(v + 0.5))
-        v = min(max(v, lo), hi)
+        v = min(max(v, m_lo), m_hi)
         if not math.isfinite(v):
             return None
         vals.append(v)
@@ -5008,9 +5060,16 @@ class _Propagator:
             ) from None
 
     def mark_unreached(self, eqn: ir.JaxprEqn) -> None:
-        stack = list(sub_jaxprs(eqn))
+        # each frame carries the primitive whose sub-jaxpr it IS, so a
+        # nested body names the INNERMOST primitive that swallowed the
+        # obligation: an assert inside a `while` inside a `scan` sits in
+        # the `while` body, and telling the reader `'scan'` sends them to
+        # the wrong construct (its source location is right, so the two
+        # disagree). The outermost name is what the single `eqn.primitive`
+        # gave for every depth.
+        stack = [(j, eqn.primitive) for j in sub_jaxprs(eqn)]
         while stack:
-            j = stack.pop()
+            j, swallower = stack.pop()
             for e in j.eqns:
                 self.counter.record_unreached(e.primitive)
                 # THE choke point for "this sub-jaxpr was never analysed",
@@ -5022,8 +5081,8 @@ class _Propagator:
                 # it IS in the IR — and nothing ever propagated a box to
                 # its predicate.
                 if e.primitive in _UNEXAMINABLE_OBLIGATIONS:
-                    self._record_unexamined(e, eqn.primitive)
-                stack.extend(sub_jaxprs(e))
+                    self._record_unexamined(e, swallower)
+                stack.extend((sj, e.primitive) for sj in sub_jaxprs(e))
 
     def _reach_key(self, eqn: ir.JaxprEqn) -> tuple:
         """The identity of one DYNAMIC occurrence of an assert equation:
