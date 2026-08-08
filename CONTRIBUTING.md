@@ -15,6 +15,16 @@ pytest
 > environment with no jax at all, and letting it into a resolver that is
 > already managing your jax can desync CUDA plugin wheels.
 
+`--group dev` also installs `hypothesis`, which drives the **property suite**
+in `tests/property/` — generated harnesses, metamorphic properties, a
+one-sided oracle, and the cvc5 record protocol as a fuzz target. Without it
+those modules skip at collection and the suite still prints green, so if you
+are changing anything the properties cover, check that they ran. Start at
+[`tests/property/README.md`](tests/property/README.md): it says what a
+metamorphic property is here, how to add one, how to give it a positive
+control, and — with numbers from this project's own defect catalogue — what
+the whole mechanism cannot reach.
+
 ## Sign your commits
 
 Every commit must carry a `Signed-off-by` line (`git commit -s`), certifying
