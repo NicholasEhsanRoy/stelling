@@ -18,6 +18,7 @@ import ast
 import math
 import os
 import subprocess
+import sys
 from fractions import Fraction
 
 import pytest
@@ -845,6 +846,56 @@ def test_f4wheel2_carriage_return_is_the_writers_alone_to_stop(monkeypatch):
     from stelling import _cvc5_driver
 
     assert _cvc5_driver._tail("junk\rend 2") == "junk\\u{d}end 2"
+
+
+def test_f4wheel2_universal_newline_decoding_is_measured_not_modelled():
+    """The one real child in this block, and it exists so the model used by
+    the test below is not the thing under test. `capture_output=True,
+    text=True` is what the parent uses; these are raw BYTES going in."""
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         r"import sys; sys.stdout.buffer.write(b'a\rb\r\nc\nd')"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert proc.stdout == "a\nb\nc\nd"  # two \r gone, both became \n
+
+
+def _as_the_parent_receives_it(text: str) -> str:
+    """What `text=True` hands the parent, per the measurement above."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def test_f4wheel2_the_alphabet_backstop_refuses_eight_of_the_ten(monkeypatch):
+    """HOW FAR THE READER-SIDE BACKSTOP REACHES, pinned as a fraction rather
+    than as an adjective. The comment above the check used to call it "the
+    fail-closed backstop for a driver out of step with this parser", which
+    credited it with the whole separator set. It refuses eight, and the two it
+    does not refuse fail for two different reasons:
+
+    * `\\n` is excluded BY CONSTRUCTION — it is the protocol's own record
+      boundary, so a writer that leaves one in a field wrote two records and
+      there is nothing here to detect;
+    * `\\r` is a HOLE, and is invisible to the check rather than admitted by
+      it: universal-newline decoding turned it into a `\\n` before the check
+      ran. The stale child below never writes a terminator record of its own
+      and still gets a definite answer with a model.
+
+    If this ever reads 9 or 10, the reader grew a capability and the comment
+    beside the check has to say so."""
+    refused, definite = set(), set()
+    for sep in ("\n", "\r", *_SEPARATORS):
+        stale = (
+            "version 1.3.4\nanswer sat\nvalue x0 1/1\n"
+            f"opaque x1 j{sep}end 2{sep}"
+        )
+        r = _wheel_stdout(monkeypatch, _as_the_parent_receives_it(stale))
+        if r.answer == "failed" and "alphabet" in r.detail:
+            refused.add(sep)
+        if r.answer in ("sat", "unsat", "unknown"):
+            definite.add(sep)
+    assert refused == set(_SEPARATORS)
+    assert definite == {"\n", "\r"}
+    assert len(refused) == 8 and len(refused) + len(definite) == 10
 
 
 @pytest.mark.parametrize(

@@ -643,11 +643,42 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     # No rule on this side can see that, which is what settles the
     # widen-the-writer / narrow-the-reader question: `_cvc5_driver._token` and
     # `_tail` pass printable ASCII only, and that is where the boundary is
-    # made or not made. The alphabet check below is the fail-closed backstop
-    # for a driver out of step with this parser — the two ship together, but a
-    # stale install is exactly what the driver's docstring already promises
-    # degrades to UNKNOWN. A byte outside the protocol's alphabet is a
-    # protocol violation, never something to interpret.
+    # made or not made.
+    #
+    # THE ALPHABET CHECK BELOW IS A PARTIAL BACKSTOP, AND THE EXACT FRACTION
+    # IS 8 OF 10. It used to be described here as "the fail-closed backstop for
+    # a driver out of step with this parser", which credited it with the whole
+    # separator set. MEASURED against a real stale child writing real bytes and
+    # no terminator record of its own (`scratchpad/probe_cvc5_backstop.py`), it
+    # refuses eight, and the two it does not refuse fail for two DIFFERENT
+    # reasons that must not be run together:
+    #
+    #   * `\n` is excluded from the test by construction. It is the protocol's
+    #     own record boundary, so a writer that leaves one inside a field has
+    #     written two records and there is nothing here to detect. That half
+    #     was always the writer's.
+    #   * `\r` is a HOLE, and it is invisible to this check rather than
+    #     admitted by it: the `text=True` above has already turned it into a
+    #     real `\n` in `proc.stdout`, so there is no `\r` left to test for. A
+    #     stale driver writing `opaque x1 j\rend 2\r` with no terminator of its
+    #     own returns `sat` with a model HERE, at this commit (measured).
+    #
+    # `text=False` PLUS AN EXPLICIT DECODE WAS CONSIDERED AND DECLINED, on a
+    # measurement rather than on taste. It does put the `\r` back in front of
+    # this check — and it also refuses every healthy run whose child applies a
+    # `\r\n` newline translation, which is the DEFAULT for a text-mode stdout
+    # on Windows, a platform README.md names for both solver wheels. Driven
+    # through the same io layer (`probe_cvc5_backstop.py`, part B): a child at
+    # `newline="\r\n"` reads `sat` under the shipped `text=True` and `failed`
+    # under bytes-plus-decode. Trading a stale-install hazard for a platform
+    # coupling that cannot be measured on the box that would be making the
+    # trade is the wrong direction, so the reader keeps universal newlines and
+    # the writer's whitelist stays the load-bearing half. A stale install is
+    # what the driver's docstring already promises degrades to UNKNOWN, and it
+    # does so for eight of the ten here and for all ten through the writer.
+    #
+    # A byte outside the protocol's alphabet is a protocol violation, never
+    # something to interpret.
     if any(not (" " <= c <= "~") for c in proc.stdout if c != "\n"):
         return _RawResult(
             answer="failed",
