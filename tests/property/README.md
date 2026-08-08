@@ -111,6 +111,32 @@ property still has a control, seven controls still fire, and the suite still
 runs at all. **That is rot, caught on the push that causes it — not a soundness
 argument.**
 
+### Landing this suite withdrew a repo-wide pin
+
+`tests/test_skip_inventory.py::test_no_session_skip_is_undisclosed` claims the
+whole suite's skip set is complete. It **withdraws that claim** — by skipping,
+with its own reason — on any session that reported an `xfail`, and this suite
+ships one:
+
+```
+the completeness pin is WITHDRAWN, not passed: this session reported
+1 test(s) as xfailed.
+```
+
+Measured on the whole tree with hypothesis installed: `2470 passed, 13 skipped,
+1 xfailed`, exit 0, that pin among the skips. It is the pin's own rule
+(disclosed ⇒ withdrawn, never failed — the same cut `N deselected` gets), and
+it is not a defect in the pin. It is a consequence of this suite that nobody
+wrote down, and it is written down here, in `CONTRIBUTING.md` and in the
+`property` job's own comment block.
+
+**CI is unaffected**, measured rather than assumed: none of the three whole-suite
+lanes installs hypothesis, so every module under `tests/property/` gates at
+collection, no xfail is reported, and their `verdict=made` assertion holds. The
+pin is off for exactly the sessions that *can* run the property suite. It comes
+back the day the wrap remedy lands and the marker in `test_oracle.py` is
+deleted — narrowing the session does not bring it back, by the same rule.
+
 **There is no nightly job.** Adding one needs a `schedule:` trigger in
 `.github/workflows/ci.yml`, and that file was being edited concurrently when
 this suite landed, so the change was kept to a single appended job. Until a

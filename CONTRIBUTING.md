@@ -25,6 +25,21 @@ metamorphic property is here, how to add one, how to give it a positive
 control, and — with numbers from this project's own defect catalogue — what
 the whole mechanism cannot reach.
 
+> **With `hypothesis` installed, the whole-suite completeness pin is
+> WITHDRAWN, and you should know that before you read a green line.** One
+> property is `xfail`-marked against an open defect (the integer-literal wrap),
+> and `tests/test_skip_inventory.py::test_no_session_skip_is_undisclosed`
+> withdraws its claim — by skipping, and saying so — on any session that
+> reported an xfail. Measured on the whole tree: `2470 passed, 13 skipped,
+> 1 xfailed`, exit 0, that pin among the skips. Nothing is hidden from you: the
+> pin's *other* half, which checks every skip the session did see, still runs.
+> But "this suite's skip set is complete" is not being asserted in your local
+> run. It **is** asserted in CI, which does not install `hypothesis` — so the
+> pin is off for exactly the sessions that can run the property suite. It comes
+> back the day the wrap remedy lands and the marker in
+> `tests/property/test_oracle.py` is deleted; narrowing the session with `-k` or
+> `--deselect` does not bring it back, by the same rule.
+
 ## Sign your commits
 
 Every commit must carry a `Signed-off-by` line (`git commit -s`), certifying

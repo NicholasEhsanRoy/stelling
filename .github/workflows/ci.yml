@@ -812,6 +812,31 @@ jobs:
   # AssertionError is swallowed by the blanket amnesty. With `raises=` in place
   # the same run is reported FAILED.
   #
+  # A FIFTH CONSEQUENCE, AND IT IS NOT LOCAL TO THIS JOB. Landing the xfail
+  # WITHDRAWS AN EXISTING REPO-WIDE PIN. `tests/test_skip_inventory.py::
+  # test_no_session_skip_is_undisclosed` claims the suite's skip set is
+  # complete, and it withdraws that claim — by SKIPPING, with its own reason —
+  # on any session that reported an xfail:
+  #
+  #   "the completeness pin is WITHDRAWN, not passed: this session reported
+  #    1 test(s) as xfailed."
+  #
+  # Measured on the whole tree with hypothesis installed: 2470 passed,
+  # 13 skipped, 1 xfailed, exit 0, and that pin among the skips. It is
+  # self-disclosed and it is the pin's own rule (disclosed => withdrawn, never
+  # failed, the same cut `N deselected` gets) — but nothing on this branch said
+  # it out loud, and "a repo-wide completeness pin is off" is not something a
+  # reader should have to derive from a skip line.
+  #
+  # THE THREE JOBS ABOVE ARE UNAFFECTED, and that is measured rather than
+  # assumed: none of them installs hypothesis, so every module under
+  # tests/property/ gates at collection, no xfail is reported, and their
+  # `verdict=made` assertion still holds. The pin is off for exactly the
+  # sessions that CAN run the property suite. It comes back the day the wrap
+  # remedy lands and the marker is deleted — there is no other way to get it
+  # back, because narrowing the session (`-k`, `--deselect`) withdraws the
+  # claim too, by the same rule.
+  #
   # WHAT THIS JOB DOES NOT RUN, stated so the tick cannot be over-read:
   #
   #   * the CROSS-SERIES property. It needs two interpreters with different jax
