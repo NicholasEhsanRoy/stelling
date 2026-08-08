@@ -4265,18 +4265,153 @@ def _probe_fraction(k: int, element: int) -> float:
     ) % 1.0
 
 
+# The largest finite value of each binary format, DERIVED from the format
+# table so the two cannot drift: (2**p - 1) * 2**(emax - p + 1). Every
+# value of every format here is exactly representable in binary64 (each has
+# at most 53 significand bits and an exponent range inside binary64's), so
+# every comparison and every rounding below is EXACT in python floats.
+_FLOAT_MAX: dict[str, float] = {
+    d: math.ldexp(float(2**p - 1), emax - p + 1)
+    for d, (p, _emin, emax) in _FLOAT_FORMATS.items()
+}
+
+
+def _round_in_format(v: float, fmt: tuple[int, int, int], direction: int) -> float:
+    """``v`` rounded to a value of the binary format ``fmt = (p, emin,
+    emax)``, TOWARD ``direction`` (``+1`` up, ``-1`` down) — the DIRECTED
+    rounding, never round-to-nearest.
+
+    The direction is the whole point. Round-to-nearest can cross the
+    endpoint it is narrowing (``float32`` nearest of a value just above
+    `lo` sits just BELOW `lo`, outside the declared interval), and the
+    obvious repair — nearest, then step with :func:`math.nextafter` — is
+    the float face of the trap :data:`_INT_DTYPE_BOUNDS` documents for
+    ``int64``: ``nextafter`` steps to the next **binary64**, which for
+    every format narrower than binary64 is not a value of the format at
+    all. So the step is taken in the format's own grid, by rounding the
+    exact scaled significand.
+
+    The result is ``±inf`` exactly when the format holds no value on that
+    side of ``v`` — rounding `1e308` UP in `float32` has nowhere to go —
+    and the format's largest finite value when it does: rounding `-1e308`
+    UP in `float32` gives `-3.4e38`, the smallest `float32` there is.
+    Overflowing the SIGNIFICAND is not overflow: rounding `65503.9` up in
+    `float16` carries to `65504.0`, which is a value.
+    """
+    if v == 0.0 or not math.isfinite(v):
+        return v
+    p, emin, emax = fmt
+    big = math.ldexp(float(2**p - 1), emax - p + 1)
+    _m, e = math.frexp(v)  # v == _m * 2**e with 0.5 <= |_m| < 1
+    # the exponent of the local ulp: `e - p` in the normal range, floored
+    # at the subnormal spacing so the grid never gets finer than the
+    # format's smallest step
+    q = max(e - p, emin - p + 1)
+    scaled = math.ldexp(v, -q)  # exact: scaling by a power of two
+    s = math.ceil(scaled) if direction > 0 else math.floor(scaled)
+    try:
+        out = math.ldexp(float(s), q)
+    except OverflowError:  # far outside binary64's own exponent range
+        out = math.inf if s > 0 else -math.inf
+    if out > big:
+        return math.inf if direction > 0 else big
+    if out < -big:
+        return -big if direction > 0 else -math.inf
+    return out
+
+
+def _member_bounds(lo: float, hi: float, dtype: str):
+    """``[lo, hi]`` narrowed until its own endpoints are MEMBERS of the
+    declared set, or ``(None, None)`` when the set is empty.
+
+    The declared set of a declaration is the set of that dtype's VALUES
+    inside ``[lo, hi]`` — stelling says so itself when it refuses `int32
+    (0.2, 0.8)`: "int32 represents the integers ... and the interval
+    contains none of them". So the set declared by `int32 (0.2, 2.8)` is
+    `{1, 2}`, and `0.2` is not in it. TWO constraints, and the clamp needs
+    both: the interval's own endpoints rounded INWARD to the dtype's
+    grid, and the dtype's representable range (an `int8` declared over
+    `(-1e9, 1e9)` declares `[-128, 127]`, nothing wider).
+
+    A FLOAT declaration is bounded the same way twice, and reading its
+    interval as its declared set is the same error one dtype family over:
+    `float32 (-1e308, 1e308)` declares `[-3.4e38, 3.4e38]`, not the
+    binary64 range, and `float32 (v, (v + nextafter(v))/2)` declares the
+    single value `{v}` — no `float32` lies strictly inside. Only
+    `float64` is its own interval, which is why a float64-only corpus
+    cannot see this half at all.
+
+    Returning the pair rather than clamping in place is what lets the
+    caller round toward the dtype's grid and then clamp INTO the member
+    set — clamping to the raw `[lo, hi]` after rounding puts the
+    non-member endpoint straight back, which is the defect this exists to
+    close.
+
+    A dtype whose grid this module cannot name yields ``(None, None)``:
+    no member it can vouch for, therefore no witness. That is
+    DEFAULT-DENY and it is the only safe default here, because "skip the
+    clamp" would return the raw interval and hand back a witness that is
+    not a member. `any_array` accepts `int2`, `uint2`, five `float8`/
+    `float4` formats and the two complex dtypes (measured, jax 0.11.0 and
+    0.10.2), none of which either table names.
+    """
+    if _is_integer_dtype(dtype):
+        d_lo, d_hi = _INT_DTYPE_BOUNDS.get(dtype, (None, None))
+        if d_lo is None:
+            return None, None
+        m_lo = float(math.ceil(lo)) if lo != -math.inf else -math.inf
+        m_hi = float(math.floor(hi)) if hi != math.inf else math.inf
+        # int64/uint64 end where binary64 goes inexact: `float(2**63 - 1)`
+        # rounds UP to 2**63, which is not an int64 value. Step back onto
+        # the largest float that the dtype really holds — the clamp must
+        # land on a member, not near one.
+        f_lo, f_hi = float(d_lo), float(d_hi)
+        if f_lo < d_lo:
+            f_lo = math.nextafter(f_lo, math.inf)
+        if f_hi > d_hi:
+            f_hi = math.nextafter(f_hi, -math.inf)
+        m_lo, m_hi = max(m_lo, f_lo), min(m_hi, f_hi)
+        if m_lo > m_hi:
+            return None, None
+        return m_lo, m_hi
+    fmt = _FLOAT_FORMATS.get(dtype)
+    if fmt is None:
+        return None, None
+    big = _FLOAT_MAX[dtype]
+    m_lo = -big if lo == -math.inf else _round_in_format(lo, fmt, +1)
+    m_hi = big if hi == math.inf else _round_in_format(hi, fmt, -1)
+    # No clamp into `[-big, big]` here, DELIBERATELY: the rounding already
+    # returns a value of the format or the ±inf that says the format has
+    # nothing on that side, so a clamp would be dead. An endpoint past the
+    # top (`float32 (1e300, 1e308)`) makes `m_lo` +inf, the two cross, and
+    # the declared set is empty — which is right, no `float32` is up there.
+    # A clamp did stand here; the mutation survey deleted it and no test
+    # moved, and it was removed rather than left looking load-bearing.
+    if m_lo > m_hi:
+        return None, None
+    return m_lo, m_hi
+
+
 def _probe_point(k: int, shape, lo: float, hi: float, dtype: str, base: int):
     """A point of the declared box ``[lo, hi]^shape``, as flat values.
 
     ``base`` offsets the per-element index by the declaration's position,
-    so two declarations are not pinned to the same fraction. Integer and
-    boolean declarations are pinned to integers: a non-integral point is
-    not a member of their declared set, and a witness that is not a member
-    certifies nothing.
+    so two declarations are not pinned to the same fraction. Every
+    declaration is pinned to values OF ITS DTYPE inside the box
+    (:func:`_member_bounds`): a point the dtype cannot hold is not a
+    member of the declared set, and a witness that is not a member
+    certifies nothing. That is one rule for integers (a non-integral
+    point) and for floats (a point off the format's grid, or past its
+    finite range). A box holding no value of its dtype yields ``None`` —
+    no member, no witness.
     """
     n = 1
     for d in shape:
         n *= d
+    m_lo, m_hi = _member_bounds(lo, hi, dtype)
+    if m_lo is None:
+        return None
+    fmt = None if _is_integer_dtype(dtype) else _FLOAT_FORMATS.get(dtype)
     vals = []
     for j in range(n):
         f = _probe_fraction(k, base + j)
@@ -4287,10 +4422,27 @@ def _probe_point(k: int, shape, lo: float, hi: float, dtype: str, base: int):
             elif hi != math.inf:
                 v = hi - abs(v)
         else:
-            v = lo + f * (hi - lo)
+            # NOT `lo + f * (hi - lo)`: on a box wider than half the float
+            # range `hi - lo` overflows to +inf, `0 * inf` is NaN and
+            # every other fraction saturates — measured on
+            # `[-1e308, 1e308]`, 15 of the 16 probes collapse onto `hi`
+            # and the 16th is no probe at all. The convex combination
+            # never forms the difference, so the grid stays 16 points
+            # wide; it still returns `lo` at f=0 and `hi` at f=1 exactly.
+            v = lo * (1.0 - f) + hi * f
         if _is_integer_dtype(dtype) or dtype == "bool":
             v = float(math.floor(v + 0.5))
-        v = min(max(v, lo), hi)
+        v = min(max(v, m_lo), m_hi)
+        if fmt is not None:
+            # The clamp alone is not enough for floats: it fixes the two
+            # ENDPOINTS and leaves every interior point on binary64's grid
+            # — measured on the shipped sweep, 6716 of 6880 float32 probe
+            # values were not float32 values, and only 90 of those were
+            # out-of-range. `v` is already inside `[m_lo, m_hi]`, whose
+            # endpoints ARE values of the format, and directed rounding is
+            # monotone and fixes them, so rounding down cannot leave the
+            # member set. For float64 this is the identity.
+            v = _round_in_format(v, fmt, -1)
         if not math.isfinite(v):
             return None
         vals.append(v)
@@ -5008,9 +5160,16 @@ class _Propagator:
             ) from None
 
     def mark_unreached(self, eqn: ir.JaxprEqn) -> None:
-        stack = list(sub_jaxprs(eqn))
+        # each frame carries the primitive whose sub-jaxpr it IS, so a
+        # nested body names the INNERMOST primitive that swallowed the
+        # obligation: an assert inside a `while` inside a `scan` sits in
+        # the `while` body, and telling the reader `'scan'` sends them to
+        # the wrong construct (its source location is right, so the two
+        # disagree). The outermost name is what the single `eqn.primitive`
+        # gave for every depth.
+        stack = [(j, eqn.primitive) for j in sub_jaxprs(eqn)]
         while stack:
-            j = stack.pop()
+            j, swallower = stack.pop()
             for e in j.eqns:
                 self.counter.record_unreached(e.primitive)
                 # THE choke point for "this sub-jaxpr was never analysed",
@@ -5022,8 +5181,8 @@ class _Propagator:
                 # it IS in the IR — and nothing ever propagated a box to
                 # its predicate.
                 if e.primitive in _UNEXAMINABLE_OBLIGATIONS:
-                    self._record_unexamined(e, eqn.primitive)
-                stack.extend(sub_jaxprs(e))
+                    self._record_unexamined(e, swallower)
+                stack.extend((sj, e.primitive) for sj in sub_jaxprs(e))
 
     def _reach_key(self, eqn: ir.JaxprEqn) -> tuple:
         """The identity of one DYNAMIC occurrence of an assert equation:

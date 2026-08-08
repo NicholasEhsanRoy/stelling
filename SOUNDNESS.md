@@ -2288,4 +2288,226 @@ verdicts:
   Constructions: `tests/test_branch_reachability.py`; pre-registration,
   corpus design and outcomes: `scratchpad/PREREG_REACH.md`.
 
+- **2026-08-08 (pre-release): the reachability certificate certified with
+  points that are not in the declared set — a live wrong REFUTED — and its
+  probe grid collapsed on wide boxes.** Both are defects in the witness
+  search added by the entry above; the direction of the first fix is
+  **REFUTED → UNKNOWN**, and nothing here moves anything toward VERIFIED.
+
+  **(1) A witness that is not a member certifies nothing, and the probe
+  points were not members.** `_probe_point` rounded an integer
+  declaration to an integer and then clamped the result to `[lo, hi]`,
+  which put the non-integral endpoint straight back. The declared set of
+  an integer or boolean declaration is the set of that dtype's VALUES in
+  the interval — stelling says so itself when it refuses `int32
+  (0.2, 0.8)`: "int32 represents the integers ... and the interval
+  contains none of them" — so `any_array((), "int32", (0.2, 2.8))`
+  declares `{1, 2}`. Probes pinned it to `0.2` and to `2.8`, and `i < 1`
+  and `i > 2`, **false at every member**, were certified reached and
+  stamped **REFUTED**. Reproduced on jax 0.11.0 and 0.10.2.
+
+  The declared set is bounded twice, and only the first bound was ever
+  applied: `int8 (-1e9, 1e9)` declares `[-128, 127]`, and
+  `k.astype(f64) < -200.0` — false at every int8 value — REFUTED over it.
+  The clamp now goes INTO the member set before rounding, using both the
+  interval's endpoints rounded inward and the dtype's own range. A box
+  holding no value of its dtype yields no probe at all: no member, no
+  witness, and a probe that cannot be formed leaves the declaration at
+  its full box, which certifies nothing. `any_array` refuses such a
+  declaration at the door, so that path is reachable only through
+  hand-built IR — the safe answer there is "no point", never "some
+  point".
+
+  Normalising the bounds at `any_array` instead — recording `int32
+  (0.2, 2.8)` as `[1, 2]` — was considered and rejected. It is the wider
+  change (`any_array` is the public surface, and the recorded box travels
+  into every message, the SMT emission and the exactness claims), and it
+  moves the propagated box in the NARROWING direction, which is the
+  direction that can manufacture a VERIFIED: a declaration bound would
+  then be load-bearing for discharge, not only for a witness. Fixing the
+  probe can only ever change which branches are certified, and the
+  certificate's only effect is to rewrite `violated-over-set` into
+  `unknown`.
+
+  **Retroactively invalid:** any REFUTED whose refuting obligation sat
+  inside a `cond`/`switch` branch certified by a probe over an integer or
+  boolean declaration — that is, any REFUTED on a query with an integer
+  declaration whose branch guard was not already forced by the index
+  interval. Re-run: such a query now returns UNKNOWN unless a real member
+  witnesses the branch. **Float declarations keep a residual of exactly
+  this defect, closed by entry (5) below.** The sentence that stood here
+  said they were "unaffected by this half"; that is true of `float64`
+  and false of every narrower float format, and the corpus behind the
+  figures below could not tell the difference because it declares no
+  narrow float at all.
+
+  **(2) The probe grid degenerated on wide boxes.** `lo + f*(hi - lo)`
+  overflows to `+inf` when the box is wider than half the float range:
+  measured on `[-1e308, 1e308]`, 15 of the 16 probes collapsed onto `hi`
+  and the 16th was NaN, so a guard satisfied only at the low end was
+  never witnessed and its violation was withheld. The fraction is now
+  computed as a convex combination, which never forms the difference and
+  keeps 16 distinct points (`lo` at f=0 and `hi` at f=1, exactly).
+
+  **Retroactively invalid:** an UNKNOWN on a query whose branch guard is
+  satisfiable only on the low side of a very wide declared box may now be
+  REFUTED. No VERIFIED is affected — the certificate cannot discharge.
+
+  **Measured cost**, on a NEW 336-case corpus over ten declarations x 2
+  legs, scored **per obligation** against a numpy oracle that never calls
+  stelling and that samples MEMBERS (the previous oracle sampled
+  `uniform(lo, hi)`, which agreed with the defect that `0.2` was an int32
+  point — this defect was invisible to it): **18** obligations moved
+  `violated-over-set → unknown`, every one of them a refutation the
+  oracle finds is evaluated at **zero** points of the declared set, and
+  **8** moved `unknown → violated-over-set`, every one confirmed really
+  violated by the oracle (the wide-box witnesses). **0** obligations
+  became `discharged`; **0** queries moved into VERIFIED; **0** sound
+  refutations were lost. Unsound obligation rows in the corpus: **18 → 0**.
+
+  **Scope of that "18 → 0"** (corrected after the fact; the paragraph
+  above is what was measured and is left as recorded): the corpus is
+  `scratchpad/probe/corpus.py`, whose only float declarations —
+  `f_pos`, `f_str`, `f_wide` — are all `float64`. `float64` is the one
+  float format that IS its own interval, so a `float64`-only corpus
+  cannot observe the narrow-float residual at all, and the zero is a
+  zero over the classes it declares (integer, boolean, `float64`), not
+  over all declarations. The residual it could not see is entry (5),
+  measured on a corpus that can.
+
+  **(3) An index-EXCLUDED `cond`/`switch` branch is dropped, not
+  recorded — deliberately.** When the index interval excludes a branch,
+  the walk counts its equations unreached and does not collect its
+  obligations. That is a silent drop, and as literally worded it
+  contradicts clause **C5** of `scratchpad/PREREG_REACH.md` ("every
+  `stelling_assert` inside a sub-jaxpr propagation does not descend into
+  is recorded ... `unknown`"); C5's own falsifier could not see it,
+  because it ranged only over obligations the oracle saw executed. It is
+  kept, and this is the statement C5 lacked: an index-excluded branch is
+  not unexamined, it is PROVED untaken. The index box over-approximates
+  the true index set, so a branch outside it is taken at no point of the
+  declared set, and its obligation is vacuously true. Recording it
+  `unknown` would assert an ignorance the analysis does not have, and it
+  is not free: measured on the same corpus, naming them costs **28 of 28**
+  VERIFIED queries and removes **zero** unsound rows (the oracle finds no
+  dropped obligation that is ever false — `SWALLOWED_FALSE` is 0 before
+  and after). The coverage denominator still counts them, and
+  `test_an_index_excluded_branch_is_deliberately_dropped` pins the
+  behaviour so it can never become silent again.
+
+  **(4) The swallowing primitive named in a NOT EXAMINED obligation is now
+  the innermost one.** An assert inside a `while` inside a `scan` was
+  reported against `'scan'` while its source location pointed into the
+  `while`; the two disagreed and the message sent the reader to the wrong
+  construct. Message-only: no verdict flips.
+
+  **(5) The same defect, on FLOAT declarations: a probe point that is
+  not a value of the declared float dtype.** Entries (1) and (2) shut
+  the integer face of "a witness that is not a member certifies
+  nothing" and left the float face open. A float declaration is bounded
+  twice in exactly the way an integer one is: `float32 (-1e308, 1e308)`
+  declares the `float32` values of that interval, i.e. `[-3.4e38,
+  3.4e38]`, and `float32 (v, (v + nextafter(v))/2)` declares the single
+  value `{v}`. `_member_bounds` returned floats' intervals untouched and
+  `_probe_point` left every interior point on binary64's grid, so the
+  witnesses were binary64 points that the declared dtype does not hold.
+  Measured on the sweep this branch already ships
+  (`tests/test_probe_witness.py::_SWEEP_BOUNDS`, 215 bound pairs): of
+  the **6880** `float32` probe values formed, **6716** were not
+  `float32` values and **90** were outside `float32`'s range entirely;
+  for `float16`, **6736** and **6184**. `float64` was clean, which is
+  why only it was right.
+
+  Two of the three constructions are as old as the certificate; the
+  third is NEW on this branch, because entry (2)'s wide-box repair is
+  what first let a probe reach `±1e308` on a box the dtype cannot hold.
+  Reproduced on jax 0.11.0 and 0.10.2, `JAX_ENABLE_X64=1` (without x64
+  jax truncates the declaration to `float32` and the effect vanishes):
+
+  - `float32 (-1e308, 1e308)` with `w < -3.4028234663852886e38` (the
+    `float32` minimum): false at every `float32`, UNKNOWN on `688e829`,
+    **REFUTED on `62e4190`**;
+  - `float32 (v0, (v0 + nextafter(v0, inf))/2)` with `w > v0`: the
+    declared set is `{v0}`, REFUTED on both;
+  - `float32 (-1e308, 1e308)` with `w.astype(float64) > 1e39`: REFUTED
+    on both — literally the second face of the defect entry (1) fixes
+    for `int8 (-1e9, 1e9)` with `k.astype(float64) > 200.0`.
+
+  The endpoints are now rounded INWARD onto the declared format's own
+  grid and clamped to its finite range, and every probe value is rounded
+  onto that grid too (`_round_in_format`, directed, in exact integer
+  arithmetic on the significand — round-to-nearest can cross the
+  endpoint it is narrowing, and `math.nextafter` steps to the next
+  *binary64*, which for a narrower format is not a value of it: the same
+  trap `_INT_DTYPE_BOUNDS` documents for `int64`). `float64` is the
+  identity under this rounding, measured over 80028 values, so the one
+  format that was already right does not move. A dtype whose grid
+  neither table names now yields **no member** rather than the raw
+  interval: `any_array` accepts `int2`, `uint2`, five `float8`/`float4`
+  formats and the two complex dtypes, and `int2 (-1e9, 1e9)` was pinned
+  to `±1e9`, which is not an `int2`. That one is latent — no
+  construction over it moved a verdict, including its positive control —
+  and it is fixed anyway, in the withholding direction.
+
+  Why the fix is the default-deny and not an `int2`/`uint2` row in
+  `_INT_DTYPE_BOUNDS` — measured, in its own worktree, not reasoned. With
+  the row added: no `int2` verdict moves (still UNKNOWN on all 55
+  constructions tried per dtype, positive controls included), the suite
+  is green but for the two tests that assert the dtype is unnamed, and
+  two things do change, both away from withholding. `_snap_integer`'s
+  decline stops being unconditional — it goes from "no representable
+  range is registered for it, so integer wraparound cannot be excluded"
+  to a real range check, which ADMITS wherever the result fits — and
+  `_conversion_exactness("int2", "float64")` flips from `"unknown"` to a
+  minted `"exact"`, a claim about a dtype that nothing else in the
+  module knows. Admission stays gated on `_EXACT_CONVERSIONS` membership,
+  so neither turns into a verdict today, and that is precisely the
+  argument for not doing it: the repair needed here is a withholding, and
+  the table is where admissions come from.
+
+  **Retroactively invalid:** any REFUTED whose refuting obligation sat
+  inside a `cond`/`switch` branch certified by a probe over a
+  declaration of any float dtype other than `float64`. Re-run: such a
+  query now returns UNKNOWN unless a real value of that dtype witnesses
+  the branch. `float64` declarations are unaffected — under this
+  rounding `float64` is the identity — and nothing moves toward
+  VERIFIED, because the certificate can only rewrite
+  `violated-over-set` into `unknown`.
+
+  **Measured cost**, on a NEW 619-case / 1359-obligation corpus
+  (`scratchpad/probe2/`) built for this entry because
+  `scratchpad/probe/corpus.py` declares no narrow float and so is blind
+  to it. Fourteen declarations, of which nine are narrow floats
+  including **a `float32` box wider than `float32`** — the declaration
+  the earlier corpus and the audit's own corpus both lack. Scored **per
+  obligation** against a numpy/ml_dtypes oracle that never calls
+  stelling and that samples MEMBERS *of the declared dtype*:
+
+  | | `688e829` | `62e4190` | with this entry |
+  |---|---|---|---|
+  | unsound refutation rows | 35 | 31 | **0** |
+  | sound refutation rows | 201 | 220 | **220** |
+  | rows moved to `discharged` | — | — | **0** |
+  | queries moved into VERIFIED | — | — | **0** |
+
+  From `62e4190`: **31** obligations moved `violated-over-set →
+  unknown`, every one of them a refutation the oracle finds is evaluated
+  at **zero** members of the declared set; **no** obligation moved in
+  any other direction, and **0** sound refutations were lost. Unsound
+  obligation rows: **31 → 0**.
+
+  The alternative remedy — withhold for every float format narrower than
+  `float64` — is also sound and is one line, and it was rejected on
+  measurement, not on preference: on the same corpus it reaches 0 unsound
+  rows too, but costs **90** sound refutations (220 → 130), every one
+  confirmed violated at a real member by the oracle, and the loss is not
+  confined to pathological boxes — 13 of the 90 are an ordinary
+  `float32 (-1.0, 1.0)` array declaration. Rounding inward costs zero of
+  them because it narrows to the real member set rather than abandoning
+  it.
+
+  Constructions: `tests/test_probe_witness.py`; pre-registration, corpus
+  design and outcomes: `scratchpad/PREREG_PROBE.md`, corpora
+  `scratchpad/probe/` and `scratchpad/probe2/`.
+
 *(no releases yet)*
