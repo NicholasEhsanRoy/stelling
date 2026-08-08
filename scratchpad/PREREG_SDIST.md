@@ -505,3 +505,242 @@ rather than the developer. Recorded as the next pass's, not silently dropped.
   re-including inside an excluded directory, POSIX character classes) do not
   appear in this repository's `.gitignore`, but that is an observation about
   today's file.
+
+# SECOND REPAIR PASS — the audit's seven, and one of them does not reproduce
+
+Appended below the record above; nothing above this line is edited. Branch
+`fix/sdist-force-include-parity`, off `main` at **a4c16fe**, in a worktree at
+`/home/nick/MSF/.wt-sdist3/W`. Every construction below was built in a
+standalone throwaway repository made by `git archive` of this tree + `git init`
++ one commit, never by mutating a shared worktree. Environment as measured:
+hatchling **1.31.0** (what `uv build --offline` resolves), pathspec 1.1.1, git
+2.43.0, reuse 6.2.0, jax 0.11.0 / 0.10.2.
+
+**Baseline for every member count below: 261 members**, all files, all prefixed
+`stelling-0.1.0/`, no directory members. The audit's baseline was 260; the tree
+has grown one file since. Every count it reports is one lower than the same
+count here, and they agree on every difference.
+
+**All blinding measured under the DEFAULT `tmp_path`.** The previous pass's
+matrix put `--basetemp` inside the plant directory, which makes the staged copy
+inherit the planted ancestor — that manufactures the independence it was
+measuring, and it is the reason F1's independence claim read as true.
+
+## Reproduction — six CONFIRMED, one REFUTED as stated
+
+| # | finding | reproduced | measurement |
+|---|---|---|---|
+| F1 | the force-include check skips where its route opens | **YES** | `.git`-stripped copy + ancestor `.hgignore`: `11 passed, 1 skipped`; build 262 members; `stelling-0.1.0/.hgignore` SHIPPED. Controls: no plant -> `11 passed, 1 skipped`, 261 members; plant WITH `.git` -> `1 failed`, 262 members |
+| F1b | "deliberately independent — blind either one and the other still reddens" | **YES, the claim is FALSE** | hazard planted and shipping, default `tmp_path`: `_force_included -> {}` 12 passed; `_forced_without_a_reviewed_source -> []` 12 passed; `.hgignore` out of `_HATCH_VCS_EXCLUSION_FILES` 12 passed; unblinded `1 failed` |
+| F2 | `lying` matches the full path, every other consumer matches the first component | **YES** | `license-files = ["LICENSE", "scratchpad/PREREG*.md"]`: `12 passed`, 271 members, **10** WITHHELD `scratchpad/PREREG*.md` in the tarball (the audit said 268 / 8; this tree now has ten) |
+| F3 | `BuilderConfig.force_include` unmodelled and unnamed | **YES** | `[tool.hatch.build] force-include = {"scratchpad/PREREG_SDIST.md" = "scratchpad/PREREG_SDIST.md"}`: `12 passed`, 262 members, shipped |
+| F4a | "a drift in any of the three constants shows up there as a set difference" | **YES, the claim is FALSE** | `__pycache__` out: 12 passed. `.hatch` out: 12 passed. `.DS_Store` out: 12 passed. `_HATCH_FORCED_ROOT_FILES = ("pyproject.toml",)`: 12 passed. Only `*.py[cdo]` out of `_HATCH_DEFAULT_GLOBAL_EXCLUDE` reddens — and in `test_the_exclusion_classifier_discriminates`, not in the parity test the sentence points at |
+| F4b | "if a `hatch_build.py` appears, the parity test is what will notice" | **YES, the claim is FALSE** | committed, allowlisted, registered hook force-including a TRACKED file: `12 passed`, 263 members, `hatch_build.py` AND `scratchpad/PREREG_SDIST.md` in the tarball |
+| F5 | `GENERATED_IN_DISTRIBUTION` is an unguarded escape hatch | **YES as a defect, REFUTED as stated** | see below |
+| F6a | dangling symlink misdiagnosed as FORCE-INCLUDED | **YES** | committed `docs/zz_dangling.md -> zz_nowhere.md`: parity red, message "it was FORCE-INCLUDED"; it was not |
+| F6b | tracked dir-symlink misdiagnosed as a broken walk | **YES** | committed `docs/zz_linkdir -> <empty dir outside the tree>`: `assert not unseen` red with "the walk is not looking at the tree git is looking at" |
+| F7 | three tests skip without `uv`, not one | **YES** | `PATH` without `uv`, at a4c16fe: `9 passed, 3 skipped`. The three are `test_built_metadata_carries_no_relative_reference`, `test_an_arbitrary_new_file_does_not_ship` and `test_the_untracked_scan_agrees_with_the_tarball` |
+
+### F5 — the defect is real; the construction the audit names is not
+
+The audit: *"Adding `.hgignore`: 'generated, honest' to that dict reportedly
+takes the **ancestor**-`.hgignore` case from `1 failed` to `12 passed` with the
+file still shipping."* Driven, all four cells, at a4c16fe:
+
+| construction | plain | + `".hgignore": "generated, honest"` |
+|---|---|---|
+| **ancestor** `.hgignore`, `.git` present | `1 failed` | **`1 failed`** — unchanged |
+| root `.hgignore`, untracked | `2 failed` | `1 failed` |
+| root `.hgignore`, **committed** | `1 failed` | **`12 passed`**, 262 members, SHIPPED |
+
+`GENERATED_IN_DISTRIBUTION` is consulted in exactly two places, and neither is
+the force-include review, which is what catches the ancestor case — so no entry
+in that dict can silence it. The hatch opens on a **root, committed**
+`.hgignore`, where the only red was `test_every_root_entry_is_a_decision`'s
+"undecided" and the dict is precisely the way to make a root path decided
+without deciding anything. The audit's account of *why* is right — it is the
+escape hatch `WITHHELD` used to be, unguarded in exactly the way `WITHHELD` was
+before the `lying` assertion — and its construction is wrong. Fixed for the
+shape that reproduces, and for the ancestor shape too, since `_falsely_recorded`
+now reads a force-included path recorded in either dict as false.
+
+### And the audit's proposed single fix does not work
+
+*"A check of the form `shipped ⊆ tracked ∪ scanned ∪ GENERATED_IN_DISTRIBUTION`
+catches all three at once."* Implemented verbatim on top of a4c16fe's parity
+test and driven against all three constructions:
+
+| construction | with the subset check added |
+|---|---|
+| widened `license-files` | `12 passed` |
+| static `force-include` table | `12 passed` |
+| `hatch_build.py` hook | `12 passed` |
+
+All three ship files that ARE tracked in the staged tree, so the subset holds.
+It is also already implied by the existing `scanned == shipped_untracked`
+equality (`shipped` has `GENERATED` subtracted before it), so it adds no power
+even in principle. **Not adopted.** What catches the three is: first-component
++ both-dicts matching on the force-include model (constructions 1 and 2, once
+the static table is modelled), and refusing the build-hook capability outright
+(construction 3), because a hook that ships a tracked file satisfies every
+counterpart check a comparison against the tree can make.
+
+## Controls, per fix — positive, negative, blinding
+
+Trees: `f1o` pristine standalone repo; `f1p` `.git`-stripped + ancestor
+`.hgignore`; `f1n` `.git`-stripped, no plant; `c1` widened `license-files`;
+`c2b` static `force-include`; `c3` registered hook; `f5c` committed root
+`.hgignore` + `GENERATED` entry; `sym_out` tracked dir-symlink;
+`sym_dangling` committed dangling symlink. Module counts: **12 tests at
+a4c16fe, 17 here.**
+
+**F1 — the force-include check moves out from behind the `.git` skip.**
+POSITIVE `f1p`: `1 failed, 15 passed, 1 skipped`, naming
+`.hgignore <- <parent>/.hgignore (OUTSIDE the tree)`. NEGATIVE `f1n`:
+`16 passed, 1 skipped`, 261 members. NEGATIVE `f1o`: `17 passed`, 261 members.
+BLINDING, default `tmp_path`, **on the PRISTINE tree** (so the red is the
+guard refusing to be blinded and not the hazard):
+
+| blinding | a4c16fe | here |
+|---|---|---|
+| `_force_included -> {}` | 12 passed | **2 failed** |
+| `_forced_without_a_reviewed_source -> []` | 12 passed | **1 failed** |
+| `.hgignore` out of `_HATCH_VCS_EXCLUSION_FILES` | 12 passed | **1 failed** |
+
+The first is caught by a non-vacuity assertion that `_force_included(REPO)` is
+non-empty; the other two by `test_the_force_include_review_sees_an_outside_
+source`, a synthetic root with an ancestor `.hgignore` planted under
+`tmp_path`, whose negative half removes the plant and asserts silence.
+
+**F2/F3/F5 — the two dicts and the static table.** POSITIVE: `c1` `1 failed`,
+`c2b` `2 failed`, `f5c`+entry `2 failed`, ancestor+entry `3 failed`.
+NEGATIVE: `f1o` `17 passed`. BLINDING, default `tmp_path`:
+
+| blinding | pristine | on the construction |
+|---|---|---|
+| `_falsely_recorded -> None` | **1 failed** | still red |
+| `_static_force_include -> {}` | **1 failed** | still red |
+| parity `dishonest -> []` | 17 passed | still red (root-entry test) |
+| parity `unused -> []` | 17 passed | still red (root-entry test) |
+
+The last two are absence checks over a one-entry dict, so a pristine tree has
+nothing for them to find; what makes them non-droppable is that the
+construction they exist for is red from the other half. That is the
+independence the audit asked for and did not get from parity.
+
+**F4b — the build hook.** POSITIVE `c3`: `1 failed`, naming `hatch_build.py`
+and the registered `[tool.hatch.build.targets.sdist.hooks.custom]` table.
+NEGATIVE `f1o`: `17 passed`. BLINDING: pointing the file half at a name that
+does not exist leaves the registered-table half red on `c3`; the table half has
+a non-vacuity assertion that `[tool.hatch.build.targets.*]` is non-empty.
+
+**F4a — the constants.** POSITIVE, one mutation at a time, pristine tree:
+
+| mutation | a4c16fe | here | caught by |
+|---|---|---|---|
+| `__pycache__` out of `_HATCH_EXCLUDED_DIRECTORIES` | 12 passed | **1 failed** | the static-table control's directory-source pruning |
+| `.hatch` out | 12 passed | **1 failed** | the parity build (`docs/.hatch/` plant) |
+| `.DS_Store` out of `_HATCH_EXCLUDED_FILES` | 12 passed | **1 failed** | the parity build (`docs/.DS_Store` plant) |
+| `_HATCH_FORCED_ROOT_FILES = ("pyproject.toml",)` | 12 passed | **1 failed** | the static-table control, literal names |
+| `*.py[cdo]` out of `_HATCH_DEFAULT_GLOBAL_EXCLUDE` | 1 failed | 1 failed | the classifier control |
+| `.hg` out of `_HATCH_EXCLUDED_DIRECTORIES` | 17 passed | **17 passed** | nothing — recorded |
+| `_HATCH_DEFAULT_LICENSE_GLOBS = ("ZZ_NEVER*",)` | 17 passed | **17 passed** | nothing — recorded |
+
+NEGATIVE: the two new parity plants are `False` entries — the artefact must NOT
+contain them, and it does not, so no member count moves and nothing cries wolf.
+`.hatch` and `.DS_Store` were chosen because they are among the only names in
+those two constants that this repository's own `.gitignore` does not also
+cover; `git check-ignore --no-index` says the other eight excluded-directory
+names are gitignored here, which is exactly why dropping them was silent.
+
+**F6 — the two messages.** POSITIVE `sym_dangling`: parity red, now reading
+"the tree has something at that path that is not a regular file — a dangling
+symlink" and naming the link target, instead of "it was FORCE-INCLUDED".
+POSITIVE `sym_out`: red, now reading "these tracked paths are SYMLINKS TO
+DIRECTORIES … the walk is looking at exactly the tree git is". NEGATIVE `f1o`:
+`17 passed` — no ordinary tree has either shape. BLINDING: `dir_links = []`
+returns the path to `unseen` and the suite stays red, so the split cannot
+silently drop anything.
+
+One measured correction to my own first draft of that message. It said
+`tarfile` resolves a symlink's target when it stores the member. It does not:
+on the committed dangling link the build SUCCEEDS and the member is stored as
+a symlink — `issym=True`, `size=0`, `linkname` preserved. The message says
+that now. A second measured fact, on `docs/zz_linkdir -> ../design` inside the
+tree: the tarball carries **zero** members at or under the link, because
+`safe_walk`'s `(st_dev, st_ino)` seen-set has already visited `design/` — and
+it also drops `design/`'s own 64 files when the link is walked first, which is
+its own true red.
+
+**F7 — the release assertion.** The step's script extracted verbatim from
+`release.yml` and driven against real built sdists:
+
+| tree | rc | first line |
+|---|---|---|
+| pristine | 0 | `every one of 261 sdist members is committed to this tree` |
+| ancestor `.hgignore` | 1 | names `.hgignore` |
+| untracked `docs/zz_leak.md` | 1 | names it |
+| hook shipping a TRACKED file | 0 | in scope for the test module, not for this question |
+| `members.txt` emptied (blinding) | 1 | "the sdist check examined nothing" |
+| `tracked.txt` emptied (blinding) | 1 | "the sdist check examined nothing" |
+
+The one blinding it cannot self-pin is deleting its own comparison; nothing in
+a shell step can. It also asserts four members are present (`PKG-INFO`,
+`pyproject.toml`, `README.md`, `LICENSE`) before believing any absence.
+
+## Figures
+
+* module: **12 tests at a4c16fe -> 17 here**; `12 passed` -> `17 passed`.
+* suite: `2362 passed, 2 skipped` at `main` -> **`2367 passed, 2 skipped`**
+  on BOTH series — jax 0.11.0 in 148.14s (load average 7.14 at the end),
+  jax 0.10.2 in 146.07s (load average 8.19). `--collect-only` ids **identical
+  between the two series** (2369 each, `diff` empty); against `main`'s 2364 the
+  diff is exactly the five added test ids and nothing else.
+* sdist members, this tree: **261 before, 261 after** — no fix changes what
+  ships.
+* `reuse lint`: **301/301 rc=0** at `main`, **301/301 rc=0** here. No files
+  added or removed.
+* no `uv` on `PATH`: `9 passed, 3 skipped` at a4c16fe, **`14 passed,
+  3 skipped`** here. The three skipped are unchanged.
+
+## Judgements the audit asked for
+
+**F3, "model it or name it; say which and why": MODELLED.** It is a static,
+diff-reviewable table in `pyproject.toml` with no code in it, its resolution is
+forty lines of hatchling that can be transcribed exactly
+(`builders/config.py:678-704`, `builders/utils.py`), and it is strictly easier
+to introduce than the `hatch_build.py` route the module already named. Naming
+it would have left the cheaper route as the unguarded one.
+
+**F1's suggested shape: adopted, both halves.** The check is out from behind
+the `.git` skip and degrades rather than skipping when the index is unreadable,
+and `_force_included(REPO)` is asserted non-empty.
+
+**F6b: kept RED, diagnosis corrected, not made green.** A tracked directory
+symlink ships nothing at its own path, so there is a case for subtracting it
+the way `_pruned_by_the_walk` is subtracted. It is not taken: everything
+hatchling reaches THROUGH the link ships under the link's path whenever the
+seen-set has not already visited the target, and a link out of the tree
+therefore distributes files nobody committed here. The finding was that the
+diagnosis pointed at the wrong mechanism, and that is what changed.
+
+## Still not fixed, and deliberately
+
+* Eight of the eleven names in `_HATCH_EXCLUDED_DIRECTORIES`, and all of
+  `_HATCH_DEFAULT_LICENSE_GLOBS`, are held by nothing. Measured, not assumed
+  (`.hg` and a `ZZ_NEVER*` license glob both leave 17 passed). Holding them
+  would mean un-gitignoring those names in this repository or planting a file
+  per name; the two that could be held without either were.
+* `project.readme` in its table form (`{text = "…"}`) carries no path and is
+  still not exercised.
+* `git check-ignore` vs `pathspec` on 7 of 22 pattern shapes — unchanged from
+  the previous pass, and the release-workflow assertion added here is the first
+  guard on that class that does not depend on the model at all.
+* **SUSPECTED, not measured**: that `_static_force_include` matches hatchling
+  for a source key that is absolute or `~`-prefixed. The code path is written
+  and the transcription is from the upstream source; no build was made with
+  such a key, because both shapes are `(OUTSIDE the tree)` reds anyway.
+* **SUSPECTED, not measured**: that the release-workflow step behaves on
+  GitHub's runner as it does here. It was driven with `bash` locally on real
+  artefacts; it has not run under `actions/checkout@v4`, whose index is the
+  thing `git ls-files` reads there.
