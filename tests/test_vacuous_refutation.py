@@ -46,15 +46,16 @@ is a refutation only if the assumed region is non-empty, and a dropped
 conjunct is exactly the part of the precondition whose satisfiability was
 never established.
 
-NOT fixed here, deliberately: an `assume` traced AFTER the `assert_` it
-should constrain. That is a question about what an `assume` SCOPES OVER,
-not about superset judging. The principal has since RULED it QUERY-scoped;
-implementing that uniformly is a separate change with its own
-pre-registration. This file only pins the current behaviour, on BOTH legs
-— and the two legs do not agree: the affine guard keys on
-`propagation.assume_dropped` (a whole-run flag, so query-scoped) while the
-interval withhold reads `uncertified` at assert time (order-scoped). See
-the C section.
+**C — an `assume` traced AFTER the `assert_` it should constrain.** Open
+when this file was written, CLOSED now (`scratchpad/PREREG_MECHC.md`).
+What it pinned then was the two legs DISAGREEING: the affine guard keyed
+on `propagation.assume_dropped`, a whole-run flag with no order in it,
+while the interval withhold read its uncertified flag at assert time and
+so saw only the assumes traced above the obligation. Both legs now
+consult one shared point —
+:func:`stelling.exactness.certifies_set_refutation`, over the run's whole
+assume state — and the C section pins the agreement instead, together
+with the rows that moved.
 """
 from __future__ import annotations
 
@@ -622,33 +623,37 @@ def test_a_vacuous_conjunct_beside_a_narrowing_withholds():
     assert _run(_branch_mixed_vacuous).status == "UNKNOWN"
 
 
-# -- C: the ordering rule, and the two legs that do not yet agree on it ------
+# -- C: the ordering rule, and the two legs that now agree on it -------------
 #
-# The principal has RULED: an `assume` is QUERY-scoped — it constrains the
-# whole query, not only the obligations traced after it. Implementing that
-# uniformly is a separate change with its own pre-registration; this branch
-# implements none of it and only pins what the tree does today, on BOTH legs,
-# so that change lands loudly wherever it touches.
+# The principal RULED: an `assume` is QUERY-scoped — it constrains the whole
+# query, not only the obligations traced after it. Implemented here.
 #
-# What the tree does today is not one thing. The affine guard keys on
+# What the tree did before was not one thing. The affine guard keyed on
 # `propagation.assume_dropped`, a whole-run flag with no order in it, while
-# the interval withhold reads `uncertified` at assert time — so the affine
-# leg is already query-scoped and the interval leg is still order-scoped.
-# Measured (`refine=None` / `refine="affine"`):
+# the interval withhold read its uncertified flag at assert time — so the
+# affine leg was already query-scoped and the interval leg was order-scoped.
+# Measured at `e8b9377` (`refine=None` / `refine="affine"`):
 #
-#     assert-before-assume, interval-decided   REFUTED / REFUTED
+#     assert-before-assume, interval-decided   REFUTED / REFUTED   <- moved
 #     assert-before-assume, affine-decided     UNKNOWN / UNKNOWN
 #     the same, no assume at all (control)     UNKNOWN / REFUTED
 #
-# The affine row read UNKNOWN / **REFUTED** at `9efea6f`, so this branch DID
-# move an ordering row (PREREG_REF1 C7 is false at the tip; see its
-# re-scoring). The direction is REFUTED → UNKNOWN, and it is the direction
-# the ruling wants, but it arrived as a side effect of the mechanism-B guard
-# rather than as a decision.
+# The oracle says the region is EMPTY (50 000 uniform samples over [-1,1]^3
+# plus every corner plus a 21^3 grid satisfy `x >= 2` zero times), so the two
+# REFUTEDs in the first row were refutations of a claim that is vacuously
+# TRUE. Both are UNKNOWN now, and the third row — no assume at all — is
+# untouched, which is what keeps the first row's move from being a checker
+# that withholds everything.
+#
+# The agreement is no longer a coincidence. Both legs consult
+# `stelling.exactness.certifies_set_refutation` over the run's whole assume
+# state; `tests/test_exactness_lift.py` forces that shared answer False and
+# requires BOTH legs to withhold, so a leg that stops consulting it reddens
+# there rather than drifting quietly.
 
 _ORDERING_ROWS = [
-    ("interval-leg/refine-none", _assert_before_assume, None, "REFUTED"),
-    ("interval-leg/refine-affine", _assert_before_assume, "affine", "REFUTED"),
+    ("interval-leg/refine-none", _assert_before_assume, None, "UNKNOWN"),
+    ("interval-leg/refine-affine", _assert_before_assume, "affine", "UNKNOWN"),
     ("affine-leg/refine-none", _assert_before_assume_affine, None, "UNKNOWN"),
     ("affine-leg/refine-affine", _assert_before_assume_affine, "affine",
      "UNKNOWN"),
@@ -659,26 +664,83 @@ _ORDERING_ROWS = [
     "name,h,refine,expected", _ORDERING_ROWS,
     ids=[r[0] for r in _ORDERING_ROWS],
 )
-def test_an_assume_after_the_assert_is_pinned_on_BOTH_legs(
+def test_an_assume_after_the_assert_withholds_on_BOTH_legs(
     name, h, refine, expected
 ):
-    """CURRENT BEHAVIOUR, not a claim that any of these four is right.
+    """The ruling, on all four cells.
 
-    The oracle says this region is EMPTY (no point of [-1,1]^3 satisfies
-    `x >= 2`), so under the query-scoped ruling every REFUTED here is
-    wrong and will change. The predecessor of this test ran only
-    `refine=None` on the interval-decided harness — one of these four
-    cells — and was blind to the affine cell that actually moved.
+    The oracle says this region is EMPTY, so every REFUTED here was wrong.
+    The predecessor of this test ran only `refine=None` on the
+    interval-decided harness — one of these four cells — and was blind to
+    the affine cell.
     """
     assert _run(h, refine=refine).status == expected
 
 
-def test_the_two_legs_do_not_yet_agree_on_assume_ordering():
-    """The inconsistency as a fact rather than as prose. Disclosed, not
-    decided: resolving it is the forthcoming query-scoping change."""
+def test_the_two_legs_now_agree_on_assume_ordering():
+    """The agreement as a fact rather than as prose, with the control that
+    keeps it from being satisfied by a checker that withholds everything."""
     # the affine leg withholds under an assume traced AFTER the assert...
     assert _run(_assert_before_assume_affine, refine="affine").status == "UNKNOWN"
-    # ...and it is the assume doing that, not the leg going dark
+    # ...and so does the interval leg, on the same ordering
+    assert _run(_assert_before_assume, refine=None).status == "UNKNOWN"
+    # ...and it is the assume doing that on BOTH legs, not the legs going
+    # dark: delete the assume and each refutes on its own leg
     assert _run(_affine_control_no_assume, refine="affine").status == "REFUTED"
-    # the interval leg does not withhold on the same ordering
-    assert _run(_assert_before_assume, refine=None).status == "REFUTED"
+
+    def interval_control_no_assume():
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return (assert_(x > 5.0),)
+
+    assert _run(interval_control_no_assume, refine=None).status == "REFUTED"
+
+
+def test_the_order_of_the_assume_no_longer_moves_the_verdict():
+    """The defect in one assertion, on both legs: the SAME claim under the
+    SAME precondition, with the assume written first and written second."""
+    def assume_first():
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        assume(jnp.all(x >= 2.0))
+        return (assert_(x > 5.0),)
+
+    for refine in (None, "affine"):
+        assert (
+            _run(assume_first, refine=refine).status
+            == _run(_assert_before_assume, refine=refine).status
+            == "UNKNOWN"
+        )
+
+
+def test_an_obligation_ABOVE_the_assume_is_withheld_with_the_ones_below():
+    """Per obligation, in one query — the sharpest form of the rule.
+
+    Before the change this returned `violated-over-set` for the obligation
+    traced above the assume and `unknown` for the one below, from the same
+    empty precondition. If the assumed region is empty then EVERY
+    obligation is vacuously true, not only the ones under the line, which
+    is exactly what the raise for a DETECTABLY empty region already does.
+    """
+    def h():
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        above = assert_(x > 5.0)
+        assume(jnp.all(x >= 2.0))          # region EMPTY
+        below = assert_(x > 6.0)
+        return (above, below)
+
+    p = _prop(h)
+    assert [o.status for o in p.obligations] == ["unknown", "unknown"]
+    assert all("WITHHELD from REFUTED" in o.detail for o in p.obligations)
+
+
+def test_the_withholding_sentence_names_the_mechanism_that_actually_fired():
+    """A DROPPED assume and a narrowed over-approximated intermediate are
+    withheld by the same decision and are NOT the same mechanism. Quoting
+    the wrong one is a false statement of mechanism in the one sentence
+    whose job is to explain the withholding."""
+    dropped = next(
+        n for n in _prop(_plain_empty).notes
+        if "violation WITHHELD from REFUTED" in n
+    )
+    assert "an assume was DROPPED rather than applied" in dropped
+    assert "over-approximated intermediate" not in dropped
+    assert _prop(_plain_empty).narrowing_uncertified is False

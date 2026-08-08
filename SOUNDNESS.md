@@ -2510,4 +2510,142 @@ verdicts:
   design and outcomes: `scratchpad/PREREG_PROBE.md`, corpora
   `scratchpad/probe/` and `scratchpad/probe2/`.
 
+- **2026-08-08 (pre-release): an `assume` is a precondition on the WHOLE
+  QUERY, not only on the obligations traced after it — the interval
+  leg's withholding was order-scoped and is now run-scoped. Verdicts
+  move REFUTED → UNKNOWN and in no other direction; nothing moves toward
+  VERIFIED and no `discharged` is touched.**
+
+  **The defect.** An `assume` the checker cannot represent exactly is
+  DROPPED, and the run records that it was; an `assume` that narrows a
+  value whose computed box may exceed its true image leaves the narrowed
+  region uncertified. Either way no definite violation of that run is a
+  refutation — it may be a refutation of a claim that is vacuously true.
+  The interval leg read that fact **at the assert**, so it saw only the
+  assumes traced ABOVE the obligation. The same claim under the same
+  precondition therefore returned **UNKNOWN with the `assume` written
+  first and REFUTED with it written second**. The entry above recorded
+  the measured shape: 36 of 36 rows in one survey, 20 of them over a
+  precondition satisfied by 0 of 59 269 sampled points.
+
+  Worse, the tree was **already** query-scoped where it could detect the
+  assumed region empty — `UnsatisfiableAssumptionError` ends the run
+  whole, obligations written above the assume included — and order-scoped
+  where it could not. Which behaviour a caller got depended on whether
+  they wrote `jnp.all(x >= 2)` or `x >= 2`.
+
+  **The rule, and its argument.** If the assumed region is empty then
+  **every** obligation is vacuously true, not only the ones below the
+  line — which is exactly why the detectable case ends the run whole. The
+  possibly-empty case is the same fact known less precisely, so it takes
+  the same scope. The withholding is now applied once, at the end of the
+  run, over every obligation and every nonvacuity condition.
+
+  **Where the rule lives, and why not in either leg.** Two legs can mint
+  a set-level refutation. The affine refinement was already query-scoped
+  — but by ARCHITECTURE, being a post-pass over a finished propagation:
+  there is no "during the walk" for it to read from, so it could not have
+  been order-scoped if it tried. Left there, the two legs would agree for
+  two different reasons, and that agreement breaks silently the first
+  time the refinement is restructured to run inline or to interleave. The
+  decision is therefore stated **once**, in `stelling.exactness` beside
+  `certifies_nonemptiness`, as **`certifies_set_refutation`** — *given
+  this run's whole assume state, is a set-level refutation certified?* —
+  and both legs consult it. Its signature names no obligation, no
+  equation and no position, so no caller can make the answer depend on
+  where in the trace it was asked. `tests/test_exactness_lift.py` forces
+  that shared answer False and requires **both** legs to withhold, with
+  each leg's positive control (a query with no assume at all, which must
+  refute on that leg) asserted in the same test.
+
+  The two mechanisms stay **separate flags** — `assume_dropped` and
+  `narrowing_uncertified` — rather than one merged "uncertified" bit,
+  because the sentence whose job is to explain a withholding may not
+  quote the mechanism that did not fire.
+
+  **Which verdicts are retroactively invalid**: any REFUTED on a query
+  that dropped an assume, or narrowed an over-approximated intermediate,
+  **where the refuted obligation was traced above that assume**. Those
+  are exactly the verdicts the old code let through, and the assumed
+  region may be empty, in which case the tool told the author their
+  correct program was broken. Re-`check()` them: a `violation WITHHELD
+  from REFUTED` note where a REFUTED used to be is this change.
+
+  **Cost, measured on this change's own corpus, not inherited.** 23
+  harnesses × trace order {assumes first, assumes last, or a fixed
+  interleaving} × `refine` ∈ {None, affine} × `assume_mode` ∈ {constrain,
+  inert} = 168 runs and **184 obligation-runs**, scored **per
+  obligation**, never per query — a corpus in this project once scored per
+  query and turned a measured 24:168 trade into a fake 216:216. Ground
+  truth is a jax/numpy oracle over the same source — 20 000 uniform
+  samples plus every corner plus a 21³ grid (29 269 or 20 023 points per
+  case), applying **every** assume of the harness regardless of trace
+  position, stelling never consulted.
+
+  | | `discharged` | `violated-over-set` | `unknown` |
+  |---|---|---|---|
+  | `e8b9377` | 28 | 94 | 62 |
+  | this change | **28** | 76 | 80 |
+
+  **18 obligation-runs move, every one `violated-over-set` → `unknown`;
+  12 of the 18 are wrong REFUTEDs closed** (the oracle finds **0**
+  admitted points — the assumed region is empty and the claim is
+  vacuously true) **and 6 are legitimate REFUTEDs lost** (the oracle finds
+  admitted points that really violate the obligation: 560, 4 995, 12 507
+  and 29 269 of them on the four cases concerned). Nothing moved toward
+  `discharged`, in either direction. **These are counts on this corpus of
+  this shape, which is built to REACH the defect and so over-samples it;
+  none of it is a rate.** The prior figures 92, 168 and 252 came from
+  three different corpora and are not comparable with this one or with
+  each other.
+
+  The 6 are the same class the entry above records: nothing at the
+  interval level establishes that a dropped conjunct is SATISFIABLE, so a
+  genuine refutation over a non-empty region is withheld beside the
+  vacuous ones. A "certificate" that recovers most of that class is
+  planned and is not this change.
+
+  **Order-dependence, measured with its positive control.** Rows where
+  the same case gives different per-obligation statuses with the assumes
+  written first and written last: **16 of 38 at `e8b9377`, 2 of 38 now**,
+  across both `refine` legs. The controls that keep that from being a
+  checker which withholds everything: a query with **no assume** (both
+  legs still REFUTE), a **certified** narrowing of a declared input (still
+  REFUTES), and a **definitely-true** assume, the audit-F8 channel (still
+  REFUTES) — all unchanged, all in the corpus.
+
+  **The 2 residual rows are not this withholding, and are disclosed
+  rather than closed.** Narrowing is forward-only (equation order), so an
+  `assume` traced after an obligation does not narrow the box that
+  obligation is judged over; the corpus row is a CERTIFIED
+  `assume(x >= 0.9)` on `x ∈ [0,1]` with `assert_(x <= 0.5)`, which is
+  `violated-over-set` with the assume first and `unknown` with it last.
+  That direction is the safe one and is sound in both cells: a definite
+  violation over the WIDER box is a violation at every point of the
+  narrowed region, and "certified" means that region was shown inhabited,
+  so the refutation stands; the later-order cell merely judges over more
+  and decides less. It can cost an UNKNOWN, never mint a verdict.
+  `stelling.harness.assume`'s docstring now states this, and states it as
+  the one positional thing about an assume.
+
+  **Byte-identity where nothing should move.** Every corpus run with no
+  assume, every run whose assumes are all certified, and **every** run in
+  `assume_mode="inert"` — 110 runs, compared on obligation statuses AND
+  details, notes (including their order), stamped assumptions and
+  coverage counts: **0 differ**. The guard returns having done nothing.
+
+  At the verdict layer the same 168 runs give **VERIFIED 12 → 12**,
+  REFUTED 36 → 20, UNKNOWN 36 → 52: all 16 verdict moves are REFUTED →
+  UNKNOWN and no query becomes VERIFIED.
+
+  **Both jax series.** 2357 passed / 2 skipped on jax 0.11.0 and on jax
+  0.10.2, `--collect-only` ids byte-identical between them (2359), and
+  the 168-run ledger is run-for-run identical on the two series (0
+  disagreements).
+
+  Constructions: `tests/test_exactness_lift.py` (the routing pin),
+  `tests/test_assume_constrain.py`, `tests/test_vacuous_refutation.py`;
+  pre-registration, corpus, oracle and outcomes:
+  `scratchpad/PREREG_MECHC.md` and `scratchpad/mechc/`.
+
 *(no releases yet)*

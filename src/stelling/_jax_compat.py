@@ -1320,16 +1320,57 @@ def fold_extrema(value):
 
 
 def assume(pred):
-    """Record an assumption in the trace. The MVP interval propagation does
-    **not** refine by assumptions (they are inert, conservative); bounds
-    belong in :func:`any_array`."""
+    """State a **precondition**: ``pred`` is taken as given, and every
+    obligation of the query is judged only where it holds.
+
+    **What it does.** Where the checker can represent the assumed region
+    exactly, it narrows the propagated domain, and the verdict becomes
+    the conditional claim *"holds wherever the precondition holds"* — the
+    stamp says so, naming this call's source address and the region.
+    Where it cannot (a relation between two varying quantities, a
+    reduction such as ``jnp.all(x >= 0)``, anything outside the
+    representable census), the assume is **dropped**, the run records
+    that it was, and the query is judged over a **superset** of the
+    region you asked about. The earlier claim here — that assumptions
+    are inert and conservative — stopped being true when constraining
+    landed.
+
+    **What it scopes over: the whole query, not the lines below it.**
+    An ``assume`` is a precondition on the query, so it is not a
+    statement about the obligations that happen to be traced after it.
+    Concretely, in both directions:
+
+    * If the assumed region turns out to be **empty**, every obligation
+      of the query is vacuously true — the ones written above this call
+      included — and the run refuses (an empty precondition is a harness
+      defect, raised loudly, never a VERIFIED).
+    * If the checker cannot *tell* whether the assumed region is empty —
+      because this assume was dropped, or narrowed a value whose
+      computed bounds may exceed its true range — then no obligation of
+      the run is REFUTED. The same fact known less precisely takes the
+      same scope. Discharges are kept: a proof over a superset is a
+      proof over the region you meant.
+
+    The one thing that *is* positional is the narrowing itself, which is
+    applied forward from this call (equation order). That direction only
+    ever widens the set an earlier obligation is judged over, which is
+    the safe direction — it can cost an UNKNOWN, never mint a verdict.
+    So writing preconditions before the obligations they guard is worth
+    doing for precision; it is not what makes them apply.
+
+    Simple bounds on an input belong in :func:`any_array`, which is
+    exact by construction and needs none of this.
+    """
     return _assume_p.bind(pred)
 
 
 def assert_(pred):
     """State an obligation: ``pred`` must hold for every input admitted by
-    the ``any_array`` declarations. Returns ``pred`` — harnesses should
-    return their asserts so no obligation can be dropped as dead code."""
+    the ``any_array`` declarations — and, where the query states
+    preconditions, only for those inputs that satisfy every
+    :func:`assume` of the query, wherever it is written. Returns ``pred``
+    — harnesses should return their asserts so no obligation can be
+    dropped as dead code."""
     return _assert_p.bind(pred)
 
 

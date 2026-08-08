@@ -218,6 +218,17 @@ class Propagation:
     # assume being present, and a dropped one is not present at all — leaving
     # the solver free to emit a sat witness outside the precondition.
     assume_dropped: bool = False
+    # a constraining assume NARROWED a variable whose box is an
+    # over-approximation, so the narrowed region was never certified
+    # inhabited (audit F7). The OTHER half of this run's assume state, and
+    # carried out for the same reason `assume_dropped` is: the refinement
+    # layer decides the same question on its own leg and must consult the
+    # whole state through the same shared point
+    # (:func:`stelling.exactness.certifies_set_refutation`), not a private
+    # subset of it. Kept a SEPARATE field rather than merged into one
+    # "uncertified" bit because the two name different mechanisms, and the
+    # sentence explaining a withholding has to name the one that fired.
+    narrowing_uncertified: bool = False
     # Values this walk bound to ⊤ — every element [-inf, inf], the widest
     # box there is — in the top-level scope, as (producing primitive,
     # count), most frequent first. THE FACT THE COVERAGE CENSUS CANNOT
@@ -4555,20 +4566,28 @@ class _Propagator:
         # its maintenance rules, and the certification decision live in
         # stelling.exactness (the shared primitive future layers import).
         self.exact = exactness.ExactSet()
-        # set once a constraining assume narrows a NON-exact variable: an
-        # uncertified-precondition constraint is then in force, and every
-        # subsequent definite violation is withheld from REFUTED (a
-        # possibly-vacuous refutation is not a refutation — audit F7).
-        self.uncertified = False
+        # set once a constraining assume narrows a NON-exact variable: the
+        # narrowed region was not certified inhabited, so no definite
+        # violation on this run is a refutation (a possibly-vacuous
+        # refutation is not a refutation — audit F7). NAMED FOR ITS
+        # MECHANISM, not merged into a generic "uncertified": the sentence
+        # that explains a withholding must quote the mechanism that
+        # actually fired, and this one is "narrowed an over-approximated
+        # intermediate". Read ONCE, at the end of the run, through
+        # exactness.certifies_set_refutation — never at an obligation.
+        self.narrowing_uncertified = False
         # set once MEMBERSHIP_IDIOM_HINT's body has been printed on this run.
         # One property can be stated on three faces and the hint is ~1.2k
         # characters; every later face gets the pointer instead (see
         # MEMBERSHIP_IDIOM_POINTER). Message content only.
         self.membership_hint_emitted = False
-        # set when an assume was DROPPED rather than applied. Distinct from
-        # `uncertified` because it must also reach the SOLVER path: the
-        # escalation decline keys on a constrained assume being present, and
-        # a dropped one is not present at all.
+        # set when an assume was DROPPED rather than applied: the judged set
+        # is a SUPERSET of the assumed region and that region was never
+        # shown inhabited. Distinct from `narrowing_uncertified` because it
+        # is a different mechanism (see above) and because it must also
+        # reach the SOLVER path: the escalation decline keys on a
+        # constrained assume being present, and a dropped one is not
+        # present at all.
         self.assume_dropped = False
 
     def read(self, atom: ir.Atom) -> iv.IntervalArray:
@@ -5376,10 +5395,12 @@ class _Propagator:
                     # meet does NOT certify the true assumed region
                     # nonempty. The narrowing itself is sound (superset of
                     # true-region ∩ reachable) and stays applied; the
-                    # conditional claim may be vacuous, and every
-                    # subsequent definite violation is withheld from
-                    # REFUTED.
-                    self.uncertified = True
+                    # conditional claim may be vacuous, so EVERY definite
+                    # violation on this run is withheld from REFUTED —
+                    # every, not every subsequent: the flag is read once at
+                    # the end of the run (an assume is a precondition on
+                    # the whole query), never here.
+                    self.narrowing_uncertified = True
                     self.notes.append(
                         f"precondition satisfiability UNCERTIFIED at "
                         f"{where}: var {var_id} is an over-approximated "
@@ -5457,13 +5478,17 @@ class _Propagator:
                 # nothing, and its mere presence flipped a correct UNKNOWN
                 # into a wrong REFUTED.
                 #
-                # Same two flags, same reasons, as the whole-drop path:
-                # `uncertified` withholds the interval leg's
-                # `violated-over-set`, `assume_dropped` reaches the solver
-                # leg's DROPPED_ASSUME_REFUSAL (which the constrained-assume
-                # refusal already covers here, but the flag is the record of
-                # WHY, and the affine leg reads it).
-                self.uncertified = True
+                # Same flag, same reason, as the whole-drop path.
+                # `assume_dropped` is the DROP's own mechanism name: it
+                # withholds the interval leg's `violated-over-set` and the
+                # affine leg's (both through
+                # `exactness.certifies_set_refutation`), and it reaches the
+                # solver leg's DROPPED_ASSUME_REFUSAL — which the
+                # constrained-assume refusal already covers here, but the
+                # flag is the record of WHY. It does NOT also set
+                # `narrowing_uncertified`: nothing here narrowed an
+                # over-approximated intermediate, and a run that quoted that
+                # mechanism would be stating a mechanism that did not fire.
                 self.assume_dropped = True
                 self.notes.append(
                     f"precondition satisfiability UNCERTIFIED at {where}: "
@@ -5494,8 +5519,9 @@ class _Propagator:
                     ASSUME_DROP_NOTE.format(where=where) + f" ({reasons})"
                     + self._membership_hint_for(eqn.invars[0])
                 )
-            # F7's NO-OP HALF. The narrowing path sets `uncertified` when it
-            # constrains an over-approximated variable; a DROPPED assume never
+            # F7's NO-OP HALF. The narrowing path sets
+            # `narrowing_uncertified` when it constrains an
+            # over-approximated variable; a DROPPED assume never
             # reached that branch, so neither the interval withhold nor
             # solvers.py's decline-when-constrained ever engaged — both are
             # conditioned on the assume having TAKEN EFFECT, and an assume
@@ -5541,8 +5567,14 @@ class _Propagator:
             # because a branch-scoped unsatisfiable conjunct IS the assumed
             # region being empty in that branch. Here nothing narrowed at
             # all, so every reason to withhold that the mixed path has, this
-            # path has; the flags are unconditional.
-            self.uncertified = True
+            # path has; the flag is unconditional.
+            #
+            # ONE flag, not two, and the difference is a claim about
+            # mechanism: nothing on this path narrowed anything, so
+            # `narrowing_uncertified` — "a constraining assume narrowed an
+            # over-approximated intermediate" — would be false here. The
+            # withholding they both cause is the same withholding; the
+            # sentence that explains it is not the same sentence.
             self.assume_dropped = True
 
     def _conjunct_certainly_true(self, atom: ir.Atom) -> bool:
@@ -5583,9 +5615,12 @@ class _Propagator:
            (``exactness.certifies_nonemptiness(...)``, with audit F8's
            definitely-true half). A narrowing whose target is neither
            exact-declared nor definitely-true over its box sets
-           ``uncertified``, and ``uncertified`` withholds every
-           ``violated-over-set`` from REFUTED regardless of what this
-           method answers. Measured, three rows: a sibling narrowing an
+           ``narrowing_uncertified``, which withholds every
+           ``violated-over-set`` of the run from REFUTED — through
+           :func:`stelling.exactness.certifies_set_refutation`, at the end
+           of the run, regardless of what this method answers or of where
+           in the trace the obligation sits. Measured, three rows: a
+           sibling narrowing an
            exact declared input does not raise it; the same narrowing on
            ``y = x * 2.`` does; the same again with the predicate
            definitely true over ``y``'s box does not.
@@ -6708,31 +6743,12 @@ class _Propagator:
                     "predicate value carries maybe-NaN under ieee semantics "
                     "(see notes); no definite status is claimed"
                 )
-            if status == "violated-over-set" and self.uncertified:
-                # audit F7: a definite violation judged while an
-                # UNCERTIFIED-precondition constraint is in force is
-                # withheld from REFUTED — the narrowed superset it was
-                # judged over may over-approximate an EMPTY true region,
-                # and a possibly-vacuous refutation is not a refutation.
-                where = (
-                    eqn.source_info[-1] if eqn.source_info else "unknown location"
-                )
-                self.notes.append(
-                    f"violation WITHHELD from REFUTED at {where}: a "
-                    f"definite violation was found over the narrowed "
-                    f"superset, but the precondition's satisfiability is "
-                    f"uncertified (it constrains an over-approximated "
-                    f"intermediate whose box may exceed its true image) — "
-                    f"a possibly-vacuous refutation is not a refutation; "
-                    f"REFUTED under constraining assumes requires "
-                    f"certified-satisfiable preconditions"
-                )
-                status = "unknown"
-                detail = (
-                    "definite violation over the precondition-narrowed "
-                    "superset WITHHELD from REFUTED (precondition "
-                    "satisfiability uncertified; see notes)"
-                )
+            # audit F7's withholding is NOT applied here. It is a fact about
+            # the RUN's assume state, and this is a position in the walk: the
+            # assume that puts the precondition's satisfiability in doubt may
+            # be traced BELOW this obligation and would not be visible yet.
+            # `_withhold_uncertified_refutations` applies it once, at the end,
+            # over every obligation. See its docstring for the ruling.
             if status == "violated-over-set" and self.unforced_depth:
                 # a definite violation inside a branch the analysis only
                 # ADMITS. Recorded as a candidate rather than decided here:
@@ -6790,31 +6806,12 @@ class _Propagator:
                     "membership condition carries maybe-NaN under ieee "
                     "semantics (see notes); no definite status is claimed"
                 )
-            if status == "violated-over-set" and self.uncertified:
-                # audit F9: the definite FAILED stamp sentence is the same
-                # claim class the assert withholding guards — a membership
-                # condition judged definitely false over an
-                # uncertified-narrowed region may be vacuously so. Same
-                # forward scoping as the assert withholding; certified and
-                # exact runs keep FAILED byte-identically.
-                where = (
-                    eqn.source_info[-1] if eqn.source_info else "unknown location"
-                )
-                self.notes.append(
-                    f"nonvacuity FAILED face WITHHELD at {where}: the "
-                    f"membership condition was judged definitely false over "
-                    f"an uncertified-narrowed region (a constraining assume "
-                    f"cut an over-approximated intermediate whose box may "
-                    f"exceed its true image) — the FAILED sentence is "
-                    f"reserved for judgments not confounded by an "
-                    f"uncertified constraint"
-                )
-                status = "unknown"
-                detail = (
-                    "membership condition definitely false over the "
-                    "precondition-narrowed superset WITHHELD from FAILED "
-                    "(precondition satisfiability uncertified; see notes)"
-                )
+            # audit F9's withholding — the definite FAILED stamp sentence is
+            # the same claim class the assert withholding guards — is
+            # likewise applied once at the end, over the whole run, by
+            # `_withhold_uncertified_refutations`. Not here, for the reason
+            # given at the assert above: this is a position, and the rule is
+            # about the run.
             if status == "violated-over-set" and self.unforced_depth:
                 # the same class as the assert candidate above, on the
                 # face that makes the strongest claim: FAILED says "the
@@ -7004,6 +7001,134 @@ UNCERTIFIED_REACHABILITY_REFUSAL = (
 )
 
 
+# The scope sentence, quoted by every withholding this rule produces so a
+# reader who meets one obligation's note meets the rule itself.
+ASSUME_QUERY_SCOPE = (
+    "an assume is a precondition on the WHOLE QUERY, not only on the "
+    "obligations traced after it, so this withholding is applied to every "
+    "obligation of the run — the refusal for a DETECTABLY empty assumed "
+    "region already ends the run whole, obligations written above the "
+    "assume included, because an empty assumed region makes EVERY "
+    "obligation vacuously true; the possibly-empty case is the same fact "
+    "known less precisely and takes the same scope"
+)
+
+
+def _uncertified_mechanism(p) -> str:
+    """The mechanism(s) this run actually hit, named PER FLAG.
+
+    Not one generic sentence for both. Quoting the
+    over-approximated-intermediate mechanism at a run whose narrowing
+    target was exact — or that narrowed nothing at all — would be a false
+    statement of mechanism in the one sentence whose job is to explain the
+    withholding, and a reader would have no way to tell it from the run
+    where that mechanism really fired.
+    """
+    causes = []
+    if p.narrowing_uncertified:
+        causes.append(
+            "a constraining assume narrowed an over-approximated "
+            "intermediate whose box may exceed its true image"
+        )
+    if p.assume_dropped:
+        causes.append(
+            "an assume was DROPPED rather than applied, so the judged set "
+            "is a SUPERSET of the assumed region and that region was never "
+            "shown non-empty"
+        )
+    if not causes:
+        # the shared decision declined with NEITHER flag set. Unreachable
+        # from the flags themselves, and reachable from a caller that
+        # overrides `exactness.certifies_set_refutation` — the routing pin
+        # does exactly that. Naming no mechanism is the honest sentence
+        # there; an empty parenthetical would read as a missing one.
+        return (
+            "the shared certification decision "
+            "(stelling.exactness.certifies_set_refutation) declined for "
+            "this run without naming a mechanism of its own"
+        )
+    return "; and ".join(causes)
+
+
+def _withhold_uncertified_refutations(p) -> None:
+    """Withhold every definite violation of a run whose assume state does
+    not certify a set-level refutation — audit F7 (obligations) and F9
+    (the nonvacuity FAILED face), applied ONCE, at the end, over the whole
+    run.
+
+    **The shared point.** The decision is
+    :func:`stelling.exactness.certifies_set_refutation`, which
+    :mod:`stelling.affine` consults for the same decision on its own leg.
+    It is stated there rather than here because two legs answering it
+    separately is an agreement that breaks silently: the refinement reads
+    a whole-run quantity by architecture (it is a post-pass), this leg
+    reads one because that is the rule, and a refinement restructured to
+    run inline would drift with nothing catching it.
+
+    **Why the end of the run and not the obligation.** Read at the
+    obligation, this saw only the assumes traced ABOVE it, and the same
+    claim under the same precondition returned UNKNOWN with the assume
+    written first and REFUTED with it written second. An assume is a
+    precondition on the query (:data:`ASSUME_QUERY_SCOPE`).
+
+    **One-sided.** `discharged` is never touched: a discharge over a
+    superset implies the discharge over the intended set. And the run is
+    never declined wholly — `solvers.py` tried that on its own leg and
+    reverted it.
+
+    A run with no assumes, with only certified assumes, or in inert mode
+    returns at the guard having done nothing: no note, no status, no
+    detail changes.
+    """
+    if exactness.certifies_set_refutation(
+        nonemptiness_certified=not p.narrowing_uncertified,
+        assume_dropped=p.assume_dropped,
+    ):
+        return
+    mechanism = _uncertified_mechanism(p)
+    work = (
+        (
+            p.obligations,
+            "violation WITHHELD from REFUTED",
+            (
+                "a definite violation was found over the judged set, but "
+                "the precondition's satisfiability is uncertified "
+                f"({mechanism}) — a possibly-vacuous refutation is not a "
+                "refutation; REFUTED under constraining assumes requires "
+                f"certified-satisfiable preconditions. {ASSUME_QUERY_SCOPE}"
+            ),
+            (
+                "definite violation over the judged set WITHHELD from "
+                f"REFUTED (precondition satisfiability uncertified: "
+                f"{mechanism}; see notes)"
+            ),
+        ),
+        (
+            p.nonvacuity_checks,
+            "nonvacuity FAILED face WITHHELD",
+            (
+                "the membership condition was judged definitely false over "
+                "the judged set, but the precondition's satisfiability is "
+                f"uncertified ({mechanism}) — the FAILED sentence is "
+                "reserved for judgments not confounded by an uncertified "
+                f"constraint. {ASSUME_QUERY_SCOPE}"
+            ),
+            (
+                "membership condition definitely false over the judged set "
+                "WITHHELD from FAILED (precondition satisfiability "
+                f"uncertified: {mechanism}; see notes)"
+            ),
+        ),
+    )
+    for sink, headline, why, detail in work:
+        for i, o in enumerate(sink):
+            if o.status != "violated-over-set":
+                continue
+            where = o.source_info[-1] if o.source_info else "unknown location"
+            p.notes.append(f"{headline} at {where}: {why}")
+            sink[i] = dataclasses.replace(o, status="unknown", detail=detail)
+
+
 def _reachability_witnesses(closed, p, *, assume_mode, semantics):
     """Assert outvar ids the program provably reaches somewhere in the box.
 
@@ -7118,6 +7243,12 @@ def propagate(
             f"via any_array), got {len(closed.jaxpr.invars)} free invar(s)"
         )
     p.run(closed.jaxpr, list(closed.consts), [])
+    # FIRST: the run-scoped assume withholding. It runs before the
+    # branch-reachability pass so that an obligation withheld here is not
+    # also re-explained there — the branch pass skips anything no longer
+    # `violated-over-set`, exactly as it did when this withholding was
+    # applied inside the walk.
+    _withhold_uncertified_refutations(p)
     _withhold_uncertified_branch_refutations(
         closed, p, assume_mode=assume_mode, semantics=semantics
     )
@@ -7150,5 +7281,6 @@ def propagate(
         notes=tuple(p.notes),
         semantics=semantics,
         assume_dropped=p.assume_dropped,
+        narrowing_uncertified=p.narrowing_uncertified,
         top_boxes=_top_boxes(closed, p.env),
     )
