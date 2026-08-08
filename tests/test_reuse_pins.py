@@ -35,6 +35,8 @@ import os
 import re
 import subprocess
 
+import pytest
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CI = os.path.join(ROOT, ".github", "workflows", "ci.yml")
 PRECOMMIT = os.path.join(ROOT, ".pre-commit-config.yaml")
@@ -104,21 +106,42 @@ def test_the_two_reuse_pins_are_the_pair_this_repository_recorded():
 def test_the_skew_is_still_written_up_where_the_pins_are():
     """A pin without its write-up is a pin nobody can act on. Both files have
     to keep naming BOTH versions, so a bump that edits one number and leaves
-    the prose describing the other cannot pass quietly."""
+    the prose describing the other cannot pass quietly.
+
+    ONE CONJUNCT HERE WAS IMPLIED BY ANOTHER TEST AND COULD NOT FAIL. It read
+    `local in precommit`, where `local` is `6.2.0` — but
+    :func:`test_the_two_reuse_pins_are_the_pair_this_repository_recorded`
+    already requires the literal `rev: v6.2.0` in that same file, so the
+    substring was guaranteed by the pin itself. MEASURED: rewriting all SIX
+    prose mentions of `6.2.0` in `.pre-commit-config.yaml` to a nonsense token
+    and leaving only `rev: v6.2.0` still gave `3 passed`. The write-up could
+    be deleted wholesale and this test would not notice, which is the one
+    thing it exists to notice. It now reads the file with the pin LINE
+    REMOVED, so the prose has to carry the version on its own."""
     ci = _read(CI)
     precommit = _read(PRECOMMIT)
     suspected = CI_ACTION_REUSE_VERSION_SUSPECTED
     local = PRECOMMIT_REV.lstrip("v")
 
-    assert suspected in ci and local in ci, (
-        f"ci.yml no longer names both reuse versions ({suspected} and {local}); "
-        f"the `reuse` job's write-up is what tells a human how to close this."
+    # the write-up is everything that is NOT the pin the other test asserts;
+    # `6.2.0` inside `rev: v6.2.0` is that pin, not prose about it.
+    precommit_prose = re.sub(
+        r"^\s*rev:\s*\S+\s*$", "", precommit, flags=re.MULTILINE
     )
-    assert suspected in precommit and local in precommit, (
+    # likewise for ci.yml: the `uses:` step is the pin, the comments are prose
+    ci_prose = re.sub(r"^\s*-?\s*uses:\s*\S+\s*$", "", ci, flags=re.MULTILINE)
+
+    assert suspected in ci_prose and local in ci_prose, (
+        f"ci.yml no longer names both reuse versions ({suspected} and {local}) "
+        f"ANYWHERE BUT THE `uses:` STEP; the `reuse` job's write-up is what "
+        f"tells a human how to close this, and a step is not a write-up."
+    )
+    assert suspected in precommit_prose and local in precommit_prose, (
         f".pre-commit-config.yaml no longer names both reuse versions "
-        f"({suspected} and {local}); the `insert-license` comment's argument "
-        f"for excluding scratchpad/ depends on saying which version reads the "
-        f"annotation that replaced it."
+        f"({suspected} and {local}) ANYWHERE BUT THE `rev:` PIN; the "
+        f"`insert-license` comment's argument for excluding scratchpad/ "
+        f"depends on saying which version reads the annotation that replaced "
+        f"it, and the pin line does not say it."
     )
     # and the write-up must still point at where the bound was taken
     assert "v5.0.0" in ci, (
@@ -155,8 +178,22 @@ def test_the_scratchpad_annotation_is_load_bearing_and_present():
         ["git", "ls-files", "scratchpad"],
         cwd=ROOT, capture_output=True, text=True, timeout=60,
     )
-    if tracked.returncode != 0:  # not a git checkout: say so, do not pass
-        return
+    # `return` HERE WAS A PASS, and the comment on it said the opposite. It
+    # read `# not a git checkout: say so, do not pass` and then returned,
+    # which is exactly a pass — the non-vacuity floor below never ran and
+    # nothing said so. MEASURED on the unfixed tree: a non-git copy of this
+    # repository with `scratchpad/` absent ENTIRELY still gave `3 passed`,
+    # the floor silently skipped. A guard that cannot examine its subject
+    # must not report the same thing as a guard that examined it and was
+    # satisfied, so this skips (visible in `-ra`) instead of returning.
+    if tracked.returncode != 0:
+        pytest.skip(
+            "not a git checkout, so `git ls-files scratchpad` cannot enumerate "
+            "the tracked files this test's non-vacuity floor counts "
+            f"(rc={tracked.returncode}, stderr={tracked.stderr.strip()!r}). "
+            "The annotation assertion above DID run; the floor did not, and a "
+            "skip is what says so."
+        )
     headerless = []
     for rel in tracked.stdout.split("\n"):
         if not rel:

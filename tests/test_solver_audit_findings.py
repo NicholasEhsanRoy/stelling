@@ -1097,11 +1097,28 @@ def test_f4wheel2_the_two_line_end_sets_are_not_nested():
             continue
         compiles.add(ch)
 
-    # each of the four is independently falsifiable; none implies another
-    assert compiles == {"\n", "\r", "#", ";"}
-    assert compiles - splits == {"#", ";"}            # a MISS is possible
-    assert splits - compiles == set(_SEPARATORS)      # the cry-wolf direction
-    assert splits & compiles == {"\n", "\r"}
+    # WHAT THESE FOUR ARE AND ARE NOT. The comment here read "each of the four
+    # is independently falsifiable; none implies another". THE SECOND HALF WAS
+    # FALSE, and is measured so rather than argued: enumerate all 4096
+    # (splits, compiles) pairs over a six-symbol universe modelling this
+    # alphabet, and ask for each assertion whether the other three entail it —
+    #
+    #   A2 & A3 & A4  =>  A1   IMPLIED, 0 counterexamples of 4096
+    #   A1 & A3 & A4  =>  A2   IMPLIED, 0
+    #   A1 & A2 & A4  =>  A3   independent, 3 counterexamples
+    #   A1 & A2 & A3  =>  A4   IMPLIED, 0
+    #
+    # and the tightest form of the one that matters: A1 & A4 => A2 on its own,
+    # 0 counterexamples, since A2 is A1 minus A1&A4 by set algebra. THREE of
+    # the four are entailed by the rest; only A3 — the cry-wolf direction, the
+    # one carrying the eight separators — is not. They stay as four because
+    # four named facts read better than one derived one, but the redundancy is
+    # written down instead of denied: a mutation that moved only what A2 says
+    # could not redden this test THROUGH A2.
+    assert compiles == {"\n", "\r", "#", ";"}         # A1
+    assert compiles - splits == {"#", ";"}            # A2, a MISS is possible
+    assert splits - compiles == set(_SEPARATORS)      # A3, the cry-wolf leg
+    assert splits & compiles == {"\n", "\r"}          # A4
 
 
 @pytest.mark.parametrize(
