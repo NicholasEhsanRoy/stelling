@@ -3204,9 +3204,11 @@ verdicts:
 
   Constructions: `tests/test_nonempty_certificate.py` (one-sidedness,
   the `discharged` ledger with its positive control, membership, the
-  boundary cases, the dial, the invariant, the stamp swap, the bounds),
-  `tests/test_exactness_lift.py` (both routings); pre-registration,
-  corpus, oracle, ledger and outcomes: `scratchpad/PREREG_CERT.md` and
-  `scratchpad/cert/`.
+  boundary cases, the dial, the invariant, the stamp swap, the bounds,
+  the `lax.cond` counter-construction and its untaken-branch cost twin),
+  `tests/test_exactness_lift.py` (both routings, each now forced in BOTH
+  directions); pre-registration, corpus, oracle, ledger and outcomes:
+  `scratchpad/PREREG_CERT.md`, `scratchpad/cert/` and
+  `scratchpad/pin/`.
 
 *(no releases yet)*
