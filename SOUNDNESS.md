@@ -3202,6 +3202,21 @@ verdicts:
   a doc-example id is a file:line pair, so editing prose above a block
   retires one id and mints another.
 
+  **This branch, on top of that.** `fix/shared-point-pin-both-directions`
+  adds 5 tests and removes none — `--collect-only` id diff, `0ad22bb`
+  (2400 ids) vs this branch (2405), 5 added and 0 removed, so the
+  arithmetic and the sentence agree this time. 2403 passed / 2 skipped on
+  jax 0.11.0 and on jax 0.10.2, `--collect-only` ids byte-identical
+  between the two series, `reuse lint` rc=0. **No verdict moved, scored
+  PER OBLIGATION**: `scratchpad/pin/corpus_pin.py`, 95 rows × {real,
+  ieee} × {constrain, inert} × {interval leg, affine refinement} plus
+  `check()` at `refine=None` and `refine="affine"`, diffed key-for-key
+  against a clean `0ad22bb` worktree — **9228 leaf keys compared, 2090 of
+  them per-obligation or per-verdict statuses, 0 moved, and 0 non-status
+  keys differ** (worktree paths inside `source_info` strings normalised,
+  and nothing else). Raw output for every figure on this page that this
+  branch added: `scratchpad/pin/RESULTS_pin.txt`.
+
   Constructions: `tests/test_nonempty_certificate.py` (one-sidedness,
   the `discharged` ledger with its positive control, membership, the
   boundary cases, the dial, the invariant, the stamp swap, the bounds,
