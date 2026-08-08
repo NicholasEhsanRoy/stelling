@@ -64,12 +64,30 @@ only in the branch that also calls ``counter.record_constrained``, so it
 implies ``coverage.constrained >= 1``, and
 :func:`stelling.affine.refine_propagation` declines wholly on
 ``coverage.constrained`` before reaching the shared point. MEASURED, not
-reasoned: instrumenting that call site and running the whole suite
-records **25** reaches, ``narrowing_uncertified`` False at every one (19
-with ``assume_dropped`` False, 6 with it True) and
+reasoned, and RE-MEASURED on this tree because the count moves with the
+suite: instrumenting that call site records **31** reaches (it was 25 at
+``43896fc``), ``narrowing_uncertified`` False at every one — 12 with
+``assume_dropped`` True, 2 with a certificate — and
 ``coverage.constrained == 0`` at every one. On this leg the argument is
 a constant today; a refinement restructured to run under a constraining
-assume would make it live, and this file would still not see it.
+assume would make it live, and this file would still not see it. The
+same fact is now stated AT the call site in ``affine.py``, which is
+where a reader of that line meets it.
+
+**AND THE PINS THEMSELVES WERE HALF PINS.** Forcing a shared decision
+``False`` observes only the answers it VETOES. Every consumer reads the
+answer as one operand of an ``and``, so a leg that kept a private copy of
+the rule and wrote ``shared(<all the real arguments>) and _own_copy(...)``
+still calls the shared function, unconditionally, first, with everything
+a recorder expects — and a forced ``False`` still makes the conjunction
+``False``, so the leg withholds and the pin passes on a leg that has
+stopped obeying. Measured on this tree at ``0ad22bb``: that mutant on the
+affine leg (``M4``), on both legs (``M5``), and the same trick on
+:func:`stelling.exactness.certifies_nonemptiness` (``M6``) each pass the
+WHOLE SUITE, 2398 passed / 2 skipped / 0 failed. The three
+``..._in_the_TRUE_direction`` / ``..._is_ONE_SIDED_too`` tests below force
+the granting direction, which a private copy cannot follow, and redden
+all three.
 """
 
 from __future__ import annotations
@@ -310,6 +328,48 @@ def test_assume_certification_routes_through_the_shared_primitive(monkeypatch):
     assert any("UNCERTIFIED" in n for n in p2.notes)
 
 
+def test_the_nonemptiness_route_is_pinned_in_the_TRUE_direction(monkeypatch):
+    """The OTHER half of the routing pin above, and the half that was
+    missing: force the shared decision **True** on a run that would
+    otherwise withhold, and require the propagator to STOP withholding.
+
+    **Why a False-only pin is only half a pin.** The consumer at
+    ``propagate.py`` reads the shared answer as one operand of an ``and``.
+    A leg that kept a private copy of the same rule and wrote
+    ``exactness.certifies_nonemptiness(...) and _own_copy(...)`` still
+    calls the shared function, with the real arguments, first — so the
+    False-direction pin above forces the conjunction False, the leg
+    withholds exactly as required, and the pin passes on a leg that has
+    stopped obeying the shared decision. A conjunct can only ever be
+    observed through the answer it VETOES. Forcing True is what observes
+    the answer it GRANTS, and a private copy cannot follow it.
+
+    The certificate is closed throughout: it is the second, independent
+    route to the same conclusion, and leaving it open would let the
+    positive control pass without the shared decision doing anything.
+    """
+    q = _uncertified_but_inhabited_query()
+    _close_the_certificate(monkeypatch)
+
+    # positive control, with only the certificate closed: the run really
+    # does withhold, so the lift below is observing something
+    p0 = propagate(q)
+    assert p0.obligations[0].status == "unknown"
+    assert p0.narrowing_uncertified is True
+
+    monkeypatch.setattr(
+        exactness, "certifies_nonemptiness", lambda *a, **k: True
+    )
+    p1 = propagate(q)
+    assert p1.narrowing_uncertified is False, (
+        "the propagator must reach exactness.certifies_nonemptiness and "
+        "take its answer — not AND it with a private copy of the same rule, "
+        "which a False-only pin cannot tell apart"
+    )
+    assert p1.obligations[0].status == "violated-over-set"
+    assert not any("UNCERTIFIED" in n for n in p1.notes)
+
+
 def test_routing_pin_covers_the_f8_channel_too(monkeypatch):
     # a definitely-true no-op assume certifies via the definitely_true
     # argument of the shared primitive; forcing the primitive False must
@@ -457,6 +517,173 @@ def test_the_shared_point_is_one_sided_on_both_legs(monkeypatch):
     ra, rep = affine.refine_propagation(qa, pa)
     assert ra.obligations[0].status == "discharged"
     assert rep.discharged == (0,)
+
+
+def test_both_legs_follow_the_shared_point_in_the_TRUE_direction(monkeypatch):
+    """The missing half of the RUN-level routing pin, on both legs at once.
+
+    ``test_both_legs_consult_the_shared_set_refutation_point`` forces the
+    shared answer False and requires both legs to withhold. That is the
+    RESTRICTIVE direction only, and on its own it is **half a pin**: a leg
+    that kept a private copy of the run-level rule and wrote
+
+        not (exactness.certifies_set_refutation(<all three kwargs>)
+             and _own_copy(propagation))
+
+    still reaches the shared point, unconditionally, as the FIRST operand,
+    with all three real keyword arguments — so the recorder pin below sees
+    exactly what it expects, the forced ``False`` still makes the whole
+    conjunction False, and both legs still withhold. Measured on this
+    tree: that mutant on the affine leg alone, and on both legs at once,
+    each pass the whole suite **2398 passed / 2 skipped / 0 failed**. A
+    conjunct is observable only through the answers it VETOES; the answers
+    it GRANTS are what this test observes.
+
+    So: force the shared answer **True** on runs that would otherwise
+    withhold, and require BOTH legs to stop withholding. A private copy
+    cannot follow that forcing, because its own answer is still False.
+
+    (The interval leg's query is ``_dropped_and_uncertifiable_query``,
+    defined below with the certificate's pins: its assumed region is empty
+    and unwitnessable, which is precisely why the run withholds with
+    nothing else lifting it.)
+    """
+    # --- leg 1, the interval propagator ---------------------------------
+    qi = _dropped_and_uncertifiable_query()
+    pi = propagate(qi)
+    # positive control: unpatched, this run really does withhold
+    assert pi.obligations[0].status == "unknown"
+    assert pi.assume_dropped is True
+    assert pi.region_inhabited is False
+
+    # --- leg 2, the affine refinement -----------------------------------
+    qa = _affine_refuted_query()
+    pa = dataclasses.replace(propagate(qa), assume_dropped=True)
+    ra, rep = affine.refine_propagation(qa, pa)
+    # positive control: unpatched, this refinement really does withhold
+    assert ra.obligations[0].status == "unknown"
+    assert rep.violated == ()
+
+    monkeypatch.setattr(
+        exactness, "certifies_set_refutation", lambda **k: True
+    )
+
+    pi2 = propagate(qi)
+    assert pi2.obligations[0].status == "violated-over-set", (
+        "the interval leg must TAKE the shared answer, not AND it with a "
+        "private copy of the same rule — a False-only pin cannot tell the "
+        "two apart"
+    )
+    assert not any("WITHHELD from REFUTED" in n for n in pi2.notes)
+
+    ra2, rep2 = affine.refine_propagation(qa, pa)
+    assert ra2.obligations[0].status == "violated-over-set", (
+        "the affine refinement must TAKE the same shared answer, for the "
+        "same reason"
+    )
+    assert rep2.violated == (0,)
+    assert not any("WITHHELD from REFUTED" in n for n in ra2.notes)
+
+
+def _withheld_run_with_all_three_outcomes():
+    """`x ∈ [0, 1]`, `w = x·x`, `assume(w <= 0.9)` — a narrowing on an
+    OVER-APPROXIMATED intermediate, so the run withholds — carrying one
+    obligation of each kind over the declared box:
+
+        #0  `x <= -1`   definitely FALSE  -> violated, and WITHHELD
+        #1  `x <= 10`   definitely TRUE   -> discharged
+        #2  `x <= 0.5`  straddles         -> unknown, undecided by anyone
+
+    One query with all three outcomes is what makes the one-sidedness
+    observable in the GRANTING direction: the shared answer is False here
+    for its own reasons, so forcing it True is not a no-op, and the two
+    obligations that must not move are on the same run as the one that
+    must.
+    """
+    x, w, ap, aout = var(0), var(1), var(2, BOOL), var(3, BOOL)
+    p0, o0 = var(4, BOOL), var(5, BOOL)
+    p1, o1 = var(6, BOOL), var(7, BOOL)
+    p2, o2 = var(8, BOOL), var(9, BOOL)
+    return close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            eqn("mul", [x, x], w),
+            eqn("le", [w, lit(0.9)], ap),
+            eqn("stelling_assume", [ap], aout),
+            eqn("le", [x, lit(-1.0)], p0),
+            eqn("stelling_assert", [p0], o0),
+            eqn("le", [x, lit(10.0)], p1),
+            eqn("stelling_assert", [p1], o1),
+            eqn("le", [x, lit(0.5)], p2),
+            eqn("stelling_assert", [p2], o2),
+        ],
+        [o0, o1, o2],
+    )
+
+
+def test_the_TRUE_direction_is_ONE_SIDED_too(monkeypatch):
+    """The one-sidedness pin's own missing half.
+
+    ``test_the_shared_point_is_one_sided_on_both_legs`` forces the shared
+    answer **False** and requires a discharge to survive. That is the
+    direction in which one-sidedness is easy: False is the WITHHOLDING
+    answer, and the sentence it pins is "withholding touches violations
+    only".
+
+    The other direction is the one the contract actually spends its words
+    on — *"a True here can restore a withheld ``violated-over-set`` and
+    can do nothing else at all"* — and nothing observed it. Forcing True
+    on a query that already answers True is a no-op and would pin
+    nothing, so the run below is one that genuinely withholds, with the
+    certificate closed, carrying an obligation of every kind at once:
+    the violated one must come BACK, and the discharged and the merely
+    undecided ones must not move a step.
+
+    **This one is a weaker finding than the two above, and the difference
+    is worth stating.** ``M4``/``M5``/``M6`` — the private-copy mutants —
+    are invisible to the WHOLE SUITE: 2398 passed, 2 skipped, 0 failed.
+    The mutant this test was built against (``M7``, a leg reading a
+    granted answer as licence to DECIDE rather than only to stop
+    withholding) is invisible to THIS FILE — 14 of 14 pre-existing tests
+    pass on it — but not to the suite, which reddens 2 tests elsewhere
+    (``test_the_certificate_reaches_the_affine_leg_as_a_LIVE_argument``
+    and ``test_solver_dispatch.py::test_inert_relational_assume_escalates_normally``).
+    So what this closes is a hole in the ROUTING FILE, not a hole in the
+    tree: the property the shared point's own contract spends its words on
+    is now owned where that contract is pinned, instead of being caught
+    incidentally by two tests that are about something else and could
+    stop covering it at any time.
+    """
+    q = _withheld_run_with_all_three_outcomes()
+    _close_the_certificate(monkeypatch)
+
+    p0 = propagate(q)
+    assert [o.status for o in p0.obligations] == [
+        "unknown", "discharged", "unknown",
+    ], "the positive control must have all three outcomes on one run"
+    assert p0.narrowing_uncertified is True
+    assert "WITHHELD" in p0.obligations[0].detail
+    assert "WITHHELD" not in p0.obligations[2].detail, (
+        "obligation #2 must be undecided for its OWN reason, or its "
+        "staying unknown below says nothing about one-sidedness"
+    )
+
+    monkeypatch.setattr(
+        exactness, "certifies_set_refutation", lambda **k: True
+    )
+    p1 = propagate(q)
+    assert p1.obligations[0].status == "violated-over-set", (
+        "the granted answer must restore the withheld violation, or this "
+        "run is not observing the grant at all"
+    )
+    assert p1.obligations[1].status == "discharged", (
+        "a granted answer may not touch a discharge — the shared point is "
+        "one-sided in BOTH directions, not only in the one that withholds"
+    )
+    assert p1.obligations[2].status == "unknown", (
+        "a granted answer may not decide an obligation nobody decided; it "
+        "lifts a withholding and does nothing else at all"
+    )
 
 
 # --- the CERTIFICATE's own routing pins ---------------------------------------

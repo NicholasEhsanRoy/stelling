@@ -1109,6 +1109,31 @@ def refine_propagation(
             # half of the run's assume state, and this leg must consult the
             # whole of it through the same function the interval leg
             # consults, or the two legs agree only by coincidence.
+            #
+            # ONE OF THE THREE INPUTS IS A CONSTANT HERE, and it is said at
+            # the call site rather than left to be derived from a
+            # SOUNDNESS.md entry in another file. `nonemptiness_certified`
+            # is `True` on EVERY reach of this line, structurally:
+            # `narrowing_uncertified` is set only inside the `if narrowed:`
+            # block of `_Propagator._assume_constrain`, which sets
+            # `any_constrained` and calls `counter.record_constrained` at
+            # its head, so it implies `coverage.constrained >= 1` — and
+            # `refine_propagation` declines WHOLLY on
+            # `propagation.coverage.constrained` above, before this loop.
+            # MEASURED, not reasoned — this call site wrapped in a
+            # recorder that delegates to the real decision, jax 0.11.0:
+            # **31 of 31** whole-suite reaches and **70 of 70** reaches
+            # over `scratchpad/pin/corpus_pin.py` carry
+            # `nonemptiness_certified=True` and `coverage.constrained == 0`,
+            # and `narrowing_uncertified` is False at every one of them.
+            # The other two inputs ARE live at the same site and on the
+            # same runs: `assume_dropped` is True at 12 of the 31 and 40 of
+            # the 70, `region_inhabited` at 2 and 8. So the constant is one
+            # argument of three, not the call.
+            # It is still passed, and passed by NAME, because the argument
+            # is what makes this leg's answer the shared one; a refinement
+            # restructured to run under a constraining assume would make it
+            # live, and nothing in the tree would see that but this line.
             and not exactness.certifies_set_refutation(
                 nonemptiness_certified=not propagation.narrowing_uncertified,
                 assume_dropped=propagation.assume_dropped,

@@ -1,0 +1,346 @@
+SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy <nicholas.roy@formulearn.org>
+SPDX-License-Identifier: Apache-2.0
+
+PIN — raw measurement outputs for the shared-point pin repair.
+Every figure quoted in SOUNDNESS.md, in the source comments, and in the
+round-2 section of scratchpad/PREREG_CERT.md is one of these.
+
+Tree:   /home/nick/MSF/.wt-pin/W, branch fix/shared-point-pin-both-directions
+Base:   main @ 0ad22bb
+Python: /home/nick/venvs/stelling-jax/bin/python (jax 0.11.0)
+        /home/nick/venvs/stelling-jax010/bin/python (jax 0.10.2)
+Mutant worktrees: /home/nick/MSF/.wt-pin/mine/{OLD,NEW}/<name>, each
+created from 0ad22bb by scratchpad/pin/mutants.py, run with `python -B`
+and `__pycache__` cleared.  OLD carries the 0ad22bb tests; NEW carries
+this branch's.
+
+================================================================
+F1 — do the PRE-EXISTING pins see the private-copy mutants?
+     (OLD family, whole suite, jax 0.11.0)
+================================================================
+################ OLD/CTRL_unmutated ################
+ 11:45:11 up 17:35,  1 user,  load average: 2.99, 2.03, 1.25
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/CTRL_unmutated/src/stelling/__init__.py jax 0.11.0
+2398 passed, 2 skipped, 22 warnings in 155.16s (0:02:35)
+ 11:47:49 up 17:37,  1 user,  load average: 7.01, 3.71, 2.00
+################ OLD/M4_affine_and_private ################
+ 11:47:49 up 17:37,  1 user,  load average: 7.01, 3.71, 2.00
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/M4_affine_and_private/src/stelling/__init__.py jax 0.11.0
+2398 passed, 2 skipped, 22 warnings in 160.54s (0:02:40)
+ 11:50:32 up 17:40,  1 user,  load average: 8.45, 5.13, 2.79
+################ OLD/M5_both_and_private ################
+ 11:50:32 up 17:40,  1 user,  load average: 8.45, 5.13, 2.79
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/M5_both_and_private/src/stelling/__init__.py jax 0.11.0
+2398 passed, 2 skipped, 22 warnings in 161.13s (0:02:41)
+ 11:53:15 up 17:43,  1 user,  load average: 4.24, 4.88, 3.08
+################ OLD/M6_nonemptiness_and_private ################
+ 11:53:15 up 17:43,  1 user,  load average: 4.24, 4.88, 3.08
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/M6_nonemptiness_and_private/src/stelling/__init__.py jax 0.11.0
+2398 passed, 2 skipped, 22 warnings in 161.55s (0:02:41)
+ 11:55:59 up 17:45,  1 user,  load average: 5.67, 6.06, 3.88
+################ OLD/M2g_genuine_inline_interval ################
+ 11:55:59 up 17:45,  1 user,  load average: 5.67, 6.06, 3.88
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/M2g_genuine_inline_interval/src/stelling/__init__.py jax 0.11.0
+FAILED tests/test_exactness_lift.py::test_both_legs_consult_the_shared_set_refutation_point
+FAILED tests/test_exactness_lift.py::test_every_reach_of_the_shared_point_names_the_certificate
+2 failed, 2396 passed, 2 skipped, 22 warnings in 152.05s (0:02:32)
+ 11:58:34 up 17:48,  1 user,  load average: 3.23, 4.89, 3.77
+################ OLD/M3g_genuine_inline_affine ################
+ 11:58:34 up 17:48,  1 user,  load average: 3.23, 4.89, 3.77
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/M3g_genuine_inline_affine/src/stelling/__init__.py jax 0.11.0
+FAILED tests/test_exactness_lift.py::test_both_legs_consult_the_shared_set_refutation_point
+FAILED tests/test_exactness_lift.py::test_every_reach_of_the_shared_point_names_the_certificate
+2 failed, 2396 passed, 2 skipped, 22 warnings in 166.43s (0:02:46)
+ 12:01:23 up 17:51,  1 user,  load average: 5.66, 5.11, 4.04
+DONE
+
+--- OLD/M7_granted_answer_decides (added by me) ---
+ 12:01:44 up 17:51,  1 user,  load average: 6.44, 5.35, 4.14
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/M7_granted_answer_decides/src/stelling/__init__.py jax 0.11.0
+FAILED tests/test_nonempty_certificate.py::test_the_certificate_reaches_the_affine_leg_as_a_LIVE_argument
+FAILED tests/test_solver_dispatch.py::test_inert_relational_assume_escalates_normally
+2 failed, 2396 passed, 2 skipped, 22 warnings in 151.12s (0:02:31)
+ 12:04:17 up 17:54,  1 user,  load average: 3.58, 4.82, 4.14
+DONE
+
+================================================================
+F1 — does MY pin see them? (NEW family, tests/test_exactness_lift.py
+     = this branch's file, 17 tests; the mutant source is 0ad22bb+M)
+================================================================
+--- NEW/CTRL_unmutated ---
+17 passed in 0.33s
+--- NEW/M4_affine_and_private ---
+FAILED tests/test_exactness_lift.py::test_both_legs_follow_the_shared_point_in_the_TRUE_direction
+1 failed, 16 passed in 0.36s
+--- NEW/M5_both_and_private ---
+FAILED tests/test_exactness_lift.py::test_both_legs_follow_the_shared_point_in_the_TRUE_direction
+FAILED tests/test_exactness_lift.py::test_the_TRUE_direction_is_ONE_SIDED_too
+2 failed, 15 passed in 0.36s
+--- NEW/M6_nonemptiness_and_private ---
+FAILED tests/test_exactness_lift.py::test_the_nonemptiness_route_is_pinned_in_the_TRUE_direction
+1 failed, 16 passed in 0.39s
+--- NEW/M7_granted_answer_decides ---
+FAILED tests/test_exactness_lift.py::test_the_TRUE_direction_is_ONE_SIDED_too
+1 failed, 16 passed in 0.32s
+
+--- for contrast, the SAME mutants under the 0ad22bb version of that
+    file (14 tests): every one of them passes ---
+OLD/M4_affine_and_private            14 passed in 0.42s
+OLD/M5_both_and_private              14 passed in 0.40s
+OLD/M6_nonemptiness_and_private      14 passed in 0.34s
+OLD/M7_granted_answer_decides        14 passed in 0.49s
+
+================================================================
+F2 — the branch-scoped counter-construction and its cost twin
+     $ PYTHONPATH=<W>/src python scratchpad/pin/f2_repro.py
+================================================================
+stelling: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py
+jax:      0.11.0
+
+===== taken (SATISFIABLE in branch) =====
+  top-level stelling_assume eqns : 0
+  STATIC required assume ids     : 1
+  narrowing_uncertified          : True
+  assume_dropped                 : False
+  region_inhabited               : True
+  obligation status              : violated-over-set
+  certificate note               : assumed region CERTIFIED NON-EMPTY: probe point 1 of the declared set satisfies every assume of ...
+  oracle admissible AND violating: 20000/20000
+  probes with a NON-EMPTY witness map: 8 / EMPTY: 8  (of 16)
+
+===== untaken (EMPTY in branch) =====
+  top-level stelling_assume eqns : 0
+  STATIC required assume ids     : 1
+  narrowing_uncertified          : False
+  assume_dropped                 : True
+  region_inhabited               : False
+  obligation status              : unknown
+  certificate note               : (none)
+  oracle admissible AND violating: 9933/20000
+  probes with a NON-EMPTY witness map: 8 / EMPTY: 8  (of 16)
+
+================================================================
+F5 — the boundary point on both dials, and the corpus-wide split
+     $ PYTHONPATH=<W>/src python scratchpad/pin/f5_repro.py
+================================================================
+stelling: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py
+jax:      0.11.0
+
+binary64: 0.1 + 0.2 == 0.30000000000000004; >= bound -> True
+exact real: 1/10 + 2/10 = 3/10 >= bound -> False
+
+===== the boundary point, both dials =====
+  real : region_inhabited=False narrowing_uncertified=True status=unknown
+  ieee : region_inhabited=True narrowing_uncertified=False status=violated-over-set
+
+===== which dial certifies MORE, per declared dtype =====
+  dtype        real   ieee
+  float64      True   True
+  float32      True  False
+  int32        True  False
+  float16     False  False
+  bfloat16    False  False
+
+  certified under real only: 2
+  certified under ieee only: 0
+
+===== the same split over the whole corpus =====
+  corpus rows x assume_mode measured : 190
+  certified on BOTH dials            : 16
+  certified under REAL only          : 11
+      uncertified_narrowing__nonempty__reduce_sum__before/constrain
+      uncertified_narrowing__nonempty__reduce_sum__after/constrain
+      uncertified_narrowing_f32__nonempty__elementwise__before/constrain
+      uncertified_narrowing_f32__nonempty__elementwise__after/constrain
+      uncertified_narrowing_f32__nonempty__reduce_sum__before/constrain
+      uncertified_narrowing_f32__nonempty__reduce_sum__after/constrain
+      uncertified_narrowing_i32__nonempty__elementwise__before/constrain
+      uncertified_narrowing_i32__nonempty__elementwise__after/constrain
+      uncertified_narrowing_i32__nonempty__reduce_sum__before/constrain
+      uncertified_narrowing_i32__nonempty__reduce_sum__after/constrain
+      nested_branch_assume/constrain
+  certified under IEEE only          : 0
+  certified on neither               : 163
+
+================================================================
+F3 — the constant arguments, from a DELEGATING recorder at each
+     call site (worktree /home/nick/MSF/.wt-pin/mine/INSTR)
+================================================================
+whole suite in that tree: 2402 passed, 2 skipped, 168.27s
+
+affine.py's reach of exactness.certifies_set_refutation
+                          suite   corpus
+  total reaches              31       70
+  nonemptiness_certified=T   31       70   <- CONSTANT
+  coverage.constrained == 0  31       70
+  narrowing_uncertified=T     0        0
+  assume_dropped=T           12       40   <- live
+  region_inhabited=T          2        8   <- live
+
+exactness.certifies_point_witness, by caller
+  _region_witness                                  2203 calls, 0 empty
+  test_a_certifying_probe_narrows_nothing            24 calls, 0 empty
+  test_the_point_witness_decision_is_one_sided...     4 calls, 2 empty
+  over corpus_pin.py: _region_witness               1544 calls, 0 empty
+
+================================================================
+F6 — the two searches
+     $ PYTHONPATH=<INSTR6>/src python scratchpad/pin/f6_repro.py count|time|capcost
+     (INSTR6 = 0ad22bb + one counter increment in each probe loop)
+================================================================
+stelling: /home/nick/MSF/.wt-pin/mine/INSTR6/src/stelling/__init__.py
+jax:      0.11.0
+_PROBE_COUNT = 16  _CERT_MAX_ELEMENTS = 4096  _CERT_PROBE_BUDGET = 4096  _CERT_MIN_PROBES = 3
+
+runs measured                       : 508
+runs paying for BOTH searches       : 0
+worst COMBINED probe count          : 16  at (('corpus/uncertified_narrowing__empty__elementwise__before', 'real', 'constrain'), 16, 0)
+worst _reachability_witnesses alone : 16  at ('grid/branch_violation_n4', 'real', 'constrain')
+worst _region_witness alone         : 16  at ('corpus/uncertified_narrowing__empty__elementwise__before', 'real', 'constrain')
+
+the sum they would pay were they NOT exclusive, maximised over declared size: 32 probes (at n = 256) = 16 + 16; above n = 4096 the certificate declines and the sum is 16 again
+
+stelling: /home/nick/MSF/.wt-pin/mine/INSTR6/src/stelling/__init__.py
+jax:      0.11.0
+NOTE: this timing table was taken while a CONCURRENT AGENT was running
+its own test suites on the same machine (load 19).  The absolute
+milliseconds are roughly 2x the quiet-machine run quoted in SOUNDNESS.md
+and at _CERT_MAX_ELEMENTS (549.9 ms / 25.7 ms at n=16384, load 1.18);
+the RATIO is stable across both (21.4x quiet, 22.6x loaded), which is
+the figure the finding rests on.  Both are kept, because a load average
+printed beside a number is only useful if the number it did not suit is
+shown too.  The quiet run, for comparison:
+
+      n  reach  region  propagate ms  bare walk ms   ratio
+     16     16       0           1.6           0.1   16.1x
+     64     16       0           3.3           0.2   19.0x
+    256     16       0           9.7           0.5   21.0x
+   1024     16       0          34.1           1.5   22.3x
+   4096     16       0         126.6           6.2   20.4x
+  16384     16       0         549.9          25.7   21.4x
+  (load 1.18 before / 1.16 after)
+
+and the loaded run as taken:
+load before: (19.056640625, 15.17138671875, 8.72119140625)
+
+      n  reach  region  propagate ms  bare walk ms   ratio
+     16     16       0           2.2           0.1   18.2x
+     64     16       0           3.9           0.2   16.6x
+    256     16       0          22.9           1.0   22.0x
+   1024     16       0          46.2           3.6   12.9x
+   4096     16       0         300.4          14.9   20.2x
+  16384     16       0        1137.0          50.4   22.6x
+
+load after: (18.2509765625, 15.06884765625, 8.72314453125)
+
+stelling: /home/nick/MSF/.wt-pin/mine/INSTR6/src/stelling/__init__.py
+jax:      0.11.0
+row                           n  cap  asked       first_idx  lost
+corner_guard_n4               4   16      1             [1]     0
+sum_guard_n4                  4   16      1             [2]     0
+relational_guard_n4           4   16      1             [3]     0
+corner_guard_n64             64   16      1             [1]     0
+sum_guard_n64                64   16      0              []     0
+relational_guard_n64         64   16      1             [3]     0
+corner_guard_n256           256   16      1             [1]     0
+sum_guard_n256              256   16      0              []     0
+relational_guard_n256       256   16      1             [3]     0
+corner_guard_n1024         1024    4      1             [1]     0
+sum_guard_n1024            1024    4      0              []     0
+relational_guard_n1024     1024    4      1             [3]     0
+corner_guard_n4096         4096    3      1             [1]     0
+sum_guard_n4096            4096    3      0              []     0
+relational_guard_n4096     4096    3      1             [3]     1
+corner_guard_n8192         8192    3      1             [1]     0
+sum_guard_n8192            8192    3      0              []     0
+relational_guard_n8192     8192    3      1             [3]     1
+corner_guard_n16384       16384    3      1             [1]     0
+sum_guard_n16384          16384    3      0              []     0
+relational_guard_n16384   16384    3      1             [3]     1
+
+branch-violation keys asked: 15; lost under a _certificate_probe_count cap: 3
+
+================================================================
+NO VERDICT MOVED — per obligation, not per query
+     $ python scratchpad/pin/corpus_pin.py diff BASE.json W.json
+     A = clean 0ad22bb worktree, B = this branch
+================================================================
+A: /home/nick/MSF/.wt-pin/BASE/src/stelling/__init__.py  jax 0.11.0
+B: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py  jax 0.11.0
+leaf keys compared: 9228
+  per-obligation/verdict STATUS keys: 2090
+  STATUS keys that MOVED:             0
+  non-status keys that differ:        0
+
+================================================================
+BOTH SERIES, --collect-only ids, reuse lint — at the final commit
+================================================================
+commit under test: 220158a The query-scoped-assume pins were audited too, and left alone
+worktree clean: 0 modified paths
+################ stelling-jax ################
+ 12:26:29 up 18:16,  1 user,  load average: 11.25, 12.86, 9.88
+resolved: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py jax 0.11.0
+2403 passed, 2 skipped, 22 warnings in 144.90s (0:02:24)
+ 12:28:58 up 18:18,  1 user,  load average: 3.70, 8.82, 8.78
+################ stelling-jax010 ################
+ 12:29:05 up 18:19,  1 user,  load average: 4.37, 8.88, 8.80
+resolved: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py jax 0.10.2
+2403 passed, 2 skipped, 22 warnings in 291.51s (0:04:51)
+ 12:34:01 up 18:23,  1 user,  load average: 29.00, 17.44, 12.33
+=== collect-only ids, the two series ===
+  2405 /home/nick/MSF/.wt-pin/W/scratchpad/pin/FINAL_ids_stelling-jax.txt
+  2405 /home/nick/MSF/.wt-pin/W/scratchpad/pin/FINAL_ids_stelling-jax010.txt
+  4810 total
+BYTE-IDENTICAL between the series
+=== collect-only id diff vs 0ad22bb ===
+BASE ids: 2400   BRANCH ids: 2405
+REMOVED (in BASE, not in branch):
+ADDED (in branch, not in BASE):
+tests/test_exactness_lift.py::test_both_legs_follow_the_shared_point_in_the_TRUE_direction
+tests/test_exactness_lift.py::test_the_nonemptiness_route_is_pinned_in_the_TRUE_direction
+tests/test_exactness_lift.py::test_the_TRUE_direction_is_ONE_SIDED_too
+tests/test_nonempty_certificate.py::test_an_assume_the_probe_walks_INTO_is_witnessed_and_certified
+tests/test_nonempty_certificate.py::test_a_region_inhabited_only_via_the_UNTAKEN_branch_is_not_recovered
+=== reuse lint ===
+* Files with copyright information: 323 / 323
+* Files with license information: 323 / 323
+
+Congratulations! Your project is compliant with version 3.3 of the REUSE Specification :-)
+DONE
+
+================================================================
+F1 minor — the certificate branch's own M2/M3, RE-RUN not quoted
+     (transcribed exactly from scratchpad/cert/apply_mutant.py)
+================================================================
+################ OLD/M2_local_lift_interval ################
+ 12:34:40 up 18:24,  1 user,  load average: 32.46, 19.66, 13.28
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/M2_local_lift_interval/src/stelling/__init__.py jax 0.11.0
+FAILED tests/test_exactness_lift.py::test_every_reach_of_the_shared_point_names_the_certificate
+1 failed, 2397 passed, 2 skipped, 22 warnings in 219.80s (0:03:39)
+ 12:38:23 up 18:28,  1 user,  load average: 15.93, 18.98, 14.52
+################ OLD/M3_local_lift_affine ################
+ 12:38:23 up 18:28,  1 user,  load average: 15.93, 18.98, 14.52
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/M3_local_lift_affine/src/stelling/__init__.py jax 0.11.0
+FAILED tests/test_exactness_lift.py::test_every_reach_of_the_shared_point_names_the_certificate
+1 failed, 2397 passed, 2 skipped, 22 warnings in 197.39s (0:03:17)
+ 12:41:43 up 18:31,  1 user,  load average: 10.31, 17.79, 15.16
+DONE
+
+--- re-confirmed at the final commit ae9a09e ---
+commit: ae9a09e The one count I was still quoting is now one I ran
+worktree: 0 modified paths
+#### stelling-jax ####
+ 12:43:14 up 18:33,  1 user,  load average: 23.17, 19.83, 16.10
+resolved: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py jax 0.11.0
+2403 passed, 2 skipped, 22 warnings in 200.62s (0:03:20)
+ 12:46:37 up 18:36,  1 user,  load average: 8.85, 15.20, 15.03
+#### stelling-jax010 ####
+ 12:46:42 up 18:36,  1 user,  load average: 8.46, 15.01, 14.97
+resolved: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py jax 0.10.2
+2403 passed, 2 skipped, 22 warnings in 189.75s (0:03:09)
+ 12:49:55 up 18:39,  1 user,  load average: 8.72, 12.21, 13.91
+collect-only ids BYTE-IDENTICAL between the series: 2405
+* Files with license information: 325 / 325
+
+Congratulations! Your project is compliant with version 3.3 of the REUSE Specification :-)
+DONE

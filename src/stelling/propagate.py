@@ -7360,6 +7360,52 @@ def _withhold_uncertified_refutations(p) -> None:
 # half-space-shaped, and a region whose only members sit off the
 # corner/midpoint grid would need a later probe and would be lost at the
 # floor. That is a withholding, which is safe, and it is a real cost.
+#
+# WHICH SEARCH THESE BOUNDS BIND, because this module now holds TWO.
+# `_region_witness` is bounded above; `_reachability_witnesses` is NOT —
+# it still runs `for k in range(_PROBE_COUNT)`, 16 full propagations, at
+# any declared size whatever. Measured on this tree (jax 0.11.0, load
+# 1.18 before and 1.16 after, a violation inside a `lax.cond` branch;
+# `scratchpad/pin/f6_repro.py time`): `propagate` costs
+# 1.6/9.7/126.6/549.9 ms at n = 16/256/4096/16384 against a bare walk of
+# 0.1/0.5/6.2/25.7 ms — 21.4x at n = 16384, which is four times the size
+# cap above, with the probe count unmoved at 16 throughout. That is the
+# same shape as the 469 ms/23 ms number this cap was added to fix.
+#
+# THEY ARE MUTUALLY EXCLUSIVE, so no query pays for both. `_region_witness`
+# gets past its own gate only when `narrowing_uncertified or
+# assume_dropped`; `narrowing_uncertified` is set inside the same
+# `if narrowed:` block that sets `any_constrained`, so that implies
+# `any_constrained or assume_dropped`, which is exactly the condition on
+# which `_reachability_witnesses` returns the empty set BEFORE probing.
+# Contrapositive: a run that pays the 16 probes is a run whose certificate
+# search declined at its gate for 0. MEASURED over
+# `scratchpad/pin/corpus_pin.py` plus a size grid built to reach both,
+# **508 propagations** including 32 rows that put a branch-scoped
+# violation beside a narrowing and a dropped assume: **0 pay for both**,
+# and the worst combined probe count is **16**, not `16 +
+# _certificate_probe_count(n)` — which, were they not exclusive, would
+# peak at **32** at small n, where the certificate's budget is loosest,
+# and not at the size cap. The two also cannot contradict each other
+# for the same reason — the certificate can only fire on runs where the
+# reachability search certifies nothing, so a branch-scoped violation is
+# never restored by it (`test_the_certificate_can_never_restore_a_branch_
+# scoped_refutation`).
+#
+# WHY THE OLDER SEARCH IS NOT CAPPED HERE. Applying
+# `_certificate_probe_count` to it would move verdicts, which this branch
+# may not do. Measured over 21 branch-violation rows at n = 4 … 16384,
+# scored on the keys the branch pass ASKS about (`p.branch_violations`)
+# and not on the ones it happens to find — a key asked and never
+# certified within the budget is exactly a loss, and a found-key score
+# would miss every one of them by construction: 15
+# reachability keys asked, **3 lost** — the `x[0] > x[1]` shape at
+# n >= 4096, whose first certifying probe is index 3 (the first
+# per-element probe; the plain anchors put every element at the same
+# value and cannot witness a relation between two of them) while the
+# budget floor grants exactly 3. Each loss is a `violated-over-set` ->
+# `unknown` move: the safe direction, and a real cost. Recorded here so
+# the decision is a measured one rather than an omission.
 _CERT_MAX_ELEMENTS = 4096
 _CERT_PROBE_BUDGET = 4096
 _CERT_MIN_PROBES = 3
@@ -7459,11 +7505,19 @@ def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
     * the check is exact where the arithmetic is exact and INDETERMINATE
       where it is not, never wrong. Measured: at the point `(0.1, 0.2)`
       the predicate `x0 + x1 >= 0.30000000000000004` is TRUE in binary64
-      and FALSE in ℝ; under ``semantics="real"`` the box is
-      `[0x1.3333333333333p-2, 0x1.3333333333334p-2]`, which straddles the
-      bound, so the predicate is INDETERMINATE and no witness is claimed.
-      An exact-rational checker would answer FALSE there; this answers
-      "not established", which withholds. Weaker, never unsound.
+      and FALSE in ℝ; **under ``semantics="real"``, and only there,** the
+      box is `[0x1.3333333333333p-2, 0x1.3333333333334p-2]`, which
+      straddles the bound, so the predicate is INDETERMINATE and no
+      witness is claimed. An exact-rational checker would answer FALSE
+      there; this answers "not established", which withholds. Weaker,
+      never unsound. **Under ``semantics="ieee"`` the SAME query
+      certifies and REFUTES** — measured on this tree, `region_inhabited`
+      False/`unknown` under `real` and True/`violated-over-set` under
+      `ieee` — and that is also sound, because jax executes binary64 and
+      the point genuinely satisfies the assume AS EXECUTED. The dial is
+      part of the sentence, not a qualification 20 lines away: the check
+      runs in the run's own semantics, and neither dial is the stronger
+      one (see the two-semantics paragraph in ``SOUNDNESS.md``).
 
     **``sqrt``/``sin``/``exp``/``log`` are a boundary, not a gap.**
     Nothing confirms a point exactly through them, and this does not try:
@@ -7489,7 +7543,7 @@ def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
     the withholding completely on its own, and it was true before this
     function existed.
 
-    **What is NOT certified.** Branch-scoped assumes, always. The
+    **What is NOT certified: an assume the probe walked AROUND.** The
     requirement is the STATIC set of assume equations
     (:func:`_assume_equation_ids`) and the witness is what one pinned walk
     evaluated, so an assume in a branch the probe did not take is required
@@ -7497,6 +7551,29 @@ def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
     branch-scoped precondition that is empty in its branch is exactly the
     vacuity being guarded against, and a top-level point that walks around
     it certifies nothing about it.
+
+    **NOT "branch-scoped assumes, always", which is what this paragraph
+    used to say and is false.** Pinning a declaration FORCES a cond, and
+    forcing it can force it either way; a probe whose point takes the
+    branch evaluates the assume inside it and witnesses it like any other.
+    Measured on this tree: a query whose ONLY assume sits inside a
+    ``lax.cond`` branch is certified by probe 1 (the declared box's high
+    corner), and the recovery is sound — at that point the program really
+    does take the branch and really does satisfy the assume
+    (``test_an_assume_the_probe_walks_INTO_is_witnessed_and_certified``).
+    The guarantee that branch-scoped VIOLATIONS stay withheld is a
+    DIFFERENT and independent mechanism — :func:`_reachability_witnesses`
+    returns the empty set on any run with ``any_constrained or
+    assume_dropped``, which is every run this function can fire on — and
+    that one is true. Conflating the two overstated both.
+
+    The static requirement does cost recoveries, in exactly the shape the
+    overstated sentence claimed it prevented: a region inhabited only via
+    the UNTAKEN branch (every admissible point walks the side WITHOUT the
+    assume) is required-and-not-witnessed on every probe, and a sound
+    refutation is withheld. Measured, 8 of 16 probes walking around it
+    with an EMPTY witness map
+    (``test_a_region_inhabited_only_via_the_UNTAKEN_branch_is_not_recovered``).
     """
     if exactness.certifies_set_refutation(
         nonemptiness_certified=not p.narrowing_uncertified,
@@ -7596,6 +7673,17 @@ def _reachability_witnesses(closed, p, *, assume_mode, semantics):
     outside the narrowed region is not a witness for it. A probe that
     raises certifies nothing either — the safe direction throughout is
     withholding.
+
+    **THIS SEARCH IS NOT CAPPED**, and the bounds stated at
+    :data:`_CERT_MAX_ELEMENTS` are the OTHER search's. It runs the full
+    ``_PROBE_COUNT`` grid — 16 whole propagations — at any declared size:
+    measured, 549.9 ms against a 25.7 ms bare walk at n = 16384. It never
+    runs on the same query as :func:`_region_witness` (the guard above is
+    the complement of that function's gate, so the worst combined cost is
+    16 probes and not 16 plus a budget — measured 0 of 508 propagations
+    paying for both), and the reasons it is left
+    uncapped — a cap costs 3 of 15 measured reachability keys, i.e. moves
+    verdicts — are recorded at :data:`_CERT_MAX_ELEMENTS`.
     """
     if p.any_constrained or p.assume_dropped:
         return frozenset()
