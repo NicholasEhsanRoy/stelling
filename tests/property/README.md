@@ -333,6 +333,53 @@ refusals are recorded next to the clauses that replaced them:
 | `test_generator_floor.py` | the strategies still draw what they claim to |
 | `test_suite_disclosure.py` | runs with neither hypothesis nor jax, so "examined nothing" is never silent |
 
+## Measured, on this tree
+
+All at `PYTHONPATH=<tree>/src`, `JAX_PLATFORMS=cpu`, x64 forced on by the
+modules themselves, on a loaded box — load averages quoted because they are
+the only thing that makes a wall-clock figure mean anything.
+
+| | jax 0.11.0 | jax 0.10.2 |
+|---|---|---|
+| property suite, `ci` profile | 27 passed, 1 skipped, 1 xfailed | 27 passed, 1 skipped, 1 xfailed |
+| wall | 38.37 / 42.70 / 39.83 s (three runs, load 2.1 → 4.8) | 38.60 s (load 3.6) |
+| whole `tests/` on the shared venvs | 2474 passed, 7 skipped, 145.0 s | 2474 passed, 7 skipped, 146.7 s |
+| `--collect-only` ids | 2476 | 2476 — **0 lines of diff** |
+
+The one skip in the property suite is the cross-series differential, which
+needs a second interpreter; run with one, it passes in **both** directions
+(0.11 driving 0.10, and 0.10 driving 0.11).
+
+**The `ci` profile is deterministic.** Three consecutive runs gave
+byte-identical outcomes, which is what `derandomize=True` buys and why a
+per-push gate uses it: this suite either fails on every push or on none, and
+never reddens an unrelated PR a quarter of the time.
+
+**~40 s per push, not the ~6 s an earlier estimate quoted, and the difference
+is not overhead.** That estimate priced two properties (an integer oracle at
+500 examples and the cvc5 state machine at 1000x10). Those two still cost
+about that here — 6.8 s and 1.1 s. The other ~30 s is six more properties,
+four of which call `check()` **twice per example** because that is what a
+metamorphic property is. `STELLING_PROPERTY_SCALE=0.5` halves it if a future
+job needs the room; the census floors are what will complain first.
+
+**The randomised `dev` profile found two defects — in this suite, not in
+stelling.** Both were invisible at the `ci` budget and both are now fixed:
+
+* `wrappable_constants()` — the MASK the oracle properties use — RAISED rather
+  than answering on any constant subexpression the exact integer folder did not
+  know. `x <= (0.0 / 0.0)` beside an `int8` declaration was enough. Three runs
+  out of three at 1000 randomised examples; zero at 250 derandomised ones.
+* `widened()` clamped the widened bound to the dtype range, so a declaration
+  whose bound was *already* outside it — `any_array((), "uint8", (-1, 0))`,
+  which stelling accepts — had its `lo` moved UP and the "wide" box was a
+  strict SUBSET. The monotonicity property reported `UNKNOWN -> VERIFIED` and
+  was right about the two runs it was handed. One run in three.
+
+That is the argument for the nightly profile in one paragraph, and it is the
+suite's own lesson turned on itself: **a green run at one budget says nothing
+about another.** Five `dev` runs are green after the fixes.
+
 ## Measured facts worth not re-deriving
 
 * **Shrinking on the harness grammar is the one mechanism that justified the
