@@ -337,10 +337,26 @@ def test_reordering_statements_moves_only_what_narrowing_entitles_it_to():
     **Two adjacent ``assume``s are in the second bucket, not the first, and
     that was a correction.** An earlier draft asserted equality for them on the
     grounds that intersection commutes. It does not commute *in a single
-    narrowing pass*: with ``x, y ∈ [0, 10]``, ``assume(x >= y); assume(y >= 5)``
-    leaves ``x ∈ [0, 10]``, while the other order narrows ``y`` first and then
-    ``x`` to ``[5, 10]``. Both are sound over-approximations; one is sharper.
-    Asserting equality would have reported that as a defect.
+    narrowing pass*. The counterexample this docstring used to give —
+    ``x, y ∈ [0, 10]``, ``assume(x >= y); assume(y >= 5)`` against the other
+    order — **does not reproduce on this tree and never did**: measured with
+    ``assert_(x >= 5.0)`` appended as the probe, both orders give UNKNOWN.
+    ``assume(x >= y)`` is *relational*, neither side is a point interval, and
+    it is DROPPED in both orders, so there is nothing left to commute.
+
+    The one that does reproduce, measured at 9cefc6d, jax 0.11.0, x64 on::
+
+        x, y ∈ float64 [0, 10]
+        assume(x == 5.0); assume(y <= x)  ⊢  y <= 5.0   ->  VERIFIED
+        assume(y <= x); assume(x == 5.0)  ⊢  y <= 5.0   ->  UNKNOWN
+
+    Same three statements, one transposition, and one order proves what the
+    other cannot. The mechanism is the relational-drop rule keying on
+    *point-ness*: ``eq`` collapses ``x`` to the point ``[5, 5]``, after which
+    ``y <= x`` is no longer relational and narrows ``y``; run the other way
+    round, ``y <= x`` is dropped before ``x`` becomes a point. Both are sound
+    over-approximations; one is sharper. Asserting equality would have reported
+    that as a defect.
 
     **The reach this does NOT have, stated because a green run would otherwise
     over-claim it.** The historical reordering defect on this tree (``e8b9377``,

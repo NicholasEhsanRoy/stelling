@@ -311,9 +311,14 @@ refusals are recorded next to the clauses that replaced them:
   a real scoping boundary. What holds is equality for two adjacent `assert_`s,
   and no *contradiction* for anything else over a provably non-empty admitted
   set. Two adjacent `assume`s are in the second bucket, not the first: a single
-  narrowing pass does not commute — with `x, y ∈ [0,10]`,
-  `assume(x >= y); assume(y >= 5)` leaves `x ∈ [0,10]` while the other order
-  narrows `x` to `[5,10]`. Both sound; one sharper.
+  narrowing pass does not commute — with `x, y ∈ float64 [0,10]`,
+  `assume(x == 5.0); assume(y <= x) ⊢ y <= 5.0` is **VERIFIED** and the same
+  three statements with the two assumes transposed are **UNKNOWN**. Both sound;
+  one sharper. (`eq` makes `x` a point, after which `y <= x` is no longer
+  relational and narrows; the other way round it is dropped first. An earlier
+  version of this bullet gave `assume(x >= y); assume(y >= 5)` as the
+  counterexample — that one does not reproduce, because a *relational* assume
+  is dropped in **both** orders.)
 
 ---
 
