@@ -367,3 +367,172 @@ absent` (2, against a real jax-less interpreter and a real jax one) ·
 `library-identifier-hygiene` (2) · `reuse lint` (2) · conftest with the pin
 made unimportable (verdict=failed, exit 1) and with the conftest removed
 (no file at all).
+
+---
+
+# Repair pass: the audit's SHOULD-LAND-WITH-FIXES findings, driven
+
+Appended below the record above; nothing above this line is edited. Written by
+a second pass that did not write the branch and did not write the audit. Every
+claim handed to it was treated as a hypothesis and re-measured first.
+CONFIRMED means driven here; SUSPECTED means reasoned and labelled so.
+
+## Reproduction, before any repair
+
+**F1 CONFIRMED.** `pre-commit run --all-files`, twice, in a clean checkout:
+
+    33fd1f8   pass 1 Failed (12 scratchpad/** rewritten)   pass 2 rc=0
+    6918afb   pass 1 Failed (12 scratchpad/** rewritten)   pass 2 rc=1
+
+and rc=1 on every pass after, with the advice `git add -- scratchpad/…` on
+twelve headers `REUSE.toml` exists to make unnecessary. `grep -rn pre-commit
+.github/workflows/` finds nothing (rc=1), so this is developer experience and
+not a broken gate.
+
+**F1 replacement coverage CONFIRMED**, reuse 6.2.0, one header-less file at a
+time on the branch tip:
+
+    scratchpad/zz.py   reuse lint  rc=0   285/285 files carry license info
+    src/zz.py          reuse lint  rc=1   284/285, "MISSING … * src/zz.py"
+
+So the narrowing drops only paths another control already covers. That control
+runs in CI, where `--no-verify` cannot reach — with the version-skew caveat now
+written at the `reuse` job in ci.yml.
+
+**F2 CONFIRMED.** Two planted files under `src/`, one at a time:
+
+    src/zz_probe.py   import jax  # mirrors _jax_compat.py    Passed  rc=0
+    src/zz_plain.py   import jax                              Failed  rc=1
+
+The property was covered: `tests/test_import_hygiene.py::
+test_jax_imported_only_in_compat_module` reddens on the evading file.
+**One figure did not reproduce**: the audit reports `2 failed`;
+`pytest -q -ra tests/test_import_hygiene.py` alone gives **1 failed, 10
+passed**. The second failure is `test_sdist_contents.py::
+test_no_untracked_file_anywhere_would_ship` reacting to the same untracked
+probe — driven, adding that nodeid gives `2 failed, 10 passed`. The finding
+holds; the scope attached to the number did not.
+
+**F3 CONFIRMED exactly.** `docs/build` planted as a FILE, two copies of this
+tree, both built:
+
+    the copy `ignore_patterns` makes    260 members, docs/build ABSENT
+    the tree hatchling reads            261 members, docs/build SHIPPED
+
+`git check-ignore --no-index`, the authority: all eight cache/build names are
+IGNORED as directories at any depth (`docs/build/`, `a/b/c/build/`, …) and
+seven of the eight are NOT IGNORED as files — `.venv` is the exception, its
+pattern carries no trailing slash. No such filename exists in the tree, so the
+divergence was latent and no test reddened either way.
+
+**F4 CONFIRMED.** Both hazards appear only in this file (S3 at lines 129/302,
+S9 at 158/339) and nowhere in `.github/workflows/`. `scratchpad/` does not
+ship.
+
+**F5 CONFIRMED, three false or overclaimed sentences**, all reworded.
+
+**F6 CONFIRMED, and one clause of it did not.** `GIT_DIR=/nonexistent/x` on the
+nodeid gives `1 skipped` from a tree that IS a git checkout, and the skip
+inventory calls it: verdict=failed, pytest exit 1. The audit says this reads as
+a hard red "only on the lanes where this branch put the verdict assertion".
+**Not so** — driven at 33fd1f8 in the same way, `pytest -q` on that nodeid
+already exits **1**, because the conftest carries the verdict through
+`session.testsfailed`. What the branch's file channel adds is that the red
+survives a last-writer-wins overwrite of the exit code, not the red itself.
+
+## What was changed, and the control for each
+
+**F1** `exclude: ^scratchpad/` on `insert-license`. Pass 1 is now all-Passed
+rc=0 with zero worktree modifications; pass 2 the same.
+
+**F2** `| grep -v _jax_compat.py` → `--exclude=_jax_compat.py`, grep's per-FILE
+name filter, which is the rule the independent test already used.
+
+**F3** `_NOT_COPIED` → `_NOT_COPIED_DIRS` (dropped only when `is_dir()` and not
+a symlink) plus `_NOT_COPIED_AT_ROOT = (".git",)` at the top level only.
+
+**F4/F5** comments only — `yaml.safe_load` of ci.yml hashes to the same SHA256
+(`15508a04…`) before and after, and the textual diff has no non-comment line.
+
+**F6** the skip now asks `not (REPO / ".git").exists()` — byte-for-byte the
+predicate the inventory declares legitimate — and any other non-zero from
+`git status` is a hard red carrying git's stderr.
+
+### The bite table, re-driven
+
+`insert-license`, probe STAGED (`--all-files` reads `git ls-files`, so an
+untracked probe is invisible to it — the first attempt at this table was
+unsound for exactly that reason and was re-driven):
+
+    header-less, staged      BEFORE            AFTER
+    src/zz.py                Failed, headered  Failed, headered
+    tests/zz.py              Failed, headered  Failed, headered
+    scratchpad/zz.py         Failed, headered  Passed, NOT headered   <- intended
+
+`reuse` (the replacement coverage): `src/zz.py` Failed both sides,
+`scratchpad/zz.py` Passed both sides.
+
+`staged-spdx-header`, a real divergence planted INSIDE `scratchpad/`
+(worktree has the header, index does not): Failed rc=1 before and after,
+Passed after `git add` before and after. It is divergence-scoped, not
+path-scoped, and the F1 narrowing does not reach it.
+
+`jax-import-hygiene`:
+
+    plant                                       BEFORE   AFTER
+    src/zz_probe.py  import jax # …_jax_compat.py  Passed   Failed   <- the fix
+    src/zz_plain.py  import jax                    Failed   Failed
+    src/zz_plain.py  from jax import numpy         Failed   Failed
+    src/zz_src.py    jax._src, names _jax_compat   Failed   Failed
+    src/zzsub/_jax_compat.py  import jax           Passed   Passed
+    clean tree (real _jax_compat.py: 5 imports)    Passed   Passed
+
+`test_an_arbitrary_new_file_does_not_ship`, positive control on the property:
+with `[tool.hatch.build.targets.sdist]` disabled the probe reaches the tarball
+and the test FAILS; restored, it passes.
+
+`test_no_untracked_file_anywhere_would_ship`, four cells after F6:
+`GIT_DIR=/nonexistent/x` in a real checkout FAILED ("git status exited 128");
+ordinary checkout 1 passed; `touch docs/zz_untracked.md` FAILED naming the
+path; a **real unpacked sdist** (built, untarred, no `.git`) 1 skipped with the
+reason string unchanged and no objection from the inventory.
+
+### The sdist, unchanged
+
+260 members before the repair and 260 after, member list byte-identical. With
+`docs/build` planted as a FILE the copy and the tree now agree at 261/261
+(they were 260/261); as a DIRECTORY both are 260/260, so the exclusion still
+does the job it was added for.
+
+### CI YAML, driven under `bash -e` with the environment faked both ways
+
+Nothing executable changed, and both gates were driven anyway. The `test-no-jax`
+verdict step body, extracted verbatim: `verdict=made` GREEN; `verdict=failed`,
+`verdict=withdrawn`, no file written, a STALE `verdict=made` beside a session
+that wrote none, and a pytest exiting 1 beside a good file — all RED.
+`release.yml`'s verdict step: the same six, same colours. `release.yml`'s
+tag-vs-artifact step: `v0.1.0` and `0.1.0` GREEN against artifact 0.1.0;
+`v0.2.0`, an empty tag, and no wheel at all RED.
+
+### Both series
+
+    jax 0.11.0   2296 passed, 2 skipped   verdict=made   146s, load 0.56 -> 6.26
+    jax 0.10.2   2296 passed, 2 skipped   verdict=made   144s, load 5.75 -> 5.03
+
+Run sequentially in one checkout. `--collect-only` ids: 2298 on both series and
+2298 at 33fd1f8, `diff` empty in both directions. `reuse lint` rc=0 at 33fd1f8
+(283/283) and rc=0 here (284/284 — `PREREG_GREEN.md` is the extra file).
+
+### Judged and NOT changed
+
+The `dco` `if:` condition. `dco-check` compares a pull request's commit range
+against its base; a push has no such range, so running it there would be a
+different check wearing the same name. Disclosed at the job instead.
+
+The reuse version skew is **stated, not measured**: only 6.2.0 exists on this
+box and installing 5.1.1 needs network that is not available. SUSPECTED, in
+those words, at the `reuse` job.
+
+That a job skipped by an `if:` reports as a success to required status checks
+is GitHub's documented behaviour, not something measured here. SUSPECTED, and
+labelled as such in the comment.
