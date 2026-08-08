@@ -3092,8 +3092,12 @@ verdicts:
   forcing its decision `True` on a run that would otherwise withhold and
   requiring the leg (both legs, for the second) to STOP withholding. A
   private copy cannot follow a forcing it does not read. Each reddens its
-  mutant: 1 failed / 15 passed in that file, against 16/16 on the
-  unmutated control tree.
+  mutant, in a worktree carrying the mutated source and this file's tests:
+  `M4` 1 failed / 16 passed, `M5` **2** failed / 15 passed (a private copy
+  on both legs blocks the granting direction on the one-sidedness query
+  too), `M6` 1 failed / 16 passed — against **17 passed** on the
+  unmutated control tree, and against **14 passed** for every one of them
+  under the `0ad22bb` version of the same file.
 
   A third, `test_the_TRUE_direction_is_ONE_SIDED_too`, closes the
   granting half of the ONE-SIDEDNESS contract — *"a True here can restore
