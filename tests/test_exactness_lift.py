@@ -567,6 +567,92 @@ def test_both_legs_follow_the_shared_point_in_the_TRUE_direction(monkeypatch):
     assert not any("WITHHELD from REFUTED" in n for n in ra2.notes)
 
 
+def _withheld_run_with_all_three_outcomes():
+    """`x ∈ [0, 1]`, `w = x·x`, `assume(w <= 0.9)` — a narrowing on an
+    OVER-APPROXIMATED intermediate, so the run withholds — carrying one
+    obligation of each kind over the declared box:
+
+        #0  `x <= -1`   definitely FALSE  -> violated, and WITHHELD
+        #1  `x <= 10`   definitely TRUE   -> discharged
+        #2  `x <= 0.5`  straddles         -> unknown, undecided by anyone
+
+    One query with all three outcomes is what makes the one-sidedness
+    observable in the GRANTING direction: the shared answer is False here
+    for its own reasons, so forcing it True is not a no-op, and the two
+    obligations that must not move are on the same run as the one that
+    must.
+    """
+    x, w, ap, aout = var(0), var(1), var(2, BOOL), var(3, BOOL)
+    p0, o0 = var(4, BOOL), var(5, BOOL)
+    p1, o1 = var(6, BOOL), var(7, BOOL)
+    p2, o2 = var(8, BOOL), var(9, BOOL)
+    return close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            eqn("mul", [x, x], w),
+            eqn("le", [w, lit(0.9)], ap),
+            eqn("stelling_assume", [ap], aout),
+            eqn("le", [x, lit(-1.0)], p0),
+            eqn("stelling_assert", [p0], o0),
+            eqn("le", [x, lit(10.0)], p1),
+            eqn("stelling_assert", [p1], o1),
+            eqn("le", [x, lit(0.5)], p2),
+            eqn("stelling_assert", [p2], o2),
+        ],
+        [o0, o1, o2],
+    )
+
+
+def test_the_TRUE_direction_is_ONE_SIDED_too(monkeypatch):
+    """The one-sidedness pin's own missing half.
+
+    ``test_the_shared_point_is_one_sided_on_both_legs`` forces the shared
+    answer **False** and requires a discharge to survive. That is the
+    direction in which one-sidedness is easy: False is the WITHHOLDING
+    answer, and the sentence it pins is "withholding touches violations
+    only".
+
+    The other direction is the one the contract actually spends its words
+    on — *"a True here can restore a withheld ``violated-over-set`` and
+    can do nothing else at all"* — and nothing observed it. Forcing True
+    on a query that already answers True is a no-op and would pin
+    nothing, so the run below is one that genuinely withholds, with the
+    certificate closed, carrying an obligation of every kind at once:
+    the violated one must come BACK, and the discharged and the merely
+    undecided ones must not move a step.
+    """
+    q = _withheld_run_with_all_three_outcomes()
+    _close_the_certificate(monkeypatch)
+
+    p0 = propagate(q)
+    assert [o.status for o in p0.obligations] == [
+        "unknown", "discharged", "unknown",
+    ], "the positive control must have all three outcomes on one run"
+    assert p0.narrowing_uncertified is True
+    assert "WITHHELD" in p0.obligations[0].detail
+    assert "WITHHELD" not in p0.obligations[2].detail, (
+        "obligation #2 must be undecided for its OWN reason, or its "
+        "staying unknown below says nothing about one-sidedness"
+    )
+
+    monkeypatch.setattr(
+        exactness, "certifies_set_refutation", lambda **k: True
+    )
+    p1 = propagate(q)
+    assert p1.obligations[0].status == "violated-over-set", (
+        "the granted answer must restore the withheld violation, or this "
+        "run is not observing the grant at all"
+    )
+    assert p1.obligations[1].status == "discharged", (
+        "a granted answer may not touch a discharge — the shared point is "
+        "one-sided in BOTH directions, not only in the one that withholds"
+    )
+    assert p1.obligations[2].status == "unknown", (
+        "a granted answer may not decide an obligation nobody decided; it "
+        "lifts a withholding and does nothing else at all"
+    )
+
+
 # --- the CERTIFICATE's own routing pins ---------------------------------------
 #
 # Two of them, because the certificate touches the shared machinery in two

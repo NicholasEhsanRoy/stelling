@@ -157,8 +157,31 @@ M_INLINE_AFFINE = [
     ),
 ]
 
+# A GRANTED answer treated as two-sided: the leg reads a True as licence
+# to DECIDE rather than merely to stop withholding.  Scoped to runs that
+# would otherwise have withheld, which is what keeps it out of the way of
+# every ordinary run and makes it the shape a False-only pin cannot see.
+M_TWO_SIDED_GRANT = [
+    (
+        "src/stelling/propagate.py",
+        "        region_inhabited=p.region_inhabited,\n    ):\n        return\n",
+        "        region_inhabited=p.region_inhabited,\n"
+        "    ):\n"
+        "        # MUTANT: a granted answer used to DECIDE, not only to\n"
+        "        # stop withholding.\n"
+        "        if p.narrowing_uncertified or p.assume_dropped:\n"
+        "            for _i, _o in enumerate(p.obligations):\n"
+        "                if _o.status == 'unknown':\n"
+        "                    p.obligations[_i] = dataclasses.replace(\n"
+        "                        _o, status='discharged', detail='MUTANT'\n"
+        "                    )\n"
+        "        return\n",
+    ),
+]
+
 MUTANTS = {
     "M4_affine_and_private": M_AFFINE_AND,
+    "M7_granted_answer_decides": M_TWO_SIDED_GRANT,
     "M5_both_and_private": M_AFFINE_AND + M_INTERVAL_AND,
     "M6_nonemptiness_and_private": M_NONEMPTINESS_AND,
     "M2g_genuine_inline_interval": M_INLINE_INTERVAL,
