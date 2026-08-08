@@ -814,7 +814,7 @@ jobs:
   #     outside this appended block, and this file is being edited concurrently.
   #     The command is in `tests/property/README.md`; until a trigger is added,
   #     nobody is running it, and that is the honest state.
-  #   * three of the nine positive controls — `cvc5-stateful` (20x budget),
+  #   * three of the ten positive controls — `cvc5-stateful` (20x budget),
   #     `cross-series` (two interpreters), and `oracle-wrap` (its property is
   #     the xfail above, which the step below already asserts fired).
   property:
@@ -862,6 +862,8 @@ jobs:
               exactly empty, at refine=None AND refine="affine"
             * a conjunct that adds no information adds no proving power,
               including the zero-element case
+            * an inserted assume restating a declaration's own lower bound
+              adds no proving power
             * transposing two adjacent, independent assert_s moves nothing
             * widening a declared bound cannot turn UNKNOWN into VERIFIED
             * the cvc5 record protocol, flat and stateful: a definite answer
@@ -870,7 +872,7 @@ jobs:
             * the strategies still draw their boundary classes (generator floor)
             * every property is registered with a positive control, every
               control names a property that exists, every mutation still applies
-            * six of the nine positive controls FIRE where they are supposed to
+            * seven of the ten positive controls FIRE where they are supposed to
 
           NOT CHECKED HERE:
             * THE OPEN WRAP DEFECT IS EXPECTED TO FAIL. The unmasked oracle leg
@@ -948,6 +950,7 @@ jobs:
             --control oracle-masked \
             --control vacuous-refutation \
             --control conjunct \
+            --control redundant-assume \
             --control reorder \
             --control widen \
             --control cvc5-flat

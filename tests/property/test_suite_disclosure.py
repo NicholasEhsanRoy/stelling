@@ -312,6 +312,7 @@ def test_the_registry_still_covers_the_defect_classes_it_was_built_for():
         "oracle-masked",        # the residual, one-sided oracle
         "vacuous-refutation",   # the affine leg judging an empty region
         "conjunct",             # the size-0 conjunct narrowing to a subset
+        "redundant-assume",     # a box-implied assume adding proving power
         "reorder",              # order-dependence among independent obligations
         "widen",                # non-monotonicity in the input box
         "cvc5-flat",            # the record-boundary disagreement

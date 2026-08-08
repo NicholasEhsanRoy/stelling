@@ -18,10 +18,17 @@ caught X" — as a machine-checkable entry that ``tools/property_check.py
 that carries the defect, asserting that the run comes back RED.
 
 A property whose control cannot be demonstrated does not ship. That is the
-rule, it cost two properties (see ``test_metamorphic.py``'s module docstring),
-and the rest of its cost is visible here: **three of the nine** controls are
+rule, it cost one property (see ``test_metamorphic.py``'s module docstring),
+and the rest of its cost is visible here: **four of the ten** controls are
 source MUTANTS rather than historical commits, because the defect they describe
-has never been in this tree. That is recorded as such rather than papered over
+has never been in this tree.
+
+**The rule cuts the other way too, and it has.** A second property was dropped
+under it on a premise — "no one-line mutation makes it fail" — that was written
+down without being run. The mutation exists; it is registered below as
+``redundant-assume``; the property is back. A control that was not looked for
+is not a control that does not exist, and this file is the place that
+distinction has to be made honestly. That is recorded as such rather than papered over
 — ``kind`` says which, and a mutant is honestly weaker evidence than a commit,
 because a mutant is a defect somebody invented while a commit is one somebody
 shipped. ``test_suite_disclosure.py`` asserts the split is written down
@@ -144,6 +151,51 @@ CONTROLS = (
             "whole declared box — still narrowed its rank-0 sibling to a "
             "strict SUBSET, minting VERIFIED over less than the declared set. "
             "Fixed at 717b9ca."
+        ),
+        expect_message="toward-VERIFIED",
+    ),
+    # ── the box-implied assume ──────────────────────────────────────────────
+    Control(
+        name="redundant-assume",
+        nodeid=(
+            f"{_META}::test_inserting_a_box_implied_assume"
+            "_adds_no_proving_power"
+        ),
+        kind="mutant",
+        at="HEAD",
+        why=(
+            "`_classify_assumed_pred` builds a half-space for `ge`/`gt` and "
+            "`le`/`lt` and a POINT only for `eq`. Using the point for every "
+            "comparison makes an assumed `x >= k` pin x to k, so restating a "
+            "declaration's own lower bound narrows it to a single value: "
+            "x in float64 [-1,1] |- x <= -0.5 is UNKNOWN, and VERIFIED once "
+            "assume(x >= -1.0) is inserted in front of it. A MUTANT, not a "
+            "commit — no revision of this tree carried it — and weaker "
+            "evidence for that reason. This property shipped DROPPED, on the "
+            "written-but-unrun claim that no one-line mutation makes it fail; "
+            "this is that mutation."
+        ),
+        mutation=Mutation(
+            path="src/stelling/propagate.py",
+            old=(
+                '        if cmp in ("ge", "gt"):\n'
+                "            half = iv.IntervalArray(\n"
+                "                shape=target_box.shape, los=ks, "
+                "his=(math.inf,) * n\n"
+                "            )\n"
+                '        elif cmp in ("le", "lt"):\n'
+                "            half = iv.IntervalArray(\n"
+                "                shape=target_box.shape, los=(-math.inf,) * n, "
+                "his=ks\n"
+                "            )\n"
+                "        else:  # eq\n"
+                "            half = iv.IntervalArray(shape=target_box.shape, "
+                "los=ks, his=ks)"
+            ),
+            new=(
+                "        half = iv.IntervalArray(shape=target_box.shape, "
+                "los=ks, his=ks)"
+            ),
         ),
         expect_message="toward-VERIFIED",
     ),

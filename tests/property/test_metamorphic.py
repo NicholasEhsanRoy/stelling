@@ -57,7 +57,7 @@ NOT covered: the solver legs, ``nonvacuity``, control flow (``scan``/``while``/
 the public template helpers, ``strict=True``, and ``vacuity_mode="all"``.
 
 ────────────────────────────────────────────────────────────────────────────
-TWO PROPERTIES THAT DO NOT SHIP, AND WHY
+ONE PROPERTY THAT DOES NOT SHIP, AND WHY
 ────────────────────────────────────────────────────────────────────────────
 
 **"``refine=None`` and ``refine="affine"`` must not disagree on a definite
@@ -79,13 +79,24 @@ this tree actually shipped lived:
 refine legs and forbids a ``violated-over-set`` over an admitted region that is
 exactly empty. Its positive control is ``8106a55``.
 
-**"Inserting a box-implied ``assume`` must not add proving power" — DROPPED FOR
-WANT OF A CONTROL.** The clause is sound and it is what the first spike ran.
-No commit in this tree's history and no one-line mutation makes it fail: the
-size-0 defect it would plausibly have caught needs the vacuous predicate to be
-CONJOINED onto an existing narrowing assume, not inserted beside one, and the
-conjunct property above covers that. Under this suite's own rule — a property
-whose positive control cannot be demonstrated does not ship — it is not here.
+**"Inserting a box-implied ``assume`` must not add proving power" — WAS
+DROPPED ON A FALSE PREMISE, AND IS BACK.** It shipped dropped, with the stated
+reason "no one-line mutation makes it fail". That was written down without
+being run, and it is wrong. One line in ``propagate._classify_assumed_pred`` —
+using the ``eq`` branch's ``IntervalArray(los=ks, his=ks)`` for *every*
+comparison, so an assumed ``x >= k`` pins ``x`` to the point ``k`` instead of
+meeting a half-space — makes it fail immediately, and blatantly::
+
+    x ∈ float64 [-1, 1]                    ⊢ x <= -0.5   ->  UNKNOWN
+    x ∈ float64 [-1, 1], assume(x >= -1.0) ⊢ x <= -0.5   ->  VERIFIED
+
+The inserted ``assume`` is exactly the declared lower bound. It cannot add
+information, and under the mutant it proves the obligation. That is a mutant
+rather than a commit, which is weaker evidence — but three of this suite's
+controls were already invented mutants for the same reason, so by the branch's
+own rule this one qualifies. It ships as
+:func:`test_inserting_a_box_implied_assume_adds_no_proving_power` below, with
+that mutation registered as ``redundant-assume``.
 """
 
 from __future__ import annotations
@@ -273,6 +284,113 @@ def test_a_conjunct_that_adds_no_information_adds_no_proving_power():
 
     search()
     census.require(compared=40, preserving_compared=30, emptying_compared=3)
+
+
+# ── P1b: inserting a box-implied assume ──────────────────────────────────────
+
+REDUNDANT_ASSUME_EXAMPLE = (
+    _grammar.Spec(
+        (_grammar.Decl("x0", (), "float64", -1.0, 1.0),),
+        (
+            _grammar.Stmt(
+                "assert", ("cmp", "<=", ("var", "x0"), ("const", -0.5))
+            ),
+        ),
+    ),
+    0,  # the declaration whose lower bound is re-asserted
+    0,  # insert the assume before statement 0
+)
+"""The point-narrowing shape, pinned.
+
+``x ∈ [-1, 1] ⊢ x <= -0.5`` is UNKNOWN, and it stays UNKNOWN when
+``assume(x >= -1.0)`` — the declared lower bound, restated — is inserted in
+front of it. Under the registered ``redundant-assume`` mutant, where an assumed
+comparison pins its variable to the bound POINT instead of meeting a
+half-space, ``x`` becomes ``[-1, -1]`` and the obligation DISCHARGES.
+
+**Unlike every other ``@example`` in this suite, this one is not a reachability
+crutch, and saying so is the point.** Measured under the ``redundant-assume``
+mutant with the pin DELETED: the unbiased search finds the violation on its own
+at the ``ci`` budget (and again at ×4). The pin is here so the exact shape is
+in the source where a reader can run it by hand, and so the control cannot
+become budget-dependent later — not because the search cannot get there. The
+other pins in this suite say the opposite about themselves, and the difference
+is worth keeping legible.
+"""
+
+
+def _redundant_assume_targets():
+    return _grammar.general_specs().flatmap(
+        lambda s: st.tuples(
+            st.just(s),
+            st.integers(0, len(s.decls) - 1),
+            st.integers(0, len(s.stmts)),
+        )
+    )
+
+
+def test_inserting_a_box_implied_assume_adds_no_proving_power():
+    """Inserting ``assume(x >= lo)`` — true of every member of ``x``'s box.
+
+    The conjunct property above conjoins the same predicate ONTO an existing
+    statement. This one inserts it as a statement of its own, anywhere in the
+    program, and that is a different question of the same tool: conjunction
+    tests how an ``&`` is decomposed, insertion tests what a standalone
+    ``assume`` does to the environment the obligations after it are judged in.
+
+    **Only the toward-VERIFIED direction is asserted**, and only that one,
+    because it is the only one with a demonstrated control. ``VERIFIED ->
+    UNKNOWN`` under an inserted statement is an ordinary precision loss in the
+    safe direction — a bigger program is a harder program — and this file does
+    not assert against the tool withholding. A toward-REFUTED gain would also
+    be a defect; it is not asserted here because nothing demonstrates that this
+    property can see one, and an assertion whose control cannot be shown is the
+    green line this suite exists to prevent.
+
+    The same three exclusions as the conjunct property, via
+    ``_grammar.redundant_conjunct_is_sound_for``: a NaN bound, a ``bool``
+    declaration, and an integer bound outside its own dtype's range — which jax
+    reduces mod ``2**bits``, so the assume the tool sees is not the assume that
+    was written. That last one is the open wrap defect, and reporting it here
+    would file it under the wrong heading.
+
+    Positive control: ``redundant-assume``, a source mutant. See the module
+    docstring for the measurement and for why the property was dropped and is
+    now back.
+
+    Measured at the ``ci`` profile on 9cefc6d's grammar, jax 0.11.0: 251 drawn,
+    **127 pairs compared**, verdicts ``{UNKNOWN: 192, VERIFIED: 58, REFUTED:
+    4}``. The floor below is set at 40, well under that, because a floor is a
+    tripwire for a collapsed search and not a claim of thoroughness.
+    """
+    census = _runner.Census("metamorphic/redundant-assume")
+
+    @_profiles.current().settings(250)
+    @given(_redundant_assume_targets())
+    @example(REDUNDANT_ASSUME_EXAMPLE)
+    def search(item):
+        spec, di, at = item
+        census.draw()
+        decl = spec.decls[di]
+        if not _grammar.redundant_conjunct_is_sound_for(decl):
+            census.skip("assume would not be box-implied for this declaration")
+            return
+        at = min(at, len(spec.stmts))
+        with_assume = _grammar.with_redundant_assume(spec, at, decl)
+        pair = _both(spec, with_assume, census)
+        if pair is None:
+            return
+        before, after = pair
+        census.tag("assume_inserted_compared")
+        assert not (before.status != "VERIFIED" and after.status == "VERIFIED"), (
+            f"toward-VERIFIED: {before.status} -> VERIFIED under an inserted "
+            f"assume that restates {decl.name}'s own declared lower bound "
+            f"({decl.lo!r}) and so cannot add information\n{spec.render()}\n"
+            f"--- with the inserted assume ---\n{with_assume.render()}"
+        )
+
+    search()
+    census.require(compared=40, assume_inserted_compared=40)
 
 
 # ── P2: reordering independent statements ────────────────────────────────────

@@ -108,9 +108,11 @@ metamorphic properties are strictly stronger than an execution oracle.**
   that forbade this would report the tool being careful.
 
 Most properties as first posed are too strong, and the interesting work is
-finding the version that holds. Three in this suite were rewritten and two were
-refused outright; each docstring records the refusal and its counterexample
-next to the clause that replaced it. See "Refusals" below.
+finding the version that holds. Three in this suite were rewritten, one was
+refused outright, and one was refused and then restored when the mutation its
+refusal said did not exist turned out to; each docstring records the refusal
+and its counterexample next to the clause that replaced it. See "Refusals"
+below.
 
 ## Why the oracle property is one-sided
 
@@ -172,8 +174,12 @@ Two consequences worth keeping in mind:
 5. **Say what it does not cover**, in the docstring, in as many words. The
    module docstrings have a `NOT covered:` block; extend it.
 6. **Give it a positive control** — see below. A property whose control cannot
-   be demonstrated does not ship. That is a rule, not a preference; two
-   properties were dropped from this suite under it.
+   be demonstrated does not ship. That is a rule, not a preference; one
+   property is out of this suite under it. **And look for the mutation before
+   you write that there isn't one** — a second property was dropped on the
+   unrun claim that no one-line mutation makes it fail, and the mutation turned
+   out to exist. The rule is "the control could not be demonstrated", never
+   "the control was not looked for".
 
 ### How to give it a positive control
 
@@ -274,7 +280,9 @@ under one class of defect. The class it cannot see is the larger one.
 
 ## Refusals, and what they cost
 
-Two properties are **not here**, and the reasons are the useful part.
+One property is **not here**, and the reason is the useful part. A second was
+ dropped and has been restored; that story is below it, because it is the more
+ instructive of the two.
 
 **`refine=None` and `refine="affine"` must not disagree on a definite verdict.**
 Sound. Also *incapable of failing on this tree*, which makes it exactly the
@@ -291,12 +299,30 @@ thing it watches is not watching it. The falsifiable half ships instead, as
 and forbids a `violated-over-set` over an exactly-empty admitted region — and
 whose control is the commit where that actually happened.
 
-**Inserting a box-implied `assume` must not add proving power.** Sound, and no
-commit in this tree's history and no one-line mutation makes it fail. Dropped
-under the rule above. The defect it would plausibly have caught (a vacuous
-predicate narrowing a sibling) needs the vacuous predicate *conjoined onto* an
-existing narrowing assume rather than inserted beside one, and
-`test_a_conjunct_that_adds_no_information_adds_no_proving_power` covers that.
+**Inserting a box-implied `assume` must not add proving power — DROPPED ON A
+FALSE PREMISE, AND RESTORED.** It shipped dropped, with the reason "no commit in
+this tree's history and no one-line mutation makes it fail". The first half is
+true. The second was written down without being run, and it is wrong. One line
+in `propagate._classify_assumed_pred` — the `eq` branch's
+`IntervalArray(los=ks, his=ks)` used for *every* comparison, so an assumed
+`x >= k` pins `x` to the point `k` instead of meeting a half-space — makes it
+fail at once:
+
+| | verdict |
+|---|---|
+| `x ∈ float64 [-1,1] ⊢ x <= -0.5` | UNKNOWN |
+| `x ∈ float64 [-1,1]`, `assume(x >= -1.0)` `⊢ x <= -0.5` | **VERIFIED** |
+
+The inserted `assume` restates the declared lower bound; it cannot add
+information; under the mutant it proves the obligation. The property is back as
+`test_inserting_a_box_implied_assume_adds_no_proving_power`, with that mutation
+registered as the `redundant-assume` control. It is a mutant and therefore
+weaker evidence than a commit — but three of this suite's controls were already
+invented mutants, so by its own rule it qualifies.
+
+**The lesson is about the rule, not the property.** "No control exists" and "I
+did not look for a control" print the same sentence in a docstring, and only one
+of them is a reason to drop a property.
 
 Two clauses were also refused *inside* properties that did ship, and the
 refusals are recorded next to the clauses that replaced them:
