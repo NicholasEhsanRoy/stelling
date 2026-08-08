@@ -18,7 +18,7 @@ read the brief that produced the suite.
 
 ## Getting an environment
 
-One command, and it refuses by resolved path to install into the shared venvs:
+One command, and it **refuses** rather than clobber anything it did not make:
 
 ```
 tools/property_venv.sh                # jax 0.11.0 -> ~/.cache/stelling-property/jax-0.11.0
@@ -29,6 +29,20 @@ tools/property_venv.sh 0.11.0 /some/where
 The default target is outside the checkout (a venv inside the tree would be a
 new undecided root entry, which `tests/test_sdist_contents.py` fails on). Below,
 `$VENV` is whatever it printed.
+
+**What it refuses, and why it is not a denylist.** Three checks, cheapest
+first: the two named shared jax venvs by resolved path; anything *inside* one
+of them; and — the general one — any existing directory that looks like a venv
+and does not carry the script's own `.stelling-property-venv` marker, plus any
+existing non-empty directory that is not a venv. Re-running the script on a
+target it made before is fine; that is what the marker is for.
+
+A two-name denylist was the shape this started as, and it was measured to let
+through `/home/nick/venvs/stelling-jax/subdir`, two other agents' venvs, and
+**its own default target** — which already existed and which `uv venv` would
+have recreated in silence. A denylist protects the venvs somebody thought to
+name. The thing that needs protecting is "a venv this script did not create",
+and only one of those is knowable by name.
 
 It reads the `hypothesis` requirement out of `pyproject.toml`'s dev group, so
 the version lives in one place. `stelling` itself is **not** installed into the

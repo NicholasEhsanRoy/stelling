@@ -31,21 +31,84 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # suite red for anyone who ran it.
 TARGET="${2:-${XDG_CACHE_HOME:-$HOME/.cache}/stelling-property/jax-${JAX_VERSION}}"
 
-# The two shared venvs, named so the refusal is legible rather than implicit.
+# ── THE REFUSAL ──────────────────────────────────────────────────────────────
+#
+# A TWO-NAME DENYLIST WAS THE WRONG SHAPE, and it was measured to be. The
+# earlier version refused exactly `/home/nick/venvs/stelling-jax` and
+# `/home/nick/venvs/stelling-jax010` by resolved path — correctly, and by
+# resolved path, so `..`, a trailing slash and a symlink were all caught. What
+# it let through, on this box, on the day it shipped:
+#
+#   /home/nick/venvs/stelling-jax/subdir   inside a venv it is told to protect
+#   /home/nick/venvs/stelling-ci011        an existing venv, another agent's
+#   /home/nick/venvs/jax051                an existing venv, another agent's
+#   ~/.cache/stelling-property/jax-0.11.0  ITS OWN DEFAULT TARGET, which
+#                                          already existed, and which `uv venv`
+#                                          would have silently recreated
+#
+# The last one is the point. A denylist protects the venvs somebody thought to
+# name; the thing that actually needs protecting is "a venv this script did not
+# create", and only one of those is knowable by name.
+#
+# So there are three refusals, cheapest first, and the third is the general one:
+#
+#   1. the named shared venvs, kept because a named refusal is legible;
+#   2. anything INSIDE one of them, by resolved-path prefix;
+#   3. any existing directory that looks like a venv and does not carry this
+#      script's own marker file, plus any existing non-empty directory that is
+#      not a venv at all. Re-running this script on a target it made before is
+#      fine and stays fine: that is what the marker is for.
 FORBIDDEN=(
   "/home/nick/venvs/stelling-jax"
   "/home/nick/venvs/stelling-jax010"
 )
 
+# Written into every venv this script creates, and the only thing that makes a
+# pre-existing directory reusable. Do not rename it without reading (3) above.
+MARKER=".stelling-property-venv"
+
 resolve() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
 
 TARGET_ABS="$(resolve "$TARGET")"
+
+refuse() {
+  echo "REFUSED: $1" >&2
+  echo "         target was: $TARGET_ABS" >&2
+  echo "         Pass a different target, or delete it yourself if you are" >&2
+  echo "         sure. This script will not remove a directory it did not" >&2
+  echo "         create — several agents share this machine." >&2
+  exit 2
+}
+
+# (1) and (2): the named shared venvs, and anything under them.
 for bad in "${FORBIDDEN[@]}"; do
-  if [ -e "$bad" ] && [ "$TARGET_ABS" = "$(resolve "$bad")" ]; then
-    echo "REFUSED: $TARGET_ABS is a shared venv. Pick another target." >&2
-    exit 2
+  [ -e "$bad" ] || continue
+  bad_abs="$(resolve "$bad")"
+  if [ "$TARGET_ABS" = "$bad_abs" ]; then
+    refuse "$bad_abs is a shared venv."
   fi
+  case "$TARGET_ABS" in
+    "$bad_abs"/*)
+      refuse "that path is INSIDE the shared venv $bad_abs."
+      ;;
+  esac
 done
+
+# (3) the general one: an existing directory this script did not make.
+if [ -e "$TARGET_ABS" ]; then
+  if [ ! -d "$TARGET_ABS" ]; then
+    refuse "that path exists and is not a directory."
+  elif [ -e "$TARGET_ABS/$MARKER" ]; then
+    echo "== reusing a target this script created earlier (marker present)"
+  elif [ -e "$TARGET_ABS/pyvenv.cfg" ] || [ -e "$TARGET_ABS/bin/python" ]; then
+    refuse "that directory is already a venv, and it carries no $MARKER — so
+         this script did not create it and something else may be using it.
+         (This is what would have happened to the DEFAULT target: it already
+         exists on this box and uv venv would have recreated it in silence.)"
+  elif [ -n "$(ls -A "$TARGET_ABS" 2>/dev/null)" ]; then
+    refuse "that directory exists and is not empty."
+  fi
+fi
 
 # The hypothesis requirement is READ OUT OF pyproject.toml rather than repeated
 # here. Two places to type a version is one place for them to disagree.
@@ -77,6 +140,13 @@ else
   "$TARGET_ABS/bin/python" -m pip install \
     "jax==${JAX_VERSION}" "jaxlib==${JAX_VERSION}" "pytest>=8" "$HYP_REQ"
 fi
+
+# Claim it, so a re-run of this script may reuse it and nothing else is
+# mistaken for it. Written after the venv exists, so an interrupted create
+# leaves an UNCLAIMED directory and the refusal above fires next time — which
+# is the safe direction.
+printf 'created by tools/property_venv.sh, jax %s\n' "$JAX_VERSION" \
+  > "$TARGET_ABS/$MARKER"
 
 echo
 echo "== resolved"
