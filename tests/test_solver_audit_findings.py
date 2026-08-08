@@ -996,3 +996,53 @@ def test_f4wheel2_property_fuzz_no_definite_answer_from_an_incomplete_run():
     # ANTI-VACUITY: the property is not passing because nothing was accepted.
     assert seen_sat > 200, seen_sat
     assert crywolf == [], crywolf[:3]
+
+
+# --- F4-wheel-2, the sweep: the same class anywhere else a writer meets a
+# --- reader. Three places round-trip text across a process or a splitter; none
+# --- of them is live, and these pin why rather than leaving it read once.
+
+
+@pytest.mark.parametrize("sep", ("\n", "\r", *_SEPARATORS))
+def test_f4wheel2_sweep_the_binary_transport_tokenizes_separators_alike(sep):
+    """The binary cvc5 leg splits with `splitlines()` and re-joins with "\\n"
+    before parsing. That normalisation is a no-op for the reader it feeds:
+    `_tokenize_sexpr` splits on `str.split()`, whose whitespace set already
+    contains every one of these, so no separator can move a model value from
+    one define-fun into another."""
+    base = solvers._tokenize_sexpr("(define-fun x0 () Real 1)")
+    assert solvers._tokenize_sexpr(
+        f"(define-fun{sep}x0{sep}(){sep}Real{sep}1)"
+    ) == base
+    assert solvers._model_values_from_text(
+        f"(define-fun{sep}x0{sep}(){sep}Real{sep}1)"
+    ) == ((("x0", "1"),), False)
+
+
+@pytest.mark.parametrize("sep", ("\n", "\r", *_SEPARATORS))
+def test_f4wheel2_sweep_the_reproducer_scan_errs_toward_crying_wolf(sep):
+    """`reproduce.py` refuses to emit a reproducer that imports stelling, and
+    scans for it with `splitlines()` while the thing that will READ the file is
+    Python's own tokenizer. Same shape as the defect, opposite direction:
+    Python's line-end set is a strict SUBSET of `splitlines()`', so the scan can
+    only see MORE line-starts than Python will — a false alarm is possible, a
+    miss is not."""
+    is_splitlines_boundary = len(f"a{sep}b".splitlines()) > 1
+    try:
+        compile(f"x=1{sep}y=2", "<probe>", "exec")
+        is_python_line_end = True
+    except SyntaxError:
+        is_python_line_end = False
+    assert is_splitlines_boundary
+    assert not is_python_line_end or is_splitlines_boundary
+
+
+def test_f4wheel2_sweep_the_z3_transport_has_no_record_protocol():
+    """z3 runs in-process over the API: names and values arrive as objects, so
+    there is no writer, no reader and no boundary to disagree about. Pinned
+    structurally so a future move to a text transport has to face this."""
+    import inspect
+
+    src = inspect.getsource(solvers._run_z3)
+    assert "splitlines" not in src and "subprocess" not in src
+    assert "decl.name()" in src  # values come off the model API, not off text
