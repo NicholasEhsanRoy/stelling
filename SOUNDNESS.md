@@ -2571,14 +2571,16 @@ verdicts:
   correct program was broken. Re-`check()` them: a `violation WITHHELD
   from REFUTED` note where a REFUTED used to be is this change.
 
-  **Cost, measured on this change's own corpus, not inherited.** 22
+  **Cost, measured on this change's own corpus, not inherited.** 23
   harnesses × trace order {assumes first, assumes last, or a fixed
   interleaving} × `refine` ∈ {None, affine} × `assume_mode` ∈ {constrain,
-  inert} = **184 obligation-runs**, scored **per obligation**, never per
-  query. Ground truth is a numpy/jax oracle over the same source — 20 000
-  uniform samples plus every corner plus a 21³ grid (29 269 or 20 023
-  points per case), applying **every** assume of the harness regardless of
-  trace position, stelling never consulted.
+  inert} = 168 runs and **184 obligation-runs**, scored **per
+  obligation**, never per query — a corpus in this project once scored per
+  query and turned a measured 24:168 trade into a fake 216:216. Ground
+  truth is a jax/numpy oracle over the same source — 20 000 uniform
+  samples plus every corner plus a 21³ grid (29 269 or 20 023 points per
+  case), applying **every** assume of the harness regardless of trace
+  position, stelling never consulted.
 
   | | `discharged` | `violated-over-set` | `unknown` |
   |---|---|---|---|
@@ -2632,8 +2634,14 @@ verdicts:
   details, notes (including their order), stamped assumptions and
   coverage counts: **0 differ**. The guard returns having done nothing.
 
+  At the verdict layer the same 168 runs give **VERIFIED 12 → 12**,
+  REFUTED 36 → 20, UNKNOWN 36 → 52: all 16 verdict moves are REFUTED →
+  UNKNOWN and no query becomes VERIFIED.
+
   **Both jax series.** 2357 passed / 2 skipped on jax 0.11.0 and on jax
-  0.10.2, `--collect-only` ids byte-identical between them (2359).
+  0.10.2, `--collect-only` ids byte-identical between them (2359), and
+  the 168-run ledger is run-for-run identical on the two series (0
+  disagreements).
 
   Constructions: `tests/test_exactness_lift.py` (the routing pin),
   `tests/test_assume_constrain.py`, `tests/test_vacuous_refutation.py`;
