@@ -390,3 +390,57 @@ changed here** (the ruling names two legs) and **not measured**:
 verdicts, because a run that narrows an over-approximated intermediate
 raises `coverage.constrained`, which `escalate()` already refuses on. Not
 run, so not claimed.
+
+---
+
+## Correction, appended 2026-08-08 by an independent claim re-check
+
+Nothing above this line is edited. Two things recorded above were checked
+again and one of them is false as written.
+
+**H12 was recorded MET and one of its two clauses is false.** The clause
+reads *"`stelling.harness.assume.__doc__` no longer contains `inert`"*,
+and its registered falsifier is *"The string `inert` surviving in
+`assume.__doc__`"*. That falsifier is satisfied. Measured, at `43896fc`
+on jax 0.11.0:
+
+```
+>>> 'inert' in stelling.harness.assume.__doc__
+True
+```
+
+on the line *"The earlier claim here — that assumptions are inert and
+conservative — stopped being true when constraining landed."* The
+retraction quotes the claim it retracts, which is the right way to write
+the paragraph and the wrong way to satisfy a substring falsifier. The
+SUBSTANTIVE claim behind H12 holds and was re-measured: the docstring
+does not say assumptions ARE inert, it says what `assume` does, it names
+the scope in both the empty and the possibly-empty case, and
+`assert_.__doc__` carries the added clause. **The defect is in the
+clause, not in the docstring.** H12 as it should have read: *"`assume`'s
+docstring no longer ASSERTS that assumptions are inert; any surviving
+occurrence of the word is a retraction of the earlier claim, quoted."*
+A substring test is not a test of what a sentence claims, and this is the
+second falsifier in this project to be satisfiable by prose that says the
+opposite of what the falsifier is looking for.
+
+**The "Out of scope" SUSPECTED is now measured, on the AFFINE leg rather
+than on `solvers.py`, and it holds there.** That paragraph reasons that
+routing a leg through the shared point is a no-op because a run which
+narrows an over-approximated intermediate raises `coverage.constrained`,
+which the leg already refuses on. The same argument applies to
+`affine.refine_propagation`'s use of `nonemptiness_certified`, and it was
+run: the shared call site in `affine.py` was instrumented and the whole
+suite executed, giving **25** reaches with `narrowing_uncertified` False
+at every one and `coverage.constrained == 0` at every one; a mutant
+hardcoding `nonemptiness_certified=True` there passes the entire suite
+(2357 passed / 2 skipped). CONFIRMED for the affine leg. `solvers.py`
+was still **not** run and stays SUSPECTED.
+
+**A blind spot in the routing pin, recorded where it can be read.**
+`tests/test_exactness_lift.py` monkeypatches the shared functions with
+argument-ignoring lambdas, so no argument-level defect can redden that
+file — a mutant hardcoding `assume_dropped=False` in the affine leg
+passes it **10/10** and is caught only by 5 tests in
+`tests/test_vacuous_refutation.py`. The pin's own docstring now says what
+it pins and what it does not.
