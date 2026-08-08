@@ -229,6 +229,18 @@ class Propagation:
     # "uncertified" bit because the two name different mechanisms, and the
     # sentence explaining a withholding has to name the one that fired.
     narrowing_uncertified: bool = False
+    # a POINT WITNESS was found: one member of the declared set at which
+    # every ``stelling_assume`` of the query is definitely true, so the
+    # assumed region is INHABITED and the vacuity the two flags above
+    # guard against cannot arise on this run. The positive channel to the
+    # same fact those two flags approach negatively, carried out for
+    # exactly the reason they are: the refinement layer decides the same
+    # question on its own leg and must consult the whole assume state
+    # through the same shared point
+    # (:func:`stelling.exactness.certifies_set_refutation`), not a private
+    # subset of it. False means NO WITNESS WAS FOUND — never "the region
+    # is empty"; see :func:`_region_witness`.
+    region_inhabited: bool = False
     # Values this walk bound to ⊤ — every element [-inf, inf], the widest
     # box there is — in the top-level scope, as (producing primitive,
     # count), most frequent first. THE FACT THE COVERAGE CENSUS CANNOT
@@ -2531,8 +2543,10 @@ MEMBERSHIP_IDIOM_HINT = (
     "arithmetic forms narrow the reduction's own intermediate — an "
     "over-approximated value — so the precondition is stamped "
     "satisfiability-UNCERTIFIED and every definite violation is then withheld "
-    "from REFUTED, whereas the elementwise form narrows the compared value "
-    "itself and stays certified where that value is a declared input"
+    "from REFUTED unless a probed point of the declared set is found to "
+    "satisfy every assume of the query, whereas the elementwise form narrows "
+    "the compared value itself and stays certified where that value is a "
+    "declared input"
 )
 
 # The hint is ~1.2k characters and one run can state a property on three faces.
@@ -4591,6 +4605,14 @@ class _Propagator:
         # which is what turns propagation into a witness evaluator.
         self.pin: int | None = None
         self._pin_ordinal = 0
+        # PROBE RUNS ONLY: assume equation id -> was this assume's predicate
+        # DEFINITELY TRUE at the pinned point, on every occasion this walk
+        # evaluated it. The conjunction over occasions, so a query whose
+        # cond stayed unforced (both branch bodies walked) needs the assume
+        # true on both. Empty on a real run: nothing writes it unless
+        # `pin` is set. Read by :func:`_region_witness` and handed to
+        # :func:`stelling.exactness.certifies_point_witness`.
+        self.assume_witness: dict[int, bool] = {}
         # set once any assume narrows: violated-over-set details are then
         # judged over the precondition-narrowed set, and must say so
         # (audit F4)
@@ -4630,6 +4652,13 @@ class _Propagator:
         # constrained assume being present, and a dropped one is not
         # present at all.
         self.assume_dropped = False
+        # the NON-EMPTINESS CERTIFICATE's answer for this run, written by
+        # :func:`propagate` after the walk finishes and before the
+        # withholding reads it (:func:`_region_witness`). False here means
+        # "no witness found" and is the initial value precisely because
+        # that is also the conservative one: a walk that never reaches the
+        # search behaves exactly as it did before the search existed.
+        self.region_inhabited = False
 
     def read(self, atom: ir.Atom) -> iv.IntervalArray:
         if isinstance(atom, ir.Literal):
@@ -6563,6 +6592,31 @@ class _Propagator:
                 else None
             )
             where = eqn.source_info[-1] if eqn.source_info else "unknown location"
+            if self.pin is not None and eqn.invars:
+                # PROBE RUN: read the predicate's box at the pinned point,
+                # BEFORE `_assume_constrain` can meet anything into it. A
+                # box of [1, 1] on every element means the predicate is
+                # true at this point — the box encloses the true value, so
+                # a definite TRUE over the box is a TRUE at the value.
+                #
+                # Before, not after, and the ordering is not defensive
+                # tidiness: `_classify_cmp` writes narrowed boxes straight
+                # back into the env, and a later conjunct read against a
+                # narrowed sibling is read against a box that is
+                # deliberately NOT an over-approximation of the reachable
+                # set (see `_conjunct_certainly_true`). Reading here keeps
+                # every witness answer a statement about the PINNED POINT
+                # and nothing else. (In fact a definitely-true predicate
+                # narrows nothing — the meet with the closed half-space is
+                # a no-op exactly when the comparison is definitely true —
+                # so on the runs that certify, the two orders agree; the
+                # runs where they differ are the runs that certify
+                # nothing.)
+                key = id(eqn)
+                true_here = self._conjunct_certainly_true(eqn.invars[0])
+                self.assume_witness[key] = (
+                    self.assume_witness.get(key, True) and true_here
+                )
             if self.assume_mode == "constrain" and eqn.invars:
                 self._assume_constrain(eqn, where)
             else:
@@ -7146,7 +7200,11 @@ def _withhold_uncertified_refutations(p) -> None:
     separately is an agreement that breaks silently: the refinement reads
     a whole-run quantity by architecture (it is a post-pass), this leg
     reads one because that is the rule, and a refinement restructured to
-    run inline would drift with nothing catching it.
+    run inline would drift with nothing catching it. The NON-EMPTINESS
+    CERTIFICATE reaches that same point as its third argument
+    (``region_inhabited``) rather than as a test of its own here — a leg
+    that lifted the withholding locally would be a third channel around
+    the shared decision, which is the arrangement it exists to end.
 
     **Why the end of the run and not the obligation.** Read at the
     obligation, this saw only the assumes traced ABOVE it, and the same
@@ -7190,6 +7248,7 @@ def _withhold_uncertified_refutations(p) -> None:
     if exactness.certifies_set_refutation(
         nonemptiness_certified=not p.narrowing_uncertified,
         assume_dropped=p.assume_dropped,
+        region_inhabited=p.region_inhabited,
     ):
         return
     mechanism = _uncertified_mechanism(p)
@@ -7234,6 +7293,198 @@ def _withhold_uncertified_refutations(p) -> None:
             where = o.source_info[-1] if o.source_info else "unknown location"
             p.notes.append(f"{headline} at {where}: {why}")
             sink[i] = dataclasses.replace(o, status="unknown", detail=detail)
+
+
+# The NON-EMPTINESS CERTIFICATE's cap, in DECLARED ELEMENTS (Gate 2).
+#
+# The search costs up to `_PROBE_COUNT` extra propagations of the whole
+# query, and a propagation's cost grows with the declared element count
+# (every box is a pair of endpoint tuples that long). Unbounded, that is a
+# per-query cost the caller never asked for and cannot predict. Bounded by
+# the DECLARED SIZE — the one quantity the user wrote down and the one the
+# cost actually tracks — it is predictable from the harness.
+#
+# The number is not a guess: see `scratchpad/cert/cap_timing.py` and the
+# PREREG outcomes. It costs recovered refutations at declarations above
+# it, and that cost is measured rather than defined away.
+_CERT_MAX_ELEMENTS = 4096
+
+
+def _assume_equation_ids(jaxpr) -> frozenset:
+    """The identity of every ``stelling_assume`` equation the query
+    CONTAINS — statically, sub-jaxprs included, whether or not any walk
+    reaches it.
+
+    Static because :func:`stelling.exactness.certifies_point_witness`
+    needs the requirement to cover assumes a probe could walk AROUND: a
+    pinned probe forces conds and so walks one branch, and an assume in
+    the other branch would otherwise be certified by not being looked at.
+    Over-collecting is the safe direction here — an assume nothing ever
+    evaluates simply makes the subset test fail and no certificate is
+    issued.
+    """
+    found: set[int] = set()
+    stack = [jaxpr]
+    while stack:
+        j = stack.pop()
+        for e in j.eqns:
+            if e.primitive == "stelling_assume":
+                found.add(id(e))
+            stack.extend(sub_jaxprs(e))
+    return frozenset(found)
+
+
+def _declared_element_count(jaxpr) -> int:
+    """Total elements across every ``stelling_any`` declaration in the
+    query — the size the user declared, which is what the certificate
+    search's cap is stated in."""
+    total = 0
+    stack = [jaxpr]
+    while stack:
+        j = stack.pop()
+        for e in j.eqns:
+            if e.primitive == "stelling_any":
+                for out in e.outvars:
+                    n = 1
+                    for d in out.aval.shape:
+                        n *= d
+                    total += n
+            stack.extend(sub_jaxprs(e))
+    return total
+
+
+def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
+    """Search for ONE point of the declared set at which EVERY assume of
+    the query is definitely true — the non-emptiness certificate.
+
+    **What it is for.** A run whose assume state does not certify a
+    set-level refutation withholds every definite violation from REFUTED,
+    query-wide. The withholding has exactly one ground: the assumed region
+    *may be empty*, in which case every obligation is vacuously true. It
+    does not say the judged set was wrong — a narrowing is a meet with a
+    CLOSED half-space and a drop only widens, so the judged set is a
+    superset of the assumed region either way, and a definite violation
+    over a superset is a violation at every point of the region. Exhibit
+    one point of that region and the ground is gone.
+
+    **What a "point" has to be.** A member of the DECLARED SET, which for
+    a narrow dtype is a value of that format and not merely a number
+    inside the interval: `int32 (0.2, 2.8)` declares `{1, 2}` and
+    `float32 (v, (v + nextafter(v))/2)` declares `{v}`. That problem is
+    already solved — :func:`_member_bounds` and :func:`_probe_point` solve
+    it for the reachability probe grid — and this reuses them rather than
+    re-deriving them, through the same ``pin`` mechanism
+    (:meth:`_Propagator._pinned`).
+
+    **What arithmetic the check runs in, and why that one.** stelling's
+    own, in ``semantics`` — the same propagation that judged the query.
+    The endpoints of the basic operations are computed in ``Fraction``
+    and correctly directed-rounded (:func:`stelling.interval._exact_down`
+    / ``_exact_up``), so a predicate box is a sound enclosure of the
+    predicate's value AT THE PINNED POINT; ``[1, 1]`` on every element
+    therefore means true at that point. Two consequences, both wanted:
+
+    * no second arithmetic. A witness checker with its own evaluator
+      could disagree with the propagator about what a program computes,
+      and the disagreement would be invisible. This one inherits the
+      tool's soundness argument instead of running beside it.
+    * the check is exact where the arithmetic is exact and INDETERMINATE
+      where it is not, never wrong. Measured: at the point `(0.1, 0.2)`
+      the predicate `x0 + x1 >= 0.30000000000000004` is TRUE in binary64
+      and FALSE in ℝ; under ``semantics="real"`` the box is
+      `[0x1.3333333333333p-2, 0x1.3333333333334p-2]`, which straddles the
+      bound, so the predicate is INDETERMINATE and no witness is claimed.
+      An exact-rational checker would answer FALSE there; this answers
+      "not established", which withholds. Weaker, never unsound.
+
+    **``sqrt``/``sin``/``exp``/``log`` are a boundary, not a gap.**
+    Nothing confirms a point exactly through them, and this does not try:
+    the enclosure at the pinned point has width, and a predicate whose
+    bound falls inside that width reads INDETERMINATE and certifies
+    nothing. What it does still do — soundly — is certify a predicate
+    with SLACK: `assume(sqrt(x + 1) >= 1.2)` at the pinned `x = 0.5`
+    encloses `sqrt(1.5)` in a box whose lower endpoint is above 1.2, and
+    a definite TRUE over an enclosure is a TRUE at the value. So the
+    boundary is the margin, not the primitive.
+
+    **ONE-SIDED, and the code says so because the code is the claim.**
+    Returning False means NO WITNESS WAS FOUND. It never means the region
+    is empty: the grid is 16 points, the arithmetic can be indeterminate,
+    the cap can decline to search at all, and a probe that raises is
+    caught and skipped. Every False path below therefore leaves the run
+    EXACTLY as it found it — no note, no status, no detail, not even a
+    disclosure that a search happened. That is not reticence; it is what
+    makes the one-sidedness pinnable byte-for-byte
+    (``test_a_failed_certificate_search_changes_nothing_at_all``) instead
+    of argued. The withholding sentence the run already carries explains
+    the withholding completely on its own, and it was true before this
+    function existed.
+
+    **What is NOT certified.** Branch-scoped assumes, always. The
+    requirement is the STATIC set of assume equations
+    (:func:`_assume_equation_ids`) and the witness is what one pinned walk
+    evaluated, so an assume in a branch the probe did not take is required
+    and not witnessed, and the certificate fails. Deliberate: a
+    branch-scoped precondition that is empty in its branch is exactly the
+    vacuity being guarded against, and a top-level point that walks around
+    it certifies nothing about it.
+    """
+    if exactness.certifies_set_refutation(
+        nonemptiness_certified=not p.narrowing_uncertified,
+        assume_dropped=p.assume_dropped,
+        # explicitly False rather than omitted: this is the question
+        # "would this run withhold ABSENT a certificate", asked before one
+        # exists, and passing the answer we are about to compute would be
+        # a circular read. Spelling it keeps the invariant that EVERY
+        # reach of the shared point names all three inputs, which is what
+        # `test_every_reach_of_the_shared_point_names_the_certificate`
+        # observes.
+        region_inhabited=False,
+    ):
+        # nothing is being withheld on this run, so there is nothing for a
+        # certificate to lift and no reason to pay for one.
+        return False
+    if not any(
+        o.status == "violated-over-set"
+        for sink in (p.obligations, p.nonvacuity_checks)
+        for o in sink
+    ):
+        return False  # nothing withheld; a query with none pays nothing
+    required = _assume_equation_ids(closed.jaxpr)
+    if not required:
+        return False
+    if _declared_element_count(closed.jaxpr) > _CERT_MAX_ELEMENTS:
+        # THE CAP (Gate 2). Silent, like every other failure path here:
+        # declining to search is not a finding, and the run's own
+        # withholding sentence is unchanged and still complete.
+        return False
+    for k in range(_PROBE_COUNT):
+        probe = _Propagator(assume_mode, semantics)
+        probe.pin = k
+        try:
+            probe.run(closed.jaxpr, list(closed.consts), [])
+        except Exception:  # noqa: BLE001 — a failed probe certifies nothing
+            continue
+        if exactness.certifies_point_witness(
+            required_assumes=required,
+            witnessed_assumes=frozenset(
+                key for key, ok in probe.assume_witness.items() if ok
+            ),
+        ):
+            # FIRST witness wins: one point is the whole claim, and
+            # searching on after it is found buys nothing (Gate 2's other
+            # half — a successful search costs one probe, not sixteen).
+            p.notes.append(
+                f"assumed region CERTIFIED NON-EMPTY: probe point {k} of "
+                f"the declared set satisfies every assume of this query "
+                f"(each assume's predicate is definitely true at that "
+                f"point, in the same arithmetic the query was judged in), "
+                f"so the assumed region is inhabited and a definite "
+                f"violation over the judged set is not vacuous — definite "
+                f"violations are NOT withheld from REFUTED on this run"
+            )
+            return True
+    return False
 
 
 def _reachability_witnesses(closed, p, *, assume_mode, semantics):
@@ -7350,6 +7601,13 @@ def propagate(
             f"via any_array), got {len(closed.jaxpr.invars)} free invar(s)"
         )
     p.run(closed.jaxpr, list(closed.consts), [])
+    # BEFORE the withholding: the non-emptiness certificate. It is an
+    # INPUT to the withholding's shared decision, so it has to be computed
+    # first; it is one-sided, so computing it can only ever leave the
+    # withholding alone or lift it.
+    p.region_inhabited = _region_witness(
+        closed, p, assume_mode=assume_mode, semantics=semantics
+    )
     # FIRST: the run-scoped assume withholding. It runs before the
     # branch-reachability pass so that an obligation withheld here is not
     # also re-explained there — the branch pass skips anything no longer
@@ -7389,5 +7647,6 @@ def propagate(
         semantics=semantics,
         assume_dropped=p.assume_dropped,
         narrowing_uncertified=p.narrowing_uncertified,
+        region_inhabited=p.region_inhabited,
         top_boxes=_top_boxes(closed, p.env),
     )

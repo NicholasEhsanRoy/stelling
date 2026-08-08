@@ -1625,6 +1625,28 @@ def test_a_certified_assume_leaves_both_obligations_untouched():
     assert not any("WITHHELD" in n for n in p.notes)
 
 
+def _uncertified_after_exact_query(cut):
+    """`x ∈ [0, 1]`, `assume(x >= 0.9)` (certified — the declared box is
+    exact), then an UNCERTIFIED narrowing of the intermediate ``cut``
+    builds, then `assert(x <= 0.5)` — definitely false over the narrowed
+    `[0.9, 1]`."""
+    x, xa, xaout = var(0), var(1, boolav()), var(2, boolav())
+    w, ap, aout = var(3), var(4, boolav()), var(5, boolav())
+    p1, o1 = var(6, boolav()), var(7, boolav())
+    return close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            eqn("ge", [x, lit(0.9)], xa),  # certified input assume
+            eqn("stelling_assume", [xa], xaout),
+            *cut(x, w, ap),  # the uncertified intermediate assume
+            eqn("stelling_assume", [ap], aout),
+            eqn("le", [x, lit(0.5)], p1),  # false over the narrowed [0.9, 1]
+            eqn("stelling_assert", [p1], o1),
+        ],
+        [o1],
+    )
+
+
 def test_uncertified_flag_withholds_even_exact_target_violations_after_it():
     # conservative by design: once ANY uncertified constraint is in
     # force, every subsequent definite violation is withheld — including
@@ -1632,25 +1654,49 @@ def test_uncertified_flag_withholds_even_exact_target_violations_after_it():
     # judgment env still contains the uncertified narrowing, and
     # value-flow precision is out of scope). Sound: withholding never
     # mints a wrong definite verdict.
-    x, xa, xaout = var(0), var(1, boolav()), var(2, boolav())
-    w, ap, aout = var(3), var(4, boolav()), var(5, boolav())
-    p1, o1 = var(6, boolav()), var(7, boolav())
-    q = close(
-        [
-            any_eqn(x, 0.0, 1.0),
-            eqn("ge", [x, lit(0.9)], xa),  # certified input assume
-            eqn("stelling_assume", [xa], xaout),
-            eqn("mul", [x, x], w),
-            eqn("le", [w, lit(0.9)], ap),  # uncertified intermediate assume
-            eqn("stelling_assume", [ap], aout),
-            eqn("le", [x, lit(0.5)], p1),  # false over the narrowed [0.9, 1]
-            eqn("stelling_assert", [p1], o1),
-        ],
-        [o1],
-    )
-    p = propagate(q)
+    #
+    # THE CUT IS `w = x - x`, and the choice is the whole test. The
+    # uncertified narrowing must be one over an assumed region that is
+    # really EMPTY, or the NON-EMPTINESS CERTIFICATE finds a point of it
+    # and correctly lifts the withholding — which is what happens to the
+    # `w = x·x`, `assume(w <= 0.9)` cut this test used to carry: the
+    # region `{x : x ≥ 0.9 ∧ x² ≤ 0.9}` is `[0.9, 0.948…]`, inhabited,
+    # and the refutation it now returns is a right answer, not a
+    # regression. `x - x` is exactly 0 at every point while its box after
+    # the narrowing to `[0.9, 1]` is `[-0.1, 0.1]`, so `w ≥ 0.05` is an
+    # uncertified cut over an image-empty region: nothing can witness it,
+    # and the run-scoped withholding this test is about is what is left.
+    def cut(x, w, ap):
+        return (
+            eqn("sub", [x, x], w),
+            eqn("ge", [w, lit(0.05)], ap),
+        )
+
+    p = propagate(_uncertified_after_exact_query(cut))
+    assert p.narrowing_uncertified is True
+    assert p.region_inhabited is False
     assert p.obligations[0].status == "unknown"
     assert "WITHHELD" in p.obligations[0].detail
+
+
+def test_an_uncertified_cut_over_an_INHABITED_region_keeps_its_refutation():
+    # the other face of the test above, and the reason its cut had to
+    # change: the withholding is not a property of the UNCERTIFIED flag
+    # alone. `{x : x ≥ 0.9 ∧ x² ≤ 0.9}` is `[0.9, 0.948…]` — inhabited —
+    # so a probed point of the declared set satisfies both assumes, the
+    # certificate fires, and the definite violation is a refutation of
+    # something. Withholding it would cost a sound REFUTED for nothing.
+    def cut(x, w, ap):
+        return (
+            eqn("mul", [x, x], w),
+            eqn("le", [w, lit(0.9)], ap),
+        )
+
+    p = propagate(_uncertified_after_exact_query(cut))
+    assert p.narrowing_uncertified is True  # the flag still fires...
+    assert p.region_inhabited is True  # ...and the certificate answers it
+    assert p.obligations[0].status == "violated-over-set"
+    assert any("CERTIFIED NON-EMPTY" in n for n in p.notes)
 
 
 def test_branch_invars_never_inherit_exactness_selector_correlation():
@@ -1701,10 +1747,23 @@ def test_branch_invars_never_inherit_exactness_selector_correlation():
     p = propagate(q)  # must not raise
     (ob,) = p.obligations  # the in-branch assert
     assert ob.status == "unknown"  # withheld, never violated-over-set
-    assert "WITHHELD" in ob.detail
+    assert "withheld from refuted" in ob.detail.lower()
     assert any(
         "precondition satisfiability UNCERTIFIED" in n for n in p.notes
     )
+    # WHICH withholding lands on it is not what this test is about, and
+    # it moved: a point of the DECLARED box satisfies the in-branch
+    # `x >= 0.9` (x and the selector's `w` are separate declarations here,
+    # so nothing correlates them), the NON-EMPTINESS CERTIFICATE fires,
+    # and the run-scoped withholding lifts. The obligation stays withheld
+    # because it is BRANCH-SCOPED and the branch-reachability pass
+    # certifies nothing on a run that constrained or dropped an assume —
+    # which is not a coincidence but a structural guarantee, pinned by
+    # `test_the_certificate_can_never_restore_a_branch_scoped_refutation`
+    # in tests/test_nonempty_certificate.py.
+    assert p.region_inhabited is True
+    assert any("WITHHELD from REFUTED" in n for n in p.notes)
+    assert any("only ADMITS" in n for n in p.notes)  # the branch pass's own
 
 
 # --- audit F8: definitely-true assumes certify themselves ---------------------
@@ -1779,12 +1838,27 @@ def test_strict_boundary_noop_assume_does_not_certify():
             [out],
         )
 
+    # OBSERVED ON THE FLAG, not on the downstream verdict. The F8 claim is
+    # about whether the assume CERTIFIES ITSELF, and the flag is that
+    # claim; the withholding used to be its only visible consequence, and
+    # is no longer, because `{x ∈ [1, 2] : x > 1}` is `(1, 2]` — genuinely
+    # inhabited — so the NON-EMPTINESS CERTIFICATE finds a point of it and
+    # the definite violation correctly stands. Pinning the verdict here
+    # would make this a test of the certificate, which has its own file.
     p_strict = propagate(q_with("gt"))  # no-op meet, but NOT definitely true
-    assert p_strict.obligations[0].status == "unknown"
-    assert "WITHHELD" in p_strict.obligations[0].detail
+    assert p_strict.narrowing_uncertified is True
+    assert any(
+        "precondition satisfiability UNCERTIFIED" in n for n in p_strict.notes
+    )
+    assert p_strict.region_inhabited is True  # and the region really is
     p_nonstrict = propagate(q_with("ge"))  # definitely true: certified
+    assert p_nonstrict.narrowing_uncertified is False
     assert p_nonstrict.obligations[0].status == "violated-over-set"
     assert not any("UNCERTIFIED" in n for n in p_nonstrict.notes)
+    # the nonstrict form needs NO certificate: it certified on its own,
+    # so the search never runs and the run says nothing about witnesses
+    assert p_nonstrict.region_inhabited is False
+    assert not any("CERTIFIED NON-EMPTY" in n for n in p_nonstrict.notes)
 
 
 # --- audit F9: nonvacuity is withheld like asserts ----------------------------

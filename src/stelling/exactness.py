@@ -19,11 +19,20 @@ exact-point constant — supports the nonemptiness claim, plus the one
 box-independent channel: a predicate definitely true over the whole box
 is true over the whole true set a fortiori (audit F8).
 
+The last clause of that principle — *concrete witnesses* — is the one
+this module gained a second function for. Exactness is the NEGATIVE
+channel: it says which boxes may be read as their own truth. A point
+witness is the POSITIVE channel: an actual member of the declared set,
+at which every assume of the query is definitely true, settles
+nonemptiness outright and needs no box to be exact.
+
 :class:`ExactSet` is the per-scope bookkeeping (the per-var exact set and
 its maintenance rules); :func:`certifies_nonemptiness` is the
-per-variable certification decision; :func:`certifies_set_refutation` is
-the RUN-level decision layered on it — *given this run's whole assume
-state, is a set-level refutation certified?* All three are consumed by
+per-variable certification decision; :func:`certifies_point_witness` is
+the positive channel's decision — *did one probed point satisfy every
+assume this query wrote?*; :func:`certifies_set_refutation` is the
+RUN-level decision layered on both — *given this run's whole assume
+state, is a set-level refutation certified?* All four are consumed by
 :mod:`stelling.propagate`'s constraining-assume machinery and are
 importable by any future layer that must certify a region inhabited, or
 must decide whether a set-level refutation is owed.
@@ -64,7 +73,12 @@ the interval representation.
 
 from __future__ import annotations
 
-__all__ = ["ExactSet", "certifies_nonemptiness", "certifies_set_refutation"]
+__all__ = [
+    "ExactSet",
+    "certifies_nonemptiness",
+    "certifies_point_witness",
+    "certifies_set_refutation",
+]
 
 
 class ExactSet:
@@ -110,11 +124,57 @@ def certifies_nonemptiness(
     return definitely_true or var_id in exact
 
 
+def certifies_point_witness(
+    *, required_assumes: frozenset, witnessed_assumes: frozenset
+) -> bool:
+    """The POSITIVE channel: did one probed point of the declared set
+    satisfy **every** assume this query wrote — so the assumed region is
+    inhabited, whatever the boxes could or could not certify?
+
+    ``required_assumes`` is the identity of every ``stelling_assume``
+    equation the query CONTAINS, read statically off the IR, sub-jaxprs
+    included. ``witnessed_assumes`` is the identity of every assume the
+    probe run EVALUATED and found definitely true at the point it pinned.
+
+    **Why the requirement is static and the witness dynamic — this is the
+    whole safety of the function.** A probe pins each declaration to a
+    point, which forces conds, so a probe walks ONE branch. An assume
+    sitting in the branch it did not walk is never evaluated and never
+    appears in ``witnessed_assumes``; the subset test then fails and no
+    certificate is issued. Were the requirement gathered dynamically from
+    the probe instead, a query whose only doubtful assume lives in an
+    untaken branch would certify itself by walking around it — a
+    branch-scoped empty precondition wearing a top-level witness's
+    clothes. The asymmetry is deliberate and is what makes this build
+    decline every branch-scoped assume rather than reason about it.
+
+    **Empty ``required_assumes`` answers no.** A query with no assume has
+    nothing whose satisfiability is in doubt, so it never reaches the
+    withholding this lifts; answering yes there would be a certificate
+    with no content, and a later caller reading a True would be reading a
+    claim nobody established.
+
+    **ONE-SIDED, and this is the load-bearing sentence.** A False answer
+    means *no witness was found*. It is **not** a proof that the region is
+    empty: the probe grid is finite, the arithmetic that evaluates a
+    predicate at a point is an enclosure and may be indeterminate, and the
+    search is capped by declared size. A caller may use a True to stop
+    withholding; a caller may NEVER use a False to conclude anything —
+    everything a False leaves in place was already in place for its own
+    reasons.
+    """
+    return bool(required_assumes) and required_assumes <= witnessed_assumes
+
+
 def certifies_set_refutation(
-    *, nonemptiness_certified: bool, assume_dropped: bool
+    *,
+    nonemptiness_certified: bool,
+    assume_dropped: bool,
+    region_inhabited: bool = False,
 ) -> bool:
     """Given a run's WHOLE assume state, is a set-level refutation
-    certified? The run-level layer over :func:`certifies_nonemptiness`.
+    certified? The run-level layer over :func:`certifies_nonemptiness`
+    and :func:`certifies_point_witness`.
 
     ``nonemptiness_certified`` is the conjunction, over the whole run, of
     every answer :func:`certifies_nonemptiness` gave where a constraining
@@ -148,5 +208,32 @@ def certifies_set_refutation(
     for nothing — ``solvers.py`` tried the two-sided version on its own
     leg and reverted it. Nothing here may be used to decline a run
     wholly or to touch a ``discharged`` status.
+
+    **``region_inhabited`` — the certificate, and why it is an INPUT
+    here rather than a channel of its own.** Both of the other two
+    arguments withhold for exactly one reason: the assumed region *may be
+    empty*, in which case every obligation is vacuously true and no
+    refutation is owed. Neither says the judged set is wrong — a
+    narrowing is a meet with a CLOSED half-space and a drop only widens,
+    so in both cases the judged set is a superset of the assumed region
+    and a definite violation over it is a violation at every point of
+    that region. What is missing in both is a point. Supply one — a
+    member of the declared set at which every assume of the query holds
+    (:func:`certifies_point_witness`) — and the region is inhabited, the
+    violation is a violation of something, and REFUTED is owed.
+
+    So it is a third argument to THIS function and not a fourth
+    consultation somewhere else, because the question *"is a set-level
+    refutation certified on this run?"* still has exactly one answer and
+    two legs still have to get the same one. A leg that consulted the
+    witness separately would be back to two legs agreeing by coincidence,
+    which is the arrangement this function exists to end.
+
+    It defaults to ``False`` — the pre-certificate answer — so a caller
+    that does not know about witnesses gets the conservative behaviour
+    rather than a signature error, and so the disjunction below can only
+    ever turn withholding OFF, never on. The one-sidedness above is
+    unchanged by it: a True here can restore a withheld
+    ``violated-over-set`` and can do nothing else at all.
     """
-    return nonemptiness_certified and not assume_dropped
+    return region_inhabited or (nonemptiness_certified and not assume_dropped)

@@ -23,18 +23,37 @@ the shared answer to False and requires BOTH legs to withhold — it is
 not a test of today's verdicts, it is a test that fails if either leg
 stops consulting the shared point.
 
-**WHAT THIS FILE DOES NOT PIN — the shape of its own blind spot.** The
-routing pins below monkeypatch the shared functions with
-``lambda **k: False`` / ``lambda *a, **k: False``. Those lambdas IGNORE
-their arguments, which is what makes them a ROUTING pin rather than a
-behaviour pin — but it also means **no argument-level defect can redden
-this file**. A leg that reaches the shared point with the wrong arguments
-still gets ``False`` back and still withholds, so every test here passes.
-Measured at ``43896fc`` on jax 0.11.0: an ``affine.py`` mutant hardcoding
+**THREE routings now.** The NON-EMPTINESS CERTIFICATE added a second,
+POSITIVE route to the same nonemptiness fact —
+:func:`certifies_point_witness`, "did one probed point of the declared
+set satisfy every assume this query wrote?" — and fed it into the
+run-level decision as a third argument. Both halves are pinned below:
+``test_the_witness_route_is_the_shared_primitive_too`` forces that
+function in BOTH directions and requires the propagator to follow, and
+``test_every_reach_of_the_shared_point_names_the_certificate`` requires
+both legs to carry the answer into the shared point rather than act on it
+locally.
+
+**WHAT THIS FILE DID NOT PIN — the shape of its own blind spot, and the
+one part of it that is now closed.** The ``lambda **k: False`` /
+``lambda *a, **k: False`` routing pins IGNORE their arguments, which is
+what makes them ROUTING pins rather than behaviour pins — but it also
+means **no argument-level defect could redden them**. A leg that reaches
+the shared point with the wrong arguments still gets ``False`` back and
+still withholds, so every one of those tests passes. Measured at
+``43896fc`` on jax 0.11.0: an ``affine.py`` mutant hardcoding
 ``assume_dropped=False`` at the shared call passes this file **10/10**,
 and is caught only elsewhere — 5 tests in
 ``tests/test_vacuous_refutation.py`` fail on it (whole suite: 2352
 passed, 5 failed).
+
+``test_every_reach_of_the_shared_point_names_the_certificate`` is the
+first pin here that is NOT argument-blind: it wraps the real decision in
+a recorder and inspects the keyword arguments, so behaviour is untouched
+and the arrival of each argument is the observable. It closes the blind
+spot for ``region_inhabited`` specifically — it asserts every reach names
+it and that a run which certified passes a True — and leaves the other
+two arguments exactly as described above.
 
 The OTHER argument is a different case, recorded here so the next reader
 does not read its silence as coverage: a mutant hardcoding
@@ -54,6 +73,8 @@ assume would make it live, and this file would still not see it.
 """
 
 from __future__ import annotations
+
+import dataclasses
 
 from stelling import affine, exactness, ir
 from stelling.exactness import (
@@ -137,19 +158,75 @@ def test_run_level_certification_decision():
     )
 
 
+def test_the_certificate_is_an_input_to_the_run_level_decision():
+    # the third argument, on its own truth table. A point witness settles
+    # nonemptiness outright, which is the ONE thing the other two
+    # arguments withhold for, so it overrides either of them; and it
+    # defaults to the pre-certificate answer, so a caller that does not
+    # know about it gets the conservative behaviour rather than a
+    # signature error.
+    for dropped in (False, True):
+        for certified in (False, True):
+            assert certifies_set_refutation(
+                nonemptiness_certified=certified,
+                assume_dropped=dropped,
+                region_inhabited=True,
+            ), (certified, dropped)
+            assert certifies_set_refutation(
+                nonemptiness_certified=certified,
+                assume_dropped=dropped,
+                region_inhabited=False,
+            ) is certifies_set_refutation(
+                nonemptiness_certified=certified, assume_dropped=dropped
+            ), "omitting the argument must equal passing it False"
+
+
+def test_the_point_witness_decision_is_one_sided_and_static():
+    # the positive channel's own contract. A subset test, in that
+    # direction: every assume the QUERY contains must be witnessed, and a
+    # witness set that misses one certifies nothing however large it is.
+    ka, kb = 101, 202
+    assert exactness.certifies_point_witness(
+        required_assumes=frozenset({ka}), witnessed_assumes=frozenset({ka, kb})
+    )
+    assert not exactness.certifies_point_witness(
+        required_assumes=frozenset({ka, kb}), witnessed_assumes=frozenset({ka})
+    )
+    # no assume, no claim: a query with nothing to certify does not get a
+    # certificate it never earned
+    assert not exactness.certifies_point_witness(
+        required_assumes=frozenset(), witnessed_assumes=frozenset({ka})
+    )
+    assert not exactness.certifies_point_witness(
+        required_assumes=frozenset(), witnessed_assumes=frozenset()
+    )
+
+
 def test_the_run_level_decision_takes_no_position_argument():
     # the scope, structurally: an assume is a precondition on the WHOLE
     # QUERY, so the decision may not be askable "here" versus "there".
     # Nothing in this signature names an obligation, an equation or a
     # position, so no caller can make the answer depend on where in the
-    # trace it was asked.
+    # trace it was asked. `region_inhabited` is a RUN quantity for the
+    # same reason the other two are: a point either is or is not a member
+    # of the whole query's assumed region.
     import inspect
 
     sig = inspect.signature(certifies_set_refutation)
-    assert set(sig.parameters) == {"nonemptiness_certified", "assume_dropped"}
+    assert set(sig.parameters) == {
+        "nonemptiness_certified",
+        "assume_dropped",
+        "region_inhabited",
+    }
     assert all(
         p.kind is inspect.Parameter.KEYWORD_ONLY
         for p in sig.parameters.values()
+    )
+    wsig = inspect.signature(exactness.certifies_point_witness)
+    assert set(wsig.parameters) == {"required_assumes", "witnessed_assumes"}
+    assert all(
+        p.kind is inspect.Parameter.KEYWORD_ONLY
+        for p in wsig.parameters.values()
     )
 
 
@@ -163,6 +240,31 @@ def test_module_docstring_states_the_principle():
 
 
 # --- the routing pin ----------------------------------------------------------
+
+
+def _close_the_certificate(monkeypatch):
+    """Force the NON-EMPTINESS CERTIFICATE to find nothing.
+
+    Every routing pin below observes a leg's duty through the SAME
+    channel: it forces one shared decision to "certifies nothing" and
+    requires the leg to withhold. The certificate is a **second,
+    legitimate route to the same conclusion** — a point of the declared
+    set that satisfies every assume settles nonemptiness whatever
+    `certifies_nonemptiness` was made to answer — so on a query whose
+    region really is inhabited it restores the refutation and the pin
+    stops observing anything. That is not the certificate misbehaving; it
+    is a pin whose channel now has two sources.
+
+    So a pin for the FIRST route closes the second one explicitly. This is
+    the shape the whole file already relies on and the reason it can: the
+    routing is what is under test, and each source has its own pin
+    (`test_the_witness_route_is_the_shared_primitive_too`). Every caller
+    below checks the POSITIVE CONTROL with only this patch in force — the
+    query must still refute — so a pin can never pass on this patch alone.
+    """
+    monkeypatch.setattr(
+        exactness, "certifies_point_witness", lambda **k: False
+    )
 
 
 def _certified_refuted_query():
@@ -190,6 +292,11 @@ def test_assume_certification_routes_through_the_shared_primitive(monkeypatch):
     p = propagate(q)
     assert p.obligations[0].status == "violated-over-set"
     assert not any("UNCERTIFIED" in n for n in p.notes)
+
+    # the OTHER route to the same conclusion, closed — and re-checked as a
+    # control, so this pin can never pass on the closing patch alone
+    _close_the_certificate(monkeypatch)
+    assert propagate(q).obligations[0].status == "violated-over-set"
 
     # the pin: force the shared decision to "certifies nothing" and the
     # SAME query must withhold — proof the propagator consults
@@ -222,6 +329,8 @@ def test_routing_pin_covers_the_f8_channel_too(monkeypatch):
         [out],
     )
     assert propagate(q).obligations[0].status == "violated-over-set"
+    _close_the_certificate(monkeypatch)
+    assert propagate(q).obligations[0].status == "violated-over-set"  # control
     monkeypatch.setattr(
         exactness, "certifies_nonemptiness", lambda *a, **k: False
     )
@@ -348,6 +457,189 @@ def test_the_shared_point_is_one_sided_on_both_legs(monkeypatch):
     ra, rep = affine.refine_propagation(qa, pa)
     assert ra.obligations[0].status == "discharged"
     assert rep.discharged == (0,)
+
+
+# --- the CERTIFICATE's own routing pins ---------------------------------------
+#
+# Two of them, because the certificate touches the shared machinery in two
+# places and each place has its own way of going wrong:
+#
+#   1. the WITNESS decision — "did this probed point satisfy every assume?"
+#      — is `exactness.certifies_point_witness`, and the propagator must
+#      CONSULT it. The failure mode is an inlined `required <= witnessed`
+#      in propagate.py: behaviour-preserving, invisible to every verdict
+#      test in the tree.
+#   2. the certificate must reach the run-level decision as an ARGUMENT,
+#      from BOTH legs. The failure mode is a leg writing
+#      `p.region_inhabited or certifies_set_refutation(<old two kwargs>)`
+#      — also behaviour-preserving, and invisible to the pins above,
+#      which patch with `lambda **k: False` and so cannot see an argument
+#      at all (this file says as much about itself, in its docstring).
+#      The pin below therefore RECORDS the keyword arguments instead of
+#      ignoring them.
+
+
+def _uncertified_but_inhabited_query():
+    """`x ∈ [0, 1]`, `w = x·x`, `assume(w <= 0.9)` — a narrowing on an
+    OVER-APPROXIMATED intermediate, so `narrowing_uncertified` is set and
+    the run would withhold — then `assert(x <= -1)`, definitely false.
+
+    The assumed region `{x ∈ [0, 1] : x² ≤ 0.9}` is `[0, 0.948…]`:
+    genuinely inhabited, so the certificate genuinely fires here and the
+    REFUTED it restores is a correct one."""
+    x, w, ap, aout, pred, out = (
+        var(0), var(1), var(2, BOOL), var(3, BOOL), var(4, BOOL), var(5, BOOL),
+    )
+    return close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            eqn("mul", [x, x], w),
+            eqn("le", [w, lit(0.9)], ap),
+            eqn("stelling_assume", [ap], aout),
+            eqn("le", [x, lit(-1.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+
+
+def _dropped_and_uncertifiable_query():
+    """`x ∈ [0, 1]`, `assume(reduce_and(x >= 2))` — `reduce_and` has no
+    interval transfer in either registry, so the assumed predicate is ⊤,
+    the classifier drops the assume (`assume_dropped`) and the run
+    withholds `assert(x <= -1)`.
+
+    The assumed region is EMPTY (no `x ∈ [0, 1]` is ≥ 2) and the probe
+    CANNOT SEE THAT: the predicate is ⊤ at every pinned point too, so no
+    witness is recorded and the certificate correctly declines. That is
+    what makes it the right query for the second direction of the routing
+    pin — the probe run completes, `certifies_point_witness` really is
+    asked, and its answer is the only thing standing between this query
+    and a wrong REFUTED.
+
+    NOT the `x - x >= 0.5` or the relational `x >= y` shape: at a PINNED
+    point both sides of a relational comparison are points, so the
+    classifier narrows, the meet comes out empty and the probe dies of
+    ``UnsatisfiableAssumptionError`` before the witness decision is ever
+    reached. Sound, and useless for pinning what that decision is asked.
+    """
+    x, c, ap, aout, pred, out = (
+        var(0), var(1, BOOL), var(2, BOOL), var(3, BOOL), var(4, BOOL),
+        var(5, BOOL),
+    )
+    return close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            eqn("ge", [x, lit(2.0)], c),
+            eqn("reduce_and", [c], ap),
+            eqn("stelling_assume", [ap], aout),
+            eqn("le", [x, lit(-1.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+
+
+def test_the_witness_route_is_the_shared_primitive_too(monkeypatch):
+    """The propagator must CONSULT `exactness.certifies_point_witness`,
+    not hold a private copy of the same subset test.
+
+    Pinned in BOTH directions, which is what makes an inlined predicate
+    impossible to hide: forced False, an inhabited region stops being
+    certified; forced True, an EMPTY one starts being. A `propagate.py`
+    that computed `required <= witnessed` itself would ignore both
+    forcings and keep its own answer, and neither half of this test would
+    pass.
+    """
+    live, dead = _uncertified_but_inhabited_query(), _dropped_and_uncertifiable_query()
+
+    # positive controls, unpatched: the mechanism really does separate
+    # these two queries, so neither half below can pass by going dark
+    pl, pd = propagate(live), propagate(dead)
+    assert pl.region_inhabited is True
+    assert pl.obligations[0].status == "violated-over-set"
+    assert pd.region_inhabited is False
+    assert pd.obligations[0].status == "unknown"
+
+    monkeypatch.setattr(
+        exactness, "certifies_point_witness", lambda **k: False
+    )
+    p1 = propagate(live)
+    assert p1.region_inhabited is False, (
+        "the certificate must reach exactness.certifies_point_witness, not "
+        "a private copy of the same subset test"
+    )
+    assert p1.obligations[0].status == "unknown"
+
+    monkeypatch.setattr(
+        exactness, "certifies_point_witness", lambda **k: True
+    )
+    p2 = propagate(dead)
+    assert p2.region_inhabited is True, (
+        "the same, in the direction an inlined predicate could not follow"
+    )
+    assert p2.obligations[0].status == "violated-over-set"
+
+
+def test_every_reach_of_the_shared_point_names_the_certificate(monkeypatch):
+    """The ARGUMENT-level routing pin, on both legs, and the one thing
+    this file's `lambda **k: False` pins structurally cannot see.
+
+    The recorder DELEGATES to the real decision rather than replacing it,
+    so behaviour is untouched and what is under test is only which
+    arguments arrive. A leg that lifted the withholding locally —
+    `region_inhabited or certifies_set_refutation(<old two kwargs>)` —
+    keeps every verdict in the tree exactly as it is and reddens only
+    this.
+    """
+    seen: list[dict] = []
+    real = exactness.certifies_set_refutation
+
+    def recorder(**k):
+        seen.append(dict(k))
+        return real(**k)
+
+    monkeypatch.setattr(exactness, "certifies_set_refutation", recorder)
+
+    # leg 1, the interval propagator, on a query whose certificate FIRES:
+    # the True has to be what arrives, not a hardcoded False that happens
+    # to agree on the runs where nothing was certified anyway
+    p = propagate(_uncertified_but_inhabited_query())
+    assert p.region_inhabited is True
+    assert p.obligations[0].status == "violated-over-set"
+    assert seen, "the interval leg reached the shared point zero times"
+    assert all("region_inhabited" in k for k in seen), (
+        f"a reach of the shared point omitted the certificate: {seen}"
+    )
+    assert any(k["region_inhabited"] is True for k in seen), (
+        "the interval leg must pass the run's OWN certificate, not a "
+        "constant — every reach carried False on a run that certified"
+    )
+
+    # leg 2, the affine refinement. Its own certificate arrives on the
+    # propagation it is handed, so the pin hands it one that carries a
+    # True beside a dropped assume: without the third argument the leg
+    # withholds, with it the refinement's violation stands.
+    seen.clear()
+    qa = _affine_refuted_query()
+    pa = propagate(qa)
+    withheld = dataclasses.replace(pa, assume_dropped=True)
+    ra, rep = affine.refine_propagation(qa, withheld)
+    assert ra.obligations[0].status == "unknown"  # control: it does withhold
+    assert seen and all("region_inhabited" in k for k in seen), (
+        f"the affine leg reached the shared point without the certificate: {seen}"
+    )
+    assert all(k["region_inhabited"] is False for k in seen)
+
+    seen.clear()
+    certified = dataclasses.replace(pa, assume_dropped=True, region_inhabited=True)
+    ra2, rep2 = affine.refine_propagation(qa, certified)
+    assert any(k["region_inhabited"] is True for k in seen), (
+        "the affine leg must pass the propagation's certificate through "
+        "the shared point, not decide the lift for itself"
+    )
+    assert ra2.obligations[0].status == "violated-over-set"
+    assert rep2.violated == (0,)
 
 
 def test_propagator_exact_set_is_the_shared_class():
