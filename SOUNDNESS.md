@@ -1935,10 +1935,42 @@ verdicts:
   this side to detect. `\r` is a genuine hole and is the reason the writer
   half is load-bearing: `text=True` has already turned it into a `\n` before
   the check runs, so a stale driver writing `opaque x1 j\rend 2\r` and no
-  terminator still returns `sat` with a model **at the fixed tip**. So the
-  driver docstring's *"a mismatch degrades every run to UNKNOWN"* is true
-  for this class **through the writer**, and only for 8 of 10 through the
-  reader; the earlier wording credited the reader with all of it. **A third refusal came from the fuzzer, on
+  terminator still returns `sat` with a model **at the fixed tip** — and,
+  measured since, `unsat` if that is what the corpse's `answer` line said,
+  which is the DISCHARGE direction and the one with no downstream backstop.
+  So the driver docstring's *"a mismatch degrades every run to UNKNOWN"* is
+  true for this class **through the writer**, and only for 8 of 10 through the
+  reader; the earlier wording credited the reader with all of it.
+  **THE REPAIR WAS DECLINED ON A FALSIFIER NARROWER THAN THE CONCLUSION IT
+  CARRIED, and the decline stands on a different reason now.** What was
+  written here and in `solvers.py` was that `text=False` plus an explicit
+  decode "also refuses every healthy run whose child applies a `\r\n` newline
+  translation" — asserted over the whole repair class from ONE arm of it, the
+  raw decode. The nearest rival, `bytes.decode().replace("\r\n", "\n")`, was
+  not measured. It is now (`probe_cvc5_backstop.py` parts B/C/D, three readers
+  over the same real children): identical to the shipped reader on a healthy
+  POSIX child AND on a healthy Windows `\r\n` child — same answer, same values
+  — `failed` on the stale `\r` child under an LF body and a CRLF body alike,
+  **9 of 10 separators refused instead of 8**, no platform coupling, and
+  `failed` rather than an UNCAUGHT `UnicodeDecodeError` when a child writes
+  invalid UTF-8. It DOMINATES the shipped reader on every case measured. Its
+  one measured cry-wolf case is a healthy child reconfigured to bare-CR line
+  endings, which no platform's `print` default produces and `_cvc5_driver`
+  never sets. **It is not landed here, and the reason is evidence cost, not
+  behaviour** — saying otherwise would repeat the defect being corrected.
+  Measured: applying it makes the suite **16 failed, 2451 passed, 2 skipped**,
+  all 16 in `tests/test_solver_audit_findings.py` and all 16 the same
+  `AttributeError: 'bytes' object has no attribute 'encode'` at
+  `subprocess.py:2172`, because `input=` must become bytes when `text=` goes
+  and six files shim `subprocess.run` with a `str` `CompletedProcess` —
+  including `fuzz_transport.py`, `repro_forgery.py`, `repro_real_kill.py` and
+  `probe_cvc5_value_channel.py`, the artefacts behind figures quoted in this
+  very entry. And `scratchpad/pin/corpus_pin.py`, the per-obligation
+  instrument, says in its own docstring that it "has no solver escalation …
+  so nothing here scores `solvers.py`", so the zero this repository requires
+  of a behavioural change cannot be produced by the instrument that exists.
+  **The hole is live, in both directions, and the repair that closes nine of
+  ten is measured, dominant and unlanded.** **A third refusal came from the fuzzer, on
   the fix rather than into it:** a record is `text + "\n"`, so a final
   record whose newline never got out is one the child did not finish
   writing — `…\nend 4`, the newline cut and nothing else, read as a
