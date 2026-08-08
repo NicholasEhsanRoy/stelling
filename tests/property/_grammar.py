@@ -190,8 +190,12 @@ class Spec:
         return "\n".join(lines)
 
     @property
+    def asserts(self) -> tuple:
+        return tuple(s for s in self.stmts if s.kind == "assert")
+
+    @property
     def n_asserts(self) -> int:
-        return sum(1 for s in self.stmts if s.kind == "assert")
+        return len(self.asserts)
 
 
 def _lit(v) -> str:
@@ -775,6 +779,99 @@ def integer_specs(draw, *, allow_assume=True, max_box=48, max_leaves=6,
     return Spec(decls, tuple(stmts))
 
 
+@st.composite
+def integer_program_specs(draw, *, max_stmts=3, max_box=32, max_leaves=4,
+                          shapes=((), (2,)), dtypes=INT_DTYPES):
+    """Several statements over the sharp-integer grammar.
+
+    The one-declaration :func:`integer_specs` has at most one ``assume`` and one
+    ``assert_``, which is all an oracle needs and not enough to reorder. This
+    draws two to ``max_stmts`` statements so that the reordering and
+    redundant-conjunct properties keep the exact machinery — in particular
+    :func:`any_obligation_is_admitted`, which is what lets those properties
+    exclude the vacuous case *exactly* rather than by guessing.
+    """
+    dtype = draw(st.sampled_from(dtypes))
+    dlo, dhi = dtype_range(dtype)
+    lo = draw(st.integers(min_value=max(dlo, -32), max_value=min(dhi, 32)))
+    hi = draw(st.integers(min_value=lo, max_value=min(dhi, lo + max_box)))
+    shape = draw(st.sampled_from(shapes))
+    decls = (Decl("x0", shape, dtype, lo, hi),)
+    n = draw(st.integers(2, max_stmts))
+    kinds = [draw(st.sampled_from(("assert", "assert", "assume"))) for _ in range(n)]
+    if "assert" not in kinds:
+        kinds[-1] = "assert"
+    stmts = tuple(
+        Stmt(k, draw(_int_predicates(dtype, max_leaves=max_leaves))) for k in kinds
+    )
+    return Spec(decls, stmts)
+
+
+def static_shape(e, decls):
+    """The shape an expression will have, or ``None`` if it cannot be built.
+
+    Needed by the vacuous-conjunct property, which has to know *before running
+    anything* whether conjoining a predicate collapses the whole conjunction to
+    zero elements. Broadcasting rules only; a ``None`` means jax would refuse
+    the harness, and the example is discarded rather than reported.
+    """
+    shapes = {d.name: d.shape for d in decls}
+    tag = e[0]
+    if tag == "var":
+        return shapes[e[1]]
+    if tag == "const":
+        return ()
+    if tag in ("un", "cast"):
+        return static_shape(e[2], decls)
+    if tag in ("cancel", "copy"):
+        return static_shape(e[1], decls)
+    if tag == "sum":
+        return () if static_shape(e[1], decls) is not None else None
+    if tag == "pow":
+        return static_shape(e[1], decls)
+    if tag == "bin":
+        return _broadcast(static_shape(e[2], decls), static_shape(e[3], decls))
+    if tag == "where":
+        a = static_shape_pred(e[1], decls)
+        b = _broadcast(static_shape(e[2], decls), static_shape(e[3], decls))
+        return _broadcast(a, b)
+    return None
+
+
+def static_shape_pred(p, decls):
+    if p[0] == "cmp":
+        return _broadcast(static_shape(p[2], decls), static_shape(p[3], decls))
+    if p[0] in ("and", "or"):
+        return _broadcast(static_shape_pred(p[1], decls),
+                          static_shape_pred(p[2], decls))
+    if p[0] == "not":
+        return static_shape_pred(p[1], decls)
+    return None
+
+
+def _broadcast(a, b):
+    if a is None or b is None:
+        return None
+    out = []
+    for x, y in zip(reversed(a or ()), reversed(b or ())):
+        if x == y or y == 1:
+            out.append(x)
+        elif x == 1:
+            out.append(y)
+        else:
+            return None
+    longer = a if len(a) >= len(b) else b
+    out += list(reversed(longer[: len(longer) - len(out)]))
+    return tuple(reversed(out))
+
+
+def n_elements(shape) -> int:
+    n = 1
+    for d in shape:
+        n *= d
+    return n
+
+
 def wrap_biased_integer_specs(**kw):
     """:func:`integer_specs` restricted to harnesses jax can wrap a constant in.
 
@@ -834,8 +931,14 @@ def general_specs(draw, *, max_decls=3, max_stmts=4, dtypes=ALL_DTYPES):
     decls = []
     for i in range(n):
         dt = primary if i == 0 or draw(st.booleans()) else draw(st.sampled_from(dtypes))
+        # MIXED RANKS ON PURPOSE. The size-0 conjunct defect needs a rank-0
+        # sibling next to a `(0,)` declaration: a `bool[0]` conjunct is
+        # vacuously true over the whole box, and the tool narrowed the sibling
+        # to a strict SUBSET anyway. A grammar that gave every declaration the
+        # same shape could not build that harness.
+        sh = shape if i == 0 or draw(st.booleans()) else draw(st.sampled_from(SHAPES))
         lo, hi = draw(_bounds(dt))
-        decls.append(Decl(f"x{i}", shape, dt, lo, hi))
+        decls.append(Decl(f"x{i}", sh, dt, lo, hi))
     decls = tuple(decls)
 
     names = [d.name for d in decls]

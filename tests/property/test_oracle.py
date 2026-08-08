@@ -207,3 +207,85 @@ def test_a_verified_is_true_at_every_admitted_point_outside_the_wrap_class():
 
     search()
     census.require(examined=60, verified_oracle_checked=10)
+
+
+# ── the other side of the same coin ──────────────────────────────────────────
+
+
+def test_a_refuted_is_false_at_some_admitted_point():
+    """A ``violated-over-set`` must not be minted over a region it is not about.
+
+    ``violated-over-set`` says the obligation is definitely false **for every
+    element of the declared set**. Two ways that is wrong, and both are
+    checkable exactly on the integer grammar:
+
+    * there is an admitted point at which the predicate, as written, is TRUE.
+      Then the obligation is not violated over the set, whatever else it is.
+      This is the one-sided direction: finding such a point refutes a REFUTED,
+      finding none confirms nothing;
+    * the admitted set is EMPTY. ``∀ x ∈ ∅`` is vacuously true, so nothing is
+      violated. This is a *ruling* rather than a theorem — over an empty set
+      both a discharge and a violation are vacuously supportable — and it is
+      this project's own: commit 463ee81, "the affine refinement may not
+      restore what the interval leg withheld", fixed exactly this shape, where
+      the refinement judged over the declared boxes rather than the assumed
+      region and re-minted a violation the interval leg had deliberately
+      withheld.
+
+    Both ``refine`` legs are checked, because the defect the second clause
+    describes lived in the refinement and is invisible at ``refine=None``.
+
+    Harnesses carrying an out-of-dtype-range constant are masked: under the
+    open wrap defect the exact reading and the traced program are different
+    programs, and a REFUTED reported here would be a second sighting of that
+    defect rather than a finding about refutation.
+    """
+    census = _runner.Census("oracle/refuted")
+
+    @_profiles.current().settings(250)
+    @given(_grammar.integer_specs())
+    def search(spec):
+        census.draw()
+        if _grammar.wrappable_constants(spec):
+            census.skip("masked: carries a wrappable constant")
+            return
+        if not _grammar.exact_supported(spec):
+            census.skip("no exact oracle for this shape")
+            return
+        points = _grammar.declared_points(spec)
+        if points is None:
+            census.skip("box too large to enumerate")
+            return
+        for leg in (None, "affine"):
+            outcome = _runner.run(spec, census=census, refine=leg)
+            if outcome is None:
+                continue
+            asserts = spec.asserts
+            if len(outcome.obligations) != len(asserts):
+                census.skip("obligation count does not match the assert count")
+                continue
+            for i, status in enumerate(outcome.obligations):
+                if status != "violated-over-set":
+                    continue
+                census.tag("refuted_oracle_checked")
+                admitted = _grammar.admitted_for_obligation(spec, i, points)
+                assert admitted, (
+                    f"REFUTED OVER AN EMPTY ADMITTED SET (refine={leg!r}): "
+                    f"obligation {i} is 'violated-over-set', but the harness's "
+                    f"own preconditions admit no point of the declared box, so "
+                    f"the obligation is vacuously true\n{spec.render()}"
+                )
+                true_at = [
+                    p
+                    for p in admitted
+                    if _grammar.eval_pred_exact(asserts[i].pred, p)
+                ]
+                assert not true_at, (
+                    f"REFUTED BUT TRUE SOMEWHERE (refine={leg!r}): obligation "
+                    f"{i} is 'violated-over-set', and the predicate as written "
+                    f"is TRUE at admitted point(s) {true_at[:3]}\n"
+                    f"{spec.render()}"
+                )
+
+    search()
+    census.require(examined=60)
