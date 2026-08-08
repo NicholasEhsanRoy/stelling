@@ -2962,6 +2962,12 @@ verdicts:
 
   n = 16384 is four times the size cap below, the probe count does not
   move, and that is the same shape the certificate's cap was added to fix.
+  The absolute milliseconds are load-sensitive and the ratio is not: the
+  same table taken at load 19, with a concurrent agent on the machine,
+  reads 1137.0 ms against 50.4 ms at n = 16384 — **22.6x**, against
+  21.4x here. Both runs are in `scratchpad/pin/RESULTS_pin.txt`, because
+  a load average printed beside a number is only useful if the number it
+  did not suit is shown too.
 
   **The two are MUTUALLY EXCLUSIVE, so no query pays for both**:
   `_region_witness` gets past its gate only when

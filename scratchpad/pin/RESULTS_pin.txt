@@ -202,6 +202,25 @@ the sum they would pay were they NOT exclusive, maximised over declared size: 32
 
 stelling: /home/nick/MSF/.wt-pin/mine/INSTR6/src/stelling/__init__.py
 jax:      0.11.0
+NOTE: this timing table was taken while a CONCURRENT AGENT was running
+its own test suites on the same machine (load 19).  The absolute
+milliseconds are roughly 2x the quiet-machine run quoted in SOUNDNESS.md
+and at _CERT_MAX_ELEMENTS (549.9 ms / 25.7 ms at n=16384, load 1.18);
+the RATIO is stable across both (21.4x quiet, 22.6x loaded), which is
+the figure the finding rests on.  Both are kept, because a load average
+printed beside a number is only useful if the number it did not suit is
+shown too.  The quiet run, for comparison:
+
+      n  reach  region  propagate ms  bare walk ms   ratio
+     16     16       0           1.6           0.1   16.1x
+     64     16       0           3.3           0.2   19.0x
+    256     16       0           9.7           0.5   21.0x
+   1024     16       0          34.1           1.5   22.3x
+   4096     16       0         126.6           6.2   20.4x
+  16384     16       0         549.9          25.7   21.4x
+  (load 1.18 before / 1.16 after)
+
+and the loaded run as taken:
 load before: (19.056640625, 15.17138671875, 8.72119140625)
 
       n  reach  region  propagate ms  bare walk ms   ratio
