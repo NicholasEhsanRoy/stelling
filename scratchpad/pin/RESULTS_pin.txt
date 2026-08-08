@@ -325,3 +325,22 @@ FAILED tests/test_exactness_lift.py::test_every_reach_of_the_shared_point_names_
 1 failed, 2397 passed, 2 skipped, 22 warnings in 197.39s (0:03:17)
  12:41:43 up 18:31,  1 user,  load average: 10.31, 17.79, 15.16
 DONE
+
+--- re-confirmed at the final commit ae9a09e ---
+commit: ae9a09e The one count I was still quoting is now one I ran
+worktree: 0 modified paths
+#### stelling-jax ####
+ 12:43:14 up 18:33,  1 user,  load average: 23.17, 19.83, 16.10
+resolved: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py jax 0.11.0
+2403 passed, 2 skipped, 22 warnings in 200.62s (0:03:20)
+ 12:46:37 up 18:36,  1 user,  load average: 8.85, 15.20, 15.03
+#### stelling-jax010 ####
+ 12:46:42 up 18:36,  1 user,  load average: 8.46, 15.01, 14.97
+resolved: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py jax 0.10.2
+2403 passed, 2 skipped, 22 warnings in 189.75s (0:03:09)
+ 12:49:55 up 18:39,  1 user,  load average: 8.72, 12.21, 13.91
+collect-only ids BYTE-IDENTICAL between the series: 2405
+* Files with license information: 325 / 325
+
+Congratulations! Your project is compliant with version 3.3 of the REUSE Specification :-)
+DONE
