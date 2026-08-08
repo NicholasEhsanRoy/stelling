@@ -674,8 +674,66 @@ def _is_constant(e) -> bool:
     return all(_is_constant(c) for c in e[1:] if isinstance(c, tuple))
 
 
+_FOLD_ANY_UNARY = {
+    "neg": lambda v: -v,
+    "abs": abs,
+    "sign": lambda v: (v > 0) - (v < 0),
+    "square": lambda v: v * v,
+    "copy": lambda v: v,
+    "sqrt": lambda v: math.sqrt(v),
+    "exp": lambda v: math.exp(v),
+}
+_FOLD_ANY_BINARY = {
+    "add": lambda a, b: a + b,
+    "sub": lambda a, b: a - b,
+    "mul": lambda a, b: a * b,
+    "max": max,
+    "min": min,
+    "div": lambda a, b: a / b,
+}
+
+
 def _fold(e):
-    return eval_expr_exact(e, {})
+    """The value of a CONSTANT subexpression, as Python computes it.
+
+    Wider than :func:`eval_expr_exact`, and it has to be: the general grammar
+    carries ``div``/``sqrt``/``exp``/``cast``/``sum``/``cancel``/``where``, and
+    a folder that raised on those made :func:`wrappable_constants` — which is
+    the MASK the oracle properties use — raise instead of answering.
+
+    That was a defect in this harness, not in the tool, and the ``dev`` profile
+    found it: 250 derandomised examples never built ``x <= (0.0 / 0.0)`` beside
+    an ``int8`` declaration, and 1000 randomised ones did, three runs out of
+    three. Recorded because it is the same lesson the properties are for — a
+    green run at one budget says nothing about another.
+
+    ``cast`` to an integer dtype is folded WITH its wrap, because that is a
+    genuine second face of the wrap class and the mask must be able to see it.
+    """
+    tag = e[0]
+    if tag == "const":
+        return e[1]
+    if tag == "un":
+        return _FOLD_ANY_UNARY[e[1]](_fold(e[2]))
+    if tag == "bin":
+        return _FOLD_ANY_BINARY[e[1]](_fold(e[2]), _fold(e[3]))
+    if tag == "pow":
+        return _fold(e[1]) ** e[2]
+    if tag == "cancel":
+        v = _fold(e[1])
+        return v - v
+    if tag == "sum":
+        return _fold(e[1])
+    if tag == "cast":
+        v = _fold(e[1])
+        if e[1] in INT_DTYPES:
+            bits, _ = _BITS[e[1]]
+            lo, _hi = dtype_range(e[1])
+            return lo + ((int(v) - lo) % (2**bits))
+        return float(v)
+    if tag == "where":
+        return _fold(e[2])
+    raise AssertionError(tag)
 
 
 def folded_constants(spec: Spec):
@@ -686,7 +744,14 @@ def folded_constants(spec: Spec):
         if _is_constant(e):
             try:
                 out.append(_fold(e))
-            except (AssertionError, TypeError, ZeroDivisionError, OverflowError):
+            except Exception:  # noqa: BLE001
+                # A constant subexpression this folder cannot evaluate is one
+                # it cannot classify. The catch is broad DELIBERATELY and the
+                # cost is stated: an unclassifiable constant is not masked, so
+                # the oracle properties see the harness rather than skip it.
+                # That direction is the safe one — it can produce a report to
+                # read, never a silent skip — and it is the direction a mask
+                # must fail in.
                 pass
             return
         for c in e[1:]:
