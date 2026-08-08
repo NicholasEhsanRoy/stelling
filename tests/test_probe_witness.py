@@ -572,6 +572,83 @@ def test_a_box_with_no_member_yields_no_probe():
     assert _probe_point(1, (), 0.2, 1.8, "bool", 0) == [1.0]
 
 
+def test_a_nan_endpoint_declares_no_member_on_either_dtype_family():
+    """PINS: the NaN guard, which the emptiness test cannot supply.
+
+    `nan > 1.0` is False, so `m_lo > m_hi` never fires: the float branch
+    used to hand back `(nan, 1.0)`, a pair whose endpoints are members
+    of nothing, and the integer branch raised `ValueError` inside
+    `math.ceil(nan)`. Neither is reachable through `any_array`, which
+    refuses a NaN bound at declaration (asserted below, because that
+    refusal is half of the containment) — but `_member_bounds` is the
+    function that answers "does this box hold a member at all", and
+    under NaN the only answer it can defend is no.
+    """
+    nan = float("nan")
+    for dtype in ("float16", "bfloat16", "float32", "float64",
+                  "int8", "int32", "int64", "uint8", "bool"):
+        for lo, hi in ((nan, 1.0), (1.0, nan), (nan, nan)):
+            assert _member_bounds(lo, hi, dtype) == (None, None), (dtype, lo, hi)
+            assert _probe_point(0, (2,), lo, hi, dtype, 0) is None, (dtype, lo, hi)
+    # the containment, so the guard is not the only thing standing here
+    for lo, hi in ((nan, 1.0), (1.0, nan), (nan, nan)):
+
+        def h(lo=lo, hi=hi):
+            return assert_(any_array((), "float32", (lo, hi)) > 0.0)
+
+        with pytest.raises(ValueError, match="empty set"):
+            trace(h)
+    # the neighbour: the same calls with finite bounds still find members
+    assert _member_bounds(-1.0, 1.0, "float32") == (-1.0, 1.0)
+    assert _member_bounds(0.2, 2.8, "int32") == (1.0, 2.0)
+
+
+def test_the_judged_set_wording_is_detail_only_and_cannot_move_a_status():
+    """PINS: `_bool_status`'s `constrained` argument as DETAIL-ONLY.
+
+    It is the one assume-state read still taken at the obligation rather
+    than over the run, and it is deliberately positional — the detail
+    names the set this obligation was judged over, and forward-only
+    narrowing makes that a positional fact. What must never follow from
+    it is a STATUS, and nothing else in the tree says so: the two call
+    sites pass `self.any_constrained`, and a refactor that let the flag
+    reach the status computation would make an obligation's verdict
+    depend on where it was traced.
+    """
+    from stelling import interval as iv
+    from stelling.propagate import _bool_status
+
+    def box(shape, *pairs):
+        return iv.IntervalArray(
+            shape=shape,
+            los=tuple(p[0] for p in pairs),
+            his=tuple(p[1] for p in pairs),
+        )
+
+    boxes = [
+        box((), iv.BOOL_TRUE),
+        box((), iv.BOOL_FALSE),
+        box((), (0.0, 1.0)),
+        box((3,), iv.BOOL_TRUE, iv.BOOL_FALSE, (0.0, 1.0)),
+        box((2,), iv.BOOL_TRUE, iv.BOOL_TRUE),
+        box((2,), iv.BOOL_FALSE, (0.0, 1.0)),
+    ]
+    seen = set()
+    for b in boxes:
+        st_t, det_t = _bool_status(b, constrained=True)
+        st_f, det_f = _bool_status(b, constrained=False)
+        assert st_t == st_f, (b.los, b.his, st_t, st_f)
+        seen.add(st_t)
+        if st_t == "violated-over-set":
+            # ...and it really is read, so this is not vacuous
+            assert det_t != det_f
+            assert "precondition-narrowed set" in det_t
+            assert "declared box" in det_f
+        else:
+            assert det_t == det_f
+    assert seen == {"discharged", "violated-over-set", "unknown"}
+
+
 def _int_box_ir(lo, hi):
     """The `_cond` harness with its int32 declaration's box replaced —
     the only route to a memberless declaration, since `any_array` refuses

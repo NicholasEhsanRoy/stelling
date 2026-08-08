@@ -436,10 +436,19 @@ def _is_integer_dtype(dtype: str) -> bool:
 # derivation exact.
 _INT_RANGE = {d: float(_INT_DTYPE_BOUNDS[d][1] + 1) for d in ("int32", "int64")}
 
-# Binary float formats the conversion-exactness classifier below knows, as
-# (significand bits INCLUDING the implicit leading one, minimum normal
-# exponent, maximum exponent). Read only when wording a decline NOTE —
-# admission never consults this table.
+# Binary float formats this module knows, as (significand bits INCLUDING
+# the implicit leading one, minimum normal exponent, maximum exponent).
+#
+# TWO consumers, and the second one JUDGES. The conversion-exactness
+# classifier below reads it to word a decline NOTE, and CONVERSION
+# admission really does not consult it — that stays gated on
+# `_EXACT_CONVERSIONS` membership. But `_FLOAT_MAX` is derived from this
+# table and `_member_bounds` reads both to decide whether a probe witness
+# may be admitted AT ALL: a dtype absent here yields no member, hence no
+# witness, hence no branch-scoped refutation. The comment that stood here
+# said "admission never consults this table" without that qualification,
+# and the member-witness repair made it false — a row added or removed
+# here now moves verdicts.
 _FLOAT_FORMATS: dict[str, tuple[int, int, int]] = {
     "float16": (11, -14, 15),
     "bfloat16": (8, -126, 127),
@@ -4200,6 +4209,24 @@ def _ulp_steps(a: float, b: float, cap: int = 3) -> int | None:
 
 
 def _bool_status(b: iv.IntervalArray, *, constrained: bool = False) -> tuple[str, str]:
+    """``(status, detail)`` for a judged boolean box.
+
+    ``constrained`` is a DETAIL-ONLY input and deliberately so. The status
+    is computed from ``n_true``/``n_false``/``n`` above the only line that
+    reads the flag, so no value of it can change which of the three
+    statuses comes back. MEASURED, not asserted: over the whole suite this
+    function is called **7392** times and computing the status both ways
+    disagrees **0** times; over the 184-row `scratchpad/mechc` ledger and
+    the 464-row `scratchpad/claims/corpus_b3.py` ledger, forcing the flag
+    to ``True`` and to ``False`` moves **0** of 648 obligation statuses
+    (details move 62/8 and 86/4 respectively).
+
+    Its two callers pass ``self.any_constrained`` DURING the walk, so the
+    sentence is positional while the withholding decision
+    (:func:`stelling.exactness.certifies_set_refutation`) is run-scoped.
+    That is the intended split and not an oversight of the query-scoping
+    change — see the note at the ``stelling_assert`` call site.
+    """
     n_true = sum(1 for lo, hi in zip(b.los, b.his) if (lo, hi) == iv.BOOL_TRUE)
     n_false = sum(1 for lo, hi in zip(b.los, b.his) if (lo, hi) == iv.BOOL_FALSE)
     n = b.size
@@ -4365,7 +4392,21 @@ def _member_bounds(lo: float, hi: float, dtype: str):
     not a member. `any_array` accepts `int2`, `uint2`, five `float8`/
     `float4` formats and the two complex dtypes (measured, jax 0.11.0 and
     0.10.2), none of which either table names.
+
+    A NaN endpoint yields ``(None, None)`` too, and that guard is FIRST
+    because neither branch below can catch it: every comparison with NaN
+    is False, so ``m_lo > m_hi`` does not fire and the pair is returned
+    with the NaN still in it, and the integer branch raises
+    ``ValueError`` on ``math.ceil(nan)`` before getting that far. Both
+    were measured; neither is reachable through the public API, which is
+    why this is a hardening and not a fix — ``any_array`` refuses NaN
+    bounds at declaration ("declare an empty set; refusing at declaration
+    time") and :func:`_probe_point` drops any non-finite value it forms.
+    Recorded rather than left to be re-derived: an internal caller added
+    later would meet the raise, not the withholding.
     """
+    if math.isnan(lo) or math.isnan(hi):
+        return None, None
     if _is_integer_dtype(dtype):
         d_lo, d_hi = _INT_DTYPE_BOUNDS.get(dtype, (None, None))
         if d_lo is None:
@@ -6710,6 +6751,42 @@ class _Propagator:
                 # path means the program reaches it too. On a pinned probe
                 # run that is a witness; on a real run it is unread.
                 self.certain_reached.add(self._reach_key(eqn))
+            # THE ONE ASSUME-STATE READ THAT IS STILL POSITIONAL, AND IT IS
+            # MEANT TO BE. `any_constrained` is read HERE, at the
+            # obligation, and it selects only between the detail's "over
+            # the precondition-narrowed set" and "over the declared box".
+            #
+            # Why not run-scoped like the withholding. The two answer
+            # different questions. The withholding asks whether a definite
+            # violation may be called REFUTED at all — a fact about the
+            # RUN's assume state, hence read once at the end
+            # (`_withhold_uncertified_refutations`). This asks which SET
+            # this obligation was judged over, and narrowing is
+            # forward-only, so that really is positional: an obligation
+            # traced above every assume was judged over the declared box,
+            # and a run-scoped read would tell the reader it was judged
+            # over the narrowed set — a weaker sentence than the truth,
+            # for exactly the rows that differ. Making it run-scoped would
+            # make it LESS accurate, not more consistent.
+            #
+            # The safe direction, and why the coarseness is tolerable.
+            # `any_constrained` is one run-wide boolean applied per
+            # obligation, so an obligation over a variable no assume
+            # touched can still be described as judged "over the
+            # precondition-narrowed set". That set is a SUBSET of the
+            # declared box, so a predicate definitely false over the box
+            # is definitely false over it: the sentence understates and
+            # never overstates. The reverse — saying "the declared box"
+            # of a narrowed judgment — WOULD overstate, and cannot
+            # happen: `any_constrained` is set in the same branch that
+            # narrows, and narrowing is forward-only, so no obligation is
+            # judged over a narrowed box while this flag is still False.
+            #
+            # Measured: 6 of the 76 before/after obligation pairs in
+            # `scratchpad/mechc` differ in this detail and 0 differ in
+            # status; forcing the flag both ways moves 0 of 648
+            # obligation statuses across two corpora and disagrees 0 times
+            # in 7392 suite-wide calls (see `_bool_status`).
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
             if status == "unknown":
                 # the undecided detail quotes the straddle it was judged
@@ -6773,6 +6850,12 @@ class _Propagator:
                 # conds, so a pinned probe run that gets here has found a
                 # point of the declared box that evaluates it.
                 self.certain_reached.add(self._reach_key(eqn))
+            # the same deliberately-positional detail read as the assert
+            # above, on the nonvacuity face: which SET this condition was
+            # judged over is a forward-only fact, while whether its FAILED
+            # sentence may stand is the run-scoped one and is decided in
+            # `_withhold_uncertified_refutations`. See the assert's note
+            # for the argument and the measurements.
             status, detail = _bool_status(ins[0], constrained=self.any_constrained)
             if status == "unknown":
                 # the assert's hint, on the face that needs it MOST: an
@@ -7075,6 +7158,30 @@ def _withhold_uncertified_refutations(p) -> None:
     superset implies the discharge over the intended set. And the run is
     never declined wholly — `solvers.py` tried that on its own leg and
     reverted it.
+
+    **The surface this widened, and the invariant that closes it.** The
+    one-sidedness above is about what THIS function writes; it is not by
+    itself an argument, because writing `unknown` at the end of the run
+    rather than at the assert hands the obligation to two layers that
+    never saw it. Both key on exactly this word:
+    :func:`stelling.affine.refine_propagation` and
+    :func:`stelling.solvers.escalate` each take
+    ``[o for o in propagation.obligations if o.status == "unknown"]``.
+    What keeps that from becoming a route to a wrong `discharged` is
+    WHICH DOMAIN those layers judge over. Both decline wholly on a run
+    with ``coverage.constrained`` — so every obligation this function
+    newly offers them comes from a run in which nothing was narrowed,
+    where the declared boxes they read ARE the boxes the interval leg
+    judged. A sound layer cannot discharge a predicate that the interval
+    leg found definitely FALSE at every point of that same domain, and a
+    re-minted violation is caught by the shared point again on the affine
+    leg. Measured across `scratchpad/mechc` and
+    `scratchpad/claims/corpus_b3.py` (100 harness-runs, jax 0.11.0):
+    **24** obligations newly offered to each layer, **34** additional
+    solver invocations, and **0** new affine discharges, **0** new affine
+    violations, **0** solver-decided outcomes (every one `unknown`) and
+    **0** new VERIFIEDs at the verdict layer (14 → 14 of 200 verdicts;
+    48 verdicts move, all REFUTED → UNKNOWN).
 
     A run with no assumes, with only certified assumes, or in inert mode
     returns at the guard having done nothing: no note, no status, no
