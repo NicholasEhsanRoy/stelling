@@ -777,10 +777,31 @@ jobs:
   #   * the reason names the defect, so this job's own output says what is not
   #     being checked instead of leaving a reader to infer it from a green tick.
   #
-  # And a fourth, here rather than in the test, because it is the hole a marker
-  # cannot close by itself: the step below ASSERTS the run reported exactly one
-  # xfail and zero xpasses. If somebody weakens `strict=True`, this job notices
-  # on the next push rather than on the day the defect is fixed.
+  # And a fourth, because it is the hole a marker cannot close by itself — but
+  # it is NOT the log-reading step below, and an earlier version of this comment
+  # said it was. Measured, at 9cefc6d, on this tree:
+  #
+  #   strict=True -> strict=False, defect still present:
+  #       `27 passed, 1 skipped, 1 xfailed`, pytest exit 0, guard exit 0
+  #   raises=WrongVerifiedFromWrap deleted (blanket amnesty):
+  #       `27 passed, 1 skipped, 1 xfailed`, pytest exit 0, guard exit 0
+  #
+  # Both logs are byte-identical to a healthy one, because the defect the
+  # marker excuses is still there and the test still xfails either way. A
+  # log-reader can only notice on the day the defect is FIXED, which is the one
+  # day it must not be the first to notice. What the step below does catch is a
+  # CHANGE IN THE NUMBER of xfails (measured: a second xfail added is caught
+  # twice over) and a real xpass (both shapes, driven against real logs).
+  #
+  # The weakening is caught STATICALLY instead, by
+  # `test_suite_disclosure.py::test_every_xfail_in_the_suite_is_strict_and`
+  # `_narrowed_by_raises`, which parses the marker out of the source and runs
+  # in this same job — and in the zero-dep lanes, since it needs neither
+  # hypothesis nor jax. Deleting `raises=` is not cosmetic: with it removed and
+  # `_bool_status` mutated to violate everything, the wrap leg reports XFAIL —
+  # green — while its own generator floor was never met, because the floor's
+  # AssertionError is swallowed by the blanket amnesty. With `raises=` in place
+  # the same run is reported FAILED.
   #
   # WHAT THIS JOB DOES NOT RUN, stated so the tick cannot be over-read:
   #

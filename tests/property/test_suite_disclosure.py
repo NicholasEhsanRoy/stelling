@@ -22,6 +22,14 @@ cannot run:
 * every registered **mutation still applies exactly once** to the file it
   names. A mutant that stops matching is a control that silently always passes,
   and this catches it without running anything;
+* every ``xfail`` marker in the suite is **strict and narrowed by ``raises=``**,
+  read out of the source. The CI step that greps the run's own log cannot see
+  either of those weakened while the defect is still there — measured: with
+  ``strict=True`` changed to ``strict=False``, and separately with ``raises=``
+  deleted, the suite still reports ``27 passed, 1 skipped, 1 xfailed`` at exit
+  0 and every log-reading guard stays green. A source read is the only
+  instrument that fires on the push that weakens the marker rather than on the
+  day the defect is fixed;
 * every property module carries the **hypothesis gate with the registered skip
   reason**, so ``tests/test_skip_inventory.py`` can hold the skip to its
   condition rather than to a count;
@@ -144,6 +152,90 @@ def test_every_registered_mutation_still_applies_exactly_once():
         "these registered mutations no longer apply, so their controls cannot "
         "demonstrate anything:\n  " + "\n  ".join(bad)
     )
+
+
+def _xfail_markers_in(path: pathlib.Path):
+    """``(nodeid, keyword-name -> ast node)`` for every ``xfail`` decorator.
+
+    Static, because that is the point: the run's own log cannot distinguish a
+    strict marker from a weakened one while the defect the marker excuses is
+    still present. Both report ``XFAIL``.
+    """
+    tree = ast.parse(path.read_text())
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for dec in node.decorator_list:
+            call = dec if isinstance(dec, ast.Call) else None
+            target = call.func if call else dec
+            name = target.attr if isinstance(target, ast.Attribute) else (
+                target.id if isinstance(target, ast.Name) else None
+            )
+            if name != "xfail":
+                continue
+            kw = {k.arg: k.value for k in (call.keywords if call else [])}
+            out.append((f"tests/property/{path.name}::{node.name}", kw))
+    return out
+
+
+def test_every_xfail_in_the_suite_is_strict_and_narrowed_by_raises():
+    """An amnesty in this suite must be strict, narrow, and controlled.
+
+    **This is the check the CI log-grep cannot be**, and the difference was
+    measured rather than reasoned. The ``property`` job reads the suite's own
+    ``-q -ra`` output and asserts one ``XFAIL`` and no ``XPASS``. Against a
+    tree where ``strict=True`` had been changed to ``strict=False``, and again
+    against one where ``raises=WrongVerifiedFromWrap`` had been deleted, that
+    log is **byte-identical to a healthy one** — ``27 passed, 1 skipped,
+    1 xfailed``, pytest exit 0, guard exit 0 — because the defect the marker
+    excuses is still there, so the test still xfails either way. A log-reader
+    can only notice on the day the defect is fixed, which is the one day it
+    must not be the first to notice.
+
+    Deleting ``raises=`` is not cosmetic. Measured on this tree: with
+    ``raises=`` removed and ``_bool_status`` mutated to violate everything, the
+    wrap leg reports **XFAIL — green — while its own generator floor was never
+    met**. The floor's ``AssertionError`` is swallowed by the blanket amnesty.
+    With ``raises=`` in place the same run is reported ``FAILED``. That is the
+    silent-success shape this suite exists to prevent, reachable by deleting
+    one keyword.
+
+    So the rule is on the marker itself, and it applies to every xfail in the
+    tree rather than to one named test: strict, narrowed to an exception type,
+    carrying a reason, and on a test that is registered with a positive
+    control. A second, casual ``@pytest.mark.xfail`` fails here.
+    """
+    bad = []
+    for path in _property_modules():
+        for nodeid, kw in _xfail_markers_in(path):
+            if not (
+                isinstance(kw.get("strict"), ast.Constant)
+                and kw["strict"].value is True
+            ):
+                bad.append(
+                    f"{nodeid}: xfail is not `strict=True`. A non-strict xfail "
+                    f"passes silently the day the defect is fixed, and the CI "
+                    f"log-grep cannot tell the two apart before then."
+                )
+            if "raises" not in kw:
+                bad.append(
+                    f"{nodeid}: xfail carries no `raises=`, so it is a blanket "
+                    f"amnesty over the whole property — including its own "
+                    f"generator floor, which then fails green."
+                )
+            if not kw.get("reason"):
+                bad.append(
+                    f"{nodeid}: xfail carries no `reason=`, so the run's output "
+                    f"does not say what is not being checked."
+                )
+            if nodeid not in pc.property_nodeids():
+                bad.append(
+                    f"{nodeid}: xfail-marked and not registered in "
+                    f"positive_controls.py, so nothing demonstrates that the "
+                    f"property it excuses still finds anything."
+                )
+    assert not bad, "\n  ".join(["xfail markers in tests/property/:", *bad])
 
 
 def test_every_property_module_carries_the_hypothesis_gate():
