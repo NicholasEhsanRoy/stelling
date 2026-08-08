@@ -139,11 +139,45 @@ repos:
         # property rather than an exposure. What the change buys is that the
         # local hook bites on the same set as that test, and that BOTH
         # violations are reported instead of the second only.
+        #
+        # AND IT PASSED WHEN THERE WAS NOTHING TO SCAN. `grep -r` exits **2**
+        # on "no such directory" and **1** on "no match"; `if grep …; then
+        # rc=1; fi` reads both as "no violation", and pre-commit prints the
+        # green tick over grep's stderr. Measured, in a standalone repository
+        # built from this tree:
+        #
+        #   mv src /elsewhere            pre-commit run … --all-files   Passed
+        #   mv src/stelling /elsewhere   (src exists, no .py under it)  Passed
+        #
+        # That is the shape `staged-spdx-header` above closes for itself with
+        # an explicit "this hook checked NOTHING" exit, left unclosed in the
+        # two hooks beside it. Both halves are needed and neither implies the
+        # other: the CENSUS catches "nothing was there", and the EXIT CODE
+        # catches an error partway through a scan that did examine files (an
+        # unreadable subdirectory, say) — grep exits 2 having already printed
+        # real matches, and 2 is not 1.
+        #
+        # The census is `grep -c ""` over the same directory with the same
+        # `--include`/`--exclude`, so it counts what THIS check would examine
+        # and not what some other enumeration would: one output line per file
+        # examined, including empty files, which `grep -l` would drop. The two
+        # checks scan different sets (only the first exempts `_jax_compat.py`),
+        # so they are counted separately.
         language: system
         entry: >-
-          bash -c 'rc=0;
-          if grep -rnE "^[[:space:]]*(import jax\b|from jax\b)" src --include="*.py" --exclude=_jax_compat.py; then rc=1; fi;
-          if grep -rn "jax\._src" src --include="*.py"; then rc=1; fi;
+          bash -c 'census() { grep -rc "" "$@" 2>/dev/null | wc -l; };
+          rc=0;
+          n1=$(census src --include="*.py" --exclude=_jax_compat.py);
+          n2=$(census src --include="*.py");
+          if [ "$n1" -eq 0 ] || [ "$n2" -eq 0 ]; then
+          echo "jax-import-hygiene: examined $n1 and $n2 files under src/; this hook checked NOTHING and must not report a pass." >&2;
+          exit 1; fi;
+          grep -rnE "^[[:space:]]*(import jax\b|from jax\b)" src --include="*.py" --exclude=_jax_compat.py; s=$?;
+          if [ $s -eq 0 ]; then rc=1;
+          elif [ $s -ne 1 ]; then echo "jax-import-hygiene: grep exited $s scanning src/ for jax imports — an ERROR, not \"no match\"." >&2; rc=1; fi;
+          grep -rn "jax\._src" src --include="*.py"; s=$?;
+          if [ $s -eq 0 ]; then rc=1;
+          elif [ $s -ne 1 ]; then echo "jax-import-hygiene: grep exited $s scanning src/ for jax._src — an ERROR, not \"no match\"." >&2; rc=1; fi;
           exit $rc'
         pass_filenames: false
         always_run: true
@@ -154,9 +188,37 @@ repos:
         # sync there); a divergence between hook and test is a bug. The
         # second grep anchors past "path:lineno:" so a marker in a file
         # PATH (census.py) cannot mask an unmarked line.
+        #
+        # THE SAME "PASSED WITH NOTHING TO SCAN" AS THE HOOK ABOVE, by a
+        # different route: `! grep …` inverts a non-zero, and 2 (no such
+        # directory) inverts to success exactly as 1 (no match) does. It was
+        # also under `set -e`, which bash documents as IGNORED for a
+        # `!`-inverted command, so errexit was never going to catch it either.
+        # Measured, in a standalone repository built from this tree:
+        #
+        #   mv src /elsewhere            pre-commit run … --all-files   Passed
+        #   mv src/stelling /elsewhere   (src exists, no .py under it)  Passed
+        #
+        # Rewritten to say what it counted. The census is `grep -c ""` over
+        # `src/stelling` with the same `--include`, so it is a count of what
+        # THIS check examines. The pipeline is unrolled because a pipe hides
+        # the first grep's exit status, and the first grep's exit status is
+        # the whole finding: `grep -rniE … | grep -v …` reports 1 for "the
+        # banned words are absent" and for "the directory is absent" alike.
         language: system
         entry: >-
-          bash -c 'set -e;
-          ! grep -rniE "\b(mime|maddening|lineax|equinox|diffrax|blackjax|optimistix|optax)\b" src/stelling --include="*.py" | grep -viE "^[^:]*:[0-9]+:.*(census|design/)"'
+          bash -c 'n=$(grep -rc "" src/stelling --include="*.py" 2>/dev/null | wc -l);
+          if [ "$n" -eq 0 ]; then
+          echo "library-identifier-hygiene: examined 0 files under src/stelling/; this hook checked NOTHING and must not report a pass." >&2;
+          exit 1; fi;
+          hits=$(grep -rniE "\b(mime|maddening|lineax|equinox|diffrax|blackjax|optimistix|optax)\b" src/stelling --include="*.py"); s=$?;
+          if [ $s -gt 1 ]; then echo "library-identifier-hygiene: grep exited $s scanning src/stelling/ — an ERROR, not \"no match\"." >&2; exit 1; fi;
+          if [ $s -eq 1 ]; then exit 0; fi;
+          unmarked=$(printf "%s\n" "$hits" | grep -viE "^[^:]*:[0-9]+:.*(census|design/)"); s=$?;
+          if [ $s -gt 1 ]; then echo "library-identifier-hygiene: the marker filter exited $s — an ERROR, not \"every line is marked\"." >&2; exit 1; fi;
+          if [ $s -eq 1 ]; then exit 0; fi;
+          printf "%s\n" "$unmarked" >&2;
+          echo "library-identifier-hygiene: the lines above name a library in core prose with no census/design marker (ARCHITECTURE.md Rule 2)." >&2;
+          exit 1'
         pass_filenames: false
         always_run: true
