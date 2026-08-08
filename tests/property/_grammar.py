@@ -753,7 +753,8 @@ def _int_predicates(dtype: str, max_leaves: int = 6):
 
 
 @st.composite
-def integer_specs(draw, *, allow_assume=True, max_box=48, max_leaves=6):
+def integer_specs(draw, *, allow_assume=True, max_box=48, max_leaves=6,
+                  shapes=((), (2,)), dtypes=INT_DTYPES):
     """The sharp-oracle grammar: one integer declaration, elementwise ops.
 
     The box is drawn **inside the dtype's own range** and small enough to
@@ -761,17 +762,37 @@ def integer_specs(draw, *, allow_assume=True, max_box=48, max_leaves=6):
     strategy produces. Out-of-range values appear as *literals in the
     expression*, which is where they wrap.
     """
-    dtype = draw(st.sampled_from(INT_DTYPES))
+    dtype = draw(st.sampled_from(dtypes))
     dlo, dhi = dtype_range(dtype)
     lo = draw(st.integers(min_value=max(dlo, -64), max_value=min(dhi, 64)))
     hi = draw(st.integers(min_value=lo, max_value=min(dhi, lo + max_box)))
-    shape = draw(st.sampled_from([(), (2,)]))
+    shape = draw(st.sampled_from(shapes))
     decls = (Decl("x0", shape, dtype, lo, hi),)
     stmts = []
     if allow_assume and draw(st.booleans()):
         stmts.append(Stmt("assume", draw(_int_predicates(dtype, max_leaves=4))))
     stmts.append(Stmt("assert", draw(_int_predicates(dtype, max_leaves=max_leaves))))
     return Spec(decls, tuple(stmts))
+
+
+def wrap_biased_integer_specs(**kw):
+    """:func:`integer_specs` restricted to harnesses jax can wrap a constant in.
+
+    **Why a biased generator is the right instrument here, and where the bias
+    must NOT go.** The unbiased grammar reaches the wrap class, but thinly:
+    measured, 5 of 25 randomly-seeded 200-example runs found a wrong VERIFIED,
+    which is far too thin for a deterministic per-push gate that is supposed to
+    fail *every* time until the defect is fixed. Restricting the draw to
+    harnesses that carry an out-of-dtype-range constant is generator design
+    aimed at a known open defect, and every measurement this project has made
+    says generator design dominates search budget.
+
+    The bias is confined to the leg that is ``xfail``-marked for that defect.
+    The residual leg — the one that must stay green, and the one that would
+    catch a *new* wrong VERIFIED — runs the unbiased grammar with this class
+    masked out. Biasing that one would be marking one's own homework.
+    """
+    return integer_specs(**kw).filter(lambda s: bool(wrappable_constants(s)))
 
 
 def _bounds(dtype: str):
