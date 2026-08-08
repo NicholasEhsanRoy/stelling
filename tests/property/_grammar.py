@@ -874,11 +874,28 @@ def widened(spec: Spec, decl_index: int, factor: float = 2.0):
             return None
         dlo, dhi = dtype_range(d.dtype)
         span = max(abs(d.hi - d.lo), 1)
-        nlo, nhi = max(dlo, d.lo - span), min(dhi, d.hi + span)
+        # CLAMPED TO THE DTYPE, AND THEN CLAMPED AGAIN TO THE ORIGINAL BOX.
+        # The second clamp is not belt and braces. A declaration whose bound is
+        # already OUTSIDE its own dtype's range — `any_array((), "uint8",
+        # (-1, 0))`, which this grammar draws and stelling accepts — had its
+        # `lo` moved UP by the dtype clamp, so the "widened" box was a strict
+        # SUBSET of the original and the monotonicity property was comparing a
+        # narrowing against a narrowing. It reported `UNKNOWN -> VERIFIED` and
+        # was right to: `x0 <= x1` over `x1 in [-1, 0]` is undecided and over
+        # `x1 in [0, 255]` it is discharged. That was a defect in this
+        # function, found by the randomised profile at 1000 examples where 250
+        # derandomised ones never built it.
+        nlo = min(d.lo, max(dlo, d.lo - span))
+        nhi = max(d.hi, min(dhi, d.hi + span))
         if (nlo, nhi) == (d.lo, d.hi):
             return None
     decls = list(spec.decls)
     decls[decl_index] = replace(d, lo=nlo, hi=nhi)
+    # The property's whole premise, asserted rather than assumed: the new box
+    # must CONTAIN the old one. A "widening" that does not is a different
+    # mutation and any report from it is a false one.
+    if not (nlo <= d.lo and nhi >= d.hi):
+        return None
     return replace(spec, decls=tuple(decls))
 
 

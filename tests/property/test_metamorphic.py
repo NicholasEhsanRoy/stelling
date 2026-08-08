@@ -466,6 +466,17 @@ def test_widening_a_declared_bound_cannot_turn_unknown_into_verified():
     def search(item):
         spec, i = item
         census.draw()
+        decl = spec.decls[i]
+        if decl.dtype in _grammar.INT_DTYPES and not (
+            _grammar.in_dtype_range(decl.dtype, decl.lo)
+            and _grammar.in_dtype_range(decl.dtype, decl.hi)
+        ):
+            # A declared bound outside its own dtype's range is the open wrap
+            # class, and there the DECLARED box and the box the tool was handed
+            # are different boxes. Anything reported here would be a second
+            # sighting of that defect wearing a monotonicity label.
+            census.skip("declared bound outside the dtype range (the wrap class)")
+            return
         wide = _grammar.widened(spec, i)
         if wide is None:
             census.skip("declaration cannot be widened")
