@@ -43,7 +43,21 @@ repos:
       # ci.yml — where this comment used to say it already was, and it was not.
       # The bound, read there from the vendored changelog: the newest release
       # documenting any change to `REUSE.toml` semantics is v5.0.0, BELOW both
-      # pins. SUSPECTED, not measured; 5.1.1 cannot be installed offline.
+      # pins. SUSPECTED, not measured; 5.1.1 cannot be installed offline. That
+      # reading was re-verified independently on 2026-08-08 against the same
+      # vendored file — 52 release headings, v0.0.2 to v6.2.0, so the window is
+      # not truncated, and the 5.1.1 → 6.2.0 window yields exactly one hit,
+      # about `reuse lint --lines` sort order. It still only bounds what the
+      # changelog DOCUMENTS.
+      #
+      # THE PINS THEMSELVES ARE NOW GUARDED. `tests/test_reuse_pins.py` records
+      # the pair (`fsfe/reuse-action@v5` in ci.yml, `rev: v6.2.0` below) and
+      # reddens if either moves alone, if either file stops naming both
+      # versions, or if the `scratchpad/**` annotation this exclusion depends
+      # on is removed — with a non-vacuity floor on the header-less file count,
+      # so it cannot pass by guarding nothing. That DETECTS drift; it does not
+      # close the skew, and the four steps at the `reuse` job in ci.yml are
+      # still what does.
       - id: insert-license
         name: insert SPDX headers
         files: \.(py|pyi|sh|toml|ya?ml)$

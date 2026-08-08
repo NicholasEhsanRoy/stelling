@@ -679,6 +679,18 @@ jobs:
   # `annotation`, `precedence`, `glob` and `path` returns exactly one line,
   # about the sort order of `reuse lint --lines`.
   #
+  # RE-VERIFIED INDEPENDENTLY (2026-08-08), against the same vendored file at
+  # ~/.cache/pre-commit/reporzhg7lx1/CHANGELOG.md, whose `reuse --version` in
+  # that env reports 6.2.0. `grep -c '^## v'` gives **52** release headings,
+  # newest `## v6.2.0 - 2025-10-27`, oldest `## v0.0.2 - 2017-11-03` — so the
+  # file really is complete and the window really is inside it. Grepping lines
+  # 29–194 (v6.2.0 down to just above `## v5.1.1`) for the five terms returns
+  # exactly the one line quoted above, and a full-word grep for `annotation`,
+  # `precedence` and `glob` over that window returns NOTHING. Mapping every
+  # `REUSE.toml` mention in the whole file to its release: v5.0.0 (×5), v4.0.0
+  # (×5), v3.0.0 (×1), and no later one. `precedence` appears at the v2.0.0
+  # heading. Both readings below stand as written.
+  #
   # The sharper form of the same reading: the NEWEST release that documents
   # any change to `REUSE.toml` semantics is **v5.0.0** (2024-11-14) — glob
   # handling for `*/`, annotation application, parse errors. Support for
@@ -688,7 +700,23 @@ jobs:
   #
   # STILL SUSPECTED, and labelled so on purpose: that is a bound on what the
   # changelog DOCUMENTS, not a measurement of 5.1.1's behaviour, and it cannot
-  # become one on a box with no network and one installed version.
+  # become one on a box with no network and one installed version. WHAT IT DOES
+  # NOT BOUND, said plainly so nobody upgrades it by re-reading it: an
+  # undocumented change; a change in a DEPENDENCY that does the parsing rather
+  # than in reuse itself (6.0.0 made `python-magic` a hard dependency, which is
+  # exactly that shape); and any difference in what the two versions COUNT,
+  # since a count is not compared anywhere between them.
+  #
+  # THE SKEW IS NOT CLOSED, IT IS DETECTED. `tests/test_reuse_pins.py` records
+  # the pair — `fsfe/reuse-action@v5` here, `rev: v6.2.0` in
+  # `.pre-commit-config.yaml` — and reddens if either moves without the other
+  # being reconsidered, if either file stops naming both versions, or if
+  # `REUSE.toml`'s `scratchpad/**` annotation (the thing the skew is ABOUT)
+  # goes away. It also carries a non-vacuity floor: it counts the tracked
+  # `scratchpad/` files that have no inline header and fails if that reaches 0,
+  # because then it would be guarding nothing. Every one of those was driven
+  # red before it was landed. A drift detector is not a resolution and is not
+  # offered as one — the steps below are still what closes it.
   #
   # NOT PINNED HERE, and the reason is not inertia. Closing the skew needs a
   # fact that cannot be had offline — whether `fsfe/reuse-action` has a `v6`
