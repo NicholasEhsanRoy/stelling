@@ -290,21 +290,70 @@ def test_every_root_entry_is_a_decision() -> None:
         "unpublished."
     )
     # The dichotomy above is only true for paths the include/exclude machinery
-    # decides. Force-included ones bypass it, so a WITHHELD entry naming one is
-    # a false record — the strongest kind of defect this repository has, since
-    # the next reader will take it as an assurance.
+    # decides. Force-included ones bypass it, so a record naming one is a FALSE
+    # record — the strongest kind of defect this repository has, since the next
+    # reader will take it as an assurance.
+    #
+    # TWO WAYS THIS ASSERTION USED TO THROW ITS OWN ANSWER AWAY.
+    #
+    # 1. It matched `name in WITHHELD` on the FULL distribution path, while
+    #    every other consumer of WITHHELD matches the FIRST COMPONENT
+    #    (`path.split('/', 1)[0] in WITHHELD`) — which is what makes the
+    #    `scratchpad` entry exempt the whole subtree. So a force-included path
+    #    INSIDE a withheld directory was predicted by the model and then
+    #    dropped by the comparison. Driven at a4c16fe, one line of
+    #    `pyproject.toml`::
+    #
+    #      license-files = ["LICENSE", "scratchpad/PREREG*.md"]
+    #        pytest tests/test_sdist_contents.py    12 passed
+    #        uv build --offline --sdist .           271 members (baseline 261)
+    #        10 WITHHELD scratchpad/PREREG*.md in the tarball
+    #
+    #    The model was right and the comparison threw the answer away.
+    #
+    # 2. It consulted WITHHELD only. GENERATED_IN_DISTRIBUTION is the OTHER
+    #    dict a name can hide in, and nothing checked that a name in it is
+    #    actually produced by the backend — it was the escape hatch WITHHELD
+    #    used to be. Driven at a4c16fe, a root `.hgignore` committed to the
+    #    tree::
+    #
+    #      plain                                        1 failed  (undecided)
+    #      + ".hgignore": "generated, honest"            12 passed
+    #      uv build --offline --sdist .                  262 members,
+    #                                                      .hgignore SHIPPED
+    #
+    #    A force-included path is taken from a FILE; it is never generated.
     forced = _force_included(REPO)
-    lying = sorted(name for name in forced if name in WITHHELD)
+    lying = sorted(name for name in forced if _falsely_recorded(name))
     assert not lying, (
-        "these root paths are recorded in WITHHELD and hatchling FORCE-INCLUDES "
-        "them, so they ship whatever this dict says:\n  "
-        + "\n  ".join(f"{name}  <- {forced[name]}" for name in lying)
+        "these paths are recorded here as not-distributed or as "
+        "backend-generated, and hatchling FORCE-INCLUDES them, so they ship "
+        "whatever these dicts say:\n  "
+        + "\n  ".join(
+            f"{name}  <- {forced[name]}  ({_false_record(name)})" for name in lying
+        )
         + "\n\n`force_include` bypasses `include_path()` (hatchling "
         f"{_HATCHLING_READ_AT}, `builders/plugin/interface.py` "
-        "`recurse_forced_files`), so neither WITHHELD nor the allowlist can "
-        "keep one out. Put it in the allowlist and say it ships, or stop the "
+        "`recurse_forced_files`), so neither dict nor the allowlist can keep "
+        "one out. Put it in the allowlist and say it ships, or stop the "
         "backend from finding it."
     )
+
+
+def _falsely_recorded(distribution_path: str) -> str | None:
+    """Which record — if any — claims a force-included path is not shipped.
+
+    Matched on the FULL path and on its FIRST COMPONENT, because that is how
+    every other consumer of :data:`WITHHELD` matches (``scratchpad`` exempts
+    the whole subtree), and on BOTH dicts, because a name in
+    :data:`GENERATED_IN_DISTRIBUTION` is exempt from just as much.
+    """
+    for key in (distribution_path, distribution_path.split("/", 1)[0]):
+        if key in WITHHELD:
+            return f"recorded WITHHELD as `{key}`"
+        if key in GENERATED_IN_DISTRIBUTION:
+            return f"recorded GENERATED_IN_DISTRIBUTION as `{key}`"
+    return None
 
 
 # --- what the PyPI project page renders ------------------------------------
@@ -487,8 +536,13 @@ def _force_included(root: pathlib.Path) -> dict[str, pathlib.Path]:
 
     NOT modelled, and unmodellable from here: a `hatch_build.py` build hook may
     add arbitrary entries to ``build_data["force_include"]`` at build time.
-    This project has no `hatch_build.py`; if one appears, the parity test is
-    what will notice.
+    **This docstring used to end "if one appears, the parity test is what will
+    notice", and that was false.** A committed, allowlisted, registered hook
+    that force-includes a TRACKED file leaves every counterpart the parity test
+    can check satisfied — driven at a4c16fe: ``12 passed``, 263 members,
+    ``scratchpad/PREREG_SDIST.md`` in the tarball. What notices one now is
+    ``test_no_build_hook_can_force_include_behind_this_module``, which refuses
+    the capability rather than modelling it.
     """
     forced: dict[str, pathlib.Path] = {}
     for name in _HATCH_FORCED_ROOT_FILES:
@@ -517,7 +571,82 @@ def _force_included(root: pathlib.Path) -> dict[str, pathlib.Path]:
         for match in sorted(globlib.glob(os.path.normpath(os.path.join(root, pattern)))):
             if os.path.isfile(match):
                 forced[os.path.relpath(match, root).replace(os.sep, "/")] = pathlib.Path(match)
+
+    forced.update(_static_force_include(root, cfg))
     return forced
+
+
+def _static_force_include(
+    root: pathlib.Path, cfg: dict
+) -> dict[str, pathlib.Path]:
+    """``BuilderConfig.force_include``, the table written in `pyproject.toml`.
+
+    THIS USED TO BE UNMODELLED AND UNNAMED, and it is the easiest of all the
+    force-include routes to introduce: a two-line static table, no build hook,
+    no ancestor directory. ``get_force_include()`` (`builders/config.py:823`)
+    merges it with whatever ``get_default_build_data()`` produced, and
+    ``recurse_forced_files`` yields the result past `include_path()`. Driven at
+    a4c16fe, in a standalone repo from this tree::
+
+        [tool.hatch.build]
+        force-include = {"scratchpad/PREREG_SDIST.md" = "scratchpad/PREREG_SDIST.md"}
+
+        pytest -q -ra tests/test_sdist_contents.py   12 passed
+        uv build --offline --sdist .                 262 members (baseline 261)
+        tar tzf …  ->  stelling-0.1.0/scratchpad/PREREG_SDIST.md
+
+    — a path this file's own :data:`WITHHELD` says is not distributed.
+
+    Transcribed rather than summarised (`builders/config.py:678-704`,
+    `builders/utils.py` ``normalize_inclusion_map`` /
+    ``normalize_relative_path``, `builders/plugin/interface.py`
+    ``recurse_forced_files``):
+
+    * the target table SHADOWS the global one — it is ``if "force-include" in
+      target_config … else build_config``, not a merge;
+    * the KEY is the source (``expanduser`` + ``normpath``, made absolute
+      against the root, so it may point outside the tree) and the VALUE is the
+      distribution-relative path;
+    * a source that is a DIRECTORY force-includes everything under it, pruned
+      by the same :data:`_HATCH_EXCLUDED_DIRECTORIES` and
+      :data:`_HATCH_EXCLUDED_FILES` as the ordinary walk.
+
+    NOT modelled: ``get_distribution_path``'s ``sources`` rewriting (the sdist
+    target sets none here), and a missing source — hatchling raises
+    ``FileNotFoundError`` for that, so the build fails loudly and nothing
+    ships.
+    """
+    build_cfg = cfg.get("tool", {}).get("hatch", {}).get("build", {})
+    sdist_cfg = build_cfg.get("targets", {}).get("sdist", {})
+    table = (
+        sdist_cfg["force-include"]
+        if "force-include" in sdist_cfg
+        else build_cfg.get("force-include", {})
+    )
+    if not isinstance(table, dict):
+        return {}
+    out: dict[str, pathlib.Path] = {}
+    for raw_source, relative_path in table.items():
+        if not isinstance(relative_path, str):
+            continue
+        source = pathlib.Path(os.path.expanduser(os.path.normpath(str(raw_source))))
+        if not source.is_absolute():
+            source = pathlib.Path(os.path.abspath(os.path.join(root, source)))
+        target = os.path.normpath(relative_path).strip(os.sep).replace(os.sep, "/")
+        if source.is_file():
+            out[target] = source
+        elif source.is_dir():
+            for dirpath, dirnames, filenames in os.walk(source):
+                dirnames[:] = [
+                    d for d in dirnames if d not in _HATCH_EXCLUDED_DIRECTORIES
+                ]
+                relative = os.path.relpath(dirpath, source)
+                for name in sorted(filenames):
+                    if name in _HATCH_EXCLUDED_FILES:
+                        continue
+                    dist = os.path.normpath(os.path.join(target, relative, name))
+                    out[dist.replace(os.sep, "/")] = pathlib.Path(dirpath) / name
+    return out
 
 
 def _forced_without_a_reviewed_source(
@@ -1423,22 +1552,84 @@ def test_the_untracked_scan_agrees_with_the_tarball(tmp_path: pathlib.Path) -> N
     # the tarball went 260 -> 261 members and the suite stayed at `8 passed`.
     # Now the ONE generated member is named, and everything else must have a
     # counterpart.
-    shipped = {n.split("/", 1)[1] for n in members if "/" in n} - set(
-        GENERATED_IN_DISTRIBUTION
+    delivered = {n.split("/", 1)[1] for n in members if "/" in n}
+
+    # GENERATED_IN_DISTRIBUTION is SUBTRACTED below, so every name in it is
+    # exempt from the two assertions that follow — and nothing used to check
+    # that a name in it is generated at all. That is the escape hatch WITHHELD
+    # used to be, and it is closed the same way: by asking the question the
+    # dict claims to answer. A backend-generated member has no counterpart in
+    # the tree and is not force-included from one; and a name that is not in
+    # the artefact at all is a rotted entry widening the exemption for nothing.
+    forced_here = _force_included(staged)
+    dishonest = sorted(
+        name
+        for name in GENERATED_IN_DISTRIBUTION
+        if (staged / name).exists()
+        or (staged / name).is_symlink()
+        or name in forced_here
     )
-    orphans = sorted(rel for rel in shipped if not (staged / rel).is_file())
-    assert not orphans, (
-        "the sdist ships these members and the tree it was built from has no "
-        "such file:\n    "
-        + "\n    ".join(orphans)
+    assert not dishonest, (
+        "these names are recorded in GENERATED_IN_DISTRIBUTION and are NOT "
+        "generated — the tree has a file at that path, or hatchling "
+        "force-includes one there:\n    "
+        + "\n    ".join(f"{name}  <- {forced_here.get(name, staged / name)}" for name in dishonest)
+        + "\n\nThat dict exempts a name from the counterpart check below and "
+        "from the scan/tarball comparison, so an entry that is really a file "
+        "buys a shipping path a silent pass. Driven at a4c16fe with a root "
+        "`.hgignore`: `1 failed` -> `12 passed`, 262 members, the file still "
+        "in the tarball."
+    )
+    unused = sorted(set(GENERATED_IN_DISTRIBUTION) - delivered)
+    assert not unused, (
+        "these names are recorded in GENERATED_IN_DISTRIBUTION and the built "
+        "sdist does not contain them:\n    "
+        + "\n    ".join(unused)
+        + "\n\nAn entry nothing ships is an exemption granted to a name the "
+        "backend does not use, and it will still be granted the day something "
+        "else arrives under it."
+    )
+
+    shipped = delivered - set(GENERATED_IN_DISTRIBUTION)
+    # A member with NOTHING at its path, and a member with something that is
+    # not a regular file, are different findings and used to share one message.
+    # A dangling symlink is `is_file() == False` and was reported as "it was
+    # FORCE-INCLUDED", which it was not — the diagnosis sent the reader to the
+    # wrong mechanism entirely.
+    missing = sorted(
+        rel
+        for rel in shipped
+        if not (staged / rel).exists() and not (staged / rel).is_symlink()
+    )
+    irregular = sorted(
+        rel
+        for rel in shipped
+        if rel not in set(missing) and not (staged / rel).is_file()
+    )
+    assert not missing, (
+        "the sdist ships these members and the tree it was built from has "
+        "nothing at all at that path:\n    "
+        + "\n    ".join(missing)
         + "\n\nA member with no counterpart in the source tree did not go "
         "through the include allowlist — it was FORCE-INCLUDED, which bypasses "
         "`include_path()` altogether. The known routes are an `.hgignore` or "
-        "`.gitignore` found by walking UP out of the build root, both of which "
-        "arrive keyed by basename at the root of the distribution. Nothing in "
+        "`.gitignore` found by walking UP out of the build root (both arrive "
+        "keyed by basename at the root of the distribution), a `force-include` "
+        "table in `pyproject.toml`, and a `hatch_build.py` hook. Nothing in "
         "`pyproject.toml` can exclude one. If a member here is generated by the "
         "backend rather than taken from a file, name it in "
         "`GENERATED_IN_DISTRIBUTION` and say why."
+    )
+    assert not irregular, (
+        "the sdist ships these members and the tree has something at that path "
+        "that is not a regular file — a dangling symlink, a directory, a "
+        "socket:\n    "
+        + "\n    ".join(f"{rel}  ({os.readlink(staged / rel) if (staged / rel).is_symlink() else 'not a file'})" for rel in irregular)
+        + "\n\nThis is NOT the force-include finding above: the path is a real "
+        "entry of this tree and went through the allowlist. `tarfile` resolves "
+        "a symlink's target when it stores the member, so what shipped is "
+        "whatever the link pointed at when the build ran — or a broken member "
+        "if it pointed nowhere."
     )
     tracked = _tracked_files(staged)
     shipped_untracked = shipped - tracked
@@ -1543,6 +1734,185 @@ def test_the_scan_refuses_a_blinded_walk(tmp_path: pathlib.Path) -> None:
     # that gets switched off.
     pruned = _repo("pruned", "docs/.hatch/note.md", delete=False)
     assert _untracked_that_would_ship(pruned, {"docs"}, tmp_path / "oracle-pruned") == []
+
+
+def test_a_record_of_a_force_included_path_is_read_as_false() -> None:
+    """:func:`_falsely_recorded` must match the way WITHHELD is matched
+    everywhere else, and must look in BOTH dicts.
+
+    The assertion in ``test_every_root_entry_is_a_decision`` is an absence over
+    this checkout's four force-included paths, and an absence proves nothing
+    unless the predicate can produce a presence. It could not, twice over:
+    matching the full distribution path missed everything inside a withheld
+    DIRECTORY (the `license-files = [… "scratchpad/PREREG*.md"]` construction,
+    12 passed, 10 withheld files in the tarball), and it never consulted
+    :data:`GENERATED_IN_DISTRIBUTION` at all (a committed root `.hgignore`
+    plus one dict entry, ``1 failed`` -> ``12 passed``, file shipping).
+
+    The NEGATIVE half is the tree's real force-included paths: `README.md`,
+    `LICENSE`, `pyproject.toml`, `.gitignore` all ship and are recorded
+    nowhere, so a predicate that answered "false record" for them would be red
+    in every checkout.
+    """
+    assert "scratchpad" in WITHHELD and "PKG-INFO" in GENERATED_IN_DISTRIBUTION, (
+        "this control names two keys that are no longer in the dicts, so it is "
+        "no longer measuring the matching rule"
+    )
+    inside_withheld = _falsely_recorded("scratchpad/PREREG_SDIST.md")
+    assert inside_withheld and "WITHHELD" in inside_withheld, (
+        "a force-included path inside a WITHHELD directory was not read as a "
+        "false record, which is the construction that shipped 10 of them with "
+        "the suite green"
+    )
+    assert _falsely_recorded(".git"), "an exact WITHHELD key was not matched"
+    generated = _falsely_recorded("PKG-INFO")
+    assert generated and "GENERATED" in generated, (
+        "GENERATED_IN_DISTRIBUTION is not consulted, so it is still the escape "
+        "hatch WITHHELD used to be"
+    )
+    for benign in ("README.md", "LICENSE", "pyproject.toml", ".gitignore"):
+        assert _falsely_recorded(benign) is None, (
+            f"{benign} is force-included AND shipped AND recorded nowhere; "
+            "reading it as a false record would be red in every checkout"
+        )
+
+
+def test_the_force_include_model_reads_the_static_table(
+    tmp_path: pathlib.Path,
+) -> None:
+    """:func:`_static_force_include` and :data:`_HATCH_FORCED_ROOT_FILES`,
+    pinned on a synthetic root.
+
+    The `force-include` table is the cheapest force-include route there is —
+    two lines of `pyproject.toml`, no build hook, no ancestor directory — and
+    it was neither modelled nor named among the routes this module says it
+    cannot model. It is modelled now, and this is what stops the model from
+    quietly returning ``{}`` again.
+
+    ``_HATCH_FORCED_ROOT_FILES`` is pinned here rather than by the parity
+    build for a reason that is worth writing down: two of its three entries,
+    `hatch.toml` and `hatch_build.py`, DO NOT EXIST in this tree, so reducing
+    the constant to ``("pyproject.toml",)`` changes no measurement any build
+    can make. Driven at a4c16fe: ``12 passed``, vacuously. A synthetic root
+    that has all three is the only place the constant can be non-vacuous.
+    """
+    root = tmp_path / "static-table"
+    (root / "pkg").mkdir(parents=True)
+    (root / "pkg" / "payload.md").write_text("forced\n", encoding="utf-8")
+    (root / "tree").mkdir()
+    (root / "tree" / "a.md").write_text("a\n", encoding="utf-8")
+    (root / "tree" / "__pycache__").mkdir()
+    (root / "tree" / "__pycache__" / "b.py").write_text("b\n", encoding="utf-8")
+    for name in _HATCH_FORCED_ROOT_FILES:
+        if name != "pyproject.toml":
+            (root / name).write_text("# forced at the root\n", encoding="utf-8")
+
+    def _write(table: str) -> None:
+        (root / "pyproject.toml").write_text(
+            '[project]\nname = "zz-probe"\nversion = "0"\n' + table, encoding="utf-8"
+        )
+
+    # every entry of the constant, present on disk, must be named
+    _write("")
+    plain = _force_included(root)
+    for name in _HATCH_FORCED_ROOT_FILES:
+        assert plain.get(name) == root / name, (
+            f"`{name}` is force-included unconditionally by "
+            f"`get_default_build_data` (hatchling {_HATCHLING_READ_AT}) and "
+            f"the model did not name it: {sorted(plain)}"
+        )
+
+    # a FILE source, relocated by the table
+    _write('\n[tool.hatch.build]\nforce-include = { "pkg/payload.md" = "docs/moved.md" }\n')
+    assert _force_included(root).get("docs/moved.md") == root / "pkg" / "payload.md", (
+        "the static `force-include` table was not read — this is the two-line "
+        "route that shipped a WITHHELD file with the suite at 12 passed"
+    )
+
+    # the TARGET table SHADOWS the global one; it is not merged
+    _write(
+        '\n[tool.hatch.build]\nforce-include = { "pkg/payload.md" = "global.md" }\n'
+        '\n[tool.hatch.build.targets.sdist]\n'
+        'force-include = { "pkg/payload.md" = "target.md" }\n'
+    )
+    shadowed = _force_included(root)
+    assert "target.md" in shadowed and "global.md" not in shadowed, (
+        "`force_include` is `if 'force-include' in target_config … else "
+        "build_config` upstream, not a merge, and the model disagrees: "
+        f"{sorted(shadowed)}"
+    )
+
+    # a DIRECTORY source takes everything under it, pruned like the walk
+    _write('\n[tool.hatch.build]\nforce-include = { "tree" = "vendored" }\n')
+    walked = _force_included(root)
+    assert walked.get("vendored/a.md") == root / "tree" / "a.md", (
+        f"a directory source did not force-include its files: {sorted(walked)}"
+    )
+    assert "vendored/__pycache__/b.py" not in walked, (
+        "`recurse_forced_files` prunes EXCLUDED_DIRECTORIES and the model did "
+        "not"
+    )
+
+    # NEGATIVE: no table, nothing extra. A model that invented entries would
+    # be red on this repository, which has no `force-include` table.
+    _write("")
+    assert not _static_force_include(
+        root, tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    ), "the model reported a static force-include with no table in the file"
+    assert not _static_force_include(
+        REPO, tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    ), "this repository has grown a `force-include` table; teach the guard first"
+
+
+def test_no_build_hook_can_force_include_behind_this_module() -> None:
+    """A `hatch_build.py` hook is UNMODELLABLE, so its appearance is a red.
+
+    ``_force_included``'s docstring used to say "This project has no
+    `hatch_build.py`; if one appears, the parity test is what will notice."
+    **It does not.** Driven at a4c16fe, in a standalone repo from this tree —
+    a committed, allowlisted hook, registered under
+    ``[tool.hatch.build.targets.sdist.hooks.custom]``, whose ``initialize``
+    puts ``scratchpad/PREREG_SDIST.md`` into ``build_data["force_include"]``::
+
+        pytest -q -ra tests/test_sdist_contents.py   12 passed
+        uv build --offline --sdist .                 263 members (baseline 261)
+        tar tzf …  ->  stelling-0.1.0/hatch_build.py
+                       stelling-0.1.0/scratchpad/PREREG_SDIST.md
+
+    Nothing reddened, because the hook ships a file that IS tracked and IS in
+    the tree: every counterpart check the parity test can make is satisfied.
+    A model cannot follow arbitrary Python, and the parity comparison is a
+    comparison against the tree — so the only honest guard is to refuse the
+    CAPABILITY. If a hook is ever genuinely wanted, this test is the place the
+    decision gets written down, next to what it force-includes.
+    """
+    hook = REPO / "hatch_build.py"
+    assert not hook.is_file(), (
+        f"{hook} exists. A build hook can put ANY path into "
+        '`build_data["force_include"]` at build time, past the allowlist and '
+        "past the exclusion spec, and no model in this module can know what "
+        "without executing it. The parity test does not catch it either: a "
+        "hook that ships a tracked file leaves every counterpart check "
+        "satisfied. Say here what it force-includes and why, or delete it."
+    )
+    cfg = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    build = cfg.get("tool", {}).get("hatch", {}).get("build", {})
+    targets = build.get("targets", {})
+    assert targets, (
+        "`pyproject.toml` declares no `[tool.hatch.build.targets.*]` tables at "
+        "all, so this scan looked at nothing and its silence is not an answer"
+    )
+    tables = {"tool.hatch.build.hooks": build.get("hooks")}
+    for target, target_cfg in targets.items():
+        tables[f"tool.hatch.build.targets.{target}.hooks"] = target_cfg.get("hooks")
+    declared = sorted(name for name, table in tables.items() if table)
+    assert not declared, (
+        "`pyproject.toml` registers build hooks:\n  "
+        + "\n  ".join(declared)
+        + "\n\nA registered hook runs arbitrary code at build time and may "
+        "force-include anything. Nothing in this module models it and the "
+        "parity test does not notice it."
+    )
 
 
 def test_the_force_include_review_sees_an_outside_source(
