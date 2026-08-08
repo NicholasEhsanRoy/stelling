@@ -258,13 +258,40 @@ def test_no_untracked_file_anywhere_would_ship() -> None:
     decision. Committed files are out of scope — they are reviewed.
 
     Break it: `touch docs/anything.md` and run this test.
+
+    **The skip condition is the one the message names, and it did not used to
+    be.** The gate was ``if proc.returncode != 0: skip("not a git checkout")``
+    — so this test reported a green skip on *any* non-zero from ``git status``:
+    a broken ``GIT_DIR``, an unreadable index, a held lock, a half-finished
+    rebase. Driven::
+
+        GIT_DIR=/nonexistent/x pytest -q -ra <this nodeid>
+        1 skipped                        <- and the tree IS a git checkout
+
+    That is this branch's own subject: a control reporting pass while it did
+    not run. It was not an exposure — ``tests/test_skip_inventory.py`` pins the
+    disclosed condition (``not (REPO / ".git").exists()``), which is False in a
+    real checkout, so the session's verdict went to ``failed`` and ``pytest``
+    exited 1 on that same drive at 33fd1f8 as well as here. But a second
+    control catching the first control's misstatement is not the same thing as
+    the first control being true, so the condition now IS ``.git`` absence and
+    every other failure is a hard red carrying git's own stderr.
     """
+    if not (REPO / ".git").exists():
+        # A worktree's `.git` is a FILE, hence `exists()` and not `is_dir()`.
+        # This is byte-for-byte the predicate `tests/test_skip_inventory.py`
+        # declares legitimate for this reason string; the two agreeing by
+        # construction is the point.
+        pytest.skip("not a git checkout (an unpacked sdist, say)")
     proc = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all"],
         cwd=REPO, capture_output=True, text=True, timeout=120,
     )
-    if proc.returncode != 0:
-        pytest.skip("not a git checkout (an unpacked sdist, say)")
+    assert proc.returncode == 0, (
+        f"`git status` exited {proc.returncode} in a tree that HAS a .git, so "
+        "this check could not run — and it must not report that as a skip, "
+        "which reads as green. git said:\n" + (proc.stderr or "(nothing)")
+    )
     undecided = []
     for ln in proc.stdout.splitlines():
         if not ln.startswith("?? "):
