@@ -2004,6 +2004,19 @@ verdicts:
   cheap), and the emitter now ALSO walks the parse tree it was about to
   compile anyway and refuses any `Import`/`ImportFrom` of `stelling` or a
   `stelling.*` submodule, wherever on the line it sits.
+  **Cost, measured rather than asserted.** The added refusal never fires on
+  what the emitter emits: the reproducer for the same subject is
+  byte-identical at `bf905b9` and here apart from the two lines that record
+  the stelling sha, which is the provenance stamp doing its job. `reproduce`
+  is not on the verdict path at all (importing `verdict`, `solvers`,
+  `propagate`, `obligation`, `preconditions`, `harness` and `contracts`
+  leaves `stelling.reproduce` absent from `sys.modules`), and the corpus that
+  scores this per obligation agrees: `scratchpad/pin/corpus_pin.py`, 95 rows
+  across the mechanism × shape × order × mode × semantics × leg grid, **2090
+  per-obligation and verdict status keys compared, 0 moved, 0 non-status keys
+  differing — on jax 0.11.0 AND on jax 0.10.2.** The vacuous test that pinned
+  the withdrawn claim is replaced, not deleted: 10 parametrised ids retired,
+  18 added, and every new one was driven red on a mutant before it landed.
 - **2026-08-07 (pre-release): jax 0.10 was in `TESTED_JAX_SERIES` and did
   not work — verdicts move, in the UNKNOWN → VERIFIED direction, on 0.10
   only.** `jex_core.ClosedJaxpr is jex_core.Jaxpr` is `False` on 0.10.2 and
