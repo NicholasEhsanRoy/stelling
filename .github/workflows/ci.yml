@@ -40,14 +40,35 @@ permissions:
 # assertion was added, so none of them is being asked for something it does not
 # already produce:
 #
-#   jax 0.11.0   2297 passed, 2 skipped     verdict=made
-#   jax 0.10.2   2297 passed, 2 skipped     verdict=made
-#   no jax       1186 passed, 85 skipped    verdict=made
+#   jax 0.11.0   verdict=made
+#   jax 0.10.2   verdict=made
+#   no jax       verdict=made
 #
-# (each figure is one higher than it was, and the +1 is the same test in all
-# three: `test_the_untracked_scan_agrees_with_the_tarball`, which gates on git
-# and uv and not on jax. Re-measured in all three environments rather than
-# adjusted by arithmetic.)
+# THE PASS COUNTS THAT STOOD HERE ARE GONE, AND THAT IS THE FIX RATHER THAN AN
+# OMISSION. This block read `2296 / 2296 / 1185`, was bumped to
+# `2297 / 2297 / 1186` one commit later (486862c, where `--collect-only` gives
+# 2299 ids -- re-checked), and the tree has been 2348, 2398, 2454 and 2459
+# since. A number that moves whenever anyone adds a test, in a comment nobody
+# re-runs, is a defect with a delay fuse, and this one had already been lit
+# twice. What the counts were evidence FOR is the line above -- all three lanes
+# already produce a verdict, which is all the assertion below asks of them --
+# and that does not rot.
+#
+# WHAT TO CHECK INSTEAD, as a comparison between runs of ONE commit rather than
+# against a constant written here (same rule, same reason, as the `reuse` job's
+# "N / N" instruction further down):
+#   * the two jax lanes must report the SAME passed/skipped as EACH OTHER: they
+#     collect the same tests, and `--collect-only` ids are byte-identical
+#     between the series;
+#   * the no-jax lane must report fewer passes and more skips than either, with
+#     every one of those skips itemised by the inventory that lane writes;
+#   * all three must report `verdict=made`.
+# A difference of any size in the first is the signal; equality at any value is
+# the pass.
+#
+# (measured in all three environments at 486862c; the two jax lanes re-measured
+# at bf905b9 and equal to each other there. Records of two commits, not
+# targets -- nothing here is to be bumped to match a future run.)
 #
 # (the third measured in an interpreter that genuinely does not have jax, not
 # with an import hook, since `stelling._optional.available` asks `find_spec`.)

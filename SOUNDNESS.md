@@ -2705,8 +2705,11 @@ verdicts:
   — because the safe answer to "is this box inhabited" under NaN is *no
   member I can vouch for*, and because the next internal caller would
   otherwise meet the raise. It moves nothing: 0 of 648 obligation rows
-  across the two assume corpora and 0 of 2357+2 suite outcomes on either
-  jax series.
+  across the two assume corpora, and 0 suite outcomes on either jax series
+  — the whole suite at that pass, every test and both skips. **The
+  numerator is the claim; the denominator was a scale marker and has been
+  dropped**, because the suite has gained tests on most days since and a
+  frozen total in a dated entry reads as a statement about the tree now.
 
   **Retroactively invalid:** any REFUTED whose refuting obligation sat
   inside a `cond`/`switch` branch certified by a probe over a
@@ -2947,10 +2950,14 @@ verdicts:
   REFUTED 36 → 20, UNKNOWN 36 → 52: all 16 verdict moves are REFUTED →
   UNKNOWN and no query becomes VERIFIED.
 
-  **Both jax series.** 2357 passed / 2 skipped on jax 0.11.0 and on jax
-  0.10.2, `--collect-only` ids byte-identical between them (2359), and
-  the 168-run ledger is run-for-run identical on the two series (0
-  disagreements).
+  **Both jax series, measured at `c8d0304`** (the count is a record of
+  that commit, not of the tree now, and `--collect-only` at `c8d0304`
+  re-run today still gives 2359): 2357 passed / 2 skipped on jax 0.11.0
+  and on jax 0.10.2, `--collect-only` ids byte-identical between them
+  (2359), and the 168-run ledger is run-for-run identical on the two
+  series (0 disagreements). The claim that does not rot is the second
+  half — the two series agree with each other, and the ledger agrees
+  run-for-run — and that is what a reader should check on any commit.
 
   Constructions: `tests/test_exactness_lift.py` (the routing pin),
   `tests/test_assume_constrain.py`, `tests/test_vacuous_refutation.py`;
@@ -3373,10 +3380,13 @@ verdicts:
   sentence *"every definite violation is then withheld from REFUTED"* was
   made true again by naming the exception.
 
-  **Both jax series.** 2398 passed / 2 skipped on jax 0.11.0 and on jax
-  0.10.2 (140.30 s and 139.97 s, load 0.59 and 2.85), `--collect-only`
-  ids byte-identical between them (2400), `reuse lint` rc=0 with 317/317
-  files carrying copyright and license information. Baseline at `681c6ef`
+  **Both jax series, measured at `ef41164`** (a record of that commit;
+  `--collect-only` at `ef41164` re-run today still gives 2400): 2398
+  passed / 2 skipped on jax 0.11.0 and on jax 0.10.2 (140.30 s and
+  139.97 s, load 0.59 and 2.85), `--collect-only` ids byte-identical
+  between them (2400), `reuse lint` rc=0 — with 317/317 files carrying
+  copyright and license information **at that commit, a figure that moves
+  whenever anyone adds a file and is not the claim; `rc=0` is**. Baseline at `681c6ef`
   was 2369 / 2 on both: **31 tests added and 2 REMOVED, net +29** — which
   is the 2369 → 2398 delta, and the sentence that said "none removed" did
   not match its own arithmetic. The two removed are
@@ -3394,8 +3404,9 @@ verdicts:
   adds 5 tests and removes none — `--collect-only` id diff, `0ad22bb`
   (2400 ids) vs this branch (2405), 5 added and 0 removed, so the
   arithmetic and the sentence agree this time. 2403 passed / 2 skipped on
-  jax 0.11.0 and on jax 0.10.2, `--collect-only` ids byte-identical
-  between the two series, `reuse lint` rc=0. **No verdict moved, scored
+  jax 0.11.0 and on jax 0.10.2 **at `d58e57d`** (a record of that commit;
+  `--collect-only` there re-run today still gives 2405), `--collect-only`
+  ids byte-identical between the two series, `reuse lint` rc=0. **No verdict moved, scored
   PER OBLIGATION**: `scratchpad/pin/corpus_pin.py`, 95 rows × {real,
   ieee} × {constrain, inert} × {interval leg, affine refinement} plus
   `check()` at `refine=None` and `refine="affine"`, diffed key-for-key
