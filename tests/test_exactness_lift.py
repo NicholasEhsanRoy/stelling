@@ -22,6 +22,35 @@ propagation) while the propagator reads one by DECISION. The pin forces
 the shared answer to False and requires BOTH legs to withhold — it is
 not a test of today's verdicts, it is a test that fails if either leg
 stops consulting the shared point.
+
+**WHAT THIS FILE DOES NOT PIN — the shape of its own blind spot.** The
+routing pins below monkeypatch the shared functions with
+``lambda **k: False`` / ``lambda *a, **k: False``. Those lambdas IGNORE
+their arguments, which is what makes them a ROUTING pin rather than a
+behaviour pin — but it also means **no argument-level defect can redden
+this file**. A leg that reaches the shared point with the wrong arguments
+still gets ``False`` back and still withholds, so every test here passes.
+Measured at ``43896fc`` on jax 0.11.0: an ``affine.py`` mutant hardcoding
+``assume_dropped=False`` at the shared call passes this file **10/10**,
+and is caught only elsewhere — 5 tests in
+``tests/test_vacuous_refutation.py`` fail on it (whole suite: 2352
+passed, 5 failed).
+
+The OTHER argument is a different case, recorded here so the next reader
+does not read its silence as coverage: a mutant hardcoding
+``nonemptiness_certified=True`` at the same call passes this file 10/10
+**and the whole suite, 2357 passed / 2 skipped**. That is not a coverage
+hole, it is an unreachable argument. ``narrowing_uncertified`` is set
+only in the branch that also calls ``counter.record_constrained``, so it
+implies ``coverage.constrained >= 1``, and
+:func:`stelling.affine.refine_propagation` declines wholly on
+``coverage.constrained`` before reaching the shared point. MEASURED, not
+reasoned: instrumenting that call site and running the whole suite
+records **25** reaches, ``narrowing_uncertified`` False at every one (19
+with ``assume_dropped`` False, 6 with it True) and
+``coverage.constrained == 0`` at every one. On this leg the argument is
+a constant today; a refinement restructured to run under a constraining
+assume would make it live, and this file would still not see it.
 """
 
 from __future__ import annotations
