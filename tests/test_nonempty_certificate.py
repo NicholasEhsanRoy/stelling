@@ -399,6 +399,118 @@ def test_an_assume_the_probe_walks_around_is_not_witnessed():
     assert all(o.status == "unknown" for o in p.obligations)
 
 
+def test_an_assume_the_probe_walks_INTO_is_witnessed_and_certified():
+    """The counter-construction to *"branch-scoped assumes are never
+    certified"*, which is what this file, ``SOUNDNESS.md`` and two
+    docstrings used to say.
+
+    A probe pins each declaration to a point, which FORCES the cond — and
+    forcing it can force it EITHER WAY. Here the query's only assume sits
+    inside the branch taken when `x >= 0.5`, and probe 1 (the declared
+    box's HIGH corner, `x = 1.0`) walks into that branch, evaluates the
+    assume, finds it definitely true and witnesses it. The static
+    requirement is then satisfied — the one assume the IR contains is the
+    one the walk evaluated — and the certificate fires.
+
+    **The recovery is sound**, and that is the point: at `x = 1.0` the
+    program really does take the branch, really does evaluate
+    `assume(v >= 0.25)`, and really does satisfy it, so the assumed region
+    (as executed) is inhabited and the definite violation over the judged
+    set is not vacuous.
+
+    What the static requirement actually guarantees is the narrower
+    sentence the docstrings now carry: an assume the probe walked AROUND
+    is never certified — required and not witnessed, so the subset test
+    fails. The other, independent mechanism (`_reachability_witnesses`
+    returning the empty set on any run with `any_constrained or
+    assume_dropped`) is what protects branch-scoped VIOLATIONS, and it is
+    pinned one test up. Conflating the two overstated both.
+    """
+    from jax import lax
+
+    def h():
+        x = any_array((), "float64", (0.0, 1.0))
+
+        def has_assume(v):
+            assume(v >= 0.25)  # SATISFIABLE within the branch
+            return v * 2.0
+
+        y = lax.cond(x >= 0.5, has_assume, lambda v: v, x)
+        return (assert_(y <= -1.0),)
+
+    c = trace(h)
+    # the assume really is branch-scoped: the top-level jaxpr holds none
+    assert not [e for e in c.jaxpr.eqns if e.primitive == "stelling_assume"]
+    assert len(P._assume_equation_ids(c.jaxpr)) == 1
+
+    p = propagate(c)
+    assert p.narrowing_uncertified is True, (
+        "a branch invar never inherits exactness, so a branch-scoped "
+        "assume narrows an over-approximated intermediate and the run "
+        "would withhold — which is what makes the recovery observable"
+    )
+    assert p.region_inhabited is True
+    assert p.obligations[0].status == "violated-over-set"
+    assert any(
+        "assumed region CERTIFIED NON-EMPTY: probe point 1 " in n
+        for n in p.notes
+    ), p.notes
+
+
+def test_a_region_inhabited_only_via_the_UNTAKEN_branch_is_not_recovered():
+    """The cost of the same rule, in exactly the shape the old sentence
+    claimed it prevented.
+
+    The only assume sits in the branch taken when `x >= 0.5` and is
+    UNSATISFIABLE there (`v >= 2` over `[0.5, 1]`). Every `x < 0.5`
+    therefore satisfies every assume the program EVALUATES at it — the
+    assumed region is `[0, 0.5)`, inhabited — and the assert is definitely
+    violated over the whole declared box, so a REFUTED is owed.
+
+    It is not given. The requirement is STATIC, so the assume in the
+    branch those points do not take is required and never witnessed:
+    measured, 8 of the 16 probes walk the branch WITHOUT the assume and
+    record an EMPTY witness map, and the subset test fails on every one.
+    A sound refutation, lost to the static requirement. Withholding is the
+    safe direction and this is a real price, recorded here rather than
+    left to be rediscovered.
+    """
+    from jax import lax
+
+    def h():
+        x = any_array((), "float64", (0.0, 1.0))
+
+        def has_assume(v):
+            assume(v >= 2.0)  # EMPTY within the branch
+            return v * 2.0
+
+        y = lax.cond(x >= 0.5, has_assume, lambda v: v, x)
+        return (assert_(y <= -1.0),)
+
+    c = trace(h)
+    required = P._assume_equation_ids(c.jaxpr)
+    assert len(required) == 1
+
+    walked_around = 0
+    for k in range(P._PROBE_COUNT):
+        probe = P._Propagator("constrain", "real")
+        probe.pin = k
+        try:
+            probe.run(c.jaxpr, list(c.consts), [])
+        except Exception:  # noqa: BLE001
+            continue
+        if not probe.assume_witness:
+            walked_around += 1
+    assert walked_around, (
+        "no probe walked around the assume, so this row is not measuring "
+        "the static requirement at all"
+    )
+
+    p = propagate(c)
+    assert p.region_inhabited is False
+    assert p.obligations[0].status == "unknown"
+
+
 # --- 3. the witness is a MEMBER of the declared set ---------------------------
 
 

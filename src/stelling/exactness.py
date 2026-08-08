@@ -145,14 +145,53 @@ def certifies_point_witness(
     the probe instead, a query whose only doubtful assume lives in an
     untaken branch would certify itself by walking around it — a
     branch-scoped empty precondition wearing a top-level witness's
-    clothes. The asymmetry is deliberate and is what makes this build
-    decline every branch-scoped assume rather than reason about it.
+    clothes.
+
+    **What that does and does not say about branch-scoped assumes, since
+    an earlier version of this paragraph said the stronger thing.** It
+    declines every assume a probe walked AROUND. It does NOT decline every
+    branch-scoped assume: forcing a cond forces it EITHER WAY, so a probe
+    whose pinned point takes the branch evaluates the assume in it, and an
+    assume that is definitely true at that point is witnessed and
+    certified like any other. Measured, and pinned by
+    ``test_an_assume_the_probe_walks_INTO_is_witnessed_and_certified``: a
+    query whose ONLY assume sits inside a ``lax.cond`` branch certifies on
+    probe 1, the declared box's high corner, and its withheld violation
+    correctly comes back. That recovery is sound — at that point the
+    program really does take the branch and really does satisfy the
+    assume. What protects branch-scoped VIOLATIONS is a second,
+    independent mechanism in :mod:`stelling.propagate`
+    (``_reachability_witnesses`` returns the empty set on any run with
+    ``any_constrained or assume_dropped``, which is every run this
+    certificate can fire on), not this subset test.
+
+    The asymmetry still costs recoveries, and in exactly the shape the
+    overstated sentence claimed it prevented: a region inhabited only via
+    the UNTAKEN branch — every admissible point walks the side WITHOUT the
+    assume — is required-and-not-witnessed on every probe, so a sound
+    refutation is withheld
+    (``test_a_region_inhabited_only_via_the_UNTAKEN_branch_is_not_recovered``).
 
     **Empty ``required_assumes`` answers no.** A query with no assume has
     nothing whose satisfiability is in doubt, so it never reaches the
     withholding this lifts; answering yes there would be a certificate
     with no content, and a later caller reading a True would be reading a
     claim nobody established.
+
+    **That guard is DEAD in production, and the docstring says so rather
+    than presenting a constant as a live decision.** The one production
+    caller (:func:`stelling.propagate._region_witness`) runs
+    ``if not required: return False`` before its probe loop, so every call
+    that reaches here from the propagator carries a non-empty set.
+    MEASURED, not reasoned: instrumenting this function and running the
+    whole suite on jax 0.11.0 records **2169 calls from
+    ``_region_witness``, non-empty at 2169 of 2169**, and **1392 of 1392**
+    over ``scratchpad/pin/corpus_pin.py``. The only empty-set calls in the
+    tree are the 2 from
+    ``test_the_point_witness_decision_is_one_sided_and_static``, which
+    exercises this guard directly and is the reason it stays: an importer
+    that has not got the propagator's early return is not a hypothetical,
+    it is the documented purpose of this module.
 
     **ONE-SIDED, and this is the load-bearing sentence.** A False answer
     means *no witness was found*. It is **not** a proof that the region is

@@ -310,6 +310,48 @@ def test_assume_certification_routes_through_the_shared_primitive(monkeypatch):
     assert any("UNCERTIFIED" in n for n in p2.notes)
 
 
+def test_the_nonemptiness_route_is_pinned_in_the_TRUE_direction(monkeypatch):
+    """The OTHER half of the routing pin above, and the half that was
+    missing: force the shared decision **True** on a run that would
+    otherwise withhold, and require the propagator to STOP withholding.
+
+    **Why a False-only pin is only half a pin.** The consumer at
+    ``propagate.py`` reads the shared answer as one operand of an ``and``.
+    A leg that kept a private copy of the same rule and wrote
+    ``exactness.certifies_nonemptiness(...) and _own_copy(...)`` still
+    calls the shared function, with the real arguments, first — so the
+    False-direction pin above forces the conjunction False, the leg
+    withholds exactly as required, and the pin passes on a leg that has
+    stopped obeying the shared decision. A conjunct can only ever be
+    observed through the answer it VETOES. Forcing True is what observes
+    the answer it GRANTS, and a private copy cannot follow it.
+
+    The certificate is closed throughout: it is the second, independent
+    route to the same conclusion, and leaving it open would let the
+    positive control pass without the shared decision doing anything.
+    """
+    q = _uncertified_but_inhabited_query()
+    _close_the_certificate(monkeypatch)
+
+    # positive control, with only the certificate closed: the run really
+    # does withhold, so the lift below is observing something
+    p0 = propagate(q)
+    assert p0.obligations[0].status == "unknown"
+    assert p0.narrowing_uncertified is True
+
+    monkeypatch.setattr(
+        exactness, "certifies_nonemptiness", lambda *a, **k: True
+    )
+    p1 = propagate(q)
+    assert p1.narrowing_uncertified is False, (
+        "the propagator must reach exactness.certifies_nonemptiness and "
+        "take its answer — not AND it with a private copy of the same rule, "
+        "which a False-only pin cannot tell apart"
+    )
+    assert p1.obligations[0].status == "violated-over-set"
+    assert not any("UNCERTIFIED" in n for n in p1.notes)
+
+
 def test_routing_pin_covers_the_f8_channel_too(monkeypatch):
     # a definitely-true no-op assume certifies via the definitely_true
     # argument of the shared primitive; forcing the primitive False must
@@ -457,6 +499,72 @@ def test_the_shared_point_is_one_sided_on_both_legs(monkeypatch):
     ra, rep = affine.refine_propagation(qa, pa)
     assert ra.obligations[0].status == "discharged"
     assert rep.discharged == (0,)
+
+
+def test_both_legs_follow_the_shared_point_in_the_TRUE_direction(monkeypatch):
+    """The missing half of the RUN-level routing pin, on both legs at once.
+
+    ``test_both_legs_consult_the_shared_set_refutation_point`` forces the
+    shared answer False and requires both legs to withhold. That is the
+    RESTRICTIVE direction only, and on its own it is **half a pin**: a leg
+    that kept a private copy of the run-level rule and wrote
+
+        not (exactness.certifies_set_refutation(<all three kwargs>)
+             and _own_copy(propagation))
+
+    still reaches the shared point, unconditionally, as the FIRST operand,
+    with all three real keyword arguments — so the recorder pin below sees
+    exactly what it expects, the forced ``False`` still makes the whole
+    conjunction False, and both legs still withhold. Measured on this
+    tree: that mutant on the affine leg alone, and on both legs at once,
+    each pass the whole suite **2398 passed / 2 skipped / 0 failed**. A
+    conjunct is observable only through the answers it VETOES; the answers
+    it GRANTS are what this test observes.
+
+    So: force the shared answer **True** on runs that would otherwise
+    withhold, and require BOTH legs to stop withholding. A private copy
+    cannot follow that forcing, because its own answer is still False.
+
+    (The interval leg's query is ``_dropped_and_uncertifiable_query``,
+    defined below with the certificate's pins: its assumed region is empty
+    and unwitnessable, which is precisely why the run withholds with
+    nothing else lifting it.)
+    """
+    # --- leg 1, the interval propagator ---------------------------------
+    qi = _dropped_and_uncertifiable_query()
+    pi = propagate(qi)
+    # positive control: unpatched, this run really does withhold
+    assert pi.obligations[0].status == "unknown"
+    assert pi.assume_dropped is True
+    assert pi.region_inhabited is False
+
+    # --- leg 2, the affine refinement -----------------------------------
+    qa = _affine_refuted_query()
+    pa = dataclasses.replace(propagate(qa), assume_dropped=True)
+    ra, rep = affine.refine_propagation(qa, pa)
+    # positive control: unpatched, this refinement really does withhold
+    assert ra.obligations[0].status == "unknown"
+    assert rep.violated == ()
+
+    monkeypatch.setattr(
+        exactness, "certifies_set_refutation", lambda **k: True
+    )
+
+    pi2 = propagate(qi)
+    assert pi2.obligations[0].status == "violated-over-set", (
+        "the interval leg must TAKE the shared answer, not AND it with a "
+        "private copy of the same rule — a False-only pin cannot tell the "
+        "two apart"
+    )
+    assert not any("WITHHELD from REFUTED" in n for n in pi2.notes)
+
+    ra2, rep2 = affine.refine_propagation(qa, pa)
+    assert ra2.obligations[0].status == "violated-over-set", (
+        "the affine refinement must TAKE the same shared answer, for the "
+        "same reason"
+    )
+    assert rep2.violated == (0,)
+    assert not any("WITHHELD from REFUTED" in n for n in ra2.notes)
 
 
 # --- the CERTIFICATE's own routing pins ---------------------------------------

@@ -455,3 +455,233 @@ branch adds 31 tests and removes none.
 
 Raw outputs are the `RESULTS_*.txt` beside them, each with the load
 average it was taken under.
+
+---
+
+# OUTCOMES ROUND 2 — a blinded audit of this entry, repaired
+# (appended 2026-08-08; nothing above is edited)
+
+Branch `fix/shared-point-pin-both-directions`, off `main` @ `0ad22bb`,
+own worktree under `/home/nick/MSF/.wt-pin/`. Baseline in that worktree,
+verified before any edit: **2398 passed / 2 skipped** on jax 0.11.0.
+Every mutant below is a SEPARATE worktree, run with `python -B` and
+`__pycache__` cleared. The audit's finding list is the pre-registration
+for this round; each finding below carries the command that reproduced it
+or the reason it did not.
+
+## F1 — the routing pins closed only the RESTRICTIVE direction
+
+**REPRODUCED.** Every patch of a shared decision in
+`tests/test_exactness_lift.py` was `lambda **k: False` (`:398`, `:436`)
+or a delegating recorder (`:596`), so nothing ever forced
+`certifies_set_refutation` TRUE. A leg can therefore keep a private copy
+of the run-level rule and demote the shared function to an `and`-veto —
+the call still happens, unconditionally, as the FIRST operand, with all
+three real keyword arguments, so the recorder sees exactly what it
+expects and a forced `False` still vetoes.
+
+| mutant | what it does | whole suite, jax 0.11.0 |
+|---|---|---|
+| `M4_affine_and_private` | affine leg: `not (shared(...) and _affine_own_set_refutation(p))` | **2398 passed, 2 skipped, 0 failed** |
+| `M5_both_and_private` | the same on BOTH legs | **2398 passed, 2 skipped, 0 failed** |
+| `M6_nonemptiness_and_private` | `certifies_nonemptiness(...) and (def_true or id in exact)`, written line-count-preserving so `docs/supported-primitives.md` is not disturbed | **2398 passed, 2 skipped, 0 failed** |
+
+The divergence the pins miss, measured with
+`certifies_set_refutation = lambda **k: True` on `x - x >= 0.5` with
+`assume_dropped=True`:
+
+    real build   affine status  unknown -> violated-over-set
+    M4           affine status  unknown -> unknown        (diverged)
+    M5           both legs      unknown -> unknown        (diverged)
+
+**FIX.** Two new pins, each forcing its decision TRUE on a run that would
+otherwise withhold:
+
+* `test_both_legs_follow_the_shared_point_in_the_TRUE_direction` —
+  `certifies_set_refutation` forced True; the interval leg on the
+  `reduce_and`-dropped query and the affine leg on `x - x >= 0.5` with a
+  dropped assume must BOTH stop withholding. Reddens **M4** (affine half)
+  and **M5** (interval half first).
+* `test_the_nonemptiness_route_is_pinned_in_the_TRUE_direction` —
+  `certifies_nonemptiness` forced True with the certificate's route
+  closed; `narrowing_uncertified` must not be set and the violation must
+  stand. Reddens **M6**, which the 14 pre-existing tests in that file pass
+  14/14.
+
+## The full inventory of shared-point pins, and which direction each forces
+
+| site | decision | before | after |
+|---|---|---|---|
+| `test_exactness_lift.py:304` (`..._routes_through_the_shared_primitive`) | `certifies_nonemptiness` | False only | False only |
+| `test_exactness_lift.py:334` (`..._covers_the_f8_channel_too`) | `certifies_nonemptiness` | False only | False only |
+| **NEW** `..._nonemptiness_route_is_pinned_in_the_TRUE_direction` | `certifies_nonemptiness` | — | **True** |
+| `test_exactness_lift.py:398` (`test_both_legs_consult_...`) | `certifies_set_refutation` | False only | False only |
+| `test_exactness_lift.py:436` (`..._is_one_sided_on_both_legs`) | `certifies_set_refutation` | False only | False only |
+| **NEW** `test_both_legs_follow_the_shared_point_in_the_TRUE_direction` | `certifies_set_refutation` | — | **True** |
+| `test_exactness_lift.py:596` (`..._names_the_certificate`) | `certifies_set_refutation` | delegating recorder (neither) | unchanged |
+| `test_exactness_lift.py:564` / `:574` (`..._witness_route_is_the_shared_primitive_too`) | `certifies_point_witness` | **False AND True** | unchanged — already whole |
+
+AFFECTED and now fixed: `certifies_nonemptiness`, `certifies_set_refutation`.
+NOT affected: `certifies_point_witness` (already pinned both ways), and
+the recorder (an argument-level pin, which forces no direction by design
+and is the only thing that sees a dropped keyword).
+
+**Four further `lambda **k: False` patches of `certifies_point_witness`
+are CONTROLS, not pins**, and forcing them True would be meaningless:
+`test_exactness_lift.py:265` (`_close_the_certificate`),
+`test_nonempty_certificate.py:65` (`_without_certificate`),
+`test_vacuous_refutation.py:390` and `test_membership_idiom_hint.py:344`.
+Each closes the certificate's independent route so a DIFFERENT mechanism
+is observable underneath it. They still carry restrictive-direction
+routing signal — a private copy would make the patch inert and each
+would fail — which is the `M1_inline_witness` "reddens six" result.
+
+## F1 minor — the M2/M3 mutant names
+
+**REPRODUCED.** `scratchpad/cert/apply_mutant.py` shows `m2`/`m3` keep
+`exactness.certifies_set_refutation(...)` and drop the `region_inhabited`
+keyword; neither inlines anything. A GENUINE inlining — the call gone,
+the expression written out — reddens **2** tests on each leg, not 1:
+
+    M2g_genuine_inline_interval   2 failed, 2396 passed, 2 skipped
+    M3g_genuine_inline_affine     2 failed, 2396 passed, 2 skipped
+    (test_both_legs_consult_the_shared_set_refutation_point and
+     test_every_reach_of_the_shared_point_names_the_certificate)
+
+`SOUNDNESS.md` now says so and gives the names to read them by.
+
+## F2 — "BRANCH-SCOPED ASSUMES ARE NEVER CERTIFIED" is false
+
+**REPRODUCED.** An `assume` inside a `lax.cond` branch with nothing at
+top level: probe 1 (the declared box's HIGH corner) forces the branch, the
+assume is evaluated, witnessed and certified —
+`region_inhabited: True`, note *"probe point 1 of the declared set
+satisfies every assume"*, obligation back at `violated-over-set`. The
+recovery is sound. Corrected in three places (`SOUNDNESS.md`,
+`_region_witness`, `exactness.certifies_point_witness`), which now
+separate the static requirement (declines an assume the probe walked
+AROUND) from `_reachability_witnesses` returning ∅ (which is what
+actually protects branch-scoped violations).
+
+**And the cost, measured.** A region inhabited only via the UNTAKEN
+branch is not recovered: `assume(v >= 2)` inside the `x >= 0.5` branch of
+`x ∈ [0, 1]` — **8 of 16 probes walk around it with an EMPTY witness
+map**, the certificate declines, the obligation stays `unknown`, and a
+20 000-sample oracle over the executed program finds **9880 admissible
+violating points**. A sound refutation lost to the static requirement, in
+exactly the shape the old sentence claimed the rule prevented.
+
+Pinned by `test_an_assume_the_probe_walks_INTO_is_witnessed_and_certified`
+and `test_a_region_inhabited_only_via_the_UNTAKEN_branch_is_not_recovered`.
+
+## F3 — constant arguments at shared points
+
+**REPRODUCED, with my own counts.** Instrumented worktree
+(`/home/nick/MSF/.wt-pin/instr`), whole suite jax 0.11.0:
+
+* `affine.py`'s reach of the shared point: **29 calls, all 29 with
+  `nonemptiness_certified=True` and `coverage.constrained == 0`** (19 with
+  `assume_dropped` False, 10 with it True, of which 2 carry a certificate).
+  Over `scratchpad/pin/corpus_pin.py`: **68 of 68**. (The audit reported
+  26/26 and 17/17; the direction reproduces, the counts are mine.)
+  Structurally constant, not merely empirically: `narrowing_uncertified`
+  is set inside the `if narrowed:` block whose head sets `any_constrained`
+  and calls `counter.record_constrained`, and `refine_propagation`
+  declines wholly on `coverage.constrained` before the loop. Verified
+  over the corpus: **380 propagations, 48 with `narrowing_uncertified`,
+  0 of those with `coverage.constrained == 0`**.
+* `certifies_point_witness`'s `bool(required_assumes)` guard: **2169 calls
+  from `_region_witness`, non-empty at 2169 of 2169** — dead in
+  production, because `if not required: return False` runs first. The only
+  empty-set calls in the tree are the **2** from
+  `test_the_point_witness_decision_is_one_sided_and_static`, which
+  exercises the guard directly. (The audit reported 2153/2153 and did not
+  separate the direct test calls.)
+
+Both facts are now stated AT the call site / in the function's own
+docstring, not left to be derived from a `SOUNDNESS.md` entry in another
+file.
+
+## F4 — "31 tests added, none removed"
+
+**REPRODUCED exactly.** `--collect-only` id diff, `681c6ef` (2371 ids) vs
+`0ad22bb` (2400 ids): **31 added, 2 removed, net +29**, matching
+2369 → 2398. Removed:
+`test_doc_examples.py::test_doc_example[harness-api.md:614]` and
+`[harness-api.md:660]`; `docs/harness-api.md` gained 11 lines and lost 2,
+so both blocks shifted 9 lines and re-entered as `[:623]` and `[:669]`,
+which are among the 31 added. Restated in `SOUNDNESS.md`.
+
+## F5 — a boundary paragraph scoped to one dial
+
+**REPRODUCED.** With `x0` and `x1` each declared as their own point:
+
+    real : region_inhabited=False  status=unknown
+    ieee : region_inhabited=True   status=violated-over-set
+
+Sound under ieee — jax executes binary64, in which
+`0.1 + 0.2 == 0.30000000000000004` exactly. The sentence is now scoped
+inside itself in `SOUNDNESS.md` and in `_region_witness`.
+
+**The other direction, on my own corpus:** **11 rows certify under `real`
+and not under `ieee`**, among them every `float32` and every `int32` row
+whose assume narrows an over-approximated intermediate (4 each), and 0 the
+other way in that corpus — the ieee-only direction being the boundary
+point above, which the corpus's grid does not contain. (The audit
+reported 2 rows each way, on the `scratchpad/cert/` corpus.)
+
+## F6 — one search is capped, the other is not
+
+**Non-contradiction: CONFIRMED, and stronger than reported.** The two
+searches are MUTUALLY EXCLUSIVE. `_region_witness` gets past its gate only
+when `narrowing_uncertified or assume_dropped`; `narrowing_uncertified`
+implies `any_constrained` (same `if narrowed:` block); and
+`any_constrained or assume_dropped` is exactly when
+`_reachability_witnesses` returns ∅ BEFORE probing.
+
+**The combined worst case therefore DOES NOT REPRODUCE as stated.** The
+audit says a query reaching both pays up to `16 +
+_certificate_probe_count(n)` propagations. No query can reach both.
+Measured over 380 propagations of `scratchpad/pin/corpus_pin.py`: **0 pay
+for both, worst combined probe count 16.**
+
+**The underlying complaint stands and is corrected.**
+`_reachability_witnesses` is uncapped at any declared size. Measured
+(jax 0.11.0, load 0.41, violation inside a `lax.cond` branch):
+
+    n         propagate ms   bare walk ms   reach probes
+    16               1.6            0.1          16
+    256              7.9            0.3          16
+    4096           114.5            4.5          16
+    16384          462.4           18.0          16
+
+462.4 ms against an 18.0 ms walk at n = 16384 — four times the size cap —
+is the same 96%-of-the-pipeline shape the certificate's cap was added to
+fix. The cost sentence in `SOUNDNESS.md` and the comment block at
+`_CERT_MAX_ELEMENTS` now say which search they bind.
+
+**DECISION: the older search is NOT capped on this branch, because
+capping it moves verdicts.** Measured over 21 branch-violation rows at
+n = 4 … 16384: **15 reachability keys asked, 3 lost** under a
+`_certificate_probe_count` cap — the `x[0] > x[1]` shape at n ≥ 4096,
+first certified by probe index 3 (the plain anchors put every element at
+the same value and cannot witness a relation between two of them) against
+a budget floor of exactly 3. Each loss is `violated-over-set` →
+`unknown`. Safe direction, real cost; recorded rather than taken.
+
+## No verdict moved
+
+`scratchpad/pin/corpus_pin.py`, 95 rows × {real, ieee} × {constrain,
+inert} × {interval, affine} plus `check()` at `refine=None` and
+`refine="affine"`, diffed key-for-key between a clean `0ad22bb` worktree
+and this branch: **1826 per-obligation and per-verdict status keys, 0
+moved; 0 non-status keys differ** (worktree paths in `source_info`
+strings normalised, and only those).
+
+## Where to reproduce
+
+* `scratchpad/pin/corpus_pin.py run OUT.json` / `diff A.json B.json`
+* the mutants, each its own worktree off `0ad22bb`:
+  `M4_affine_and_private`, `M5_both_and_private`,
+  `M6_nonemptiness_and_private`, `M2g_genuine_inline_interval`,
+  `M3g_genuine_inline_affine`.

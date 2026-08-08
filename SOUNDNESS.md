@@ -2865,33 +2865,109 @@ verdicts:
   POINT and its meet comes out empty. The certificate is the second line
   there, not the first.
 
-  **The boundary cases, measured.** At the point `(0.1, 0.2)` the
+  **The boundary cases, measured — and SCOPED TO THEIR DIAL inside the
+  sentence, because the qualifying paragraph is 20 lines below and the
+  reader meets the strong sentence first.** At the point `(0.1, 0.2)` the
   predicate `x0 + x1 >= 0.30000000000000004` is TRUE in binary64 and FALSE
-  in ℝ; under `semantics="real"` the box is
+  in ℝ; **under `semantics="real"`, and only there,** the box is
   `[0x1.3333333333333p-2, 0x1.3333333333334p-2]`, which straddles the
   bound, so the predicate is INDETERMINATE and **no witness is claimed**.
   An exact-rational checker would answer FALSE there; this answers "not
   established", which withholds. Weaker, never unsound — and never in
   disagreement with the propagation that judged the query, which is the
   reason for running the check in stelling's own arithmetic rather than
-  beside it. `sqrt`/`sin`/`exp`/`log` are a boundary and not a gap on the
+  beside it. **Under `semantics="ieee"` the same query CERTIFIES and
+  REFUTES**, and that is sound for its own dial: jax executes binary64,
+  in which `0.1 + 0.2 == 0.30000000000000004` exactly, so the point
+  genuinely satisfies the assume AS EXECUTED. Measured on this tree with
+  `x0` and `x1` each declared as their own point — `region_inhabited`
+  False and the obligation `unknown` under `real`, `region_inhabited`
+  True and `violated-over-set` under `ieee`. The trade runs both ways and
+  the other direction is not free either: measured over
+  `scratchpad/pin/corpus_pin.py`, **11 rows certify under `real` and not
+  under `ieee`** — among them every `float32` and every `int32` row whose
+  assume narrows an over-approximated intermediate (4 each) — and **0 the
+  other way in that corpus**, the `ieee`-only direction being exactly the
+  boundary point above, which the corpus's grid does not contain.
+  `sqrt`/`sin`/`exp`/`log` are a boundary and not a gap on the
   same rule: the enclosure at a pinned point has width, a bound inside
   that width certifies nothing (`sqrt` of the point 0.25 against `>= 0.5`
   — exactly true, and INDETERMINATE here), and a bound clear of it
   certifies soundly (`sqrt(x+1) >= 1.2` at `x = 0.5`).
 
-  **BRANCH-SCOPED ASSUMES ARE NEVER CERTIFIED**, by two independent
-  mechanisms. The requirement is the STATIC set of `stelling_assume`
-  equations in the IR and the witness is what one pinned walk evaluated,
-  so an assume in a branch the probe did not take is required and not
-  witnessed. And the certificate can only fire on a run that narrowed or
-  dropped an assume, on which `_reachability_witnesses` certifies nothing
-  at all — so every branch-scoped violation stays withheld by the branch
-  pass however inhabited the top-level region is.
+  **AN ASSUME THE PROBE WALKED AROUND IS NEVER CERTIFIED, AND
+  BRANCH-SCOPED VIOLATIONS ARE NEVER RESTORED — two different mechanisms,
+  and an earlier version of this heading conflated them into the single
+  false sentence "branch-scoped assumes are never certified".** The two,
+  separately:
+
+  * *the static requirement.* The requirement is the STATIC set of
+    `stelling_assume` equations in the IR and the witness is what one
+    pinned walk evaluated, so an assume in a branch the probe did not take
+    is required and not witnessed. This does **not** decline every
+    branch-scoped assume: pinning a declaration FORCES the cond, and
+    forcing it can force it EITHER WAY. Counter-construction, measured and
+    pinned: a query whose ONLY assume sits inside a `lax.cond` branch is
+    certified on probe 1 — the declared box's high corner, which forces
+    the branch — with `region_inhabited: True`, the note *"probe point 1
+    of the declared set satisfies every assume"*, and the obligation back
+    at `violated-over-set`. **The recovery is sound**: at that point the
+    program really does take the branch, really does evaluate the assume
+    and really does satisfy it, and an oracle over the executed program
+    finds the region inhabited. What was wrong was the safety argument,
+    not the behaviour
+    (`test_an_assume_the_probe_walks_INTO_is_witnessed_and_certified`).
+  * *the reachability search.* The certificate can only fire on a run that
+    narrowed or dropped an assume, on which `_reachability_witnesses`
+    returns the empty set (`any_constrained or assume_dropped`) and
+    certifies nothing at all — so every branch-scoped violation stays
+    withheld by the branch pass however inhabited the top-level region is.
+    This one is true, it is the mechanism that actually protects
+    branch-scoped violations, and it is independent of the first.
+
+  **What the static requirement COSTS, in the shape the old heading
+  claimed it prevented.** A region inhabited only via the UNTAKEN branch —
+  every admissible point walks the side WITHOUT the assume, so nothing
+  there is required of it — is required-and-not-witnessed on every probe
+  and its refutation is withheld. Measured: on
+  `assume(v >= 2)` inside the `x >= 0.5` branch of `x ∈ [0, 1]`, 8 of the
+  16 probes walk around the assume with an EMPTY witness map, the
+  certificate declines, the obligation stays `unknown` — and a 20 000-point
+  oracle over the executed program finds **9880 admissible violating
+  points**. A sound refutation, lost to the static requirement. Withholding
+  is the safe direction and this is a real price
+  (`test_a_region_inhabited_only_via_the_UNTAKEN_branch_is_not_recovered`).
 
   **THE COST, with load averages** (`scratchpad/cert/RESULTS_cap.txt`,
-  jax 0.11.0, load 0.06–0.44). Bounded by the DECLARED SIZE twice over. A
-  size cap (`_CERT_MAX_ELEMENTS = 4096`) stops the search entirely above
+  jax 0.11.0, load 0.06–0.44). **This search — `_region_witness`, the new
+  one — is bounded by the DECLARED SIZE twice over. `propagate.py`'s
+  OTHER witness search is not**, and the sentence used to read as though
+  the module had one. `_reachability_witnesses`, the branch-reachability
+  probe, still runs `for k in range(_PROBE_COUNT)` — 16 whole
+  propagations — at any declared size: measured on this tree (jax 0.11.0,
+  load 0.49, a violation inside a `lax.cond` branch) `propagate` costs
+  **480.3 ms against an 18.8 ms bare walk at n = 16384**, four times the
+  size cap below, which is the same 96%-of-the-pipeline shape the cap was
+  added to fix. **The two are MUTUALLY EXCLUSIVE, so no query pays for
+  both**: `_region_witness` gets past its gate only when
+  `narrowing_uncertified or assume_dropped`, `narrowing_uncertified` is
+  set in the same `if narrowed:` block that sets `any_constrained`, and
+  `any_constrained or assume_dropped` is exactly when
+  `_reachability_witnesses` returns ∅ before probing. Measured over
+  `scratchpad/pin/corpus_pin.py`, 380 propagations: **0 pay for both, and
+  the worst combined probe count is 16** — not `16 +
+  _certificate_probe_count(n)`. The same fact is why they cannot
+  contradict each other. **The older search is deliberately left uncapped
+  on this branch**, because capping it moves verdicts: over 21
+  branch-violation rows at n = 4 … 16384, a `_certificate_probe_count`
+  cap loses **3 of 15** reachability keys — the `x[0] > x[1]` shape at
+  n ≥ 4096, first certified by probe 3 (the plain anchors put every
+  element at the same value and cannot witness a relation between two of
+  them) against a budget floor of exactly 3 — and each loss is a
+  `violated-over-set` → `unknown` move. Safe direction, real cost,
+  measured rather than assumed away. The bounds that DO apply, to the new
+  search only: a size cap (`_CERT_MAX_ELEMENTS = 4096`) stops it entirely
+  above
   it; a probe budget in element-probes
   (`_CERT_PROBE_BUDGET = 4096`, floor `_CERT_MIN_PROBES = 3`) scales the
   probe count down as the declaration grows. The second bound was added
@@ -2948,6 +3024,21 @@ verdicts:
   32 corpus verdicts are identical to the real build under all three**
   (`scratchpad/cert/RESULTS_mutants.txt`) — a pin that checked only
   verdicts would see nothing.
+
+  **Those two mutant NAMES are wrong, and the numbers beside them are
+  right.** `M2_inline_setref_interval` and `M3_inline_setref_affine` do
+  not inline anything: read
+  `scratchpad/cert/apply_mutant.py`, each keeps
+  `exactness.certifies_set_refutation(...)` and DROPS the third keyword
+  argument, lifting the withholding locally beside a call that still
+  happens. That is why they redden exactly one test — the recorder pin,
+  which is the only one that looks at arguments. A GENUINE inlining, the
+  call gone and the expression written out, reddens **two** on each leg —
+  `test_both_legs_consult_the_shared_set_refutation_point` as well as the
+  recorder — measured on this tree at `0ad22bb`: 2 failed / 2396 passed /
+  2 skipped for each of the two legs. Read the names as
+  *`M2_local_lift_interval`* / *`M3_local_lift_affine`*; the mutants
+  themselves are unchanged and their published counts stand.
 
   **The certificate is LIVE on the affine leg, and it took a second look
   to make it so.** The search's gate first asked only "did the interval
@@ -3010,7 +3101,18 @@ verdicts:
   0.10.2 (140.30 s and 139.97 s, load 0.59 and 2.85), `--collect-only`
   ids byte-identical between them (2400), `reuse lint` rc=0 with 317/317
   files carrying copyright and license information. Baseline at `681c6ef`
-  was 2369 / 2 on both: 31 tests added, none removed.
+  was 2369 / 2 on both: **31 tests added and 2 REMOVED, net +29** — which
+  is the 2369 → 2398 delta, and the sentence that said "none removed" did
+  not match its own arithmetic. The two removed are
+  `tests/test_doc_examples.py::test_doc_example[harness-api.md:614]` and
+  `[harness-api.md:660]`, and no example was deleted: `docs/harness-api.md`
+  gained 11 lines and lost 2, so both blocks shifted 9 lines and re-entered
+  the collection as `[harness-api.md:623]` and `[harness-api.md:669]`,
+  which are among the 31 "added". Measured by `--collect-only` id diff
+  between `681c6ef` (2371 ids) and `0ad22bb` (2400 ids). Same
+  line-number-keyed-id artefact class as `docs/supported-primitives.md`:
+  a doc-example id is a file:line pair, so editing prose above a block
+  retires one id and mints another.
 
   Constructions: `tests/test_nonempty_certificate.py` (one-sidedness,
   the `discharged` ledger with its positive control, membership, the
