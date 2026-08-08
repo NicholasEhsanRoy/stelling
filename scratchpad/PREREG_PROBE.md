@@ -431,3 +431,54 @@ comparison of the two remedies.
 same checkout, load average 0.44 and 6.01 at the two starts.
 `--collect-only` collects **2350** ids on both series and the two id sets are
 byte-identical (`diff` empty); `62e4190` collected 2331.
+
+---
+
+## Second correction, appended 2026-08-08 by an independent claim re-check
+
+Nothing above either rule line is edited.
+
+**The untabled-dtype default-deny was recorded as latent and is latent
+only on the integer half.** `SOUNDNESS.md` entry (5) said of it *"That
+one is latent — no construction over it moved a verdict, including its
+positive control"*. Re-measured on jax 0.11.0, `JAX_ENABLE_X64=1`, at
+`688e829` / `62e4190` / `0222925` / `43896fc`, with
+`cond(w.astype(int32) > 1000, assert_(v > 5.0), assert_(v > -9.0))` over
+`any_array((), D, (-1e9, 1e9))`:
+
+| D | 688e829 | 62e4190 | 0222925 | today | ground truth (ml_dtypes) |
+|---|---|---|---|---|---|
+| `int2`, `uint2` (5 constructions each, controls incl.) | UNKNOWN | UNKNOWN | UNKNOWN | UNKNOWN | latent, as recorded |
+| `float8_e4m3fn` | **REFUTED** | **REFUTED** | UNKNOWN | UNKNOWN | 253 finite values, max 448 → **0** members satisfy the guard: the REFUTED was WRONG |
+| `float8_e5m2` | **REFUTED** | **REFUTED** | UNKNOWN | UNKNOWN | 247 finite values, max 57344 → **24** members satisfy it: the REFUTED was SOUND and is LOST |
+
+So the default-deny closed a live wrong REFUTED and paid for it with
+sound ones over the sibling format — a trade the entry recorded as a
+cost-free latent fix. `float8_e4m3fn`'s own positive control
+(`w.astype(int32) > -1000`, true at all 253 members) is lost the same
+way. Both halves are now in the SOUNDNESS entry.
+
+**`bfloat16` is one table row away from two false REFUTEDs, and that row
+is what the repair defends.** `bfloat16 (-1.0, 1.0)` with
+`cond(w.astype(int32) > 0, …)` is REFUTED at all four revisions and
+soundly so (`1.0` is a member). With `("bfloat16", "float64")` added to
+`_EXACT_CONVERSIONS` in a scratch mutant, `688e829` and `62e4190` mint
+**two** false REFUTEDs — the wide box with `w.astype(float64) > 1e39`
+(`bfloat16` tops out at `3.39e38`) and the sub-ulp box `(v0, (v0 +
+nextafter(v0))/2)` with `> v0` — and `0222925` and today mint **none**,
+keeping both positive controls REFUTED. CONFIRMED, in a scratch worktree,
+not reasoned.
+
+**C2's rounding figure had the wrong provenance.** The SOUNDNESS entry
+said `float64` identity was "measured over 80028 values"; the shipped
+test checks **1013 values × 4 formats × 2 directions = 8104** directed
+roundings (`float64` leg: 2026), and an independent 60009-value sweep ×
+2 directions = 120018 roundings finds 0 mismatches. The result stands;
+only the number was not the shipped test's.
+
+**One residual in `_member_bounds`, contained twice.**
+`_member_bounds(nan, 1.0, "float32")` returned `(nan, 1.0)` — `nan >
+1.0` is False so the emptiness guard cannot fire — and the integer path
+raised `ValueError` on `math.ceil(nan)`. Unreachable through the public
+API (`any_array` refuses NaN bounds at declaration; `_probe_point` drops
+non-finite values), measured in both directions, and hardened anyway.

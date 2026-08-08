@@ -1352,11 +1352,26 @@ def assume(pred):
       proof over the region you meant.
 
     The one thing that *is* positional is the narrowing itself, which is
-    applied forward from this call (equation order). That direction only
-    ever widens the set an earlier obligation is judged over, which is
-    the safe direction — it can cost an UNKNOWN, never mint a verdict.
-    So writing preconditions before the obligations they guard is worth
-    doing for precision; it is not what makes them apply.
+    applied forward from this call (equation order). An obligation traced
+    ABOVE this line is judged over a WIDER set than the one you asked
+    about. Both faces of that are sound — a definite violation over the
+    wider set is a violation at every point of the narrower one, and a
+    proof over the wider set is a proof over the narrower one — but it is
+    not verdict-neutral in either direction: **writing the same
+    precondition below an obligation rather than above it can cost a
+    VERIFIED just as it can cost a REFUTED.** Measured on jax 0.11.0, in
+    all four ``refine`` × solver cells of
+    :func:`stelling.preconditions.check`, over a scalar ``float64``
+    declaration on ``(0.0, 1.0)`` with the certified
+    ``assume(x >= 0.9)``: ``assert_(x >= 0.5)`` is **VERIFIED** with the
+    assume written first and **UNKNOWN** with it written last, and
+    ``assert_(x <= 0.5)`` is **REFUTED** first and **UNKNOWN** last. The
+    VERIFIED is the conditional claim and stamps itself as one
+    (``constrained assume at ...: the verdict holds where the
+    precondition holds``), so no cell here is unsound; what the position
+    moves is only how much the checker could decide. So writing
+    preconditions before the obligations they guard is worth doing for
+    precision; it is not what makes them apply.
 
     Simple bounds on an input belong in :func:`any_array`, which is
     exact by construction and needs none of this.

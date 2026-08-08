@@ -70,16 +70,36 @@ itself, never through its defining arithmetic.
 tension.** The two are separate mechanisms and only one of them is
 positional. Narrowing forward-only means an obligation traced above an
 assume is judged over a wider set than the assume describes; that costs
+precision, and both faces of the cost are sound — a definite violation
+over the wider set is a violation at every point of the narrower one, and
+a proof over the wider set is a proof over the narrower one. The
+**withholding** — whether a definite violation may be called REFUTED at
+all — is a fact about the run's whole assume state and is read once, at
+the end, over every obligation
+(`stelling.exactness.certifies_set_refutation`; see the 2026-08-08
+SOUNDNESS entry). Both scopes err toward withholding, which is why they
+can differ without either being unsound. Measured on the change's corpus:
+order-dependent rows fell 16 → 2 of 38, and the 2 survivors are the
+forward-only narrowing above, not the withholding.
+
+**The residual's cost is two-sided, and this section used to state only
+one side (corrected 2026-08-08).** The sentence here read "costs
 precision (an UNKNOWN where a REFUTED was available) and can never mint
-a verdict, because a definite violation over the wider set is a violation
-at every point of the narrower one. The **withholding** — whether a
-definite violation may be called REFUTED at all — is a fact about the
-run's whole assume state and is read once, at the end, over every
-obligation (`stelling.exactness.certifies_set_refutation`; see the
-2026-08-08 SOUNDNESS entry). Both scopes err toward withholding, which is
-why they can differ without either being unsound. Measured on the
-change's corpus: order-dependent rows fell 16 → 2 of 38, and the 2
-survivors are the forward-only narrowing above, not the withholding.
+a verdict", which reads as *the residual cannot touch a VERIFIED*. It
+can. Measured on jax 0.11.0 in all four `refine` × solver cells of
+`check()`, over `x = any_array((), "float64", (0.0, 1.0))` with the
+certified `assume(x >= 0.9)`:
+
+| obligation | assume traced FIRST | assume traced LAST |
+|---|---|---|
+| `assert_(x >= 0.5)` | **VERIFIED** | UNKNOWN |
+| `assert_(x <= 0.5)` | **REFUTED** | UNKNOWN |
+
+Eight cells, all sound. The VERIFIED is the conditional claim and stamps
+itself as one (`constrained assume at ...: the verdict holds where the
+precondition holds — narrowed var 2 to [0.9, 1.0]`), so nothing here is
+a wrong VERIFIED; what the position moves is only how much the checker
+could decide, and it moves it in both directions.
 
 ## The empty region — the empty-set bug, one level up
 

@@ -2440,14 +2440,65 @@ verdicts:
   endpoint it is narrowing, and `math.nextafter` steps to the next
   *binary64*, which for a narrower format is not a value of it: the same
   trap `_INT_DTYPE_BOUNDS` documents for `int64`). `float64` is the
-  identity under this rounding, measured over 80028 values, so the one
-  format that was already right does not move. A dtype whose grid
-  neither table names now yields **no member** rather than the raw
-  interval: `any_array` accepts `int2`, `uint2`, five `float8`/`float4`
-  formats and the two complex dtypes, and `int2 (-1e9, 1e9)` was pinned
-  to `±1e9`, which is not an `int2`. That one is latent — no
-  construction over it moved a verdict, including its positive control —
-  and it is fixed anyway, in the withholding direction.
+  identity under this rounding. **Provenance, corrected 2026-08-08:** an
+  earlier draft of this sentence read "measured over 80028 values", which
+  describes no check this tree performs. What the SHIPPED test
+  (`test_directed_format_rounding_never_crosses_the_value_it_rounds`)
+  builds is **1013 values × 4 formats × 2 directions = 8104 directed
+  roundings**, of which the `float64` leg is **2026**, all identities, 0
+  mismatches. The substance is unaffected and was re-measured
+  independently, on a value list this tree does not contain (uniform
+  draws, `ldexp` draws across the whole binary64 exponent range, and
+  Gaussian draws around `1e-300`): **60009 `float64` values × 2
+  directions = 120018 roundings, 0 mismatches**.
+
+  A dtype whose grid neither table names now yields **no member** rather
+  than the raw interval: `any_array` accepts `int2`, `uint2`, five
+  `float8`/`float4` formats and the two complex dtypes, and `int2 (-1e9,
+  1e9)` was pinned to `±1e9`, which is not an `int2`. **That
+  default-deny is latent on `int2`/`uint2` and LIVE on `float8` — both
+  halves measured on jax 0.11.0, `JAX_ENABLE_X64=1`, and an earlier
+  draft of this entry called the whole of it latent.**
+
+  - `int2`/`uint2`: latent, as recorded. Five constructions per dtype of
+    the shape `cond(w.astype(int32) > 1000, assert_(v > 5.0), assert_(v >
+    -9.0))` over `(-1e9, 1e9)`, positive controls (`>= -2`, `>= 0`, true
+    at every member) included, are **UNKNOWN at `688e829`, `62e4190`,
+    `0222925` and today** — no verdict moves in either direction.
+  - `float8_e4m3fn`: **a live wrong REFUTED, closed.**
+    `any_array((), "float8_e4m3fn", (-1e9, 1e9))` with
+    `cond(w.astype(int32) > 1000, …)` is **REFUTED at `688e829` and at
+    `62e4190`, UNKNOWN from `0222925`**. Ground truth, from
+    `ml_dtypes`/numpy over all 256 bit patterns and never from stelling:
+    the format has **253** distinct finite values, its largest is
+    **448**, so **0** members satisfy the guard — the branch runs at no
+    point of the declared set and the refutation was over nothing.
+  - **And the cost the earlier draft did not state at all.** The same
+    default-deny withholds SOUND refutations over the same formats.
+    `float8_e5m2` (247 distinct finite values, largest 57344) has **24**
+    members with `int32(w) > 1000`, so the branch really runs and its
+    obligation really fails: **REFUTED at `688e829` and `62e4190`,
+    UNKNOWN today** — a real loss. `float8_e4m3fn`'s own positive
+    control, `w.astype(int32) > -1000`, is true at every one of its 253
+    members and is lost the same way. The float8 half of this fix is a
+    trade, not a free withholding, and the trade is in the safe
+    direction.
+  - **`bfloat16` is a third case, and it is the load-bearing one.**
+    `bfloat16` IS in `_FLOAT_FORMATS`, so it is not default-denied, and
+    no `bfloat16` verdict moves across the repair: `bfloat16 (-1.0, 1.0)`
+    with `cond(w.astype(int32) > 0, …)` is REFUTED at all four
+    revisions, soundly (`1.0` is a member and casts to `1`). That stability
+    is bought by ONE table row and nothing else, which the measurement
+    shows rather than argues: with `("bfloat16", "float64")` added to
+    `_EXACT_CONVERSIONS` in a scratch mutant — the only thing standing
+    between these constructions and a verdict — `688e829` and `62e4190`
+    mint **two false REFUTEDs** (`bfloat16 (-1e308, 1e308)` with
+    `w.astype(float64) > 1e39`, false at every `bfloat16` since the
+    format tops out at `3.39e38`; and the sub-ulp box `bfloat16 (v0, (v0
+    + nextafter(v0))/2)` with `w.astype(float64) > v0`, whose declared
+    set is `{v0}`), while `0222925` and today mint **none** and keep both
+    positive controls (`> 1e30`, `>= v0`) REFUTED. The `bfloat16` half of
+    `_member_bounds` is CONFIRMED correct, not merely untested.
 
   Why the fix is the default-deny and not an `int2`/`uint2` row in
   `_INT_DTYPE_BOUNDS` — measured, in its own worktree, not reasoned. With
@@ -2464,6 +2515,26 @@ verdicts:
   so neither turns into a verdict today, and that is precisely the
   argument for not doing it: the repair needed here is a withholding, and
   the table is where admissions come from.
+
+  **One residual in the same function, recorded and hardened (2026-08-08,
+  not reachable through the public API).** `_member_bounds` had no NaN
+  guard, and NaN defeats the emptiness test it relies on: measured,
+  `_member_bounds(nan, 1.0, "float32")` returned `(nan, 1.0)` rather than
+  `(None, None)`, because `nan > 1.0` is False so `m_lo > m_hi` never
+  fires; and on the integer path `_member_bounds(nan, 1.0, "int32")`
+  **raised `ValueError: cannot convert float NaN to integer`**. Both are
+  contained twice over, and both containments were measured, not assumed:
+  `any_array` refuses a NaN bound at declaration for all three
+  placements (`(nan, 1.0)`, `(1.0, nan)`, `(nan, nan)` — *"declare an
+  empty set; refusing at declaration time"*), and `_probe_point` returns
+  `None` on any non-finite value it forms, so the wrong pair could not
+  have become a witness even if it were reached. The guard is added
+  anyway — `return None, None` on a NaN endpoint, ahead of both branches
+  — because the safe answer to "is this box inhabited" under NaN is *no
+  member I can vouch for*, and because the next internal caller would
+  otherwise meet the raise. It moves nothing: 0 of 648 obligation rows
+  across the two assume corpora and 0 of 2357+2 suite outcomes on either
+  jax series.
 
   **Retroactively invalid:** any REFUTED whose refuting obligation sat
   inside a `cond`/`switch` branch certified by a probe over a
@@ -2558,6 +2629,30 @@ verdicts:
   each leg's positive control (a query with no assume at all, which must
   refute on that leg) asserted in the same test.
 
+  **What moving the withholding to the end of the run widened, and what
+  closes it — added 2026-08-08; the change landed with this surface
+  argued nowhere.** Withholding at the assert wrote `unknown` before the
+  obligation reached anything else; withholding at the end writes it into
+  the object two later layers read, and both key on exactly that word
+  (`affine.refine_propagation` and `solvers.escalate` each take `[o for o
+  in propagation.obligations if o.status == "unknown"]`). Obligations
+  that used to arrive at those layers as `violated-over-set` now arrive
+  as candidates. The one-sidedness argument that shipped with the change
+  covers only what `_withhold_uncertified_refutations` itself writes, not
+  this. The invariant that does close it: **both layers decline wholly on
+  a run with `coverage.constrained`**, so every newly offered obligation
+  comes from a run in which nothing was narrowed, where the declared
+  boxes those layers judge over ARE the boxes the interval leg judged —
+  and a sound layer cannot discharge a predicate found definitely FALSE
+  at every point of its own domain, while a re-minted violation meets
+  `certifies_set_refutation` again on the affine leg. Measured across the
+  two assume corpora (100 harness-runs, jax 0.11.0, cvc5 1.3.4 + z3):
+  **24** obligations newly offered to each layer and **34** additional
+  solver invocations, for **0** new affine discharges, **0** new affine
+  violations, **0** solver-decided outcomes (all 34 returned `unknown`)
+  and **0** new VERIFIEDs — 200 verdicts, VERIFIED 14 → 14, with all 48
+  verdict moves REFUTED → UNKNOWN.
+
   The two mechanisms stay **separate flags** — `assume_dropped` and
   `narrowing_uncertified` — rather than one merged "uncertified" bit,
   because the sentence whose job is to explain a withholding may not
@@ -2599,6 +2694,31 @@ verdicts:
   three different corpora and are not comparable with this one or with
   each other.
 
+  **Scope of the 12:6, and what sets it — added 2026-08-08, because
+  "not a rate" understated the problem.** 12:6 is not merely
+  non-extrapolable; it is a restatement of this corpus's own composition.
+  Nine of the 23 harnesses move, six of them with an EMPTY assumed region
+  and three with a non-empty one, and each contributes exactly two
+  obligation-runs (the two `refine` legs). The trade ratio IS the
+  empty:non-empty ratio of the harnesses that move — 2:1 here — and
+  nothing in the change fixes it there. Shown by measurement rather than
+  by argument, on a SECOND corpus built for this purpose
+  (`scratchpad/claims/corpus_b3.py`, jax 0.11.0): not another hand-picked
+  list but the full cross product of the four uncertification mechanisms
+  this tree has (`jnp.all` reduction, relational, disjunction,
+  uncertified narrowing of an over-approximated intermediate) × region
+  ∈ {empty, non-empty} × obligation shape ∈ {elementwise, `reduce_sum`,
+  affine}, so its empty:non-empty ratio is **1:1 by construction** and
+  not by selection; each cell carries one violated and one discharged
+  obligation, in both trace orders, both `refine` legs and both assume
+  modes; 29 harnesses, **464 obligation-runs**, scored per obligation
+  against its own sampling oracle. Result: **32 rows move, all
+  `violated-over-set` → `unknown`, 16 wrong REFUTEDs closed and 16 sound
+  ones lost** — 1:1, tracking the corpus, with 0 moves toward
+  `discharged` and 0 inert-mode differences. Two corpora, two ratios,
+  both set by their own designs: neither is the trade's rate, and no
+  corpus in this tree can supply one.
+
   The 6 are the same class the entry above records: nothing at the
   interval level establishes that a dropped conjunct is SATISFIABLE, so a
   genuine refutation over a non-empty region is withheld beside the
@@ -2624,9 +2744,26 @@ verdicts:
   violation over the WIDER box is a violation at every point of the
   narrowed region, and "certified" means that region was shown inhabited,
   so the refutation stands; the later-order cell merely judges over more
-  and decides less. It can cost an UNKNOWN, never mint a verdict.
-  `stelling.harness.assume`'s docstring now states this, and states it as
-  the one positional thing about an assume.
+  and decides less.
+
+  **The residual has a VERIFIED face too, and this entry described only
+  its refutation face — corrected 2026-08-08.** The sentence that stood
+  here, *"it can cost an UNKNOWN, never mint a verdict"*, is true of the
+  mechanism and false as a reader parses it: it reads as "the residual
+  cannot touch a VERIFIED", and it can. Same declaration, same certified
+  assume, opposite obligation — `x ∈ [0,1]`, `assume(x >= 0.9)`,
+  `assert_(x >= 0.5)` — is **VERIFIED with the assume written first and
+  UNKNOWN with it written last**, measured in all four `refine` × solver
+  cells of `check()` on jax 0.11.0, exactly as `assert_(x <= 0.5)` is
+  REFUTED-then-UNKNOWN in the same four. Both cells are sound and neither
+  is a wrong VERIFIED: the discharge is the CONDITIONAL claim and the
+  stamp says so in itself — *"constrained assume at ...: the verdict
+  holds where the precondition holds — narrowed var 2 to [0.9, 1.0]"* —
+  and the assume-last cell simply judges over more and discharges less.
+  What is true of the residual is that it can only cost precision, in
+  BOTH directions; what is false is that a VERIFIED is out of its reach.
+  `stelling.harness.assume`'s docstring now states both faces with the
+  measurement, as the one positional thing about an assume.
 
   **Byte-identity where nothing should move.** Every corpus run with no
   assume, every run whose assumes are all certified, and **every** run in
