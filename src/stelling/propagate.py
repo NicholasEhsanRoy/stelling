@@ -4380,11 +4380,13 @@ def _member_bounds(lo: float, hi: float, dtype: str):
     big = _FLOAT_MAX[dtype]
     m_lo = -big if lo == -math.inf else _round_in_format(lo, fmt, +1)
     m_hi = big if hi == math.inf else _round_in_format(hi, fmt, -1)
-    # An endpoint past the format's finite range has no value on its far
-    # side, so clamping into the range only ever NARROWS. When the whole
-    # interval sits outside — `float32 (1e300, 1e308)` — the two cross and
-    # the declared set is empty.
-    m_lo, m_hi = max(m_lo, -big), min(m_hi, big)
+    # No clamp into `[-big, big]` here, DELIBERATELY: the rounding already
+    # returns a value of the format or the ±inf that says the format has
+    # nothing on that side, so a clamp would be dead. An endpoint past the
+    # top (`float32 (1e300, 1e308)`) makes `m_lo` +inf, the two cross, and
+    # the declared set is empty — which is right, no `float32` is up there.
+    # A clamp did stand here; the mutation survey deleted it and no test
+    # moved, and it was removed rather than left looking load-bearing.
     if m_lo > m_hi:
         return None, None
     return m_lo, m_hi
