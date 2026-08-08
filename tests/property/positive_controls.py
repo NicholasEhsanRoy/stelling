@@ -18,12 +18,15 @@ caught X" — as a machine-checkable entry that ``tools/property_check.py
 that carries the defect, asserting that the run comes back RED.
 
 A property whose control cannot be demonstrated does not ship. That is the
-rule, and the cost of it is visible here: two of the eight controls are source
-MUTANTS rather than historical commits, because the defect they describe has
-never been in this tree. That is recorded as such rather than papered over —
-``kind`` says which, and a mutant is honestly weaker evidence than a commit,
+rule, it cost two properties (see ``test_metamorphic.py``'s module docstring),
+and the rest of its cost is visible here: **three of the nine** controls are
+source MUTANTS rather than historical commits, because the defect they describe
+has never been in this tree. That is recorded as such rather than papered over
+— ``kind`` says which, and a mutant is honestly weaker evidence than a commit,
 because a mutant is a defect somebody invented while a commit is one somebody
-shipped.
+shipped. ``test_suite_disclosure.py`` asserts the split is written down
+(a mutant control must say so in its own ``why``) rather than left to be
+counted.
 
 **This module imports nothing.** It is read by ``test_suite_disclosure.py``,
 which runs in environments with neither hypothesis nor jax — so that "the
