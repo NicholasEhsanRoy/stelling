@@ -7304,10 +7304,45 @@ def _withhold_uncertified_refutations(p) -> None:
 # the DECLARED SIZE — the one quantity the user wrote down and the one the
 # cost actually tracks — it is predictable from the harness.
 #
-# The number is not a guess: see `scratchpad/cert/cap_timing.py` and the
-# PREREG outcomes. It costs recovered refutations at declarations above
-# it, and that cost is measured rather than defined away.
+# TWO BOUNDS, because one was not enough and the measurement says which.
+# `scratchpad/cert/RESULTS_cap.txt`, jax 0.11.0, load 0.44: with the size
+# cap alone at 4096, a search that FINDS nothing walks the full grid and
+# costs **469 ms against a 23 ms propagation — 95% of the whole `check()`
+# pipeline**. The successful search is cheap (3.7x) because it stops at
+# the first witness; it is the failing one that had to be bounded.
+#
+# So the probe count itself scales with the declared size:
+# `_CERT_PROBE_BUDGET` is a budget in ELEMENT-PROBES, and a declaration
+# of n elements gets `budget // n` probes, floored at `_CERT_MIN_PROBES`
+# and capped at `_PROBE_COUNT`. Worst case at the size cap falls from
+# ~469 ms to ~70 ms, and small declarations still get the whole grid.
+#
+# WHAT THE FLOOR COSTS, measured rather than assumed
+# (`scratchpad/cert/RESULTS_probe_index.txt`): across the 17 corpus rows
+# that witness at all, the first witnessing probe index is 0, 1 or 2 in
+# **17 of 17** — three probes recover 100% of them, one probe recovers
+# 18%. Probes 0, 1 and 2 are the declared box's LOW corner, HIGH corner
+# and MIDPOINT, which is why the floor is 3 and not some fitted number.
+# The corpus's blind spot is stated with it: its assumed regions are
+# half-space-shaped, and a region whose only members sit off the
+# corner/midpoint grid would need a later probe and would be lost at the
+# floor. That is a withholding, which is safe, and it is a real cost.
 _CERT_MAX_ELEMENTS = 4096
+_CERT_PROBE_BUDGET = 4096
+_CERT_MIN_PROBES = 3
+
+
+def _certificate_probe_count(elements: int) -> int:
+    """How many probes a declaration of ``elements`` elements earns.
+
+    The whole grid for a small declaration, the corner/corner/midpoint
+    floor for one at the size cap. Bounded by the DECLARED SIZE at both
+    ends, so a caller can read the worst case off the harness.
+    """
+    return max(
+        _CERT_MIN_PROBES,
+        min(_PROBE_COUNT, _CERT_PROBE_BUDGET // max(elements, 1)),
+    )
 
 
 def _assume_equation_ids(jaxpr) -> frozenset:
@@ -7409,9 +7444,10 @@ def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
 
     **ONE-SIDED, and the code says so because the code is the claim.**
     Returning False means NO WITNESS WAS FOUND. It never means the region
-    is empty: the grid is 16 points, the arithmetic can be indeterminate,
-    the cap can decline to search at all, and a probe that raises is
-    caught and skipped. Every False path below therefore leaves the run
+    is empty: the grid is at most 16 points and fewer on a large
+    declaration (:func:`_certificate_probe_count`), the arithmetic can be
+    indeterminate, the cap can decline to search at all, and a probe that
+    raises is caught and skipped. Every False path below therefore leaves the run
     EXACTLY as it found it — no note, no status, no detail, not even a
     disclosure that a search happened. That is not reticence; it is what
     makes the one-sidedness pinnable byte-for-byte
@@ -7453,12 +7489,13 @@ def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
     required = _assume_equation_ids(closed.jaxpr)
     if not required:
         return False
-    if _declared_element_count(closed.jaxpr) > _CERT_MAX_ELEMENTS:
+    elements = _declared_element_count(closed.jaxpr)
+    if elements > _CERT_MAX_ELEMENTS:
         # THE CAP (Gate 2). Silent, like every other failure path here:
         # declining to search is not a finding, and the run's own
         # withholding sentence is unchanged and still complete.
         return False
-    for k in range(_PROBE_COUNT):
+    for k in range(_certificate_probe_count(elements)):
         probe = _Propagator(assume_mode, semantics)
         probe.pin = k
         try:

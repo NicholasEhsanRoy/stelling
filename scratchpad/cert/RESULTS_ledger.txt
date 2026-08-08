@@ -1,0 +1,155 @@
+ 09:08:01 up 14:57,  1 user,  load average: 2.56, 1.30, 1.15
+=== ledger: REAL BUILD (20000 oracle samples/row) ===
+row                                label      orcl  cert  before -> after (per obligation)
+r01_narrow_inhabited               INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r02_narrow_empty                   EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r03_narrow_inhabited_pair          INHABITED  ne    Y     #1:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r04_narrow_empty_pair              EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r05_square_inhabited               INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r06_square_empty                   EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r07_relational_inhabited           INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r08_relational_empty               EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r09_relational_array_inhabited     INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r10_relational_array_empty         EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r11_all_reduction_inhabited        INHABITED  ne    .     -   [UNKNOWN -> UNKNOWN]
+r12_all_reduction_empty            EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r13_or_predicate_inhabited         INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r14_or_predicate_empty             EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r15_int32_inhabited                INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r16_int32_empty_off_grid           EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r17_float32_inhabited              INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r18_float32_pair                   INHABITED  ne    Y     #1:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r19_sqrt_slack                     INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r20_sqrt_no_slack                  INHABITED  ne    .     -   [UNKNOWN -> UNKNOWN]
+r21_exp_slack                      INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r22_exp_empty                      EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r23_two_assumes_one_empty          EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r24_two_assumes_both_live          INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r25_no_assume_refuted              INHABITED  ne    .     -   [REFUTED -> REFUTED]
+r26_no_assume_verified             INHABITED  ne    .     -   [VERIFIED -> VERIFIED]
+r27_certified_assume_verified      INHABITED  ne    .     -   [VERIFIED -> VERIFIED]
+r28_certified_assume_refuted       INHABITED  ne    .     -   [REFUTED -> REFUTED]
+r29_uncertified_then_verified      INHABITED  ne    .     -   [VERIFIED -> VERIFIED]
+r30_uncertified_empty_verified     EMPTY      EMP   .     -   [VERIFIED -> VERIFIED]
+r31_wide_declaration               INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r32_narrow_inhabited_but_assert_holds INHABITED  ne    .     -   [UNKNOWN -> UNKNOWN]
+
+  verdict layer (per QUERY, reported beside the per-obligation ledger and never instead of it):
+    VERIFIED    4 ->   4
+    REFUTED     2 ->  15
+    UNKNOWN    26 ->  13
+    queries moved: 13; toward VERIFIED: 0
+
+  obligations            35
+  recovered              13
+  toward_discharged      0
+  off_discharged         0
+  other_move             0
+  wrong_refuted          0
+  vacuous_recovery       0
+  wrong_verified         0
+  label_disagreements    0
+
+=== ledger: MUTANT=two_sided (20000 oracle samples/row) ===
+row                                label      orcl  cert  before -> after (per obligation)
+r01_narrow_inhabited               INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r02_narrow_empty                   EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r03_narrow_inhabited_pair          INHABITED  ne    Y     #1:unknown->discharged   [UNKNOWN -> VERIFIED]
+r04_narrow_empty_pair              EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r05_square_inhabited               INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r06_square_empty                   EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r07_relational_inhabited           INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r08_relational_empty               EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r09_relational_array_inhabited     INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r10_relational_array_empty         EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r11_all_reduction_inhabited        INHABITED  ne    .     -   [UNKNOWN -> UNKNOWN]
+r12_all_reduction_empty            EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r13_or_predicate_inhabited         INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r14_or_predicate_empty             EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r15_int32_inhabited                INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r16_int32_empty_off_grid           EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r17_float32_inhabited              INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r18_float32_pair                   INHABITED  ne    Y     #1:unknown->discharged   [UNKNOWN -> VERIFIED]
+r19_sqrt_slack                     INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r20_sqrt_no_slack                  INHABITED  ne    .     -   [UNKNOWN -> UNKNOWN]
+r21_exp_slack                      INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r22_exp_empty                      EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r23_two_assumes_one_empty          EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r24_two_assumes_both_live          INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r25_no_assume_refuted              INHABITED  ne    .     -   [REFUTED -> REFUTED]
+r26_no_assume_verified             INHABITED  ne    .     -   [VERIFIED -> VERIFIED]
+r27_certified_assume_verified      INHABITED  ne    .     -   [VERIFIED -> VERIFIED]
+r28_certified_assume_refuted       INHABITED  ne    .     -   [REFUTED -> REFUTED]
+r29_uncertified_then_verified      INHABITED  ne    .     -   [VERIFIED -> VERIFIED]
+r30_uncertified_empty_verified     EMPTY      EMP   .     -   [VERIFIED -> VERIFIED]
+r31_wide_declaration               INHABITED  ne    Y     #0:unknown->discharged   [UNKNOWN -> VERIFIED]
+r32_narrow_inhabited_but_assert_holds INHABITED  ne    .     -   [UNKNOWN -> UNKNOWN]
+
+  verdict layer (per QUERY, reported beside the per-obligation ledger and never instead of it):
+    VERIFIED    4 ->  17
+    REFUTED     2 ->   2
+    UNKNOWN    26 ->  13
+    queries moved: 13; toward VERIFIED: 13
+
+  obligations            35
+  recovered              0
+  toward_discharged      13
+  off_discharged         0
+  other_move             0
+  wrong_refuted          0
+  vacuous_recovery       0
+  wrong_verified         13
+  label_disagreements    0
+
+=== ledger: MUTANT=certify_everything (20000 oracle samples/row) ===
+row                                label      orcl  cert  before -> after (per obligation)
+r01_narrow_inhabited               INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r02_narrow_empty                   EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r03_narrow_inhabited_pair          INHABITED  ne    Y     #1:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r04_narrow_empty_pair              EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r05_square_inhabited               INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r06_square_empty                   EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r07_relational_inhabited           INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r08_relational_empty               EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r09_relational_array_inhabited     INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r10_relational_array_empty         EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r11_all_reduction_inhabited        INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r12_all_reduction_empty            EMPTY      EMP   Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r13_or_predicate_inhabited         INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r14_or_predicate_empty             EMPTY      EMP   Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r15_int32_inhabited                INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r16_int32_empty_off_grid           EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r17_float32_inhabited              INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r18_float32_pair                   INHABITED  ne    Y     #1:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r19_sqrt_slack                     INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r20_sqrt_no_slack                  INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r21_exp_slack                      INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r22_exp_empty                      EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r23_two_assumes_one_empty          EMPTY      EMP   .     -   [UNKNOWN -> UNKNOWN]
+r24_two_assumes_both_live          INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r25_no_assume_refuted              INHABITED  ne    .     -   [REFUTED -> REFUTED]
+r26_no_assume_verified             INHABITED  ne    .     -   [VERIFIED -> VERIFIED]
+r27_certified_assume_verified      INHABITED  ne    .     -   [VERIFIED -> VERIFIED]
+r28_certified_assume_refuted       INHABITED  ne    .     -   [REFUTED -> REFUTED]
+r29_uncertified_then_verified      INHABITED  ne    .     -   [VERIFIED -> VERIFIED]
+r30_uncertified_empty_verified     EMPTY      EMP   .     -   [VERIFIED -> VERIFIED]
+r31_wide_declaration               INHABITED  ne    Y     #0:unknown->violated-over-set   [UNKNOWN -> REFUTED]
+r32_narrow_inhabited_but_assert_holds INHABITED  ne    .     -   [UNKNOWN -> UNKNOWN]
+
+  verdict layer (per QUERY, reported beside the per-obligation ledger and never instead of it):
+    VERIFIED    4 ->   4
+    REFUTED     2 ->  19
+    UNKNOWN    26 ->   9
+    queries moved: 17; toward VERIFIED: 0
+
+  obligations            35
+  recovered              17
+  toward_discharged      0
+  off_discharged         0
+  other_move             0
+  wrong_refuted          0
+  vacuous_recovery       2
+  wrong_verified         0
+  label_disagreements    0
+
+ 09:08:35 up 14:58,  1 user,  load average: 2.31, 1.38, 1.18

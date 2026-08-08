@@ -473,9 +473,34 @@ def test_the_search_is_capped_by_the_DECLARED_size(monkeypatch):
     assert lifted.obligations[0].status == "violated-over-set"
 
 
+def test_the_probe_count_scales_down_with_the_declared_size():
+    """The second bound, and the one that made the cap affordable: a
+    failing search at the size cap walked the whole 16-point grid and cost
+    **469 ms against a 23 ms propagation — 95% of the whole `check()`
+    pipeline** (`scratchpad/cert/RESULTS_cap.txt`). Scaling the probe
+    count by the declared size brings that to ~95 ms while small
+    declarations keep the full grid.
+
+    The FLOOR is 3 and not a fitted number: probes 0, 1 and 2 are the
+    declared box's low corner, high corner and midpoint, and across the 17
+    corpus rows that witness at all the first witnessing probe is one of
+    those three in 17 of 17 (`RESULTS_probe_index.txt`).
+    """
+    assert P._certificate_probe_count(1) == P._PROBE_COUNT
+    assert P._certificate_probe_count(P._CERT_PROBE_BUDGET // P._PROBE_COUNT) \
+        == P._PROBE_COUNT
+    assert P._certificate_probe_count(P._CERT_MAX_ELEMENTS) == P._CERT_MIN_PROBES
+    assert P._certificate_probe_count(10**9) == P._CERT_MIN_PROBES
+    # monotone non-increasing in the declared size, which is what "bounded
+    # by the declared size" has to mean if it means anything
+    counts = [P._certificate_probe_count(n) for n in (1, 4, 16, 64, 256,
+                                                      1024, 4096, 65536)]
+    assert counts == sorted(counts, reverse=True)
+
+
 def test_the_search_stops_at_the_first_witness(monkeypatch):
-    """The other half of the bound: a successful search costs ONE probe
-    propagation, not `_PROBE_COUNT` of them. One point is the whole claim.
+    """The other half of the bound: a successful search stops at the first
+    witness rather than walking the grid. One point is the whole claim.
     """
     runs = []
     real = P._Propagator.run
@@ -492,7 +517,8 @@ def test_the_search_stops_at_the_first_witness(monkeypatch):
         f"the search ran {len(runs)} probes after finding a witness"
     )
 
-    # and the declining run is what the cap is FOR: it pays the full grid
+    # and the declining run is what the bounds are FOR: it pays the whole
+    # grid its declared size earns (a scalar earns all of it)
     runs.clear()
     assert _prop(h_empty_relational).region_inhabited is False
-    assert len(runs) == P._PROBE_COUNT
+    assert len(runs) == P._certificate_probe_count(2) == P._PROBE_COUNT
