@@ -37,7 +37,12 @@ import re
 # thing here as it does to the skip inventory's scope check.
 from conftest import _in_a_pruned_directory
 
-HEAVY = ("jax", "maddening", "mime")
+# `hypothesis` is here for the same reason as the other three and one more:
+# it is a DEV-GROUP dependency, so the zero-dep job and both shared jax venvs
+# lack it, and an unguarded `from hypothesis import given` at module scope in
+# `tests/property/` would abort collection for the whole suite rather than skip
+# its own module. Measured shape, same as jax's.
+HEAVY = ("jax", "maddening", "mime", "hypothesis")
 
 # a module-scope import: column 0, not inside a function, try, or if
 _MODULE_SCOPE_IMPORT = re.compile(
@@ -138,6 +143,11 @@ def test_the_checker_can_actually_see_an_offender():
     assert not _MODULE_SCOPE_IMPORT.match("import jaxlib_unrelated")
     assert not _MODULE_SCOPE_IMPORT.match("# import jax")
     assert _SKIP.search('jax = pytest.importorskip("jax")')
+    # and the property suite's own two forms, which is where `hypothesis`
+    # entered HEAVY
+    assert _MODULE_SCOPE_IMPORT.match("from hypothesis import given")
+    assert _MODULE_SCOPE_IMPORT.match("import hypothesis")
+    assert _SKIP.search('pytest.importorskip("hypothesis", reason="needs hypothesis")')
 
 
 def test_at_least_one_module_is_actually_scanned():

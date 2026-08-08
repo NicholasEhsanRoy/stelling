@@ -207,6 +207,14 @@ WITHHELD = {
     ".venv": "local environment",
     "venv": "local environment",
     ".pytest_cache": "test cache",
+    ".hypothesis": (
+        "Hypothesis's example database, written by any `dev`-profile run of "
+        "`tests/property/`. Local state about one machine's search history, "
+        "and never part of the library. The `ci` profile does not create one "
+        "at all — `derandomize=True` forbids a database — so this appears only "
+        "on a developer's checkout"
+    ),
+    ".venv-prop": "local environment (tools/property_venv.sh)",
     ".ruff_cache": "lint cache",
     ".mypy_cache": "type-check cache",
     "__pycache__": "bytecode cache",

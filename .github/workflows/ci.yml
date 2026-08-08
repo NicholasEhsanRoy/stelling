@@ -895,3 +895,282 @@ jobs:
           fetch-depth: 0
       - name: check sign-offs
         run: pipx run dco-check --verbose
+
+  # ── THE PROPERTY SUITE ──────────────────────────────────────────────────────
+  #
+  # ADDED AS ONE NEW JOB, deliberately, so the diff against a concurrently
+  # edited `ci.yml` is a pure append. Nothing above this line is touched.
+  #
+  # THE DECISION, AND THE ARGUMENT, because it is not obvious.
+  #
+  # `tests/property/test_oracle.py::test_a_verified_is_true_at_every_admitted_point`
+  # FAILS on `main` today. It finds the open integer-literal wrap defect
+  # (HANDOFF6 §71, §74) — a family of VERIFIEDs over predicates that are false
+  # at every declared point. Wiring that into a must-be-green job would turn CI
+  # red on a defect already known, already scoped, and reserved to the
+  # principal. So there were two options:
+  #
+  #   (1) leave this job out until the remedy lands;
+  #   (2) land it with the failing property xfail-marked.
+  #
+  # (1) was rejected. A property suite that runs nowhere is a property suite
+  # that rots: the strategies drift, the controls stop applying, and nobody
+  # notices until somebody thinks to run it — which, on the evidence of this
+  # project, is when they are already debugging something else. The stated
+  # reason for building this at all was to make continued development with it a
+  # NORM, and a norm needs a job.
+  #
+  # (2) it is, with three constraints, each of which closes a way the marker
+  # could go quiet:
+  #
+  #   * `strict=True`. A non-strict xfail passes silently the day the defect is
+  #     fixed — the same silent-success shape this whole suite exists to
+  #     prevent. Strict means the suite goes RED when the remedy lands and
+  #     somebody has to come and delete the marker.
+  #   * `raises=WrongVerifiedFromWrap`. The marker excuses THAT defect class and
+  #     no other — but NOT for the reason an earlier version of this comment
+  #     gave. It said a non-wrap wrong VERIFIED raises a plain AssertionError,
+  #     does not match, and is reported as a real failure. True of the code
+  #     path, VACUOUS for that test: the leg draws from
+  #     `integer_specs().filter(wrappable_constants)`, so every spec it sees
+  #     carries a wrappable constant and the AssertionError branch is
+  #     unreachable. The residual masked leg is what confines the class.
+  #     What `raises=` IS load-bearing for, measured: the CENSUS FLOOR. With it
+  #     deleted and `_bool_status` mutated to violate everything, the leg
+  #     reports XFAIL — green — on `verified_oracle_checked=0 < 5` after
+  #     drawing 150 specs, because `census.require`'s AssertionError is
+  #     swallowed by the blanket amnesty. With it in place the same run is
+  #     FAILED on GENERATOR FLOOR NOT MET.
+  #   * the reason names the defect, so this job's own output says what is not
+  #     being checked instead of leaving a reader to infer it from a green tick.
+  #
+  # And a fourth, because it is the hole a marker cannot close by itself — but
+  # it is NOT the log-reading step below, and an earlier version of this comment
+  # said it was. Measured, at 9cefc6d, on this tree:
+  #
+  #   strict=True -> strict=False, defect still present:
+  #       `27 passed, 1 skipped, 1 xfailed`, pytest exit 0, guard exit 0
+  #   raises=WrongVerifiedFromWrap deleted (blanket amnesty):
+  #       `27 passed, 1 skipped, 1 xfailed`, pytest exit 0, guard exit 0
+  #
+  # Both logs are byte-identical to a healthy one, because the defect the
+  # marker excuses is still there and the test still xfails either way. A
+  # log-reader can only notice on the day the defect is FIXED, which is the one
+  # day it must not be the first to notice. What the step below does catch is a
+  # CHANGE IN THE NUMBER of xfails (measured: a second xfail added is caught
+  # twice over) and a real xpass (both shapes, driven against real logs).
+  #
+  # The weakening is caught STATICALLY instead, by
+  # `test_suite_disclosure.py::test_every_xfail_in_the_suite_is_strict_and`
+  # `_narrowed_by_raises`, which parses the marker out of the source and runs
+  # in this same job — and in the zero-dep lanes, since it needs neither
+  # hypothesis nor jax. Deleting `raises=` is not cosmetic: with it removed and
+  # `_bool_status` mutated to violate everything, the wrap leg reports XFAIL —
+  # green — while its own generator floor was never met, because the floor's
+  # AssertionError is swallowed by the blanket amnesty. With `raises=` in place
+  # the same run is reported FAILED.
+  #
+  # A FIFTH CONSEQUENCE, AND IT IS NOT LOCAL TO THIS JOB. Landing the xfail
+  # WITHDRAWS AN EXISTING REPO-WIDE PIN. `tests/test_skip_inventory.py::
+  # test_no_session_skip_is_undisclosed` claims the suite's skip set is
+  # complete, and it withdraws that claim — by SKIPPING, with its own reason —
+  # on any session that reported an xfail:
+  #
+  #   "the completeness pin is WITHDRAWN, not passed: this session reported
+  #    1 test(s) as xfailed."
+  #
+  # Measured on the whole tree with hypothesis installed: 2470 passed,
+  # 13 skipped, 1 xfailed, exit 0, and that pin among the skips. It is
+  # self-disclosed and it is the pin's own rule (disclosed => withdrawn, never
+  # failed, the same cut `N deselected` gets) — but nothing on this branch said
+  # it out loud, and "a repo-wide completeness pin is off" is not something a
+  # reader should have to derive from a skip line.
+  #
+  # THE THREE JOBS ABOVE ARE UNAFFECTED, and that is measured rather than
+  # assumed: none of them installs hypothesis, so every module under
+  # tests/property/ gates at collection, no xfail is reported, and their
+  # `verdict=made` assertion still holds. The pin is off for exactly the
+  # sessions that CAN run the property suite. It comes back the day the wrap
+  # remedy lands and the marker is deleted — there is no other way to get it
+  # back, because narrowing the session (`-k`, `--deselect`) withdraws the
+  # claim too, by the same rule.
+  #
+  # WHAT THIS JOB DOES NOT RUN, stated so the tick cannot be over-read:
+  #
+  #   * the CROSS-SERIES property. It needs two interpreters with different jax
+  #     series in one job, and the two existing jax lanes each have one. It
+  #     SKIPS here, with a reason registered in `tests/test_skip_inventory.py`.
+  #   * the nightly budgets (5000 examples; 50 000 x 12 stateful steps,
+  #     randomised, with a cached example database). There is NO nightly job:
+  #     adding one needs a `schedule:` trigger in `on:`, which is an edit
+  #     outside this appended block, and this file is being edited concurrently.
+  #     The command is in `tests/property/README.md`; until a trigger is added,
+  #     nobody is running it, and that is the honest state.
+  #   * three of the ten positive controls — `cvc5-stateful` (20x budget),
+  #     `cross-series` (two interpreters), and `oracle-wrap` (its property is
+  #     the xfail above, which the step below already asserts fired).
+  property:
+    name: property suite (hypothesis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The positive controls materialise old revisions with `git archive`.
+          # Without full history, `--controls` cannot run and this job would
+          # lose the one mechanism that distinguishes "found nothing" from
+          # "generated nothing".
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      - name: install, with hypothesis read out of pyproject.toml's dev group
+        # Read rather than restated: two places to type a version is one place
+        # for them to disagree, and `tools/property_venv.sh` reads the same line.
+        run: |
+          set -euo pipefail
+          HYP="$(python3 - <<'PY'
+          import re
+          text = open("pyproject.toml").read()
+          m = re.search(r'^dev\s*=\s*\[(.*?)\]', text, re.S | re.M)
+          reqs = re.findall(r'"([^"]+)"', m.group(1))
+          print(next(r for r in reqs if r.startswith("hypothesis")))
+          PY
+          )"
+          echo "hypothesis requirement from pyproject.toml: ${HYP}"
+          uv pip install -e ".[jax]" pytest "${HYP}"
+      - name: RESOLVED versions
+        run: |
+          .venv/bin/python -c "import jax, jaxlib, hypothesis, numpy; print('jax', jax.__version__, 'jaxlib', jaxlib.__version__, 'numpy', numpy.__version__, 'hypothesis', hypothesis.__version__)"
+      - name: WHAT THIS JOB IS, WHAT IT RUNS, AND WHAT IT DOES NOT
+        # Printed into the log on every run, because a green tick says nothing
+        # about scope and a reader has only the log.
+        run: |
+          cat <<'EOF'
+          WHAT THIS JOB IS: A ROT DETECTOR, NOT A DEFECT FINDER. Read that
+          before the list below, because the list is a list of what RUNS and a
+          reader will otherwise take it for a list of what is RULED OUT.
+
+          Measured on this tree, and the reason for the sentence above:
+            * the `widen` positive control FIRES at this budget — and the same
+              property, against a BLATANTER mutant (a wide declared box
+              collapsed to its midpoint, under which `x in [-0.25,0.25] |-
+              x >= 0.0` is UNKNOWN while the WIDENED `x in [-2.25,2.25]` is
+              VERIFIED), passed at 250 examples. A firing control is not
+              evidence that the budget is adequate.
+            * two properties therefore now draw 1000 rather than 250 (conjunct
+              and widen); both mutants above are caught at 1000 and neither was
+              at 250. Cost: +21 s per push.
+            * that moved the boundary and did not change the instrument. The
+              reordering property's cross-kind clause is falsifiable — it fires
+              when the shape is supplied as an @example — and the search does
+              not reach it at this budget, at x4, or at x16. The whole suite at
+              x4 takes 172 s against ~60 s and is still green against a mutant
+              a three-line probe would have caught.
+
+          What this job DOES buy, and it is worth having: the strategies still
+          draw their boundary classes, the registered mutations still apply,
+          every property still has a control, seven controls still fire, and
+          the suite still runs at all. That is rot, caught on the push that
+          causes it. It is not a soundness argument.
+
+          RUN, at the `ci` profile (derandomized — the same tree gives the
+          same examples in the same order, so a property fails on every push or
+          on none). Each line is a property that EXECUTED, never a class of
+          defect ruled out:
+            * no VERIFIED is false at an admitted point, integer grammar, with
+              the open wrap class MASKED OUT  (this one must be green)
+            * no `violated-over-set` is minted over an admitted region that is
+              exactly empty, at refine=None AND refine="affine"
+            * a conjunct that adds no information adds no proving power,
+              including the zero-element case
+            * an inserted assume restating a declaration's own lower bound
+              adds no proving power
+            * transposing two adjacent, independent assert_s moves nothing
+            * widening a declared bound cannot turn UNKNOWN into VERIFIED
+            * the cvc5 record protocol, flat and stateful: a definite answer
+              requires exit 0, no truncation, and a harvested model equal to the
+              value records in the bytes actually read
+            * the strategies still draw their boundary classes (generator floor)
+            * every property is registered with a positive control, every
+              control names a property that exists, every mutation still applies
+            * seven of the ten positive controls FIRE where they are supposed to
+
+          NOT RUN HERE AT ALL:
+            * THE OPEN WRAP DEFECT IS EXPECTED TO FAIL. The unmasked oracle leg
+              is xfail(strict, raises=WrongVerifiedFromWrap). This job is GREEN
+              while stelling returns VERIFIED for predicates that are false at
+              every declared point, and will go RED the day that is fixed.
+            * the two tested jax series agreeing (needs two interpreters)
+            * the nightly budgets — no scheduled job exists
+            * the solver legs, control flow (scan/while/fori_loop), vmap/grad,
+              nonvacuity, and the public template helpers
+
+          WHAT A PROPERTY SUITE CANNOT REACH AT ALL, measured over this
+          project's own catalogue of 153 defects:
+            * 61 would have been caught, 81 would NOT, 2 unclear
+            * generated input is the trigger for 50 of 80 CODE-VERDICT defects
+              and for only 4 of 58 CLAIM defects
+          Half this project's defects are claims — a docstring, a figure, a
+          count, a scope — and no amount of generated input reads a docstring
+          against its implementation. This job does not replace the audit
+          discipline and a green tick here is not evidence that it could.
+          EOF
+      - name: the property suite
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q -ra tests/property \
+            | tee "${RUNNER_TEMP}/property.txt"
+      - name: the xfail marker is still doing its job
+        # The hole `strict=True` cannot close on its own: somebody weakening it
+        # to a plain xfail would be invisible until the day the defect is fixed,
+        # which is exactly the day it must not be invisible.
+        #
+        # THE PATTERNS ARE ANCHORED, AND THAT IS WHAT THIS COMMENT IS FOR. An
+        # unanchored `grep -q 'XPASS'` over a `-ra` log matches the xfail
+        # REASON: `WRAP_DEFECT` in tests/property/test_oracle.py ends "…this
+        # test XPASSes and the suite goes red", and `-ra` prints the reason on
+        # the `XFAIL …` summary line. Measured on a HEALTHY tree at 9cefc6d
+        # (`27 passed, 1 skipped, 1 xfailed`, pytest exit 0): the unanchored
+        # form matched its own disclosure text and failed this job on EVERY
+        # push, telling the reader to delete a marker that was working.
+        #
+        # Three anchors, because pytest reports an xpass in three shapes, and
+        # each was driven against a real log on pytest 9.1.1:
+        #   `^XPASS `  non-strict xpass, short-summary line. THIS is the shape
+        #              the step exists for — somebody weakens `strict=True`,
+        #              the remedy lands, the suite stays GREEN, and this line
+        #              is the only thing that notices.
+        #   `^\[XPASS` strict xpass: pytest prints `[XPASS(strict)]` in the
+        #              FAILURES body and the short-summary line is a bare
+        #              `FAILED <nodeid>` with no reason on it. So the obvious
+        #              `FAILED .*\[XPASS` does NOT match on 9.1.1 — measured —
+        #              and is kept below only for other pytest versions.
+        #   `FAILED .*\[XPASS`  pytest versions that do append the reason.
+        # The trailing space in `^XPASS ` is deliberate: it cannot match the
+        # word "XPASSes" even if a future pytest wraps a long reason line.
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/property.txt"
+          if grep -qE '^(XPASS |\[XPASS|FAILED .*\[XPASS)' "${out}"; then
+            echo "::error title=an xfail-marked property PASSED::A property marked xfail is now passing. If the wrap remedy landed, delete the marker in tests/property/test_oracle.py; if it did not, the property has stopped finding a defect that is still there."
+            exit 1
+          fi
+          n="$(grep -c '^XFAIL ' "${out}" || true)"
+          if [ "${n}" != "1" ]; then
+            echo "::error title=expected exactly one xfail::Found ${n}. This job asserts the open wrap defect is still being found and still being disclosed as an expected failure. A different number means a marker was added, removed, or silently weakened."
+            exit 1
+          fi
+          echo "one xfail, zero xpasses — the open wrap defect is still found and still disclosed"
+      - name: positive controls (the per-push subset)
+        # The anti-vacuity mechanism, executed rather than asserted: today's
+        # property, run against a tree that carries the defect, must come back
+        # RED. A control that passes exits non-zero and is reported as
+        # NOT DEMONSTRATED.
+        run: |
+          .venv/bin/python tools/property_check.py \
+            --control oracle-masked \
+            --control vacuous-refutation \
+            --control conjunct \
+            --control redundant-assume \
+            --control reorder \
+            --control widen \
+            --control cvc5-flat

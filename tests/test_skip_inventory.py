@@ -244,6 +244,7 @@ DECLARED_OPTIONAL_DEPENDENCIES = frozenset(
         "blackjax",  # corpus/supply probe library, test-only (the CI job)
         "maddening",  # the pinned-jax reproducer library, test-only
         "jaxfluids",  # the WENO5 acceptance subject, test-only
+        "hypothesis",  # the property suite's driver, dev-group, test-only
     }
 )
 
@@ -409,6 +410,36 @@ RULES = (
         when="`uv` is not on PATH, so no distribution can be built to inspect",
         reasons=frozenset({"needs `uv` to build", "needs `uv` to build an sdist"}),
         legitimate=lambda: shutil.which("uv") is None,
+    ),
+    Rule(
+        when=(
+            "hypothesis is not installed. It is a DEV-GROUP dependency, not an "
+            "extra and not a runtime one, so the two shared jax venvs and the "
+            "zero-dep CI job do not have it and every module under "
+            "`tests/property/` gates at collection. What keeps that from "
+            "reading as `the property suite found nothing` is "
+            "`tests/property/test_suite_disclosure.py`, which needs neither "
+            "hypothesis nor jax, runs in exactly these environments, and holds "
+            "the registry of positive controls to the properties that exist"
+        ),
+        reasons=frozenset({"needs hypothesis"}),
+        legitimate=lambda: not _importable("hypothesis"),
+    ),
+    Rule(
+        when=(
+            "no second interpreter with the other jax series was named, so "
+            "the cross-series differential has nothing to differ against. The "
+            "condition is an environment variable rather than an installed "
+            "library, and it is checked in BOTH directions here: with "
+            "`STELLING_PROPERTY_OTHER_PYTHON` set, that property MUST run"
+        ),
+        reasons=frozenset(
+            {
+                "needs a second interpreter with the other jax series "
+                "(set STELLING_PROPERTY_OTHER_PYTHON)"
+            }
+        ),
+        legitimate=lambda: not os.environ.get("STELLING_PROPERTY_OTHER_PYTHON"),
     ),
     Rule(
         when="`git` is not on PATH",
