@@ -96,6 +96,66 @@ jobs:
             echo "::error title=tag and artifact disagree::The release is tagged '${TAG}' but the built artifact is version '${version}'. Publishing would put '${version}' on PyPI permanently, under a release that says otherwise. Fix __version__ or the tag; do not re-run this job until they match."
             exit 1
           fi
+      # THE ASSERTION `tests/test_sdist_contents.py` CANNOT MAKE ON A
+      # CONTRIBUTOR'S MACHINE, and the step below used to print the manifest
+      # and assert nothing about it.
+      #
+      # Three tests in that module are gated on `uv` and skip without it —
+      # including `test_an_arbitrary_new_file_does_not_ship`, the module's own
+      # headline property and the only one established by intervention.
+      # Measured on a PATH with no `uv`: `9 passed, 3 skipped` at a4c16fe, and
+      # one smuggling shape (a committed dangling symlink) goes from red to
+      # green with it. Making that skip a hard failure would be flaky in the
+      # environment where it matters least — a contributor's first `pytest`.
+      # It matters HERE, one step from immutable, so the failure belongs here.
+      # Every pytest job in this repository already uses
+      # `astral-sh/setup-uv@v6`, so no CI run takes that skip either.
+      #
+      # It is deliberately NOT a copy of the test module's model of hatchling.
+      # It reads the built tarball and the index and asks the one question a
+      # release can answer completely: was every member committed to the
+      # TAGGED tree? That covers every force-include route at once — an
+      # ancestor `.gitignore`/`.hgignore` arriving keyed by basename, a
+      # `force-include` table, a `hatch_build.py` hook — and every untracked
+      # file, without modelling any of them.
+      - name: every sdist member is a committed file of the tagged tree
+        env:
+          # Written by the build backend from the project metadata; no tree
+          # path can supply it. Kept in step with `GENERATED_IN_DISTRIBUTION`
+          # in tests/test_sdist_contents.py.
+          GENERATED: PKG-INFO
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          sdist="$(ls dist/*.tar.gz)"
+          tar tzf "${sdist}" | sed -e 's|^[^/]*/||' -e '/\/$/d' -e '/^$/d' | sort -u > members.txt
+          git ls-files | sort -u > tracked.txt
+          printf '%s\n' "${GENERATED}" | sort -u > generated.txt
+          sort -u tracked.txt generated.txt > explained.txt
+          # ZERO EXAMINED MUST NOT READ AS ZERO PROBLEMS. Each of these is a
+          # way for the comparison below to come back empty because it looked
+          # at nothing: an unreadable tarball, an index this job cannot see, a
+          # `sed` that ate every line.
+          for f in members.txt tracked.txt explained.txt; do
+            if [ ! -s "${f}" ]; then
+              echo "::error title=the sdist check examined nothing::${f} is empty, so the comparison below could not have found anything. Refusing to publish."
+              exit 1
+            fi
+          done
+          for required in "${GENERATED}" pyproject.toml README.md LICENSE; do
+            if ! grep -qxF "${required}" members.txt; then
+              echo "::error title=the sdist check is not looking at a real artefact::'${required}' is not in ${sdist}. Refusing to publish."
+              exit 1
+            fi
+          done
+          unexplained="$(comm -23 members.txt explained.txt)"
+          if [ -n "${unexplained}" ]; then
+            echo "${unexplained}"
+            echo "::error title=the sdist ships files that are not committed to this tree::The members listed above are in ${sdist} and not in \`git ls-files\` for the tagged commit. An sdist on PyPI cannot be unpublished, only yanked, and a yanked file still resolves for anyone who pins it. Either commit them and re-tag, or find the force-include route putting them there (see tests/test_sdist_contents.py). Refusing to publish."
+            exit 1
+          fi
+          echo "every one of $(wc -l < members.txt) sdist members is committed to this tree"
+          rm -f members.txt tracked.txt generated.txt explained.txt
       # A last look at what would ship, in the log, before it becomes immutable.
       # tests/test_sdist_contents.py already holds the allowlist shut; this is
       # here so the record of a release includes the file list it published.

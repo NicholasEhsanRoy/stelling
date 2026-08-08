@@ -52,16 +52,43 @@ member has a counterpart in the tree it was built from.
 WHAT IS STILL NOT MODELLED HERE, said out loud rather than left to be
 discovered: a `hatch_build.py` build hook can put anything at all into
 ``build_data["force_include"]`` at build time, and this module cannot know what
-without executing it; ``project.readme`` in its table form
+without executing it — so its capability is REFUSED rather than modelled, by
+``test_no_build_hook_can_force_include_behind_this_module``, because the
+parity test does not notice one (a hook that ships a TRACKED file leaves every
+counterpart check satisfied: driven, 12 passed, 263 members). This list used
+to omit ``BuilderConfig.force_include``, the STATIC `force-include` table in
+`pyproject.toml`, which is strictly easier to introduce than the hook route it
+did name — two lines, no code. That one is modelled now
+(:func:`_static_force_include`). Also unmodelled: ``project.readme`` in its
+table form
 (``{text = "…"}``) carries no path and is not exercised; and
 ``git check-ignore`` — the instrument :func:`_check_ignore` uses — is not
 `pathspec`, the two disagree on 7 of 22 pattern shapes tried (negations that
 re-include inside an excluded directory, POSIX character classes), and every
 disagreement found was in the smuggle direction. Only the parity test, which
-needs `uv`, catches that class; a machine with no `uv` runs the scan alone and
-has no guard for it.
+needs `uv`, catches that class.
 
-Three tests, in the order they matter:
+**WITHOUT `uv`, THREE TESTS SKIP, AND THIS USED TO SAY "a machine with no `uv`
+runs the scan alone".** It runs a good deal more than the scan and rather less
+than the module. Measured, a `PATH` with no `uv`: ``14 passed, 3 skipped``
+here, ``9 passed, 3 skipped`` at a4c16fe. What goes is everything that builds —
+``test_built_metadata_carries_no_relative_reference``,
+``test_the_untracked_scan_agrees_with_the_tarball``, and
+``test_an_arbitrary_new_file_does_not_ship``, which is the module's own
+headline property and the only one established by INTERVENTION. What stays is
+the model, its controls, and both dicts. Driven across the smuggling shapes
+this module carries: one of them, a committed dangling symlink, goes from
+``1 failed`` to ``14 passed, 3 skipped``; the rest stay red, because what
+catches them is model-side.
+
+Making that skip a hard failure would be flaky in the environment where it
+matters least — a contributor's first `pytest`. Every pytest job in CI uses
+`astral-sh/setup-uv@v6`, so no CI run takes the skip; and the `build` job of
+`.github/workflows/release.yml` asserts on the artefact itself that every
+sdist member is a committed file of the tagged tree. That is where a missing
+`uv` has to be a failure, because that is where the mistake becomes immutable.
+
+The tests, in the order they matter:
 
 1. ``test_an_arbitrary_new_file_does_not_ship`` — the real property, by
    INTERVENTION. Drop a file the allowlist has never heard of, build, and
