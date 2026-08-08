@@ -332,6 +332,20 @@ def test_every_control_says_what_it_is_and_which_kind_of_evidence_it_is(control)
     """
     assert control.kind in ("commit", "mutant"), control.kind
     assert len(control.why) > 60, f"{control.name}: `why` is too thin to act on"
+    # `expect_message=""` is a substring of EVERY string, so a control carrying
+    # it is checked on `returncode != 0` alone. Measured: with `""`, a planted
+    # collection error in tests/property/test_cvc5_protocol.py — the module
+    # would not even import — was reported "FIRED — the property failed where
+    # it is supposed to", `1/1 controls fired`, exit 0. Two controls shipped
+    # that way. A control that cannot tell a defect from a broken import is
+    # worth nothing, and this is the cheapest place to say so.
+    assert control.expect_message, (
+        f"{control.name}: expect_message is empty, which is a substring of "
+        f"every string — including a traceback, a collection error and a "
+        f"typo'd nodeid. tools/property_check.py would report any of those as "
+        f"FIRED. Name a substring the property's own failure message carries; "
+        f"a leg tag such as '[flat]' covers every failure shape of one leg."
+    )
     if control.kind == "mutant":
         assert control.mutation is not None, (
             f"{control.name} is registered as a mutant with no mutation"
