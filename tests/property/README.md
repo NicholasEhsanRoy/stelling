@@ -21,10 +21,14 @@ read the brief that produced the suite.
 One command, and it refuses by resolved path to install into the shared venvs:
 
 ```
-tools/property_venv.sh                # jax 0.11.0, ./.venv-prop-0.11.0
-tools/property_venv.sh 0.10.2         # jax 0.10.2, ./.venv-prop-0.10.2
+tools/property_venv.sh                # jax 0.11.0 -> ~/.cache/stelling-property/jax-0.11.0
+tools/property_venv.sh 0.10.2         # jax 0.10.2 -> ~/.cache/stelling-property/jax-0.10.2
 tools/property_venv.sh 0.11.0 /some/where
 ```
+
+The default target is outside the checkout (a venv inside the tree would be a
+new undecided root entry, which `tests/test_sdist_contents.py` fails on). Below,
+`$VENV` is whatever it printed.
 
 It reads the `hypothesis` requirement out of `pyproject.toml`'s dev group, so
 the version lives in one place. `stelling` itself is **not** installed into the
@@ -35,7 +39,7 @@ venv be pointed at any worktree.
 
 ```
 # against this tree
-JAX_PLATFORMS=cpu PYTHONPATH=$PWD/src .venv-prop-0.11.0/bin/python -m pytest -ra tests/property
+JAX_PLATFORMS=cpu PYTHONPATH=$PWD/src $VENV/bin/python -m pytest -ra tests/property
 
 # against SOME OTHER worktree or revision — the properties come from HERE,
 # the code under test comes from THERE
@@ -48,7 +52,7 @@ python tools/property_check.py --controls \
 
 # the cross-series differential needs two interpreters
 STELLING_PROPERTY_OTHER_PYTHON=/path/to/venv-jax-0.10/bin/python \
-  PYTHONPATH=$PWD/src .venv-prop-0.11.0/bin/python -m pytest -ra \
+  PYTHONPATH=$PWD/src $VENV/bin/python -m pytest -ra \
   tests/property/test_cross_series.py
 ```
 
@@ -69,7 +73,7 @@ trigger exists, the nightly recipe is a command somebody has to type:
 
 ```
 STELLING_PROPERTY_PROFILE=nightly STELLING_PROPERTY_DB=/some/cached/dir \
-  PYTHONPATH=$PWD/src .venv-prop-0.11.0/bin/python -m pytest -ra tests/property
+  PYTHONPATH=$PWD/src $VENV/bin/python -m pytest -ra tests/property
 ```
 
 ---

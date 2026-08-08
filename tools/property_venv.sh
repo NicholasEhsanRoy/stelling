@@ -4,8 +4,8 @@
 #
 # One command for a local environment that can run tests/property/.
 #
-#     tools/property_venv.sh                    # jax 0.11.0, ./.venv-prop-0.11.0
-#     tools/property_venv.sh 0.10.2             # jax 0.10.2, ./.venv-prop-0.10.2
+#     tools/property_venv.sh                    # jax 0.11.0, into ~/.cache
+#     tools/property_venv.sh 0.10.2             # jax 0.10.2, into ~/.cache
 #     tools/property_venv.sh 0.11.0 /path/to/v  # explicit target
 #
 # WHY THIS EXISTS AS A SCRIPT AND NOT A PARAGRAPH. The property suite needs
@@ -25,7 +25,11 @@ set -euo pipefail
 
 JAX_VERSION="${1:-0.11.0}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET="${2:-${HERE}/.venv-prop-${JAX_VERSION}}"
+# Default OUTSIDE the checkout. A venv inside the tree is a new root entry, and
+# `tests/test_sdist_contents.py` requires every root entry to be a recorded
+# decision — so a convenience script that dropped one there would make the
+# suite red for anyone who ran it.
+TARGET="${2:-${XDG_CACHE_HOME:-$HOME/.cache}/stelling-property/jax-${JAX_VERSION}}"
 
 # The two shared venvs, named so the refusal is legible rather than implicit.
 FORBIDDEN=(
