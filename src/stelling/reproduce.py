@@ -160,6 +160,7 @@ another branch to hold, delete the thing that made the branch necessary.**
 
 from __future__ import annotations
 
+import ast
 import functools
 import json
 import os
@@ -1080,18 +1081,7 @@ def _reproducer_source(verdict, subject: Subject, obligation_index) -> str:
         result_exit=RESULT_EXIT,
         not_executed_exit=NOT_EXECUTED_EXIT,
     )
-    # THE ONE RULE, CHECKED ON THE OUTPUT rather than promised by the
-    # template. A reproducer that reaches back into the tool checks the tool
-    # with the tool and is worth nothing as independent evidence, so this is
-    # a structural refusal at the point of emission, not a comment asking
-    # the next author to be careful.
-    for lineno, line in enumerate(text.splitlines(), 1):
-        if line.strip().startswith(("import stelling", "from stelling")):
-            raise ReproducerError(
-                f"the emitted reproducer imports stelling at line {lineno} "
-                f"({line.strip()!r}) — a file that reaches back into the tool "
-                f"checks the tool with the tool"
-            )
+    _refuse_tool_import(text)
     try:
         compile(text, "<reproducer>", "exec")
     except SyntaxError as e:
@@ -1102,6 +1092,73 @@ def _reproducer_source(verdict, subject: Subject, obligation_index) -> str:
             f"the contract name"
         ) from e
     return text
+
+
+def _refuse_tool_import(text: str) -> None:
+    """THE ONE RULE, CHECKED ON THE OUTPUT rather than promised by the
+    template. A reproducer that reaches back into the tool checks the tool
+    with the tool and is worth nothing as independent evidence, so this is a
+    structural refusal at the point of emission, not a comment asking the next
+    author to be careful.
+
+    TWO CHECKS, AND THE SECOND EXISTS BECAUSE THE FIRST HAS A HOLE THE
+    ARGUMENT FOR IT DENIED. The line scan below was defended in `SOUNDNESS.md`
+    on the ground that Python's statement-separator set is a strict SUBSET of
+    ``str.splitlines()``' — so the scan would see more line-starts than the
+    tokenizer and could only cry wolf. The two sets are not nested. Measured
+    over the whole code-point range, `compile("x=1" + c + "y=2")` succeeds for
+    ``;`` and ``#`` and `("a" + c + "b").splitlines()` does not split on
+    either, while `splitlines()` splits on eight the compiler does not accept
+    (U+000B U+000C U+001C U+001D U+001E U+0085 U+2028 U+2029). ``;`` is the one
+    that bites, because it carries a real statement::
+
+        "x = 1; import stelling\\ny = 2\\n"
+
+    — a genuine ``import stelling`` that the line scan does not see and
+    ``ast.parse`` does. Not reachable from caller text today (:func:`one_line`
+    maps every character below U+0020 to a space and neutralises the triple
+    quote, and the JSON blocks sit inside a raw triple-quoted string
+    ``json.dumps`` cannot terminate), which is exactly why the scan's charter
+    is the FUTURE edit of :data:`_TEMPLATE` rather than today's caller — and a
+    refusal a semicolon walks past does not discharge that charter.
+
+    The line scan is KEPT rather than replaced: it fires on an
+    ``import stelling`` inside a string or a docstring, which the parse tree
+    correctly does not report, and a false alarm at the point of emission is
+    the cheap direction. The tree walk is exact and catches the rest wherever
+    on the line it sits. Neither implies the other.
+
+    The tree walk runs only when the text parses; when it does not, the
+    caller's own :func:`compile` reports that with its own message, and this
+    function stays silent so that message is unchanged.
+    """
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if line.strip().startswith(("import stelling", "from stelling")):
+            raise ReproducerError(
+                f"the emitted reproducer imports stelling at line {lineno} "
+                f"({line.strip()!r}) — a file that reaches back into the tool "
+                f"checks the tool with the tool"
+            )
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [node.module or ""]
+        else:
+            continue
+        for name in names:
+            if name == "stelling" or name.startswith("stelling."):
+                raise ReproducerError(
+                    f"the emitted reproducer imports {name} at line "
+                    f"{node.lineno} — a file that reaches back into the tool "
+                    f"checks the tool with the tool. Found on the PARSE TREE, "
+                    f"not at a line start: a statement after a `;` is an "
+                    f"import the line scan above cannot see"
+                )
 
 
 def _version() -> str:
