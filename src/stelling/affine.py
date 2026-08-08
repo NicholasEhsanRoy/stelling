@@ -238,6 +238,16 @@ def _uncertified_affine_refusal(propagation) -> str:
             "the propagation DROPPED an assume, so the declared boxes this "
             "refinement judges over are a superset of the assumed region"
         )
+    if not causes:
+        # neither flag set and the shared decision still declined: only a
+        # caller overriding `exactness.certifies_set_refutation` reaches
+        # this, and the routing pin is that caller. Say that, rather than
+        # emit an empty parenthetical a reader would take for a bug.
+        causes.append(
+            "the shared certification decision "
+            "(stelling.exactness.certifies_set_refutation) declined for "
+            "this run without naming a mechanism of its own"
+        )
     return (
         "violation WITHHELD from REFUTED: "
         + "; and ".join(causes)

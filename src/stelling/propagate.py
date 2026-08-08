@@ -7036,6 +7036,17 @@ def _uncertified_mechanism(p) -> str:
             "is a SUPERSET of the assumed region and that region was never "
             "shown non-empty"
         )
+    if not causes:
+        # the shared decision declined with NEITHER flag set. Unreachable
+        # from the flags themselves, and reachable from a caller that
+        # overrides `exactness.certifies_set_refutation` — the routing pin
+        # does exactly that. Naming no mechanism is the honest sentence
+        # there; an empty parenthetical would read as a missing one.
+        return (
+            "the shared certification decision "
+            "(stelling.exactness.certifies_set_refutation) declined for "
+            "this run without naming a mechanism of its own"
+        )
     return "; and ".join(causes)
 
 
