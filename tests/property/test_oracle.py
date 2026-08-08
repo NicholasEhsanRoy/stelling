@@ -60,10 +60,27 @@ marker, each deliberate:
   which is the same silent-success shape this whole suite exists to prevent.
   Strict means the suite goes RED when the remedy lands, and somebody has to
   come here and delete the marker.
-* **raises=** — the marker excuses *this* defect class and no other. A wrong
-  VERIFIED whose harness carries no out-of-dtype-range constant raises a plain
-  ``AssertionError``, which does not match, and is reported as a real failure.
-  Without ``raises=`` the xfail would be a blanket amnesty over the property.
+* **raises=** — the marker excuses *this* defect class and no other. **What it
+  is load-bearing for is not what this docstring used to claim.** The old
+  wording said a wrong VERIFIED carrying no out-of-dtype-range constant raises
+  a plain ``AssertionError``, does not match, and is reported as a real
+  failure. That is true of the code path below and **vacuous for this test**:
+  the leg draws from ``wrap_biased_integer_specs``, which is
+  ``integer_specs().filter(wrappable_constants)``, so every spec it examines
+  carries a wrappable constant, ``WrongVerifiedFromWrap`` is always the branch
+  taken, and ``raise AssertionError(msg)`` on the line below is unreachable
+  from this test. The residual leg is what confines the class, not ``raises=``.
+
+  ``raises=`` stays, because it is load-bearing for something that WAS
+  measured: the **census floor**. With ``raises=`` deleted and
+  ``propagate._bool_status`` mutated to violate everything, this leg reports
+  **XFAIL — green — on ``verified_oracle_checked=0 < 5`` after drawing 150
+  specs and examining 90**, because ``census.require``'s ``AssertionError`` is
+  swallowed by the blanket amnesty. With ``raises=`` in place the same run is
+  reported ``FAILED`` on ``GENERATOR FLOOR NOT MET``. One deleted keyword
+  between a floor that holds and a floor that cannot fail.
+  ``test_suite_disclosure.py`` now asserts the keyword is there, statically,
+  because no log-reader can see it go.
 * the reason names the open defect, so CI's own output says what is not being
   checked rather than leaving a reader to infer it from a green tick.
 
@@ -115,8 +132,11 @@ class WrongVerifiedFromWrap(AssertionError):
     """A wrong VERIFIED whose harness carries an out-of-dtype-range constant.
 
     A distinct type so that ``xfail(raises=...)`` can excuse this defect class
-    and nothing else. Any other wrong VERIFIED is a plain ``AssertionError``
-    and fails the run.
+    and nothing else. **Inside the leg that raises it that narrowing is
+    vacuous** — the leg's strategy is filtered to wrappable harnesses, so no
+    other wrong VERIFIED can arrive there; see the module docstring. What the
+    narrowing does confine is everything else the marked test can raise, and
+    the one that matters is its own census floor.
     """
 
 
@@ -186,6 +206,15 @@ def test_a_verified_is_true_at_every_admitted_point():
             return
         if _grammar.wrappable_constants(spec):
             raise WrongVerifiedFromWrap(msg)
+        # UNREACHABLE FROM THIS TEST, and left in deliberately. The strategy
+        # above is `integer_specs().filter(wrappable_constants)`, so the branch
+        # cannot be taken here — the narrowing this line represents is done by
+        # the residual leg below, not by `raises=`. It stays because the day
+        # somebody widens this leg's strategy it is the difference between a
+        # non-wrap wrong VERIFIED being reported and being excused, and because
+        # deleting it would leave a reader thinking `raises=` narrows something
+        # inside this test. It does not; see the module docstring for what it
+        # DOES do, which is hold the census floor.
         raise AssertionError(msg)
 
     search()

@@ -770,10 +770,19 @@ jobs:
   #     prevent. Strict means the suite goes RED when the remedy lands and
   #     somebody has to come and delete the marker.
   #   * `raises=WrongVerifiedFromWrap`. The marker excuses THAT defect class and
-  #     no other. A wrong VERIFIED whose harness carries no out-of-dtype-range
-  #     constant raises a plain AssertionError, does not match, and is reported
-  #     as a real failure. Without `raises=`, the xfail would be a blanket
-  #     amnesty over the strongest property in the suite.
+  #     no other — but NOT for the reason an earlier version of this comment
+  #     gave. It said a non-wrap wrong VERIFIED raises a plain AssertionError,
+  #     does not match, and is reported as a real failure. True of the code
+  #     path, VACUOUS for that test: the leg draws from
+  #     `integer_specs().filter(wrappable_constants)`, so every spec it sees
+  #     carries a wrappable constant and the AssertionError branch is
+  #     unreachable. The residual masked leg is what confines the class.
+  #     What `raises=` IS load-bearing for, measured: the CENSUS FLOOR. With it
+  #     deleted and `_bool_status` mutated to violate everything, the leg
+  #     reports XFAIL — green — on `verified_oracle_checked=0 < 5` after
+  #     drawing 150 specs, because `census.require`'s AssertionError is
+  #     swallowed by the blanket amnesty. With it in place the same run is
+  #     FAILED on GENERATOR FLOOR NOT MET.
   #   * the reason names the defect, so this job's own output says what is not
   #     being checked instead of leaving a reader to infer it from a green tick.
   #
