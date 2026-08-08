@@ -6,9 +6,44 @@ repos:
   - repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: v1.5.6
     hooks:
+      # `scratchpad/**` IS EXCLUDED, and a narrowing has to show its
+      # replacement rather than assume one.
+      #
+      # REUSE.toml annotates the whole subtree — deliberately, because the
+      # scratchpad holds evidence in whatever form the measurement produced,
+      # including formats (.json, .csv) that cannot carry a comment at all.
+      # This fixer rewrites the WORKING TREE, so with `scratchpad/**` still in
+      # its `files:` regex it added twelve headers REUSE.toml exists to make
+      # unnecessary, and `staged-spdx-header` below then correctly reported the
+      # divergence the fixer had just created. Driven, `pre-commit run
+      # --all-files` twice in a clean checkout:
+      #
+      #   33fd1f8   pass 1 Failed (12 files rewritten)   pass 2 rc=0
+      #   6918afb   pass 1 Failed (12 files rewritten)   pass 2 rc=1, and every
+      #                                                  pass after it
+      #
+      # The advice printed with that red is `git add` on twelve headers that
+      # should not exist. A permanently red control, telling you to undo the
+      # annotation, is one people learn to ignore.
+      #
+      # WHAT STILL ENFORCES THE PROPERTY HERE. `reuse lint` — the `reuse` hook
+      # below, and `fsfe/reuse-action` in ci.yml, which is where `--no-verify`
+      # cannot reach. Measured with reuse 6.2.0 on this tree, one header-less
+      # file at a time:
+      #
+      #   scratchpad/zz.py   reuse lint  rc=0    (the REUSE.toml annotation)
+      #   src/zz.py          reuse lint  rc=1    (nothing annotates src/)
+      #
+      # So the exclusion drops exactly the paths another control already
+      # covers, and drops nothing anywhere else: a header-less file under
+      # `src/` or `tests/` still reddens this fixer, driven both ways. The CI
+      # half of that sentence carries the version-skew hazard written up at the
+      # `reuse` job in ci.yml — CI lints with reuse 5.1.1, this config pins
+      # 6.2.0, and only 6.2.0 is installable here.
       - id: insert-license
         name: insert SPDX headers
         files: \.(py|pyi|sh|toml|ya?ml)$
+        exclude: ^scratchpad/
         args:
           - --license-filepath
           - .license-header.txt
