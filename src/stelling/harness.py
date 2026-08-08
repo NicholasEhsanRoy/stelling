@@ -6,9 +6,11 @@
 ``any_array(shape, dtype, (lo, hi))`` declares an arbitrary bounded input;
 ``any_pytree(tree, bounds)`` is tracing-time sugar declaring one bounded
 input per array leaf of a prototype pytree (identical trace, hence
-identical content hash, to the hand declaration); ``assume(pred)`` records
-an assumption (inert in the MVP propagation); ``assert_(pred)`` states an
-obligation. The declarations bind real jax primitives (``stelling_any`` /
+identical content hash, to the hand declaration); ``assume(pred)`` states
+a precondition on the **whole query** — not on the lines below it — and
+``assert_(pred)`` states an obligation over the inputs that satisfy every
+such precondition (each function's own docstring carries the rule and its
+limits). The declarations bind real jax primitives (``stelling_any`` /
 ``stelling_assume`` / ``stelling_assert``) so they land in the traced
 jaxpr — the query's content hash covers them. ``trace(harness)`` returns
 the transcribed :class:`stelling.ir` query.
