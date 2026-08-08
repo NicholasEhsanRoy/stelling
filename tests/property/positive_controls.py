@@ -65,7 +65,12 @@ class Control:
     why: str             # the defect, in one sentence
     mutation: Mutation | None = None
     series: str = "any"  # "any" | "both" — "both" needs two interpreters
-    expect_message: str = ""  # a substring the failure must carry
+    # A substring the failure must carry. NOT optional in practice, and
+    # ``test_suite_disclosure`` asserts it: ``""`` is a substring of every
+    # string, so a control carrying it checks only ``returncode != 0`` and
+    # reports a collection error, an import failure or a typo'd nodeid as
+    # FIRED. The default stays for the dataclass's sake and is refused.
+    expect_message: str = ""
     scale: float = 1.0  # budget multiplier, where the search needs more room
 
 
@@ -276,7 +281,15 @@ CONTROLS = (
             "mid-model-walk; and `...\\nend 4`, the final newline cut and "
             "nothing else, read as a present terminator. Fixed at 8d3051a."
         ),
-        expect_message="",
+        # `[flat]` is the leg tag `_judge` stamps on ALL THREE of its failure
+        # messages — truncated run, nonzero-exit run, model that was not
+        # written — so it matches any genuine failure of this property and
+        # nothing else. It was `""`, which is a substring of every string
+        # including a traceback: measured, a planted COLLECTION ERROR in
+        # test_cvc5_protocol.py was reported "FIRED — the property failed where
+        # it is supposed to", `1/1 controls fired`, exit 0. A control that
+        # cannot tell a defect from a broken import is not a control.
+        expect_message="[flat]",
     ),
     Control(
         name="cvc5-stateful",
@@ -290,7 +303,7 @@ CONTROLS = (
             "search on a protocol whose record ORDER is fixed."
         ),
         scale=20.0,
-        expect_message="",
+        expect_message="[stateful]",  # see cvc5-flat for why this is not ""
     ),
     # ── cross-series ────────────────────────────────────────────────────────
     Control(

@@ -66,6 +66,37 @@ Budgets are chosen by `STELLING_PROPERTY_PROFILE`:
 
 `STELLING_PROPERTY_SCALE` multiplies any of them.
 
+### The `ci` profile is a rot detector, not a defect finder
+
+Say it that way round, because the per-push job's log lists what it *runs* and
+a reader will otherwise take that for a list of what it *rules out*.
+
+**A firing positive control is not evidence that the budget is adequate.**
+Measured on this tree: the `widen` control fires at `ci`. The same property,
+against a *blatanter* mutant — a wide declared box collapsed to its midpoint in
+`interval.from_bounds` — did not, at 250 examples:
+
+| under the midpoint mutant | verdict |
+|---|---|
+| `x ∈ [-0.25, 0.25] ⊢ x >= 0.0` | UNKNOWN |
+| `x ∈ [-2.25, 2.25] ⊢ x >= 0.0` | **VERIFIED** — widening *proved* it |
+
+A three-line probe hits that instantly. So `conjunct` and `widen` now draw
+**1000** rather than 250: both mutants are caught at 1000 and neither was at
+250, and the cost is **+21 s** per push (4.2 s → 14.7 s and 4.2 s → 15.3 s).
+
+That moved the boundary. It did not change the instrument. The reordering
+property's cross-kind clause is falsifiable — supply the shape as an `@example`
+under an assume-pins-to-`1e9` mutant and it fires — and the search does not
+reach it at `ci`, at ×4, or at ×16. The whole suite at ×4 costs **172 s**
+against ~60 s and is still green against a mutant a three-line probe catches.
+
+What the per-push job does buy, and it is worth having: the strategies still
+draw their boundary classes, the registered mutations still apply, every
+property still has a control, seven controls still fire, and the suite still
+runs at all. **That is rot, caught on the push that causes it — not a soundness
+argument.**
+
 **There is no nightly job.** Adding one needs a `schedule:` trigger in
 `.github/workflows/ci.yml`, and that file was being edited concurrently when
 this suite landed, so the change was kept to a single appended job. Until a

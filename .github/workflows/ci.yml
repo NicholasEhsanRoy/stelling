@@ -857,14 +857,42 @@ jobs:
       - name: RESOLVED versions
         run: |
           .venv/bin/python -c "import jax, jaxlib, hypothesis, numpy; print('jax', jax.__version__, 'jaxlib', jaxlib.__version__, 'numpy', numpy.__version__, 'hypothesis', hypothesis.__version__)"
-      - name: WHAT THIS JOB CHECKS, AND WHAT IT DOES NOT
+      - name: WHAT THIS JOB IS, WHAT IT RUNS, AND WHAT IT DOES NOT
         # Printed into the log on every run, because a green tick says nothing
         # about scope and a reader has only the log.
         run: |
           cat <<'EOF'
-          CHECKED, at the `ci` profile (derandomized — the same tree gives the
+          WHAT THIS JOB IS: A ROT DETECTOR, NOT A DEFECT FINDER. Read that
+          before the list below, because the list is a list of what RUNS and a
+          reader will otherwise take it for a list of what is RULED OUT.
+
+          Measured on this tree, and the reason for the sentence above:
+            * the `widen` positive control FIRES at this budget — and the same
+              property, against a BLATANTER mutant (a wide declared box
+              collapsed to its midpoint, under which `x in [-0.25,0.25] |-
+              x >= 0.0` is UNKNOWN while the WIDENED `x in [-2.25,2.25]` is
+              VERIFIED), passed at 250 examples. A firing control is not
+              evidence that the budget is adequate.
+            * two properties therefore now draw 1000 rather than 250 (conjunct
+              and widen); both mutants above are caught at 1000 and neither was
+              at 250. Cost: +21 s per push.
+            * that moved the boundary and did not change the instrument. The
+              reordering property's cross-kind clause is falsifiable — it fires
+              when the shape is supplied as an @example — and the search does
+              not reach it at this budget, at x4, or at x16. The whole suite at
+              x4 takes 172 s against ~60 s and is still green against a mutant
+              a three-line probe would have caught.
+
+          What this job DOES buy, and it is worth having: the strategies still
+          draw their boundary classes, the registered mutations still apply,
+          every property still has a control, seven controls still fire, and
+          the suite still runs at all. That is rot, caught on the push that
+          causes it. It is not a soundness argument.
+
+          RUN, at the `ci` profile (derandomized — the same tree gives the
           same examples in the same order, so a property fails on every push or
-          on none):
+          on none). Each line is a property that EXECUTED, never a class of
+          defect ruled out:
             * no VERIFIED is false at an admitted point, integer grammar, with
               the open wrap class MASKED OUT  (this one must be green)
             * no `violated-over-set` is minted over an admitted region that is
@@ -883,7 +911,7 @@ jobs:
               control names a property that exists, every mutation still applies
             * seven of the ten positive controls FIRE where they are supposed to
 
-          NOT CHECKED HERE:
+          NOT RUN HERE AT ALL:
             * THE OPEN WRAP DEFECT IS EXPECTED TO FAIL. The unmasked oracle leg
               is xfail(strict, raises=WrongVerifiedFromWrap). This job is GREEN
               while stelling returns VERIFIED for predicates that are false at

@@ -57,6 +57,40 @@ NOT covered: the solver legs, ``nonvacuity``, control flow (``scan``/``while``/
 the public template helpers, ``strict=True``, and ``vacuity_mode="all"``.
 
 ────────────────────────────────────────────────────────────────────────────
+A NOTE ON BUDGET — WHAT THE `ci` PROFILE IS, AND WHAT IT IS NOT
+────────────────────────────────────────────────────────────────────────────
+
+**A firing positive control is not evidence that the budget is adequate**, and
+this file has the measurement that proves it. The ``widen`` control — interval
+multiplication over two corners instead of four — DOES fire at the ``ci``
+budget. The same property, against a *blatanter* mutant (a wide declared box
+collapsed to its midpoint in ``interval.from_bounds``), did NOT::
+
+    under the midpoint mutant:
+        x ∈ [-0.25, 0.25] ⊢ x >= 0.0   ->  UNKNOWN
+        x ∈ [-2.25, 2.25] ⊢ x >= 0.0   ->  VERIFIED     ← widening PROVED it
+
+A three-line probe hits that instantly. At 250 examples the property passed;
+at 1000 it fails. The same held for the conjunct property against an
+assume-narrows-to-a-point mutant: pass at 250, fail at 1000.
+
+So **those two properties draw 1000 rather than 250**, measured cost on the
+healthy tree +21 s (4.2 s → 14.7 s and 4.2 s → 15.3 s), which is the price of
+moving two demonstrated, blatant unsoundnesses from unseen to seen on every
+push.
+
+**That does not make this a defect-finder, and the docs must not imply it
+does.** Measured on the same tree: the cross-kind clause of the reordering
+property below is falsifiable — supply the shape as an ``@example`` under an
+assume-pins-to-1e9 mutant and it fires — and the search does not reach it at
+``ci``, at ×4, or at ×16. Raising the budget moved the boundary; it did not
+change the kind of instrument this is. The ``ci`` profile is a **rot detector**
+— the strategies still draw, the controls still apply, the properties still run
+— and a green tick from it is not evidence that nothing is wrong. The whole
+suite at ×4 takes 172 s against ~60 s, and is still green against a mutant a
+three-line probe would have caught.
+
+────────────────────────────────────────────────────────────────────────────
 ONE PROPERTY THAT DOES NOT SHIP, AND WHY
 ────────────────────────────────────────────────────────────────────────────
 
@@ -220,7 +254,12 @@ def test_a_conjunct_that_adds_no_information_adds_no_proving_power():
     """
     census = _runner.Census("metamorphic/conjunct")
 
-    @_profiles.current().settings(250)
+    # 1000, NOT the 250 every other property here uses, and the number was
+    # measured rather than picked. At 250 this property PASSES against a
+    # source mutant that breaks the thing it watches blatantly; at 1000 it
+    # FAILS. See the "A NOTE ON BUDGET" block in this module's docstring for
+    # both measurements and for what raising it does NOT buy.
+    @_profiles.current().settings(1000)
     @given(_conjunct_targets())
     @example(SIZE0_CONJUNCT_EXAMPLE)
     def search(item):
@@ -594,7 +633,12 @@ def test_widening_a_declared_bound_cannot_turn_unknown_into_verified():
     """
     census = _runner.Census("metamorphic/widen")
 
-    @_profiles.current().settings(250)
+    # 1000, NOT the 250 every other property here uses, and the number was
+    # measured rather than picked. At 250 this property PASSES against a
+    # source mutant that breaks the thing it watches blatantly; at 1000 it
+    # FAILS. See the "A NOTE ON BUDGET" block in this module's docstring for
+    # both measurements and for what raising it does NOT buy.
+    @_profiles.current().settings(1000)
     @given(_widen_targets())
     @example(WIDEN_EXAMPLE)
     def search(item):
