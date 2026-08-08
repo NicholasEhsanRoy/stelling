@@ -681,8 +681,18 @@ jobs:
   #   1. `git ls-remote --tags https://github.com/fsfe/reuse-action` and read
   #      off whether a `v6` tag exists and which reuse it carries.
   #   2. if it does, change the `uses:` below to `fsfe/reuse-action@v6` and
-  #      confirm on a pull request that `reuse lint` still reports 284/284,
-  #      exit 0 — the figure this tree gives under 6.2.0 locally.
+  #      confirm on a pull request that `reuse lint` still exits 0 and reports
+  #      the SAME "N / N" as `reuse lint` run on the SAME COMMIT locally. Run
+  #      both, compare the two; do not compare either against a number written
+  #      here.
+  #      A LITERAL FIGURE ROTS, AND THIS ONE HAD. It said "284/284 — the figure
+  #      this tree gives under 6.2.0 locally", which was the merge-base's
+  #      count; every commit of the branch that carried the instruction gave
+  #      285/285, and `main` gives 292/292. Any pass that adds a file moves it
+  #      again, so the only instruction that survives is the comparison, not
+  #      the constant. What is being tested is that the action's reuse counts
+  #      the same files as the pinned local one — a difference of any size is
+  #      the signal, and equality at any value is the pass.
   #   3. if it does not, install the pin explicitly instead of using the
   #      action, and keep the two in one place:
   #      `pipx run reuse==6.2.0 lint` or `uvx --from reuse==6.2.0 reuse lint`.

@@ -83,22 +83,36 @@ packages = ["src/stelling"]
 #
 # Hatchling's default sdist takes everything that is not gitignored — tracked or
 # not. That is fail-OPEN: a file protected only by being untracked still ships,
-# and `.git/info/exclude` does not protect it either, because hatchling reads
-# ONE `.gitignore` — the one found walking up to the `.git` boundary — and no
-# other exclusion source: not `.git/info/exclude`, not the developer's
-# `core.excludesFile`, and not a `.gitignore` in a subdirectory. `git status`
-# reads all four, which is why the subdirectory guard in
-# `tests/test_sdist_contents.py` does not ask it any more: a probe in `docs/`
-# hidden by any of those three passed that guard and shipped, 261 members
-# against a baseline of 260. Measured: an internal release checklist,
-# untracked and deliberately uncommitted, shipped byte-identical inside
+# and `.git/info/exclude` does not protect it either, because hatchling does not
+# read it. `git status` reads four exclusion sources; hatchling reads a
+# different set, and that difference is why the subdirectory guard in
+# `tests/test_sdist_contents.py` does not ask `git status` any more: a probe in
+# `docs/` hidden by `.git/info/exclude`, by a developer's `core.excludesFile` or
+# by a nested `.gitignore` passed that guard and shipped, 261 members against a
+# baseline of 260. Measured: an internal release checklist, untracked and
+# deliberately uncommitted, shipped byte-identical inside
 # `stelling-0.1.0.tar.gz`, and a probe file dropped in the tree shipped with it.
+#
+# WHAT HATCHLING ACTUALLY READS — this comment used to say "ONE `.gitignore` …
+# and no other exclusion source", and that was FALSE. It locates TWO files, each
+# by walking UP from the build root: `.gitignore` (stopping at a `.git`) and
+# `.hgignore` (stopping at a `.hg`, which a git checkout does not have, so that
+# search runs to `/`). BOTH are also force-included into the sdist, which
+# bypasses this allowlist entirely — an `.hgignore` in a parent directory of the
+# checkout is distributed as `stelling-0.1.0/.hgignore`, measured at 261 members
+# against the same baseline of 260. And hatchling DISCARDS the whole exclusion
+# set when the checkout's own absolute path matches it, so this file's `.cache`,
+# `lib/`, `var/`, `dist/` and `venv/` lines make a checkout at, say,
+# `~/.cache/x/stelling` ship every gitignored file inside an allowlisted
+# directory: 262 members from one path and 260 from another, same tree, same
+# plants. `tests/test_sdist_contents.py` is where all three are held.
 #
 # An sdist on PyPI cannot be unpublished, so this is one of the few places where
 # a defect is immutable once released. Hence an allowlist: a path that is not
-# named below does not ship, and a new stray file at the root fails closed
-# instead of being distributed. `tests/test_sdist_contents.py` holds this shut
-# with the same intervention that found the leak.
+# named below does not ship — except for the force-included handful, which no
+# allowlist can reach — and a new stray file at the root fails closed instead of
+# being distributed. `tests/test_sdist_contents.py` holds this shut with the
+# same intervention that found the leak.
 [tool.hatch.build.targets.sdist]
 include = [
   "/src",
