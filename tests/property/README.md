@@ -438,15 +438,42 @@ refusals are recorded next to the clauses that replaced them:
 ## Measured, on this tree
 
 All at `PYTHONPATH=<tree>/src`, `JAX_PLATFORMS=cpu`, x64 forced on by the
-modules themselves, on a loaded box — load averages quoted because they are
-the only thing that makes a wall-clock figure mean anything.
+modules themselves, python 3.12.3, 24 cores, on a loaded box — load averages
+quoted because they are the only thing that makes a wall-clock figure mean
+anything. **Every figure below is anchored to the commit AND the environment
+that produced it**, for the reason the collect-only row spells out.
+
+At **`35f9480`**, in a venv with `hypothesis`, `cvc5` and `z3` and *without*
+`maddening` or `jaxfluids`:
 
 | | jax 0.11.0 | jax 0.10.2 |
 |---|---|---|
-| property suite, `ci` profile | 27 passed, 1 skipped, 1 xfailed | 27 passed, 1 skipped, 1 xfailed |
-| wall | 38.37 / 42.70 / 39.83 s (three runs, load 2.1 → 4.8) | 38.60 s (load 3.6) |
-| whole `tests/` on the shared venvs | 2474 passed, 7 skipped, 145.0 s | 2474 passed, 7 skipped, 146.7 s |
-| `--collect-only` ids | 2476 | 2476 — **0 lines of diff** |
+| property suite, `ci` profile | 30 passed, 1 skipped, 1 xfailed | 30 passed, 1 skipped, 1 xfailed |
+| wall | 66.11 s (load 2.51) | 69.28 s (load 2.82) |
+| whole `tests/` | 2470 passed, 13 skipped, 1 xfailed, 228 s | — |
+| `--collect-only` ids | 2483 | 2483 — **0 lines of diff** |
+
+and on the **shared jax venvs** — `cvc5`, `z3`, `maddening`, `jaxfluids`, and
+**no `hypothesis`**, which is also what CI installs:
+
+| | jax 0.11.0 | jax 0.10.2 |
+|---|---|---|
+| whole `tests/` | 2476 passed, 7 skipped, 155.01 s, `verdict=made` | — |
+| `--collect-only` ids | 2478 | 2478 — **0 lines of diff** |
+
+**The collect-only count is a fact about an environment, not about a tree, and
+it was recorded here as though it were the second.** This table used to carry a
+bare `2476`. That number was right — for the shared venvs, at `9cefc6d`. In a
+venv carrying `hypothesis` instead of `maddening`/`jaxfluids` the same commit
+collects **2453**; add `cvc5` and `z3` to that venv and it collects **2480**.
+Three different true answers for one commit, and the row said none of which it
+was. So: the commit and the installed optional dependencies are now part of
+every figure.
+
+**The part that cannot rot is the comparison, and it is the part worth having**
+— *same commit, same environment, two jax series: 0 lines of `--collect-only`
+diff*, in both environments above. That claim survives anyone installing
+anything, and it is the claim the two-series support actually rests on.
 
 The one skip in the property suite is the cross-series differential, which
 needs a second interpreter; run with one, it passes in **both** directions
@@ -457,13 +484,15 @@ byte-identical outcomes, which is what `derandomize=True` buys and why a
 per-push gate uses it: this suite either fails on every push or on none, and
 never reddens an unrelated PR a quarter of the time.
 
-**~40 s per push, not the ~6 s an earlier estimate quoted, and the difference
+**~66 s per push, not the ~6 s an earlier estimate quoted, and the difference
 is not overhead.** That estimate priced two properties (an integer oracle at
 500 examples and the cvc5 state machine at 1000x10). Those two still cost
-about that here — 6.8 s and 1.1 s. The other ~30 s is six more properties,
-four of which call `check()` **twice per example** because that is what a
-metamorphic property is. `STELLING_PROPERTY_SCALE=0.5` halves it if a future
-job needs the room; the census floors are what will complain first.
+about that here — 6.8 s and 1.1 s. The rest is seven more properties, five of
+which call `check()` **twice per example** because that is what a metamorphic
+property is, plus the 1000-example budgets on `conjunct` and `widen` argued
+above (+21 s, and they buy two blatant unsoundnesses the 250-example budget
+could not see). `STELLING_PROPERTY_SCALE=0.5` halves the lot if a future job
+needs the room; the census floors are what will complain first.
 
 **The randomised `dev` profile found two defects — in this suite, not in
 stelling.** Both were invisible at the `ci` budget and both are now fixed:
