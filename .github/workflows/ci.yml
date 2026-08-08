@@ -687,9 +687,24 @@ jobs:
   # 29–194 (v6.2.0 down to just above `## v5.1.1`) for the five terms returns
   # exactly the one line quoted above, and a full-word grep for `annotation`,
   # `precedence` and `glob` over that window returns NOTHING. Mapping every
-  # `REUSE.toml` mention in the whole file to its release: v5.0.0 (×5), v4.0.0
-  # (×5), v3.0.0 (×1), and no later one. `precedence` appears at the v2.0.0
-  # heading. Both readings below stand as written.
+  # `REUSE.toml` mention in the whole file to its release — AND THE FIGURE
+  # THAT STOOD HERE NAMED NO UNIT AND WAS WRONG UNDER EVERY UNIT. It read
+  # "v5.0.0 (×5), v4.0.0 (×5), v3.0.0 (×1)". `grep -c 'REUSE\.toml'` on that
+  # file gives **13**, not 11, and no counting rule yields 5/5/1. The two
+  # rules that mean anything here, each with its unit stated:
+  #   * BY MATCHING LINE — the unit `grep -n 'REUSE\.toml'` counts —
+  #     **v5.0.0 ×6, v4.0.0 ×6, v3.0.0 ×1 = 13**. (v5.0.0 at L290, 294, 307,
+  #     318, 319, 321; v4.0.0 at L352, 356, 359, 376, 377, 437; v3.0.0 at
+  #     L479.)
+  #   * BY CHANGELOG ENTRY — one bullet or one prose paragraph, however many
+  #     lines it wraps onto — **v5.0.0 ×5, v4.0.0 ×6, v3.0.0 ×1 = 12**. Only
+  #     v5.0.0 differs between the two rules, because L318/L319 are one
+  #     wrapped bullet.
+  # A figure in a norm states the UNIT it counts (docs/norms.md); this one did
+  # not, and the number was not reachable from any unit. THE CONCLUSION IS
+  # UNTOUCHED and was never at risk: under both rules the newest release
+  # mentioning `REUSE.toml` at all is v5.0.0, below both pins. `precedence`
+  # appears at the v2.0.0 heading. Both readings below stand as written.
   #
   # The sharper form of the same reading: the NEWEST release that documents
   # any change to `REUSE.toml` semantics is **v5.0.0** (2024-11-14) — glob
