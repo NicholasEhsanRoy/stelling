@@ -2936,11 +2936,65 @@ verdicts:
   an empty one starts), which an inlined subset test cannot follow; and
   `test_every_reach_of_the_shared_point_names_the_certificate` wraps the
   shared decision in a RECORDER and inspects the keyword arguments, which
-  is the first pin in that file that is not argument-blind. Mutants
-  confirming the pins are the ones that redden, each in its own worktree
-  with `python -B` and `__pycache__` cleared: `M1_inline_witness`,
-  `M2_inline_setref_interval`, `M3_inline_setref_affine` — all
-  behaviour-preserving, all invisible to every verdict test in the tree.
+  is the first pin in that file that is not argument-blind. Three
+  behaviour-preserving mutants, each in its own worktree with `python -B`
+  and `__pycache__` cleared, confirm which pin sees what:
+  `M2_inline_setref_interval` and `M3_inline_setref_affine` — each leg
+  lifting the withholding locally instead of passing the certificate in —
+  redden **exactly one test each, and it is that pin**, out of 2396;
+  `M1_inline_witness` reddens **six**, its own pin plus the five tests
+  that close the certificate's route as a CONTROL while measuring
+  something else, and an inlined predicate makes that patch inert. **All
+  32 corpus verdicts are identical to the real build under all three**
+  (`scratchpad/cert/RESULTS_mutants.txt`) — a pin that checked only
+  verdicts would see nothing.
+
+  **The certificate is LIVE on the affine leg, and it took a second look
+  to make it so.** The search's gate first asked only "did the interval
+  leg withhold a violation?", which is never true on a query the interval
+  leg cannot decide — so on the one class the refinement actually judges
+  (`assume_dropped`, `coverage.constrained == 0`) the certificate was
+  never computed and the third argument arrived False by construction,
+  exactly the documented-dead situation `nonemptiness_certified` is in on
+  that leg. Measured: `assume(x >= y)` (relational, dropped, region
+  inhabited at `x = y = 0`) with `assert_(x - x >= 0.5)` —
+  interval-undecided, affine-violated — returned UNKNOWN from the
+  refinement. The gate now also fires on an `unknown` obligation when
+  nothing was constrained, which is precisely when the refinement will
+  run, and the same query returns REFUTED. Cost: a search on a run whose
+  interval leg withheld nothing, 1.4 ms → 30 ms on a 256-element
+  declaration, inside the bounds above. Pinned with its empty-region twin
+  by `test_the_certificate_reaches_the_affine_leg_as_a_LIVE_argument`.
+
+  **The stamp does not carry a known-false assumption.** Both uncertified
+  assumptions say *"the conditional claim may be vacuous"* — true when the
+  walk writes them, before any witness exists, and FALSE on a run the
+  certificate then settles. On a certified run they are removed and
+  replaced by one that states what the claim now rests on (the soundness
+  of the transfers at a point, and the probed point's membership in the
+  declared set); on a declining run they are untouched. A stamped
+  assumption is what a verdict claims to rest on, so leaving a known-false
+  one in would be a disclosure defect whatever the verdict said
+  (`test_a_certified_run_does_not_stamp_a_known_false_assumption`).
+
+  **The invariant the reading order rests on, measured.** Each assume's
+  witness answer is read BEFORE `_assume_constrain` can meet anything into
+  the env, and the argument that this suffices is that a `[1, 1]`
+  predicate's meet with the closed half-space is a NO-OP — otherwise an
+  earlier assume could certify itself AND cut the box a later one is read
+  against. Measured across the corpus: **148 certifying probe runs
+  inspected, 0 narrowed anything**
+  (`scratchpad/cert/RESULTS_invariant.txt`).
+
+  **The two semantics dials are NOT ordered, and the sentence that said
+  they were is corrected here.** The check runs in the run's own
+  semantics. `sqrt` of the declared point 0.25 is EXACTLY 0.5 in binary64,
+  so the ieee transfer encloses it as a point and `>= 0.5` is definitely
+  TRUE — while the real-mode transfer bumps outward unconditionally,
+  straddles, and certifies nothing: **ieee certifies where real does
+  not**. Three other corpus rows go the other way. Both are sound for
+  their own dial, which is the whole content of "the same arithmetic the
+  query was judged in".
 
   **Six existing expectations changed, every one because a withheld
   refutation was CORRECT.** `{x : x ≥ 0.9 ∧ x² ≤ 0.9}` is `[0.9, 0.948…]`;
@@ -2952,10 +3006,17 @@ verdicts:
   sentence *"every definite violation is then withheld from REFUTED"* was
   made true again by naming the exception.
 
+  **Both jax series.** 2398 passed / 2 skipped on jax 0.11.0 and on jax
+  0.10.2 (140.30 s and 139.97 s, load 0.59 and 2.85), `--collect-only`
+  ids byte-identical between them (2400), `reuse lint` rc=0 with 317/317
+  files carrying copyright and license information. Baseline at `681c6ef`
+  was 2369 / 2 on both: 31 tests added, none removed.
+
   Constructions: `tests/test_nonempty_certificate.py` (one-sidedness,
   the `discharged` ledger with its positive control, membership, the
-  boundary cases, the bounds), `tests/test_exactness_lift.py` (both
-  routings); pre-registration, corpus, oracle, ledger and outcomes:
-  `scratchpad/PREREG_CERT.md` and `scratchpad/cert/`.
+  boundary cases, the dial, the invariant, the stamp swap, the bounds),
+  `tests/test_exactness_lift.py` (both routings); pre-registration,
+  corpus, oracle, ledger and outcomes: `scratchpad/PREREG_CERT.md` and
+  `scratchpad/cert/`.
 
 *(no releases yet)*

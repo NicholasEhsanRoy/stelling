@@ -89,11 +89,18 @@ satisfiability by the nonempty meet, and definite verdicts stand. An
 assume constraining a NON-exact variable is still applied (the meet
 over-approximates true-region ∩ reachable — sound) and the emptiness
 refusals still fire (they prove emptiness from the over-approximation),
-but the precondition's satisfiability is UNCERTIFIED: every subsequent
-definite violation is withheld from REFUTED (status ``unknown``, note
+but the precondition's satisfiability is UNCERTIFIED: every definite
+violation of the run is withheld from REFUTED (status ``unknown``, note
 quoted — a possibly-vacuous refutation is not a refutation), while
 VERIFIED remains allowed carrying a may-be-vacuous note and stamped
-line; the inert-mode control is the visibility instrument. An assume whose region is provably
+line; the inert-mode control is the visibility instrument. **Unless a
+POINT WITNESS is found** — one member of the declared set at which every
+``stelling_assume`` of the query is definitely true, which settles the
+one thing the withholding was waiting on (the assumed region is
+inhabited, so no obligation is vacuous) and lets the violations stand:
+:func:`_region_witness`, one-sided, and reaching the withholding through
+:func:`stelling.exactness.certifies_set_refutation` like everything else.
+An assume whose region is provably
 EMPTY — an empty meet, a definitely-false constant comparison, or a
 STRICT constraint whose meet collapses onto the closed boundary point
 (``x > k`` narrowing to ``[k, k]``: the true region ``(k, k]`` is empty
@@ -5477,13 +5484,7 @@ class _Propagator:
                         f"intermediate (its box may exceed its true image) "
                         f"— the conditional claim may be vacuous"
                     )
-                    self.assumptions.add(
-                        "precondition satisfiability uncertified: a "
-                        "constraining assume narrowed an over-approximated "
-                        "intermediate whose box may exceed its true image "
-                        "— the conditional claim may be vacuous; the "
-                        "inert-mode control is the visibility instrument"
-                    )
+                    self.assumptions.add(UNCERTIFIED_NARROWING_ASSUMPTION)
             for i, reason in enumerate(dropped):
                 # a conjunction can mix constrainable and inert conjuncts;
                 # the un-narrowable part is still a drop and still says so.
@@ -5565,18 +5566,13 @@ class _Propagator:
                     f"{len(restricting) + len(vacuous)} conjunct(s) of this "
                     f"assume were dropped, so the narrowed set is a "
                     f"SUPERSET of the assumed region and that region was "
-                    f"not shown non-empty — the conditional claim may be "
-                    f"vacuous, and every definite violation is withheld "
-                    f"from REFUTED"
+                    f"not shown non-empty HERE — the conditional claim may "
+                    f"be vacuous, and every definite violation is withheld "
+                    f"from REFUTED unless the run's non-emptiness "
+                    f"certificate finds a point of the declared set "
+                    f"satisfying every assume of this query"
                 )
-                self.assumptions.add(
-                    "precondition satisfiability uncertified: a constraining "
-                    "assume dropped at least one conjunct, so the narrowed "
-                    "set is a superset of the assumed region and that region "
-                    "was not shown non-empty — the conditional claim may be "
-                    "vacuous; the inert-mode control is the visibility "
-                    "instrument"
-                )
+                self.assumptions.add(UNCERTIFIED_DROP_ASSUMPTION)
         else:
             self.counter.record_inert(eqn.primitive)
             if dropped or not vacuous:
@@ -7138,6 +7134,43 @@ UNCERTIFIED_REACHABILITY_REFUSAL = (
 )
 
 
+# The two STAMPED assumptions an uncertified assume state adds, and the
+# one that SUPERSEDES them.
+#
+# They are constants rather than literals at their emission sites because
+# `propagate` has to remove them again. Each says "the conditional claim
+# may be vacuous", which is true when it is written — during the walk,
+# before any witness exists — and FALSE on a run the non-emptiness
+# certificate then settles. A stamped assumption is what a verdict claims
+# to rest on; leaving a known-false one in the stamp is a disclosure
+# defect whatever the verdict says, so the swap is done once, at the same
+# place the certificate's answer is known.
+UNCERTIFIED_NARROWING_ASSUMPTION = (
+    "precondition satisfiability uncertified: a constraining assume "
+    "narrowed an over-approximated intermediate whose box may exceed its "
+    "true image — the conditional claim may be vacuous; the inert-mode "
+    "control is the visibility instrument"
+)
+UNCERTIFIED_DROP_ASSUMPTION = (
+    "precondition satisfiability uncertified: a constraining assume "
+    "dropped at least one conjunct, so the narrowed set is a superset of "
+    "the assumed region and that region was not shown non-empty — the "
+    "conditional claim may be vacuous; the inert-mode control is the "
+    "visibility instrument"
+)
+REGION_INHABITED_ASSUMPTION = (
+    "precondition satisfiability CERTIFIED: a probed point of the declared "
+    "set — a value of each declaration's own dtype inside its own declared "
+    "box — satisfies every assume of this query, each predicate definitely "
+    "true at that point in the arithmetic the obligations were judged in. "
+    "The assumed region is therefore INHABITED and no obligation of this "
+    "run is vacuous, which is what the 'precondition satisfiability "
+    "uncertified' assumption would otherwise have said. What this rests "
+    "on: the soundness of the interval transfers at a point (a definite "
+    "TRUE over an enclosure is a TRUE at the value) and the membership of "
+    "the probed point in the declared set"
+)
+
 # The scope sentence, quoted by every withholding this rule produces so a
 # reader who meets one obligation's note meets the rule itself.
 ASSUME_QUERY_SCOPE = (
@@ -7480,12 +7513,34 @@ def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
         # nothing is being withheld on this run, so there is nothing for a
         # certificate to lift and no reason to pay for one.
         return False
-    if not any(
-        o.status == "violated-over-set"
-        for sink in (p.obligations, p.nonvacuity_checks)
-        for o in sink
+    statuses = {
+        o.status for sink in (p.obligations, p.nonvacuity_checks) for o in sink
+    }
+    if "violated-over-set" not in statuses and not (
+        "unknown" in statuses and not p.any_constrained
     ):
-        return False  # nothing withheld; a query with none pays nothing
+        # NOTHING FOR A CERTIFICATE TO LIFT ON THIS RUN, so it pays nothing.
+        # Two ways there can be something, one per leg:
+        #
+        #  * a `violated-over-set` obligation is what THIS leg withholds;
+        #  * an `unknown` one on a run that CONSTRAINED nothing is what the
+        #    affine refinement may still mint a violation from — and that
+        #    leg withholds through the same shared decision, reading this
+        #    same answer off the propagation.
+        #
+        # The second clause is narrowed by `any_constrained` because
+        # :func:`stelling.affine.refine_propagation` declines WHOLLY on
+        # `coverage.constrained` (the same condition, one name over), so
+        # searching on a run that narrowed something would buy that leg
+        # nothing. Measured, jax 0.11.0: without the second clause,
+        # `assume(x >= y)` (relational, dropped, region inhabited) with
+        # `assert_(x - x >= 0.5)` — interval-undecided, affine-violated —
+        # returns UNKNOWN from the refinement with the certificate never
+        # computed; with it, REFUTED, which is the right answer. The cost
+        # is a search on a run whose interval leg withheld nothing:
+        # 1.4 ms -> 30 ms on a 256-element declaration, inside the bounds
+        # below.
+        return False
     required = _assume_equation_ids(closed.jaxpr)
     if not required:
         return False
@@ -7518,7 +7573,10 @@ def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
                 f"point, in the same arithmetic the query was judged in), "
                 f"so the assumed region is inhabited and a definite "
                 f"violation over the judged set is not vacuous — definite "
-                f"violations are NOT withheld from REFUTED on this run"
+                f"violations are NOT withheld from REFUTED on this run, "
+                f"and this SUPERSEDES the 'precondition satisfiability "
+                f"UNCERTIFIED' note(s) and stamped assumption(s) this run "
+                f"wrote while walking, before any witness existed"
             )
             return True
     return False
@@ -7655,6 +7713,18 @@ def propagate(
         closed, p, assume_mode=assume_mode, semantics=semantics
     )
     assumptions = set(p.assumptions)
+    if p.region_inhabited:
+        # THE STAMP SWAP. Both uncertified assumptions say "the
+        # conditional claim may be vacuous" — true when written, during
+        # the walk, before any witness existed, and FALSE on this run. A
+        # stamped assumption is what a verdict claims to rest on, so a
+        # known-false one is a disclosure defect whatever the verdict
+        # says. Removed here rather than never written, because the walk
+        # cannot know: the certificate is a whole-run answer computed
+        # after it.
+        assumptions.discard(UNCERTIFIED_NARROWING_ASSUMPTION)
+        assumptions.discard(UNCERTIFIED_DROP_ASSUMPTION)
+        assumptions.add(REGION_INHABITED_ASSUMPTION)
     if semantics == "ieee":
         # the mode-wide stamped assumptions: how ieee endpoints are
         # computed and what their soundness relies on, and the

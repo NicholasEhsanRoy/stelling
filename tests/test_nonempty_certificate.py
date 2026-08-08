@@ -251,14 +251,98 @@ def test_the_ledger_would_see_a_move_toward_discharged__POSITIVE_CONTROL(
     )
 
 
+def test_a_certified_run_does_not_stamp_a_known_false_assumption():
+    """The stamp swap. Both uncertified assumptions say "the conditional
+    claim MAY BE vacuous" — true when the walk writes them, before any
+    witness exists, and FALSE on a run the certificate then settles. A
+    stamped assumption is what a verdict claims to rest on, so a
+    known-false one is a disclosure defect whatever the verdict says.
+    """
+    p = _prop(h_inhabited_narrowing)
+    assert p.region_inhabited is True
+    assert P.UNCERTIFIED_NARROWING_ASSUMPTION not in p.assumptions
+    assert P.UNCERTIFIED_DROP_ASSUMPTION not in p.assumptions
+    assert P.REGION_INHABITED_ASSUMPTION in p.assumptions
+    # and what REPLACES it says what the claim now rests on, rather than
+    # simply dropping the disclosure
+    assert "probed point of the declared set" in P.REGION_INHABITED_ASSUMPTION
+    assert "What this rests on" in P.REGION_INHABITED_ASSUMPTION
+
+    # the control: a run the certificate declines keeps its uncertified
+    # assumption exactly as before, so the swap is the certificate's and
+    # not an unconditional deletion
+    q = _prop(h_empty_narrowing)
+    assert q.region_inhabited is False
+    assert P.UNCERTIFIED_NARROWING_ASSUMPTION in q.assumptions
+    assert P.REGION_INHABITED_ASSUMPTION not in q.assumptions
+
+    # and the DROP half of the swap, on its own mechanism
+    d = _prop(h_inhabited_relational)
+    assert d.assume_dropped is True and d.region_inhabited is True
+    assert P.UNCERTIFIED_DROP_ASSUMPTION not in d.assumptions
+    assert P.REGION_INHABITED_ASSUMPTION in d.assumptions
+
+
 def test_a_certificate_never_reaches_a_run_with_nothing_withheld():
     """The search does not even run where there is nothing to lift: a
-    query with no definite violation pays nothing and claims nothing."""
+    query whose obligations all DISCHARGED pays nothing and claims
+    nothing."""
     p = _prop(h_discharged_under_uncertified)
     assert p.narrowing_uncertified is True  # the withholding WOULD apply...
     assert p.obligations[0].status == "discharged"
     assert p.region_inhabited is False  # ...and no certificate was minted
     assert not any("CERTIFIED NON-EMPTY" in n for n in p.notes)
+
+
+def test_the_certificate_reaches_the_affine_leg_as_a_LIVE_argument():
+    """The second leg's third argument is not a documented-dead constant,
+    and this is the query that makes it live.
+
+    `assume(x >= y)` is RELATIONAL — dropped, so the run withholds and
+    `coverage.constrained` stays 0, which is the one state in which the
+    affine refinement does not decline wholly. `assert_(x - x >= 0.5)` is
+    interval-UNDECIDED and affine-VIOLATED, so the refinement is the leg
+    that mints the violation and the leg that must decide whether to
+    withhold it. The region `{x, y ∈ [-1,1]^3 : x ≥ y}` contains
+    `x = y = 0`, so the refutation is owed.
+
+    Measured before the search's gate learned about this leg: UNKNOWN,
+    with the certificate never computed — the interval leg had nothing
+    withheld of its own, so it did not look.
+    """
+    from stelling import affine
+
+    def h():
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        y = any_array((3,), "float64", (-1.0, 1.0))
+        assume(x >= y)
+        return (assert_(x - x >= 0.5),)
+
+    closed = trace(h)
+    p = propagate(closed)
+    assert p.assume_dropped is True
+    assert p.coverage.constrained == 0  # or the refinement declines wholly
+    assert p.obligations[0].status == "unknown"  # the interval leg cannot
+    assert p.region_inhabited is True  # ...and the search ran anyway
+    r, rep = affine.refine_propagation(closed, p)
+    assert r.obligations[0].status == "violated-over-set"
+    assert rep.violated == (0,)
+
+    # the empty-region twin: same shape, disjoint boxes, and the affine
+    # leg must still withhold. Without this the test above would pass on
+    # a refinement that had simply stopped consulting the shared point.
+    def h_empty():
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        y = any_array((3,), "float64", (2.0, 3.0))
+        assume(x >= y)
+        return (assert_(x - x >= 0.5),)
+
+    ce = trace(h_empty)
+    pe = propagate(ce)
+    assert pe.region_inhabited is False
+    re, repe = affine.refine_propagation(ce, pe)
+    assert re.obligations[0].status == "unknown"
+    assert repe.violated == ()
 
 
 def test_the_certificate_can_never_restore_a_branch_scoped_refutation():
@@ -441,6 +525,78 @@ def test_a_transcendental_is_a_boundary_not_a_gap():
     p_ns = _prop(h_no_slack)
     assert p_ns.region_inhabited is False
     assert p_ns.obligations[0].status == "unknown"
+
+
+def test_the_certificate_speaks_the_dial_the_query_was_judged_on():
+    """The witness check runs in the run's OWN semantics, and the two
+    dials are NOT ordered — measured, against the sentence that was
+    written here first.
+
+    `x` is declared at the point 0.25 and `sqrt(0.25)` is EXACTLY 0.5 in
+    binary64, so the ieee transfer encloses it as the point `[0.5, 0.5]`
+    and `>= 0.5` is definitely TRUE; the REAL-mode transfer bumps outward
+    unconditionally, straddles the bound and certifies nothing. **ieee
+    certifies where real does not** — the opposite of the usual direction,
+    and sound in both, because the certificate is computed in the same
+    arithmetic the obligations are judged in and under ieee the program
+    really does compute 0.5. Three corpus rows go the other way
+    (`scratchpad/cert/RESULTS_invariant.txt`).
+    """
+    def h():
+        x = any_array((), "float64", (0.25, 0.25))
+        assume(jnp.sqrt(x) >= 0.5)
+        return (assert_(x <= -1.0),)
+
+    assert _prop(h, semantics="real").region_inhabited is False
+    assert _prop(h, semantics="ieee").region_inhabited is True
+
+    # and an EMPTY region is declined on BOTH dials: the dials differ on
+    # what they can confirm, never on whether an empty region certifies
+    for dial in ("real", "ieee"):
+        assert _prop(h_empty_narrowing, semantics=dial).region_inhabited is False
+        assert _prop(h_empty_relational, semantics=dial).region_inhabited is False
+
+
+def test_a_certifying_probe_narrows_nothing():
+    """The invariant the reading order rests on.
+
+    The witness answer for each assume is read BEFORE `_assume_constrain`
+    can meet anything into the env, and the argument that this suffices is
+    that a predicate whose box is `[1, 1]` is definitely true over the
+    boxes in force, so its meet with the closed half-space is a NO-OP. If
+    that failed, an earlier assume could certify itself AND cut the box a
+    later assume is read against, and the later `[1, 1]` would be a
+    statement about a box that no longer over-approximates the point.
+
+    Measured across the corpus rather than argued: 148 certifying probe
+    runs inspected, 0 narrowed anything
+    (`scratchpad/cert/RESULTS_invariant.txt`). Driven here on the two
+    rows where a certifying run has more than one assume to get wrong.
+    """
+    for h in (h_inhabited_narrowing, h_mixed):
+        c = trace(h)
+        required = P._assume_equation_ids(c.jaxpr)
+        certified = 0
+        for k in range(P._PROBE_COUNT):
+            probe = P._Propagator("constrain", "real")
+            probe.pin = k
+            try:
+                probe.run(c.jaxpr, list(c.consts), [])
+            except Exception:  # noqa: BLE001
+                continue
+            if not exactness.certifies_point_witness(
+                required_assumes=required,
+                witnessed_assumes=frozenset(
+                    key for key, ok in probe.assume_witness.items() if ok
+                ),
+            ):
+                continue
+            certified += 1
+            assert not [n for n in probe.notes if "narrowed var" in n], (
+                f"{h.__name__} probe {k} certified AND narrowed"
+            )
+            assert probe.narrowing_uncertified is False
+        assert certified, f"{h.__name__} certified on no probe at all"
 
 
 # --- the cap (Gate 2) ---------------------------------------------------------

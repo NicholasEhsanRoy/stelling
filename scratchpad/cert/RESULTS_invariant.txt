@@ -1,0 +1,37 @@
+=== I1: a certifying probe narrows nothing ===
+  certifying probe runs inspected: 148; runs that narrowed anything: 0
+
+=== I2: real vs ieee, same rows ===
+  r01_narrow_inhabited                   real=True  ieee=True 
+  r02_narrow_empty                       real=False ieee=False
+  r03_narrow_inhabited_pair              real=True  ieee=True 
+  r04_narrow_empty_pair                  real=False ieee=False
+  r05_square_inhabited                   real=True  ieee=True 
+  r06_square_empty                       real=False ieee=False
+  r07_relational_inhabited               real=True  ieee=True 
+  r08_relational_empty                   real=False ieee=False
+  r09_relational_array_inhabited         real=True  ieee=True 
+  r10_relational_array_empty             real=False ieee=False
+  r11_all_reduction_inhabited            real=False ieee=False
+  r12_all_reduction_empty                real=False ieee=False
+  r13_or_predicate_inhabited             real=True  ieee=True 
+  r14_or_predicate_empty                 real=False ieee=False
+  r15_int32_inhabited                    real=True  ieee=False  <-- differs
+  r16_int32_empty_off_grid               real=False ieee=False
+  r17_float32_inhabited                  real=True  ieee=False  <-- differs
+  r18_float32_pair                       real=True  ieee=False  <-- differs
+  r19_sqrt_slack                         real=True  ieee=True 
+  r20_sqrt_no_slack                      real=False ieee=True   <-- differs
+  r21_exp_slack                          real=True  ieee=True 
+  r22_exp_empty                          real=False ieee=False
+  r23_two_assumes_one_empty              real=False ieee=False
+  r24_two_assumes_both_live              real=True  ieee=True 
+  r25_no_assume_refuted                  real=False ieee=False
+  r26_no_assume_verified                 real=False ieee=False
+  r27_certified_assume_verified          real=False ieee=False
+  r28_certified_assume_refuted           real=False ieee=False
+  r29_uncertified_then_verified          real=False ieee=False
+  r30_uncertified_empty_verified         real=False ieee=False
+  r31_wide_declaration                   real=True  ieee=True 
+  r32_narrow_inhabited_but_assert_holds  real=False ieee=False
+  rows whose certificate differs by dial: 4 (NOT ordered — see this file's docstring: real is more conservative on r20, ieee on r15/r17/r18)
