@@ -880,14 +880,38 @@ jobs:
         # The hole `strict=True` cannot close on its own: somebody weakening it
         # to a plain xfail would be invisible until the day the defect is fixed,
         # which is exactly the day it must not be invisible.
+        #
+        # THE PATTERNS ARE ANCHORED, AND THAT IS WHAT THIS COMMENT IS FOR. An
+        # unanchored `grep -q 'XPASS'` over a `-ra` log matches the xfail
+        # REASON: `WRAP_DEFECT` in tests/property/test_oracle.py ends "…this
+        # test XPASSes and the suite goes red", and `-ra` prints the reason on
+        # the `XFAIL …` summary line. Measured on a HEALTHY tree at 9cefc6d
+        # (`27 passed, 1 skipped, 1 xfailed`, pytest exit 0): the unanchored
+        # form matched its own disclosure text and failed this job on EVERY
+        # push, telling the reader to delete a marker that was working.
+        #
+        # Three anchors, because pytest reports an xpass in three shapes, and
+        # each was driven against a real log on pytest 9.1.1:
+        #   `^XPASS `  non-strict xpass, short-summary line. THIS is the shape
+        #              the step exists for — somebody weakens `strict=True`,
+        #              the remedy lands, the suite stays GREEN, and this line
+        #              is the only thing that notices.
+        #   `^\[XPASS` strict xpass: pytest prints `[XPASS(strict)]` in the
+        #              FAILURES body and the short-summary line is a bare
+        #              `FAILED <nodeid>` with no reason on it. So the obvious
+        #              `FAILED .*\[XPASS` does NOT match on 9.1.1 — measured —
+        #              and is kept below only for other pytest versions.
+        #   `FAILED .*\[XPASS`  pytest versions that do append the reason.
+        # The trailing space in `^XPASS ` is deliberate: it cannot match the
+        # word "XPASSes" even if a future pytest wraps a long reason line.
         run: |
           set -euo pipefail
           out="${RUNNER_TEMP}/property.txt"
-          if grep -q 'XPASS' "${out}"; then
+          if grep -qE '^(XPASS |\[XPASS|FAILED .*\[XPASS)' "${out}"; then
             echo "::error title=an xfail-marked property PASSED::A property marked xfail is now passing. If the wrap remedy landed, delete the marker in tests/property/test_oracle.py; if it did not, the property has stopped finding a defect that is still there."
             exit 1
           fi
-          n="$(grep -c '^XFAIL' "${out}" || true)"
+          n="$(grep -c '^XFAIL ' "${out}" || true)"
           if [ "${n}" != "1" ]; then
             echo "::error title=expected exactly one xfail::Found ${n}. This job asserts the open wrap defect is still being found and still being disclosed as an expected failure. A different number means a marker was added, removed, or silently weakened."
             exit 1
