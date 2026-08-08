@@ -40,9 +40,14 @@ permissions:
 # assertion was added, so none of them is being asked for something it does not
 # already produce:
 #
-#   jax 0.11.0   2296 passed, 2 skipped     verdict=made
-#   jax 0.10.2   2296 passed, 2 skipped     verdict=made
-#   no jax       1185 passed, 85 skipped    verdict=made
+#   jax 0.11.0   2297 passed, 2 skipped     verdict=made
+#   jax 0.10.2   2297 passed, 2 skipped     verdict=made
+#   no jax       1186 passed, 85 skipped    verdict=made
+#
+# (each figure is one higher than it was, and the +1 is the same test in all
+# three: `test_the_untracked_scan_agrees_with_the_tarball`, which gates on git
+# and uv and not on jax. Re-measured in all three environments rather than
+# adjusted by arithmetic.)
 #
 # (the third measured in an interpreter that genuinely does not have jax, not
 # with an import hook, since `stelling._optional.available` asks `find_spec`.)
