@@ -281,14 +281,37 @@ def test_no_untracked_file_anywhere_would_ship() -> None:
     )
 
 
-# Names pytest's own tmp copy never needs and hatchling never reads. `.git` is
-# in here because a worktree's `.git` is a FILE and copying it produces a tree
-# that git commands would follow back out of the copy; the rest are caches and
-# build output that make the copy large for nothing. `.gitignore` is NOT here:
-# hatchling reads it, and a copy without it would build under different rules
-# from the repository, which is the one thing the copy must not do.
-_NOT_COPIED = (
-    ".git",
+# DIRECTORIES the copy leaves behind, and the "directories" is the whole point.
+#
+# These are caches and build output that make the copy large for nothing, and
+# every one of them is gitignored *as a directory* at any depth, so dropping
+# them changes nothing hatchling would have read. Driven with `git check-ignore
+# --no-index`, which is the authority here because hatchling's rule IS
+# `.gitignore`: `docs/build/`, `a/b/c/build/` and the other seven are all
+# IGNORED.
+#
+# THE COMMENT HERE USED TO SAY "names … hatchling never reads", AND THAT WAS
+# FALSE FOR FILES. ``shutil.ignore_patterns`` matches a NAME whatever it is,
+# while `.gitignore`'s `build/` is directory-only — so a FILE named `build`
+# is not gitignored and hatchling ships it. Counter-construction, one plant,
+# two copies of this tree, both built:
+#
+#   docs/build (a FILE)   copy made by ignore_patterns   260 members, absent
+#                         the tree hatchling reads       261 members, SHIPPED
+#
+# The test would then have been measuring a tree the build does not see. Seven
+# of the eight are not gitignored as files (`.venv` is, its pattern carries no
+# trailing slash); no such filename exists in the tree today, so this was
+# latent, and it is closed by asking `is_dir()` rather than by matching a name.
+#
+# RE-DRIVE IT by putting `shutil.ignore_patterns(*_NOT_COPIED_DIRS)` back in
+# `_tree_to_build`, planting `docs/build` as a FILE, and building an sdist from
+# the copy and from the tree: 260 against 261. With `_copy_ignore` it is 261
+# against 261, and `docs/build` as a DIRECTORY is still 260 against 260, so the
+# exclusion still does the job it was added for. No test in the suite reddens
+# either way — the divergence is latent, which is exactly why it is written
+# down rather than left to the next reader to rediscover.
+_NOT_COPIED_DIRS = (
     "__pycache__",
     ".pytest_cache",
     ".ruff_cache",
@@ -299,6 +322,45 @@ _NOT_COPIED = (
     "build",
 )
 
+# The one exclusion that is NOT about gitignore, and so is by name: a worktree's
+# `.git` is a FILE pointing back out of the copy, and copying either shape gives
+# a tree git commands would follow out of. TOP LEVEL only — a `.git` deeper in
+# the tree is not gitignored either, and the root allowlist keeps the top-level
+# one out of the sdist regardless (`/.git` is not in the include list), so
+# restricting it here is what keeps the copy and the tree in agreement.
+_NOT_COPIED_AT_ROOT = (".git",)
+
+# `.gitignore` is in NEITHER list: hatchling reads it, and a copy without it
+# would build under different rules from the repository, which is the one thing
+# the copy must not do.
+
+
+def _copy_ignore(repo: pathlib.Path):
+    """A ``copytree`` ignore callable that agrees with ``git check-ignore``.
+
+    ``shutil.ignore_patterns`` cannot express "only when it is a directory",
+    and that is exactly the distinction `.gitignore` draws for every name in
+    :data:`_NOT_COPIED_DIRS`. A symlink is not a directory for the
+    trailing-slash rule, hence the ``is_symlink`` guard — and the copy is made
+    with ``symlinks=True``, so a symlink is copied as a symlink either way.
+    """
+    root = repo.resolve()
+
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        here = pathlib.Path(directory).resolve()
+        drop = set()
+        if here == root:
+            drop |= {n for n in names if n in _NOT_COPIED_AT_ROOT}
+        for name in names:
+            if name not in _NOT_COPIED_DIRS:
+                continue
+            entry = here / name
+            if entry.is_dir() and not entry.is_symlink():
+                drop.add(name)
+        return drop
+
+    return ignore
+
 
 def _tree_to_build(tmp_path: pathlib.Path) -> pathlib.Path:
     """A private copy of the repository, for interventions that must not be
@@ -307,7 +369,7 @@ def _tree_to_build(tmp_path: pathlib.Path) -> pathlib.Path:
     Measured, at 33fd1f8: 0.01s and 5.3 MiB with the exclusions above.
     """
     staged = tmp_path / "tree"
-    shutil.copytree(REPO, staged, ignore=shutil.ignore_patterns(*_NOT_COPIED), symlinks=True)
+    shutil.copytree(REPO, staged, ignore=_copy_ignore(REPO), symlinks=True)
     assert (staged / "pyproject.toml").is_file(), "the copy is not a source tree"
     assert (staged / "src" / "stelling" / "__init__.py").is_file()
     return staged
