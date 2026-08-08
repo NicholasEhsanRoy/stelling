@@ -66,6 +66,21 @@ Narrowing is **forward-only** (equation order; earlier uses saw the
 wider interval — conservative) and applies to the compared variable
 itself, never through its defining arithmetic.
 
+**Forward-only NARROWING, query-scoped WITHHOLDING — and they are not in
+tension.** The two are separate mechanisms and only one of them is
+positional. Narrowing forward-only means an obligation traced above an
+assume is judged over a wider set than the assume describes; that costs
+precision (an UNKNOWN where a REFUTED was available) and can never mint
+a verdict, because a definite violation over the wider set is a violation
+at every point of the narrower one. The **withholding** — whether a
+definite violation may be called REFUTED at all — is a fact about the
+run's whole assume state and is read once, at the end, over every
+obligation (`stelling.exactness.certifies_set_refutation`; see the
+2026-08-08 SOUNDNESS entry). Both scopes err toward withholding, which is
+why they can differ without either being unsound. Measured on the
+change's corpus: order-dependent rows fell 16 → 2 of 38, and the 2
+survivors are the forward-only narrowing above, not the withholding.
+
 ## The empty region — the empty-set bug, one level up
 
 An empty meet means the precondition is **definitely false on the whole
@@ -175,6 +190,18 @@ verified 0.11.0 throughout. Result: **F1 VERIFIED / F2 UNKNOWN / F3
 UNKNOWN — every status identical to the recorded run.** F2's single
 propagation note now reads, verbatim:
 
+*(**Series scope of this row, settled 2026-08-08 and deferred until
+now.** "jax verified 0.11.0 throughout" is the whole claim: this row was
+measured on **one** series and no other, and the row above states nothing
+about jax 0.10.2. That is not a choice made here — it is measured.
+`import mime` resolves in the 0.11.0 interpreter and raises
+`ModuleNotFoundError` in the 0.10.2 one, and no install into either is
+permitted, so the F2 re-run **cannot** be reproduced on 0.10.2 from this
+tree. Every other claim in this document is series-independent by
+construction: it is about stelling's own behaviour on hand-built or
+harness-built queries, which both series drive identically. This one row
+is the exception, and it is scoped rather than generalised.)*
+
 > assume constraint DROPPED (inert in MVP propagation) at
 > corpus/supply/mime_fvm.py:202 (h_f2): VERIFIED proves a superset;
 > UNKNOWN may be confounded by this drop **(relational: both sides
@@ -239,9 +266,22 @@ the rule found an UNSOUND escape in the F1 fix on its first use.**
   (sound from the over-approximation), but definite REFUTEDs judged
   under an uncertified precondition are **withheld** to UNKNOWN with
   the reason disclosed, and uncertified VERIFIEDs carry a stamped
-  may-be-vacuous line. Withholding is forward-scoped — the builder's
+  may-be-vacuous line. ~~Withholding is forward-scoped — the builder's
   reasoned deviation from the adjudicator's literal directive (a
-  pre-narrowing violation is an unconditional fact), accepted.
+  pre-narrowing violation is an unconditional fact), accepted.~~
+  **SUPERSEDED 2026-08-08: withholding is QUERY-scoped.** The deviation
+  rested on "a pre-narrowing violation is an unconditional fact", and it
+  is not one: if the assumed region is empty then *every* obligation of
+  the query is vacuously true, the ones written above the assume
+  included — which is exactly what the refusal for a *detectably* empty
+  region already did, ending the run whole. The tree was therefore
+  query-scoped where it could detect emptiness and order-scoped where it
+  could not, so the behaviour turned on whether the caller wrote
+  `jnp.all(x >= 2)` or `x >= 2`. The principal ruled it query-scoped;
+  the flag is now read once at the end of the run, through
+  `stelling.exactness.certifies_set_refutation`, which the affine leg
+  consults for the same decision. See the 2026-08-08 SOUNDNESS entry for
+  the measured cost.
 
 **Second re-attack (on the exactness split): 0 UNSOUND / 0 FRAGILE —
 the split held** under scope-descent bookkeeping attacks, flag
