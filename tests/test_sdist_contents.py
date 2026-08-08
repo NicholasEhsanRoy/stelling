@@ -438,9 +438,59 @@ def test_built_metadata_carries_no_relative_reference(tmp_path: pathlib.Path) ->
 # Transcribed from `hatchling/builders/constants.py` and
 # `hatchling/builders/config.py` at **1.31.0**, which is what `uv build`
 # resolves here; `pyproject.toml` requires `hatchling>=1.27`. A transcription
-# rots, so it is not trusted: `test_the_untracked_scan_agrees_with_the_tarball`
-# holds every line of it against a real build, and a drift in any of the three
-# constants below shows up there as a set difference and not as a silent pass.
+# rots, so it is not trusted — but WHERE each constant is held, and how much
+# of it, is not one sentence.
+#
+# THIS COMMENT USED TO SAY "a drift in any of the three constants below shows
+# up there [in the parity test] as a set difference and not as a silent pass",
+# AND THAT WAS FALSE THREE WAYS. Driven at a4c16fe, pristine standalone repo
+# from this tree, one mutation at a time:
+#
+#   `__pycache__` dropped from _HATCH_EXCLUDED_DIRECTORIES     12 passed
+#   `.hatch`      dropped from _HATCH_EXCLUDED_DIRECTORIES     12 passed
+#   `.DS_Store`   dropped from _HATCH_EXCLUDED_FILES           12 passed
+#   _HATCH_FORCED_ROOT_FILES = ("pyproject.toml",)             12 passed
+#   `*.py[cdo]`   dropped from _HATCH_DEFAULT_GLOBAL_EXCLUDE   1 failed
+#
+# and the one that reddened did so in `test_the_exclusion_classifier_
+# discriminates`, not in the parity test. The masking is this repository's own
+# `.gitignore`: the parity plant for the pruned-directory case sat under
+# `docs/__pycache__/`, which is gitignored HERE, so the file was dropped twice
+# over and the constant decided nothing.
+#
+# What holds each one now, said exactly:
+#
+#   _HATCH_EXCLUDED_DIRECTORIES   the parity build, via a plant under
+#                                 `docs/.hatch/` — `.hatch` is one of only
+#                                 three names in the set this tree's
+#                                 `.gitignore` does not also cover (`.git` and
+#                                 `.hg` are the others). `__pycache__`
+#                                 specifically is ALSO held by
+#                                 `test_the_force_include_model_reads_the_
+#                                 static_table`, which asserts a directory
+#                                 force-include source is pruned by this set.
+#                                 The remaining eight names are held by
+#                                 neither, and would have to be un-gitignored
+#                                 here to be: recorded, not fixed.
+#   _HATCH_EXCLUDED_FILES         the parity build, via a `docs/.DS_Store`
+#                                 plant; likewise not gitignored here.
+#   _HATCH_DEFAULT_GLOBAL_EXCLUDE `test_the_exclusion_classifier_
+#                                 discriminates`, on a synthetic root.
+#   _HATCH_FORCED_ROOT_FILES      `test_the_force_include_model_reads_the_
+#                                 static_table`, on a synthetic root, and it
+#                                 CANNOT be held by any build from this tree:
+#                                 two of its three entries, `hatch.toml` and
+#                                 `hatch_build.py`, do not exist here.
+#   _HATCH_VCS_EXCLUSION_FILES    `test_the_force_include_review_sees_an_
+#                                 outside_source`, which plants an ancestor
+#                                 `.hgignore` — the parity build cannot hold
+#                                 it, because it builds under `tmp_path` and
+#                                 a staged copy has no ancestors in common
+#                                 with this checkout.
+#   _HATCH_DEFAULT_LICENSE_GLOBS  NOT held by anything: `project.license-files`
+#                                 is set in `pyproject.toml`, so the defaults
+#                                 are never reached from this tree. SUSPECTED,
+#                                 not measured, that they are still correct.
 _HATCHLING_READ_AT = "1.31.0"
 
 # `EXCLUDED_DIRECTORIES` — pruned by NAME during the walk, at any depth,
@@ -955,9 +1005,21 @@ def _untracked_that_would_ship(
         "check and this must not read as 'no untracked file would ship'"
     )
     walked = _walked_files(root)
-    unseen = sorted(
-        p for p in tracked - walked if not _pruned_by_the_walk(root, p)
-    )
+    missed = [p for p in tracked - walked if not _pruned_by_the_walk(root, p)]
+    # A SYMLINK TO A DIRECTORY IS NOT A WALK FAILURE, and it used to be
+    # reported as one. `os.walk` puts it in `dirnames`, never in `filenames`,
+    # so it is never a walked FILE; `git ls-files` names it, because git tracks
+    # the link itself as a blob. The walk is fine. Measured, a tracked
+    # `docs/zz_linkdir -> ../design` committed to a standalone repo from this
+    # tree: `assert not unseen` red with "the walk is not looking at the tree
+    # git is looking at", and the tarball carries NO member at or under
+    # `docs/zz_linkdir` at all — `safe_walk`'s (st_dev, st_ino) seen-set has
+    # already visited `design/`, so it descends into nothing. Kept red, because
+    # the contents of a link whose target has NOT already been walked do reach
+    # the tarball under the link's path; separated, because sending the next
+    # reader to look for a broken walk is sending them to the wrong mechanism.
+    dir_links = sorted(p for p in missed if (root / p).is_symlink() and (root / p).is_dir())
+    unseen = sorted(p for p in missed if p not in set(dir_links))
     assert not unseen, (
         f"the filesystem walk reached {len(walked)} files and missed "
         f"{len(unseen)} that git says are tracked and that hatchling's own walk "
@@ -966,6 +1028,19 @@ def _untracked_that_would_ship(
         "nothing — or one of these is a git submodule, whose contents DO reach "
         "the sdist while `git ls-files` names only the gitlink. First few:\n  "
         + "\n  ".join(unseen[:10])
+    )
+    assert not dir_links, (
+        "these tracked paths are SYMLINKS TO DIRECTORIES:\n  "
+        + "\n  ".join(f"{p} -> {os.readlink(root / p)}" for p in dir_links[:10])
+        + "\n\nThis is not a walk failure and not a submodule. `os.walk` yields "
+        "a directory symlink in `dirnames`, never in `filenames`, so it is "
+        "never a walked FILE while `git ls-files` names it — the walk is "
+        "looking at exactly the tree git is. Nothing ships AT this path. What "
+        "does ship is everything hatchling reaches THROUGH it, under the "
+        "link's path, and only when `safe_walk`'s (st_dev, st_ino) seen-set "
+        "has not already visited the target — so a link out of the tree "
+        "distributes files nobody committed here. Point the allowlist at the "
+        "real directory instead of at a link into it."
     )
     admitted = {p for p in walked - tracked if _allowlist_admits(p, allow)}
     return sorted(admitted - _hatchling_excluded(root, admitted, oracle))
@@ -1418,6 +1493,16 @@ _PARITY_SHIPS = {
     "docs/zz_parity_bytecode.pyc": False,
     #   inside a directory hatchling prunes by name
     "docs/__pycache__/zz_parity_cached.py": False,
+    #   ... and the SAME mechanism on a name this repository's own `.gitignore`
+    #   does NOT cover. `__pycache__/` is gitignored here, so the plant above
+    #   is dropped twice over and dropping `__pycache__` from
+    #   `_HATCH_EXCLUDED_DIRECTORIES` changed no measurement anywhere —
+    #   driven at a4c16fe: 12 passed. `.hatch` is not gitignored in this tree,
+    #   so this plant is what makes that constant load-bearing.
+    "docs/.hatch/zz_parity_hatch.md": False,
+    #   dropped by BASENAME (`EXCLUDED_FILES`), and `.DS_Store` is likewise not
+    #   gitignored here, so `_HATCH_EXCLUDED_FILES` is load-bearing too
+    "docs/.DS_Store": False,
     #   outside the allowlist entirely: `/scratchpad` is not an include entry
     "scratchpad/zz_parity_note.md": False,
 }
@@ -1625,11 +1710,13 @@ def test_the_untracked_scan_agrees_with_the_tarball(tmp_path: pathlib.Path) -> N
         "that is not a regular file — a dangling symlink, a directory, a "
         "socket:\n    "
         + "\n    ".join(f"{rel}  ({os.readlink(staged / rel) if (staged / rel).is_symlink() else 'not a file'})" for rel in irregular)
-        + "\n\nThis is NOT the force-include finding above: the path is a real "
-        "entry of this tree and went through the allowlist. `tarfile` resolves "
-        "a symlink's target when it stores the member, so what shipped is "
-        "whatever the link pointed at when the build ran — or a broken member "
-        "if it pointed nowhere."
+        + "\n\nThis is NOT the force-include finding above, and it used to be "
+        "reported as one: the path is a real entry of this tree and went "
+        "through the allowlist. Measured on a committed dangling "
+        "`docs/zz_dangling.md -> zz_nowhere.md`: the build SUCCEEDS and the "
+        "member is stored as a SYMLINK (`issym`, size 0, linkname preserved), "
+        "not as the bytes it points at — so unpacking the sdist recreates the "
+        "link, and where it lands is decided on the consumer's machine."
     )
     tracked = _tracked_files(staged)
     shipped_untracked = shipped - tracked
@@ -1803,19 +1890,20 @@ def test_the_force_include_model_reads_the_static_table(
     (root / "tree" / "a.md").write_text("a\n", encoding="utf-8")
     (root / "tree" / "__pycache__").mkdir()
     (root / "tree" / "__pycache__" / "b.py").write_text("b\n", encoding="utf-8")
-    for name in _HATCH_FORCED_ROOT_FILES:
-        if name != "pyproject.toml":
-            (root / name).write_text("# forced at the root\n", encoding="utf-8")
+    # NAMED HERE AS LITERALS, not read out of the constant. A loop that plants
+    # and then checks `_HATCH_FORCED_ROOT_FILES` shrinks with the constant and
+    # pins nothing — reducing it to `("pyproject.toml",)` stays green.
+    (root / "hatch.toml").write_text("# forced at the root\n", encoding="utf-8")
+    (root / "hatch_build.py").write_text("# forced at the root\n", encoding="utf-8")
 
     def _write(table: str) -> None:
         (root / "pyproject.toml").write_text(
             '[project]\nname = "zz-probe"\nversion = "0"\n' + table, encoding="utf-8"
         )
 
-    # every entry of the constant, present on disk, must be named
     _write("")
     plain = _force_included(root)
-    for name in _HATCH_FORCED_ROOT_FILES:
+    for name in ("pyproject.toml", "hatch.toml", "hatch_build.py"):
         assert plain.get(name) == root / name, (
             f"`{name}` is force-included unconditionally by "
             f"`get_default_build_data` (hatchling {_HATCHLING_READ_AT}) and "
