@@ -6,9 +6,44 @@ repos:
   - repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: v1.5.6
     hooks:
+      # `scratchpad/**` IS EXCLUDED, and a narrowing has to show its
+      # replacement rather than assume one.
+      #
+      # REUSE.toml annotates the whole subtree — deliberately, because the
+      # scratchpad holds evidence in whatever form the measurement produced,
+      # including formats (.json, .csv) that cannot carry a comment at all.
+      # This fixer rewrites the WORKING TREE, so with `scratchpad/**` still in
+      # its `files:` regex it added twelve headers REUSE.toml exists to make
+      # unnecessary, and `staged-spdx-header` below then correctly reported the
+      # divergence the fixer had just created. Driven, `pre-commit run
+      # --all-files` twice in a clean checkout:
+      #
+      #   33fd1f8   pass 1 Failed (12 files rewritten)   pass 2 rc=0
+      #   6918afb   pass 1 Failed (12 files rewritten)   pass 2 rc=1, and every
+      #                                                  pass after it
+      #
+      # The advice printed with that red is `git add` on twelve headers that
+      # should not exist. A permanently red control, telling you to undo the
+      # annotation, is one people learn to ignore.
+      #
+      # WHAT STILL ENFORCES THE PROPERTY HERE. `reuse lint` — the `reuse` hook
+      # below, and `fsfe/reuse-action` in ci.yml, which is where `--no-verify`
+      # cannot reach. Measured with reuse 6.2.0 on this tree, one header-less
+      # file at a time:
+      #
+      #   scratchpad/zz.py   reuse lint  rc=0    (the REUSE.toml annotation)
+      #   src/zz.py          reuse lint  rc=1    (nothing annotates src/)
+      #
+      # So the exclusion drops exactly the paths another control already
+      # covers, and drops nothing anywhere else: a header-less file under
+      # `src/` or `tests/` still reddens this fixer, driven both ways. The CI
+      # half of that sentence carries the version-skew hazard written up at the
+      # `reuse` job in ci.yml — CI lints with reuse 5.1.1, this config pins
+      # 6.2.0, and only 6.2.0 is installable here.
       - id: insert-license
         name: insert SPDX headers
         files: \.(py|pyi|sh|toml|ya?ml)$
+        exclude: ^scratchpad/
         args:
           - --license-filepath
           - .license-header.txt
@@ -20,13 +55,96 @@ repos:
       - id: reuse
   - repo: local
     hooks:
-      - id: jax-import-hygiene
-        name: jax only in _jax_compat; private jax modules banned
+      # THE STAGED BLOB IS WHAT GETS COMMITTED, and `insert SPDX headers`
+      # above does not look at it. That hook is a FIXER: it reads and rewrites
+      # the WORKING TREE. Measured, on a header-less file that had been added:
+      #
+      #   pre-commit run insert-license --files f   Failed  (worktree rewritten)
+      #   git status --short f                      AM
+      #   git show :f                               X = 1     <- no header
+      #   pre-commit run insert-license --files f   Passed
+      #   git show :f                               X = 1     <- still no header
+      #
+      # So "Passed" was compatible with a header-less blob being the thing
+      # committed. The `git commit` path itself is safe — pre-commit stashes
+      # unstaged changes there, so the fixer sees the INDEX content and fails
+      # again (driven: `pre-commit run` with no `--files` reports Failed with
+      # the worktree already fixed) — but `--files` and `--all-files` do not
+      # stash, and those are the invocations a developer uses to CHECK.
+      #
+      # This reads the one channel the fixer never touches: `git show :<path>`.
+      # It fires on the DIVERGENCE — worktree has the header, index does not —
+      # and not on "the index has no header", because the latter would redden
+      # the twelve deliberately header-less `scratchpad/**` files that
+      # REUSE.toml now annotates instead of headering.
+      #
+      # NOT a replacement for `reuse lint`, which is the control that runs
+      # where `--no-verify` cannot reach. A pre-commit hook is a client-side
+      # courtesy: 14e34a2 landed 12 header-less `.py` files squarely inside
+      # the fixer's `files:` regex, with the config byte-identical and the
+      # hook installed, and re-running the pinned fixer over those exact blobs
+      # rewrites all 12 — so the hook did not run, and no hook can promise it
+      # will.
+      - id: staged-spdx-header
+        name: the SPDX header must be in the blob you are COMMITTING, not just the worktree
         language: system
         entry: >-
-          bash -c 'set -e;
-          ! grep -rnE "^[[:space:]]*(import jax\b|from jax\b)" src --include="*.py" | grep -v _jax_compat.py;
-          ! grep -rn "jax\._src" src --include="*.py"'
+          bash -c 'git rev-parse --git-dir >/dev/null 2>&1 ||
+          { echo "staged-spdx-header: no git index to read; this hook checked NOTHING." >&2; exit 1; };
+          rc=0;
+          for f in "$@"; do
+          git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || continue;
+          head -5 -- "$f" 2>/dev/null | grep -q "SPDX-License-Identifier" || continue;
+          git show ":$f" 2>/dev/null | head -5 | grep -q "SPDX-License-Identifier" && continue;
+          echo "$f: the WORKING TREE carries the SPDX header and the STAGED blob does not." >&2;
+          echo "    the fixer above corrected the file on disk; you are committing the old blob." >&2;
+          echo "    git add -- $f" >&2;
+          rc=1;
+          done; exit $rc' --
+        files: \.(py|pyi|sh|toml|ya?ml)$
+      - id: jax-import-hygiene
+        name: jax only in _jax_compat; private jax modules banned
+        # TWO checks, combined through `rc` rather than through `set -e`.
+        # They were `! grep …; ! grep …` under `set -e`, and bash documents
+        # that errexit is IGNORED when a command's return value is inverted
+        # with `!` — so the FIRST check could not fail this hook, and the
+        # hook's status was the second check's alone. Measured, with a bare
+        # `import jax` planted under `src/` outside `_jax_compat.py`:
+        #
+        #   pre-commit run jax-import-hygiene --all-files   Passed   (exit 0)
+        #
+        # …with the offending line printed in the output. It went Failed only
+        # once `jax._src` was ALSO present. The first half of this hook's own
+        # name had never been enforceable.
+        #
+        # THE EXEMPTION IS BY PATH, and it used to be by LINE CONTENT: the
+        # first check was `grep -rnE … | grep -v _jax_compat.py`. A grep output
+        # line carries the source TEXT as well as the path, so an import that
+        # merely MENTIONED the filename filtered itself out. Measured, two
+        # planted files under `src/`, one at a time:
+        #
+        #   src/zz_probe.py   import jax  # mirrors _jax_compat.py   Passed
+        #   src/zz_plain.py   import jax                             Failed
+        #
+        # `--exclude` is grep's own per-FILE name filter and is the same rule
+        # the independent test applies (`if path.name == "_jax_compat.py"`), so
+        # hook and test now exempt exactly the same set. Driven after the
+        # change: the first line Failed, the second still Failed, and the real
+        # `src/stelling/_jax_compat.py` — which does import jax, five times —
+        # still Passed.
+        #
+        # THE PROPERTY WAS NEVER UNCOVERED. `tests/test_import_hygiene.py::
+        # test_jax_imported_only_in_compat_module` filters by path and reddens
+        # on the evading file, so this was a defective control over a covered
+        # property rather than an exposure. What the change buys is that the
+        # local hook bites on the same set as that test, and that BOTH
+        # violations are reported instead of the second only.
+        language: system
+        entry: >-
+          bash -c 'rc=0;
+          if grep -rnE "^[[:space:]]*(import jax\b|from jax\b)" src --include="*.py" --exclude=_jax_compat.py; then rc=1; fi;
+          if grep -rn "jax\._src" src --include="*.py"; then rc=1; fi;
+          exit $rc'
         pass_filenames: false
         always_run: true
       - id: library-identifier-hygiene

@@ -10,6 +10,51 @@ on:
 permissions:
   contents: read
 
+# THE THREE LANES BELOW ARE THE ONES A MERGE IS MEANT TO REST ON, and until
+# this commit they were the only pytest steps in either workflow that ran
+# `pytest -q` and read nothing but its exit code.
+#
+# That is backwards. The argument for the separate channel is written out in
+# full at the `acceptance-any-pytree` step below — `session.exitstatus` is
+# last-writer-wins, and a run in which `tests/conftest.py` was ignored, filtered
+# out or never reached leaves the summary line byte-identical to a clean one —
+# and it was applied only to the two acceptance jobs, which the comments here
+# say explicitly must NOT be required checks, plus the release gate. So the
+# strongest assertion in the repo sat on the jobs whose red does not block, and
+# the jobs whose green does was taken on trust.
+#
+# "MEANT TO REST ON", NOT "CAN BE REQUIRED". An earlier wording of the sentence
+# above claimed these three were "the ones a branch protection rule CAN
+# require", and that is false: a rule can name ANY job in this file, `reuse`
+# and `dco` included, because required checks are a repo setting and nothing
+# here grants or withholds the capability. Every other statement in this file
+# about which jobs are required is POLICY ("must NOT be required"), not
+# capability, and stays as written. What separates these three is scope plus
+# policy — they run the WHOLE suite in the three supported environments (no
+# jax, floating jax, pinned 0.10 series), while the two acceptance jobs below
+# say in as many words that they must not be required, since a third-party
+# library or a GitHub outage can redden them on a day stelling did not change.
+# That is why the verdict assertion belongs here.
+#
+# The verdict was measured in all three of these environments before the
+# assertion was added, so none of them is being asked for something it does not
+# already produce:
+#
+#   jax 0.11.0   2296 passed, 2 skipped     verdict=made
+#   jax 0.10.2   2296 passed, 2 skipped     verdict=made
+#   no jax       1185 passed, 85 skipped    verdict=made
+#
+# (the third measured in an interpreter that genuinely does not have jax, not
+# with an import hook, since `stelling._optional.available` asks `find_spec`.)
+#
+# `rm -f` before the run is not tidiness. The step's whole claim is that
+# ABSENCE is a failure signal, and absence only means "this session did not
+# write one" if nothing else could have left the file there. Driven, with a
+# stand-in pytest that writes no verdict and a file already at the path: the
+# step exits 0 with `verdict=made` on a session that wrote nothing. GitHub's
+# hosted runners give each job a fresh RUNNER_TEMP, so this is inert there
+# today; it is one line, it fails closed, and it makes the sentence true
+# without depending on that.
 jobs:
   test-no-jax:
     name: tests (solvers only, jax uninstalled)
@@ -21,7 +66,23 @@ jobs:
       - run: uv pip install -e ".[solvers]" pytest
       - name: assert jax is absent
         run: .venv/bin/python -c "import importlib.util, sys; sys.exit(1 if importlib.util.find_spec('jax') else 0)"
-      - run: .venv/bin/python -m pytest -q
+      - name: pytest, with the skip-inventory verdict asserted off a file channel
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          .venv/bin/python -m pytest -q -ra
+          verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. A 'failed' verdict is an undisclosed skip or a silently dropped item; 'withdrawn' means this session was not entitled to claim the suite, and an unnarrowed CI run must be."
+            exit 1
+          fi
       - run: .venv/bin/python -m stelling
 
   # The FLOATING lane: `[jax]` is `jax>=0.5`, so this resolves whatever jax
@@ -46,7 +107,24 @@ jobs:
       - run: uv pip install -e ".[solvers,jax]" pytest
       - name: RESOLVED jax (floating — whatever is newest)
         run: .venv/bin/python -c "import jax, jaxlib; print('jax', jax.__version__, 'jaxlib', jaxlib.__version__)"
-      - run: .venv/bin/python -m pytest -q
+      # The verdict channel; see the block above `jobs:` for why it is here.
+      - name: pytest, with the skip-inventory verdict asserted off a file channel
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          .venv/bin/python -m pytest -q -ra
+          verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. A 'failed' verdict is an undisclosed skip or a silently dropped item; 'withdrawn' means this session was not entitled to claim the suite, and an unnarrowed CI run must be."
+            exit 1
+          fi
 
   # The PINNED lane, and the reason it exists is a measured gap, not tidiness.
   #
@@ -94,7 +172,24 @@ jobs:
               *) echo "::error title=the 0.10 lane did not get 0.10::${name} resolved to '${ver}'. This job exists to test the jax 0.10 series that TESTED_JAX_SERIES claims; on any other series it is a duplicate of the floating lane wearing a 0.10 name. Fix the pin, or narrow TESTED_JAX_SERIES to the series CI actually runs."; exit 1 ;;
             esac
           done
-      - run: .venv/bin/python -m pytest -q
+      # The verdict channel; see the block above `jobs:` for why it is here.
+      - name: pytest, with the skip-inventory verdict asserted off a file channel
+        env:
+          STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
+        run: |
+          set -euo pipefail
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          .venv/bin/python -m pytest -q -ra
+          verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          if [ ! -f "${verdict}" ]; then
+            echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
+            exit 1
+          fi
+          cat "${verdict}"
+          if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
+            echo "::error title=the skip-inventory completeness claim was not made::The verdict file above says what happened. A 'failed' verdict is an undisclosed skip or a silently dropped item; 'withdrawn' means this session was not entitled to claim the suite, and an unnarrowed CI run must be."
+            exit 1
+          fi
 
   # The two any_pytree acceptance tests hold the bar for "faithful sugar" —
   # a sugar declaration must trace to a content-hash-IDENTICAL query to the
@@ -198,10 +293,19 @@ jobs:
             exit 1
           fi
       - run: uv pip list
+      # `-ra` rather than `-rs`, for the reason spelled out at the reproducer
+      # step below: it is a superset, so the SKIPPED lines the grep depends on
+      # are still emitted, and a FAILED / ERROR / xpassed line shows up in the
+      # same summary instead of being silently absent from it. Driven, on one
+      # failing and one skipping test: `-rs` prints the SKIPPED line and NOT
+      # the `FAILED …` line; `-ra` prints both. The exit code is 1 either way,
+      # so this is legibility and not a false green — but a reader who has to
+      # scroll for the failure is a reader who mistakes it for something else,
+      # which has happened here.
       - name: the two acceptance tests must RUN — a skip here is the defect
         run: |
           set -euo pipefail
-          .venv/bin/python -m pytest -q -rs --no-header \
+          .venv/bin/python -m pytest -q -ra --no-header \
             "tests/test_any_pytree.py::test_h_clean_sugar_hash_equals_hand_declaration" \
             "tests/test_any_pytree.py::test_h_hard_sugar_hash_equals_hand_declaration" \
             | tee "${RUNNER_TEMP}/acceptance.log"
@@ -243,7 +347,12 @@ jobs:
           STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
         run: |
           set -euo pipefail
-          .venv/bin/python -m pytest -q -rs
+          # ABSENCE is only a signal if nothing else could have supplied the
+          # file; see the block above `jobs:`. Driven: with a file already at
+          # this path and a pytest that writes none, the step exits 0 on a
+          # session that wrote nothing.
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
+          .venv/bin/python -m pytest -q -ra
           verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
           if [ ! -f "${verdict}" ]; then
             echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the session did not reach it — the recorder was ignored, filtered out, or never loaded. pytest's own exit code cannot report that, which is why this is a separate assertion."
@@ -495,6 +604,9 @@ jobs:
           STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/skip-inventory-verdict.txt
         run: |
           set -euo pipefail
+          # See the identical line in the any_pytree lane: absence is only a
+          # signal if nothing else could have supplied the file.
+          rm -f "${RUNNER_TEMP}/skip-inventory-verdict.txt"
           .venv/bin/python -m pytest -q -ra
           verdict="${RUNNER_TEMP}/skip-inventory-verdict.txt"
           if [ ! -f "${verdict}" ]; then
@@ -507,6 +619,22 @@ jobs:
             exit 1
           fi
 
+  # HAZARD, REAL BUT UNMEASURED: two different linters guard one property.
+  # `fsfe/reuse-action@v5` resolves reuse-tool 5.1.1; `.pre-commit-config.yaml`
+  # pins `reuse-tool` v6.2.0. So the check a contributor runs locally and the
+  # check that blocks are not the same program, and a file that satisfies one
+  # is only assumed to satisfy the other. That matters more than it used to:
+  # `insert-license` now excludes `scratchpad/**` and the REUSE.toml annotation
+  # is what covers it, which means the annotation's handling is the thing both
+  # versions have to agree about.
+  #
+  # NOT MEASURED, and stated in exactly those terms rather than reasoned into a
+  # conclusion: only 6.2.0 exists on the machine this was audited on, and
+  # installing 5.1.1 needs network that was not available. Driven there with
+  # 6.2.0 only — a header-less `scratchpad/zz.py` lints clean (rc=0) and a
+  # header-less `src/zz.py` does not (rc=1). Whether 5.1.1 reads REUSE.toml the
+  # same way is a question this repository has not answered. The cheap way to
+  # answer it is to pin both sides to one version.
   reuse:
     name: reuse lint
     runs-on: ubuntu-latest
@@ -514,6 +642,27 @@ jobs:
       - uses: actions/checkout@v4
       - uses: fsfe/reuse-action@v5
 
+  # HAZARD: A SKIPPED JOB READS AS GREEN. This workflow runs on `push:
+  # branches: [main]` as well as on `pull_request`, and this job runs only on
+  # the second — so on every push to main it does not run at all, which is
+  # read off the `if:` and the `on:` triggers above and is certain. What
+  # follows from it is GitHub's DOCUMENTED behaviour rather than anything this
+  # repository has measured: a job skipped by an `if:` reports as successful to
+  # required status checks, so naming `dco` in branch protection does not make
+  # it a gate on pushes to main. It would pass there without checking a commit.
+  # Not drivable off a runner, so it is stated in exactly those terms.
+  #
+  # THE CONDITION IS DELIBERATE AND IS NOT BEING CHANGED. `dco-check` compares
+  # a pull request's commit range against its base; a push has no such range,
+  # so running it there would not be the same check under the same name — it
+  # would be a different one, and a checker that finds no commits to examine
+  # exits 0 exactly like one that finds only signed-off commits. The honest
+  # move is to say what the gate does and does not cover, which is this
+  # comment. The independent cover is review: sign-offs are checked on the PR
+  # that introduces the commits, which is the only place the range exists.
+  #
+  # `pipx run dco-check` is also unpinned, so what runs here can change without
+  # a commit to this file. Same class, same unmeasured status (no network).
   dco:
     name: DCO sign-offs
     if: github.event_name == 'pull_request'
