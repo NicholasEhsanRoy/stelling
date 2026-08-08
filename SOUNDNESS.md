@@ -1832,6 +1832,83 @@ verdicts:
   first, is now a protocol violation. Cry-wolf cost measured at zero.
   Every construction is a permanent regression test
   (`tests/test_solver_audit_findings.py`, the `f4wheel` block).
+- **2026-08-08 (pre-release): the cvc5 wheel driver and its parent
+  disagreed about what a LINE is, and the payload could forge the
+  terminator — defeating both tells at once. Reachable in PRINCIPLE, not
+  through any script this tool emits.** Direction: **toward UNKNOWN,
+  only.** The driver sanitised model text with `replace("\n", " ")`; the
+  parent read with `str.splitlines()`, which breaks on **ten** characters
+  and not one (measured off Python, not recalled: U+000A U+000B U+000C
+  U+000D U+001C U+001D U+001E U+0085 U+2028 U+2029). A value carrying any
+  of the other nine was ONE line to the writer and TWO to the reader, so
+  the payload supplied the reader's LAST line — an `end <n>` whose count
+  matched what the reader had parsed — while the child was truncated
+  mid-model-walk. The terminator exists precisely to catch a death that
+  exits zero, so with exit 0 both tells go blind together.
+  **Reproduced end to end, real cvc5 1.3.4, real driver, real SIGKILL,
+  the parent reading the child's whole flushed prefix (53311 bytes, cut
+  mid-write by the pipe boundary — deterministic, 15/15 trials): last
+  line `end 3800`, `_run_cvc5_wheel` reporting *terminator present*, and
+  on exit 0 returning `sat` with **3800 values harvested from a
+  corpse**.** The exit code is the one constructed ingredient, and it is
+  constructed exactly as this log's `end of the resource limit` shape
+  already was.
+  **REACHABILITY, measured rather than assumed, and it is the reason this
+  reads as incompleteness and not as an incident.** cvc5 escapes every
+  separator inside a model VALUE (`"a\u{b}b"` — measured for all ten), so
+  the channel the sanitiser guarded was already closed by cvc5's own
+  printer. What cvc5 does NOT escape is a **quoted symbol**: `|a<VT>b|`
+  comes back raw from `getValue`, and the driver interpolated the term
+  NAME with no sanitiser at all. stelling names its own consts
+  `x{k}`/`x{k}_{i}` (`obligation.py`), and `smt.py` declares Real sorts
+  only, so no script this tool emits can carry one. The guard was
+  therefore held up by two coincidences neither of which stelling owns.
+  `(exit)` and `:rlimit` were driven against the real driver as candidate
+  truncation routes and neither terminates it.
+  **Fixed on both sides, because the measurement says neither alone is
+  enough.** The WRITER now passes **printable ASCII only**, in every field
+  — name, value, version, error text — escaping the rest as `\u{…}`. A
+  whitelist and not a wider blacklist, because `splitlines()`'s set is not
+  ours to freeze and the io layer's translations are not either. That half
+  is **load-bearing and cannot be moved downstream**: the parent captures
+  with `text=True`, so universal-newline decoding turns a `\r` into a real
+  `\n` **before the parent sees the string** (measured — one record
+  written, two records seen, under either splitter), and no reader-side
+  rule can see it. The READER now splits on `"\n"`, `print`'s own
+  boundary, so an unsanitised record stays ONE record and a payload
+  holding an `end <n>` is REFUSED by the terminator check instead of read
+  as it; a byte outside the protocol's alphabet is a protocol violation
+  rather than something to interpret, which is what makes the driver
+  docstring's "a mismatch degrades every run to UNKNOWN" true for this
+  class instead of accidental. **A third refusal came from the fuzzer, on
+  the fix rather than into it:** a record is `text + "\n"`, so a final
+  record whose newline never got out is one the child did not finish
+  writing — `…\nend 4`, the newline cut and nothing else, read as a
+  present terminator with a matching count and became a definite answer on
+  exit 0. 86 of 86 residual counterexamples over 200k examples had that
+  shape and no other; `splitlines()` accepted it identically, so it is the
+  same disagreement at the other end of the record. **One delimiter down,
+  same class:** `value`/`opaque` lines are read with `split(maxsplit=2)`,
+  so a space inside a NAME shifted the value into the name's field; names
+  are now whitespace-free tokens. **Cry-wolf cost measured at zero** —
+  every healthy shape the `f4wheel` block pins is byte-identical, printable
+  ASCII passes the whitelist untouched, `opaque x0 (root 2)` keeps its
+  spaces, and both jax series are green at 2433 passed / 2 skipped with
+  identical `--collect-only` ids. **Property fuzzer** (line-boundary AND
+  mid-write truncation, exit code drawn independently of truncation,
+  ground truth taken from what the WRITER emitted): **0 counterexamples
+  over 200k examples across 10 seeds; the same generator at `0ad22bb`
+  finds 1428.** A seeded 4000-example run of it is a permanent test, with
+  an anti-vacuity floor so a fuzzer that accepts nothing cannot pass.
+  **Swept for the same class elsewhere and found none live:** z3 is
+  in-process over the API with no text record protocol at all; the binary
+  cvc5 transport splits and re-joins, but `_tokenize_sexpr` already treats
+  every one of these as whitespace and its unsat/unknown leg fails closed
+  on any noise; `reproduce.py`'s no-`import stelling` scan reads MORE
+  line-starts than Python's tokenizer does, which is the safe direction;
+  `slice_unknown_obligations` round-trips no text. Every construction is a
+  permanent regression test (`tests/test_solver_audit_findings.py`, the
+  `f4wheel2` block).
 - **2026-08-07 (pre-release): jax 0.10 was in `TESTED_JAX_SERIES` and did
   not work — verdicts move, in the UNKNOWN → VERIFIED direction, on 0.10
   only.** `jex_core.ClosedJaxpr is jex_core.Jaxpr` is `False` on 0.10.2 and
