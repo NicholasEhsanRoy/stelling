@@ -328,7 +328,7 @@ jobs:
       # claim in a session that did not collect the whole tree, and fails in
       # one that collected it and then deselected part — so a `-k` or a path
       # added here would quietly turn the second guard off.
-      - name: the skip-inventory verdict, asserted off the exit code
+      - name: the skip-inventory verdict, asserted off a file channel
         # THE EXIT CODE IS A LAST-WRITER-WINS CHANNEL. `session.exitstatus` is
         # whatever the last hook to touch it left there, and `pytest_cmdline_main`
         # as a wrapper returns over all of them — so a green tick on the step
