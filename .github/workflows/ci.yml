@@ -635,6 +635,55 @@ jobs:
   # header-less `src/zz.py` does not (rc=1). Whether 5.1.1 reads REUSE.toml the
   # same way is a question this repository has not answered. The cheap way to
   # answer it is to pin both sides to one version.
+  # VERSION SKEW, AND IT IS LOAD-BEARING. `.pre-commit-config.yaml` refers to
+  # this job for the write-up and the write-up was not here; it is now.
+  #
+  # This job lints with `fsfe/reuse-action@v5`, which is reuse **5.1.1**.
+  # `.pre-commit-config.yaml` pins `reuse-tool` **v6.2.0**. Two versions guard
+  # one property, and since `insert-license` there now excludes `scratchpad/`,
+  # what makes those files compliant is `REUSE.toml`'s `scratchpad/**`
+  # `[[annotations]]` block — so the argument rests on a version nobody
+  # working on this repository has run. Only 6.2.0 is installed here and
+  # installing 5.1.1 needs the network.
+  #
+  # WHAT WAS MEASURED, from the 6.2.0 `CHANGELOG.md` vendored in the
+  # pre-commit cache. The file carries every release from v0.0.2 to v6.2.0, so
+  # the 5.1.1 → 6.2.0 window is covered and not truncated: v6.0.0, v6.1.0,
+  # v6.1.1, v6.1.2, v6.2.0. Grepping that window for `REUSE.toml`,
+  # `annotation`, `precedence`, `glob` and `path` returns exactly one line,
+  # about the sort order of `reuse lint --lines`.
+  #
+  # The sharper form of the same reading: the NEWEST release that documents
+  # any change to `REUSE.toml` semantics is **v5.0.0** (2024-11-14) — glob
+  # handling for `*/`, annotation application, parse errors. Support for
+  # `REUSE.toml` arrived in v4.0.0 and the precedence ordering in v2.0.0.
+  # Every one of those is BELOW 5.1.1, so both pinned versions sit on the same
+  # side of every documented change to the mechanism this repository relies on.
+  #
+  # STILL SUSPECTED, and labelled so on purpose: that is a bound on what the
+  # changelog DOCUMENTS, not a measurement of 5.1.1's behaviour, and it cannot
+  # become one on a box with no network and one installed version.
+  #
+  # NOT PINNED HERE, and the reason is not inertia. Closing the skew needs a
+  # fact that cannot be had offline — whether `fsfe/reuse-action` has a `v6`
+  # tag, or whether `uvx --from reuse==6.2.0 reuse lint` gets a working
+  # encoding module on `ubuntu-latest` (6.0.0 made `python-magic` a hard
+  # dependency and 6.1.0 documents a real misdetection bug when it is
+  # missing). Guessing either would replace a working gate with an unverified
+  # one on the workflow that stands between a tag and PyPI.
+  #
+  # WHAT A HUMAN MUST DO, on a machine with network, in this order:
+  #   1. `git ls-remote --tags https://github.com/fsfe/reuse-action` and read
+  #      off whether a `v6` tag exists and which reuse it carries.
+  #   2. if it does, change the `uses:` below to `fsfe/reuse-action@v6` and
+  #      confirm on a pull request that `reuse lint` still reports 284/284,
+  #      exit 0 — the figure this tree gives under 6.2.0 locally.
+  #   3. if it does not, install the pin explicitly instead of using the
+  #      action, and keep the two in one place:
+  #      `pipx run reuse==6.2.0 lint` or `uvx --from reuse==6.2.0 reuse lint`.
+  #   4. either way, `pip install reuse==5.1.1 && reuse lint` on this tree
+  #      once, and record the count, which is the measurement no reading of a
+  #      changelog can replace.
   reuse:
     name: reuse lint
     runs-on: ubuntu-latest

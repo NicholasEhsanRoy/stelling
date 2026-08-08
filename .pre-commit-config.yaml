@@ -37,9 +37,13 @@ repos:
       # So the exclusion drops exactly the paths another control already
       # covers, and drops nothing anywhere else: a header-less file under
       # `src/` or `tests/` still reddens this fixer, driven both ways. The CI
-      # half of that sentence carries the version-skew hazard written up at the
-      # `reuse` job in ci.yml — CI lints with reuse 5.1.1, this config pins
-      # 6.2.0, and only 6.2.0 is installable here.
+      # half of that sentence carries a version-skew hazard: CI lints with
+      # reuse 5.1.1 (`fsfe/reuse-action@v5`), this config pins 6.2.0, and only
+      # 6.2.0 is installable here. It is written up at the `reuse` job in
+      # ci.yml — where this comment used to say it already was, and it was not.
+      # The bound, read there from the vendored changelog: the newest release
+      # documenting any change to `REUSE.toml` semantics is v5.0.0, BELOW both
+      # pins. SUSPECTED, not measured; 5.1.1 cannot be installed offline.
       - id: insert-license
         name: insert SPDX headers
         files: \.(py|pyi|sh|toml|ya?ml)$
