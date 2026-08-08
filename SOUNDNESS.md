@@ -3062,6 +3062,62 @@ verdicts:
   *`M2_local_lift_interval`* / *`M3_local_lift_affine`*; the mutants
   themselves are unchanged and their published counts stand.
 
+  **AND EVERY ONE OF THOSE PINS WAS HALF A PIN, which is the larger
+  finding and the one that named its own fix.** All of them force a
+  shared decision to `False` and require a leg to WITHHOLD. Every
+  consumer reads that answer as one operand of an `and`, so a conjunct is
+  observable only through the answers it VETOES — and a leg that kept a
+  private copy of the rule and wrote
+  `shared(<all the real arguments>) and _own_copy(...)` still calls the
+  shared function, unconditionally, as the FIRST operand, with everything
+  a recorder expects. The forced `False` still makes the conjunction
+  `False`, the leg still withholds, and the pin still passes on a leg
+  that has stopped obeying. Measured at `0ad22bb`, each mutant in its own
+  worktree with `python -B` and `__pycache__` cleared
+  (`scratchpad/pin/mutants.py`), against the **whole suite**:
+
+  | mutant | | |
+  |---|---|---|
+  | `M4_affine_and_private` | the affine leg only | **2398 passed, 2 skipped, 0 failed** |
+  | `M5_both_and_private` | both legs | **2398 passed, 2 skipped, 0 failed** |
+  | `M6_nonemptiness_and_private` | the same trick on `certifies_nonemptiness` | **2398 passed, 2 skipped, 0 failed** |
+
+  The contrast that names the fix was already in the file:
+  `certifies_point_witness` **is** forced BOTH ways, by
+  `test_the_witness_route_is_the_shared_primitive_too`, and the same trick
+  there is caught. So the GRANTING direction is now pinned on the other
+  two decisions as well —
+  `test_the_nonemptiness_route_is_pinned_in_the_TRUE_direction` and
+  `test_both_legs_follow_the_shared_point_in_the_TRUE_direction`, each
+  forcing its decision `True` on a run that would otherwise withhold and
+  requiring the leg (both legs, for the second) to STOP withholding. A
+  private copy cannot follow a forcing it does not read. Each reddens its
+  mutant: 1 failed / 15 passed in that file, against 16/16 on the
+  unmutated control tree.
+
+  A third, `test_the_TRUE_direction_is_ONE_SIDED_too`, closes the
+  granting half of the ONE-SIDEDNESS contract — *"a True here can restore
+  a withheld `violated-over-set` and can do nothing else at all"*, which
+  nothing observed. It runs on a query that genuinely withholds, carrying
+  a definitely-false, a definitely-true and a straddling obligation at
+  once: forced `True`, the first must come back and the other two must not
+  move. It is a weaker finding than the three above and the difference is
+  stated rather than smoothed: its mutant (`M7`, a leg reading a granted
+  answer as licence to DECIDE) is invisible to the routing file — 14 of 14
+  pre-existing tests pass on it — but NOT to the suite, which reddens 2
+  tests elsewhere. What it closes is a hole in the pin file, not a hole
+  in the tree.
+
+  **A pin that cannot fail in both directions is only half a pin**, and
+  the inventory is now: `certifies_nonemptiness` False and True;
+  `certifies_set_refutation` False and True, plus the argument-level
+  recorder that forces no direction by design; `certifies_point_witness`
+  False and True. The four remaining `lambda **k: False` patches of
+  `certifies_point_witness` elsewhere in the tree are CONTROLS, not pins —
+  each closes the certificate's independent route so a different mechanism
+  is observable underneath it — and forcing them True would observe
+  nothing.
+
   **The certificate is LIVE on the affine leg, and it took a second look
   to make it so.** The search's gate first asked only "did the interval
   leg withhold a violation?", which is never true on a query the interval
@@ -3107,7 +3163,17 @@ verdicts:
   straddles, and certifies nothing: **ieee certifies where real does
   not**. Three other corpus rows go the other way. Both are sound for
   their own dial, which is the whole content of "the same arithmetic the
-  query was judged in".
+  query was judged in". **Which dial certifies more is a property of the
+  grid you ask, not of the dials**, and the two corpora in this branch
+  give different ratios without contradicting each other: the sentence
+  above is scored on `scratchpad/cert/corpus.py`, whose interesting rows
+  are transcendental, and the F5 paragraph earlier on this page is scored
+  on `scratchpad/pin/corpus_pin.py`, whose rows narrow over-approximated
+  intermediates — 11 `real`-only and 0 `ieee`-only there, the `ieee`-only
+  direction on that grid being the `0.1 + 0.2` boundary point, which the
+  grid does not contain. Neither ratio is a rate in any population, and a
+  reader who meets one of them first should not read it as the general
+  fact.
 
   **Six existing expectations changed, every one because a withheld
   refutation was CORRECT.** `{x : x ≥ 0.9 ∧ x² ≤ 0.9}` is `[0.9, 0.948…]`;
