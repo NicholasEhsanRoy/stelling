@@ -98,6 +98,47 @@ def main() -> None:
     print(f"\n  certified under real only: {only_real}")
     print(f"  certified under ieee only: {only_ieee}")
 
+    print("\n===== the same split over the whole corpus =====")
+    import os
+    import sys as _s
+
+    _s.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import corpus_pin
+
+    r_only, i_only, both, neither, rows = [], [], 0, 0, 0
+    for name, h in corpus_pin.cases():
+        try:
+            c = trace(h)
+        except Exception:  # noqa: BLE001
+            continue
+        for mode in ("constrain", "inert"):
+            got = {}
+            for sem in ("real", "ieee"):
+                try:
+                    got[sem] = propagate(
+                        c, semantics=sem, assume_mode=mode
+                    ).region_inhabited
+                except Exception:  # noqa: BLE001 — a refusal is an outcome
+                    got[sem] = None
+            rows += 1
+            if got["real"] and got["ieee"]:
+                both += 1
+            elif got["real"] and not got["ieee"]:
+                r_only.append(f"{name}/{mode}")
+            elif got["ieee"] and not got["real"]:
+                i_only.append(f"{name}/{mode}")
+            else:
+                neither += 1
+    print(f"  corpus rows x assume_mode measured : {rows}")
+    print(f"  certified on BOTH dials            : {both}")
+    print(f"  certified under REAL only          : {len(r_only)}")
+    for n in r_only:
+        print(f"      {n}")
+    print(f"  certified under IEEE only          : {len(i_only)}")
+    for n in i_only:
+        print(f"      {n}")
+    print(f"  certified on neither               : {neither}")
+
 
 if __name__ == "__main__":
     main()

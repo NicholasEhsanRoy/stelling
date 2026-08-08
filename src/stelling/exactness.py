@@ -183,11 +183,12 @@ def certifies_point_witness(
     caller (:func:`stelling.propagate._region_witness`) runs
     ``if not required: return False`` before its probe loop, so every call
     that reaches here from the propagator carries a non-empty set.
-    MEASURED, not reasoned: instrumenting this function and running the
-    whole suite on jax 0.11.0 records **2169 calls from
-    ``_region_witness``, non-empty at 2169 of 2169**, and **1392 of 1392**
-    over ``scratchpad/pin/corpus_pin.py``. The only empty-set calls in the
-    tree are the 2 from
+    MEASURED, not reasoned: instrumenting this function to record its
+    caller and its argument size, and running the whole suite on
+    jax 0.11.0, records **2203 calls from ``_region_witness``, non-empty
+    at 2203 of 2203**, and **1544 of 1544** over
+    ``scratchpad/pin/corpus_pin.py``. The only empty-set calls anywhere in
+    the tree are the **2** from
     ``test_the_point_witness_decision_is_one_sided_and_static``, which
     exercises this guard directly and is the reason it stays: an importer
     that has not got the propagator's early return is not a hypothetical,

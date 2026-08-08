@@ -2913,9 +2913,12 @@ verdicts:
     of the declared set satisfies every assume"*, and the obligation back
     at `violated-over-set`. **The recovery is sound**: at that point the
     program really does take the branch, really does evaluate the assume
-    and really does satisfy it, and an oracle over the executed program
-    finds the region inhabited. What was wrong was the safety argument,
-    not the behaviour
+    and really does satisfy it, and a 20 000-sample oracle over the
+    EXECUTED program (`scratchpad/pin/f2_repro.py`, seed 0) finds
+    **20 000 of 20 000** points admissible AND violating — every point of
+    the declared box, because `assume(v >= 0.25)` holds wherever the
+    `x >= 0.5` branch is taken and is not evaluated anywhere else. What
+    was wrong was the safety argument, not the behaviour
     (`test_an_assume_the_probe_walks_INTO_is_witnessed_and_certified`).
   * *the reachability search.* The certificate can only fire on a run that
     narrowed or dropped an assume, on which `_reachability_witnesses`
@@ -2933,8 +2936,9 @@ verdicts:
   `assume(v >= 2)` inside the `x >= 0.5` branch of `x ∈ [0, 1]`, 8 of the
   16 probes walk around the assume with an EMPTY witness map, the
   certificate declines, the obligation stays `unknown` — and a 20 000-point
-  oracle over the executed program finds **9880 admissible violating
-  points**. A sound refutation, lost to the static requirement. Withholding
+  oracle over the executed program (`scratchpad/pin/f2_repro.py`, seed 0)
+  finds **9933 admissible violating points**, which is every `x < 0.5` it
+  sampled. A sound refutation, lost to the static requirement. Withholding
   is the safe direction and this is a real price
   (`test_a_region_inhabited_only_via_the_UNTAKEN_branch_is_not_recovered`).
 

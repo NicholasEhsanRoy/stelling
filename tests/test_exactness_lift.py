@@ -64,12 +64,30 @@ only in the branch that also calls ``counter.record_constrained``, so it
 implies ``coverage.constrained >= 1``, and
 :func:`stelling.affine.refine_propagation` declines wholly on
 ``coverage.constrained`` before reaching the shared point. MEASURED, not
-reasoned: instrumenting that call site and running the whole suite
-records **25** reaches, ``narrowing_uncertified`` False at every one (19
-with ``assume_dropped`` False, 6 with it True) and
+reasoned, and RE-MEASURED on this tree because the count moves with the
+suite: instrumenting that call site records **31** reaches (it was 25 at
+``43896fc``), ``narrowing_uncertified`` False at every one — 12 with
+``assume_dropped`` True, 2 with a certificate — and
 ``coverage.constrained == 0`` at every one. On this leg the argument is
 a constant today; a refinement restructured to run under a constraining
-assume would make it live, and this file would still not see it.
+assume would make it live, and this file would still not see it. The
+same fact is now stated AT the call site in ``affine.py``, which is
+where a reader of that line meets it.
+
+**AND THE PINS THEMSELVES WERE HALF PINS.** Forcing a shared decision
+``False`` observes only the answers it VETOES. Every consumer reads the
+answer as one operand of an ``and``, so a leg that kept a private copy of
+the rule and wrote ``shared(<all the real arguments>) and _own_copy(...)``
+still calls the shared function, unconditionally, first, with everything
+a recorder expects — and a forced ``False`` still makes the conjunction
+``False``, so the leg withholds and the pin passes on a leg that has
+stopped obeying. Measured on this tree at ``0ad22bb``: that mutant on the
+affine leg (``M4``), on both legs (``M5``), and the same trick on
+:func:`stelling.exactness.certifies_nonemptiness` (``M6``) each pass the
+WHOLE SUITE, 2398 passed / 2 skipped / 0 failed. The three
+``..._in_the_TRUE_direction`` / ``..._is_ONE_SIDED_too`` tests below force
+the granting direction, which a private copy cannot follow, and redden
+all three.
 """
 
 from __future__ import annotations

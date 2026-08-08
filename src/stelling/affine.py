@@ -1120,10 +1120,16 @@ def refine_propagation(
             # its head, so it implies `coverage.constrained >= 1` — and
             # `refine_propagation` declines WHOLLY on
             # `propagation.coverage.constrained` above, before this loop.
-            # MEASURED, not reasoned (jax 0.11.0, instrumented call site):
-            # **29 of 29** whole-suite reaches and **68 of 68**
-            # `scratchpad/pin/corpus_pin.py` reaches carry
-            # `nonemptiness_certified=True` and `coverage.constrained == 0`.
+            # MEASURED, not reasoned — this call site wrapped in a
+            # recorder that delegates to the real decision, jax 0.11.0:
+            # **31 of 31** whole-suite reaches and **70 of 70** reaches
+            # over `scratchpad/pin/corpus_pin.py` carry
+            # `nonemptiness_certified=True` and `coverage.constrained == 0`,
+            # and `narrowing_uncertified` is False at every one of them.
+            # The other two inputs ARE live at the same site and on the
+            # same runs: `assume_dropped` is True at 12 of the 31 and 40 of
+            # the 70, `region_inhabited` at 2 and 8. So the constant is one
+            # argument of three, not the call.
             # It is still passed, and passed by NAME, because the argument
             # is what makes this leg's answer the shared one; a refinement
             # restructured to run under a constraining assume would make it
