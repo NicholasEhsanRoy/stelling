@@ -26,6 +26,34 @@ and are read together — change one and you must change the other; a
 mismatch degrades every run to UNKNOWN with the terminator quoted, which
 is the safe direction but is still a break.
 
+THE PROTOCOL'S ALPHABET, and why it is a whitelist. Every field below is
+written through :func:`_token` / :func:`_tail`, which pass **printable
+ASCII and nothing else**; the only ``\\n`` on this stdout is the one
+``print`` puts at the end of a record. This used to be a blacklist —
+``str.replace("\\n", " ")`` on the model text only — and it was too narrow
+twice over:
+
+* ``str.splitlines()``, which the parent used to read with, breaks on ten
+  characters, not one (measured: U+000A U+000B U+000C U+000D U+001C U+001D
+  U+001E U+0085 U+2028 U+2029). A model value carrying one of those was
+  ONE line to this writer and TWO to that reader, which let the payload
+  forge the terminator.
+* ``\\r`` is worse than the rest and cannot be fixed downstream at all:
+  the parent captures with ``text=True``, so Python's universal-newline
+  decoding turns a ``\\r`` into a real ``\\n`` **before the parent gets to
+  split anything** (measured). No reader-side rule can see it. The
+  boundary is created here or nowhere.
+
+A whitelist rather than a wider blacklist because the blacklist's contents
+are not ours: ``str.splitlines()`` may learn a new separator, and the io
+layer may learn a new translation. Printable ASCII cannot become a line
+boundary under either.
+
+:func:`_token` additionally escapes the space, because ``value`` and
+``opaque`` lines are read with ``split(maxsplit=2)`` — a space inside a
+NAME would shift the value into the name's field, which is the same
+writer/reader disagreement one delimiter down.
+
 Why a child process at all, measured on cvc5 1.3.4: the wheel's
 ``checkSat`` holds the GIL for the entire check, so an in-process thread
 guard can never fire, and the script-level ``:tlimit`` does not reliably
@@ -45,6 +73,24 @@ import sys
 from stelling._optional import require
 
 
+def _esc(text: str, keep_space: bool) -> str:
+    lo = 0x20 if keep_space else 0x21
+    return "".join(
+        c if lo <= ord(c) <= 0x7E else f"\\u{{{ord(c):x}}}" for c in text
+    )
+
+
+def _token(text: str) -> str:
+    """One whitespace-free field: no line boundary AND no field boundary."""
+    return _esc(text, keep_space=False)
+
+
+def _tail(text: str) -> str:
+    """A record's free-text last field: spaces are content, everything
+    outside printable ASCII is escaped."""
+    return _esc(text, keep_space=True)
+
+
 def main() -> int:
     out = sys.stdout
     try:
@@ -55,7 +101,7 @@ def main() -> int:
         version = solver.getVersion()
         if isinstance(version, bytes):
             version = version.decode("utf-8", "replace")
-        print(f"version {version}", file=out)
+        print(f"version {_token(str(version))}", file=out)
         parser = cvc5.InputParser(solver)
         parser.setStringInput(
             cvc5.InputLanguage.SMT_LIB_2_6, script, "stelling-escalation"
@@ -81,17 +127,16 @@ def main() -> int:
         if answer == "sat":
             for term in sm.getDeclaredTerms():
                 value = solver.getValue(term)
+                name = _token(str(term))
                 if value.isRealValue():
-                    print(f"value {term} {value.getRealValue()}", file=out)
+                    print(f"value {name} {_tail(str(value.getRealValue()))}", file=out)
                 else:
-                    raw = str(value).replace("\n", " ")
-                    print(f"opaque {term} {raw}", file=out)
+                    print(f"opaque {name} {_tail(str(value))}", file=out)
                 written += 1
         print(f"end {written}", file=out)
         return 0
     except Exception as e:  # noqa: BLE001 — the parent quotes this, never crashes
-        msg = str(e).replace("\n", " ")
-        print(f"error {type(e).__name__}: {msg}", file=out)
+        print(f"error {_tail(f'{type(e).__name__}: {e}')}", file=out)
         return 0
 
 

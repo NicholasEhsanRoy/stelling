@@ -728,3 +728,271 @@ def test_f4wheel_the_real_driver_and_this_parser_agree_on_the_terminator(
     lines = proc.stdout.splitlines()
     assert lines[-1] == "end 1", proc.stdout  # one declared const, one model line
     assert "answer sat" in lines
+
+
+# --- F4-wheel-2: the writer and the reader disagreed about what a line is -----
+#
+# The driver sanitised model text with `replace("\n", " ")`; this parent read it
+# with `str.splitlines()`, which breaks on TEN characters, not one. A value
+# holding one of the other nine was ONE line to the writer and TWO to the
+# reader, so the payload could supply the reader's LAST line — a forged
+# terminator — while the child was truncated. With the child also exiting 0
+# that defeats BOTH tells at once, which is the one thing two tells exists to
+# prevent.
+#
+# REACHABILITY, measured on cvc5 1.3.4 rather than argued: cvc5 escapes every
+# separator inside a model VALUE (`"a\u{b}b"`), so the channel the sanitiser
+# guarded was already closed by cvc5's own printer. It does NOT escape a quoted
+# SYMBOL, which the driver interpolated unsanitised — `|a<VT>b|` comes back
+# raw. stelling names its own consts `x{k}`/`x{k}_{i}` (`obligation.py`), so no
+# script this tool emits can carry one. Incompleteness in a deliberate guard,
+# not a live exploit — and the guard is what has to hold when the next script
+# emitter is not this one.
+
+_SEPARATORS = (
+    "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", " ", " ",
+)
+
+
+def _wheel_stdout(monkeypatch, stdout, returncode=0):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda a, **kw: subprocess.CompletedProcess([], returncode, stdout, ""),
+    )
+    monkeypatch.setattr(solvers, "_cvc5_wheel_version", lambda: "1.3.4")
+    return solvers._run_cvc5_wheel("(check-sat)\n(get-model)\n", 60.0)
+
+
+def test_f4wheel2_splitlines_breaks_on_ten_characters_not_one():
+    """The fact the whole finding rests on, measured off Python rather than
+    recalled: `str.splitlines()`'s separator set. If this ever grows, the
+    driver's WHITELIST still holds (printable ASCII cannot join this set) —
+    which is the reason it is a whitelist."""
+    found = {c for c in map(chr, range(0x110000)) if len(("a" + c + "b").splitlines()) > 1}
+    assert found == {"\n", "\r", *_SEPARATORS}
+    # and every one of them is outside the protocol's alphabet
+    assert all(not (" " <= c <= "~") for c in found)
+
+
+@pytest.mark.parametrize("sep", _SEPARATORS)
+def test_f4wheel2_a_payload_cannot_forge_the_terminator(monkeypatch, sep):
+    """THE DEFECT. One line to the writer, two to the reader: the tail forges
+    the terminator and its count, the child never wrote one, and it exits 0 so
+    the other tell is blind too. Measured at base: `sat` with 1 value."""
+    forged = f"version 1.3.4\nanswer sat\nvalue x0 1/1\nopaque x1 junk{sep}end 2\n"
+    assert len(forged.splitlines()) == 5      # what the reader used to see
+    assert len(forged.split("\n")) - 1 == 4   # what the writer actually wrote
+    r = _wheel_stdout(monkeypatch, forged)
+    assert r.answer == "failed"
+    assert r.values == ()
+
+
+def test_f4wheel2_the_same_payload_without_a_separator_is_the_control(monkeypatch):
+    """POSITIVE CONTROL for the parametrisation above: identical bytes but for
+    the separator. It was refused before this fix and is refused now, so the
+    separator — not the shape — is what the test above is about."""
+    r = _wheel_stdout(
+        monkeypatch,
+        "version 1.3.4\nanswer sat\nvalue x0 1/1\nopaque x1 junk end 2\n",
+    )
+    assert r.answer == "failed"
+    assert "not complete" in r.detail and "ABSENT" in r.detail
+
+
+@pytest.mark.parametrize("sep", _SEPARATORS)
+def test_f4wheel2_the_reader_narrowing_refuses_on_its_own(monkeypatch, sep):
+    """THE NARROWING, measured as its own mechanism rather than through the
+    alphabet check that fires first. `split("\\n")` is the writer's boundary,
+    so the poisoned record stays ONE record and the forged `end 2` is no longer
+    the last line — the terminator check refuses it. `splitlines()` on the same
+    bytes accepts it. Both readings are computed here, so the difference is a
+    measurement and not a claim about which branch ran."""
+    forged = f"version 1.3.4\nanswer sat\nvalue x0 1/1\nopaque x1 junk{sep}end 2\n"
+    narrow = [ln for ln in forged.split("\n")][:-1]
+    assert narrow[-1] != "end 2"          # refused: the terminator is absent
+    assert forged.splitlines()[-1] == "end 2"  # accepted: the forgery lands
+
+
+def test_f4wheel2_a_stale_driver_is_a_protocol_violation(monkeypatch):
+    """FAIL CLOSED on a driver out of step with this parser. The two ship
+    together, but a stale install is exactly what the driver's docstring says
+    degrades to UNKNOWN; a byte outside the protocol's alphabet is now refused
+    with that said, rather than interpreted."""
+    r = _wheel_stdout(
+        monkeypatch, "version 1.3.4\nanswer sat\nopaque x0 a\x0bb\nend 1\n"
+    )
+    assert r.answer == "failed"
+    assert "alphabet" in r.detail
+
+
+def test_f4wheel2_carriage_return_is_the_writers_alone_to_stop(monkeypatch):
+    """WHY THE WRITER IS THE LOAD-BEARING HALF, and the measurement that
+    settles widen-the-writer against narrow-the-reader.
+
+    `capture_output=True, text=True` means Python's universal-newline decoding
+    turns a `\\r` into a real `\\n` BEFORE this parent sees the string. By the
+    time any rule here runs there is nothing left to detect: the bytes below
+    are what a stale driver's `\\r` payload looks like after decoding, and this
+    parent accepts them — correctly, because they are indistinguishable from a
+    child that really wrote two records. No reader-side rule can close this;
+    only `_cvc5_driver._tail` escaping the `\\r` can."""
+    decoded = "version 1.3.4\nanswer sat\nvalue x0 1/1\nopaque x1 junk\nend 2\n"
+    r = _wheel_stdout(monkeypatch, decoded)
+    assert r.answer == "sat"  # the parent is blind here, and cannot not be
+    # ...and the driver is not: nothing it writes can decode into that.
+    from stelling import _cvc5_driver
+
+    assert _cvc5_driver._tail("junk\rend 2") == "junk\\u{d}end 2"
+
+
+@pytest.mark.parametrize(
+    "sep", ("\n", "\r", *_SEPARATORS),
+)
+def test_f4wheel2_the_driver_escapes_every_separator_in_every_field(sep):
+    """THE FIX, on the writer. Name, value and error text all go through the
+    same whitelist, and a field can no longer become two records."""
+    from stelling import _cvc5_driver
+
+    for fn in (_cvc5_driver._token, _cvc5_driver._tail):
+        out = fn(f"a{sep}b")
+        assert sep not in out
+        assert len(out.splitlines()) == 1
+        assert len(out.split("\n")) == 1
+
+
+def test_f4wheel2_the_driver_escapes_a_space_in_a_NAME_but_not_in_a_value():
+    """The same disagreement one delimiter down: `value`/`opaque` lines are read
+    with `split(maxsplit=2)`, so a space inside a NAME shifts the value into the
+    name's field. Names are tokens; the trailing field is free text and keeps
+    its spaces (`opaque x0 (root 2)` must survive)."""
+    from stelling import _cvc5_driver
+
+    assert _cvc5_driver._token("a b") == "a\\u{20}b"
+    assert _cvc5_driver._tail("(root 2)") == "(root 2)"
+
+
+def test_f4wheel2_printable_ascii_is_passed_through_untouched():
+    """CRY-WOLF FLOOR for the whitelist: every character the protocol actually
+    uses survives it, so no healthy field is rewritten."""
+    from stelling import _cvc5_driver
+
+    printable = "".join(map(chr, range(0x21, 0x7F)))
+    assert _cvc5_driver._token(printable) == printable
+    assert _cvc5_driver._tail(" " + printable) == " " + printable
+
+
+@pytest.mark.skipif(not _optional.available("cvc5"), reason="needs the cvc5 wheel")
+def test_f4wheel2_real_cvc5_emits_a_raw_separator_in_a_quoted_symbol():
+    """REACHABILITY, measured on the real backend through the real driver.
+
+    cvc5 escapes separators inside a model VALUE, so the channel the old
+    sanitiser guarded was already closed by cvc5's printer. It does not escape
+    a quoted SYMBOL — which the driver used to interpolate unsanitised. This
+    pins both halves: the raw separator really does reach the driver, and the
+    driver really does neutralise it. stelling names its own consts `x{k}`, so
+    no script this tool emits can carry one; the guard is for the next emitter,
+    not this one."""
+    import sys as _sys
+
+    vt = "\x0b"
+    script = (
+        "(set-option :produce-models true)\n(set-logic QF_LRA)\n"
+        f"(declare-const |x0{vt}end 1| Real)\n"
+        f"(assert (= |x0{vt}end 1| 3.0))\n(check-sat)\n(get-model)\n"
+    )
+    proc = subprocess.run(
+        [_sys.executable, "-m", "stelling._cvc5_driver"],
+        input=script, capture_output=True, text=True, timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert vt not in proc.stdout                       # escaped by the driver
+    assert "\\u{b}" in proc.stdout                     # ...and disclosed, not dropped
+    assert len(proc.stdout.splitlines()) == len(proc.stdout.split("\n")) - 1
+    assert proc.stdout.splitlines()[-1] == "end 1"     # the terminator is the driver's
+
+
+def test_f4wheel2_a_final_record_without_its_newline_is_not_a_record(monkeypatch):
+    """FOUND BY THE FUZZER ON THE FIX, not reasoned into it. A record is
+    `text + "\\n"` — that is what `print` writes — so a final record whose
+    newline never got out is one the child did not finish writing. This parser
+    accepted it: `end 4` with a matching count and exit 0 was a definite
+    answer, under `splitlines()` and under `split("\\n")` alike. 86 of 86
+    residual findings over 200k examples had this shape and no other."""
+    body = "version 1.3.4\nanswer sat\nvalue x0 1/1\nend 1"
+    assert _wheel_stdout(monkeypatch, body).answer == "failed"
+    assert "not newline-terminated" in _wheel_stdout(monkeypatch, body).detail
+    # NEGATIVE CONTROL: the same bytes, properly terminated, still answer.
+    r = _wheel_stdout(monkeypatch, body + "\n")
+    assert r.answer == "sat" and r.values == (("x0", "1/1"),) and r.detail == ""
+
+
+def test_f4wheel2_property_fuzz_no_definite_answer_from_an_incomplete_run():
+    """The spike's property, seeded and bounded so it runs in the suite: the
+    transport returns a definite answer only if the child wrote a complete
+    protocol AND exited 0 — with ground truth taken from what the WRITER
+    emitted, never from what the reader parsed.
+
+    Both generator changes that made the spike find anything are here:
+    truncation at a line boundary as well as mid-write, and an exit code drawn
+    INDEPENDENTLY of whether truncation happened. Measured on this fix: 0
+    counterexamples over 200k examples across 10 seeds; measured at 0ad22bb
+    with the same generator: 1428.
+    """
+    import random
+
+    from stelling import _cvc5_driver
+
+    seps = ["\n", "\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", " "]
+    rng = random.Random(20260807)
+    unsound, crywolf, seen_sat = [], [], 0
+    for _ in range(4000):
+        answer = rng.choice(["sat", "unsat", "unknown"])
+        recs = ["version 1.3.4", f"answer {answer}"]
+        n = rng.randrange(0, 4)
+        for _i in range(n):
+            name = _cvc5_driver._token(rng.choice(["x0", "x1", "end", "x0 y"]))
+            tail = rng.choice(["junk", "(root 2)", "end", ""])
+            if rng.random() < 0.75:
+                tail += rng.choice(seps) + f"end {rng.randrange(4)}"
+            kind = "value" if rng.random() < 0.5 else "opaque"
+            body = "1/1" if kind == "value" else tail
+            recs.append(f"{kind} {name} {_cvc5_driver._tail(body)}")
+        complete = rng.random() < 0.5
+        if complete:
+            recs.append(f"end {n}")
+        stream = "".join(r + "\n" for r in recs)
+        truncated = False
+        roll = rng.random()
+        if roll < 0.25:
+            keep = rng.randrange(0, len(recs) + 1)
+            truncated = keep < len(recs)
+            stream = "".join(r + "\n" for r in recs[:keep])
+        elif roll < 0.45 and stream:
+            stream = stream[: rng.randrange(0, len(stream))]
+            truncated = True
+        rc = rng.choice([0, 0, 0, 1, -9])
+        wrote_full = not truncated and complete
+        # what `capture_output=True, text=True` hands the parent
+        decoded = stream.replace("\r\n", "\n").replace("\r", "\n")
+        proc = subprocess.CompletedProcess([], rc, decoded, "")
+        real = subprocess.run
+        subprocess.run = lambda a, _p=proc, **kw: _p
+        old_version = solvers._cvc5_wheel_version
+        solvers._cvc5_wheel_version = lambda: "1.3.4"
+        try:
+            r = solvers._run_cvc5_wheel("(check-sat)\n", 60.0)
+        finally:
+            subprocess.run = real
+            solvers._cvc5_wheel_version = old_version
+        definite = r.answer in ("sat", "unsat", "unknown")
+        if definite and not (wrote_full and rc == 0):
+            unsound.append((decoded, rc, r.answer))
+        if wrote_full and rc == 0 and not definite:
+            crywolf.append((decoded, r.answer, r.detail))
+        if definite:
+            seen_sat += 1
+    assert unsound == [], unsound[:3]
+    # ANTI-VACUITY: the property is not passing because nothing was accepted.
+    assert seen_sat > 200, seen_sat
+    assert crywolf == [], crywolf[:3]

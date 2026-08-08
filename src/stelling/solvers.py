@@ -611,7 +611,64 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
         )
     except OSError as e:
         return _RawResult(answer="not-run", version=version, detail=str(e))
-    lines = proc.stdout.splitlines()
+    # ONE NOTION OF A LINE, and it is the driver's. This read used
+    # `str.splitlines()` while the driver wrote records with `print` and
+    # sanitised them with `replace("\n", " ")` — and `splitlines()` breaks on
+    # TEN characters, not one (measured: U+000A U+000B U+000C U+000D U+001C
+    # U+001D U+001E U+0085 U+2028 U+2029). A model value carrying any of the
+    # other nine was ONE line to the writer and TWO to this reader, so the
+    # payload could supply this parser's LAST line — a forged terminator —
+    # while the child was truncated mid-model-walk. MEASURED end to end: real
+    # cvc5, real driver, real SIGKILL, this parser reading the whole flushed
+    # prefix (53311 bytes), last line `end 3800`, this function reporting
+    # "terminator present" and, on exit 0, returning `sat` with 3800 values
+    # harvested from a corpse. That defeats BOTH tells at once, which is the
+    # one thing two tells exists to prevent.
+    #
+    # `split("\n")` is the writer's own boundary — `print`'s — so a record the
+    # driver failed to sanitise stays ONE record here, and a payload holding
+    # an `end <n>` is no longer this parser's last line: the terminator check
+    # REFUSES it instead of reading it. That is why this narrows rather than
+    # widening `splitlines()`'s set into a membership test on this side: this
+    # side then has no second notion of a line to disagree with.
+    #
+    # The trailing empty element is `print`'s own newline on the last record,
+    # not a record; exactly one is dropped, so a stdout that really does end
+    # in a blank line still fails the terminator check.
+    #
+    # THE WRITER IS THE LOAD-BEARING HALF, and this cannot be closed here
+    # alone: `capture_output=True, text=True` means Python's universal-newline
+    # decoding turns a `\r` into a real `\n` BEFORE this function sees the
+    # string (MEASURED — the child wrote one record, both splitters see two).
+    # No rule on this side can see that, which is what settles the
+    # widen-the-writer / narrow-the-reader question: `_cvc5_driver._token` and
+    # `_tail` pass printable ASCII only, and that is where the boundary is
+    # made or not made. The alphabet check below is the fail-closed backstop
+    # for a driver out of step with this parser — the two ship together, but a
+    # stale install is exactly what the driver's docstring already promises
+    # degrades to UNKNOWN. A byte outside the protocol's alphabet is a
+    # protocol violation, never something to interpret.
+    if any(not (" " <= c <= "~") for c in proc.stdout if c != "\n"):
+        return _RawResult(
+            answer="failed",
+            version=version,
+            detail=f"cvc5 driver wrote outside the protocol's alphabet "
+            f"(printable ASCII and newline); refusing to interpret it. "
+            f"stdout: {_quote(proc.stdout)!r}",
+        )
+    # A RECORD IS `text + "\n"`, because that is what `print` writes. A final
+    # record with no newline is a record the child did not finish writing, and
+    # this parser used to accept one: `…\nend 4` (the newline cut, nothing
+    # else) read as a present terminator with a matching count, and on exit 0
+    # became a definite answer. FOUND BY THE FUZZER ON THIS FIX, not reasoned
+    # into it — 86 of 86 residual findings over 200k examples had exactly this
+    # shape and no other. `splitlines()` accepted it identically, so this is
+    # the same disagreement as above at the other end of the record: the writer
+    # terminates, the reader did not require termination.
+    lines = proc.stdout.split("\n")
+    terminated = len(lines) > 1 and lines[-1] == ""
+    if terminated:
+        lines.pop()  # `print`'s own newline on the last record, not a record
     answer = ""
     answers = 0
     values: list[tuple[str, str]] = []
@@ -728,14 +785,20 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     # is deliberate and matches the binary transport's F4 policy — a nonzero
     # exit is not a transport this layer will discharge OR refute on, and the
     # cost is UNKNOWN, never a flipped verdict.
-    complete = bool(lines) and lines[-1] == f"end {len(values) + opaques}"
+    complete = (
+        terminated and bool(lines) and lines[-1] == f"end {len(values) + opaques}"
+    )
     if not complete or proc.returncode != 0:
+        why = "present" if complete else (
+            "ABSENT (final record not newline-terminated)" if not terminated
+            else "ABSENT"
+        )
         return _RawResult(
             answer="failed",
             version=version,
             detail=f"cvc5 driver answered {answer!r} but the run is not "
             f"complete (exit {proc.returncode}; terminator "
-            f"{'present' if complete else 'ABSENT'}); refusing to rely on a "
+            f"{why}); refusing to rely on a "
             f"crashed run. stderr: {_quote(proc.stderr)!r}",
         )
     return _RawResult(
