@@ -67,7 +67,31 @@ Repository = "https://github.com/NicholasEhsanRoy/stelling"
 Issues = "https://github.com/NicholasEhsanRoy/stelling/issues"
 
 [dependency-groups]
+# `hypothesis` is DEV ONLY, and deliberately so. It drives `tests/property/`,
+# where the metamorphic and oracle properties live. It is not a runtime
+# dependency and not an extra: nothing under `src/stelling/` imports it, and a
+# consumer installing `stelling` must not acquire it.
+#
+# RESOLVED VERSION, recorded because "pinned" without a measurement is a hope:
+#
+#     hypothesis 6.165.2   (python 3.12.3, numpy 2.5.1, sortedcontainers 2.4.0)
+#     resolved 2026-08-08, against jax 0.11.0 and jax 0.10.2 alike
+#
+# The upper bound is the real pin. A Hypothesis major bump is entitled to change
+# strategy semantics and shrinker behaviour, and this suite's value rests on
+# shrink quality over a recursive harness grammar — measured at a median of 3
+# AST nodes over 25 seeds, which is the one mechanism that justified taking the
+# dependency at all. A silent major upgrade would move that number with nothing
+# watching it.
+#
+# `tests/property/` SKIPS when hypothesis is absent, which is what the two
+# shared jax venvs and the zero-dep CI job see. That skip is registered in
+# `tests/test_skip_inventory.py`, and `tests/property/test_suite_disclosure.py`
+# runs WITHOUT hypothesis, so "the property suite examined nothing" can never
+# read as "the property suite found nothing". See `tests/property/README.md`
+# and `tools/property_venv.sh` for the one-command local environment.
 dev = [
+  "hypothesis>=6.165.2,<7",
   "pre-commit>=4.0",
   "pytest>=8.0",
   "reuse>=5.0",
