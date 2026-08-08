@@ -40,14 +40,54 @@ permissions:
 # assertion was added, so none of them is being asked for something it does not
 # already produce:
 #
-#   jax 0.11.0   2297 passed, 2 skipped     verdict=made
-#   jax 0.10.2   2297 passed, 2 skipped     verdict=made
-#   no jax       1186 passed, 85 skipped    verdict=made
+#   jax 0.11.0   verdict=made
+#   jax 0.10.2   verdict=made
+#   no jax       verdict=made
 #
-# (each figure is one higher than it was, and the +1 is the same test in all
-# three: `test_the_untracked_scan_agrees_with_the_tarball`, which gates on git
-# and uv and not on jax. Re-measured in all three environments rather than
-# adjusted by arithmetic.)
+# THE PASS COUNTS THAT STOOD HERE ARE GONE, AND THAT IS THE FIX RATHER THAN AN
+# OMISSION. This block read `2296 / 2296 / 1185`, was bumped to
+# `2297 / 2297 / 1186` one commit later (486862c, where `--collect-only` gives
+# 2299 ids -- re-checked), and the tree has been 2348, 2398, 2454 and 2459
+# since. A number that moves whenever anyone adds a test, in a comment nobody
+# re-runs, is a defect with a delay fuse, and this one had already been lit
+# twice. What the counts were evidence FOR is the line above -- all three lanes
+# already produce a verdict, which is all the assertion below asks of them --
+# and that does not rot.
+#
+# WHAT TO CHECK INSTEAD, as a comparison between runs of ONE commit rather than
+# against a constant written here (same rule, same reason, as the `reuse` job's
+# "N / N" instruction further down):
+#   * the two jax lanes must report the SAME passed/skipped as EACH OTHER: they
+#     collect the same tests, and `--collect-only` ids are byte-identical
+#     between the series;
+#   * the no-jax lane must report fewer passes and more skips than either, with
+#     every one of those skips itemised by the inventory that lane writes;
+#   * all three must report `verdict=made`.
+# A difference of any size in the first is the signal; equality at any value is
+# the pass.
+#
+# ALL THREE OF THOSE ARE PROSE, NOT GATES — said here because two jobs down
+# this workflow does machine-check a pass count (`grep -qE '^2 passed'` on the
+# acceptance log, and `'^18 passed'` on the reproducer log), so a reader could
+# reasonably assume these are checked too. They are not. Nothing in this file
+# compares the two jax lanes to each other; the comparison is an instruction to
+# a human reading a PR.
+#
+# NOT CONVERTED INTO A STEP, and the reason is that it cannot be driven here.
+# The two `grep -qE` gates named above (lines 361 and 632) work because each
+# compares one log against a constant INSIDE the job that produced it. A cross-lane equality needs the two
+# lanes' counts to meet — an artifact upload from each matrix leg and a
+# dependent job that downloads both — which is new workflow machinery on the
+# path between a tag and PyPI, and this box has no network and no runner, so it
+# could not be driven red before landing. Adding a gate whose failure mode has
+# never been observed is the defect this branch exists to remove, one level up.
+# Whoever has a runner should add it; the shape is: upload
+# `${RUNNER_TEMP}/counts-${{ matrix.jax }}` from each lane, then one job that
+# downloads both and `diff`s them.
+#
+# (measured in all three environments at 486862c; the two jax lanes re-measured
+# at bf905b9 and equal to each other there. Records of two commits, not
+# targets -- nothing here is to be bumped to match a future run.)
 #
 # (the third measured in an interpreter that genuinely does not have jax, not
 # with an import hook, since `stelling._optional.available` asks `find_spec`.)
@@ -624,32 +664,90 @@ jobs:
             exit 1
           fi
 
-  # HAZARD, REAL BUT UNMEASURED: two different linters guard one property.
-  # `fsfe/reuse-action@v5` resolves reuse-tool 5.1.1; `.pre-commit-config.yaml`
-  # pins `reuse-tool` v6.2.0. So the check a contributor runs locally and the
-  # check that blocks are not the same program, and a file that satisfies one
-  # is only assumed to satisfy the other. That matters more than it used to:
-  # `insert-license` now excludes `scratchpad/**` and the REUSE.toml annotation
-  # is what covers it, which means the annotation's handling is the thing both
-  # versions have to agree about.
+  # VERSION SKEW: two different linters guard one property, and the question
+  # of whether they AGREE is now CLOSED BY MEASUREMENT rather than bounded by
+  # a changelog. `fsfe/reuse-action@v5` resolves reuse-tool 5.1.1;
+  # `.pre-commit-config.yaml` pins `reuse-tool` v6.2.0. Since `insert-license`
+  # there now excludes `scratchpad/`, what makes those files compliant is
+  # `REUSE.toml`'s `scratchpad/**` `[[annotations]]` block, so the annotation's
+  # handling is the thing both versions have to agree about.
   #
-  # NOT MEASURED, and stated in exactly those terms rather than reasoned into a
-  # conclusion: only 6.2.0 exists on the machine this was audited on, and
-  # installing 5.1.1 needs network that was not available. Driven there with
-  # 6.2.0 only — a header-less `scratchpad/zz.py` lints clean (rc=0) and a
-  # header-less `src/zz.py` does not (rc=1). Whether 5.1.1 reads REUSE.toml the
-  # same way is a question this repository has not answered. The cheap way to
-  # answer it is to pin both sides to one version.
-  # VERSION SKEW, AND IT IS LOAD-BEARING. `.pre-commit-config.yaml` refers to
-  # this job for the write-up and the write-up was not here; it is now.
+  # WHAT THIS BLOCK USED TO SAY, AND WHY IT IS WITHDRAWN. It said "only 6.2.0
+  # exists on the machine this was audited on, and installing 5.1.1 needs
+  # network that was not available", "a version nobody working on this
+  # repository has run", and that the changelog bound "cannot become [a
+  # measurement] on a box with no network and one installed version". Three
+  # statements of IMPOSSIBILITY, and all three were false: 5.1.1 was on the box
+  # the whole time, in pip's own build cache, mtime 2026-08-08 00:37:52 against
+  # this branch's first commit at 15:44:25 the same day — fifteen hours and six
+  # minutes earlier, and fifteen and a half hours before the commit that
+  # asserted the skew could not be closed. Nobody had looked. An impossibility
+  # claim is the most expensive kind of claim to get wrong, because it stops
+  # anyone else looking too.
   #
-  # This job lints with `fsfe/reuse-action@v5`, which is reuse **5.1.1**.
-  # `.pre-commit-config.yaml` pins `reuse-tool` **v6.2.0**. Two versions guard
-  # one property, and since `insert-license` there now excludes `scratchpad/`,
-  # what makes those files compliant is `REUSE.toml`'s `scratchpad/**`
-  # `[[annotations]]` block — so the argument rests on a version nobody
-  # working on this repository has run. Only 6.2.0 is installed here and
-  # installing 5.1.1 needs the network.
+  # MEASURED, 2026-08-08, OFFLINE, WITH NO INSTALL INTO ANY SHARED ENV.
+  # reuse 5.1.1 assembled by extracting two cached wheels into one directory:
+  #   * reuse 5.1.1 itself from pip's wheel cache —
+  #     ~/.cache/pip/wheels/d1/19/84/94225e2ddab6a7af21602bd5682a54ecbd24afc0ad796fd2e2/
+  #     reuse-5.1.1-cp312-cp312-manylinux_2_39_x86_64.whl, whose `origin.json`
+  #     names the PyPI sdist `reuse-5.1.1.tar.gz`. The cp312/manylinux tag is
+  #     spurious: the wheel contains no compiled object, only `reuse/**.py` and
+  #     its resources, so it imports on the 3.11 interpreter used below.
+  #   * `binaryornot` 0.6.0 — 5.1.1's one requirement the 6.2.0 env lacks —
+  #     from pip's http cache,
+  #     ~/.cache/pip/http-v2/c/6/5/e/8/c65e8d0f5cd15687198954fc037441ea3aefb6411c3c36edebd544b4.body
+  # Every other 5.1.1 requirement (Jinja2, attrs, boolean.py, click,
+  # license-expression, python-debian, tomlkit) is already in the pinned 6.2.0
+  # pre-commit env and was reused from there. Then:
+  #
+  #   PYTHONPATH=<5.1.1 dir>:~/.cache/pre-commit/reporzhg7lx1/py_env-python3/\
+  #     lib/python3.11/site-packages \
+  #     ~/.cache/pre-commit/reporzhg7lx1/py_env-python3/bin/python \
+  #     -m reuse --root <tree> lint
+  #
+  # `import reuse; reuse.__version__` reports 5.1.1 with that prefix and 6.2.0
+  # without it. THE RUN REALLY EXECUTED 5.1.1's CODE, not 6.2.0's, and that is
+  # controlled rather than assumed: move `binaryornot` aside and the same
+  # command dies with `ModuleNotFoundError: No module named 'binaryornot'`,
+  # a module 6.2.0 neither has nor imports (6.0.0 replaced it with
+  # python-magic). Only 5.1.1 can fail that way.
+  #
+  #   tree                                    | 6.2.0        | 5.1.1
+  #   ----------------------------------------|--------------|--------------
+  #   this branch's tip                        | rc=0 331/331 | rc=0 331/331
+  #   same, `scratchpad/**` annotation deleted | rc=1 302/331 | rc=1 302/331
+  #
+  # The second row is the POSITIVE CONTROL and it is the whole point: without
+  # it, two rc=0s prove only that both programs ran. Deleting the one block
+  # this skew is ABOUT moves both versions, by the same 29 files, in the same
+  # direction. The agreement is on the mechanism, not on an accident.
+  #
+  # STRONGER THAN THE COUNTS: `lint --json` at the tip gives 331 file paths
+  # from each version and the two SETS are equal — empty symmetric difference.
+  # Same files, not merely the same total.
+  #
+  # THE ONE DIFFERENCE OBSERVED, and it is the one the changelog documents.
+  # `lint --lines` on the control tree emits 58 lines from each version, and
+  # the two are IDENTICAL AS SETS BUT NOT AS SEQUENCES: 6.2.0 sorts by path
+  # and interleaves the two categories per file, 5.1.1 emits all 29 "no license
+  # identifier" and then all 29 "no copyright notice". That is exactly the
+  # single hit in the 5.1.1 → 6.2.0 changelog window recorded below — the sort
+  # order of `reuse lint --lines` — and nothing else differed. `reuse lint`
+  # (no `--lines`) is what this job runs, and its rc and counts are equal.
+  #
+  # WHAT IS STILL SUSPECTED, and it is now exactly one thing: that
+  # `fsfe/reuse-action@v5` carries EXACTLY reuse 5.1.1. That is read off the
+  # action's own pinning, needs `git ls-remote` to confirm, and cannot be had
+  # offline. Everything downstream of "the action is 5.1.1" is measured.
+  #
+  # AND WHAT THIS MEASUREMENT DOES NOT COVER, said plainly so it is not read
+  # as more than it is: the 5.1.1 run used the 6.2.0 env's dependency versions
+  # (attrs 26.1.0, click 8.4.2, license-expression 30.4.4, tomlkit 0.15.0,
+  # python-debian 1.1.1, Jinja2 3.1.6, binaryornot 0.6.0), not the closure pip
+  # would resolve for 5.1.1 today. It measures reuse 5.1.1's own code against
+  # this tree. A parsing change inside a DEPENDENCY is the one hazard shape
+  # this does not exclude — the same hazard the changelog reading did not
+  # exclude either.
   #
   # WHAT WAS MEASURED, from the 6.2.0 `CHANGELOG.md` vendored in the
   # pre-commit cache. The file carries every release from v0.0.2 to v6.2.0, so
@@ -658,6 +756,33 @@ jobs:
   # `annotation`, `precedence`, `glob` and `path` returns exactly one line,
   # about the sort order of `reuse lint --lines`.
   #
+  # RE-VERIFIED INDEPENDENTLY (2026-08-08), against the same vendored file at
+  # ~/.cache/pre-commit/reporzhg7lx1/CHANGELOG.md, whose `reuse --version` in
+  # that env reports 6.2.0. `grep -c '^## v'` gives **52** release headings,
+  # newest `## v6.2.0 - 2025-10-27`, oldest `## v0.0.2 - 2017-11-03` — so the
+  # file really is complete and the window really is inside it. Grepping lines
+  # 29–194 (v6.2.0 down to just above `## v5.1.1`) for the five terms returns
+  # exactly the one line quoted above, and a full-word grep for `annotation`,
+  # `precedence` and `glob` over that window returns NOTHING. Mapping every
+  # `REUSE.toml` mention in the whole file to its release — AND THE FIGURE
+  # THAT STOOD HERE NAMED NO UNIT AND WAS WRONG UNDER EVERY UNIT. It read
+  # "v5.0.0 (×5), v4.0.0 (×5), v3.0.0 (×1)". `grep -c 'REUSE\.toml'` on that
+  # file gives **13**, not 11, and no counting rule yields 5/5/1. The two
+  # rules that mean anything here, each with its unit stated:
+  #   * BY MATCHING LINE — the unit `grep -n 'REUSE\.toml'` counts —
+  #     **v5.0.0 ×6, v4.0.0 ×6, v3.0.0 ×1 = 13**. (v5.0.0 at L290, 294, 307,
+  #     318, 319, 321; v4.0.0 at L352, 356, 359, 376, 377, 437; v3.0.0 at
+  #     L479.)
+  #   * BY CHANGELOG ENTRY — one bullet or one prose paragraph, however many
+  #     lines it wraps onto — **v5.0.0 ×5, v4.0.0 ×6, v3.0.0 ×1 = 12**. Only
+  #     v5.0.0 differs between the two rules, because L318/L319 are one
+  #     wrapped bullet.
+  # A figure in a norm states the UNIT it counts (docs/norms.md); this one did
+  # not, and the number was not reachable from any unit. THE CONCLUSION IS
+  # UNTOUCHED and was never at risk: under both rules the newest release
+  # mentioning `REUSE.toml` at all is v5.0.0, below both pins. `precedence`
+  # appears at the v2.0.0 heading. Both readings below stand as written.
+  #
   # The sharper form of the same reading: the NEWEST release that documents
   # any change to `REUSE.toml` semantics is **v5.0.0** (2024-11-14) — glob
   # handling for `*/`, annotation application, parse errors. Support for
@@ -665,9 +790,36 @@ jobs:
   # Every one of those is BELOW 5.1.1, so both pinned versions sit on the same
   # side of every documented change to the mechanism this repository relies on.
   #
-  # STILL SUSPECTED, and labelled so on purpose: that is a bound on what the
-  # changelog DOCUMENTS, not a measurement of 5.1.1's behaviour, and it cannot
-  # become one on a box with no network and one installed version.
+  # THAT READING IS A BOUND ON WHAT THE CHANGELOG DOCUMENTS, and it is no
+  # longer the only evidence: the block at the top of this job MEASURED both
+  # versions on this tree, with a positive control, and they agree. What the
+  # changelog reading still does not bound on its own — an undocumented change;
+  # a change in a DEPENDENCY that does the parsing rather than in reuse itself
+  # (6.0.0 made `python-magic` a hard dependency, which is exactly that shape)
+  # — is narrowed but not eliminated by that measurement, because the 5.1.1 run
+  # borrowed the 6.2.0 env's dependency versions. The third item that used to
+  # stand here, "any difference in what the two versions COUNT, since a count
+  # is not compared anywhere between them", is DISCHARGED: the counts are
+  # compared, and so are the file SETS behind them.
+  #
+  # A SENTENCE IS WITHDRAWN HERE TOO. This paragraph said the bound "cannot
+  # become [a measurement] on a box with no network and one installed
+  # version". It could and it did; see the top of this job.
+  #
+  # THE SKEW IS MEASURED CLOSED ON THIS TREE, AND IT IS ALSO DETECTED IF IT
+  # MOVES. The measurement above is a fact about this commit and these two
+  # versions; it is not self-maintaining, so `tests/test_reuse_pins.py` still
+  # records the pair — `fsfe/reuse-action@v5` here, `rev: v6.2.0` in
+  # `.pre-commit-config.yaml` — and reddens if either moves without the other
+  # being reconsidered, if either file stops naming both versions in PROSE, or
+  # if `REUSE.toml`'s `scratchpad/**` annotation (the thing the skew is ABOUT)
+  # goes away. It also carries a non-vacuity floor: it counts the tracked
+  # `scratchpad/` files that have no inline header and fails if that reaches 0,
+  # because then it would be guarding nothing — and SKIPS, loudly, rather than
+  # returning, when it is not in a checkout where it can count them at all.
+  # Every one of those was driven red before it was landed. Keeping the
+  # detector after closing the question is the point: a bump on either side
+  # invalidates the measurement above, and the test is what says so.
   #
   # NOT PINNED HERE, and the reason is not inertia. Closing the skew needs a
   # fact that cannot be had offline — whether `fsfe/reuse-action` has a `v6`
@@ -696,9 +848,15 @@ jobs:
   #   3. if it does not, install the pin explicitly instead of using the
   #      action, and keep the two in one place:
   #      `pipx run reuse==6.2.0 lint` or `uvx --from reuse==6.2.0 reuse lint`.
-  #   4. either way, `pip install reuse==5.1.1 && reuse lint` on this tree
-  #      once, and record the count, which is the measurement no reading of a
-  #      changelog can replace.
+  #   4. STEP 4 IS DONE — this used to read "either way, `pip install
+  #      reuse==5.1.1 && reuse lint` on this tree once, and record the count,
+  #      which is the measurement no reading of a changelog can replace". It
+  #      has been done offline, with a positive control, and the record is at
+  #      the top of this job: 6.2.0 and 5.1.1 agree on this tree, on the counts
+  #      and on the file sets, and disagree only on the ORDER of `lint --lines`
+  #      output. What remains for a human with network is 4a, not 4: confirm
+  #      that `fsfe/reuse-action@v5` really carries 5.1.1 and not some other
+  #      5.x — that is the last SUSPECTED link, and it is the only one.
   reuse:
     name: reuse lint
     runs-on: ubuntu-latest

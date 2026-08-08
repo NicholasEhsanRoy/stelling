@@ -1040,8 +1040,18 @@ def test_flag_survives_a_transparent_jit_scope():
 # call and of `cond` were covered three-quarters of the way. `env` is read by
 # every following equation and `exact`/`nan` have their own pins; the product
 # taint had none, and BOTH `self.taint = outer_taint` lines could be replaced
-# by `pass` with the whole suite still at `2271 passed, 2 skipped` on jax
-# 0.11.0 (measured, twice: one mutant per line, whole suite each time).
+# by `pass` WITH THE WHOLE SUITE STILL GREEN on jax 0.11.0 (measured, twice:
+# one mutant per line, whole suite each time).
+#
+# THE FIGURE THAT STOOD HERE HAS BEEN REMOVED, NOT BUMPED. It read "still at
+# `2271 passed, 2 skipped`", which is a RECORD of the suite at whatever commit
+# the mutants were driven at — and it names no commit, so it reads as a target.
+# It has rotted: `--collect-only` gives 2469 ids at this commit, and the entry
+# in SOUNDNESS.md dated 2026-08-06 records the tree passing through 2433, 2454
+# and 2459 on the way. What the number was evidence FOR is the word GREEN — the
+# mutant changed nothing anywhere in the suite — and that survives every added
+# test, where a constant does not. The same rule, and the same reason, as the
+# pass counts already removed from ci.yml and SOUNDNESS.md.
 #
 # What the mutant does is not cosmetic and it is not conservative. `self.taint`
 # is swapped for a FRESH dict at scope entry, so without the restore the outer

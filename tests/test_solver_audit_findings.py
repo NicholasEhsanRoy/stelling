@@ -14,14 +14,16 @@ real-portfolio F5 case, which skips when the wheels are absent.
 
 from __future__ import annotations
 
+import ast
 import math
 import os
 import subprocess
+import sys
 from fractions import Fraction
 
 import pytest
 
-from stelling import _optional, solvers
+from stelling import _optional, reproduce, solvers
 from stelling.propagate import propagate
 from stelling.solvers import (
     NO_USABLE_MODEL,
@@ -846,6 +848,56 @@ def test_f4wheel2_carriage_return_is_the_writers_alone_to_stop(monkeypatch):
     assert _cvc5_driver._tail("junk\rend 2") == "junk\\u{d}end 2"
 
 
+def test_f4wheel2_universal_newline_decoding_is_measured_not_modelled():
+    """The one real child in this block, and it exists so the model used by
+    the test below is not the thing under test. `capture_output=True,
+    text=True` is what the parent uses; these are raw BYTES going in."""
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         r"import sys; sys.stdout.buffer.write(b'a\rb\r\nc\nd')"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert proc.stdout == "a\nb\nc\nd"  # two \r gone, both became \n
+
+
+def _as_the_parent_receives_it(text: str) -> str:
+    """What `text=True` hands the parent, per the measurement above."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def test_f4wheel2_the_alphabet_backstop_refuses_eight_of_the_ten(monkeypatch):
+    """HOW FAR THE READER-SIDE BACKSTOP REACHES, pinned as a fraction rather
+    than as an adjective. The comment above the check used to call it "the
+    fail-closed backstop for a driver out of step with this parser", which
+    credited it with the whole separator set. It refuses eight, and the two it
+    does not refuse fail for two different reasons:
+
+    * `\\n` is excluded BY CONSTRUCTION — it is the protocol's own record
+      boundary, so a writer that leaves one in a field wrote two records and
+      there is nothing here to detect;
+    * `\\r` is a HOLE, and is invisible to the check rather than admitted by
+      it: universal-newline decoding turned it into a `\\n` before the check
+      ran. The stale child below never writes a terminator record of its own
+      and still gets a definite answer with a model.
+
+    If this ever reads 9 or 10, the reader grew a capability and the comment
+    beside the check has to say so."""
+    refused, definite = set(), set()
+    for sep in ("\n", "\r", *_SEPARATORS):
+        stale = (
+            "version 1.3.4\nanswer sat\nvalue x0 1/1\n"
+            f"opaque x1 j{sep}end 2{sep}"
+        )
+        r = _wheel_stdout(monkeypatch, _as_the_parent_receives_it(stale))
+        if r.answer == "failed" and "alphabet" in r.detail:
+            refused.add(sep)
+        if r.answer in ("sat", "unsat", "unknown"):
+            definite.add(sep)
+    assert refused == set(_SEPARATORS)
+    assert definite == {"\n", "\r"}
+    assert len(refused) == 8 and len(refused) + len(definite) == 10
+
+
 @pytest.mark.parametrize(
     "sep", ("\n", "\r", *_SEPARATORS),
 )
@@ -1019,22 +1071,134 @@ def test_f4wheel2_sweep_the_binary_transport_tokenizes_separators_alike(sep):
     ) == ((("x0", "1"),), False)
 
 
-@pytest.mark.parametrize("sep", ("\n", "\r", *_SEPARATORS))
-def test_f4wheel2_sweep_the_reproducer_scan_errs_toward_crying_wolf(sep):
-    """`reproduce.py` refuses to emit a reproducer that imports stelling, and
-    scans for it with `splitlines()` while the thing that will READ the file is
-    Python's own tokenizer. Same shape as the defect, opposite direction:
-    Python's line-end set is a strict SUBSET of `splitlines()`', so the scan can
-    only see MORE line-starts than Python will — a false alarm is possible, a
-    miss is not."""
-    is_splitlines_boundary = len(f"a{sep}b".splitlines()) > 1
-    try:
-        compile(f"x=1{sep}y=2", "<probe>", "exec")
-        is_python_line_end = True
-    except SyntaxError:
-        is_python_line_end = False
-    assert is_splitlines_boundary
-    assert not is_python_line_end or is_splitlines_boundary
+def test_f4wheel2_the_two_line_end_sets_are_not_nested():
+    """THE WITHDRAWN CLAIM, PINNED SO IT CANNOT BE RE-ASSERTED.
+
+    What stood here asserted that Python's statement-separator set is a strict
+    SUBSET of `str.splitlines()`', which would mean `reproduce.py`'s
+    `splitlines()`-based no-`import stelling` scan sees MORE line-starts than
+    the tokenizer and can only cry wolf. It also could not have detected its
+    own falsity: it parametrised over `splitlines()` separators ONLY, and its
+    second assertion (`not is_python_line_end or is_splitlines_boundary`) was
+    implied by its first (`is_splitlines_boundary`) on every one of them.
+
+    Measured over the whole code-point range instead of assumed, both sides
+    read off this interpreter. Neither set contains the other."""
+    splits = {
+        c for c in map(chr, range(0x110000))
+        if len(("a" + c + "b").splitlines()) > 1
+    }
+    compiles = set()
+    for cp in range(0x110000):
+        ch = chr(cp)
+        try:
+            compile("x=1" + ch + "y=2", "<probe>", "exec")
+        except (SyntaxError, ValueError):
+            continue
+        compiles.add(ch)
+
+    # WHAT THESE FOUR ARE AND ARE NOT. The comment here read "each of the four
+    # is independently falsifiable; none implies another". THE SECOND HALF WAS
+    # FALSE, and is measured so rather than argued: enumerate all 4096
+    # (splits, compiles) pairs over a six-symbol universe modelling this
+    # alphabet, and ask for each assertion whether the other three entail it —
+    #
+    #   A2 & A3 & A4  =>  A1   IMPLIED, 0 counterexamples of 4096
+    #   A1 & A3 & A4  =>  A2   IMPLIED, 0
+    #   A1 & A2 & A4  =>  A3   independent, 3 counterexamples
+    #   A1 & A2 & A3  =>  A4   IMPLIED, 0
+    #
+    # and the tightest form of the one that matters: A1 & A4 => A2 on its own,
+    # 0 counterexamples, since A2 is A1 minus A1&A4 by set algebra. THREE of
+    # the four are entailed by the rest; only A3 — the cry-wolf direction, the
+    # one carrying the eight separators — is not. They stay as four because
+    # four named facts read better than one derived one, but the redundancy is
+    # written down instead of denied: a mutation that moved only what A2 says
+    # could not redden this test THROUGH A2.
+    assert compiles == {"\n", "\r", "#", ";"}         # A1
+    assert compiles - splits == {"#", ";"}            # A2, a MISS is possible
+    assert splits - compiles == set(_SEPARATORS)      # A3, the cry-wolf leg
+    assert splits & compiles == {"\n", "\r"}          # A4
+
+
+@pytest.mark.parametrize(
+    "text, the_line_scan_sees_it",
+    (
+        # `;` carries a real statement past a line-start scan
+        ("x = 1; import stelling\ny = 2\n", False),
+        ("x = 1; from stelling.harness import assert_\n", False),
+        ("x = 1; import stelling.solvers as s\n", False),
+        ("if True: import stelling\n", False),
+        # and the shape the line scan was already catching, still caught
+        ("import stelling\n", True),
+        ("from stelling import verdict\n", True),
+    ),
+)
+def test_f4wheel2_the_emitter_refuses_an_import_a_line_scan_cannot_see(
+    text, the_line_scan_sees_it
+):
+    """The counter-construction, and the emitter's answer to it.
+
+    `reproduce.py`'s refusal is called *"a structural refusal at the point of
+    emission, not a comment asking the next author to be careful"* — so its
+    charter is a future edit of `_TEMPLATE`, not today's caller text (which
+    `one_line` already funnels). A refusal a semicolon walks past does not
+    discharge that charter, so the emitter now also walks the parse tree."""
+    line_hits = [
+        line for line in text.splitlines()
+        if line.strip().startswith(("import stelling", "from stelling"))
+    ]
+    assert bool(line_hits) is the_line_scan_sees_it
+    # ...and in every case there really is an import of the tool in the tree
+    found = {
+        alias.name for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.Import) for alias in node.names
+    } | {
+        node.module or "" for node in ast.walk(ast.parse(text))
+        if isinstance(node, ast.ImportFrom)
+    }
+    assert any(n == "stelling" or n.startswith("stelling.") for n in found)
+    with pytest.raises(reproduce.ReproducerError, match="reaches back into"):
+        reproduce._refuse_tool_import(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "import json\nx = 1\n",
+        # the tree walk is EXACT: an import inside a string literal is text,
+        # not a statement, and the walk does not fire on it
+        "S = 'x = 1; import stelling'\n",
+        "from json import loads\nx = 1\n",
+        "import json as stelling_j\n",
+    ),
+)
+def test_f4wheel2_the_parse_tree_leg_does_not_cry_wolf(text):
+    """Non-vacuity in the other direction: the added refusal has to accept
+    text that carries no import of the tool, or it would refuse every
+    reproducer and the test above would pass for the wrong reason."""
+    reproduce._refuse_tool_import(text)
+
+
+def test_f4wheel2_the_line_scan_is_kept_and_still_cries_wolf():
+    """The line scan is not replaced by the tree walk: it fires on an
+    `import stelling` inside a docstring, which the parse tree correctly does
+    not report as an import at all. A false alarm at the point of emission is
+    the cheap direction, so both legs stay and neither implies the other."""
+    text = 'D = """\nimport stelling\n"""\n'
+    assert not [
+        node for node in ast.walk(ast.parse(text))
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    with pytest.raises(reproduce.ReproducerError, match="reaches back into"):
+        reproduce._refuse_tool_import(text)
+
+
+def test_f4wheel2_unparseable_text_is_left_to_the_callers_own_compile():
+    """The tree walk runs only when the text parses. When it does not, this
+    function stays silent so the caller's `compile` reports it with the
+    "does not parse" message the emitter has always given."""
+    reproduce._refuse_tool_import("x = (\n")
 
 
 def test_f4wheel2_sweep_the_z3_transport_has_no_record_protocol():

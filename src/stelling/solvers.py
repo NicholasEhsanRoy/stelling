@@ -643,11 +643,98 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     # No rule on this side can see that, which is what settles the
     # widen-the-writer / narrow-the-reader question: `_cvc5_driver._token` and
     # `_tail` pass printable ASCII only, and that is where the boundary is
-    # made or not made. The alphabet check below is the fail-closed backstop
-    # for a driver out of step with this parser — the two ship together, but a
-    # stale install is exactly what the driver's docstring already promises
-    # degrades to UNKNOWN. A byte outside the protocol's alphabet is a
-    # protocol violation, never something to interpret.
+    # made or not made.
+    #
+    # THE ALPHABET CHECK BELOW IS A PARTIAL BACKSTOP, AND THE EXACT FRACTION
+    # IS 8 OF 10. It used to be described here as "the fail-closed backstop for
+    # a driver out of step with this parser", which credited it with the whole
+    # separator set. MEASURED against a real stale child writing real bytes and
+    # no terminator record of its own (`scratchpad/probe_cvc5_backstop.py`), it
+    # refuses eight, and the two it does not refuse fail for two DIFFERENT
+    # reasons that must not be run together:
+    #
+    #   * `\n` is excluded from the test by construction. It is the protocol's
+    #     own record boundary, so a writer that leaves one inside a field has
+    #     written two records and there is nothing here to detect. That half
+    #     was always the writer's.
+    #   * `\r` is a HOLE, and it is invisible to this check rather than
+    #     admitted by it: the `text=True` above has already turned it into a
+    #     real `\n` in `proc.stdout`, so there is no `\r` left to test for. A
+    #     stale driver writing `opaque x1 j\rend 2\r` with no terminator of its
+    #     own returns `sat` with a model HERE, at this commit (measured).
+    #
+    # `text=False` PLUS AN EXPLICIT DECODE WAS DECLINED HERE OVER A FALSIFIER
+    # NARROWER THAN THE CONCLUSION IT CARRIED, and that is corrected below.
+    # What stood here said bytes-plus-explicit-decode "also refuses every
+    # healthy run whose child applies a `\r\n` newline translation" — a claim
+    # about the whole repair class, taken from ONE arm of it.
+    #
+    #   (a) shipped `text=True`
+    #   (b) `bytes.decode()`                        — the arm that was measured
+    #   (c) `bytes.decode().replace("\r\n", "\n")`  — the arm that was not
+    #
+    # ALL THREE ARE NOW MEASURED, same io layer, real children, real bytes
+    # (`scratchpad/probe_cvc5_backstop.py`, parts B/C/D):
+    #
+    #   case                             (a)      (b)      (c)
+    #   healthy POSIX   `\n`             sat      sat      sat
+    #   healthy Windows `\r\n`           sat      FAILED   sat
+    #   stale `\r`, LF body              SAT (!)  failed   failed
+    #   stale `\r`, CRLF body            SAT (!)  failed   failed
+    #   stale `\x0b`                     failed   failed   failed
+    #   separators refused (LF stale)    8 of 10  9 of 10  9 of 10
+    #
+    # The withdrawn sentence is TRUE OF (b) AND FALSE OF (c). Arm (c)
+    # DOMINATES the shipped reader on everything measured: identical answer
+    # AND identical values on both healthy children, strictly stronger on the
+    # stale ones, nine of the ten separators instead of eight, and no platform
+    # coupling at all — it puts back by hand the one translation `text=True`
+    # was doing for us, and nothing else. It is better again in a case neither
+    # arm's table covers: a child writing invalid UTF-8 makes the shipped
+    # reader raise an UNCAUGHT `UnicodeDecodeError` out of this function, where
+    # (c) returns `failed`. Its one measured cry-wolf case is a healthy child
+    # reconfigured to BARE CR line endings, which no platform's `print` default
+    # produces and which `_cvc5_driver` never sets.
+    #
+    # AND THE HOLE REACHES THE DISCHARGE DIRECTION. The `\r` row is not only a
+    # spurious violation: the same stale child saying `answer unsat` returns
+    # `unsat` HERE (measured, part D) — a false DISCHARGE off a corpse that
+    # wrote no terminator record of its own. That is the direction with no
+    # downstream backstop.
+    #
+    # (c) IS STILL NOT TAKEN IN THIS TREE, AND THE REASON IS EVIDENCE COST,
+    # NOT BEHAVIOUR. Saying it any other way would repeat the defect this
+    # comment corrects. Measured rather than estimated — arm (c) applied to
+    # this function and the whole suite run: **16 TESTS FAIL**, every one of
+    # them in `tests/test_solver_audit_findings.py` and every one the same
+    # `AttributeError: 'bytes' object has no attribute 'encode'` at
+    # `subprocess.py:2172`. (16 is the durable figure and its unit is TESTS;
+    # the rest of that run was 2451 passed and 2 skipped of 2469 collected,
+    # which is a record of this commit and will move with the next added
+    # test.) `input=` must become bytes when `text=` goes,
+    # and six files shim `subprocess.run` to hand this parser a `str`
+    # `CompletedProcess`: that test file plus `fuzz_transport.py`,
+    # `repro_forgery.py`, `repro_real_kill.py`, `probe_cvc5_value_channel.py`
+    # and `probe_cvc5_backstop.py` — the artefacts behind figures quoted in
+    # SOUNDNESS.md, each needing re-driving to stay honest. On top of that, the
+    # per-obligation instrument this repository uses to show a change moved no
+    # verdict says in its own docstring that it "has no solver escalation ...
+    # so nothing here scores `solvers.py`" (`scratchpad/pin/corpus_pin.py`), so
+    # a new corpus with its own positive control is a precondition and not a
+    # formality. That is a change with its own branch and its own evidence, not
+    # a rider on one correcting prose.
+    #
+    # WHAT IS THEREFORE TRUE AND UNCLOSED, stated so nobody reads a decline as
+    # a refutation: the reader keeps universal newlines, the writer's whitelist
+    # stays the load-bearing half, and `\r` from a driver out of step with this
+    # parser is a LIVE hole in both directions. A stale install is what the
+    # driver's docstring promises degrades to UNKNOWN; it does so for eight of
+    # the ten here, for all ten through a writer that is not itself stale, and
+    # for nine of the ten under a repair that is measured, dominant, and
+    # unlanded.
+    #
+    # A byte outside the protocol's alphabet is a protocol violation, never
+    # something to interpret.
     if any(not (" " <= c <= "~") for c in proc.stdout if c != "\n"):
         return _RawResult(
             answer="failed",

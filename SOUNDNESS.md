@@ -1853,16 +1853,64 @@ verdicts:
   corpse**.** The exit code is the one constructed ingredient, and it is
   constructed exactly as this log's `end of the resource limit` shape
   already was.
-  **REACHABILITY, measured rather than assumed, and it is the reason this
-  reads as incompleteness and not as an incident.** cvc5 escapes every
-  separator inside a model VALUE (`"a\u{b}b"` — measured for all ten), so
-  the channel the sanitiser guarded was already closed by cvc5's own
-  printer. What cvc5 does NOT escape is a **quoted symbol**: `|a<VT>b|`
-  comes back raw from `getValue`, and the driver interpolated the term
-  NAME with no sanitiser at all. stelling names its own consts
-  `x{k}`/`x{k}_{i}` (`obligation.py`), and `smt.py` declares Real sorts
-  only, so no script this tool emits can carry one. The guard was
-  therefore held up by two coincidences neither of which stelling owns.
+  **REACHABILITY — AND THE FIRST READING OF IT WAS FALSE, in the
+  understating direction. Corrected 2026-08-08; the correction is recorded
+  here because the "incompleteness, not incident" framing rests on this
+  paragraph and on nothing else.** The sentence that stood here said cvc5
+  escapes every separator inside a model VALUE, so the value channel was
+  already closed by cvc5's own printer and only the NAME channel was ever
+  open. Half of that is true and half is false.
+  TRUE: inside a String LITERAL cvc5 escapes all ten
+  (`"a\u{b}b"` — `scratchpad/probe_cvc5_separators.py`, driven for each).
+  FALSE: a **quoted symbol reaches the VALUE field verbatim** whenever the
+  value's SORT or CONSTRUCTOR was declared as one — no string literal
+  anywhere in it. Driven through the driver's own route
+  (`cvc5.InputParser`, SMT_LIB_2_6 string input, `sm.getDeclaredTerms()`,
+  `solver.getValue`), real cvc5 1.3.4, `scratchpad/probe_cvc5_value_channel.py`:
+
+      (declare-sort |S<VT>end 1| 0) (declare-const c |S<VT>end 1|)
+        value = '(as |@_S\x0bend 1__0| |S\x0bend 1|)'
+      (declare-datatypes ((D 0)) (((|c<VT>end 1|))))  (declare-const d D)
+        value = '|c\x0bend 1|'
+      (declare-const a (Array Int |S<VT>z|))
+        value = '((as const (Array Int |S\x0bz|)) (as |@_S\x0bz__0| |S\x0bz|))'
+      CONTROL, the same sort named in ASCII: value = '(as @S_0 S)' — none
+
+  and the value channel alone was enough to harvest a corpse. Driven at
+  `0ad22bb` with the base driver and the base parent, same probe with
+  `--corpse`: the real child writes
+  `version …\nanswer sat\nopaque c (as |@_S\x0bend 1__0| |S\x0bend 1|)\nend 1\n`,
+  and its **57-byte prefix** — a mid-write truncation, with **no terminator
+  record written at all** — handed to the real parent with exit 0 returns
+  **`sat`**, because the reader's last line is the forged `end 1` sitting
+  inside the value text. The 70-byte prefix does it again off the second
+  quoted symbol in the same value. The branch's own probe
+  (`scratchpad/probe_cvc5_sorts.py`) missed this by naming its datatype
+  constructor in ASCII and poisoning a String SELECTOR value — a string
+  literal, the one place cvc5 really does escape.
+  **What survives from the original sentence, re-measured:** stelling names
+  its own consts `x{k}`/`x{k}_{i}` (`obligation.py`) and `smt.py` puts nothing
+  but `Real` and `Bool` into SMT-LIB. **THE CITATION HERE WAS WRONG AND THE
+  CONCLUSION WAS NOT.** It read "`git grep -n 'declare-' src/stelling/smt.py`
+  — `declare-const … Real`, `… Bool`", and that command returns exactly ONE
+  line: `smt.py:490: lines.append(f"(declare-const {inp.name} Real)")`. There
+  is no `declare-const … Bool` to find. `Bool` reaches the script through
+  `define-fun`, at `smt.py:503-509` — `sort = "Bool" if out.aval.dtype ==
+  "bool" else "Real"`, emitted as `(define-fun t{id} () {sort} …)`. So the
+  two commands that carry the claim are `git grep -n 'declare-'
+  src/stelling/smt.py` (**one** line, `Real`, and therefore no `declare-sort`
+  and no `declare-datatypes` either) and `git grep -n 'lines.append(f"(define-
+  fun' src/stelling/smt.py` (**three** lines — 506 and 510 emit `{sort}`, which
+  line 504 sets to `Bool` or `Real` and to nothing else; 659 emits `Real`
+  literally). A bare `git grep -n 'define-fun' src/stelling/smt.py` returns
+  **eight**, five of them prose in docstrings, which is why the emitting form
+  is the one quoted. Sorts: `Real` and `Bool` and nothing else — checked the
+  other way too, `git grep -nE '"(Int|String|BitVec|Array|RoundingMode)"'
+  src/stelling/smt.py` returns nothing. So no script this tool emits carries a quoted symbol
+  into EITHER channel, and the defect stays unreachable through stelling's
+  own emissions. What changes is the size of the guard's margin: it rested
+  on ONE coincidence stelling does not own, not two, and the value channel
+  it was said to be closed against was open the whole time.
   `(exit)` and `:rlimit` were driven against the real driver as candidate
   truncation routes and neither terminates it.
   **Fixed on both sides, because the measurement says neither alone is
@@ -1878,37 +1926,157 @@ verdicts:
   boundary, so an unsanitised record stays ONE record and a payload
   holding an `end <n>` is REFUSED by the terminator check instead of read
   as it; a byte outside the protocol's alphabet is a protocol violation
-  rather than something to interpret, which is what makes the driver
-  docstring's "a mismatch degrades every run to UNKNOWN" true for this
-  class instead of accidental. **A third refusal came from the fuzzer, on
+  rather than something to interpret. **How far that reader-side backstop
+  reaches, measured rather than asserted** (`scratchpad/probe_cvc5_backstop.py`,
+  a real stale child writing real bytes, no terminator record of its own):
+  it refuses **8 of the 10** separators. `\n` is excluded from it by
+  construction — it is the protocol's own record boundary, so a writer that
+  leaves one inside a field has written two records and there is nothing on
+  this side to detect. `\r` is a genuine hole and is the reason the writer
+  half is load-bearing: `text=True` has already turned it into a `\n` before
+  the check runs, so a stale driver writing `opaque x1 j\rend 2\r` and no
+  terminator still returns `sat` with a model **at the fixed tip** — and,
+  measured since, `unsat` if that is what the corpse's `answer` line said,
+  which is the DISCHARGE direction and the one with no downstream backstop.
+  So the driver docstring's *"a mismatch degrades every run to UNKNOWN"* is
+  true for this class **through the writer**, and only for 8 of 10 through the
+  reader; the earlier wording credited the reader with all of it.
+  **THE REPAIR WAS DECLINED ON A FALSIFIER NARROWER THAN THE CONCLUSION IT
+  CARRIED, and the decline stands on a different reason now.** What was
+  written here and in `solvers.py` was that `text=False` plus an explicit
+  decode "also refuses every healthy run whose child applies a `\r\n` newline
+  translation" — asserted over the whole repair class from ONE arm of it, the
+  raw decode. The nearest rival, `bytes.decode().replace("\r\n", "\n")`, was
+  not measured. It is now (`probe_cvc5_backstop.py` parts B/C/D, three readers
+  over the same real children): identical to the shipped reader on a healthy
+  POSIX child AND on a healthy Windows `\r\n` child — same answer, same values
+  — `failed` on the stale `\r` child under an LF body and a CRLF body alike,
+  **9 of 10 separators refused instead of 8**, no platform coupling, and
+  `failed` rather than an UNCAUGHT `UnicodeDecodeError` when a child writes
+  invalid UTF-8. It DOMINATES the shipped reader on every case measured. Its
+  one measured cry-wolf case is a healthy child reconfigured to bare-CR line
+  endings, which no platform's `print` default produces and `_cvc5_driver`
+  never sets. **It is not landed here, and the reason is evidence cost, not
+  behaviour** — saying otherwise would repeat the defect being corrected.
+  Measured: applying it makes **16 TESTS** fail — 16 is the durable figure and
+  its unit is tests; the rest of that run was 2451 passed and 2 skipped of
+  2469 collected, a record of this commit that will move with the next added
+  test. All 16 are in `tests/test_solver_audit_findings.py` and all 16 are the
+  same `AttributeError: 'bytes' object has no attribute 'encode'` at
+  `subprocess.py:2172`, because `input=` must become bytes when `text=` goes
+  and six files shim `subprocess.run` with a `str` `CompletedProcess` —
+  including `fuzz_transport.py`, `repro_forgery.py`, `repro_real_kill.py` and
+  `probe_cvc5_value_channel.py`, the artefacts behind figures quoted in this
+  very entry. And `scratchpad/pin/corpus_pin.py`, the per-obligation
+  instrument, says in its own docstring that it "has no solver escalation …
+  so nothing here scores `solvers.py`", so the zero this repository requires
+  of a behavioural change cannot be produced by the instrument that exists.
+  **The hole is live, in both directions, and the repair that closes nine of
+  ten is measured, dominant and unlanded.** **A third refusal came from the fuzzer, on
   the fix rather than into it:** a record is `text + "\n"`, so a final
   record whose newline never got out is one the child did not finish
   writing — `…\nend 4`, the newline cut and nothing else, read as a
   present terminator with a matching count and became a definite answer on
-  exit 0. 86 of 86 residual counterexamples over 200k examples had that
-  shape and no other; `splitlines()` accepted it identically, so it is the
-  same disagreement at the other end of the record. **One delimiter down,
+  exit 0. 86 of 86 residual counterexamples over the same 200 000 (20 000
+  per seed × seeds 1–10) had that shape and no other — re-driven at
+  `bf905b9` by reinstating exactly the one line under test, `terminated`
+  forced true, and running the shipped fuzzer over it: 86, all of them a
+  final record with its newline cut. `splitlines()` accepted it
+  identically, so it is the same disagreement at the other end of the
+  record. **One delimiter down,
   same class:** `value`/`opaque` lines are read with `split(maxsplit=2)`,
   so a space inside a NAME shifted the value into the name's field; names
   are now whitespace-free tokens. **Cry-wolf cost measured at zero** —
   every healthy shape the `f4wheel` block pins is byte-identical, printable
   ASCII passes the whitelist untouched, `opaque x0 (root 2)` keeps its
-  spaces, and both jax series are green at 2433 passed / 2 skipped with
-  identical `--collect-only` ids. **Property fuzzer** (line-boundary AND
-  mid-write truncation, exit code drawn independently of truncation,
-  ground truth taken from what the WRITER emitted): **0 counterexamples
-  over 200k examples across 10 seeds; the same generator at `0ad22bb`
-  finds 1428.** A seeded 4000-example run of it is a permanent test, with
-  an anti-vacuity floor so a fuzzer that accepts nothing cannot pass.
+  spaces, and the whole suite is green on BOTH jax series with
+  `--collect-only` ids byte-identical between them, at this branch and at
+  its merge-base alike. **A BARE PASS COUNT STOOD HERE AND HAS BEEN
+  REMOVED, not bumped.** It read `2433 passed / 2 skipped`, which was true
+  at `92e5ab4` and false three times in the two days after — the tree has
+  been 2454 and is 2459 as of `bf905b9`. What the number was standing in
+  for is a comparison, and the comparison is what is now written: the two
+  series equal EACH OTHER on the same commit, and the branch's own
+  `--collect-only` delta against its merge-base is **18 ids added and 10 ids
+  removed**, the 10 being the retired params of the de-vacuified
+  `test_f4wheel2_sweep_the_reproducer_scan_errs_toward_crying_wolf` and
+  nothing else. **THE SENTENCE HERE SAID "AND NOTHING REMOVED" AND THAT WAS
+  FALSE** — false in the same entry that says "10 parametrised ids retired,
+  18 added" sixty-odd lines below, so the branch contradicted itself inside
+  one entry while replacing a rotting count with a durable comparison. The
+  measurement, and the one that would have refuted it: `pytest --collect-only
+  -q | grep :: | sort` in a worktree at each commit, then `comm -13` and
+  `comm -23` over the two files — 2461 ids at `bf905b9`, 2469 here, `comm -13`
+  gives 18 and `comm -23` gives 10, and every one of the 10 is a
+  `…crying_wolf[…]` param. A constant cannot say "nothing moved" on a tree
+  that gains tests daily; neither can a delta that is only counted in one
+  direction. Two measurements on one commit can, and they stay true next
+  week — provided both directions of the delta are read, which is the defect
+  this paragraph is now a record of. **Property fuzzer** (line-boundary AND mid-write truncation,
+  exit code drawn independently of truncation, ground truth taken from what
+  the WRITER emitted): **0 counterexamples at 20 000 examples per seed
+  across seeds 1–10 — 200 000 in total, not 200 000 each; the same
+  generator at `0ad22bb` finds 1428 in the same 200 000** (`scratchpad/
+  fuzz_transport.py N SEED`, whose own default `N` is 20 000; re-driven
+  seed by seed at `bf905b9`: base 134/150/136/146/141/136/136/159/145/145
+  = 1428, tip 0 at every seed, cry-wolf 0 at every seed). The 134 at seed 1
+  has its first counterexample at example #64, which is a figure only the
+  20 000 reading admits. A seeded 4000-example run of it is a permanent
+  test, with an anti-vacuity floor so a fuzzer that accepts nothing cannot
+  pass.
   **Swept for the same class elsewhere and found none live:** z3 is
   in-process over the API with no text record protocol at all; the binary
   cvc5 transport splits and re-joins, but `_tokenize_sexpr` already treats
   every one of these as whitespace and its unsat/unknown leg fails closed
-  on any noise; `reproduce.py`'s no-`import stelling` scan reads MORE
-  line-starts than Python's tokenizer does, which is the safe direction;
+  on any noise;
   `slice_unknown_obligations` round-trips no text. Every construction is a
   permanent regression test (`tests/test_solver_audit_findings.py`, the
   `f4wheel2` block).
+
+  **ONE LEG OF THAT SWEEP WAS FALSE AND IS WITHDRAWN (2026-08-08).** It
+  read: *"`reproduce.py`'s no-`import stelling` scan reads MORE line-starts
+  than Python's tokenizer does, which is the safe direction"*, i.e. that
+  Python's statement-separator set is a strict SUBSET of `splitlines()`'.
+  The two sets are not nested in either direction. Measured over the whole
+  code-point range — `compile("x=1" + c + "y=2")` against
+  `("a" + c + "b").splitlines()`, both read off this interpreter
+  (`tests/test_solver_audit_findings.py::…_the_two_line_end_sets_are_not_nested`):
+
+      splitlines() only : U+000B U+000C U+001C U+001D U+001E U+0085 U+2028 U+2029
+      compile() only    : U+0023 '#'   U+003B ';'
+      both              : U+000A U+000D
+
+  `;` is the one that bites, because it can carry a real statement:
+  `"x = 1; import stelling\ny = 2\n"` contains an `import stelling` that
+  `ast.parse` finds and the line-start scan does not. (`#` only comments
+  the rest of the line out, so it cannot introduce an import.) **NOT LIVE
+  today, and the reason is a different one than the withdrawn sentence
+  gave:** every piece of caller text reaching the emitted file goes through
+  `reproduce.one_line`, which maps every character below U+0020 to a space
+  and neutralises the triple quote, so nothing a caller writes can reach
+  statement position; the sidecar and payload are `json.dumps`ed inside a
+  raw triple-quoted string, which `json.dumps` cannot terminate. **Fixed
+  rather than argued, because the scan's whole charter is to survive a
+  future edit of `_TEMPLATE`** — it is called a *"structural refusal at the
+  point of emission, not a comment asking the next author to be careful"*,
+  and a refusal that a semicolon walks past is not that. The line-start
+  scan is kept (it cries wolf on an import inside a string, which is
+  cheap), and the emitter now ALSO walks the parse tree it was about to
+  compile anyway and refuses any `Import`/`ImportFrom` of `stelling` or a
+  `stelling.*` submodule, wherever on the line it sits.
+  **Cost, measured rather than asserted.** The added refusal never fires on
+  what the emitter emits: the reproducer for the same subject is
+  byte-identical at `bf905b9` and here apart from the two lines that record
+  the stelling sha, which is the provenance stamp doing its job. `reproduce`
+  is not on the verdict path at all (importing `verdict`, `solvers`,
+  `propagate`, `obligation`, `preconditions`, `harness` and `contracts`
+  leaves `stelling.reproduce` absent from `sys.modules`), and the corpus that
+  scores this per obligation agrees: `scratchpad/pin/corpus_pin.py`, 95 rows
+  across the mechanism × shape × order × mode × semantics × leg grid, **2090
+  per-obligation and verdict status keys compared, 0 moved, 0 non-status keys
+  differing — on jax 0.11.0 AND on jax 0.10.2.** The vacuous test that pinned
+  the withdrawn claim is replaced, not deleted: 10 parametrised ids retired,
+  18 added, and every new one was driven red on a mutant before it landed.
 - **2026-08-07 (pre-release): jax 0.10 was in `TESTED_JAX_SERIES` and did
   not work — verdicts move, in the UNKNOWN → VERIFIED direction, on 0.10
   only.** `jex_core.ClosedJaxpr is jex_core.Jaxpr` is `False` on 0.10.2 and
@@ -2610,8 +2778,11 @@ verdicts:
   — because the safe answer to "is this box inhabited" under NaN is *no
   member I can vouch for*, and because the next internal caller would
   otherwise meet the raise. It moves nothing: 0 of 648 obligation rows
-  across the two assume corpora and 0 of 2357+2 suite outcomes on either
-  jax series.
+  across the two assume corpora, and 0 suite outcomes on either jax series
+  — the whole suite at that pass, every test and both skips. **The
+  numerator is the claim; the denominator was a scale marker and has been
+  dropped**, because the suite has gained tests on most days since and a
+  frozen total in a dated entry reads as a statement about the tree now.
 
   **Retroactively invalid:** any REFUTED whose refuting obligation sat
   inside a `cond`/`switch` branch certified by a probe over a
@@ -2852,10 +3023,14 @@ verdicts:
   REFUTED 36 → 20, UNKNOWN 36 → 52: all 16 verdict moves are REFUTED →
   UNKNOWN and no query becomes VERIFIED.
 
-  **Both jax series.** 2357 passed / 2 skipped on jax 0.11.0 and on jax
-  0.10.2, `--collect-only` ids byte-identical between them (2359), and
-  the 168-run ledger is run-for-run identical on the two series (0
-  disagreements).
+  **Both jax series, measured at `c8d0304`** (the count is a record of
+  that commit, not of the tree now, and `--collect-only` at `c8d0304`
+  re-run today still gives 2359): 2357 passed / 2 skipped on jax 0.11.0
+  and on jax 0.10.2, `--collect-only` ids byte-identical between them
+  (2359), and the 168-run ledger is run-for-run identical on the two
+  series (0 disagreements). The claim that does not rot is the second
+  half — the two series agree with each other, and the ledger agrees
+  run-for-run — and that is what a reader should check on any commit.
 
   Constructions: `tests/test_exactness_lift.py` (the routing pin),
   `tests/test_assume_constrain.py`, `tests/test_vacuous_refutation.py`;
@@ -3278,10 +3453,13 @@ verdicts:
   sentence *"every definite violation is then withheld from REFUTED"* was
   made true again by naming the exception.
 
-  **Both jax series.** 2398 passed / 2 skipped on jax 0.11.0 and on jax
-  0.10.2 (140.30 s and 139.97 s, load 0.59 and 2.85), `--collect-only`
-  ids byte-identical between them (2400), `reuse lint` rc=0 with 317/317
-  files carrying copyright and license information. Baseline at `681c6ef`
+  **Both jax series, measured at `ef41164`** (a record of that commit;
+  `--collect-only` at `ef41164` re-run today still gives 2400): 2398
+  passed / 2 skipped on jax 0.11.0 and on jax 0.10.2 (140.30 s and
+  139.97 s, load 0.59 and 2.85), `--collect-only` ids byte-identical
+  between them (2400), `reuse lint` rc=0 — with 317/317 files carrying
+  copyright and license information **at that commit, a figure that moves
+  whenever anyone adds a file and is not the claim; `rc=0` is**. Baseline at `681c6ef`
   was 2369 / 2 on both: **31 tests added and 2 REMOVED, net +29** — which
   is the 2369 → 2398 delta, and the sentence that said "none removed" did
   not match its own arithmetic. The two removed are
@@ -3299,8 +3477,9 @@ verdicts:
   adds 5 tests and removes none — `--collect-only` id diff, `0ad22bb`
   (2400 ids) vs this branch (2405), 5 added and 0 removed, so the
   arithmetic and the sentence agree this time. 2403 passed / 2 skipped on
-  jax 0.11.0 and on jax 0.10.2, `--collect-only` ids byte-identical
-  between the two series, `reuse lint` rc=0. **No verdict moved, scored
+  jax 0.11.0 and on jax 0.10.2 **at `d58e57d`** (a record of that commit;
+  `--collect-only` there re-run today still gives 2405), `--collect-only`
+  ids byte-identical between the two series, `reuse lint` rc=0. **No verdict moved, scored
   PER OBLIGATION**: `scratchpad/pin/corpus_pin.py`, 95 rows × {real,
   ieee} × {constrain, inert} × {interval leg, affine refinement} plus
   `check()` at `refine=None` and `refine="affine"`, diffed key-for-key
