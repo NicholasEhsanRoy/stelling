@@ -11,17 +11,29 @@ block — and an annotation is only as good as the version that reads it. Thirty
 or so tracked files under `scratchpad/` carry no inline header at all and rest
 entirely on that block (counted below, so the number cannot be wrong here).
 
-WHAT THIS FILE IS AND IS NOT. It is a DRIFT DETECTOR, not a resolution: it
-cannot install `reuse 5.1.1`, cannot reach the network, and therefore cannot
-measure whether 5.1.1 and 6.2.0 read `REUSE.toml` the same way. That question
-is bounded, not closed, and the bound is written up at the `reuse` job in
-`.github/workflows/ci.yml` — the newest release documenting ANY change to
-`REUSE.toml` semantics is v5.0.0, below both pins. That reading was re-verified
-against the vendored 6.2.0 `CHANGELOG.md` (52 releases, v0.0.2 to v6.2.0, so
-the window is not truncated; grepping the 5.1.1→6.2.0 window for `REUSE.toml`,
-`annotation`, `precedence`, `glob` and `path` returns exactly one line, about
-the sort order of `reuse lint --lines`). It is a bound on what the changelog
-DOCUMENTS. **SUSPECTED, not measured.**
+WHAT THIS FILE IS AND IS NOT. It is a DRIFT DETECTOR, and that is all it was
+ever able to be — but the sentence that used to say so here overreached and is
+WITHDRAWN. It read: "it cannot install `reuse 5.1.1`, cannot reach the
+network, and therefore cannot measure whether 5.1.1 and 6.2.0 read
+`REUSE.toml` the same way. That question is bounded, not closed." The
+*therefore* was wrong. reuse 5.1.1 was on the box the whole time, in pip's own
+wheel cache; assembled from there offline, it lints THIS tree identically to
+the pinned 6.2.0 — rc=0 at 331/331 from both, rc=1 at 302/331 from both with
+the `scratchpad/**` annotation deleted (the positive control), and the same
+331 paths from `lint --json`. The question is CLOSED on this tree, by
+measurement, and the commands are at the `reuse` job in
+`.github/workflows/ci.yml`.
+
+None of which retires this file. A measurement is about the two versions it
+ran; a bump on either side makes it stale, and nothing but a test notices a
+bump. **What is still SUSPECTED, and it is now exactly one link:** that
+`fsfe/reuse-action@v5` carries exactly 5.1.1, which is read off the action's
+own pinning and needs `git ls-remote` to confirm. The changelog bound (newest
+release documenting ANY change to `REUSE.toml` semantics is v5.0.0, below both
+pins; 52 releases vendored, v0.0.2 to v6.2.0, so the window is not truncated;
+the 5.1.1→6.2.0 window yields exactly one hit, about the sort order of `reuse
+lint --lines` — which is also the ONLY difference the measurement found) is
+still recorded there and is no longer the only evidence.
 
 What this file adds is the thing the write-up asked for and did not have: a
 control that FAILS if either pin moves without the other being reconsidered. A

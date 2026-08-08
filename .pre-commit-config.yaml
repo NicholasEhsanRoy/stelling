@@ -38,26 +38,34 @@ repos:
       # covers, and drops nothing anywhere else: a header-less file under
       # `src/` or `tests/` still reddens this fixer, driven both ways. The CI
       # half of that sentence carries a version-skew hazard: CI lints with
-      # reuse 5.1.1 (`fsfe/reuse-action@v5`), this config pins 6.2.0, and only
-      # 6.2.0 is installable here. It is written up at the `reuse` job in
-      # ci.yml — where this comment used to say it already was, and it was not.
-      # The bound, read there from the vendored changelog: the newest release
-      # documenting any change to `REUSE.toml` semantics is v5.0.0, BELOW both
-      # pins. SUSPECTED, not measured; 5.1.1 cannot be installed offline. That
-      # reading was re-verified independently on 2026-08-08 against the same
-      # vendored file — 52 release headings, v0.0.2 to v6.2.0, so the window is
-      # not truncated, and the 5.1.1 → 6.2.0 window yields exactly one hit,
-      # about `reuse lint --lines` sort order. It still only bounds what the
-      # changelog DOCUMENTS.
+      # reuse 5.1.1 (`fsfe/reuse-action@v5`), this config pins 6.2.0. It is
+      # written up at the `reuse` job in ci.yml — where this comment used to
+      # say it already was, and it was not.
       #
-      # THE PINS THEMSELVES ARE NOW GUARDED. `tests/test_reuse_pins.py` records
-      # the pair (`fsfe/reuse-action@v5` in ci.yml, `rev: v6.2.0` below) and
-      # reddens if either moves alone, if either file stops naming both
-      # versions, or if the `scratchpad/**` annotation this exclusion depends
-      # on is removed — with a non-vacuity floor on the header-less file count,
-      # so it cannot pass by guarding nothing. That DETECTS drift; it does not
-      # close the skew, and the four steps at the `reuse` job in ci.yml are
-      # still what does.
+      # "ONLY 6.2.0 IS INSTALLABLE HERE" AND "5.1.1 CANNOT BE INSTALLED
+      # OFFLINE" ARE WITHDRAWN. Both were written here as fact and both were
+      # false: reuse 5.1.1 was already on this box, in pip's own wheel cache,
+      # before this branch's first commit. THE SKEW IS MEASURED CLOSED on this
+      # tree. 5.1.1 was assembled offline from that cache (plus `binaryornot`
+      # from pip's http cache; every other requirement came from the pinned
+      # 6.2.0 env) and run against this tree beside 6.2.0: both rc=0 at
+      # 331/331, both rc=1 at 302/331 with the `scratchpad/**` annotation
+      # deleted — the positive control, and it is the same 29 files either way.
+      # `lint --json` gives the same 331 PATHS, not just the same total. The
+      # commands, the cache paths, the control that proves 5.1.1's own code
+      # ran, and the limits of the measurement are all at the `reuse` job in
+      # ci.yml. The changelog bound is still recorded there and is no longer
+      # the only evidence. WHAT IS STILL SUSPECTED is one link and only one:
+      # that `fsfe/reuse-action@v5` carries exactly 5.1.1.
+      #
+      # THE PINS THEMSELVES ARE STILL GUARDED, because the measurement above is
+      # about these two versions and stops being evidence the moment either
+      # moves. `tests/test_reuse_pins.py` records the pair
+      # (`fsfe/reuse-action@v5` in ci.yml, `rev: v6.2.0` below) and reddens if
+      # either moves alone, if either file stops naming both versions in PROSE
+      # rather than only in the pin, or if the `scratchpad/**` annotation this
+      # exclusion depends on is removed — with a non-vacuity floor on the
+      # header-less file count, so it cannot pass by guarding nothing.
       - id: insert-license
         name: insert SPDX headers
         files: \.(py|pyi|sh|toml|ya?ml)$
