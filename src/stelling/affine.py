@@ -78,6 +78,7 @@ import math
 from dataclasses import dataclass
 from fractions import Fraction
 
+from stelling import exactness
 from stelling import interval as iv
 from stelling import ir
 from stelling.obligation import (
@@ -202,16 +203,51 @@ CONSTRAINED_AFFINE_DECLINE = (
 # called it "definitely false over the declared box". The refinement is a
 # refinement OF the interval judgment; it may not restore what that
 # judgment withheld on a soundness ground it cannot see.
-DROPPED_ASSUME_AFFINE_REFUSAL = (
-    "violation WITHHELD from REFUTED: the propagation DROPPED an assume, "
-    "so the declared boxes this refinement judges over are a superset of "
-    "the assumed region and a definite violation over them need not be a "
-    "violation anywhere the precondition holds (the assumed region may be "
-    "empty, making the claim vacuously true). A discharge over a superset "
-    "still implies a discharge over the intended set and is kept — the "
-    "same one-sided disposition the solver escalation applies under a "
-    "dropped assume"
-)
+#
+# WHICH DECISION THIS IS, and where it is made. Whether a set-level
+# refutation is certified on a run is ONE question with one answer, and
+# both legs that can mint one — the interval propagator and this
+# refinement — consult the same function for it:
+# `exactness.certifies_set_refutation`, over the run's WHOLE assume state.
+# This leg reads a whole-run quantity by ARCHITECTURE, being a post-pass
+# over a finished propagation: there is no "during the walk" here for it
+# to read from, so it could not be order-scoped if it tried. That is not a
+# reason to answer the question locally — it is the reason not to. An
+# agreement between two legs that holds for two different reasons breaks
+# silently the first time this refinement is restructured to run inline or
+# to interleave, and nothing in the tree would catch it. The shared point
+# is what would.
+def _uncertified_affine_refusal(propagation) -> str:
+    """The refusal sentence, with the mechanism named PER FLAG.
+
+    A run that dropped an assume and a run that narrowed an
+    over-approximated intermediate are withheld for the same reason and by
+    the same decision, but they are not the same mechanism, and the
+    sentence whose job is to explain the withholding may not quote the one
+    that did not fire.
+    """
+    causes = []
+    if propagation.narrowing_uncertified:
+        causes.append(
+            "a constraining assume narrowed an over-approximated "
+            "intermediate, so the region it narrowed to was never certified "
+            "inhabited"
+        )
+    if propagation.assume_dropped:
+        causes.append(
+            "the propagation DROPPED an assume, so the declared boxes this "
+            "refinement judges over are a superset of the assumed region"
+        )
+    return (
+        "violation WITHHELD from REFUTED: "
+        + "; and ".join(causes)
+        + " — a definite violation over them need not be a violation "
+        "anywhere the precondition holds (the assumed region may be empty, "
+        "making the claim vacuously true). A discharge over a superset "
+        "still implies a discharge over the intended set and is kept — the "
+        "same one-sided disposition the solver escalation applies under a "
+        "dropped assume"
+    )
 
 _FR0 = Fraction(0)
 
@@ -1058,10 +1094,18 @@ def refine_propagation(
             undecided.append(item.index)
             notes.append(f"assert #{item.index}: {decision.detail}")
         elif (
-            decision.status == "violated-over-set" and propagation.assume_dropped
+            decision.status == "violated-over-set"
+            # THE SHARED POINT. Not `propagation.assume_dropped` — that is
+            # half of the run's assume state, and this leg must consult the
+            # whole of it through the same function the interval leg
+            # consults, or the two legs agree only by coincidence.
+            and not exactness.certifies_set_refutation(
+                nonemptiness_certified=not propagation.narrowing_uncertified,
+                assume_dropped=propagation.assume_dropped,
+            )
         ):
-            # the one-sided dropped-assume refusal (see
-            # DROPPED_ASSUME_AFFINE_REFUSAL). Recorded as UNDECIDED rather
+            # the one-sided uncertified-precondition refusal (see
+            # _uncertified_affine_refusal). Recorded as UNDECIDED rather
             # than as a decline: the refinement RAN and separated the
             # obligation — what it could not establish is that the region
             # it separated over is the region the query is about. The
@@ -1069,7 +1113,8 @@ def refine_propagation(
             # which is where the withhold is already explained.
             undecided.append(item.index)
             notes.append(
-                f"assert #{item.index}: {DROPPED_ASSUME_AFFINE_REFUSAL}"
+                f"assert #{item.index}: "
+                f"{_uncertified_affine_refusal(propagation)}"
             )
         else:
             decisions[item.index] = (decision.status, decision.detail)

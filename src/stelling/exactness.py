@@ -21,9 +21,23 @@ is true over the whole true set a fortiori (audit F8).
 
 :class:`ExactSet` is the per-scope bookkeeping (the per-var exact set and
 its maintenance rules); :func:`certifies_nonemptiness` is the
-certification decision. Both are consumed by
+per-variable certification decision; :func:`certifies_set_refutation` is
+the RUN-level decision layered on it — *given this run's whole assume
+state, is a set-level refutation certified?* All three are consumed by
 :mod:`stelling.propagate`'s constraining-assume machinery and are
-importable by any future layer that must certify a region inhabited.
+importable by any future layer that must certify a region inhabited, or
+must decide whether a set-level refutation is owed.
+
+**Why the run-level decision lives here rather than in either judging
+leg.** Two legs can mint a set-level refutation — the interval
+propagator and the affine refinement — and they must not answer this
+question separately. The affine refinement is a post-pass over a
+finished propagation, so it reads a whole-run quantity by ARCHITECTURE,
+not by choice; the interval leg reads one because that is the rule. Two
+legs agreeing for two different reasons is an agreement that breaks
+silently the first time the refinement is restructured to run inline or
+to interleave, with nothing in the tree catching it. So the rule is
+stated ONCE, here, and both legs consult this function.
 
 Maintenance rules (the complete list — anything not named here is
 NON-exact by default, the conservative direction):
@@ -50,7 +64,7 @@ the interval representation.
 
 from __future__ import annotations
 
-__all__ = ["ExactSet", "certifies_nonemptiness"]
+__all__ = ["ExactSet", "certifies_nonemptiness", "certifies_set_refutation"]
 
 
 class ExactSet:
@@ -94,3 +108,45 @@ def certifies_nonemptiness(
     precondition's satisfiability as uncertified.
     """
     return definitely_true or var_id in exact
+
+
+def certifies_set_refutation(
+    *, nonemptiness_certified: bool, assume_dropped: bool
+) -> bool:
+    """Given a run's WHOLE assume state, is a set-level refutation
+    certified? The run-level layer over :func:`certifies_nonemptiness`.
+
+    ``nonemptiness_certified`` is the conjunction, over the whole run, of
+    every answer :func:`certifies_nonemptiness` gave where a constraining
+    assume narrowed: False once ANY narrowing was applied to a region
+    this module could not certify inhabited. ``assume_dropped`` says an
+    assume was not applied at all, so the judged set is a SUPERSET of the
+    assumed region and that region was never shown inhabited either.
+    They are separate arguments and not one merged "uncertified" bit
+    because the two name different mechanisms, and the sentence that
+    explains a withholding has to name the one that actually happened:
+    quoting the over-approximated-intermediate mechanism at a run whose
+    narrowing target was exact is a false statement of mechanism in the
+    one sentence whose job is to explain the withholding.
+
+    **The scope is the WHOLE QUERY, not the obligations traced after the
+    assume.** An assume is a precondition on the query. The refusal for a
+    *detectably* empty assumed region
+    (:class:`stelling.propagate.UnsatisfiableAssumptionError`) already
+    ends the run whole — obligations written ABOVE the assume included —
+    because if the assumed region is empty then *every* obligation is
+    vacuously true, not only the ones below the line. The possibly-empty
+    case is the same fact known less precisely, so it takes the same
+    scope. A run-level state and a run-level answer are what that scope
+    means in code: no argument here names an obligation, an equation or a
+    position, so no caller can accidentally make the answer depend on
+    where in the trace it was asked.
+
+    **One-sided, and this is load-bearing.** A False answer withholds
+    *violations only*. A discharge over a superset implies the discharge
+    over the intended set, so suppressing discharges costs real verdicts
+    for nothing — ``solvers.py`` tried the two-sided version on its own
+    leg and reverted it. Nothing here may be used to decline a run
+    wholly or to touch a ``discharged`` status.
+    """
+    return nonemptiness_certified and not assume_dropped
