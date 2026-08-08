@@ -457,10 +457,33 @@ def _force_included(root: pathlib.Path) -> dict[str, pathlib.Path]:
     """``{distribution-relative path: the file on disk it is taken from}``.
 
     A model of ``SdistBuilder.get_default_build_data()``. It is a model, so it
-    is not trusted: ``test_the_untracked_scan_agrees_with_the_tarball`` asserts
-    that every tarball member has a counterpart in the tree, which catches a
-    force-included file whether or not this function predicted it. The two are
-    deliberately independent — blind either one and the other still reddens.
+    is not trusted where it can be checked: ``test_the_untracked_scan_agrees_
+    with_the_tarball`` asserts that every tarball member was admitted by
+    something, which catches a force-included file whether or not this function
+    predicted it.
+
+    **THE TWO ARE NOT INDEPENDENT, AND THIS DOCSTRING USED TO SAY THEY WERE**
+    — "blind either one and the other still reddens". Measured under the
+    DEFAULT ``tmp_path``, in a standalone repo from this tree with an ancestor
+    ``.hgignore`` planted and shipping::
+
+        _force_included -> {}                                12 passed
+        _forced_without_a_reviewed_source -> []               12 passed
+        `.hgignore` dropped from _HATCH_VCS_EXCLUSION_FILES   12 passed
+
+    against ``1 failed`` unblinded. The reason is structural, not incidental:
+    the parity test builds from a copy under ``tmp_path``, so the staged tree
+    never shares this checkout's ANCESTRY. Parity independently covers
+    force-include routes that are a property of the tree's CONTENT; it cannot
+    cover one that is a property of the tree's LOCATION, and every route
+    :func:`_locate_file` opens is the second kind. (An earlier blinding matrix
+    got "independent" by putting ``--basetemp`` inside the plant directory,
+    which makes the staged copy inherit the planted ancestor — an artefact of
+    the harness, not a property of the guard.)
+
+    So this function is load-bearing on its own, and
+    ``test_no_force_included_path_escapes_review`` asserts it is non-empty
+    rather than trusting a green to mean it looked.
 
     NOT modelled, and unmodellable from here: a `hatch_build.py` build hook may
     add arbitrary entries to ``build_data["force_include"]`` at build time.
@@ -498,7 +521,7 @@ def _force_included(root: pathlib.Path) -> dict[str, pathlib.Path]:
 
 
 def _forced_without_a_reviewed_source(
-    root: pathlib.Path, tracked: set[str]
+    root: pathlib.Path, tracked: set[str] | None
 ) -> list[str]:
     """Force-included paths whose content is not a committed file of this tree.
 
@@ -506,6 +529,14 @@ def _forced_without_a_reviewed_source(
     this module: the source lies OUTSIDE ``root``, so there is nothing in the
     tree to review and nothing the allowlist can exclude. The second is a
     source inside the tree that nobody has committed.
+
+    ``tracked=None`` means THE INDEX COULD NOT BE READ HERE — no `git`, or no
+    `.git` at the build root. Only the first shape can be judged then, and it
+    still is, because that is precisely the configuration the first shape
+    appears in: an unpacked sdist or a `.git`-stripped container copy has no
+    `.git` boundary, so ``_locate_file(root, ".hgignore", ".hg")`` and
+    ``_locate_file(root, ".gitignore", ".git")`` both walk out of the tree.
+    "The index is unreadable" must not read as "nothing is force-included".
     """
     out = []
     resolved_root = root.resolve()
@@ -515,9 +546,19 @@ def _forced_without_a_reviewed_source(
         except ValueError:
             out.append(f"{dist_path}  <- {source}  (OUTSIDE the tree)")
             continue
-        if inside.as_posix() not in tracked:
+        if tracked is not None and inside.as_posix() not in tracked:
             out.append(f"{dist_path}  <- {source}  (inside the tree, untracked)")
     return out
+
+
+def _index_is_readable(root: pathlib.Path) -> bool:
+    """Whether ``git ls-files`` can answer for `root` at all.
+
+    A worktree's `.git` is a FILE, hence ``exists()``. This is the same
+    predicate ``test_no_untracked_file_anywhere_would_ship`` skips on, asked
+    here so that the force-include check can DEGRADE instead of skipping.
+    """
+    return shutil.which("git") is not None and (root / ".git").exists()
 
 
 def _git(args: list[str], cwd: pathlib.Path, *, ok: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess:
@@ -910,16 +951,72 @@ def test_no_untracked_file_anywhere_would_ship(tmp_path: pathlib.Path) -> None:
         "Commit the file, add it to the ROOT `.gitignore`, or take its directory "
         "out of the sdist allowlist."
     )
-    # THE SECOND ROUTE INTO THE TARBALL, which nothing above can see: a
-    # force-included path never meets `include_path()` at all, so neither the
-    # allowlist nor the exclusion spec is consulted for it — and one of them,
-    # `.hgignore`, is looked for with a boundary that does not exist in a git
-    # checkout and is therefore taken from an ANCESTOR of the repository.
-    forced = _forced_without_a_reviewed_source(REPO, _tracked_files(REPO))
-    assert not forced, (
+    # THE SECOND ROUTE INTO THE TARBALL is not checked here any more, and the
+    # move is the point: see `test_no_force_included_path_escapes_review`. It
+    # used to live under this function's `.git` skip, which is the one
+    # configuration where that route opens.
+
+
+def test_no_force_included_path_escapes_review() -> None:
+    """The second route into the tarball, and IT RUNS WHERE THE ROUTE OPENS.
+
+    A force-included path never meets ``include_path()``, so neither the
+    allowlist nor the exclusion spec is consulted for it. One of the two VCS
+    files, ``.hgignore``, is located with a boundary (``.hg``) that a git
+    checkout does not have, so it is found by walking UP to ``/``; and with no
+    ``.git`` at the build root the SAME thing happens to ``.gitignore``.
+
+    **This check used to sit inside**
+    ``test_no_untracked_file_anywhere_would_ship``, **which skips on**
+    ``not (REPO / ".git").exists()`` — the exact configuration this module's
+    own docstring names as the trigger ("an unpacked sdist, a `.git`-stripped
+    container copy"). Driven, in standalone repos built by `git archive` from
+    this tree, one ancestor level up::
+
+        cp -a ok/repo s26/repo && rm -rf s26/repo/.git
+        printf 'syntax: glob\\nzz_never\\n' > s26/.hgignore
+
+        BEFORE, at a4c16fe   pytest tests/test_sdist_contents.py
+                               11 passed, 1 skipped
+                             uv build --offline --sdist .
+                               262 members (baseline 261)
+                               stelling-0.1.0/.hgignore   SHIPPED
+        AFTER                  11 passed, 1 skipped, 1 FAILED (this test)
+
+    Controls, same command, same tree: without the planted `.hgignore` the
+    build is 261 members and this test is green; with the plant AND a `.git`
+    present it was already red before the move, and still is.
+
+    It needs no git. ``_tracked_files`` does, and only for the SECOND of the
+    two shapes :func:`_forced_without_a_reviewed_source` reports; with no
+    readable index the check degrades to "every force-included source outside
+    the tree is a red" rather than to silence.
+
+    **And the non-vacuity assertion is not decoration.** Blinding
+    :func:`_force_included` to ``{}`` was measured to leave the whole module at
+    ``12 passed`` with an ancestor `.hgignore` shipping — the parity test does
+    not cover it, because parity builds under `tmp_path` and a staged copy
+    never inherits the real tree's ANCESTORS. Parity catches force-include
+    routes that are a property of the tree's CONTENT; it cannot catch one that
+    is a property of the tree's LOCATION. So zero force-included paths is a red
+    here, not a green.
+    """
+    forced = _force_included(REPO)
+    assert forced, (
+        "this tree has NO force-included paths at all, which cannot be true — "
+        "`pyproject.toml` is one unconditionally "
+        f"(hatchling {_HATCHLING_READ_AT}, `builders/sdist.py` "
+        "`get_default_build_data`). The model has stopped modelling, and its "
+        "silence below is silence about nothing."
+    )
+    readable = _index_is_readable(REPO)
+    problems = _forced_without_a_reviewed_source(
+        REPO, _tracked_files(REPO) if readable else None
+    )
+    assert not problems, (
         "these paths would be FORCE-INCLUDED in the sdist and are not committed "
         "files of this tree:\n  "
-        + "\n  ".join(forced)
+        + "\n  ".join(problems)
         + "\n\n`force_include` bypasses the allowlist and the exclusion spec "
         f"entirely (hatchling {_HATCHLING_READ_AT}, "
         "`builders/sdist.py` `get_default_build_data`), so nothing in "
@@ -927,6 +1024,12 @@ def test_no_untracked_file_anywhere_would_ship(tmp_path: pathlib.Path) -> None:
         "source is OUTSIDE the tree it is somebody else's file being published "
         "under this project's name: remove it, or build from a root that does "
         "not have it above."
+        + (
+            ""
+            if readable
+            else "\n\n(No readable index here, so only the outside-the-tree "
+            "shape was judged.)"
+        )
     )
 
 
@@ -1440,6 +1543,61 @@ def test_the_scan_refuses_a_blinded_walk(tmp_path: pathlib.Path) -> None:
     # that gets switched off.
     pruned = _repo("pruned", "docs/.hatch/note.md", delete=False)
     assert _untracked_that_would_ship(pruned, {"docs"}, tmp_path / "oracle-pruned") == []
+
+
+def test_the_force_include_review_sees_an_outside_source(
+    tmp_path: pathlib.Path,
+) -> None:
+    """:func:`_forced_without_a_reviewed_source` must find the shape it exists
+    for, on a root that HAS one.
+
+    ``test_no_force_included_path_escapes_review`` asserts an absence in this
+    checkout, and an absence is worth nothing unless the instrument can produce
+    a presence. Blinded three ways at a4c16fe under the DEFAULT ``tmp_path``,
+    with a real ancestor `.hgignore` shipping, the module stayed at
+    ``12 passed`` — ``_force_included -> {}``,
+    ``_forced_without_a_reviewed_source -> []``, and `.hgignore` dropped from
+    :data:`_HATCH_VCS_EXCLUSION_FILES`. The first is pinned by that test's
+    non-vacuity assertion; the other two are pinned here.
+
+    No git and no build: the whole point is that this route is open in a tree
+    that has neither. The NEGATIVE half is the same root with the plant
+    removed — a guard that reports an outside source when there is none would
+    be red on every machine.
+    """
+    root = tmp_path / "outside-source" / "repo"
+    root.mkdir(parents=True)
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "zz-probe"\nversion = "0"\n', encoding="utf-8"
+    )
+    planted = root.parent / ".hgignore"
+    planted.write_text("syntax: glob\nzz_never\n", encoding="utf-8")
+
+    # `.hgignore`'s boundary is `.hg`, which this root does not have, so
+    # `locate_file` walks out of the tree and hatchling force-includes the
+    # ancestor's file at the ROOT of the distribution, keyed by basename.
+    assert _force_included(root).get(".hgignore") == planted, (
+        "the force-include model did not locate an ancestor `.hgignore` at all, "
+        f"so nothing below is being measured: {sorted(_force_included(root))}"
+    )
+    named = [e for e in _forced_without_a_reviewed_source(root, None) if ".hgignore" in e]
+    assert len(named) == 1 and "OUTSIDE the tree" in named[0], (
+        "an ancestor's `.hgignore` is force-included into the sdist under this "
+        "project's name and the review did not report it as an outside source: "
+        f"{named}"
+    )
+    # ... and it is reported the same way when the index IS readable, because
+    # the degradation must not be what is doing the work.
+    assert named == [
+        e for e in _forced_without_a_reviewed_source(root, set()) if ".hgignore" in e
+    ]
+
+    # NEGATIVE: no plant, no report. This is the state of every ordinary
+    # checkout, and a guard that fires here gets switched off.
+    planted.unlink()
+    assert not [
+        e for e in _forced_without_a_reviewed_source(root, None) if ".hgignore" in e
+    ], "the review reported an ancestor `.hgignore` that no longer exists"
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
