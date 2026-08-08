@@ -50,10 +50,14 @@ from stelling.harness import (  # noqa: E402
 from stelling.preconditions import check  # noqa: E402
 from stelling.propagate import (  # noqa: E402
     UNCERTIFIED_REACHABILITY_REFUSAL,
+    _FLOAT_FORMATS,
     _INT_DTYPE_BOUNDS,
     _is_integer_dtype,
+    _member_bounds,
     _PROBE_COUNT,
+    _PROBE_LADDER,
     _probe_point,
+    _round_in_format,
     propagate,
 )
 
@@ -215,6 +219,183 @@ def test_the_pin_stays_inside_the_dtypes_own_range():
     assert "violated-over-set" in statuses(reachable)
 
 
+# --- F1b: the FLOAT half of "a witness must be a member" --------------------
+#
+# Every construction below is the float face of one already tested above for
+# integers. Each pairs an UNREACHABLE guard (false at every value of the
+# declared dtype in the box) with a REACHABLE neighbour that must keep
+# refuting — a checker that simply stopped certifying float declarations
+# passes the first half of each and fails the second.
+
+
+def _f32(v):
+    return float(jnp.asarray(v, "float32"))
+
+
+def test_a_float_declaration_is_never_pinned_outside_its_dtypes_range():
+    """PINS: the float half of the dtype-range clamp.
+
+    `float32 (-1e308, 1e308)` declares `[-3.4e38, 3.4e38]` — the
+    `float32` values of that interval — not the binary64 range. A probe
+    at `-1e308` is not a `float32` at all, and on `62e4190` it certified
+    a branch no execution takes. The guard is read through a widening
+    cast because a narrow-float LITERAL has no zero-dep decoder, so the
+    comparison would go ⊤ before any of this is exercised.
+    """
+    f32max = float(jnp.finfo("float32").max)
+
+    def unreachable():
+        w = any_array((), "float32", (-1e308, 1e308))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            w.astype(jnp.float64) < -f32max,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    def reachable():
+        # true at the member -3.4e38: the neighbour that must not move
+        w = any_array((), "float32", (-1e308, 1e308))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            w.astype(jnp.float64) < -1e30,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    assert sorted(statuses(unreachable)) == ["discharged", "unknown"]
+    assert check(unreachable, vacuity_mode="all").status == "UNKNOWN"
+    assert "violated-over-set" in statuses(reachable)
+    assert check(reachable, vacuity_mode="all").status == "REFUTED"
+
+
+def test_a_box_whose_interior_holds_no_float32_certifies_nothing():
+    """PINS: the float ENDPOINT rounding (the sub-ulp box).
+
+    `float32 (v0, (v0 + nextafter(v0))/2)` declares the single value
+    `{v0}` — no `float32` lies strictly inside it — so `w > v0` is false
+    at every member. The interval's own midpoint is a member of nothing.
+    """
+    v0 = _f32(0.1)
+    v1 = float(jnp.nextafter(jnp.asarray(v0, "float32"), jnp.asarray(math.inf, "float32")))
+    mid = (v0 + v1) / 2.0
+
+    def unreachable():
+        w = any_array((), "float32", (v0, mid))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            w.astype(jnp.float64) > v0,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    def reachable():
+        # `>= v0` IS true at the one member: unmoved
+        w = any_array((), "float32", (v0, mid))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            w.astype(jnp.float64) >= v0,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    assert sorted(statuses(unreachable)) == ["discharged", "unknown"]
+    assert "violated-over-set" in statuses(reachable)
+
+
+def test_the_float_half_of_the_dtype_overflowing_box():
+    """The float face of `int8 (-1e9, 1e9)`, which the integer half
+    already closes: `float32 (-1e308, 1e308)` cast up to `float64` still
+    cannot exceed `3.4e38`, so `> 1e39` is false at every member. Both
+    faces of one defect; only one of them was shut."""
+
+    def unreachable():
+        w = any_array((), "float32", (-1e308, 1e308))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            w.astype(jnp.float64) > 1e39,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    def reachable():
+        w = any_array((), "float32", (-1e308, 1e308))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            w.astype(jnp.float64) > 1e30,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    assert sorted(statuses(unreachable)) == ["discharged", "unknown"]
+    assert "violated-over-set" in statuses(reachable)
+
+
+def test_a_float16_box_is_pinned_onto_float16s_own_grid():
+    """PINS: the fix is per-FORMAT, not float32-shaped.
+
+    `float16 (0.1, 0.2)` declares `[0.10003662109375, 0.199951171875]`:
+    neither endpoint is a `float16`, and `0.1` itself is not a member.
+    """
+    lo_m = 0.10003662109375  # the smallest float16 at or above 0.1
+    assert float(jnp.asarray(lo_m, "float16")) == lo_m
+
+    def unreachable():
+        w = any_array((), "float16", (0.1, 0.2))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            w.astype(jnp.float64) < lo_m,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    def reachable():
+        w = any_array((), "float16", (0.1, 0.2))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            w.astype(jnp.float64) <= lo_m,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    assert sorted(statuses(unreachable)) == ["discharged", "unknown"]
+    assert "violated-over-set" in statuses(reachable)
+
+
+@pytest.mark.parametrize("dtype", ["int2", "uint2", "float8_e4m3fn", "complex64"])
+def test_a_dtype_neither_table_names_yields_no_probe(dtype):
+    """PINS: the DEFAULT-DENY in :func:`_member_bounds`.
+
+    `any_array` accepts all four of these on jax 0.11.0 and 0.10.2, and
+    neither ``_INT_DTYPE_BOUNDS`` nor ``_FLOAT_FORMATS`` names any of
+    them. "Skip the clamp" returns the raw interval and hands back a
+    witness that is not a member — `int2 (-1e9, 1e9)` was pinned to
+    `±1e9`, which is not an `int2`. No grid, no member, no witness.
+    """
+    # the declaration really is accepted — this is not a hypothetical dtype
+    def h():
+        w = any_array((), dtype, (-1.0, 1.0))
+        return assert_(w == w)
+
+    assert any(
+        e.primitive == "stelling_any" and e.params_dict()["dtype"] == dtype
+        for e in trace(h).jaxpr.eqns
+    )
+    assert _member_bounds(-1e9, 1e9, dtype) == (None, None)
+    assert all(
+        _probe_point(k, (2,), -1e9, 1e9, dtype, 0) is None
+        for k in range(_PROBE_COUNT)
+    )
+
+
 _SWEEP_BOUNDS = [
     (0.2, 2.8),
     (-2.8, -0.2),
@@ -239,34 +420,77 @@ for _ in range(200):
     _SWEEP_BOUNDS.append((_a, _b))
 
 
+def _is_a_value_of(v, dtype):
+    """Is the binary64 ``v`` a VALUE of ``dtype``? Asked of JAX's own
+    cast, never of stelling: the round trip is the identity exactly on
+    the dtype's grid, and a ``v`` outside its range casts to ``inf`` and
+    fails. That makes this oracle independent of the rounding under
+    test — it shares no code with it."""
+    if _is_integer_dtype(dtype):
+        d_lo, d_hi = _INT_DTYPE_BOUNDS[dtype]
+        return v == math.floor(v) and d_lo <= v <= d_hi
+    return float(jnp.asarray(v, dtype)) == v
+
+
+def _float_member_span(lo, hi, dtype):
+    """(smallest, largest) VALUE of ``dtype`` inside ``[lo, hi]``, or
+    ``(None, None)`` — by casting and stepping in the dtype's own grid
+    with :func:`jnp.nextafter`, which is a different algorithm from the
+    significand arithmetic the implementation uses."""
+    big = float(jnp.finfo(dtype).max)
+    if lo > big or hi < -big:
+        return None, None
+    a = -big if lo <= -big else float(jnp.asarray(lo, dtype))
+    b = big if hi >= big else float(jnp.asarray(hi, dtype))
+    inf = jnp.asarray(math.inf, dtype)
+    if a < lo:
+        a = float(jnp.nextafter(jnp.asarray(a, dtype), inf))
+    if b > hi:
+        b = float(jnp.nextafter(jnp.asarray(b, dtype), -inf))
+    if not (math.isfinite(a) and math.isfinite(b)) or a > b or a < lo or b > hi:
+        return None, None
+    return a, b
+
+
 def _declares_a_member(lo, hi, dtype):
-    """Does `[lo, hi]` under `dtype` declare a non-empty set? The
-    SPECIFICATION, in exact integer arithmetic: the values of an integer
-    dtype are the integers of its range, and the values of a float dtype
-    are dense enough that any non-empty interval holds one."""
-    if not _is_integer_dtype(dtype):
-        return lo <= hi
-    d_lo, d_hi = _INT_DTYPE_BOUNDS[dtype]
-    lo_i = d_lo if lo == -math.inf else math.ceil(lo)
-    hi_i = d_hi if hi == math.inf else math.floor(hi)
-    return max(lo_i, d_lo) <= min(hi_i, d_hi)
+    """Does `[lo, hi]` under `dtype` declare a non-empty set?
+
+    The values of an integer dtype are the integers of its range —
+    computed here in EXACT integer arithmetic, so that half of the sweep
+    is independent of the float reasoning the implementation does. The
+    values of a FLOAT dtype are its own grid, which is NOT "any non-empty
+    interval holds one": `float32 (1e300, 1e308)` holds none, and
+    `float32 (v, (v + nextafter(v))/2)` holds exactly one. Reading
+    `lo <= hi` as "inhabited" is the same error the implementation used
+    to make, and while this oracle said it, this test could not fail.
+    """
+    if _is_integer_dtype(dtype):
+        d_lo, d_hi = _INT_DTYPE_BOUNDS[dtype]
+        lo_i = d_lo if lo == -math.inf else math.ceil(lo)
+        hi_i = d_hi if hi == math.inf else math.floor(hi)
+        return max(lo_i, d_lo) <= min(hi_i, d_hi)
+    return _float_member_span(lo, hi, dtype)[0] is not None
 
 
-@pytest.mark.parametrize("dtype", sorted(_INT_DTYPE_BOUNDS) + ["float32", "float64"])
+@pytest.mark.parametrize(
+    "dtype", sorted(_INT_DTYPE_BOUNDS) + sorted(_FLOAT_FORMATS)
+)
 def test_every_probe_point_it_can_form_is_a_member(dtype):
     """Over every dtype, 215 bound pairs and every probe index: the point
-    is inside the box, integral when the dtype is, and inside the dtype's
-    own range. Ranges wider than the defect — it includes the float
-    dtypes and the infinite-endpoint ladder, neither of which the reported
-    construction touches."""
+    is inside the box AND is a VALUE of the dtype.
+
+    The membership check is the whole test, and it is asked of every
+    dtype. It used to sit inside `if _is_integer_dtype(dtype)`, so for
+    the float parameters the test asserted only `lo <= v <= hi` — the
+    name outran the assertion, and 6716 of the 6880 `float32` points this
+    sweep forms were not `float32` values while it was green.
+    """
     formed = 0
     inhabited = 0
     for lo, hi in _SWEEP_BOUNDS:
         pts = [_probe_point(k, (2,), lo, hi, dtype, 0) for k in range(_PROBE_COUNT)]
         if not _declares_a_member(lo, hi, dtype):
-            # no member, no witness — checked in EXACT integer arithmetic,
-            # so this half of the sweep is independent of the float
-            # reasoning the implementation does
+            # no member, no witness
             assert all(p is None for p in pts), (dtype, lo, hi)
             continue
         inhabited += 1
@@ -277,10 +501,7 @@ def test_every_probe_point_it_can_form_is_a_member(dtype):
             for v in vals:
                 assert math.isfinite(v), (dtype, lo, hi, k, v)
                 assert lo <= v <= hi, (dtype, lo, hi, k, v)
-                if _is_integer_dtype(dtype):
-                    assert v == math.floor(v), (dtype, lo, hi, k, v)
-                    d_lo, d_hi = _INT_DTYPE_BOUNDS[dtype]
-                    assert d_lo <= v <= d_hi, (dtype, lo, hi, k, v)
+                assert _is_a_value_of(v, dtype), (dtype, lo, hi, k, v)
     # not vacuous: an implementation that formed nothing would satisfy
     # every assertion above
     assert inhabited > 0 and formed >= _PROBE_COUNT * inhabited, (
@@ -288,6 +509,52 @@ def test_every_probe_point_it_can_form_is_a_member(dtype):
         inhabited,
         formed,
     )
+
+
+@pytest.mark.parametrize("dtype", sorted(_FLOAT_FORMATS))
+def test_the_member_bounds_of_a_float_box_are_the_dtypes_own_neighbours(dtype):
+    """PINS: the DIRECTION of the endpoint rounding.
+
+    Rounding a float endpoint to the nearest value of the format is the
+    obvious implementation and it is wrong in one direction out of two:
+    nearest can land OUTSIDE the declared interval. Checked against
+    jax's own cast-and-step, over the whole sweep.
+    """
+    checked = 0
+    for lo, hi in _SWEEP_BOUNDS:
+        want = _float_member_span(lo, hi, dtype)
+        got = _member_bounds(lo, hi, dtype)
+        assert got == want, (dtype, lo, hi, got, want)
+        checked += 1
+    assert checked == len(_SWEEP_BOUNDS)
+
+
+@pytest.mark.parametrize("dtype", sorted(_FLOAT_FORMATS))
+def test_directed_format_rounding_never_crosses_the_value_it_rounds(dtype):
+    """PINS: :func:`_round_in_format` — the exactness the clamp rests on.
+
+    Up never lands below, down never lands above, both land ON the
+    format's grid, and rounding a value the format already holds is the
+    identity. `float64` in particular must be the identity everywhere,
+    or this repair would move the one float dtype that was already
+    right.
+    """
+    fmt = _FLOAT_FORMATS[dtype]
+    vals = [0.0, 1.0, -1.0, 0.1, -0.1, 65504.0, 65505.0, 1e-9, 5e-324, 1e308,
+            -1e308, 3.4028234663852886e38, 2.2250738585072014e-308]
+    rng = random.Random(20260808)
+    vals += [rng.uniform(-1e6, 1e6) for _ in range(500)]
+    vals += [rng.gauss(0.0, 1.0) for _ in range(500)]
+    big = float(jnp.finfo(dtype).max)
+    for v in vals:
+        up = _round_in_format(v, fmt, +1)
+        dn = _round_in_format(v, fmt, -1)
+        assert up >= v and dn <= v, (dtype, v, up, dn)
+        for r in (up, dn):
+            if math.isfinite(r):
+                assert abs(r) <= big and _is_a_value_of(r, dtype), (dtype, v, r)
+        if math.isfinite(v) and abs(v) <= big and _is_a_value_of(v, dtype):
+            assert up == v and dn == v, (dtype, v, up, dn)
 
 
 def test_a_box_with_no_member_yields_no_probe():
@@ -412,13 +679,66 @@ def test_a_witness_that_needs_a_probe_beyond_the_three_anchors():
 
     `x[1] - x[0] > 1.0` is false at all three anchors — every element at
     `lo`, at `hi`, at the middle all give `0` — and true at the mixed
-    point probe 4 pins (`x[0] = -0.82`, `x[1] = 0.69`, difference
-    `1.51`). So the grid must run past the anchors, and past probe 3
-    (difference `0.49`), for this genuinely-reachable branch to refute.
+    point probe 4 pins (`x[0] = -0.8197`, `x[1] = 0.6901`, difference
+    `1.5098`). So the grid must run past the anchors, and past probe 3
+    (difference `-0.4902`, measured; the sign was wrong here, and a
+    negative difference is even further from satisfying `> 1.0` than the
+    `0.49` this used to claim), for this genuinely-reachable branch to
+    refute.
     """
     h = _cond(lambda x: x[1] - x[0] > 1.0)
     assert "violated-over-set" in statuses(h)
     assert check(h, vacuity_mode="all").status == "REFUTED"
+    # the docstring's arithmetic, measured rather than asserted by hand
+    p3 = _probe_point(3, (3,), -1.0, 1.0, "float64", 0)
+    p4 = _probe_point(4, (3,), -1.0, 1.0, "float64", 0)
+    assert round(p3[1] - p3[0], 4) == -0.4902
+    assert round(p4[1] - p4[0], 4) == 1.5098
+
+
+def test_a_witness_that_needs_a_ladder_rung_past_the_first():
+    """PINS: :data:`_PROBE_LADDER` — by a REQUIREMENT, not by its values.
+
+    A declaration with an infinite endpoint has no fractions, so its
+    probes walk a ladder of finite magnitudes instead. `w > 500.0` over
+    `float64 (-inf, inf)` is false at the ladder's first rung (`0.0`)
+    and true at a later one, so a ladder collapsed to its first rung
+    certifies nothing and this genuinely-reachable branch stops
+    refuting. Measured: with `_PROBE_LADDER = (0.0,)` the whole rest of
+    the suite stays green and this obligation goes UNKNOWN.
+
+    Pinned as "some rung past the first is needed", never as the current
+    tuple: shortening or reordering the ladder is free as long as the
+    search keeps this much reach.
+    """
+    assert len(_PROBE_LADDER) > 1 and _PROBE_LADDER[0] == 0.0
+
+    def reachable():
+        w = any_array((), "float64", (-math.inf, math.inf))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            w > 500.0,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    def rung_zero_is_enough():
+        # the control: `w > -0.5` is true at the FIRST rung, so it would
+        # keep refuting under a collapsed ladder. A test that only had
+        # this one would measure nothing about the ladder's length.
+        w = any_array((), "float64", (-math.inf, math.inf))
+        x = any_array((3,), "float64", (-1.0, 1.0))
+        return jax.lax.cond(
+            w > -0.5,
+            lambda v: assert_(v > 5.0),
+            lambda v: assert_(v > -9.0),
+            x,
+        )
+
+    assert "violated-over-set" in statuses(reachable)
+    assert check(reachable, vacuity_mode="all").status == "REFUTED"
+    assert "violated-over-set" in statuses(rung_zero_is_enough)
 
 
 def test_the_certificate_is_withheld_while_a_precondition_narrows():
