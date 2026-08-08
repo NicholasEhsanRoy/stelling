@@ -7,9 +7,17 @@ The sdist is the one artefact where a mistake is immutable: it cannot be
 unpublished from PyPI. Hatchling's *default* sdist takes everything not
 gitignored — tracked or not — which is fail-OPEN, and it shipped an internal
 file that was protected only by being uncommitted. `.git/info/exclude` does not
-protect against it either; hatchling reads `.gitignore` files and nothing else.
+protect against it either; hatchling reads ONE `.gitignore` — the one found by
+walking up from the build root to the `.git` boundary — and no other exclusion
+source. Not the user's `core.excludesFile`, not `.git/info/exclude`, and not a
+`.gitignore` in any subdirectory.
 
-Two tests, in the order they matter:
+`git status` reads all four. **Every source in that difference is a file the
+guard below cannot see and the tarball can**, which is what
+``test_the_untracked_scan_agrees_with_the_tarball`` now measures rather than
+narrates.
+
+Three tests, in the order they matter:
 
 1. ``test_an_arbitrary_new_file_does_not_ship`` — the real property, by
    INTERVENTION. Drop a file the allowlist has never heard of, build, and
@@ -21,6 +29,10 @@ Two tests, in the order they matter:
    either allowlisted or listed here as deliberately withheld. It cannot be
    neither. This one needs no build backend, so it runs everywhere and fails
    closed when someone adds a file and does not think about distribution.
+
+3. ``test_the_untracked_scan_agrees_with_the_tarball`` — the SUBDIRECTORY half,
+   which is where the root allowlist stops reaching, held against the built
+   artefact and not against anybody's reading of hatchling.
 
 **The intervention is performed on a COPY of the tree, and it did not used to
 be.** ``test_an_arbitrary_new_file_does_not_ship`` wrote
@@ -56,6 +68,7 @@ believed.
 from __future__ import annotations
 
 import email
+import os
 import pathlib
 import re
 import shutil
@@ -124,8 +137,10 @@ WITHHELD = {
         "`test_no_untracked_file_anywhere_would_ship` skips on "
         "`path.split('/', 1)[0] in WITHHELD`, so this entry exempts the whole "
         "`scratchpad/` SUBTREE from the untracked-file check, not just the "
-        "directory. Harmless while nothing inside it would ship, and stated "
-        "because 'harmless today' is a reason to write it down"
+        "directory. That exemption used to be 'harmless while nothing inside "
+        "it would ship', which is a hope; it is now an assertion — the check "
+        "computes what hatchling would ship BEFORE consulting this dict and "
+        "reddens if any WITHHELD prefix ever masks a shipping path"
     ),
 }
 
@@ -243,8 +258,207 @@ def test_built_metadata_carries_no_relative_reference(tmp_path: pathlib.Path) ->
     assert not bad, "the published long description carries relative refs:\n  " + "\n  ".join(bad)
 
 
+# --- what hatchling ACTUALLY reads ----------------------------------------
+#
+# Transcribed from `hatchling/builders/constants.py` and
+# `hatchling/builders/config.py` at **1.31.0**, which is what `uv build`
+# resolves here; `pyproject.toml` requires `hatchling>=1.27`. A transcription
+# rots, so it is not trusted: `test_the_untracked_scan_agrees_with_the_tarball`
+# holds every line of it against a real build, and a drift in any of the three
+# constants below shows up there as a set difference and not as a silent pass.
+_HATCHLING_READ_AT = "1.31.0"
+
+# `EXCLUDED_DIRECTORIES` — pruned by NAME during the walk, at any depth,
+# whatever the patterns say.
+_HATCH_EXCLUDED_DIRECTORIES = frozenset((
+    "__pycache__",
+    ".venv",
+    ".git",
+    ".hg",
+    ".hatch",
+    ".tox",
+    ".nox",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".pixi",
+))
+# `EXCLUDED_FILES` — dropped by basename. `.git` is here as well as above
+# because a linked worktree's `.git` is a FILE.
+_HATCH_EXCLUDED_FILES = frozenset((".DS_Store", ".git"))
+# `default_global_exclude()` — prepended to the exclusion patterns, in this
+# order (it is `sorted()` upstream), BEFORE the `.gitignore` lines. The order
+# is load-bearing: `pathspec.GitIgnoreSpec` is last-match-wins, so a `!`
+# negation in `.gitignore` can un-exclude a `.pyc`.
+_HATCH_DEFAULT_GLOBAL_EXCLUDE = ("*.py[cdo]", "/dist")
+
+
+def _git(args: list[str], cwd: pathlib.Path, *, ok: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess:
+    """`git`, with a non-zero treated as a hard failure and never as silence.
+
+    This is the shape the pre-commit hooks got wrong: a command that could not
+    run reports the same "found nothing" as a command that ran and found
+    nothing. Every call site here says which exit codes MEAN something.
+    """
+    proc = subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=120
+    )
+    assert proc.returncode in ok, (
+        f"`git {' '.join(args)}` exited {proc.returncode} in {cwd}, so this "
+        "check could not run — and a check that could not run must not report "
+        "the same thing as a check that ran and was satisfied. git said:\n"
+        + (proc.stderr or "(nothing)")
+    )
+    return proc
+
+
+def _tracked_files(root: pathlib.Path) -> set[str]:
+    """The index, which has nothing to do with any exclusion rule.
+
+    `-z` because a path with a quote, a newline or a non-ASCII byte comes back
+    C-quoted otherwise, and a quoted path silently fails to match the walk.
+    """
+    return {p for p in _git(["ls-files", "-z"], root).stdout.split("\0") if p}
+
+
+def _walked_files(root: pathlib.Path) -> set[str]:
+    """Every file hatchling's walk reaches, as a POSIX path relative to `root`.
+
+    THE ENUMERATION CONSULTS NO EXCLUSION SOURCE AT ALL. That is the whole
+    repair: the previous enumeration was `git status --untracked-files=all`,
+    which honours `.gitignore` at every level, `.git/info/exclude`,
+    `core.excludesFile` and the command line, while hatchling honours one of
+    those four. Anything in the difference vanished from the guard and appeared
+    in the tarball.
+
+    `followlinks=True` with a device/inode seen-set is `hatchling.builders.
+    utils.safe_walk` verbatim — a symlinked directory IS descended into by the
+    build, so a walk that skipped it would under-report exactly where the build
+    over-collects.
+    """
+    found: set[str] = set()
+    seen: set[tuple[int, int]] = set()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
+        stat = os.stat(dirpath)
+        identifier = (stat.st_dev, stat.st_ino)
+        if identifier in seen:
+            dirnames[:] = []
+            continue
+        seen.add(identifier)
+        dirnames[:] = [d for d in dirnames if d not in _HATCH_EXCLUDED_DIRECTORIES]
+        relative = os.path.relpath(dirpath, root)
+        prefix = "" if relative == "." else relative.replace(os.sep, "/") + "/"
+        for name in filenames:
+            if name in _HATCH_EXCLUDED_FILES:
+                continue
+            found.add(prefix + name)
+    return found
+
+
+def _assert_allowlist_is_plain(allow: set[str]) -> None:
+    """The allowlist is matched here by first path component, and that is only
+    faithful to `pathspec.GitIgnoreSpec` while every entry is a plain rooted
+    name. A glob or a nested path in `pyproject.toml` breaks the equivalence,
+    so it fails HERE rather than quietly widening what this guard accepts."""
+    fancy = sorted(e for e in allow if (set(e) & set("*?[]!")) or "/" in e)
+    assert not fancy, (
+        "the sdist allowlist has grown an entry this check cannot match by "
+        "first path component:\n  " + "\n  ".join(fancy)
+        + "\n\nIt is compared as `path.split('/', 1)[0] in allow`, which is "
+        "equivalent to hatchling's `GitIgnoreSpec` only for plain rooted "
+        "names. Teach this check the new shape before adding it."
+    )
+
+
+def _allowlist_admits(path: str, allow: set[str]) -> bool:
+    """`/src` in hatchling's include spec admits `src` and everything under it."""
+    return path in allow or path.split("/", 1)[0] in allow
+
+
+def _hatchling_excluded(
+    root: pathlib.Path, paths: set[str], oracle: pathlib.Path
+) -> set[str]:
+    """Which of `paths` hatchling's exclusion spec matches — asked of git, in a
+    repository that has nothing in it but the patterns hatchling would use.
+
+    `git check-ignore` run in the REAL tree is the wrong instrument for this:
+    it answers with the winning pattern across all four of git's sources, and
+    three of them are precisely what hatchling cannot see. So the patterns are
+    composed here — `default_global_exclude()` first, then the ROOT
+    `.gitignore` verbatim — written into a throwaway repository, and matched
+    there. That repository has no `.git/info/exclude` entries, no nested
+    `.gitignore`, and `core.excludesFile` is pointed at `/dev/null`, so the
+    only thing that can decide is the thing hatchling reads.
+
+    The paths are NOT materialised, deliberately. `git check-ignore` stats:
+    driven, with the pattern `build/` and the query `docs/build`, it answers
+    ignored when `docs/build` is a directory and NOT ignored when it is a file
+    or absent — and `pathspec` treats a file named `build` as not excluded,
+    which is the divergence written up at `_NOT_COPIED_DIRS` below. Absent is
+    the file answer, and everything asked here is a file.
+
+    Exit codes are read the way the pre-commit hooks failed to: 0 is "some
+    matched", 1 is "none matched", and anything else is an ERROR that must not
+    be mistaken for either.
+    """
+    if not paths:
+        return set()
+    lines = [*_HATCH_DEFAULT_GLOBAL_EXCLUDE]
+    root_gitignore = root / ".gitignore"
+    if root_gitignore.is_file():
+        lines.extend(root_gitignore.read_text(encoding="utf-8").splitlines())
+    oracle.mkdir(parents=True, exist_ok=True)
+    (oracle / ".gitignore").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _git(["init", "-q", "."], oracle)
+    proc = subprocess.run(
+        ["git", "-c", "core.excludesFile=/dev/null", "check-ignore", "-z", "--stdin"],
+        cwd=oracle,
+        input="\0".join(sorted(paths)),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode in (0, 1), (
+        f"`git check-ignore` exited {proc.returncode}, which is neither "
+        "'some matched' (0) nor 'none matched' (1). An error here must not be "
+        "read as 'hatchling excludes nothing', and must not be read as "
+        "'hatchling excludes everything' either. git said:\n"
+        + (proc.stderr or "(nothing)")
+    )
+    return {p for p in proc.stdout.split("\0") if p}
+
+
+def _untracked_that_would_ship(
+    root: pathlib.Path, allow: set[str], oracle: pathlib.Path
+) -> list[str]:
+    """The property, computed by hatchling's rule: untracked AND admitted by
+    the allowlist AND not excluded by the one `.gitignore` hatchling reads.
+
+    Two non-vacuity assertions live here, because the caller cannot make them:
+    the index must be non-empty, and **the walk must have reached every tracked
+    file**. Zero items examined is the failure mode this whole pass is about,
+    and the second assertion is what makes it impossible — blind the walk and
+    every tracked file goes missing at once.
+    """
+    tracked = _tracked_files(root)
+    assert tracked, (
+        "`git ls-files` reported no tracked files, so there is no tree here to "
+        "check and this must not read as 'no untracked file would ship'"
+    )
+    walked = _walked_files(root)
+    unseen = sorted(tracked - walked)
+    assert not unseen, (
+        f"the filesystem walk reached {len(walked)} files and missed "
+        f"{len(unseen)} that git says are tracked, so it is not looking at the "
+        "tree git is looking at and its silence about untracked files means "
+        "nothing. First few:\n  " + "\n  ".join(unseen[:10])
+    )
+    admitted = {p for p in walked - tracked if _allowlist_admits(p, allow)}
+    return sorted(admitted - _hatchling_excluded(root, admitted, oracle))
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
-def test_no_untracked_file_anywhere_would_ship() -> None:
+def test_no_untracked_file_anywhere_would_ship(tmp_path: pathlib.Path) -> None:
     """The allowlist has ROOT-LEVEL granularity, and that is not the whole job.
 
     Measured: an allowlist entry like ``/docs`` admits the directory, and
@@ -258,6 +472,43 @@ def test_no_untracked_file_anywhere_would_ship() -> None:
     decision. Committed files are out of scope — they are reviewed.
 
     Break it: `touch docs/anything.md` and run this test.
+
+    **IT USED TO ASK A CHANNEL THAT DISAGREES WITH THE BUILDER.** The
+    enumeration was ``git status --porcelain --untracked-files=all``, which
+    honours four exclusion sources; hatchling honours one of them. Driven end
+    to end in a standalone repository built from this tree — plant, check,
+    build, list::
+
+        docs/zz_exclude_probe.md  +  a line in .git/info/exclude
+            git status --porcelain -uall | grep -c zz_exclude_probe   0
+            this test                                                1 passed
+            uv build --offline --sdist                                261 members
+            tar tzf | grep zz_exclude_probe   stelling-0.1.0/docs/zz_exclude_probe.md
+
+        docs/notes.md  +  core.excludesFile naming `notes.md`
+            (a developer's global gitignore — the likelier one in practice)
+            git status: 0    this test: 1 passed    sdist: 261, SHIPPED
+
+        docs/zz_nested_probe.md  +  a TRACKED docs/.gitignore naming it
+            (hatchling reads the ROOT .gitignore only; this repository already
+            carries a nested one at scratchpad/reach/.gitignore)
+            git status: clean    this test: 1 passed    sdist: 262, SHIPPED
+
+    The baseline is 260 members. Root-level plants were never the hole —
+    ``test_every_root_entry_is_a_decision`` reads the filesystem and catches
+    those. It is subdirectory + a git-only exclusion, which is exactly where
+    the leak that motivated the allowlist would have hidden one directory
+    deeper.
+
+    **And it had no non-vacuity guard.** Driven, ``--untracked-files=all`` →
+    ``=no`` with a real untracked non-ignored file in ``docs/``: ``1 passed``,
+    and the file in the tarball. Zero items examined read as zero problems.
+
+    Both are closed by asking a different question. The enumeration is now the
+    filesystem minus the index — no exclusion source can hide anything from it
+    — the classification is hatchling's own rule
+    (:func:`_hatchling_excluded`), and the walk must reach every tracked file
+    before its silence counts for anything.
 
     **The skip condition is the one the message names, and it did not used to
     be.** The gate was ``if proc.returncode != 0: skip("not a git checkout")``
@@ -283,28 +534,36 @@ def test_no_untracked_file_anywhere_would_ship() -> None:
         # declares legitimate for this reason string; the two agreeing by
         # construction is the point.
         pytest.skip("not a git checkout (an unpacked sdist, say)")
-    proc = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all"],
-        cwd=REPO, capture_output=True, text=True, timeout=120,
+    allow = _allowlist()
+    assert allow, (
+        "pyproject's sdist allowlist is empty, so nothing would be admitted "
+        "and this check would have nothing to say about anything"
     )
-    assert proc.returncode == 0, (
-        f"`git status` exited {proc.returncode} in a tree that HAS a .git, so "
-        "this check could not run — and it must not report that as a skip, "
-        "which reads as green. git said:\n" + (proc.stderr or "(nothing)")
+    _assert_allowlist_is_plain(allow)
+    would_ship = _untracked_that_would_ship(REPO, allow, tmp_path / "oracle")
+    # WITHHELD is consulted AFTER the shipping question is answered, so it can
+    # no longer decide it. Every entry names a root path that the allowlist
+    # does not admit anyway, so nothing should ever reach `masked` — and if a
+    # future WITHHELD entry starts covering a path hatchling WOULD ship, that
+    # is a red here rather than a silent exemption.
+    masked = [p for p in would_ship if p.split("/", 1)[0] in WITHHELD or p in WITHHELD]
+    assert not masked, (
+        "these paths would be DISTRIBUTED and are being suppressed by a "
+        "WITHHELD entry, which is a build exclusion WITHHELD cannot make:\n  "
+        + "\n  ".join(masked)
+        + "\n\nWITHHELD records a decision; `[tool.hatch.build.targets.sdist]"
+        ".include` is what enforces it. Take the path out of the allowlist."
     )
-    undecided = []
-    for ln in proc.stdout.splitlines():
-        if not ln.startswith("?? "):
-            continue
-        path = ln[3:].strip().strip('"')
-        if path.split("/", 1)[0] in WITHHELD or path in WITHHELD:
-            continue
-        undecided.append(path)
+    undecided = [p for p in would_ship if p not in masked]
     assert not undecided, (
-        "these paths are untracked, not gitignored, and would be DISTRIBUTED in "
-        "the sdist:\n  " + "\n  ".join(undecided)
-        + "\n\nThe root allowlist does not reach inside an allowlisted directory. "
-        "Commit the file, gitignore it, or add it to WITHHELD with a reason."
+        "these paths are untracked and WOULD BE DISTRIBUTED in the sdist:\n  "
+        + "\n  ".join(undecided)
+        + "\n\nThe root allowlist does not reach inside an allowlisted directory, "
+        "and hatchling reads ONE `.gitignore` — the root one. `.git/info/exclude`, "
+        "your global `core.excludesFile` and any nested `.gitignore` hide a file "
+        "from `git status` and not from the build.\n"
+        "Commit the file, add it to the ROOT `.gitignore`, or take its directory "
+        "out of the sdist allowlist."
     )
 
 
@@ -477,4 +736,184 @@ def test_an_arbitrary_new_file_does_not_ship(tmp_path: pathlib.Path) -> None:
         f"an arbitrary untracked file reached the sdist: {leaked}. The sdist "
         "allowlist is not holding; hatchling's default ships everything that "
         "is not gitignored."
+    )
+
+
+# --- the scan against the artefact, on a tree that carries every hazard ------
+
+# Every path this control plants, with what the BUILD must do with it. The four
+# `True`s below are the finding: each is hidden from `git status` by a source
+# hatchling does not read, and each reaches the tarball.
+_PARITY_SHIPS = {
+    # untracked, nothing excludes it — the base case
+    "docs/zz_parity_plain.md": True,
+    # hidden by `.git/info/exclude`
+    "docs/zz_parity_info_exclude.md": True,
+    # hidden by the developer's global `core.excludesFile`
+    "docs/zz_parity_global_excludes.md": True,
+    # hidden by a TRACKED nested `.gitignore` — hatchling reads the root one only
+    "docs/zz_parity_nested_gitignore.md": True,
+    # the NEGATIVE controls: a guard that fires on these cries wolf on every
+    # developer machine and gets switched off.
+    #   matched by the ROOT `.gitignore` (`*.log`) — the one source hatchling
+    #   DOES read, so this is "git hides it AND the build drops it"
+    "docs/zz_parity_quiet.log": False,
+    #   matched by hatchling's own `default_global_exclude` (`*.py[cdo]`)
+    "docs/zz_parity_bytecode.pyc": False,
+    #   inside a directory hatchling prunes by name
+    "docs/__pycache__/zz_parity_cached.py": False,
+    #   outside the allowlist entirely: `/scratchpad` is not an include entry
+    "scratchpad/zz_parity_note.md": False,
+}
+# The three the scan must see and `git status --porcelain -uall` must not.
+_PARITY_HIDDEN_FROM_GIT = (
+    "docs/zz_parity_info_exclude.md",
+    "docs/zz_parity_global_excludes.md",
+    "docs/zz_parity_nested_gitignore.md",
+)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build an sdist")
+def test_the_untracked_scan_agrees_with_the_tarball(tmp_path: pathlib.Path) -> None:
+    """PARITY, measured — the scan's answer against `tar tzf`, not against a
+    reading of hatchling.
+
+    :func:`_untracked_that_would_ship` is a model of a build backend, and a
+    model of a build backend is wrong the moment the backend moves. Three
+    constants are transcribed from hatchling 1.31.0 (`EXCLUDED_DIRECTORIES`,
+    `EXCLUDED_FILES`, `default_global_exclude`), the include patterns are
+    matched by first path component rather than by `pathspec`, and
+    `pyproject.toml` requires only `hatchling>=1.27`. None of that is trusted.
+
+    A private copy of this tree is made into a real git repository, eight files
+    are planted — four that must ship and four that must not, each hidden or
+    admitted by a DIFFERENT mechanism — an sdist is built from it, and the set
+    the scan predicts is asserted **equal** to the set of untracked files the
+    tarball actually contains. Not "contains the probes": equal, over the whole
+    tree, so a transcription that drifts in either direction is a set
+    difference here.
+
+    The two halves this buys:
+
+    * POSITIVE — a file `git status --untracked-files=all` does not mention,
+      because `.git/info/exclude`, `core.excludesFile` or a nested
+      `.gitignore` covers it, is in the tarball and in the scan's answer. That
+      is the defect this pass exists for, asserted rather than narrated.
+    * NEGATIVE — a `.log`, a `.pyc`, a `__pycache__` member and a
+      `scratchpad/` file are absent from the tarball and absent from the
+      scan's answer. A guard that fired on those would be red in every
+      checkout that has ever run the test suite.
+
+    Break it, and this is driven rather than proposed: point
+    :func:`_hatchling_excluded`'s ``check-ignore`` at the tree itself instead
+    of at the isolated oracle — one word, ``cwd=root`` — and git starts
+    answering with all four of its exclusion sources. Measured::
+
+        the tarball ships these untracked files and the scan did not name them:
+            docs/zz_parity_info_exclude.md
+            docs/zz_parity_nested_gitignore.md
+
+    Two of the three, not all three: the invocation still carries
+    ``-c core.excludesFile=/dev/null``, so the global-gitignore case survives
+    that particular mistake and the other two do not.
+    """
+    allow = _allowlist()
+    _assert_allowlist_is_plain(allow)
+    staged = _tree_to_build(tmp_path)
+
+    # A real repository, so that `git status` has something to be wrong about.
+    _git(["init", "-q", "."], staged)
+    # The nested `.gitignore` is COMMITTED. Untracked, it would show up in
+    # `git status` itself and the miss would be visible; tracked, the tree is
+    # clean and the file it hides is invisible — which is the shape this
+    # repository already has at `scratchpad/reach/.gitignore`.
+    (staged / "docs" / ".gitignore").write_text("zz_parity_nested_gitignore.md\n")
+    _git(["add", "-A"], staged)
+    _git(
+        [
+            "-c", "user.email=parity@example.invalid",
+            "-c", "user.name=parity control",
+            "commit", "-q", "-m", "the tree as it stands",
+        ],
+        staged,
+    )
+
+    (staged / ".git" / "info" / "exclude").write_text("zz_parity_info_exclude.md\n")
+    global_excludes = tmp_path / "global_gitignore"
+    global_excludes.write_text("zz_parity_global_excludes.md\n")
+    _git(["config", "core.excludesFile", str(global_excludes)], staged)
+
+    for relative in _PARITY_SHIPS:
+        target = staged / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        assert not target.exists(), f"probe path already taken: {relative}"
+        target.write_text(f"parity probe: {relative}\n")
+
+    # THE FINDING ITSELF: the channel the guard used to enumerate on cannot see
+    # three of the four files that ship.
+    status = _git(["status", "--porcelain", "--untracked-files=all"], staged).stdout
+    seen_by_status = {
+        ln[3:].strip().strip('"') for ln in status.splitlines() if ln.startswith("?? ")
+    }
+    assert "docs/zz_parity_plain.md" in seen_by_status, (
+        "`git status` cannot see a plainly untracked file, so this control is "
+        "not measuring what it claims to measure"
+    )
+    invisible = [p for p in _PARITY_HIDDEN_FROM_GIT if p not in seen_by_status]
+    assert invisible == list(_PARITY_HIDDEN_FROM_GIT), (
+        "`git status --untracked-files=all` reported a file that is excluded "
+        f"only by a source hatchling does not read: {sorted(set(_PARITY_HIDDEN_FROM_GIT) - set(invisible))}. "
+        "If git has stopped honouring one of those sources, this control's "
+        "premise is gone and the guard must be re-derived."
+    )
+
+    scanned = set(_untracked_that_would_ship(staged, allow, tmp_path / "parity-oracle"))
+
+    out = tmp_path / "dist-parity"
+    proc = subprocess.run(
+        ["uv", "build", "--offline", "--sdist", "--out-dir", str(out), str(staged)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert proc.returncode == 0, f"sdist build failed:\n{proc.stderr}"
+    built = sorted(out.glob("*.tar.gz"))
+    assert len(built) == 1, f"expected one sdist, got {built}"
+    with tarfile.open(built[0]) as tf:
+        members = tf.getnames()
+    assert any(n.endswith("/pyproject.toml") for n in members), (
+        "the built sdist has no pyproject.toml — this is not a real artefact "
+        "and the comparison below would be vacuous"
+    )
+    # `stelling-0.1.0/docs/x` -> `docs/x`; PKG-INFO is generated and has no
+    # counterpart in the tree, so it drops out of `is_file()`.
+    shipped = {
+        rel for rel in (n.split("/", 1)[1] for n in members if "/" in n)
+        if (staged / rel).is_file()
+    }
+    tracked = _tracked_files(staged)
+    shipped_untracked = shipped - tracked
+
+    assert shipped_untracked, (
+        "no untracked file reached the sdist at all, so the comparison below "
+        "could not tell a correct scan from one that never looked"
+    )
+    for relative, must_ship in _PARITY_SHIPS.items():
+        assert (relative in shipped_untracked) is must_ship, (
+            f"{relative}: the ARTEFACT "
+            f"{'omits' if must_ship else 'contains'} it, and the premise of "
+            f"this control is that it {'ships' if must_ship else 'does not'}. "
+            "Hatchling's selection has moved; re-derive the model before "
+            "trusting either direction of this test."
+        )
+    assert scanned == shipped_untracked, (
+        "the untracked-file scan and the built sdist disagree.\n"
+        "  the scan says these would ship and the tarball has no such member:\n    "
+        + "\n    ".join(sorted(scanned - shipped_untracked) or ["(none)"])
+        + "\n  the tarball ships these untracked files and the scan did not name them:\n    "
+        + "\n    ".join(sorted(shipped_untracked - scanned) or ["(none)"])
+        + "\n\nThe second list is the dangerous one: it is what would reach PyPI "
+        "with nothing red. The model of hatchling in this module (constants "
+        f"transcribed at {_HATCHLING_READ_AT}, the root `.gitignore` as the only "
+        "VCS source, the allowlist matched by first path component) is what has "
+        "to move."
     )

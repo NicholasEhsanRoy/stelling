@@ -84,7 +84,13 @@ packages = ["src/stelling"]
 # Hatchling's default sdist takes everything that is not gitignored — tracked or
 # not. That is fail-OPEN: a file protected only by being untracked still ships,
 # and `.git/info/exclude` does not protect it either, because hatchling reads
-# `.gitignore` files and nothing else. Measured: an internal release checklist,
+# ONE `.gitignore` — the one found walking up to the `.git` boundary — and no
+# other exclusion source: not `.git/info/exclude`, not the developer's
+# `core.excludesFile`, and not a `.gitignore` in a subdirectory. `git status`
+# reads all four, which is why the subdirectory guard in
+# `tests/test_sdist_contents.py` does not ask it any more: a probe in `docs/`
+# hidden by any of those three passed that guard and shipped, 261 members
+# against a baseline of 260. Measured: an internal release checklist,
 # untracked and deliberately uncommitted, shipped byte-identical inside
 # `stelling-0.1.0.tar.gz`, and a probe file dropped in the tree shipped with it.
 #
