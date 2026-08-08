@@ -1536,31 +1536,93 @@ def test_declared_input_assume_still_certifies_both_faces():
     assert not any("uncertified" in a for a in v2.stamp.assumptions)
 
 
-def test_withholding_is_forward_scoped():
-    # a violation judged BEFORE any uncertified constraint was applied is
-    # an unconditional set-level fact over the un-narrowed domain: it
-    # stands. Only violations judged while the uncertified constraint is
-    # in force are withheld.
+def _obligations_across_an_uncertified_assume():
+    """Two obligations, one traced BEFORE the uncertified assume and one
+    AFTER. `w = x*x` over `x ∈ [-1,1]` has box [-1,1] and true image [0,1],
+    so `assume(w <= -0.5)` narrows a region that is EMPTY in truth — the
+    audit-F7 channel."""
     x = var(0)
     p0, o0 = var(1, boolav()), var(2, boolav())
     w, ap, aout = var(3), var(4, boolav()), var(5, boolav())
     p1, o1 = var(6, boolav()), var(7, boolav())
-    q = close(
+    return close(
         [
             any_eqn(x, -1.0, 1.0),
             eqn("ge", [x, lit(2.0)], p0),  # definitely false over [-1, 1]
-            eqn("stelling_assert", [p0], o0),  # BEFORE: unconditional
+            eqn("stelling_assert", [p0], o0),  # BEFORE the assume
             eqn("mul", [x, x], w),
             eqn("le", [w, lit(-0.5)], ap),  # image-gap: uncertified
             eqn("stelling_assume", [ap], aout),
             eqn("ge", [w, lit(0.0)], p1),
-            eqn("stelling_assert", [p1], o1),  # AFTER: withheld
+            eqn("stelling_assert", [p1], o1),  # AFTER the assume
+        ],
+        [o0, o1],
+    )
+
+
+def test_withholding_is_QUERY_scoped():
+    # THE RULING. An assume is a precondition on the WHOLE QUERY, not only
+    # on the obligations traced after it — so the obligation written ABOVE
+    # the uncertified assume is withheld too. Supersedes
+    # `test_withholding_is_forward_scoped`, which pinned the opposite and
+    # is the defect this replaced: the same claim under the same
+    # precondition returned UNKNOWN with the assume written first and
+    # REFUTED with it written second.
+    #
+    # The argument is the tree's own. The refusal for a DETECTABLY empty
+    # assumed region (UnsatisfiableAssumptionError) already ends the run
+    # whole, obligations written above the assume included, because an
+    # empty assumed region makes EVERY obligation vacuously true. The
+    # possibly-empty case is the same fact known less precisely, so it
+    # takes the same scope. Here the assumed region really is empty
+    # (`x*x >= 0` for every real x), and BOTH refutations would be
+    # vacuous.
+    p = propagate(_obligations_across_an_uncertified_assume())
+    assert [o.status for o in p.obligations] == ["unknown", "unknown"]
+    assert all("WITHHELD" in o.detail for o in p.obligations)
+    assert sum("violation WITHHELD from REFUTED" in n for n in p.notes) == 2
+
+
+def test_the_query_scoped_withholding_names_the_mechanism_that_fired():
+    # the withholding sentence must quote the mechanism this run hit. Here
+    # a constraining assume NARROWED an over-approximated intermediate and
+    # nothing was dropped, so the note says the former and not the latter.
+    p = propagate(_obligations_across_an_uncertified_assume())
+    note = next(n for n in p.notes if "violation WITHHELD from REFUTED" in n)
+    assert "narrowed an over-approximated intermediate" in note
+    assert "DROPPED" not in note
+    assert p.assume_dropped is False
+    assert p.narrowing_uncertified is True
+
+
+def test_a_certified_assume_leaves_both_obligations_untouched():
+    # the positive control for the test above, and the one that keeps it
+    # from being a test of a checker that withholds everything: the same
+    # two-obligation shape with a CERTIFIED assume (the target is the
+    # declared input, whose box IS its value set) keeps the definite
+    # violation on BOTH sides of the assume.
+    x = var(0)
+    p0, o0 = var(1, boolav()), var(2, boolav())
+    ap, aout = var(3, boolav()), var(4, boolav())
+    p1, o1 = var(5, boolav()), var(6, boolav())
+    q = close(
+        [
+            any_eqn(x, 0.0, 1.0),
+            eqn("ge", [x, lit(2.0)], p0),  # definitely false over [0, 1]
+            eqn("stelling_assert", [p0], o0),  # BEFORE the assume
+            eqn("ge", [x, lit(0.9)], ap),  # certified: exact declared box
+            eqn("stelling_assume", [ap], aout),
+            eqn("ge", [x, lit(2.0)], p1),
+            eqn("stelling_assert", [p1], o1),  # AFTER the assume
         ],
         [o0, o1],
     )
     p = propagate(q)
-    assert [o.status for o in p.obligations] == ["violated-over-set", "unknown"]
-    assert "WITHHELD" in p.obligations[1].detail
+    assert [o.status for o in p.obligations] == [
+        "violated-over-set",
+        "violated-over-set",
+    ]
+    assert not any("WITHHELD" in n for n in p.notes)
 
 
 def test_uncertified_flag_withholds_even_exact_target_violations_after_it():
