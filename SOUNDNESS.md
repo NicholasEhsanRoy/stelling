@@ -3060,7 +3060,13 @@ verdicts:
   `exactness.certifies_set_refutation(...)` and DROPS the third keyword
   argument, lifting the withholding locally beside a call that still
   happens. That is why they redden exactly one test — the recorder pin,
-  which is the only one that looks at arguments. A GENUINE inlining, the
+  which is the only one that looks at arguments — and that count, quoted
+  above from an earlier branch, has now been RE-RUN here rather than
+  carried: transcribed exactly from that file into
+  `scratchpad/pin/mutants.py` and given a worktree each, both score
+  **1 failed / 2397 passed / 2 skipped**, and the one failure is
+  `test_every_reach_of_the_shared_point_names_the_certificate` on each.
+  A GENUINE inlining, the
   call gone and the expression written out, reddens **two** on each leg —
   `test_both_legs_consult_the_shared_set_refutation_point` as well as the
   recorder — measured on this tree at `0ad22bb`: 2 failed / 2396 passed /

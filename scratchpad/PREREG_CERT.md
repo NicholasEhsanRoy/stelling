@@ -596,6 +596,13 @@ reddens **2** tests on each leg, not 1:
     (test_both_legs_consult_the_shared_set_refutation_point and
      test_every_reach_of_the_shared_point_names_the_certificate)
 
+And the count I was quoting for them from round 1 — "exactly one test
+each" — is now RE-RUN rather than carried: both mutants transcribed
+verbatim from `apply_mutant.py` into `scratchpad/pin/mutants.py`, a
+worktree each, **1 failed / 2397 passed / 2 skipped** apiece, the one
+failure being `test_every_reach_of_the_shared_point_names_the_certificate`
+in both cases. A number I quote is a number I ran.
+
 `SOUNDNESS.md` now says so and gives the names to read them by.
 
 ## F2 — "BRANCH-SCOPED ASSUMES ARE NEVER CERTIFIED" is false

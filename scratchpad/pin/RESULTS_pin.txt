@@ -271,3 +271,57 @@ leaf keys compared: 9228
   per-obligation/verdict STATUS keys: 2090
   STATUS keys that MOVED:             0
   non-status keys that differ:        0
+
+================================================================
+BOTH SERIES, --collect-only ids, reuse lint — at the final commit
+================================================================
+commit under test: 220158a The query-scoped-assume pins were audited too, and left alone
+worktree clean: 0 modified paths
+################ stelling-jax ################
+ 12:26:29 up 18:16,  1 user,  load average: 11.25, 12.86, 9.88
+resolved: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py jax 0.11.0
+2403 passed, 2 skipped, 22 warnings in 144.90s (0:02:24)
+ 12:28:58 up 18:18,  1 user,  load average: 3.70, 8.82, 8.78
+################ stelling-jax010 ################
+ 12:29:05 up 18:19,  1 user,  load average: 4.37, 8.88, 8.80
+resolved: /home/nick/MSF/.wt-pin/W/src/stelling/__init__.py jax 0.10.2
+2403 passed, 2 skipped, 22 warnings in 291.51s (0:04:51)
+ 12:34:01 up 18:23,  1 user,  load average: 29.00, 17.44, 12.33
+=== collect-only ids, the two series ===
+  2405 /home/nick/MSF/.wt-pin/W/scratchpad/pin/FINAL_ids_stelling-jax.txt
+  2405 /home/nick/MSF/.wt-pin/W/scratchpad/pin/FINAL_ids_stelling-jax010.txt
+  4810 total
+BYTE-IDENTICAL between the series
+=== collect-only id diff vs 0ad22bb ===
+BASE ids: 2400   BRANCH ids: 2405
+REMOVED (in BASE, not in branch):
+ADDED (in branch, not in BASE):
+tests/test_exactness_lift.py::test_both_legs_follow_the_shared_point_in_the_TRUE_direction
+tests/test_exactness_lift.py::test_the_nonemptiness_route_is_pinned_in_the_TRUE_direction
+tests/test_exactness_lift.py::test_the_TRUE_direction_is_ONE_SIDED_too
+tests/test_nonempty_certificate.py::test_an_assume_the_probe_walks_INTO_is_witnessed_and_certified
+tests/test_nonempty_certificate.py::test_a_region_inhabited_only_via_the_UNTAKEN_branch_is_not_recovered
+=== reuse lint ===
+* Files with copyright information: 323 / 323
+* Files with license information: 323 / 323
+
+Congratulations! Your project is compliant with version 3.3 of the REUSE Specification :-)
+DONE
+
+================================================================
+F1 minor — the certificate branch's own M2/M3, RE-RUN not quoted
+     (transcribed exactly from scratchpad/cert/apply_mutant.py)
+================================================================
+################ OLD/M2_local_lift_interval ################
+ 12:34:40 up 18:24,  1 user,  load average: 32.46, 19.66, 13.28
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/M2_local_lift_interval/src/stelling/__init__.py jax 0.11.0
+FAILED tests/test_exactness_lift.py::test_every_reach_of_the_shared_point_names_the_certificate
+1 failed, 2397 passed, 2 skipped, 22 warnings in 219.80s (0:03:39)
+ 12:38:23 up 18:28,  1 user,  load average: 15.93, 18.98, 14.52
+################ OLD/M3_local_lift_affine ################
+ 12:38:23 up 18:28,  1 user,  load average: 15.93, 18.98, 14.52
+resolved: /home/nick/MSF/.wt-pin/mine/OLD/M3_local_lift_affine/src/stelling/__init__.py jax 0.11.0
+FAILED tests/test_exactness_lift.py::test_every_reach_of_the_shared_point_names_the_certificate
+1 failed, 2397 passed, 2 skipped, 22 warnings in 197.39s (0:03:17)
+ 12:41:43 up 18:31,  1 user,  load average: 10.31, 17.79, 15.16
+DONE
