@@ -559,6 +559,20 @@ forcing them True would observe nothing. They still carry
 restrictive-direction routing signal, which is the `M1_inline_witness`
 "reddens six" result recorded in round 1.
 
+**The query-scoped-assume pins are a different KIND and the audit's
+question does not apply to them.** `test_an_obligation_ABOVE_the_assume_
+is_withheld_with_the_ones_below`, `test_the_order_of_the_assume_no_longer_
+moves_the_verdict`, the four `_ORDERING_ROWS` cells and
+`test_the_run_level_decision_takes_no_position_argument` force NO shared
+decision: three of them assert behaviour end to end and the fourth
+inspects the function's signature for the absence of any parameter naming
+an obligation, an equation or a position. There is no direction to force
+in a pin that forces nothing, and adding one would not make them
+stronger — `test_the_run_level_decision_takes_no_position_argument` is
+already the sharpest available statement of query scope, because it
+forbids the argument rather than checking a consequence of not having it.
+They were audited and left alone, which is a result and not an omission.
+
 **The one-sidedness pin is a weaker finding than the other two, and the
 difference is recorded rather than smoothed.** `M4`/`M5`/`M6` are
 invisible to the WHOLE SUITE. `M7` is invisible to
