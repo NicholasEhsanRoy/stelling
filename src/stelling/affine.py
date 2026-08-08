@@ -1112,6 +1112,14 @@ def refine_propagation(
             and not exactness.certifies_set_refutation(
                 nonemptiness_certified=not propagation.narrowing_uncertified,
                 assume_dropped=propagation.assume_dropped,
+                # THE THIRD INPUT: the non-emptiness CERTIFICATE the
+                # interval leg computed, carried on the propagation. It is
+                # passed here for exactly the reason the other two are —
+                # the run's WHOLE assume state, through the one shared
+                # function. A leg that read the certificate and decided
+                # for itself would restore the coincidence this call
+                # exists to remove, one argument later.
+                region_inhabited=propagation.region_inhabited,
             )
         ):
             # the one-sided uncertified-precondition refusal (see

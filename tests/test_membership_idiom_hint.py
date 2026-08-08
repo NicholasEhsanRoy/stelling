@@ -318,14 +318,32 @@ def test_the_form_the_text_names_first_is_one_that_survives_ieee():
         )
 
 
-def test_the_texts_assume_clause_partitions_the_shipped_rewrites():
+def test_the_texts_assume_clause_partitions_the_shipped_rewrites(monkeypatch):
     """The differentiation clause, measured as a PARTITION of whatever the
     text names — no form spelled out here.
 
     Exactly one named form narrows the declared input, stays certified and
     leaves the REFUTED face reachable; every other named form narrows the
     reduction's own intermediate, raises satisfiability-UNCERTIFIED, and has
-    its definite violations withheld. That is what the clause claims."""
+    its definite violations withheld. That is what the clause claims.
+
+    **The withholding half is measured with the NON-EMPTINESS CERTIFICATE
+    closed, and the clause says "unless" for the same reason.** The
+    declared box here is `[-10, 10]^3` and the membership condition the
+    rewrites express is satisfied at plenty of its points, so a probed
+    point witnesses the assume and the withheld refutation correctly comes
+    back — on the arithmetic forms, which evaluate to a definite value at
+    a point, though NOT on a `jnp.all` whose `reduce_and` is ⊤ at a point
+    as much as over a box. That is a fact about the certificate, not about
+    the partition this test measures, so the certificate's route is closed
+    and the partition is read underneath it.
+    """
+    from stelling import exactness
+
+    monkeypatch.setattr(
+        exactness, "certifies_point_witness", lambda **k: False
+    )
+
     def violation_under(span):
         def h():
             x = any_array((3,), "float64", (-10.0, 10.0))

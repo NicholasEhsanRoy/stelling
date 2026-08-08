@@ -2785,4 +2785,238 @@ verdicts:
   pre-registration, corpus, oracle and outcomes:
   `scratchpad/PREREG_MECHC.md` and `scratchpad/mechc/`.
 
+- **2026-08-08 (pre-release): a NON-EMPTINESS CERTIFICATE lifts the
+  withholding where a point of the declared set satisfies every assume.
+  Direction: UNKNOWN → REFUTED, and in no other direction.** The entry
+  above withholds every definite violation of a run whose assume state
+  does not certify a set-level refutation. That rule is correct and it is
+  blunt: it withholds because it cannot rule out that the assumed region
+  is EMPTY, in which case every obligation is vacuously true. Where the
+  region is demonstrably non-empty the refutation stands, and this change
+  demonstrates it.
+
+  **What the certificate is.** One point of the DECLARED SET at which
+  every `stelling_assume` of the query is definitely true. It is found by
+  re-propagating the query with each declaration pinned to a point of its
+  own box, through the machinery the reachability probe already uses
+  (`_Propagator.pin`, `_pinned`, `_probe_point`, `_member_bounds`) — so
+  the point is a MEMBER of the declared set, a value of the declaration's
+  own dtype and not merely a number in the interval. The predicates are
+  read at that point in the SAME arithmetic that judged the query, whose
+  endpoints are computed in `Fraction` and correctly directed-rounded, so
+  a predicate box of `[1, 1]` means true at the point: the box encloses
+  the true value.
+
+  **THE DIRECTION, precisely.** A True answer can restore a withheld
+  `violated-over-set` and can do nothing else. It reaches the same
+  run-level decision the two existing flags reach —
+  `exactness.certifies_set_refutation`, now
+  `region_inhabited or (nonemptiness_certified and not assume_dropped)` —
+  and that function gates violations only. `discharged` is not reachable
+  from it, structurally: no code path writes `discharged` under its
+  answer. **Retroactively invalid verdicts: none in the VERIFIED
+  direction. In the REFUTED direction: any UNKNOWN recorded since the
+  entry above, on a query whose assumed region a probed point of the
+  declared set satisfies, was weaker than it needed to be** — re-run such
+  queries; nothing that was VERIFIED or REFUTED changes.
+
+  **Why lifting is sound.** Both withholding flags withhold for one
+  reason and it is not that the judged set is wrong. A narrowing is a meet
+  with a CLOSED half-space and a drop only widens, so in both cases the
+  judged set is a SUPERSET of the assumed region, and a definite violation
+  over a superset is a violation at every point of that region. The one
+  missing premise is that the region has a point. Supply one and the
+  refutation is a refutation of something.
+
+  **ONE-SIDED, and the failure path is silent.** A False answer means no
+  witness was FOUND: the grid is at most 16 points and fewer on a large
+  declaration, the arithmetic can be indeterminate, the size cap can
+  decline to search at all, and a probe that raises is skipped. It never
+  means the region is empty. Every declining path leaves the run
+  BYTE-IDENTICAL — no note, no status, no detail, not even a disclosure
+  that a search happened — which is what makes the one-sidedness pinnable
+  byte-for-byte (`test_a_failed_certificate_search_changes_nothing_at_all`
+  compares whole `Propagation` objects) rather than argued.
+
+  **THE PER-OBLIGATION LEDGER**, jax 0.11.0, 32-row corpus, 35
+  obligations, oracle 20 000 concrete samples per row
+  (`scratchpad/cert/`): **13 refutations recovered**, **0 obligations
+  moved toward `discharged`**, **0 left `discharged`**, **0 other moves**,
+  **0 recoveries the oracle can falsify**, **0 recoveries on a row where
+  the oracle found no admissible point**. At the verdict layer: VERIFIED
+  4 → 4, REFUTED 2 → 15, UNKNOWN 26 → 13 — every move is UNKNOWN →
+  REFUTED.
+
+  **The zero has a positive control, because a zero without one is
+  unfalsifiable.** Two unsound mutants of this build's own machinery, run
+  through the same ledger and the same oracle. `two_sided` — let the
+  certificate lift a withheld obligation all the way to `discharged` —
+  scores **13 toward `discharged` and 13 oracle-confirmed WRONG
+  VERIFIEDs**. `certify_everything` — certify every run inhabited whatever
+  the probe found — scores **17 recovered, of which 2 are on rows where
+  the oracle found no admissible point**, i.e. 2 vacuous refutations
+  caught. The instrument sees both failure modes; the real build scores
+  zero on both.
+
+  **What protects the other 8 empty rows from `certify_everything` is not
+  this certificate**, and it is worth naming: their probes die of
+  `UnsatisfiableAssumptionError` at the pinned point, because a relational
+  or arithmetic assume that is undecidable over BOXES is decidable at a
+  POINT and its meet comes out empty. The certificate is the second line
+  there, not the first.
+
+  **The boundary cases, measured.** At the point `(0.1, 0.2)` the
+  predicate `x0 + x1 >= 0.30000000000000004` is TRUE in binary64 and FALSE
+  in ℝ; under `semantics="real"` the box is
+  `[0x1.3333333333333p-2, 0x1.3333333333334p-2]`, which straddles the
+  bound, so the predicate is INDETERMINATE and **no witness is claimed**.
+  An exact-rational checker would answer FALSE there; this answers "not
+  established", which withholds. Weaker, never unsound — and never in
+  disagreement with the propagation that judged the query, which is the
+  reason for running the check in stelling's own arithmetic rather than
+  beside it. `sqrt`/`sin`/`exp`/`log` are a boundary and not a gap on the
+  same rule: the enclosure at a pinned point has width, a bound inside
+  that width certifies nothing (`sqrt` of the point 0.25 against `>= 0.5`
+  — exactly true, and INDETERMINATE here), and a bound clear of it
+  certifies soundly (`sqrt(x+1) >= 1.2` at `x = 0.5`).
+
+  **BRANCH-SCOPED ASSUMES ARE NEVER CERTIFIED**, by two independent
+  mechanisms. The requirement is the STATIC set of `stelling_assume`
+  equations in the IR and the witness is what one pinned walk evaluated,
+  so an assume in a branch the probe did not take is required and not
+  witnessed. And the certificate can only fire on a run that narrowed or
+  dropped an assume, on which `_reachability_witnesses` certifies nothing
+  at all — so every branch-scoped violation stays withheld by the branch
+  pass however inhabited the top-level region is.
+
+  **THE COST, with load averages** (`scratchpad/cert/RESULTS_cap.txt`,
+  jax 0.11.0, load 0.06–0.44). Bounded by the DECLARED SIZE twice over. A
+  size cap (`_CERT_MAX_ELEMENTS = 4096`) stops the search entirely above
+  it; a probe budget in element-probes
+  (`_CERT_PROBE_BUDGET = 4096`, floor `_CERT_MIN_PROBES = 3`) scales the
+  probe count down as the declaration grows. The second bound was added
+  because the first was not enough: with the size cap alone, a FAILING
+  search at n=4096 cost **469 ms against a 23 ms propagation, 95% of the
+  whole `check()` pipeline**; with the budget it is **95 ms (4.3x)**. A
+  SUCCEEDING search stops at the first witness and costs 3.7x at every
+  size. **What the bounds cost in recovered refutations, measured by
+  turning each off in turn: the probe budget 0 across n = 64 … 16384; the
+  size cap 1 per row above it (2 of the 7 sizes tested).** The floor of 3
+  is not a fitted number — probes 0, 1, 2 are the declared box's low
+  corner, high corner and midpoint, and across the 17 corpus rows that
+  witness at all the first witnessing probe is one of those three in
+  **17 of 17** (`RESULTS_probe_index.txt`); one probe alone recovers 18%.
+
+  **WHAT THE CORPUS CANNOT SEE**, stated because five corpora in this
+  project have been found structurally incapable of observing the residual
+  they reported as zero. (1) `jnp.all(...)` lowers to `reduce_and`, which
+  has no interval transfer in either registry, so its predicate is ⊤ at a
+  POINT exactly as over a box — **the certificate cannot reach the single
+  most common dropped-assume idiom**, and `r11_all_reduction_inhabited` is
+  in the corpus to measure that rather than hide it. (2) The corpus's
+  assumed regions are half-space-shaped; a region whose only members sit
+  off the corner/midpoint grid would need a later probe and is lost at the
+  budget floor. (3) The oracle samples and therefore never proves a region
+  EMPTY — its two verdicts are existence claims, and "no admissible sample
+  in 20 000" is reported as exactly that. (4) The oracle evaluates in
+  binary64 while stelling judges in ℝ; the corpus's one deliberate
+  boundary row is the only place that could matter and it is scored by
+  hand. (5) Independent per-element sampling is useless on a wide
+  elementwise assume — `2x >= 0.5` over `[0,1]^64` has admissible
+  probability `0.75^64 ≈ 1e-8` — which the oracle's correlated and corner
+  fills exist to fix; measured on `r31_wide_declaration`, which the first
+  oracle reported as empty.
+
+  **The routing (both legs, one decision).** The certificate is an INPUT
+  to `exactness.certifies_set_refutation`, not a channel around it, and
+  the per-probe decision is `exactness.certifies_point_witness`, which the
+  propagator consults rather than reimplements. Two pins, both new:
+  `test_the_witness_route_is_the_shared_primitive_too` forces the witness
+  decision in BOTH directions (an inhabited region stops being certified,
+  an empty one starts), which an inlined subset test cannot follow; and
+  `test_every_reach_of_the_shared_point_names_the_certificate` wraps the
+  shared decision in a RECORDER and inspects the keyword arguments, which
+  is the first pin in that file that is not argument-blind. Three
+  behaviour-preserving mutants, each in its own worktree with `python -B`
+  and `__pycache__` cleared, confirm which pin sees what:
+  `M2_inline_setref_interval` and `M3_inline_setref_affine` — each leg
+  lifting the withholding locally instead of passing the certificate in —
+  redden **exactly one test each, and it is that pin**, out of 2396;
+  `M1_inline_witness` reddens **six**, its own pin plus the five tests
+  that close the certificate's route as a CONTROL while measuring
+  something else, and an inlined predicate makes that patch inert. **All
+  32 corpus verdicts are identical to the real build under all three**
+  (`scratchpad/cert/RESULTS_mutants.txt`) — a pin that checked only
+  verdicts would see nothing.
+
+  **The certificate is LIVE on the affine leg, and it took a second look
+  to make it so.** The search's gate first asked only "did the interval
+  leg withhold a violation?", which is never true on a query the interval
+  leg cannot decide — so on the one class the refinement actually judges
+  (`assume_dropped`, `coverage.constrained == 0`) the certificate was
+  never computed and the third argument arrived False by construction,
+  exactly the documented-dead situation `nonemptiness_certified` is in on
+  that leg. Measured: `assume(x >= y)` (relational, dropped, region
+  inhabited at `x = y = 0`) with `assert_(x - x >= 0.5)` —
+  interval-undecided, affine-violated — returned UNKNOWN from the
+  refinement. The gate now also fires on an `unknown` obligation when
+  nothing was constrained, which is precisely when the refinement will
+  run, and the same query returns REFUTED. Cost: a search on a run whose
+  interval leg withheld nothing, 1.4 ms → 30 ms on a 256-element
+  declaration, inside the bounds above. Pinned with its empty-region twin
+  by `test_the_certificate_reaches_the_affine_leg_as_a_LIVE_argument`.
+
+  **The stamp does not carry a known-false assumption.** Both uncertified
+  assumptions say *"the conditional claim may be vacuous"* — true when the
+  walk writes them, before any witness exists, and FALSE on a run the
+  certificate then settles. On a certified run they are removed and
+  replaced by one that states what the claim now rests on (the soundness
+  of the transfers at a point, and the probed point's membership in the
+  declared set); on a declining run they are untouched. A stamped
+  assumption is what a verdict claims to rest on, so leaving a known-false
+  one in would be a disclosure defect whatever the verdict said
+  (`test_a_certified_run_does_not_stamp_a_known_false_assumption`).
+
+  **The invariant the reading order rests on, measured.** Each assume's
+  witness answer is read BEFORE `_assume_constrain` can meet anything into
+  the env, and the argument that this suffices is that a `[1, 1]`
+  predicate's meet with the closed half-space is a NO-OP — otherwise an
+  earlier assume could certify itself AND cut the box a later one is read
+  against. Measured across the corpus: **148 certifying probe runs
+  inspected, 0 narrowed anything**
+  (`scratchpad/cert/RESULTS_invariant.txt`).
+
+  **The two semantics dials are NOT ordered, and the sentence that said
+  they were is corrected here.** The check runs in the run's own
+  semantics. `sqrt` of the declared point 0.25 is EXACTLY 0.5 in binary64,
+  so the ieee transfer encloses it as a point and `>= 0.5` is definitely
+  TRUE — while the real-mode transfer bumps outward unconditionally,
+  straddles, and certifies nothing: **ieee certifies where real does
+  not**. Three other corpus rows go the other way. Both are sound for
+  their own dial, which is the whole content of "the same arithmetic the
+  query was judged in".
+
+  **Six existing expectations changed, every one because a withheld
+  refutation was CORRECT.** `{x : x ≥ 0.9 ∧ x² ≤ 0.9}` is `[0.9, 0.948…]`;
+  `{x ∈ [1,2] : x > 1}` is `(1, 2]`;
+  `{a ∈ [0,10]^3, b ∈ [5,6]^3 : 0 ≤ a ≤ b}` contains `(a=0, b=5)`. Each
+  site now observes the mechanism it is actually about — the UNCERTIFIED
+  flag, the drop discriminant — and keeps its end-to-end consequence with
+  the certificate's independent route closed. `MEMBERSHIP_IDIOM_HINT`'s
+  sentence *"every definite violation is then withheld from REFUTED"* was
+  made true again by naming the exception.
+
+  **Both jax series.** 2398 passed / 2 skipped on jax 0.11.0 and on jax
+  0.10.2 (140.30 s and 139.97 s, load 0.59 and 2.85), `--collect-only`
+  ids byte-identical between them (2400), `reuse lint` rc=0 with 317/317
+  files carrying copyright and license information. Baseline at `681c6ef`
+  was 2369 / 2 on both: 31 tests added, none removed.
+
+  Constructions: `tests/test_nonempty_certificate.py` (one-sidedness,
+  the `discharged` ledger with its positive control, membership, the
+  boundary cases, the dial, the invariant, the stamp swap, the bounds),
+  `tests/test_exactness_lift.py` (both routings); pre-registration,
+  corpus, oracle, ledger and outcomes: `scratchpad/PREREG_CERT.md` and
+  `scratchpad/cert/`.
+
 *(no releases yet)*

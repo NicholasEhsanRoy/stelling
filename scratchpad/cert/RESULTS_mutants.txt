@@ -1,0 +1,60 @@
+=== mutant ledger comparison (jax 0.11.0) ===
+The SHIPPED-column is 'after' — the behaviour a caller sees.
+
+--- M1_inline_witness vs shipped ---
+1c1
+< r01_narrow_inhabited INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r01_narrow_inhabited INHABITED ne Y - [REFUTED -> REFUTED]
+3c3
+< r03_narrow_inhabited_pair INHABITED ne Y #1:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r03_narrow_inhabited_pair INHABITED ne Y - [REFUTED -> REFUTED]
+5c5
+< r05_square_inhabited INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r05_square_inhabited INHABITED ne Y - [REFUTED -> REFUTED]
+7c7
+< r07_relational_inhabited INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r07_relational_inhabited INHABITED ne Y - [REFUTED -> REFUTED]
+9c9
+< r09_relational_array_inhabited INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r09_relational_array_inhabited INHABITED ne Y - [REFUTED -> REFUTED]
+13c13
+< r13_or_predicate_inhabited INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r13_or_predicate_inhabited INHABITED ne Y - [REFUTED -> REFUTED]
+15c15
+< r15_int32_inhabited INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r15_int32_inhabited INHABITED ne Y - [REFUTED -> REFUTED]
+17,19c17,19
+< r17_float32_inhabited INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+< r18_float32_pair INHABITED ne Y #1:unknown->violated-over-set [UNKNOWN -> REFUTED]
+< r19_sqrt_slack INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r17_float32_inhabited INHABITED ne Y - [REFUTED -> REFUTED]
+> r18_float32_pair INHABITED ne Y - [REFUTED -> REFUTED]
+> r19_sqrt_slack INHABITED ne Y - [REFUTED -> REFUTED]
+21c21
+< r21_exp_slack INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r21_exp_slack INHABITED ne Y - [REFUTED -> REFUTED]
+24c24
+< r24_two_assumes_both_live INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r24_two_assumes_both_live INHABITED ne Y - [REFUTED -> REFUTED]
+31c31
+< r31_wide_declaration INHABITED ne Y #0:unknown->violated-over-set [UNKNOWN -> REFUTED]
+---
+> r31_wide_declaration INHABITED ne Y - [REFUTED -> REFUTED]
+  SHIPPED VERDICTS IDENTICAL: no verdict moves under this mutant
+
+--- M2_inline_setref_interval vs shipped ---
+  SHIPPED VERDICTS IDENTICAL: no verdict moves under this mutant
+
+--- M3_inline_setref_affine vs shipped ---
+  SHIPPED VERDICTS IDENTICAL: no verdict moves under this mutant
+

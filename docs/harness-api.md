@@ -550,8 +550,17 @@ measured reasons the preference is not cosmetic:
   rather than DROP, but the arithmetic pair narrows the reduction's own
   intermediate — an over-approximated value — so the precondition is
   stamped satisfiability-UNCERTIFIED and every definite violation is
-  withheld from REFUTED. The elementwise form narrows the declared input
-  and stays certified.
+  withheld from REFUTED *unless a probed point of the declared set is
+  found to satisfy every assume of the query* (the non-emptiness
+  certificate). The elementwise form narrows the declared input and stays
+  certified with no search at all.
+
+  A `jnp.all` assume is out of that search's reach in **both**
+  directions, which is the one thing to know about it here: `jnp.all`
+  lowers to `reduce_and`, which has no interval transfer, so its
+  predicate is ⊤ at a single point exactly as it is over a box. The
+  arithmetic rewrites evaluate to a definite value at a point and their
+  refutations are recoverable; a `jnp.all` assume's are not.
 
 **One conjunct, one call.** Deleting the reduction from a *conjunction*
 means writing each conjunct as its own `assert_` / `assume` /

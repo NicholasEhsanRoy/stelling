@@ -366,9 +366,41 @@ def test_the_drop_note_stops_saying_superset_when_it_is_not_one():
     assert "NOT a superset" not in restricting
 
 
-def test_an_indeterminate_dropped_conjunct_does_NOT():
+def _no_certificate(monkeypatch):
+    """Force the NON-EMPTINESS CERTIFICATE to find nothing.
+
+    Every withholding this file measures rests on the assumed region
+    possibly being EMPTY. `_restricting_relational`'s region is NOT empty
+    — `a ∈ [0,10]^3`, `b ∈ [5,6]^3`, and `0 ≤ a ≤ b` holds at `a = 0,
+    b = 5` — and a relational conjunct that is undecidable over the BOXES
+    is perfectly decidable at a POINT, so the certificate finds a witness
+    and correctly restores the refutation.
+
+    The two tests below are not about that. They are about the
+    DISCRIMINANT (`harmless`) and the fail-safe that refuses a misaligned
+    one, whose whole effect is whether `assume_dropped` gets set. That
+    flag is asserted directly in both — it is the observable that cannot
+    be faked — and the end-to-end UNKNOWN is kept as its consequence with
+    the certificate's independent route closed, so the consequence still
+    follows from the flag alone.
+    """
+    from stelling import exactness
+
+    monkeypatch.setattr(
+        exactness, "certifies_point_witness", lambda **k: False
+    )
+
+
+def test_an_indeterminate_dropped_conjunct_does_NOT(monkeypatch):
     """The other face. Without this the discriminant could return True
     unconditionally and every test above still pass."""
+    assert _prop(_restricting_relational).assume_dropped is True
+    # the region is genuinely inhabited, so the certificate fires and the
+    # refutation stands. A right answer — and not what this test is about
+    assert _prop(_restricting_relational).region_inhabited is True
+    assert _run(_restricting_relational).status == "REFUTED"
+    # with the certificate's route closed, the drop alone withholds
+    _no_certificate(monkeypatch)
     assert _run(_restricting_relational).status == "UNKNOWN"
     assert _prop(_restricting_relational).assume_dropped is True
 
@@ -409,6 +441,10 @@ def test_the_attribution_fail_safe_refuses_a_misaligned_verdict(monkeypatch):
         "a misaligned attribution must be refused wholesale, not indexed "
         "into — reading harmless[0] here marks a restricting drop harmless"
     )
+    # the flag above is the fail-safe's whole effect; the end-to-end
+    # consequence is read with the certificate's independent route closed,
+    # since that region really is inhabited (see `_no_certificate`)
+    _no_certificate(monkeypatch)
     assert _run(_restricting_relational).status == "UNKNOWN"
 
 
