@@ -81,13 +81,33 @@ repos:
         # …with the offending line printed in the output. It went Failed only
         # once `jax._src` was ALSO present. The first half of this hook's own
         # name had never been enforceable.
-        # `tests/test_import_hygiene.py::test_jax_imported_only_in_compat_module`
-        # is the independent guard that did hold; this makes the local one
-        # hold too, and reports BOTH violations instead of the second only.
+        #
+        # THE EXEMPTION IS BY PATH, and it used to be by LINE CONTENT: the
+        # first check was `grep -rnE … | grep -v _jax_compat.py`. A grep output
+        # line carries the source TEXT as well as the path, so an import that
+        # merely MENTIONED the filename filtered itself out. Measured, two
+        # planted files under `src/`, one at a time:
+        #
+        #   src/zz_probe.py   import jax  # mirrors _jax_compat.py   Passed
+        #   src/zz_plain.py   import jax                             Failed
+        #
+        # `--exclude` is grep's own per-FILE name filter and is the same rule
+        # the independent test applies (`if path.name == "_jax_compat.py"`), so
+        # hook and test now exempt exactly the same set. Driven after the
+        # change: the first line Failed, the second still Failed, and the real
+        # `src/stelling/_jax_compat.py` — which does import jax, five times —
+        # still Passed.
+        #
+        # THE PROPERTY WAS NEVER UNCOVERED. `tests/test_import_hygiene.py::
+        # test_jax_imported_only_in_compat_module` filters by path and reddens
+        # on the evading file, so this was a defective control over a covered
+        # property rather than an exposure. What the change buys is that the
+        # local hook bites on the same set as that test, and that BOTH
+        # violations are reported instead of the second only.
         language: system
         entry: >-
           bash -c 'rc=0;
-          if grep -rnE "^[[:space:]]*(import jax\b|from jax\b)" src --include="*.py" | grep -v _jax_compat.py; then rc=1; fi;
+          if grep -rnE "^[[:space:]]*(import jax\b|from jax\b)" src --include="*.py" --exclude=_jax_compat.py; then rc=1; fi;
           if grep -rn "jax\._src" src --include="*.py"; then rc=1; fi;
           exit $rc'
         pass_filenames: false
