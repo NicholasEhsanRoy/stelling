@@ -172,8 +172,12 @@ def check_controls(args) -> int:
                 _apply(control.mutation, tree)
             print(f"-- {control.name}  [{control.kind} {control.at}]")
             print(f"   {control.nodeid}")
+            # The control's own scale multiplies the caller's: some searches
+            # need more room than a per-push budget, and burying that in a
+            # global flag would make every control pay for the slowest one.
+            scale = float(args.scale) * control.scale
             proc = _run(tree, [control.nodeid], python=args.python,
-                        profile=args.profile, scale=args.scale,
+                        profile=args.profile, scale=scale,
                         runxfail=True, verbose=args.verbose,
                         extra_env=_cross_env(args))
             out = (proc.stdout or "") + (proc.stderr or "")
@@ -226,7 +230,7 @@ def main(argv=None) -> int:
 
     if args.list:
         for c in pc.CONTROLS:
-            print(f"{c.name:20s} {c.kind:7s} {c.at:10s} {c.nodeid}")
+            print(f"{c.name:20s} {c.kind:7s} {c.at:10s} x{c.scale:<5g} {c.nodeid}")
         return 0
     if args.controls or args.control:
         return check_controls(args)

@@ -247,6 +247,14 @@ def render_expr(e) -> str:
     if tag == "cancel":
         x = render_expr(e[1])
         return f"({x} - {x})"
+    if tag == "at_add":
+        # The scatter-add form. Present because the cross-series property's
+        # positive control needs it: `_is_add_combiner` read the combiner by
+        # jaxpr CONTAINER CLASS, and jax 0.11 merged `ClosedJaxpr` into
+        # `Jaxpr` while 0.10.2 did not, so this one node was VERIFIED on one
+        # series and UNKNOWN on the other with `TESTED_JAX_SERIES` claiming
+        # both.
+        return f"{render_expr(e[1])}.at[{e[2]}].add({_lit(e[3])})"
     raise AssertionError(tag)
 
 
@@ -259,6 +267,8 @@ def render_pred(p) -> str:
         return f"({render_pred(p[1])} | {render_pred(p[2])})"
     if p[0] == "not":
         return f"(~{render_pred(p[1])})"
+    if p[0] == "all":
+        return f"jnp.all({render_pred(p[1])})"
     raise AssertionError(p[0])
 
 
@@ -299,6 +309,8 @@ def eval_expr(e, env, jnp):
     if tag == "cancel":
         x = eval_expr(e[1], env, jnp)
         return x - x
+    if tag == "at_add":
+        return eval_expr(e[1], env, jnp).at[e[2]].add(e[3])
     raise AssertionError(tag)
 
 
@@ -317,7 +329,12 @@ def eval_pred(p, env, jnp):
     if p[0] == "or":
         return eval_pred(p[1], env, jnp) | eval_pred(p[2], env, jnp)
     if p[0] == "not":
-        return ~eval_pred(p[1], env, jnp)
+        return jnp.logical_not(eval_pred(p[1], env, jnp))
+    if p[0] == "all":
+        # `jnp.all` over a predicate is the form that makes an assume DROPPED
+        # rather than constraining, which is the shape the affine
+        # vacuous-refutation defect lived in. It is in the grammar for that.
+        return jnp.all(eval_pred(p[1], env, jnp))
     raise AssertionError(p[0])
 
 
@@ -520,6 +537,104 @@ def counterexamples(spec: Spec, limit: int = 8):
                     return out
         seen += 1
     return out
+
+
+def simple_admitted_region_is_empty(spec: Spec, upto: int):
+    """Is the admitted region for assert #``upto`` EXACTLY empty? Or unknown.
+
+    Returns ``True``, ``False``, or ``None`` — and ``None`` is a refusal to
+    answer, never "no".
+
+    Deliberately narrow, and narrow in the direction that keeps it exact. It
+    answers only for harnesses where every declaration is a **float** dtype
+    with finite, non-NaN bounds and at least one element, and where every
+    ``assume`` in scope is a conjunction (optionally under ``jnp.all``) of
+    atoms comparing one variable to one constant. On that fragment the admitted
+    region is an intersection of half-spaces with a box, so emptiness is a
+    comparison of two real numbers and nothing is approximated.
+
+    Why the float fragment specifically: this is the shape of the affine defect
+    this project shipped — ``assume(jnp.all(x >= 2.0))`` over a box of
+    ``(-1.0, 1.0)``, where the refinement judged over the DECLARED box rather
+    than the assumed region and re-minted a violation the interval leg had
+    withheld. The integer grammar cannot reach it, because the affine
+    refinement supports float declarations only.
+    """
+    box = {}
+    for d in spec.decls:
+        if d.dtype not in FLOAT_DTYPES:
+            return None
+        if n_elements(d.shape) == 0:
+            return None
+        try:
+            lo, hi = float(d.lo), float(d.hi)
+        except (TypeError, ValueError):
+            return None
+        if lo != lo or hi != hi or not (math.isfinite(lo) and math.isfinite(hi)):
+            return None
+        if lo > hi:
+            return None
+        box[d.name] = (lo, hi, True, True)  # lo, hi, lo_closed, hi_closed
+
+    seen = 0
+    for s in spec.stmts:
+        if s.kind == "assert":
+            if seen == upto:
+                break
+            seen += 1
+            continue
+        atoms = _conjuncts(s.pred)
+        if atoms is None:
+            return None
+        for op, name, const, var_on_left in atoms:
+            if name not in box:
+                return None
+            lo, hi, lc, hc = box[name]
+            try:
+                c = float(const)
+            except (TypeError, ValueError):
+                return None
+            if c != c:
+                return None
+            o = op if var_on_left else _FLIP[op]
+            if o in (">=", ">"):
+                if c > lo or (c == lo and o == ">"):
+                    lo, lc = c, o == ">="
+            elif o in ("<=", "<"):
+                if c < hi or (c == hi and o == "<"):
+                    hi, hc = c, o == "<="
+            elif o == "==":
+                lo = max(lo, c)
+                hi = min(hi, c)
+                lc = hc = True
+            else:  # "!=" cannot be expressed as a box, and is not guessed at
+                return None
+            box[name] = (lo, hi, lc, hc)
+
+    for lo, hi, lc, hc in box.values():
+        if lo > hi or (lo == hi and not (lc and hc)):
+            return True
+    return False
+
+
+_FLIP = {"<=": ">=", ">=": "<=", "<": ">", ">": "<", "==": "==", "!=": "!="}
+
+
+def _conjuncts(p):
+    """Flatten an ``and``-tree (optionally under ``all``) into simple atoms."""
+    if p[0] == "all":
+        return _conjuncts(p[1])
+    if p[0] == "and":
+        a, b = _conjuncts(p[1]), _conjuncts(p[2])
+        return None if a is None or b is None else a + b
+    if p[0] != "cmp":
+        return None
+    _, op, left, right = p
+    if left[0] == "var" and right[0] == "const":
+        return [(op, left[1], right[1], True)]
+    if left[0] == "const" and right[0] == "var":
+        return [(op, right[1], left[1], False)]
+    return None
 
 
 def any_obligation_is_admitted(spec: Spec) -> bool:
@@ -827,7 +942,7 @@ def static_shape(e, decls):
         return static_shape(e[1], decls)
     if tag == "sum":
         return () if static_shape(e[1], decls) is not None else None
-    if tag == "pow":
+    if tag in ("pow", "at_add"):
         return static_shape(e[1], decls)
     if tag == "bin":
         return _broadcast(static_shape(e[2], decls), static_shape(e[3], decls))
@@ -846,6 +961,8 @@ def static_shape_pred(p, decls):
                           static_shape_pred(p[2], decls))
     if p[0] == "not":
         return static_shape_pred(p[1], decls)
+    if p[0] == "all":
+        return () if static_shape_pred(p[1], decls) is not None else None
     return None
 
 

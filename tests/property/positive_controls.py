@@ -56,6 +56,7 @@ class Control:
     mutation: Mutation | None = None
     series: str = "any"  # "any" | "both" — "both" needs two interpreters
     expect_message: str = ""  # a substring the failure must carry
+    scale: float = 1.0  # budget multiplier, where the search needs more room
 
 
 _ORACLE = f"{PROPERTY_DIR}/test_oracle.py"
@@ -74,8 +75,8 @@ CONTROLS = (
         why=(
             "an out-of-dtype-range integer literal wraps mod 2**bits before "
             "tracing, so stelling returns VERIFIED for a predicate that is "
-            "false at every declared point. OPEN — this control passes for as "
-            "long as the defect does, and the property is xfail(strict) so "
+            "false at every declared point. OPEN — this control fires for as "
+            "long as the defect lives, and the property is xfail(strict) so "
             "that the day it is fixed the suite goes red instead of quiet."
         ),
         expect_message="WRONG VERIFIED",
@@ -91,11 +92,14 @@ CONTROLS = (
         at="HEAD",
         why=(
             "interval multiplication that considers only the two SAME-CORNER "
-            "products instead of all four is unsound in both directions and "
-            "mints VERIFIEDs that are false at declared points. No historical "
-            "commit carries this; it is a mutant, and is labelled as one."
+            "products instead of all four discharges `x*x >= 1` over "
+            "int8 [-1, 1], which is false at x = 0. No historical commit "
+            "carries a non-monotone interval domain — the first spike ran the "
+            "monotonicity property over 6000 examples and it passed — so this "
+            "is a MUTANT, which is weaker evidence than a commit and is "
+            "labelled as one."
         ),
-        mutation=Mutation(
+    mutation=Mutation(
             path="src/stelling/interval.py",
             old=(
                 "        products = (_prod(alo, blo), _prod(alo, bhi), "
@@ -105,12 +109,29 @@ CONTROLS = (
         ),
         expect_message="WRONG VERIFIED",
     ),
+    # ── the affine leg deciding over a region it is not about ───────────────
+    Control(
+        name="vacuous-refutation",
+        nodeid=f"{_ORACLE}::test_a_refuted_is_false_at_some_admitted_point",
+        kind="commit",
+        at="8106a55",
+        why=(
+            "`affine.refine_propagation` declined only on `coverage."
+            "constrained`, which a DROPPED assume never raises, so the "
+            "refinement judged over the DECLARED boxes — a superset of the "
+            "assumed region — and re-minted a violation the interval leg had "
+            "withheld. Measured at 8106a55: `assume(jnp.all(x >= 2.0))` over "
+            "(-1.0, 1.0) is UNKNOWN at refine=None and REFUTED at "
+            "refine='affine'. Fixed at 463ee81."
+        ),
+        expect_message="REFUTED OVER AN EMPTY ADMITTED REGION",
+    ),
     # ── the size-0 conjunct ─────────────────────────────────────────────────
     Control(
-        name="vacuous-conjunct",
+        name="conjunct",
         nodeid=(
-            f"{_META}::test_a_conjunct_that_empties_the_predicate"
-            "_says_what_it_says_alone"
+            f"{_META}::test_a_conjunct_that_adds_no_information"
+            "_adds_no_proving_power"
         ),
         kind="commit",
         at="fb34e0d",
@@ -123,19 +144,6 @@ CONTROLS = (
         ),
         expect_message="toward-VERIFIED",
     ),
-    Control(
-        name="redundant-conjunct",
-        nodeid=f"{_META}::test_a_box_implied_conjunct_does_not_add_proving_power",
-        kind="commit",
-        at="fb34e0d",
-        why=(
-            "the same size-0 narrowing, reached through the shape-preserving "
-            "conjunct rather than the emptying one. Weaker evidence than "
-            "`vacuous-conjunct` and recorded separately so that a green run "
-            "here is not read as covering that defect."
-        ),
-        expect_message="",
-    ),
     # ── reordering ──────────────────────────────────────────────────────────
     Control(
         name="reorder",
@@ -143,53 +151,35 @@ CONTROLS = (
             f"{_META}::test_reordering_statements_moves_only_what_narrowing"
             "_entitles_it_to"
         ),
-        kind="commit",
-        at="e8b9377",
-        why=(
-            "the interval leg's withhold of a definite violation was read AT "
-            "THE ASSERT, so it saw only the assumes traced above that "
-            "obligation. Transposing two independent `assert_`s therefore "
-            "moved each one between REFUTED and UNKNOWN. Fixed at d081d5f — "
-            "'an assume is a precondition on the WHOLE QUERY'."
-        ),
-        expect_message="transposed",
-    ),
-    # ── refine ──────────────────────────────────────────────────────────────
-    Control(
-        name="refine",
-        nodeid=f"{_META}::test_the_affine_refinement_never_contradicts_the_interval_leg",
         kind="mutant",
         at="HEAD",
         why=(
-            "the affine leg deciding `discharged` off the UPPER end of the "
-            "concretised slack instead of the lower end — a bound confusion, "
-            "which discharges obligations the interval leg refutes and so "
-            "produces the both-definite disagreement this property forbids. "
-            "A mutant: the affine defect this tree actually shipped (8106a55) "
-            "was UNKNOWN-vs-REFUTED, which this property permits, and is "
-            "covered by `vacuous-refutation` instead."
+            "an `assert_` narrowing the environment the way an `assume` does "
+            "— the assume/assert confusion — makes two adjacent, independent "
+            "obligations order-dependent: `assert_(x >= 0.5); assert_(x >= "
+            "0.0)` gives ('unknown', 'discharged') in one order and "
+            "('unknown', 'unknown') in the other. A MUTANT, and deliberately "
+            "so: the reordering defect this tree shipped (e8b9377, fixed at "
+            "d081d5f) is only visible when two asserts are permuted ACROSS an "
+            "intervening assume, and asserting invariance under THAT "
+            "permutation is unsound today, because narrowing is now "
+            "deliberately forward-scoped. This property would not have caught "
+            "that defect, and says so."
         ),
         mutation=Mutation(
-            path="src/stelling/affine.py",
-            old="    n_true = sum(1 for lo, _ in ranges if _element_true(lo))",
-            new="    n_true = sum(1 for _, hi in ranges if _element_true(hi))",
+            path="src/stelling/propagate.py",
+            old=(
+                '        if eqn.primitive == "stelling_assert":\n'
+                "            if self.unforced_depth == 0:"
+            ),
+            new=(
+                '        if eqn.primitive == "stelling_assert":\n'
+                '            if self.assume_mode == "constrain" and eqn.invars:\n'
+                '                self._assume_constrain(eqn, "assert")\n'
+                "            if self.unforced_depth == 0:"
+            ),
         ),
-        expect_message="contradict",
-    ),
-    Control(
-        name="vacuous-refutation",
-        nodeid=f"{_ORACLE}::test_a_refuted_is_false_at_some_admitted_point",
-        kind="commit",
-        at="8106a55",
-        why=(
-            "`affine.refine_propagation` declined only on `coverage."
-            "constrained`, which a DROPPED assume never raises, so the "
-            "refinement judged over declared boxes that are a superset of the "
-            "assumed region and re-minted a violation the interval leg had "
-            "withheld — REFUTED over an empty assumed region. Fixed at "
-            "463ee81."
-        ),
-        expect_message="REFUTED",
+        expect_message="transposed",
     ),
     # ── widening ────────────────────────────────────────────────────────────
     Control(
@@ -202,14 +192,12 @@ CONTROLS = (
         at="HEAD",
         why=(
             "interval multiplication over two corners instead of four is "
-            "non-monotone in the input box: x ∈ [-0.4, 0.5] gives [0.16, "
-            "0.25] for x*x and leaves `x*x >= 0.25` UNKNOWN, while WIDENING "
-            "to x ∈ [-1.0, 0.5] gives [0.25, 1.0] and DISCHARGES it. No "
-            "historical commit carries a non-monotone domain — the first "
-            "spike ran this property over 6000 examples and it passed — so "
-            "the control is a mutant and is labelled as one."
+            "non-monotone in the input box: x*x >= 0.5 over x in [-1.0, 0.5] "
+            "gives [0.25, 1.0] and stays UNKNOWN, while WIDENING to "
+            "[-4.0, 3.5] gives [4.0, 12.25] and DISCHARGES it. A mutant, for "
+            "the same reason as `oracle-masked`, and labelled as one."
         ),
-        mutation=Mutation(
+    mutation=Mutation(
             path="src/stelling/interval.py",
             old=(
                 "        products = (_prod(alo, blo), _prod(alo, bhi), "
@@ -230,7 +218,7 @@ CONTROLS = (
             "while the child wrote records with `print`. splitlines breaks on "
             "ten characters, not one, so a payload could forge the parser's "
             "last line — the terminator — while the child was truncated "
-            "mid-model-walk; and `…\\nend 4`, the final newline cut and "
+            "mid-model-walk; and `...\\nend 4`, the final newline cut and "
             "nothing else, read as a present terminator. Fixed at 8d3051a."
         ),
         expect_message="",
@@ -240,7 +228,13 @@ CONTROLS = (
         nodeid=f"{_CVC5}::TestCvcTransport::runTest",
         kind="commit",
         at="0ad22bb",
-        why="the same two defects, reached by the rule-based state machine.",
+        why=(
+            "the same two defects, reached by the rule-based state machine "
+            "without being told the record layout. It needs ~20x the flat "
+            "leg's budget to get there, which is the honest cost of stateful "
+            "search on a protocol whose record ORDER is fixed."
+        ),
+        scale=20.0,
         expect_message="",
     ),
     # ── cross-series ────────────────────────────────────────────────────────
@@ -253,7 +247,7 @@ CONTROLS = (
             "`_is_add_combiner` tested `isinstance(v, ir.ClosedJaxpr)`, and "
             "0.11 merged ClosedJaxpr into Jaxpr while 0.10.2 did not — so a "
             "scatter-add harness was VERIFIED at 6/6 equations known on "
-            "0.11.0 and UNKNOWN at 4/6 with a ⊤ scatter-add on 0.10.2, with "
+            "0.11.0 and UNKNOWN at 4/6 with a top scatter-add on 0.10.2, with "
             "TESTED_JAX_SERIES already claiming both. Fixed at 76140c2."
         ),
         series="both",

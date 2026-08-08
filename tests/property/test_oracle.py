@@ -95,7 +95,8 @@ import pytest
 pytest.importorskip("hypothesis", reason="needs hypothesis")
 jax = pytest.importorskip("jax", reason="needs jax")
 
-from hypothesis import given  # noqa: E402
+from hypothesis import example, given  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
 
 import _grammar  # noqa: E402
 import _profiles  # noqa: E402
@@ -194,12 +195,34 @@ def test_a_verified_is_true_at_every_admitted_point():
     census.require(examined=40, verified_oracle_checked=5)
 
 
+MONOTONICITY_PROBE = _grammar.Spec(
+    (_grammar.Decl("x0", (), "int8", -1, 1),),
+    (
+        _grammar.Stmt(
+            "assert",
+            ("cmp", ">=", ("bin", "mul", ("var", "x0"), ("var", "x0")),
+             ("const", 1)),
+        ),
+    ),
+)
+"""``x*x >= 1`` over ``int8 [-1, 1]``, pinned, carrying no wrappable constant.
+
+This is the residual leg's positive control in one harness: with interval
+multiplication taking only the two same-corner products — the registered
+``oracle-masked`` mutant — the image of ``x*x`` is ``[1, 1]`` and the
+obligation is DISCHARGED, while ``x = 0`` is a declared point at which it is
+false. Pinned so that the control does not depend on the search happening to
+build ``x*x`` against a constant inside 500 examples.
+"""
+
+
 def test_a_verified_is_true_at_every_admitted_point_outside_the_wrap_class():
     """The residual, and the thing that keeps the xfail above honest."""
     census = _runner.Census("oracle/masked")
 
     @_profiles.current().settings(500)
     @given(_grammar.integer_specs())
+    @example(MONOTONICITY_PROBE)
     def search(spec):
         msg = _oracle_body(spec, census, mask_wrap=True)
         if msg is not None:
@@ -212,50 +235,69 @@ def test_a_verified_is_true_at_every_admitted_point_outside_the_wrap_class():
 # ── the other side of the same coin ──────────────────────────────────────────
 
 
+VACUOUS_REFUTATION_EXAMPLE = _grammar.Spec(
+    (_grammar.Decl("x0", (3,), "float64", -1.0, 1.0),),
+    (
+        _grammar.Stmt("assume", ("all", ("cmp", ">=", ("var", "x0"),
+                                         ("const", 2.0)))),
+        _grammar.Stmt("assert", ("cmp", ">=", ("var", "x0"), ("const", 5.0))),
+    ),
+)
+"""The shape the affine refinement got wrong, pinned.
+
+`jnp.all(...)` around the comparison is load-bearing and not decoration: the
+plain form `assume(x0 >= 2.0)` is refused outright with
+``UnsatisfiableAssumptionError``, so the defect is only reachable through the
+form the assume is DROPPED on. Measured at 8106a55: ``refine=None`` UNKNOWN,
+``refine="affine"`` REFUTED, over a region the harness's own precondition
+leaves empty. Pinned as an ``@example`` because the search over this grammar
+does not construct it — that is recorded rather than hidden, and it is the
+honest reading of what a generated corpus reaches.
+"""
+
+
 def test_a_refuted_is_false_at_some_admitted_point():
     """A ``violated-over-set`` must not be minted over a region it is not about.
 
     ``violated-over-set`` says the obligation is definitely false **for every
-    element of the declared set**. Two ways that is wrong, and both are
-    checkable exactly on the integer grammar:
+    element of the declared set**. Two ways that is wrong:
 
-    * there is an admitted point at which the predicate, as written, is TRUE.
-      Then the obligation is not violated over the set, whatever else it is.
-      This is the one-sided direction: finding such a point refutes a REFUTED,
-      finding none confirms nothing;
     * the admitted set is EMPTY. ``∀ x ∈ ∅`` is vacuously true, so nothing is
       violated. This is a *ruling* rather than a theorem — over an empty set
       both a discharge and a violation are vacuously supportable — and it is
-      this project's own: commit 463ee81, "the affine refinement may not
-      restore what the interval leg withheld", fixed exactly this shape, where
-      the refinement judged over the declared boxes rather than the assumed
-      region and re-minted a violation the interval leg had deliberately
-      withheld.
+      this project's own: 463ee81, "the affine refinement may not restore what
+      the interval leg withheld", fixed exactly this shape;
+    * there is an admitted point at which the predicate, as written, is TRUE.
+      One-sided: finding such a point refutes a REFUTED; finding none confirms
+      nothing.
 
-    Both ``refine`` legs are checked, because the defect the second clause
-    describes lived in the refinement and is invisible at ``refine=None``.
+    Emptiness is decided EXACTLY, two ways, and never guessed: by enumerating
+    the declared box in Python integers where the harness is integral, and by
+    intersecting half-spaces with the declared box where it is float and the
+    assumes are simple comparisons. Where neither applies the example is
+    discarded — a refusal to answer, not a silent "no".
 
-    Harnesses carrying an out-of-dtype-range constant are masked: under the
-    open wrap defect the exact reading and the traced program are different
-    programs, and a REFUTED reported here would be a second sighting of that
-    defect rather than a finding about refutation.
+    **Both ``refine`` legs are checked**, and that is where the defect lived:
+    at ``refine=None`` this harness is UNKNOWN, and only the refinement mints
+    the violation.
+
+    Harnesses carrying an out-of-dtype-range constant are masked, because under
+    the open wrap defect the exact reading and the traced program are different
+    programs, and a report here would be a second sighting of that defect
+    rather than a finding about refutation.
     """
     census = _runner.Census("oracle/refuted")
 
     @_profiles.current().settings(250)
-    @given(_grammar.integer_specs())
+    @given(st.one_of(_grammar.integer_specs(), _grammar.general_specs()))
+    @example(VACUOUS_REFUTATION_EXAMPLE)
     def search(spec):
         census.draw()
         if _grammar.wrappable_constants(spec):
             census.skip("masked: carries a wrappable constant")
             return
-        if not _grammar.exact_supported(spec):
-            census.skip("no exact oracle for this shape")
-            return
-        points = _grammar.declared_points(spec)
-        if points is None:
-            census.skip("box too large to enumerate")
-            return
+        exact = _grammar.exact_supported(spec)
+        points = _grammar.declared_points(spec) if exact else None
         for leg in (None, "affine"):
             outcome = _runner.run(spec, census=census, refine=leg)
             if outcome is None:
@@ -267,14 +309,25 @@ def test_a_refuted_is_false_at_some_admitted_point():
             for i, status in enumerate(outcome.obligations):
                 if status != "violated-over-set":
                     continue
+                admitted = None
+                if points is not None:
+                    admitted = _grammar.admitted_for_obligation(spec, i, points)
+                    empty = not admitted
+                else:
+                    empty = _grammar.simple_admitted_region_is_empty(spec, i)
+                    if empty is None:
+                        census.skip("emptiness not exactly decidable here")
+                        continue
                 census.tag("refuted_oracle_checked")
-                admitted = _grammar.admitted_for_obligation(spec, i, points)
-                assert admitted, (
-                    f"REFUTED OVER AN EMPTY ADMITTED SET (refine={leg!r}): "
+                assert not empty, (
+                    f"REFUTED OVER AN EMPTY ADMITTED REGION (refine={leg!r}): "
                     f"obligation {i} is 'violated-over-set', but the harness's "
                     f"own preconditions admit no point of the declared box, so "
-                    f"the obligation is vacuously true\n{spec.render()}"
+                    f"the obligation is vacuously TRUE and nothing is violated"
+                    f"\n{spec.render()}"
                 )
+                if admitted is None:
+                    continue
                 true_at = [
                     p
                     for p in admitted
@@ -288,4 +341,4 @@ def test_a_refuted_is_false_at_some_admitted_point():
                 )
 
     search()
-    census.require(examined=60)
+    census.require(examined=60, refuted_oracle_checked=1)
