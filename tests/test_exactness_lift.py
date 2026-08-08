@@ -638,6 +638,21 @@ def test_the_TRUE_direction_is_ONE_SIDED_too(monkeypatch):
     certificate closed, carrying an obligation of every kind at once:
     the violated one must come BACK, and the discharged and the merely
     undecided ones must not move a step.
+
+    **This one is a weaker finding than the two above, and the difference
+    is worth stating.** ``M4``/``M5``/``M6`` — the private-copy mutants —
+    are invisible to the WHOLE SUITE: 2398 passed, 2 skipped, 0 failed.
+    The mutant this test was built against (``M7``, a leg reading a
+    granted answer as licence to DECIDE rather than only to stop
+    withholding) is invisible to THIS FILE — 14 of 14 pre-existing tests
+    pass on it — but not to the suite, which reddens 2 tests elsewhere
+    (``test_the_certificate_reaches_the_affine_leg_as_a_LIVE_argument``
+    and ``test_solver_dispatch.py::test_inert_relational_assume_escalates_normally``).
+    So what this closes is a hole in the ROUTING FILE, not a hole in the
+    tree: the property the shared point's own contract spends its words on
+    is now owned where that contract is pinned, instead of being caught
+    incidentally by two tests that are about something else and could
+    stop covering it at any time.
     """
     q = _withheld_run_with_all_three_outcomes()
     _close_the_certificate(monkeypatch)

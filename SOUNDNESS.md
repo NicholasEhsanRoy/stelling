@@ -2948,28 +2948,46 @@ verdicts:
   OTHER witness search is not**, and the sentence used to read as though
   the module had one. `_reachability_witnesses`, the branch-reachability
   probe, still runs `for k in range(_PROBE_COUNT)` — 16 whole
-  propagations — at any declared size: measured on this tree (jax 0.11.0,
-  load 0.49, a violation inside a `lax.cond` branch) `propagate` costs
-  **480.3 ms against an 18.8 ms bare walk at n = 16384**, four times the
-  size cap below, which is the same 96%-of-the-pipeline shape the cap was
-  added to fix. **The two are MUTUALLY EXCLUSIVE, so no query pays for
-  both**: `_region_witness` gets past its gate only when
+  propagations — at any declared size. Measured on this tree
+  (`scratchpad/pin/f6_repro.py time`, jax 0.11.0, load 1.18 before and
+  1.16 after, a violation inside a `lax.cond` branch), `propagate` against
+  a bare walk of the same query:
+
+  | n | propagate | bare walk | ratio | reach probes |
+  |---|---|---|---|---|
+  | 16 | 1.6 ms | 0.1 ms | 16.1x | 16 |
+  | 256 | 9.7 ms | 0.5 ms | 21.0x | 16 |
+  | 4096 | 126.6 ms | 6.2 ms | 20.4x | 16 |
+  | 16384 | **549.9 ms** | **25.7 ms** | **21.4x** | 16 |
+
+  n = 16384 is four times the size cap below, the probe count does not
+  move, and that is the same shape the certificate's cap was added to fix.
+
+  **The two are MUTUALLY EXCLUSIVE, so no query pays for both**:
+  `_region_witness` gets past its gate only when
   `narrowing_uncertified or assume_dropped`, `narrowing_uncertified` is
   set in the same `if narrowed:` block that sets `any_constrained`, and
   `any_constrained or assume_dropped` is exactly when
-  `_reachability_witnesses` returns ∅ before probing. Measured over
-  `scratchpad/pin/corpus_pin.py`, 380 propagations: **0 pay for both, and
-  the worst combined probe count is 16** — not `16 +
-  _certificate_probe_count(n)`. The same fact is why they cannot
-  contradict each other. **The older search is deliberately left uncapped
-  on this branch**, because capping it moves verdicts: over 21
-  branch-violation rows at n = 4 … 16384, a `_certificate_probe_count`
-  cap loses **3 of 15** reachability keys — the `x[0] > x[1]` shape at
-  n ≥ 4096, first certified by probe 3 (the plain anchors put every
-  element at the same value and cannot witness a relation between two of
-  them) against a budget floor of exactly 3 — and each loss is a
-  `violated-over-set` → `unknown` move. Safe direction, real cost,
-  measured rather than assumed away. The bounds that DO apply, to the new
+  `_reachability_witnesses` returns ∅ before probing. That is a structural
+  argument, so it is also measured: **508 propagations** over
+  `scratchpad/pin/corpus_pin.py` and a size grid built to reach both —
+  including 32 rows that put a branch-scoped violation beside a narrowing
+  and a dropped assume — **0 pay for both, worst combined probe count 16**
+  (worst for either search alone is also 16). Were they NOT exclusive the
+  sum would peak at **32** probes, at small n where the certificate's
+  budget is loosest — not at the size cap, where it is 16 + 3. The same
+  exclusivity is why they cannot contradict each other: the certificate
+  can only fire on runs where the reachability search certifies nothing.
+  **The older search is deliberately left uncapped on this branch**,
+  because capping it moves verdicts: over 21 branch-violation rows at
+  n = 4 … 16384, scored on the keys the branch pass ASKS about rather than
+  the ones it happens to find, a `_certificate_probe_count` cap loses
+  **3 of 15** — the `x[0] > x[1]` guard at n ≥ 4096, first certified by
+  probe index 3 (the plain anchors put every element at the same value and
+  cannot witness a relation between two of them) against a budget floor of
+  exactly 3 — and each loss is a `violated-over-set` → `unknown` move.
+  Safe direction, real cost, measured rather than assumed away. The bounds
+  that DO apply, to the new
   search only: a size cap (`_CERT_MAX_ELEMENTS = 4096`) stops it entirely
   above
   it; a probe budget in element-probes

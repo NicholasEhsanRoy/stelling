@@ -57,7 +57,10 @@ def _branch_violation(n, claim=lambda v: v > 5.0):
             jax.lax.cond(
                 x[0] >= 0.0,
                 lambda v: assert_(claim(v)),
-                lambda v: assert_(v > -9.0),
+                # the SAME shape, definitely true: `cond` requires equal
+                # output types, and an inert filler in the other branch is
+                # what keeps the violation branch-scoped
+                lambda v: assert_(claim(v) | True),
                 x,
             ),
         )
@@ -239,27 +242,80 @@ def timing() -> None:
 
 def capcost() -> None:
     """What capping the OLDER search with `_certificate_probe_count`
-    would cost in VERDICTS: the reachability keys it would stop finding.
+    would cost in VERDICTS.
 
-    Reported per row as: the probe index that first certifies each key,
-    against the budget the cap would grant.
+    The accounting is over the keys the branch pass ASKS about --
+    `p.branch_violations`, the violations recorded inside a cond branch --
+    and not over the keys the search happened to find.  A key that is
+    asked and never certified within the budget is a `violated-over-set`
+    that stays `unknown`: the loss is exactly what a cap would cause, and
+    counting found-keys instead would miss every one of them by
+    construction.
+
+    Three guard shapes, because WHICH probe first certifies a key is the
+    whole question:
+
+      corner_guard      a guard on one element; the plain corner anchors
+                        decide it immediately
+      sum_guard         a guard on a SUM, which no plain corner satisfies
+      relational_guard  a guard relating two ELEMENTS, which the plain
+                        anchors cannot witness at all -- they put every
+                        element at the same value
     """
     print(f"stelling: {stelling.__file__}")
     print(f"jax:      {jax.__version__}")
-    shapes = {
-        "corner_guard": lambda v: v[0] > 5.0,
-        "sum_guard": lambda v: jnp.sum(v) > 5.0,
-        "relational_guard": lambda v: v[0] > v[1],
-    }
-    print(f"{'row':<26}{'n':>7}{'cap':>5}{'keys':>6}"
-          f"{'first_idx':>13}{'lost':>6}")
-    asked = lost = 0
+
+    def corner_guard(n):
+        def h():
+            x = any_array((n,), "float64", (-1.0, 1.0))
+            return jax.lax.cond(
+                x[0] >= 0.0,
+                lambda v: assert_(v > 5.0),
+                lambda v: assert_(v > -9.0),
+                x,
+            )
+
+        return h
+
+    def sum_guard(n):
+        def h():
+            x = any_array((n,), "float64", (-1.0, 1.0))
+            return jax.lax.cond(
+                (jnp.sum(x) >= -0.25) & (jnp.sum(x) <= 0.25),
+                lambda v: assert_(jnp.sum(v) > 5.0),
+                lambda v: assert_(jnp.sum(v) > -9.0 * n),
+                x,
+            )
+
+        return h
+
+    def relational_guard(n):
+        def h():
+            x = any_array((n,), "float64", (-1.0, 1.0))
+            return jax.lax.cond(
+                x[0] > x[1],
+                lambda v: assert_(v[0] > 5.0),
+                lambda v: assert_(v[0] > -9.0),
+                x,
+            )
+
+        return h
+
+    print(f"{'row':<24}{'n':>7}{'cap':>5}{'asked':>7}"
+          f"{'first_idx':>16}{'lost':>6}")
+    asked_total = lost_total = 0
     for n in (4, 64, 256, 1024, 4096, 8192, 16384):
-        for sname, claim in shapes.items():
-            closed = trace(_branch_violation(n, claim))
-            p = P.propagate(closed)
-            cap = P._certificate_probe_count(n)
-            firsts = {}
+        for sname, mk in (("corner_guard", corner_guard),
+                          ("sum_guard", sum_guard),
+                          ("relational_guard", relational_guard)):
+            closed = trace(mk(n))
+            walk = P._Propagator("constrain", "real")
+            walk.run(closed.jaxpr, list(closed.consts), [])
+            if walk.any_constrained or walk.assume_dropped:
+                print(f"{sname + '_n' + str(n):<24}{n:>7}"
+                      f"   -- search short-circuits")
+                continue
+            first = {}
             for k in range(P._PROBE_COUNT):
                 probe = P._Propagator("constrain", "real")
                 probe.pin = k
@@ -268,18 +324,23 @@ def capcost() -> None:
                 except Exception:  # noqa: BLE001
                     continue
                 for key in probe.certain_reached:
-                    firsts.setdefault(key, k)
-            real = P._reachability_witnesses(
-                closed, p, assume_mode="constrain", semantics="real"
+                    first.setdefault(key, k)
+            asked = {key for _i, key in walk.branch_violations}
+            cap = P._certificate_probe_count(n)
+            idxs = sorted(
+                (first.get(key) if first.get(key) is not None else -1)
+                for key in asked
             )
-            idxs = sorted(firsts.get(key, -1) for key in real)
-            n_lost = sum(1 for i in idxs if i >= cap)
-            asked += len(real)
-            lost += n_lost
-            print(f"{sname + '_n' + str(n):<26}{n:>7}{cap:>5}{len(real):>6}"
-                  f"{str(idxs):>11}{n_lost:>6}")
-    print(f"\nreachability keys asked: {asked}; "
-          f"lost under a _certificate_probe_count cap: {lost}")
+            lost = sum(
+                1 for key in asked
+                if first.get(key) is None or first[key] >= cap
+            )
+            asked_total += len(asked)
+            lost_total += lost
+            print(f"{sname + '_n' + str(n):<24}{n:>7}{cap:>5}"
+                  f"{len(asked):>7}{str(idxs):>16}{lost:>6}")
+    print(f"\nbranch-violation keys asked: {asked_total}; lost under a "
+          f"_certificate_probe_count cap: {lost_total}")
 
 
 if __name__ == "__main__":

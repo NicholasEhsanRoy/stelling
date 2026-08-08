@@ -7365,12 +7365,12 @@ def _withhold_uncertified_refutations(p) -> None:
 # `_region_witness` is bounded above; `_reachability_witnesses` is NOT —
 # it still runs `for k in range(_PROBE_COUNT)`, 16 full propagations, at
 # any declared size whatever. Measured on this tree (jax 0.11.0, load
-# 0.49, a violation inside a `lax.cond` branch;
-# `scratchpad/pin/RESULTS.txt`): `propagate` costs
-# 1.7/8.4/121.1/480.3 ms at n = 16/256/4096/16384 against a bare walk of
-# 0.1/0.4/4.7/18.8 ms — 25.5x, and 96% of the propagation, at n = 16384,
-# which is four times the size cap above. That is the same shape as the
-# 469 ms/23 ms number this cap was added to fix.
+# 1.18 before and 1.16 after, a violation inside a `lax.cond` branch;
+# `scratchpad/pin/f6_repro.py time`): `propagate` costs
+# 1.6/9.7/126.6/549.9 ms at n = 16/256/4096/16384 against a bare walk of
+# 0.1/0.5/6.2/25.7 ms — 21.4x at n = 16384, which is four times the size
+# cap above, with the probe count unmoved at 16 throughout. That is the
+# same shape as the 469 ms/23 ms number this cap was added to fix.
 #
 # THEY ARE MUTUALLY EXCLUSIVE, so no query pays for both. `_region_witness`
 # gets past its own gate only when `narrowing_uncertified or
@@ -7380,9 +7380,13 @@ def _withhold_uncertified_refutations(p) -> None:
 # which `_reachability_witnesses` returns the empty set BEFORE probing.
 # Contrapositive: a run that pays the 16 probes is a run whose certificate
 # search declined at its gate for 0. MEASURED over
-# `scratchpad/pin/corpus_pin.py`, 380 propagations: **0 pay for both**,
+# `scratchpad/pin/corpus_pin.py` plus a size grid built to reach both,
+# **508 propagations** including 32 rows that put a branch-scoped
+# violation beside a narrowing and a dropped assume: **0 pay for both**,
 # and the worst combined probe count is **16**, not `16 +
-# _certificate_probe_count(n)`. The two also cannot contradict each other
+# _certificate_probe_count(n)` — which, were they not exclusive, would
+# peak at **32** at small n, where the certificate's budget is loosest,
+# and not at the size cap. The two also cannot contradict each other
 # for the same reason — the certificate can only fire on runs where the
 # reachability search certifies nothing, so a branch-scoped violation is
 # never restored by it (`test_the_certificate_can_never_restore_a_branch_
@@ -7390,7 +7394,11 @@ def _withhold_uncertified_refutations(p) -> None:
 #
 # WHY THE OLDER SEARCH IS NOT CAPPED HERE. Applying
 # `_certificate_probe_count` to it would move verdicts, which this branch
-# may not do. Measured over 21 branch-violation rows at n = 4 … 16384: 15
+# may not do. Measured over 21 branch-violation rows at n = 4 … 16384,
+# scored on the keys the branch pass ASKS about (`p.branch_violations`)
+# and not on the ones it happens to find — a key asked and never
+# certified within the budget is exactly a loss, and a found-key score
+# would miss every one of them by construction: 15
 # reachability keys asked, **3 lost** — the `x[0] > x[1]` shape at
 # n >= 4096, whose first certifying probe is index 3 (the first
 # per-element probe; the plain anchors put every element at the same
@@ -7669,10 +7677,11 @@ def _reachability_witnesses(closed, p, *, assume_mode, semantics):
     **THIS SEARCH IS NOT CAPPED**, and the bounds stated at
     :data:`_CERT_MAX_ELEMENTS` are the OTHER search's. It runs the full
     ``_PROBE_COUNT`` grid — 16 whole propagations — at any declared size:
-    measured, 480.3 ms against an 18.8 ms bare walk at n = 16384. It never
+    measured, 549.9 ms against a 25.7 ms bare walk at n = 16384. It never
     runs on the same query as :func:`_region_witness` (the guard above is
     the complement of that function's gate, so the worst combined cost is
-    16 probes and not 16 plus a budget), and the reasons it is left
+    16 probes and not 16 plus a budget — measured 0 of 508 propagations
+    paying for both), and the reasons it is left
     uncapped — a cap costs 3 of 15 measured reachability keys, i.e. moves
     verdicts — are recorded at :data:`_CERT_MAX_ELEMENTS`.
     """
