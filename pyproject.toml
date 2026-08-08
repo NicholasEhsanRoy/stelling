@@ -141,6 +141,13 @@ packages = ["src/stelling"]
 include = [
   "/src",
   "/tests",
+  # `/tools` ships because a file that DOES ship references it: the property
+  # suite's README, under `/tests/property/`, tells a reader to run
+  # `tools/property_check.py`. A shipped instruction pointing at a path the
+  # artefact does not contain is a claim defect waiting to be found by
+  # somebody who trusted it. `--tree` works from an unpacked sdist; `--rev`
+  # and `--controls` need a git checkout, and the README says so.
+  "/tools",
   "/docs",
   "/corpus",
   "/design",

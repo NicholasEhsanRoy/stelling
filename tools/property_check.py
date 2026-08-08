@@ -157,7 +157,8 @@ def _cross_env(args):
 
 
 def check_controls(args) -> int:
-    wanted = [pc.by_name(args.control)] if args.control else list(pc.CONTROLS)
+    wanted = ([pc.by_name(n) for n in args.control]
+              if args.control else list(pc.CONTROLS))
     failures = []
     for control in wanted:
         if control.series == "both" and not args.other_python:
@@ -214,7 +215,8 @@ def main(argv=None) -> int:
     p.add_argument("--mutant", help="also apply this registered control's mutation")
     p.add_argument("--controls", action="store_true",
                    help="run every positive control and assert each FAILS")
-    p.add_argument("--control", help="run one positive control by name")
+    p.add_argument("--control", action="append",
+                   help="run one positive control by name (repeatable)")
     p.add_argument("--select", action="append",
                    help="pytest target(s); default is the whole property suite")
     p.add_argument("--profile", default="ci", choices=("ci", "dev", "nightly"))
