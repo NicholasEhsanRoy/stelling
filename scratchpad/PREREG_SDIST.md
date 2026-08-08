@@ -360,3 +360,148 @@ Left alone deliberately: the obvious repair (a `WITHHELD["PKG-INFO"]` entry)
 puts a generated artefact in a dict whose every other key is a path in the
 repository, and that is a decision for whoever owns the allowlist, not a
 drive-by.
+
+---
+
+# REPAIR PASS — the audit's seven, measured before repaired
+
+Appended below the record above; nothing above this line is edited. Written by
+a second agent, on top of 10120d9, against the blinded audit's
+SHOULD-LAND-WITH-FIXES verdict. **Every finding was reproduced before it was
+touched**, in standalone throwaway repositories built with `git archive` +
+`git init` and never by mutating a shared worktree. Environment as measured:
+hatchling **1.31.0** (what `uv build --offline` resolves), pathspec 1.1.1, git
+2.43.0, reuse 6.2.0, jax 0.11.0 / 0.10.2.
+
+## Reproduction — all six measurable findings CONFIRMED, none refuted
+
+Baseline for every count below: **260 members**, all of them files, all
+prefixed `stelling-0.1.0/`, no directory members.
+
+| # | finding | reproduced | measurement |
+|---|---|---|---|
+| 1 | ancestor `.hgignore` is force-included | YES | 261 members, `stelling-0.1.0/.hgignore` present, suite `8 passed` |
+| 1b | no `.git` at build root -> ancestor `.gitignore` shipped AND applied | YES | 240 members, `docs/` gone, tarball `.gitignore` == the ancestor's text |
+| 2 | checkout path matching `.gitignore` discards it all | YES | `<..>/.cache/repo` 262 members with `docs/zz_secret.log` + `docs/htmlcov/index.html`; `<..>/ok/repo` 260; `8 passed` in both |
+| 3 | `WITHHELD` ships the file anyway | YES | plant `.hgignore`: `1 failed`; move to WITHHELD: `8 passed`; build: 261, shipped |
+| 4 | false RED on tracked `docs/.hatch/note.md` | YES | `2 failed, 6 passed`, tarball 260, no `.hatch` member |
+| 4b | submodule is a TRUE red | YES | `docs/sub` named, 261 members, `stelling-0.1.0/docs/sub/payload.md` present |
+| 5 | both non-vacuity assertions unpinned | YES | delete `assert not unseen` -> `8 passed`; `assert True or tracked` -> `8 passed` |
+| 6 | stale reuse figure | YES | 9c37995 284/284, 10120d9 285/285, e8b9377 (`main`) 292/292 |
+| 7 | the prose claim is incomplete | YES | hatchling reads `.hgignore` too, and force-includes both |
+| PKG-INFO | decision test fails from an unpacked sdist | YES | `1 failed, 6 passed, 1 skipped` |
+
+The audit's realism list for finding 2 was checked pattern-by-pattern against
+this repository's own `.gitignore` and reproduces exactly: `~/.cache/x/stelling`,
+`~/lib/...`, `/var/lib/ci/...`, `/srv/dist/...`, `~/.env/...` all match;
+`/home/runner/work/stelling/stelling` does not. Adding `~/build/...`,
+`~/venv/...` and `/opt/target/...`, which also match, and `~/site/...`, which
+does not (`/site` is root-anchored). GitHub-hosted CI is safe; a developer box
+may not be.
+
+## Controls, per fix
+
+**Fix 1 — force-include.** POSITIVE: ancestor `.hgignore` planted above a lab
+checkout, `--basetemp` set inside the plant so the parity copy inherits it —
+`2 failed`, `test_no_untracked_file_anywhere_would_ship` naming
+`.hgignore <- <parent>/.hgignore  (OUTSIDE the tree)` and
+`test_the_untracked_scan_agrees_with_the_tarball` naming it as a member with
+no counterpart. NEGATIVE: same tree, no plant — `12 passed`. BLINDING, and
+this is the part that matters: the two halves are INDEPENDENT. Blind
+`_force_included` to `{}` and the parity test still reddens; delete the parity
+orphan assertion and the scan test still reddens.
+
+**Fix 2 — checkout path.** POSITIVE: lab checkout at `<..>/.cache/repo` with
+the two plants — `2 failed`, the dedicated test naming the path and the scan
+naming `docs/htmlcov/index.html` and `docs/zz_secret.log` as would-ship (the
+scan now models the bail-out too, so it is right for the first time at that
+path). NEGATIVE: `<..>/ok/repo` — `12 passed`. BLINDING: neuter `_check_ignore`
+to `set()` and the dedicated test's own instrument-liveness assertion fires
+before its verdict is read, so a dead instrument cannot report "safe".
+
+**Fix 3 — WITHHELD.** POSITIVE, both branches of the false dichotomy: root
+`.hgignore` undecided -> `AssertionError: ... in none of pyproject's sdist
+allowlist, WITHHELD or GENERATED_IN_DISTRIBUTION: .hgignore`; moved into
+WITHHELD -> `AssertionError: these root paths are recorded in WITHHELD and
+hatchling FORCE-INCLUDES them`. The escape hatch is closed. It also caught a
+live entry on its first run: `.gitignore` was in WITHHELD *and* in the
+allowlist *and* force-included, which is the exact shape it exists to catch.
+NEGATIVE: unpacked sdist, `11 passed, 1 skipped` (was `1 failed, 6 passed,
+1 skipped`) — PKG-INFO taken, in `GENERATED_IN_DISTRIBUTION` rather than
+WITHHELD, because "exists only in a distribution" is not "exists here and is
+withheld".
+
+**Fix 4 — `tracked - pruned` in `walked`.** NEGATIVE (the false red):
+tracked `docs/.hatch/note.md` -> `12 passed`, 260 members, no `.hatch` member.
+POSITIVE (the true red preserved): submodule at `docs/sub` -> still red,
+`docs/sub` named, 261 members, `docs/sub/payload.md` shipped.
+
+**Fix 5 — pinning.** Three tests, no monkeypatching: an empty index, a walk
+blinded by deleting the one tracked file from disk, and a classifier asked to
+separate three inputs. Each of the old mutations now reddens.
+
+**Blinding matrix.** Eight blindings applied to the repaired module in lab
+repositories, each run as the whole file; every one RED, and each caught by
+something other than itself:
+
+| blinding | caught by |
+|---|---|
+| `_walked_files` -> `set()` | scan + parity |
+| `_tracked_files` -> `_walked_files` | parity + both new pinning tests |
+| `_hatchling_excluded` -> everything | parity + classifier test |
+| `_hatchling_excluded` -> nothing | parity + classifier test |
+| parity `members` -> `[]` | parity |
+| `_check_ignore` -> `set()` | checkout-path + parity + classifier |
+| `_force_included` -> `{}` (+ancestor `.hgignore`) | parity |
+| parity orphan assertion deleted (+ancestor `.hgignore`) | scan + parity |
+
+## Figures
+
+* sdist **260 members before, 260 after**; the repair adds no distributed file.
+* `tests/test_sdist_contents.py`: **8 -> 12** tests.
+* Whole suite: **2297 passed, 2 skipped -> 2301 passed, 2 skipped**, on BOTH
+  series (jax 0.11.0 and jax 0.10.2), measured in this checkout with
+  `PYTHONPATH` verified against `stelling.__file__`.
+* `--collect-only`: 2299 -> 2303 ids, diff is exactly four ADDED lines and no
+  removals or renames —
+  `test_the_checkout_path_does_not_disable_the_exclusions`,
+  `test_the_exclusion_classifier_discriminates`,
+  `test_the_scan_refuses_a_blinded_walk`,
+  `test_the_scan_refuses_an_empty_index`.
+* `reuse lint`: 285/285 exit 0 before, 285/285 exit 0 after (no file added).
+* No new skip reason: both new skips reuse `"needs git"`, already registered.
+
+## Judgements the audit asked for
+
+**PKG-INFO: taken.** It is the same dict and the same question, and leaving it
+meant the suite could not be run green from the artefact it guards. It is not
+in WITHHELD — a dict that means "not distributed" cannot also hold a key that
+means "nothing but distributed" without becoming unreadable.
+
+**The no-`uv` skip: it can be made noisier, and should not be made a failure.**
+On a machine without `uv` the parity test skips and the scan runs, and the
+scan is a MODEL — the `git check-ignore` / `pathspec` divergence on 7 of 22
+pattern shapes has no guard at all in that configuration, and every one of
+those divergences was in the smuggle direction. Turning the skip into an error
+would be flaky in exactly the environment where it matters least (a
+contributor's first `pytest`) and is not proposed. What is proposed, and NOT
+done here because it touches the CI files a concurrent pass owns: the release
+workflow already builds the sdist, so it is the place to assert that `uv` was
+present — a job-level `uv --version` step whose absence fails the release
+rather than the developer. Recorded as the next pass's, not silently dropped.
+
+## Still not fixed, and deliberately
+
+* `git check-ignore` vs `pathspec` on 7 of 22 pattern shapes. Not made worse:
+  the one new use of the instrument (the checkout-path test) was cross-checked
+  against `pathspec.GitIgnoreSpec.match_file` on 13 candidate checkout paths
+  and agreed on all 13.
+* A `hatch_build.py` build hook can force-include anything at build time and
+  no model here can know what. This project has none; the parity test is what
+  would notice one. Written into the module docstring rather than left implicit.
+* **SUSPECTED, not measured**: that the `check-ignore`/`pathspec`
+  correspondence used by `_vcs_exclusions_are_discarded` holds for pattern
+  shapes outside the 13 paths tried. The known divergence classes (negation
+  re-including inside an excluded directory, POSIX character classes) do not
+  appear in this repository's `.gitignore`, but that is an observation about
+  today's file.
