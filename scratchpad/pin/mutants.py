@@ -179,7 +179,43 @@ M_TWO_SIDED_GRANT = [
     ),
 ]
 
+# The certificate branch's own `M2_inline_setref_interval` /
+# `M3_inline_setref_affine`, transcribed EXACTLY from
+# `scratchpad/cert/apply_mutant.py` so their published "reddens exactly
+# one test each" can be re-run rather than quoted.  Neither inlines
+# anything: each KEEPS the call and drops the third keyword argument,
+# lifting the withholding locally beside a call that still happens --
+# which is why the names are wrong and the prose beside them is right.
+M_LOCAL_LIFT_INTERVAL = [
+    (
+        "src/stelling/propagate.py",
+        "    if exactness.certifies_set_refutation(\n"
+        "        nonemptiness_certified=not p.narrowing_uncertified,\n"
+        "        assume_dropped=p.assume_dropped,\n"
+        "        region_inhabited=p.region_inhabited,\n"
+        "    ):\n"
+        "        return\n"
+        "    mechanism = _uncertified_mechanism(p)",
+        "    if p.region_inhabited or exactness.certifies_set_refutation(\n"
+        "        nonemptiness_certified=not p.narrowing_uncertified,\n"
+        "        assume_dropped=p.assume_dropped,\n"
+        "    ):\n"
+        "        return\n"
+        "    mechanism = _uncertified_mechanism(p)",
+    ),
+]
+
+M_LOCAL_LIFT_AFFINE = [
+    (
+        "src/stelling/affine.py",
+        "                region_inhabited=propagation.region_inhabited,\n            )\n        ):",
+        "            )\n            and not propagation.region_inhabited\n        ):",
+    ),
+]
+
 MUTANTS = {
+    "M2_local_lift_interval": M_LOCAL_LIFT_INTERVAL,
+    "M3_local_lift_affine": M_LOCAL_LIFT_AFFINE,
     "M4_affine_and_private": M_AFFINE_AND,
     "M7_granted_answer_decides": M_TWO_SIDED_GRANT,
     "M5_both_and_private": M_AFFINE_AND + M_INTERVAL_AND,
