@@ -1125,8 +1125,39 @@ def _refuse_tool_import(text: str) -> None:
     The line scan is KEPT rather than replaced: it fires on an
     ``import stelling`` inside a string or a docstring, which the parse tree
     correctly does not report, and a false alarm at the point of emission is
-    the cheap direction. The tree walk is exact and catches the rest wherever
-    on the line it sits. Neither implies the other.
+    the cheap direction. Neither check implies the other.
+
+    WHAT THE TREE WALK ACTUALLY COVERS. This said "the tree walk is exact and
+    catches the rest wherever on the line it sits", and *the rest* claimed more
+    than the code does. It is exact on ``ast.Import`` and ``ast.ImportFrom``
+    and on nothing else. Measured against this function, all four of these
+    PASS BOTH CHECKS and compile::
+
+        __import__('stelling')
+        importlib.import_module('stelling')
+        exec("import stelling")
+        from . import stelling
+
+    The first two and the third genuinely reach the tool when run (measured:
+    ``__import__('stelling')`` in a standalone script imports it). The fourth
+    cannot — a reproducer is a standalone script, so a relative import raises
+    ``ImportError: attempted relative import with no known parent package``
+    (measured) — but it is still a shape this walk does not report.
+
+    NOT WIDENED, and the reason is the charter rather than inertia. This
+    refusal exists so that a future edit of :data:`_TEMPLATE` cannot
+    reintroduce an import ACCIDENTALLY; it is not a sandbox, and it cannot
+    become one, because no static check can see through ``exec`` or an
+    ``__import__`` whose argument is computed. Widening to a name-based rule
+    would buy a partial fence at a cry-wolf cost on a function that runs on
+    every emission. What IS claimed is the whole of what is enforced: no
+    ``Import`` or ``ImportFrom`` naming ``stelling`` or a ``stelling.*``
+    submodule survives here, wherever on the line it sits.
+
+    ONE THING ONLY THE TREE WALK CAN CATCH, which is why it is not merely a
+    superset argument: ``import ﬅelling`` (U+FB05) is NFKC-normalised to
+    ``stelling`` by the parser, so the walk reports it (measured) and no line
+    scan over the source text ever could.
 
     The tree walk runs only when the text parses; when it does not, the
     caller's own :func:`compile` reports that with its own message, and this

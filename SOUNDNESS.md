@@ -1958,9 +1958,11 @@ verdicts:
   endings, which no platform's `print` default produces and `_cvc5_driver`
   never sets. **It is not landed here, and the reason is evidence cost, not
   behaviour** — saying otherwise would repeat the defect being corrected.
-  Measured: applying it makes the suite **16 failed, 2451 passed, 2 skipped**,
-  all 16 in `tests/test_solver_audit_findings.py` and all 16 the same
-  `AttributeError: 'bytes' object has no attribute 'encode'` at
+  Measured: applying it makes **16 TESTS** fail — 16 is the durable figure and
+  its unit is tests; the rest of that run was 2451 passed and 2 skipped of
+  2469 collected, a record of this commit that will move with the next added
+  test. All 16 are in `tests/test_solver_audit_findings.py` and all 16 are the
+  same `AttributeError: 'bytes' object has no attribute 'encode'` at
   `subprocess.py:2172`, because `input=` must become bytes when `text=` goes
   and six files shim `subprocess.run` with a `str` `CompletedProcess` —
   including `fuzz_transport.py`, `repro_forgery.py`, `repro_real_kill.py` and

@@ -705,10 +705,13 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     # (c) IS STILL NOT TAKEN IN THIS TREE, AND THE REASON IS EVIDENCE COST,
     # NOT BEHAVIOUR. Saying it any other way would repeat the defect this
     # comment corrects. Measured rather than estimated — arm (c) applied to
-    # this function, whole suite run: **16 failed, 2451 passed, 2 skipped**,
-    # every one of the 16 in `tests/test_solver_audit_findings.py` and every
-    # one the same `AttributeError: 'bytes' object has no attribute 'encode'`
-    # at `subprocess.py:2172`. `input=` must become bytes when `text=` goes,
+    # this function and the whole suite run: **16 TESTS FAIL**, every one of
+    # them in `tests/test_solver_audit_findings.py` and every one the same
+    # `AttributeError: 'bytes' object has no attribute 'encode'` at
+    # `subprocess.py:2172`. (16 is the durable figure and its unit is TESTS;
+    # the rest of that run was 2451 passed and 2 skipped of 2469 collected,
+    # which is a record of this commit and will move with the next added
+    # test.) `input=` must become bytes when `text=` goes,
     # and six files shim `subprocess.run` to hand this parser a `str`
     # `CompletedProcess`: that test file plus `fuzz_transport.py`,
     # `repro_forgery.py`, `repro_real_kill.py`, `probe_cvc5_value_channel.py`
