@@ -1889,10 +1889,24 @@ verdicts:
   constructor in ASCII and poisoning a String SELECTOR value — a string
   literal, the one place cvc5 really does escape.
   **What survives from the original sentence, re-measured:** stelling names
-  its own consts `x{k}`/`x{k}_{i}` (`obligation.py`) and `smt.py` declares
-  nothing but `Real` and `Bool` (`git grep -n 'declare-' src/stelling/smt.py`
-  — `declare-const … Real`, `… Bool`, and no `declare-sort` or
-  `declare-datatypes`), so no script this tool emits carries a quoted symbol
+  its own consts `x{k}`/`x{k}_{i}` (`obligation.py`) and `smt.py` puts nothing
+  but `Real` and `Bool` into SMT-LIB. **THE CITATION HERE WAS WRONG AND THE
+  CONCLUSION WAS NOT.** It read "`git grep -n 'declare-' src/stelling/smt.py`
+  — `declare-const … Real`, `… Bool`", and that command returns exactly ONE
+  line: `smt.py:490: lines.append(f"(declare-const {inp.name} Real)")`. There
+  is no `declare-const … Bool` to find. `Bool` reaches the script through
+  `define-fun`, at `smt.py:503-509` — `sort = "Bool" if out.aval.dtype ==
+  "bool" else "Real"`, emitted as `(define-fun t{id} () {sort} …)`. So the
+  two commands that carry the claim are `git grep -n 'declare-'
+  src/stelling/smt.py` (**one** line, `Real`, and therefore no `declare-sort`
+  and no `declare-datatypes` either) and `git grep -n 'lines.append(f"(define-
+  fun' src/stelling/smt.py` (**three** lines — 506 and 510 emit `{sort}`, which
+  line 504 sets to `Bool` or `Real` and to nothing else; 659 emits `Real`
+  literally). A bare `git grep -n 'define-fun' src/stelling/smt.py` returns
+  **eight**, five of them prose in docstrings, which is why the emitting form
+  is the one quoted. Sorts: `Real` and `Bool` and nothing else — checked the
+  other way too, `git grep -nE '"(Int|String|BitVec|Array|RoundingMode)"'
+  src/stelling/smt.py` returns nothing. So no script this tool emits carries a quoted symbol
   into EITHER channel, and the defect stays unreachable through stelling's
   own emissions. What changes is the size of the guard's margin: it rested
   on ONE coincidence stelling does not own, not two, and the value channel
@@ -1949,10 +1963,22 @@ verdicts:
   been 2454 and is 2459 as of `bf905b9`. What the number was standing in
   for is a comparison, and the comparison is what is now written: the two
   series equal EACH OTHER on the same commit, and the branch's own
-  `--collect-only` delta against its merge-base is the added tests and
-  nothing removed. A constant cannot say "nothing moved" on a tree that
-  gains tests daily; two measurements on one commit can, and they stay true
-  next week. **Property fuzzer** (line-boundary AND mid-write truncation,
+  `--collect-only` delta against its merge-base is **18 ids added and 10 ids
+  removed**, the 10 being the retired params of the de-vacuified
+  `test_f4wheel2_sweep_the_reproducer_scan_errs_toward_crying_wolf` and
+  nothing else. **THE SENTENCE HERE SAID "AND NOTHING REMOVED" AND THAT WAS
+  FALSE** — false in the same entry that says "10 parametrised ids retired,
+  18 added" sixty-odd lines below, so the branch contradicted itself inside
+  one entry while replacing a rotting count with a durable comparison. The
+  measurement, and the one that would have refuted it: `pytest --collect-only
+  -q | grep :: | sort` in a worktree at each commit, then `comm -13` and
+  `comm -23` over the two files — 2461 ids at `bf905b9`, 2469 here, `comm -13`
+  gives 18 and `comm -23` gives 10, and every one of the 10 is a
+  `…crying_wolf[…]` param. A constant cannot say "nothing moved" on a tree
+  that gains tests daily; neither can a delta that is only counted in one
+  direction. Two measurements on one commit can, and they stay true next
+  week — provided both directions of the delta are read, which is the defect
+  this paragraph is now a record of. **Property fuzzer** (line-boundary AND mid-write truncation,
   exit code drawn independently of truncation, ground truth taken from what
   the WRITER emitted): **0 counterexamples at 20 000 examples per seed
   across seeds 1–10 — 200 000 in total, not 200 000 each; the same
