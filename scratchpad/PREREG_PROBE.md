@@ -370,3 +370,64 @@ is the same "not a member" shape as D1. **SUSPECTED, not measured** — no
 construction in this branch turns it into a wrong verdict, and unlike the
 integer case the fix needs a real float-format rounding rather than a
 clamp. It is named here so the next reader does not have to re-derive it.
+
+---
+
+## Correction, appended 2026-08-08 by the repair of this branch
+
+Nothing above this heading is edited; this is the record of what one
+recorded clause claimed and what it actually measured.
+
+**C2 was recorded MET and its claim was false as written.** The clause
+requires that "every value `_probe_point` returns lies in `[lo, hi]`, is
+integral when the dtype is integral or boolean, and lies inside the
+dtype's representable range", over a sweep it says explicitly includes
+`float32` and `float64`. The third conjunct was never checked for the
+float parameters, and it is false for them. The falsifier the clause
+names — "one sweep point violating any of the three" — was reachable and
+was never reached, because the test performed both dtype-specific checks
+inside `if _is_integer_dtype(dtype):`; for `float32` and `float64` it
+asserted only finiteness and `lo <= v <= hi`. The name of the test
+outran what it asserted, and both the test and the clause read as though
+membership had been checked for every dtype in the sweep.
+
+**Measured, on the branch's own `_SWEEP_BOUNDS` (215 bound pairs x 16
+probe indices x 2 elements) at `62e4190`:**
+
+| dtype | values formed | not a value of the dtype | outside the dtype's range |
+|---|---|---|---|
+| `float16` | 6880 | **6736** | **6184** |
+| `float32` | 6880 | **6716** | **90** |
+| `float64` | 6880 | 0 | 0 |
+
+The `float32` row reproduces the audit's figures exactly. `float64` is
+clean, and that is the whole reason the clause could be believed: it is
+the one float format that is its own interval, so the only float dtype
+the sweep checked in a way that could have failed was already right.
+
+**C2 as it should have read**, and as it now reads in the test: *every
+value `_probe_point` returns lies in `[lo, hi]` and is a VALUE of the
+declared dtype* — one sentence covering both families, with the
+membership oracle asked of jax's own cast rather than of stelling.
+`_declares_a_member` also had to be corrected before the sweep could
+fail: it answered `lo <= hi` for float dtypes, which is the same error
+the implementation made, and while the oracle said it the test could not
+go red.
+
+**After the repair, the same sweep:** `float16` **0** non-members of 832
+formed, `bfloat16` **0** of 2848, `float32` **0** of 6880, `float64`
+**0** of 6880. The formed counts fall for the narrow formats because
+boxes holding no value of the dtype now yield no probe at all, which is
+C3's "no member, no witness" and is the withholding direction.
+
+**The residual named at the end of the Outcomes section is no longer
+SUSPECTED.** That paragraph says no construction in this branch turns it
+into a wrong verdict. Three do, and one of them is new on this branch:
+see `SOUNDNESS.md` entry (5) for all three, the ledger, and the
+comparison of the two remedies.
+
+**C11 re-run after the repair.** jax 0.11.0: 2348 passed, 2 skipped in
+140.58 s. jax 0.10.2: 2348 passed, 2 skipped in 155.84 s, run serially in the
+same checkout, load average 0.44 and 6.01 at the two starts.
+`--collect-only` collects **2350** ids on both series and the two id sets are
+byte-identical (`diff` empty); `62e4190` collected 2331.
