@@ -2449,6 +2449,22 @@ verdicts:
   construction over it moved a verdict, including its positive control —
   and it is fixed anyway, in the withholding direction.
 
+  Why the fix is the default-deny and not an `int2`/`uint2` row in
+  `_INT_DTYPE_BOUNDS` — measured, in its own worktree, not reasoned. With
+  the row added: no `int2` verdict moves (still UNKNOWN on all 55
+  constructions tried per dtype, positive controls included), the suite
+  is green but for the two tests that assert the dtype is unnamed, and
+  two things do change, both away from withholding. `_snap_integer`'s
+  decline stops being unconditional — it goes from "no representable
+  range is registered for it, so integer wraparound cannot be excluded"
+  to a real range check, which ADMITS wherever the result fits — and
+  `_conversion_exactness("int2", "float64")` flips from `"unknown"` to a
+  minted `"exact"`, a claim about a dtype that nothing else in the
+  module knows. Admission stays gated on `_EXACT_CONVERSIONS` membership,
+  so neither turns into a verdict today, and that is precisely the
+  argument for not doing it: the repair needed here is a withholding, and
+  the table is where admissions come from.
+
   **Retroactively invalid:** any REFUTED whose refuting obligation sat
   inside a `cond`/`switch` branch certified by a probe over a
   declaration of any float dtype other than `float64`. Re-run: such a
