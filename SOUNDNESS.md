@@ -3633,6 +3633,21 @@ verdicts:
   containment sweep cannot see it: hulling the whole operand would pass
   every soundness check and fail the ramp tests.
 
+  **A blinded independent re-run agreed, on a far larger corpus, and it
+  was re-run again against the tree AFTER the fixes below** — the hulls
+  are untouched by them (the only `src/` change in the fix pass is a
+  comment). Exhaustive over shapes to rank 3 and the whole legal
+  start-range lattice, plus rank-3/4 boundary, size-0 and extent-1
+  cases, both `dynamic_slice` and `dynamic_update_slice` and the gather
+  row form: **454 784 configurations, 19 476 246 executed elements
+  judged per position, 0 containment violations and 0 non-tight
+  positions on jax 0.11.0 AND 0.10.2**, with the five wrong hulls
+  scoring 1962 / 1514 / 900 / 2370 / 1695 through the same instrument
+  and the three real hulls scoring 0 / 0 / 0. Independent probes for a
+  false VERIFIED under narrow and unsigned index dtypes, wrapping index
+  arithmetic, narrowing converts, `jit`, `cond`, `scan`, `fori_loop` and
+  chained indexing found none, before or after.
+
   **ALL THREE HULLS ARE NOW SWEPT IN THE SUITE, not only in a run
   record.** The first version of this entry committed the
   `dynamic_slice` sweep and left the other two hulls this round added —
@@ -3718,17 +3733,27 @@ verdicts:
   old ones could not have), and two whose out-of-range index is now a
   finding with the same accounting.
 
-  **Both jax series, measured at `eb3519d`:** 2515 passed / 7 skipped on
-  jax 0.11.0 and on jax 0.10.2 (170.91 s and 181.93 s, load 1.26 and
-  8.07), `--collect-only` ids **byte-identical** between the series (2517
-  each), `reuse lint` rc=0. Baseline at `9564728` was 2484 / 7 on both
-  with 2486 ids: **35 tests added and 4 REMOVED, net +31** — and
-  2486 − 4 + 35 = 2517, and 2484 + 31 = 2515, so both arithmetics and the
-  sentence agree.
+  **Both jax series, re-measured at `5b6fd89`** — the last commit on this
+  branch that touches a test; this entry is its only successor and
+  changes no test, so the figures describe a tree that exists:
+  **2526 passed / 7 skipped** on jax 0.11.0 and on jax 0.10.2 (167.15 s
+  and 169.60 s, load 5.52 and 3.78 at start), `--collect-only` ids
+  **byte-identical** between the series (2528 each), `reuse lint` rc=0.
+  The baseline at `9564728` was **re-run rather than quoted**: 2484 / 7
+  with 2486 ids (160.60 s, load 5.52). **46 tests added and 4 REMOVED,
+  net +42** — and 2486 − 4 + 46 = 2528, and 2484 + 42 = 2526, so both
+  arithmetics and the sentence agree.
+
+  *Eleven of the 46 are the fix pass*, and one existing test was renamed
+  inside the branch: against `a5c9659` the id diff is 12 added / 1
+  removed, 2517 − 1 + 12 = 2528, and the run total moves 2515 → 2526.
+  The rename is `test_reverse_mode_ad_DOES_preserve_the_clamp` →
+  `test_reverse_mode_ad_preserves_the_clamp_for_the_ds_dus_pair`, the
+  name being the over-broad claim corrected above.
 
   *The run total and the collect count differ by 5 on this branch and by
   5 on `9564728` alike* — `2484 + 7 = 2491 = 2486 + 5` there and
-  `2515 + 7 = 2522 = 2517 + 5` here. The five are `tests/property/`
+  `2526 + 7 = 2533 = 2528 + 5` here. The five are `tests/property/`
   modules skipped at import for a missing optional dependency, which the
   junit report records as testcases and `--collect-only` does not. An
   environment fact, unchanged by this branch, and named here so the two
@@ -3740,7 +3765,9 @@ verdicts:
   `test_fvm_gather_dynamic_index_declines_traced`,
   `test_gather_out_of_range_static_index_declines_traced`); no test was
   deleted, each was renamed to the behaviour it now pins and is among the
-  33 "added".
+  46 "added". *(This sentence said 33 while the paragraph above it said
+  35, in the same entry — a stale figure from an earlier revision, and
+  the reason both counts are now derived from one measured id diff.)*
 
   **Known limits, stated rather than left to be re-derived.** Under
   `semantics="ieee"` the from-the-end normalisation declines at its
@@ -3748,7 +3775,12 @@ verdicts:
   for jnp-spelled dynamic indexing; the row itself is sound as-is there.
   No SMT emission row, so an obligation reaching one cannot escalate.
   Gather geometries outside the covered row form — batching dims,
-  multi-column indices, the `vmap` form — decline exactly as before. The
+  multi-column indices, the `vmap` form, and `jnp.take` (shape-`(1,)`
+  indices, not an `(N, 1)` column) — decline exactly as before, while
+  `jnp.take_along_axis` along axis 0 DOES reach the widened row form and
+  now decides: a capability the round gained without naming it, named
+  and pinned in `design/index-bounds-round.md` and
+  `tests/test_index_bounds.py`. The
   index-dtype gate refuses an UNCONFIRMED hazard: XLA computes the
   out-of-bounds comparison in the index's own element type, and probing
   `dynamic_slice` with an `int8` start over lengths 100/127/128/129/200
