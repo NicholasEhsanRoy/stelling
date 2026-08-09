@@ -188,11 +188,29 @@ jobs:
       # returns whatever follows the LAST `/` — so with two wheels present
       # this reads only the LAST one's version. Driven: a planted
       # `stelling-0.2.0-…whl` beside the real 0.1.0 made this report
-      # `artifact version=0.2.0`. It went red there, but the mirror image (a
-      # STALE 0.1.0 beside a real 0.2.0, tagged v0.1.0) would go green. It
-      # cannot arise here: `actions/checkout@v4` gives this job an empty
-      # `dist/` and one `uv build` fills it. Recorded rather than patched,
-      # because the patch cannot be validated on a runner from here. With NO
+      # `artifact version=0.2.0`, and it went red there.
+      #
+      # THE GREEN SHAPE WAS DESCRIBED BACKWARDS HERE AND IS NOW DRIVEN. This
+      # said the mirror image — "a STALE 0.1.0 beside a real 0.2.0, tagged
+      # v0.1.0" — would go green. It does not, and the reason is the same
+      # sentence two lines up: `ls` SORTS, so the LAST match is the HIGHEST
+      # version, and that is the one compared. Both shapes driven on a `dist/`
+      # of two empty files with the step body verbatim:
+      #
+      #   0.1.0 + 0.2.0, TAG=v0.1.0   "artifact version=0.2.0"   rc=1  RED
+      #   0.0.9 + 0.1.0, TAG=v0.1.0   "artifact version=0.1.0"   rc=0  GREEN
+      #
+      # So what goes green is a stray that sorts BEFORE the real wheel, not
+      # after — and it is worse than a wrong version string, because the
+      # comparison never sees the stray at all: `upload-artifact` takes the
+      # whole `dist/` directory, `download-artifact` restores it, and the
+      # publish step uploads every file in it. A 0.0.9 nobody tagged goes to
+      # PyPI beside the 0.1.0, permanently, with this step green.
+      #
+      # STILL NOT REACHABLE HERE, which is why it is recorded rather than
+      # patched: `actions/checkout@v4` gives this job a fresh clone, `dist/` is
+      # gitignored and has no tracked member, and one `uv build` fills it.
+      # The patch cannot be validated on a runner from here. With NO
       # wheel at all, `ls` fails and `set -e` exits 2 before this compares
       # anything — red, but not by this gate.
       - name: the tag and the artifact must agree
