@@ -1,0 +1,125 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+
+RESULTS — scratchpad/crlf/corpus_solver.py
+==========================================
+
+BASE  main 9564728, worktree /home/nick/MSF/.wt-crlf/BASE
+TIP   fix/cvc5-crlf-reader-dominance, worktree /home/nick/MSF/.wt-crlf/W
+PC1   TIP + `_decode_child_stream` ending in `.rstrip("\\n")` — the
+      fuzzer-found class (a record is `text + "\\n"`), applied to the
+      one function this branch adds
+PC2   TIP + `_run_cvc5_wheel` returning `unsat` where the child said
+      `sat` — a move in the CATASTROPHIC direction
+TIP2  TIP, run a second time: the determinism control, so the zero
+      below is not simply what this instrument always prints
+
+python 3.12, jax 0.11.0, cvc5 1.3.4-modified, z3 5.0.0, JAX_PLATFORMS=cpu
+14 rows x 3 portfolios; 48 escalated obligation records, 64 solver spawns,
+24 discharged and 24 refuted-with-witness at BASE and at TIP alike.
+
+== BASE vs TIP — the zero this branch is claiming ==
+A: /home/nick/MSF/.wt-crlf/BASE/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+B: /home/nick/MSF/.wt-crlf/W/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+A totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+B totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+leaf keys compared: 3009
+  VERDICT-BEARING keys (outcome/status/answered_by/declined/witness): 337
+  verdict-bearing keys that MOVED:  0
+  other keys that differ:           0
+
+== TIP vs TIP2 — determinism control ==
+A: /home/nick/MSF/.wt-crlf/W/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+B: /home/nick/MSF/.wt-crlf/W/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+A totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+B totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+leaf keys compared: 3009
+  VERDICT-BEARING keys (outcome/status/answered_by/declined/witness): 337
+  verdict-bearing keys that MOVED:  0
+  other keys that differ:           0
+
+== TIP vs PC1 — POSITIVE CONTROL, toward UNKNOWN ==
+A: /home/nick/MSF/.wt-crlf/W/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+B: /home/nick/MSF/.wt-crlf/PC/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+A totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+B totals: {'discharged': 16, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 16}
+leaf keys compared: 3057
+  VERDICT-BEARING keys (outcome/status/answered_by/declined/witness): 337
+  verdict-bearing keys that MOVED:  155
+    .cubic_false.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .cubic_false.cvc5.records[0].outcome: 'violated-witness' -> 'unknown'
+    .cubic_false.cvc5.records[0].witness.detail: '' -> None
+    .cubic_false.cvc5.records[0].witness.values.x0: '-3' -> None
+    .cubic_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'unknown'
+    .cubic_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .cubic_false.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    .cubic_false.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .cubic_false.full.records[0].witness.values.x0: '-3' -> '-2'
+    .cubic_true.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .cubic_true.cvc5.records[0].outcome: 'discharged' -> 'unknown'
+    .cubic_true.cvc5.verdict.obligations[0].status: 'discharged' -> 'unknown'
+    .cubic_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+    .cubic_true.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    .cubic_true.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .product_bound_4.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .product_bound_4.cvc5.records[0].outcome: 'violated-witness' -> 'unknown'
+    .product_bound_4.cvc5.records[0].witness.detail: '' -> None
+    .product_bound_4.cvc5.records[0].witness.values.x0: '2' -> None
+    .product_bound_4.cvc5.records[0].witness.values.x1: '3' -> None
+    .product_bound_4.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'unknown'
+    .product_bound_4.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .product_bound_4.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    .product_bound_4.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .product_bound_4.full.records[0].witness.values.x1: '3' -> '5/2'
+    .psd_false.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .psd_false.cvc5.records[0].outcome: 'violated-witness' -> 'unknown'
+    .psd_false.cvc5.records[0].witness.detail: '' -> None
+    .psd_false.cvc5.records[0].witness.values.x0: '1' -> None
+    .psd_false.cvc5.records[0].witness.values.x1: '1' -> None
+    .psd_false.cvc5.records[0].witness.values.x2: '-1' -> None
+    .psd_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'unknown'
+    .psd_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>
+BrokenPipeError: [Errno 32] Broken pipe
+
+== TIP vs PC2 — POSITIVE CONTROL, toward VERIFIED ==
+A: /home/nick/MSF/.wt-crlf/W/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+B: /home/nick/MSF/.wt-crlf/PC/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+A totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+B totals: {'discharged': 32, 'escalated_obligation_records': 40, 'spawns': 48, 'violated_witness': 8}
+leaf keys compared: 3032
+  VERDICT-BEARING keys (outcome/status/answered_by/declined/witness): 337
+  verdict-bearing keys that MOVED:  136
+    .cubic_false.cvc5.records[0].outcome: 'violated-witness' -> 'discharged'
+    .cubic_false.cvc5.records[0].witness.detail: '' -> None
+    .cubic_false.cvc5.records[0].witness.values.x0: '-3' -> None
+    .cubic_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'discharged'
+    .cubic_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .cubic_false.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .cubic_false.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .cubic_false.full.records[0].outcome: 'violated-witness' -> None
+    .cubic_false.full.records[0].witness.detail: '' -> None
+    .cubic_false.full.records[0].witness.values.x0: '-3' -> None
+    .cubic_false.full.verdict.obligations[0].status: 'violated-witness' -> None
+    .cubic_false.full.verdict.status: 'REFUTED' -> None
+    .product_bound_4.cvc5.records[0].outcome: 'violated-witness' -> 'discharged'
+    .product_bound_4.cvc5.records[0].witness.detail: '' -> None
+    .product_bound_4.cvc5.records[0].witness.values.x0: '2' -> None
+    .product_bound_4.cvc5.records[0].witness.values.x1: '3' -> None
+    .product_bound_4.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'discharged'
+    .product_bound_4.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .product_bound_4.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .product_bound_4.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .product_bound_4.full.records[0].outcome: 'violated-witness' -> None
+    .product_bound_4.full.records[0].witness.detail: '' -> None
+    .product_bound_4.full.records[0].witness.values.x0: '2' -> None
+    .product_bound_4.full.records[0].witness.values.x1: '3' -> None
+    .product_bound_4.full.verdict.obligations[0].status: 'violated-witness' -> None
+    .product_bound_4.full.verdict.status: 'REFUTED' -> None
+    .psd_false.cvc5.records[0].outcome: 'violated-witness' -> 'discharged'
+    .psd_false.cvc5.records[0].witness.detail: '' -> None
+    .psd_false.cvc5.records[0].witness.values.x0: '1' -> None
+    .psd_false.cvc5.records[0].witness.values.x1: '1' -> None
+    .psd_false.cvc5.records[0].witness.values.x2: '-1' -> None
+    .psd_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'discharged'
+    .psd_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
