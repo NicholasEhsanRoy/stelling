@@ -4117,12 +4117,14 @@ verdicts:
   Every one of those nine paths is inside the sdist allowlist in
   `pyproject.toml`, and `propagate.py` is in the wheel as well, so all 12
   ship. **At least four of them say what the defect IS**, not merely that
-  it exists: `tests/property/positive_controls.py:91` and
-  `tests/property/test_oracle.py:17` and `:123` each spell out *"an
+  it exists. `tests/property/positive_controls.py:91`, verbatim: *"an
   out-of-dtype-range integer literal wraps mod 2\*\*bits before tracing, so
   stelling returns VERIFIED for a predicate that is false at every declared
-  point"*, and `tests/property/_grammar.py:32` names the mechanism. That
-  grep is a FLOOR, not a census: a wider pattern
+  point"*. `tests/property/test_oracle.py:123` says the same in its own
+  words (*"…so stelling verifies a predicate that is false at every
+  declared point"*), `:17` gives the mechanism and why an execution oracle
+  cannot see it, and `_grammar.py:32` names the mechanism again. That grep
+  is a FLOOR, not a census: a wider pattern
   (`out-of-dtype-range|wraps mod 2|wrapping before tracing`) finds more,
   including `tests/property/README.md:165`.
 
