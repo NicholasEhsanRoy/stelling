@@ -624,6 +624,49 @@ def test_f4wheel_values_written_after_the_terminator_are_refused(
     assert "ABSENT" in r.detail
 
 
+def test_f4wheel_the_terminator_must_be_the_LAST_line_not_merely_present(
+    monkeypatch,
+):
+    """POSITION, separated from COUNT — the test above does not separate them.
+
+    `…_values_written_after_the_terminator_are_refused` writes `end` early and
+    then two MORE values, so the count inside the terminator no longer matches
+    what this parser tallies. A rule that asked only *"is a matching `end <n>`
+    ANYWHERE in the stream?"* refuses that stream for the wrong reason, and is
+    therefore not distinguished by it. This one writes the terminator with the
+    RIGHT final count and then one further record, so the only thing left to
+    refuse it on is WHERE the terminator sits.
+
+    MEASURED, real child, real bytes, in this worktree: the rule
+    `complete = terminated and any(l == f"end {len(values) + opaques}"
+    for l in lines)` — position dropped, count kept — passes the ENTIRE suite
+    at this tip (2494 passed, 7 skipped, jax 0.11.0) and returns `sat` with
+    `(('x0', '1/2'),)` on the stream below, where the shipped rule returns
+    `failed`. That is a value harvested from a record the child wrote AFTER
+    announcing the run was over.
+
+    UNCHANGED FROM `9564728` — not a defect this branch introduced, and not a
+    claim it made. It is closed here because this branch is the one that
+    narrowed this reader, and a surviving mutant on the rule next door is
+    worth a line more than it is worth a note.
+    """
+    prog = (
+        "import sys\n"
+        "sys.stdout.buffer.write("
+        "b'version 1.3.4\\nanswer sat\\nend 1\\nvalue x0 1/2\\n')\n"
+    )
+
+    def route(argv, **kw):
+        return _REAL_SPAWN([sys.executable, "-c", prog], **kw)
+
+    monkeypatch.setattr(subprocess, "run", route)
+    monkeypatch.setattr(solvers, "_cvc5_wheel_version", lambda: "1.3.4")
+    r = solvers._run_cvc5_wheel("(check-sat)\n(get-model)\n", 60.0)
+    assert r.answer == "failed"
+    assert r.values == ()
+    assert "ABSENT" in r.detail
+
+
 def test_f4wheel_a_truncated_trailing_line_is_refused(monkeypatch, tmp_path):
     """A trailing line cut off mid-write. Measured identically at base and at
     the first version of the guard: sat, and the partial line silently
