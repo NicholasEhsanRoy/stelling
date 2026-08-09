@@ -255,3 +255,162 @@ def test_every_test_cited_in_core_prose_still_exists():
     assert _defined_test_names("def broken(:\n") is None, (
         "a file that does not parse is being reported as defining tests"
     )
+
+
+# --- line citations, in the SHIPPED tree ------------------------------------
+#
+# The scope is DERIVED from the sdist allowlist rather than typed, and that is
+# the correction this check embodies. A stale-figure sweep of this tree was
+# described as covering "the tracked, SHIPPED tree" and covered six of the 22
+# allowlisted roots — SOUNDNESS.md, docs/, README.md, ARCHITECTURE.md,
+# CONTRIBUTING.md, .github/. `/design`, `/corpus`, `/tests`, `/src` and
+# `/tools` all ship and were not swept, and TEN wrong own-source citations were
+# sitting in them, one of them repeated three times.
+#
+# WHAT THIS CAN AND CANNOT DO, said plainly, because the gap is most of the
+# defect. It resolves a `file.ext:N` citation and asserts N is a line the file
+# HAS. That is the whole class it closes — line 1031 of `contracts.py` cited
+# in a file of 1022 lines. It cannot know whether line N says what the sentence around
+# it says, and eight of those ten were exactly that: off by 20, by 27, by 18,
+# pointing at a blank line or at the wrong helper. Nothing cheap catches those,
+# which is why the house rule is to cite a SYMBOL and why the fixes took that
+# form. This is the mechanical floor under the rule, not the rule.
+_LINE_CITATION = re.compile(
+    r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:py|md|yml|yaml|toml|cff)):(\d+)"
+)
+_REPO = Path(__file__).resolve().parent.parent
+
+
+def _shipped_roots():
+    """The `[tool.hatch.build.targets.sdist]` allowlist, read as TEXT.
+
+    Not with `tomllib`, which is 3.11+ while the declared floor is 3.10 — see
+    `tests/test_zero_dep_import_discipline.py`, where that is the whole
+    subject.
+    """
+    text = (_REPO / "pyproject.toml").read_text(encoding="utf-8")
+    text = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    block = re.search(
+        r"\[tool\.hatch\.build\.targets\.sdist\]\s*\ninclude\s*=\s*\[(.*?)^\]",
+        text, re.S | re.M,
+    )
+    assert block, "the sdist allowlist is not where this expects it"
+    return [m.group(1).lstrip("/") for m in re.finditer(r'"([^"]+)"', block.group(1))]
+
+
+def _shipped_text_files():
+    out = []
+    for root in _shipped_roots():
+        base = _REPO / root
+        if base.is_file():
+            out.append(base)
+        elif base.is_dir():
+            out.extend(
+                p for p in sorted(base.rglob("*"))
+                if p.is_file()
+                and p.suffix in (".py", ".md", ".yml", ".yaml", ".toml", ".cff")
+                and "__pycache__" not in p.parts
+            )
+    return out
+
+
+def _resolve_citation(rel: str):
+    """The file a citation names, or None when it names nothing in this repo.
+
+    Third-party targets (`subprocess.py`, jax's `lax.py`, hatchling's
+    `builders/config.py`) are the common case and must resolve to None rather
+    than to a same-named file here — so a BARE basename is accepted only when
+    exactly one file in the tree carries it. `builders/config.py` resolves to
+    nothing because no such path exists; `solvers.py` resolves to
+    `src/stelling/solvers.py` because exactly one file is called that.
+    """
+    direct = _REPO / rel
+    if direct.is_file():
+        return direct
+    if "/" in rel:
+        return None
+    matches = [p for p in _shipped_text_files() if p.name == rel]
+    return matches[0] if len(matches) == 1 else None
+
+
+def test_no_shipped_page_cites_a_line_its_own_tree_does_not_have():
+    """A citation past the end of a file is a claim nothing can be.
+
+    Break it: change any `foo.py:12` in a shipped page to `foo.py:999999`.
+    Driven the other way at 650e678, before the citations were repaired:
+    `corpus/supply/affine_holdout/SCOUT_CASES.md` cited line 1031 of
+    `contracts.py`, and `src/stelling/contracts.py` is 1022 lines.
+    """
+    lengths: dict[Path, int] = {}
+    past_eof = []
+    checked = 0
+    for path in _shipped_text_files():
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for rel, cited in _LINE_CITATION.findall(line):
+                target = _resolve_citation(rel)
+                if target is None:
+                    continue
+                if target not in lengths:
+                    lengths[target] = len(
+                        target.read_text(encoding="utf-8").splitlines()
+                    )
+                checked += 1
+                if int(cited) > lengths[target]:
+                    past_eof.append(
+                        f"{path.relative_to(_REPO)}:{lineno} cites {rel}:{cited}, "
+                        f"and {target.relative_to(_REPO)} has "
+                        f"{lengths[target]} lines"
+                    )
+    assert not past_eof, (
+        "shipped page(s) cite a line that does not exist:\n  "
+        + "\n  ".join(past_eof)
+        + "\nCite the SYMBOL, not the line — a line number in a page nothing "
+        "regenerates is a claim nothing checks, and a wrong one sends a reader "
+        "to a line that reads plausibly."
+    )
+    # ...and it looked at something. A regex that stopped matching and a tree
+    # with no bad citations return the same empty list.
+    assert checked > 30, (
+        f"only {checked} in-repo line citation(s) resolved; the pattern has "
+        "stopped matching how they are written"
+    )
+
+
+def test_the_citation_sweep_covers_the_whole_allowlist_and_the_resolver_works():
+    """The two ways the check above goes quiet without failing."""
+    roots = _shipped_roots()
+    assert len(roots) >= 20, roots
+    swept = {p.relative_to(_REPO).parts[0] for p in _shipped_text_files()}
+    # the five roots the sweep this replaces did not reach
+    assert {"design", "corpus", "tests", "src", "tools"} <= swept, sorted(swept)
+    assert len(_shipped_text_files()) > 200
+
+    # the resolver: a bare basename with exactly one bearer resolves, a
+    # third-party path does not, and a bare name matching nothing does not
+    assert _resolve_citation("solvers.py") == _REPO / "src" / "stelling" / "solvers.py"
+    assert _resolve_citation("subprocess.py") is None
+    assert _resolve_citation("builders/config.py") is None
+    assert _resolve_citation("does_not_exist_anywhere.py") is None
+    assert _resolve_citation("pyproject.toml") == _REPO / "pyproject.toml"
+
+    # ...and the pattern reads the shapes these pages actually use. The
+    # samples are BUILT BY CONCATENATION so this file cannot cite anything
+    # itself — the same device `tests/test_import_hygiene.py` uses for the
+    # private-jax token, and here it is load-bearing: this file is INSIDE the
+    # swept tree and is deliberately not exempted from its own check. A
+    # checker that exempts itself is a checker whose own claims go unread.
+    colon = ":"
+    assert _LINE_CITATION.findall(f"(contracts.py{colon}1031), not by raw") == [
+        ("contracts.py", "1031")
+    ]
+    assert _LINE_CITATION.findall(f"`preconditions.py{colon}213-240`") == [
+        ("preconditions.py", "213")
+    ]
+    assert _LINE_CITATION.findall(f"`src/stelling/obligation.py{colon}886`") == [
+        ("src/stelling/obligation.py", "886")
+    ]
+    assert _LINE_CITATION.findall("no citation here") == []
