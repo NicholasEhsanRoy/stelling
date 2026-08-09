@@ -130,8 +130,14 @@ jobs:
           fi
       - run: .venv/bin/python -m stelling
 
-  # The FLOATING lane: `[jax]` is `jax>=0.5`, so this resolves whatever jax
-  # is newest. That is deliberate — it is the lane that meets a new series
+  # The FLOATING lane: `[jax]` carries NO UPPER BOUND, so this resolves
+  # whatever jax is newest. (This said "`[jax]` is `jax>=0.5`".
+  # `pyproject.toml` has read `jax = ["jax>=0.10"]` since c3ff79d — which
+  # raised the floor to the verified one and left a comment there saying
+  # `>=0.5` "was wrong twice over and measurably so" — so the figure was
+  # already false when this line was last edited. What makes the lane float is
+  # the missing ceiling, not the floor, so the sentence survived its own
+  # figure.) That is deliberate — it is the lane that meets a new series
   # first — but it means this job alone can only ever test ONE series, and
   # which one is decided by PyPI rather than by this file. Job id and name
   # are left alone on purpose: they may be named in branch protection, which
@@ -175,9 +181,13 @@ jobs:
   #
   # `stelling._optional.TESTED_JAX_SERIES` claims ("0.10", "0.11") — that BOTH
   # series are verified. But every jax lane in this workflow installed
-  # `.[solvers,jax]`, whose floor is `jax>=0.5`, so every one of them resolved
+  # `.[solvers,jax]`, whose floor WAS `jax>=0.5` at the time (it is `jax>=0.10`
+  # today; c3ff79d raised it, AFTER this lane landed at 1053714, and this
+  # sentence was left in the present tense), so every one of them resolved
   # the newest jax and the 0.10 half of that claim rested on a developer's
-  # one-off re-verification run, never on CI. A constant asserting two series
+  # one-off re-verification run, never on CI. The FLOOR was never the
+  # mechanism — the absent ceiling is, and it is still absent, which is why
+  # this lane is still needed. A constant asserting two series
   # while the machine only ever checks one is exactly the kind of unbacked
   # claim this project does not ship.
   #

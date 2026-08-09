@@ -1145,8 +1145,22 @@ def _stale_child(answer: str, payload: bytes) -> str:
     ``ast.parse(src, feature_version=(3, 10))`` on a 3.12 host PARSES this
     construct, so a same-interpreter floor check would have been vacuous
     against exactly this defect. Catching it needs a real floor interpreter,
-    and no job in ``.github/workflows/`` runs one — every ``uv venv`` but the
-    ``acceptance-any-pytree`` lane's takes the runner's default.
+    and NO JOB IN ``.github/workflows/`` RUNS ONE.
+
+    THE SENTENCE THAT USED TO SAY SO NAMED THE WRONG LANE, and the correction
+    is the smaller half. It read "every ``uv venv`` but the
+    ``acceptance-any-pytree`` lane's takes the runner's default". Re-counted
+    across both workflow files: SEVEN ``uv venv`` invocations, SIX of them
+    bare. The one that is not bare is ``uv venv --python 3.12`` in the
+    ``acceptance-reproducer`` job; ``acceptance-any-pytree``'s is bare like the
+    rest. Cited by JOB NAME rather than by line, since these move.
+
+    The load-bearing half is untouched by that, and is why the paragraph
+    exists: 3.12 is not a floor interpreter, so pinning it changes nothing
+    about this defect. Six lanes take whatever the runner image ships and the
+    seventh takes a version above the floor, so which interpreter the release
+    gate's suite runs is a property of the runner image and not of this
+    repository, and 3.10 is exercised by no job at all.
     """
     answer_record = f"answer {answer}\n".encode()
     return (
