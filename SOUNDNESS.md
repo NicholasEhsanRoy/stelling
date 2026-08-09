@@ -4527,15 +4527,35 @@ verdicts:
   emits a warning of any kind under `warnings.simplefilter("always")`, and
   none becomes an exception under `-W error`; (ii) wrapping
   `np.errstate(all="raise")` around each of the eleven doors changes
-  nothing; (iii) the only catchable signal found anywhere in the eleven is
-  a `FutureWarning` out of `x.at[k].set(np.int64(...))` — *"scatter inputs
-  have incompatible types: cannot safely cast value from …"* — and it is a
-  DTYPE-class warning, not a value one. Its control: it fires identically
-  for `np.int64(3)`, which is in range and does not wrap, and is silent for
-  `np.int8(3)`. Escalating it would flag ordinary in-range code — the same
-  failure that got the detector branch audited SHOULD-NOT-LAND — and would
-  still see none of the other ten doors. It is not a wrap detector and is
-  not offered as one.
+  nothing; (iii) a `FutureWarning` out of `x.at[k].set(np.int64(...))` —
+  *"scatter inputs have incompatible types: cannot safely cast value from
+  …"* — and it is a DTYPE-class warning, not a value one. Its control: it
+  fires identically for `np.int64(3)`, which is in range and does not
+  wrap, and is silent for `np.int8(3)`. Escalating it would flag ordinary
+  in-range code — the same failure that got the detector branch audited
+  SHOULD-NOT-LAND — and would still see none of the other ten doors. It is
+  not a wrap detector and is not offered as one.
+
+  **CLAUSE (iii) SAID THAT WARNING WAS THE ONLY CATCHABLE SIGNAL ANYWHERE
+  IN THE ELEVEN. IT IS NOT, AND SINCE THIS PARAGRAPH INVITES THE READER TO
+  RE-RUN THE SEARCH, THE CORRECTION IS RECORDED HERE.** The words removed
+  above were *"the only catchable signal found anywhere in the eleven is"*.
+  Measured at `b2e3a15`, all four cells: under
+  `jax_numpy_dtype_promotion="strict"` — a jax setting, not a stelling one,
+  default `"standard"` — **six of the eleven doors raise
+  `TypePromotionError` for the NumPy-scalar spelling**: `x + c`, `x >= c`,
+  `x.at[0].set`, `jnp.where`, `jnp.clip`, `jnp.maximum`. That is a second
+  catchable signal, and the search as stated does find it.
+
+  **It is not a wrap detector either, and its control is the same
+  control.** Measured in the same four cells: it fires identically for the
+  in-range `np.int64(3)` (6 of 11, same doors), is silent for `np.int8(3)`
+  (0 of 11), and — the direction that decides it — is silent for the bare
+  Python literal `256` (0 of 11), which is the spelling that wraps at
+  eight of the eleven doors. So it separates DTYPES, not values: it flags
+  honest in-range code and misses the wrap the entry's own reproducer is
+  written in. Strict promotion is worth its own reasons; it does not close
+  this, and no replacement guard is offered.
 
   What is left buys no protection, and is written as what it is:
 
