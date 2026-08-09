@@ -712,28 +712,53 @@ jobs:
   # a module 6.2.0 neither has nor imports (6.0.0 replaced it with
   # python-magic). Only 5.1.1 can fail that way.
   #
-  #   tree                                    | 6.2.0        | 5.1.1
-  #   ----------------------------------------|--------------|--------------
-  #   this branch's tip                        | rc=0 331/331 | rc=0 331/331
-  #   same, `scratchpad/**` annotation deleted | rc=1 302/331 | rc=1 302/331
+  # THE RESULT IS AN AGREEMENT, AND AN AGREEMENT IS THE ONE FORM THAT DOES NOT
+  # ROT. The table below is written as a comparison between two versions on one
+  # commit, so re-running it needs no number from this file to compare against —
+  # which is the same rule step 4a below insists on for the action. The absolute
+  # counts are given only as a record of the run, and each is stamped with the
+  # commit it was read on; they will move with the next file added and that is
+  # expected. What must not move is the EQUALITY of the two columns.
+  #
+  #   RE-MEASURED 2026-08-09 at 53f9f84 (the first table below is the reading
+  #   at that commit; the second is what stood here, read at an unnamed tip of
+  #   the branch that closed this question, kept so the two are comparable):
+  #
+  #   tree, at 53f9f84                         | 6.2.0        | 5.1.1
+  #   -----------------------------------------|--------------|--------------
+  #   as committed                             | rc=0 350/350 | rc=0 350/350
+  #   same, `scratchpad/**` annotation deleted | rc=1 321/350 | rc=1 321/350
+  #
+  #   the earlier reading, unnamed commit      | rc=0 331/331 | rc=0 331/331
+  #   same, annotation deleted                 | rc=1 302/331 | rc=1 302/331
+  #
+  # BOTH READINGS SAY THE SAME THING and the numbers are not the thing: the two
+  # columns are equal in every cell, and the annotation moves both versions by
+  # the same amount in the same direction — 29 files at 53f9f84 (350 − 321) and
+  # 29 at the earlier commit (331 − 302).
   #
   # The second row is the POSITIVE CONTROL and it is the whole point: without
   # it, two rc=0s prove only that both programs ran. Deleting the one block
-  # this skew is ABOUT moves both versions, by the same 29 files, in the same
+  # this skew is ABOUT moves both versions, by the same files, in the same
   # direction. The agreement is on the mechanism, not on an accident.
   #
-  # STRONGER THAN THE COUNTS: `lint --json` at the tip gives 331 file paths
-  # from each version and the two SETS are equal — empty symmetric difference.
-  # Same files, not merely the same total.
+  # STRONGER THAN THE COUNTS: `lint --json` gives the same file PATHS from each
+  # version, not merely the same total — the two SETS have an empty symmetric
+  # difference. Re-measured at 53f9f84 on the committed tree AND on the control
+  # tree: 350 paths from each version, symmetric difference 0 in both.
   #
   # THE ONE DIFFERENCE OBSERVED, and it is the one the changelog documents.
-  # `lint --lines` on the control tree emits 58 lines from each version, and
-  # the two are IDENTICAL AS SETS BUT NOT AS SEQUENCES: 6.2.0 sorts by path
-  # and interleaves the two categories per file, 5.1.1 emits all 29 "no license
-  # identifier" and then all 29 "no copyright notice". That is exactly the
-  # single hit in the 5.1.1 → 6.2.0 changelog window recorded below — the sort
-  # order of `reuse lint --lines` — and nothing else differed. `reuse lint`
-  # (no `--lines`) is what this job runs, and its rc and counts are equal.
+  # `lint --lines` on the control tree emits the SAME NUMBER of lines from each
+  # version (58 at 53f9f84 — two per file over the 29), and the two are
+  # IDENTICAL AS SETS BUT NOT AS SEQUENCES: 6.2.0 sorts by path and interleaves
+  # the two categories per file, 5.1.1 emits all the "no license identifier"
+  # lines and then all the "no copyright notice" ones. Verified as a set
+  # comparison (`diff <(sort a) <(sort b)` empty) and a sequence comparison
+  # (`diff a b` non-empty), so the claim is not resting on the count. That is
+  # exactly the single hit in the 5.1.1 → 6.2.0 changelog window recorded below
+  # — the sort order of `reuse lint --lines` — and nothing else differed.
+  # `reuse lint` (no `--lines`) is what this job runs, and on the committed tree
+  # it emits nothing from either version and exits 0 from both.
   #
   # WHAT IS STILL SUSPECTED, and it is now exactly one thing: that
   # `fsfe/reuse-action@v5` carries EXACTLY reuse 5.1.1. That is read off the
@@ -837,14 +862,18 @@ jobs:
   #      the SAME "N / N" as `reuse lint` run on the SAME COMMIT locally. Run
   #      both, compare the two; do not compare either against a number written
   #      here.
-  #      A LITERAL FIGURE ROTS, AND THIS ONE HAD. It said "284/284 — the figure
-  #      this tree gives under 6.2.0 locally", which was the merge-base's
-  #      count; every commit of the branch that carried the instruction gave
-  #      285/285, and `main` gives 292/292. Any pass that adds a file moves it
-  #      again, so the only instruction that survives is the comparison, not
-  #      the constant. What is being tested is that the action's reuse counts
-  #      the same files as the pinned local one — a difference of any size is
-  #      the signal, and equality at any value is the pass.
+  #      A LITERAL FIGURE ROTS, AND THIS ONE HAD — TWICE, INCLUDING IN THE
+  #      SENTENCE THAT SAYS SO. It first said "284/284 — the figure this tree
+  #      gives under 6.2.0 locally", which was the merge-base's count while
+  #      every commit of the branch carrying the instruction gave 285/285. The
+  #      correction then wrote "`main` gives 292/292", and by 53f9f84 `main`
+  #      gives 350/350 — measured, 2026-08-09. Four values for one sentence, in
+  #      a paragraph whose subject is that such values rot. THE FIGURE IS NOT
+  #      THE INSTRUCTION AND NEVER WAS: what is being tested is that the
+  #      action's reuse counts the same files as the pinned local one on THE
+  #      SAME COMMIT — a difference of any size is the signal, and equality at
+  #      any value is the pass. Run both, compare the two to each other, and do
+  #      not compare either against any number written in this file.
   #   3. if it does not, install the pin explicitly instead of using the
   #      action, and keep the two in one place:
   #      `pipx run reuse==6.2.0 lint` or `uvx --from reuse==6.2.0 reuse lint`.

@@ -48,15 +48,22 @@ repos:
       # before this branch's first commit. THE SKEW IS MEASURED CLOSED on this
       # tree. 5.1.1 was assembled offline from that cache (plus `binaryornot`
       # from pip's http cache; every other requirement came from the pinned
-      # 6.2.0 env) and run against this tree beside 6.2.0: both rc=0 at
-      # 331/331, both rc=1 at 302/331 with the `scratchpad/**` annotation
-      # deleted — the positive control, and it is the same 29 files either way.
-      # `lint --json` gives the same 331 PATHS, not just the same total. The
-      # commands, the cache paths, the control that proves 5.1.1's own code
-      # ran, and the limits of the measurement are all at the `reuse` job in
-      # ci.yml. The changelog bound is still recorded there and is no longer
-      # the only evidence. WHAT IS STILL SUSPECTED is one link and only one:
-      # that `fsfe/reuse-action@v5` carries exactly 5.1.1.
+      # 6.2.0 env) and run against this tree beside 6.2.0. THE RESULT IS AN
+      # EQUALITY, WHICH IS WHY IT IS STATED AS ONE: on the same commit the two
+      # versions give the same rc and the same count, and deleting the
+      # `scratchpad/**` annotation — the positive control — moves both by the
+      # same files in the same direction. `lint --json` gives the same PATHS
+      # from each, not just the same total. Re-measured 2026-08-09 at 53f9f84:
+      # both rc=0 at 350/350, both rc=1 at 321/350 with the annotation deleted,
+      # 350 paths from each version with an empty symmetric difference. Those
+      # absolutes move with the next file added and are recorded with their
+      # commit for that reason; the equality is the claim. The commands, the
+      # cache paths, the control that proves 5.1.1's own code ran, and the
+      # limits of the measurement are all at the `reuse` job in ci.yml. The
+      # changelog bound is still recorded there and is no longer the only
+      # evidence. WHAT IS STILL SUSPECTED is one link and only one: that
+      # `fsfe/reuse-action@v5` carries exactly 5.1.1, which needs
+      # `git ls-remote` and cannot be had offline.
       #
       # THE PINS THEMSELVES ARE STILL GUARDED, because the measurement above is
       # about these two versions and stops being evidence the moment either
