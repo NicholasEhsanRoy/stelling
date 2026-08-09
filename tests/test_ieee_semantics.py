@@ -588,6 +588,129 @@ def test_scatter_takes_the_updates_flag():
     assert propagate(q).obligations[0].status == "discharged"
 
 
+def _dus_flag_query(operand_top, update_top):
+    """`dynamic_update_slice` writing a length-1 update at a definite start,
+    with either side optionally routed through an unregistered primitive so
+    it arrives ⊤-maybe-NaN."""
+    x = var(0, aval((3,)))
+    u0, u = var(1), var(2)
+    upd = var(6, aval((1,)))
+    start = var(7, aval((), "int32"))
+    znew = var(3, aval((3,)))
+    pred, out = var(4, aval((3,), "bool")), var(5, aval((3,), "bool"))
+    eqns = [any_eqn(x, 1.0, 2.0, shape=(3,))]
+    if operand_top:
+        xt = var(8, aval((3,)))
+        eqns.append(eqn("mystery_op", [x], xt))  # ⊤-maybe-NaN operand
+        x = xt
+    eqns.append(any_eqn(u0, 0.0, 1.0))
+    if update_top:
+        eqns.append(eqn("mystery_op", [u0], u))  # ⊤-maybe-NaN scalar update
+    else:
+        eqns.append(eqn("copy", [u0], u))
+    eqns += [
+        eqn(
+            "reshape",
+            [u],
+            upd,
+            params=[("new_sizes", (1,)), ("dimensions", None)],
+        ),
+        any_eqn(start, 0.0, 0.0, shape=(), dtype="int32"),
+        eqn("dynamic_update_slice", [x, upd, start], znew),
+        eqn("le", [znew, lit(INF)], pred),
+    ]
+    return assert_query(eqns, pred, out)
+
+
+def test_dynamic_update_slice_takes_both_sides_flags():
+    """The write row's flag is the OR of the OPERAND's and the UPDATE's,
+    and BOTH halves are pinned here because each is a separate line to get
+    wrong. Every output element is an operand element or an update element,
+    so a maybe-NaN on either side can reach the output; dropping either
+    half of the OR lets that value out unflagged and DISCHARGES a
+    comparison NaN falsifies.
+
+    MUTATION-CHECKED, and this test exists because the mutant survived
+    everything else: `[flags[0] or flags[1]]` -> `[flags[0]]` in
+    `_ieee_dynamic_update_slice` turns the update-side query below from
+    `unknown` into `discharged`, and the full suite still passed 2515 / 7
+    without it. The scatter set-form's copy of the identical line has been
+    pinned since its own round by
+    `test_scatter_takes_the_updates_flag` above; this row's had not been.
+    A rule proved correct is not a rule proved wired in."""
+    for tag, operand_top, update_top in (
+        ("update", False, True),
+        ("operand", True, False),
+        ("both", True, True),
+    ):
+        q = _dus_flag_query(operand_top, update_top)
+        assert propagate(q, semantics="ieee").obligations[0].status == (
+            "unknown"
+        ), tag
+        # real mode: the same shape discharges (⊤ element still ≤ +inf in ℝ),
+        # so the ieee `unknown` above is the FLAG's doing and not the box's
+        assert propagate(q).obligations[0].status == "discharged", tag
+    # anti-vacuity: with neither side flagged the ieee leg decides it, so
+    # the three `unknown`s above are not just "this query never discharges"
+    clean = _dus_flag_query(False, False)
+    assert propagate(clean, semantics="ieee").obligations[0].status == (
+        "discharged"
+    )
+
+
+def test_the_ieee_dus_maybe_nan_start_gate_is_wired_in():
+    """The `dynamic_update_slice` start-index maybe-NaN gate, driven THROUGH
+    the walk rather than argued.
+
+    Building the case is the whole difficulty: a ⊤-maybe-NaN start is
+    caught by `_classify_index_range`'s finiteness check first, so removing
+    the gate changes nothing there. What separates them is `select_n`,
+    whose ieee rule ORs in every CASE's flag — *including cases the
+    selector definitely excludes*, as its own docstring says. A definite
+    selector picking a finite declared `int32` therefore yields a start
+    that is FINITE, in-window, and flagged; the gate is then the only thing
+    between it and a computed value. Deleting the gate turns the `unknown`
+    below into `discharged`.
+
+    SOUNDNESS-WISE THIS IS DEFENCE IN DEPTH, and saying so is the honest
+    version: on this query the flag is conservative (an `int32` cannot BE
+    NaN), so the removed-gate answer happens to be true, and a genuinely
+    NaN-able float start declines one step later at the index-dtype gate
+    instead. The gate earns its place by holding a form that reaches it,
+    not by being the only thing standing between here and a false
+    VERIFIED."""
+    x = var(0, aval((3,)))
+    upd = var(1, aval((1,)))
+    i_ok = var(2, aval((), "int32"))
+    junk = var(3)
+    i_top = var(4, aval((), "int32"))
+    start = var(5, aval((), "int32"))
+    znew = var(6, aval((3,)))
+    pred, out = var(7, aval((3,), "bool")), var(8, aval((3,), "bool"))
+    q = assert_query(
+        [
+            any_eqn(x, 1.0, 2.0, shape=(3,)),
+            any_eqn(upd, 1.0, 2.0, shape=(1,)),
+            any_eqn(i_ok, 0.0, 2.0, shape=(), dtype="int32"),
+            any_eqn(junk, 0.0, 1.0),
+            eqn("mystery_op", [junk], i_top),  # ⊤-maybe-NaN int32
+            eqn("select_n", [lit(0, aval((), "int32")), i_ok, i_top], start),
+            eqn("dynamic_update_slice", [x, upd, start], znew),
+            eqn("le", [znew, lit(2.0)], pred),
+        ],
+        pred,
+        out,
+    )
+    p = propagate(q, semantics="ieee")
+    assert p.obligations[0].status == "unknown"
+    assert any(
+        "dynamic_update_slice start indices carry maybe-NaN" in n
+        for n in p.notes
+    ), p.notes
+    # the start really is finite and in-window: the real leg computes with it
+    assert propagate(q).obligations[0].status == "discharged"
+
+
 def test_top_is_maybe_nan_under_ieee():
     # rule 5 directly: an unknown primitive's output is ⊤-maybe-NaN, so a
     # NaN-falsified comparison over it never discharges (the marker

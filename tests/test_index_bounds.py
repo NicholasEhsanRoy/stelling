@@ -664,6 +664,127 @@ def test_the_dtype_gate_is_actually_WIRED_IN_not_merely_correct():
     assert wide.obligations[0].status == "discharged"
 
 
+def _hand_gather_row_query(index_dtype, axis_len, lo, hi):
+    """The covered leading-axis gather ROW form over a length-`axis_len`
+    const, indexed by a shape-(1, 1) vector of `index_dtype`. Hand IR for
+    the same reason the `dynamic_slice` helper above is: `jnp` will not
+    build a narrow or float index for this geometry, and a raw `lax.gather`
+    or a deserialised query is exactly the door the gate has to hold."""
+    from stelling import ir
+
+    def av(shape=(), dtype="float64"):
+        return ir.Aval(kind="ShapedArray", shape=shape, dtype=dtype)
+
+    idx = ir.Var(id=0, aval=av((1, 1), index_dtype))
+    y = ir.Var(id=1, aval=av((1,)))
+    pred = ir.Var(id=2, aval=av((1,), "bool"))
+    out = ir.Var(id=3, aval=av((1,), "bool"))
+    data = ir.Literal(
+        val=ir.Array(
+            dtype="<f8",
+            shape=(axis_len,),
+            data=np.zeros(axis_len, dtype="<f8").tobytes(),
+        ),
+        aval=av((axis_len,)),
+    )
+    return ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(),
+            outvars=(out,),
+            eqns=(
+                ir.JaxprEqn(
+                    primitive="stelling_any",
+                    invars=(),
+                    outvars=(idx,),
+                    params=(
+                        ("shape", (1, 1)),
+                        ("dtype", index_dtype),
+                        ("lo", float(lo)),
+                        ("hi", float(hi)),
+                    ),
+                ),
+                ir.JaxprEqn(
+                    primitive="gather",
+                    invars=(data, idx),
+                    outvars=(y,),
+                    params=(
+                        (
+                            "dimension_numbers",
+                            ir.NamedTupleParam(
+                                cls="GatherDimensionNumbers",
+                                fields=(
+                                    ("offset_dims", ()),
+                                    ("collapsed_slice_dims", (0,)),
+                                    ("start_index_map", (0,)),
+                                    ("operand_batching_dims", ()),
+                                    ("start_indices_batching_dims", ()),
+                                ),
+                            ),
+                        ),
+                        ("slice_sizes", (1,)),
+                        ("mode", "clip"),
+                        ("fill_value", None),
+                        ("indices_are_sorted", False),
+                        ("unique_indices", False),
+                    ),
+                ),
+                ir.JaxprEqn(
+                    primitive="le",
+                    invars=(y, ir.Literal(val=1.0, aval=av())),
+                    outvars=(pred,),
+                ),
+                ir.JaxprEqn(
+                    primitive="stelling_assert",
+                    invars=(pred,),
+                    outvars=(out,),
+                ),
+            ),
+        )
+    )
+
+
+def test_the_GATHER_dtype_gate_is_actually_WIRED_IN_not_merely_correct():
+    """The same defect as the `dynamic_slice` test above, one function away,
+    and open until now.
+
+    `test_a_narrow_index_dtype_declines_because_xla_wraps_the_bound` passes
+    the string `"gather"` to `_index_dtype_covers_or_decline` while calling
+    the helper DIRECTLY — so the gather case *looks* covered and is not: it
+    proves the helper's message, never that `_t_gather` asks it anything.
+    MEASURED: deleting the call from `_t_gather` line-neutrally leaves the
+    full suite at 2515 passed / 7 skipped, while an `int8` index over a
+    200-element axis flips from `unknown` to `discharged` (and so does a
+    `float64` one). This query goes through the walk."""
+    narrow = propagate(_hand_gather_row_query("int8", 200, 0, 5))
+    assert narrow.obligations[0].status == "unknown"
+    note = next(n for n in narrow.notes if "'gather' declined" in n)
+    assert "does not hold the largest legal index 199" in note, note
+
+    # a float index is refused for the other reason the helper carries, and
+    # it too only arrives here if the transfer actually calls it
+    floaty = propagate(_hand_gather_row_query("float64", 200, 0, 5))
+    assert floaty.obligations[0].status == "unknown"
+    fnote = next(n for n in floaty.notes if "'gather' declined" in n)
+    assert "not one this build knows the range of" in fnote, fnote
+
+    # the identical query decides at int32, and at int8 over an axis whose
+    # largest legal index DOES fit — so the decline above is the dtype
+    # gate's doing and not the row form's
+    assert (
+        propagate(_hand_gather_row_query("int32", 200, 0, 5))
+        .obligations[0]
+        .status
+        == "discharged"
+    )
+    assert (
+        propagate(_hand_gather_row_query("int8", 100, 0, 5))
+        .obligations[0]
+        .status
+        == "discharged"
+    )
+
+
 def test_take_row_ranges_agrees_with_take_rows_on_point_indices():
     """The generalisation must not have moved the case it generalises."""
     a = iv.IntervalArray(
