@@ -4227,7 +4227,7 @@ verdicts:
 
   | door class | the line that destroys the value | does anything raise there? |
   |---|---|---|
-  | `jnp.array`, `jnp.asarray`, `jnp.int8` | none — `_convert_element_type` is **entered 0 times**; the `OverflowError` is raised upstream by `np.asarray(256, dtype=int8)` in jnp's own array construction | yes — that IS the raise |
+  | `jnp.array`, `jnp.asarray`, `jnp.int8` | none — `_convert_element_type` is **entered 0 times**; the `OverflowError` comes from `return np.asarray(x, dtype)` in a different module, `jax/_src/dtypes.py:478` at **0.11.0** and `dtypes.py:507` at **0.10.2** (read off the traceback, all four cells) | yes — that IS the raise |
   | `jnp.full`, `jnp.full_like`, `x.at[0].set` | `arr = np.asarray(operand).astype(new_dtype)`, on the `type(operand) is int` fast path — `lax.py:1726` at **0.11.0**, `lax.py:1724` at **0.10.2** | no: `.astype` is a cast, and truncates in silence |
   | `x + 256`, `x >= 256`, `jnp.where`, `jnp.clip`, `jnp.maximum` | no Python-level fast path applies; every entry falls through to `convert_element_type_p.bind` and the narrowing is the primitive's own | no |
 
@@ -4286,9 +4286,10 @@ verdicts:
 
   **And jax is inconsistent about which door raises**, which matters
   because it means no remedy can be scoped by "where jax wraps" without
-  being scoped by an unstable surface. Measured at `53f9f84` on both
-  series, `int8`, literal `256`, identical results on jax 0.11.0 and jax
-  0.10.2:
+  being scoped by an unstable surface. Measured at `53f9f84` and
+  re-measured at `650e678` on both series, `int8`, **the constant written
+  as a bare Python literal `256` in every cell of both columns** —
+  identical on jax 0.11.0 and jax 0.10.2:
 
   | raises `OverflowError` | wraps in silence |
   |---|---|
@@ -4305,13 +4306,52 @@ verdicts:
   `try/except` above"*; **not one of them does**, and where each of them
   actually loses the value is the table further up.
 
+  **THE "BARE PYTHON LITERAL" QUALIFIER ON THAT TABLE IS LOAD-BEARING AND
+  WAS NOT THERE WHEN THE TABLE LANDED.** NumPy's check applies to Python
+  scalars and to nested Python sequences of them, and to nothing else, so
+  the raise is a joint fact about the door AND the argument's Python type —
+  and the table, pinning one literal in both columns, reads as a fact
+  about the function alone. Measured at `650e678`, three doors × thirteen
+  spellings of the value 256, target `int8`, **identical in all four cells
+  (jax 0.11.0 and 0.10.2 × `JAX_ENABLE_X64` 0 and 1): 15 raise, 24 wrap
+  silently to `0`, and the split is the same at all three doors** — it
+  tracks the argument, not the door:
+
+  | at `jnp.array`, `jnp.asarray` AND `jnp.int8` | argument spellings of 256 |
+  |---|---|
+  | raises `OverflowError` | `256`, `256.0`, `[256]`, `(256,)`, `[[256]]` |
+  | wraps to `0`, in silence | `np.int64(256)`, `np.int16(256)`, `np.float64(256.)`, `np.array(256)`, `np.array([256])`, `np.array([256], np.int16)`, `jnp.array(256)`, `jnp.array([256])` |
+
+  Neither factor alone predicts the outcome, and both directions were
+  driven: `jnp.array(int(LUT[7]), int8)` RAISES where
+  `jnp.array(LUT[7], int8)` wraps for the same `LUT[7]`; and the very same
+  Python `int` that raises at `jnp.array` wraps at
+  `jnp.full((), int(LUT[7]), int8)` and at `x + int(LUT[7])`. A whole
+  table goes through quietly: `jnp.array(LUT, int8)` with
+  `LUT = np.array([1,2,3,4,5,6,7,256], np.int64)` returns
+  `[1 2 3 4 5 6 7 0]`, while `jnp.array(LUT.tolist(), int8)` raises. **Not
+  one of the 24 wrapping combinations emits a warning of any kind** under
+  `warnings.simplefilter("always")`.
+
+  **Driven end to end, this is the same wrong VERIFIED and not a smaller
+  one.** The four-line reproducer at the top of this entry, with `jnp.full`
+  replaced by each of the three doors and `OFFSET`'s constant supplied as
+  `LUT[7]` (i.e. `np.int64(256)`), returns **VERIFIED — source-false at all
+  11 declared points — through `jnp.array`, through `jnp.asarray` and
+  through `jnp.int8`**, in all four cells, at `650e678`, `vacuity_mode=
+  "inputs-only"` with the solver portfolio at 20 s. With the bare literal
+  the same three doors raise before a harness exists. The door did not
+  change; the constant's provenance did.
+
   **A DECLARED BOX SOMETIMES CATCHES A WRAPPED `assume` BOUND, AND
   NARROWNESS IS NOT WHAT DECIDES WHETHER IT DOES.** What catches one is
   the wrapped bound landing OUTSIDE the declared box. Where it lands is a
   fact about the wrap's arithmetic, not about the box, and it is not
-  something the user can see. Driven at `53f9f84` on both series with
-  `jax_enable_x64` on and off — four cells, identical in all four,
-  obligation `assert_(x.astype(jnp.float32) <= 10.0)` throughout:
+  something the user can see. Driven at `53f9f84` and re-driven at
+  `650e678` on both series with `jax_enable_x64` on and off — four cells,
+  identical in all four, obligation
+  `assert_(x.astype(jnp.float32) <= 10.0)` throughout, **the `assume`
+  bound written as a bare Python literal**:
 
   | declaration | `assume` written | traced as | outcome |
   |---|---|---|---|
@@ -4337,6 +4377,21 @@ verdicts:
   for that cell at all. That is the same reason narrowing cannot be sold
   as a guard: neither cell's outcome is a property of the declaration.
 
+  **The bound's SPELLING moves this table too, and in the opposite
+  direction from the doors table, which is why neither spelling can be
+  recommended.** Re-run at `650e678` with the identical four rows and the
+  bound written `np.int64(300)` / `np.int64(261)` / `np.int64(30)` instead
+  of the literal, all four cells: `x >= np.int64(300)` does NOT wrap — jax
+  widens `x` to `int32`/`int64` and compares against `300:i32[]`/`300:i64[]`
+  — and every one of the four rows then raises
+  `UnsatisfiableAssumptionError`, including the row that returned VERIFIED
+  with the literal. **The two ends run opposite.** At the three
+  construction doors the bare Python literal is the spelling that RAISES
+  and `np.int64` is the spelling that wraps in silence; at an `assume`
+  bound it is the bare Python literal that wraps and `np.int64` that
+  refuses. No spelling is the safe one at both ends, so no spelling can be
+  recommended, and this entry recommends neither.
+
   **NOTHING IN THIS TREE CONSULTS ANY DIAGNOSTIC FOR THIS.** There is no
   detector on `main`, no stamp field, no note, no verdict gate, and no
   count that changes because of this entry. **A VERIFIED over a narrow
@@ -4349,19 +4404,56 @@ verdicts:
   it. A reader must not read this disclosure as the announcement of a
   guard.
 
-  **What a user can do today**, in decreasing order of how much it buys,
-  reordered against the branch this was extracted from because the
-  control above unseated its first item. **One thing here is a guard and
-  the rest are odds.** The guard: keep out-of-range constants out of
-  narrow integer dtypes by construction — `jnp.array`, `jnp.asarray` and
-  `jnp.int8` RAISE, measured above, and are the doors to prefer. Then:
-  treat a VERIFIED over a narrow integer declaration as a statement about
-  the program jax traced, which is what `Floats are judged in ℝ; integers
-  and converts are execution-faithful` above already says it is. Last,
-  and explicitly NOT a guard: a narrower declaration raises the chance
-  that a wrapped `assume` bound lands outside the box and gets refused,
-  but row 3 of the table above is a wrap that lands inside the narrowest
-  box there and returns VERIFIED. Narrowing a declaration is worth doing
-  for its own reasons; it does not close this.
+  **What a user can do today. NOTHING BELOW IS A GUARD, AND THE VERSION OF
+  THIS LIST THAT LANDED WITH THIS ENTRY SAID OTHERWISE.** It read: *"One
+  thing here is a guard and the rest are odds. The guard: keep out-of-range
+  constants out of narrow integer dtypes by construction — `jnp.array`,
+  `jnp.asarray` and `jnp.int8` RAISE, measured above, and are the doors to
+  prefer."* **THAT IS WITHDRAWN.** Measured above: those three doors raise
+  for a Python scalar and wrap in silence for a NumPy scalar, a NumPy array
+  or a jnp array, and the reproducer driven through each of them with the
+  constant arriving as `LUT[7]` returns the same VERIFIED, source-false at
+  all 11 declared points, in all four cells. A reader who followed that
+  advice would have moved the wrap rather than removed it, and would have
+  been told they were protected while doing so. That is the worst thing
+  this page could do, so the retraction is written here rather than the
+  sentence deleted.
+
+  **No replacement guard is offered, because the search for one came back
+  empty, and the search is stated so it can be re-run.** At `650e678`, all
+  four cells: (i) not one of the 24 wrapping door × spelling combinations
+  emits a warning of any kind under `warnings.simplefilter("always")`, and
+  none becomes an exception under `-W error`; (ii) wrapping
+  `np.errstate(all="raise")` around each of the eleven doors changes
+  nothing; (iii) the only catchable signal found anywhere in the eleven is
+  a `FutureWarning` out of `x.at[k].set(np.int64(...))` — *"scatter inputs
+  have incompatible types: cannot safely cast value from …"* — and it is a
+  DTYPE-class warning, not a value one. Its control: it fires identically
+  for `np.int64(3)`, which is in range and does not wrap, and is silent for
+  `np.int8(3)`. Escalating it would flag ordinary in-range code — the same
+  failure that got the detector branch audited SHOULD-NOT-LAND — and would
+  still see none of the other ten doors. It is not a wrap detector and is
+  not offered as one.
+
+  What is left buys no protection, and is written as what it is:
+
+  * Treat a VERIFIED over a narrow integer declaration as a statement
+    about the program jax TRACED — which is what `Floats are judged in ℝ;
+    integers and converts are execution-faithful` above already says it
+    is. This lowers nothing; it names what the verdict was ever about.
+  * **NOT a guard:** a narrower declaration raises the chance that a
+    wrapped `assume` bound lands outside the box and gets refused, but row
+    3 of the table above is a wrap that lands inside the narrowest box
+    there and returns VERIFIED. Narrowing a declaration is worth doing for
+    its own reasons; it does not close this.
+  * **NOT a guard, and recorded here to foreclose the inference the doors
+    table invites:** forcing a constant through Python `int()` does restore
+    the raise at `jnp.array` / `jnp.asarray` / `jnp.int8` — measured,
+    `jnp.array(int(LUT[7]), int8)` raises where `jnp.array(LUT[7], int8)`
+    wraps — and does nothing at the other eight doors, where that same
+    Python `int` wraps in silence (`jnp.full((), int(LUT[7]), int8)` and
+    `x + int(LUT[7])` both give `0`). It protects exactly the call sites
+    somebody remembered to write it at, which is the property a guard does
+    not have.
 
 *(no releases yet)*
