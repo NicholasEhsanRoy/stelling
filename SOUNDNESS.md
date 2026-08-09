@@ -4404,6 +4404,35 @@ verdicts:
   `try/except` above"*; **not one of them does**, and where each of them
   actually loses the value is the table further up.
 
+  **ELEVEN IS A SAMPLE, NOT A CENSUS, AND THIS ENTRY NEVER SAID SO.** It
+  does not claim the eleven are exhaustive, but a reader counting doors
+  will read a table for a list. Measured at `b2e3a15`, `int8`, bare Python
+  literal, identical in all four cells, eight more that wrap to `0` in
+  silence and are named nowhere above: `jnp.arange(256, 257, int8)`,
+  `jnp.pad(x, 1, constant_values=256)`, `jnp.select([c], [256], x)`,
+  `x.at[0].add(256)`, `jnp.minimum(x, 256)`, `lax.full((), 256, int8)`,
+  `jnp.astype(jnp.asarray(256), int8)`, `jnp.ones((), int8) * 256`. They
+  are recorded as more of the same shape, not as a new one, and the count
+  is still a FLOOR.
+
+  **ONE OF THEM IS A DIFFERENT SHAPE, AND THE ENTRY'S "WRAPS MOD 2\*\*bits"
+  FRAMING DOES NOT DESCRIBE IT AT ALL.** Measured at `b2e3a15`, all four
+  cells: **`jnp.linspace(256, 256, 1, dtype=jnp.int8)` returns `127`. It
+  SATURATES; it does not wrap.** So does `jnp.linspace(300, 300, 1, int8)`
+  (`127`), and `−300` clamps to `−128`; at `int16`, `70000` clamps to
+  `32767` while `256` passes through untouched. That is a SECOND
+  source-to-trace divergence with a different arithmetic, and every
+  sentence on this page that says "wraps mod `2**bits`" is about the first
+  one only. Its direction is not stated here, because it was not measured:
+  a clamp moves a constant toward zero-magnitude rather than around the
+  ring, so whether it costs a VERIFIED or a REFUTED depends on the
+  obligation, and no reproducer for it was driven. **What is claimed is
+  only that it exists, is silent, and is not the shape this entry
+  describes.** The saturating direction is not new to the page — the
+  instrument's positive control above saturates `1e308` to `127` — but
+  that is a Python FLOAT, and this is an out-of-range INTEGER going the
+  same way, which nothing above accounts for.
+
   **THE "BARE PYTHON LITERAL" QUALIFIER ON THAT TABLE IS LOAD-BEARING AND
   WAS NOT THERE WHEN THE TABLE LANDED.** Per the mechanism above, jax's
   explicit check fires only for `isinstance(object, (bool, int, float,
