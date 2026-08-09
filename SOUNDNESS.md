@@ -4148,16 +4148,20 @@ verdicts:
   `x + 256 ∈ [256, 266]`, so the predicate AS WRITTEN is false at all 11
   declared points. **stelling returns VERIFIED.** Re-driven at `53f9f84`
   before this entry was written, in all four cells — jax 0.11.0 and jax
-  0.10.2, `jax_enable_x64` on and off — and VERIFIED in every one. The
-  index-bounds transfer that landed at `53f9f84` does not touch it; the
-  reproducer contains no indexing.
+  0.10.2, `jax_enable_x64` on and off — and VERIFIED in every one; driven
+  again at `650e678`, same four cells, `vacuity_mode="inputs-only"`, both
+  interval-only and with the solver portfolio at 20 s, VERIFIED in all
+  eight. The index-bounds transfer that landed at `53f9f84` does not touch
+  it; the reproducer contains no indexing.
 
   **It is a wrong VERIFIED, not a lost one.** That is the expensive
   direction, and it is the direction this defect has.
 
   **The VERIFIED is not a blanket VERIFIED for this harness shape**, and
   that is the control rather than an inference. Same three lines, same
-  declared box, only the literal changed, jax 0.11.0:
+  declared box, only the literal changed, jax 0.11.0 (re-derived at
+  `650e678`, interval-only and with the solver portfolio at 20 s, same
+  four rows either way):
 
   | `OFFSET` literal | what jax traces | verdict |
   |---|---|---|
@@ -4171,14 +4175,15 @@ verdicts:
   `0`: by the time it looks, those are the same program.
 
   **Why no backward-cone rule closes it: the information is destroyed
-  before stelling sees it.** The wrap happens inside `jnp.full`, before
-  any array exists and before tracing begins. Measured at `53f9f84` on
-  jax 0.11.0, the ENTIRE jaxpr tree for the harness above holds exactly
-  **one** literal — `10.0:f32`, the comparison bound — and the string
-  `256` does not appear anywhere in it. The wrapped value enters as a
-  **constvar closed over by the `jit` sub-jaxpr** (`lambda c:i8[]; a:i8[]`),
-  not as an `ir.Literal` operand, and every rule in this family walks
-  literal operands.
+  before stelling sees it.** The wrap happens inside `jnp.full`, at eager
+  time — the narrowed value IS the first array that exists — and before
+  the harness is traced at all. Measured at `53f9f84` on jax 0.11.0, and
+  re-derived at `650e678` in all four cells: the ENTIRE jaxpr tree for the
+  harness above holds exactly **one** literal — `10.0:f32`, the comparison
+  bound — and the string `256` does not appear anywhere in it. The wrapped
+  value enters as a **constvar closed over by the `jit` sub-jaxpr**
+  (`lambda c:i8[]; a:i8[]`), not as an `ir.Literal` operand, and every rule
+  in this family walks literal operands.
 
   Four families of jaxpr-level remedy were built and priced against a
   purpose-built corpus and the full suite on both series — a
