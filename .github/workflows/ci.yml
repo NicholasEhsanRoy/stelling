@@ -1103,12 +1103,13 @@ jobs:
             * the nightly budgets — no scheduled job exists
             * the solver legs, control flow (scan/while/fori_loop), vmap/grad,
               nonvacuity, and the public template helpers
-            * TWO OF THE cvc5 ORACLE'S THREE CLAUSES, by the control listed
-              two blocks up. That line reads "a definite answer requires exit
-              0, no truncation, and a harvested model equal to the value
-              records in the bytes actually read" — the property does check all
-              three on every example, and `cvc5-flat` is a control for exactly
-              one of them. Measured over the flat leg's own 1500 examples at
+            * TWO OF THE cvc5 ORACLE'S THREE CLAUSES ARE NOT CONTROLLED BY THIS
+              JOB. The property CHECKS all three on every example — that is the
+              line two blocks up, "a definite answer requires exit 0, no
+              truncation, and a harvested model equal to the value records in
+              the bytes actually read". What runs here demonstrates that the
+              check works for exactly one of the three.
+              Measured over the flat leg's own 1500 examples at
               `0ad22bb`, all three clauses evaluated independently: 5
               violations, every one clause (2) `no truncation`, none of clause
               (1) or (3). The tree carries that defect and not the others.
