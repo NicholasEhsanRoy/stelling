@@ -44,6 +44,11 @@ from hypothesis import given  # noqa: E402
 
 import _grammar  # noqa: E402
 import _profiles  # noqa: E402
+# The cvc5 transcript strategy lives beside its property rather than in
+# `_grammar`, because it models one file's wire format and nothing else. It is
+# floored here all the same: see the test at the bottom for why a control
+# firing was not enough.
+import test_cvc5_protocol as _cvc5  # noqa: E402
 
 
 def _classify_integer(spec, seen):
@@ -259,6 +264,97 @@ def test_the_general_grammar_still_draws_its_boundary_classes():
         },
         "general_specs",
     )
+
+
+def _classify_transcript(item, seen):
+    full, stdout, rc = item
+    seen["intact" if stdout == full else "truncated"] += 1
+    seen["exit 0" if rc == 0 else "nonzero exit"] += 1
+    if stdout != full and rc == 0:
+        seen["truncated on exit 0"] += 1
+    if stdout != full and full.endswith("\n") and stdout == full[:-1]:
+        seen["final newline cut and nothing else"] += 1
+    seps = [s for s in _cvc5.SPLITLINES_ONLY if s in full]
+    if seps:
+        seen["separator payload"] += 1
+    for s in seps:
+        seen[f"sep:{ord(s):#x}"] += 1
+    for line in full.split("\n"):
+        parts = line.split(maxsplit=2)
+        if len(parts) == 3 and parts[0] == "opaque":
+            for s in _cvc5.SPLITLINES_ONLY:
+                if s in parts[2] and parts[2].split(s, 1)[1].startswith("end "):
+                    seen["forged terminator inside a payload"] += 1
+                    break
+    values = _cvc5._values_actually_present(full)
+    if values:
+        seen["a value record"] += 1
+    if len(values) != len(set(values)):
+        seen["a duplicate value record"] += 1
+    if any(ln.startswith("end ") for ln in full.split("\n")):
+        seen["a terminator"] += 1
+
+
+def test_the_cvc5_transcript_generator_still_draws_its_defect_shapes():
+    """The floor the four cvc5 controls cannot supply between them.
+
+    **A control firing is not evidence that the strategy still draws the shape
+    the control is about**, and here that is measured rather than argued. Two
+    line-neutral mutations of ``test_cvc5_protocol.py``'s generator, each
+    deleting one of the two defect shapes ``cvc5-flat``'s ``why`` names:
+
+    * drop the separator branch of ``_PAYLOADS``, so no transcript can ever
+      carry a ``splitlines``-only character;
+    * drop the ``cut -= 1`` line, so the final record's newline is never cut on
+      its own.
+
+    Under either one, the property suite is GREEN (``3 passed``) and all four
+    cvc5 controls report FIRED — because the OTHER shape still reaches
+    ``0ad22bb``, and ``property_check.py`` asks only whether the run came back
+    red carrying ``expect_message``. Half the defect class silently stops being
+    searched and every gate in the repository stays green. This test is the one
+    that does not: it reads the drawn transcripts rather than the tool's answer,
+    so it fails on the push that removes the shape.
+
+    Measured at ``ci`` (1000 draws, 1.6 s, no solver and no jax): truncated 547,
+    intact 453, exit 0 601, truncated-on-exit-0 340, separator payload 315, a
+    forged terminator inside a payload 283, the final newline cut and nothing
+    else 25, a duplicate value record 81, each of the nine separators 31-47.
+    The floors are set well below all of those: tripwires for a shape going to
+    zero, not targets.
+    """
+    seen = collections.Counter()
+
+    @_profiles.current().settings(1000)
+    @given(_cvc5._transcripts())
+    def draw(item):
+        seen["drawn"] += 1
+        _classify_transcript(item, seen)
+
+    draw()
+    floors = {
+        "drawn": 400,
+        "intact": 100,
+        "truncated": 100,
+        "exit 0": 100,
+        "nonzero exit": 100,
+        # The whole defect: a child that died with its exit code saying nothing.
+        # Drawn independently of truncation on purpose; if that ever becomes a
+        # dependent draw this is what notices.
+        "truncated on exit 0": 50,
+        # NAMED SHAPE 1 of cvc5-flat's `why`: `…\nend 4`, and nothing else.
+        "final newline cut and nothing else": 5,
+        # NAMED SHAPE 2: a payload the writer sees as one record and
+        # `splitlines()` sees as two, the second of which forges a terminator.
+        "separator payload": 50,
+        "forged terminator inside a payload": 30,
+        "a value record": 100,
+        "a terminator": 50,
+        # What `cvc5-phantom-model` needs to reach clause (3) of the oracle.
+        "a duplicate value record": 10,
+    }
+    floors.update({f"sep:{ord(s):#x}": 5 for s in _cvc5.SPLITLINES_ONLY})
+    _require(seen, floors, "test_cvc5_protocol._transcripts")
 
 
 def test_the_cross_series_corpus_still_contains_what_its_control_needs():
