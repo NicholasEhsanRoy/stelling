@@ -4194,18 +4194,83 @@ verdicts:
   integer literals in a backward cone can close this**, because there is
   no integer literal in the cone to key on.
 
-  **It is jax's, it is deliberate, and it is in the shipping release.**
-  `jax/_src/lax/lax.py` wraps the narrowing conversion in
+  **It is jax's, it is deliberate, and it is in the shipping release —
+  BUT NOT BY THE MECHANISM THIS ENTRY FIRST NAMED, AND THAT CLAIM IS
+  RETRACTED HERE RATHER THAN QUIETLY SWAPPED.** What this paragraph said
+  was that `jax/_src/lax/lax.py` "wraps the narrowing conversion in
   `try: ... except OverflowError: pass` — jax catches the overflow NumPy
-  raises and discards it — carrying the comment *"TODO(phawkins): remove
+  raises and discards it", carrying the comment *"TODO(phawkins): remove
   the try-except block here, which would be a breaking change to users in
-  the presence of overflows"*. **The line range is an installed-dependency
-  figure, not a repository figure**, so it is quoted with the version it
-  was read from: `lax.py:1747-1754` at jax **0.11.0**, and the same block
-  at `lax.py:1740-1747` at jax **0.10.2**. Cite the comment, not the
-  range.
+  the presence of overflows"*. **The comment is accurate and so are the
+  line ranges. The causal claim built on them is false.**
 
-  That behaviour is against jax's own published promotion rule. **JEP
+  Measured by instrumenting the code object of
+  `jax._src.lax.lax._convert_element_type` with `sys.monitoring` LINE
+  events LOCAL to that one code object, then sweeping the eleven doors
+  below × four constant spellings (Python `int`, `np.int64`, 0-d
+  `np.ndarray`, 0-d `jnp` array) × seven written values × four narrow
+  target dtypes: **1144 runs at `JAX_ENABLE_X64=0` and 1232 at `=1` per
+  series, `_convert_element_type` entered on 607 and 655 of them
+  respectively, and the `except OverflowError:` line executed ZERO
+  times** — jax 0.11.0 and jax 0.10.2, both x64 settings, all four cells,
+  NumPy 2.5.1. **The instrument carries its own positive control**: in the
+  same process the same probe sees that line execute exactly once for
+  `jnp.full((), 1e308, jnp.int8)` and for
+  `lax.convert_element_type(1e308, jnp.int8)` — a Python FLOAT out of the
+  target integer's range, whose answer is `127`, saturated, not wrapped.
+  So the zero is a fact about the integer path, not about the probe.
+
+  **Where the value is actually destroyed**, per door class, by
+  line-execution count inside that same code object. Line numbers are
+  installed-dependency figures and carry their version; the constant is a
+  bare Python literal:
+
+  | door class | the line that destroys the value | does anything raise there? |
+  |---|---|---|
+  | `jnp.array`, `jnp.asarray`, `jnp.int8` | none — `_convert_element_type` is **entered 0 times**; the `OverflowError` is raised upstream by `np.asarray(256, dtype=int8)` in jnp's own array construction | yes — that IS the raise |
+  | `jnp.full`, `jnp.full_like`, `x.at[0].set` | `arr = np.asarray(operand).astype(new_dtype)`, on the `type(operand) is int` fast path — `lax.py:1726` at **0.11.0**, `lax.py:1724` at **0.10.2** | no: `.astype` is a cast, and truncates in silence |
+  | `x + 256`, `x >= 256`, `jnp.where`, `jnp.clip`, `jnp.maximum` | no Python-level fast path applies; every entry falls through to `convert_element_type_p.bind` and the narrowing is the primitive's own | no |
+
+  Respell the constant as `np.int64(256)` — how a value read out of a
+  NumPy table arrives — and the sites move again. `jnp.array` /
+  `jnp.asarray` / `jnp.int8` destroy it at
+  `arr = operand.astype(new_dtype, copy=False)`, `lax.py:1731`, **a branch
+  0.11.0 has and 0.10.2 does not**; on 0.10.2 the value is already
+  narrowed before `_convert_element_type` is entered. And `jnp.full` /
+  `jnp.full_like` destroy it **inside the `try` itself**, at
+  `np.asarray(operand, dtype=new_dtype)` (`lax.py:1750` at 0.11.0,
+  `lax.py:1743` at 0.10.2) — which under NumPy 2.5.1 CASTS an
+  `np.generic` instead of raising. Measured at the NumPy level in the same
+  interpreters: `np.asarray(256, dtype=np.int8)` raises `OverflowError`,
+  while `np.asarray(np.int64(256), dtype=np.int8)` and
+  `np.asarray(256).astype(np.int8)` both return `0` with no exception and
+  no warning. **That is the correction at its sharpest: the one door class
+  whose wrap really does happen inside the guarded call is the class for
+  which NumPy declines to raise, so the `except` beneath it has nothing to
+  catch.**
+
+  **The block is not dead code, and this entry does not claim it is.**
+  It executes for the Python float above, and for an `int` SUBCLASS — an
+  `enum.IntEnum` member, or any `class MyInt(int)` — because the fast path
+  above it tests `type(operand) is int` EXACTLY, so a subclass skips it,
+  reaches the guarded call, NumPy raises, jax swallows it, and `256`
+  becomes `0`. Measured in all four cells:
+  `lax.convert_element_type(Colour.RED, jnp.int8)` with `Colour.RED = 256`
+  executes the `except` once and returns `0`. That route is real and is
+  the one the `TODO` describes. It is not the route any of the eleven
+  doors below takes. *(INFERRED, not measured: because the `except` body
+  runs on none of those 1144/1232 runs, deleting the `except` clause alone
+  cannot change any of them — but deleting the whole `try` block WOULD
+  change the `np.generic` rows, whose wrap is the `try` body.)*
+
+  **The line range is an installed-dependency figure, not a repository
+  figure**, so it is quoted with the version it was read from:
+  `lax.py:1747-1754` at jax **0.11.0**, and the same block at
+  `lax.py:1740-1747` at jax **0.10.2** — both re-read and both correct.
+  Cite the comment, not the range; and do not cite either as the cause of
+  the integer wrap.
+
+  The silent narrowing is against jax's own published promotion rule. **JEP
   9407** states as a design goal *"Promotion should never lead to an
   unhandled overflow."* **SUSPECTED, and labelled so deliberately**: JEP
   9407 is not shipped inside the `jax` distribution, so the wording is
@@ -4214,8 +4279,10 @@ verdicts:
   digits `9407` do match, in three files per tree, and every match is
   noise — inside float literals in the SVD back-compat test data and
   inside the unrelated bug number `TODO(b/278940799)` in
-  `jax2tf.py`. No reference to the JEP is present in either tree. The
-  `try/except` above IS verified, in both.
+  `jax2tf.py`. No reference to the JEP is present in either tree. All of
+  that re-derives at `650e678` against both installed trees. The
+  `try/except` above IS PRESENT in both — verified by reading; what it does
+  and does not do is measured above.
 
   **And jax is inconsistent about which door raises**, which matters
   because it means no remedy can be scoped by "where jax wraps" without
@@ -4233,7 +4300,10 @@ verdicts:
   | | `jnp.clip(x, 256, 256)`, `jnp.maximum(x, 256)` |
 
   The three that raise delegate to `np.asarray(..., dtype)` and inherit
-  NumPy's check. The eight that wrap go through the `try/except` above.
+  NumPy's check — re-measured, and the only part of the original sentence
+  that survives. The rest of it read *"the eight that wrap go through the
+  `try/except` above"*; **not one of them does**, and where each of them
+  actually loses the value is the table further up.
 
   **A DECLARED BOX SOMETIMES CATCHES A WRAPPED `assume` BOUND, AND
   NARROWNESS IS NOT WHAT DECIDES WHETHER IT DOES.** What catches one is
