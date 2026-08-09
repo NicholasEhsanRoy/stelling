@@ -3610,12 +3610,24 @@ verdicts:
   old ones could not have), and two whose out-of-range index is now a
   finding with the same accounting.
 
-  **Both jax series, at `882750f`:** 2515 passed / 7 skipped on jax
-  0.11.0 and on 0.10.2, `--collect-only` ids **byte-identical** between
-  the series (2515 each), `reuse lint` rc=0. Baseline at `9564728` was
-  2484 / 7 on both with 2486 ids: **33 tests added and 4 REMOVED, net
-  +29** — and 2486 − 4 + 33 = 2515, so the arithmetic and the sentence
-  agree. The four removed are the four renamed gather tests
+  **Both jax series, measured at `882750f`** (a record of that commit;
+  the commits after it are prose and a doc regeneration): 2513 passed / 7
+  skipped on jax 0.11.0 and on jax 0.10.2 (161.62 s and 170.11 s, load
+  1.53 and 6.93), `--collect-only` ids **byte-identical** between the
+  series (2515 each), `reuse lint` rc=0. Baseline at `9564728` was 2484 / 7 on
+  both with 2486 ids: **33 tests added and 4 REMOVED, net +29** — and
+  2486 − 4 + 33 = 2515, and 2484 + 29 = 2513, so both arithmetics and the
+  sentence agree.
+
+  *The run total and the collect count differ by 5 on this branch and by
+  5 on `9564728` alike* — `2484 + 7 = 2491 = 2486 + 5` there and
+  `2513 + 7 = 2520 = 2515 + 5` here. The five are `tests/property/`
+  modules skipped at import for a missing optional dependency, which the
+  junit report records as testcases and `--collect-only` does not. An
+  environment fact, unchanged by this branch, and named here so the two
+  figures are not read as a discrepancy it introduced.
+
+  The four removed are the four renamed gather tests
   (`test_gather_dynamic_index_declines_not_crashes`,
   `test_gather_out_of_range_index_declines_not_crashes`,
   `test_fvm_gather_dynamic_index_declines_traced`,
