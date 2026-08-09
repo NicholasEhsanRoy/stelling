@@ -1608,33 +1608,284 @@ def _t_gather(eqn, params, ins):
             f"covered row form takes (1, *operand.shape[1:]) = {want_ss} "
             f"of the operand (shape {operand.shape}) per index"
         )
-    ks = []
+    _index_dtype_covers_or_decline(
+        _index_operand_dtype(eqn, 1), operand.shape[0] - 1, "gather"
+    )
+    ranges = []
     for i, (lo, hi) in enumerate(zip(indices.los, indices.his)):
-        if lo != hi:
-            raise iv.IntervalError(
-                f"gather index element {i} spans [{lo}, {hi}] over the "
-                f"declared box — not a single point, so no one row is THE "
-                f"taken row, and nothing here brackets a data-dependent "
-                f"take"
+        ranges.append(
+            _classify_index_range(
+                lo, hi, operand.shape[0] - 1, f"gather index element {i}",
+                f"the operand's leading axis (shape {operand.shape})",
             )
-        if not math.isfinite(lo) or lo != math.floor(lo):
+        )
+    return [iv.take_row_ranges(operand, ranges)]
+
+
+# -- index-bounds reasoning for dynamic indexing -----------------------------
+#
+# WHAT THIS BUYS, and the one thing it must never do.
+#
+# `u[i]` with a traced `i` is not a gather. MEASURED on jax 0.11.0 and
+# 0.10.2: `jnp`'s `__getitem__` emits `lt/add/select_n` (the from-the-end
+# normalisation) and then a `dynamic_slice`, and so does an out-of-range
+# STATIC index — `u[3]` on a length-10 array lowers to a static `slice`,
+# but `u[30]` and `u[-11]` fall back to the same normalise-then-
+# `dynamic_slice` path. `dynamic_slice` had no transfer, so every dynamic
+# index — and every statically-out-of-range one — collapsed the value to ⊤
+# and killed all reasoning downstream of it. Indexing is everywhere in
+# scientific code; this is the largest single power gap the census left.
+#
+# THE CLAMP, AND WHY IT IS NOT MODELLED. MEASURED, primitive-level, by
+# binding `dynamic_slice_p` directly (which skips the wrapper's
+# normalisation): jax CLAMPS the start of a gather/slice into the legal
+# window — `dynamic_slice(arange(10), 30, (1,))` reads element 9, and
+# `dynamic_slice(arange(10), -1, (1,))` reads element 0 — while a scatter
+# with an out-of-range index is silently DROPPED (`x.at[30].set(v)` on a
+# length-10 `x` is a no-op). A transfer that modelled the clamp would be
+# sound about the *executed* program and wrong about the program the user
+# WROTE: it would answer `u[i] == u[9]` with "definitely true" for `i` in
+# [12, 20]. That is precisely the shape of the integer-literal wrap defect,
+# and the tree's stated posture — *"integers and converts are
+# execution-faithful"* (SOUNDNESS.md, the fixed-width boundary) — makes the
+# tension real rather than rhetorical, so the choice is argued here and in
+# SOUNDNESS.md rather than assumed. Three reasons decide it the other way
+# for indexing specifically:
+#
+#   1. jax's own documentation calls out-of-bounds indexing UNDEFINED
+#      BEHAVIOUR, not a defined value. The wrap of an int32 `add` is IEEE-
+#      and C-defined and reproducible; the clamp is a platform convention
+#      the docs explicitly decline to guarantee.
+#   2. It is not even self-consistent inside jax: the gather clamps, the
+#      scatter drops, and the same source-level `x[i]` picks one or the
+#      other by which side of an assignment it lands on.
+#   3. Reverse-mode AD does not preserve it. The cotangent of a clamped
+#      gather does not accumulate where the clamped read came from, so a
+#      value modelled as `u[9]` in the primal is not `u[9]`'s derivative in
+#      the tangent — "execution-faithful" has no single referent here.
+#
+# So the rule below computes a value ONLY where jax's clamp is provably the
+# IDENTITY. That is the whole soundness argument in one line, and it is why
+# minting a false VERIFIED through this path requires the hull to be wrong,
+# not the clamp story.
+#
+# Three cases, and only the first produces a value:
+#
+#   (1) index range inside the legal window  -> the hull over every
+#       reachable slice. The power gain.
+#   (2) range straddles the window           -> DECLINE, named: the value
+#       depends on the clamp for some declared inputs and on nothing else
+#       for the rest, and no box states that.
+#   (3) range disjoint from the window       -> PROVABLY out of bounds for
+#       every input the user declared. Reported as a finding
+#       (`iv.IndexOutOfBoundsError`, its own shouted note), still ⊤.
+
+
+def _index_operand_dtype(eqn, position: int) -> str | None:
+    """The aval dtype of an equation's index operand, or None when the
+    equation does not carry one. The interval domain is bounds-only, so
+    every dtype question is asked of the EQUATION — the same place
+    :func:`_scatter_indices_dtype` asks it."""
+    if len(eqn.invars) <= position:
+        return None
+    return eqn.invars[position].aval.dtype
+
+
+def _index_dtype_covers_or_decline(
+    dtype: str | None, bound: int, prim: str
+) -> None:
+    """Decline unless the largest legal index is exactly representable in
+    the index operand's element type.
+
+    XLA computes an index's out-of-bounds bound IN THE INDEX ARRAY'S
+    ELEMENT TYPE — the fact :func:`_scatter_index_dtype_covers` was written
+    for, where a bound that does not fit WRAPS and silently changes which
+    indices are treated as in range. Probing jax 0.11.0's `dynamic_slice`
+    with an `int8` start over operands of length 100/127/128/129/200 did
+    NOT exhibit a wrapped clamp bound (every reachable start read the
+    element it should), so the failure is UNCONFIRMED for this primitive —
+    but "I could not make it happen" is not "it cannot happen", and the
+    gate costs nothing where it matters: every index dtype jax's own
+    indexing produces is `int32`/`int64`, for which any array length jax
+    can allocate fits. Refusing the unconfirmed case is free; guessing it
+    is not."""
+    bounds = _INT_DTYPE_BOUNDS.get(dtype or "")
+    if bounds is None:
+        raise iv.IntervalError(
+            f"{prim} index dtype {dtype!r} is not one this build knows the "
+            f"range of, so whether the largest legal index {bound} is "
+            f"representable in it cannot be checked — and XLA computes the "
+            f"out-of-bounds comparison in the index's own element type"
+        )
+    lo, hi = bounds
+    if not lo <= bound <= hi:
+        raise iv.IntervalError(
+            f"{prim} index dtype {dtype!r} spans [{lo}, {hi}], which does "
+            f"not hold the largest legal index {bound} — XLA computes the "
+            f"out-of-bounds comparison in the index's element type, where "
+            f"that bound WRAPS, so the comparison performed is not the one "
+            f"modelled here"
+        )
+
+
+def _classify_index_range(
+    lo: float, hi: float, top: int, what: str, where: str
+) -> tuple[int, int]:
+    """The three-case classifier shared by every dynamic-index transfer.
+
+    ``[lo, hi]`` is a propagated index interval and ``[0, top]`` the legal
+    window (``top`` is ``n - 1`` for a gather row, ``n - slice_size`` for a
+    dynamic slice start). Returns the integer range on the inside case, and
+    raises on the other two: :class:`interval.IndexOutOfBoundsError` when
+    the interval cannot contain a legal index at all, a plain
+    :class:`interval.IntervalError` when it straddles.
+
+    Endpoints must be finite integers. They are NOT rounded inward to the
+    integers they contain: this layer is handed bounds with no dtype, and
+    narrowing ``[0.5, 5.5]`` to ``[1, 5]`` would be sound only if the value
+    really is integral. jax's own typing rule says index operands are
+    integral, but a hand-built or deserialised query is not bound by it,
+    and the cost of the strict reading is a decline on a form no trace
+    produces."""
+    if not (math.isfinite(lo) and math.isfinite(hi)):
+        raise iv.IntervalError(
+            f"{what} spans [{lo}, {hi}], which is not finite — an index "
+            f"with an unbounded side names no position in {where}"
+        )
+    if lo != math.floor(lo) or hi != math.floor(hi):
+        raise iv.IntervalError(
+            f"{what} spans [{lo}, {hi}], whose endpoints are not integers "
+            f"— positions in {where} are integers, and this layer does not "
+            f"round an index inward to the ones it contains"
+        )
+    ilo, ihi = int(lo), int(hi)
+    if ihi < 0 or ilo > top:
+        raise iv.IndexOutOfBoundsError(
+            f"{what} spans [{ilo}, {ihi}], and EVERY value in it is outside "
+            f"{where}: the legal positions are [0, {top}]. This is not a "
+            f"gap in stelling — over the whole declared set there is no "
+            f"input for which this index is in bounds. jax will not raise: "
+            f"measured on jax 0.11.0, a read clamps into range and a write "
+            f"is dropped, so the program silently computes with the wrong "
+            f"element. stelling withholds the value rather than modelling "
+            f"the clamp. (jnp normalises a from-the-end index upstream of "
+            f"this equation, so the span printed is the position actually "
+            f"asked for: on a length-10 axis, u[-11] arrives here as -1)"
+        )
+    if ilo < 0 or ihi > top:
+        raise iv.IntervalError(
+            f"{what} spans [{ilo}, {ihi}], which straddles the legal "
+            f"positions [0, {top}] of {where} — some inputs the declared "
+            f"set admits index in bounds and some do not, and the "
+            f"out-of-bounds ones take a clamped (read) or dropped (write) "
+            f"element that is not the one written. No box states that, so "
+            f"no value is claimed here"
+        )
+    return ilo, ihi
+
+
+def _start_ranges(eqn, ins, first: int, sizes, prim: str):
+    """Classify one scalar start index per axis for the dynamic-slice
+    family, and check each index operand's dtype covers its axis' bound."""
+    operand = ins[0]
+    rank = len(operand.shape)
+    starts = ins[first:]
+    if len(starts) != rank:
+        raise iv.IntervalError(
+            f"{prim} takes one scalar start index per axis of its rank-"
+            f"{rank} operand (shape {operand.shape}) and this equation "
+            f"binds {len(starts)}"
+        )
+    out = []
+    for d, (start, n, s) in enumerate(zip(starts, operand.shape, sizes)):
+        if start.shape != ():
             raise iv.IntervalError(
-                f"gather index element {i} is the point {lo}, which is not "
-                f"a finite integer — row numbers are integers, so this "
-                f"index names no row"
+                f"{prim} start index for axis {d} has shape {start.shape}; "
+                f"the primitive takes one SCALAR start per axis"
             )
-        k = int(lo)
-        if not 0 <= k < operand.shape[0]:
+        if not 0 <= s <= n:
             raise iv.IntervalError(
-                f"gather index element {i} is {k}, outside the operand's "
-                f"leading axis: 0 <= {k} < {operand.shape[0]} fails "
-                f"(operand shape {operand.shape}) — out-of-range handling "
-                f"is mode-dependent (measured on jax 0.11.0: mode 'clip' "
-                f"takes the clamped row, mode 'fill' yields the fill value "
-                f"instead of any row) and is never guessed"
+                f"{prim} takes {s} element(s) along axis {d} of an extent-"
+                f"{n} axis (operand shape {operand.shape})"
             )
-        ks.append(k)
-    return [iv.take_rows(operand, ks)]
+        _index_dtype_covers_or_decline(
+            _index_operand_dtype(eqn, first + d), n - s, prim
+        )
+        out.append(
+            _classify_index_range(
+                start.los[0], start.his[0], n - s,
+                f"{prim} start index for axis {d}",
+                f"axis {d} of the operand (shape {operand.shape}, taking "
+                f"{s} element(s) there)",
+            )
+        )
+    return tuple(out)
+
+
+def _t_dynamic_slice(eqn, params, ins):
+    """``lax.dynamic_slice`` — what ``u[i]`` with a traced ``i`` lowers to,
+    and what an out-of-range static index lowers to as well.
+
+    Covered: any rank, any ``slice_sizes``, start indices known to any
+    integer interval that lies inside the axis' legal start window
+    ``[0, n_d - s_d]``. The result is the elementwise hull over every start
+    the declared set admits (:func:`interval.dynamic_slice_hull`), which is
+    tight on a single axis. A point start reproduces the exact slice.
+
+    Declines, each naming its reason: a start straddling the legal window
+    (the clamp would decide the value for some inputs), a start range
+    disjoint from it (reported as an out-of-bounds FINDING), a non-integral
+    or unbounded start interval, an index dtype too narrow to hold the
+    axis' bound, and a hull whose enumeration would exceed the work budget.
+
+    Data movement only: every output element IS an input element, so there
+    is no arithmetic and no rounding — tier exact."""
+    if not ins:
+        raise iv.IntervalError(
+            "dynamic_slice takes an operand and one start index per axis, "
+            "and this equation binds none"
+        )
+    operand = ins[0]
+    sizes = tuple(int(s) for s in _req(params, "slice_sizes", "dynamic_slice"))
+    if len(sizes) != len(operand.shape):
+        raise iv.IntervalError(
+            f"dynamic_slice slice_sizes {sizes} do not match the rank of "
+            f"its operand (shape {operand.shape})"
+        )
+    ranges = _start_ranges(eqn, ins, 1, sizes, "dynamic_slice")
+    return [iv.dynamic_slice_hull(operand, ranges, sizes)]
+
+
+def _t_dynamic_update_slice(eqn, params, ins):
+    """``lax.dynamic_update_slice`` — the write sibling of
+    :func:`_t_dynamic_slice`, and what ``u.at[i].set(v)`` lowers to when
+    the update is a contiguous block (a scalar ``.at[i].set`` traces to a
+    ``scatter`` instead, measured on jax 0.11.0).
+
+    The operand keeps its own value everywhere some admitted start does not
+    write, and takes the update's values everywhere some admitted start
+    does; positions where both are possible get the hull of the two. With a
+    point start that is exact.
+
+    Same three cases and the same declines as the read side — the start
+    must lie inside ``[0, n_d - s_d]``, because jax clamps a write's start
+    exactly as it clamps a read's (measured, primitive-level: a length-2
+    update at start 20 of a length-10 operand lands at index 8)."""
+    if len(ins) < 2:
+        raise iv.IntervalError(
+            f"dynamic_update_slice takes an operand, an update and one "
+            f"start index per axis, and this equation binds {len(ins)}"
+        )
+    operand, update = ins[0], ins[1]
+    if len(update.shape) != len(operand.shape):
+        raise iv.IntervalError(
+            f"dynamic_update_slice update shape {update.shape} does not "
+            f"match the rank of its operand (shape {operand.shape})"
+        )
+    ranges = _start_ranges(
+        eqn, ins, 2, update.shape, "dynamic_update_slice"
+    )
+    return [iv.dynamic_update_slice_hull(operand, update, ranges)]
 
 
 # The core scatter-add dimension-number fields shared by every measured
@@ -2844,6 +3095,15 @@ TRANSFERS = {
     # the MIME fvm laplacian census trace; every other gather configuration
     # declines (see _t_gather).
     "gather": (_t_gather, TIER_EXACT),
+    # u[i] with a traced i, and any out-of-range static index: the
+    # index-bounds round. Dynamic start indices are propagated as intervals
+    # and compared against the axis' legal start window; a value is
+    # computed only where jax's clamp is provably the identity, so the
+    # clamp is never modelled (see _t_dynamic_slice). Pure data movement:
+    # tier exact.
+    "dynamic_slice": (_t_dynamic_slice, TIER_EXACT),
+    # the write sibling, same round, same three cases, same clamp posture
+    "dynamic_update_slice": (_t_dynamic_update_slice, TIER_EXACT),
     # axis permutation: pure data movement (MIME fvm census round, reached
     # inside the transparent jnp.linalg.inv jit); malformed permutations
     # decline inside iv.transpose (IntervalError -> noted ⊤).
@@ -2963,6 +3223,7 @@ _INT_NON_COMPUTING = frozenset({
     "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
     "convert_element_type",
     "stop_gradient", "reshape", "squeeze", "slice", "scatter", "gather",
+    "dynamic_slice", "dynamic_update_slice",
     "transpose", "broadcast_in_dim", "concatenate", "stack",
     "stelling_any", "stelling_assert", "stelling_nonvacuity",
 })
@@ -3060,8 +3321,20 @@ _INT_NON_COMPUTING_EXEMPT: dict[str, str] = {
         "'scatter-add' computes and is probed"
     ),
     "gather": (
-        "pure element routing (static row take) — copies of in-range "
-        "values, no arithmetic performed on them"
+        "pure element routing (row take) — copies of in-range values, no "
+        "arithmetic performed on them; a range-valued index only widens "
+        "WHICH in-range values are copied, never computes a new one"
+    ),
+    "dynamic_slice": (
+        "pure element routing (window take) — every output element IS an "
+        "operand element, and the transfer computes a value only where the "
+        "start index provably lands inside the legal window, so no index "
+        "arithmetic (jax's clamp) is performed either"
+    ),
+    "dynamic_update_slice": (
+        "element REPLACEMENT (the write form): the output holds only "
+        "values its operand and update already contained, hulled where "
+        "both are reachable — no arithmetic on any of them"
     ),
     "transpose": (
         "pure element routing (axis permutation) — copies of in-range "
@@ -3813,6 +4086,41 @@ def _ieee_gather(eqn, params, ins, flags):
     return outs, [flags[0]]
 
 
+def _ieee_dynamic_slice(eqn, params, ins, flags):
+    """Data movement, sound as-is under ieee: every output element IS an
+    operand element, so the output is maybe-NaN exactly when the operand
+    is. Maybe-NaN START INDICES decline, as for gather and scatter — the
+    bounds classification needs definite integers, and a NaN start is
+    clamp-dependent garbage."""
+    if any(flags[1:]):
+        raise iv.IntervalError(
+            "dynamic_slice start indices carry maybe-NaN under ieee "
+            "semantics — the index-bounds rule needs definite non-NaN "
+            "indices; declined"
+        )
+    outs = _t_dynamic_slice(eqn, params, ins)
+    if outs is None:
+        return None
+    return outs, [flags[0]]
+
+
+def _ieee_dynamic_update_slice(eqn, params, ins, flags):
+    """Data movement, sound as-is under ieee: every output element is an
+    operand element or an update element, so the output is maybe-NaN when
+    either side is — the same OR the scatter set-form takes. Maybe-NaN
+    start indices decline."""
+    if len(ins) >= 2 and any(flags[2:]):
+        raise iv.IntervalError(
+            "dynamic_update_slice start indices carry maybe-NaN under ieee "
+            "semantics — the index-bounds rule needs definite non-NaN "
+            "indices; declined"
+        )
+    outs = _t_dynamic_update_slice(eqn, params, ins)
+    if outs is None:
+        return None
+    return outs, [flags[0] or flags[1]]
+
+
 def _ieee_scatter_add(eqn, params, ins, flags):
     """Category (iii), whole-primitive: the censused ieee REFUSAL for
     scatter-add — the honest floor, chosen over an order-independent
@@ -3981,6 +4289,8 @@ IEEE_TRANSFERS = {
     ),
     "scatter": (_ieee_scatter, TIER_EXACT),
     "gather": (_ieee_gather, TIER_EXACT),
+    "dynamic_slice": (_ieee_dynamic_slice, TIER_EXACT),
+    "dynamic_update_slice": (_ieee_dynamic_update_slice, TIER_EXACT),
     # (iii) the whole-primitive censused refusal: the accumulate's ℝ-
     # associativity argument does not survive the dial, and no all-orders
     # bound or contraction hull is built for the scatter path — every
@@ -6661,6 +6971,41 @@ class _Propagator:
                 if ieee
                 else transfer(eqn, params, ins)
             )
+        except iv.IndexOutOfBoundsError as e:
+            # A FINDING, not a decline. Every other exception arriving here
+            # means stelling has no rule for a legal form; this one means
+            # the PROGRAM indexes outside its array for every input the
+            # user declared, and stelling proved it over the whole set.
+            # Reporting it through `_note_decline`'s wording — which is
+            # what happened before this arm existed — told the reader "no
+            # rule here" about a fact that has nothing to do with rules.
+            #
+            # The accounting is deliberately IDENTICAL to the decline
+            # below: ⊤, unknown, unreached. A definite out-of-bounds index
+            # does not make any asserted predicate false, so it must not
+            # manufacture a REFUTED, and withholding the value is the only
+            # safe direction. What changes is only what the reader is told
+            # — and notes are the loudest channel a transfer has without a
+            # new Stamp field (which would mean editing the solver
+            # verdict's assembly site too).
+            #
+            # `self.notes` rather than `_note_decline`: findings keep their
+            # multiplicity, one per equation site, the way the withhold and
+            # assume notes do. Two out-of-bounds indexes at two places in a
+            # program are two things to fix, and deduping byte-identical
+            # text would hide the second whenever the two sites share a
+            # message.
+            where = (
+                eqn.source_info[-1] if eqn.source_info else "unknown location"
+            )
+            self.notes.append(
+                f"OUT-OF-BOUNDS INDEX (definite) in {eqn.primitive!r} at "
+                f"{where}: {e}{self._operand_provenance(eqn)}; ⊤"
+            )
+            self.counter.record_unknown(eqn.primitive)
+            self.mark_unreached(eqn)
+            self.top_out(eqn, cause="its index is out of bounds for every declared input")
+            return
         except iv.IntervalError as e:
             # a transfer whose domain doesn't cover this legal form (rank
             # broadcasting, batched selectors, …) DECLINES: sound ⊤

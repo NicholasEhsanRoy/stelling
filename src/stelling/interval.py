@@ -274,6 +274,26 @@ class IntervalError(ArithmeticError):
     """The domain met a value it has no sound treatment for (e.g. NaN)."""
 
 
+class IndexOutOfBoundsError(IntervalError):
+    """An index is out of bounds for **every input the user declared**.
+
+    A subclass of :class:`IntervalError` so it keeps that class' sound
+    accounting exactly — the walk still degrades the equation to a noted ⊤,
+    still counts it unknown, still refuses to decide anything downstream of
+    it. What the subclass adds is the *reason*, which is categorically
+    different from every other decline in the tree: a plain
+    :class:`IntervalError` says **stelling** has no rule for this form; this
+    one says **the program** indexes outside its array on the whole declared
+    set, and stelling proved it.
+
+    It is a finding, not an imprecision, and the walk gives it its own note
+    so a reader can tell those apart. It never changes a verdict's status:
+    an out-of-bounds index does not make an asserted predicate false, and
+    manufacturing a REFUTED from it would be claiming something the
+    obligations do not say. It can only ever *withhold* — which it does, via
+    the ⊤ — so the direction stays safe."""
+
+
 def _check(x: float) -> float:
     if x != x:  # NaN
         raise IntervalError("NaN endpoint in interval arithmetic")
@@ -2165,6 +2185,63 @@ def take_rows(a: IntervalArray, ks: list[int]) -> IntervalArray:
     )
 
 
+def take_row_ranges(
+    a: IntervalArray, ranges: list[tuple[int, int]]
+) -> IntervalArray:
+    """Leading-axis row take where each taken row is known only to a RANGE:
+    ``out[i] = hull(a[lo_i], …, a[hi_i])``, trailing block by trailing
+    block. The generalisation of :func:`take_rows` to a gather whose index
+    is not a single point but a declared integer interval.
+
+    Soundness of the hull is the whole point and it is one sentence: for
+    any one input the program takes exactly ONE row ``k`` with ``lo_i <= k
+    <= hi_i``, and every element of that row lies inside the elementwise
+    hull of rows ``lo_i … hi_i`` — so the returned box contains the taken
+    row for **every** index the declared set admits, not merely for the
+    ones an enumeration happened to visit. When ``lo_i == hi_i`` the hull
+    is that single row and this agrees with :func:`take_rows` element for
+    element (pinned as a control).
+
+    Both endpoints must name real rows: ``0 <= lo_i <= hi_i <
+    a.shape[0]``. Out-of-range endpoints raise :class:`IntervalError` (the
+    decline channel) rather than being clamped here — the registered
+    gather transfer classifies in-range / straddling / disjoint BEFORE
+    calling, because clamping is jax's runtime behaviour and modelling it
+    would answer about the executed program instead of the written one."""
+    if not a.shape:
+        raise IntervalError(
+            "take_row_ranges needs a leading axis; got rank-0 input"
+        )
+    rowsz = 1
+    for d in a.shape[1:]:
+        rowsz *= d
+    los: list[float] = []
+    his: list[float] = []
+    for lo_k, hi_k in ranges:
+        if not 0 <= lo_k <= hi_k < a.shape[0]:
+            raise IntervalError(
+                f"take_row_ranges rows [{lo_k}, {hi_k}] out of range for "
+                f"leading axis {a.shape[0]}"
+            )
+        base = lo_k * rowsz
+        rlo = list(a.los[base:base + rowsz])
+        rhi = list(a.his[base:base + rowsz])
+        for k in range(lo_k + 1, hi_k + 1):
+            base = k * rowsz
+            for j in range(rowsz):
+                v = a.los[base + j]
+                if v < rlo[j]:
+                    rlo[j] = v
+                v = a.his[base + j]
+                if v > rhi[j]:
+                    rhi[j] = v
+        los.extend(rlo)
+        his.extend(rhi)
+    return IntervalArray(
+        shape=(len(ranges),) + a.shape[1:], los=tuple(los), his=tuple(his)
+    )
+
+
 def stack(parts: list[IntervalArray], axis: int) -> IntervalArray:
     """Join ``k`` same-shape boxes along a NEW axis at position ``axis``:
     ``out[..., i, ...] = parts[i]`` — pure element routing, no arithmetic,
@@ -2245,3 +2322,214 @@ def concatenate(parts: list[IntervalArray], dimension: int) -> IntervalArray:
                 break
             offset -= p.shape[dimension]
     return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
+
+
+# Element-visit budget for the two dynamic-index hulls below. Their cost is
+# the product of the output size and the widths of the declared start
+# ranges, which a wide declaration over a large operand can make quadratic
+# in the operand size — an unbounded loop in a verifier is a hang, and a
+# hang is a worse failure than a ⊤. Exceeding the budget DECLINES (sound:
+# the caller turns it into a noted ⊤), it never truncates the hull, so the
+# budget can only cost precision and can never cost soundness.
+# degrade-don't-hang, the posture `_integer_pow_budget` and the
+# membership-hint walk cap already take.
+DYNAMIC_INDEX_WORK_CAP = 1 << 22
+
+
+def _range_widths(start_ranges: tuple[tuple[int, int], ...]) -> list[int]:
+    return [hi - lo + 1 for lo, hi in start_ranges]
+
+
+def dynamic_slice_hull(
+    a: IntervalArray,
+    start_ranges: tuple[tuple[int, int], ...],
+    slice_sizes: tuple[int, ...],
+) -> IntervalArray:
+    """``lax.dynamic_slice`` where each axis' start index is known only to a
+    declared integer RANGE: the elementwise hull, over every admitted start,
+    of the window that start selects.
+
+        ``out[c] = hull{ a[s + c] : s_d ∈ [lo_d, hi_d] for every axis d }``
+
+    **Every start range must already lie inside the axis' LEGAL start
+    window** ``0 <= lo_d <= hi_d <= a.shape[d] - slice_sizes[d]``; a range
+    that leaves it raises :class:`IntervalError`. That is deliberate and it
+    is the soundness argument of the whole transfer: jax CLAMPS an
+    out-of-window start, and the clamped read is a fact about the executed
+    program, not about the program the user wrote. This function is only
+    ever the rule for starts where the clamp is the **identity**, so no
+    value it returns depends on clamping having happened.
+
+    Soundness of the hull, stated so it can be checked: for one input the
+    program performs exactly one read, at one start ``s`` in the declared
+    box, and ``out[c]`` is a hull taken over a source set that CONTAINS
+    ``a[s + c]`` for every such ``s`` — the enumeration is over the
+    declared range's endpoints-inclusive integer span, never over a sample
+    of it. Axes are hulled ONE AT A TIME, which computes the same box as
+    one pass over the whole product: a minimum over an axis-aligned box is
+    the minimum over one axis of the minima over the rest.
+
+    Interval propagation has already forgotten any coupling BETWEEN the
+    axes' start indices (each arrived as its own box), so the product of
+    the per-axis ranges over-approximates the reachable set of starts —
+    which is the sound direction: a superset of starts gives a superset
+    hull.
+
+    Precision, for the record: on a single axis the result is TIGHT — every
+    endpoint of every output element is attained by some admitted start —
+    so nothing here is thrown away that intervals could have kept."""
+    rank = len(a.shape)
+    slice_sizes = tuple(int(s) for s in slice_sizes)
+    if not (len(start_ranges) == len(slice_sizes) == rank):
+        raise IntervalError(
+            f"dynamic_slice_hull needs one start range and one slice size "
+            f"per axis of a rank-{rank} operand (shape {a.shape}); got "
+            f"{len(start_ranges)} range(s) and {len(slice_sizes)} size(s)"
+        )
+    for d, ((lo_d, hi_d), s_d) in enumerate(zip(start_ranges, slice_sizes)):
+        if s_d < 0 or s_d > a.shape[d]:
+            raise IntervalError(
+                f"dynamic_slice_hull axis {d} takes {s_d} element(s) of an "
+                f"extent-{a.shape[d]} axis (operand shape {a.shape})"
+            )
+        if not 0 <= lo_d <= hi_d <= a.shape[d] - s_d:
+            raise IntervalError(
+                f"dynamic_slice_hull axis {d} start range [{lo_d}, {hi_d}] "
+                f"leaves the legal start window [0, {a.shape[d] - s_d}] — "
+                f"the hull rule is defined only where jax's clamp is the "
+                f"identity"
+            )
+    widths = _range_widths(start_ranges)
+    work, running = 0, 1
+    for d in range(rank):
+        running *= slice_sizes[d]
+        tail = 1
+        for e in range(d + 1, rank):
+            tail *= a.shape[e]
+        work += running * widths[d] * tail
+    if work > DYNAMIC_INDEX_WORK_CAP:
+        raise IntervalError(
+            f"dynamic_slice_hull over operand shape {a.shape}, slice sizes "
+            f"{slice_sizes} and start ranges {tuple(start_ranges)} would "
+            f"visit {work} elements, past the {DYNAMIC_INDEX_WORK_CAP} "
+            f"budget — declined rather than run unbounded"
+        )
+    cur_shape = a.shape
+    los = list(a.los)
+    his = list(a.his)
+    for d in range(rank):
+        lo_d, _ = start_ranges[d]
+        w = widths[d]
+        new_shape = cur_shape[:d] + (slice_sizes[d],) + cur_shape[d + 1:]
+        n_new = 1
+        for e in new_shape:
+            n_new *= e
+        nlos = [_INF] * n_new
+        nhis = [-_INF] * n_new
+        for coord in _coords(new_shape):
+            best_lo, best_hi = _INF, -_INF
+            head, tail = coord[:d], coord[d + 1:]
+            for t in range(w):
+                i = _flat_index(head + (lo_d + coord[d] + t,) + tail, cur_shape)
+                if los[i] < best_lo:
+                    best_lo = los[i]
+                if his[i] > best_hi:
+                    best_hi = his[i]
+            o = _flat_index(coord, new_shape)
+            nlos[o] = best_lo
+            nhis[o] = best_hi
+        cur_shape, los, his = new_shape, nlos, nhis
+    return IntervalArray(shape=cur_shape, los=tuple(los), his=tuple(his))
+
+
+def dynamic_update_slice_hull(
+    operand: IntervalArray,
+    update: IntervalArray,
+    start_ranges: tuple[tuple[int, int], ...],
+) -> IntervalArray:
+    """``lax.dynamic_update_slice`` where each axis' start index is known
+    only to a declared integer RANGE: the operand with ``update`` written at
+    some admitted start, hulled over every admitted start.
+
+    Two things can be true of an output position ``c``, and the rule keeps
+    both:
+
+    * some admitted start writes ``update[j]`` there, for every ``j`` with
+      ``j_d ∈ [max(0, c_d - hi_d), min(s_d - 1, c_d - lo_d)]``; and
+    * some admitted start does NOT write there, leaving ``operand[c]`` —
+      which happens unless ``c`` falls in the window of **every** admitted
+      start, i.e. unless ``c_d ∈ [hi_d, lo_d + s_d - 1]`` on every axis.
+
+    ``out[c]`` is the hull of whichever of those are reachable. When the
+    start is a single point this is exact: the written region takes the
+    update's values and nothing else, the rest keeps the operand's.
+
+    As for :func:`dynamic_slice_hull`, every start range must already sit
+    inside the legal window ``[0, operand.shape[d] - update.shape[d]]``;
+    outside it jax clamps, and the clamp is not modelled."""
+    rank = len(operand.shape)
+    if len(update.shape) != rank or len(start_ranges) != rank:
+        raise IntervalError(
+            f"dynamic_update_slice_hull needs an update and one start range "
+            f"of the operand's rank {rank} (operand shape {operand.shape}); "
+            f"got update shape {update.shape} and {len(start_ranges)} range(s)"
+        )
+    for d, ((lo_d, hi_d), s_d) in enumerate(zip(start_ranges, update.shape)):
+        if s_d > operand.shape[d]:
+            raise IntervalError(
+                f"dynamic_update_slice_hull axis {d} writes {s_d} element(s) "
+                f"into an extent-{operand.shape[d]} axis (operand shape "
+                f"{operand.shape}, update shape {update.shape})"
+            )
+        if not 0 <= lo_d <= hi_d <= operand.shape[d] - s_d:
+            raise IntervalError(
+                f"dynamic_update_slice_hull axis {d} start range [{lo_d}, "
+                f"{hi_d}] leaves the legal start window "
+                f"[0, {operand.shape[d] - s_d}] — the hull rule is defined "
+                f"only where jax's clamp is the identity"
+            )
+    work = operand.size
+    for s_d, w in zip(update.shape, _range_widths(start_ranges)):
+        work *= min(s_d, w)
+    if work > DYNAMIC_INDEX_WORK_CAP:
+        raise IntervalError(
+            f"dynamic_update_slice_hull over operand shape {operand.shape}, "
+            f"update shape {update.shape} and start ranges "
+            f"{tuple(start_ranges)} would visit {work} elements, past the "
+            f"{DYNAMIC_INDEX_WORK_CAP} budget — declined rather than run "
+            f"unbounded"
+        )
+    los: list[float] = []
+    his: list[float] = []
+    for c in _coords(operand.shape):
+        j_ranges = []
+        reachable = True
+        covered_always = True
+        for d, (lo_d, hi_d) in enumerate(start_ranges):
+            s_d = update.shape[d]
+            j_lo = max(0, c[d] - hi_d)
+            j_hi = min(s_d - 1, c[d] - lo_d)
+            if j_lo > j_hi:
+                reachable = False
+                break
+            j_ranges.append((j_lo, j_hi))
+            if not hi_d <= c[d] <= lo_d + s_d - 1:
+                covered_always = False
+        i = _flat_index(c, operand.shape)
+        if covered_always and reachable:
+            best_lo, best_hi = _INF, -_INF
+        else:
+            best_lo, best_hi = operand.los[i], operand.his[i]
+        if reachable:
+            for j in _coords(tuple(hi - lo + 1 for lo, hi in j_ranges)):
+                src = tuple(lo + o for (lo, _), o in zip(j_ranges, j))
+                k = _flat_index(src, update.shape)
+                if update.los[k] < best_lo:
+                    best_lo = update.los[k]
+                if update.his[k] > best_hi:
+                    best_hi = update.his[k]
+        los.append(best_lo)
+        his.append(best_hi)
+    return IntervalArray(
+        shape=operand.shape, los=tuple(los), his=tuple(his)
+    )
