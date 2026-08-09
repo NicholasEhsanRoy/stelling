@@ -169,6 +169,22 @@ class _FakeProc:
     # this fixture performs it. ``strict`` decoding, likewise, because that is
     # what text mode does and a child writing invalid UTF-8 RAISES out of the
     # transport there (measured, and tabulated in ``solvers.py``).
+    #
+    # THE CODEC IS NOT utf-8 BY RULE, AND THIS FIXTURE HARD-CODES IT. Real
+    # ``text=True`` with ``encoding=None`` decodes with the LOCALE's preferred
+    # encoding, not with utf-8. Measured on CPython 3.12.3 against a real child
+    # writing ``opaque x0 q<U+0085>end 1``: with PEP 538 locale coercion and
+    # PEP 540 UTF-8 mode both off (``PYTHONCOERCECLOCALE=0 PYTHONUTF8=0
+    # LC_ALL=C``, preferred encoding ANSI_X3.4-1968) real ``subprocess`` raises
+    # ``UnicodeDecodeError: 'ascii' codec can't decode byte 0xc2`` where this
+    # fixture decodes cleanly. Bare ``LC_ALL=C`` does NOT reproduce it — 3.12
+    # coerces the C locale to C.UTF-8 — so the gap needs an environment nobody
+    # runs here, and it is not theoretical: three of the nine
+    # ``SPLITLINES_ONLY`` characters are non-ASCII (U+0085, U+2028, U+2029), so
+    # against the ``text=True`` parser at ``0ad22bb`` the real transport would
+    # raise on those three rows in a non-UTF-8 locale while the property scores
+    # a parse. It would raise LOUDLY, which is the safe direction, and the
+    # property would be measuring the wrong parent all the same.
     def __init__(self, stdout, returncode, *, text):
         raw = stdout.encode("utf-8") if isinstance(stdout, str) else stdout
         if text:
@@ -189,6 +205,30 @@ class _FakeSubprocess:
     # not just ``text=`` (``subprocess.Popen.__init__``). Reading only ``text``
     # would be right about the two trees this file is pointed at today and
     # wrong about the next one for a reason nobody would look for.
+    #
+    # HOW FAR THAT "AND THE NEXT ONE" REACHES, driven against the real
+    # ``subprocess`` module with a real child on CPython 3.12.3: twelve keyword
+    # spellings, of which ten agree with this rule, and one POSITIONAL spelling
+    # that defeats it outright.
+    #
+    #   universal_newlines passed POSITIONALLY — real ``str``, model ``bytes``.
+    #     ``run(*popenargs, **kwargs)`` forwards positionals straight to
+    #     ``Popen``, whose 11th positional parameter is ``universal_newlines``.
+    #     ``run(self, *a, **k)`` below reads ``k`` alone, so a positional is
+    #     invisible to it. That is precisely the forward-looking case the
+    #     paragraph above claims to protect against, and it is not protected.
+    #   text=True, universal_newlines=False — real raises ``SubprocessError``
+    #     ("Cannot disambiguate when both text and universal_newlines are
+    #     supplied but different"); the model returns text.
+    #   encoding='latin-1' (with or without ``text=True``) — real decodes
+    #     latin-1; ``_FakeProc`` always decodes utf-8.
+    #
+    # NONE OF THE THREE IS LIVE for either tree this file is pointed at — the
+    # tip spawns with no io kwargs at all, ``0ad22bb`` spawns ``text=True`` by
+    # keyword — so they are limits on the claim rather than on today's controls.
+    # A transport that spawned any of the three would be scored against the
+    # wrong parent here rather than caught, which is the same failure this
+    # fixture was repaired for at ``f00375a``.
     _TEXT_MODE = ("text", "universal_newlines", "encoding", "errors")
 
     def __init__(self):
