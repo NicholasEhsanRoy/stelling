@@ -106,13 +106,34 @@ to be faithful to** — measured, not argued:
 An int32 `add`'s wrap has neither property — it is one defined, reproducible
 answer — which is why that is modelled and this is not.
 
-**MEASURED AND NOT A REASON, recorded because an earlier revision of this
-page asserted it before running it, and it is false.** Reverse-mode AD *does*
-preserve the clamp: the cotangent of `u[30]` on a length-10 `u` lands on
-element 9, exactly where the clamped read came from, and the scatter side
-agrees (`d/dv` of `.at[30].set(v)` is `0.0`, `d/du` passes all ten through).
-The two reasons above stand without it; this one was reasoned and not run,
-which is precisely the failure mode the method exists to catch.
+**MEASURED AND NOT A REASON — and corrected TWICE, because the first version
+of this paragraph asserted it before running it and the second generalised
+past what it ran.** jax's non-inverse property out of bounds *is* real, on
+0.11.0 and 0.10.2 alike. The mechanism is one line: under
+`GatherScatterMode.PROMISE_IN_BOUNDS` XLA's gather **clamps** and its scatter
+**drops**, and the transpose of a gather is a scatter.
+
+| expression | lowering | forward | true derivative | AD derivative |
+|---|---|---|---|---|
+| `u.at[array([30])].get()` — **the default** | `gather` `PROMISE_IN_BOUNDS`, transposing to `scatter-add` `PROMISE_IN_BOUNDS` | `9.0`, read **clamped** to element 9 | `d/du₉ = 1.0` | **`0.0`** — the transpose *dropped* |
+| `x.at[30].set(v, mode="promise_in_bounds")` | `scatter` `PROMISE_IN_BOUNDS`, transposing to `gather` `PROMISE_IN_BOUNDS` | `45.0`, write **dropped**, `f` constant in `v` | `d/dv = 0.0` | **`1.0`** — the transpose *clamped* |
+
+The modes are part of the claim. The **read** half mismatches at the default
+indexing mode; the **write** half needs the mode spelled out, because
+`.at[...].set()` defaults to `FILL_OR_DROP`, whose pair agrees. Under `CLIP`
+both halves agree.
+
+**It does not reach the pair this round sits on.** `u[i]` is a
+`dynamic_slice`, transposing to `dynamic_update_slice`, and both clamp — the
+cotangent of `u[30]` lands on element 9, where the clamped read came from —
+while `.at[k].set(v)` with a traced `k` is a `FILL_OR_DROP` scatter
+transposing to a `FILL_OR_DROP` gather, and both drop. The retraction
+measured exactly those two *self-consistent* pairs and wrote a claim about
+all of reverse-mode AD, never having built the mixed one: the same
+generalise-past-the-measurement failure it was written to correct. Both
+statements are pinned as tests. **It decides nothing either way** — the two
+reasons above carry the decision, and neither the false version nor the true
+one was ever load-bearing.
 
 The rule therefore computes a value **only where jax's clamp is provably the
 identity**. That is the entire soundness argument, and it is why minting a
@@ -124,9 +145,19 @@ the clamp story.
 Case 3 raises `interval.IndexOutOfBoundsError`, a **subclass** of
 `IntervalError`, caught by the walk one arm ahead of the generic decline. The
 accounting is deliberately identical — ⊤, `record_unknown`, `mark_unreached`,
-never a REFUTED — because an out-of-bounds index does not make any asserted
-predicate false, and manufacturing a status from it would claim something the
-obligations do not say. Only the note changes, and it is shouted
+and the channel itself never manufactures a status — because an out-of-bounds
+index does not make any asserted predicate false, and minting one from it
+would claim something the obligations do not say.
+
+**That is a property of the channel, not of the program**, and the two read
+alike if the sentence is careless. A program containing a definite
+out-of-bounds index *can* carry a `violated-over-set`: `assert_(abs(u[30]) <
+0)` and three siblings are refuted, because ⊤ refutes them — byte-identically
+to how they are refuted downstream of a plain straddle **decline**, which
+mints no finding at all. Checked against execution: false at every point the
+declaration admits.
+
+Only the note changes, and it is shouted
 (`OUT-OF-BOUNDS INDEX (definite)`), the loudest channel a transfer has short
 of a new `Stamp` field.
 
@@ -162,6 +193,15 @@ independent start indices; the `u[i, j]` multi-axis form; negative indices via
 the upstream normalisation; the covered leading-axis gather row form with a
 range-valued index; point starts (which reproduce the exact slice).
 
+**`jnp.take_along_axis` along axis 0, named because the round gained it
+without saying so.** It lowers to exactly the widened gather row form — an
+`(N, 1)` column of leading-axis row numbers — so a declared index range now
+produces DEFINITE verdicts through it: `unknown` on `9564728`, `discharged`
+here for a bound that holds over the whole declared range, a named decline
+for a straddling range and a finding for a disjoint one. It is the audited
+row form and nothing about it is special-cased; it is listed because a
+capability nobody names is a capability nobody re-checks.
+
 **Declined, each with a named reason.** A start straddling the legal window; a
 start range disjoint from it (a finding); non-integral or unbounded index
 intervals — this layer is handed bounds with no dtype and never rounds
@@ -172,7 +212,10 @@ hold the axis' bound; a hull whose enumeration would exceed the work budget
 **Untouched.** Gather geometries outside the covered row form — batching
 dimensions, multi-column index vectors, non-leading collapsed axes, and the
 `vmap` form (`offset_dims=(1,)`, `collapsed_slice_dims=()`), which is a
-different geometry and declines exactly as before. `scatter` and `scatter-add`
+different geometry and declines exactly as before. `jnp.take` is one of
+these and is named for the same reason its `take_along_axis` neighbour is:
+it emits indices of shape `(1,)` rather than an `(N, 1)` column, so it
+declines here and did before. `scatter` and `scatter-add`
 keep their static-index rows; only their *definite* out-of-range message was
 reclassified as a finding. No SMT emission row: `dynamic_slice` and
 `dynamic_update_slice` are absent from `obligation._SUPPORTED`, so an

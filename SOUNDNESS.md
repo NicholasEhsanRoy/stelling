@@ -3547,17 +3547,40 @@ verdicts:
   about the program the user wrote: the shape of the integer-literal wrap
   defect, one layer over.
 
-  **A THIRD REASON WAS ASSERTED HERE AND IS FALSE, recorded rather than
-  quietly deleted.** An earlier revision of this entry, and of the code
-  comment and design page it mirrors, claimed *"reverse-mode AD does not
-  preserve the clamp"*. Measured on jax 0.11.0: it does. The cotangent of
-  `u[30]` on a length-10 `u` lands on element 9, exactly where the
-  clamped read came from, and the scatter side agrees (`d/dv` of
-  `.at[30].set(v)` is `0.0`). It was reasoned and not run — the failure
-  this project's method exists to catch, committed in the middle of a
-  round whose whole subject is not trusting an argument over a
-  measurement. The two measured reasons above carry the decision without
-  it, and no code depended on the false one.
+  **A THIRD REASON WAS ASSERTED HERE, AND THEN RETRACTED TOO BROADLY.
+  Both corrections are recorded rather than quietly deleted, because the
+  second made the same mistake as the first.** An early revision of this
+  entry, and of the code comment and design page it mirrors, claimed
+  *"reverse-mode AD does not preserve the clamp"* — reasoned and not run,
+  the failure this project's method exists to catch, committed in the
+  middle of a round whose whole subject is not trusting an argument over
+  a measurement. The retraction that replaced it said flatly that AD
+  *does* preserve it. **That is also wrong, and for the same reason: it
+  generalised past what it measured.** It measured `u[30]` (a
+  `dynamic_slice`, transposing to `dynamic_update_slice` — both clamp)
+  and `.at[k].set(v)` at the default (a `FILL_OR_DROP` scatter,
+  transposing to a `FILL_OR_DROP` gather — both drop). Those are the two
+  SELF-CONSISTENT pairs. It never built the mixed one.
+
+  Measured on jax 0.11.0 **and** 0.10.2, `JAX_ENABLE_X64=1`: under
+  `GatherScatterMode.PROMISE_IN_BOUNDS` XLA's gather CLAMPS and its
+  scatter DROPS, and the transpose of a gather is a scatter — so
+  `u.at[array([30])].get()` (**the default** for `.at[...].get()`) reads
+  element 9 and its cotangent is identically ZERO where the true `d/du₉`
+  is `1.0`, and `x.at[30].set(v, mode="promise_in_bounds")` drops the
+  write — `f` constant in `v`, true `d/dv = 0.0` — while AD answers
+  `1.0`. The modes are part of the claim: the READ half mismatches at
+  the default indexing mode, the WRITE half needs the mode spelled out
+  (`.at[...].set()` defaults to `FILL_OR_DROP`, whose pair agrees), and
+  under `CLIP` both halves agree.
+
+  **So: jax's non-inverse property is real and reproduces at the default
+  indexing mode on both series; it does not apply to the
+  `dynamic_slice`/`dynamic_update_slice` pair this transfer sits on,
+  which clamps symmetrically.** Both halves of that sentence are pinned
+  as tests. It remains NOT a reason — the two measured reasons above
+  carry the decision, and no code depended on the false version or on
+  the true one.
 
   **The rule therefore computes a value ONLY where jax's clamp is
   provably the identity.** Three cases: an index range inside the axis'
@@ -3573,9 +3596,20 @@ verdicts:
   `interval.IndexOutOfBoundsError`, a subclass of `IntervalError` caught
   one arm ahead of the generic decline. **The accounting is deliberately
   byte-identical to a decline** — ⊤, `record_unknown`, `mark_unreached`,
-  never a REFUTED — because an out-of-bounds index does not make an
-  asserted predicate false, and manufacturing a status from it would
-  claim something the obligations do not say. Only the note changes, and
+  and **the finding channel itself never manufactures a status** —
+  because an out-of-bounds index does not make an asserted predicate
+  false, and minting one from it would claim something the obligations
+  do not say. *That is a property of the CHANNEL and not of the
+  program*, and the distinction is measured rather than left to be
+  misread: a program containing a definite out-of-bounds index can
+  perfectly well carry a `violated-over-set`, and four do —
+  `assert_(abs(u[30]) < 0)`, `assert_(max(u[30], 5.0) < 0)`,
+  `assert_(min(u[30], -5.0) > 0)` and `assert_(exp(u[30]) < 0)` are
+  refuted because ⊤ still refutes them, exactly as they would be
+  refuted downstream of a plain straddle DECLINE. Checked against
+  execution: false at every point the declaration admits, so each is
+  sound. The earlier wording here — *"never a REFUTED"* — read as a
+  claim about the program and was wrong in that reading. Only the note changes, and
   it is shouted. The old wording explained why *stelling* declined and
   never said the *program* indexes out of bounds; `_t_scatter` and
   `_t_gather` had detected this exact fact since their own rounds and

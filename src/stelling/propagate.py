@@ -1687,12 +1687,25 @@ def _t_gather(eqn, params, ins):
 # An int32 `add`'s wrap has neither property: it is one defined,
 # reproducible answer, which is why THAT is modelled and this is not.
 #
-# MEASURED AND NOT A REASON, recorded because it was asserted here before
-# it was run and it is false: reverse-mode AD DOES preserve the clamp. The
-# cotangent of `u[30]` on a length-10 `u` lands on element 9, exactly where
-# the clamped read came from, and the scatter side agrees (d/dv of
-# `.at[30].set(v)` is 0). An earlier revision of this comment claimed the
-# opposite as a third reason. The two reasons above stand without it.
+# MEASURED AND NOT A REASON, corrected TWICE, because the first version of
+# this paragraph asserted it without running it and the second generalised
+# past what it ran. jax's non-inverse property out of bounds IS real, on
+# 0.11.0 and 0.10.2: under GatherScatterMode.PROMISE_IN_BOUNDS, XLA's
+# gather CLAMPS and its scatter DROPS, and the transpose of a gather is a
+# scatter — so `u.at[array([30])].get()` reads element 9 while its
+# cotangent is identically ZERO (the true d/du_9 is 1), and
+# `x.at[30].set(v, mode="promise_in_bounds")` drops the write (the true
+# d/dv is 0) while AD answers 1. The READ half reproduces at the DEFAULT
+# indexing mode; the write half needs the mode spelled out, because
+# `.at[...].set()` defaults to FILL_OR_DROP, which agrees.
+#
+# It does NOT reach the pair this rule sits on. `u[i]` is a dynamic_slice
+# transposing to dynamic_update_slice, and both CLAMP: the cotangent of
+# `u[30]` lands on element 9, exactly where the clamped read came from.
+# The retraction measured that pair and the FILL_OR_DROP scatter/gather
+# pair — the two SELF-CONSISTENT ones — and wrote a claim about all of AD,
+# which is the failure it was written to correct. Either way it decides
+# nothing here: the two reasons above stand without it.
 #
 # So the rule below computes a value ONLY where jax's clamp is provably the
 # IDENTITY. That is the whole soundness argument in one line, and it is why

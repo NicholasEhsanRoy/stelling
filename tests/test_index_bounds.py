@@ -16,7 +16,11 @@ SCOPE, declared (docs/norms.md). What this file establishes:
   designs -- `u[i] == u[9]` for `i` in [12, 20] is TRUE of the executed
   program and states nothing about the written one, and must stay undecided;
 * the accounting of a finding is byte-for-byte the accounting of a decline:
-  top, unknown, unreached, never a REFUTED.
+  top, unknown, unreached, and the CHANNEL mints no status -- which is not
+  the claim that a program holding an out-of-bounds index is never refuted,
+  a reading measured and killed below;
+* `jnp.take_along_axis` along axis 0 reaches the widened row form and gets
+  definite verdicts, which it did not before this round.
 
 What it does NOT establish: the affine or solver legs (this round emits no
 SMT rows -- dynamic_slice and dynamic_update_slice are absent from
@@ -311,6 +315,48 @@ def test_a_finding_is_accounted_exactly_like_a_decline():
     assert not any(o.status == "violated-over-set" for o in finding.obligations)
 
 
+def test_the_no_REFUTED_rule_is_about_the_CHANNEL_not_about_the_program():
+    """The sentence above is easy to over-read, so the over-reading is
+    measured and killed here. "A finding never manufactures a verdict" is a
+    property of the FINDING CHANNEL. It is NOT the claim that a program
+    containing an out-of-bounds index cannot be refuted -- it can, and
+    `assert_(abs(u[30]) < 0)` is: ⊤ refutes it, because |⊤| < 0 is false
+    everywhere.
+
+    The discrimination that makes this a real test rather than a
+    restatement: the SAME refutation arises from a straddling index, which
+    mints no finding at all. Identical status, identical coverage,
+    identical transfers -- so the refutation is ⊤'s doing and the finding
+    channel added nothing. And it is sound: `abs(x) < 0` is false at every
+    point any declaration admits, out of bounds or not."""
+
+    def oob():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        return assert_(jnp.abs(u[30]) < 0.0)
+
+    def straddling():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        i = any_array((), "int32", (5, 20))  # straddles: a DECLINE, no finding
+        return assert_(jnp.abs(u[i]) < 0.0)
+
+    f, d = run(oob), run(straddling)
+    assert f.obligations[0].status == "violated-over-set"
+    assert d.obligations[0].status == "violated-over-set"
+    assert f.coverage.unknown_primitives == d.coverage.unknown_primitives
+    assert dict(f.transfers_used) == dict(d.transfers_used)
+    # only the note differs, and only the finding shouts
+    assert any("OUT-OF-BOUNDS INDEX (definite)" in n for n in f.notes)
+    assert not any("OUT-OF-BOUNDS INDEX (definite)" in n for n in d.notes)
+    assert any("straddles the legal positions" in n for n in d.notes)
+    # and the refutation is TRUE of the executed program at every admitted
+    # index, which is what makes it sound rather than merely consistent
+    ramp = jnp.arange(10, dtype=jnp.float64)
+    take = jax.jit(lambda u, k: u[k])
+    assert not any(
+        abs(float(take(ramp, jnp.int32(k)))) < 0.0 for k in range(5, 21)
+    )
+
+
 # -- the clamp is not modelled ---------------------------------------------
 
 
@@ -370,25 +416,142 @@ def test_there_is_no_single_clamp_to_model_one_gather_two_values():
         assert take(3, mode) == 3.0, mode
 
 
-def test_reverse_mode_ad_DOES_preserve_the_clamp():
-    """A CORRECTION, pinned so it cannot be re-asserted. An earlier
-    revision of this round claimed reverse-mode AD does not preserve the
-    clamp, and offered that as a third reason not to model it. Measured:
-    it does. The cotangent of `u[30]` lands on element 9, where the
-    clamped read came from, and the scatter side agrees.
+def test_reverse_mode_ad_preserves_the_clamp_for_the_ds_dus_pair():
+    """A CORRECTION OF A CORRECTION, and the narrower claim is the true one.
 
-    The round's decision does not rest on this and never did -- the two
-    measured reasons are the mode disagreement above and the read/write
-    asymmetry below. This test exists so the false claim stays dead."""
+    An early revision of this round asserted, without running it, that
+    reverse-mode AD does not preserve out-of-bounds semantics. The
+    retraction that replaced it measured the two pairs below -- and both
+    are SELF-CONSISTENT pairs, so it generalised past its own measurement,
+    which is the same failure it was written to correct. The mixed pair is
+    the next test, and it is not self-consistent.
+
+    What IS true, and is the only part that touches this round: the pair
+    this row sits on preserves it. `u[i]` with a traced `i` lowers to
+    `dynamic_slice`, whose transpose is `dynamic_update_slice`; both CLAMP,
+    so the cotangent of `u[30]` lands on element 9 where the clamped read
+    came from. `x.at[k].set(v)` with a traced `k` lowers at the default to
+    `scatter` in FILL_OR_DROP, whose transpose is `gather` in FILL_OR_DROP;
+    both DROP, so `d/dv` is 0 exactly as the forward value is constant in
+    `v`. The primitive pairs are asserted here, not assumed, because the
+    whole claim is about which pair you are on."""
     u = jnp.arange(10, dtype=jnp.float64)
+
+    def prims(f, *a):
+        return [
+            e.primitive.name
+            for e in jax.make_jaxpr(f)(*a).eqns
+            if e.primitive.name
+            in ("gather", "scatter", "dynamic_slice", "dynamic_update_slice")
+        ]
+
+    # the read pair: dynamic_slice forward, dynamic_update_slice transposed
+    assert prims(lambda u, k: u[k], u, jnp.int32(30)) == ["dynamic_slice"]
+    assert prims(
+        jax.grad(lambda u, k: u[k], argnums=0), u, jnp.int32(30)
+    ) == ["dynamic_slice", "dynamic_update_slice"]
     g = jax.jit(jax.grad(lambda u, k: u[k], argnums=0))
     assert list(np.asarray(g(u, jnp.int32(30)))) == [0.0] * 9 + [1.0]
     assert list(np.asarray(g(u, jnp.int32(9)))) == [0.0] * 9 + [1.0]
+
+    # the write pair: scatter forward, gather transposed, both FILL_OR_DROP
+    assert prims(
+        lambda u, v, k: (u.at[k].set(v)).sum(), u, jnp.float64(5.0),
+        jnp.int32(30),
+    ) == ["scatter"]
+    assert prims(
+        jax.grad(lambda u, v, k: (u.at[k].set(v)).sum(), argnums=1),
+        u, jnp.float64(5.0), jnp.int32(30),
+    ) == ["scatter", "gather"]
     dv = jax.jit(
         jax.grad(lambda u, v, k: (u.at[k].set(v)).sum(), argnums=1)
     )
     assert float(dv(u, jnp.float64(5.0), jnp.int32(30))) == 0.0  # dropped
     assert float(dv(u, jnp.float64(5.0), jnp.int32(9))) == 1.0
+
+
+def test_reverse_mode_ad_is_NOT_an_inverse_across_the_gather_scatter_pair():
+    """THE MIXED PAIR, which neither earlier revision built. jax's
+    documented non-inverse property out of bounds is real, it reproduces on
+    both tested series, and the read half reproduces at the DEFAULT
+    indexing mode -- so the blanket retraction above it was wrong too.
+
+    The mechanism is one line: under `PROMISE_IN_BOUNDS` -- which is what
+    `.at[...].get()` lowers to by default -- XLA's gather CLAMPS and its
+    scatter DROPS, and the transpose of a gather is a scatter. So
+
+      * `u.at[array([30])].get()` reads element 9 (clamped) and its
+        cotangent is identically ZERO: the transposed `scatter-add` dropped
+        where the gather clamped. True `d/du_9` is 1.0.
+      * `x.at[30].set(v, mode="promise_in_bounds")` drops the write, so `f`
+        is constant in `v` and the true `d/dv` is 0.0, while AD answers
+        1.0: the transposed gather clamped where the scatter dropped.
+
+    THE MODES MATTER AND ARE ASSERTED. The write half needs the mode
+    spelled out: `.at[...].set()` at the default lowers to FILL_OR_DROP,
+    not PROMISE_IN_BOUNDS, and that pair agrees (previous test). Only the
+    read half mismatches at the default. Under CLIP both halves agree.
+
+    NONE OF THIS IS A REASON for the design. The round declines on the two
+    measured reasons above -- one gather with two values, and read/write
+    disagreement -- and this pair is not the pair the transfer sits on. It
+    is written down because it is TRUE and was deleted as false."""
+    ramp = jnp.arange(10, dtype=jnp.float64)
+    idx = jnp.array([30], dtype=jnp.int32)
+
+    def modes(f, *a):
+        return [
+            (e.primitive.name, e.params["mode"])
+            for e in jax.make_jaxpr(f)(*a).eqns
+            if e.primitive.name in ("gather", "scatter", "scatter-add")
+        ]
+
+    M = jax.lax.GatherScatterMode
+
+    # -- read: DEFAULT mode, forward clamps, cotangent is zero
+    def rd(u):
+        return jnp.sum(u.at[idx].get())
+
+    assert modes(rd, ramp) == [("gather", M.PROMISE_IN_BOUNDS)]
+    assert modes(jax.grad(rd), ramp) == [
+        ("gather", M.PROMISE_IN_BOUNDS),
+        ("scatter-add", M.PROMISE_IN_BOUNDS),
+    ]
+    assert float(np.asarray(rd(ramp))) == 9.0  # the clamped read
+    true_d9 = float(np.asarray(rd(ramp.at[9].add(1.0)))) - 9.0
+    assert true_d9 == 1.0
+    assert list(np.asarray(jax.grad(rd)(ramp))) == [0.0] * 10  # AD says none
+
+    # -- write: needs the mode SPELLED OUT; the default one agrees
+    def wr(v, mode):
+        return jnp.sum(ramp.at[30].set(v, mode=mode))
+
+    assert modes(lambda v: wr(v, "promise_in_bounds"), jnp.float64(7.0)) == [
+        ("scatter", M.PROMISE_IN_BOUNDS)
+    ]
+    f7 = float(np.asarray(wr(jnp.float64(7.0), "promise_in_bounds")))
+    f8 = float(np.asarray(wr(jnp.float64(8.0), "promise_in_bounds")))
+    assert (f7, f8) == (45.0, 45.0)  # dropped: f is constant in v
+    ad = float(
+        np.asarray(jax.grad(lambda v: wr(v, "promise_in_bounds"))(
+            jnp.float64(7.0)
+        ))
+    )
+    assert (f8 - f7, ad) == (0.0, 1.0)  # true 0, AD 1
+
+    # -- and under CLIP both halves agree, which is why the mode is the story
+    for mode in ("clip",):
+        c7 = float(np.asarray(wr(jnp.float64(7.0), mode)))
+        c8 = float(np.asarray(wr(jnp.float64(8.0), mode)))
+        cad = float(
+            np.asarray(jax.grad(lambda v, m=mode: wr(v, m))(jnp.float64(7.0)))
+        )
+        assert c8 - c7 == cad == 1.0, mode
+
+        def cget(u, m=mode):
+            return jnp.sum(u.at[idx].get(mode=m))
+
+        assert float(np.asarray(jax.grad(cget)(ramp))[9]) == 1.0, mode
 
 
 def test_a_write_past_the_end_is_dropped_by_jax_and_reported_here():
@@ -951,6 +1114,61 @@ def test_the_GATHER_dtype_gate_is_actually_WIRED_IN_not_merely_correct():
         .status
         == "discharged"
     )
+
+
+def test_take_along_axis_reaches_the_row_form_and_gets_definite_verdicts():
+    """A CAPABILITY THE ROUND GAINED WITHOUT NAMING IT, now named and
+    pinned. `jnp.take_along_axis(u, i, 0)` lowers to exactly the widened
+    gather row form — an (N, 1) column of leading-axis row numbers — so a
+    declared index range decides through it. Measured on `9564728` the same
+    query is `unknown`; here it discharges.
+
+    All three cases are checked, because "it reaches the row form" is only
+    worth writing down if the row form's discrimination survives the trip:
+    a bound true over the whole declared range discharges, a bound false
+    somewhere in it does not, a straddling range declines by name and a
+    disjoint one is a finding. The oracle is executed, not assumed.
+
+    `jnp.take` is the near neighbour that does NOT reach it — its indices
+    are shape (1,), not an (N, 1) column — and is asserted here so the two
+    are not confused later."""
+    base = jnp.asarray(
+        np.array([3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0, 5.0, 3.0])
+    )
+    f = jax.jit(lambda b, k: jnp.take_along_axis(b, k, 0)[0])
+    real = [
+        float(np.asarray(f(base, jnp.asarray([k], jnp.int32))))
+        for k in range(4)
+    ]
+    assert max(real) == 4.0  # the oracle the two bounds below straddle
+
+    def h(lo, hi, bound):
+        def q():
+            i = any_array((1,), "int32", (lo, hi))
+            return assert_(jnp.take_along_axis(base, i, 0)[0] <= bound)
+
+        return q
+
+    true_over_set = run(h(0, 3, 4.0))
+    assert true_over_set.obligations[0].status == "discharged"
+    assert dict(true_over_set.transfers_used)["gather"] == "exact"
+    # false at index 2, and the row form sees it rather than over-claiming
+    assert run(h(0, 3, 3.5)).obligations[0].status == "unknown"
+    # the three cases survive the trip through take_along_axis
+    straddle = run(h(5, 20, 9.0))
+    assert straddle.obligations[0].status == "unknown"
+    assert any("straddles the legal positions" in n for n in straddle.notes)
+    disjoint = run(h(15, 20, 9.0))
+    assert disjoint.obligations[0].status == "unknown"
+    _finding(disjoint, "spans [15, 20]")
+
+    # jnp.take is a different geometry and still declines
+    def take_q():
+        return assert_(jnp.take(base, any_array((), "int32", (0, 3))) <= 4.0)
+
+    p = run(take_q)
+    assert p.obligations[0].status == "unknown"
+    assert any("is not such a column" in n for n in p.notes), p.notes
 
 
 def test_take_row_ranges_agrees_with_take_rows_on_point_indices():
