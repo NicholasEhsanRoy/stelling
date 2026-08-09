@@ -14,6 +14,18 @@
 # REASONS below and never the count of refusals; the sdist checks arrived after
 # it was written and it did not move.
 #
+# AND UNTIL `tests/test_release_gates.py` LANDED, NOTHING IN THIS REPOSITORY
+# READ THIS FILE. One test opened a workflow at all — `tests/test_reuse_pins.py`,
+# and only `ci.yml`. Six line-neutral mutations were applied here at once (the
+# `rm` deleted, `-ra` -> `-rs`, the `verdict=made` condition made always-true,
+# `publish: needs` losing `test`, this header's EIGHT -> TWELVE, and `comm -23`
+# -> `comm -12`, which makes the committed-members gate incapable of firing) and
+# the FULL SUITE STAYED GREEN on every one of them. That file is a text pin,
+# one test per mutation, driven RED against each of the six individually and
+# against all six at once. What it cannot do is check that any gate WORKS —
+# only that the literal the record describes is still the literal here. Each
+# gate's behaviour is recorded beside it, with the run that established it.
+#
 #   1. THE SUITE, on the tagged tree. `ci` runs on pushes to main and on pull
 #      requests — neither of which is this event. A GitHub Release can be cut
 #      from any commit, tag or branch, so "ci was green" is a statement about
