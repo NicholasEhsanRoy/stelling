@@ -1895,8 +1895,13 @@ verdicts:
   — `declare-const … Real`, `… Bool`", and that command returns exactly ONE
   line: `smt.py:490: lines.append(f"(declare-const {inp.name} Real)")`. There
   is no `declare-const … Bool` to find. `Bool` reaches the script through
-  `define-fun`, at `smt.py:503-509` — `sort = "Bool" if out.aval.dtype ==
-  "bool" else "Real"`, emitted as `(define-fun t{id} () {sort} …)`. So the
+  `define-fun`, at `smt.py:504-510` — `sort = "Bool" if out.aval.dtype ==
+  "bool" else "Real"`, emitted as `(define-fun t{id} () {sort} …)`. *(The
+  range first written here was `503-509`, which starts on the closing line of
+  a docstring and stops one line SHORT of `510` — one of the two `{sort}`
+  emitters its own next sentence names. Re-derived: `504` is the `sort =`
+  assignment and `506`/`510` are the two emitters, so `504-510` is the block
+  that carries `Bool`.)* So the
   two commands that carry the claim are `git grep -n 'declare-'
   src/stelling/smt.py` (**one** line, `Real`, and therefore no `declare-sort`
   and no `declare-datatypes` either) and `git grep -n 'lines.append(f"(define-
