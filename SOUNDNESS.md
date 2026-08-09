@@ -4279,16 +4279,32 @@ verdicts:
   |---|---|---|
   | `jnp.array`, `jnp.asarray`, `jnp.int8` | nothing in `lax` — `_convert_element_type` is **entered 0 times**. jax runs an explicit overflow check first, at `jax/_src/numpy/array_constructors.py:249-250` (same line numbers in both series), which calls `dtypes.coerce_to_array`, whose `return np.asarray(x, dtype)` — `dtypes.py:478` at **0.11.0**, `dtypes.py:507` at **0.10.2** — is what raises | yes — that IS the raise |
   | `jnp.full`, `jnp.full_like` | `arr = np.asarray(operand).astype(new_dtype)`, on the `type(operand) is int` fast path — `lax.py:1726` at **0.11.0**, `lax.py:1724` at **0.10.2** | no: `.astype` is a cast, and truncates in silence |
-  | `x + 256`, `x >= 256`, `jnp.where`, `jnp.clip`, `jnp.maximum`, `x.at[0].set` | the `256` has already been promoted to a concrete `int32`/`int64` array by the time it arrives; no Python-level fast path applies to an `Array`, so the entry falls through to `convert_element_type_p.bind` and the narrowing is the primitive's own | no |
+  | `x + 256`, `x >= 256`, `jnp.where`, `jnp.clip`, `jnp.maximum` | the `256` has already been promoted to a weakly-typed `int32`/`int64` **Tracer** by the time it arrives (`JitTracer(~int32[])` / `~int64[]`); no Python-level fast path applies, so the entry falls through to `convert_element_type_p.bind` and the narrowing is the primitive's own | no |
+  | `x.at[0].set` | same fall-through, but the operand is **concrete** — `ArrayImpl(256, dtype=int32/int64, weak_type=True)` | no |
+
+  **That last split was one row until now, reading "already promoted to a
+  CONCRETE `int32`/`int64` array" for all six; per-entry tracing at
+  `b2e3a15`, all four cells, says concrete at `x.at[0].set` and a Tracer
+  at the other five.** It changes no conclusion — both take `bind` — and
+  it is corrected because the row is the section's own evidence and a
+  reader reasoning from "concrete" would reason about a value that is not
+  there to read.
 
   The `x.at[0].set` row is where the entry's own earlier grouping went
   wrong, and it is worth naming because it is the trap this whole section
   is about: that door DOES execute `np.asarray(operand).astype(new_dtype)`
-  once, so a line-count alone puts it in the row above — but per-entry
+  once, so a line-count alone puts it in the `jnp.full` row — but per-entry
   tracing shows the operand on that entry is the INDEX `0` (`int -> int32`)
   and the operand carrying `256` is a separate entry,
   `ArrayImpl(int32/int64 256) -> int8`, which takes the `bind` path. A
   count of line hits is not an attribution.
+
+  *(A second thing a count is not: a repeatable figure. The attribution
+  above is a FIRST-CALL measurement, taken with one door per fresh
+  interpreter. jax caches its traces, so the same door called again with a
+  constant of the same jit signature enters `_convert_element_type` ZERO
+  times — measured at `b2e3a15`, and stated here because an entry count
+  taken second in a process is a fact about the cache, not the door.)*
 
   **That check at `array_constructors.py:249-250` is the ONLY explicit
   overflow check jax runs on a constant, and its gate is a Python
