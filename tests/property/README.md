@@ -62,13 +62,26 @@ python tools/property_check.py --rev  fb34e0d
 
 # demonstrate every positive control (each must FAIL where it is supposed to)
 python tools/property_check.py --controls \
-    --other-python /path/to/venv-with-the-other-jax-series
+    --other-python ~/.cache/stelling-property/jax-0.10.2/bin/python
 
 # the cross-series differential needs two interpreters
-STELLING_PROPERTY_OTHER_PYTHON=/path/to/venv-jax-0.10/bin/python \
+STELLING_PROPERTY_OTHER_PYTHON=~/.cache/stelling-property/jax-0.10.2/bin/python \
   PYTHONPATH=$PWD/src $VENV/bin/python -m pytest -ra \
   tests/property/test_cross_series.py
 ```
+
+**The second interpreter needs `hypothesis` too, not just the other jax
+series**, so build it with `tools/property_venv.sh 0.10.2` and do not reach for
+a shared jax venv. The child runs `_corpus.py` as a script, `_corpus` imports
+`_grammar`, and `_grammar` imports `hypothesis` at module scope — the corpus
+itself is seeded by `random.Random`, but the module it lives beside is not.
+Measured, pointed at a jax 0.10.2 venv without hypothesis: the child dies with
+`ModuleNotFoundError: No module named 'hypothesis'`, the property's three
+anti-vacuity guards never run, and the control is reported as a *wrong failure*
+rather than as a demonstration. This is the canonical copy of that command —
+`ci.yml`'s own comment names this file as where it lives — and it said
+`/path/to/venv-with-the-other-jax-series` for as long as the instruction was
+wrong.
 
 Budgets are chosen by `STELLING_PROPERTY_PROFILE`:
 
