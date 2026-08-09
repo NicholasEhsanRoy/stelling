@@ -3,22 +3,25 @@
 """Probe 4: how much of the separator set does the parent's alphabet check
 actually back-stop, and what would it cost to make it complete?
 
-PART A -- COVERAGE. `solvers._run_cvc5_wheel` refuses stdout carrying a byte
-outside printable ASCII and `\\n`. The comment above it called that "the
-fail-closed backstop for a driver out of step with this parser". Measured
-against a REAL stale child writing REAL bytes: it refuses EIGHT of the ten
-`splitlines()` separators, and the two it does not refuse fail for two
-different reasons that must not be run together.
+PART A -- COVERAGE, BEFORE AND AT THIS TIP. `solvers._run_cvc5_wheel` refuses
+stdout carrying a byte outside printable ASCII and `\\n`. The comment above it
+once called that "the fail-closed backstop for a driver out of step with this
+parser". Measured against a REAL stale child writing REAL bytes, under
+`text=True` it refused EIGHT of the ten `splitlines()` separators, and the two
+it did not refuse failed for two different reasons that must not be run
+together.
 
 * `\\n` is excluded from the check BY CONSTRUCTION -- it is the protocol's own
   record boundary, so a writer that leaves one inside a field has written two
   records and there is nothing here to detect. That half is the writer's job
-  and always was.
-* `\\r` is the hole. `capture_output=True, text=True` universal-newline
-  decoding turns it into a real `\\n` in the parent's buffer before any
-  reader-side rule runs, so no `\\r` ever reaches the check. A stale child that
-  writes `opaque x1 j\\rend 2\\r` and NO terminator record of its own still gets
-  `sat` with a model.
+  and always was, and it is unchanged.
+* `\\r` was the hole. `capture_output=True, text=True` universal-newline
+  decoding turned it into a real `\\n` in the parent's buffer before any
+  reader-side rule ran, so no `\\r` ever reached the check. A stale child that
+  wrote `opaque x1 j\\rend 2\\r` and NO terminator record of its own got `sat`
+  with a model -- and `unsat`, the DISCHARGE direction, off the identical
+  corpse (part D). THAT ROW IS THE ONE THAT MOVED: the transport decodes for
+  itself now and the count reads NINE.
 
 PART B -- ONE CANDIDATE REPAIR, AND IT IS NOT THE ONLY ONE. `text=False` plus
 a RAW decode puts the `\\r` back in front of the check. Driven here through the
@@ -27,7 +30,8 @@ default, and README.md names Windows as a platform both solver wheels install
 on -- is read correctly by the SHIPPED `text=True` and refused outright under
 raw bytes-plus-decode.
 
-PART C -- THE NEAREST RIVAL, WHICH THE ORIGINAL WRITE-UP DID NOT MEASURE.
+PART C -- THE ARM THAT LANDED, AND THE ONE THE ORIGINAL WRITE-UP DID NOT
+MEASURE AT ALL.
 `bytes.decode().replace("\\r\\n", "\\n")` is the same repair with the ONE newline
 translation `text=True` was doing for us put back by hand. Part B's conclusion
 was stated over the whole `text=False`-plus-decode class -- "it ALSO refuses
@@ -45,14 +49,22 @@ below is the refutation:
 
 The `crlf` arm DOMINATES the shipped reader on everything measured here:
 identical on both healthy children (same answer, same values), strictly
-stronger on the stale ones, and with no platform coupling. It is NOT taken in
-this tree, and the reason is evidence cost rather than behaviour -- see the
-comment above `_run_cvc5_wheel` in `solvers.py`, which records the measured
-blast radius.
+stronger on the stale ones, and with no platform coupling. IT IS WHAT THIS
+TREE NOW DOES -- `solvers._decode_child_stream`. The `shipped` column below is
+therefore a record of what the transport used to be, not of what it is, and
+the `crlf` column is the tip.
+
+An arm is selected by swapping the transport's OWN decode point, so the parser
+under test is the real one in every column and only the decode differs. The
+`shipped` arm is the one thing here that is modelled rather than run, because
+this tree no longer contains that io layer; it is checked against a real
+`text=True` spawn on every child in the run
+(`_universal_newlines_is_still_what_we_think`), so a drift in the model is an
+assertion failure and not a quiet wrong number.
 
 Usage: probe_cvc5_backstop.py     (run against any tree; the numbers quoted in
-                                   SOUNDNESS.md and solvers.py are from the
-                                   fixed one)
+                                   SOUNDNESS.md and solvers.py are from this
+                                   one)
 """
 from __future__ import annotations
 
@@ -113,58 +125,108 @@ SEPARATORS = (
 
 ARMS = ("shipped", "raw", "crlf")
 
+# The three readers, as functions of the BYTES the child wrote.
+#
+#   shipped -- what `capture_output=True, text=True` used to hand the parent:
+#              a strict decode plus universal newlines, which maps `\r\n` AND a
+#              bare `\r` to `\n`, and RAISES on undecodable bytes.
+#   raw     -- bytes plus a decode and no translation whatever.
+#   crlf    -- what `solvers._decode_child_stream` does at this tip: the one
+#              translation `text=True` was performing, put back by hand.
+#
+# `shipped` is a MODEL of an io layer this tree no longer uses, so it is
+# checked against the real thing on every child in this run rather than
+# trusted -- see `_universal_newlines_is_still_what_we_think`.
+#
+# `crlf` is bound HERE, at import, and not looked up inside the arm: `_parent`
+# swaps `solvers._decode_child_stream` to select an arm, so a late lookup would
+# find the swapped one and recurse into itself.
+_TIP_DECODE = solvers._decode_child_stream
+
+_READERS = {
+    "shipped":
+        lambda raw: raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"),
+    # `replace`, not strict: this is the arm as it was DEFINED and measured
+    # when it was rejected, and a strict decode would silently make it a
+    # different arm than the one the rejection is on record about.
+    "raw": lambda raw: raw.decode("utf-8", "replace"),
+    "crlf": _TIP_DECODE,
+}
+
+
+def _universal_newlines_is_still_what_we_think(argv) -> None:
+    """Refuse to model `text=True` without checking the model on this child."""
+    raw = REAL(argv, capture_output=True, timeout=60).stdout
+    try:
+        real_text = REAL(argv, capture_output=True, text=True, timeout=60).stdout
+    except UnicodeDecodeError:
+        try:
+            _READERS["shipped"](raw)
+        except UnicodeDecodeError:
+            return  # both raise: the model is faithful on this child too
+        raise AssertionError("model decoded bytes that `text=True` refused")
+    modelled = _READERS["shipped"](raw)
+    assert modelled == real_text, (modelled, real_text)
+
 
 def _parent(argv, *, as_bytes=False, arm=None):
     """Run the real parser over the real child, through one of three readers.
 
-    `shipped` is `capture_output=True, text=True` exactly as `solvers.py` does
-    it. `raw` is bytes plus a decode. `crlf` is bytes plus a decode plus the
-    one newline translation `text=True` was performing. `as_bytes=True` is the
-    old spelling of `arm="raw"` and is kept so the part B call sites read the
-    same as they did when their numbers were taken.
+    The parser takes BYTES and decodes them itself now, so an arm is chosen by
+    swapping `solvers._decode_child_stream` — the transport's own decode point
+    — rather than by pre-decoding behind its back. `as_bytes=True` is the old
+    spelling of `arm="raw"` and is kept so the part B call sites read the same
+    as they did when their numbers were taken.
     """
     if arm is None:
         arm = "raw" if as_bytes else "shipped"
 
     def shim(a, **kw):
-        if arm == "shipped":
-            return REAL(argv, capture_output=True, text=True, timeout=60)
-        proc = REAL(argv, capture_output=True, timeout=60)
-        out = proc.stdout.decode("utf-8", "replace")
-        if arm == "crlf":
-            out = out.replace("\r\n", "\n")
-        return subprocess.CompletedProcess(argv, proc.returncode, out, "")
+        return REAL(argv, capture_output=True, timeout=60)
 
+    real_decode = solvers._decode_child_stream
     subprocess.run = shim
+    solvers._decode_child_stream = _READERS[arm]
     try:
         return solvers._run_cvc5_wheel("(check-sat)\n(get-model)\n", 60.0)
+    except UnicodeDecodeError:
+        raise
     finally:
         subprocess.run = REAL
+        solvers._decode_child_stream = real_decode
 
 
 def part_a() -> None:
     print("PART A -- what the alphabet check backstops, stale child, real bytes")
     print(f"stelling under test: {solvers.__file__}\n")
-    definite = []
+    definite = {"shipped": [], "crlf": []}
     for label, escape in SEPARATORS:
         argv = [sys.executable, "-c", STALE.format(sep=escape)]
+        _universal_newlines_is_still_what_we_think(argv)
         raw = REAL(argv, capture_output=True, timeout=60).stdout
         seen = REAL(argv, capture_output=True, text=True, timeout=60).stdout
-        result = _parent(argv)
-        verdict = result.answer
-        if verdict in ("sat", "unsat", "unknown"):
-            definite.append(label)
+        row = {}
+        for arm in ("shipped", "crlf"):
+            result = _parent(argv, arm=arm)
+            row[arm] = result
+            if result.answer in ("sat", "unsat", "unknown"):
+                definite[arm].append(label)
         print(f"  {label:12s} child bytes {raw[-22:]!r:28s} "
-              f"parent saw {seen[-20:]!r:24s} -> {verdict!r}"
-              + (f"  values={result.values}" if result.values else ""))
-    print(f"\n  definite answers from a child that wrote NO terminator: "
-          f"{definite or 'none'}")
-    print(f"  refused by the alphabet check: {len(SEPARATORS) - len(definite)} "
-          f"of {len(SEPARATORS)}")
-    print("  of the two that get through: U+000A is the protocol's own record "
-          "boundary and is\n  excluded from the check by construction; U+000D "
-          "is the hole, and it is invisible\n  to the check rather than "
-          "admitted by it.")
+              f"text=True saw {seen[-20:]!r:24s} "
+              f"was={row['shipped'].answer!r:10s} now={row['crlf'].answer!r}"
+              + (f"  values={row['crlf'].values}" if row["crlf"].values else ""))
+    for arm, tag in (("shipped", "text=True, before"), ("crlf", "THIS TIP")):
+        got = definite[arm]
+        print(f"\n  {tag}: definite answers from a child that wrote NO "
+              f"terminator: {got or 'none'}")
+        print(f"  refused by the alphabet check: "
+              f"{len(SEPARATORS) - len(got)} of {len(SEPARATORS)}")
+    print("\n  U+000A is the protocol's own record boundary and is excluded "
+          "from the check by\n  construction -- a writer that leaves one in a "
+          "field wrote two records, and there\n  is nothing on this side to "
+          "detect. U+000D was a HOLE: invisible to the check rather\n  than "
+          "admitted by it, because universal-newline decoding had already "
+          "spent it. That\n  is the row that moved.")
 
 
 def part_b() -> None:

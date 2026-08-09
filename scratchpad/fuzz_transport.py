@@ -96,13 +96,20 @@ def generate(rng: random.Random):
     return stream, rc, wrote_full, answer, n_model
 
 
-def decode(text: str) -> str:
-    """What `capture_output=True, text=True` hands the parent."""
-    return text.replace("\r\n", "\n").replace("\r", "\n")
+def as_child_bytes(text: str) -> bytes:
+    """The BYTES the child wrote.
+
+    This was `decode()` — `text.replace("\\r\\n","\\n").replace("\\r","\\n")`,
+    a restatement of what `capture_output=True, text=True` did to the child's
+    stdout before the parent saw it. The parent decodes for itself now
+    (`solvers._decode_child_stream`), so restating it here would be modelling
+    the thing under test.
+    """
+    return text.encode("utf-8")
 
 
-def run_parent(stdout: str, rc: int):
-    subprocess.run = lambda a, **kw: subprocess.CompletedProcess([], rc, stdout, "")
+def run_parent(stdout: bytes, rc: int):
+    subprocess.run = lambda a, **kw: subprocess.CompletedProcess([], rc, stdout, b"")
     try:
         return solvers._run_cvc5_wheel("(check-sat)\n(get-model)\n", 60.0)
     finally:
@@ -119,7 +126,7 @@ def main() -> int:
     crywolf = []      # healthy run refused
     for i in range(n):
         stream, rc, wrote_full, answer, n_model = generate(rng)
-        r = run_parent(decode(stream), rc)
+        r = run_parent(as_child_bytes(stream), rc)
         definite = r.answer in ("sat", "unsat", "unknown")
         if definite and not (wrote_full and rc == 0):
             unsound.append((i, stream, rc, wrote_full, r.answer, r.values))

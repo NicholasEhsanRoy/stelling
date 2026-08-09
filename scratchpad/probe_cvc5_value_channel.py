@@ -127,9 +127,12 @@ def part2() -> None:
     print(f"real child: rc={child.returncode} stdout={child.stdout!r} "
           f"({len(child.stdout)} chars)")
 
-    def parent(stdout: str, rc: int):
+    def parent(stdout, rc: int):
+        """`stdout` is the child's BYTES; a `str` is encoded UTF-8. The parent
+        decodes for itself now, so a `str` here is not a child's output."""
+        raw = stdout.encode("utf-8") if isinstance(stdout, str) else stdout
         subprocess.run = lambda a, **kw: subprocess.CompletedProcess(
-            [], rc, stdout, ""
+            [], rc, raw, b""
         )
         try:
             return solvers._run_cvc5_wheel(script, 60.0)
