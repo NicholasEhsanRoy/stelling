@@ -43,6 +43,16 @@ Anything else is a definite answer resting on a transcript that was never
 spoken. Note the asymmetry: refusing is always allowed. The property forbids
 misplaced *confidence*, never excessive caution.
 
+**A CONTROL THAT FIRES DOES NOT SAY WHICH OF THE THREE IT DEMONSTRATED, and for
+most of this file's life exactly one of them was demonstrated by anything.**
+``0ad22bb`` — the tree both ``cvc5-flat`` and ``cvc5-stateful`` point at —
+violates clause (2) and only clause (2): measured over the flat leg's own 1500
+``ci`` examples with all three clauses evaluated independently, 5 violations,
+all of them (2). Clauses (1) and (3) are demonstrated by two registered MUTANT
+controls, ``cvc5-exit-tell`` and ``cvc5-phantom-model``. The measurements, and
+the one thing still undemonstrated (the FORGERY route to clause (3)), are in
+``_judge``'s docstring below.
+
 **Ordering oddities a real driver would never write are deliberately NOT
 asserted against.** The first model of this protocol invented a driver that
 writes records *after* its own terminator, and the search happily shrank to
@@ -84,9 +94,17 @@ here; real cvc5; the z3 transport; the binary (non-wheel) cvc5 transport; the
 subprocess machinery, which is replaced wholesale; anything above
 ``_run_cvc5_wheel`` in the escalation stack.
 
-POSITIVE CONTROL: ``0ad22bb`` (the pre-fix ``splitlines()`` parser), where both
-legs fail. Registered as ``cvc5-flat`` and ``cvc5-stateful``; run them with
-``python tools/property_check.py --controls``.
+POSITIVE CONTROLS, four of them, and which clause of the oracle each one
+actually demonstrates:
+
+* ``cvc5-flat`` / ``cvc5-stateful`` — commit ``0ad22bb``, the pre-fix
+  ``splitlines()`` parser, where both legs fail. **Clause (2) only.**
+* ``cvc5-exit-tell`` — mutant, the ``or proc.returncode != 0`` half of the
+  transport's own guard deleted. **Clause (1).**
+* ``cvc5-phantom-model`` — mutant, the harvested model deduped after the
+  terminator check. **Clause (3), by duplication rather than by forgery.**
+
+Run them with ``python tools/property_check.py --controls``.
 """
 
 from __future__ import annotations

@@ -295,6 +295,29 @@ that `old` still occurs exactly once, so a mutant that stops matching fails on
 the commit that moves the line rather than the next time somebody runs the
 controls.
 
+**A control that fires does not say *which part* of your oracle it
+demonstrated.** `tools/property_check.py` checks two things — the run came back
+RED, and the failure carried `expect_message` — and neither of them knows that
+your oracle is a conjunction. If it has three clauses and the tree you point at
+violates one, the control is green and two clauses have been demonstrated by
+nothing.
+
+That is not hypothetical here. `test_cvc5_protocol.py`'s oracle is
+`exit 0 AND nothing truncated AND the model equals the value records read`, and
+`0ad22bb` — the commit `cvc5-flat` and `cvc5-stateful` both point at — violates
+the middle clause and only the middle clause: measured over the flat leg's own
+1500 `ci` examples with all three evaluated independently, **5 violations, all
+of them clause (2)**. The other two are demonstrated by two *mutant* controls
+added for the purpose, `cvc5-exit-tell` and `cvc5-phantom-model`, whose
+`expect_message` is the clause's own sentence rather than the leg tag `[flat]`
+— because `[flat]` is stamped on all three messages and would have been
+satisfied by the failure `cvc5-flat` already finds.
+
+So: if your oracle is a conjunction, say in the control's `why` which conjunct
+its tree exercises, and register a mutant for each of the rest or write down
+that you did not. The measurements for this one are in `_judge`'s docstring in
+`test_cvc5_protocol.py`.
+
 **If the unbiased search cannot build the shape, pin it and say so.** Several
 controls here needed an `@example`, because the shape is a conjunction of
 conditions the wide grammar does not stumble into (a size-0 declaration beside

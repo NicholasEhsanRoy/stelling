@@ -279,7 +279,15 @@ CONTROLS = (
             "ten characters, not one, so a payload could forge the parser's "
             "last line — the terminator — while the child was truncated "
             "mid-model-walk; and `...\\nend 4`, the final newline cut and "
-            "nothing else, read as a present terminator. Fixed at 8d3051a."
+            "nothing else, read as a present terminator. Fixed at 8d3051a. "
+            "WHAT A GREEN RUN OF THIS CONTROL DOES NOT SAY: the property's "
+            "oracle is a conjunction of THREE clauses and this tree exercises "
+            "ONE of them. Measured over the flat leg's own 1500 ci examples at "
+            "0ad22bb, all three evaluated independently: 5 violations, every "
+            "one of them clause (2) `nothing was truncated`, none of clause "
+            "(1) or clause (3). The table is in `_judge`'s docstring in "
+            "test_cvc5_protocol.py, and clauses (1) and (3) are demonstrated "
+            "by `cvc5-exit-tell` and `cvc5-phantom-model` below instead."
         ),
         # `[flat]` is the leg tag `_judge` stamps on ALL THREE of its failure
         # messages — truncated run, nonzero-exit run, model that was not
@@ -289,6 +297,11 @@ CONTROLS = (
         # test_cvc5_protocol.py was reported "FIRED — the property failed where
         # it is supposed to", `1/1 controls fired`, exit 0. A control that
         # cannot tell a defect from a broken import is not a control.
+        #
+        # THE SAME BREADTH IS WHY THIS GUARD CANNOT SAY WHICH CLAUSE FIRED, and
+        # it is not doing so here: at 0ad22bb what it matches is always the
+        # clause-(2) message. `cvc5-exit-tell` and `cvc5-phantom-model` carry
+        # clause-specific guards for exactly that reason.
         expect_message="[flat]",
     ),
     Control(
@@ -300,7 +313,10 @@ CONTROLS = (
             "the same two defects, reached by the rule-based state machine "
             "without being told the record layout. It needs ~20x the flat "
             "leg's budget to get there, which is the honest cost of stateful "
-            "search on a protocol whose record ORDER is fixed."
+            "search on a protocol whose record ORDER is fixed. It demonstrates "
+            "the SAME ONE of `_judge`'s three clauses that `cvc5-flat` does — "
+            "(2), nothing was truncated — and for the same reason: the tree, "
+            "not the search. See `cvc5-flat`'s `why` and `_judge`'s docstring."
         ),
         scale=20.0,
         expect_message="[stateful]",  # see cvc5-flat for why this is not ""
