@@ -28,8 +28,12 @@ contact: a real ``jax.ops.segment_sum`` assembly traced to a
 ×1)``, obligation UNKNOWN, escalation declined naming the primitive —
 so ``scatter-add`` lands in its static-index accumulate row forms only,
 and ``stack``, what ``jnp.stack`` traces to on jax 0.11.0, lands as
-pure element routing). Everything else falls to ⊤ — soundly, with
-coverage recording exactly how much fell.
+pure element routing), plus the two rows of the index-bounds round
+(``dynamic_slice`` and ``dynamic_update_slice`` — what ``u[i]`` with a
+traced ``i`` and an out-of-range static ``u[30]`` actually lower to,
+measured on both tested series; the same round widens ``gather``'s row
+form from a point index to a range). Everything else falls to ⊤ —
+soundly, with coverage recording exactly how much fell.
 
 The three-row round is also where the ieee census first had to say **no**
 to arithmetic it can state in ℝ. Both new rows contract more than one
@@ -1527,28 +1531,40 @@ def _t_scatter(eqn, params, ins):
 
 
 def _t_gather(eqn, params, ins):
-    """``x[idx]`` in its static-index leading-axis row form — the
-    allowed-by-census structural addition from the MIME fvm laplacian
-    trace (the gather half of the operators' gather→compute→scatter
-    pattern: ``phi[mesh.owner]`` / ``phi[mesh.neighbour]`` on rank-1
-    fields and ``grad[mesh.owner]`` on rank-2, with the mesh topology
-    entering as definite const indices).
+    """``x[idx]`` in its leading-axis row form — the allowed-by-census
+    structural addition from the MIME fvm laplacian census trace (the
+    gather half of the operators' gather→compute→scatter pattern:
+    ``phi[mesh.owner]`` / ``phi[mesh.neighbour]`` on rank-1 fields and
+    ``grad[mesh.owner]`` on rank-2, with the mesh topology entering as
+    definite const indices), widened by the index-bounds round to indices
+    known only to a RANGE.
 
-    Covered form, exactly: operand of rank r >= 1; indices ``(N, 1)``
-    holding definite integral in-range points; dimension numbers that
-    collapse exactly the leading axis (``offset_dims = (1, …, r-1)``,
+    Covered GEOMETRY, exactly, and unchanged by that round: operand of
+    rank r >= 1; indices ``(N, 1)``; dimension numbers that collapse
+    exactly the leading axis (``offset_dims = (1, …, r-1)``,
     ``collapsed_slice_dims = (0,)``, ``start_index_map = (0,)``, every
     batching field empty); ``slice_sizes = (1, *operand.shape[1:])``.
-    The output stacks the selected rows: ``out[i] = operand[k_i]`` —
-    pure data movement, no arithmetic, no rounding. All
-    ``GatherScatterMode``\\ s agree on definitely-in-range indices, so
-    the mode is not constrained here.
+
+    Covered INDICES: any integral interval lying inside the leading axis.
+    A point reproduces the exact row take, ``out[i] = operand[k_i]``; a
+    range takes the elementwise hull of the rows it can reach. Pure data
+    movement either way — every output element IS an operand element, so
+    there is no arithmetic and no rounding, and a range only widens WHICH
+    in-range elements are copied. All ``GatherScatterMode``\\ s agree on
+    definitely-in-range indices, so the mode is still not constrained
+    here: this transfer computes a value only where every admitted index
+    is in range, which is exactly the condition under which the modes
+    cannot disagree.
 
     Everything else declines to a noted ⊤ that names its reason and prints
-    the numbers: dynamic (non-point) or out-of-range indices
-    (mode-dependent clamp/drop/fill is the census's wedge bug class, never
-    guessed), batching dims, window offsets not covering the full trailing
-    block, multi-column index vectors.
+    the numbers: an index range STRADDLING the axis (the out-of-range
+    inputs would take a clamped or filled element — the census's wedge bug
+    class, never guessed), a non-integral or unbounded index interval, an
+    index dtype too narrow to hold the axis' bound, batching dims, window
+    offsets not covering the full trailing block, multi-column index
+    vectors. An index range DISJOINT from the axis is out of bounds for
+    every declared input and is reported as a finding rather than a
+    decline (:class:`interval.IndexOutOfBoundsError`).
     """
     if len(ins) != 2:
         raise iv.IntervalError(
@@ -3097,9 +3113,10 @@ TRANSFERS = {
         lambda eqn, p, ins: [iv.stack(list(ins), int(_req(p, "axis", "stack")))],
         TIER_EXACT,
     ),
-    # x[idx], static-index leading-axis row form only — census addition from
-    # the MIME fvm laplacian census trace; every other gather configuration
-    # declines (see _t_gather).
+    # x[idx], leading-axis row form only — census addition from the MIME
+    # fvm laplacian census trace, widened by the index-bounds round to an
+    # index known only to a range; every other gather GEOMETRY declines
+    # (see _t_gather).
     "gather": (_t_gather, TIER_EXACT),
     # u[i] with a traced i, and any out-of-range static index: the
     # index-bounds round. Dynamic start indices are propagated as intervals

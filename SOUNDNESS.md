@@ -3498,4 +3498,142 @@ verdicts:
   `scratchpad/PREREG_CERT.md`, `scratchpad/cert/` and
   `scratchpad/pin/`.
 
+- **2026-08-09 (pre-release): the index-bounds round — verdicts move in
+  the DIRECTION THAT MINTS, and the clamp is deliberately not modelled.**
+  `dynamic_slice` and `dynamic_update_slice` gain interval transfers and
+  `gather`'s covered row form accepts a range-valued index, so an index
+  known only to an interval now produces a box where it produced ⊤.
+  **This is the catastrophic direction: it can mint a VERIFIED that did
+  not exist before**, and nothing about the round is more important than
+  the hull being right. No prior verdict is retroactively invalid —
+  every move is UNKNOWN → definite, and ⊤ decides nothing — but a
+  re-run is what re-establishes trust in anything that was UNKNOWN
+  *because of* an index. `design/index-bounds-round.md` is the full
+  record.
+
+  **What was wrong before was power, not soundness.** Measured on
+  `9564728`: `u[i]` with a traced `i` collapsed to `[-inf, inf]` whether
+  the index was in bounds, partly out, or wholly out, and so did an
+  out-of-range static `u[30]`. stelling withheld rather than modelling
+  jax's clamp, which was right; it simply withheld everywhere.
+
+  **The measurement the round turns on: `u[i]` is not a gather.** `jnp`'s
+  `__getitem__` emits the from-the-end normalisation (`lt`/`add`/
+  `select_n`) and then a `dynamic_slice`, on both tested series — and an
+  out-of-range STATIC index takes the same path (`u[3]` lowers to a
+  static `slice`; `u[30]` and `u[-11]` do not). `dynamic_slice` had no
+  transfer at all. Registering the dynamic-index gather alone would have
+  closed nothing that scientific code actually writes.
+
+  **THE CLAMP IS NOT MODELLED, and this is a real tension with the
+  tree's stated posture, not a free choice.** Measured, primitive-level:
+  jax CLAMPS an out-of-range read (`dynamic_slice(arange(10), 30, (1,))`
+  reads element 9; start `-1` reads element 0) and DROPS an out-of-range
+  scatter write (`x.at[30].set(v)` on a length-10 `x` is a no-op). The
+  fixed-width boundary above records this project as *"integers and
+  converts are execution-faithful"*, and an index clamp is integer index
+  arithmetic — so execution-faithfulness would say model it. It is not
+  modelled, for three measured reasons: jax's own docs call
+  out-of-bounds indexing **undefined behaviour** rather than a defined
+  value, where an `int32` wrap is C-defined and reproducible; jax is not
+  self-consistent about it (**the gather clamps, the scatter drops**, and
+  the same `x[i]` picks one by which side of an assignment it lands on);
+  and **reverse-mode AD does not preserve it**, so a value modelled as
+  `u[9]` in the primal is not `u[9]`'s derivative in the tangent and
+  "execution-faithful" has no single referent. Modelling it would be
+  sound about the executed program and wrong about the program the user
+  wrote — the shape of the integer-literal wrap defect, one layer over.
+
+  **The rule therefore computes a value ONLY where jax's clamp is
+  provably the identity.** Three cases: an index range inside the axis'
+  legal window gets the hull over every start the declared set admits; a
+  range straddling the window DECLINES; a range disjoint from it is
+  reported as an out-of-bounds FINDING. The control that separates this
+  design from the other one is a single query — `u[i] == u[9]` for
+  `i ∈ [12, 20]` is TRUE of what jax runs (the test measures that it is)
+  and states nothing about the source. A clamp-faithful transfer
+  discharges it; this one leaves it undecided.
+
+  **A new note class, and NO new status.** A disjoint index raises
+  `interval.IndexOutOfBoundsError`, a subclass of `IntervalError` caught
+  one arm ahead of the generic decline. **The accounting is deliberately
+  byte-identical to a decline** — ⊤, `record_unknown`, `mark_unreached`,
+  never a REFUTED — because an out-of-bounds index does not make an
+  asserted predicate false, and manufacturing a status from it would
+  claim something the obligations do not say. Only the note changes, and
+  it is shouted. The old wording explained why *stelling* declined and
+  never said the *program* indexes out of bounds; `_t_scatter` and
+  `_t_gather` had detected this exact fact since their own rounds and
+  filed it as a decline. This is the case a jax maintainer asked for in
+  Feb 2026 (*"I would rather there be an error for OOB indexing if it's
+  statically provable"*); `checkify` is runtime-only and
+  `jax_check_static_indices` reaches static constants only.
+
+  **SOUNDNESS EVIDENCE, measured, with a positive control — a zero with
+  no positive control has been wrong three times in this project.** The
+  oracle enumerates the WHOLE product of declared start ranges over
+  randomised shapes and slice sizes, executes the real primitive at every
+  one, and checks containment element by element: **6000 configurations
+  and ~57 000 executed elements per run, three seeds, on jax 0.11.0 AND
+  0.10.2 — 0 containment violations, 0 non-tight configurations.** Five
+  deliberately wrong hulls driven through the same instrument produced
+  908 / 573 / 439 / 608 / 1073 violations, so its zero is falsifiable.
+  Two of the five are committed (`tests/test_index_bounds.py`).
+  **Tightness is pinned separately and on CONCRETE data**, because a
+  containment sweep cannot see it: hulling the whole operand would pass
+  every soundness check and fail the ramp tests.
+
+  **Nine mutants, one worktree each, `python -B`, `__pycache__` cleared:
+  9/9 killed.** The first pass killed 8 — `M8_no_index_dtype_gate`
+  SURVIVED, 129 passed with the call to the index-dtype gate deleted,
+  because the test covering it drove the helper directly and never asked
+  whether the transfer consults it. A gate proved correct and never
+  proved wired in; closed with a query that goes through the walk.
+
+  **SCORED PER OBLIGATION.** Own corpus, 304 keys × {real, ieee}, each
+  key carrying an oracle that executes the program at every declared
+  index: **81 obligations moved, every one UNKNOWN → definite, every one
+  agreeing with the oracle, 0 wrong moves**, 25 out-of-bounds findings
+  where the baseline emitted 0. *(Two "wrong moves" in the first scoring
+  run were the ORACLE's defect, not the transfer's: it pooled every
+  output position into one list instead of judging per position, and so
+  called a correct `violated-over-set` wrong on two queries whose LAST
+  slice element exceeds the bound at every admitted start. Recorded
+  because the instrument being wrong first is the normal case.)** On
+  `corpus/supply`: all 20 harnesses **byte-identical** after normalising
+  solver timings — those harnesses contain no dynamic indexing, so the
+  round buys nothing there and costs nothing.
+
+  **Four expectations changed, every one because a decline was power
+  lost**, shown red first: two gather tests whose in-range dynamic index
+  now takes a hull (replaced with tests carrying the discrimination the
+  old ones could not have), and two whose out-of-range index is now a
+  finding with the same accounting.
+
+  **Both jax series, at `882750f`:** 2515 passed / 7 skipped on jax
+  0.11.0 and on 0.10.2, `--collect-only` ids **byte-identical** between
+  the series (2515 each), `reuse lint` rc=0. Baseline at `9564728` was
+  2484 / 7 on both with 2486 ids: **33 tests added and 4 REMOVED, net
+  +29** — and 2486 − 4 + 33 = 2515, so the arithmetic and the sentence
+  agree. The four removed are the four renamed gather tests
+  (`test_gather_dynamic_index_declines_not_crashes`,
+  `test_gather_out_of_range_index_declines_not_crashes`,
+  `test_fvm_gather_dynamic_index_declines_traced`,
+  `test_gather_out_of_range_static_index_declines_traced`); no test was
+  deleted, each was renamed to the behaviour it now pins and is among the
+  33 "added".
+
+  **Known limits, stated rather than left to be re-derived.** Under
+  `semantics="ieee"` the from-the-end normalisation declines at its
+  integer `add` before the row is reached, so the ieee leg buys nothing
+  for jnp-spelled dynamic indexing; the row itself is sound as-is there.
+  No SMT emission row, so an obligation reaching one cannot escalate.
+  Gather geometries outside the covered row form — batching dims,
+  multi-column indices, the `vmap` form — decline exactly as before. The
+  index-dtype gate refuses an UNCONFIRMED hazard: XLA computes the
+  out-of-bounds comparison in the index's own element type, and probing
+  `dynamic_slice` with an `int8` start over lengths 100/127/128/129/200
+  did not exhibit a wrapped bound — refused anyway, because every dtype
+  jnp's own indexing produces is `int32`/`int64` and the gate is free.
+
 *(no releases yet)*
