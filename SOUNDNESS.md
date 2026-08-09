@@ -1971,10 +1971,11 @@ verdicts:
   from `Popen._communicate`'s `self._input = self._input.encode(...)` in the
   standard library's `subprocess` (`subprocess.py:2172` on CPython 3.12.3 —
   the LINE NUMBER IS A PROPERTY OF THE INTERPRETER, not of this repository:
-  measured 2026-08-09, 2172 is that statement on CPython 3.12.3 and 3.11.15
-  and is a BLANK LINE on CPython 3.10.20, which `requires-python = ">=3.10"`
-  admits; cite the symbol, not the line), because `input=` must become bytes
-  when `text=` goes
+  measured 2026-08-09, 2172 is that statement on CPython 3.12.3 and 3.11.15;
+  on CPython 3.10.20, which `requires-python = ">=3.10"` admits, the file is
+  2122 lines long, so 2172 is 50 lines PAST END OF FILE and the statement is
+  at `:2078`; cite the symbol, not the line), because `input=` must become
+  bytes when `text=` goes
   and six files shim `subprocess.run` with a `str` `CompletedProcess` —
   including `fuzz_transport.py`, `repro_forgery.py`, `repro_real_kill.py` and
   `probe_cvc5_value_channel.py`, the artefacts behind figures quoted in this
@@ -2282,8 +2283,9 @@ verdicts:
   `tests/test_solver_audit_findings.py`, all one cause —
   `AttributeError: 'bytes' object has no attribute 'encode'` from
   `Popen._communicate`'s `self._input.encode(...)` in the standard library's
-  `subprocess` (line 2172 on CPython 3.12.3 and 3.11.15, a blank line on
-  3.10.20 — see the entry above on why the symbol is cited and the line is
+  `subprocess` (line 2172 on CPython 3.12.3 and 3.11.15; on 3.10.20 that
+  file is 2122 lines, so 2172 is past its end and the statement is at 2078
+  — see the entry above on why the symbol is cited and the line is
   not), because `input=` must become bytes when `text=` goes.
   That figure was reproduced here exactly, ids and frame, and it is the cost
   of a TOLERANT decode; a strict one reddens **31**, the extra 15 being the
