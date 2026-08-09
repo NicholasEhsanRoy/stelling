@@ -117,20 +117,46 @@ DEFINITE = ("sat", "unsat", "unknown")
 
 
 class _FakeProc:
-    """What ``subprocess.run`` hands the transport: BYTES, on both streams.
+    """What ``subprocess.run`` hands the transport, in the mode it ASKED FOR.
 
-    This used to hand it ``str``, which quietly made the model a reader that
-    does no decoding at all — so the ``\\r`` row of ``SPLITLINES_ONLY`` above
-    was being scored against a parent that did not exist in either direction:
-    the shipped one translated ``\\r`` to ``\\n`` before reading, and this one
-    did nothing. The transport decodes for itself now
-    (``solvers._decode_child_stream``), so the child's job here is to be the
-    bytes and let the real decoder run.
+    This used to hand it ``str`` unconditionally, which quietly made the model
+    a reader that does no decoding at all — so the ``\\r`` row of
+    ``SPLITLINES_ONLY`` above was being scored against a parent that did not
+    exist in either direction: the shipped one translated ``\\r`` to ``\\n``
+    before reading, and this one did nothing. Then it handed BYTES
+    unconditionally, which is right for the shipped transport (it decodes for
+    itself now, ``solvers._decode_child_stream``) and WRONG for any revision
+    that passed ``text=True``.
+
+    THAT SECOND FORM BROKE A POSITIVE CONTROL, AND NOTHING NOTICED — because
+    the job that runs the controls had never run. ``cvc5-flat`` and
+    ``cvc5-stateful`` materialise ``0ad22bb``, where ``_run_cvc5_wheel`` called
+    ``subprocess.run(..., text=True)``; against bytes that revision dies in
+    ``_quote`` with ``TypeError: sequence item 0: expected str instance, bytes
+    found`` before reaching the record boundary the control is about. Driven at
+    53f9f84 on jax 0.10.2 + hypothesis 6.165.2: ``property_check.py --control
+    cvc5-flat`` came back ``FIRED, but the failure did not carry '[flat]'`` →
+    ``0/1 controls fired``, exit 1, so ci.yml's ``property`` job was RED on
+    every push on a healthy tree.
+
+    So the mode is READ OFF THE CALL rather than pinned here, which is the same
+    rule ``_wheel_real_child`` in ``tests/test_solver_audit_findings.py``
+    already follows: a fixture that pins the transport's own IO choice measures
+    the fixture. ``text=``/``universal_newlines=`` is what ``subprocess``
+    itself consults, in that order of precedence.
     """
 
-    def __init__(self, stdout, returncode):
-        self.stdout = stdout.encode("utf-8") if isinstance(stdout, str) else stdout
-        self.stderr = b""
+    def __init__(self, stdout, returncode, *, text: bool):
+        if text:
+            self.stdout = (
+                stdout.decode("utf-8") if isinstance(stdout, bytes) else stdout
+            )
+            self.stderr = ""
+        else:
+            self.stdout = (
+                stdout.encode("utf-8") if isinstance(stdout, str) else stdout
+            )
+            self.stderr = b""
         self.returncode = returncode
 
 
@@ -144,7 +170,10 @@ class _FakeSubprocess:
         self.rc = 0
 
     def run(self, *a, **k):
-        return _FakeProc(self.stdout, self.rc)
+        text = k.get("text")
+        if text is None:
+            text = k.get("universal_newlines")
+        return _FakeProc(self.stdout, self.rc, text=bool(text))
 
 
 class _ScriptedChild:
