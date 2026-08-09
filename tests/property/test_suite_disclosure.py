@@ -317,6 +317,8 @@ def test_the_registry_still_covers_the_defect_classes_it_was_built_for():
         "widen",                # non-monotonicity in the input box
         "cvc5-flat",            # the record-boundary disagreement
         "cvc5-stateful",
+        "cvc5-exit-tell",       # a definite answer over a nonzero exit
+        "cvc5-phantom-model",   # a harvested model the child never wrote
         "cross-series",         # jax 0.10.2 vs 0.11.0
     }
     assert want <= have, f"positive controls have been removed: {sorted(want - have)}"

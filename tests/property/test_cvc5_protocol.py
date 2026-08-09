@@ -265,17 +265,47 @@ def _judge(res, stdout, full, rc, census, *, where):
     nothing else, and a payload separator forging the terminator while the
     child was killed mid-model-walk on exit 0.
 
-    (1) THE CHILD EXITED 0 — never violated at ``0ad22bb``, and it cannot be:
+    (1) THE CHILD EXITED 0 — DEMONSTRATED, by the ``cvc5-exit-tell`` mutant
+    control, and by nothing at ``0ad22bb``. It cannot be demonstrated there:
     that parser already refuses a nonzero exit (``if not complete or
-    proc.returncode != 0``, its "two tells"). Nothing is wrong with the clause
-    or the search; the control's tree carries the other defect and not this
-    one, so this clause has no place it is known to fail and therefore no
-    demonstration anywhere.
+    proc.returncode != 0``, its "two tells"), so the control's tree carries the
+    other defect and not this one. What this docstring drew from that — that
+    the clause "has no place it is known to fail and therefore no demonstration
+    anywhere" — did not follow, and ``positive_controls.py``'s own docstring
+    says why: a registry entry does not have to name a commit, and four of its
+    entries were already MUTANTS for exactly this reason. Deleting the ``or
+    proc.returncode != 0`` half of the guard is that mutation, one place, this
+    leg, ci profile::
 
-    (3) THE MODEL IS EXACTLY THE VALUE RECORDS IN THE BYTES READ — VIOLATED at
-    ``0ad22bb``, and NOT REACHABLE BY EITHER GENERATOR. Hand-driven through
-    this file's own fixture, no truncation, exit 0, count matching, so clauses
-    (1) and (2) both hold and only this one can fail::
+        ACCEPTED A NONZERO-EXIT RUN (exit 1) as 'sat' [flat]
+          stdout: 'version 1.3.4\\nanswer sat\\nend 0\\n'
+
+    in 0.5 s, and green against the unmutated tip.
+
+    (3) THE MODEL IS EXACTLY THE VALUE RECORDS IN THE BYTES READ — DEMONSTRATED,
+    by the ``cvc5-phantom-model`` mutant control, and the shape it needs was
+    inside the alphabet all along. Two DIFFERENT ways to break this clause were
+    run together here and they are separated now.
+
+    A DUPLICATE value record is drawable today: ``_NAMES`` x ``_RATIONALS`` is
+    15 combinations over up to three records, so ``value x0 0/1`` twice is an
+    ordinary draw. Dedupe the harvested model AFTER the terminator check
+    (``tuple(sorted(values))`` -> ``tuple(sorted(set(values)))``) and the count
+    in ``end <n>`` still matches, so clauses (1) and (2) both hold and only this
+    one can fail::
+
+        HARVESTED A MODEL THAT WAS NOT WRITTEN [flat]
+          parent harvested: [('x0', '0/1')]
+          actually present: [('x0', '0/1'), ('x0', '0/1')]
+          stdout: 'version 1.3.4\\nanswer sat\\nvalue x0 0/1\\nvalue x0 0/1\\nend 2\\n'
+
+    in 2.0 s, and green against the unmutated tip. ``_PAYLOADS`` is untouched,
+    so the two example-efficiency figures in the module docstring keep
+    describing the strategy that produced them.
+
+    A FORGED value record is still out of reach, and that half of the finding
+    stands. It is the shape ``0ad22bb`` actually gets wrong — hand-driven
+    through this file's own fixture, no truncation, exit 0, count matching::
 
         version 1.3.4
         answer sat
@@ -285,17 +315,16 @@ def _judge(res, stdout, full, rc, census, *, where):
       0ad22bb: sat, harvesting x9 = 1/2, which the writer never wrote
       tip    : failed
 
-    No draw from ``_PAYLOADS`` can express it. Its separator payloads are
+    and no draw from ``_PAYLOADS`` can express it. Its separator payloads are
     ``q<sep><tail>`` with ``tail`` in ``end <n>`` / ``answer unsat`` / ``q``,
     and a forged ``value`` record needs a tail beginning ``value ``. A forged
     ``end`` harms only a TRUNCATED child, so it is caught as clause (2); a
-    forged ``value`` is the one that harms an intact one. **The clause this
-    module's docstring puts at the centre of the oracle is the clause nothing
-    has ever demonstrated.** Adding a ``value x9 1/2`` tail is what would
-    demonstrate it, and the cost is re-measuring the two example-efficiency
-    figures in the module docstring, which describe the alphabet as it stands.
-    Left as a finding rather than taken, so that the numbers above and the
-    numbers up there keep describing the same strategy.
+    forged ``value`` is the one that harms an intact one. So what remains
+    undemonstrated is narrower than "clause (3)": it is **the forgery route to
+    clause (3), against the one tree that historically carried it.** Adding a
+    ``value x9 1/2`` tail is what would put that route in the search, and the
+    cost is re-measuring 673/8165; that trade is still open and still the
+    principal's. It is no longer the price of demonstrating the clause.
     """
     census.tag("driven")
     if res.answer not in DEFINITE:

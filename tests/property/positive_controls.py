@@ -19,7 +19,7 @@ that carries the defect, asserting that the run comes back RED.
 
 A property whose control cannot be demonstrated does not ship. That is the
 rule, it cost one property (see ``test_metamorphic.py``'s module docstring),
-and the rest of its cost is visible here: **four of the ten** controls are
+and the rest of its cost is visible here: **six of the twelve** controls are
 source MUTANTS rather than historical commits, because the defect they describe
 has never been in this tree.
 
@@ -304,6 +304,76 @@ CONTROLS = (
         ),
         scale=20.0,
         expect_message="[stateful]",  # see cvc5-flat for why this is not ""
+    ),
+    # ── the other two clauses of the same oracle ────────────────────────────
+    #
+    # `_judge` states its invariant as THREE clauses and the two controls above
+    # demonstrate exactly one of them — clause (2), measured, tabulated in
+    # `_judge`'s own docstring. These two demonstrate the other two, by MUTATION
+    # rather than by commit, which is what a mutant control is for: the defect
+    # is a real class and this tree has never carried it in this place, so no
+    # revision can be pointed at. Neither touches `_PAYLOADS`, so neither costs
+    # the 673/8165 example-efficiency figures in `test_cvc5_protocol.py`'s
+    # module docstring anything.
+    #
+    # Their `expect_message` is the clause's own sentence and NOT the `[flat]`
+    # leg tag the two controls above carry. `[flat]` is stamped on all three of
+    # `_judge`'s messages, so a control carrying it would be satisfied by the
+    # clause-(2) failure `cvc5-flat` already finds — i.e. it would fire without
+    # demonstrating the clause it is registered for, which is the exact
+    # distinction these two entries exist to make.
+    Control(
+        name="cvc5-exit-tell",
+        nodeid=f"{_CVC5}::test_the_parent_never_trusts_an_unspoken_transcript_flat",
+        kind="mutant",
+        at="HEAD",
+        why=(
+            "the transport drops one of its own TWO TELLS: `if not complete or "
+            "proc.returncode != 0` becomes `if not complete`, so a child that "
+            "wrote a complete, well-formed transcript and then died with a "
+            "nonzero exit is answered on. MEASURED under the mutation at the "
+            "ci profile: `ACCEPTED A NONZERO-EXIT RUN (exit 1) as 'sat' "
+            "[flat]` on 'version 1.3.4\\nanswer sat\\nend 0\\n', found in 0.5 "
+            "s. A MUTANT, and honestly weaker evidence than a commit — no "
+            "revision of this tree has carried it, which is why clause (1) had "
+            "no demonstration before this entry. `0ad22bb` cannot supply one: "
+            "that parser already refuses a nonzero exit, so the control tree "
+            "carries the other defect and not this one."
+        ),
+        mutation=Mutation(
+            path="src/stelling/solvers.py",
+            old="    if not complete or proc.returncode != 0:",
+            new="    if not complete:",
+        ),
+        expect_message="ACCEPTED A NONZERO-EXIT RUN",
+    ),
+    Control(
+        name="cvc5-phantom-model",
+        nodeid=f"{_CVC5}::test_the_parent_never_trusts_an_unspoken_transcript_flat",
+        kind="mutant",
+        at="HEAD",
+        why=(
+            "the harvested model stops being the value records that were "
+            "written: `values=tuple(sorted(values))` becomes "
+            "`tuple(sorted(set(values)))`, so a child that wrote `value x0 0/1` "
+            "twice is reported as having written it once. The dedupe sits "
+            "AFTER the terminator check, so `end <n>`'s count still matches "
+            "and clauses (1) and (2) both hold — only clause (3) can fail. "
+            "MEASURED under the mutation at the ci profile: `HARVESTED A MODEL "
+            "THAT WAS NOT WRITTEN [flat]`, parent harvested [('x0', '0/1')] "
+            "against actually present [('x0', '0/1'), ('x0', '0/1')], found in "
+            "2.0 s. A MUTANT, weaker evidence than a commit, and the narrow "
+            "answer to `_judge`'s standing finding that no draw of either "
+            "generator reaches clause (3): a FORGED value record is still out "
+            "of the alphabet's reach and that finding stands, but a DUPLICATE "
+            "one is in it and needs no new payload."
+        ),
+        mutation=Mutation(
+            path="src/stelling/solvers.py",
+            old="        values=tuple(sorted(values)),",
+            new="        values=tuple(sorted(set(values))),",
+        ),
+        expect_message="HARVESTED A MODEL THAT WAS NOT WRITTEN",
     ),
     # ── cross-series ────────────────────────────────────────────────────────
     Control(
