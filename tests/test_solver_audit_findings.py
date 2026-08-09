@@ -1130,12 +1130,30 @@ def _stale_child(answer: str, payload: bytes) -> str:
 
     Whatever `end <n>` the parent ends up seeing is inside the payload, so
     accepting one is accepting a terminator the child never wrote.
+
+    THE ANSWER RECORD IS HOISTED INTO A LOCAL, AND THAT IS NOT A STYLE
+    CHOICE. It used to be spelled ``f"w({f'answer {answer}\\n'.encode()!r})\\n"``
+    — a nested f-string whose ``\\n`` sits inside the OUTER f-string's
+    expression part. That is PEP 701 syntax and it is Python 3.12+ only, while
+    ``pyproject.toml`` declares ``requires-python = ">=3.10"`` and the sdist
+    ships ``/tests``. Measured on this box at 53f9f84: every tracked ``.py``
+    parses under 3.10 and 3.11 EXCEPT this one, and ``python -m pytest`` on a
+    3.11 interpreter came back ``6 skipped, 1 error`` — a collection error, so
+    the suite examined nothing. ``src/`` was and is clean on both.
+
+    The obvious cheap guard does not work and was driven rather than assumed:
+    ``ast.parse(src, feature_version=(3, 10))`` on a 3.12 host PARSES this
+    construct, so a same-interpreter floor check would have been vacuous
+    against exactly this defect. Catching it needs a real floor interpreter,
+    and no job in ``.github/workflows/`` runs one — every ``uv venv`` but the
+    ``acceptance-any-pytree`` lane's takes the runner's default.
     """
+    answer_record = f"answer {answer}\n".encode()
     return (
         "import sys\n"
         "w = sys.stdout.buffer.write\n"
         "w(b'version 1.3.4\\n')\n"
-        f"w({f'answer {answer}\n'.encode()!r})\n"
+        f"w({answer_record!r})\n"
         "w(b'value x0 1/2\\n')\n"
         f"w({payload!r})\n"
     )
