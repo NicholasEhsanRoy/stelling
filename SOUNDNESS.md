@@ -4335,9 +4335,11 @@ verdicts:
   **THE "BARE PYTHON LITERAL" QUALIFIER ON THAT TABLE IS LOAD-BEARING AND
   WAS NOT THERE WHEN THE TABLE LANDED.** Per the mechanism above, jax's
   explicit check fires only for `isinstance(object, (bool, int, float,
-  complex))`, and NumPy's own bound check at `array_constructors.py:314`
-  fires only on Python ints — inside sequences included. So the raise is a
-  joint fact about the door AND the argument's Python type, and the table,
+  complex))`, and the fallback at `array_constructors.py:314` is what
+  raises for a Python list or tuple of such scalars — measured, both
+  `jnp.array([256], int8)` and `jnp.array([256.0], int8)` raise there. So
+  the raise is a joint fact about the door AND the argument's Python type,
+  and the table,
   pinning one literal in both columns, reads as a fact about the function
   alone. Measured at `650e678`, three doors × thirteen
   spellings of the value 256, target `int8`, **identical in all four cells
