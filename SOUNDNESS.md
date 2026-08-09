@@ -1962,8 +1962,14 @@ verdicts:
   its unit is tests; the rest of that run was 2451 passed and 2 skipped of
   2469 collected, a record of this commit that will move with the next added
   test. All 16 are in `tests/test_solver_audit_findings.py` and all 16 are the
-  same `AttributeError: 'bytes' object has no attribute 'encode'` at
-  `subprocess.py:2172`, because `input=` must become bytes when `text=` goes
+  same `AttributeError: 'bytes' object has no attribute 'encode'` raised
+  from `Popen._communicate`'s `self._input = self._input.encode(...)` in the
+  standard library's `subprocess` (`subprocess.py:2172` on CPython 3.12.3 —
+  the LINE NUMBER IS A PROPERTY OF THE INTERPRETER, not of this repository:
+  measured 2026-08-09, 2172 is that statement on CPython 3.12.3 and 3.11.15
+  and is a BLANK LINE on CPython 3.10.20, which `requires-python = ">=3.10"`
+  admits; cite the symbol, not the line), because `input=` must become bytes
+  when `text=` goes
   and six files shim `subprocess.run` with a `str` `CompletedProcess` —
   including `fuzz_transport.py`, `repro_forgery.py`, `repro_real_kill.py` and
   `probe_cvc5_value_channel.py`, the artefacts behind figures quoted in this
@@ -2269,8 +2275,11 @@ verdicts:
   **WHAT IT COST, AND WHERE THE FIXTURES WERE MEASURING THEMSELVES.**
   Applying (c) reddens **16 tests**, all in
   `tests/test_solver_audit_findings.py`, all one cause —
-  `AttributeError: 'bytes' object has no attribute 'encode'` at
-  `subprocess.py:2172`, because `input=` must become bytes when `text=` goes.
+  `AttributeError: 'bytes' object has no attribute 'encode'` from
+  `Popen._communicate`'s `self._input.encode(...)` in the standard library's
+  `subprocess` (line 2172 on CPython 3.12.3 and 3.11.15, a blank line on
+  3.10.20 — see the entry above on why the symbol is cited and the line is
+  not), because `input=` must become bytes when `text=` goes.
   That figure was reproduced here exactly, ids and frame, and it is the cost
   of a TOLERANT decode; a strict one reddens **31**, the extra 15 being the
   `str`-shim call sites, which is the same population the 16's report named
