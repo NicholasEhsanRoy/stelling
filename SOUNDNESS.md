@@ -1972,7 +1972,17 @@ verdicts:
   so nothing here scores `solvers.py`", so the zero this repository requires
   of a behavioural change cannot be produced by the instrument that exists.
   **The hole is live, in both directions, and the repair that closes nine of
-  ten is measured, dominant and unlanded.** **A third refusal came from the fuzzer, on
+  ten is measured, dominant and unlanded.**
+  **SUPERSEDED 2026-08-09 — READ THE ENTRY DATED 2026-08-09 BEFORE ANY OF
+  THIS PARAGRAPH.** The hole is CLOSED and arm (c) IS LANDED. Everything
+  above about the defect and the three arms still holds and was re-driven
+  before the repair went in; what no longer holds is the disposition —
+  "unlanded", "not taken in this tree", and the evidence cost that was the
+  reason for it. The instrument this paragraph says cannot exist was built
+  (`scratchpad/crlf/corpus_solver.py`), and the 16 tests were paid. A
+  decline that has been reversed reads as a live decline if nothing beside
+  it says otherwise, which is the same defect as a rotting count.
+  **A third refusal came from the fuzzer, on
   the fix rather than into it:** a record is `text + "\n"`, so a final
   record whose newline never got out is one the child did not finish
   writing — `…\nend 4`, the newline cut and nothing else, read as a
@@ -2077,6 +2087,168 @@ verdicts:
   differing — on jax 0.11.0 AND on jax 0.10.2.** The vacuous test that pinned
   the withdrawn claim is replaced, not deleted: 10 parametrised ids retired,
   18 added, and every new one was driven red on a mutant before it landed.
+- **2026-08-09 (pre-release): the cvc5 WHEEL transport's reader was blind
+  to a `\r`, in BOTH directions, and the repair the entry above declined is
+  now landed. Direction of movement: toward UNKNOWN, only. REACHABLE ONLY
+  THROUGH A STALE INSTALL — a driver out of step with this parser — and NOT
+  through any child the shipped `_cvc5_driver` can produce.** The entry
+  above closes with *"`\r` from a driver out of step with this parser is a
+  LIVE hole in both directions"*, and records a repair that was measured,
+  dominant and unlanded. This is that repair.
+
+  **The mechanism, in one line.** `_run_cvc5_wheel` captured with
+  `capture_output=True, text=True`, and universal-newline decoding maps a
+  bare `\r` to a real `\n` **before the string reaches the function**. The
+  parser's alphabet check therefore never saw a `\r` to refuse: the hole was
+  invisible to it rather than admitted by it. A stale child writing
+  `opaque x1 j\rend 2\r` — with **no terminator record of its own anywhere**
+  — supplied the reader's last line and got a definite answer.
+
+  **BOTH DIRECTIONS, and the second is the one that matters.** Measured at
+  `9564728`, real child, real bytes, no mocking: the same corpse returns
+  `sat` with a model, `unsat`, or `unknown`, according to what its `answer`
+  line happened to say. `sat` → REFUTED still runs through
+  `_require_valid_refutation` and exact-rational replay, which is a
+  downstream backstop. **`unsat` → VERIFIED has none.**
+
+  **THE THREE ARMS, re-driven at `9564728` before anything was changed**
+  (`scratchpad/probe_cvc5_backstop.py`, parts A–D; the shipped column is a
+  record of an io layer this tree no longer contains and is checked against
+  a real `text=True` spawn on every child in the run, so a drift in the
+  model is an assertion failure and not a quiet wrong number):
+
+  | case | (a) `text=True` | (b) `bytes.decode()` | **(c) `+ replace("\r\n","\n")`** |
+  |---|---|---|---|
+  | healthy POSIX `\n` | sat | sat | **sat** |
+  | healthy Windows `\r\n` | sat | **failed** | **sat** |
+  | stale `\r`, LF body | **sat** | failed | **failed** |
+  | stale `\r`, CRLF body | **sat** | failed | **failed** |
+  | stale `\x0b` | failed | failed | failed |
+  | separators refused (LF stale) | 8 of 10 | 9 of 10 | **9 of 10** |
+  | child writes invalid UTF-8 | **RAISES** | failed | **failed** |
+
+  **(c) lands.** It dominates (a) on every case measured — identical answer
+  AND identical values on both healthy children, strictly stronger on both
+  stale ones, and `failed` where (a) raised an **uncaught
+  `UnicodeDecodeError`** out of the transport. (b) buys the same ninth
+  separator by refusing a healthy Windows child outright, and `README.md`
+  names Windows for both solver wheels; that, and not behaviour on the stale
+  children, is what rules (b) out. `_decode_child_stream` puts back by hand
+  the one translation `text=True` was performing and nothing else.
+
+  **WHAT IS STILL NOT CLOSED, stated rather than left to be found.** The
+  nine is over SINGLE characters. `\n` is excluded by construction — it is
+  the protocol's own record boundary, so a writer that leaves one inside a
+  field has written two records and there is nothing on the reader's side to
+  detect — and the two-character `\r\n` is that same fact in a second
+  spelling, a genuine record boundary under this reader exactly as under
+  (a). Neither is a regression and neither is an improvement; both are the
+  WRITER's, and the writer's printable-ASCII whitelist escapes them
+  (`test_f4wheel3_a_crlf_inside_a_field_is_a_record_boundary_and_stays_one`).
+  The writer half remains the load-bearing half and is not weakened by this.
+  (c)'s one measured cry-wolf case is a healthy child reconfigured to BARE
+  CR line endings, which no platform's `print` default produces and which
+  `_cvc5_driver` never sets — asserted structurally, not remembered.
+
+  **NO VERDICT MOVED, SCORED PER OBLIGATION — and the instrument had to be
+  BUILT, because the one this repository reaches for says in its own
+  docstring that it "has no solver escalation … so nothing here scores
+  `solvers.py`" (`scratchpad/pin/corpus_pin.py`).** A zero from an
+  instrument that is structurally blind to the file under change is not a
+  zero. `scratchpad/crlf/corpus_solver.py`: 14 rows whose obligations the
+  interval leg leaves UNKNOWN, each driven under cvc5-only, z3-only and the
+  full portfolio — **48 escalated obligation records, 64 real solver spawns,
+  24 discharged and 24 refuted-with-witness**, with rows in pairs differing
+  in ONE CONSTANT so both directions are scored. Against a clean `9564728`
+  worktree: **3009 leaf keys compared, 337 of them verdict-bearing
+  (outcome / status / `answered_by` / witness values), 0 moved, and 0
+  non-verdict keys differ.** Exactly two things are normalised and both are
+  named in the code — the two tree roots, and the millisecond durations
+  inside notes, which were 41 of the 41 remaining differences on the first
+  run.
+
+  **THE ZERO HAS A POSITIVE CONTROL, in each direction, and a determinism
+  control.** Re-running the same tree moves 0 of 337, so the zero is not
+  what the instrument always prints. `_decode_child_stream` ending in
+  `.rstrip("\n")` — the fuzzer-found class, applied to the one function this
+  branch adds — moves **155** verdict-bearing keys, VERIFIED → UNKNOWN and
+  REFUTED → UNKNOWN. The transport reporting a `sat` as `unsat` moves
+  **136**, six of them **REFUTED → VERIFIED**, and under the full portfolio
+  surfaces as the `SolverDisagreement` the portfolio exists to raise. Raw
+  output: `scratchpad/crlf/RESULTS_crlf.txt`.
+
+  **NEGATIVE CONTROLS.** Real unmocked cvc5 still returns `sat` with its
+  model and `unsat`; VERIFIED and REFUTED both still land end to end (the
+  corpus records 24 of each). z3 is scored on its own rows and moves
+  nothing. The binary transport and z3 are not merely unaffected in
+  behaviour but **textually identical**: of 34 functions in `solvers.py`,
+  exactly two differ — `_run_cvc5_wheel` and the new `_decode_child_stream`
+  — and `_make_run_cvc5_binary`, `_run_z3`, `_tokenize_sexpr`,
+  `_model_values_from_text`, `escalate`, `make_solver_verdict` and
+  `_screen_model` hash byte-identical to `9564728`.
+
+  **WHAT IT COST, AND WHERE THE FIXTURES WERE MEASURING THEMSELVES.**
+  Applying (c) reddens **16 tests**, all in
+  `tests/test_solver_audit_findings.py`, all one cause —
+  `AttributeError: 'bytes' object has no attribute 'encode'` at
+  `subprocess.py:2172`, because `input=` must become bytes when `text=` goes.
+  That figure was reproduced here exactly, ids and frame, and it is the cost
+  of a TOLERANT decode; a strict one reddens **31**, the extra 15 being the
+  `str`-shim call sites, which is the same population the 16's report named
+  separately. Two fixtures were not merely stale but circular:
+  `_wheel_child`'s shim named `text=True` **in its own body**, so every test
+  routed through it scored the fixture's io choice rather than the
+  transport's, and `_wheel_stdout` handed the parent a `str` that `text=True`
+  had already decoded, so its cases were a model of the io layer instead of
+  the io layer. Both now hand the child's bytes and forward the transport's
+  own spawn kwargs. `…_the_alphabet_backstop_refuses_eight_of_the_ten` is
+  retired for `…_the_reader_now_refuses_nine_of_the_ten_separators`, which
+  spawns a real child instead of modelling the decode;
+  `…_carriage_return_is_the_writers_alone_to_stop` is renamed and narrowed to
+  `…_a_record_boundary_is_the_writers_alone_to_stop`, because `\r` is no
+  longer the writer's alone and `\n` and `\r\n` still are.
+
+  **THE FIVE ARTEFACTS BEHIND FIGURES ON THIS PAGE WERE RE-DRIVEN, not
+  edited and assumed.** `fuzz_transport.py`: **0 unsound and 0 cry-wolf at
+  every one of seeds 1–10, 20 000 examples each, 200 000 in total**, with
+  its `decode()` — a restatement of what `text=True` did — replaced by the
+  child's bytes; the restatement was a no-op in any case, since every record
+  it builds goes through `_cvc5_driver._tail`. `repro_forgery.py`,
+  `repro_real_kill.py` and `probe_cvc5_value_channel.py` re-driven against
+  real cvc5, every figure unchanged (3 of 4 value-channel cases still carry a
+  raw separator, the ASCII control still carries none). `probe_cvc5_backstop.py`
+  needed more than a fixture edit and now selects an arm by swapping the
+  transport's own decode point, so the parser under test is the real one in
+  every column.
+
+  **AND A SKIPPED TEST WAS MEASURED RATHER THAN TRUSTED.**
+  `tests/property/test_cvc5_protocol.py` needs hypothesis, which is on
+  neither venv, and its `_FakeProc` handed `str` — quietly making its model a
+  reader that does no decoding at all, so the `\r` row of its own separator
+  table was scored against a parent that existed in neither direction. It
+  hands bytes now, and because that change runs nowhere,
+  `scratchpad/crlf/probe_property_grammar.py` drives that file's grammar and
+  its oracle exhaustively without hypothesis: of **185** records the grammar
+  can build, 15 contain a bare `\r`, **ZERO end in one** — which is the only
+  way a `\r\n` could appear — and zero `value` records carry a separator at
+  all; then **27 483 513 drives**, every transcript up to 3 records × every
+  BYTE PREFIX × three exit codes, **0 counterexamples** with 30 accepted as
+  the anti-vacuity floor. **That probe's own first run is its positive
+  control and is recorded in it:** without the driver's grammar rule (`end`
+  and `error` are its LAST record) it reported 6 counterexamples, every one a
+  transcript with two terminators — the same mistake the property file
+  already records making.
+
+  Both series **2494 passed / 7 skipped**, `--collect-only` ids byte-identical
+  between them at this tip AND at `9564728`; the branch's own delta read in
+  both directions is **12 ids added and 2 removed**. (Collect-only reports
+  2496 ids where the run reports 2501 items: the five `importorskip`
+  module-level skips are reported at run time and contribute no id — the
+  same offset at `9564728`, 2486 and 2491.) `reuse lint` rc=0.
+  Constructions: the `f4wheel3` block of
+  `tests/test_solver_audit_findings.py`, every one driven red at `9564728`
+  first — and the three that must NOT move (both healthy children, the
+  `\r\n`-in-a-field residual) were green there and are green here.
 - **2026-08-07 (pre-release): jax 0.10 was in `TESTED_JAX_SERIES` and did
   not work — verdicts move, in the UNKNOWN → VERIFIED direction, on 0.10
   only.** `jex_core.ClosedJaxpr is jex_core.Jaxpr` is `False` on 0.10.2 and
