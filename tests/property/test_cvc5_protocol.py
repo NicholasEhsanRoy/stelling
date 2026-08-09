@@ -228,7 +228,53 @@ def _values_actually_present(stdout):
 
 
 def _judge(res, stdout, full, rc, census, *, where):
-    """The invariant. Returns a failure message or ``None``."""
+    """The invariant. Returns a failure message or ``None``.
+
+    WHICH OF THE THREE CLAUSES THE POSITIVE CONTROL ACTUALLY DEMONSTRATES,
+    written down because "the control fires" and "the property is shown to
+    find what it claims to find" are different statements and this file has
+    only ever checked the first. Measured against ``0ad22bb`` at the ci
+    profile, evaluating all three clauses INDEPENDENTLY instead of
+    short-circuiting, over the flat leg's own 1500 examples: 1418 refused, 82
+    definite, and every failure among them is clause (2).
+
+    (2) NOTHING WAS TRUNCATED — DEMONSTRATED, by both legs, in both of the
+    shapes ``cvc5-flat``'s ``why`` names: the final record's newline cut and
+    nothing else, and a payload separator forging the terminator while the
+    child was killed mid-model-walk on exit 0.
+
+    (1) THE CHILD EXITED 0 — never violated at ``0ad22bb``, and it cannot be:
+    that parser already refuses a nonzero exit (``if not complete or
+    proc.returncode != 0``, its "two tells"). Nothing is wrong with the clause
+    or the search; the control's tree carries the other defect and not this
+    one, so this clause has no place it is known to fail and therefore no
+    demonstration anywhere.
+
+    (3) THE MODEL IS EXACTLY THE VALUE RECORDS IN THE BYTES READ — VIOLATED at
+    ``0ad22bb``, and NOT REACHABLE BY EITHER GENERATOR. Hand-driven through
+    this file's own fixture, no truncation, exit 0, count matching, so clauses
+    (1) and (2) both hold and only this one can fail::
+
+        version 1.3.4
+        answer sat
+        opaque x1 q\\x0bvalue x9 1/2      <- ONE record to the writer
+        end 2
+
+      0ad22bb: sat, harvesting x9 = 1/2, which the writer never wrote
+      tip    : failed
+
+    No draw from ``_PAYLOADS`` can express it. Its separator payloads are
+    ``q<sep><tail>`` with ``tail`` in ``end <n>`` / ``answer unsat`` / ``q``,
+    and a forged ``value`` record needs a tail beginning ``value ``. A forged
+    ``end`` harms only a TRUNCATED child, so it is caught as clause (2); a
+    forged ``value`` is the one that harms an intact one. **The clause this
+    module's docstring puts at the centre of the oracle is the clause nothing
+    has ever demonstrated.** Adding a ``value x9 1/2`` tail is what would
+    demonstrate it, and the cost is re-measuring the two example-efficiency
+    figures in the module docstring, which describe the alphabet as it stands.
+    Left as a finding rather than taken, so that the numbers above and the
+    numbers up there keep describing the same strategy.
+    """
     census.tag("driven")
     if res.answer not in DEFINITE:
         census.tag("refused")
