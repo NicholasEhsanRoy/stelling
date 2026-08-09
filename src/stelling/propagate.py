@@ -1670,20 +1670,29 @@ def _t_gather(eqn, params, ins):
 # and the tree's stated posture — *"integers and converts are
 # execution-faithful"* (SOUNDNESS.md, the fixed-width boundary) — makes the
 # tension real rather than rhetorical, so the choice is argued here and in
-# SOUNDNESS.md rather than assumed. Three reasons decide it the other way
-# for indexing specifically:
+# SOUNDNESS.md rather than assumed. What decides it is that THERE IS NO
+# SINGLE CLAMP TO BE FAITHFUL TO — measured, not argued:
 #
-#   1. jax's own documentation calls out-of-bounds indexing UNDEFINED
-#      BEHAVIOUR, not a defined value. The wrap of an int32 `add` is IEEE-
-#      and C-defined and reproducible; the clamp is a platform convention
-#      the docs explicitly decline to guarantee.
-#   2. It is not even self-consistent inside jax: the gather clamps, the
-#      scatter drops, and the same source-level `x[i]` picks one or the
-#      other by which side of an assignment it lands on.
-#   3. Reverse-mode AD does not preserve it. The cotangent of a clamped
-#      gather does not accumulate where the clamped read came from, so a
-#      value modelled as `u[9]` in the primal is not `u[9]`'s derivative in
-#      the tangent — "execution-faithful" has no single referent here.
+#   1. One gather, one out-of-range index, TWO values. Measured on jax
+#      0.11.0, index 30 into a 10-element operand: mode CLIP returns
+#      element 9, mode FILL_OR_DROP returns the fill value. In range, all
+#      three modes agree. So "the clamp" is not a property of the
+#      operation; it is a property of a param, and modelling it would mean
+#      picking one of two answers the same jaxpr can carry.
+#   2. Read and write disagree too: the gather clamps, the scatter DROPS
+#      (`x.at[30].set(v)` on a length-10 `x` is a no-op, measured), and the
+#      same source-level `x[i]` picks one or the other by which side of an
+#      assignment it lands on.
+#
+# An int32 `add`'s wrap has neither property: it is one defined,
+# reproducible answer, which is why THAT is modelled and this is not.
+#
+# MEASURED AND NOT A REASON, recorded because it was asserted here before
+# it was run and it is false: reverse-mode AD DOES preserve the clamp. The
+# cotangent of `u[30]` on a length-10 `u` lands on element 9, exactly where
+# the clamped read came from, and the scatter side agrees (d/dv of
+# `.at[30].set(v)` is 0). An earlier revision of this comment claimed the
+# opposite as a third reason. The two reasons above stand without it.
 #
 # So the rule below computes a value ONLY where jax's clamp is provably the
 # IDENTITY. That is the whole soundness argument in one line, and it is why

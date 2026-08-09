@@ -474,10 +474,16 @@ def test_gather_rank0_operand_declines_traced():
 
 
 def test_gather_out_of_range_mode_behaviours_as_the_decline_states():
-    """The decline's measured fragment, measured: "mode 'clip' takes the
-    clamped row, mode 'fill' yields the fill value instead of any row".
-    If either mode stops behaving as the message states, this goes red
-    and the message must be rewritten, not trusted."""
+    """The mode disagreement, measured. It used to back a fragment of the
+    gather decline's message; the index-bounds round rewrote that message
+    and promoted this measurement to the LOAD-BEARING reason the round
+    does not model jax's clamp (`design/index-bounds-round.md`): mode
+    'clip' takes the clamped row and mode 'fill' yields the fill value
+    instead of any row, so there is no single clamp to be faithful to.
+    If either mode stops behaving this way, the design argument must be
+    rewritten, not trusted. Pinned again, with the in-range agreement
+    beside it, at tests/test_index_bounds.py::
+    test_there_is_no_single_clamp_to_model_one_gather_two_values."""
     x = jnp.asarray([1.0, 5.0, 2.0])
     idx = jnp.array(7)
     clip = x.at[idx].get(mode="clip")

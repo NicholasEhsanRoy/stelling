@@ -337,6 +337,60 @@ def test_the_clamp_is_not_modelled_and_this_is_the_query_that_shows_it():
     _finding(p, "spans [12, 20]")
 
 
+def test_there_is_no_single_clamp_to_model_one_gather_two_values():
+    """THE load-bearing measurement behind "do not model the clamp".
+
+    One gather, one out-of-range index, TWO values: `CLIP` returns the
+    clamped element and `FILL_OR_DROP` returns the fill. So "the clamp" is
+    a property of a PARAM, not of the operation, and a clamp-faithful
+    transfer would have to pick one of two answers the same jaxpr can
+    carry. In range the modes agree, which is exactly the condition this
+    round computes a value under.
+
+    If either half of this stops holding, the design argument in
+    `design/index-bounds-round.md` must be rewritten, not trusted."""
+    u = jnp.arange(10, dtype=jnp.float64)
+    gdn = jax.lax.GatherDimensionNumbers(
+        offset_dims=(), collapsed_slice_dims=(0,), start_index_map=(0,)
+    )
+
+    def take(k, mode, fill=None):
+        return np.asarray(
+            jax.lax.gather(
+                u, jnp.array([[k]], jnp.int32), gdn,
+                slice_sizes=(1,), mode=mode, fill_value=fill,
+            )
+        )[0]
+
+    M = jax.lax.GatherScatterMode
+    assert take(30, M.CLIP) == 9.0
+    assert take(30, M.FILL_OR_DROP, fill=-1.0) == -1.0  # NOT any row
+    # in range, every mode agrees -- the condition the round computes under
+    for mode in (M.CLIP, M.FILL_OR_DROP, M.PROMISE_IN_BOUNDS):
+        assert take(3, mode) == 3.0, mode
+
+
+def test_reverse_mode_ad_DOES_preserve_the_clamp():
+    """A CORRECTION, pinned so it cannot be re-asserted. An earlier
+    revision of this round claimed reverse-mode AD does not preserve the
+    clamp, and offered that as a third reason not to model it. Measured:
+    it does. The cotangent of `u[30]` lands on element 9, where the
+    clamped read came from, and the scatter side agrees.
+
+    The round's decision does not rest on this and never did -- the two
+    measured reasons are the mode disagreement above and the read/write
+    asymmetry below. This test exists so the false claim stays dead."""
+    u = jnp.arange(10, dtype=jnp.float64)
+    g = jax.jit(jax.grad(lambda u, k: u[k], argnums=0))
+    assert list(np.asarray(g(u, jnp.int32(30)))) == [0.0] * 9 + [1.0]
+    assert list(np.asarray(g(u, jnp.int32(9)))) == [0.0] * 9 + [1.0]
+    dv = jax.jit(
+        jax.grad(lambda u, v, k: (u.at[k].set(v)).sum(), argnums=1)
+    )
+    assert float(dv(u, jnp.float64(5.0), jnp.int32(30))) == 0.0  # dropped
+    assert float(dv(u, jnp.float64(5.0), jnp.int32(9))) == 1.0
+
+
 def test_a_write_past_the_end_is_dropped_by_jax_and_reported_here():
     """The scatter half of the same inconsistency, measured: a read clamps,
     a write is DROPPED. `x.at[30].set(v)` on a length-10 `x` is a no-op --

@@ -3532,17 +3532,32 @@ verdicts:
   scatter write (`x.at[30].set(v)` on a length-10 `x` is a no-op). The
   fixed-width boundary above records this project as *"integers and
   converts are execution-faithful"*, and an index clamp is integer index
-  arithmetic — so execution-faithfulness would say model it. It is not
-  modelled, for three measured reasons: jax's own docs call
-  out-of-bounds indexing **undefined behaviour** rather than a defined
-  value, where an `int32` wrap is C-defined and reproducible; jax is not
-  self-consistent about it (**the gather clamps, the scatter drops**, and
-  the same `x[i]` picks one by which side of an assignment it lands on);
-  and **reverse-mode AD does not preserve it**, so a value modelled as
-  `u[9]` in the primal is not `u[9]`'s derivative in the tangent and
-  "execution-faithful" has no single referent. Modelling it would be
-  sound about the executed program and wrong about the program the user
-  wrote — the shape of the integer-literal wrap defect, one layer over.
+  arithmetic — so execution-faithfulness would say model it. **What
+  decides it the other way is that there is no single clamp to be
+  faithful to, and that is measured rather than argued.** ONE gather,
+  ONE out-of-range index, TWO values: index 30 into a 10-element operand
+  returns element 9 under `GatherScatterMode.CLIP` and the fill value
+  under `FILL_OR_DROP`, while in range all three modes agree. So "the
+  clamp" is a property of a param, not of the operation, and modelling it
+  means picking one of two answers the same jaxpr can carry. Read and
+  write disagree on top of that: the gather clamps, the scatter DROPS.
+  An `int32` `add`'s wrap has neither property — one defined,
+  reproducible answer — which is why that is modelled and this is not.
+  Modelling the clamp would be sound about the executed program and wrong
+  about the program the user wrote: the shape of the integer-literal wrap
+  defect, one layer over.
+
+  **A THIRD REASON WAS ASSERTED HERE AND IS FALSE, recorded rather than
+  quietly deleted.** An earlier revision of this entry, and of the code
+  comment and design page it mirrors, claimed *"reverse-mode AD does not
+  preserve the clamp"*. Measured on jax 0.11.0: it does. The cotangent of
+  `u[30]` on a length-10 `u` lands on element 9, exactly where the
+  clamped read came from, and the scatter side agrees (`d/dv` of
+  `.at[30].set(v)` is `0.0`). It was reasoned and not run — the failure
+  this project's method exists to catch, committed in the middle of a
+  round whose whole subject is not trusting an argument over a
+  measurement. The two measured reasons above carry the decision without
+  it, and no code depended on the false one.
 
   **The rule therefore computes a value ONLY where jax's clamp is
   provably the identity.** Three cases: an index range inside the axis'

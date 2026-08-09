@@ -82,19 +82,37 @@ clamp-faithful transfer discharges it. This one leaves it undecided.
 **The tension is real, not rhetorical.** `SOUNDNESS.md`'s fixed-width
 boundary records the tree's posture as *"floats are judged in ℝ; integers and
 converts are execution-faithful"*, and jax's clamp is integer index
-arithmetic. Three things decide it the other way for indexing:
+arithmetic. What decides it the other way is that **there is no single clamp
+to be faithful to** — measured, not argued:
 
-1. jax's own documentation calls out-of-bounds indexing **undefined
-   behaviour**, not a defined value. An int32 `add`'s wrap is C-defined and
-   reproducible; the clamp is a platform convention the docs decline to
-   guarantee.
-2. It is not self-consistent inside jax: **the gather clamps, the scatter
-   drops**, and the same source-level `x[i]` picks one or the other by which
-   side of an assignment it lands on.
-3. **Reverse-mode AD does not preserve it.** The cotangent of a clamped
-   gather does not accumulate where the clamped read came from, so a value
-   modelled as `u[9]` in the primal is not `u[9]`'s derivative in the
-   tangent — "execution-faithful" has no single referent here.
+1. **One gather, one out-of-range index, two values.** Index 30 into a
+   10-element operand: mode `CLIP` returns element 9, mode `FILL_OR_DROP`
+   returns the fill value. In range, all three modes agree.
+
+   | mode | `u[30]`, `u = arange(10)` | `u[3]` |
+   |---|---|---|
+   | `CLIP` | `9.0` | `3.0` |
+   | `FILL_OR_DROP` | the fill value (`-1.0` as passed) | `3.0` |
+   | `PROMISE_IN_BOUNDS` | `9.0` (UB; this is what CPU happened to do) | `3.0` |
+
+   So "the clamp" is not a property of the operation, it is a property of a
+   param — modelling it means picking one of two answers the same jaxpr can
+   carry.
+2. **Read and write disagree too**: the gather clamps, the scatter DROPS
+   (`x.at[30].set(v)` on a length-10 `x` is a no-op, measured), and the same
+   source-level `x[i]` picks one or the other by which side of an assignment
+   it lands on.
+
+An int32 `add`'s wrap has neither property — it is one defined, reproducible
+answer — which is why that is modelled and this is not.
+
+**MEASURED AND NOT A REASON, recorded because an earlier revision of this
+page asserted it before running it, and it is false.** Reverse-mode AD *does*
+preserve the clamp: the cotangent of `u[30]` on a length-10 `u` lands on
+element 9, exactly where the clamped read came from, and the scatter side
+agrees (`d/dv` of `.at[30].set(v)` is `0.0`, `d/du` passes all ten through).
+The two reasons above stand without it; this one was reasoned and not run,
+which is precisely the failure mode the method exists to catch.
 
 The rule therefore computes a value **only where jax's clamp is provably the
 identity**. That is the entire soundness argument, and it is why minting a
