@@ -905,7 +905,17 @@ def test_a_narrow_index_dtype_declines_because_xla_wraps_the_bound():
     dynamic_slice with an int8 start over lengths 100/127/128/129/200 did
     not exhibit it, so the hazard is UNCONFIRMED for this primitive -- and
     refused anyway, because every dtype jnp's own indexing produces is
-    int32/int64 and the gate is therefore free."""
+    int32/int64 and the gate is therefore free.
+
+    THIS TEST PROVES THE HELPER'S MESSAGE AND NOTHING ELSE. It calls
+    `_index_dtype_covers_or_decline` DIRECTLY, and the `"gather"` below is
+    a string it passes, not a transfer it reaches -- which is exactly how
+    both wiring defects hid: the `dynamic_slice` one until `M8`, the
+    gather one until a later blinded re-run. Whether either transfer asks
+    the helper anything is established by
+    `test_the_dtype_gate_is_actually_WIRED_IN_not_merely_correct` and
+    `test_the_GATHER_dtype_gate_is_actually_WIRED_IN_not_merely_correct`,
+    which go through the walk."""
     from stelling.propagate import _index_dtype_covers_or_decline
 
     _index_dtype_covers_or_decline("int32", 10**6, "dynamic_slice")  # fine
