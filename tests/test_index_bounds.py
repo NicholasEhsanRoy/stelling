@@ -535,6 +535,174 @@ def test_the_sweep_catches_an_exclusive_upper_endpoint():
     assert violations > 0, "the instrument cannot see an off-by-one hull"
 
 
+def _sweep_dus(rng, n, hull):
+    """The WRITE row's sweep. Same shape as `_sweep_ds`: enumerate every
+    admitted start, execute the real primitive, count values the box does
+    not contain. Operand values and update values are drawn from DISJOINT
+    ranges so that "kept the operand" and "took the update" are
+    distinguishable at every position -- a sweep on overlapping data could
+    not see a rule that confuses them."""
+    dus = _prim("dynamic_update_slice")
+    violations = elements = 0
+    for _ in range(n):
+        rank = rng.randint(1, 3)
+        shape = tuple(rng.randint(1, 4) for _ in range(rank))
+        upshape = tuple(rng.randint(1, d) for d in shape)
+        ranges = []
+        for d, s in zip(shape, upshape):
+            lo = rng.randint(0, d - s)
+            ranges.append((lo, rng.randint(lo, d - s)))
+        ranges = tuple(ranges)
+        arr = jnp.asarray(
+            rng.sample(range(-500, 0), int(np.prod(shape))), dtype=jnp.float64
+        ).reshape(shape)
+        upd = jnp.asarray(
+            rng.sample(range(1, 500), int(np.prod(upshape))), dtype=jnp.float64
+        ).reshape(upshape)
+        box = hull(_point(arr), _point(upd), ranges)
+        for start in itertools.product(
+            *[range(lo, hi + 1) for lo, hi in ranges]
+        ):
+            got = np.asarray(
+                dus.bind(arr, upd, *[jnp.int32(s) for s in start])
+            ).reshape(-1)
+            for i, v in enumerate(got):
+                elements += 1
+                if not box.los[i] <= v <= box.his[i]:
+                    violations += 1
+    return violations, elements
+
+
+def test_the_WRITE_hull_contains_what_jax_computes_for_every_admitted_index():
+    """Soundness of `dynamic_update_slice_hull`, measured with the same
+    total enumeration the read row gets. The committed evidence covered
+    `dynamic_slice` only until now; the write row's sweep existed in a run
+    record and not in the tree, which is the difference between evidence
+    and a claim about evidence."""
+    violations, elements = _sweep_dus(
+        random.Random(20260809), 250, iv.dynamic_update_slice_hull
+    )
+    assert elements > 500, elements  # anti-vacuity: the sweep really ran
+    assert violations == 0, violations
+
+
+def test_the_write_sweep_catches_a_hull_that_covered_only_the_lowest_start():
+    """POSITIVE CONTROL for the write sweep, the same error class as the
+    read row's: hulling over the starts you thought of rather than the ones
+    the declaration admits. A position written only by a HIGHER start keeps
+    the operand under this rule and takes the update under jax."""
+
+    def sampled(op, up, ranges):
+        return iv.dynamic_update_slice_hull(
+            op, up, tuple((lo, lo) for lo, _ in ranges)
+        )
+
+    violations, elements = _sweep_dus(random.Random(20260809), 250, sampled)
+    assert elements > 500, elements
+    assert violations > 0, "the instrument cannot see a wrong write hull"
+
+
+def test_the_write_sweep_catches_a_hull_that_never_keeps_the_operand():
+    """SECOND POSITIVE CONTROL, and the error specific to THIS row: a write
+    rule that takes only the update wherever any admitted start could
+    write, never keeping the operand's value there. That is the join the
+    read row does not have, so the read row's controls cannot stand in for
+    it. Caught because operand and update values are drawn disjoint."""
+
+    def never_keeps(op, up, ranges):
+        box = iv.dynamic_update_slice_hull(op, up, ranges)
+        ulo, uhi = min(up.los), max(up.his)
+        los, his = list(box.los), list(box.his)
+        for c in itertools.product(*[range(d) for d in op.shape]):
+            if all(
+                any(0 <= c[d] - s < up.shape[d] for s in range(lo, hi + 1))
+                for d, (lo, hi) in enumerate(ranges)
+            ):
+                i = 0
+                for x, d in zip(c, op.shape):
+                    i = i * d + x
+                los[i], his[i] = ulo, uhi
+        return iv.IntervalArray(
+            shape=op.shape, los=tuple(los), his=tuple(his)
+        )
+
+    violations, elements = _sweep_dus(random.Random(11), 250, never_keeps)
+    assert elements > 500, elements
+    assert violations > 0, "the instrument cannot see an operand-losing hull"
+
+
+def _sweep_rows(rng, n, hull):
+    """The gather ROW form's sweep, judged per output position against a
+    REAL `lax.gather` in the covered geometry -- not against `arr[k]`, which
+    would be a different lowering. For output row `i` over declared index
+    range `[lo, hi]`, every real row `k` in that range must lie inside the
+    box's row `i`."""
+    violations = elements = 0
+    for _ in range(n):
+        rank = rng.randint(1, 3)
+        shape = tuple(rng.randint(1, 4) for _ in range(rank))
+        n0 = shape[0]
+        ranges = []
+        for _ in range(rng.randint(1, 4)):
+            lo = rng.randint(0, n0 - 1)
+            ranges.append((lo, rng.randint(lo, n0 - 1)))
+        arr = jnp.asarray(
+            rng.sample(range(-500, 500), int(np.prod(shape))),
+            dtype=jnp.float64,
+        ).reshape(shape)
+        box = hull(_point(arr), ranges)
+        gdn = jax.lax.GatherDimensionNumbers(
+            offset_dims=tuple(range(1, rank)),
+            collapsed_slice_dims=(0,),
+            start_index_map=(0,),
+        )
+        rowsz = int(np.prod(shape[1:])) if rank > 1 else 1
+        for i, (lo, hi) in enumerate(ranges):
+            for k in range(lo, hi + 1):
+                got = np.asarray(
+                    jax.lax.gather(
+                        arr,
+                        jnp.asarray([[k]], jnp.int32),
+                        gdn,
+                        slice_sizes=(1,) + shape[1:],
+                        mode=jax.lax.GatherScatterMode.PROMISE_IN_BOUNDS,
+                    )
+                ).reshape(-1)
+                for j, v in enumerate(got):
+                    elements += 1
+                    p = i * rowsz + j
+                    if not box.los[p] <= v <= box.his[p]:
+                        violations += 1
+    return violations, elements
+
+
+def test_the_ROW_hull_contains_what_jax_gathers_for_every_admitted_index():
+    """Soundness of `take_row_ranges`, the third hull this round added and
+    the second that had no committed sweep. Judged against a real
+    `lax.gather` in the covered leading-axis row geometry, per output
+    position, over every index the declared range admits."""
+    violations, elements = _sweep_rows(
+        random.Random(20260809), 200, iv.take_row_ranges
+    )
+    assert elements > 400, elements  # anti-vacuity: the sweep really ran
+    assert violations == 0, violations
+
+
+def test_the_row_sweep_catches_a_hull_taking_only_the_first_row():
+    """POSITIVE CONTROL for the row sweep: a rule that takes only the FIRST
+    reachable row of each declared range -- i.e. the generalisation
+    `take_row_ranges` exists to make, un-made. It is exactly
+    `take_rows` on the range's lower endpoints, which is the pre-round
+    behaviour, so this control also states what the widening bought."""
+
+    def first_row_only(a, ranges):
+        return iv.take_rows(a, [lo for lo, _ in ranges])
+
+    violations, elements = _sweep_rows(random.Random(13), 200, first_row_only)
+    assert elements > 400, elements
+    assert violations > 0, "the instrument cannot see a first-row-only hull"
+
+
 # -- the declines, each named ----------------------------------------------
 
 
