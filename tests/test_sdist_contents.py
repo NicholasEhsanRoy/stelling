@@ -140,6 +140,7 @@ from __future__ import annotations
 
 import email
 import glob as globlib
+import json
 import os
 import pathlib
 import re
@@ -495,6 +496,233 @@ def test_built_metadata_carries_no_relative_reference(tmp_path: pathlib.Path) ->
     assert images and links, "the built metadata carries no refs — check is vacuous"
     bad = [u for u in images + links if not u.startswith(("http://", "https://", "mailto:"))]
     assert not bad, "the published long description carries relative refs:\n  " + "\n  ".join(bad)
+
+
+# --- the WHEEL's member list ------------------------------------------------
+#
+# THE SDIST'S PROTECTION DID NOT REACH THE WHEEL, AND THE COMMENT SAYING SO
+# NAMED ONLY HALF THE GAP. `release.yml`'s header records that nothing checks
+# the wheel's member list, and argues a COUPLING protects it — one `uv build`
+# over one tree, and the sdist allowlist covers `/src`. The coupling was
+# measured in ONE DIRECTION: a planted `src/stelling/_relgate_probe.py` shipped
+# in the wheel too, 29 members against 28. That is the ADDITIVE direction.
+#
+# THE SUBTRACTIVE DIRECTION IS THE ONE THAT SHIPS AN UNIMPORTABLE PACKAGE, and
+# it was uncovered. Re-derived at 650e678 in a clone of this tree, with two
+# lines added to `pyproject.toml`::
+#
+#   [tool.hatch.build.targets.wheel]
+#   exclude = ["**/solvers.py", "**/contracts.py"]
+#
+#   uv build --offline           sdist 279 members (UNCHANGED), wheel 26 (from 28)
+#   the sdist gate               rc=0, "every one of 279 sdist members is
+#                                committed to this tree"
+#   the tag gate, TAG=v0.1.0     rc=0, "tag=v0.1.0 artifact version=0.1.0"
+#   the three test modules       39 passed, 0 failures, 0 errors
+#   pip install the wheel        `import stelling` OK
+#                                `import stelling.solvers` ->
+#                                ModuleNotFoundError: No module named
+#                                'stelling.solvers'
+#
+# Every gate green, and the artefact a user would get cannot import its own
+# solver module. The sdist allowlist cannot see this: it says which paths are
+# ALLOWED to ship, never which must, and the wheel target reads a different
+# table entirely. The two checks below are that missing "must", and the second
+# one asks the question of an INSTALLED artefact rather than of a file list —
+# because nothing in either workflow installs or imports what it publishes.
+
+
+def _wheel_package_members(wheel: pathlib.Path) -> set[str]:
+    """Every member of a built wheel that is the PACKAGE, not the metadata."""
+    with zipfile.ZipFile(wheel) as z:
+        names = z.namelist()
+    return {n for n in names if not n.split("/")[0].endswith(".dist-info")}
+
+
+def _package_files_in_tree(root: pathlib.Path) -> set[str]:
+    """What `[tool.hatch.build.targets.wheel] packages` has to put in a wheel.
+
+    Read off the tree rather than off a list written here, and in the wheel's
+    own spelling (`stelling/x.py`, not `src/stelling/x.py`) so the comparison
+    is a set equality with no translation step to get wrong.
+    """
+    pkg = root / "src" / "stelling"
+    return {
+        f"stelling/{path.relative_to(pkg).as_posix()}"
+        for path in pkg.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix not in (".pyc", ".pyo")
+    }
+
+
+def _build_into(root: pathlib.Path, out: pathlib.Path) -> pathlib.Path:
+    proc = subprocess.run(
+        ["uv", "build", "--offline", "--out-dir", str(out), str(root)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert proc.returncode == 0, f"build failed:\n{proc.stderr}"
+    wheels = sorted(out.glob("*.whl"))
+    assert len(wheels) == 1, f"expected one wheel, got {wheels}"
+    return wheels[0]
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_the_wheel_ships_every_module_of_the_package(tmp_path: pathlib.Path) -> None:
+    """An EQUALITY, so it fires in both directions.
+
+    A subset check would pass the wheel that dropped `solvers.py`; a superset
+    check would pass the wheel that gained an untracked stray. The sdist's
+    committed-members gate in `release.yml` already covers the second for the
+    tarball, and the coupling carries it to the wheel — but the coupling is
+    one-directional and the first was uncovered entirely.
+
+    Break it: add ``exclude = ["**/solvers.py"]`` under
+    ``[tool.hatch.build.targets.wheel]``. That is driven rather than suggested,
+    by the test below.
+    """
+    wheel = _build_into(REPO, tmp_path)
+    shipped = _wheel_package_members(wheel)
+    expected = _package_files_in_tree(REPO)
+    assert expected, "no package files found in the tree — this check is vacuous"
+    assert shipped == expected, (
+        "the built wheel's member list is not the package.\n"
+        f"  in the tree and NOT in the wheel: {sorted(expected - shipped)}\n"
+        f"  in the wheel and NOT in the tree: {sorted(shipped - expected)}\n"
+        "The first list is a package that cannot import its own modules once "
+        "installed; the second is a file distributed from nowhere. Neither is "
+        "visible to the sdist allowlist, which governs a different target."
+    )
+    # …and the artefact really was examined: a wheel with no `.py` in it would
+    # satisfy an equality against a tree with no `.py` in it
+    assert "stelling/__init__.py" in shipped
+    assert "stelling/solvers.py" in shipped
+    assert len([n for n in shipped if n.endswith(".py")]) > 10
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The intervention, and it establishes TWO things rather than one.
+
+    That the comparison above fires — and that the wheel it fires on is
+    genuinely unimportable, which is what makes the comparison worth having.
+    The second half is measured by INSTALLING the artefact, because a file list
+    is a proxy and the thing a user meets is an install.
+    """
+    staged = _tree_to_build(tmp_path)
+    cfg = staged / "pyproject.toml"
+    text = cfg.read_text(encoding="utf-8")
+    marker = '[tool.hatch.build.targets.wheel]\npackages = ["src/stelling"]'
+    assert marker in text, "the wheel target is not spelled as this test expects"
+    cfg.write_text(
+        text.replace(marker, marker + '\nexclude = ["**/solvers.py"]'),
+        encoding="utf-8",
+    )
+
+    out = tmp_path / "dist"
+    wheel = _build_into(staged, out)
+    shipped = _wheel_package_members(wheel)
+    expected = _package_files_in_tree(staged)
+    missing = expected - shipped
+    assert missing == {"stelling/solvers.py"}, (
+        f"the intervention did not drop exactly one module: {sorted(missing)}"
+    )
+
+    # AND THE ARTEFACT IS REALLY BROKEN, not merely short a line in a list.
+    # `python -m venv --without-pip` plus an unpack is what installing a
+    # `py3-none-any` wheel amounts to, and it needs no index.
+    venv = tmp_path / "bare"
+    made = subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(venv)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert made.returncode == 0, f"could not build a bare venv:\n{made.stderr}"
+    site = tmp_path / "site"
+    with zipfile.ZipFile(wheel) as z:
+        z.extractall(site)
+    python = venv / ("Scripts" if os.name == "nt" else "bin") / "python"
+    env = {**os.environ, "PYTHONPATH": str(site)}
+    probe = subprocess.run(
+        [str(python), "-c",
+         "import stelling, importlib.util;"
+         "print(stelling.__file__);"
+         "print(importlib.util.find_spec('stelling.solvers'))"],
+        capture_output=True, text=True, timeout=300, env=env,
+    )
+    assert probe.returncode == 0, f"probe crashed:\n{probe.stdout}\n{probe.stderr}"
+    lines = probe.stdout.strip().splitlines()
+    assert pathlib.Path(lines[0]).is_relative_to(site), (
+        f"the probe imported some other stelling: {lines}"
+    )
+    assert lines[-1] == "None", (
+        "the mutated wheel still resolves `stelling.solvers`, so this control "
+        f"is not demonstrating what it claims: {lines}"
+    )
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_the_built_wheel_installs_and_every_module_resolves(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The same question asked of an INSTALLED artefact, which is the gap.
+
+    `release.yml` builds both artefacts, reads the sdist's member list against
+    the index, reads the wheel's FILENAME, and uploads. Nothing anywhere
+    unpacks the wheel and asks whether it works. A member-list equality is a
+    static proxy for that; this is not.
+
+    ``find_spec`` rather than ``import``, deliberately: it resolves the module
+    without executing it, so this stays a question about the ARTEFACT and does
+    not become a question about whether jax is installed
+    (``stelling.harness`` raises ``OptionalDependencyError`` in a bare
+    environment by design — see `tests/test_import_hygiene.py`).
+    """
+    wheel = _build_into(REPO, tmp_path / "dist")
+    venv = tmp_path / "bare"
+    made = subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(venv)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert made.returncode == 0, f"could not build a bare venv:\n{made.stderr}"
+    site = tmp_path / "site"
+    with zipfile.ZipFile(wheel) as z:
+        z.extractall(site)
+    python = venv / ("Scripts" if os.name == "nt" else "bin") / "python"
+    env = {**os.environ, "PYTHONPATH": str(site)}
+
+    modules = sorted(
+        name[len("stelling/") : -len(".py")].replace("/", ".")
+        for name in _package_files_in_tree(REPO)
+        if name.endswith(".py") and not name.endswith("/__init__.py")
+    )
+    assert len(modules) > 10, modules
+    probe = subprocess.run(
+        [str(python), "-c",
+         "import json, sys, importlib.util;"
+         "names = json.loads(sys.argv[1]);"
+         "print(json.dumps({n: importlib.util.find_spec('stelling.' + n)"
+         " is not None for n in names}))",
+         json.dumps(modules)],
+        capture_output=True, text=True, timeout=300, env=env,
+    )
+    assert probe.returncode == 0, f"probe crashed:\n{probe.stdout}\n{probe.stderr}"
+    got = json.loads(probe.stdout.strip().splitlines()[-1])
+    unresolvable = sorted(n for n, ok in got.items() if not ok)
+    assert not unresolvable, (
+        "the built wheel installs, and these modules of it do not resolve: "
+        f"{unresolvable}. This is what publishing an unimportable package "
+        "looks like, and no gate in `.github/workflows/release.yml` can see it."
+    )
+
+    # and the artefact's own entry point runs — the release gate runs
+    # `python -m stelling` against the SOURCE tree, never against the wheel
+    cli = subprocess.run(
+        [str(python), "-m", "stelling"],
+        capture_output=True, text=True, timeout=300, env=env,
+    )
+    assert cli.returncode == 0, f"`python -m stelling` off the wheel failed:\n{cli.stdout}\n{cli.stderr}"
 
 
 # --- what hatchling ACTUALLY reads ----------------------------------------
