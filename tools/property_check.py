@@ -163,7 +163,8 @@ def check_controls(args) -> int:
     for control in wanted:
         if control.series == "both" and not args.other_python:
             print(f"-- {control.name}: SKIPPED (needs --other-python, an "
-                  f"interpreter with the other jax series)")
+                  f"interpreter with the other jax series AND hypothesis — "
+                  f"tools/property_venv.sh builds one)")
             failures.append((control.name, "not demonstrated: no second series"))
             continue
         with tempfile.TemporaryDirectory(prefix="stelling-ctl-") as tmp:
@@ -224,8 +225,10 @@ def main(argv=None) -> int:
     p.add_argument("--python", default=sys.executable,
                    help="interpreter with hypothesis and jax installed")
     p.add_argument("--other-python",
-                   help="interpreter with the OTHER jax series, for the "
-                        "cross-series property")
+                   help="interpreter with the OTHER jax series AND hypothesis, "
+                        "for the cross-series property (tools/property_venv.sh "
+                        "builds one; the child imports _grammar, so a bare jax "
+                        "venv fails there rather than differing)")
     p.add_argument("--list", action="store_true", help="list the controls")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
