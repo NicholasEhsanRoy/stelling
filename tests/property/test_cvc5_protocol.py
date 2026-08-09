@@ -279,9 +279,28 @@ def _judge(res, stdout, full, rc, census, *, where):
     offered in support of, and it survives the correction.
 
     (2) NOTHING WAS TRUNCATED — DEMONSTRATED, by both legs, in both of the
-    shapes ``cvc5-flat``'s ``why`` names: the final record's newline cut and
-    nothing else, and a payload separator forging the terminator while the
-    child was killed mid-model-walk on exit 0.
+    shapes ``cvc5-flat``'s ``why`` names, and the split between them is **4 and
+    1**, not the 3 and 3 reported when the fixture was repaired::
+
+        4  the final record's newline cut and nothing else
+             read 'version 1.2.0\\nanswer sat\\nvalue x0_0 17/4\\nend 1'
+             full 'version 1.2.0\\nanswer sat\\nvalue x0_0 17/4\\nend 1\\n'
+        1  a payload separator forging the terminator while the child was
+           killed mid-model-walk, exit 0
+             read 'version 1.3.4\\nanswer unknown\\nopaque x0_0 q\\u2028end 1\\n'
+             full 'version 1.3.4\\nanswer unknown\\nopaque x0_0 q\\u2028end 1\\nend 9\\n'
+
+    The QUALITATIVE claim that split was offered for is true and is what
+    matters: both shapes are reached by the SEARCH rather than only by the
+    shrink. The counter above never raises, so nothing shrank — all 1500 are
+    draws — and both shapes are among them. The same 1500 draws produce zero
+    failures against the tip.
+
+    The pair printed with the old split cannot be one draw, and the property's
+    own construction says so: it builds ``stdout = full[:cut]``, so the read is
+    always a PREFIX of the full. The quoted read (``opaque x0_0 q\\x0cend 1``)
+    is not a prefix of the quoted full (``opaque x0 q\\x1cq``) — different name,
+    different separator. Two different examples were printed as one.
 
     (1) THE CHILD EXITED 0 — DEMONSTRATED, by the ``cvc5-exit-tell`` mutant
     control, and by nothing at ``0ad22bb``. It cannot be demonstrated there:
