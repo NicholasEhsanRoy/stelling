@@ -117,20 +117,48 @@ DEFINITE = ("sat", "unsat", "unknown")
 
 
 class _FakeProc:
-    """What ``subprocess.run`` hands the transport: BYTES, on both streams.
+    """What ``subprocess.run`` hands the transport, IN THE MODE IT WAS ASKED FOR.
 
-    This used to hand it ``str``, which quietly made the model a reader that
-    does no decoding at all — so the ``\\r`` row of ``SPLITLINES_ONLY`` above
-    was being scored against a parent that did not exist in either direction:
-    the shipped one translated ``\\r`` to ``\\n`` before reading, and this one
-    did nothing. The transport decodes for itself now
-    (``solvers._decode_child_stream``), so the child's job here is to be the
-    bytes and let the real decoder run.
+    ``subprocess.run`` returns ``bytes`` on both streams unless the caller asks
+    for text mode, and universal-newline-decoded ``str`` if it does. **Which of
+    the two is not this fixture's choice to make.** It is the caller's, the
+    caller is ``_run_cvc5_wheel``, and a positive control runs this file
+    against a tree where that caller is a different one.
+
+    Both halves have been got wrong here, in opposite directions, at the same
+    cost. It first handed ``str`` unconditionally, which made the model a
+    reader that does no decoding at all, so the ``\\r`` row of
+    ``SPLITLINES_ONLY`` above was scored against a parent that existed in
+    neither direction. It was then changed (``420cc12``) to hand ``bytes``
+    unconditionally — right for today's transport, which spawns with no
+    ``text=`` and decodes for itself in ``solvers._decode_child_stream``, and
+    wrong for the transport at ``0ad22bb``, which spawns with ``text=True``.
+
+    MEASURED, at ``0ad22bb``, on the first example of both legs: ``TypeError:
+    sequence item 0: expected str instance, bytes found``, raised inside the
+    parent's own protocol-violation message. Both cvc5 controls came back RED
+    for a value ``subprocess`` would never have handed that parent, the defect
+    they are registered for was never reached, and ``expect_message`` is the
+    only reason this was reported as NOT DEMONSTRATED rather than as a control
+    that fired.
     """
 
-    def __init__(self, stdout, returncode):
-        self.stdout = stdout.encode("utf-8") if isinstance(stdout, str) else stdout
-        self.stderr = b""
+    # Universal-newline decoding is what text mode DOES (``io.TextIOWrapper``
+    # with ``newline=None``): ``\r\n`` AND a bare ``\r`` become ``\n``. That is
+    # not incidental here — it is the one translation
+    # ``_decode_child_stream``'s docstring is about, and the ``\r`` row of
+    # ``SPLITLINES_ONLY`` is only a real case against a ``text=True`` parent if
+    # this fixture performs it. ``strict`` decoding, likewise, because that is
+    # what text mode does and a child writing invalid UTF-8 RAISES out of the
+    # transport there (measured, and tabulated in ``solvers.py``).
+    def __init__(self, stdout, returncode, *, text):
+        raw = stdout.encode("utf-8") if isinstance(stdout, str) else stdout
+        if text:
+            self.stdout = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+            self.stderr = ""
+        else:
+            self.stdout = raw
+            self.stderr = b""
         self.returncode = returncode
 
 
@@ -139,12 +167,24 @@ class _FakeSubprocess:
 
     TimeoutExpired = _real_subprocess.TimeoutExpired
 
+    # CPython opens the child's streams in text mode if ANY of these is given,
+    # not just ``text=`` (``subprocess.Popen.__init__``). Reading only ``text``
+    # would be right about the two trees this file is pointed at today and
+    # wrong about the next one for a reason nobody would look for.
+    _TEXT_MODE = ("text", "universal_newlines", "encoding", "errors")
+
     def __init__(self):
         self.stdout = ""
         self.rc = 0
 
     def run(self, *a, **k):
-        return _FakeProc(self.stdout, self.rc)
+        # THE SPAWN KWARGS ARE THE TRANSPORT'S AND THIS READS THEM RATHER THAN
+        # NAMING ITS OWN — the same repair ``_wheel_child`` in
+        # ``tests/test_solver_audit_findings.py`` carries, for the same reason:
+        # a fixture that names the io mode itself scores the FIXTURE's choice.
+        return _FakeProc(
+            self.stdout, self.rc, text=any(k.get(n) for n in self._TEXT_MODE)
+        )
 
 
 class _ScriptedChild:
