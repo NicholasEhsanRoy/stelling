@@ -4176,31 +4176,73 @@ verdicts:
   VERIFIED at `256` for exactly the same reason it returns VERIFIED at
   `0`: by the time it looks, those are the same program.
 
-  **Why no backward-cone rule closes it: the information is destroyed
-  before stelling sees it.** The wrap happens inside `jnp.full`, at eager
-  time, before the harness is traced at all — and, per the mechanism
-  section below, at a `.astype` cast that leaves no trace of the value it
-  narrowed. Measured at `53f9f84` on jax 0.11.0, and
-  re-derived at `650e678` in all four cells: the ENTIRE jaxpr tree for the
-  harness above holds exactly **one** literal — `10.0:f32`, the comparison
-  bound — and the string `256` does not appear anywhere in it. The wrapped
-  value enters as a **constvar closed over by the `jit` sub-jaxpr**
-  (`lambda c:i8[]; a:i8[]`), not as an `ir.Literal` operand, and every rule
-  in this family walks literal operands.
+  **Why no backward-cone rule closes it: the wrapped value is
+  indistinguishable from an honest one by the time stelling sees it.**
+  The wrap happens inside `jnp.full`, at eager time, before the harness is
+  traced at all — and, per the mechanism section below, at a `.astype`
+  cast that leaves no trace of the value it narrowed. Re-derived at
+  `b2e3a15` in all four cells, via `stelling.harness.trace` and
+  `ir.ClosedJaxpr.to_dict(include_metadata=False)`, jax's default
+  configuration: **the transcribed tree for the wrapped `256` is
+  byte-identical to the tree for an honestly written `0`** — and the same
+  comparison against an honestly written `5` differs, so the comparison is
+  live and not vacuously true. `0` is the third row of the control table
+  above, where stelling returns VERIFIED and the source is TRUE. The two
+  rows are one program, exactly, at the level any rule could read them.
+  That is the fact the conclusion below rests on.
+
+  **THE "NO INTEGER LITERAL IN THE CONE" READING OF THAT IS A FACT ABOUT
+  ONE SPELLING OF THE REPRODUCER, NOT ABOUT THE DEFECT, AND IS NARROWED
+  HERE.** For the reproducer exactly as written above, the figure holds
+  and re-derives in all four cells: the ENTIRE jaxpr tree holds exactly
+  **one** `ir.Literal` — `10.0:f32`, the comparison bound — the string
+  `256` appears nowhere in it, and the wrapped value enters as a
+  **constvar closed over by the `jit` sub-jaxpr**, printed by jax as
+  `{ lambda c:i8[]; a:i8[]. … }`. But that is a fact about `OFFSET` being
+  CLOSED OVER by the jitted function, and two respellings that change
+  nothing about the defect put the wrapped value into the cone as an
+  ordinary integer literal — both measured in all four cells at `b2e3a15`:
+
+  * pass `OFFSET` as an ARGUMENT to the jitted function instead of closing
+    over it, and the tree holds **two** `ir.Literal` operands, the second
+    being the wrapped value as an `int8` `0` operand of the `jit`
+    equation; there are then no constvars anywhere (top-level `consts=()`,
+    sub-jaxpr `constvars=[]`), and jax prints the sub-jaxpr
+    `{ lambda ; c:i8[] a:i8[]. … }` with the value at the call site as
+    `] 0:i8[] a`;
+  * or leave the reproducer alone and set jax's own transitional
+    `jax_use_simplified_jaxpr_constants` (default `False` in **both**
+    installed series, and carrying jax's warning that it "will exist only
+    briefly, while we transition users. DO NOT RELY ON THIS FLAG"), and
+    the closure spelling itself inlines the wrapped value as `0:i8[]` into
+    the `add`.
+
+  So a rule cannot be sold as safe on the ground that the value is not
+  there to be seen: in two of the three configurations measured it IS
+  there. What does not change across any of them is the equality above —
+  wrapped `256` and honest `0` transcribe to the same tree in all four
+  cells, in both spellings, with the flag and without it.
 
   Four families of jaxpr-level remedy were built and priced against a
   purpose-built corpus and the full suite on both series — a
   literal-immediate rule, a narrowing rule, a backward-cone rule and a
   declaration-scoped rule, plus a cross-scope cone and an index-only
   exemption. Every one is either blind at `jit`/`cond`/`custom_jvp`
-  boundaries (which is universal in real jax code), or structurally blind
-  to the constvar form above, or costs capability that is not the wrap's
-  to take — including `u.at[3].set(0.5)`, the commonest jax write there
-  is. *(That pricing is RESTATED here from the measurement round that did
-  it, not re-run for this entry; what IS re-measured here is the jaxpr
-  above, which is the fact the conclusion rests on.)* **No rule keyed on
-  integer literals in a backward cone can close this**, because there is
-  no integer literal in the cone to key on.
+  boundaries (which is universal in real jax code), or costs capability
+  that is not the wrap's to take — including `u.at[3].set(0.5)`, the
+  commonest jax write there is. *(That pricing is RESTATED here from the
+  measurement round that did it, not re-run for this entry. Its third
+  clause read "or structurally blind to the constvar form above"; that
+  clause is WITHDRAWN, because the constvar form is one spelling's and the
+  measurement above finds the value in the cone under the other two. What
+  IS re-measured here is the tree equality, which is the fact the
+  conclusion rests on.)* **No rule keyed on integer literals in a backward
+  cone can close this** — not because there is nothing to key on, but
+  because what there is to key on is the same `0:i8[]` an honest program
+  writes, so a rule that fires on the wrapped row fires on the honest one
+  too. That is the same SHAPE of failure as the one that got the detector
+  branch audited SHOULD-NOT-LAND, below — firing on honest code — and it
+  is stated as a shape, not as an identification of the two.
 
   **It is jax's, it is deliberate, and it is in the shipping release —
   BUT NOT BY THE MECHANISM THIS ENTRY FIRST NAMED, AND THAT CLAIM IS
