@@ -1979,9 +1979,18 @@ verdicts:
   before the repair went in; what no longer holds is the disposition —
   "unlanded", "not taken in this tree", and the evidence cost that was the
   reason for it. The instrument this paragraph says cannot exist was built
-  (`scratchpad/crlf/corpus_solver.py`), and the 16 tests were paid. A
-  decline that has been reversed reads as a live decline if nothing beside
-  it says otherwise, which is the same defect as a rotting count.
+  (`scratchpad/crlf/corpus_solver.py`), and the tests were paid — **the 16
+  this paragraph names, and 15 more.** The 16 is this paragraph's own figure
+  and is the cost of a TOLERANT decode; the full bill under a strict one is
+  **31**, the extra 15 being the `str`-shim call sites. Both figures are the
+  2026-08-09 entry's own, recorded when the change landed and not re-measured
+  in the 2026-08-09 revision that added this sentence; what is fixed here is
+  only that they are now BOTH visible at the point of reference, a hundred
+  lines before the entry that states them. Saying "the 16" alone here would
+  let a back-reference
+  understate what landing cost, which is the same shape as the rotting count
+  this paragraph is about. A decline that has been reversed reads as a live
+  decline if nothing beside it says otherwise, which is that shape again.
   **A third refusal came from the fuzzer, on
   the fix rather than into it:** a record is `text + "\n"`, so a final
   record whose newline never got out is one the child did not finish
@@ -2136,6 +2145,25 @@ verdicts:
   children, is what rules (b) out. `_decode_child_stream` puts back by hand
   the one translation `text=True` was performing and nothing else.
 
+  **A STRENGTHENING THE BRANCH DID NOT CLAIM, found by a blinded audit and
+  re-measured here: (c) also closes a hole on a HEALTHY WINDOWS child.** A
+  pipe cut is a byte prefix, so the set of a stream's prefixes is a superset
+  of what any buffering regime can deliver. Driven byte by byte, real child,
+  real bytes, both trees, `rc=0`: over the 664-byte CRLF transcript of a
+  healthy run (`version`, `answer sat`, 40 `value` records, `end 40`, every
+  record ending `\r\n`), **exactly one proper prefix returned a definite
+  answer at `9564728` — byte 663 of 664, the cut landing between the final
+  `\r` and its `\n`, returning `sat` with all 40 values from a child that
+  never finished writing its terminator.** At this tip that prefix is
+  `failed` (alphabet), and the count of definite answers off a proper prefix
+  is **0 of 664**. The mechanism is the same one the table above is about,
+  reached from the other side: universal-newline decoding turned the orphaned
+  `\r` into a record boundary, so a torn terminator read as a whole one.
+  Under (c) the `\r` survives the decode and the alphabet check refuses it.
+  This is not the stale-driver direction and not a `README.md` platform
+  caveat — it is a truncated run on the platform the branch went out of its
+  way to keep working.
+
   **WHAT IS STILL NOT CLOSED, stated rather than left to be found.** The
   nine is over SINGLE characters. `\n` is excluded by construction — it is
   the protocol's own record boundary, so a writer that leaves one inside a
@@ -2149,6 +2177,21 @@ verdicts:
   (c)'s one measured cry-wolf case is a healthy child reconfigured to BARE
   CR line endings, which no platform's `print` default produces and which
   `_cvc5_driver` never sets — asserted structurally, not remembered.
+
+  **THAT RESIDUAL AND WINDOWS SUPPORT ARE ONE COIN, and the entry should say
+  so rather than list them as two separate facts.** The `\r\n` survives the
+  reader because `replace("\r\n", "\n")` runs BEFORE the alphabet check, so
+  the `\r` is spent and never reaches it — the same order that makes a
+  healthy Windows child readable at all. MEASURED here on a mutant that drops
+  only that `replace` (arm (b)): the `\r\n`-in-a-field stale child goes
+  `sat` → `failed` (alphabet), closing the tenth separator, **and** the
+  healthy Windows child goes `sat` → `failed` in the same run, on the same
+  line of code — `tests/test_solver_audit_findings.py -k f4wheel3` under that
+  mutant is 3 failed / 8 passed, and two of the three are exactly those. **You
+  cannot buy the tenth separator without breaking the platform**; the branch
+  bought the platform, which is the right way round, because the residual is
+  the WRITER's and the writer's whitelist closes it while nothing else closes
+  a broken Windows install.
 
   **NO VERDICT MOVED, SCORED PER OBLIGATION — and the instrument had to be
   BUILT, because the one this repository reaches for says in its own
@@ -2172,10 +2215,31 @@ verdicts:
   what the instrument always prints. `_decode_child_stream` ending in
   `.rstrip("\n")` — the fuzzer-found class, applied to the one function this
   branch adds — moves **155** verdict-bearing keys, VERIFIED → UNKNOWN and
-  REFUTED → UNKNOWN. The transport reporting a `sat` as `unsat` moves
-  **136**, six of them **REFUTED → VERIFIED**, and under the full portfolio
-  surfaces as the `SolverDisagreement` the portfolio exists to raise. Raw
-  output: `scratchpad/crlf/RESULTS_crlf.txt`.
+  REFUTED → UNKNOWN (7 of each, complete list in the raw output). The
+  transport reporting a `sat` as `unsat` moves **136**, **SEVEN** of them
+  **REFUTED → VERIFIED** — every one of the corpus's seven refuting rows,
+  under the cvc5-only portfolio — and under the full portfolio surfaces as
+  the `SolverDisagreement` the portfolio exists to raise. Raw output:
+  `scratchpad/crlf/RESULTS_crlf.txt`.
+
+  **CORRECTED 2026-08-09, and the correction is the entry's own subject.**
+  That count read **"six"**, written without re-running it, in an entry whose
+  first paragraph is about a claim that rotted. A blinded audit caught it; the
+  number was then re-measured here rather than taken on report — every arm
+  re-run in this worktree, PC2 reproducing its recorded totals exactly
+  (`{'discharged': 32, 'escalated_obligation_records': 40, 'spawns': 48,
+  'violated_witness': 8}`) and its 136. The seven are `psd_false`,
+  `cubic_false`, `product_bound_4`, `square_scalar_false`, `square_vec4_false`,
+  `square_vec16_false` and `two_obligations_false`. **The evidence file could
+  not have settled it either**, which is why the wrong number survived
+  review: `diff` capped its per-key listing at `moved[:80]` and printed no
+  sign of the cap, and the capture was piped on top of that, so
+  `RESULTS_crlf.txt` displayed **3** of the 7. Both are fixed — the listing
+  now announces its own truncation, and every capped listing is followed by a
+  COMPLETE transition histogram and the COMPLETE list of `.verdict.status`
+  moves, which is where a count in this prose should now be checked. **A
+  silently truncated listing reads as a complete one**, and this file has been
+  wrong that way before.
 
   **NEGATIVE CONTROLS.** Real unmocked cvc5 still returns `sat` with its
   model and `unsat`; VERIFIED and REFUTED both still land end to end (the
@@ -2186,6 +2250,21 @@ verdicts:
   — and `_make_run_cvc5_binary`, `_run_z3`, `_tokenize_sexpr`,
   `_model_values_from_text`, `escalate`, `make_solver_verdict` and
   `_screen_model` hash byte-identical to `9564728`.
+
+  **BUT "TEXTUALLY IDENTICAL" IS NOT "COVERED BY THE REASONING ABOVE", and a
+  future reader should not have to work that out.** `_make_run_cvc5_binary`
+  and `_cvc5_binary_version` still capture with `text=True` and split with
+  `splitlines()` — both halves of the pair this entry narrows for the wheel.
+  They are unchanged from `9564728`, so nothing here regressed them and this
+  branch does not own them; what does not carry across is the ARGUMENT. The
+  binary leg has no record protocol of its own — no terminator, no count, no
+  `end <n>` — so the forged-terminator shape the wheel's reader was narrowed
+  against has nothing to forge, and the audit that scored this branch drove
+  8 constructions through that transport and found **no exploitable
+  direction: every failure was in the safe one** — *that last figure is the
+  AUDIT's measurement and was **NOT re-measured** in this worktree; every
+  other number in this entry was.* It is recorded as an open question about a
+  DIFFERENT transport, not as a conclusion this entry's arm table supports.
 
   **WHAT IT COST, AND WHERE THE FIXTURES WERE MEASURING THEMSELVES.**
   Applying (c) reddens **16 tests**, all in
@@ -2213,7 +2292,25 @@ verdicts:
   every one of seeds 1–10, 20 000 examples each, 200 000 in total**, with
   its `decode()` — a restatement of what `text=True` did — replaced by the
   child's bytes; the restatement was a no-op in any case, since every record
-  it builds goes through `_cvc5_driver._tail`. `repro_forgery.py`,
+  it builds goes through `_cvc5_driver._tail`.
+
+  **AND THAT ZERO IS A REGRESSION CONTROL, NOT EVIDENCE FOR THIS REPAIR —
+  the fuzzer is STRUCTURALLY BLIND to the character the branch is about.**
+  The same fact that makes its `decode()` a no-op makes its generator unable
+  to reach the defect: every record goes through `_cvc5_driver._token` /
+  `_tail`, whose printable-ASCII whitelist escapes the separators the
+  generator picks. MEASURED here over the generator alone, at the same seeds
+  and counts the figure above quotes — 200 000 streams, 11 438 247
+  characters: **0 raw `\r`, 0 `\r\n`, and 0 characters outside printable
+  ASCII plus LF**, the whole emitted alphabet being 40 printable characters
+  and the newline. So `0 unsound / 0 cry-wolf over 200 000` says the reader
+  narrowing did not break the record protocol it was already being fuzzed
+  against; it says nothing about `\r`, in either direction. The evidence for
+  the CR repair is the arm table above, the separator sweep, the byte-prefix
+  sweep and the `f4wheel3` block — all of which spawn children the fuzzer
+  cannot generate. **A control that cannot fail on the change under review is
+  not a control for it**, which is the same reading error as the blind
+  per-obligation instrument two paragraphs up. `repro_forgery.py`,
   `repro_real_kill.py` and `probe_cvc5_value_channel.py` re-driven against
   real cvc5, every figure unchanged (3 of 4 value-channel cases still carry a
   raw separator, the ASCII control still carries none). `probe_cvc5_backstop.py`
@@ -2239,16 +2336,43 @@ verdicts:
   transcript with two terminators — the same mistake the property file
   already records making.
 
-  Both series **2494 passed / 7 skipped**, `--collect-only` ids byte-identical
+  **A PRE-EXISTING GAP IN THE NEIGHBOURING RULE, FOUND BY THE SAME AUDIT AND
+  CLOSED HERE — UNCHANGED FROM `9564728`, so it is not this branch's doing.**
+  The comment on the completeness check says *"the terminator must be the LAST
+  line"*, and nothing tested that. The nearest test —
+  `…_values_written_after_the_terminator_are_refused` — writes `end` early and
+  then two MORE values, so the
+  count inside the terminator stops matching what the parser tallies — a rule
+  that asked only *"is a matching `end <n>` ANYWHERE in the stream?"* refuses
+  that stream for the wrong reason, and is therefore not distinguished by it.
+  POSITION and COUNT were never separated. MEASURED here: the mutant
+  `complete = terminated and any(l == f"end {len(values) + opaques}" for l in
+  lines)` **passed the entire suite as it stood at `ca5b7da` — 2494 passed,
+  7 skipped, jax 0.11.0, rc 0** — and, through a real child with real bytes,
+  returns `sat` with
+  `(('x0', '1/2'),)` on
+  `b"version 1.3.4\nanswer sat\nend 1\nvalue x0 1/2\n"`, a value harvested
+  from a record written AFTER the run announced it was over; the shipped rule
+  returns `failed`. Closed by
+  `test_f4wheel_the_terminator_must_be_the_LAST_line_not_merely_present`,
+  driven red against that mutant and green here before it landed. **No
+  verdict moved and nothing shipped changed** — this adds a test to an
+  existing rule, it does not alter the rule.
+
+  Both series **2495 passed / 7 skipped**, `--collect-only` ids byte-identical
   between them at this tip AND at `9564728`; the branch's own delta read in
-  both directions is **12 ids added and 2 removed**. (Collect-only reports
-  2496 ids where the run reports 2501 items: the five `importorskip`
+  both directions is **13 ids added and 2 removed**. (Collect-only reports
+  2497 ids where the run reports 2502 items: the five `importorskip`
   module-level skips are reported at run time and contribute no id — the
   same offset at `9564728`, 2486 and 2491.) `reuse lint` rc=0.
   Constructions: the `f4wheel3` block of
   `tests/test_solver_audit_findings.py`, every one driven red at `9564728`
   first — and the three that must NOT move (both healthy children, the
-  `\r\n`-in-a-field residual) were green there and are green here.
+  `\r\n`-in-a-field residual) were green there and are green here. **The
+  counts and the id delta above moved by one on 2026-08-09** when the
+  terminator-position test recorded in the paragraph above was added; they
+  read 2494 / 7 and 12-added at `ca5b7da`, and both series were re-run here
+  rather than adjusted on paper.
 - **2026-08-07 (pre-release): jax 0.10 was in `TESTED_JAX_SERIES` and did
   not work — verdicts move, in the UNKNOWN → VERIFIED direction, on 0.10
   only.** `jex_core.ClosedJaxpr is jex_core.Jaxpr` is `False` on 0.10.2 and
