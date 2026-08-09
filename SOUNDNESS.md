@@ -4178,8 +4178,9 @@ verdicts:
 
   **Why no backward-cone rule closes it: the information is destroyed
   before stelling sees it.** The wrap happens inside `jnp.full`, at eager
-  time — the narrowed value IS the first array that exists — and before
-  the harness is traced at all. Measured at `53f9f84` on jax 0.11.0, and
+  time, before the harness is traced at all — and, per the mechanism
+  section below, at a `.astype` cast that leaves no trace of the value it
+  narrowed. Measured at `53f9f84` on jax 0.11.0, and
   re-derived at `650e678` in all four cells: the ENTIRE jaxpr tree for the
   harness above holds exactly **one** literal — `10.0:f32`, the comparison
   bound — and the string `256` does not appear anywhere in it. The wrapped
