@@ -924,31 +924,91 @@ def _gather_declined(q, *frags):
     return note
 
 
-def test_gather_dynamic_index_declines_not_crashes():
-    # a non-point index interval has no exact rule: noted ⊤, never a
-    # guess. The note used to read "no sound rule for params {...}";
-    # strengthened, not relaxed — it must name the element and print ITS
-    # span, the right way round.
-    _gather_declined(
-        _gather_query((0.0, 2.0), 6.0),
-        "index element 0 spans [0.0, 2.0]",
-        "not a single point",
+def test_gather_dynamic_in_range_index_takes_the_hull():
+    # CHANGED EXPECTATION, index-bounds round. This declined before: a
+    # non-point index had "no exact rule". It has one — the hull over the
+    # rows the declared index can reach — and the row data is [1, 5, 2], so
+    # an index anywhere in [0, 2] reaches [1.0, 5.0].
+    #
+    # The hull is what makes this sound and the THRESHOLD is what proves it
+    # is not merely ⊤: 6.0 discharges, 4.0 must stay undecided (5.0 is
+    # reachable) and 0.5 must refute (1.0 is reachable). A rule returning ⊤
+    # fails the first; one returning only the first reachable row's value
+    # wrongly discharges the second.
+    p = propagate(_gather_query((0.0, 2.0), 6.0))
+    assert p.obligations[0].status == "discharged"
+    assert dict(p.transfers_used)["gather"] == "exact"
+    assert propagate(_gather_query((0.0, 2.0), 4.0)).obligations[0].status == (
+        "unknown"
+    )
+    assert propagate(_gather_query((0.0, 2.0), 0.5)).obligations[0].status == (
+        "violated-over-set"
     )
 
 
-def test_gather_out_of_range_index_declines_not_crashes():
-    # CLIP clamps, FILL_OR_DROP fills — the wedge bug class; refuse to
-    # guess. The note prints the failing comparison with the true bound
-    # (the operand has 3 rows) and the measured mode behaviours
-    # (measured in test_transfers_jax.py::
-    # test_gather_out_of_range_mode_behaviours_as_the_decline_states).
-    _gather_declined(
-        _gather_query((7.0, 7.0), 6.0),
-        "index element 0 is 7",
-        "0 <= 7 < 3 fails",
-        "mode-dependent",
-        "never guessed",
+def test_gather_dynamic_index_hull_narrows_with_the_declared_range():
+    # the hull is over the DECLARED range, not over the whole operand: an
+    # index confined to [0, 1] cannot reach row 2, and one confined to
+    # [2, 2] reaches only that row. Without this the test above would pass
+    # against a transfer that always hulled every row of the operand.
+    assert propagate(_gather_query((0.0, 0.0), 1.0)).obligations[0].status == (
+        "discharged"  # row 0 alone is 1.0
     )
+    assert propagate(_gather_query((2.0, 2.0), 2.0)).obligations[0].status == (
+        "discharged"  # row 2 alone is 2.0
+    )
+    assert propagate(_gather_query((0.0, 1.0), 2.0)).obligations[0].status == (
+        "unknown"  # rows 0..1 reach 5.0
+    )
+
+
+def test_gather_index_straddling_the_axis_declines_not_crashes():
+    # CHANGED EXPECTATION: [1, 7] on a 3-row operand admits inputs that
+    # index in range and inputs that do not. The in-range ones take a row;
+    # the others take a clamped or filled element that is not the one
+    # written. No box states that, so the transfer declines — the middle
+    # case of the three, and the one that keeps this round from modelling
+    # the clamp.
+    _gather_declined(
+        _gather_query((1.0, 7.0), 6.0),
+        "index element 0 spans [1, 7]",
+        "straddles the legal positions [0, 2]",
+    )
+
+
+def test_gather_out_of_range_index_is_a_finding_not_a_decline():
+    # CHANGED EXPECTATION: index 7 into a 3-row operand is out of bounds
+    # for EVERY input the declared set admits. That is a fact about the
+    # program, not a gap in stelling, and it gets its own note — the old
+    # wording ("out-of-range handling is mode-dependent … never guessed")
+    # explained why stelling declines and never said the program indexes
+    # out of bounds. The ACCOUNTING is deliberately unchanged: still ⊤,
+    # still unknown, still never a REFUTED.
+    p = propagate(_gather_query((7.0, 7.0), 6.0))
+    assert p.obligations[0].status == "unknown"
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("gather", 1),)
+    assert "gather" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "OUT-OF-BOUNDS INDEX (definite)" in n)
+    for f in (
+        "'gather'",
+        "index element 0 spans [7, 7]",
+        "EVERY value in it is outside",
+        "the legal positions are [0, 2]",
+        "no input for which this index is in bounds",
+    ):
+        assert f in note, (f, note)
+
+
+def test_gather_wholly_negative_index_is_a_finding_too():
+    # the other side of the axis, and the side a from-the-end index lands
+    # on when it runs off the front: jnp normalises u[-11] on a length-10
+    # axis to -1 BEFORE the take, so a negative index arriving here is
+    # already out of bounds and is not a Python from-the-end request.
+    p = propagate(_gather_query((-4.0, -2.0), 6.0))
+    assert p.obligations[0].status == "unknown"
+    note = next(n for n in p.notes if "OUT-OF-BOUNDS INDEX (definite)" in n)
+    assert "spans [-4, -2]" in note, note
 
 
 def test_gather_batched_form_declines_not_crashes():
@@ -1048,10 +1108,24 @@ def test_gather_non_integral_and_non_finite_points_decline_hand_ir():
             [out],
         )
 
+    # message CHANGED with the index-bounds round: the classifier reads a
+    # RANGE now, so it prints the span rather than "the point", and it
+    # separates the two refusals it used to fold together — a non-integral
+    # endpoint and an infinite one fail for different reasons and now say
+    # so. Both still decline, which is the part that matters: this layer is
+    # handed bounds with no dtype, so it never rounds [0.5, 0.5] inward to
+    # the integers it contains.
     _gather_declined(
-        q(0.5, 0.5), "index element 0 is the point 0.5", "not a finite integer"
+        q(0.5, 0.5),
+        "index element 0 spans [0.5, 0.5]",
+        "endpoints are not integers",
+        "does not round an index inward",
     )
-    _gather_declined(q(float("inf"), float("inf")), "the point inf")
+    _gather_declined(
+        q(float("inf"), float("inf")),
+        "spans [inf, inf]",
+        "is not finite",
+    )
 
 
 def _transpose_query(perm, threshold):

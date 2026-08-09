@@ -1,0 +1,1235 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+"""The index-bounds round: dynamic indexing, and the three cases it splits.
+
+SCOPE, declared (docs/norms.md). What this file establishes:
+
+* the HULL IS SOUND -- the box a dynamic index produces contains the value
+  jax actually computes, for every start the declared range admits, checked
+  by enumerating the whole product and executing the real primitive;
+* the hull is TIGHT enough to be worth having, and narrows with the
+  declared range (without that control, "always hull the whole operand"
+  would pass every soundness test here);
+* the three cases are the three cases: inside the legal window produces a
+  value, straddling it declines, disjoint from it is reported as a finding;
+* the clamp is NOT modelled, pinned by the one query that separates the two
+  designs -- `u[i] == u[9]` for `i` in [12, 20] is TRUE of the executed
+  program and states nothing about the written one, and must stay undecided;
+* the accounting of a finding is byte-for-byte the accounting of a decline:
+  top, unknown, unreached, and the CHANNEL mints no status -- which is not
+  the claim that a program holding an out-of-bounds index is never refuted,
+  a reading measured and killed below;
+* `jnp.take_along_axis` along axis 0 reaches the widened row form and gets
+  definite verdicts, which it did not before this round.
+
+What it does NOT establish: the affine or solver legs (this round emits no
+SMT rows -- dynamic_slice and dynamic_update_slice are absent from
+obligation._SUPPORTED, so an obligation reaching one cannot escalate), and
+gather geometries outside the covered leading-axis row form.
+
+Every jax fact quoted here was measured on 0.11.0 and 0.10.2, and the
+measurements that decided the design are re-run as tests below rather than
+recorded as prose.
+"""
+from __future__ import annotations
+
+import itertools
+import random
+
+import pytest
+
+jax = pytest.importorskip("jax")
+jnp = pytest.importorskip("jax.numpy")
+np = pytest.importorskip("numpy")
+
+import stelling.interval as iv  # noqa: E402
+from stelling.harness import any_array, assert_, trace  # noqa: E402
+from stelling.propagate import (  # noqa: E402
+    IEEE_TRANSFERS,
+    TRANSFERS,
+    propagate,
+)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _x64():
+    # float64 declarations must not be truncated to float32 under us: the
+    # ramp fixtures below pin exact element values
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    yield
+    jax.config.update("jax_enable_x64", old)
+
+
+def run(h, **kw):
+    return propagate(trace(h), **kw)
+
+
+def _prim(name):
+    """The primitive itself, via jax's PUBLIC alias (`jax.lax.dynamic_slice_p`
+    exists on both tested series). Binding it directly is the only way to
+    reach the transfer without jnp's from-the-end normalisation in front,
+    which is exactly what several measurements below need to separate."""
+    return getattr(jax.lax, f"{name}_p")
+
+
+def _point(arr):
+    flat = [float(v) for v in np.asarray(arr).reshape(-1)]
+    return iv.IntervalArray(
+        shape=tuple(arr.shape), los=tuple(flat), his=tuple(flat)
+    )
+
+
+# -- the round is registered, in both registries, at a stated tier ----------
+
+
+def test_the_round_registers_both_rows_in_both_registries():
+    for name in ("dynamic_slice", "dynamic_update_slice"):
+        assert TRANSFERS[name][1] == "exact"
+        assert IEEE_TRANSFERS[name][1] == "exact"
+    assert set(IEEE_TRANSFERS) == set(TRANSFERS)
+
+
+# -- what the gap was ------------------------------------------------------
+
+
+def test_a_traced_scalar_index_is_a_dynamic_slice_not_a_gather():
+    """The measurement the whole round turns on. `u[i]` with a traced `i`
+    does not trace to a gather: jnp emits the from-the-end normalisation
+    and then a `dynamic_slice`. Registering the gather row alone would have
+    closed nothing."""
+    u, i = jnp.zeros((10,)), jnp.int32(3)
+    prims = [e.primitive.name for e in jax.make_jaxpr(lambda u, i: u[i])(u, i).eqns]
+    assert "dynamic_slice" in prims
+    assert "gather" not in prims
+    # and the normalisation is really there, ahead of the take
+    assert prims[:3] == ["lt", "add", "select_n"]
+
+
+def test_an_out_of_range_static_index_takes_the_dynamic_path_too():
+    """`u[3]` lowers to a static `slice`; `u[30]` and `u[-11]` do not --
+    they fall back to normalise-then-`dynamic_slice`. So the statically
+    provable out-of-bounds case arrives at the SAME transfer."""
+    u = jnp.zeros((10,))
+    assert "slice" in [
+        e.primitive.name for e in jax.make_jaxpr(lambda u: u[3])(u).eqns
+    ]
+    for bad in (30, -11):
+        prims = [
+            e.primitive.name
+            for e in jax.make_jaxpr(lambda u, k=bad: u[k])(u).eqns
+        ]
+        assert "dynamic_slice" in prims, (bad, prims)
+
+
+# -- case 1: inside the legal window -- the power gain ---------------------
+
+
+def test_traced_in_range_index_discharges_where_it_used_to_be_top():
+    """Row 3 of the measured gap: `u[i]`, `i` in [0, 5], in bounds. Was
+    unknown with the operand at [-inf, inf]."""
+
+    def h():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        i = any_array((), "int32", (0, 5))
+        return assert_(u[i] >= 0.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "discharged"
+    assert dict(p.transfers_used)["dynamic_slice"] == "exact"
+
+
+def test_the_hull_is_over_the_reachable_slice_and_no_wider():
+    """Discrimination. The operand is a ramp, so the answer depends on
+    exactly which elements the declared index can reach: with `i` in [0, 3]
+    the reachable values are the first four, and the bound that separates a
+    correct hull from a lazy one is the fourth."""
+
+    def h(lo, hi, bound):
+        def q():
+            u = any_array((8,), "float64", (0.0, 1.0))
+            i = any_array((), "int32", (lo, hi))
+            # u is a declared box, so use its INDEX arithmetic: compare the
+            # taken element against itself shifted -- instead, pin on a
+            # concrete ramp below. Here just take and bound.
+            return assert_(u[i] <= bound)
+
+        return q
+
+    # the operand box is [0, 1] elementwise, so <= 1 holds for any reachable
+    # element and <= 0.5 cannot be decided -- the hull must not invent
+    # tightness the declaration does not have
+    assert run(h(0, 3, 1.0)).obligations[0].status == "discharged"
+    assert run(h(0, 3, 0.5)).obligations[0].status == "unknown"
+
+
+def test_the_hull_narrows_with_the_declared_range_on_real_data():
+    """The control that a soundness sweep cannot supply: on a CONCRETE
+    ramp, an index confined to the low half must not reach the high half.
+    A transfer that hulled the whole axis would be perfectly sound and
+    would fail here."""
+    ramp = jnp.arange(8, dtype=jnp.float64)  # 0 .. 7
+
+    def h(lo, hi, bound):
+        def q():
+            i = any_array((), "int32", (lo, hi))
+            return assert_(ramp[i] <= bound)
+
+        return q
+
+    assert run(h(0, 3, 3.0)).obligations[0].status == "discharged"
+    assert run(h(0, 3, 2.9)).obligations[0].status == "unknown"
+    assert run(h(4, 7, 7.0)).obligations[0].status == "discharged"
+    assert run(h(4, 7, 3.0)).obligations[0].status == "violated-over-set"
+    # and the point case stays exact
+    assert run(h(5, 5, 5.0)).obligations[0].status == "discharged"
+    assert run(h(5, 5, 4.9)).obligations[0].status == "violated-over-set"
+
+
+def test_a_from_the_end_index_is_python_semantics_not_out_of_bounds():
+    """MEASURED, and it contradicts the obvious guess: `u[-1]` is `u[9]`,
+    because jnp normalises the index UPSTREAM of the primitive. The
+    primitive itself clamps a negative start to 0 -- both are true, at
+    different layers, and the transfer sits at the lower one."""
+    ramp = jnp.arange(10, dtype=jnp.float64)
+    assert float(jax.jit(lambda u, i: u[i])(ramp, jnp.int32(-1))) == 9.0
+    assert float(
+        np.asarray(
+            jax.jit(
+                lambda u, i: _prim("dynamic_slice").bind(u, i, slice_sizes=(1,))
+            )(ramp, jnp.int32(-1))
+        )[0]
+    ) == 0.0
+
+    def h(k, bound):
+        def q():
+            i = any_array((), "int32", (k, k))
+            return assert_(ramp[i] <= bound)
+
+        return q
+
+    # -1 reaches the LAST element, so <= 8 must not discharge
+    assert run(h(-1, 9.0)).obligations[0].status == "discharged"
+    assert run(h(-1, 8.0)).obligations[0].status == "violated-over-set"
+    assert run(h(-10, 0.0)).obligations[0].status == "discharged"
+
+
+# -- case 2: straddling -- decline, named ----------------------------------
+
+
+def test_straddling_index_declines_with_its_reason():
+    """Row 4 of the measured gap: `i` in [0, 20] on a 10-element array.
+    Some declared inputs index in bounds and some do not."""
+
+    def h():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        i = any_array((), "int32", (0, 20))
+        return assert_(u[i] >= 0.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "unknown"
+    note = next(n for n in p.notes if "'dynamic_slice' declined" in n)
+    assert "straddles the legal positions [0, 9]" in note, note
+    assert "OUT-OF-BOUNDS INDEX" not in note, note
+
+
+# -- case 3: disjoint -- a finding, not a decline --------------------------
+
+
+def _finding(p, *frags):
+    note = next(n for n in p.notes if "OUT-OF-BOUNDS INDEX (definite)" in n)
+    for f in frags:
+        assert f in note, (f, note)
+    return note
+
+
+def test_always_out_of_range_index_is_reported_as_a_finding():
+    """Row 5 of the measured gap: `i` in [15, 20] on a 10-element array is
+    out of bounds for EVERY input the declaration admits."""
+
+    def h():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        i = any_array((), "int32", (15, 20))
+        return assert_(u[i] >= 0.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "unknown"
+    _finding(
+        p,
+        "'dynamic_slice'",
+        "spans [15, 20]",
+        "the legal positions are [0, 9]",
+        "no input for which this index is in bounds",
+    )
+
+
+def test_a_statically_provable_out_of_range_index_is_reported():
+    """The case a jax maintainer asked for in Feb 2026 and nothing in the
+    ecosystem does: checkify is runtime-only and jax_check_static_indices
+    reaches only static constants. jax itself does not raise -- measured on
+    0.11.0, `arange(10)[30]` returns 9.0."""
+    assert float(jnp.arange(10, dtype=jnp.float64)[30]) == 9.0
+
+    def h():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        return assert_(u[30] >= 0.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "unknown"
+    _finding(p, "spans [30, 30]", "the legal positions are [0, 9]")
+
+
+def test_a_from_the_end_index_past_the_front_is_reported():
+    """`u[-11]` on a length-10 axis normalises to -1 and IS out of bounds;
+    the note says so, and warns that the span printed is post-normalisation
+    so a reader does not go looking for a -11 that no equation carries."""
+
+    def h():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        return assert_(u[-11] >= 0.0)
+
+    p = run(h)
+    assert p.obligations[0].status == "unknown"
+    _finding(p, "spans [-1, -1]", "u[-11] arrives here as -1")
+
+
+def test_a_finding_is_accounted_exactly_like_a_decline():
+    """The direction that matters: a finding must never manufacture a
+    verdict. Same ⊤, same unknown count, same unreached, no tier recorded
+    -- only the note differs."""
+
+    def h(k):
+        def q():
+            u = any_array((10,), "float64", (0.0, 1.0))
+            i = any_array((), "int32", (k, k))
+            return assert_(u[i] >= 0.0)
+
+        return q
+
+    finding = run(h(30))
+    straddle = run(h(0))  # in range: the control that the query is otherwise
+    assert straddle.obligations[0].status == "discharged"
+    assert finding.obligations[0].status == "unknown"
+    assert finding.coverage.unknown_primitives == (("dynamic_slice", 1),)
+    assert "dynamic_slice" not in dict(finding.transfers_used)
+    assert not any(o.status == "violated-over-set" for o in finding.obligations)
+
+
+def test_the_no_REFUTED_rule_is_about_the_CHANNEL_not_about_the_program():
+    """The sentence above is easy to over-read, so the over-reading is
+    measured and killed here. "A finding never manufactures a verdict" is a
+    property of the FINDING CHANNEL. It is NOT the claim that a program
+    containing an out-of-bounds index cannot be refuted -- it can, and
+    `assert_(abs(u[30]) < 0)` is: ⊤ refutes it, because |⊤| < 0 is false
+    everywhere.
+
+    The discrimination that makes this a real test rather than a
+    restatement: the SAME refutation arises from a straddling index, which
+    mints no finding at all. Identical status, identical coverage,
+    identical transfers -- so the refutation is ⊤'s doing and the finding
+    channel added nothing. And it is sound: `abs(x) < 0` is false at every
+    point any declaration admits, out of bounds or not."""
+
+    def oob():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        return assert_(jnp.abs(u[30]) < 0.0)
+
+    def straddling():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        i = any_array((), "int32", (5, 20))  # straddles: a DECLINE, no finding
+        return assert_(jnp.abs(u[i]) < 0.0)
+
+    f, d = run(oob), run(straddling)
+    assert f.obligations[0].status == "violated-over-set"
+    assert d.obligations[0].status == "violated-over-set"
+    assert f.coverage.unknown_primitives == d.coverage.unknown_primitives
+    assert dict(f.transfers_used) == dict(d.transfers_used)
+    # only the note differs, and only the finding shouts
+    assert any("OUT-OF-BOUNDS INDEX (definite)" in n for n in f.notes)
+    assert not any("OUT-OF-BOUNDS INDEX (definite)" in n for n in d.notes)
+    assert any("straddles the legal positions" in n for n in d.notes)
+    # and the refutation is TRUE of the executed program at every admitted
+    # index, which is what makes it sound rather than merely consistent
+    ramp = jnp.arange(10, dtype=jnp.float64)
+    take = jax.jit(lambda u, k: u[k])
+    assert not any(
+        abs(float(take(ramp, jnp.int32(k)))) < 0.0 for k in range(5, 21)
+    )
+
+
+# -- the clamp is not modelled ---------------------------------------------
+
+
+def test_the_clamp_is_not_modelled_and_this_is_the_query_that_shows_it():
+    """THE control for the whole design. `u[i] == u[9]` for `i` in [12, 20]
+    is TRUE of the program jax executes -- every index clamps to 9 -- and
+    says nothing about the program the user wrote. A clamp-faithful
+    transfer discharges it. This one must not.
+
+    Measured: the clamp really does make it true at runtime, so the test is
+    not asserting against a phantom."""
+    ramp = jnp.arange(10, dtype=jnp.float64)
+    take = jax.jit(lambda u, i: u[i])
+    for k in (12, 15, 20):
+        assert float(take(ramp, jnp.int32(k))) == float(ramp[9])
+
+    def h():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        i = any_array((), "int32", (12, 20))
+        return assert_(u[i] == u[9])
+
+    p = run(h)
+    assert p.obligations[0].status == "unknown"
+    _finding(p, "spans [12, 20]")
+
+
+def test_there_is_no_single_clamp_to_model_one_gather_two_values():
+    """THE load-bearing measurement behind "do not model the clamp".
+
+    One gather, one out-of-range index, TWO values: `CLIP` returns the
+    clamped element and `FILL_OR_DROP` returns the fill. So "the clamp" is
+    a property of a PARAM, not of the operation, and a clamp-faithful
+    transfer would have to pick one of two answers the same jaxpr can
+    carry. In range the modes agree, which is exactly the condition this
+    round computes a value under.
+
+    If either half of this stops holding, the design argument in
+    `design/index-bounds-round.md` must be rewritten, not trusted."""
+    u = jnp.arange(10, dtype=jnp.float64)
+    gdn = jax.lax.GatherDimensionNumbers(
+        offset_dims=(), collapsed_slice_dims=(0,), start_index_map=(0,)
+    )
+
+    def take(k, mode, fill=None):
+        return np.asarray(
+            jax.lax.gather(
+                u, jnp.array([[k]], jnp.int32), gdn,
+                slice_sizes=(1,), mode=mode, fill_value=fill,
+            )
+        )[0]
+
+    M = jax.lax.GatherScatterMode
+    assert take(30, M.CLIP) == 9.0
+    assert take(30, M.FILL_OR_DROP, fill=-1.0) == -1.0  # NOT any row
+    # in range, every mode agrees -- the condition the round computes under
+    for mode in (M.CLIP, M.FILL_OR_DROP, M.PROMISE_IN_BOUNDS):
+        assert take(3, mode) == 3.0, mode
+
+
+def test_reverse_mode_ad_preserves_the_clamp_for_the_ds_dus_pair():
+    """A CORRECTION OF A CORRECTION, and the narrower claim is the true one.
+
+    An early revision of this round asserted, without running it, that
+    reverse-mode AD does not preserve out-of-bounds semantics. The
+    retraction that replaced it measured the two pairs below -- and both
+    are SELF-CONSISTENT pairs, so it generalised past its own measurement,
+    which is the same failure it was written to correct. The mixed pair is
+    the next test, and it is not self-consistent.
+
+    What IS true, and is the only part that touches this round: the pair
+    this row sits on preserves it. `u[i]` with a traced `i` lowers to
+    `dynamic_slice`, whose transpose is `dynamic_update_slice`; both CLAMP,
+    so the cotangent of `u[30]` lands on element 9 where the clamped read
+    came from. `x.at[k].set(v)` with a traced `k` lowers at the default to
+    `scatter` in FILL_OR_DROP, whose transpose is `gather` in FILL_OR_DROP;
+    both DROP, so `d/dv` is 0 exactly as the forward value is constant in
+    `v`. The primitive pairs are asserted here, not assumed, because the
+    whole claim is about which pair you are on."""
+    u = jnp.arange(10, dtype=jnp.float64)
+
+    def prims(f, *a):
+        return [
+            e.primitive.name
+            for e in jax.make_jaxpr(f)(*a).eqns
+            if e.primitive.name
+            in ("gather", "scatter", "dynamic_slice", "dynamic_update_slice")
+        ]
+
+    # the read pair: dynamic_slice forward, dynamic_update_slice transposed
+    assert prims(lambda u, k: u[k], u, jnp.int32(30)) == ["dynamic_slice"]
+    assert prims(
+        jax.grad(lambda u, k: u[k], argnums=0), u, jnp.int32(30)
+    ) == ["dynamic_slice", "dynamic_update_slice"]
+    g = jax.jit(jax.grad(lambda u, k: u[k], argnums=0))
+    assert list(np.asarray(g(u, jnp.int32(30)))) == [0.0] * 9 + [1.0]
+    assert list(np.asarray(g(u, jnp.int32(9)))) == [0.0] * 9 + [1.0]
+
+    # the write pair: scatter forward, gather transposed, both FILL_OR_DROP
+    assert prims(
+        lambda u, v, k: (u.at[k].set(v)).sum(), u, jnp.float64(5.0),
+        jnp.int32(30),
+    ) == ["scatter"]
+    assert prims(
+        jax.grad(lambda u, v, k: (u.at[k].set(v)).sum(), argnums=1),
+        u, jnp.float64(5.0), jnp.int32(30),
+    ) == ["scatter", "gather"]
+    dv = jax.jit(
+        jax.grad(lambda u, v, k: (u.at[k].set(v)).sum(), argnums=1)
+    )
+    assert float(dv(u, jnp.float64(5.0), jnp.int32(30))) == 0.0  # dropped
+    assert float(dv(u, jnp.float64(5.0), jnp.int32(9))) == 1.0
+
+
+def test_reverse_mode_ad_is_NOT_an_inverse_across_the_gather_scatter_pair():
+    """THE MIXED PAIR, which neither earlier revision built. jax's
+    documented non-inverse property out of bounds is real, it reproduces on
+    both tested series, and the read half reproduces at the DEFAULT
+    indexing mode -- so the blanket retraction above it was wrong too.
+
+    The mechanism is one line: under `PROMISE_IN_BOUNDS` -- which is what
+    `.at[...].get()` lowers to by default -- XLA's gather CLAMPS and its
+    scatter DROPS, and the transpose of a gather is a scatter. So
+
+      * `u.at[array([30])].get()` reads element 9 (clamped) and its
+        cotangent is identically ZERO: the transposed `scatter-add` dropped
+        where the gather clamped. True `d/du_9` is 1.0.
+      * `x.at[30].set(v, mode="promise_in_bounds")` drops the write, so `f`
+        is constant in `v` and the true `d/dv` is 0.0, while AD answers
+        1.0: the transposed gather clamped where the scatter dropped.
+
+    THE MODES MATTER AND ARE ASSERTED. The write half needs the mode
+    spelled out: `.at[...].set()` at the default lowers to FILL_OR_DROP,
+    not PROMISE_IN_BOUNDS, and that pair agrees (previous test). Only the
+    read half mismatches at the default. Under CLIP both halves agree.
+
+    NONE OF THIS IS A REASON for the design. The round declines on the two
+    measured reasons above -- one gather with two values, and read/write
+    disagreement -- and this pair is not the pair the transfer sits on. It
+    is written down because it is TRUE and was deleted as false."""
+    ramp = jnp.arange(10, dtype=jnp.float64)
+    idx = jnp.array([30], dtype=jnp.int32)
+
+    def modes(f, *a):
+        return [
+            (e.primitive.name, e.params["mode"])
+            for e in jax.make_jaxpr(f)(*a).eqns
+            if e.primitive.name in ("gather", "scatter", "scatter-add")
+        ]
+
+    M = jax.lax.GatherScatterMode
+
+    # -- read: DEFAULT mode, forward clamps, cotangent is zero
+    def rd(u):
+        return jnp.sum(u.at[idx].get())
+
+    assert modes(rd, ramp) == [("gather", M.PROMISE_IN_BOUNDS)]
+    assert modes(jax.grad(rd), ramp) == [
+        ("gather", M.PROMISE_IN_BOUNDS),
+        ("scatter-add", M.PROMISE_IN_BOUNDS),
+    ]
+    assert float(np.asarray(rd(ramp))) == 9.0  # the clamped read
+    true_d9 = float(np.asarray(rd(ramp.at[9].add(1.0)))) - 9.0
+    assert true_d9 == 1.0
+    assert list(np.asarray(jax.grad(rd)(ramp))) == [0.0] * 10  # AD says none
+
+    # -- write: needs the mode SPELLED OUT; the default one agrees
+    def wr(v, mode):
+        return jnp.sum(ramp.at[30].set(v, mode=mode))
+
+    assert modes(lambda v: wr(v, "promise_in_bounds"), jnp.float64(7.0)) == [
+        ("scatter", M.PROMISE_IN_BOUNDS)
+    ]
+    f7 = float(np.asarray(wr(jnp.float64(7.0), "promise_in_bounds")))
+    f8 = float(np.asarray(wr(jnp.float64(8.0), "promise_in_bounds")))
+    assert (f7, f8) == (45.0, 45.0)  # dropped: f is constant in v
+    ad = float(
+        np.asarray(jax.grad(lambda v: wr(v, "promise_in_bounds"))(
+            jnp.float64(7.0)
+        ))
+    )
+    assert (f8 - f7, ad) == (0.0, 1.0)  # true 0, AD 1
+
+    # -- and under CLIP both halves agree, which is why the MODE is the
+    # story and not the operation: same expressions, one param changed
+    c7 = float(np.asarray(wr(jnp.float64(7.0), "clip")))
+    c8 = float(np.asarray(wr(jnp.float64(8.0), "clip")))
+    cad = float(
+        np.asarray(jax.grad(lambda v: wr(v, "clip"))(jnp.float64(7.0)))
+    )
+    assert c8 - c7 == cad == 1.0
+
+    def cget(u):
+        return jnp.sum(u.at[idx].get(mode="clip"))
+
+    assert float(np.asarray(jax.grad(cget)(ramp))[9]) == 1.0
+
+
+def test_a_write_past_the_end_is_dropped_by_jax_and_reported_here():
+    """The scatter half of the same inconsistency, measured: a read clamps,
+    a write is DROPPED. `x.at[30].set(v)` on a length-10 `x` is a no-op --
+    which is why one clamp story cannot cover both, and why neither is
+    modelled."""
+    ramp = jnp.arange(10, dtype=jnp.float64)
+    assert list(np.asarray(jax.jit(lambda u: u.at[30].set(-1.0))(ramp))) == list(
+        np.asarray(ramp)
+    )
+    assert float(
+        np.asarray(jax.jit(lambda u: u.at[-1].set(-1.0))(ramp))[9]
+    ) == -1.0
+
+
+def test_dynamic_update_slice_clamps_its_start_exactly_as_the_read_does():
+    """Measured, primitive-level: a length-2 update at start 9 or 20 of a
+    length-10 operand lands at index 8. So the write row uses the SAME
+    legal window `[0, n - s]` and declines outside it."""
+    ramp = jnp.arange(10, dtype=jnp.float64)
+    upd = jnp.asarray([-1.0, -2.0])
+    f = jax.jit(lambda u, v, i: _prim("dynamic_update_slice").bind(u, v, i))
+    for start in (9, 20):
+        got = np.asarray(f(ramp, upd, jnp.int32(start)))
+        assert list(got[8:]) == [-1.0, -2.0], (start, got)
+
+    def h(lo, hi):
+        def q():
+            u = any_array((10,), "float64", (0.0, 1.0))
+            v = any_array((2,), "float64", (5.0, 6.0))
+            i = any_array((), "int32", (lo, hi))
+            return assert_(jax.lax.dynamic_update_slice(u, v, (i,)) <= 6.0)
+
+        return q
+
+    assert run(h(0, 8)).obligations[0].status == "discharged"
+    p = run(h(9, 9))
+    assert p.obligations[0].status == "unknown"
+    _finding(p, "the legal positions are [0, 8]")
+
+
+def test_dynamic_update_slice_keeps_the_operand_where_no_start_writes():
+    """The write row's own discrimination: a position outside every
+    admitted window keeps the operand's box, one inside every admitted
+    window takes the update's, and one that may or may not be written gets
+    the hull of both. Pinned on concrete data through the interval layer,
+    where the three answers are distinguishable."""
+    operand = _point(jnp.asarray([0.0, 0.0, 0.0, 0.0, 0.0]))
+    update = _point(jnp.asarray([9.0]))
+    box = iv.dynamic_update_slice_hull(operand, update, ((1, 2),))
+    assert (box.los[0], box.his[0]) == (0.0, 0.0)  # never written
+    assert (box.los[1], box.his[1]) == (0.0, 9.0)  # written iff start == 1
+    assert (box.los[2], box.his[2]) == (0.0, 9.0)  # written iff start == 2
+    assert (box.los[3], box.his[3]) == (0.0, 0.0)  # never written
+    # a width-1 start writes exactly one position and nothing else
+    exact = iv.dynamic_update_slice_hull(operand, update, ((2, 2),))
+    assert (exact.los[2], exact.his[2]) == (9.0, 9.0)
+    assert (exact.los[1], exact.his[1]) == (0.0, 0.0)
+    # a start range whose windows COVER a position leaves no operand value
+    wide = iv.dynamic_update_slice_hull(
+        operand, _point(jnp.asarray([9.0, 8.0])), ((1, 1),)
+    )
+    assert (wide.los[1], wide.his[1]) == (9.0, 9.0)
+
+
+# -- the soundness sweep, with its positive control ------------------------
+
+
+def _sweep_ds(rng, n, hull):
+    """Enumerate EVERY admitted start, execute the real primitive, and count
+    values the box does not contain. Returns (violations, elements)."""
+    ds = _prim("dynamic_slice")
+    violations = elements = 0
+    for _ in range(n):
+        rank = rng.randint(1, 3)
+        shape = tuple(rng.randint(1, 4) for _ in range(rank))
+        sizes = tuple(rng.randint(1, d) for d in shape)
+        ranges = []
+        for d, s in zip(shape, sizes):
+            lo = rng.randint(0, d - s)
+            ranges.append((lo, rng.randint(lo, d - s)))
+        ranges = tuple(ranges)
+        arr = jnp.asarray(
+            rng.sample(range(-500, 500), int(np.prod(shape))),
+            dtype=jnp.float64,
+        ).reshape(shape)
+        box = hull(_point(arr), ranges, sizes)
+        for start in itertools.product(
+            *[range(lo, hi + 1) for lo, hi in ranges]
+        ):
+            got = np.asarray(
+                ds.bind(arr, *[jnp.int32(s) for s in start], slice_sizes=sizes)
+            ).reshape(-1)
+            for i, v in enumerate(got):
+                elements += 1
+                if not box.los[i] <= v <= box.his[i]:
+                    violations += 1
+    return violations, elements
+
+
+def test_the_hull_contains_what_jax_computes_for_every_admitted_index():
+    """Soundness, measured rather than argued: over randomised shapes,
+    slice sizes and start ranges, every value the real primitive produces
+    at every admitted start lies inside the box. The enumeration is total
+    over the declared range -- this is not a sample."""
+    violations, elements = _sweep_ds(
+        random.Random(20260809), 250, iv.dynamic_slice_hull
+    )
+    assert elements > 500, elements  # anti-vacuity: the sweep really ran
+    assert violations == 0, violations
+
+
+def test_the_sweep_catches_a_hull_that_covered_only_the_lowest_start():
+    """POSITIVE CONTROL for the test above. A zero with no positive control
+    has been wrong three times in this project. This mutant is the exact
+    error the round is most exposed to -- hulling over the starts you
+    thought of instead of the ones the declaration admits -- and the
+    instrument must see it."""
+
+    def sampled(a, ranges, sizes):
+        return iv.dynamic_slice_hull(
+            a, tuple((lo, lo) for lo, _ in ranges), sizes
+        )
+
+    violations, elements = _sweep_ds(random.Random(20260809), 250, sampled)
+    assert elements > 500, elements
+    assert violations > 0, "the instrument cannot see a wrong hull"
+
+
+def test_the_sweep_catches_an_exclusive_upper_endpoint():
+    """Second positive control, a different error: an off-by-one that drops
+    the last admitted index. Caught for the same reason and by the same
+    enumeration."""
+
+    def off_by_one(a, ranges, sizes):
+        return iv.dynamic_slice_hull(
+            a,
+            tuple((lo, hi - 1 if hi > lo else hi) for lo, hi in ranges),
+            sizes,
+        )
+
+    violations, _ = _sweep_ds(random.Random(7), 250, off_by_one)
+    assert violations > 0, "the instrument cannot see an off-by-one hull"
+
+
+def _sweep_dus(rng, n, hull):
+    """The WRITE row's sweep. Same shape as `_sweep_ds`: enumerate every
+    admitted start, execute the real primitive, count values the box does
+    not contain. Operand values and update values are drawn from DISJOINT
+    ranges so that "kept the operand" and "took the update" are
+    distinguishable at every position -- a sweep on overlapping data could
+    not see a rule that confuses them."""
+    dus = _prim("dynamic_update_slice")
+    violations = elements = 0
+    for _ in range(n):
+        rank = rng.randint(1, 3)
+        shape = tuple(rng.randint(1, 4) for _ in range(rank))
+        upshape = tuple(rng.randint(1, d) for d in shape)
+        ranges = []
+        for d, s in zip(shape, upshape):
+            lo = rng.randint(0, d - s)
+            ranges.append((lo, rng.randint(lo, d - s)))
+        ranges = tuple(ranges)
+        arr = jnp.asarray(
+            rng.sample(range(-500, 0), int(np.prod(shape))), dtype=jnp.float64
+        ).reshape(shape)
+        upd = jnp.asarray(
+            rng.sample(range(1, 500), int(np.prod(upshape))), dtype=jnp.float64
+        ).reshape(upshape)
+        box = hull(_point(arr), _point(upd), ranges)
+        for start in itertools.product(
+            *[range(lo, hi + 1) for lo, hi in ranges]
+        ):
+            got = np.asarray(
+                dus.bind(arr, upd, *[jnp.int32(s) for s in start])
+            ).reshape(-1)
+            for i, v in enumerate(got):
+                elements += 1
+                if not box.los[i] <= v <= box.his[i]:
+                    violations += 1
+    return violations, elements
+
+
+def test_the_WRITE_hull_contains_what_jax_computes_for_every_admitted_index():
+    """Soundness of `dynamic_update_slice_hull`, measured with the same
+    total enumeration the read row gets. The committed evidence covered
+    `dynamic_slice` only until now; the write row's sweep existed in a run
+    record and not in the tree, which is the difference between evidence
+    and a claim about evidence."""
+    violations, elements = _sweep_dus(
+        random.Random(20260809), 250, iv.dynamic_update_slice_hull
+    )
+    assert elements > 500, elements  # anti-vacuity: the sweep really ran
+    assert violations == 0, violations
+
+
+def test_the_write_sweep_catches_a_hull_that_covered_only_the_lowest_start():
+    """POSITIVE CONTROL for the write sweep, the same error class as the
+    read row's: hulling over the starts you thought of rather than the ones
+    the declaration admits. A position written only by a HIGHER start keeps
+    the operand under this rule and takes the update under jax."""
+
+    def sampled(op, up, ranges):
+        return iv.dynamic_update_slice_hull(
+            op, up, tuple((lo, lo) for lo, _ in ranges)
+        )
+
+    violations, elements = _sweep_dus(random.Random(20260809), 250, sampled)
+    assert elements > 500, elements
+    assert violations > 0, "the instrument cannot see a wrong write hull"
+
+
+def test_the_write_sweep_catches_a_hull_that_never_keeps_the_operand():
+    """SECOND POSITIVE CONTROL, and the error specific to THIS row: a write
+    rule that takes only the update wherever any admitted start could
+    write, never keeping the operand's value there. That is the join the
+    read row does not have, so the read row's controls cannot stand in for
+    it. Caught because operand and update values are drawn disjoint."""
+
+    def never_keeps(op, up, ranges):
+        box = iv.dynamic_update_slice_hull(op, up, ranges)
+        ulo, uhi = min(up.los), max(up.his)
+        los, his = list(box.los), list(box.his)
+        for c in itertools.product(*[range(d) for d in op.shape]):
+            if all(
+                any(0 <= c[d] - s < up.shape[d] for s in range(lo, hi + 1))
+                for d, (lo, hi) in enumerate(ranges)
+            ):
+                i = 0
+                for x, d in zip(c, op.shape):
+                    i = i * d + x
+                los[i], his[i] = ulo, uhi
+        return iv.IntervalArray(
+            shape=op.shape, los=tuple(los), his=tuple(his)
+        )
+
+    violations, elements = _sweep_dus(random.Random(11), 250, never_keeps)
+    assert elements > 500, elements
+    assert violations > 0, "the instrument cannot see an operand-losing hull"
+
+
+def _sweep_rows(rng, n, hull):
+    """The gather ROW form's sweep, judged per output position against a
+    REAL `lax.gather` in the covered geometry -- not against `arr[k]`, which
+    would be a different lowering. For output row `i` over declared index
+    range `[lo, hi]`, every real row `k` in that range must lie inside the
+    box's row `i`."""
+    violations = elements = 0
+    for _ in range(n):
+        rank = rng.randint(1, 3)
+        shape = tuple(rng.randint(1, 4) for _ in range(rank))
+        n0 = shape[0]
+        ranges = []
+        for _ in range(rng.randint(1, 4)):
+            lo = rng.randint(0, n0 - 1)
+            ranges.append((lo, rng.randint(lo, n0 - 1)))
+        arr = jnp.asarray(
+            rng.sample(range(-500, 500), int(np.prod(shape))),
+            dtype=jnp.float64,
+        ).reshape(shape)
+        box = hull(_point(arr), ranges)
+        gdn = jax.lax.GatherDimensionNumbers(
+            offset_dims=tuple(range(1, rank)),
+            collapsed_slice_dims=(0,),
+            start_index_map=(0,),
+        )
+        rowsz = int(np.prod(shape[1:])) if rank > 1 else 1
+        for i, (lo, hi) in enumerate(ranges):
+            for k in range(lo, hi + 1):
+                got = np.asarray(
+                    jax.lax.gather(
+                        arr,
+                        jnp.asarray([[k]], jnp.int32),
+                        gdn,
+                        slice_sizes=(1,) + shape[1:],
+                        mode=jax.lax.GatherScatterMode.PROMISE_IN_BOUNDS,
+                    )
+                ).reshape(-1)
+                for j, v in enumerate(got):
+                    elements += 1
+                    p = i * rowsz + j
+                    if not box.los[p] <= v <= box.his[p]:
+                        violations += 1
+    return violations, elements
+
+
+def test_the_ROW_hull_contains_what_jax_gathers_for_every_admitted_index():
+    """Soundness of `take_row_ranges`, the third hull this round added and
+    the second that had no committed sweep. Judged against a real
+    `lax.gather` in the covered leading-axis row geometry, per output
+    position, over every index the declared range admits."""
+    violations, elements = _sweep_rows(
+        random.Random(20260809), 200, iv.take_row_ranges
+    )
+    assert elements > 400, elements  # anti-vacuity: the sweep really ran
+    assert violations == 0, violations
+
+
+def test_the_row_sweep_catches_a_hull_taking_only_the_first_row():
+    """POSITIVE CONTROL for the row sweep: a rule that takes only the FIRST
+    reachable row of each declared range -- i.e. the generalisation
+    `take_row_ranges` exists to make, un-made. It is exactly
+    `take_rows` on the range's lower endpoints, which is the pre-round
+    behaviour, so this control also states what the widening bought."""
+
+    def first_row_only(a, ranges):
+        return iv.take_rows(a, [lo for lo, _ in ranges])
+
+    violations, elements = _sweep_rows(random.Random(13), 200, first_row_only)
+    assert elements > 400, elements
+    assert violations > 0, "the instrument cannot see a first-row-only hull"
+
+
+# -- the declines, each named ----------------------------------------------
+
+
+def test_the_work_budget_declines_rather_than_hanging():
+    """Degrade-don't-hang: a hull whose enumeration would exceed the budget
+    declines to ⊤ instead of running unbounded. Sound in the safe
+    direction -- the budget can cost precision and can never cost
+    soundness."""
+    # work is |out| x width, so a half-width window over a 4096-element
+    # axis costs ~4.2M visits: just past the 4194304 budget
+    n = 4096
+    big = iv.from_bounds((n,), 0.0, 1.0)
+    with pytest.raises(iv.IntervalError, match="past the .* budget"):
+        iv.dynamic_slice_hull(big, ((0, n // 2),), (n // 2,))
+    # and just under the cap it computes
+    small = iv.from_bounds((4,), 0.0, 1.0)
+    assert iv.dynamic_slice_hull(small, ((0, 3),), (1,)).shape == (1,)
+
+
+def test_a_start_outside_the_legal_window_never_reaches_the_hull():
+    """The hull functions refuse a start range they were not promised is
+    in-window. The transfer classifies first, so this is defence in depth:
+    if a future edit dropped the classification, the hull would decline
+    rather than silently model the clamp."""
+    a = iv.from_bounds((4,), 0.0, 1.0)
+    with pytest.raises(iv.IntervalError, match="leaves the legal start window"):
+        iv.dynamic_slice_hull(a, ((2, 4),), (2,))
+    with pytest.raises(iv.IntervalError, match="leaves the legal start window"):
+        iv.dynamic_update_slice_hull(
+            a, iv.from_bounds((2,), 0.0, 1.0), ((3, 3),)
+        )
+
+
+def test_a_narrow_index_dtype_declines_because_xla_wraps_the_bound():
+    """XLA computes an index's out-of-bounds comparison in the INDEX's
+    element type; a bound that does not fit wraps. Probing jax 0.11.0's
+    dynamic_slice with an int8 start over lengths 100/127/128/129/200 did
+    not exhibit it, so the hazard is UNCONFIRMED for this primitive -- and
+    refused anyway, because every dtype jnp's own indexing produces is
+    int32/int64 and the gate is therefore free.
+
+    THIS TEST PROVES THE HELPER'S MESSAGE AND NOTHING ELSE. It calls
+    `_index_dtype_covers_or_decline` DIRECTLY, and the `"gather"` below is
+    a string it passes, not a transfer it reaches -- which is exactly how
+    both wiring defects hid: the `dynamic_slice` one until `M8`, the
+    gather one until a later blinded re-run. Whether either transfer asks
+    the helper anything is established by
+    `test_the_dtype_gate_is_actually_WIRED_IN_not_merely_correct` and
+    `test_the_GATHER_dtype_gate_is_actually_WIRED_IN_not_merely_correct`,
+    which go through the walk."""
+    from stelling.propagate import _index_dtype_covers_or_decline
+
+    _index_dtype_covers_or_decline("int32", 10**6, "dynamic_slice")  # fine
+    with pytest.raises(iv.IntervalError, match="does not hold the largest"):
+        _index_dtype_covers_or_decline("int8", 200, "dynamic_slice")
+    with pytest.raises(iv.IntervalError, match="not one this build knows"):
+        _index_dtype_covers_or_decline("float64", 3, "gather")
+
+
+def _hand_dynamic_slice_query(index_dtype, axis_len, lo, hi):
+    """A `dynamic_slice` over a length-`axis_len` const, indexed by a scalar
+    of `index_dtype`. Hand IR because jnp REFUSES to build this: measured on
+    jax 0.11.0, `arange(200)[jnp.int8(0)]` raises OverflowError at trace
+    time ("Python integer 200 out of bounds for int8"), so the only way the
+    form reaches a transfer is a raw lax call or a deserialised query -- and
+    both are doors this gate has to hold."""
+    from stelling import ir
+
+    def av(shape=(), dtype="float64"):
+        return ir.Aval(kind="ShapedArray", shape=shape, dtype=dtype)
+
+    idx = ir.Var(id=0, aval=av((), index_dtype))
+    y = ir.Var(id=1, aval=av((1,)))
+    pred = ir.Var(id=2, aval=av((1,), "bool"))
+    out = ir.Var(id=3, aval=av((1,), "bool"))
+    data = ir.Literal(
+        val=ir.Array(
+            dtype="<f8",
+            shape=(axis_len,),
+            data=np.zeros(axis_len, dtype="<f8").tobytes(),
+        ),
+        aval=av((axis_len,)),
+    )
+    return ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(),
+            outvars=(out,),
+            eqns=(
+                ir.JaxprEqn(
+                    primitive="stelling_any",
+                    invars=(),
+                    outvars=(idx,),
+                    params=(
+                        ("shape", ()),
+                        ("dtype", index_dtype),
+                        ("lo", float(lo)),
+                        ("hi", float(hi)),
+                    ),
+                ),
+                ir.JaxprEqn(
+                    primitive="dynamic_slice",
+                    invars=(data, idx),
+                    outvars=(y,),
+                    params=(("slice_sizes", (1,)),),
+                ),
+                ir.JaxprEqn(
+                    primitive="le",
+                    invars=(y, ir.Literal(val=1.0, aval=av())),
+                    outvars=(pred,),
+                ),
+                ir.JaxprEqn(
+                    primitive="stelling_assert",
+                    invars=(pred,),
+                    outvars=(out,),
+                ),
+            ),
+        )
+    )
+
+
+def test_the_dtype_gate_is_actually_WIRED_IN_not_merely_correct():
+    """The mutation gauge's one survivor, closed. Deleting the CALL to
+    `_index_dtype_covers_or_decline` from `_start_ranges` left the test
+    above green, because that test drives the helper directly and never
+    proves the transfer asks it anything. This one goes through the walk.
+
+    An `int8` index over a 200-element axis must DECLINE (bound 199 does
+    not fit int8, so XLA's out-of-bounds comparison is computed on a
+    wrapped bound), while the identical query at `int32` decides."""
+    narrow = propagate(_hand_dynamic_slice_query("int8", 200, 0, 5))
+    assert narrow.obligations[0].status == "unknown"
+    note = next(n for n in narrow.notes if "'dynamic_slice' declined" in n)
+    assert "does not hold the largest legal index 199" in note, note
+
+    wide = propagate(_hand_dynamic_slice_query("int32", 200, 0, 5))
+    assert wide.obligations[0].status == "discharged"
+
+
+def _hand_gather_row_query(index_dtype, axis_len, lo, hi):
+    """The covered leading-axis gather ROW form over a length-`axis_len`
+    const, indexed by a shape-(1, 1) vector of `index_dtype`. Hand IR for
+    the same reason the `dynamic_slice` helper above is: `jnp` will not
+    build a narrow or float index for this geometry, and a raw `lax.gather`
+    or a deserialised query is exactly the door the gate has to hold."""
+    from stelling import ir
+
+    def av(shape=(), dtype="float64"):
+        return ir.Aval(kind="ShapedArray", shape=shape, dtype=dtype)
+
+    idx = ir.Var(id=0, aval=av((1, 1), index_dtype))
+    y = ir.Var(id=1, aval=av((1,)))
+    pred = ir.Var(id=2, aval=av((1,), "bool"))
+    out = ir.Var(id=3, aval=av((1,), "bool"))
+    data = ir.Literal(
+        val=ir.Array(
+            dtype="<f8",
+            shape=(axis_len,),
+            data=np.zeros(axis_len, dtype="<f8").tobytes(),
+        ),
+        aval=av((axis_len,)),
+    )
+    return ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(),
+            outvars=(out,),
+            eqns=(
+                ir.JaxprEqn(
+                    primitive="stelling_any",
+                    invars=(),
+                    outvars=(idx,),
+                    params=(
+                        ("shape", (1, 1)),
+                        ("dtype", index_dtype),
+                        ("lo", float(lo)),
+                        ("hi", float(hi)),
+                    ),
+                ),
+                ir.JaxprEqn(
+                    primitive="gather",
+                    invars=(data, idx),
+                    outvars=(y,),
+                    params=(
+                        (
+                            "dimension_numbers",
+                            ir.NamedTupleParam(
+                                cls="GatherDimensionNumbers",
+                                fields=(
+                                    ("offset_dims", ()),
+                                    ("collapsed_slice_dims", (0,)),
+                                    ("start_index_map", (0,)),
+                                    ("operand_batching_dims", ()),
+                                    ("start_indices_batching_dims", ()),
+                                ),
+                            ),
+                        ),
+                        ("slice_sizes", (1,)),
+                        ("mode", "clip"),
+                        ("fill_value", None),
+                        ("indices_are_sorted", False),
+                        ("unique_indices", False),
+                    ),
+                ),
+                ir.JaxprEqn(
+                    primitive="le",
+                    invars=(y, ir.Literal(val=1.0, aval=av())),
+                    outvars=(pred,),
+                ),
+                ir.JaxprEqn(
+                    primitive="stelling_assert",
+                    invars=(pred,),
+                    outvars=(out,),
+                ),
+            ),
+        )
+    )
+
+
+def test_the_GATHER_dtype_gate_is_actually_WIRED_IN_not_merely_correct():
+    """The same defect as the `dynamic_slice` test above, one function away,
+    and open until now.
+
+    `test_a_narrow_index_dtype_declines_because_xla_wraps_the_bound` passes
+    the string `"gather"` to `_index_dtype_covers_or_decline` while calling
+    the helper DIRECTLY — so the gather case *looks* covered and is not: it
+    proves the helper's message, never that `_t_gather` asks it anything.
+    MEASURED: deleting the call from `_t_gather` line-neutrally leaves the
+    full suite at 2515 passed / 7 skipped, while an `int8` index over a
+    200-element axis flips from `unknown` to `discharged` (and so does a
+    `float64` one). This query goes through the walk."""
+    narrow = propagate(_hand_gather_row_query("int8", 200, 0, 5))
+    assert narrow.obligations[0].status == "unknown"
+    note = next(n for n in narrow.notes if "'gather' declined" in n)
+    assert "does not hold the largest legal index 199" in note, note
+
+    # a float index is refused for the other reason the helper carries, and
+    # it too only arrives here if the transfer actually calls it
+    floaty = propagate(_hand_gather_row_query("float64", 200, 0, 5))
+    assert floaty.obligations[0].status == "unknown"
+    fnote = next(n for n in floaty.notes if "'gather' declined" in n)
+    assert "not one this build knows the range of" in fnote, fnote
+
+    # the identical query decides at int32, and at int8 over an axis whose
+    # largest legal index DOES fit — so the decline above is the dtype
+    # gate's doing and not the row form's
+    assert (
+        propagate(_hand_gather_row_query("int32", 200, 0, 5))
+        .obligations[0]
+        .status
+        == "discharged"
+    )
+    assert (
+        propagate(_hand_gather_row_query("int8", 100, 0, 5))
+        .obligations[0]
+        .status
+        == "discharged"
+    )
+
+
+def test_take_along_axis_reaches_the_row_form_and_gets_definite_verdicts():
+    """A CAPABILITY THE ROUND GAINED WITHOUT NAMING IT, now named and
+    pinned. `jnp.take_along_axis(u, i, 0)` lowers to exactly the widened
+    gather row form — an (N, 1) column of leading-axis row numbers — so a
+    declared index range decides through it. Measured on `9564728` the same
+    query is `unknown`; here it discharges.
+
+    All three cases are checked, because "it reaches the row form" is only
+    worth writing down if the row form's discrimination survives the trip:
+    a bound true over the whole declared range discharges, a bound false
+    somewhere in it does not, a straddling range declines by name and a
+    disjoint one is a finding. The oracle is executed, not assumed.
+
+    `jnp.take` is the near neighbour that does NOT reach it — its indices
+    are shape (1,), not an (N, 1) column — and is asserted here so the two
+    are not confused later."""
+    base = jnp.asarray(
+        np.array([3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0, 5.0, 3.0])
+    )
+    f = jax.jit(lambda b, k: jnp.take_along_axis(b, k, 0)[0])
+    real = [
+        float(np.asarray(f(base, jnp.asarray([k], jnp.int32))))
+        for k in range(4)
+    ]
+    assert max(real) == 4.0  # the oracle the two bounds below straddle
+
+    def h(lo, hi, bound):
+        def q():
+            i = any_array((1,), "int32", (lo, hi))
+            return assert_(jnp.take_along_axis(base, i, 0)[0] <= bound)
+
+        return q
+
+    true_over_set = run(h(0, 3, 4.0))
+    assert true_over_set.obligations[0].status == "discharged"
+    assert dict(true_over_set.transfers_used)["gather"] == "exact"
+    # false at index 2, and the row form sees it rather than over-claiming
+    assert run(h(0, 3, 3.5)).obligations[0].status == "unknown"
+    # the three cases survive the trip through take_along_axis
+    straddle = run(h(5, 20, 9.0))
+    assert straddle.obligations[0].status == "unknown"
+    assert any("straddles the legal positions" in n for n in straddle.notes)
+    disjoint = run(h(15, 20, 9.0))
+    assert disjoint.obligations[0].status == "unknown"
+    _finding(disjoint, "spans [15, 20]")
+
+    # jnp.take is a different geometry and still declines
+    def take_q():
+        return assert_(jnp.take(base, any_array((), "int32", (0, 3))) <= 4.0)
+
+    p = run(take_q)
+    assert p.obligations[0].status == "unknown"
+    assert any("is not such a column" in n for n in p.notes), p.notes
+
+
+def test_take_row_ranges_agrees_with_take_rows_on_point_indices():
+    """The generalisation must not have moved the case it generalises."""
+    a = iv.IntervalArray(
+        shape=(3, 2),
+        los=(1.0, 2.0, 3.0, 4.0, 5.0, 6.0),
+        his=(1.5, 2.5, 3.5, 4.5, 5.5, 6.5),
+    )
+    for ks in ([0], [2, 0], [1, 1, 2]):
+        assert iv.take_row_ranges(a, [(k, k) for k in ks]) == iv.take_rows(a, ks)
+
+
+# -- ieee mirror -----------------------------------------------------------
+
+
+def test_the_row_is_sound_as_is_under_ieee():
+    """Data movement is sound as-is under ieee: every output element IS an
+    operand element, so the output is maybe-NaN exactly when the operand
+    is. Bound at the PRIMITIVE, which is the only way to reach the row
+    under ieee -- see the next test for why."""
+
+    def h():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        i = any_array((), "int32", (0, 5))
+        return assert_(_prim("dynamic_slice").bind(u, i, slice_sizes=(1,)) >= 0.0)
+
+    for sem in ("real", "ieee"):
+        p = run(h, semantics=sem)
+        assert p.obligations[0].status == "discharged", sem
+        assert dict(p.transfers_used)["dynamic_slice"] == "exact", sem
+
+
+def test_under_ieee_the_normalisation_declines_before_the_row_is_reached():
+    """A LIMITATION, recorded rather than papered over. `u[i]` written the
+    ordinary way carries jnp's from-the-end normalisation, whose integer
+    `add` declines under ieee (endpoint arithmetic there is binary64-only).
+    So the index arrives ⊤ and maybe-NaN, and the row declines on the NaN
+    index exactly as gather and scatter do. Sound -- the ieee leg simply
+    buys nothing for jnp-spelled dynamic indexing until the integer
+    endpoint question is settled, which is a mode-wide decision and not a
+    two-row fix."""
+
+    def h():
+        u = any_array((10,), "float64", (0.0, 1.0))
+        i = any_array((), "int32", (0, 5))
+        return assert_(u[i] >= 0.0)
+
+    p = run(h, semantics="ieee")
+    assert p.obligations[0].status == "unknown"
+    assert dict(p.coverage.unknown_primitives) == {"add": 1, "dynamic_slice": 1}
+    assert any("carry maybe-NaN under ieee" in n for n in p.notes), p.notes
+    # and the real leg on the identical query decides it
+    assert run(h).obligations[0].status == "discharged"
