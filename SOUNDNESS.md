@@ -4335,10 +4335,30 @@ verdicts:
   becomes `0`. Measured in all four cells:
   `lax.convert_element_type(Colour.RED, jnp.int8)` with `Colour.RED = 256`
   executes the `except` once and returns `0`. That route is real and is
-  the one the `TODO` describes. It is not the route any of the eleven
-  doors below takes. *(INFERRED, not measured: because the `except` body
-  runs on none of those 1144/1232 runs, deleting the `except` clause alone
-  cannot change any of them — but deleting the whole `try` block WOULD
+  the one the `TODO` describes.
+
+  **AND TWO OF THE ELEVEN DOORS BELOW TAKE IT. THIS PARAGRAPH SAID THEY DO
+  NOT, AND THAT IS CORRECTED HERE RATHER THAN QUIETLY SWAPPED.** It read:
+  *"It is not the route any of the eleven doors below takes."* Measured at
+  `b2e3a15`, `sys.monitoring` LINE events local to that same code object,
+  in all four cells: with `class Colour(IntEnum): RED = 256`,
+  **`jnp.full((), Colour.RED, jnp.int8)` and `jnp.full_like(x, Colour.RED)`
+  each execute `except OverflowError:` — `lax.py:1753` at 0.11.0,
+  `lax.py:1746` at 0.10.2 — exactly once, and return `0`**; identical for
+  a bare `class MyInt(int)`. Per-entry attribution confirms the swallowed
+  operand IS the constant (`Colour(<Colour.RED: 256>) -> int8`), not some
+  other entry of the same call. The constant class is the one this entry
+  introduces one sentence earlier, so the route and the doors were never
+  disjoint populations; the sentence simply had not been driven through
+  them. The other nine are unchanged: the three construction doors RAISE
+  for an `int` subclass (it passes the `isinstance(object, (bool, int,
+  float, complex))` gate), and the six remaining doors never reach the
+  guarded call. *(INFERRED, not measured, and now narrowed by the above:
+  because the `except` body runs on none of the 1144/1232 runs — whose
+  four spellings do not include an `int` subclass — deleting the `except`
+  clause alone cannot change any of THOSE; but it WOULD change the two
+  `int`-subclass rows just measured, which would raise instead of
+  returning `0`, and deleting the whole `try` block would additionally
   change the `np.generic` rows, whose wrap is the `try` body.)*
 
   **The line range is an installed-dependency figure, not a repository
