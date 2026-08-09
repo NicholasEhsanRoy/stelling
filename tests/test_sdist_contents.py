@@ -145,9 +145,38 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
-import tomllib
 import zipfile
+
+# `tomllib` IS 3.11+, AND THIS FILE SHIPS TO 3.10 USERS. It was spelled
+# `import tomllib` at column 0 here, which is a COLLECTION error on the floor
+# `pyproject.toml` declares — and a collection error under default flags takes
+# down the whole session, not this module. Measured at 650e678 on uv-managed
+# CPython 3.10.20, core installed, `JAX_ENABLE_X64=1`::
+#
+#     pytest -q              rc=2, junitxml tests=48 failures=0 errors=1
+#                            skipped=47, "Interrupted: 1 error during collection"
+#     pytest --collect-only  1335 tests collected, 1 error
+#
+# against 1352 collected and no error on CPython 3.11.15. So a 3.10 user who
+# ran the suite the sdist ships got exit 2 and zero tests.
+#
+# The fallback's provider is not a hope: `pytest` itself declares
+# `tomli>=1; python_version < "3.11"` (read off `importlib.metadata.requires`
+# for pytest 9.1.1 in a 3.10.20 venv, where `tomli 2.4.1` was installed by
+# asking for pytest alone), so an environment able to run this suite at all
+# already has it. It is named in `[dependency-groups] dev` as well, because a
+# dependency borrowed from another package's requirement is one that package
+# can drop without anything here noticing.
+#
+# THE CLASS is held by `test_no_module_imports_a_stdlib_module_the_floor_lacks`
+# in `tests/test_zero_dep_import_discipline.py`, beside the heavy-import scan
+# whose blast radius is identical.
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # the 3.10 floor
+    import tomli as tomllib
 
 import pytest
 

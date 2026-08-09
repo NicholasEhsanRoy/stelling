@@ -90,11 +90,19 @@ Issues = "https://github.com/NicholasEhsanRoy/stelling/issues"
 # runs WITHOUT hypothesis, so "the property suite examined nothing" can never
 # read as "the property suite found nothing". See `tests/property/README.md`
 # and `tools/property_venv.sh` for the one-command local environment.
+# `tomli` is the 3.10 half of `tomllib`, which arrived in 3.11 while this
+# project's floor is 3.10 and the sdist ships `/tests`.
+# `tests/test_sdist_contents.py` parses this file, and spelling that parse
+# `import tomllib` at module scope made the whole suite uncollectable on the
+# floor — exit 2, zero tests. `pytest` already requires `tomli` below 3.11, so
+# no environment gains a package here; what it gains is a DECLARATION, so the
+# suite does not depend on a requirement another project is free to drop.
 dev = [
   "hypothesis>=6.165.2,<7",
   "pre-commit>=4.0",
   "pytest>=8.0",
   "reuse>=5.0",
+  'tomli>=1.1.0; python_version < "3.11"',
 ]
 
 [tool.hatch.version]

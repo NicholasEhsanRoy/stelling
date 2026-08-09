@@ -1,7 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 # SPDX-License-Identifier: Apache-2.0
 
-"""No test module may import a heavy dependency at module scope.
+"""No shipped module may import, at module scope, a name its target lacks.
+
+Two axes, one failure. A *heavy* dependency (jax, hypothesis, …) is absent
+from the environment; a *too-new stdlib* module (``tomllib``) is absent from
+the interpreter. Either one, spelled at column 0, is a COLLECTION error, and
+under default flags a collection error aborts the whole run.
 
 The zero-dep CI job installs stelling and nothing else. A bare
 ``import jax`` at module scope in a test file is a COLLECTION error there, and
@@ -17,6 +22,29 @@ Each was found by CI rather than locally, because locally jax is always there.
 The rule: reach a heavy dependency through ``pytest.importorskip``, and place
 that call BEFORE the first import that needs it.
 
+THE SECOND AXIS ARRIVED THE SAME WAY AND WAS SHIPPED. ``tomllib`` is 3.11+;
+``pyproject.toml`` declares ``requires-python = ">=3.10"`` and the sdist ships
+``/tests``. ``tests/test_sdist_contents.py`` spelled ``import tomllib`` at
+column 0, and at 650e678 on uv-managed CPython 3.10.20 with the core
+installed, ``pytest -q`` came back rc=2 — junitxml ``tests=48 failures=0
+errors=1 skipped=47``, ``Interrupted: 1 error during collection`` — while
+``--collect-only`` reported 1335 collected and 1 error against 1352 clean on
+CPython 3.11.15. A 3.10 user running the shipped suite got zero tests. Nothing
+in the repository was watching that axis, which is why
+:func:`test_no_module_imports_a_stdlib_module_the_floor_lacks` exists; the rule
+there is the same shape as ``importorskip`` and just as cheap — put the import
+behind a ``sys.version_info`` branch, which indents it off column 0.
+
+WHAT THAT CHECK DOES NOT BUY, stated here rather than left to be discovered:
+it is live only on an interpreter ABOVE the floor (see
+:func:`_too_new_for_the_floor`), it is a *static* read of import statements, and
+it says nothing about SYNTAX. A construct newer than the floor — the PEP 701
+nested f-string that made this same file uncollectable one commit earlier — is
+a different defect with the same blast radius, and ``ast.parse(src,
+feature_version=(3, 10))`` was measured to PARSE that construct on a 3.12 host,
+so no same-interpreter check can see it. Catching that one needs a real floor
+interpreter, and no job in ``.github/workflows/`` runs one.
+
 This module is deliberately dependency-free and reads the files as text. It
 must never import the things it is checking for. It does import
 ``tests/conftest.py``, which is one of the files it checks — that costs
@@ -29,6 +57,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import sys
 
 # The one import, and it is the runner's own conftest: dependency-free
 # (``__future__``, ``fnmatch``, ``os``, ``pathlib``, ``pytest``) and already
@@ -49,6 +78,309 @@ _MODULE_SCOPE_IMPORT = re.compile(
     r"^(?:import|from)\s+(" + "|".join(HEAVY) + r")(?:\s|\.|$)"
 )
 _SKIP = re.compile(r"importorskip\(\s*[\"'](" + "|".join(HEAVY) + r")[\"']")
+
+REPO = pathlib.Path(__file__).resolve().parents[1]
+_PYPROJECT = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+# read as TEXT, and that is not a stylistic choice: the one parser for this
+# file in the stdlib is `tomllib`, which is the very name this check exists to
+# keep out of a module-scope import. A checker that needed the thing it checks
+# for could not run on the floor it is checking.
+_UNCOMMENTED = "\n".join(
+    line for line in _PYPROJECT.splitlines() if not line.lstrip().startswith("#")
+)
+
+
+def _declared_floor() -> tuple[int, int]:
+    """``requires-python`` from `pyproject.toml`, as a ``(major, minor)``."""
+    m = re.search(r'^requires-python\s*=\s*"\s*>=\s*(\d+)\.(\d+)', _UNCOMMENTED, re.M)
+    assert m, (
+        "pyproject.toml has no `requires-python = \">=X.Y\"` this can read, so "
+        "the floor the table below is written against cannot be confirmed"
+    )
+    return (int(m.group(1)), int(m.group(2)))
+
+
+# THE FLOOR'S OWN STANDARD LIBRARY, recorded rather than reasoned about. This
+# is `sys.stdlib_module_names` read off uv-managed CPython 3.10.20 on
+# 2026-08-09 — all 303 names, private ones included, reproducible in one line:
+#
+#     python3.10 -c "import sys; print(sorted(sys.stdlib_module_names))"
+#
+# A SET, NOT A TABLE OF ADDITIONS, and that is the whole design. A table listing
+# "modules added after 3.10" is short the moment a newer interpreter ships one
+# nobody added to it, and it is short SILENTLY. The check below instead asks a
+# question the running interpreter can answer completely: is this name stdlib
+# HERE and absent THERE. Differenced when this was written: 3.11.15 minus
+# 3.10.20 is exactly {'_tokenize', '_typing', 'tomllib'} and 3.12.3 minus
+# 3.11.15 is {'_pydatetime', '_pylong', '_sha2'} — but the check does not
+# depend on that difference being current, which is the point of recording the
+# set instead. The private names are kept for the same reason `__future__` has
+# to be here: filtering to "public" names would make `from __future__ import
+# annotations`, which every file in this tree opens with, look like an import
+# the floor lacks.
+#
+# THE MIRROR DIRECTION IS OUT OF SCOPE AND SAID SO RATHER THAN LEFT IMPLIED: a
+# module the floor has and a later interpreter dropped (3.10.20 minus 3.12.3 is
+# {'_bootsubprocess', '_sha256', '_sha512', 'asynchat', 'asyncore', 'binhex',
+# 'distutils', 'imp', 'smtpd'}) breaks the NEWER interpreter, where this suite
+# runs every day and the failure is immediate. This set cannot see that one,
+# and does not need to.
+_FLOOR_STDLIB = frozenset(
+    """
+    __future__ _abc _aix_support _ast _asyncio _bisect _blake2
+    _bootsubprocess _bz2 _codecs _codecs_cn _codecs_hk _codecs_iso2022
+    _codecs_jp _codecs_kr _codecs_tw _collections _collections_abc
+    _compat_pickle _compression _contextvars _crypt _csv _ctypes _curses
+    _curses_panel _datetime _dbm _decimal _elementtree _frozen_importlib
+    _frozen_importlib_external _functools _gdbm _hashlib _heapq _imp _io
+    _json _locale _lsprof _lzma _markupbase _md5 _msi _multibytecodec
+    _multiprocessing _opcode _operator _osx_support _overlapped _pickle
+    _posixshmem _posixsubprocess _py_abc _pydecimal _pyio _queue _random
+    _scproxy _sha1 _sha256 _sha3 _sha512 _signal _sitebuiltins _socket
+    _sqlite3 _sre _ssl _stat _statistics _string _strptime _struct
+    _symtable _thread _threading_local _tkinter _tracemalloc _uuid
+    _warnings _weakref _weakrefset _winapi _zoneinfo abc aifc
+    antigravity argparse array ast asynchat asyncio asyncore atexit
+    audioop base64 bdb binascii binhex bisect builtins bz2 cProfile
+    calendar cgi cgitb chunk cmath cmd code codecs codeop collections
+    colorsys compileall concurrent configparser contextlib contextvars
+    copy copyreg crypt csv ctypes curses dataclasses datetime dbm
+    decimal difflib dis distutils doctest email encodings ensurepip enum
+    errno faulthandler fcntl filecmp fileinput fnmatch fractions ftplib
+    functools gc genericpath getopt getpass gettext glob graphlib grp
+    gzip hashlib heapq hmac html http idlelib imaplib imghdr imp
+    importlib inspect io ipaddress itertools json keyword lib2to3
+    linecache locale logging lzma mailbox mailcap marshal math mimetypes
+    mmap modulefinder msilib msvcrt multiprocessing netrc nis nntplib nt
+    ntpath nturl2path numbers opcode operator optparse os ossaudiodev
+    pathlib pdb pickle pickletools pipes pkgutil platform plistlib
+    poplib posix posixpath pprint profile pstats pty pwd py_compile
+    pyclbr pydoc pydoc_data pyexpat queue quopri random re readline
+    reprlib resource rlcompleter runpy sched secrets select selectors
+    shelve shlex shutil signal site smtpd smtplib sndhdr socket
+    socketserver spwd sqlite3 sre_compile sre_constants sre_parse ssl
+    stat statistics string stringprep struct subprocess sunau symtable
+    sys sysconfig syslog tabnanny tarfile telnetlib tempfile termios
+    textwrap this threading time timeit tkinter token tokenize trace
+    traceback tracemalloc tty turtle turtledemo types typing unicodedata
+    unittest urllib uu uuid venv warnings wave weakref webbrowser winreg
+    winsound wsgiref xdrlib xml xmlrpc zipapp zipfile zipimport zlib
+    zoneinfo
+    """.split()
+)
+# the interpreter `_FLOOR_STDLIB` was read off, so the pair can be checked
+# against what `pyproject.toml` currently declares
+_FLOOR_MEASURED_ON = (3, 10)
+
+# any module-scope import, of anything: column 0, not inside a function, try or
+# if. Which of the names it yields are a problem is decided against the two
+# stdlib sets, not by a list written here.
+_ANY_MODULE_SCOPE_IMPORT = re.compile(r"^(import|from)\s+([A-Za-z_][A-Za-z_0-9]*)")
+
+# Every allowlisted sdist root that holds a `.py`. DERIVED from the allowlist
+# rather than typed, because a hand-typed list of areas to sweep is how a
+# "sweep of the shipped tree" ends up covering 6 roots out of 22.
+_SHIPPED_PY_ROOTS_PIN = ("corpus", "docs", "src", "tests", "tools")
+
+
+def _sdist_roots() -> list[str]:
+    """The `[tool.hatch.build.targets.sdist]` allowlist's root entries."""
+    block = re.search(
+        r"\[tool\.hatch\.build\.targets\.sdist\]\s*\ninclude\s*=\s*\[(.*?)^\]",
+        _UNCOMMENTED,
+        re.S | re.M,
+    )
+    assert block, "the sdist allowlist is not where this expects it"
+    return [m.group(1).lstrip("/") for m in re.finditer(r'"([^"]+)"', block.group(1))]
+
+
+def _shipped_python_files() -> list[pathlib.Path]:
+    """Every `.py` under a root the sdist ships.
+
+    Wider than :func:`_scanned` on purpose, because the failure is wider. What
+    changes across the areas is only the blast radius, never the cause:
+
+    * ``tests/`` — a collection error, total, exit 2 and no tests at all;
+    * ``src/`` — ``import stelling`` raises for a wheel user on the floor;
+    * ``tools/``, ``docs/``, ``corpus/`` — the script dies when run, and each
+      of these is referenced by something that ships (``tests/property/README``
+      points at ``tools/property_check.py``, which is why ``/tools`` is in the
+      allowlist at all).
+
+    ``scratchpad/`` is excluded because it is not in the allowlist and does not
+    ship; that is read off the allowlist here, not assumed.
+    """
+    out: list[pathlib.Path] = []
+    for root in _sdist_roots():
+        base = REPO / root
+        if base.is_dir():
+            out.extend(sorted(base.rglob("*.py")))
+        elif base.is_file() and base.suffix == ".py":
+            out.append(base)
+    return [p for p in out if "__pycache__" not in p.parts]
+
+
+def _module_scope_imports(text: str):
+    """``(lineno, top-level name, line)`` for every column-0 import."""
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        m = _ANY_MODULE_SCOPE_IMPORT.match(line)
+        if not m:
+            continue
+        if m.group(1) == "import":
+            # `import os, tomllib` is one statement and two names
+            rest = line[len("import") :].split("#", 1)[0]
+            for piece in rest.split(","):
+                name = piece.strip().split(" as ")[0].strip().split(".")[0]
+                if name.isidentifier():
+                    yield lineno, name, line.strip()
+        else:
+            yield lineno, m.group(2), line.strip()
+
+
+def _too_new_for_the_floor(name: str) -> bool:
+    """Stdlib on the interpreter running this, absent from the floor's.
+
+    BOTH HALVES ARE LOAD-BEARING, and the first is what makes this check LIVE
+    ONLY ABOVE THE FLOOR. "Stdlib here" is how a too-new stdlib name is told
+    apart from an ordinary third-party one (which is the other axis's
+    business), and it is read off the interpreter running the suite. Run this
+    suite ON 3.10 and ``tomllib`` is not stdlib there either, so this returns
+    False and the scan finds nothing — vacuous, by construction.
+
+    That is not a hole, because on the floor the interpreter performs the check
+    itself and far more loudly: the import raises and collection stops. What
+    the scan buys is seeing it from 3.11 and 3.12, where the defect is
+    invisible — which is every environment this project actually develops and
+    releases in, and is exactly how ``import tomllib`` shipped.
+    """
+    return name in sys.stdlib_module_names and name not in _FLOOR_STDLIB
+
+
+def _floor_offenders():
+    bad = []
+    for path in _shipped_python_files():
+        text = path.read_text(encoding="utf-8")
+        for lineno, name, line in _module_scope_imports(text):
+            if _too_new_for_the_floor(name):
+                bad.append((path.relative_to(REPO).as_posix(), lineno, name, line))
+    return bad
+
+
+def test_no_module_imports_a_stdlib_module_the_floor_lacks():
+    """The class `import tomllib` at column 0 belongs to, held shut.
+
+    This file is NOT exempted from its own scan, unlike the heavy-import one.
+    Every mention of a too-new name here is indented or inside a string, so the
+    column-0 rule leaves it alone with no exception needed — and an exception
+    is what would have let the checker ship the defect it checks for.
+    """
+    floor = _declared_floor()
+    assert floor == _FLOOR_MEASURED_ON, (
+        f"`requires-python` now declares {floor[0]}.{floor[1]} while "
+        f"`_FLOOR_STDLIB` was read off {_FLOOR_MEASURED_ON[0]}."
+        f"{_FLOOR_MEASURED_ON[1]}. Re-read `sys.stdlib_module_names` on the new "
+        "floor interpreter; until then this check is measuring the wrong one."
+    )
+    bad = _floor_offenders()
+    assert not bad, (
+        f"these module-scope imports do not resolve on CPython "
+        f"{floor[0]}.{floor[1]}, the floor `pyproject.toml` declares, and the "
+        "sdist ships every one of these files. In a test module that is a "
+        "COLLECTION error and the whole session goes with it — exit 2, zero "
+        "tests. Put the import behind a `sys.version_info` branch (which "
+        "indents it off column 0) with a fallback, and declare the fallback:\n"
+        + "\n".join(
+            f"  {name}:{lineno}  {src}   (`{dep}` is not in the "
+            f"{floor[0]}.{floor[1]} stdlib)"
+            for name, lineno, dep, src in bad
+        )
+    )
+
+
+def test_the_floor_checker_can_actually_see_an_offender():
+    """Anti-vacuity, same argument as the heavy scan's.
+
+    Three ways this check could be green while blind — a regex that matches
+    nothing, a floor set that contains everything, a scan over no files — and
+    the first two are driven here on the exact line that shipped. The third is
+    :func:`test_the_shipped_sweep_covers_every_allowlisted_root_with_python_in_it`.
+    """
+    got = list(_module_scope_imports("import tomllib\n"))
+    assert got == [(1, "tomllib", "import tomllib")], got
+    assert [n for _, n, _ in _module_scope_imports("from tomllib import loads")] == [
+        "tomllib"
+    ]
+    assert [n for _, n, _ in _module_scope_imports("import os, tomllib")] == [
+        "os",
+        "tomllib",
+    ]
+    assert [n for _, n, _ in _module_scope_imports("import tomllib  # noqa")] == [
+        "tomllib"
+    ]
+    # …and must NOT fire on the forms that are fine
+    assert not list(_module_scope_imports("    import tomllib"))  # version branch
+    assert not list(_module_scope_imports("# import tomllib"))
+    assert [n for _, n, _ in _module_scope_imports("import tomli as tomllib")] == [
+        "tomli"
+    ]
+
+    # the verdict half: the name that shipped is too new, an ordinary one is
+    # not, and a third-party name is not this axis's business at all
+    above_the_floor = sys.version_info[:2] > _FLOOR_MEASURED_ON
+    assert _too_new_for_the_floor("tomllib") is above_the_floor, (
+        "on an interpreter above the floor `tomllib` must read as too new; ON "
+        "the floor it must not, because it is not stdlib there either and the "
+        "interpreter's own ImportError is what does the checking"
+    )
+    assert not _too_new_for_the_floor("pathlib")
+    assert not _too_new_for_the_floor("pytest")
+    # the floor set is a real reading, not an empty set that would pass
+    # everything nor the running interpreter's own set that would pass nothing
+    assert len(_FLOOR_STDLIB) == 303
+    assert {"tarfile", "zipfile", "subprocess", "__future__"} <= _FLOOR_STDLIB
+    assert "tomllib" not in _FLOOR_STDLIB
+    if sys.version_info[:2] == _FLOOR_MEASURED_ON:
+        # the one interpreter that can audit the recording itself, and it does:
+        # run this suite on the floor and `_FLOOR_STDLIB` is compared name for
+        # name against the thing it claims to be a copy of
+        assert _FLOOR_STDLIB == set(sys.stdlib_module_names)
+    else:
+        # …and anywhere else it must NOT be the running interpreter's set,
+        # which is what a copy taken from the wrong python would look like
+        assert _FLOOR_STDLIB != set(sys.stdlib_module_names)
+
+
+def test_the_shipped_sweep_covers_every_allowlisted_root_with_python_in_it():
+    """The scope of the sweep is DERIVED from the allowlist, not typed.
+
+    A hand-maintained list of directories to sweep is the failure mode this
+    guards: it silently stops covering a root the moment the allowlist gains
+    one. So the roots come out of `pyproject.toml`, and the pin below is only a
+    cross-check that the derivation returned what a reader expects.
+    """
+    roots = _sdist_roots()
+    assert len(roots) >= 20, roots
+    with_python = tuple(
+        sorted(
+            r
+            for r in roots
+            if (REPO / r).is_dir() and any((REPO / r).rglob("*.py"))
+        )
+    )
+    assert with_python == _SHIPPED_PY_ROOTS_PIN, (
+        "the set of shipped roots containing Python has moved; the sweep "
+        f"follows it automatically, but the pin has not: {with_python}"
+    )
+    files = _shipped_python_files()
+    assert len(files) > 100, len(files)
+    # the file whose module-scope `import tomllib` shipped, and `src/`, which
+    # a wheel user imports
+    rel = {p.relative_to(REPO).as_posix() for p in files}
+    assert "tests/test_sdist_contents.py" in rel
+    assert "src/stelling/solvers.py" in rel
+    assert "tools/property_check.py" in rel
+    # and nothing from the one area that does NOT ship
+    assert not any(r.startswith("scratchpad/") for r in rel)
 
 
 def _scanned():

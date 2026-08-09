@@ -453,13 +453,31 @@ def test_an_UNRENDERABLE_numeral_falls_back_to_the_unfolded_emission():
     cliff rather than a curiosity: ``c ** 32`` at c = 1e-100 folds to a
     numeral; ``c ** 64`` — a single step, at this row's own
     ``INTEGER_POW_EXPANSION_CAP`` — does not, and must emit the unfolded
-    product instead of raising."""
+    product instead of raising.
+
+    THE MATCH IS ON THE CAP, NOT ON CPYTHON'S WORDING, and that is a repair
+    rather than a preference. It read ``match="4300 digits"``, and the wording
+    differs across interpreters `pyproject.toml` declares support for.
+    Measured 2026-08-09 on ``str(2**60000)``::
+
+        3.10.20   Exceeds the limit (4300) for integer string conversion; …
+        3.11.15   Exceeds the limit (4300 digits) for integer string conversion; …
+        3.12.3    Exceeds the limit (4300 digits) for integer string conversion; …
+
+    so this test FAILED on the floor, on a tree with nothing wrong with it. It
+    was invisible because the suite could not be COLLECTED on 3.10 at all
+    (``import tomllib`` in `tests/test_sdist_contents.py`, repaired alongside
+    this); making collection work is what surfaced it. All three interpreters
+    report 4300 from ``sys.get_int_max_str_digits()`` — which is the thing the
+    emission gate below actually depends on, and it is asserted on its own line
+    already. The docstring's "4300 since 3.11" is left as written: 3.10.20 has
+    the cap by backport, and the sentence is about where it arrived."""
     import sys
 
     assert sys.get_int_max_str_digits() == 4300, "the cap this pins"
     tiny = Fraction(1e-100)
     assert len(str((tiny ** 32).denominator)) < 4300
-    with pytest.raises(ValueError, match="4300 digits"):
+    with pytest.raises(ValueError, match=r"Exceeds the limit \(4300"):
         str((tiny ** 64).denominator)
 
     def q(y):
