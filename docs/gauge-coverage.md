@@ -46,6 +46,16 @@ transfer-side figures are a different population at a different date and are
 not restated here. `docs/supported-primitives.md` is generated from the live
 registries and is the current count of both.
 
+**As of the index-bounds round (2026-08-09) the registry is 48 and the
+emission set is unchanged** — `dynamic_slice` and `dynamic_update_slice` are
+transfer-only rows, so they join the "no emission row" population. Both are
+gauged on the TRANSFER face and by the strongest instrument in this table's
+sense: a containment sweep that enumerates the whole declared index set and
+executes the real primitive at every point, driven in BOTH directions by five
+deliberately wrong hulls, two of them committed
+(`tests/test_index_bounds.py`, `design/index-bounds-round.md`). Neither face
+is gauged for emission, because neither has one.
+
 ## "Gauged" is a claim about a SPACE, not about a row
 
 A row is gauged over the shapes something measured it on, and a sweep is blind

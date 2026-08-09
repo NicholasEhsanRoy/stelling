@@ -62,9 +62,11 @@ def run(h, **kw):
 
 
 def _prim(name):
-    from jax._src.lax import slicing as S
-
-    return getattr(S, f"{name}_p")
+    """The primitive itself, via jax's PUBLIC alias (`jax.lax.dynamic_slice_p`
+    exists on both tested series). Binding it directly is the only way to
+    reach the transfer without jnp's from-the-end normalisation in front,
+    which is exactly what several measurements below need to separate."""
+    return getattr(jax.lax, f"{name}_p")
 
 
 def _point(arr):

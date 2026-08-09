@@ -650,6 +650,15 @@ _REQUIRED_PARAMS: dict[str, frozenset[str]] = {
     "convert_element_type": frozenset({"new_dtype", "sharding", "weak_type"}),
     "dot_general": frozenset({"dimension_numbers", "out_sharding", "precision",
                               "preferred_element_type"}),
+    # MEASURED on jax 0.11.0 and 0.10.2, both series agreeing: a traced
+    # `dynamic_slice` carries exactly `slice_sizes`, and a traced
+    # `dynamic_update_slice` carries NO params at all — its geometry is the
+    # update operand's shape, so there is nothing for it to record and no
+    # key a loaded document could be missing. The write row is therefore
+    # deliberately ABSENT from this table rather than present with an empty
+    # set: absence means "unconstrained", which for a primitive that
+    # carries nothing is the true statement.
+    "dynamic_slice": frozenset({"slice_sizes"}),
     "exp": frozenset({"accuracy"}),
     "gather": frozenset({"dimension_numbers", "fill_value", "indices_are_sorted",
                          "mode", "slice_sizes", "unique_indices"}),

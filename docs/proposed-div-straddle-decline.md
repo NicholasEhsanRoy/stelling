@@ -50,7 +50,11 @@ why this proposal comes before #1, not after.
 
 ## The general shape, measured
 
-Across the 46 registered transfers:
+Across the 46 registered transfers **as the registry stood when this table was
+measured** — the index-bounds round has since taken it to 48, adding
+`dynamic_slice` and `dynamic_update_slice`, and the partition below is not
+restated for them; `docs/supported-primitives.md` is generated from the live
+registries and is the current count:
 
 | decline shape | count |
 |---|---|
