@@ -4101,14 +4101,40 @@ verdicts:
   MEASURED, UNCLOSED source-to-trace divergence, and its direction is a
   WRONG VERIFIED.** No verdict moves with this entry and no rule changes.
   It closes a DISCLOSURE gap: the hazard was measured, priced, and left
-  open deliberately, and it was described nowhere a reader of this page
-  could have found it. It was not quite unmentioned — the index-clamp
-  entry above reaches for *"the shape of the integer-literal wrap
-  defect, one layer over"* as an analogy — which is the gap at its
-  sharpest: the shipped tree names this defect once, to explain
-  something else, and never says what it is. It is being written down
-  before 0.1.0 because a release is where an omission stops being
-  recoverable.
+  open deliberately, and it was described nowhere a reader of THIS PAGE
+  could have found it.
+
+  **THE SCOPE OF THAT GAP WAS OVERSTATED WHEN THIS ENTRY LANDED, AND THE
+  CORRECTION IS RECORDED RATHER THAN QUIETLY SWAPPED.** The sentence
+  here read: *"the shipped tree names this defect once, to explain
+  something else, and never says what it is."* Measured at `650e678`,
+  `git grep -nEi 'integer[- ]literal wrap|literal wrap' -- .
+  ':!SOUNDNESS.md'` returns **12 lines in 9 files** — `ci.yml:936`,
+  `CONTRIBUTING.md:30`, `design/index-bounds-round.md:248`,
+  `src/stelling/propagate.py:1669`, and eight sites under
+  `tests/property/` (`_grammar.py` ×2, `positive_controls.py`,
+  `test_metamorphic.py`, `test_oracle.py` ×3, `test_suite_disclosure.py`).
+  Every one of those nine paths is inside the sdist allowlist in
+  `pyproject.toml`, and `propagate.py` is in the wheel as well, so all 12
+  ship. **At least four of them say what the defect IS**, not merely that
+  it exists: `tests/property/positive_controls.py:91` and
+  `tests/property/test_oracle.py:17` and `:123` each spell out *"an
+  out-of-dtype-range integer literal wraps mod 2\*\*bits before tracing, so
+  stelling returns VERIFIED for a predicate that is false at every declared
+  point"*, and `tests/property/_grammar.py:32` names the mechanism. That
+  grep is a FLOOR, not a census: a wider pattern
+  (`out-of-dtype-range|wraps mod 2|wrapping before tracing`) finds more,
+  including `tests/property/README.md:165`.
+
+  **What IS true, measured the same way, is the narrower claim this entry
+  should have made**: at `53f9f84` the same grep run against `SOUNDNESS.md`
+  alone returns **one** line — `SOUNDNESS.md:3843`, inside the index-clamp
+  entry above, reaching for *"the shape of the integer-literal wrap
+  defect, one layer over"* as an ANALOGY for a different decision. The
+  page a reader consults for soundness disclosures named it once, in
+  passing, to explain something else. The test suite and CI said what it
+  was; this page did not. It is being written down before 0.1.0 because a
+  release is where an omission stops being recoverable.
 
   **The defect, in four lines of plain jax and no stelling idiom.**
 
