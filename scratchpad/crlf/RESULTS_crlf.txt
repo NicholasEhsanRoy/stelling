@@ -1,0 +1,460 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+
+RESULTS — scratchpad/crlf/corpus_solver.py
+
+REGENERATED 2026-08-09 (second run of every arm), because the first version of
+this file was TRUNCATED IN TWO PLACES and disclosed neither: `diff` capped its
+per-key listing at 80 with no sign of the cap, and the capture itself was
+piped, so the PC2 section displayed 3 of the 7 `REFUTED -> VERIFIED`
+transitions and a reader could not check the count written in `SOUNDNESS.md`
+against it — which is how that count came to say "six". Both are closed here:
+`diff` now PRINTS its truncation and follows every capped listing with a
+COMPLETE transition histogram plus the complete list of `.verdict.status`
+moves, and nothing below is piped through anything.
+
+BASE  main 9564728, worktree /home/nick/MSF/.wt-crlf/BASE
+TIP   fix/cvc5-crlf-reader-dominance, worktree /home/nick/MSF/.wt-crlf/W
+PC1   TIP + `_decode_child_stream` ending in `.rstrip("\n")` — the
+      fuzzer-found class (a record is `text + "\n"`), applied to the
+      one function this branch adds
+PC2   TIP + `_run_cvc5_wheel` returning `unsat` where the child said
+      `sat` — a move in the CATASTROPHIC direction
+TIP2  TIP, run a second time: the determinism control, so the zero
+      below is not simply what this instrument always prints
+
+python 3.12, jax 0.11.0, cvc5 1.3.4-modified, z3 5.0.0, JAX_PLATFORMS=cpu
+14 rows x 3 portfolios; 48 escalated obligation records, 64 solver spawns,
+24 discharged and 24 refuted-with-witness at BASE and at TIP alike.
+
+HOW TO READ A SECTION. `verdict-bearing keys that MOVED` is the population;
+the per-key listing under it is a SAMPLE capped at 80 and says so when it is
+one; `TRANSITION HISTOGRAM` and `VERDICT STATUS moves` are COMPLETE. Any count
+quoted in prose belongs to those two blocks, not to the sample.
+
+== BASE vs TIP — the zero this branch is claiming ==
+A: /home/nick/MSF/.wt-crlf/BASE/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+B: /home/nick/MSF/.wt-crlf/W/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+A totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+B totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+leaf keys compared: 3009
+  VERDICT-BEARING keys (outcome/status/answered_by/declined/witness): 337
+  verdict-bearing keys that MOVED:  0
+  other keys that differ:           0
+
+== TIP vs TIP2 — determinism control ==
+A: /home/nick/MSF/.wt-crlf/W/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+B: /home/nick/MSF/.wt-crlf/W/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+A totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+B totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+leaf keys compared: 3009
+  VERDICT-BEARING keys (outcome/status/answered_by/declined/witness): 337
+  verdict-bearing keys that MOVED:  0
+  other keys that differ:           0
+
+== TIP vs PC1 — POSITIVE CONTROL, toward UNKNOWN ==
+A: /home/nick/MSF/.wt-crlf/W/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+B: /home/nick/MSF/.wt-crlf/APC1/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+A totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+B totals: {'discharged': 16, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 16}
+leaf keys compared: 3057
+  VERDICT-BEARING keys (outcome/status/answered_by/declined/witness): 337
+  verdict-bearing keys that MOVED:  155
+    .cubic_false.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .cubic_false.cvc5.records[0].outcome: 'violated-witness' -> 'unknown'
+    .cubic_false.cvc5.records[0].witness.detail: '' -> None
+    .cubic_false.cvc5.records[0].witness.values.x0: '-3' -> None
+    .cubic_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'unknown'
+    .cubic_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .cubic_false.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    .cubic_false.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .cubic_false.full.records[0].witness.values.x0: '-3' -> '-2'
+    .cubic_true.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .cubic_true.cvc5.records[0].outcome: 'discharged' -> 'unknown'
+    .cubic_true.cvc5.verdict.obligations[0].status: 'discharged' -> 'unknown'
+    .cubic_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+    .cubic_true.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    .cubic_true.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .product_bound_4.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .product_bound_4.cvc5.records[0].outcome: 'violated-witness' -> 'unknown'
+    .product_bound_4.cvc5.records[0].witness.detail: '' -> None
+    .product_bound_4.cvc5.records[0].witness.values.x0: '2' -> None
+    .product_bound_4.cvc5.records[0].witness.values.x1: '3' -> None
+    .product_bound_4.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'unknown'
+    .product_bound_4.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .product_bound_4.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    .product_bound_4.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .product_bound_4.full.records[0].witness.values.x1: '3' -> '5/2'
+    .psd_false.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .psd_false.cvc5.records[0].outcome: 'violated-witness' -> 'unknown'
+    .psd_false.cvc5.records[0].witness.detail: '' -> None
+    .psd_false.cvc5.records[0].witness.values.x0: '1' -> None
+    .psd_false.cvc5.records[0].witness.values.x1: '1' -> None
+    .psd_false.cvc5.records[0].witness.values.x2: '-1' -> None
+    .psd_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'unknown'
+    .psd_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .psd_false.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    .psd_false.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .psd_false.full.records[0].witness.values.x0: '1' -> '3/2'
+    .psd_false.full.records[0].witness.values.x1: '1' -> '3/2'
+    .psd_false.full.records[0].witness.values.x2: '-1' -> '5/4'
+    .psd_true.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .psd_true.cvc5.records[0].outcome: 'discharged' -> 'unknown'
+    .psd_true.cvc5.verdict.obligations[0].status: 'discharged' -> 'unknown'
+    .psd_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+    .psd_true.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    .psd_true.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .square_scalar_false.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .square_scalar_false.cvc5.records[0].outcome: 'violated-witness' -> 'unknown'
+    .square_scalar_false.cvc5.records[0].witness.detail: '' -> None
+    .square_scalar_false.cvc5.records[0].witness.values.x0: '1' -> None
+    .square_scalar_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'unknown'
+    .square_scalar_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .square_scalar_false.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    .square_scalar_false.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .square_scalar_true.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .square_scalar_true.cvc5.records[0].outcome: 'discharged' -> 'unknown'
+    .square_scalar_true.cvc5.verdict.obligations[0].status: 'discharged' -> 'unknown'
+    .square_scalar_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+    .square_scalar_true.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    .square_scalar_true.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .square_vec16_false.cvc5.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .square_vec16_false.cvc5.records[0].outcome: 'violated-witness' -> 'unknown'
+    .square_vec16_false.cvc5.records[0].witness.detail: '' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_0: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_1: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_10: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_11: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_12: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_13: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_14: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_15: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_2: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_3: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_4: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_5: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_6: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_7: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_8: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_9: '1' -> None
+    .square_vec16_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'unknown'
+    .square_vec16_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .square_vec16_false.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> 'z3 (wheel)'
+    ... TRUNCATED: this listing is a SAMPLE — 80 of 155 verdict-bearing keys shown, 75 not listed. The two blocks below are COMPLETE and are what a count written in prose should be checked against.
+  TRANSITION HISTOGRAM (complete, 19 distinct transitions over 155 moved keys):
+       24  '1' -> None
+       18  '1' -> '0'
+       16  'cvc5 (wheel)' -> 'z3 (wheel)'
+       16  'cvc5 (wheel)' -> None
+       16  'discharged' -> 'unknown'
+       16  'violated-witness' -> 'unknown'
+       16  'z3 (wheel)' -> None
+        8  '' -> None
+        7  'REFUTED' -> 'UNKNOWN'
+        7  'VERIFIED' -> 'UNKNOWN'
+        2  '1' -> '3/2'
+        2  '2' -> None
+        1  '-1' -> '5/4'
+        1  '-1' -> None
+        1  '-3' -> '-2'
+        1  '-3' -> None
+        1  '2' -> '3/2'
+        1  '3' -> '5/2'
+        1  '3' -> None
+  VERDICT STATUS moves (14, complete):
+    .cubic_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .cubic_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+    .product_bound_4.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .psd_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .psd_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+    .square_scalar_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .square_scalar_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+    .square_vec16_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .square_vec16_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+    .square_vec4_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .square_vec4_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+    .square_vec64_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+    .two_obligations_false.cvc5.verdict.status: 'REFUTED' -> 'UNKNOWN'
+    .two_obligations_true.cvc5.verdict.status: 'VERIFIED' -> 'UNKNOWN'
+  other keys that differ:           144
+    .cubic_false.cvc5.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point [PORTFOLIO DEGRADED: 1 of 2 backends answered]' -> 'solver escalation did not decide (cvc5 (wheel): failed); a timeout is never a VERIFIED'
+    .cubic_false.cvc5.records[0].notes[1]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .cubic_false.cvc5.records[0].notes[2]: "assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (cvc5 (wheel) answered; z3 was excluded by SolverConfig.only=('cvc5',))" -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'sat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .cubic_false.full.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point' -> 'violated at a concrete witness found by z3 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point [PORTFOLIO DEGRADED: 1 of 2 backends answered]'
+    .cubic_false.full.records[0].notes[0]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .cubic_false.full.records[0].notes[1]: 'assert #0: z3 (wheel) answered sat in <ms>ms' -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'sat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .cubic_false.full.records[0].notes[2]: None -> 'assert #0: z3 (wheel) answered sat in <ms>ms'
+    .cubic_false.full.records[0].notes[3]: None -> 'assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (z3 (wheel) answered; cvc5 (wheel) was invoked and returned failed)'
+    .cubic_true.cvc5.records[0].detail: 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per cvc5 (wheel) [PORTFOLIO DEGRADED: 1 of 2 backends answered; a discharge has no replay backstop]' -> 'solver escalation did not decide (cvc5 (wheel): failed); a timeout is never a VERIFIED'
+    .cubic_true.cvc5.records[0].notes[1]: 'assert #0: cvc5 (wheel) answered unsat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .cubic_true.cvc5.records[0].notes[2]: "assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (cvc5 (wheel) answered; z3 was excluded by SolverConfig.only=('cvc5',))" -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'unsat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .cubic_true.cvc5.records[0].notes[3]: 'assert #0: and this is the direction with no backstop: a discharge is a universal claim over the whole declared box, so nothing downstream re-derives it the way exact-rational replay re-derives a witness. The second backend was the only independent check on this obligation and it did not answer' -> None
+    .cubic_true.full.records[0].detail: 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per cvc5 (wheel) and z3 (wheel)' -> 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per z3 (wheel) [PORTFOLIO DEGRADED: 1 of 2 backends answered; a discharge has no replay backstop]'
+    .cubic_true.full.records[0].notes[0]: 'assert #0: cvc5 (wheel) answered unsat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .cubic_true.full.records[0].notes[1]: 'assert #0: z3 (wheel) answered unsat in <ms>ms' -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'unsat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .cubic_true.full.records[0].notes[2]: None -> 'assert #0: z3 (wheel) answered unsat in <ms>ms'
+    .cubic_true.full.records[0].notes[3]: None -> 'assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (z3 (wheel) answered; cvc5 (wheel) was invoked and returned failed)'
+    .cubic_true.full.records[0].notes[4]: None -> 'assert #0: and this is the direction with no backstop: a discharge is a universal claim over the whole declared box, so nothing downstream re-derives it the way exact-rational replay re-derives a witness. The second backend was the only independent check on this obligation and it did not answer'
+    .product_bound_4.cvc5.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point [PORTFOLIO DEGRADED: 1 of 2 backends answered]' -> 'solver escalation did not decide (cvc5 (wheel): failed); a timeout is never a VERIFIED'
+    .product_bound_4.cvc5.records[0].notes[1]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .product_bound_4.cvc5.records[0].notes[2]: "assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (cvc5 (wheel) answered; z3 was excluded by SolverConfig.only=('cvc5',))" -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'sat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .product_bound_4.full.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point' -> 'violated at a concrete witness found by z3 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point [PORTFOLIO DEGRADED: 1 of 2 backends answered]'
+    .product_bound_4.full.records[0].notes[0]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .product_bound_4.full.records[0].notes[1]: 'assert #0: z3 (wheel) answered sat in <ms>ms' -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'sat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .product_bound_4.full.records[0].notes[2]: None -> 'assert #0: z3 (wheel) answered sat in <ms>ms'
+    .product_bound_4.full.records[0].notes[3]: None -> 'assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (z3 (wheel) answered; cvc5 (wheel) was invoked and returned failed)'
+    .psd_false.cvc5.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point [PORTFOLIO DEGRADED: 1 of 2 backends answered]' -> 'solver escalation did not decide (cvc5 (wheel): failed); a timeout is never a VERIFIED'
+    .psd_false.cvc5.records[0].notes[1]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .psd_false.cvc5.records[0].notes[2]: "assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (cvc5 (wheel) answered; z3 was excluded by SolverConfig.only=('cvc5',))" -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'sat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .psd_false.full.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point' -> 'violated at a concrete witness found by z3 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point [PORTFOLIO DEGRADED: 1 of 2 backends answered]'
+    .psd_false.full.records[0].notes[0]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .psd_false.full.records[0].notes[1]: 'assert #0: z3 (wheel) answered sat in <ms>ms' -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'sat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .psd_false.full.records[0].notes[2]: None -> 'assert #0: z3 (wheel) answered sat in <ms>ms'
+    .psd_false.full.records[0].notes[3]: None -> 'assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (z3 (wheel) answered; cvc5 (wheel) was invoked and returned failed)'
+    .psd_true.cvc5.records[0].detail: 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per cvc5 (wheel) [PORTFOLIO DEGRADED: 1 of 2 backends answered; a discharge has no replay backstop]' -> 'solver escalation did not decide (cvc5 (wheel): failed); a timeout is never a VERIFIED'
+    .psd_true.cvc5.records[0].notes[1]: 'assert #0: cvc5 (wheel) answered unsat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .psd_true.cvc5.records[0].notes[2]: "assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (cvc5 (wheel) answered; z3 was excluded by SolverConfig.only=('cvc5',))" -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'unsat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .psd_true.cvc5.records[0].notes[3]: 'assert #0: and this is the direction with no backstop: a discharge is a universal claim over the whole declared box, so nothing downstream re-derives it the way exact-rational replay re-derives a witness. The second backend was the only independent check on this obligation and it did not answer' -> None
+    .psd_true.full.records[0].detail: 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per cvc5 (wheel) and z3 (wheel)' -> 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per z3 (wheel) [PORTFOLIO DEGRADED: 1 of 2 backends answered; a discharge has no replay backstop]'
+    .psd_true.full.records[0].notes[0]: 'assert #0: cvc5 (wheel) answered unsat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .psd_true.full.records[0].notes[1]: 'assert #0: z3 (wheel) answered unsat in <ms>ms' -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'unsat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .psd_true.full.records[0].notes[2]: None -> 'assert #0: z3 (wheel) answered unsat in <ms>ms'
+    .psd_true.full.records[0].notes[3]: None -> 'assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (z3 (wheel) answered; cvc5 (wheel) was invoked and returned failed)'
+    .psd_true.full.records[0].notes[4]: None -> 'assert #0: and this is the direction with no backstop: a discharge is a universal claim over the whole declared box, so nothing downstream re-derives it the way exact-rational replay re-derives a witness. The second backend was the only independent check on this obligation and it did not answer'
+    .square_scalar_false.cvc5.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point [PORTFOLIO DEGRADED: 1 of 2 backends answered]' -> 'solver escalation did not decide (cvc5 (wheel): failed); a timeout is never a VERIFIED'
+    .square_scalar_false.cvc5.records[0].notes[1]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .square_scalar_false.cvc5.records[0].notes[2]: "assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (cvc5 (wheel) answered; z3 was excluded by SolverConfig.only=('cvc5',))" -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'sat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .square_scalar_false.full.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point' -> 'violated at a concrete witness found by z3 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point [PORTFOLIO DEGRADED: 1 of 2 backends answered]'
+    .square_scalar_false.full.records[0].notes[0]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .square_scalar_false.full.records[0].notes[1]: 'assert #0: z3 (wheel) answered sat in <ms>ms' -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'sat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .square_scalar_false.full.records[0].notes[2]: None -> 'assert #0: z3 (wheel) answered sat in <ms>ms'
+    .square_scalar_false.full.records[0].notes[3]: None -> 'assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (z3 (wheel) answered; cvc5 (wheel) was invoked and returned failed)'
+    .square_scalar_true.cvc5.records[0].detail: 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per cvc5 (wheel) [PORTFOLIO DEGRADED: 1 of 2 backends answered; a discharge has no replay backstop]' -> 'solver escalation did not decide (cvc5 (wheel): failed); a timeout is never a VERIFIED'
+    .square_scalar_true.cvc5.records[0].notes[1]: 'assert #0: cvc5 (wheel) answered unsat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .square_scalar_true.cvc5.records[0].notes[2]: "assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (cvc5 (wheel) answered; z3 was excluded by SolverConfig.only=('cvc5',))" -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'unsat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .square_scalar_true.cvc5.records[0].notes[3]: 'assert #0: and this is the direction with no backstop: a discharge is a universal claim over the whole declared box, so nothing downstream re-derives it the way exact-rational replay re-derives a witness. The second backend was the only independent check on this obligation and it did not answer' -> None
+    .square_scalar_true.full.records[0].detail: 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per cvc5 (wheel) and z3 (wheel)' -> 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per z3 (wheel) [PORTFOLIO DEGRADED: 1 of 2 backends answered; a discharge has no replay backstop]'
+    .square_scalar_true.full.records[0].notes[0]: 'assert #0: cvc5 (wheel) answered unsat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .square_scalar_true.full.records[0].notes[1]: 'assert #0: z3 (wheel) answered unsat in <ms>ms' -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'unsat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .square_scalar_true.full.records[0].notes[2]: None -> 'assert #0: z3 (wheel) answered unsat in <ms>ms'
+    .square_scalar_true.full.records[0].notes[3]: None -> 'assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (z3 (wheel) answered; cvc5 (wheel) was invoked and returned failed)'
+    .square_scalar_true.full.records[0].notes[4]: None -> 'assert #0: and this is the direction with no backstop: a discharge is a universal claim over the whole declared box, so nothing downstream re-derives it the way exact-rational replay re-derives a witness. The second backend was the only independent check on this obligation and it did not answer'
+    .square_vec16_false.cvc5.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point; violating element(s) of the assert operand: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 [PORTFOLIO DEGRADED: 1 of 2 backends answered]' -> 'solver escalation did not decide (cvc5 (wheel): failed); a timeout is never a VERIFIED'
+    .square_vec16_false.cvc5.records[0].notes[1]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .square_vec16_false.cvc5.records[0].notes[2]: "assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (cvc5 (wheel) answered; z3 was excluded by SolverConfig.only=('cvc5',))" -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'sat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .square_vec16_false.full.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point; violating element(s) of the assert operand: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15' -> 'violated at a concrete witness found by z3 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point; violating element(s) of the assert operand: 4 [PORTFOLIO DEGRADED: 1 of 2 backends answered]'
+    .square_vec16_false.full.records[0].notes[0]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .square_vec16_false.full.records[0].notes[1]: 'assert #0: z3 (wheel) answered sat in <ms>ms' -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'sat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .square_vec16_false.full.records[0].notes[2]: None -> 'assert #0: z3 (wheel) answered sat in <ms>ms'
+    .square_vec16_false.full.records[0].notes[3]: None -> 'assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (z3 (wheel) answered; cvc5 (wheel) was invoked and returned failed)'
+    .square_vec16_true.cvc5.records[0].detail: 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per cvc5 (wheel) [PORTFOLIO DEGRADED: 1 of 2 backends answered; a discharge has no replay backstop]' -> 'solver escalation did not decide (cvc5 (wheel): failed); a timeout is never a VERIFIED'
+    .square_vec16_true.cvc5.records[0].notes[1]: 'assert #0: cvc5 (wheel) answered unsat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .square_vec16_true.cvc5.records[0].notes[2]: "assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (cvc5 (wheel) answered; z3 was excluded by SolverConfig.only=('cvc5',))" -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'unsat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .square_vec16_true.cvc5.records[0].notes[3]: 'assert #0: and this is the direction with no backstop: a discharge is a universal claim over the whole declared box, so nothing downstream re-derives it the way exact-rational replay re-derives a witness. The second backend was the only independent check on this obligation and it did not answer' -> None
+    .square_vec16_true.full.records[0].detail: 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per cvc5 (wheel) and z3 (wheel)' -> 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per z3 (wheel) [PORTFOLIO DEGRADED: 1 of 2 backends answered; a discharge has no replay backstop]'
+    .square_vec16_true.full.records[0].notes[0]: 'assert #0: cvc5 (wheel) answered unsat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered failed in <ms>ms'
+    .square_vec16_true.full.records[0].notes[1]: 'assert #0: z3 (wheel) answered unsat in <ms>ms' -> "assert #0: cvc5 (wheel) returned failed (cvc5 driver answered 'unsat' but the run is not complete (exit 0; terminator ABSENT (final record not newline-terminated)); refusing to rely on a crashed run. stderr: '')"
+    .square_vec16_true.full.records[0].notes[2]: None -> 'assert #0: z3 (wheel) answered unsat in <ms>ms'
+    .square_vec16_true.full.records[0].notes[3]: None -> 'assert #0: portfolio degraded — this outcome rests on 1 of the 2 backends the portfolio is designed around (z3 (wheel) answered; cvc5 (wheel) was invoked and returned failed)'
+    .square_vec16_true.full.records[0].notes[4]: None -> 'assert #0: and this is the direction with no backstop: a discharge is a universal claim over the whole declared box, so nothing downstream re-derives it the way exact-rational replay re-derives a witness. The second backend was the only independent check on this obligation and it did not answer'
+    ... TRUNCATED: this listing is a SAMPLE — 80 of 144 non-verdict keys shown, 64 not listed. No histogram here: these are free-text details and notes, so the distinct-transition count is not bounded the way the verdict-bearing one is. The COUNT above is complete.
+
+== TIP vs PC2 — POSITIVE CONTROL, toward VERIFIED ==
+A: /home/nick/MSF/.wt-crlf/W/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+B: /home/nick/MSF/.wt-crlf/APC2/src/stelling/__init__.py  jax 0.11.0  cvc5 1.3.4-modified  z3 5.0.0
+A totals: {'discharged': 24, 'escalated_obligation_records': 48, 'spawns': 64, 'violated_witness': 24}
+B totals: {'discharged': 32, 'escalated_obligation_records': 40, 'spawns': 48, 'violated_witness': 8}
+leaf keys compared: 3032
+  VERDICT-BEARING keys (outcome/status/answered_by/declined/witness): 337
+  verdict-bearing keys that MOVED:  136
+    .cubic_false.cvc5.records[0].outcome: 'violated-witness' -> 'discharged'
+    .cubic_false.cvc5.records[0].witness.detail: '' -> None
+    .cubic_false.cvc5.records[0].witness.values.x0: '-3' -> None
+    .cubic_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'discharged'
+    .cubic_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .cubic_false.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .cubic_false.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .cubic_false.full.records[0].outcome: 'violated-witness' -> None
+    .cubic_false.full.records[0].witness.detail: '' -> None
+    .cubic_false.full.records[0].witness.values.x0: '-3' -> None
+    .cubic_false.full.verdict.obligations[0].status: 'violated-witness' -> None
+    .cubic_false.full.verdict.status: 'REFUTED' -> None
+    .product_bound_4.cvc5.records[0].outcome: 'violated-witness' -> 'discharged'
+    .product_bound_4.cvc5.records[0].witness.detail: '' -> None
+    .product_bound_4.cvc5.records[0].witness.values.x0: '2' -> None
+    .product_bound_4.cvc5.records[0].witness.values.x1: '3' -> None
+    .product_bound_4.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'discharged'
+    .product_bound_4.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .product_bound_4.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .product_bound_4.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .product_bound_4.full.records[0].outcome: 'violated-witness' -> None
+    .product_bound_4.full.records[0].witness.detail: '' -> None
+    .product_bound_4.full.records[0].witness.values.x0: '2' -> None
+    .product_bound_4.full.records[0].witness.values.x1: '3' -> None
+    .product_bound_4.full.verdict.obligations[0].status: 'violated-witness' -> None
+    .product_bound_4.full.verdict.status: 'REFUTED' -> None
+    .psd_false.cvc5.records[0].outcome: 'violated-witness' -> 'discharged'
+    .psd_false.cvc5.records[0].witness.detail: '' -> None
+    .psd_false.cvc5.records[0].witness.values.x0: '1' -> None
+    .psd_false.cvc5.records[0].witness.values.x1: '1' -> None
+    .psd_false.cvc5.records[0].witness.values.x2: '-1' -> None
+    .psd_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'discharged'
+    .psd_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .psd_false.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .psd_false.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .psd_false.full.records[0].outcome: 'violated-witness' -> None
+    .psd_false.full.records[0].witness.detail: '' -> None
+    .psd_false.full.records[0].witness.values.x0: '1' -> None
+    .psd_false.full.records[0].witness.values.x1: '1' -> None
+    .psd_false.full.records[0].witness.values.x2: '-1' -> None
+    .psd_false.full.verdict.obligations[0].status: 'violated-witness' -> None
+    .psd_false.full.verdict.status: 'REFUTED' -> None
+    .square_scalar_false.cvc5.records[0].outcome: 'violated-witness' -> 'discharged'
+    .square_scalar_false.cvc5.records[0].witness.detail: '' -> None
+    .square_scalar_false.cvc5.records[0].witness.values.x0: '1' -> None
+    .square_scalar_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'discharged'
+    .square_scalar_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .square_scalar_false.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .square_scalar_false.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .square_scalar_false.full.records[0].outcome: 'violated-witness' -> None
+    .square_scalar_false.full.records[0].witness.detail: '' -> None
+    .square_scalar_false.full.records[0].witness.values.x0: '1' -> None
+    .square_scalar_false.full.verdict.obligations[0].status: 'violated-witness' -> None
+    .square_scalar_false.full.verdict.status: 'REFUTED' -> None
+    .square_vec16_false.cvc5.records[0].outcome: 'violated-witness' -> 'discharged'
+    .square_vec16_false.cvc5.records[0].witness.detail: '' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_0: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_1: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_10: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_11: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_12: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_13: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_14: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_15: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_2: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_3: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_4: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_5: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_6: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_7: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_8: '1' -> None
+    .square_vec16_false.cvc5.records[0].witness.values.x0_9: '1' -> None
+    .square_vec16_false.cvc5.verdict.obligations[0].status: 'violated-witness' -> 'discharged'
+    .square_vec16_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .square_vec16_false.full.records[0].answered_by[0]: 'cvc5 (wheel)' -> None
+    .square_vec16_false.full.records[0].answered_by[1]: 'z3 (wheel)' -> None
+    .square_vec16_false.full.records[0].outcome: 'violated-witness' -> None
+    .square_vec16_false.full.records[0].witness.detail: '' -> None
+    .square_vec16_false.full.records[0].witness.values.x0_0: '1' -> None
+    .square_vec16_false.full.records[0].witness.values.x0_1: '1' -> None
+    ... TRUNCATED: this listing is a SAMPLE — 80 of 136 verdict-bearing keys shown, 56 not listed. The two blocks below are COMPLETE and are what a count written in prose should be checked against.
+  TRANSITION HISTOGRAM (complete, 12 distinct transitions over 136 moved keys):
+       48  '1' -> None
+       16  '' -> None
+       16  'violated-witness' -> 'discharged'
+       16  'violated-witness' -> None
+        8  'cvc5 (wheel)' -> None
+        8  'z3 (wheel)' -> None
+        7  'REFUTED' -> 'VERIFIED'
+        7  'REFUTED' -> None
+        4  '2' -> None
+        2  '-1' -> None
+        2  '-3' -> None
+        2  '3' -> None
+  VERDICT STATUS moves (14, complete):
+    .cubic_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .cubic_false.full.verdict.status: 'REFUTED' -> None
+    .product_bound_4.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .product_bound_4.full.verdict.status: 'REFUTED' -> None
+    .psd_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .psd_false.full.verdict.status: 'REFUTED' -> None
+    .square_scalar_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .square_scalar_false.full.verdict.status: 'REFUTED' -> None
+    .square_vec16_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .square_vec16_false.full.verdict.status: 'REFUTED' -> None
+    .square_vec4_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .square_vec4_false.full.verdict.status: 'REFUTED' -> None
+    .two_obligations_false.cvc5.verdict.status: 'REFUTED' -> 'VERIFIED'
+    .two_obligations_false.full.verdict.status: 'REFUTED' -> None
+  other keys that differ:           643
+    .cubic_false.cvc5.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point [PORTFOLIO DEGRADED: 1 of 2 backends answered]' -> 'discharged by solver escalation (QF_NRA): the box with the negated predicate is unsat per cvc5 (wheel) [PORTFOLIO DEGRADED: 1 of 2 backends answered; a discharge has no replay backstop]'
+    .cubic_false.cvc5.records[0].notes[1]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> 'assert #0: cvc5 (wheel) answered unsat in <ms>ms'
+    .cubic_false.cvc5.records[0].notes[3]: None -> 'assert #0: and this is the direction with no backstop: a discharge is a universal claim over the whole declared box, so nothing downstream re-derives it the way exact-rational replay re-derives a witness. The second backend was the only independent check on this obligation and it did not answer'
+    .cubic_false.full.escalate: None -> 'RAISED SolverDisagreement: solver disagreement on obligation #0 (cvc5 (wheel): unsat, z3 (wheel): sat) — one of the solvers, or this emission, is wrong; refusing to pick. Scripts and option sets attached.'
+    .cubic_false.full.n_ledger_stamps: 2 -> None
+    .cubic_false.full.records[0].detail: 'violated at a concrete witness found by cvc5 (wheel) (QF_NRA); confirmed by independent exact-rational replay (fractions.Fraction arithmetic, pure Python, no solver): the predicate is false at this point' -> None
+    .cubic_false.full.records[0].index: 0 -> None
+    .cubic_false.full.records[0].invocations[0].invoked: True -> None
+    .cubic_false.full.records[0].invocations[0].name: 'cvc5' -> None
+    .cubic_false.full.records[0].invocations[0].options[0][0]: ':produce-models' -> None
+    .cubic_false.full.records[0].invocations[0].options[0][1]: 'true' -> None
+    .cubic_false.full.records[0].invocations[0].options[1][0]: ':tlimit' -> None
+    .cubic_false.full.records[0].invocations[0].options[1][1]: '30000' -> None
+    .cubic_false.full.records[0].invocations[0].options[2][0]: ':nl-cov' -> None
+    .cubic_false.full.records[0].invocations[0].options[2][1]: 'true' -> None
+    .cubic_false.full.records[0].invocations[0].options[3][0]: ':nl-ext' -> None
+    .cubic_false.full.records[0].invocations[0].options[3][1]: 'none' -> None
+    .cubic_false.full.records[0].invocations[0].options[4][0]: 'set-logic' -> None
+    .cubic_false.full.records[0].invocations[0].options[4][1]: 'QF_NRA' -> None
+    .cubic_false.full.records[0].invocations[0].options[5][0]: 'smt2_sha256' -> None
+    .cubic_false.full.records[0].invocations[0].options[5][1]: '07e54f228829bf6084eab23355ed5fca81a8c1122ff66a32a99e8653f5a6fa74' -> None
+    .cubic_false.full.records[0].invocations[0].options[6][0]: 'slice_sha256' -> None
+    .cubic_false.full.records[0].invocations[0].options[6][1]: 'e19a4a20001442ab63a10f6eff9ce2a2bfadd42fdc94cb28d9d62208c0b080a1' -> None
+    .cubic_false.full.records[0].invocations[0].reason: 'QF_NRA portfolio primary on assert #0' -> None
+    .cubic_false.full.records[0].invocations[0].transport: 'wheel-bindings (smt2 text; wall-guarded child process)' -> None
+    .cubic_false.full.records[0].invocations[0].version: '1.3.4-modified' -> None
+    .cubic_false.full.records[0].invocations[1].invoked: True -> None
+    .cubic_false.full.records[0].invocations[1].name: 'z3' -> None
+    .cubic_false.full.records[0].invocations[1].options[0][0]: ':produce-models' -> None
+    .cubic_false.full.records[0].invocations[1].options[0][1]: 'true' -> None
+    .cubic_false.full.records[0].invocations[1].options[1][0]: ':timeout' -> None
+    .cubic_false.full.records[0].invocations[1].options[1][1]: '30000' -> None
+    .cubic_false.full.records[0].invocations[1].options[2][0]: 'set-logic' -> None
+    .cubic_false.full.records[0].invocations[1].options[2][1]: 'QF_NRA' -> None
+    .cubic_false.full.records[0].invocations[1].options[3][0]: 'smt2_sha256' -> None
+    .cubic_false.full.records[0].invocations[1].options[3][1]: '679c76170a6d553fb5295629c29d77d6e5f5ba9eadafddcd3fb7f2e31b30e4a5' -> None
+    .cubic_false.full.records[0].invocations[1].options[4][0]: 'slice_sha256' -> None
+    .cubic_false.full.records[0].invocations[1].options[4][1]: 'e19a4a20001442ab63a10f6eff9ce2a2bfadd42fdc94cb28d9d62208c0b080a1' -> None
+    .cubic_false.full.records[0].invocations[1].reason: 'QF_NRA portfolio secondary on assert #0' -> None
+    .cubic_false.full.records[0].invocations[1].transport: 'wheel-bindings (smt2 text)' -> None
+    .cubic_false.full.records[0].invocations[1].version: '5.0.0' -> None
+    .cubic_false.full.records[0].notes[0]: 'assert #0: cvc5 (wheel) answered sat in <ms>ms' -> None
+    .cubic_false.full.records[0].notes[1]: 'assert #0: z3 (wheel) answered sat in <ms>ms' -> None
+    .cubic_false.full.semantics: 'real' -> None
+    .cubic_false.full.spawns: 2 -> None
+    .cubic_false.full.verdict.nonvacuity: 'UNCHECKED — no membership conditions declared' -> None
+    .cubic_false.full.verdict.obligations[0].index: 0 -> None
+    .cubic_false.full.verdict.solver[0].invoked: True -> None
+    .cubic_false.full.verdict.solver[0].name: 'cvc5' -> None
+    .cubic_false.full.verdict.solver[0].options[0][0]: ':produce-models' -> None
+    .cubic_false.full.verdict.solver[0].options[0][1]: 'true' -> None
+    .cubic_false.full.verdict.solver[0].options[1][0]: ':tlimit' -> None
+    .cubic_false.full.verdict.solver[0].options[1][1]: '30000' -> None
+    .cubic_false.full.verdict.solver[0].options[2][0]: ':nl-cov' -> None
+    .cubic_false.full.verdict.solver[0].options[2][1]: 'true' -> None
+    .cubic_false.full.verdict.solver[0].options[3][0]: ':nl-ext' -> None
+    .cubic_false.full.verdict.solver[0].options[3][1]: 'none' -> None
+    .cubic_false.full.verdict.solver[0].options[4][0]: 'set-logic' -> None
+    .cubic_false.full.verdict.solver[0].options[4][1]: 'QF_NRA' -> None
+    .cubic_false.full.verdict.solver[0].options[5][0]: 'smt2_sha256' -> None
+    .cubic_false.full.verdict.solver[0].options[5][1]: '07e54f228829bf6084eab23355ed5fca81a8c1122ff66a32a99e8653f5a6fa74' -> None
+    .cubic_false.full.verdict.solver[0].options[6][0]: 'slice_sha256' -> None
+    .cubic_false.full.verdict.solver[0].options[6][1]: 'e19a4a20001442ab63a10f6eff9ce2a2bfadd42fdc94cb28d9d62208c0b080a1' -> None
+    .cubic_false.full.verdict.solver[0].reason: 'QF_NRA portfolio primary on assert #0' -> None
+    .cubic_false.full.verdict.solver[0].transport: 'wheel-bindings (smt2 text; wall-guarded child process)' -> None
+    .cubic_false.full.verdict.solver[0].version: '1.3.4-modified' -> None
+    .cubic_false.full.verdict.solver[1].invoked: True -> None
+    .cubic_false.full.verdict.solver[1].name: 'z3' -> None
+    .cubic_false.full.verdict.solver[1].options[0][0]: ':produce-models' -> None
+    .cubic_false.full.verdict.solver[1].options[0][1]: 'true' -> None
+    .cubic_false.full.verdict.solver[1].options[1][0]: ':timeout' -> None
+    .cubic_false.full.verdict.solver[1].options[1][1]: '30000' -> None
+    .cubic_false.full.verdict.solver[1].options[2][0]: 'set-logic' -> None
+    .cubic_false.full.verdict.solver[1].options[2][1]: 'QF_NRA' -> None
+    .cubic_false.full.verdict.solver[1].options[3][0]: 'smt2_sha256' -> None
+    .cubic_false.full.verdict.solver[1].options[3][1]: '679c76170a6d553fb5295629c29d77d6e5f5ba9eadafddcd3fb7f2e31b30e4a5' -> None
+    .cubic_false.full.verdict.solver[1].options[4][0]: 'slice_sha256' -> None
+    .cubic_false.full.verdict.solver[1].options[4][1]: 'e19a4a20001442ab63a10f6eff9ce2a2bfadd42fdc94cb28d9d62208c0b080a1' -> None
+    .cubic_false.full.verdict.solver[1].reason: 'QF_NRA portfolio secondary on assert #0' -> None
+    .cubic_false.full.verdict.solver[1].transport: 'wheel-bindings (smt2 text)' -> None
+    ... TRUNCATED: this listing is a SAMPLE — 80 of 643 non-verdict keys shown, 563 not listed. No histogram here: these are free-text details and notes, so the distinct-transition count is not bounded the way the verdict-bearing one is. The COUNT above is complete.

@@ -19,10 +19,16 @@ VT = "\x0b"
 REAL_SPAWN = subprocess.run
 
 
-def parent(stdout: str, rc: int):
-    """Run the real parent over a child result we hand it."""
+def parent(stdout, rc: int):
+    """Run the real parent over a child result we hand it.
+
+    `stdout` is the child's BYTES; a `str` is encoded UTF-8 for convenience.
+    The parent stopped asking `subprocess` to decode for it, so a fixture that
+    hands it a `str` is handing it something no child ever produced.
+    """
     argv = ["python", "-m", "stelling._cvc5_driver"]
-    subprocess.run = lambda a, **kw: subprocess.CompletedProcess(argv, rc, stdout, "")
+    raw = stdout.encode("utf-8") if isinstance(stdout, str) else stdout
+    subprocess.run = lambda a, **kw: subprocess.CompletedProcess(argv, rc, raw, b"")
     try:
         return solvers._run_cvc5_wheel("(check-sat)\n(get-model)\n", 60.0)
     finally:

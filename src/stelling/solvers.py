@@ -595,12 +595,38 @@ def _cvc5_wheel_version() -> str:
         return "unknown"
 
 
+def _decode_child_stream(raw: bytes) -> str:
+    """Decode one of the cvc5 driver child's streams: bytes in, records out.
+
+    THE ONE TRANSLATION `text=True` WAS DOING FOR US, PUT BACK BY HAND, AND
+    NOTHING ELSE. `capture_output=True, text=True` performs universal-newline
+    decoding, which maps `\\r\\n` AND a bare `\\r` to `\\n`. The first is a real
+    record boundary on a platform `README.md` names for both solver wheels and
+    has to survive; the second is not a boundary anywhere `_cvc5_driver` runs,
+    and promoting it to one is what let a stale driver forge this protocol's
+    terminator (see `_run_cvc5_wheel` below).
+
+    Undecodable bytes become U+FFFD rather than an exception, because the
+    caller's alphabet check already refuses every character outside printable
+    ASCII: a child that writes non-UTF-8 is a protocol violation this layer
+    can state, not one it should raise out of the transport."""
+    return raw.decode("utf-8", "replace").replace("\r\n", "\n")
+
+
 def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     version = _cvc5_wheel_version()
     argv = [sys.executable, "-m", "stelling._cvc5_driver"]
     try:
+        # NO `text=`, NO `encoding=`, NO `universal_newlines=`: any of the
+        # three switches universal-newline decoding back on and reopens the
+        # `\r` hole described below without touching a line of the parser.
+        # The child's stdin takes bytes for the same reason — there is no
+        # text mode left to encode it.
         proc = subprocess.run(
-            argv, input=script_text, capture_output=True, text=True, timeout=wall_s
+            argv,
+            input=script_text.encode("utf-8"),
+            capture_output=True,
+            timeout=wall_s,
         )
     except subprocess.TimeoutExpired:
         return _RawResult(
@@ -636,45 +662,25 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     # not a record; exactly one is dropped, so a stdout that really does end
     # in a blank line still fails the terminator check.
     #
-    # THE WRITER IS THE LOAD-BEARING HALF, and this cannot be closed here
-    # alone: `capture_output=True, text=True` means Python's universal-newline
-    # decoding turns a `\r` into a real `\n` BEFORE this function sees the
-    # string (MEASURED — the child wrote one record, both splitters see two).
-    # No rule on this side can see that, which is what settles the
-    # widen-the-writer / narrow-the-reader question: `_cvc5_driver._token` and
+    # THE WRITER IS THE LOAD-BEARING HALF AND STILL IS; WHAT CHANGED IS THAT
+    # THIS SIDE IS NO LONGER BLIND BESIDE IT. This read used to be
+    # `capture_output=True, text=True`, so Python's universal-newline decoding
+    # turned a `\r` into a real `\n` BEFORE this function saw the string
+    # (MEASURED — the child wrote one record, both splitters saw two). No rule
+    # on this side could see it, which is what settled the widen-the-writer /
+    # narrow-the-reader question in the first place: `_cvc5_driver._token` and
     # `_tail` pass printable ASCII only, and that is where the boundary is
-    # made or not made.
+    # made or not made. THAT HALF HAS NOT MOVED and is not weakened by this.
     #
-    # THE ALPHABET CHECK BELOW IS A PARTIAL BACKSTOP, AND THE EXACT FRACTION
-    # IS 8 OF 10. It used to be described here as "the fail-closed backstop for
-    # a driver out of step with this parser", which credited it with the whole
-    # separator set. MEASURED against a real stale child writing real bytes and
-    # no terminator record of its own (`scratchpad/probe_cvc5_backstop.py`), it
-    # refuses eight, and the two it does not refuse fail for two DIFFERENT
-    # reasons that must not be run together:
+    # What moved is the fraction this side backstops when the WRITER is the
+    # thing that is wrong — a driver out of step with this parser, i.e. a
+    # PARTIAL UPGRADE, which is the case `_cvc5_driver`'s docstring promises
+    # degrades to UNKNOWN. Three readers, same io layer, real children, real
+    # bytes (`scratchpad/probe_cvc5_backstop.py`, parts B/C/D):
     #
-    #   * `\n` is excluded from the test by construction. It is the protocol's
-    #     own record boundary, so a writer that leaves one inside a field has
-    #     written two records and there is nothing here to detect. That half
-    #     was always the writer's.
-    #   * `\r` is a HOLE, and it is invisible to this check rather than
-    #     admitted by it: the `text=True` above has already turned it into a
-    #     real `\n` in `proc.stdout`, so there is no `\r` left to test for. A
-    #     stale driver writing `opaque x1 j\rend 2\r` with no terminator of its
-    #     own returns `sat` with a model HERE, at this commit (measured).
-    #
-    # `text=False` PLUS AN EXPLICIT DECODE WAS DECLINED HERE OVER A FALSIFIER
-    # NARROWER THAN THE CONCLUSION IT CARRIED, and that is corrected below.
-    # What stood here said bytes-plus-explicit-decode "also refuses every
-    # healthy run whose child applies a `\r\n` newline translation" — a claim
-    # about the whole repair class, taken from ONE arm of it.
-    #
-    #   (a) shipped `text=True`
-    #   (b) `bytes.decode()`                        — the arm that was measured
-    #   (c) `bytes.decode().replace("\r\n", "\n")`  — the arm that was not
-    #
-    # ALL THREE ARE NOW MEASURED, same io layer, real children, real bytes
-    # (`scratchpad/probe_cvc5_backstop.py`, parts B/C/D):
+    #   (a) `text=True`                             — what shipped before
+    #   (b) `bytes.decode()`
+    #   (c) `bytes.decode().replace("\r\n", "\n")`  — what is here now
     #
     #   case                             (a)      (b)      (c)
     #   healthy POSIX   `\n`             sat      sat      sat
@@ -683,65 +689,47 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     #   stale `\r`, CRLF body            SAT (!)  failed   failed
     #   stale `\x0b`                     failed   failed   failed
     #   separators refused (LF stale)    8 of 10  9 of 10  9 of 10
+    #   child writes invalid UTF-8       RAISES   failed   failed
     #
-    # The withdrawn sentence is TRUE OF (b) AND FALSE OF (c). Arm (c)
-    # DOMINATES the shipped reader on everything measured: identical answer
-    # AND identical values on both healthy children, strictly stronger on the
-    # stale ones, nine of the ten separators instead of eight, and no platform
-    # coupling at all — it puts back by hand the one translation `text=True`
-    # was doing for us, and nothing else. It is better again in a case neither
-    # arm's table covers: a child writing invalid UTF-8 makes the shipped
-    # reader raise an UNCAUGHT `UnicodeDecodeError` out of this function, where
-    # (c) returns `failed`. Its one measured cry-wolf case is a healthy child
-    # reconfigured to BARE CR line endings, which no platform's `print` default
-    # produces and which `_cvc5_driver` never sets.
+    # (c) DOMINATES (a) on every case measured: identical answer AND identical
+    # values on both healthy children, strictly stronger on both stale ones,
+    # nine of the ten separators instead of eight, no platform coupling, and
+    # `failed` where (a) raised an UNCAUGHT `UnicodeDecodeError` out of this
+    # function. (b) buys the same ninth separator by refusing a healthy
+    # Windows child OUTRIGHT, and `README.md` names Windows for both solver
+    # wheels — that, and not behaviour on the stale children, is what rules
+    # (b) out. (c)'s one measured cry-wolf case is a healthy child
+    # reconfigured to BARE CR line endings, which no platform's `print`
+    # default produces and which `_cvc5_driver` never sets.
     #
-    # AND THE HOLE REACHES THE DISCHARGE DIRECTION. The `\r` row is not only a
-    # spurious violation: the same stale child saying `answer unsat` returns
-    # `unsat` HERE (measured, part D) — a false DISCHARGE off a corpse that
-    # wrote no terminator record of its own. That is the direction with no
-    # downstream backstop.
+    # THE HOLE THIS CLOSES REACHED THE DISCHARGE DIRECTION. Under (a) a stale
+    # child writing `opaque x1 j\rend 2\r`, with no terminator record of its
+    # own anywhere, returned `sat` with a model — and returned `unsat` off the
+    # identical corpse if that is what its `answer` line said (both MEASURED
+    # at `9564728`, real child, real bytes). `sat` is the direction
+    # `_require_valid_refutation` replays and can still refuse downstream;
+    # `unsat` is the VERIFIED path and nothing downstream replays it.
     #
-    # (c) IS STILL NOT TAKEN IN THIS TREE, AND THE REASON IS EVIDENCE COST,
-    # NOT BEHAVIOUR. Saying it any other way would repeat the defect this
-    # comment corrects. Measured rather than estimated — arm (c) applied to
-    # this function and the whole suite run: **16 TESTS FAIL**, every one of
-    # them in `tests/test_solver_audit_findings.py` and every one the same
-    # `AttributeError: 'bytes' object has no attribute 'encode'` at
-    # `subprocess.py:2172`. (16 is the durable figure and its unit is TESTS;
-    # the rest of that run was 2451 passed and 2 skipped of 2469 collected,
-    # which is a record of this commit and will move with the next added
-    # test.) `input=` must become bytes when `text=` goes,
-    # and six files shim `subprocess.run` to hand this parser a `str`
-    # `CompletedProcess`: that test file plus `fuzz_transport.py`,
-    # `repro_forgery.py`, `repro_real_kill.py`, `probe_cvc5_value_channel.py`
-    # and `probe_cvc5_backstop.py` — the artefacts behind figures quoted in
-    # SOUNDNESS.md, each needing re-driving to stay honest. On top of that, the
-    # per-obligation instrument this repository uses to show a change moved no
-    # verdict says in its own docstring that it "has no solver escalation ...
-    # so nothing here scores `solvers.py`" (`scratchpad/pin/corpus_pin.py`), so
-    # a new corpus with its own positive control is a precondition and not a
-    # formality. That is a change with its own branch and its own evidence, not
-    # a rider on one correcting prose.
-    #
-    # WHAT IS THEREFORE TRUE AND UNCLOSED, stated so nobody reads a decline as
-    # a refutation: the reader keeps universal newlines, the writer's whitelist
-    # stays the load-bearing half, and `\r` from a driver out of step with this
-    # parser is a LIVE hole in both directions. A stale install is what the
-    # driver's docstring promises degrades to UNKNOWN; it does so for eight of
-    # the ten here, for all ten through a writer that is not itself stale, and
-    # for nine of the ten under a repair that is measured, dominant, and
-    # unlanded.
+    # WHAT IS STILL NOT CLOSED HERE, said plainly rather than left to be
+    # found. The nine is over SINGLE characters. `\n` is excluded by
+    # construction — it is the protocol's own record boundary, so a writer
+    # that leaves one inside a field has written two records and there is
+    # nothing here to detect — and the two-character `\r\n` is that same fact
+    # in a second spelling, since it is a genuine record boundary under this
+    # reader exactly as it was under (a). Neither is a regression and neither
+    # is an improvement; both are the writer's, and the writer escapes them.
     #
     # A byte outside the protocol's alphabet is a protocol violation, never
     # something to interpret.
-    if any(not (" " <= c <= "~") for c in proc.stdout if c != "\n"):
+    stdout = _decode_child_stream(proc.stdout)
+    stderr = _decode_child_stream(proc.stderr)
+    if any(not (" " <= c <= "~") for c in stdout if c != "\n"):
         return _RawResult(
             answer="failed",
             version=version,
             detail=f"cvc5 driver wrote outside the protocol's alphabet "
             f"(printable ASCII and newline); refusing to interpret it. "
-            f"stdout: {_quote(proc.stdout)!r}",
+            f"stdout: {_quote(stdout)!r}",
         )
     # A RECORD IS `text + "\n"`, because that is what `print` writes. A final
     # record with no newline is a record the child did not finish writing, and
@@ -752,7 +740,7 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
     # shape and no other. `splitlines()` accepted it identically, so this is
     # the same disagreement as above at the other end of the record: the writer
     # terminates, the reader did not require termination.
-    lines = proc.stdout.split("\n")
+    lines = stdout.split("\n")
     terminated = len(lines) > 1 and lines[-1] == ""
     if terminated:
         lines.pop()  # `print`'s own newline on the last record, not a record
@@ -793,7 +781,7 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
             answer="failed",
             version=version,
             detail=f"cvc5 driver protocol violation; stdout: "
-            f"{_quote(proc.stdout)!r}, stderr: {_quote(proc.stderr)!r}",
+            f"{_quote(stdout)!r}, stderr: {_quote(stderr)!r}",
         )
     # THE CRASHED CHILD. The driver answers BEFORE it walks the model, so a
     # death inside cvc5's native `getValue` leaves `answer sat` on stdout with
@@ -886,7 +874,7 @@ def _run_cvc5_wheel(script_text: str, wall_s: float) -> _RawResult:
             detail=f"cvc5 driver answered {answer!r} but the run is not "
             f"complete (exit {proc.returncode}; terminator "
             f"{why}); refusing to rely on a "
-            f"crashed run. stderr: {_quote(proc.stderr)!r}",
+            f"crashed run. stderr: {_quote(stderr)!r}",
         )
     return _RawResult(
         answer=answer,

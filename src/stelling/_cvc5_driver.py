@@ -24,7 +24,15 @@ what *complete* has to mean if a crashed or truncated run is to be refused
 (``solvers._run_cvc5_wheel``). Driver and parent ship in the same package
 and are read together — change one and you must change the other; a
 mismatch degrades every run to UNKNOWN with the terminator quoted, which
-is the safe direction but is still a break.
+is the safe direction but is still a break. **That is a claim about the
+PAIR, and its two halves are not equal.** A stale DRIVER writing past this
+whitelist is caught by the parent for nine of the ten separators and not
+for the tenth, which is ``\\n``, the protocol's own record boundary
+(measured, real children, real bytes: ``scratchpad/probe_cvc5_backstop.py``
+part A, and
+``tests/test_solver_audit_findings.py::test_f4wheel3_the_reader_now_refuses_nine_of_the_ten_separators``).
+A stale PARENT is not caught here at all. The whitelist is what makes the
+sentence true for all ten in the direction this file controls.
 
 THE PROTOCOL'S ALPHABET, and why it is a whitelist. Every field below is
 written through :func:`_token` / :func:`_tail`, which pass **printable
@@ -38,11 +46,19 @@ twice over:
   U+001E U+0085 U+2028 U+2029). A model value carrying one of those was
   ONE line to this writer and TWO to that reader, which let the payload
   forge the terminator.
-* ``\\r`` is worse than the rest and cannot be fixed downstream at all:
-  the parent captures with ``text=True``, so Python's universal-newline
-  decoding turns a ``\\r`` into a real ``\\n`` **before the parent gets to
-  split anything** (measured). No reader-side rule can see it. The
-  boundary is created here or nowhere.
+* ``\\r`` used to be worse than the rest and unfixable downstream: the
+  parent captured with ``text=True``, so Python's universal-newline
+  decoding turned a ``\\r`` into a real ``\\n`` **before the parent got to
+  split anything** (measured), and no reader-side rule could see it.
+  **THAT SENTENCE DESCRIBED A PARENT THIS PACKAGE NO LONGER HAS**
+  (2026-08-09): the parent reads bytes and applies the one translation
+  itself (``solvers._decode_child_stream``), so a bare ``\\r`` now reaches
+  its alphabet check and is refused there — eight of the ten backstopped
+  became nine. **This whitelist is still the load-bearing half and is not
+  weakened by that.** The reader's share is what a STALE parent-and-driver
+  pair degrades to; the boundary for a matched pair is created here, and
+  ``\\n`` and ``\\r\\n`` are created here or nowhere at all, because both
+  are real record boundaries that no reader can tell from two records.
 
 A whitelist rather than a wider blacklist because the blacklist's contents
 are not ours: ``str.splitlines()`` may learn a new separator, and the io

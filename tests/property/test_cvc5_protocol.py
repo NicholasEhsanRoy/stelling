@@ -117,9 +117,20 @@ DEFINITE = ("sat", "unsat", "unknown")
 
 
 class _FakeProc:
+    """What ``subprocess.run`` hands the transport: BYTES, on both streams.
+
+    This used to hand it ``str``, which quietly made the model a reader that
+    does no decoding at all — so the ``\\r`` row of ``SPLITLINES_ONLY`` above
+    was being scored against a parent that did not exist in either direction:
+    the shipped one translated ``\\r`` to ``\\n`` before reading, and this one
+    did nothing. The transport decodes for itself now
+    (``solvers._decode_child_stream``), so the child's job here is to be the
+    bytes and let the real decoder run.
+    """
+
     def __init__(self, stdout, returncode):
-        self.stdout = stdout
-        self.stderr = ""
+        self.stdout = stdout.encode("utf-8") if isinstance(stdout, str) else stdout
+        self.stderr = b""
         self.returncode = returncode
 
 
