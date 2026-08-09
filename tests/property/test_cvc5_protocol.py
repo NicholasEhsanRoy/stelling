@@ -233,10 +233,32 @@ def _judge(res, stdout, full, rc, census, *, where):
     WHICH OF THE THREE CLAUSES THE POSITIVE CONTROL ACTUALLY DEMONSTRATES,
     written down because "the control fires" and "the property is shown to
     find what it claims to find" are different statements and this file has
-    only ever checked the first. Measured against ``0ad22bb`` at the ci
-    profile, evaluating all three clauses INDEPENDENTLY instead of
-    short-circuiting, over the flat leg's own 1500 examples: 1418 refused, 82
-    definite, and every failure among them is clause (2).
+    only ever checked the first.
+
+    RE-MEASURED, BECAUSE THE FIRST VERSION OF THIS TABLE WAS A CENSUS OF THE
+    WRONG TREE. Both rows are the ci profile's own derandomized 1500 examples,
+    judged by a non-raising counter that evaluates all three clauses
+    INDEPENDENTLY instead of short-circuiting. ``search``'s own source and this
+    module's file are untouched by the instrumentation, so hypothesis's
+    function digest — and with it the example sequence — is the shipped one:
+    the 1500 drawn ``(full, stdout, rc)`` triples are byte-identical, in order,
+    at both trees::
+
+        tree       refused  definite  V(1)  V(2)  V(3)
+        0ad22bb      1392      108       0     5     0
+        the tip      1418       82       0     0     0
+
+    ``1418 refused / 82 definite`` is **the tip's** census and was published
+    here as ``0ad22bb``'s. It cannot be ``0ad22bb``'s: that parser answers
+    definitely everywhere the tip does and on 26 transcripts more — the ones
+    the tip's alphabet backstop refuses — so ``definite(0ad22bb) >=
+    definite(tip)`` pointwise, checked example by example on this sequence. A
+    second, differently seeded pair of 1500-example runs gives 88 definite at
+    ``0ad22bb`` against 67 at the tip: same direction, different totals. The
+    ``3 VIOLATED (2)`` published beside them reproduces at neither tree under
+    this instrumentation and is WITHDRAWN. The measurement is 5, and every one
+    of the 5 is clause (2) — which is the one conclusion the old table was
+    offered in support of, and it survives the correction.
 
     (2) NOTHING WAS TRUNCATED — DEMONSTRATED, by both legs, in both of the
     shapes ``cvc5-flat``'s ``why`` names: the final record's newline cut and
