@@ -4117,16 +4117,25 @@ verdicts:
   Every one of those nine paths is inside the sdist allowlist in
   `pyproject.toml`, and `propagate.py` is in the wheel as well, so all 12
   ship. **At least four of them say what the defect IS**, not merely that
-  it exists. `tests/property/positive_controls.py:91`, verbatim: *"an
+  it exists. `tests/property/positive_controls.py:91-93`, verbatim: *"an
   out-of-dtype-range integer literal wraps mod 2\*\*bits before tracing, so
   stelling returns VERIFIED for a predicate that is false at every declared
-  point"*. `tests/property/test_oracle.py:123` says the same in its own
+  point"*. `tests/property/test_oracle.py:123-125` says the same in its own
   words (*"…so stelling verifies a predicate that is false at every
   declared point"*), `:17` gives the mechanism and why an execution oracle
-  cannot see it, and `_grammar.py:32` names the mechanism again. That grep
-  is a FLOOR, not a census: a wider pattern
-  (`out-of-dtype-range|wraps mod 2|wrapping before tracing`) finds more,
-  including `tests/property/README.md:165`.
+  cannot see it, and `_grammar.py:32` names the mechanism again. *(Those
+  first two anchors were written `:91` and `:123`, which is where each
+  quoted string STARTS; the quoted words run on to `:93` and `:125`. A
+  grep hit is the first line of a wrapped string literal, and citing it
+  alone points a reader at a third of the sentence being quoted.)* That
+  grep is a FLOOR, not a census: a wider pattern
+  (`out-of-dtype-range|wraps mod 2|wrapping before tracing`) finds
+  **13 lines in 5 files**, including `tests/property/README.md:165` —
+  and it is NOT a superset. Measured at `b2e3a15`, the two greps share
+  only four lines (`_grammar.py:32`, `positive_controls.py:91`,
+  `test_oracle.py:17` and `:123`); their union is **21 lines**. So the
+  wider pattern is a different net, not a bigger one, and "finds more" is
+  true only of the count.
 
   **What IS true, measured the same way, is the narrower claim this entry
   should have made**: at `53f9f84` the same grep run against `SOUNDNESS.md`
