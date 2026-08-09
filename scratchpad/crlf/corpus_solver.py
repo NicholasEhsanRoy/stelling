@@ -387,6 +387,44 @@ def _flatten(blob, prefix, out):
 # A leaf whose key ends in one of these decides, or reports, a verdict.
 _VERDICT_SUFFIXES = (".outcome", ".status", ".answered_by", ".declined")
 
+# The per-key listings are SAMPLES and say so. This cap has always been here;
+# what was not here was any sign of it, so a run that moved 136 keys printed 80
+# and read as a complete account of the move. A positive control's job is to be
+# checkable from its own output, and a silently truncated listing is the exact
+# shape this repository has been wrong about before.
+_LIST_CAP = 80
+
+
+def _listing(label, keys, fa, fb, tail=""):
+    """Print at most `_LIST_CAP` keys, and SAY SO when there are more."""
+    for k in keys[:_LIST_CAP]:
+        print(f"    {k}: {fa.get(k)!r} -> {fb.get(k)!r}")
+    if len(keys) > _LIST_CAP:
+        print(f"    ... TRUNCATED: this listing is a SAMPLE — {_LIST_CAP} of "
+              f"{len(keys)} {label} keys shown, {len(keys) - _LIST_CAP} not "
+              f"listed.{tail}")
+
+
+def _histogram(keys, fa, fb):
+    """Every (from -> to) transition with its count, COMPLETE and uncapped.
+
+    This is what makes a count written in prose checkable against this file
+    without re-running anything. The per-key listing cannot do that job: it is
+    capped, and a claim like "seven of them REFUTED -> VERIFIED" is a statement
+    about the whole population, not about the first eighty keys of it. The
+    histogram is bounded by the number of DISTINCT transitions — twelve on the
+    run this instrument was built for — so it can be printed in full, which is
+    the whole reason to prefer it here."""
+    hist = {}
+    for k in keys:
+        hist[(repr(fa.get(k)), repr(fb.get(k)))] = (
+            hist.get((repr(fa.get(k)), repr(fb.get(k))), 0) + 1
+        )
+    print(f"  TRANSITION HISTOGRAM (complete, {len(hist)} distinct "
+          f"transitions over {len(keys)} moved keys):")
+    for (x, y), n in sorted(hist.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"    {n:5d}  {x} -> {y}")
+
 
 def diff(a_path, b_path):
     with open(a_path) as fh:
@@ -417,11 +455,23 @@ def diff(a_path, b_path):
     print(f"  VERDICT-BEARING keys (outcome/status/answered_by/"
           f"declined/witness): {len(verdict_keys)}")
     print(f"  verdict-bearing keys that MOVED:  {len(moved)}")
-    for k in moved[:80]:
-        print(f"    {k}: {fa.get(k)!r} -> {fb.get(k)!r}")
+    _listing("verdict-bearing", moved, fa, fb,
+             tail=" The two blocks below are COMPLETE and are what a count "
+                  "written in prose should be checked against.")
+    if moved:
+        _histogram(moved, fa, fb)
+    # The VERDICT transitions on their own, because a `.verdict.status` move is
+    # the thing a reader counts, and it is the thing prose gets wrong.
+    vs = [k for k in moved if k.endswith(".verdict.status")]
+    if vs:
+        print(f"  VERDICT STATUS moves ({len(vs)}, complete):")
+        for k in vs:
+            print(f"    {k}: {fa.get(k)!r} -> {fb.get(k)!r}")
     print(f"  other keys that differ:           {len(other)}")
-    for k in other[:80]:
-        print(f"    {k}: {fa.get(k)!r} -> {fb.get(k)!r}")
+    _listing("non-verdict", other, fa, fb,
+             tail=" No histogram here: these are free-text details and notes, "
+                  "so the distinct-transition count is not bounded the way the "
+                  "verdict-bearing one is. The COUNT above is complete.")
     return 1 if (moved or other) else 0
 
 
