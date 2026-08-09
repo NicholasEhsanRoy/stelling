@@ -3609,9 +3609,11 @@ verdicts:
   refuted downstream of a plain straddle DECLINE. Checked against
   execution: false at every point the declaration admits, so each is
   sound. The earlier wording here — *"never a REFUTED"* — read as a
-  claim about the program and was wrong in that reading. Only the note changes, and
-  it is shouted. The old wording explained why *stelling* declined and
-  never said the *program* indexes out of bounds; `_t_scatter` and
+  claim about the program and was wrong in that reading.
+
+  Only the note changes, and it is shouted. The old wording explained
+  why *stelling* declined and never said the *program* indexes out of
+  bounds; `_t_scatter` and
   `_t_gather` had detected this exact fact since their own rounds and
   filed it as a decline. This is the case a jax maintainer asked for in
   Feb 2026 (*"I would rather there be an error for OOB indexing if it's
@@ -3627,17 +3629,74 @@ verdicts:
   0.10.2 — 0 containment violations, 0 non-tight configurations.** Five
   deliberately wrong hulls driven through the same instrument produced
   908 / 573 / 439 / 608 / 1073 violations, so its zero is falsifiable.
-  Two of the five are committed (`tests/test_index_bounds.py`).
   **Tightness is pinned separately and on CONCRETE data**, because a
   containment sweep cannot see it: hulling the whole operand would pass
   every soundness check and fail the ramp tests.
 
-  **Nine mutants, one worktree each, `python -B`, `__pycache__` cleared:
-  9/9 killed.** The first pass killed 8 — `M8_no_index_dtype_gate`
-  SURVIVED, 129 passed with the call to the index-dtype gate deleted,
-  because the test covering it drove the helper directly and never asked
-  whether the transfer consults it. A gate proved correct and never
-  proved wired in; closed with a query that goes through the walk.
+  **ALL THREE HULLS ARE NOW SWEPT IN THE SUITE, not only in a run
+  record.** The first version of this entry committed the
+  `dynamic_slice` sweep and left the other two hulls this round added —
+  `dynamic_update_slice_hull` and `take_row_ranges` — with evidence that
+  existed in a log and nowhere a reader could re-run, which is the
+  difference between evidence and a claim about evidence. Committed in
+  `tests/test_index_bounds.py`, same instrument, judged per output
+  position against the real primitive at every admitted start:
+
+  | hull | elements | violations | positive control | violations |
+  |---|---|---|---|---|
+  | `dynamic_slice_hull` | 994 | 0 | lowest-start-only; exclusive upper | 246; 270 |
+  | `dynamic_update_slice_hull` | 3420 | 0 | lowest-start-only; never-keeps-operand | 544; 1144 |
+  | `take_row_ranges` | 2431 | 0 | first-reachable-row-only | 688 |
+
+  Two choices in the write sweep are load-bearing and stated so they are
+  not silently undone: operand values are drawn from `[-500, 0)` and
+  update values from `[1, 500)`, **disjoint**, so that *kept the operand*
+  and *took the update* are distinguishable at every position — on
+  overlapping data a rule that confuses them passes; and the second
+  control is the error specific to that row (take only the update
+  wherever any admitted start could write), which the read row's
+  controls cannot stand in for because the read row has no such join.
+  The row sweep judges against a real `lax.gather` in the covered
+  leading-axis geometry rather than against `arr[k]`, which is a
+  different lowering.
+
+  **Mutants: nine in the first pass, and three more that only a blinded
+  re-run found.** One worktree each, `python -B`, `__pycache__` cleared,
+  every mutation LINE-NEUTRAL — a mutant that shifts line numbers can be
+  "killed" by the generated `docs/supported-primitives.md` citation
+  check, which is an artefact and not coverage. The first pass killed 8;
+  `M8_no_index_dtype_gate` SURVIVED because the test covering it drove
+  the helper directly and never asked whether the transfer consults it.
+  A gate proved correct and never proved wired in; closed with a query
+  that goes through the walk. **That lesson had two more instances left
+  in this same diff**, both surviving the FULL suite as the branch stood
+  at `a5c9659` — 2515 passed / 7 skipped, rc=0, jax 0.11.0:
+
+  * `_ieee_dynamic_update_slice`, `[flags[0] or flags[1]]` →
+    `[flags[0]]`. **Reachable and UNSOUND**: a declared operand, a
+    ⊤-maybe-NaN update, `dynamic_update_slice`, `assert out ≤ +inf` —
+    correct answer `unknown` (NaN falsifies the comparison), mutant
+    `discharged`. The scatter set-form's copy of the identical line had
+    been pinned since its own round; this row's had not.
+  * `_t_gather`, the `_index_dtype_covers_or_decline` call removed.
+    Exactly the M8 defect, one function away:
+    `test_a_narrow_index_dtype_declines_because_xla_wraps_the_bound`
+    passes the string `"gather"` while driving the helper DIRECTLY, so
+    the gather case *looked* covered and was not.
+
+  A third, the `dynamic_update_slice` start-index maybe-NaN gate under
+  `ieee`, was reported as SUSPECTED equivalent and is not.
+  `_classify_index_range`'s finiteness check catches a ⊤ start first,
+  which is why it looked equivalent; but `select_n`'s ieee rule ORs in
+  every CASE's flag *including cases the selector definitely excludes*,
+  so a definite selector picking a finite declared `int32` yields a
+  start that is finite, in-window and flagged — `unknown` here,
+  `discharged` with the gate gone. **Recorded as DEFENCE IN DEPTH and
+  not as a soundness hole**, because on that query an `int32` cannot BE
+  NaN so the removed-gate answer happens to be true, and a genuinely
+  NaN-able float start declines one step later at the index-dtype gate.
+  Wired in for the verdict; defence in depth for soundness. All three
+  are now pinned, each shown red under its own line-neutral mutant.
 
   **SCORED PER OBLIGATION.** Own corpus, 304 keys × {real, ieee}, each
   key carrying an oracle that executes the program at every declared

@@ -539,19 +539,19 @@ def test_reverse_mode_ad_is_NOT_an_inverse_across_the_gather_scatter_pair():
     )
     assert (f8 - f7, ad) == (0.0, 1.0)  # true 0, AD 1
 
-    # -- and under CLIP both halves agree, which is why the mode is the story
-    for mode in ("clip",):
-        c7 = float(np.asarray(wr(jnp.float64(7.0), mode)))
-        c8 = float(np.asarray(wr(jnp.float64(8.0), mode)))
-        cad = float(
-            np.asarray(jax.grad(lambda v, m=mode: wr(v, m))(jnp.float64(7.0)))
-        )
-        assert c8 - c7 == cad == 1.0, mode
+    # -- and under CLIP both halves agree, which is why the MODE is the
+    # story and not the operation: same expressions, one param changed
+    c7 = float(np.asarray(wr(jnp.float64(7.0), "clip")))
+    c8 = float(np.asarray(wr(jnp.float64(8.0), "clip")))
+    cad = float(
+        np.asarray(jax.grad(lambda v: wr(v, "clip"))(jnp.float64(7.0)))
+    )
+    assert c8 - c7 == cad == 1.0
 
-        def cget(u, m=mode):
-            return jnp.sum(u.at[idx].get(mode=m))
+    def cget(u):
+        return jnp.sum(u.at[idx].get(mode="clip"))
 
-        assert float(np.asarray(jax.grad(cget)(ramp))[9]) == 1.0, mode
+    assert float(np.asarray(jax.grad(cget)(ramp))[9]) == 1.0
 
 
 def test_a_write_past_the_end_is_dropped_by_jax_and_reported_here():

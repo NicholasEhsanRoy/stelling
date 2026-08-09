@@ -177,7 +177,17 @@ constants only.
 * **Positive controls.** Five wrong hulls driven through the same instrument:
   lowest-start-only (908 violations), exclusive upper endpoint (573), axis-0
   only (439), a write rule that never keeps the operand (608), a gather
-  taking only the first reachable row (1073). Two are committed as tests.
+  taking only the first reachable row (1073).
+* **All three hulls swept IN THE SUITE**, not only in a run record — the
+  first version of this page committed the `dynamic_slice` sweep and left
+  `dynamic_update_slice_hull` and `take_row_ranges` with evidence a reader
+  could not re-run. Same instrument, judged per output position: 994 / 3420 /
+  2431 elements, **0 violations each**, with a positive control apiece
+  (lowest-start-only and exclusive-upper for the read row; lowest-start-only
+  at 544 and never-keeps-the-operand at 1144 for the write row;
+  first-reachable-row-only at 688 for the row form). Operand and update
+  values are drawn from disjoint ranges in the write sweep, so that "kept the
+  operand" and "took the update" are distinguishable at every position.
 * **Per-obligation scoring**, 304 keys × {real, ieee}: **81 obligations moved,
   every one UNKNOWN → definite, every one agreeing with an executing oracle,
   0 wrong moves**; 25 out-of-bounds findings where the baseline emitted 0.
