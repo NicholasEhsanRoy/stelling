@@ -530,6 +530,86 @@ def test_a_narrow_index_dtype_declines_because_xla_wraps_the_bound():
         _index_dtype_covers_or_decline("float64", 3, "gather")
 
 
+def _hand_dynamic_slice_query(index_dtype, axis_len, lo, hi):
+    """A `dynamic_slice` over a length-`axis_len` const, indexed by a scalar
+    of `index_dtype`. Hand IR because jnp REFUSES to build this: measured on
+    jax 0.11.0, `arange(200)[jnp.int8(0)]` raises OverflowError at trace
+    time ("Python integer 200 out of bounds for int8"), so the only way the
+    form reaches a transfer is a raw lax call or a deserialised query -- and
+    both are doors this gate has to hold."""
+    from stelling import ir
+
+    def av(shape=(), dtype="float64"):
+        return ir.Aval(kind="ShapedArray", shape=shape, dtype=dtype)
+
+    idx = ir.Var(id=0, aval=av((), index_dtype))
+    y = ir.Var(id=1, aval=av((1,)))
+    pred = ir.Var(id=2, aval=av((1,), "bool"))
+    out = ir.Var(id=3, aval=av((1,), "bool"))
+    data = ir.Literal(
+        val=ir.Array(
+            dtype="<f8",
+            shape=(axis_len,),
+            data=np.zeros(axis_len, dtype="<f8").tobytes(),
+        ),
+        aval=av((axis_len,)),
+    )
+    return ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(),
+            outvars=(out,),
+            eqns=(
+                ir.JaxprEqn(
+                    primitive="stelling_any",
+                    invars=(),
+                    outvars=(idx,),
+                    params=(
+                        ("shape", ()),
+                        ("dtype", index_dtype),
+                        ("lo", float(lo)),
+                        ("hi", float(hi)),
+                    ),
+                ),
+                ir.JaxprEqn(
+                    primitive="dynamic_slice",
+                    invars=(data, idx),
+                    outvars=(y,),
+                    params=(("slice_sizes", (1,)),),
+                ),
+                ir.JaxprEqn(
+                    primitive="le",
+                    invars=(y, ir.Literal(val=1.0, aval=av())),
+                    outvars=(pred,),
+                ),
+                ir.JaxprEqn(
+                    primitive="stelling_assert",
+                    invars=(pred,),
+                    outvars=(out,),
+                ),
+            ),
+        )
+    )
+
+
+def test_the_dtype_gate_is_actually_WIRED_IN_not_merely_correct():
+    """The mutation gauge's one survivor, closed. Deleting the CALL to
+    `_index_dtype_covers_or_decline` from `_start_ranges` left the test
+    above green, because that test drives the helper directly and never
+    proves the transfer asks it anything. This one goes through the walk.
+
+    An `int8` index over a 200-element axis must DECLINE (bound 199 does
+    not fit int8, so XLA's out-of-bounds comparison is computed on a
+    wrapped bound), while the identical query at `int32` decides."""
+    narrow = propagate(_hand_dynamic_slice_query("int8", 200, 0, 5))
+    assert narrow.obligations[0].status == "unknown"
+    note = next(n for n in narrow.notes if "'dynamic_slice' declined" in n)
+    assert "does not hold the largest legal index 199" in note, note
+
+    wide = propagate(_hand_dynamic_slice_query("int32", 200, 0, 5))
+    assert wide.obligations[0].status == "discharged"
+
+
 def test_take_row_ranges_agrees_with_take_rows_on_point_indices():
     """The generalisation must not have moved the case it generalises."""
     a = iv.IntervalArray(
