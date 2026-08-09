@@ -234,24 +234,35 @@ def test_fvm_gather_static_row_definite_false_traced():
     assert p.obligations[0].status == "violated-over-set"
 
 
-def test_fvm_gather_dynamic_index_declines_traced():
-    # a traced (non-point) index reaches the transfer as a real interval:
-    # decline to a noted ⊤ — clamp/drop/fill is mode-dependent, never
-    # guessed. The note used to read "no sound rule"; strengthened — it
-    # must name the element and print ITS declared span.
+def test_fvm_gather_dynamic_index_takes_the_hull_traced():
+    # CHANGED EXPECTATION, index-bounds round: a traced index whose whole
+    # declared range lands on the operand's axis no longer declines. Every
+    # row of x is in [0, 1], so whichever row the index reaches, x[i] <= 1
+    # holds — and this is the shape of query the decline used to lose.
+    #
+    # THE HAZARD THIS TEST GUARDS: jnp inserts the from-the-end
+    # normalisation (lt/add/select_n) ahead of the take, so the interval
+    # reaching the transfer is the NORMALISED one. The declared [0, 2] is
+    # non-negative, the normalisation is the identity on it, and the range
+    # arrives intact — if any of that broke, the range would widen and the
+    # obligation would fall back to unknown rather than to a wrong answer.
     def h():
         x = any_array((3,), "float64", (0.0, 1.0))
         i = any_array((1,), "int32", (0.0, 2.0))
         return assert_(x[i] <= 1.0)
 
     p = run(h)
-    assert p.obligations[0].status == "unknown"
-    assert any(
-        "'gather' declined this form" in n
-        and "index element 0 spans [0.0, 2.0]" in n
-        for n in p.notes
-    ), p.notes
-    assert "gather" not in dict(p.transfers_used)
+    assert p.obligations[0].status == "discharged"
+    assert dict(p.transfers_used)["gather"] == "exact"
+
+    # discrimination: the same query with a bound the hull cannot meet must
+    # NOT discharge. x spans [0, 1] elementwise, so <= 0.5 is undecided.
+    def h2():
+        x = any_array((3,), "float64", (0.0, 1.0))
+        i = any_array((1,), "int32", (0.0, 2.0))
+        return assert_(x[i] <= 0.5)
+
+    assert run(h2).obligations[0].status == "unknown"
 
 
 def test_fvm_transpose_traced():
@@ -422,20 +433,27 @@ def test_gather_partial_row_slice_sizes_decline_traced():
     )
 
 
-def test_gather_out_of_range_static_index_declines_traced():
-    # a static 7 into a 3-row operand reaches the transfer as the point
-    # interval [7, 7]: the failing comparison is printed with the true
-    # bound
+def test_gather_out_of_range_static_index_is_a_finding_traced():
+    # CHANGED EXPECTATION: a static 7 into a 3-row operand is out of bounds
+    # for every input, through the REAL trace. This is the case a jax
+    # maintainer asked for in Feb 2026 — "I would rather there be an error
+    # for OOB indexing if it's statically provable instead of silently
+    # giving the wrong answer" — and nothing in the ecosystem reports it:
+    # checkify is runtime-only and jax_check_static_indices reaches only
+    # static constants. jax itself does not raise; measured on 0.11.0 it
+    # returns the clamped row.
     def h():
         x = any_array((3,), "float64", (0.0, 1.0))
         return assert_(x[jnp.array([7])] <= 1.0)
 
-    _gather_traced_declined(
-        h,
-        "index element 0 is 7",
-        "0 <= 7 < 3 fails",
-        "mode-dependent",
-    )
+    p = run(h)
+    assert p.obligations[0].status == "unknown"
+    assert p.coverage.unknown == 1
+    assert p.coverage.unknown_primitives == (("gather", 1),)
+    assert "gather" not in dict(p.transfers_used)
+    note = next(n for n in p.notes if "OUT-OF-BOUNDS INDEX (definite)" in n)
+    for f in ("'gather'", "spans [7, 7]", "the legal positions are [0, 2]"):
+        assert f in note, (f, note)
 
 
 def test_gather_rank0_operand_declines_traced():

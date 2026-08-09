@@ -1608,9 +1608,6 @@ def _t_gather(eqn, params, ins):
             f"covered row form takes (1, *operand.shape[1:]) = {want_ss} "
             f"of the operand (shape {operand.shape}) per index"
         )
-    _index_dtype_covers_or_decline(
-        _index_operand_dtype(eqn, 1), operand.shape[0] - 1, "gather"
-    )
     ranges = []
     for i, (lo, hi) in enumerate(zip(indices.los, indices.his)):
         ranges.append(
@@ -1619,6 +1616,14 @@ def _t_gather(eqn, params, ins):
                 f"the operand's leading axis (shape {operand.shape})",
             )
         )
+    # AFTER the classification, deliberately: this gate protects the VALUE
+    # about to be computed, and a value is computed on the in-range path
+    # only. Asking it first would answer a malformed float-dtype index with
+    # a dtype-range complaint when the informative decline is that the
+    # index is not an integer at all.
+    _index_dtype_covers_or_decline(
+        _index_operand_dtype(eqn, 1), operand.shape[0] - 1, "gather"
+    )
     return [iv.take_row_ranges(operand, ranges)]
 
 
@@ -1808,9 +1813,6 @@ def _start_ranges(eqn, ins, first: int, sizes, prim: str):
                 f"{prim} takes {s} element(s) along axis {d} of an extent-"
                 f"{n} axis (operand shape {operand.shape})"
             )
-        _index_dtype_covers_or_decline(
-            _index_operand_dtype(eqn, first + d), n - s, prim
-        )
         out.append(
             _classify_index_range(
                 start.los[0], start.his[0], n - s,
@@ -1818,6 +1820,10 @@ def _start_ranges(eqn, ins, first: int, sizes, prim: str):
                 f"axis {d} of the operand (shape {operand.shape}, taking "
                 f"{s} element(s) there)",
             )
+        )
+        # after the classification, for the reason given in _t_gather
+        _index_dtype_covers_or_decline(
+            _index_operand_dtype(eqn, first + d), n - s, prim
         )
     return tuple(out)
 
