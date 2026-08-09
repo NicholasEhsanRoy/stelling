@@ -454,14 +454,15 @@ def _wheel_child(monkeypatch, tmp_path, mode, *, buffered=None, seen=None):
             env["PYTHONUNBUFFERED"] = "1"
 
     def route(argv, **kw):
-        proc = _REAL_SPAWN(
-            [_sys.executable, str(script), mode],
-            input=kw.get("input", ""),
-            capture_output=True,
-            text=True,
-            timeout=kw.get("timeout", 60),
-            env=env,
-        )
+        # FORWARD THE TRANSPORT'S OWN SPAWN KWARGS. This used to name
+        # `text=True` and `capture_output=True` itself, which made every test
+        # routed through here a measurement of the FIXTURE's io choice rather
+        # than the transport's — and pinned the fixture to a reading of the
+        # child's stdout the transport had stopped doing. Only the argv and
+        # the environment are the fixture's business; `seen["stdout"]` is
+        # therefore the child's raw BYTES, which is what it was always
+        # standing in for.
+        proc = _REAL_SPAWN([_sys.executable, str(script), mode], env=env, **kw)
         if seen is not None:
             seen["stdout"] = proc.stdout
             seen["returncode"] = proc.returncode
@@ -481,7 +482,7 @@ def test_f4wheel_a_child_that_answered_then_died_is_not_a_verdict(
     seen = {}
     r = _wheel_child(monkeypatch, tmp_path, "big", buffered=True, seen=seen)
     assert seen["returncode"] == -9
-    assert "answer sat" in seen["stdout"]  # the answer really did get through
+    assert b"answer sat" in seen["stdout"]  # the answer really did get through
     assert r.answer == "failed"
     assert r.values == ()  # not one value taken from the corpse
     assert "not complete" in r.detail and "ABSENT" in r.detail
@@ -516,14 +517,14 @@ def test_f4wheel_the_boundary_is_the_pipe_buffer_not_the_model_size(
         monkeypatch, tmp_path, "small", buffered=False, seen=unbuffered_seen
     )
 
-    assert buffered_seen["stdout"] == ""  # the whole model died in the buffer
+    assert buffered_seen["stdout"] == b""  # the whole model died in the buffer
     assert blocked.answer == "failed"
     assert "protocol violation" in blocked.detail
 
     # unbuffered, EVERYTHING the child wrote before dying is through — all 51
     # bytes of it, `answer sat` among them, four lines short of the terminator
     assert unbuffered_seen["stdout"] == (
-        "version 1.3.4\nanswer sat\nvalue x0 0/1\nvalue x1 1/1\n"
+        b"version 1.3.4\nanswer sat\nvalue x0 0/1\nvalue x1 1/1\n"
     )
     assert len(unbuffered_seen["stdout"]) == 51
     assert leaked.answer == "failed"
@@ -559,7 +560,9 @@ def test_f4wheel_a_mock_exhibits_the_defect_it_cannot_explain(monkeypatch):
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda a, **kw: subprocess.CompletedProcess(argv, -9, stdout, ""),
+        lambda a, **kw: subprocess.CompletedProcess(
+            argv, -9, stdout.encode("utf-8"), b""
+        ),
     )
     monkeypatch.setattr(solvers, "_cvc5_wheel_version", lambda: "1.3.4")
     r = solvers._run_cvc5_wheel("(check-sat)\n(get-model)\n", 60.0)
@@ -603,7 +606,7 @@ def test_f4wheel_a_prefix_terminator_let_both_tells_go_blind_at_once(
     seen = {}
     r = _wheel_child(monkeypatch, tmp_path, "both_tells_blind", seen=seen)
     assert seen["returncode"] == 0  # the exit-code tell really is blind
-    assert seen["stdout"].splitlines()[-1] == "end of the resource limit"
+    assert seen["stdout"].splitlines()[-1] == b"end of the resource limit"
     assert r.answer == "failed"
     assert r.values == ()
     assert "ABSENT" in r.detail
@@ -757,10 +760,20 @@ _SEPARATORS = (
 
 
 def _wheel_stdout(monkeypatch, stdout, returncode=0):
+    """Hand the parent the BYTES a child wrote.
+
+    This used to hand it a `str` — what `text=True` had already decoded — so
+    every case below was a measurement of a MODEL of the io layer rather than
+    of the io layer itself. The parent decodes for itself now, so the fixture's
+    job is to be the child's stdout and nothing more. A `str` here is encoded
+    UTF-8, which is what `print` writes; pass `bytes` where the point is a byte
+    the protocol's alphabet does not contain.
+    """
+    raw = stdout.encode("utf-8") if isinstance(stdout, str) else stdout
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda a, **kw: subprocess.CompletedProcess([], returncode, stdout, ""),
+        lambda a, **kw: subprocess.CompletedProcess([], returncode, raw, b""),
     )
     monkeypatch.setattr(solvers, "_cvc5_wheel_version", lambda: "1.3.4")
     return solvers._run_cvc5_wheel("(check-sat)\n(get-model)\n", 60.0)
@@ -828,74 +841,56 @@ def test_f4wheel2_a_stale_driver_is_a_protocol_violation(monkeypatch):
     assert "alphabet" in r.detail
 
 
-def test_f4wheel2_carriage_return_is_the_writers_alone_to_stop(monkeypatch):
-    """WHY THE WRITER IS THE LOAD-BEARING HALF, and the measurement that
-    settles widen-the-writer against narrow-the-reader.
+def test_f4wheel2_a_record_boundary_is_the_writers_alone_to_stop(monkeypatch):
+    """WHY THE WRITER IS STILL THE LOAD-BEARING HALF — narrowed to what is
+    actually true of it.
 
-    `capture_output=True, text=True` means Python's universal-newline decoding
-    turns a `\\r` into a real `\\n` BEFORE this parent sees the string. By the
-    time any rule here runs there is nothing left to detect: the bytes below
-    are what a stale driver's `\\r` payload looks like after decoding, and this
-    parent accepts them — correctly, because they are indistinguishable from a
-    child that really wrote two records. No reader-side rule can close this;
-    only `_cvc5_driver._tail` escaping the `\\r` can."""
-    decoded = "version 1.3.4\nanswer sat\nvalue x0 1/1\nopaque x1 junk\nend 2\n"
-    r = _wheel_stdout(monkeypatch, decoded)
+    THIS TEST NAMED `\\r` AND THAT IS NO LONGER THE CASE. It was called
+    "carriage return is the writer's alone to stop", and its body handed the
+    parent the string universal-newline decoding produced, asserting that shape
+    is indistinguishable from a child that really wrote two records. The parent
+    decodes for itself now and KEEPS a bare `\\r`, so that shape is refused here
+    (`test_f4wheel3_the_reader_now_refuses_nine_of_the_ten_separators`).
+
+    What survives is the claim about a REAL record boundary. A `\\n` inside a
+    field is two records by definition, and so is a `\\r\\n` on the platform
+    `README.md` names for both solver wheels. No rule on the reader's side
+    could tell either from two records, which is why the whitelist on
+    `_cvc5_driver._token`/`._tail` is load-bearing and not decorative."""
+    r = _wheel_stdout(
+        monkeypatch,
+        "version 1.3.4\nanswer sat\nvalue x0 1/1\nopaque x1 junk\nend 2\n",
+    )
     assert r.answer == "sat"  # the parent is blind here, and cannot not be
     # ...and the driver is not: nothing it writes can decode into that.
     from stelling import _cvc5_driver
 
+    assert _cvc5_driver._tail("junk\nend 2") == "junk\\u{a}end 2"
     assert _cvc5_driver._tail("junk\rend 2") == "junk\\u{d}end 2"
 
 
 def test_f4wheel2_universal_newline_decoding_is_measured_not_modelled():
-    """The one real child in this block, and it exists so the model used by
-    the test below is not the thing under test. `capture_output=True,
-    text=True` is what the parent uses; these are raw BYTES going in."""
-    proc = subprocess.run(
-        [sys.executable, "-c",
-         r"import sys; sys.stdout.buffer.write(b'a\rb\r\nc\nd')"],
-        capture_output=True, text=True, timeout=60,
-    )
+    """THE MEASUREMENT THAT CONDEMNED `text=True`, kept because it is the
+    reason the parent stopped using it. Raw BYTES go in; `text=True` maps BOTH
+    `\\r\\n` and a bare `\\r` to `\\n`, so by the time any rule in the transport
+    ran there was no `\\r` left to test for.
+
+    The transport's own decoder is measured on the SAME bytes beside it. The
+    difference is one character, and that one character is the whole of the
+    difference between backstopping eight separators and nine.
+
+    THE FRACTION ITSELF MOVED HERE AND IS PINNED ELSEWHERE. What stood below
+    was `…_the_alphabet_backstop_refuses_eight_of_the_ten`, which fed the
+    parent a MODEL of this decoding (`_as_the_parent_receives_it`) rather than
+    bytes. Its successor spawns a real child and reads nine:
+    `test_f4wheel3_the_reader_now_refuses_nine_of_the_ten_separators`."""
+    argv = [sys.executable, "-c",
+            r"import sys; sys.stdout.buffer.write(b'a\rb\r\nc\nd')"]
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=60)
     assert proc.stdout == "a\nb\nc\nd"  # two \r gone, both became \n
-
-
-def _as_the_parent_receives_it(text: str) -> str:
-    """What `text=True` hands the parent, per the measurement above."""
-    return text.replace("\r\n", "\n").replace("\r", "\n")
-
-
-def test_f4wheel2_the_alphabet_backstop_refuses_eight_of_the_ten(monkeypatch):
-    """HOW FAR THE READER-SIDE BACKSTOP REACHES, pinned as a fraction rather
-    than as an adjective. The comment above the check used to call it "the
-    fail-closed backstop for a driver out of step with this parser", which
-    credited it with the whole separator set. It refuses eight, and the two it
-    does not refuse fail for two different reasons:
-
-    * `\\n` is excluded BY CONSTRUCTION — it is the protocol's own record
-      boundary, so a writer that leaves one in a field wrote two records and
-      there is nothing here to detect;
-    * `\\r` is a HOLE, and is invisible to the check rather than admitted by
-      it: universal-newline decoding turned it into a `\\n` before the check
-      ran. The stale child below never writes a terminator record of its own
-      and still gets a definite answer with a model.
-
-    If this ever reads 9 or 10, the reader grew a capability and the comment
-    beside the check has to say so."""
-    refused, definite = set(), set()
-    for sep in ("\n", "\r", *_SEPARATORS):
-        stale = (
-            "version 1.3.4\nanswer sat\nvalue x0 1/1\n"
-            f"opaque x1 j{sep}end 2{sep}"
-        )
-        r = _wheel_stdout(monkeypatch, _as_the_parent_receives_it(stale))
-        if r.answer == "failed" and "alphabet" in r.detail:
-            refused.add(sep)
-        if r.answer in ("sat", "unsat", "unknown"):
-            definite.add(sep)
-    assert refused == set(_SEPARATORS)
-    assert definite == {"\n", "\r"}
-    assert len(refused) == 8 and len(refused) + len(definite) == 10
+    raw = subprocess.run(argv, capture_output=True, timeout=60).stdout
+    assert raw == b"a\rb\r\nc\nd"
+    assert solvers._decode_child_stream(raw) == "a\rb\nc\nd"  # the bare \r kept
 
 
 @pytest.mark.parametrize(
@@ -1025,9 +1020,14 @@ def test_f4wheel2_property_fuzz_no_definite_answer_from_an_incomplete_run():
             truncated = True
         rc = rng.choice([0, 0, 0, 1, -9])
         wrote_full = not truncated and complete
-        # what `capture_output=True, text=True` hands the parent
-        decoded = stream.replace("\r\n", "\n").replace("\r", "\n")
-        proc = subprocess.CompletedProcess([], rc, decoded, "")
+        # THE BYTES THE CHILD WROTE, not a model of what a decoder does to
+        # them. This line used to be `stream.replace("\r\n", "\n").replace(
+        # "\r", "\n")` — the parent's `text=True` decoding, restated here. The
+        # parent decodes for itself now, so restating it would be modelling
+        # the thing under test; and the restatement was a no-op in any case,
+        # since every record above goes through `_cvc5_driver._tail`, which
+        # leaves no `\r` in the stream to translate.
+        proc = subprocess.CompletedProcess([], rc, stream.encode("utf-8"), b"")
         real = subprocess.run
         subprocess.run = lambda a, _p=proc, **kw: _p
         old_version = solvers._cvc5_wheel_version
@@ -1039,15 +1039,242 @@ def test_f4wheel2_property_fuzz_no_definite_answer_from_an_incomplete_run():
             solvers._cvc5_wheel_version = old_version
         definite = r.answer in ("sat", "unsat", "unknown")
         if definite and not (wrote_full and rc == 0):
-            unsound.append((decoded, rc, r.answer))
+            unsound.append((stream, rc, r.answer))
         if wrote_full and rc == 0 and not definite:
-            crywolf.append((decoded, r.answer, r.detail))
+            crywolf.append((stream, r.answer, r.detail))
         if definite:
             seen_sat += 1
     assert unsound == [], unsound[:3]
     # ANTI-VACUITY: the property is not passing because nothing was accepted.
     assert seen_sat > 200, seen_sat
     assert crywolf == [], crywolf[:3]
+
+
+# --- F4-wheel-3: the `\r` hole, closed on the READER, and what it costs -------
+#
+# `text=True` performs UNIVERSAL-NEWLINE decoding, which turns a `\r` into a
+# real `\n` before any rule in `_run_cvc5_wheel` can run. So a stale driver —
+# one out of step with this parser, i.e. a partial upgrade — could write
+# `opaque x1 j\rend 2\r`, no terminator record of its own anywhere, and get a
+# DEFINITE answer with a model. `sat` was the spurious-violation direction;
+# `unsat` off the same corpse is the DISCHARGE direction, and that one has no
+# downstream backstop at all.
+#
+# Three readers were measured over the same real children before this landed:
+#
+#   case                             (a) text=True  (b) decode  (c) decode+CRLF
+#   healthy POSIX   `\n`             sat            sat         sat
+#   healthy Windows `\r\n`           sat            FAILED      sat
+#   stale `\r`, LF body              SAT (!)        failed      failed
+#   stale `\r`, CRLF body            SAT (!)        failed      failed
+#   stale `\x0b`                     failed         failed      failed
+#   separators refused (LF stale)    8 of 10        9 of 10     9 of 10
+#   child writes invalid UTF-8       RAISES         failed      failed
+#
+# (c) is what shipped: identical to (a) on both healthy children, strictly
+# stronger on both stale ones, and with no platform coupling — `README.md`
+# names Windows for both solver wheels, which is what rules (b) out. It puts
+# back BY HAND the one translation `text=True` was doing and nothing else.
+#
+# EVERY TEST IN THIS BLOCK MEASURES THE PARENT'S OWN IO CHOICE, so none of them
+# may name it: `_wheel_real_child` forwards whatever `_run_cvc5_wheel` asked
+# `subprocess.run` for. `_wheel_child` above pins `text=True` in the shim
+# itself, which would make these tests a measurement of the fixture.
+
+
+def _stale_child(answer: str, payload: bytes) -> str:
+    """A stale driver: raw bytes, one write per record, NO terminator record.
+
+    Whatever `end <n>` the parent ends up seeing is inside the payload, so
+    accepting one is accepting a terminator the child never wrote.
+    """
+    return (
+        "import sys\n"
+        "w = sys.stdout.buffer.write\n"
+        "w(b'version 1.3.4\\n')\n"
+        f"w({f'answer {answer}\n'.encode()!r})\n"
+        "w(b'value x0 1/2\\n')\n"
+        f"w({payload!r})\n"
+    )
+
+
+_HEALTHY_CHILD = (
+    "import sys\n"
+    "sys.stdout.reconfigure(newline={nl!r})\n"
+    "print('version 1.3.4')\n"
+    "print('answer sat')\n"
+    "print('value x0 1/2')\n"
+    "print('end 1')\n"
+)
+
+
+def _wheel_real_child(monkeypatch, prog):
+    """Spawn a real child, forwarding the transport's OWN spawn kwargs."""
+
+    def route(argv, **kw):
+        return _REAL_SPAWN([sys.executable, "-c", prog], **kw)
+
+    monkeypatch.setattr(subprocess, "run", route)
+    monkeypatch.setattr(solvers, "_cvc5_wheel_version", lambda: "1.3.4")
+    return solvers._run_cvc5_wheel("(check-sat)\n(get-model)\n", 60.0)
+
+
+def test_f4wheel3_the_transport_asks_for_bytes_and_never_for_text(monkeypatch):
+    """THE MECHANISM, pinned where it is chosen rather than only where it is
+    felt. `text=`/`encoding=`/`universal_newlines=` all switch Python's
+    universal-newline decoding on, and any of the three reopens the hole below
+    without changing a line of the parser. The child's stdin gets bytes for the
+    same reason: there is no text mode left to encode it."""
+    seen = {}
+
+    def route(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(
+            argv, 0, b"version 1.3.4\nanswer unsat\nend 0\n", b""
+        )
+
+    monkeypatch.setattr(subprocess, "run", route)
+    monkeypatch.setattr(solvers, "_cvc5_wheel_version", lambda: "1.3.4")
+    r = solvers._run_cvc5_wheel("(check-sat)\n", 60.0)
+    assert r.answer == "unsat"
+    assert isinstance(seen["input"], bytes)
+    assert not {"text", "encoding", "errors", "universal_newlines"} & set(seen)
+
+
+def test_f4wheel3_the_decode_puts_back_one_translation_and_only_one():
+    """The whole of the reader-side change, as a function. `\\r\\n` is a record
+    boundary on the platform `README.md` names for both solver wheels, so it
+    has to survive; a BARE `\\r` is not a boundary anywhere `_cvc5_driver` runs,
+    so it must reach the alphabet check intact instead of being silently
+    promoted to one."""
+    assert solvers._decode_child_stream(b"a\r\nb\n") == "a\nb\n"
+    assert solvers._decode_child_stream(b"a\rb\n") == "a\rb\n"
+    assert solvers._decode_child_stream(b"a\nb\n") == "a\nb\n"
+    # and undecodable bytes become a character the alphabet check refuses,
+    # rather than an exception out of the transport
+    assert solvers._decode_child_stream(b"\xff") == "�"
+
+
+@pytest.mark.parametrize("answer", ("sat", "unsat", "unknown"))
+def test_f4wheel3_a_stale_carriage_return_child_is_refused_in_both_directions(
+    monkeypatch, answer
+):
+    """THE DEFECT, and the direction that matters.
+
+    Measured at `9564728`, real child, real bytes: `sat` with a model, and
+    `unsat` off the identical corpse — a false DISCHARGE, which is the VERIFIED
+    path and the one with no downstream backstop. `_require_valid_refutation`
+    catches a bad `sat` by replaying the witness; nothing replays an `unsat`.
+    """
+    r = _wheel_real_child(monkeypatch, _stale_child(answer, b"opaque x1 j\rend 2\r"))
+    assert r.answer == "failed"
+    assert r.values == ()
+    assert "alphabet" in r.detail
+
+
+def test_f4wheel3_the_reader_now_refuses_nine_of_the_ten_separators(monkeypatch):
+    """HOW FAR THE READER-SIDE BACKSTOP REACHES, pinned as a fraction. It was
+    EIGHT: `\\r` was invisible to the alphabet check rather than admitted by it,
+    because universal-newline decoding had already spent it.
+
+    `\\n` is the one that remains, and it is excluded BY CONSTRUCTION — it is
+    the protocol's own record boundary, so a writer that leaves one inside a
+    field has written two records and there is nothing on this side to detect.
+    That half is the writer's and always was.
+
+    If this ever reads 8 again the reader lost a capability; if it reads 10 the
+    reader started refusing its own record separator."""
+    refused, definite = set(), set()
+    for sep in ("\n", "\r", *_SEPARATORS):
+        raw = sep.encode("utf-8")
+        r = _wheel_real_child(
+            monkeypatch, _stale_child("sat", b"opaque x1 j" + raw + b"end 2" + raw)
+        )
+        if r.answer == "failed" and "alphabet" in r.detail:
+            refused.add(sep)
+        if r.answer in ("sat", "unsat", "unknown"):
+            definite.add(sep)
+    assert refused == {"\r", *_SEPARATORS}
+    assert definite == {"\n"}
+    assert len(refused) == 9 and len(refused) + len(definite) == 10
+
+
+def test_f4wheel3_a_crlf_inside_a_field_is_a_record_boundary_and_stays_one(
+    monkeypatch,
+):
+    """THE RESIDUAL, STATED RATHER THAN LEFT TO BE DISCOVERED. The count above
+    is over single characters. The two-character sequence `\\r\\n` is a genuine
+    record boundary under this reader, exactly as it is under `text=True`, so a
+    stale driver that puts one inside a FIELD is indistinguishable from a
+    Windows child that ended a record there — and is accepted, here as before.
+    This is the `\\n` row of the table wearing a second spelling, not a new
+    hole: it is byte-for-byte what the shipped reader did, so nothing regressed
+    and nothing improved. The writer's whitelist is what closes it."""
+    r = _wheel_real_child(
+        monkeypatch, _stale_child("sat", b"opaque x1 j\r\nend 2\r\n")
+    )
+    assert r.answer == "sat"  # unchanged from `text=True`; the writer stops it
+    from stelling import _cvc5_driver
+
+    assert _cvc5_driver._tail("j\r\nend 2") == "j\\u{d}\\u{a}end 2"
+
+
+@pytest.mark.parametrize(
+    "nl, label", (("\n", "POSIX"), ("\r\n", "Windows"))
+)
+def test_f4wheel3_a_healthy_child_answers_identically_on_either_line_ending(
+    monkeypatch, nl, label
+):
+    """THE CRY-WOLF FLOOR, and the measurement that chose (c) over (b).
+
+    A raw `bytes.decode()` with no translation refuses the `\\r\\n` child
+    outright — every record ends in a byte outside the protocol's alphabet.
+    `README.md` names Windows as a platform both solver wheels install on, so
+    that arm buys the ninth separator by breaking a healthy run. Same answer
+    AND same values on both, or the repair is not the repair that was chosen.
+    """
+    r = _wheel_real_child(monkeypatch, _HEALTHY_CHILD.format(nl=nl))
+    assert r.answer == "sat", label
+    assert r.values == (("x0", "1/2"),), label
+    assert r.detail == ""
+
+
+def test_f4wheel3_invalid_utf8_fails_closed_instead_of_escaping(monkeypatch):
+    """FAIL CLOSED WHERE THE TRANSPORT CANNOT DECIDE. A child writing a byte
+    that is not UTF-8 used to raise `UnicodeDecodeError` straight out of this
+    function — measured at `9564728`, uncaught. `escalate`'s catch-all degraded
+    it to `unknown`, so the verdict direction was safe by accident and the
+    transport's own contract (`answer` in a fixed set) was not being kept.
+    It is a protocol violation, which is a thing this layer already knows how
+    to say."""
+    prog = (
+        "import sys\n"
+        "sys.stdout.buffer.write(b'version 1.3.4\\nanswer sat\\n"
+        "value x0 1/2\\n\\xff\\nend 2\\n')\n"
+    )
+    r = _wheel_real_child(monkeypatch, prog)
+    assert r.answer == "failed"
+    assert r.values == ()
+    assert "alphabet" in r.detail
+
+
+def test_f4wheel3_the_one_measured_cry_wolf_case_is_a_child_stelling_never_ships(
+    monkeypatch,
+):
+    """THE COST, NAMED. Arm (c) refuses a HEALTHY child whose records end in a
+    bare `\\r`. No platform's `print` default produces that — `newline=None`
+    writes `os.linesep`, which is `\\n` or `\\r\\n` and never `\\r` — and the
+    driver never reconfigures the stream, which is asserted here rather than
+    remembered, since an edit that added one would turn every run on every
+    platform into UNKNOWN."""
+    import inspect
+
+    from stelling import _cvc5_driver
+
+    r = _wheel_real_child(monkeypatch, _HEALTHY_CHILD.format(nl="\r"))
+    assert r.answer == "failed"
+    assert "alphabet" in r.detail
+    assert "reconfigure" not in inspect.getsource(_cvc5_driver)
 
 
 # --- F4-wheel-2, the sweep: the same class anywhere else a writer meets a
