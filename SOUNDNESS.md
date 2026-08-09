@@ -4234,20 +4234,39 @@ verdicts:
 
   | door class | the line that destroys the value | does anything raise there? |
   |---|---|---|
-  | `jnp.array`, `jnp.asarray`, `jnp.int8` | none — `_convert_element_type` is **entered 0 times**; the `OverflowError` comes from `return np.asarray(x, dtype)` in a different module, `jax/_src/dtypes.py:478` at **0.11.0** and `dtypes.py:507` at **0.10.2** (read off the traceback, all four cells) | yes — that IS the raise |
+  | `jnp.array`, `jnp.asarray`, `jnp.int8` | nothing in `lax` — `_convert_element_type` is **entered 0 times**. jax runs an explicit overflow check first, at `jax/_src/numpy/array_constructors.py:249-250` (same line numbers in both series), which calls `dtypes.coerce_to_array`, whose `return np.asarray(x, dtype)` — `dtypes.py:478` at **0.11.0**, `dtypes.py:507` at **0.10.2** — is what raises | yes — that IS the raise |
   | `jnp.full`, `jnp.full_like`, `x.at[0].set` | `arr = np.asarray(operand).astype(new_dtype)`, on the `type(operand) is int` fast path — `lax.py:1726` at **0.11.0**, `lax.py:1724` at **0.10.2** | no: `.astype` is a cast, and truncates in silence |
   | `x + 256`, `x >= 256`, `jnp.where`, `jnp.clip`, `jnp.maximum` | no Python-level fast path applies; every entry falls through to `convert_element_type_p.bind` and the narrowing is the primitive's own | no |
 
+  **That check at `array_constructors.py:249-250` is the ONLY explicit
+  overflow check jax runs on a constant, and its gate is a Python
+  `isinstance`:** `if isinstance(object, (bool, int, float, complex)):`.
   Respell the constant as `np.int64(256)` — how a value read out of a
-  NumPy table arrives — and the sites move again. `jnp.array` /
-  `jnp.asarray` / `jnp.int8` destroy it at
-  `arr = operand.astype(new_dtype, copy=False)`, `lax.py:1731`, **a branch
-  0.11.0 has and 0.10.2 does not**; on 0.10.2 the value is already
-  narrowed before `_convert_element_type` is entered. And `jnp.full` /
-  `jnp.full_like` destroy it **inside the `try` itself**, at
+  NumPy table arrives — and a NumPy scalar is none of those four types, so
+  that line is **skipped entirely (measured: 0 executions, all four
+  cells)** and the value falls through to
+  `out = np.asarray(object, dtype=dtype)` at `array_constructors.py:314` —
+  same line number in both series — where NumPy CASTS it. Traced line by
+  line, `out` is `array(0, dtype=int8)` on the very next line executed. By
+  the time `lax._convert_element_type` is called, from
+  `array_constructors.py:338`, its operand is **already an `int8` `0`**;
+  the `arr = operand.astype(new_dtype, copy=False)` at `lax.py:1731` that
+  0.11.0 then runs is a no-op on an already-narrowed array, and 0.10.2,
+  which has no such branch, reaches the identical answer. Line 314 carries
+  jax's own comment about precisely this: *"falling back to numpy here
+  fails to overflow for lists containing large integers … More correct
+  would be to call coerce_to_array on each leaf, but this may have
+  performance implications."* It is also where `jnp.array([256], int8)`
+  raises — NumPy applies its Python-int bound check per element — which is
+  why a Python list of those numbers raises and the NumPy array of the same
+  numbers does not.
+
+  `jnp.full` / `jnp.full_like` take a third route again. With an
+  `np.generic` constant they destroy it **inside the `try` itself**, at
   `np.asarray(operand, dtype=new_dtype)` (`lax.py:1750` at 0.11.0,
-  `lax.py:1743` at 0.10.2) — which under NumPy 2.5.1 CASTS an
-  `np.generic` instead of raising. Measured at the NumPy level in the same
+  `lax.py:1743` at 0.10.2): measured, that line executes twice and the
+  `except` beneath it zero times, because under NumPy 2.5.1 `np.asarray`
+  CASTS an `np.generic` rather than raising. At the NumPy level in the same
   interpreters: `np.asarray(256, dtype=np.int8)` raises `OverflowError`,
   while `np.asarray(np.int64(256), dtype=np.int8)` and
   `np.asarray(256).astype(np.int8)` both return `0` with no exception and
@@ -4314,11 +4333,13 @@ verdicts:
   actually loses the value is the table further up.
 
   **THE "BARE PYTHON LITERAL" QUALIFIER ON THAT TABLE IS LOAD-BEARING AND
-  WAS NOT THERE WHEN THE TABLE LANDED.** NumPy's check applies to Python
-  scalars and to nested Python sequences of them, and to nothing else, so
-  the raise is a joint fact about the door AND the argument's Python type —
-  and the table, pinning one literal in both columns, reads as a fact
-  about the function alone. Measured at `650e678`, three doors × thirteen
+  WAS NOT THERE WHEN THE TABLE LANDED.** Per the mechanism above, jax's
+  explicit check fires only for `isinstance(object, (bool, int, float,
+  complex))`, and NumPy's own bound check at `array_constructors.py:314`
+  fires only on Python ints — inside sequences included. So the raise is a
+  joint fact about the door AND the argument's Python type, and the table,
+  pinning one literal in both columns, reads as a fact about the function
+  alone. Measured at `650e678`, three doors × thirteen
   spellings of the value 256, target `int8`, **identical in all four cells
   (jax 0.11.0 and 0.10.2 × `JAX_ENABLE_X64` 0 and 1): 15 raise, 24 wrap
   silently to `0`, and the split is the same at all three doors** — it
@@ -4455,11 +4476,13 @@ verdicts:
     its own reasons; it does not close this.
   * **NOT a guard, and recorded here to foreclose the inference the doors
     table invites:** forcing a constant through Python `int()` does restore
-    the raise at `jnp.array` / `jnp.asarray` / `jnp.int8` — measured,
-    `jnp.array(int(LUT[7]), int8)` raises where `jnp.array(LUT[7], int8)`
-    wraps — and does nothing at the other eight doors, where that same
-    Python `int` wraps in silence (`jnp.full((), int(LUT[7]), int8)` and
-    `x + int(LUT[7])` both give `0`). It protects exactly the call sites
+    the raise at `jnp.array` / `jnp.asarray` / `jnp.int8`, because it opens
+    the `isinstance(object, (bool, int, float, complex))` gate at
+    `array_constructors.py:249` — measured, `jnp.array(int(LUT[7]), int8)`
+    raises where `jnp.array(LUT[7], int8)` wraps. It does nothing at the
+    other eight doors, which never reach that gate: the same Python `int`
+    wraps in silence through `jnp.full((), int(LUT[7]), int8)` and through
+    `x + int(LUT[7])`, both `0`. It protects exactly the call sites
     somebody remembered to write it at, which is the property a guard does
     not have.
 
