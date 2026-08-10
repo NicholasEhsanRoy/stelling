@@ -99,7 +99,14 @@ now a shorter list than the argument that used to stand for it:
   member filter keyed on anything else is outside it, as the paragraph above
   says.
 * the `publish` job's two actions, which cannot be driven from here at all
-  without cutting a tag and uploading.
+  without cutting a tag and uploading. What IS now pinned is the ref one of
+  them carries, and the environment the job runs in — see
+  `test_the_attributes_that_decide_whether_a_refusal_refuses`, which exists
+  because every other pin here reads a literal inside a `run:` block or
+  `needs:`, and the three attributes BESIDE those blocks that decide whether a
+  refusal refuses were read by nothing. Applied together they left the full
+  suite at 1433 / 0 / 0 / 94. Pinned as literals, because a runner is what it
+  would take to drive them.
 * everything about the runner: which interpreter `uv venv` picks, whether the
   `pypi` environment exists, whether Trusted Publishing is configured. This is
   the part of the old sentence that was true, and it is true of the runner's
@@ -287,6 +294,62 @@ def test_the_publish_job_still_needs_the_suite():
         "still reports, so nothing about the run looks different."
     )
     assert "needs: test" in needs, "the build job no longer needs the suite either"
+
+
+def test_the_attributes_that_decide_whether_a_refusal_refuses():
+    """Not what a step RUNS — what the workflow does with the result.
+
+    Every pin above reads a literal inside a `run:` block, or `needs:`. None of
+    them reads the step and job ATTRIBUTES beside those blocks, and three of
+    those decide whether a refusal refuses at all. Applied TOGETHER to
+    `release.yml` at cc5ce89, one full suite run, CPython 3.11.15,
+    `JAX_ENABLE_X64=1`, `-p no:randomly`, figures from `--junitxml`:
+
+        `continue-on-error: true` on the pytest step
+        `environment: pypi`   -> `environment: staging`
+        `@release/v1`         -> `@main` on the publish action
+
+        the full suite        tests=1433 failures=0 errors=0 skipped=94 — GREEN
+
+    What each costs. `continue-on-error` on the step this file's own header
+    calls a refusal point makes the job succeed on a red suite — the suite
+    still runs and still reports, exactly the no-local-symptom shape MUTANT 4
+    had. `environment:` is what binds Trusted Publishing: the publish job's
+    OIDC subject includes the environment name, so a different one is a
+    different identity and the upload this workflow is configured for is not
+    the upload it performs. And a branch ref on the publisher is arbitrary
+    future code holding an id-token on the path to PyPI — `release/v1` is
+    already a branch and the file argues that where it stands is a deliberate
+    choice; `@main` is not that choice.
+
+    A LITERAL PIN, deliberately, and the same shape as the rest of this file:
+    these are not drivable here (they need a runner, a tag and an upload), so
+    what is available is that the attribute still says what it said. The
+    comment block above the publish job records the SHA-pinning migration this
+    would interact with; that is a decision left where it is written.
+    """
+    lines = _code_lines(_release_text())
+    stripped = [line.strip() for line in lines]
+
+    assert not [line for line in stripped if line.startswith("continue-on-error")], (
+        "a step in `release.yml` now carries `continue-on-error`. On the "
+        "pytest step it makes the job SUCCEED on a red suite while the suite "
+        "still runs and still reports, so nothing about the run looks "
+        "different — and `needs: [test, build]` then gates on a job that "
+        "cannot fail."
+    )
+    assert "environment: pypi" in stripped, (
+        "the publish job's `environment:` has changed. It is what binds "
+        "Trusted Publishing — the OIDC subject carries the environment name, "
+        "so a different name is a different identity to PyPI."
+    )
+    publishers = [line for line in stripped if "gh-action-pypi-publish@" in line]
+    assert publishers == ["- uses: pypa/gh-action-pypi-publish@release/v1"], (
+        f"the publish action's ref has changed: {publishers}. This is the one "
+        "action in this file that holds an `id-token` on the path to PyPI, "
+        "and its ref decides which code does. `@main` is arbitrary future code "
+        "with that token."
+    )
 
 
 def test_the_headers_refusal_COUNT_is_the_count_of_refusals():
