@@ -24,26 +24,65 @@ suite green and the skip-inventory verdict `made`. The six:
    inverted, so it reports the INTERSECTION, is empty exactly when the tree is
    healthy, and can never fire.
 
-WHAT THIS FILE IS AND IS NOT. It is a TEXT PIN, in the same shape as
-`tests/test_reuse_pins.py`: it reads the file and asserts the load-bearing
-literals are still there. That is enough to kill all six, and it is measured
-against them below rather than argued. It is NOT a check that the gates WORK —
-nothing in this repository can be, because a gate's behaviour is a property of
-a runner and the honest local substitute is driving each step body by hand,
-which is what `release.yml`'s own comments record having done. A pin catches
-the mutation; only a drive catches the misconception.
+WHAT THIS FILE IS. Two things, and the second was called IMPOSSIBLE here for
+four commits.
 
-STILL UNGUARDED AFTER THIS, said plainly rather than left to be assumed:
+The first is a TEXT PIN, in the same shape as `tests/test_reuse_pins.py`: it
+reads the file and asserts the load-bearing literals are still there. That is
+enough to kill all six mutations above, and it is measured against them below
+rather than argued.
 
-* every gate BODY's behaviour. `comm -23` being present says nothing about
-  whether the comparison is right; `-ra` being present says nothing about what
-  pytest prints. Both are recorded in the file with the run that established
-  them, and this pin is what keeps that record attached to the code it
-  describes.
+The second is a DRIVE. Two gate bodies are EXTRACTED from `release.yml` and
+EXECUTED here against planted trees, and asserted on their exit code and their
+annotation. Extracted, not copied: a test that runs its own transcription of a
+step body is a test of the transcription, and the rewrite it has to catch
+lands in `release.yml`.
+
+THE SENTENCE THAT USED TO STAND HERE WAS FALSE, and how it was false is worth
+writing down, because it is what licensed the gap. It read: this is "NOT a
+check that the gates WORK — nothing in this repository can be, because a
+gate's behaviour is a property of a runner". The premise does not hold for
+these two bodies. Neither contains one thing a runner supplies: they are
+`tar`, `git ls-files`, `sort`, `comm`, `ls`, `basename` and `cut`, over a
+`dist/` directory and a git index, both of which a test can plant. And
+`release.yml`'s own comments record driving these same bodies by hand at
+a61c01f — so the file already knew they were drivable, and the impossibility
+claim was contradicted a few lines from where it was written.
+
+WHAT IT COST, measured rather than asserted, because a false impossibility
+claim is only worth correcting if something got through it. Two rewrites, one
+line each, each leaving every text pin in this file green:
+
+* `sort -u tracked.txt generated.txt > explained.txt` ->
+  `sort -u members.txt generated.txt > explained.txt`, one line above the
+  pinned `comm -23`. `explained.txt` then contains every member, so the
+  comparison is empty BY CONSTRUCTION and the gate cannot fire at all. Driven,
+  with an uncommitted file planted inside the tarball: unmutated refuses
+  (rc=1, the member named); mutated reports "every one of N sdist members is
+  committed to this tree" and exits 0, with the uncommitted file still in the
+  tarball.
+* `version="$(basename "${wheel}" | cut -d- -f2)"` ->
+  `version="$(echo "${TAG}" | sed s/^v//)"`, which reads the version out of
+  the tag it exists to check the tag AGAINST. Driven: `TAG=v9.9.9` against a
+  `stelling-0.1.0-py3-none-any.whl` — unmutated rc=1, mutated rc=0. No pin of
+  any kind stood on this line; the refusal point was unguarded outright.
+
+A pin catches the mutation it names. A drive catches the rewrite nobody
+thought to name, which is the only kind that ships.
+
+STILL UNGUARDED AFTER THIS, said plainly rather than left to be assumed, and
+now a shorter list than the argument that used to stand for it:
+
+* the OTHER gate bodies. `-ra` being present still says nothing about what
+  pytest prints. The two verdict refusals are pinned as literals and, below,
+  as a PATH-COHERENCE check — but the recorder itself is not driven here.
+  What is driven is the two bodies above and nothing else.
 * the `publish` job's two actions, which cannot be driven from here at all
   without cutting a tag and uploading.
 * everything about the runner: which interpreter `uv venv` picks, whether the
-  `pypi` environment exists, whether Trusted Publishing is configured.
+  `pypi` environment exists, whether Trusted Publishing is configured. This is
+  the part of the old sentence that was true, and it is true of the runner's
+  own furniture rather than of gate behaviour in general.
 
 Read as TEXT and not with a YAML parser, deliberately: `yaml` is not a
 dependency of this project, and the zero-dep CI job — the one whose whole
@@ -51,8 +90,14 @@ purpose is an environment with nothing in it — could not import one.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import re
+import shutil
+import subprocess
+import tarfile
+
+import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 RELEASE = REPO / ".github" / "workflows" / "release.yml"
@@ -83,6 +128,61 @@ def _code_lines(text: str) -> list[str]:
     return [
         line for line in text.splitlines() if not line.lstrip().startswith("#")
     ]
+
+
+def test_the_three_verdict_paths_are_one_path():
+    """THE PIN BELOW SURVIVES A REWRITE THAT DESTROYS WHAT IT PROTECTS, so the
+    identity of the path is asserted here and not only the presence of the line.
+
+    Three places in `release.yml` name the verdict file, and the signal the two
+    refusals buy is ABSENCE — which is a signal only if the path cleared is the
+    path written and the path read. Nothing tied them together:
+
+      1. `STELLING_SKIP_INVENTORY_VERDICT:` — where `tests/conftest.py` WRITES;
+      2. `rm -f "…"`                        — what is CLEARED before the suite;
+      3. `verdict="…"`                       — what the two refusals READ.
+
+    DRIVEN, and this is the rewrite that motivated the test rather than a shape
+    imagined for it: point (1) and point (3) moved together to
+    `/tmp/stelling-verdict.txt`, leaving `rm -f "${RUNNER_TEMP}/verdict.txt"`
+    untouched and still ahead of pytest. Every assertion in
+    :func:`test_the_verdict_path_is_cleared_before_the_suite_runs` stays green —
+    the literal is there, the order is right — while the file the recorder
+    writes and the refusals read is one nothing on the runner clears, so an
+    earlier run's verdict satisfies the check the `rm` exists to make honest.
+
+    `${{ runner.temp }}` and `${RUNNER_TEMP}` are the same directory spelled
+    for the two languages in this file (workflow expression, shell), so they
+    are normalised to one token before comparison. Nothing else is normalised:
+    the point is that the three agree literally.
+    """
+    text = _release_text()
+    # to end of line, NOT to whitespace: the workflow-expression spelling is
+    # `${{ runner.temp }}/verdict.txt`, and spaces live inside it
+    recorder = re.findall(
+        r"^\s*STELLING_SKIP_INVENTORY_VERDICT:\s*(.+?)\s*$", text, re.M
+    )
+    cleared = re.findall(r'^\s*rm -f "([^"]+)"\s*$', text, re.M)
+    read = re.findall(r'^\s*verdict="([^"]+)"\s*$', text, re.M)
+
+    assert len(recorder) == 1, f"expected one recorder path, got {recorder}"
+    assert len(cleared) == 1, f"expected one `rm -f` of a verdict path, got {cleared}"
+    assert len(read) == 1, f"expected one `verdict=` assignment, got {read}"
+
+    def _norm(p: str) -> str:
+        return re.sub(r"\$\{\{\s*runner\.temp\s*\}\}", "${RUNNER_TEMP}", p)
+
+    paths = {
+        "the recorder writes (STELLING_SKIP_INVENTORY_VERDICT)": _norm(recorder[0]),
+        "the step clears (rm -f)": _norm(cleared[0]),
+        "the refusals read (verdict=)": _norm(read[0]),
+    }
+    assert len(set(paths.values())) == 1, (
+        "the verdict file is named at three points in `release.yml` and they no "
+        "longer agree, so the ABSENCE the two refusals treat as a signal is "
+        "absence at a path something else may have written:\n  "
+        + "\n  ".join(f"{k}: {v}" for k, v in paths.items())
+    )
 
 
 def test_the_verdict_path_is_cleared_before_the_suite_runs():
@@ -201,8 +301,18 @@ def test_the_uncommitted_member_comparison_is_the_difference_not_the_overlap():
     something uncommitted shipped. `comm -12` is the INTERSECTION: on a healthy
     tree it is every member of the sdist, so the step goes red on every release
     — but a reviewer reading a green run learns nothing, and the mutation that
-    matters is any rewrite that leaves it empty when it should not be. The
-    literal is pinned because the semantic cannot be tested without a runner.
+    matters is any rewrite that leaves it empty when it should not be.
+
+    THE LITERAL IS PINNED BECAUSE A LITERAL IS CHEAP TO PIN, and NOT — as this
+    docstring said for four commits — because "the semantic cannot be tested
+    without a runner". It can, it now is, and the sentence was doing real
+    damage: it is the argument that made an unfirable rewrite one line above
+    this one acceptable to leave uncovered. The semantic is driven in
+    :func:`test_the_sdist_gate_refuses_a_member_that_is_not_committed`, which
+    executes this very step body against a planted tree. This test and that one
+    catch different things and both are wanted: `comm -12` is caught here
+    (the drive would catch it too, but as a mysterious failure rather than as a
+    named one), and the `explained.txt` rewrite is caught only there.
     """
     text = _release_text()
     assert 'unexplained="$(comm -23 members.txt explained.txt)"' in text, (
@@ -242,3 +352,290 @@ def test_this_pin_is_reading_the_real_file():
     )
     # the filter must not eat the code the pins read
     assert any(line.strip() == "exit 1" for line in lines)
+
+
+# --- THE GATE BODIES, EXTRACTED AND EXECUTED --------------------------------
+#
+# Everything above this line is a text pin. Everything below drives a real step
+# body, in a real shell, against a planted tree.
+#
+# WHY THIS IS NOT A RUNNER PROBLEM, since this file argued for four commits
+# that it was. Both bodies below read exactly two things: a `dist/` directory
+# and a git index. A runner supplies neither — `uv build` and
+# `actions/checkout` do, and a test can plant both. The one thing a runner
+# does supply to these two steps is `${TAG}`, which is an ordinary environment
+# variable. "A gate's behaviour is a property of a runner" is true of the
+# `publish` job and false of these.
+#
+# THE BODIES ARE EXTRACTED, NEVER TRANSCRIBED. A copy of a step body here would
+# be a second source that drifts — and worse, the rewrites these tests exist to
+# catch land in `release.yml`, so a test running its own copy would stay green
+# through every one of them. `_step_body` reads the YAML block scalar as text,
+# for the reason the header gives: `yaml` is not a dependency and the zero-dep
+# job could not import one.
+
+_NEEDED = ("bash", "git", "tar", "comm", "sort", "sed")
+_needs_a_shell = pytest.mark.skipif(
+    any(shutil.which(t) is None for t in _NEEDED),
+    reason="needs a POSIX shell and coreutils to drive a gate body",
+)
+
+
+def _step_lines(step_name: str) -> list[str]:
+    """The block of `release.yml` belonging to the step called `step_name`."""
+    lines = _release_text().splitlines()
+    want = f"- name: {step_name}"
+    starts = [i for i, line in enumerate(lines) if line.strip() == want]
+    assert len(starts) == 1, (
+        f"expected exactly one step named {step_name!r} in release.yml, found "
+        f"{len(starts)}. These drives address a step BY NAME, so a rename or a "
+        "duplicate must stop the suite rather than quietly measure the wrong "
+        "step, or no step at all."
+    )
+    start = starts[0]
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    out = [lines[start]]
+    for line in lines[start + 1 :]:
+        if line.strip():
+            here = len(line) - len(line.lstrip())
+            if here < indent or (here == indent and line.lstrip().startswith("- ")):
+                break
+        out.append(line)
+    return out
+
+
+def _block(lines: list[str], key: str) -> list[str]:
+    """The lines indented under `key` within an already-extracted step."""
+    at = [i for i, line in enumerate(lines) if line.strip() == key]
+    assert len(at) == 1, f"expected exactly one {key!r} in this step, found {len(at)}"
+    head = at[0]
+    indent = len(lines[head]) - len(lines[head].lstrip())
+    out = []
+    for line in lines[head + 1 :]:
+        if line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        out.append(line)
+    return out
+
+
+def _step_body(step_name: str) -> str:
+    """The step's `run: |` script, dedented, verbatim."""
+    body = _block(_step_lines(step_name), "run: |")
+    real = [line for line in body if line.strip()]
+    assert real, f"the step {step_name!r} has an empty `run:` block"
+    cut = min(len(line) - len(line.lstrip()) for line in real)
+    text = "\n".join(line[cut:] if line.strip() else "" for line in body)
+    # ANTI-VACUITY FOR THE EXTRACTOR ITSELF. An extractor that silently returned
+    # "" — a renamed key, a changed indent, a `run: >` — would make every drive
+    # below pass against an empty script, which is the same shape of green as
+    # the gate that cannot fire.
+    assert text.strip().startswith("set -euo pipefail"), (
+        f"the extracted body of {step_name!r} does not begin with its own "
+        f"`set -euo pipefail`, so the block scalar is not being read as this "
+        f"expects. Got: {text[:120]!r}"
+    )
+    return text + "\n"
+
+
+def _step_env(step_name: str) -> dict[str, str]:
+    """The step's literal `env:` entries. `${{ }}` expressions are the caller's."""
+    out = {}
+    for line in _block(_step_lines(step_name), "env:"):
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        key, _, value = entry.partition(":")
+        out[key.strip()] = value.strip()
+    return out
+
+
+def _drive(body: str, cwd: pathlib.Path, **env):
+    """Run an extracted step body in `cwd` with a scrubbed environment."""
+    clean = {
+        k: v
+        for k, v in os.environ.items()
+        if k in ("PATH", "HOME", "LANG", "TMPDIR", "SYSTEMROOT")
+    }
+    clean.update(env)
+    return subprocess.run(
+        ["bash", "-c", body],
+        cwd=cwd,
+        env=clean,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+_SDIST_STEP = "every sdist member is a committed file of the tagged tree"
+_TAG_STEP = "the tag and the artifact must agree"
+
+# Enough of a tree for the sdist body to agree to compare anything: it demands
+# PKG-INFO, pyproject.toml, README.md and LICENSE by name before it looks at
+# the difference, and a non-empty index.
+_TRACKED = ("pyproject.toml", "README.md", "LICENSE", "src/stelling/contracts.py")
+
+
+def _plant_tree(tree: pathlib.Path, *, uncommitted: str | None = None) -> pathlib.Path:
+    """A git checkout plus a `dist/` holding one sdist, as the build job leaves it.
+
+    `uncommitted` goes into the TARBALL and deliberately not into the index —
+    the exact shape this gate exists to refuse: a file that ships and is not in
+    the tagged tree.
+    """
+    (tree / "dist").mkdir(parents=True)
+    for rel in _TRACKED:
+        path = tree / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {rel}\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-c", "init.defaultBranch=main", "init", "-q"],
+        cwd=tree, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "add", "--", *_TRACKED], cwd=tree, check=True, capture_output=True
+    )
+
+    members = list(_TRACKED) + ["PKG-INFO"]
+    (tree / "PKG-INFO").write_text("Metadata-Version: 2.4\n", encoding="utf-8")
+    if uncommitted is not None:
+        path = tree / uncommitted
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# planted, and not in the index\n", encoding="utf-8")
+        members.append(uncommitted)
+
+    with tarfile.open(tree / "dist" / "stelling-0.1.0.tar.gz", "w:gz") as tar:
+        for rel in sorted(members):
+            tar.add(tree / rel, arcname=f"stelling-0.1.0/{rel}")
+    return tree
+
+
+@_needs_a_shell
+def test_the_sdist_gate_refuses_a_member_that_is_not_committed(tmp_path):
+    """THE SDIST GATE, DRIVEN — both directions, on the body `release.yml` ships.
+
+    THE HOLE THIS CLOSES IS ONE LINE FROM A LINE THAT WAS PINNED.
+    `explained.txt` is what the members get compared against::
+
+        sort -u tracked.txt generated.txt > explained.txt    <- was unpinned
+        unexplained="$(comm -23 members.txt explained.txt)"  <- was pinned
+
+    Rewrite the first to `sort -u members.txt generated.txt` and `explained.txt`
+    becomes a superset of `members.txt`, so `comm -23` is empty on every input
+    and the gate cannot fire — while
+    :func:`test_the_uncommitted_member_comparison_is_the_difference_not_the_overlap`
+    stays green, because `comm -23 members.txt explained.txt` is still there
+    letter for letter.
+
+    MEASURED, this body, this test, CPython 3.11.15, `JAX_ENABLE_X64=1`:
+
+        unmutated, healthy tree    rc=0, "every one of 5 sdist members is
+                                          committed to this tree"
+        unmutated, planted member  rc=1, names `src/stelling/_audit_probe.py`
+        mutated,   planted member  rc=0, "every one of 6 sdist members is
+                                          committed to this tree" — with the
+                                          uncommitted file inside the tarball
+
+    Both directions are asserted. The refusal is the point; the pass is here
+    because a gate that refuses everything is not a gate either, and a harness
+    that could never reach rc=0 would make the refusal meaningless.
+    """
+    body = _step_body(_SDIST_STEP)
+    env = _step_env(_SDIST_STEP)
+    assert env.get("GENERATED") == "PKG-INFO", (
+        f"the sdist step's GENERATED is now {env.get('GENERATED')!r}; this "
+        "drive plants exactly the members the body demands by name"
+    )
+
+    healthy = _drive(body, _plant_tree(tmp_path / "healthy"), **env)
+    assert healthy.returncode == 0, (
+        "the sdist gate refuses a tree in which every member IS committed; a "
+        f"gate that cannot pass is not a gate.\n{healthy.stdout}\n{healthy.stderr}"
+    )
+    assert "sdist members is committed to this tree" in healthy.stdout
+
+    planted = "src/stelling/_audit_probe.py"
+    bad = _drive(body, _plant_tree(tmp_path / "planted", uncommitted=planted), **env)
+    assert bad.returncode != 0, (
+        "THE SDIST GATE PASSED A TARBALL CONTAINING A FILE THAT IS NOT IN THE "
+        f"INDEX ({planted}). It reported:\n{bad.stdout}\n"
+        "An sdist on PyPI cannot be unpublished, only yanked. Check the line "
+        "that builds `explained.txt`: comparing `members.txt` against a set "
+        "BUILT FROM `members.txt` is empty by construction, and every text pin "
+        "in this file stays green through it."
+    )
+    assert planted in bad.stdout, (
+        "the gate refused, but did not name the member responsible, so the "
+        f"publish log does not say what to fix:\n{bad.stdout}"
+    )
+    assert "not committed to this tree" in bad.stdout
+
+
+@_needs_a_shell
+def test_the_tag_gate_refuses_a_tag_the_artifact_does_not_carry(tmp_path):
+    """THE TAG GATE, DRIVEN. Nothing in the repository pinned this line at all.
+
+    `release.yml`'s header calls this the refusal that stops `v0.2.0` from
+    publishing `0.1.0` "silently, and permanently". The version has to come
+    from the ARTEFACT — the filename is what gets uploaded::
+
+        version="$(basename "${wheel}" | cut -d- -f2)"
+
+    Read it from the tag instead — `version="$(echo "${TAG}" | sed s/^v//)"` —
+    and the comparison compares the tag with itself, so it can never disagree.
+    MEASURED: `TAG=v9.9.9` against a `stelling-0.1.0-py3-none-any.whl` gives
+    rc=1 unmutated and rc=0 mutated, printing `tag=v9.9.9 artifact
+    version=9.9.9` on a `dist/` that holds only 0.1.0.
+
+    THE TWO-WHEEL WEAKNESS IS NOT RE-DRIVEN HERE and is not this test's
+    subject: `ls` sorts, so a stray that sorts BEFORE the real wheel is read
+    past and uploaded anyway. That is recorded in `release.yml` beside the
+    step, with the runs that established it, and is unreachable from that
+    workflow because `dist/` is filled by one `uv build` into a fresh clone.
+    """
+    body = _step_body(_TAG_STEP)
+    dist = tmp_path / "tree" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "stelling-0.1.0-py3-none-any.whl").write_bytes(b"")
+    tree = tmp_path / "tree"
+
+    agreeing = _drive(body, tree, TAG="v0.1.0")
+    assert agreeing.returncode == 0, (
+        "the tag gate refuses a tag that MATCHES the built artifact, so it "
+        f"would refuse every release.\n{agreeing.stdout}\n{agreeing.stderr}"
+    )
+    assert "artifact version=0.1.0" in agreeing.stdout
+
+    for tag in ("v9.9.9", "0.2.0", "", "V0.1.0"):
+        r = _drive(body, tree, TAG=tag)
+        assert r.returncode != 0, (
+            f"THE TAG GATE PASSED tag {tag!r} against a 0.1.0 wheel. This is "
+            "the refusal that stops a release tagged one version from putting "
+            "another on PyPI permanently. It reported:\n" + r.stdout +
+            "\nCheck that `version` is still read from the ARTEFACT's filename "
+            "and not from ${TAG}, which would be the tag compared with itself."
+        )
+        assert "tag and artifact disagree" in r.stdout
+
+
+@_needs_a_shell
+def test_the_drives_are_reading_the_real_step_bodies():
+    """Anti-vacuity for the two drives, in the shape this file already uses.
+
+    The drives assert on exit codes of a script this file did not write. Three
+    ways that goes quietly wrong — a step name that no longer resolves, a
+    `run:` block read as empty, an `env:` that stopped carrying `GENERATED` —
+    and the first two are fatal in `_step_lines`/`_step_body` already. This
+    pins what the extracted text must CONTAIN, so that a body reduced to its
+    `set -euo pipefail` cannot satisfy the drives above by exiting 0.
+    """
+    sdist = _step_body(_SDIST_STEP)
+    tag = _step_body(_TAG_STEP)
+    for needle in ("tar tzf", "git ls-files", "comm -23", "explained.txt"):
+        assert needle in sdist, f"{needle!r} is gone from the sdist step body"
+    for needle in ("basename", "cut -d- -f2", "ls dist/*.whl"):
+        assert needle in tag, f"{needle!r} is gone from the tag step body"
+    # the bodies are scripts, not one-liners: a body that shrank to nothing
+    # would still start with `set -euo pipefail` and pass the extractor's check
+    assert len(sdist.splitlines()) > 20, sdist
+    assert len(tag.splitlines()) > 5, tag
