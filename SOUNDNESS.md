@@ -4733,12 +4733,17 @@ verdicts:
 
   **That suite run is ANOTHER CONTEXT'S MEASUREMENT and is cited, not
   claimed** — 23,705 cases is not a figure this entry re-ran. Its
-  receipts are committed at
-  `stelling-sweeps/receipts-jax-wrap-blast-radius/` (report, reproduction
-  facts, 946 run artefacts, scripts, transcript). What WAS re-derived
-  here is every delta in the table below, recomputed from the archived
-  junit XML with an independent analyser comparing per-testcase outcomes
-  between baseline and patched runs. All of them agree.
+  receipts (report, reproduction facts, 946 run artefacts, scripts,
+  transcript) are committed at `receipts-jax-wrap-blast-radius/` in
+  `stelling-sweeps`, **a SEPARATE repository held beside this one and not
+  shipped with it** — so unlike every `scratchpad/` path cited elsewhere
+  on this page, a reader of the distribution cannot open it. That is
+  stated rather than papered over: the figures below are only as good as
+  a receipt the reader may not have. What WAS re-derived here, and can be
+  re-derived from those artefacts by anyone who does have them, is every
+  delta in the table below — recomputed from the archived junit XML with
+  an independent analyser comparing per-testcase outcomes between the
+  baseline and patched runs. All of them agree with the report.
 
   | candidate fix | site it changes | newly failing, of 23,705 |
   |---|---|---|
