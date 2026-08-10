@@ -4532,6 +4532,16 @@ verdicts:
   returning `0`, and deleting the whole `try` block would additionally
   change the `np.generic` rows, whose wrap is the `try` body.)*
 
+  **AND THE BLOCK IS FREE TO DELETE, WHICH IS A DIFFERENT FACT FROM
+  WHETHER DELETING IT WOULD HELP.** Removing the `try/except` outright
+  changes **0** of the 23,705 jax test cases in the cost measurement
+  below — the joint-cheapest of the four candidate fixes priced there,
+  and the only one of them that covers the `int`-subclass route measured
+  just above, because it is the only one ON that route. **It also does
+  not touch the case this entry opens with**: it is not on the path
+  `x + 256` takes and not on the path `jnp.full` takes. Cheapest to land,
+  and it shuts the door nobody came through.
+
   **The line range is an installed-dependency figure, not a repository
   figure**, so it is quoted with the version it was read from:
   `lax.py:1747-1754` at jax **0.11.0**, and the same block at
