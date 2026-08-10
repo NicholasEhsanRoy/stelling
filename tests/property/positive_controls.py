@@ -19,9 +19,16 @@ that carries the defect, asserting that the run comes back RED.
 
 A property whose control cannot be demonstrated does not ship. That is the
 rule, it cost one property (see ``test_metamorphic.py``'s module docstring),
-and the rest of its cost is visible here: **four of the ten** controls are
+and the rest of its cost is visible here: **five of the twelve** controls are
 source MUTANTS rather than historical commits, because the defect they describe
 has never been in this tree.
+
+That count has been wrong in the cheap direction, once, on this branch.
+``cvc5-exit-tell`` shipped as a mutant whose ``why`` said "no revision of this
+tree has carried it", and one line of git says otherwise:
+``git log -S "or proc.returncode != 0" -- src/stelling/solvers.py`` shows the
+guard was ADDED at ``b6e4783``, so its parent ``8ef8f75`` carries the defect
+and the entry is a commit control. **Ask git before registering a mutant.**
 
 **The rule cuts the other way too, and it has.** A second property was dropped
 under it on a premise — "no one-line mutation makes it fail" — that was written
@@ -70,6 +77,13 @@ class Control:
     # string, so a control carrying it checks only ``returncode != 0`` and
     # reports a collection error, an import failure or a typo'd nodeid as
     # FIRED. The default stays for the dataclass's sake and is refused.
+    #
+    # MATCHED AGAINST THE FAILURE pytest RECORDS, not against everything the
+    # run echoes: ``property_check.py`` reads the ``message`` attributes out of
+    # ``--junitxml``. A traceback prints the whole source of every function on
+    # it, docstring included, so a guard string is present in the OUTPUT of any
+    # crash inside the property's own helpers even when the oracle never ran.
+    # See ``tools/property_check.py``'s module docstring for the measurement.
     expect_message: str = ""
     scale: float = 1.0  # budget multiplier, where the search needs more room
 
@@ -155,7 +169,7 @@ CONTROLS = (
             "standalone, so a `bool[0]` conjunct — vacuously true over the "
             "whole declared box — still narrowed its rank-0 sibling to a "
             "strict SUBSET, minting VERIFIED over less than the declared set. "
-            "Fixed at 717b9ca."
+            "This control runs at fb34e0d; fixed at 717b9ca."
         ),
         expect_message="toward-VERIFIED",
     ),
@@ -279,7 +293,15 @@ CONTROLS = (
             "ten characters, not one, so a payload could forge the parser's "
             "last line — the terminator — while the child was truncated "
             "mid-model-walk; and `...\\nend 4`, the final newline cut and "
-            "nothing else, read as a present terminator. Fixed at 8d3051a."
+            "nothing else, read as a present terminator. Fixed at 8d3051a. "
+            "WHAT A GREEN RUN OF THIS CONTROL DOES NOT SAY: the property's "
+            "oracle is a conjunction of THREE clauses and this tree exercises "
+            "ONE of them. Measured over the flat leg's own 1500 ci examples at "
+            "0ad22bb, all three evaluated independently: 5 violations, every "
+            "one of them clause (2) `nothing was truncated`, none of clause "
+            "(1) or clause (3). The table is in `_judge`'s docstring in "
+            "test_cvc5_protocol.py, and clauses (1) and (3) are demonstrated "
+            "by `cvc5-exit-tell` and `cvc5-phantom-model` below instead."
         ),
         # `[flat]` is the leg tag `_judge` stamps on ALL THREE of its failure
         # messages — truncated run, nonzero-exit run, model that was not
@@ -289,6 +311,11 @@ CONTROLS = (
         # test_cvc5_protocol.py was reported "FIRED — the property failed where
         # it is supposed to", `1/1 controls fired`, exit 0. A control that
         # cannot tell a defect from a broken import is not a control.
+        #
+        # THE SAME BREADTH IS WHY THIS GUARD CANNOT SAY WHICH CLAUSE FIRED, and
+        # it is not doing so here: at 0ad22bb what it matches is always the
+        # clause-(2) message. `cvc5-exit-tell` and `cvc5-phantom-model` carry
+        # clause-specific guards for exactly that reason.
         expect_message="[flat]",
     ),
     Control(
@@ -297,13 +324,151 @@ CONTROLS = (
         kind="commit",
         at="0ad22bb",
         why=(
-            "the same two defects, reached by the rule-based state machine "
+            "the same two defects at the same revision, 0ad22bb, reached by "
+            "the rule-based state machine "
             "without being told the record layout. It needs ~20x the flat "
             "leg's budget to get there, which is the honest cost of stateful "
-            "search on a protocol whose record ORDER is fixed."
+            "search on a protocol whose record ORDER is fixed. It demonstrates "
+            "the SAME ONE of `_judge`'s three clauses that `cvc5-flat` does — "
+            "(2), nothing was truncated — and for the same reason: the tree, "
+            "not the search. See `cvc5-flat`'s `why` and `_judge`'s docstring."
         ),
         scale=20.0,
         expect_message="[stateful]",  # see cvc5-flat for why this is not ""
+    ),
+    # ── the other two clauses of the same oracle ────────────────────────────
+    #
+    # `_judge` states its invariant as THREE clauses and the two controls above
+    # demonstrate exactly one of them — clause (2), measured, tabulated in
+    # `_judge`'s own docstring. These two demonstrate the other two. Neither
+    # touches `_PAYLOADS`, so neither costs the 673/8165 example-efficiency
+    # figures in `test_cvc5_protocol.py`'s module docstring anything.
+    #
+    # ONE COMMIT AND ONE MUTANT, and the split was got wrong here first. Both
+    # shipped as mutants "because the defect they describe has never been in
+    # this tree". For clause (1) that was false and git said so in one line
+    # (`git log -S "or proc.returncode != 0"`): `8ef8f75` is the parent of the
+    # commit that added the guard, and it carries the defect. For clause (3)
+    # it holds — `git log -S "sorted(set(values))" -- src/stelling/solvers.py`
+    # is empty, no revision has ever deduped the harvested model — so
+    # `cvc5-phantom-model` stays a mutant and says so.
+    #
+    # Their `expect_message` is the clause's own sentence and NOT the `[flat]`
+    # leg tag the two controls above carry. `[flat]` is stamped on all three of
+    # `_judge`'s messages, so a control carrying it would be satisfied by the
+    # clause-(2) failure `cvc5-flat` already finds — i.e. it would fire without
+    # demonstrating the clause it is registered for, which is the exact
+    # distinction these two entries exist to make.
+    #
+    # STATIC ASSERTIONS IN `test_suite_disclosure.py` ARE THE WHOLE PROTECTION
+    # AGAINST A BROADENING TO `[flat]` — not against every broadening, since the
+    # executing run does refuse `[stateful]`, as recorded below. How many static
+    # assertions fire depends on how the guard is broadened. Measured
+    # on this tree, static failures in that file, one broadening at a time:
+    #
+    #   cvc5-exit-tell     -> `[flat]`      2  (the shared-guard test, on the
+    #   cvc5-phantom-model -> `[flat]`      2   substring; and the clause-
+    #                                           specific one, on two leg tags
+    #                                           landing on one property)
+    #   cvc5-exit-tell     -> `[stateful]`  1  (the clause-specific one alone:
+    #                                           a leg tag this property never
+    #                                           stamps)
+    #
+    # The executing run catches neither `[flat]` broadening: with the guard
+    # widened and both controls in the per-push step, `property_check.py`
+    # reports `9/9 controls fired`, exit 0. It DOES refuse `[stateful]` —
+    # `0/1 controls fired`, "wrong failure" — because that string is in no
+    # message the flat leg builds. Running a control does not and cannot catch
+    # a guard widened to a string its property's every failure carries.
+    Control(
+        name="cvc5-exit-tell",
+        nodeid=f"{_CVC5}::test_the_parent_never_trusts_an_unspoken_transcript_flat",
+        kind="commit",
+        at="8ef8f75",
+        why=(
+            "`_run_cvc5_wheel` had NEITHER of the two tells it has today — no "
+            "terminator check and no `proc.returncode` check — so a child that "
+            "wrote a complete, well-formed transcript and then died with a "
+            "nonzero exit was answered on. Both tells were added together at "
+            "b6e4783 ('The cvc5 wheel transport refuses a crashed child'), of "
+            "which this revision is the parent. MEASURED, hand-driven through "
+            "test_cvc5_protocol.py's own fixture at 8ef8f75: 'version "
+            "1.3.4\\nanswer sat\\nend 0\\n' at exit 1 is a DEFINITE sat, and "
+            "'...\\nvalue x0 0/1\\nend 1\\n' at exit 137 is a DEFINITE sat "
+            "harvesting ('x0', '0/1'); the tip and 0ad22bb both refuse both. "
+            "Today's flat property fails there at the ci profile in 0.3-0.5 s "
+            "of junit XML TESTCASE TIME (three runs: 0.45, 0.38, 0.28), which "
+            "is 1.2-1.8 s of WALL CLOCK for the whole `property_check.py "
+            "--control` invocation (1.59, 1.77, 1.23) — two instruments, and "
+            "the `0.9 s` the ci.yml step comment carries is the wall-clock "
+            "one. The failure is found on "
+            "an INTACT transcript at exit 1 — nothing was truncated, so clause "
+            "(2) holds on that example and the failure is clause (1)'s own. "
+            "8ef8f75 predates the splitlines fix as well, so its parser "
+            "carries clause (2)'s defect too; `expect_message` is what makes "
+            "this a control for clause (1) rather than a second `cvc5-flat`. "
+            "AT THE ci PROFILE, AND THAT QUALIFICATION IS LOAD-BEARING: this "
+            "tree violates BOTH clauses, `_judge` returns on the first that "
+            "fails and tests (2) first, so which clause is reported is decided "
+            "by which violating example the search reaches first. Counted "
+            "independently over 1500 draws at 8ef8f75: 458 examples violate "
+            "clause (1), 284 violate clause (2). At the derandomized ci "
+            "profile the first one reached is a clause-(1) example and this "
+            "control FIRES, at scale x1, x2 and x4. At the randomised dev "
+            "profile it is EITHER, run to run: with `.hypothesis/` removed "
+            "before every run, 39 of 60 runs at x1 and 23 of 40 at x2 reached "
+            "a clause-(1) example and FIRED, and the rest reached a clause-(2) "
+            "one and reported NOT DEMONSTRATED. The `3 runs of 3 at x1, and "
+            "again at x2` this sentence used to carry is WITHDRAWN as a replay "
+            "artefact: dev is randomised but keeps hypothesis's default "
+            "example database, and after one run on a wiped database 33 of 33 "
+            "follow-ups repeated a clause-(1) answer and 15 of 15 repeated a "
+            "clause-(2) one. Always a refusal, "
+            "never a false green, and `_judge`'s docstring says why the fix "
+            "is not to pin the transcript as an @example. "
+            "`0ad22bb` cannot supply one: by then the parser refused a nonzero "
+            "exit, so that tree carries the other defect and not this one."
+        ),
+        expect_message="ACCEPTED A NONZERO-EXIT RUN",
+    ),
+    Control(
+        name="cvc5-phantom-model",
+        nodeid=f"{_CVC5}::test_the_parent_never_trusts_an_unspoken_transcript_flat",
+        kind="mutant",
+        at="HEAD",
+        why=(
+            "the harvested model stops being the value records that were "
+            "written: `values=tuple(sorted(values))` becomes "
+            "`tuple(sorted(set(values)))`, so a child that wrote `value x0 0/1` "
+            "twice is reported as having written it once. The dedupe sits "
+            "AFTER the terminator check, so `end <n>`'s count still matches "
+            "and clauses (1) and (2) both hold — only clause (3) can fail. "
+            "MEASURED under the mutation at the ci profile: `HARVESTED A MODEL "
+            "THAT WAS NOT WRITTEN [flat]`, parent harvested [('x0', '0/1')] "
+            "against actually present [('x0', '0/1'), ('x0', '0/1')]. The "
+            "slowest of the three flat-leg controls, and the two figures "
+            "recorded for it are of DIFFERENT INSTRUMENTS. Three runs each, on "
+            "a box doing other work: junit XML testcase time 2.43, 4.25, 2.40 "
+            "s; wall clock for the whole `property_check.py --control` "
+            "invocation 6.91, 7.09, 8.15 s. So the `2.0 s` recorded when this "
+            "entry landed is a junit figure and it REPRODUCES, and the `5.6 s "
+            "best / 9.1 s worst` that replaced it and called it irreproducible "
+            "are wall clock — the correction changed instrument without "
+            "saying so, and is withdrawn. What it was offered for survives "
+            "either way: on either instrument this is the slowest of the "
+            "three. A MUTANT, "
+            "weaker evidence than a commit, and the narrow "
+            "answer to `_judge`'s standing finding that no draw of either "
+            "generator reaches clause (3): a FORGED value record is still out "
+            "of the alphabet's reach and that finding stands, but a DUPLICATE "
+            "one is in it and needs no new payload."
+        ),
+        mutation=Mutation(
+            path="src/stelling/solvers.py",
+            old="        values=tuple(sorted(values)),",
+            new="        values=tuple(sorted(set(values))),",
+        ),
+        expect_message="HARVESTED A MODEL THAT WAS NOT WRITTEN",
     ),
     # ── cross-series ────────────────────────────────────────────────────────
     Control(
@@ -316,10 +481,22 @@ CONTROLS = (
             "0.11 merged ClosedJaxpr into Jaxpr while 0.10.2 did not — so a "
             "scatter-add harness was VERIFIED at 6/6 equations known on "
             "0.11.0 and UNKNOWN at 4/6 with a top scatter-add on 0.10.2, with "
-            "TESTED_JAX_SERIES already claiming both. Fixed at 76140c2."
+            "TESTED_JAX_SERIES already claiming both. This control runs at "
+            "8ef8f75; fixed at 76140c2."
         ),
         series="both",
-        expect_message="disagree",
+        # WAS `disagree`, WHICH THIS PROPERTY'S FAILURE NEVER CARRIED. The
+        # assertion says "THE TWO TESTED jax SERIES DISAGREE on N of M
+        # harnesses"; the lower-case word occurs only in the local
+        # `disagreements` list four lines above it. Matching against captured
+        # output hid that — a traceback prints the whole function source down
+        # to the failing line, so `disagree` was there for the corpus-floor
+        # assertion below it too, and a corpus that had stopped producing
+        # verdicts would have been reported as a demonstration of series
+        # disagreement. Measured, against 8ef8f75 with two interpreters: the
+        # recorded failure is `AssertionError: THE TWO TESTED jax SERIES
+        # DISAGREE on 4 of 225 harnesses`, and `disagree` is not in it.
+        expect_message="SERIES DISAGREE",
     ),
 )
 
