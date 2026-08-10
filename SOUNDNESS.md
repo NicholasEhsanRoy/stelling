@@ -4832,10 +4832,23 @@ verdicts:
   receipts (report, reproduction facts, 946 run artefacts, scripts,
   transcript) are committed at `receipts-jax-wrap-blast-radius/` in
   `stelling-sweeps`, **a SEPARATE repository held beside this one and not
-  shipped with it** — so unlike every `scratchpad/` path cited elsewhere
-  on this page, a reader of the distribution cannot open it. That is
-  stated rather than papered over: the figures below are only as good as
-  a receipt the reader may not have. What WAS re-derived here, and can be
+  shipped with it** — so a reader of the distribution cannot open it, and
+  neither can a reader of THIS repository. That is stated rather than
+  papered over: the figures below are only as good as a receipt the
+  reader may not have.
+
+  *(The contrast drawn here when this citation landed was with "every
+  `scratchpad/` path cited elsewhere on this page", as though those were
+  openable from the distribution. **They are not.** `/scratchpad` is not
+  in the sdist allowlist in `pyproject.toml` — `tests/test_sdist_contents.py`
+  withholds it deliberately, and nothing force-includes it — so not one
+  of the **30 distinct `scratchpad/` paths** this page cites is openable
+  from a distribution either. The true contrast is with a reader of the
+  REPOSITORY: `git ls-files scratchpad` is **80** files, all 30 cited
+  paths resolve inside it, and these receipts are in neither the tree nor
+  the tarball.)*
+
+  What WAS re-derived here, and can be
   re-derived from those artefacts by anyone who does have them, is every
   delta in the table below — recomputed from the archived junit XML with
   an independent analyser comparing per-testcase outcomes between the
