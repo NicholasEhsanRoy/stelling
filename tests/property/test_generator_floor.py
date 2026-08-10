@@ -296,7 +296,7 @@ def _classify_transcript(item, seen):
 
 
 def test_the_cvc5_transcript_generator_still_draws_its_defect_shapes():
-    """The floor the four cvc5 controls cannot supply between them.
+    """The floor for ``_transcripts``, which the four cvc5 controls cannot supply.
 
     **A control firing is not evidence that the strategy still draws the shape
     the control is about**, and here that is measured rather than argued. Two
@@ -316,12 +316,42 @@ def test_the_cvc5_transcript_generator_still_draws_its_defect_shapes():
     that does not: it reads the drawn transcripts rather than the tool's answer,
     so it fails on the push that removes the shape.
 
-    Measured at ``ci`` (1000 draws, 1.6 s, no solver and no jax): truncated 547,
-    intact 453, exit 0 601, truncated-on-exit-0 340, separator payload 315, a
-    forged terminator inside a payload 283, the final newline cut and nothing
-    else 25, a duplicate value record 81, each of the nine separators 31-47.
-    The floors are set well below all of those: tripwires for a shape going to
-    zero, not targets.
+    **THIS IS THE FLAT LEG'S GENERATOR AND NOTHING ELSE.** ``CvcTransport``'s
+    rules and its two kill points (``die_at_record_boundary``,
+    ``die_mid_write``) have no shape floor at all — the state machine's only
+    anti-vacuity guard is the driven/definite/refused census in
+    ``test_the_state_machine_examined_the_protocol``, which is a floor on what
+    the PROPERTY examined, not on which shapes the rules produced. A mutation
+    that stopped the machine drawing separator payloads would be caught here
+    only because both legs share ``_PAYLOADS``; a mutation to a rule or to a
+    kill point would not be caught anywhere.
+
+    RE-MEASURED AT ``ci`` (1000 draws), because the figures published with this
+    test were taken against a draft whose inner ``draw`` differed — hypothesis's
+    derandomized sequence is keyed on ``function_digest(draw)``, so any edit to
+    that nested function reshuffles it and every count with it. Taken twice,
+    identically, by capturing this test's own counter without touching a line
+    hypothesis digests, and cross-checked against an independent
+    re-classification of the same 1000 drawn triples::
+
+        truncated 524 / intact 476        exit 0 567 / nonzero 433
+        truncated on exit 0        299    a value record          580
+        separator payload          326    a terminator            441
+        forged terminator          276    a duplicate value record 93
+        final newline cut alone     12    each of nine separators  23-54
+
+    None of the nine published figures reproduced. The floors below still sit
+    4x to 9x under all of them except the rarest named shape, which is at 2.4x
+    and is argued for separately where it is set. Cost: the run is ~2 s, not
+    the 1.6 s recorded — 1.9 s fastest of nine runs, 4.5 s median on a box
+    doing other work.
+
+    One counter does not mean what its name suggests: **forged terminator
+    inside a payload counts LINES, not draws**, because the loop increments
+    once per qualifying ``opaque`` record. The 276 above is 276 qualifying
+    records across 220 transcripts. Left as it is — it is a tripwire on the
+    shape reaching zero, and both numbers go to zero together — but a reader
+    comparing it against ``drawn`` should know which it is.
     """
     seen = collections.Counter()
 
@@ -343,9 +373,28 @@ def test_the_cvc5_transcript_generator_still_draws_its_defect_shapes():
         # dependent draw this is what notices.
         "truncated on exit 0": 50,
         # NAMED SHAPE 1 of cvc5-flat's `why`: `…\nend 4`, and nothing else.
+        # THE TIGHTEST FLOOR HERE — 12 observed against 5, a margin of 2.4x
+        # where every other floor below has 4x to 9x — so the reason it is not
+        # lower is measured rather than asserted. Dropping `cut -= 1` (M18)
+        # leaves the shape reachable by accident: the arbitrary-byte truncation
+        # branch can land on `len(full) - 1`, and the accident's rate is ~3.2
+        # per 1000 draws (measured under M18: 0 at 1000, 5 at 2000, 16 at 5000,
+        # 32 at 10 000). So a floor of 1, 2 or 3 would be met by the accident
+        # alone rather than by the branch that exists to draw the shape, and
+        # `M18 residual 1, so a floor of 1 would have passed` — recorded when
+        # this test landed — was itself wrong: at this budget the residual is 0.
+        #
+        # THE LIMIT OF THAT, stated because the number is small enough for it
+        # to matter: these are ABSOLUTE counts calibrated at the `ci` budget of
+        # 1000 draws. The accidental residual grows with the budget while the
+        # floor does not, so at `STELLING_PROPERTY_SCALE=2` M18 already reaches
+        # 5 and this line stops discriminating. It is a per-push tripwire, and
+        # the per-push budget is the one it is calibrated for.
         "final newline cut and nothing else": 5,
         # NAMED SHAPE 2: a payload the writer sees as one record and
         # `splitlines()` sees as two, the second of which forges a terminator.
+        # `forged terminator` counts qualifying RECORDS, not draws: 276 records
+        # across 220 transcripts. Both go to zero together under M15.
         "separator payload": 50,
         "forged terminator inside a payload": 30,
         "a value record": 100,
