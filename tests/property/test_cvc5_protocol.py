@@ -213,7 +213,9 @@ class _FakeSubprocess:
     #
     #   universal_newlines passed POSITIONALLY — real ``str``, model ``bytes``.
     #     ``run(*popenargs, **kwargs)`` forwards positionals straight to
-    #     ``Popen``, whose 11th positional parameter is ``universal_newlines``.
+    #     ``Popen``, where ``universal_newlines`` is the 11th parameter AFTER
+    #     the command and the 12th counting ``args`` itself — ten filler
+    #     positionals (``bufsize`` through ``env``) stand between them.
     #     ``run(self, *a, **k)`` below reads ``k`` alone, so a positional is
     #     invisible to it. That is precisely the forward-looking case the
     #     paragraph above claims to protect against, and it is not protected.

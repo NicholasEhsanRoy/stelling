@@ -1006,7 +1006,7 @@ jobs:
   #     outside this appended block, and this file is being edited concurrently.
   #     The command is in `tests/property/README.md`; until a trigger is added,
   #     nobody is running it, and that is the honest state.
-  #   * three of the ten positive controls — `cvc5-stateful` (20x budget),
+  #   * three of the TWELVE positive controls — `cvc5-stateful` (20x budget),
   #     `cross-series` (two interpreters), and `oracle-wrap` (its property is
   #     the xfail above, which the step below already asserts fired).
   property:
@@ -1092,7 +1092,8 @@ jobs:
             * the strategies still draw their boundary classes (generator floor)
             * every property is registered with a positive control, every
               control names a property that exists, every mutation still applies
-            * seven of the ten positive controls FIRE where they are supposed to
+            * NINE of the twelve positive controls FIRE where they are supposed
+              to, one of them for each of the cvc5 oracle's three clauses
 
           NOT RUN HERE AT ALL:
             * THE OPEN WRAP DEFECT IS EXPECTED TO FAIL. The unmasked oracle leg
@@ -1103,25 +1104,29 @@ jobs:
             * the nightly budgets — no scheduled job exists
             * the solver legs, control flow (scan/while/fori_loop), vmap/grad,
               nonvacuity, and the public template helpers
-            * TWO OF THE cvc5 ORACLE'S THREE CLAUSES ARE NOT CONTROLLED BY THIS
-              JOB. The property CHECKS all three on every example — that is the
-              line two blocks up, "a definite answer requires exit 0, no
-              truncation, and a harvested model equal to the value records in
-              the bytes actually read". What runs here demonstrates that the
-              check works for exactly one of the three.
-              Measured over the flat leg's own 1500 examples at
-              `0ad22bb`, all three clauses evaluated independently: 5
-              violations, every one clause (2) `no truncation`, none of clause
-              (1) or (3). The tree carries that defect and not the others.
-              Clauses (1) and (3) are demonstrated by `cvc5-exit-tell` (commit
-              `8ef8f75`, before the wheel transport had either of its two
-              tells) and `cvc5-phantom-model` (a MUTANT), which this per-push
-              subset does NOT run — they are cheap (0.5 s and 2.0 s) and adding
-              them is a one-line edit to the step below, made outside this
-              block by whoever owns it next.
-            * a count above says "seven of the ten positive controls FIRE".
-              The registry is TWELVE entries now; the seven this job runs are
-              unchanged, so read that line as seven of twelve.
+            * THE FORGERY ROUTE TO THE cvc5 ORACLE'S CLAUSE (3). All three
+              clauses now have a control that RUNS in this job — `cvc5-flat`
+              for (2) at commit `0ad22bb`, `cvc5-exit-tell` for (1) at commit
+              `8ef8f75` (before the wheel transport had either of its two
+              tells), `cvc5-phantom-model` for (3) as a MUTANT — but (3)'s
+              control reaches the clause with a DUPLICATE value record, and
+              the shape `0ad22bb` actually gets wrong is a FORGED one, which
+              no draw of the generator's alphabet can express. That route is
+              demonstrated by nothing, here or anywhere.
+              Why one tree is not enough for three clauses: measured over the
+              flat leg's own 1500 examples at `0ad22bb`, all three clauses
+              evaluated independently, 5 violations, every one of them clause
+              (2) `no truncation`, none of clause (1) or (3).
+            * A THREE-CLAUSE ORACLE IS NOT A THREE-WAY CENSUS. The line two
+              blocks up — "a definite answer requires exit 0, no truncation,
+              and a harvested model equal to the value records in the bytes
+              actually read" — is the conjunction the property asserts on
+              every example, and it is correct. But `_judge` evaluates the
+              three in order and RETURNS ON THE FIRST that fails, so a failing
+              example is reported against one clause and not against every
+              clause it violates. The independent three-way count above needed
+              a non-raising counter to take, and it is in `_judge`'s docstring
+              rather than in any run of this job.
 
           WHAT A PROPERTY SUITE CANNOT REACH AT ALL, measured over this
           project's own catalogue of 153 defects:
@@ -1184,6 +1189,16 @@ jobs:
         # property, run against a tree that carries the defect, must come back
         # RED. A control that passes exits non-zero and is reported as
         # NOT DEMONSTRATED.
+        #
+        # THE LAST TWO ARE THE OTHER TWO CLAUSES of the cvc5 oracle, and they
+        # are here because a control that exists and is not run demonstrates
+        # nothing on any push. `cvc5-flat` covers clause (2) only — measured,
+        # 5 violations at `0ad22bb`, all of them (2) — so without these two the
+        # line above reads "the cvc5 record protocol … requires exit 0, no
+        # truncation, and a harvested model equal to the value records" while
+        # one third of it is what anything demonstrates. Cost, measured from
+        # junit XML on a loaded box: 0.9 s for `cvc5-exit-tell` and 5.6 s for
+        # `cvc5-phantom-model`, best of three each.
         run: |
           .venv/bin/python tools/property_check.py \
             --control oracle-masked \
@@ -1192,4 +1207,6 @@ jobs:
             --control redundant-assume \
             --control reorder \
             --control widen \
-            --control cvc5-flat
+            --control cvc5-flat \
+            --control cvc5-exit-tell \
+            --control cvc5-phantom-model

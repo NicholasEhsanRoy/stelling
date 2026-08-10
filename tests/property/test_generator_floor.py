@@ -352,6 +352,12 @@ def test_the_cvc5_transcript_generator_still_draws_its_defect_shapes():
     records across 220 transcripts. Left as it is — it is a tripwire on the
     shape reaching zero, and both numbers go to zero together — but a reader
     comparing it against ``drawn`` should know which it is.
+
+    WHAT THIS DOES NOT CLOSE. It closes the two mutations named above, which
+    are the two that delete a defect shape ``cvc5-flat``'s ``why`` names. The
+    sweep they came from left thirteen other surviving mutants of this suite
+    (its own count, not re-taken here), and none of them is addressed by a
+    floor on this one strategy.
     """
     seen = collections.Counter()
 
