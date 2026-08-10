@@ -580,12 +580,30 @@ def _from_a_run_of_its_own(nodeid: str) -> tuple[str, str]:
     Costs nothing in a full run, which is where the session already has the
     answer.
     """
+    # `PY_COLORS=0` for the same reason `_run_a_miniature_session` sets it, and
+    # this is the site where it was actually costing something. `_SKIPPED_LINE`
+    # is anchored with `^SKIPPED`, and pytest prefixes that line with an SGR
+    # escape whenever it believes a human is watching — which it does whenever
+    # `FORCE_COLOR` is set in the ambient environment. The regex then misses, so
+    # a test that DID skip falls through to the returncode check below and is
+    # reported as "neither SKIPPED nor passed".
+    #
+    # MEASURED, `test_pinned_skips_track_their_condition_in_this_environment`,
+    # in a session narrowed to this file so that this path is taken at all:
+    # with `FORCE_COLOR=3` it FAILS, accusing `tests/test_any_pytree.py::
+    # test_h_clean_sugar_hash_equals_hand_declaration` of having errored — and
+    # quoting, inside its own failure message, the `SKIPPED [1] … could not
+    # import 'jax'` line it had just failed to match. With `PY_COLORS=0` it
+    # passes. The child exits 4 either way (the module gate skips at
+    # COLLECTION, so the narrowed nodeid has no collector); colour decides only
+    # whether that is read correctly.
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-rs", "-p", "no:cacheprovider", nodeid],
         cwd=REPO,
         capture_output=True,
         text=True,
         timeout=1800,
+        env={**os.environ, "PY_COLORS": "0"},
     )
     hit = _SKIPPED_LINE.search(proc.stdout)
     if hit:
@@ -2272,7 +2290,31 @@ def _run_a_miniature_session(
     for name, source in modules:
         (tmp_path / f"{name}.py").write_text(source)
 
-    env = {**os.environ, "REAL_PIN": str(pathlib.Path(__file__).resolve())}
+    # `PY_COLORS=0`: every assertion against a miniature session is a SUBSTRING
+    # test over the child's stdout, and pytest colours its output when it
+    # believes a human is watching. It believes that whenever `FORCE_COLOR` is
+    # set in the ambient environment — which is not exotic, it is set on the box
+    # this was found on. Nodeids in the `-rfsE` report then arrive split by SGR
+    # escapes, so `"…::test_no_session_skip_is_undisclosed" in output` is False
+    # against output that visibly contains it.
+    #
+    # MEASURED, `test_the_pin_makes_its_own_claim_when_it_is_ordered_last`,
+    # nothing else changed: with `FORCE_COLOR=3` in the environment it FAILS —
+    # "the pin did not fail at its own nodeid, so it did not run last: the
+    # collection hook is no longer ordering it" — and with `PY_COLORS=0` it
+    # passes. The mechanism that message accuses was working the whole time,
+    # which is the worst shape a failure can take: a true-sounding accusation
+    # against innocent machinery.
+    #
+    # Set here rather than per-assertion because it is a fact about how this
+    # harness READS the child, not about any one case: a machine-read
+    # subprocess should not be handed a rendering meant for a terminal.
+    # `env_extra` is applied after, so a case that wants colour can ask.
+    env = {
+        **os.environ,
+        "REAL_PIN": str(pathlib.Path(__file__).resolve()),
+        "PY_COLORS": "0",
+    }
     env.update(env_extra or {})
     env["PYTHONPATH"] = os.pathsep.join(
         [str(tmp_path), *([os.environ["PYTHONPATH"]] if "PYTHONPATH" in os.environ else [])]
