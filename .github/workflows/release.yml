@@ -14,6 +14,18 @@
 # REASONS below and never the count of refusals; the sdist checks arrived after
 # it was written and it did not move.
 #
+# AND UNTIL `tests/test_release_gates.py` LANDED, NOTHING IN THIS REPOSITORY
+# READ THIS FILE. One test opened a workflow at all — `tests/test_reuse_pins.py`,
+# and only `ci.yml`. Six line-neutral mutations were applied here at once (the
+# `rm` deleted, `-ra` -> `-rs`, the `verdict=made` condition made always-true,
+# `publish: needs` losing `test`, this header's EIGHT -> TWELVE, and `comm -23`
+# -> `comm -12`, which makes the committed-members gate incapable of firing) and
+# the FULL SUITE STAYED GREEN on every one of them. That file is a text pin,
+# one test per mutation, driven RED against each of the six individually and
+# against all six at once. What it cannot do is check that any gate WORKS —
+# only that the literal the record describes is still the literal here. Each
+# gate's behaviour is recorded beside it, with the run that established it.
+#
 #   1. THE SUITE, on the tagged tree. `ci` runs on pushes to main and on pull
 #      requests — neither of which is this event. A GitHub Release can be cut
 #      from any commit, tag or branch, so "ci was green" is a statement about
@@ -41,17 +53,41 @@
 # `GENERATED`. The `members.txt` and `tracked.txt` arms both fire and are
 # driven; nothing is lost by the dead arm, and it is not a third check.
 #
-# WHAT NOTHING HERE CHECKS: the WHEEL's member list. Step 2 reads only the
-# wheel's FILENAME. `tests/test_sdist_contents.py` opens a built wheel but
-# asserts on its `METADATA` long description, not on which files it ships. What
-# protects the wheel is a COUPLING rather than a check — both artefacts come
-# out of one `uv build` over one tree, and the sdist allowlist covers `/src` —
-# and
-# the coupling was driven rather than assumed: an untracked
-# `src/stelling/_relgate_probe.py` shipped in the wheel (29 members against a
-# baseline of 28) AND in the sdist, where the committed-members comparison
-# caught it by name. The sdist's own filename version is likewise never
-# compared to the tag; same build, so it agrees by construction.
+# NO STEP IN THIS FILE CHECKS THE WHEEL'S MEMBER LIST, AND THE ARGUMENT THAT
+# ONE WAS NOT NEEDED WAS HALF AN ARGUMENT. Step 2 reads only the wheel's
+# FILENAME. What was said to protect the wheel is a COUPLING rather than a
+# check — both artefacts come out of one `uv build` over one tree, and the
+# sdist allowlist covers `/src` — and the coupling was driven in ONE
+# DIRECTION: an untracked `src/stelling/_relgate_probe.py` shipped in the wheel
+# (29 members against a baseline of 28) AND in the sdist, where the
+# committed-members comparison caught it by name. That is a file ADDED.
+#
+# THE SUBTRACTIVE DIRECTION WAS UNCOVERED, AND IT IS THE ONE THAT SHIPS AN
+# UNIMPORTABLE PACKAGE. Re-driven at 650e678 in a clone of this tree, with
+# `exclude = ["**/solvers.py", "**/contracts.py"]` added under
+# `[tool.hatch.build.targets.wheel]`: the sdist stayed at 279 members, the
+# wheel went 28 -> 26, and EVERY GATE HERE STAYED GREEN — the sdist step rc=0
+# on "every one of 279 sdist members is committed to this tree", the tag step
+# rc=0 on `v0.1.0`, and `test_sdist_contents.py` + `test_import_hygiene.py` +
+# `test_release_doc_claims.py` 39 passed. The installed wheel: `import
+# stelling` fine, `import stelling.solvers` ModuleNotFoundError. The sdist
+# allowlist cannot see it, because an allowlist says which paths MAY ship and
+# never which MUST, and the wheel target reads a different table.
+#
+# WHAT CATCHES IT NOW is not a step here, and that is deliberate: it is three
+# tests in `tests/test_sdist_contents.py`, which run inside the suite above and
+# therefore refuse through refusal point 1 rather than adding a ninth. The
+# wheel's package members are compared to the tree's as an EQUALITY (so it
+# fires in both directions), the drop is driven as an intervention, and the
+# built wheel is UNPACKED INTO A BARE INTERPRETER and every module of it
+# resolved — the "nothing installs or imports a built artefact" gap, closed
+# where it can be measured on this box instead of guessed at on a runner.
+# Driven RED against exactly the mutation above: "in the tree and NOT in the
+# wheel: ['stelling/contracts.py', 'stelling/solvers.py']" and "these modules
+# of it do not resolve: ['contracts', 'solvers']".
+#
+# The sdist's own filename version is still never compared to the tag; same
+# build, so it agrees by construction.
 
 name: release
 on:
@@ -164,11 +200,29 @@ jobs:
       # returns whatever follows the LAST `/` — so with two wheels present
       # this reads only the LAST one's version. Driven: a planted
       # `stelling-0.2.0-…whl` beside the real 0.1.0 made this report
-      # `artifact version=0.2.0`. It went red there, but the mirror image (a
-      # STALE 0.1.0 beside a real 0.2.0, tagged v0.1.0) would go green. It
-      # cannot arise here: `actions/checkout@v4` gives this job an empty
-      # `dist/` and one `uv build` fills it. Recorded rather than patched,
-      # because the patch cannot be validated on a runner from here. With NO
+      # `artifact version=0.2.0`, and it went red there.
+      #
+      # THE GREEN SHAPE WAS DESCRIBED BACKWARDS HERE AND IS NOW DRIVEN. This
+      # said the mirror image — "a STALE 0.1.0 beside a real 0.2.0, tagged
+      # v0.1.0" — would go green. It does not, and the reason is the same
+      # sentence two lines up: `ls` SORTS, so the LAST match is the HIGHEST
+      # version, and that is the one compared. Both shapes driven on a `dist/`
+      # of two empty files with the step body verbatim:
+      #
+      #   0.1.0 + 0.2.0, TAG=v0.1.0   "artifact version=0.2.0"   rc=1  RED
+      #   0.0.9 + 0.1.0, TAG=v0.1.0   "artifact version=0.1.0"   rc=0  GREEN
+      #
+      # So what goes green is a stray that sorts BEFORE the real wheel, not
+      # after — and it is worse than a wrong version string, because the
+      # comparison never sees the stray at all: `upload-artifact` takes the
+      # whole `dist/` directory, `download-artifact` restores it, and the
+      # publish step uploads every file in it. A 0.0.9 nobody tagged goes to
+      # PyPI beside the 0.1.0, permanently, with this step green.
+      #
+      # STILL NOT REACHABLE HERE, which is why it is recorded rather than
+      # patched: `actions/checkout@v4` gives this job a fresh clone, `dist/` is
+      # gitignored and has no tracked member, and one `uv build` fills it.
+      # The patch cannot be validated on a runner from here. With NO
       # wheel at all, `ls` fails and `set -e` exits 2 before this compares
       # anything — red, but not by this gate.
       - name: the tag and the artifact must agree

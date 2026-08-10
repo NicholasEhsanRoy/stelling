@@ -32,6 +32,70 @@ For ``--controls`` that means every control FAILED where it was supposed to
 fail; a control that passes is reported as ``CONTROL DID NOT FIRE`` and exits
 non-zero, because a control that cannot demonstrate its property is worth
 nothing.
+
+WHERE ``expect_message`` IS MATCHED, and why it is not the captured output.
+pytest's long traceback prints a frame's ENTIRE function source — docstring
+included — from ``def`` down to the failing line. So the strings a property
+BUILDS its failure messages from, and any string quoted in the docstring of a
+function on the traceback path, are echoed into the run's output whether or
+not the property's oracle ever ran. Matching ``expect_message`` against that
+output makes a CRASH indistinguishable from a demonstration. Measured, on
+``tests/property/test_cvc5_protocol.py`` with its two clause sentences quoted
+in ``_judge``'s docstring: a one-place defect that raises ``TypeError`` before
+the oracle is evaluated scored ``3/3 controls fired`` against three probe
+controls carrying the three shipped guard strings. So the match is made
+against the failure pytest itself RECORDS — the ``message`` attribute of each
+``<failure>``/``<error>`` in ``--junitxml``. The same run now scores ``0/3``.
+
+WHAT THAT ATTRIBUTE ACTUALLY HOLDS. It was described here as "the crash line
+and the exception's own text and nothing else", and that is not what it is.
+Measured on pytest 9.1.1 with hypothesis 6.165.2, reading one real failure of
+``test_the_parent_never_trusts_an_unspoken_transcript_flat`` out of the XML::
+
+    AssertionError: <clause (2)'s sentence> as 'unknown' [flat]  <- the
+      read : '…'                                             exception's text
+      full : '…'
+    Failing test case: search(                              <- hypothesis note
+        item=('…', '…', 0),
+    )
+    Explanation:                                            <- hypothesis note
+        These lines were always and only run by failing test cases:
+            …/tests/property/test_cvc5_protocol.py:443
+    You can reproduce this test case by temporarily adding
+    @reproduce_failure('6.165.2', b'…') as a decorator …    <- print_blob=True
+
+and, where the failure is a bare ``assert``, pytest's assertion-rewrite
+explanation as well — which embeds the **reprs of the asserted expression's
+operands**, i.e. generated data. So the attribute carries strategy output, and
+whether some generator could draw a guard string into it is a per-guard
+question rather than something this file settles by construction. Of the twelve
+guards registered today, eleven are shouted English phrases or bracketed leg
+tags; ``reorder``'s ``transposed`` is the one lower-case word, and it is the
+one to look at first if that question is ever asked in earnest. NOTHING here
+is exploitable by any guard registered today.
+
+THE BLIND SPOT THIS RULE HAS AND THE OUTPUT MATCH DID NOT. When hypothesis
+finds MORE THAN ONE distinct failure it raises an ``ExceptionGroup``, and the
+sub-exceptions' texts live in the traceback BODY only. Driven, two assert
+sites in one ``@given`` function::
+
+    <failure message="ExceptionGroup: Hypothesis found 2 distinct failures.
+                      (2 sub-exceptions)">
+
+Neither sentinel appears in the attribute. So a genuine demonstration that
+found two defects at once is scored "wrong failure" here, where the old
+output match would have scored it FIRED. Not live for any of the twelve today
+— every one of them shrinks to a single interesting origin — but it is not far
+off. Counted over the suite's ``@given`` functions: the reordering property
+and the conjunct property have THREE raise/assert sites each, the wrap-class
+oracle leg and the refutation property TWO each, and ``reorder``'s own guard
+``transposed`` is written at two of the reordering property's three. A
+second interesting origin is one mutant away, and the failure mode is a
+control reported NOT DEMONSTRATED while demonstrating twice over. That is the
+SAFE direction — it refuses, it never passes — which is why it is disclosed
+here rather than worked around: reading sub-exception texts out of the
+traceback body would put the guard back in reach of the property's own echoed
+source, which is the defect this whole rule exists to close.
 """
 
 from __future__ import annotations
@@ -43,6 +107,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
@@ -92,12 +157,22 @@ def _apply(mutation, tree: pathlib.Path) -> None:
 
 
 def _run(tree, targets, *, python, profile, scale, extra_env=None, runxfail=False,
-         verbose=False, extra_args=()):
+         verbose=False, extra_args=(), junit=None):
     env = dict(os.environ)
     env["PYTHONPATH"] = str(pathlib.Path(tree) / "src")
     env["JAX_PLATFORMS"] = env.get("JAX_PLATFORMS", "cpu")
     env["STELLING_PROPERTY_PROFILE"] = profile
     env["STELLING_PROPERTY_SCALE"] = str(scale)
+    # This child's output is READ, not merely echoed: `_verdict` decides
+    # ECHOED on `expect_message in out`, and pytest paints traceback source —
+    # docstrings included — whenever it believes a human is watching, which it
+    # does whenever `FORCE_COLOR` is set in the environment this inherits. An
+    # SGR escape landing inside the expected string turns a control that FIRED
+    # correctly into a WRONG verdict. Same rule the children of
+    # `tests/test_skip_inventory.py` follow, and set before `extra_env` so a
+    # caller that wants colour can still ask for it. The DEMONSTRATED path is
+    # unaffected either way: it reads the junit XML, which carries no colour.
+    env["PY_COLORS"] = "0"
     env.pop("STELLING_PROPERTY_DB", None)
     if extra_env:
         env.update(extra_env)
@@ -107,6 +182,8 @@ def _run(tree, targets, *, python, profile, scale, extra_env=None, runxfail=Fals
     ]
     if runxfail:
         argv.append("--runxfail")
+    if junit is not None:
+        argv.append(f"--junitxml={junit}")
     argv += list(targets)
     if verbose:
         print("   $ PYTHONPATH=%s STELLING_PROPERTY_PROFILE=%s %s"
@@ -119,6 +196,90 @@ def _tail(proc, n=25):
     out = (proc.stdout or "") + (proc.stderr or "")
     lines = out.strip().splitlines()
     return "\n".join("   | " + ln for ln in lines[-n:])
+
+
+def _crashes(junit) -> list[str]:
+    """What the run REPORTED as its failures, as pytest itself records them.
+
+    One string per ``<failure>``/``<error>``: pytest's ``message`` attribute,
+    and NOT the traceback body. That distinction is the whole point (see this
+    module's docstring): the traceback body carries the property's own source,
+    so a guard string is present there even when nothing evaluated the oracle.
+
+    IT IS NOT "THE CRASH LINE AND NOTHING ELSE", which is what this said. The
+    attribute is the exception type and its own text, PLUS pytest's assertion
+    -rewrite explanation where the failure is a bare ``assert`` (which embeds
+    the reprs of the asserted expression's operands, i.e. generated data),
+    PLUS hypothesis's own notes — ``Failing test case: …``, the
+    ``Explanation:`` file:line list, and the ``@reproduce_failure`` blob that
+    ``print_blob=True`` in ``_profiles.py`` asks for. Measured, verbatim, in
+    this module's docstring.
+
+    AND ONE SHAPE IT CANNOT SEE: when hypothesis finds more than one distinct
+    failure it raises an ``ExceptionGroup``, whose ``message`` is
+    ``"Hypothesis found N distinct failures. (N sub-exceptions)"`` — the
+    sub-exceptions' texts are in the traceback body alone. A control whose
+    property found two defects at once is therefore scored "wrong failure"
+    here. Disclosed rather than closed, because the safe direction is to
+    refuse; this module's docstring has the driven measurement and the reason.
+
+    An empty list is the honest answer for a run that produced no XML at all —
+    a pytest usage error, an interpreter that died before collection — and the
+    caller treats it as "did not carry", which is the safe direction.
+    """
+    try:
+        root = ET.parse(junit).getroot()
+    except (OSError, ET.ParseError):
+        return []
+    return [
+        child.get("message") or ""
+        for case in root.iter("testcase")
+        for child in case
+        if child.tag in ("failure", "error")
+    ]
+
+
+# ── the decision ─────────────────────────────────────────────────────────────
+#
+# THE ONE JUDGEMENT THIS TOOL MAKES, in one place so that something can execute
+# it. It was four lines inside `check_controls`, reachable only by running a
+# real control against a real tree, and nothing in the repository asserted
+# anything about it: reverting `carried` to match the run's echoed output
+# scored a pure crash — a `TypeError` raised before the oracle was evaluated at
+# all — as `FIRED`, including for a control that is in the per-push gate, and
+# every gate stayed green. It is a function now, and
+# `tests/property/test_suite_disclosure.py` drives it end to end over three
+# synthetic controls whose outcomes are known.
+
+DEMONSTRATED = "demonstrated"
+ECHOED = "echoed, not raised"
+WRONG = "wrong failure"
+DID_NOT_FIRE = "passed where it must fail"
+
+
+def _verdict(expect_message, crashes, out, *, fired) -> str:
+    """Did this run demonstrate the defect, and if not, in which way not?
+
+    ``crashes`` is ``_crashes(junit)`` — what pytest RECORDED. ``out`` is
+    everything the run echoed. The order of the three tests below is the whole
+    decision procedure:
+
+    * the guard is in a RECORDED failure -> ``DEMONSTRATED``;
+    * the guard is only in the echoed output -> ``ECHOED``, its own outcome
+      because the remedy differs (nothing is wrong with the control; a
+      docstring or a message template on the traceback path put it there);
+    * red, and the guard is nowhere -> ``WRONG``;
+    * green -> ``DID_NOT_FIRE``, which is the failure this registry exists for.
+
+    Everything except the first is NOT DEMONSTRATED and exits non-zero.
+    """
+    if not fired:
+        return DID_NOT_FIRE
+    if any(expect_message in c for c in crashes):
+        return DEMONSTRATED
+    if expect_message in out:
+        return ECHOED
+    return WRONG
 
 
 # ── the two modes ────────────────────────────────────────────────────────────
@@ -163,7 +324,8 @@ def check_controls(args) -> int:
     for control in wanted:
         if control.series == "both" and not args.other_python:
             print(f"-- {control.name}: SKIPPED (needs --other-python, an "
-                  f"interpreter with the other jax series)")
+                  f"interpreter with the other jax series AND hypothesis — "
+                  f"tools/property_venv.sh builds one)")
             failures.append((control.name, "not demonstrated: no second series"))
             continue
         with tempfile.TemporaryDirectory(prefix="stelling-ctl-") as tmp:
@@ -177,27 +339,45 @@ def check_controls(args) -> int:
             # need more room than a per-push budget, and burying that in a
             # global flag would make every control pay for the slowest one.
             scale = float(args.scale) * control.scale
+            junit = pathlib.Path(tmp) / "junit.xml"
             proc = _run(tree, [control.nodeid], python=args.python,
                         profile=args.profile, scale=scale,
                         runxfail=True, verbose=args.verbose,
-                        extra_env=_cross_env(args))
+                        extra_env=_cross_env(args), junit=junit)
             out = (proc.stdout or "") + (proc.stderr or "")
-            fired = proc.returncode != 0
-            carried = control.expect_message in out
-            if fired and carried:
+            crashes = _crashes(junit)
+            verdict = _verdict(control.expect_message, crashes, out,
+                               fired=proc.returncode != 0)
+            if verdict == DEMONSTRATED:
                 print("   FIRED — the property failed where it is supposed to")
                 if args.verbose:
                     print(_tail(proc, 30))
-            elif fired:
+            elif verdict == ECHOED:
+                # The string is in the run's OUTPUT but not in any failure the
+                # run recorded, which is the shape a docstring or a message
+                # template echoed by the traceback produces. Reported as its
+                # own outcome rather than folded into "wrong failure", because
+                # the remedy is different: nothing is wrong with the control.
+                print(f"   FIRED, but the failure ITSELF did not carry "
+                      f"{control.expect_message!r} — the string is only in the "
+                      f"run's echoed output (a traceback prints the property's "
+                      f"own source, docstring included)")
+                for c in crashes:
+                    print(f"   what pytest recorded: {c.splitlines()[0][:120]}")
+                print(_tail(proc, 30))
+                failures.append((control.name, ECHOED))
+            elif verdict == WRONG:
                 print(f"   FIRED, but the failure did not carry "
                       f"{control.expect_message!r}")
+                for c in crashes:
+                    print(f"   what pytest recorded: {c.splitlines()[0][:120]}")
                 print(_tail(proc, 30))
-                failures.append((control.name, "wrong failure"))
+                failures.append((control.name, WRONG))
             else:
                 print("   CONTROL DID NOT FIRE — this property cannot be shown "
                       "to detect anything")
                 print(_tail(proc, 30))
-                failures.append((control.name, "passed where it must fail"))
+                failures.append((control.name, DID_NOT_FIRE))
     print()
     print(f"== {len(wanted) - len(failures)}/{len(wanted)} controls fired")
     for name, why in failures:
@@ -224,8 +404,10 @@ def main(argv=None) -> int:
     p.add_argument("--python", default=sys.executable,
                    help="interpreter with hypothesis and jax installed")
     p.add_argument("--other-python",
-                   help="interpreter with the OTHER jax series, for the "
-                        "cross-series property")
+                   help="interpreter with the OTHER jax series AND hypothesis, "
+                        "for the cross-series property (tools/property_venv.sh "
+                        "builds one; the child imports _grammar, so a bare jax "
+                        "venv fails there rather than differing)")
     p.add_argument("--list", action="store_true", help="list the controls")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)

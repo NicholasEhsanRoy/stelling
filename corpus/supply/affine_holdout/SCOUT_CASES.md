@@ -42,7 +42,13 @@ Run any case:
   2x1 Cartesian mesh, boundary-fed, all declarations point intervals; the
   contract poses symmetry as two closed obligations
   `M[..,0,1] <= M[..,1,0]` AND `M[..,1,0] <= M[..,0,1]`
-  (src/stelling/contracts.py:690/691).
+  (the pair of `obligations.append(assert_(...))` calls in
+  `conditioning_2x2_field`, `src/stelling/contracts.py`).
+  *This cited `contracts.py:690/691`, which today is the middle of the triple-path
+  shape validation; the sentence it quotes is at 670/671 and the posing calls
+  are at 754/755 — measured 2026-08-09. The same wrong pair is printed by
+  `case1_REFINED.py` and `case1_mime_symmetry.py`; all three are corrected to
+  the symbol.*
 - **The socket no longer runs un-modified from the current tree.** Commit
   3f78fdd added a `scatter-add` transfer; the socket's seam probe (its line
   197) asserts scatter-add has NO transfer, and now fails:
@@ -178,9 +184,16 @@ negated predicate is unsat per cvc5 (wheel) and z3 (wheel)`;
 
 Raw-harness replica (test-suite shape, plain `propagate`, no contract layer):
 `['unknown']`, detail `undecided for 1/1 element(s)`, propagation notes
-`(none)` — the lhs/rhs-hull straddle NOTE is emitted by the contract layer
-(contracts.py:1031), not by raw propagation; raw runs record only the
+`(none)` — the lhs/rhs-hull straddle NOTE was emitted by the contract layer
+(`check_contract`), not by raw propagation; raw runs record only the
 undecided detail line.
+
+*This cited line 1031 of `contracts.py`. `src/stelling/contracts.py` is 1022
+lines, so that number was 9 past the end of the file — checked 2026-08-09. Read
+`check_contract`'s own docstring before relying on the sentence: it now records
+that the contract layer's mirrored note is GONE and that the straddle is quoted
+in the obligation's detail by the propagation layer itself. This entry is left
+as the dated observation it was, with the citation pointed at a symbol.*
 
 ### (c) Correlation structure
 
@@ -332,8 +345,13 @@ Escalation (holdout runner): **this one the solver already closes** —
 is unsat per z3 (wheel) and cvc5 (wheel)`; z3 11 ms, cvc5 70 ms. Hand
 argument: `t` shared on both sides; `(t + dt) - t = dt > 0` — linear. Same
 outward-rounding-at-a-point mechanism as case 1's symmetry pair. (Under IEEE
-semantics the same shape is genuinely false — tests/test_ieee_semantics.py:867-906
-covers that; the real-semantics claim is the decidable one.)
+semantics the same shape is genuinely false —
+`tests/test_ieee_semantics.py`'s `_t_dt_query` block, headed "the t + dt > t
+acceptance shapes", covers that; the real-semantics claim is the decidable one.
+*This cited `test_ieee_semantics.py:867-906`, which is a maybe-NaN
+assume-clearing test and nothing to do with this shape; the block meant is
+`test_t_plus_dt_point_collapse_is_refuted_under_ieee` and its two neighbours —
+measured 2026-08-09.*)
 
 ### Non-hits, recorded so the holdout does not overclaim
 

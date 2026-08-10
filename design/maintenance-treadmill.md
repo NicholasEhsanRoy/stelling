@@ -72,7 +72,9 @@ series".
 
 **Cost of this bump, corrected 2026-08-07 — the re-verification of the
 older series had not happened.** Every jax CI job installed
-`.[solvers,jax]`, whose floor is `jax>=0.5`, so every job resolved the
+`.[solvers,jax]`, whose floor was `jax>=0.5` at the time (it is `jax>=0.10`
+since `c3ff79d`) and which has never carried an **upper** bound — the half
+that actually does the work here — so every job resolved the
 NEWEST jax: whatever `TESTED_JAX_SERIES` said, CI exercised **one**
 series, and 0.10 rested on a developer's run. When 0.10 finally got a
 lane of its own (`1053714`), the suite on a real 0.10.2 failed **ten

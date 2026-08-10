@@ -1121,8 +1121,25 @@ def test_f4wheel2_property_fuzz_no_definite_answer_from_an_incomplete_run():
 #
 # EVERY TEST IN THIS BLOCK MEASURES THE PARENT'S OWN IO CHOICE, so none of them
 # may name it: `_wheel_real_child` forwards whatever `_run_cvc5_wheel` asked
-# `subprocess.run` for. `_wheel_child` above pins `text=True` in the shim
-# itself, which would make these tests a measurement of the fixture.
+# `subprocess.run` for.
+#
+# THIS USED TO SAY `_wheel_child` "pins `text=True` in the shim itself, which
+# would make these tests a measurement of the fixture". That was true when it
+# was written and has not been since `420cc12`, which gave `_wheel_child` the
+# same repair: its `route` forwards the transport's own spawn kwargs and
+# carries a comment saying why. The description outlived the code by naming a
+# fixture as the counter-example to a rule that fixture had begun following.
+#
+# Corrected rather than deleted, because the contrast is still the reason
+# `_wheel_real_child` exists: a shim that names `text=True` itself makes every
+# test routed through it a measurement of the FIXTURE's io choice. Neither
+# helper does that now. What separates them is what they spawn —
+# `_wheel_child` a scripted child of this file's own, `_wheel_real_child` an
+# arbitrary program — and not how they open its streams.
+#
+# `_FakeProc` in `tests/property/test_cvc5_protocol.py` carries the same repair
+# and cites `_wheel_child` as precedent for it, so that file and this one
+# contradicted each other outright until this was fixed.
 
 
 def _stale_child(answer: str, payload: bytes) -> str:
@@ -1145,8 +1162,22 @@ def _stale_child(answer: str, payload: bytes) -> str:
     ``ast.parse(src, feature_version=(3, 10))`` on a 3.12 host PARSES this
     construct, so a same-interpreter floor check would have been vacuous
     against exactly this defect. Catching it needs a real floor interpreter,
-    and no job in ``.github/workflows/`` runs one — every ``uv venv`` but the
-    ``acceptance-any-pytree`` lane's takes the runner's default.
+    and NO JOB IN ``.github/workflows/`` RUNS ONE.
+
+    THE SENTENCE THAT USED TO SAY SO NAMED THE WRONG LANE, and the correction
+    is the smaller half. It read "every ``uv venv`` but the
+    ``acceptance-any-pytree`` lane's takes the runner's default". Re-counted
+    across both workflow files: SEVEN ``uv venv`` invocations, SIX of them
+    bare. The one that is not bare is ``uv venv --python 3.12`` in the
+    ``acceptance-reproducer`` job; ``acceptance-any-pytree``'s is bare like the
+    rest. Cited by JOB NAME rather than by line, since these move.
+
+    The load-bearing half is untouched by that, and is why the paragraph
+    exists: 3.12 is not a floor interpreter, so pinning it changes nothing
+    about this defect. Six lanes take whatever the runner image ships and the
+    seventh takes a version above the floor, so which interpreter the release
+    gate's suite runs is a property of the runner image and not of this
+    repository, and 3.10 is exercised by no job at all.
     """
     answer_record = f"answer {answer}\n".encode()
     return (

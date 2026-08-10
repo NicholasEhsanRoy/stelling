@@ -111,10 +111,20 @@ public API), and **five src locations**: `ir.py`'s own `_decode`
 factories (the from_dict door — validated), `_jax_compat.py` (the trace
 door — validated, jax refuses malformed upstream), `vacuity.py` (the
 widen transform — rewrites `lo`/`hi` params only; well-formedness-
-preserving on valid input), `obligation.py:886` (alias substitution —
-copies an existing eqn with resolved invars; preserving),
-`propagate.py:1088–1125` (the behavioural census-assert probes —
-synthetic, valid by construction).
+preserving on valid input), `obligation.py`'s `_Slicer._rewrite` (alias
+substitution — copies an existing eqn with resolved invars; preserving),
+`propagate.py`'s `_probe_operands` / `_probe_slice` /
+`_assert_computing_transfers_close_the_integer_class` (the behavioural
+census-assert probes — synthetic, valid by construction).
+
+*Those last two named LINES, and both had rotted. Resolved against the tree
+2026-08-09: `obligation.py:886` is the tail of the `dot_general`
+linear-combination planner, not alias substitution — that is
+`_Slicer._rewrite`; and `propagate.py:1088–1125` is the `rem` transfer's
+docstring, with no `ir` construction anywhere near it — the probes are the
+three functions now named. This section is a dated reading and its numbers
+were read then, but a stale line number sends a reader to a line that looks
+plausible, so the symbols REPLACE them rather than sit beside them.*
 
 **The census-of-the-census:** `ir` objects are frozen dataclasses in a
 **public module** — freely constructible by any consumer. So the funnel

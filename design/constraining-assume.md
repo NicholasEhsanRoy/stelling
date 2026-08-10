@@ -9,11 +9,19 @@ propagated domain where — and only where — narrowing is provably sound.
 
 ## The F2 shape check — done first, because a claim hangs on it
 
-**F2 is relational, from its own line.** `corpus/supply/mime_fvm.py:202`:
+**F2 is relational, from its own line.** The `h_f2` harness in
+`corpus/supply/mime_fvm.py`:
 
 ```python
 assume(dot >= 0.71 * sf_norm * d_norm)
 ```
+
+*This cited `mime_fvm.py:202`, and that line is `PHI_PROTO = np.zeros(...)`;
+the `assume` above is at 175, measured 2026-08-09. The number is dropped
+rather than corrected, because nothing regenerates this page and the same
+citation was already disagreeing with itself across two files —
+`corpus/supply/affine_holdout/SCOUT_CASES.md` quotes the same tool note at
+175. The harness name is what `grep` still finds.*
 
 The comparison couples `dot` with `0.71·sf_norm·d_norm` — both sides are
 computed, non-constant quantities derived from the declared `Sf`/`d`
@@ -226,6 +234,11 @@ is the exception, and it is scoped rather than generalised.)*
 > corpus/supply/mime_fvm.py:202 (h_f2): VERIFIED proves a superset;
 > UNKNOWN may be confounded by this drop **(relational: both sides
 > vary — constraining needs relational domains)**
+
+*Quoted verbatim from the run, and the `:202` inside it is the TOOL's reading
+of `source_info` at the time — the `assume` is at 175 today. A transcript is a
+record of what a program printed, so it is not edited; what is corrected is
+the sentence above that repeated the number as if it were a current fact.*
 
 **F1→F2 is not closed, and the tool now says why in its own output**:
 the alignment floor is a relation between computed quantities, and its

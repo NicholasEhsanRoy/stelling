@@ -61,8 +61,20 @@ difference that both series get equally wrong.
 
 POSITIVE CONTROL: ``8ef8f75``. Run it with
 
+    tools/property_venv.sh 0.11.0            # if you do not have them already
+    tools/property_venv.sh 0.10.2
     python tools/property_check.py --control cross-series \\
         --python <venv with jax 0.11> --other-python <venv with jax 0.10>
+
+**THE SECOND INTERPRETER NEEDS HYPOTHESIS TOO, and the line above used to name
+only jax.** It runs ``_corpus.py`` as a script, and ``_corpus`` imports
+``_grammar``, which imports ``hypothesis`` at module scope — the corpus is
+seeded by ``random.Random``, but the module it lives beside is not. MEASURED,
+pointed at a jax 0.10.2 venv without hypothesis: the child dies with
+``ModuleNotFoundError: No module named 'hypothesis'``, guard (1) below never
+runs, and the control is reported as a WRONG FAILURE rather than as a
+demonstration. ``tools/property_venv.sh`` builds an interpreter with both; a
+bare jax venv is not enough on either side.
 """
 
 from __future__ import annotations
