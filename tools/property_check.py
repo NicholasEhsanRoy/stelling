@@ -45,8 +45,57 @@ in ``_judge``'s docstring: a one-place defect that raises ``TypeError`` before
 the oracle is evaluated scored ``3/3 controls fired`` against three probe
 controls carrying the three shipped guard strings. So the match is made
 against the failure pytest itself RECORDS — the ``message`` attribute of each
-``<failure>``/``<error>`` in ``--junitxml``, which is the crash line and the
-exception's own text and nothing else. The same run now scores ``0/3``.
+``<failure>``/``<error>`` in ``--junitxml``. The same run now scores ``0/3``.
+
+WHAT THAT ATTRIBUTE ACTUALLY HOLDS. It was described here as "the crash line
+and the exception's own text and nothing else", and that is not what it is.
+Measured on pytest 9.1.1 with hypothesis 6.165.2, reading one real failure of
+``test_the_parent_never_trusts_an_unspoken_transcript_flat`` out of the XML::
+
+    AssertionError: <clause (2)'s sentence> as 'unknown' [flat]  <- the
+      read : '…'                                             exception's text
+      full : '…'
+    Failing test case: search(                              <- hypothesis note
+        item=('…', '…', 0),
+    )
+    Explanation:                                            <- hypothesis note
+        These lines were always and only run by failing test cases:
+            …/tests/property/test_cvc5_protocol.py:443
+    You can reproduce this test case by temporarily adding
+    @reproduce_failure('6.165.2', b'…') as a decorator …    <- print_blob=True
+
+and, where the failure is a bare ``assert``, pytest's assertion-rewrite
+explanation as well — which embeds the **reprs of the asserted expression's
+operands**, i.e. generated data. So the attribute carries strategy output, and
+whether some generator could draw a guard string into it is a per-guard
+question rather than something this file settles by construction. Of the twelve
+guards registered today, eleven are shouted English phrases or bracketed leg
+tags; ``reorder``'s ``transposed`` is the one lower-case word, and it is the
+one to look at first if that question is ever asked in earnest. NOTHING here
+is exploitable by any guard registered today.
+
+THE BLIND SPOT THIS RULE HAS AND THE OUTPUT MATCH DID NOT. When hypothesis
+finds MORE THAN ONE distinct failure it raises an ``ExceptionGroup``, and the
+sub-exceptions' texts live in the traceback BODY only. Driven, two assert
+sites in one ``@given`` function::
+
+    <failure message="ExceptionGroup: Hypothesis found 2 distinct failures.
+                      (2 sub-exceptions)">
+
+Neither sentinel appears in the attribute. So a genuine demonstration that
+found two defects at once is scored "wrong failure" here, where the old
+output match would have scored it FIRED. Not live for any of the twelve today
+— every one of them shrinks to a single interesting origin — but it is not far
+off. Counted over the suite's ``@given`` functions: the reordering property
+and the conjunct property have THREE raise/assert sites each, the wrap-class
+oracle leg and the refutation property TWO each, and ``reorder``'s own guard
+``transposed`` is written at two of the reordering property's three. A
+second interesting origin is one mutant away, and the failure mode is a
+control reported NOT DEMONSTRATED while demonstrating twice over. That is the
+SAFE direction — it refuses, it never passes — which is why it is disclosed
+here rather than worked around: reading sub-exception texts out of the
+traceback body would put the guard back in reach of the property's own echoed
+source, which is the defect this whole rule exists to close.
 """
 
 from __future__ import annotations
@@ -143,11 +192,26 @@ def _crashes(junit) -> list[str]:
     """What the run REPORTED as its failures, as pytest itself records them.
 
     One string per ``<failure>``/``<error>``: pytest's ``message`` attribute,
-    which is the crash location's own text — the exception type and its
-    message — and NOT the traceback body. That distinction is the whole point
-    (see this module's docstring): the traceback body carries the property's
-    own source, so a guard string is present there even when nothing evaluated
-    the oracle.
+    and NOT the traceback body. That distinction is the whole point (see this
+    module's docstring): the traceback body carries the property's own source,
+    so a guard string is present there even when nothing evaluated the oracle.
+
+    IT IS NOT "THE CRASH LINE AND NOTHING ELSE", which is what this said. The
+    attribute is the exception type and its own text, PLUS pytest's assertion
+    -rewrite explanation where the failure is a bare ``assert`` (which embeds
+    the reprs of the asserted expression's operands, i.e. generated data),
+    PLUS hypothesis's own notes — ``Failing test case: …``, the
+    ``Explanation:`` file:line list, and the ``@reproduce_failure`` blob that
+    ``print_blob=True`` in ``_profiles.py`` asks for. Measured, verbatim, in
+    this module's docstring.
+
+    AND ONE SHAPE IT CANNOT SEE: when hypothesis finds more than one distinct
+    failure it raises an ``ExceptionGroup``, whose ``message`` is
+    ``"Hypothesis found N distinct failures. (N sub-exceptions)"`` — the
+    sub-exceptions' texts are in the traceback body alone. A control whose
+    property found two defects at once is therefore scored "wrong failure"
+    here. Disclosed rather than closed, because the safe direction is to
+    refuse; this module's docstring has the driven measurement and the reason.
 
     An empty list is the honest answer for a run that produced no XML at all —
     a pytest usage error, an interpreter that died before collection — and the
