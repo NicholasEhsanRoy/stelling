@@ -516,12 +516,18 @@ def test_no_shipped_page_cites_a_line_its_own_tree_does_not_have():
 def test_the_shipped_root_count_in_prose_matches_the_allowlist():
     """The count two shipped comments state about the allowlist, DERIVED.
 
-    Both comments explain their own scope with a fraction — "six of the 23
-    allowlisted roots", "6 roots out of 23" — and the denominator is a fact
-    about `pyproject.toml` that nothing read. It said 22. The allowlist has
-    held 23 root entries at every commit anyone has looked at: 43973af,
-    650e678, 53f9f84 and a61c01f, counted with the two parsers those files
-    already use.
+    Both comments state a fraction — "six of the 23 allowlisted roots", "6
+    roots out of 23" — and the denominator is a fact about `pyproject.toml`
+    that nothing read. It said 22. The allowlist has held 23 root entries at
+    every commit anyone has looked at: 43973af, 650e678, 53f9f84 and a61c01f,
+    counted with the two parsers those files already use.
+
+    THIS DOCSTRING SAID THOSE FRACTIONS "explain their own scope" AND NEITHER
+    DOES. Both describe the OLD hand-typed sweep — the one that covered six
+    roots and was replaced — as a cautionary example. The current scope of
+    either sweep is derived from the allowlist and is not a fraction anywhere.
+    Corrected here rather than left, because a checker that misdescribes its
+    own subject is the thing this file exists to catch.
 
     WHAT LET IT THROUGH IS THE INTERESTING PART. Both files carried a guard
     over exactly this number — `assert len(roots) >= 20` — added in the same
@@ -533,6 +539,37 @@ def test_the_shipped_root_count_in_prose_matches_the_allowlist():
     compared against the parsed allowlist, which means adding a root to
     `pyproject.toml` now moves both comments or goes red, and neither comment
     can drift from the other.
+
+    WHAT THIS DOES NOT BUY, measured rather than left to be assumed, because
+    "the number in the prose is parsed" reads like more than it is. Each
+    pattern is `re.findall` over the WHOLE FILE TEXT with an exactly-once
+    requirement, so what it pins is "somewhere in this file, exactly once,
+    these words appear with this number after them" — not "the sentence a
+    reader sees says this". Three consequences, each driven at cc5ce89 against
+    the two files' real text:
+
+    * the pattern here is welded to the CURRENT LINE WRAP (`(\\d+)\\s*\\n#\\s*`
+      demands the break, and a `#` at column 0 after it). Reflow the real
+      comment onto one line and it stops matching — `findall` returns `[]` and
+      this fails loudly, which is the safe half. Reflow it to say 22 AND add a
+      decoy that does match, and `findall` returns exactly `['23']`: green
+      tree, "22" on the page. Both decoy shapes work — a column-0 comment
+      anywhere in the file, and a triple-quoted assertion message in a function
+      that is never called.
+    * the zero-dep pattern has no wrap dependency, so a plain decoy makes it
+      two matches and this fails. Rewording the real sentence instead ("six
+      roots out of 22", spelled out, which the literal `6` in the pattern no
+      longer takes) plus one decoy gives exactly one match: green tree, "22" on
+      the page again.
+    * the NUMERATORS (`six`, `6`) are literals in the patterns, compared with
+      nothing. That direction is safe by accident and worth saying: change a
+      numerator and the pattern stops matching, so it goes red rather than
+      quiet.
+
+    Closing this means locating each sentence rather than searching for it —
+    anchoring on the enclosing comment block, or moving the figure out of prose
+    into a name the comment is generated from. Not done here; the shape of the
+    gap is written down so the guard is not read as more than a text search.
     """
     roots = _shipped_roots()
     found = []
