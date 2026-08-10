@@ -87,10 +87,16 @@ take, and the probe reports it rather than passing. The in-range control
 shows the wrap check is not satisfied by every constant, and the verdict
 control re-drives the entry's own ``5`` row, which is UNKNOWN: the
 VERIFIED asserted here is not something this harness shape returns
-regardless. The second door carries the same two controls, for the same
-reason: :func:`test_control_the_other_door_does_not_wrap_in_range` and,
-inside the verdict test, the check that the predicate really is false at
-every declared point before any verdict is asked for.
+regardless. The second door carries ONE of those two:
+:func:`test_control_the_other_door_does_not_wrap_in_range`. It has NO
+verdict control. What stands beside it inside the verdict test — the check
+that the predicate really is false at every declared point before any
+verdict is asked for — is a source-arithmetic precondition the fence's
+verdict test also carries, so it is not the same control and does not do
+the same work: a `make_verdict` that returned VERIFIED regardless reddens
+the fence's control and nothing here. Measured, it is not vacuous — inline
+``v + 5`` is UNKNOWN where ``v + 0`` and ``v + -1`` are VERIFIED — but that
+is asserted by this sentence and executed by nothing.
 
 **Both doors are derived from the fence, not typed in twice.** The second
 door writes the SAME constant, at the same dtype, over the same declared
@@ -100,6 +106,19 @@ second door.
 
 Interval-only throughout: no solver is invoked, so this file says the
 same thing in every environment that has jax.
+
+WHAT THIS STILL DOES NOT WATCH, and it is the same shape as the gap the
+second door was added to close, one spelling over. **A jax — or a NumPy —
+that began range-checking NumPy SCALARS leaves every test here green.**
+MEASURED by simulating exactly that at ``_convert_element_type`` for
+``np.generic``, and again with the three construction doors included: 17
+passed, 0 failed on both series, while the entry's ``LUT[7]`` constructions
+go from VERIFIED to ``OverflowError`` at construction. That would silently
+falsify the ``jnp.full`` + ``LUT[7]`` reproducer, the same VERIFIED through
+``jnp.array``/``jnp.asarray``/``jnp.int8``, the 13-spelling table's "24
+wrap silently", and the evidence under the withdrawn guard. The entry
+already says what it does not know about a third NumPy; nothing here turns
+red if that changes. Not a false claim today — an uncovered one.
 """
 
 from __future__ import annotations
@@ -349,11 +368,13 @@ def test_the_other_door_still_wraps(x64):
 
     got = _inline_offset(written, getattr(jnp, facts["dtype"]))
     assert got is not OverflowError, (
-        f"`x + {written}` at {facts['dtype']} now RAISES under jit. jax has "
-        f"fixed the narrowing at the constant-folding site, which "
-        f"SOUNDNESS.md names as the one no cheap fix reaches and prices at "
-        f"1031 newly failing cases: the entry's 'two prices for two doors' "
-        f"is no longer true and must be rewritten."
+        f"`x + {written}` at {facts['dtype']} now RAISES under jit. Something "
+        f"has fixed the narrowing this door reaches — SOUNDNESS.md names the "
+        f"constant-folding site as the one no cheap fix reaches, and prices "
+        f"it at 1031 newly failing cases OF 16,798 — so the entry's 'two "
+        f"prices for two doors' is no longer true and must be rewritten. Do "
+        f"not assume the fix was at that site: this watches the BEHAVIOUR, "
+        f"and any change on the inline path reddens it."
     )
     assert str(got.dtype) == facts["dtype"], (
         f"`x + {written}` no longer produces {facts['dtype']} — it produced "
