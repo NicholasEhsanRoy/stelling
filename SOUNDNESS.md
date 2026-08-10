@@ -4591,8 +4591,24 @@ verdicts:
   four spellings do not include an `int` subclass — deleting the `except`
   clause alone cannot change any of THOSE; but it WOULD change the two
   `int`-subclass rows just measured, which would raise instead of
-  returning `0`, and deleting the whole `try` block would additionally
-  change the `np.generic` rows, whose wrap is the `try` body.)*
+  returning `0`.)*
+
+  **THE REST OF THAT INFERENCE HAS NOW BEEN DRIVEN, AND IT IS FALSE.** It
+  ran on: *"and deleting the whole `try` block would additionally change
+  the `np.generic` rows, whose wrap is the `try` body."* The second half
+  is right; the first does not follow from it. Measured in all four cells
+  by editing `_convert_element_type`'s source IN MEMORY — read from the
+  installed file, re-`exec`'d against the module's own globals and
+  re-bound onto the module `lax.full` looks the name up in; no installed
+  tree is modified — **with the whole `try` STATEMENT deleted, body
+  included, `jnp.full((), np.int64(256), jnp.int8)` still returns `0`.**
+  The narrowing simply moves to the fall-through
+  `convert_element_type_p.bind`, which narrows the same way. **The
+  instrument carries its own control**: planting a `RuntimeError` — which
+  `except OverflowError` does not catch — as the block's first statement
+  makes that same call raise in all four cells, so the edit is live and
+  the body really is on that path, while the bare-literal
+  `jnp.full((), 256, jnp.int8)` is untouched by it and still returns `0`.
 
   **AND THE BLOCK IS FREE TO DELETE, WHICH IS A DIFFERENT FACT FROM
   WHETHER DELETING IT WOULD HELP.** Removing the `try/except` outright
@@ -4600,10 +4616,43 @@ verdicts:
   below — the joint-cheapest of the four candidate fixes priced there,
   and the only one of them that covers the `int`-subclass route measured
   just above, because it is the only one ON that route. **It also
-  reaches neither narrowing this entry is about**: it is not on the path
-  `x + 256` takes and not on the path `jnp.full` takes, so neither the
+  reaches neither narrowing this entry is about**, so neither the
   reproducer at the top nor the inline spelling changes under it.
-  Cheapest to land, and it shuts the door nobody came through.
+
+  **THE REASON GIVEN FOR THAT WAS WRONG AT ONE OF THE TWO DOORS, AND SO
+  WAS THE LINE THAT FOLLOWED IT. IT IS THE SAME MISTAKE THIS ENTRY KEEPS
+  MAKING AND IS RECORDED, NOT SWAPPED.** What it read was: *"it is not on
+  the path `x + 256` takes and not on the path `jnp.full` takes … Cheapest
+  to land, and it shuts the door nobody came through."* `x + 256` is
+  right — that dies at the folding rule. **`jnp.full` is a fact about the
+  BARE PYTHON LITERAL, written as a fact about the door** — and the
+  `np.generic` paragraph above (*"`jnp.full` / `jnp.full_like` take a
+  third route again … they destroy it inside the `try` itself"*) says the
+  opposite, on the same page, in the entry's own words. Measured with
+  `sys.monitoring` LINE events local to `_convert_element_type`, all four
+  cells: `jnp.full((), np.int64(256), jnp.int8)` — how a value read out of
+  a NumPy table arrives — executes `try:` → `np.asarray(operand,
+  dtype=new_dtype)` → `return stage(x)` (`1749`/`1750`/`1752` at
+  **0.11.0**, `1742`/`1743`/`1745` at **0.10.2**) and loses the value at
+  `1750`/`1743`, INSIDE the block, because `np.asarray(np.int64(256),
+  dtype=np.int8)` is `0` and raises nothing. The bare literal reaches none
+  of those lines: the `type(operand) is int` fast path at `1725`/`1723`
+  takes it first. **So somebody does come through that door, and it costs
+  a verdict**: the four-line reproducer with `jnp.full` left exactly as
+  written and `OFFSET`'s constant supplied as `LUT[7]` (i.e.
+  `np.int64(256)`) returns **VERIFIED — source-false at all 11 declared
+  points — in all four cells**, interval-only, no solver invoked.
+
+  **What survives is the conclusion, on the other measurement rather than
+  on that reason.** Deleting the block does not change that row either —
+  measured just above, the answer stays `0` — so "it reaches neither
+  narrowing this entry is about" holds, but because the fall-through
+  narrows identically, NOT because the block is off the path. Cheapest to
+  land; and what it changes is the `int`-subclass rows and, measured in
+  all four cells under the same in-memory edit, the Python-float route,
+  where `lax.convert_element_type(1e308, jnp.int8)` raises instead of
+  saturating to `127`. Neither is the route this entry's wrong VERIFIED
+  comes through.
 
   **The line range is an installed-dependency figure, not a repository
   figure**, so it is quoted with the version it was read from:
