@@ -48,10 +48,10 @@ most of this file's life exactly one of them was demonstrated by anything.**
 ``0ad22bb`` — the tree both ``cvc5-flat`` and ``cvc5-stateful`` point at —
 violates clause (2) and only clause (2): measured over the flat leg's own 1500
 ``ci`` examples with all three clauses evaluated independently, 5 violations,
-all of them (2). Clauses (1) and (3) are demonstrated by two registered MUTANT
-controls, ``cvc5-exit-tell`` and ``cvc5-phantom-model``. The measurements, and
-the one thing still undemonstrated (the FORGERY route to clause (3)), are in
-``_judge``'s docstring below.
+all of them (2). Clauses (1) and (3) are demonstrated by two further registered
+controls: ``cvc5-exit-tell``, at commit ``8ef8f75``, and ``cvc5-phantom-model``,
+a mutant. The measurements, and the one thing still undemonstrated (the FORGERY
+route to clause (3)), are in ``_judge``'s docstring below.
 
 **Ordering oddities a real driver would never write are deliberately NOT
 asserted against.** The first model of this protocol invented a driver that
@@ -99,8 +99,8 @@ actually demonstrates:
 
 * ``cvc5-flat`` / ``cvc5-stateful`` — commit ``0ad22bb``, the pre-fix
   ``splitlines()`` parser, where both legs fail. **Clause (2) only.**
-* ``cvc5-exit-tell`` — mutant, the ``or proc.returncode != 0`` half of the
-  transport's own guard deleted. **Clause (1).**
+* ``cvc5-exit-tell`` — commit ``8ef8f75``, before the transport had either of
+  its two tells. **Clause (1).**
 * ``cvc5-phantom-model`` — mutant, the harvested model deduped after the
   terminator check. **Clause (3), by duplication rather than by forgery.**
 
@@ -342,19 +342,30 @@ def _judge(res, stdout, full, rc, census, *, where):
     is not a prefix of the quoted full (``opaque x0 q\\x1cq``) — different name,
     different separator. Two different examples were printed as one.
 
-    (1) THE CHILD EXITED 0 — DEMONSTRATED, by the ``cvc5-exit-tell`` mutant
-    control, and by nothing at ``0ad22bb``. It cannot be demonstrated there:
-    that parser already refuses a nonzero exit (``if not complete or
-    proc.returncode != 0``, its "two tells"), so the control's tree carries the
-    other defect and not this one. What this docstring drew from that — that
-    the clause "has no place it is known to fail and therefore no demonstration
-    anywhere" — did not follow, and ``positive_controls.py``'s own docstring
-    says why: a registry entry does not have to name a commit, and four of its
-    entries were already MUTANTS for exactly this reason. Deleting the ``or
-    proc.returncode != 0`` half of the guard is that mutation, one place, this
-    leg, ci profile: the ``rc != 0`` branch below fires on
-    ``'version 1.3.4\\nanswer sat\\nend 0\\n'`` at exit 1, in 0.5 s, and the
-    unmutated tip is green.
+    (1) THE CHILD EXITED 0 — DEMONSTRATED, by the ``cvc5-exit-tell`` control at
+    commit ``8ef8f75``, and by nothing at ``0ad22bb``. It cannot be
+    demonstrated at ``0ad22bb``: by then the parser already refused a nonzero
+    exit (``if not complete or proc.returncode != 0``, its "two tells"), so
+    that tree carries the other defect and not this one.
+
+    THIS DOCSTRING DREW TWO WRONG CONCLUSIONS FROM THAT IN A ROW. First, that
+    the clause "has no place it is known to fail and therefore no
+    demonstration anywhere" — which did not follow, because a registry entry
+    does not have to name a commit. Then, registering it as a MUTANT on the
+    ground that no revision of this tree had carried it — which is simply
+    false, and one line of git says so::
+
+        git log -S "or proc.returncode != 0" -- src/stelling/solvers.py
+          b6e4783  The cvc5 wheel transport refuses a crashed child
+
+    The guard was ADDED there, with BOTH tells at once, so its parent
+    ``8ef8f75`` — a revision this registry already names, for
+    ``cross-series`` — has neither. Hand-driven through this file's own
+    fixture at ``8ef8f75``: ``'version 1.3.4\\nanswer sat\\nend 0\\n'`` at exit
+    1 is a definite ``sat``, and ``'…\\nvalue x0 0/1\\nend 1\\n'`` at exit 137
+    is a definite ``sat`` harvesting ``('x0', '0/1')``. Today's flat property
+    fails there in 0.4 s at the ci profile, on an INTACT transcript at exit 1,
+    so clause (2) holds on that example and the failure is this clause's own.
 
     THE THREE FAILURE MESSAGES ARE DELIBERATELY NOT QUOTED IN THIS DOCSTRING.
     pytest's long traceback prints a frame's ENTIRE function source, docstring

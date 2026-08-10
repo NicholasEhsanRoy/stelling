@@ -19,9 +19,16 @@ that carries the defect, asserting that the run comes back RED.
 
 A property whose control cannot be demonstrated does not ship. That is the
 rule, it cost one property (see ``test_metamorphic.py``'s module docstring),
-and the rest of its cost is visible here: **six of the twelve** controls are
+and the rest of its cost is visible here: **five of the twelve** controls are
 source MUTANTS rather than historical commits, because the defect they describe
 has never been in this tree.
+
+That count has been wrong in the cheap direction, once, on this branch.
+``cvc5-exit-tell`` shipped as a mutant whose ``why`` said "no revision of this
+tree has carried it", and one line of git says otherwise:
+``git log -S "or proc.returncode != 0" -- src/stelling/solvers.py`` shows the
+guard was ADDED at ``b6e4783``, so its parent ``8ef8f75`` carries the defect
+and the entry is a commit control. **Ask git before registering a mutant.**
 
 **The rule cuts the other way too, and it has.** A second property was dropped
 under it on a premise — "no one-line mutation makes it fail" — that was written
@@ -332,12 +339,18 @@ CONTROLS = (
     #
     # `_judge` states its invariant as THREE clauses and the two controls above
     # demonstrate exactly one of them — clause (2), measured, tabulated in
-    # `_judge`'s own docstring. These two demonstrate the other two, by MUTATION
-    # rather than by commit, which is what a mutant control is for: the defect
-    # is a real class and this tree has never carried it in this place, so no
-    # revision can be pointed at. Neither touches `_PAYLOADS`, so neither costs
-    # the 673/8165 example-efficiency figures in `test_cvc5_protocol.py`'s
-    # module docstring anything.
+    # `_judge`'s own docstring. These two demonstrate the other two. Neither
+    # touches `_PAYLOADS`, so neither costs the 673/8165 example-efficiency
+    # figures in `test_cvc5_protocol.py`'s module docstring anything.
+    #
+    # ONE COMMIT AND ONE MUTANT, and the split was got wrong here first. Both
+    # shipped as mutants "because the defect they describe has never been in
+    # this tree". For clause (1) that was false and git said so in one line
+    # (`git log -S "or proc.returncode != 0"`): `8ef8f75` is the parent of the
+    # commit that added the guard, and it carries the defect. For clause (3)
+    # it holds — `git log -S "sorted(set(values))" -- src/stelling/solvers.py`
+    # is empty, no revision has ever deduped the harvested model — so
+    # `cvc5-phantom-model` stays a mutant and says so.
     #
     # Their `expect_message` is the clause's own sentence and NOT the `[flat]`
     # leg tag the two controls above carry. `[flat]` is stamped on all three of
@@ -345,28 +358,32 @@ CONTROLS = (
     # clause-(2) failure `cvc5-flat` already finds — i.e. it would fire without
     # demonstrating the clause it is registered for, which is the exact
     # distinction these two entries exist to make.
+    # `test_suite_disclosure.py` now asserts that distinction two ways, because
+    # broadening either guard back to `[flat]` left every gate green.
     Control(
         name="cvc5-exit-tell",
         nodeid=f"{_CVC5}::test_the_parent_never_trusts_an_unspoken_transcript_flat",
-        kind="mutant",
-        at="HEAD",
+        kind="commit",
+        at="8ef8f75",
         why=(
-            "the transport drops one of its own TWO TELLS: `if not complete or "
-            "proc.returncode != 0` becomes `if not complete`, so a child that "
+            "`_run_cvc5_wheel` had NEITHER of the two tells it has today — no "
+            "terminator check and no `proc.returncode` check — so a child that "
             "wrote a complete, well-formed transcript and then died with a "
-            "nonzero exit is answered on. MEASURED under the mutation at the "
-            "ci profile: `ACCEPTED A NONZERO-EXIT RUN (exit 1) as 'sat' "
-            "[flat]` on 'version 1.3.4\\nanswer sat\\nend 0\\n', found in 0.5 "
-            "s. A MUTANT, and honestly weaker evidence than a commit — no "
-            "revision of this tree has carried it, which is why clause (1) had "
-            "no demonstration before this entry. `0ad22bb` cannot supply one: "
-            "that parser already refuses a nonzero exit, so the control tree "
-            "carries the other defect and not this one."
-        ),
-        mutation=Mutation(
-            path="src/stelling/solvers.py",
-            old="    if not complete or proc.returncode != 0:",
-            new="    if not complete:",
+            "nonzero exit was answered on. Both tells were added together at "
+            "b6e4783 ('The cvc5 wheel transport refuses a crashed child'), of "
+            "which this revision is the parent. MEASURED, hand-driven through "
+            "test_cvc5_protocol.py's own fixture at 8ef8f75: 'version "
+            "1.3.4\\nanswer sat\\nend 0\\n' at exit 1 is a DEFINITE sat, and "
+            "'...\\nvalue x0 0/1\\nend 1\\n' at exit 137 is a DEFINITE sat "
+            "harvesting ('x0', '0/1'); the tip and 0ad22bb both refuse both. "
+            "Today's flat property fails there in 0.4 s at the ci profile, on "
+            "an INTACT transcript at exit 1 — nothing was truncated, so clause "
+            "(2) holds on that example and the failure is clause (1)'s own. "
+            "8ef8f75 predates the splitlines fix as well, so its parser "
+            "carries clause (2)'s defect too; `expect_message` is what makes "
+            "this a control for clause (1) rather than a second `cvc5-flat`. "
+            "`0ad22bb` cannot supply one: by then the parser refused a nonzero "
+            "exit, so that tree carries the other defect and not this one."
         ),
         expect_message="ACCEPTED A NONZERO-EXIT RUN",
     ),

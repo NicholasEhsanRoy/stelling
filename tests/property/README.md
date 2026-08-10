@@ -320,16 +320,25 @@ That is not hypothetical here. `test_cvc5_protocol.py`'s oracle is
 `0ad22bb` — the commit `cvc5-flat` and `cvc5-stateful` both point at — violates
 the middle clause and only the middle clause: measured over the flat leg's own
 1500 `ci` examples with all three evaluated independently, **5 violations, all
-of them clause (2)**. The other two are demonstrated by two *mutant* controls
-added for the purpose, `cvc5-exit-tell` and `cvc5-phantom-model`, whose
-`expect_message` is the clause's own sentence rather than the leg tag `[flat]`
-— because `[flat]` is stamped on all three messages and would have been
-satisfied by the failure `cvc5-flat` already finds.
+of them clause (2)**. The other two are demonstrated by two controls added for
+the purpose — `cvc5-exit-tell` at commit `8ef8f75`, and `cvc5-phantom-model`, a
+mutant — whose `expect_message` is the clause's own sentence rather than the
+leg tag `[flat]`, because `[flat]` is stamped on all three messages and would
+have been satisfied by the failure `cvc5-flat` already finds.
 
 So: if your oracle is a conjunction, say in the control's `why` which conjunct
-its tree exercises, and register a mutant for each of the rest or write down
+its tree exercises, and register a control for each of the rest or write down
 that you did not. The measurements for this one are in `_judge`'s docstring in
 `test_cvc5_protocol.py`.
+
+**Reach for `git log -S` before you reach for a mutation.** Both of those
+started life as mutants, on the ground that the defect had never been in this
+tree, and for clause (1) that was false: `git log -S "or proc.returncode != 0"
+-- src/stelling/solvers.py` names the commit that ADDED the guard, so its
+parent carries the defect and the entry is a `commit` control. For clause (3)
+the same question has an empty answer — `git log -S "sorted(set(values))"`
+finds nothing — and that is what makes `cvc5-phantom-model` honestly a mutant.
+`kind` is only load-bearing if the question is actually asked.
 
 **If the unbiased search cannot build the shape, pin it and say so.** Several
 controls here needed an `@example`, because the shape is a conjunction of

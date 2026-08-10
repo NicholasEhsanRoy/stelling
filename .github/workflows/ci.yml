@@ -1113,8 +1113,9 @@ jobs:
               `0ad22bb`, all three clauses evaluated independently: 5
               violations, every one clause (2) `no truncation`, none of clause
               (1) or (3). The tree carries that defect and not the others.
-              Clauses (1) and (3) are demonstrated by two MUTANT controls,
-              `cvc5-exit-tell` and `cvc5-phantom-model`, which this per-push
+              Clauses (1) and (3) are demonstrated by `cvc5-exit-tell` (commit
+              `8ef8f75`, before the wheel transport had either of its two
+              tells) and `cvc5-phantom-model` (a MUTANT), which this per-push
               subset does NOT run — they are cheap (0.5 s and 2.0 s) and adding
               them is a one-line edit to the step below, made outside this
               block by whoever owns it next.
