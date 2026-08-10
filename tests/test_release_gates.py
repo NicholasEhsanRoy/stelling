@@ -67,8 +67,26 @@ line each, each leaving every text pin in this file green:
   `stelling-0.1.0-py3-none-any.whl` — unmutated rc=1, mutated rc=0. No pin of
   any kind stood on this line; the refusal point was unguarded outright.
 
-A pin catches the mutation it names. A drive catches the rewrite nobody
-thought to name, which is the only kind that ships.
+A pin catches the mutation it names. A drive catches rewrites nobody thought to
+name — but ONLY the ones its planted tree can express, and that bound is real
+rather than theoretical. THIS SENTENCE USED TO END "the rewrite nobody thought
+to name, which is the only kind that ships", and the sdist drive under it
+planted one uncommitted file, under `src/`. Twelve characters added to the
+step's own `sed` — `-e '/^docs\\//d'` — delete an entire allowlisted root from
+`members.txt` before the comparison sees it, and at 461b2d5 that left the full
+suite at 1430 / 0 / 0 / 94, every text pin here green, and
+`test_the_drives_are_reading_the_real_step_bodies` green, while a hand-driven
+plant at `docs/internal-release-checklist.md` went from rc=1 naming the file to
+rc=0 reporting "every one of 5 sdist members is committed to this tree" with
+the file still in the tarball.
+
+So the sdist plant now covers one uncommitted file under EVERY directory root
+of the allowlist, derived from `pyproject.toml`, with the suffix cycled across
+them. That closes filters keyed on a ROOT, which is how an area gets exempted
+in one line. It does not close a filter keyed on something else — a single
+path, a size, a member count — and no plant closes the class outright: the
+drive can only refute rewrites that change what happens to a file it thought
+to put in the tarball.
 
 STILL UNGUARDED AFTER THIS, said plainly rather than left to be assumed, and
 now a shorter list than the argument that used to stand for it:
@@ -77,6 +95,9 @@ now a shorter list than the argument that used to stand for it:
   pytest prints. The two verdict refusals are pinned as literals and, below,
   as a PATH-COHERENCE check — but the recorder itself is not driven here.
   What is driven is the two bodies above and nothing else.
+* the sdist drive's plant is keyed on the allowlist's DIRECTORY roots, so a
+  member filter keyed on anything else is outside it, as the paragraph above
+  says.
 * the `publish` job's two actions, which cannot be driven from here at all
   without cutting a tag and uploading.
 * everything about the runner: which interpreter `uv venv` picks, whether the
@@ -485,13 +506,49 @@ _TAG_STEP = "the tag and the artifact must agree"
 # the difference, and a non-empty index.
 _TRACKED = ("pyproject.toml", "README.md", "LICENSE", "src/stelling/contracts.py")
 
+# The extensions the plants below wear, cycled across the roots so that a
+# filter keyed on a SUFFIX rather than on a directory meets more than one.
+_PLANT_SUFFIXES = (".py", ".md", ".yml", ".toml", "")
 
-def _plant_tree(tree: pathlib.Path, *, uncommitted: str | None = None) -> pathlib.Path:
+
+def _sdist_directory_roots() -> list[str]:
+    """The DIRECTORY entries of the sdist allowlist, read from `pyproject.toml`.
+
+    DERIVED AND NOT TYPED, for the reason the rest of this repository derives
+    it: a typed list stops covering a root the moment the allowlist gains one,
+    and silently. Read as text rather than with `tomllib`, which is 3.11+ while
+    the declared floor is 3.10 — see `tests/test_zero_dep_import_discipline.py`.
+    """
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    text = (repo / "pyproject.toml").read_text(encoding="utf-8")
+    text = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    block = re.search(
+        r"\[tool\.hatch\.build\.targets\.sdist\]\s*\ninclude\s*=\s*\[(.*?)^\]",
+        text, re.S | re.M,
+    )
+    assert block, "the sdist allowlist is not where this expects it"
+    roots = [m.group(1).lstrip("/") for m in re.finditer(r'"([^"]+)"', block.group(1))]
+    return [r for r in roots if (repo / r).is_dir()]
+
+
+def _plants() -> list[str]:
+    """One uncommitted path under every allowlisted directory root."""
+    roots = _sdist_directory_roots()
+    assert len(roots) >= 5, roots
+    return [
+        f"{root}/_audit_probe{_PLANT_SUFFIXES[i % len(_PLANT_SUFFIXES)]}"
+        for i, root in enumerate(sorted(roots))
+    ]
+
+
+def _plant_tree(tree: pathlib.Path, *, uncommitted: tuple[str, ...] = ()) -> pathlib.Path:
     """A git checkout plus a `dist/` holding one sdist, as the build job leaves it.
 
-    `uncommitted` goes into the TARBALL and deliberately not into the index —
-    the exact shape this gate exists to refuse: a file that ships and is not in
-    the tagged tree.
+    Each `uncommitted` path goes into the TARBALL and deliberately not into the
+    index — the exact shape this gate exists to refuse: a file that ships and is
+    not in the tagged tree.
     """
     (tree / "dist").mkdir(parents=True)
     for rel in _TRACKED:
@@ -508,11 +565,11 @@ def _plant_tree(tree: pathlib.Path, *, uncommitted: str | None = None) -> pathli
 
     members = list(_TRACKED) + ["PKG-INFO"]
     (tree / "PKG-INFO").write_text("Metadata-Version: 2.4\n", encoding="utf-8")
-    if uncommitted is not None:
-        path = tree / uncommitted
+    for rel in uncommitted:
+        path = tree / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# planted, and not in the index\n", encoding="utf-8")
-        members.append(uncommitted)
+        members.append(rel)
 
     with tarfile.open(tree / "dist" / "stelling-0.1.0.tar.gz", "w:gz") as tar:
         for rel in sorted(members):
@@ -541,14 +598,33 @@ def test_the_sdist_gate_refuses_a_member_that_is_not_committed(tmp_path):
 
         unmutated, healthy tree    rc=0, "every one of 5 sdist members is
                                           committed to this tree"
-        unmutated, planted member  rc=1, names `src/stelling/_audit_probe.py`
-        mutated,   planted member  rc=0, "every one of 6 sdist members is
+        unmutated, planted members rc=1, names every planted path
+        mutated,   planted members rc=0, "every one of 14 sdist members is
                                           committed to this tree" — with the
-                                          uncommitted file inside the tarball
+                                          uncommitted files inside the tarball
 
     Both directions are asserted. The refusal is the point; the pass is here
     because a gate that refuses everything is not a gate either, and a harness
     that could never reach rc=0 would make the refusal meaningless.
+
+    THE PLANT USED TO BE ONE FILE, UNDER `src/`, AND THAT WAS A HOLE THE SIZE
+    OF A ROOT. The step's own `sed` normalises member paths, and one more
+    expression on it — `-e '/^docs\\//d'`, twelve characters — deletes an
+    entire allowlisted root from `members.txt` before the comparison sees it.
+    Driven at 461b2d5 with an uncommitted `docs/internal-release-checklist.md`
+    inside the tarball:
+
+        unmutated  rc=1, names docs/internal-release-checklist.md
+        mutated    rc=0, "every one of 5 sdist members is committed to this
+                          tree" — with the uncommitted file in the tarball
+
+    and the FULL SUITE on the mutated tree was 1430 / 0 / 0 / 94, every text
+    pin here green and `test_the_drives_are_reading_the_real_step_bodies`
+    green with it. So the plant is now one uncommitted file under EVERY
+    directory root of the sdist allowlist, derived from `pyproject.toml` by
+    :func:`_sdist_directory_roots` so that adding a root to the allowlist
+    extends the drive rather than quietly leaving it behind, and every one of
+    them must be named in the refusal.
     """
     body = _step_body(_SDIST_STEP)
     env = _step_env(_SDIST_STEP)
@@ -564,19 +640,23 @@ def test_the_sdist_gate_refuses_a_member_that_is_not_committed(tmp_path):
     )
     assert "sdist members is committed to this tree" in healthy.stdout
 
-    planted = "src/stelling/_audit_probe.py"
+    planted = tuple(_plants())
     bad = _drive(body, _plant_tree(tmp_path / "planted", uncommitted=planted), **env)
     assert bad.returncode != 0, (
-        "THE SDIST GATE PASSED A TARBALL CONTAINING A FILE THAT IS NOT IN THE "
-        f"INDEX ({planted}). It reported:\n{bad.stdout}\n"
+        "THE SDIST GATE PASSED A TARBALL CONTAINING FILES THAT ARE NOT IN THE "
+        f"INDEX ({', '.join(planted)}). It reported:\n{bad.stdout}\n"
         "An sdist on PyPI cannot be unpublished, only yanked. Check the line "
         "that builds `explained.txt`: comparing `members.txt` against a set "
         "BUILT FROM `members.txt` is empty by construction, and every text pin "
         "in this file stays green through it."
     )
-    assert planted in bad.stdout, (
-        "the gate refused, but did not name the member responsible, so the "
-        f"publish log does not say what to fix:\n{bad.stdout}"
+    missing = [p for p in planted if p not in bad.stdout]
+    assert not missing, (
+        "the gate refused, but did not name every member responsible, so the "
+        "publish log does not say what to fix — and a member it does not name "
+        "is a member the comparison never examined, which is how a filter that "
+        "exempts one ROOT hides inside a gate that still refuses on another:\n"
+        f"  unnamed: {missing}\n{bad.stdout}"
     )
     assert "not committed to this tree" in bad.stdout
 
