@@ -4934,7 +4934,16 @@ verdicts:
 
   **Four things those figures are not.** The denominator is emitted test
   cases, not jax's suite: 64 of the 164 top-level `tests/*_test.py`
-  modules ran, and `pallas`/`mosaic`, GPU/TPU and multi-device never did.
+  modules ran, and `pallas`/`mosaic` and GPU/TPU never did. *(That list
+  said "and multi-device" too, and **that is false**: `multi_device_test`
+  is one of the 36 tranche-2 modules — 20 cases, 19 passed, 1 skipped —
+  and so are `pmap_test` (289 cases, 206 passed, 83 skipped) and
+  `shard_map_test` (452 cases, 438 passed, 14 skipped), all counted here
+  from the archived baseline XML. `pallas`/`mosaic` and GPU/TPU genuinely
+  did not run: no module of either name appears in either tranche. A
+  limits list that names something as unmeasured when it was measured
+  understates the run in the direction that flatters it, which is the
+  direction to correct first.)*
   It is also not the XML's own `tests` attribute, which totals 16,982
   against tranche 1's 16,798 counted `testcase` elements. The `1031`
   counts cases that PASSED at baseline and fail under the patch; the
