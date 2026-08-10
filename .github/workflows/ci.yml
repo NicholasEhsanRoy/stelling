@@ -74,12 +74,17 @@ permissions:
 # a human reading a PR.
 #
 # NOT CONVERTED INTO A STEP, and the reason is that it cannot be driven here.
-# The two `grep -qE` gates named above (lines 361 and 632) work because each
-# compares one log against a constant INSIDE the job that produced it. A cross-lane equality needs the two
-# lanes' counts to meet — an artifact upload from each matrix leg and a
-# dependent job that downloads both — which is new workflow machinery on the
-# path between a tag and PyPI, and this box has no network and no runner, so it
-# could not be driven red before landing. Adding a gate whose failure mode has
+# The two `grep -qE` gates named above — the steps `the two acceptance tests
+# must RUN` and `the 18 acceptance tests must RUN`, cited by NAME because a
+# line number in this file goes stale the moment anything above it moves, and
+# this sentence said `(lines 361 and 632)` at 103f3b6 when they sat at 371 and
+# 642, having been correct at 70ed1a5 before edits to this file pushed them
+# down — work because each compares one log against a constant INSIDE the job
+# that produced it. A cross-lane equality needs the two lanes' counts to meet —
+# an artifact upload from each matrix leg and a dependent job that downloads
+# both — which is new workflow machinery on the path between a tag and PyPI,
+# and this box has no network and no runner, so it could not be driven red
+# before landing. Adding a gate whose failure mode has
 # never been observed is the defect this branch exists to remove, one level up.
 # Whoever has a runner should add it; the shape is: upload
 # `${RUNNER_TEMP}/counts-${{ matrix.jax }}` from each lane, then one job that

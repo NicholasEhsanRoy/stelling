@@ -290,11 +290,22 @@ def test_every_test_cited_in_core_prose_still_exists():
 # pointing at a blank line or at the wrong helper. Nothing cheap catches those,
 # which is why the house rule is to cite a SYMBOL and why the fixes took that
 # form. This is the mechanical floor under the rule, not the rule.
-# KNOWN-OPEN, MEASURED, AND LEFT OPEN ON PURPOSE. Three citation shapes go
-# unchecked. None has a live instance in the tree — every probe below is
-# synthetic, and `:99999` is a line no file here has — so these are gaps in
-# reach, not defects on the page. They are written down because "the sweep is
-# derived from the allowlist" reads like completeness and is not:
+# KNOWN-OPEN AND MEASURED. Four citation shapes go unchecked. Three of them
+# have no live instance in the tree — those probes are synthetic, and `:99999`
+# is a line no file here has — so those three are gaps in reach, not defects on
+# the page.
+#
+# THE FOURTH HAD A LIVE INSTANCE WHILE THIS NOTE SAID NONE DID, which is the
+# sentence being corrected here. At 103f3b6 `.github/workflows/ci.yml` said its
+# two `grep -qE` gates were at "(lines 361 and 632)" and they were at 371 and
+# 642. The citation was CORRECT at 70ed1a5; ten lines added to that file on this
+# branch pushed the gates down and left the sentence behind. So the argument for
+# citing symbols rather than lines arrived as a live example inside the very
+# note that says the sweep cannot check citations. It is fixed by naming the two
+# steps, in the commit that corrected this paragraph.
+#
+# These are written down because "the sweep is derived from the allowlist" reads
+# like completeness and is not:
 #
 #   tools/property_venv.sh:99999   the REGEX declines it. The extension list is
 #                                  `py|md|yml|yaml|toml|cff`, and `.sh` is not
@@ -319,6 +330,23 @@ def test_every_test_cited_in_core_prose_still_exists():
 #                                  live wrong citation and the sweep below
 #                                  would flag this very comment. It was, once,
 #                                  while this note was being written.)
+#   "lines 361 and 632"            the REGEX declines it, and this is the shape
+#                                  that had the live instance. A SELF-
+#                                  REFERENTIAL citation — "line N" of the file
+#                                  the sentence is in — carries no path token
+#                                  at all, and the pattern needs `path` then a
+#                                  colon then `N`. The path spelling would not
+#                                  have caught it either: this sweep asks only
+#                                  whether the file HAS line N, and both
+#                                  numbers sit well inside a file of over a
+#                                  thousand lines, so that citation resolves
+#                                  and PASSES while pointing at a `run: |` and
+#                                  a `tee`, which is what they held. Which is
+#                                  the "cannot know whether line N says what
+#                                  the sentence says" limit above, met in the
+#                                  wild. Citing the STEP BY NAME is the fix and
+#                                  is the house rule already; nothing cheap
+#                                  checks it.
 #
 # The third was first reported as a regex miss. It is not; the regex takes it
 # and the resolver drops it. Same outcome, different mechanism, and the
