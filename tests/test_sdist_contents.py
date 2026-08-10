@@ -230,6 +230,12 @@ WITHHELD = {
         "nothing of substance would have shipped; the point is that it was "
         "undecided, and the decision is recorded before content appears"
     ),
+    ".vscode": (
+        "local editor configuration. Gitignored at `9f96417`, which is NOT what "
+        "keeps it out: the allowlist is, because a force-included path is "
+        "decided by no allowlist at all and gitignoring decides nothing about "
+        "what hatchling packs. Same shape as `.claude` above"
+    ),
     # NOTE the key that is NOT here any more: `.gitignore` used to carry the
     # reason "listed in the allowlist; kept here only if it moves" — a path
     # recorded as WITHHELD while it ships, and one hatchling FORCE-INCLUDES so
