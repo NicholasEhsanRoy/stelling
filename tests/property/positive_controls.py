@@ -169,7 +169,7 @@ CONTROLS = (
             "standalone, so a `bool[0]` conjunct — vacuously true over the "
             "whole declared box — still narrowed its rank-0 sibling to a "
             "strict SUBSET, minting VERIFIED over less than the declared set. "
-            "Fixed at 717b9ca."
+            "This control runs at fb34e0d; fixed at 717b9ca."
         ),
         expect_message="toward-VERIFIED",
     ),
@@ -324,7 +324,8 @@ CONTROLS = (
         kind="commit",
         at="0ad22bb",
         why=(
-            "the same two defects, reached by the rule-based state machine "
+            "the same two defects at the same revision, 0ad22bb, reached by "
+            "the rule-based state machine "
             "without being told the record layout. It needs ~20x the flat "
             "leg's budget to get there, which is the honest cost of stateful "
             "search on a protocol whose record ORDER is fixed. It demonstrates "
@@ -459,7 +460,8 @@ CONTROLS = (
             "0.11 merged ClosedJaxpr into Jaxpr while 0.10.2 did not — so a "
             "scatter-add harness was VERIFIED at 6/6 equations known on "
             "0.11.0 and UNKNOWN at 4/6 with a top scatter-add on 0.10.2, with "
-            "TESTED_JAX_SERIES already claiming both. Fixed at 76140c2."
+            "TESTED_JAX_SERIES already claiming both. This control runs at "
+            "8ef8f75; fixed at 76140c2."
         ),
         series="both",
         # WAS `disagree`, WHICH THIS PROPERTY'S FAILURE NEVER CARRIED. The

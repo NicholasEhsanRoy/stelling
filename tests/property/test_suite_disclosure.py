@@ -627,3 +627,76 @@ def test_the_control_runner_scores_a_crash_before_the_oracle_as_not_demonstrated
         "included — must be NOT DEMONSTRATED, never FIRED:\n  "
         + "\n  ".join(bad)
     )
+
+
+def test_two_controls_on_one_property_do_not_point_at_the_same_tree():
+    """The other half of what makes them two controls: a different defect.
+
+    ``test_two_controls_on_one_property_do_not_share_a_guard`` holds the
+    GUARDS apart. This holds the TREES apart, and both are needed, because a
+    conjunctive oracle gets a control per conjunct only if each control's tree
+    is a place where that conjunct — and, ideally, only that conjunct — fails.
+    Two controls on one property pointing at one tree are one control reported
+    twice.
+
+    **Nothing pinned the tree.** Measured: point ``cvc5-flat`` at ``8ef8f75``
+    instead of ``0ad22bb`` and ``tools/property_check.py`` says "FIRED — the
+    property failed where it is supposed to", because ``[flat]`` is stamped on
+    all three of ``_judge``'s messages and the failure at ``8ef8f75`` is
+    clause (1)'s. The registry's own disclosure — that ``[flat]``'s breadth is
+    safe BECAUSE the tree it points at violates clause (2) and only clause
+    (2) — becomes false, silently, and every gate stays green.
+
+    A tree is the revision AND the mutation applied to it: ``at="HEAD"`` with
+    two different mutations is two different trees.
+    """
+    by_property: dict[str, list] = {}
+    for c in pc.CONTROLS:
+        by_property.setdefault(c.nodeid, []).append(c)
+    shared = []
+    for nodeid, controls in sorted(by_property.items()):
+        for a in controls:
+            for b in controls:
+                if a.name < b.name and (a.at, a.mutation) == (b.at, b.mutation):
+                    shared.append(
+                        f"{a.name} and {b.name} both name {nodeid} at "
+                        f"{a.at!r}"
+                        + ("" if a.mutation is None else " under one mutation")
+                    )
+    assert not shared, (
+        "these controls name the same property AND point at the same tree, so "
+        "they are one piece of evidence reported twice — whatever each one's "
+        "`why` says it demonstrates, they both find whichever failure that "
+        "tree produces first:\n  " + "\n  ".join(shared)
+    )
+
+
+def test_a_commit_control_names_the_revision_it_points_at_in_its_own_why():
+    """``at`` is one field, and a field can be edited without editing the prose.
+
+    Every ``why`` here is an argument about a specific tree — which defect it
+    carries, which conjunct of the oracle that defect reaches, why some OTHER
+    revision cannot supply the same evidence. Repointing ``at`` invalidates
+    that argument. Nothing made the two move together, and the runner cannot
+    help: it reports FIRED for any red run carrying the guard, whatever the
+    revision under it.
+
+    So the revision must appear in the sentence that argues for it. This does
+    not make a repoint impossible; it makes a SILENT one impossible, which is
+    the failure mode — the audit's mutation was one field, one value, no other
+    file touched.
+
+    ``at="HEAD"`` is exempt: it names no revision, and "runs against the
+    working tree" is what the surrounding ``why`` already says.
+    """
+    bad = []
+    for c in pc.CONTROLS:
+        if c.kind != "commit" or c.at == "HEAD":
+            continue
+        if c.at not in c.why:
+            bad.append(f"{c.name}: points at {c.at!r}, unnamed in its own `why`")
+    assert not bad, (
+        "these commit controls point at a revision their own `why` never "
+        "mentions, so the field and the argument for it can drift apart "
+        "without anything noticing:\n  " + "\n  ".join(bad)
+    )
