@@ -4266,12 +4266,43 @@ verdicts:
   `convert_element_type` equation, where an honest `0` would put `0` in
   its place. So "there is nothing to key on but sameness" is a fact about
   the `jnp.full` spelling this entry reproduces in, not about every door.
-  **The conclusion above is not withdrawn**, because at those two doors
-  it rests on the OTHER clause already stated — the difference is inside a
-  nested `jit` sub-jaxpr, which is where every priced remedy was blind —
-  and not on sameness. What is withdrawn is sameness as the reason that
-  covers all of them. No remedy is proposed on the strength of this, none
-  was built, and none was priced.
+  What is withdrawn is sameness as the reason that covers all of them.
+
+  **AND THE GROUND THIS ENTRY PUT UNDER THE CONCLUSION IN ITS PLACE IS
+  ALSO FALSE, MEASURED, SO THE CONCLUSION IS NARROWED HERE RATHER THAN
+  RE-FOUNDED ON A SECOND ASSERTION.** What was written was: *"The
+  conclusion above is not withdrawn, because at those two doors it rests
+  on the OTHER clause already stated — the difference is inside a nested
+  `jit` sub-jaxpr, which is where every priced remedy was blind — and not
+  on sameness."* Re-derived with `jax.make_jaxpr` in all four cells, at
+  both doors, against an honest `0` written in the same place: **the
+  nested `jit` sub-jaxpr — jax's own `_where` and `clip` — is
+  BYTE-IDENTICAL between the wrapped `256` and the honest `0`.** The
+  whole difference is at the CALL SITE, in the ENCLOSING jaxpr, and jax
+  prints it there: at `jnp.where` the `jit` equation's operands read
+  `] b 256:i32[] a` against `] b 0:i32[] a` (`i64[]` at
+  `JAX_ENABLE_X64=1`), and at `jnp.clip` the same substitution happens
+  twice. Nothing has to be descended into to see it.
+
+  What IS inside that sub-jaxpr is the NARROWING — the
+  `convert_element_type` equation and its `int8` target, one at
+  `jnp.where` and two at `jnp.clip`, with **zero** such equations in the
+  enclosing jaxpr, all four cells. That is what the paragraph on the
+  fourth site below already says correctly, and it is the honest form of
+  what "nested" is true of here: at top level the operand reads as an
+  in-range `int32`/`int64` `256`, and the dtype that makes it wrong sits
+  one level down.
+
+  **That does not re-establish the conclusion, and is not offered as
+  doing so.** The `jit` equation's OUTPUT aval — `int8[3]` — is in the
+  enclosing jaxpr too, so whether a rule could key on the call-site
+  literal together with that output is a question no measurement here
+  answers; no such rule was built and none was priced. **So the
+  conclusion is narrowed to the spelling it was measured on**: it holds
+  through `jnp.full`, where wrapped and honest transcribe to the same
+  tree, and at `jnp.where` and `jnp.clip` it is recorded as UNMEASURED
+  and is not claimed. No remedy is proposed on the strength of any of
+  this, none was built, and none was priced.
 
   **It is jax's, it is deliberate, and it is in the shipping release —
   BUT NOT BY THE MECHANISM THIS ENTRY FIRST NAMED, AND THAT CLAIM IS
