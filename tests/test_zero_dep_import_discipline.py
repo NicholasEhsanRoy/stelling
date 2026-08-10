@@ -201,7 +201,15 @@ _ANY_MODULE_SCOPE_IMPORT = re.compile(r"^(import|from)\s+([A-Za-z_][A-Za-z_0-9]*
 
 # Every allowlisted sdist root that holds a `.py`. DERIVED from the allowlist
 # rather than typed, because a hand-typed list of areas to sweep is how a
-# "sweep of the shipped tree" ends up covering 6 roots out of 22.
+# "sweep of the shipped tree" ends up covering 6 roots out of 23.
+#
+# THAT DENOMINATOR READ 22 AND THE ALLOWLIST HAS NEVER HELD 22 — measured with
+# `_sdist_roots()` at 43973af, 650e678, 53f9f84 and a61c01f: 23 at every one.
+# It survived because the guard over it asserted `len(roots) >= 20`, which is
+# true of 22 and of 23. The figure is now checked against the list it counts,
+# in `tests/test_prose_hygiene.py::
+# test_the_shipped_root_count_in_prose_matches_the_allowlist`, which reads this
+# comment too.
 _SHIPPED_PY_ROOTS_PIN = ("corpus", "docs", "src", "tests", "tools")
 
 
@@ -601,7 +609,14 @@ def test_the_shipped_sweep_covers_every_allowlisted_root_with_python_in_it():
     cross-check that the derivation returned what a reader expects.
     """
     roots = _sdist_roots()
-    assert len(roots) >= 20, roots
+    # This was `len(roots) >= 20` — a bound satisfied by 22, 23 and 40 alike,
+    # standing directly over a comment in this file that said 22 when the
+    # allowlist has always held 23. The COUNT is checked against both shipped
+    # comments in `tests/test_prose_hygiene.py::
+    # test_the_shipped_root_count_in_prose_matches_the_allowlist`; what belongs
+    # here is that the parse returned the allowlist and not a fragment of it.
+    assert "src" in roots and "pyproject.toml" in roots, roots
+    assert len(roots) == len(set(roots)), f"a root is listed twice: {sorted(roots)}"
     with_python = tuple(
         sorted(
             r

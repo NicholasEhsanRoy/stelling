@@ -261,11 +261,26 @@ def test_every_test_cited_in_core_prose_still_exists():
 #
 # The scope is DERIVED from the sdist allowlist rather than typed, and that is
 # the correction this check embodies. A stale-figure sweep of this tree was
-# described as covering "the tracked, SHIPPED tree" and covered six of the 22
+# described as covering "the tracked, SHIPPED tree" and covered six of the 23
 # allowlisted roots — SOUNDNESS.md, docs/, README.md, ARCHITECTURE.md,
 # CONTRIBUTING.md, .github/. `/design`, `/corpus`, `/tests`, `/src` and
 # `/tools` all ship and were not swept, and TEN wrong own-source citations were
 # sitting in them, one of them repeated three times.
+#
+# THE DENOMINATOR SAID 22 AND WAS NEVER 22 — the third stale figure in a
+# paragraph whose subject is stale figures. Counted with this file's own
+# `_shipped_roots()` at 43973af, 650e678, 53f9f84 and a61c01f alike: 23. The
+# commit that introduced the sentence, and a commit body announcing a re-sweep
+# of "ALL 22 ROOTS", carry the same wrong number; those are immutable. This
+# comment and its twin in `tests/test_zero_dep_import_discipline.py` are the
+# SHIPPED copies, so they are the ones corrected.
+#
+# AND THE FIGURE IS READ NOW RATHER THAN TRUSTED. It survived because the only
+# thing standing over it was `assert len(roots) >= 20` — which 22, 23 and 40
+# all satisfy. A guard sitting exactly where the defect was, unable to see it.
+# `test_the_shipped_root_count_in_prose_matches_the_allowlist` below parses the
+# number out of this comment and out of its twin, and compares both with the
+# allowlist it is a count of.
 #
 # WHAT THIS CAN AND CANNOT DO, said plainly, because the gap is most of the
 # defect. It resolves a `file.ext:N` citation and asserts N is a line the file
@@ -380,14 +395,70 @@ def test_no_shipped_page_cites_a_line_its_own_tree_does_not_have():
     )
 
 
+def test_the_shipped_root_count_in_prose_matches_the_allowlist():
+    """The count two shipped comments state about the allowlist, DERIVED.
+
+    Both comments explain their own scope with a fraction — "six of the 23
+    allowlisted roots", "6 roots out of 23" — and the denominator is a fact
+    about `pyproject.toml` that nothing read. It said 22. The allowlist has
+    held 23 root entries at every commit anyone has looked at: 43973af,
+    650e678, 53f9f84 and a61c01f, counted with the two parsers those files
+    already use.
+
+    WHAT LET IT THROUGH IS THE INTERESTING PART. Both files carried a guard
+    over exactly this number — `assert len(roots) >= 20` — added in the same
+    pass that wrote the wrong figure. It is satisfied by 22, by 23, and by 40,
+    so it could not distinguish the count from the claim about the count. A
+    bound is not a check of a figure; the figure has to be read.
+
+    So it is read. `>= 20` stays nowhere; the number in the prose is parsed and
+    compared against the parsed allowlist, which means adding a root to
+    `pyproject.toml` now moves both comments or goes red, and neither comment
+    can drift from the other.
+    """
+    roots = _shipped_roots()
+    found = []
+    for path, pattern in (
+        (Path(__file__), r"covered six of the (\d+)\s*\n#\s*allowlisted roots"),
+        (
+            _REPO / "tests" / "test_zero_dep_import_discipline.py",
+            r"ends up covering 6 roots out of (\d+)",
+        ),
+    ):
+        text = path.read_text(encoding="utf-8")
+        matches = re.findall(pattern, text)
+        assert len(matches) == 1, (
+            f"{path.name}: the shipped root-count sentence no longer matches "
+            f"{pattern!r} exactly once (found {len(matches)}). The figure it "
+            "states is the thing under test, so this must fail loudly rather "
+            "than quietly check nothing."
+        )
+        found.append((path.name, int(matches[0])))
+
+    wrong = [(name, n) for name, n in found if n != len(roots)]
+    assert not wrong, (
+        f"the sdist allowlist has {len(roots)} root entries and these shipped "
+        "comments say otherwise. The denominator is a count OF THAT LIST, so "
+        "it moves whenever the list does:\n  "
+        + "\n  ".join(f"{name} says {n}" for name, n in wrong)
+        + f"\n  pyproject.toml has {len(roots)}: {sorted(roots)}"
+    )
+
+
 def test_the_citation_sweep_covers_the_whole_allowlist_and_the_resolver_works():
     """The two ways the check above goes quiet without failing."""
     roots = _shipped_roots()
-    assert len(roots) >= 20, roots
     swept = {p.relative_to(_REPO).parts[0] for p in _shipped_text_files()}
     # the five roots the sweep this replaces did not reach
     assert {"design", "corpus", "tests", "src", "tools"} <= swept, sorted(swept)
     assert len(_shipped_text_files()) > 200
+    # …and the sweep stays INSIDE the allowlist. This was `len(roots) >= 20`,
+    # a bound that could not tell 22 from 23 and sat directly over a figure
+    # that was wrong by one — see
+    # `test_the_shipped_root_count_in_prose_matches_the_allowlist`, which now
+    # holds the count itself. What is worth asserting here is the relation:
+    # every root the sweep reaches is a root the sdist ships.
+    assert swept <= set(roots), sorted(swept - set(roots))
 
     # the resolver: a bare basename with exactly one bearer resolves, a
     # third-party path does not, and a bare name matching nothing does not
