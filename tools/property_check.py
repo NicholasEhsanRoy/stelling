@@ -229,6 +229,49 @@ def _crashes(junit) -> list[str]:
     ]
 
 
+# ── the decision ─────────────────────────────────────────────────────────────
+#
+# THE ONE JUDGEMENT THIS TOOL MAKES, in one place so that something can execute
+# it. It was four lines inside `check_controls`, reachable only by running a
+# real control against a real tree, and nothing in the repository asserted
+# anything about it: reverting `carried` to match the run's echoed output
+# scored a pure crash — a `TypeError` raised before the oracle was evaluated at
+# all — as `FIRED`, including for a control that is in the per-push gate, and
+# every gate stayed green. It is a function now, and
+# `tests/property/test_suite_disclosure.py` drives it end to end over three
+# synthetic controls whose outcomes are known.
+
+DEMONSTRATED = "demonstrated"
+ECHOED = "echoed, not raised"
+WRONG = "wrong failure"
+DID_NOT_FIRE = "passed where it must fail"
+
+
+def _verdict(expect_message, crashes, out, *, fired) -> str:
+    """Did this run demonstrate the defect, and if not, in which way not?
+
+    ``crashes`` is ``_crashes(junit)`` — what pytest RECORDED. ``out`` is
+    everything the run echoed. The order of the three tests below is the whole
+    decision procedure:
+
+    * the guard is in a RECORDED failure -> ``DEMONSTRATED``;
+    * the guard is only in the echoed output -> ``ECHOED``, its own outcome
+      because the remedy differs (nothing is wrong with the control; a
+      docstring or a message template on the traceback path put it there);
+    * red, and the guard is nowhere -> ``WRONG``;
+    * green -> ``DID_NOT_FIRE``, which is the failure this registry exists for.
+
+    Everything except the first is NOT DEMONSTRATED and exits non-zero.
+    """
+    if not fired:
+        return DID_NOT_FIRE
+    if any(expect_message in c for c in crashes):
+        return DEMONSTRATED
+    if expect_message in out:
+        return ECHOED
+    return WRONG
+
+
 # ── the two modes ────────────────────────────────────────────────────────────
 
 
@@ -293,13 +336,13 @@ def check_controls(args) -> int:
                         extra_env=_cross_env(args), junit=junit)
             out = (proc.stdout or "") + (proc.stderr or "")
             crashes = _crashes(junit)
-            fired = proc.returncode != 0
-            carried = any(control.expect_message in c for c in crashes)
-            if fired and carried:
+            verdict = _verdict(control.expect_message, crashes, out,
+                               fired=proc.returncode != 0)
+            if verdict == DEMONSTRATED:
                 print("   FIRED — the property failed where it is supposed to")
                 if args.verbose:
                     print(_tail(proc, 30))
-            elif fired and control.expect_message in out:
+            elif verdict == ECHOED:
                 # The string is in the run's OUTPUT but not in any failure the
                 # run recorded, which is the shape a docstring or a message
                 # template echoed by the traceback produces. Reported as its
@@ -312,19 +355,19 @@ def check_controls(args) -> int:
                 for c in crashes:
                     print(f"   what pytest recorded: {c.splitlines()[0][:120]}")
                 print(_tail(proc, 30))
-                failures.append((control.name, "echoed, not raised"))
-            elif fired:
+                failures.append((control.name, ECHOED))
+            elif verdict == WRONG:
                 print(f"   FIRED, but the failure did not carry "
                       f"{control.expect_message!r}")
                 for c in crashes:
                     print(f"   what pytest recorded: {c.splitlines()[0][:120]}")
                 print(_tail(proc, 30))
-                failures.append((control.name, "wrong failure"))
+                failures.append((control.name, WRONG))
             else:
                 print("   CONTROL DID NOT FIRE — this property cannot be shown "
                       "to detect anything")
                 print(_tail(proc, 30))
-                failures.append((control.name, "passed where it must fail"))
+                failures.append((control.name, DID_NOT_FIRE))
     print()
     print(f"== {len(wanted) - len(failures)}/{len(wanted)} controls fired")
     for name, why in failures:

@@ -22,6 +22,12 @@ cannot run:
 * every registered **mutation still applies exactly once** to the file it
   names. A mutant that stops matching is a control that silently always passes,
   and this catches it without running anything;
+* **the one judgement ``tools/property_check.py`` makes** — whether a run
+  demonstrated the defect — driven end to end over synthetic controls whose
+  outcome is known, including a defect that crashes BEFORE the oracle is
+  evaluated. That needs neither hypothesis nor jax, only a nested pytest, and
+  until it was here the rule that separates a demonstration from a crash was
+  guaranteed by prose in three docstrings and by nothing that runs;
 * every ``xfail`` marker in the suite is **strict and narrowed by ``raises=``**,
   read out of the source. The CI step that greps the run's own log cannot see
   either of those weakened while the defect is still there — measured: with
@@ -45,8 +51,10 @@ being green.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import pathlib
 import re
+import sys
 
 import pytest
 
@@ -450,4 +458,172 @@ def test_a_clause_specific_cvc5_guard_is_written_once_in_the_property():
         "each of these guards must occur EXACTLY ONCE in "
         "tests/property/test_cvc5_protocol.py, in the `return` that builds its "
         "clause's failure message:\n  " + "\n  ".join(bad)
+    )
+
+
+# ── the decision procedure in tools/property_check.py ────────────────────────
+#
+# THE MECHANISM'S OWN ANTI-VACUITY GAP. Everything above reads the registry.
+# The registry is inert: what turns it into evidence is one judgement in
+# `tools/property_check.py` — "the run came back red AND the failure pytest
+# RECORDED carried `expect_message`" — and until these tests landed, nothing in
+# the repository imported that file or asserted anything about how it decides.
+# It is referenced by prose in two dozen places and executed by one CI step,
+# and the CI step only ever runs it against controls that pass.
+#
+# The gap is measurable, not theoretical: reverting the match to the run's
+# ECHOED OUTPUT — one line — makes a defect that raises before the oracle is
+# evaluated at all score FIRED, for controls that are in the per-push gate,
+# with every gate in the repository still green.
+#
+# So the probes below drive the real `main()` over synthetic controls whose
+# outcome is known, in a nested pytest. No hypothesis, no jax, no solver: the
+# probe property is fifteen lines of plain Python, and the tree it is pointed
+# at is an empty `src/`.
+
+_PROBE_GUARD = "PROBE SAW A NONZERO-EXIT RUN"
+
+# Shaped after `_judge` in test_cvc5_protocol.py: a conjunction that builds its
+# message templates ABOVE the line that can crash, so a crash puts the guard
+# into the echoed traceback (pytest prints a frame's whole source, from `def`
+# down to the failing line) without any oracle having run.
+_PROBE_ORACLE = '''\
+def _oracle(res):
+    """Three clauses, evaluated in order, returning on the first that fails."""
+    if res["truncated"]:
+        return "PROBE SAW A TRUNCATED RUN"
+    if res["rc"]:
+        return "PROBE SAW A NONZERO-EXIT RUN"
+    if sorted(res["values"]) != res["present"]:
+        return "PROBE SAW A MODEL THAT WAS NOT WRITTEN"
+    return None
+
+
+def test_the_probe_property():
+    assert _oracle(%s) is None, _oracle(%s)
+'''
+
+# `case -> (the argument, the exit code main() must return, the outcome it must
+# report)`. Read as a truth table: the first row is the one the revert flips,
+# and the other two are what stop this test passing vacuously — a runner that
+# had stopped running anything would report NOT DEMONSTRATED for all three.
+_PROBE_CASES = {
+    # `values=None` makes `sorted(...)` raise TypeError at the THIRD clause, so
+    # the oracle never returns and nothing evaluated the property. The guard is
+    # in the echoed traceback and in no recorded failure.
+    "a crash before the oracle": (
+        '{"truncated": False, "rc": 0, "values": None, "present": []}',
+        1, "echoed, not raised",
+    ),
+    # the guard's own clause, genuinely reached and genuinely raised
+    "the guard's own clause": (
+        '{"truncated": False, "rc": 137, "values": [], "present": []}',
+        0, None,
+    ),
+    # the property passes: the control demonstrates nothing
+    "a green property": (
+        '{"truncated": False, "rc": 0, "values": [], "present": []}',
+        1, "passed where it must fail",
+    ),
+}
+
+
+def _property_check():
+    """``tools/property_check.py``, imported by path rather than installed."""
+    path = REPO / "tools" / "property_check.py"
+    assert path.is_file(), f"{path} is missing; the property job runs it"
+    spec = importlib.util.spec_from_file_location("_property_check_probe", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _score_one_probe(module, monkeypatch, work, argument):
+    """Run the real ``main()`` over one synthetic control; return (exit, out)."""
+    (work / "repo" / "src").mkdir(parents=True)
+    probe = work / "test_probe.py"
+    probe.write_text(_PROBE_ORACLE % (argument, argument))
+    control = pc.Control(
+        name="probe",
+        nodeid=str(probe),
+        kind="mutant",
+        at="HEAD",
+        why=(
+            "synthetic, built by test_suite_disclosure.py to drive "
+            "tools/property_check.py's decision procedure over an outcome "
+            "that is known in advance"
+        ),
+        expect_message=_PROBE_GUARD,
+    )
+
+    class _Registry:
+        CONTROLS = (control,)
+
+        @staticmethod
+        def by_name(name):
+            assert name == "probe", name
+            return control
+
+    monkeypatch.setattr(module, "pc", _Registry)
+    return module.main([
+        "--control", "probe",
+        "--repo", str(work / "repo"),
+        "--python", sys.executable,
+    ])
+
+
+def test_the_control_runner_scores_a_crash_before_the_oracle_as_not_demonstrated(
+    tmp_path, monkeypatch, capsys
+):
+    """The judgement that turns the registry into evidence, executed.
+
+    A positive control asserts that TODAY'S PROPERTY, run against a tree that
+    carries the defect, comes back RED. "Red" is not enough on its own: a
+    typo'd nodeid, a collection error, an import failure and a crash inside the
+    property's own helpers are all red, and each of them demonstrates nothing.
+    ``expect_message`` is what separates them, and where it is matched is what
+    makes the separation real — against the failure pytest RECORDS in
+    ``--junitxml``, not against everything the run echoes.
+
+    **Measured, and this is why the test exists.** With the match reverted to
+    the echoed output — one line — a defect that raises ``TypeError`` before
+    the oracle is evaluated at all scores ``FIRED`` and the tool exits 0.
+    Driven against the real suite with the line-neutral ``solvers.py`` defect
+    that makes ``sorted(res.values)`` raise, scored under both rules from one
+    run: the OLD rule fires **2 of the 3** shipped cvc5 guard strings —
+    including clause (1)'s, which is the live guard of a control in the
+    per-push gate — where the shipped rule scores 0 of 3. Nothing else in the
+    repository notices: no other test imports ``tools/property_check.py``.
+
+    The three rows below are a truth table, and all three matter. The first is
+    the one the revert flips. The other two are the anti-vacuity half — a
+    runner that had stopped running anything, or one wired to refuse
+    everything, would report NOT DEMONSTRATED for all three and would pass a
+    test that only asserted the first.
+    """
+    module = _property_check()
+    bad = []
+    for case, (argument, want_exit, want_report) in _PROBE_CASES.items():
+        work = tmp_path / case.replace(" ", "_").replace("'", "")
+        work.mkdir()
+        got_exit = _score_one_probe(module, monkeypatch, work, argument)
+        out = capsys.readouterr().out
+        if got_exit != want_exit:
+            bad.append(f"{case}: main() returned {got_exit}, expected {want_exit}")
+        if want_report is None:
+            if "FIRED — the property failed where it is supposed to" not in out:
+                bad.append(f"{case}: expected FIRED, got:\n{out}")
+        else:
+            if f"NOT DEMONSTRATED: probe — {want_report}" not in out:
+                bad.append(
+                    f"{case}: expected NOT DEMONSTRATED …— {want_report}, "
+                    f"got:\n{out}"
+                )
+    assert not bad, (
+        "tools/property_check.py decided a control's outcome differently from "
+        "the way its own docstrings say it does. The first row is the whole "
+        "anti-vacuity mechanism: a red run whose guard is only in the ECHOED "
+        "output — a traceback prints the property's own source, docstring "
+        "included — must be NOT DEMONSTRATED, never FIRED:\n  "
+        + "\n  ".join(bad)
     )
