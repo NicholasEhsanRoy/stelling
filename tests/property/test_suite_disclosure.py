@@ -855,12 +855,12 @@ def test_a_commit_control_names_the_revision_it_points_at_in_its_own_why():
         vacuous-refutation -> 463ee81   passes; per-push 8/9, DID NOT FIRE
         conjunct           -> 717b9ca   passes; per-push 8/9, DID NOT FIRE
         cvc5-flat          -> 8d3051a   passes; per-push 8/9, DID NOT FIRE
-        cvc5-exit-tell     -> 0ad22bb   passes; the same-tree pin below fires,
+        cvc5-exit-tell     -> 0ad22bb   passes; the same-tree pin above fires,
                                         and per-push 8/9, wrong failure
         cross-series       -> 76140c2   passes; NOTHING CI RUNS NOTICES
 
     ``cross-series`` is the one that gets through everything. It is the only
-    control on its property, so the same-tree pin below has no sibling to hold
+    control on its property, so the same-tree pin above has no sibling to hold
     it against; it is not in the per-push ``--control`` list; and demonstrating
     it needs ``--other-python``, which no job passes. Driven with one —
     ``--control cross-series --other-python`` — it IS caught, ``0/1 controls
@@ -869,10 +869,13 @@ def test_a_commit_control_names_the_revision_it_points_at_in_its_own_why():
     the nine-name step.
 
     So the claim this test can carry is the narrow one: it refuses a repoint to
-    any revision the control's own ``why`` has never mentioned, and the escapes
-    are exactly the revisions those ``why``s already name — the five above, and
+    any revision the control's own ``why`` has never mentioned. What it does NOT
+    refuse is the revisions those ``why``s already name — the five above, and
     ``cvc5-exit-tell`` -> ``b6e4783``, which passes this test with nothing else
-    static firing and is caught by the per-push step, 8/9, wrong failure.
+    static firing and is caught by the per-push step, 8/9, wrong failure — and,
+    by the exemption below, a repoint to ``at="HEAD"``. For ``cross-series``,
+    whose demonstration no job runs at all, that is a SECOND repoint nothing CI
+    notices, not one.
     Closing them means giving ``why`` a canonical place to name its
     own tree rather than a substring test over the whole of it, and that is a
     registry change, not a test change.

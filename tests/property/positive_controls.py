@@ -360,8 +360,10 @@ CONTROLS = (
     # demonstrating the clause it is registered for, which is the exact
     # distinction these two entries exist to make.
     #
-    # STATIC ASSERTIONS IN `test_suite_disclosure.py` ARE THE WHOLE PROTECTION,
-    # and how many of them fire depends on how the guard is broadened. Measured
+    # STATIC ASSERTIONS IN `test_suite_disclosure.py` ARE THE WHOLE PROTECTION
+    # AGAINST A BROADENING TO `[flat]` — not against every broadening, since the
+    # executing run does refuse `[stateful]`, as recorded below. How many static
+    # assertions fire depends on how the guard is broadened. Measured
     # on this tree, static failures in that file, one broadening at a time:
     #
     #   cvc5-exit-tell     -> `[flat]`      2  (the shared-guard test, on the

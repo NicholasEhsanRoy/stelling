@@ -342,7 +342,8 @@ it is **either, run to run**. With `.hypothesis/` removed before every run:
 | ×1 | 39 | 21 | 60 |
 | ×2 | 23 | 17 | 40 |
 
-and every refusal reports
+and every refusal is the clause-(2) failure, of which this is one — the
+answer is drawn data, so `'sat'` below varies run to run:
 
 ```
 FIRED, but the failure did not carry 'ACCEPTED A NONZERO-EXIT RUN'
