@@ -412,7 +412,18 @@ CONTROLS = (
             "TESTED_JAX_SERIES already claiming both. Fixed at 76140c2."
         ),
         series="both",
-        expect_message="disagree",
+        # WAS `disagree`, WHICH THIS PROPERTY'S FAILURE NEVER CARRIED. The
+        # assertion says "THE TWO TESTED jax SERIES DISAGREE on N of M
+        # harnesses"; the lower-case word occurs only in the local
+        # `disagreements` list four lines above it. Matching against captured
+        # output hid that — a traceback prints the whole function source down
+        # to the failing line, so `disagree` was there for the corpus-floor
+        # assertion below it too, and a corpus that had stopped producing
+        # verdicts would have been reported as a demonstration of series
+        # disagreement. Measured, against 8ef8f75 with two interpreters: the
+        # recorded failure is `AssertionError: THE TWO TESTED jax SERIES
+        # DISAGREE on 4 of 225 harnesses`, and `disagree` is not in it.
+        expect_message="SERIES DISAGREE",
     ),
 )
 
