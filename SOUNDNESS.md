@@ -4616,9 +4616,10 @@ verdicts:
   the `np.generic` rows, whose wrap is the `try` body."* The second half
   is right; the first does not follow from it. Measured in all four cells
   by editing `_convert_element_type`'s source IN MEMORY — read from the
-  installed file, re-`exec`'d against the module's own globals and
-  re-bound onto the module `lax.full` looks the name up in; no installed
-  tree is modified — **with the whole `try` STATEMENT deleted, body
+  installed file, re-`exec`'d against the module's own globals, and
+  re-bound onto `jax._src.lax.lax`, which is where `lax.full` looks the
+  name up; no installed tree is modified — **with the whole `try`
+  STATEMENT deleted, body
   included, `jnp.full((), np.int64(256), jnp.int8)` still returns `0`.**
   The narrowing simply moves to the fall-through
   `convert_element_type_p.bind`, which narrows the same way. **The
@@ -4666,11 +4667,15 @@ verdicts:
   measured just above, the answer stays `0` — so "it reaches neither
   narrowing this entry is about" holds, but because the fall-through
   narrows identically, NOT because the block is off the path. Cheapest to
-  land; and what it changes is the `int`-subclass rows and, measured in
-  all four cells under the same in-memory edit, the Python-float route,
+  land; and what it changes is the `int`-subclass rows and — measured in
+  all four cells under the deletion the receipts actually applied, which
+  drops the `try:`/`except` and KEEPS the body — the Python-float route,
   where `lax.convert_element_type(1e308, jnp.int8)` raises instead of
   saturating to `127`. Neither is the route this entry's wrong VERIFIED
-  comes through.
+  comes through. *(That is a different edit from the whole-statement
+  deletion measured above, and the two do not have the same effect: with
+  the body kept, the float route raises; with the statement gone
+  entirely, it saturates to `127` as it does today.)*
 
   **The line range is an installed-dependency figure, not a repository
   figure**, so it is quoted with the version it was read from:
