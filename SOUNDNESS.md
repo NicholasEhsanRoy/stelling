@@ -4507,8 +4507,18 @@ verdicts:
   `isinstance`:** `if isinstance(object, (bool, int, float, complex)):`.
   Respell the constant as `np.int64(256)` — how a value read out of a
   NumPy table arrives — and a NumPy scalar is none of those four types, so
-  that line is **skipped entirely (measured: 0 executions, all four
-  cells)** and the value falls through to
+  **the CHECK is skipped entirely: `array_constructors.py:250`, the body,
+  executes 0 times, all four cells.** *(This sentence carried the range
+  `249-250` and said "that line is skipped entirely". Re-measured with
+  `sys.monitoring` LINE events local to `array_constructors.array`'s own
+  code object: line **249**, the `isinstance` gate, executes **once** —
+  it has to, to decide — and line **250** executes **zero** times. The
+  substance was right and the range was not, and on a page that cites
+  jax's source by line the two are not the same claim. Control, same
+  probe, same four cells: the bare Python literal `256` executes BOTH
+  lines once, `OverflowError` propagates out of 250, and 314 is never
+  reached.)*
+  The value falls through to
   `out = np.asarray(object, dtype=dtype)` at `array_constructors.py:314` —
   same line number in both series — where NumPy CASTS it. Traced line by
   line, `out` is `array(0, dtype=int8)` on the very next line executed. By
