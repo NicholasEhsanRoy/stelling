@@ -366,10 +366,16 @@ def _judge(res, stdout, full, rc, census, *, where):
     fixture at ``8ef8f75``: ``'version 1.3.4\\nanswer sat\\nend 0\\n'`` at exit
     1 is a definite ``sat``, and ``'…\\nvalue x0 0/1\\nend 1\\n'`` at exit 137
     is a definite ``sat`` harvesting ``('x0', '0/1')``. Today's flat property
-    fails there at the ci profile in about a second (0.4 s to 1.2 s across
-    runs, junit XML, on a box doing other work), on an INTACT transcript at
-    exit 1 — so clause (2) holds on that example and the failure is this
-    clause's own.
+    fails there at the ci profile on an INTACT transcript at exit 1 — so
+    clause (2) holds on that example and the failure is this clause's own.
+
+    THE COST, WITH ITS INSTRUMENT NAMED, because the two figures this entry
+    has carried are of two different ones and neither said which. Three runs
+    each, on a box doing other work: **0.45 / 0.38 / 0.28 s** of junit XML
+    ``<testcase time=>``, and **1.59 / 1.77 / 1.23 s** of wall clock for the
+    whole ``property_check.py --control`` invocation, which also materialises
+    a tree and starts an interpreter. The ``0.9 s`` in the ci.yml step comment
+    is the second of those.
 
     (3) THE MODEL IS EXACTLY THE VALUE RECORDS IN THE BYTES READ — DEMONSTRATED,
     by the ``cvc5-phantom-model`` mutant control, and the shape it needs was
@@ -384,10 +390,26 @@ def _judge(res, stdout, full, rc, census, *, where):
     one can fail: the third branch below fires on
     ``'version 1.3.4\\nanswer sat\\nvalue x0 0/1\\nvalue x0 0/1\\nend 2\\n'``,
     reporting a harvested ``[('x0', '0/1')]`` against an actually-present
-    ``[('x0', '0/1'), ('x0', '0/1')]``. Green against the unmutated tip. It is
-    the slowest of the three cvc5 flat-leg controls and the ``2.0 s`` recorded
-    when it was registered did not reproduce: 5.6 s best of three, 9.1 s worst
-    (junit XML, on a box doing other work). ``_PAYLOADS`` is untouched,
+    ``[('x0', '0/1'), ('x0', '0/1')]``. Green against the unmutated tip.
+
+    IT IS THE SLOWEST OF THE THREE cvc5 FLAT-LEG CONTROLS ON EITHER
+    INSTRUMENT, and that qualitative claim is the only one the numbers were
+    ever offered for. The numbers themselves have been recorded twice, of two
+    different instruments, with neither labelled. Three runs each, on a box
+    doing other work::
+
+                            junit <testcase time=>   whole --control run
+        cvc5-flat            1.51 / 1.30 / 1.23      2.78 / 2.29 / 2.31
+        cvc5-exit-tell       0.45 / 0.38 / 0.28      1.59 / 1.77 / 1.23
+        cvc5-phantom-model   2.43 / 4.25 / 2.40      6.91 / 7.09 / 8.15
+
+    The ``2.0 s`` recorded when this control was registered is a junit figure
+    and it REPRODUCES. The ``5.6 s best of three, 9.1 s worst`` that replaced
+    it — and declared it irreproducible — is the wall clock of the whole
+    invocation, so the correction changed instrument and then read the
+    difference as a failure to reproduce. It is WITHDRAWN, and both instruments
+    are written down here rather than one of them being picked. ``_PAYLOADS``
+    is untouched,
     so the two example-efficiency figures in the module docstring keep
     describing the strategy that produced them.
 

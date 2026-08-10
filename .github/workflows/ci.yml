@@ -1196,9 +1196,16 @@ jobs:
         # 5 violations at `0ad22bb`, all of them (2) — so without these two the
         # line above reads "the cvc5 record protocol … requires exit 0, no
         # truncation, and a harvested model equal to the value records" while
-        # one third of it is what anything demonstrates. Cost, measured from
-        # junit XML on a loaded box: 0.9 s for `cvc5-exit-tell` and 5.6 s for
-        # `cvc5-phantom-model`, best of three each.
+        # one third of it is what anything demonstrates. Cost, best of three
+        # each on a loaded box, as WALL CLOCK for the whole `--control`
+        # invocation — which is what this step's runtime actually is, and NOT
+        # what junit XML reports for the testcase inside it: 1.2 s for
+        # `cvc5-exit-tell` and 6.9 s for `cvc5-phantom-model`. The junit
+        # testcase figures for the same runs are 0.3 s and 2.4 s; the two
+        # instruments are ~1 s apart per control, which is a tree materialised
+        # and an interpreter started. Both are tabulated in `_judge`'s
+        # docstring, because a figure without its instrument has twice been
+        # read here as a figure that failed to reproduce.
         run: |
           .venv/bin/python tools/property_check.py \
             --control oracle-masked \
