@@ -4405,8 +4405,8 @@ verdicts:
   times — measured at `b2e3a15`, and stated here because an entry count
   taken second in a process is a fact about the cache, not the door.)*
 
-  **THERE IS A FOURTH SITE, IT IS WHERE THE HEADLINE CASE ACTUALLY DIES,
-  AND NOTHING ELSE ON THIS PAGE NAMES IT.** The third row of the table
+  **THERE IS A FOURTH SITE — WHERE `x + 256` ACTUALLY DIES — AND NOTHING
+  ELSE ON THIS PAGE NAMES IT.** The third row of the table
   above ends at `convert_element_type_p.bind` and says the narrowing is
   "the primitive's own". That is true, and it is not an address. The
   address is `_convert_elt_type_folding_rule` in `jax/_src/lax/lax.py` —
@@ -4427,16 +4427,29 @@ verdicts:
   a per-call attribution, not a line count: the 256 goes in whole and
   comes out zero, there.
 
-  **The three sites this entry anatomises are disjoint from it, in both
-  directions.** Measured differentially in-process at 0.11.0,
-  `JAX_ENABLE_X64=1`, by installing range-checking wrappers one at a
-  time: a check on the `type(operand) is int` `.astype` site makes
-  `jnp.full((), 256, jnp.int8)` and `lax.convert_element_type(2 ** 32,
-  'int32')` raise and leaves `jit(x + 256)` returning `[0 0 0]`; a check
-  on the folding rule makes `jit(x + 256)` raise and leaves those two
-  returning `0`. **A reader pricing a remedy from the mechanism section
-  above would have priced one that does not reach the case this entry
-  opens with.**
+  **It is disjoint from the `.astype` site above, in both directions.**
+  Measured differentially in-process at 0.11.0, `JAX_ENABLE_X64=1`, by
+  installing range-checking wrappers one at a time: a check on the
+  `type(operand) is int` `.astype` site makes `jnp.full((), 256,
+  jnp.int8)` and `lax.convert_element_type(2 ** 32, 'int32')` raise and
+  leaves `jit(x + 256)` returning `[0 0 0]`; a check on the folding rule
+  makes `jit(x + 256)` raise and leaves those two returning `0`. The
+  other two sites are already established above as not on this path at
+  all: the `except` executes zero times for it, and the
+  `array_constructors.py:249-250` gate belongs to the three construction
+  doors, which `x + 256` is not one of.
+
+  **AND THIS IS EXACTLY THE DISTINCTION THIS ENTRY KEEPS GETTING WRONG,
+  SO IT IS SPELLED OUT: THIS SITE IS NOT WHERE THIS ENTRY'S OWN
+  REPRODUCER DIES.** The four-line reproducer at the top writes its
+  constant through `jnp.full`, so it dies at the `.astype` site, and a
+  range check THERE fixes it — measured, both `x64` cells, with only that
+  check installed: `jnp.full((), 256, jnp.int8)` raises while
+  `jit(x + 256)` still returns `[0 0 0]`. `x + 256` is a DIFFERENT door
+  of the eleven, reached by writing the constant inline instead, and it
+  is the one no fix at the three sites above reaches. Same defect, same
+  wrong VERIFIED, two narrowing sites — and a remedy priced against one
+  of them buys nothing at the other.
 
   **It is not a LAST site either, and it is not offered as one.** Two
   measurements bound it, both in all four cells. First, it is reached
@@ -4555,10 +4568,11 @@ verdicts:
   changes **0** of the 23,705 jax test cases in the cost measurement
   below — the joint-cheapest of the four candidate fixes priced there,
   and the only one of them that covers the `int`-subclass route measured
-  just above, because it is the only one ON that route. **It also does
-  not touch the case this entry opens with**: it is not on the path
-  `x + 256` takes and not on the path `jnp.full` takes. Cheapest to land,
-  and it shuts the door nobody came through.
+  just above, because it is the only one ON that route. **It also
+  reaches neither narrowing this entry is about**: it is not on the path
+  `x + 256` takes and not on the path `jnp.full` takes, so neither the
+  reproducer at the top nor the inline spelling changes under it.
+  Cheapest to land, and it shuts the door nobody came through.
 
   **The line range is an installed-dependency figure, not a repository
   figure**, so it is quoted with the version it was read from:
@@ -4788,8 +4802,17 @@ verdicts:
   idiom in the three other PRNG implementations (`philox2x32.py:149`,
   `philox4x32.py:160`, `threefry4x32.py:213` — all four lines re-read at
   the tag), and the 37th is `testConvertElementTypeOOB` again. **The true
-  cost of the only fix that reaches the case this entry opens with is
-  four lines of jax's own source plus one deliberately pinned test.**
+  cost of the only fix that reaches `x + 256` is four lines of jax's own
+  source plus one deliberately pinned test.**
+
+  **Read the rows against the doors, not against "the defect", because
+  they do not all buy the same thing.** The `1`-cost fix reaches the
+  narrowing this entry's own reproducer dies on, `jnp.full` — measured
+  above, with only that check installed it raises. The `1031`-cost fix is
+  what it takes to reach `x + 256` as well. Neither covers the other, so
+  there is no single row here that is "the price of closing this"; there
+  are two prices for two doors, and the cheap one leaves the entry's
+  eleven-door table mostly untouched.
 
   **What that licenses, and what it does not.** It does not license "jax
   will never fix this": four lines and a test is not a large bill. It
