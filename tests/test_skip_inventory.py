@@ -1617,6 +1617,23 @@ def test_the_scope_check_prunes_exactly_what_pytest_prunes(tmp_path, monkeypatch
         (directory / f"test_only_inside_{safe}.py").write_text(body)
         (directory / "test_top.py").write_text(body)
 
+    # THE THIRD CHILD OF THIS FILE, and it gets `PY_COLORS=0` for the same
+    # reason as the other two: what comes back is READ, and `FORCE_COLOR` is
+    # set in the ambient environment on this box. This one was green WITHOUT
+    # it, and only by luck about which lines pytest paints. Measured,
+    # `--collect-only -q` under `FORCE_COLOR=3`:
+    #
+    #   sub/test_nested.py::test_x         <- NO escapes: nodeids are plain
+    #   test_top.py::test_x
+    #   ESC[32mESC[32m2 tests collected    <- the SUMMARY line IS coloured
+    #
+    # so `line.split("::", 1)[0]` happens to see a clean path today. That is a
+    # fact about pytest's current painting, not about this test, and the parse
+    # below has no defence if it changes: an escape at the head of a nodeid
+    # goes into `PurePosixPath(...).name` and the set equality then fails
+    # against output that visibly contains the right names — which is exactly
+    # what the other two children did before they were fixed. A machine-read
+    # subprocess should not be handed a rendering meant for a terminal.
     proc = subprocess.run(
         [
             sys.executable,
@@ -1633,6 +1650,7 @@ def test_the_scope_check_prunes_exactly_what_pytest_prunes(tmp_path, monkeypatch
         capture_output=True,
         text=True,
         timeout=300,
+        env={**os.environ, "PY_COLORS": "0"},
     )
     collected = {
         pathlib.PurePosixPath(line.split("::", 1)[0]).name

@@ -90,6 +90,27 @@ permissions:
 # `${RUNNER_TEMP}/counts-${{ matrix.jax }}` from each lane, then one job that
 # downloads both and `diff`s them.
 #
+# KNOWN-OPEN AND RECORDED RATHER THAN CHANGED: SIX LINE-ANCHORED GREPS OVER
+# COLOURED-CAPABLE LOGS. Counted in this file: `^SKIPPED` and `^2 passed` on
+# `acceptance.log`, `^SKIPPED` and `^18 passed` on `reproducer.log`, and
+# `^(XPASS |\[XPASS|FAILED .*\[XPASS)` and `^XFAIL ` on `property.txt`. Each is
+# a `^`-anchored match over a log written by `… | tee`, and each decides
+# green/red on a step that `exit 1`s. pytest paints its short-summary lines
+# whenever it believes a human is watching, and it believes that whenever
+# `FORCE_COLOR` is set — an SGR escape then sits between the start of the line
+# and the word being anchored, and every one of these greps misses on output
+# that visibly contains what it is looking for. `^SKIPPED` and the XPASS
+# alternation FAIL OPEN when they miss; `^2 passed`, `^18 passed` and the
+# `^XFAIL ` count fail closed. This is safe here only because GitHub Actions
+# does not set `FORCE_COLOR` on the runner — it is a property of the host, not
+# of these steps. The same class was live and costing something in
+# `tests/test_skip_inventory.py`, whose three children now set `PY_COLORS=0`
+# for exactly this reason; `tools/property_check.py` does too. Adding
+# `PY_COLORS: 0` to these steps is the same one-line fix, and is NOT done here
+# because no runner is available on this box to drive it either way, and a
+# workflow edit that cannot be observed is the shape of change this file's own
+# header argues against.
+#
 # (measured in all three environments at 486862c; the two jax lanes re-measured
 # at bf905b9 and equal to each other there. Records of two commits, not
 # targets -- nothing here is to be bumped to match a future run.)
