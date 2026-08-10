@@ -55,6 +55,7 @@ the text read below still catches it.
 """
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 import sys
@@ -348,6 +349,180 @@ def test_the_floor_checker_can_actually_see_an_offender():
         # …and anywhere else it must NOT be the running interpreter's set,
         # which is what a copy taken from the wrong python would look like
         assert _FLOOR_STDLIB != set(sys.stdlib_module_names)
+
+
+# --- the version branch's CONDITION, not merely its indentation -------------
+#
+# THE GUARD ABOVE CANNOT SEE THE NEXT INSTANCE OF ITS OWN CLASS, and this is
+# the repair. `test_no_module_imports_a_stdlib_module_the_floor_lacks` decides
+# by COLUMN: an import at column 0 is a problem, an indented one is not. The
+# remedy it tells you to apply — "put the import behind a `sys.version_info`
+# branch (which indents it off column 0)" — is therefore accepted by the check
+# on the strength of the INDENT it produces, and the branch's THRESHOLD is
+# read by nothing.
+#
+# So the fix for the original defect can be undone by one character, and was:
+# `if sys.version_info >= (3, 11):` -> `>= (3, 10)` in
+# `tests/test_sdist_contents.py`. Driven, both directions, at 7cb6ab6:
+#
+#   CPython 3.11.15 (above the floor)  1332 passed, 94 skipped — FULLY GREEN,
+#                                      the guard sees nothing
+#   CPython 3.10.20 (the floor)        ModuleNotFoundError: No module named
+#                                      'tomllib', "Interrupted: 1 error during
+#                                      collection", 47 skipped, 1 error
+#
+# which is the original defect restored exactly: the shipped suite cannot be
+# COLLECTED on the floor it declares, and the interpreter every developer and
+# every CI job runs is green about it.
+#
+# WHAT THIS CHECKS, and it is a different question from the one above. Not
+# "is this import indented" but "does the branch that guards it actually
+# EXCLUDE the floor". A `>= (a, b)` whose threshold is at or below the
+# declared floor is taken ON the floor, so the import inside it runs there,
+# so the indent bought nothing.
+#
+# ON THE FLOOR ITSELF THIS IS INERT, for the same reason the scan above is and
+# with the same argument: `_too_new_for_the_floor` asks the RUNNING
+# interpreter, and on 3.10 `tomllib` is not stdlib there either, so the name
+# does not read as too-new and the interpreter's own ImportError is what does
+# the checking — as the 3.10.20 row above shows it doing. The direction that
+# needed covering is the other one, where the suite is green and silent.
+
+
+def _version_gate(test) -> tuple[int, ...] | None:
+    """`(a, b)` if `test` is `sys.version_info >= (a, b)`, else None.
+
+    `sys.version_info[:2] >= (a, b)` counts too — it is the same test spelled
+    with a slice, and it is the spelling used elsewhere in this very file.
+    """
+    if not isinstance(test, ast.Compare) or len(test.ops) != 1:
+        return None
+    if not isinstance(test.ops[0], ast.GtE):
+        return None
+    left = test.left
+    if isinstance(left, ast.Subscript):
+        left = left.value
+    if not (
+        isinstance(left, ast.Attribute)
+        and left.attr == "version_info"
+        and isinstance(left.value, ast.Name)
+        and left.value.id == "sys"
+    ):
+        return None
+    right = test.comparators[0]
+    if not isinstance(right, ast.Tuple) or not right.elts:
+        return None
+    parts = []
+    for element in right.elts:
+        if not isinstance(element, ast.Constant) or not isinstance(element.value, int):
+            return None
+        parts.append(element.value)
+    return tuple(parts)
+
+
+def _imports_under(statements) -> list[tuple[str, int]]:
+    """Every module name imported anywhere inside `statements`, with its line."""
+    out = []
+    for statement in statements:
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Import):
+                out.extend((a.name.split(".")[0], node.lineno) for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                out.append((node.module.split(".")[0], node.lineno))
+    return out
+
+
+def _weak_version_branches(text: str, floor: tuple[int, int]):
+    """`(lineno, name, threshold)` for each too-new import under a branch that
+    does not exclude `floor`."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    bad = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        threshold = _version_gate(node.test)
+        if threshold is None or threshold[:2] > floor:
+            continue
+        for name, lineno in _imports_under(node.body):
+            if _too_new_for_the_floor(name):
+                bad.append((lineno, name, threshold))
+    return bad
+
+
+def test_a_version_branch_must_exclude_the_floor_it_guards_against():
+    """The CONDITION of the version branch, which nothing read.
+
+    A `sys.version_info` branch is the remedy this module's main check tells
+    you to apply, and that check accepts it on the strength of the indentation
+    it produces. The threshold is the part that does the work, and lowering it
+    to or below the declared floor puts the too-new import back on the floor
+    while every other test in this file stays green.
+    """
+    floor = _declared_floor()
+    bad = []
+    for path in _shipped_python_files():
+        for lineno, name, threshold in _weak_version_branches(
+            path.read_text(encoding="utf-8"), floor
+        ):
+            bad.append(
+                f"  {path.relative_to(REPO).as_posix()}:{lineno}  imports "
+                f"`{name}` under `sys.version_info >= "
+                f"{'.'.join(str(p) for p in threshold)}`, which is TAKEN on the "
+                f"declared floor {floor[0]}.{floor[1]}"
+            )
+    assert not bad, (
+        "a version branch guards a too-new import with a threshold that does "
+        "not exclude the floor, so the branch is taken there and the import "
+        "fails — a COLLECTION error in a test module, which is exit 2 and zero "
+        "tests for anyone on the floor. The indentation is not the guard; the "
+        "threshold is:\n" + "\n".join(bad)
+    )
+
+
+def test_the_version_branch_check_can_actually_see_a_lowered_threshold():
+    """Anti-vacuity, driven on the exact edit that restored the original defect.
+
+    Three ways this could be green while blind — a gate matcher that recognises
+    no branch, an import walker that finds no import, a comparison that never
+    fires — and all three are driven here against source text rather than
+    argued, on both sides of the boundary.
+    """
+    floor = (3, 10)
+    shipped = "if sys.version_info >= (3, 11):\n    import tomllib\n"
+    lowered = "if sys.version_info >= (3, 10):\n    import tomllib\n"
+
+    # the matcher recognises the branch at all, in both spellings used here
+    assert _version_gate(ast.parse(shipped).body[0].test) == (3, 11)
+    assert _version_gate(
+        ast.parse("if sys.version_info[:2] >= (3, 11):\n    pass\n").body[0].test
+    ) == (3, 11)
+    assert _version_gate(ast.parse("if x >= (3, 11):\n    pass\n").body[0].test) is None
+
+    # the walker finds the import under the branch, in each form
+    assert _imports_under(ast.parse(shipped).body[0].body) == [("tomllib", 2)]
+    assert _imports_under(
+        ast.parse("if a:\n    from tomllib import loads\n").body[0].body
+    ) == [("tomllib", 2)]
+
+    # …and the verdict, which is inert on the floor for the reason the block
+    # above gives, so both directions are asserted against that fact
+    above_the_floor = sys.version_info[:2] > _FLOOR_MEASURED_ON
+    assert bool(_weak_version_branches(lowered, floor)) is above_the_floor, (
+        "above the floor, `>= (3, 10)` guarding `import tomllib` must be seen; "
+        "ON the floor `tomllib` is not stdlib, so it does not read as too-new "
+        "and the interpreter's own ImportError is what does the checking"
+    )
+    assert not _weak_version_branches(shipped, floor), (
+        "the threshold that SHIPS must not be flagged — `>= (3, 11)` excludes "
+        "the 3.10 floor, which is the whole point of it"
+    )
+    # a branch with no too-new import in it is not this check's business
+    assert not _weak_version_branches(
+        "if sys.version_info >= (3, 10):\n    import pathlib\n", floor
+    )
 
 
 def test_the_shipped_sweep_covers_every_allowlisted_root_with_python_in_it():
