@@ -4255,6 +4255,24 @@ verdicts:
   branch audited SHOULD-NOT-LAND, below — firing on honest code — and it
   is stated as a shape, not as an identification of the two.
 
+  **THAT REASON IS TRUE OF THE REPRODUCER'S SHAPE AND IS NOT TRUE OF THE
+  CLASS, AND SINCE THE ENTRY HAS NOW BEEN WRONG THREE TIMES IN EXACTLY
+  THIS WAY THE NARROWING IS RECORDED RATHER THAN LEFT.** At two of the
+  eight doors that wrap — `jnp.where(c, 256, x)` and
+  `jnp.clip(x, 256, 256)`, measured in all four cells and detailed under
+  the fourth site below — the traced program is NOT what an honest
+  program writes: the constant survives as a live `256:i32[]` /
+  `256:i64[]` operand with the narrowing still standing as a
+  `convert_element_type` equation, where an honest `0` would put `0` in
+  its place. So "there is nothing to key on but sameness" is a fact about
+  the `jnp.full` spelling this entry reproduces in, not about every door.
+  **The conclusion above is not withdrawn**, because at those two doors
+  it rests on the OTHER clause already stated — the difference is inside a
+  nested `jit` sub-jaxpr, which is where every priced remedy was blind —
+  and not on sameness. What is withdrawn is sameness as the reason that
+  covers all of them. No remedy is proposed on the strength of this, none
+  was built, and none was priced.
+
   **It is jax's, it is deliberate, and it is in the shipping release —
   BUT NOT BY THE MECHANISM THIS ENTRY FIRST NAMED, AND THAT CLAIM IS
   RETRACTED HERE RATHER THAN QUIETLY SWAPPED.** What this paragraph said
