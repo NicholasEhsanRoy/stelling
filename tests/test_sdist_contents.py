@@ -68,18 +68,29 @@ re-include inside an excluded directory, POSIX character classes), and every
 disagreement found was in the smuggle direction. Only the parity test, which
 needs `uv`, catches that class.
 
-**WITHOUT `uv`, THREE TESTS SKIP, AND THIS USED TO SAY "a machine with no `uv`
+**WITHOUT `uv`, EIGHT TESTS SKIP, AND THIS USED TO SAY "a machine with no `uv`
 runs the scan alone".** It runs a good deal more than the scan and rather less
-than the module. Measured, a `PATH` with no `uv`: ``14 passed, 3 skipped``
-here, ``9 passed, 3 skipped`` at a4c16fe. What goes is everything that builds —
+than the module. Measured with `uv` off `PATH`: ``15 passed, 8 skipped`` here,
+``9 passed, 3 skipped`` at a4c16fe. What goes is everything that BUILDS, which
+is now most of what this module establishes —
 ``test_built_metadata_carries_no_relative_reference``,
-``test_the_untracked_scan_agrees_with_the_tarball``, and
-``test_an_arbitrary_new_file_does_not_ship``, which is the module's own
-headline property and the only one established by INTERVENTION. What stays is
-the model, its controls, and both dicts. Driven across the smuggling shapes
-this module carries: one of them, a committed dangling symlink, goes from
-``1 failed`` to ``14 passed, 3 skipped``; the rest stay red, because what
-catches them is model-side.
+``test_the_untracked_scan_agrees_with_the_tarball``,
+``test_an_arbitrary_new_file_does_not_ship`` (the allowlist's headline property
+and the only one established by INTERVENTION), the three wheel-member and
+wheel-install checks, and the two zero-dependency checks below. What stays is
+the model, its controls, both dicts, and the source-level pins.
+
+THE FIGURE ABOVE SAID "THREE" AND ``14 passed, 3 skipped`` UNTIL bbaa251, AND
+THE TREE HAD SIX. It was written when three tests built; the wheel tests were
+added under it and it was not moved — a stale count of skips inside the one
+paragraph whose subject is how much of this module a machine without `uv` does
+not run. Re-measured at bbaa251, before the two additions below: ``14 passed,
+6 skipped``. Nothing reads this number, which is how it drifted.
+
+Driven across the smuggling shapes this module carries: one of them, a
+committed dangling symlink, goes from ``1 failed`` to a green run with the
+build half skipped; the rest stay red, because what catches them is
+model-side.
 
 Making that skip a hard failure would be flaky in the environment where it
 matters least — a contributor's first `pytest`. Every pytest job in CI uses
@@ -723,6 +734,145 @@ def test_the_built_wheel_installs_and_every_module_resolves(
         capture_output=True, text=True, timeout=300, env=env,
     )
     assert cli.returncode == 0, f"`python -m stelling` off the wheel failed:\n{cli.stdout}\n{cli.stderr}"
+
+
+# --- what a bare `pip install stelling` PULLS IN ----------------------------
+#
+# `[project] dependencies = []` is the project's headline promise, and
+# `pyproject.toml` states it in words one line above the field: "The core must
+# stay importable in a bare environment". It was checked at SOURCE level in
+# several places and at ARTEFACT level nowhere, and the source-level checks are
+# all about module-scope IMPORTS, which is a different question from what the
+# installer resolves.
+#
+# MEASURED at bbaa251, `dependencies = []` -> `["jax>=0.10"]`, that mutation
+# alone (CPython 3.11.15, `JAX_ENABLE_X64=1`, `-p no:randomly`, figures from
+# `--junitxml`):
+#
+#   the full suite       tests=1430 failures=0 errors=0 skipped=94 — GREEN
+#   `uv build --wheel`   succeeds, and the artefact's METADATA carries
+#                        `Requires-Dist: jax>=0.10` with NO marker on it
+#
+# An unmarked `Requires-Dist` is unconditional: every `pip install stelling`
+# resolves jax and jaxlib, including in the environments the promise is for.
+# Nothing in `src/`, `tests/` or `tools/` read the field — searched at bbaa251
+# for `Requires-Dist`, `requires_dist` and the `[project]` tables; the only
+# occurrences are a comment in `stelling/_optional.py` naming where the extras
+# are declared, and two synthetic `[project]` blocks written by tests here.
+#
+# So the promise is asked of the ARTEFACT below, which is the only place it is
+# true or false, and the intervention that would break it is driven.
+
+
+def _requires_dist(wheel: pathlib.Path) -> list[str]:
+    """Every `Requires-Dist` in a built wheel's METADATA, verbatim."""
+    with zipfile.ZipFile(wheel) as z:
+        name = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+        meta = email.message_from_string(z.read(name).decode())
+    return list(meta.get_all("Requires-Dist") or [])
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_the_built_wheel_pulls_nothing_in_by_default(tmp_path: pathlib.Path) -> None:
+    """The zero-dependency promise, asked of the artefact that carries it.
+
+    Every `Requires-Dist` in the published METADATA must be CONDITIONAL — that
+    is, carry an `extra ==` marker — because an unmarked one is what a bare
+    install resolves. `dependencies = []` in the source is what produces that,
+    and reading the source is what this deliberately does not do: the field is
+    one of several inputs the backend combines, and the artefact is the answer.
+    """
+    wheel = _build_into(REPO, tmp_path / "dist")
+    declared = _requires_dist(wheel)
+    # anti-vacuity: a wheel with no `Requires-Dist` at all would satisfy an
+    # "every one of them is marked" check by having none, and that is exactly
+    # the shape of green this module keeps finding
+    assert len(declared) >= 4, (
+        "the built wheel declares almost no dependencies at all, so the check "
+        f"below has nothing to examine: {declared}"
+    )
+    assert any("extra == 'jax'" in d or 'extra == "jax"' in d for d in declared), (
+        f"the `jax` extra is gone from the built METADATA: {declared}"
+    )
+    unconditional = [d for d in declared if "extra ==" not in d]
+    assert not unconditional, (
+        "the built wheel declares dependencies that are NOT behind an extra, "
+        "so every `pip install stelling` resolves them — jax drags in jaxlib, "
+        "and the solver wheels are tens of megabytes each. `pyproject.toml` "
+        "says one line above `dependencies`: the core must stay importable in "
+        "a bare environment. That promise is about THIS list:\n  "
+        + "\n  ".join(unconditional)
+    )
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_a_core_dependency_would_be_caught_and_really_does_ship(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The intervention, on a copy, establishing both halves.
+
+    That the check above fires — and that the artefact it fires on really does
+    carry the dependency unconditionally, so what is refused is a wheel that
+    changes what a bare install resolves and not merely a line in a table.
+    """
+    staged = _tree_to_build(tmp_path)
+    cfg = staged / "pyproject.toml"
+    text = cfg.read_text(encoding="utf-8")
+    marker = "\ndependencies = []\n"
+    assert text.count(marker) == 1, (
+        "the core dependency list is not spelled as this test expects"
+    )
+    cfg.write_text(
+        text.replace(marker, '\ndependencies = ["jax>=0.10"]\n'), encoding="utf-8"
+    )
+
+    declared = _requires_dist(_build_into(staged, tmp_path / "dist"))
+    unconditional = [d for d in declared if "extra ==" not in d]
+    assert unconditional == ["jax>=0.10"], (
+        "the intervention did not put an unconditional dependency into the "
+        f"artefact, so it is not demonstrating what it claims: {declared}"
+    )
+
+
+def test_the_jax_extra_floor_is_the_lowest_series_stelling_is_tested_on() -> None:
+    """The two numbers `pyproject.toml` says must agree, compared.
+
+    The comment over the `[jax]` extra says `TESTED_JAX_SERIES` "is the claim
+    this floor must match" and "Widen this only after adding the lane, never
+    before". Nothing compared them. MEASURED at bbaa251, `jax = ["jax>=0.10"]`
+    -> `["jax>=0.5"]`, that mutation alone: the full suite came back
+    tests=1430 failures=0 errors=0 skipped=94, green — against a comment eight
+    lines long arguing that 0.5 is the wrong floor and why.
+
+    This is a COMPARISON and not a derivation, which is the distinction
+    `stelling/_optional.py` draws when it says the constant is "deliberately
+    NOT derived from the [jax] extra floor". Neither is computed from the
+    other; they are two written facts that must not disagree, and the direction
+    of repair is the one the comment gives — the floor follows the lane, never
+    the other way round.
+    """
+    from stelling._optional import TESTED_JAX_SERIES
+
+    cfg = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    extra = cfg["project"]["optional-dependencies"]["jax"]
+    m = re.fullmatch(r"jax>=(\d+)\.(\d+)", extra[0]) if len(extra) == 1 else None
+    assert m, (
+        f"the `[jax]` extra is now {extra!r}, and this reads a single "
+        "`jax>=X.Y`. Any other shape changes what a bootstrap install "
+        "resolves, and nothing else in this repository reads the field."
+    )
+    floor = (int(m.group(1)), int(m.group(2)))
+    tested = sorted(tuple(int(p) for p in s.split(".")) for s in TESTED_JAX_SERIES)
+    assert floor == tested[0], (
+        f"the `[jax]` extra floor is {floor[0]}.{floor[1]} and the lowest "
+        f"series stelling is tested against is {tested[0][0]}.{tested[0][1]}. "
+        "The comment over that extra says TESTED_JAX_SERIES is the claim the "
+        "floor must match, and that widening it is allowed only after a CI "
+        "lane exists for the new series. A floor below the tested range is a "
+        "bootstrap install that resolves a jax stelling abstains on: on 0.5.x "
+        "every contract comes back UNKNOWN. Move the FLOOR to match the lane, "
+        "not the lane to match the floor."
+    )
 
 
 # --- what hatchling ACTUALLY reads ----------------------------------------
