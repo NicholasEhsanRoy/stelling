@@ -840,10 +840,40 @@ def test_a_commit_control_names_the_revision_it_points_at_in_its_own_why():
     help: it reports FIRED for any red run carrying the guard, whatever the
     revision under it.
 
-    So the revision must appear in the sentence that argues for it. This does
-    not make a repoint impossible; it makes a SILENT one impossible, which is
-    the failure mode — the audit's mutation was one field, one value, no other
-    file touched.
+    So the revision must appear in the sentence that argues for it.
+
+    WHAT THAT IS WORTH, MEASURED — because "this makes a SILENT repoint
+    impossible" is what it said, and that is stronger than the check. It is a
+    substring test over the WHOLE ``why``, and a ``why`` that argues about a
+    tree usually names a second revision: the commit that fixed the defect, or
+    the one that added the guard whose absence IS the defect. FIVE of the seven
+    commit controls name one, and repointing ``at`` to it passes this test
+    unchanged. Driven, one repoint at a time, against every gate::
+
+        vacuous-refutation -> 463ee81   passes; per-push 8/9, DID NOT FIRE
+        conjunct           -> 717b9ca   passes; per-push 8/9, DID NOT FIRE
+        cvc5-flat          -> 8d3051a   passes; per-push 8/9, DID NOT FIRE
+        cvc5-exit-tell     -> 0ad22bb   passes; the same-tree pin below fires,
+                                        and per-push 8/9, wrong failure
+        cross-series       -> 76140c2   passes; NOTHING CI RUNS NOTICES
+
+    ``cross-series`` is the one that gets through everything. It is the only
+    control on its property, so the same-tree pin below has no sibling to hold
+    it against; it is not in the per-push ``--control`` list; and demonstrating
+    it needs ``--other-python``, which no job passes. Driven with one —
+    ``--control cross-series --other-python`` — it IS caught, ``0/1 controls
+    fired``, "passed where it must fail". That is an invocation no workflow
+    makes: ``property_check.py`` appears once under ``.github/workflows/``, in
+    the nine-name step.
+
+    So the claim this test can carry is the narrow one: it refuses a repoint to
+    any revision the control's own ``why`` has never mentioned, and the escapes
+    are exactly the revisions those ``why``s already name — the five above, and
+    ``cvc5-exit-tell`` -> ``b6e4783``, which passes this test with nothing else
+    static firing and is caught by the per-push step, 8/9, wrong failure.
+    Closing them means giving ``why`` a canonical place to name its
+    own tree rather than a substring test over the whole of it, and that is a
+    registry change, not a test change.
 
     ``at="HEAD"`` is exempt: it names no revision, and "runs against the
     working tree" is what the surrounding ``why`` already says.
