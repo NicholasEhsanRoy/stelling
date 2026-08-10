@@ -91,12 +91,33 @@ _UNCOMMENTED = "\n".join(
 )
 
 
-def _declared_floor() -> tuple[int, int]:
-    """``requires-python`` from `pyproject.toml`, as a ``(major, minor)``."""
-    m = re.search(r'^requires-python\s*=\s*"\s*>=\s*(\d+)\.(\d+)', _UNCOMMENTED, re.M)
+def _requires_python() -> str:
+    """The WHOLE ``requires-python`` value, verbatim."""
+    m = re.search(r'^requires-python\s*=\s*"([^"]*)"', _UNCOMMENTED, re.M)
     assert m, (
-        "pyproject.toml has no `requires-python = \">=X.Y\"` this can read, so "
-        "the floor the table below is written against cannot be confirmed"
+        'pyproject.toml has no `requires-python = "…"` this can read, so the '
+        "floor the table below is written against cannot be confirmed"
+    )
+    return m.group(1).strip()
+
+
+def _declared_floor() -> tuple[int, int]:
+    """``requires-python`` from `pyproject.toml`, as a ``(major, minor)``.
+
+    THE WHOLE SPECIFIER IS MATCHED, NOT ITS ``>=`` HALF. This read
+    ``r'^requires-python\\s*=\\s*"\\s*>=\\s*(\\d+)\\.(\\d+)'`` — anchored at the
+    left and unanchored at the right — so every clause after the floor was
+    invisible to it, and to everything else in this repository. The argument
+    for why that matters is in
+    :func:`test_requires_python_declares_a_floor_and_not_a_ceiling`.
+    """
+    value = _requires_python()
+    m = re.fullmatch(r">=\s*(\d+)\.(\d+)", value)
+    assert m, (
+        f'`requires-python` is "{value}", and this reads a bare ">=X.Y". Any '
+        "other clause changes what the built artefact will INSTALL ON, and "
+        "nothing else in this repository reads the field — see "
+        "test_requires_python_declares_a_floor_and_not_a_ceiling."
     )
     return (int(m.group(1)), int(m.group(2)))
 
@@ -450,6 +471,52 @@ def _weak_version_branches(text: str, floor: tuple[int, int]):
             if _too_new_for_the_floor(name):
                 bad.append((lineno, name, threshold))
     return bad
+
+
+def test_requires_python_declares_a_floor_and_not_a_ceiling():
+    """`requires-python` is the one field here that decides what INSTALLS.
+
+    THE FLOOR CHECK ABOVE READ HALF OF IT. The regex was anchored on the left
+    and open on the right, so `">=3.10"` and `">=3.10,<3.11"` were the same
+    string to it — the floor came back (3, 10) either way, every table in this
+    module agreed with it, and no other test, hook or lint in this repository
+    reads the field at all.
+
+    DRIVEN, `">=3.10"` -> `">=3.10,<3.11"`, mutation applied alone (CPython
+    3.11.15, pytest 9.1.1, JAX_ENABLE_X64=1, figures from --junitxml):
+
+        the full suite      tests=1428 failures=0 errors=0 skipped=94 — GREEN
+        `uv build --wheel`  succeeds, and the artefact carries
+                            `Requires-Python: <3.11,>=3.10` in its METADATA
+        pip, CPython 3.12.3 ERROR: Package 'stelling' requires a different
+                            Python: 3.12.3 not in '<3.11,>=3.10'
+
+    So the whole suite passes, the wheel builds, and the wheel cannot be
+    installed on the interpreter this project is developed on. That is the
+    shape worth naming: the defect is not in anything that runs, it is in what
+    the run PRODUCES, and a green suite is exactly what it looks like.
+
+    NOT A GENERAL PEP 440 PARSER, and said so rather than implied. This
+    demands the one form the project actually declares and rejects everything
+    else, including forms that would be harmless (`>= 3.10`, with a space).
+    A checker that understood the grammar would have to decide which
+    combinations are safe, which is a bigger claim than this project needs;
+    demanding the exact shape is the smaller one, and it fails loudly on
+    anything it was not told about rather than passing it.
+    """
+    value = _requires_python()
+    assert re.fullmatch(r">=\s*\d+\.\d+", value), (
+        f'`requires-python` is now "{value}". This project declares a FLOOR '
+        "and no ceiling. An upper bound here is not a preference — it is "
+        "baked into the built wheel's `Requires-Python`, where pip enforces "
+        'it: `">=3.10,<3.11"` builds cleanly, keeps the whole suite green, '
+        "and produces an artefact that refuses to install on CPython 3.12. "
+        "Nothing else in this repository reads this field."
+    )
+    # …and the floor reader agrees with the string it was read from, so the
+    # two cannot drift into disagreeing about what the floor is
+    floor = _declared_floor()
+    assert value.replace(" ", "") == f">={floor[0]}.{floor[1]}", (value, floor)
 
 
 def test_a_version_branch_must_exclude_the_floor_it_guards_against():
