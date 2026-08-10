@@ -432,8 +432,10 @@ def test_two_controls_on_one_property_do_not_share_a_guard():
     guard ``cvc5-flat`` already carries — left every gate in the repository
     green, and ``tools/property_check.py`` still said ``1/1 controls fired``.
 
-    AND NOTHING THAT EXECUTES PROTECTS IT NOW EITHER. Adding ``cvc5-exit-tell``
-    and ``cvc5-phantom-model`` to the per-push ``--control`` list was written up
+    AND NOTHING THAT EXECUTES PROTECTS IT AGAINST ``[flat]`` NOW EITHER — the
+    ``[stateful]`` spelling below is the one a run does catch. Adding
+    ``cvc5-exit-tell`` and ``cvc5-phantom-model`` to the per-push ``--control``
+    list was written up
     as closing the other half — "it now fails two assertions in
     ``test_suite_disclosure.py`` AND breaks a job that runs the control".
     Re-measured with the guard broadened to ``[flat]`` and the two controls in
