@@ -781,6 +781,17 @@ def test_the_built_wheel_pulls_nothing_in_by_default(tmp_path: pathlib.Path) -> 
     install resolves. `dependencies = []` in the source is what produces that,
     and reading the source is what this deliberately does not do: the field is
     one of several inputs the backend combines, and the artefact is the answer.
+
+    KNOWN OPEN, and the check below is a SUBSTRING test rather than a marker
+    evaluation. `"extra == …" in d` is satisfied by a marker that mentions an
+    extra without being conditional on one:
+    `jax>=0.10; extra == 'jax' or python_version >= '3'` passes this test, and
+    `packaging.markers.Marker(...).evaluate({"extra": ""})` on the shipped
+    METADATA line returns True — so a bare `pip install stelling` resolves jax
+    while this stays green. Closing it means evaluating the marker with
+    `extra=""`, or demanding the marker be exactly `extra == '…'`; both are a
+    decision about how much marker grammar this project wants to accept, so
+    neither is taken here.
     """
     wheel = _build_into(REPO, tmp_path / "dist")
     declared = _requires_dist(wheel)

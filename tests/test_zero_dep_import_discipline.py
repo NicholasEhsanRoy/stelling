@@ -739,7 +739,7 @@ def test_no_version_branch_puts_a_too_new_import_where_the_floor_reaches_it():
     floor by definition, and the fallback the remedy message asks for lives
     there. Both undo the original defect while every other test in this file
     stays green. The reach limit is in the note above; the spellings are in
-    `_REACHED_ON_THE_FLOOR`.
+    `_SPELLINGS`.
     """
     floor = _declared_floor()
     bad = []
@@ -833,6 +833,18 @@ _MISSED_THOUGH_REACHED = (
      '    tomllib = importlib.import_module("tom" + "llib")\n'),
     ("true only strictly inside the floor series",
      "if (3, 10, 5) <= sys.version_info < (3, 10, 9):\n    import tomllib\n"),
+    # A CONSTRUCT, not a condition. `_version_branches` enumerates `ast.If` and
+    # `ast.IfExp` only, so this is not a version branch at all — and the import
+    # is indented, so the column-0 scan does not see it either. `_floor_value`
+    # decides `sys.version_info[:2]` correctly; it is never handed this subject.
+    # MEASURED, driven into this file: 3.11.15 full suite green, 3.10.20
+    # `tests=48 errors=1 skipped=47`, `Interrupted: 1 error during collection`
+    # — the signature the original defect had. `while` is the same shape.
+    # "does not have to be extended once per spelling" is true of CONDITIONS
+    # and not of constructs.
+    ("a match statement on sys.version_info",
+     "match sys.version_info[:2]:\n    case (3, 10):\n        import tomllib\n"
+     "    case _:\n        import tomllib\n"),
 )
 
 
