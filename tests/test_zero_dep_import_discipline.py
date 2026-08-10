@@ -56,6 +56,7 @@ the text read below still catches it.
 from __future__ import annotations
 
 import ast
+import operator
 import pathlib
 import re
 import sys
@@ -405,10 +406,64 @@ def test_the_floor_checker_can_actually_see_an_offender():
 # every CI job runs is green about it.
 #
 # WHAT THIS CHECKS, and it is a different question from the one above. Not
-# "is this import indented" but "does the branch that guards it actually
-# EXCLUDE the floor". A `>= (a, b)` whose threshold is at or below the
-# declared floor is taken ON the floor, so the import inside it runs there,
-# so the indent bought nothing.
+# "is this import indented", nor even "does the branch's THRESHOLD exclude the
+# floor", but: does a floor interpreter REACH this import. Those are not the
+# same question, and the difference was a live hole in the first version of
+# this guard, which is worth spelling out because it is the same shape as the
+# defect it was written for.
+#
+# THAT FIRST VERSION COULD NOT SEE THE FALLBACK ITS OWN REMEDY MESSAGE ASKS
+# FOR. It matched `sys.version_info >= (a, b)` and walked `node.body`. The main
+# scan's message says "put the import behind a `sys.version_info` branch …
+# **with a fallback, and declare the fallback**" — and the fallback goes in the
+# `else`, which is the one side a 3.10 interpreter is CERTAIN to run and the
+# one side the guard never looked at. So the invited remedy, written wrong,
+# passed. Driven at 103f3b6 — `else: import tomli as tomllib` ->
+# `else: import tomllib` in `tests/test_sdist_contents.py`, line-neutral, one
+# mutation alone, `JAX_ENABLE_X64=1`, figures from `--junitxml`:
+#
+#   CPython 3.11.15 (above the floor)  tests=1430 failures=0 errors=0
+#                                      skipped=94 — FULLY GREEN
+#   CPython 3.10.20 (the floor)        rc=2, tests=48 failures=0 errors=1
+#                                      skipped=47, ModuleNotFoundError: No
+#                                      module named 'tomllib', "Interrupted: 1
+#                                      error during collection"
+#
+# — the same junit signature as the BEFORE row above, i.e. the original defect
+# restored, through the door the remedy message opens. Eleven other spellings
+# of the same condition were probed at the same commit and nine of them were
+# missed as well.
+#
+# So the condition is now DECIDED rather than pattern-matched: `_floor_value`
+# evaluates it with `sys.version_info` bound to the floor, `_FloorReach` walks
+# only the side that interpreter takes, and `else` is a side.
+#
+# THE REACH LIMIT, measured and left open, because "the condition is evaluated"
+# reads like completeness and is not. Each of these is a spelling a floor
+# interpreter DOES reach and this guard does NOT see; each is a row in
+# `_MISSED_THOUGH_REACHED`, so the list cannot rot silently:
+#
+#   PY311 = sys.version_info >= (3, 11)   the condition bound to a NAME. The
+#   if PY311: … else: import tomllib     branch's test carries no
+#                                        `sys.version_info`, so it is not a
+#                                        version branch to `_version_branches`
+#                                        at all. Following it would mean
+#                                        constant-propagating module scope.
+#   import_module("tom" + "llib")        a COMPUTED module name. Only a literal
+#                                        first argument is read; anything else
+#                                        is not knowable statically.
+#   (3, 10, 5) <= sys.version_info       true only STRICTLY INSIDE the floor
+#           < (3, 10, 9)                 series. The floor is a range of
+#                                        interpreters and only its two ends are
+#                                        evaluated (`_FLOOR_MICROS`), so a
+#                                        window between them is invisible.
+#
+# And two limits that are about the whole module rather than this guard: it is
+# a STATIC read, so an import reached through `eval`/`exec` is out of reach by
+# construction; and a dynamic import OUTSIDE any version branch — a column-0
+# `__import__("tomllib")` — is seen by neither this guard (no version branch)
+# nor the main scan (its regex is `^(import|from)`). That one is a gap in the
+# scan above, not here, and is not closed.
 #
 # ON THE FLOOR ITSELF THIS IS INERT, for the same reason the scan above is and
 # with the same argument: `_too_new_for_the_floor` asks the RUNNING
@@ -418,67 +473,214 @@ def test_the_floor_checker_can_actually_see_an_offender():
 # needed covering is the other one, where the suite is green and silent.
 
 
-def _version_gate(test) -> tuple[int, ...] | None:
-    """`(a, b)` if `test` is `sys.version_info >= (a, b)`, else None.
+_UNDECIDED = object()
 
-    `sys.version_info[:2] >= (a, b)` counts too — it is the same test spelled
-    with a slice, and it is the spelling used elsewhere in this very file.
+# `sys.version_info` on the floor is not ONE tuple, it is the whole `X.Y.*`
+# series, and a condition can differ across it: `>= (3, 10, 5)` is False on
+# 3.10.0 and True on 3.10.20, and the second of those reaches the import. Both
+# ends are evaluated and the findings unioned. A condition true only STRICTLY
+# BETWEEN them is not seen; it is in the reach note below.
+_FLOOR_MICROS = (0, 9999)
+_VERSION_FIELDS = ("major", "minor", "micro", "releaselevel", "serial")
+_COMPARISONS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+}
+
+
+def _is_version_info(node) -> bool:
+    """`sys.version_info`, spelled as an attribute of `sys`."""
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "version_info"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "sys"
+    )
+
+
+def _floor_value(node, version):
+    """`node`'s value with `sys.version_info` bound to `version`, or `_UNDECIDED`.
+
+    THIS REPLACED A MATCHER FOR ONE SPELLING. Its predecessor, `_version_gate`,
+    recognised `sys.version_info >= (a, b)` and its `[:2]` variant and nothing
+    else — so `sys.version_info.minor >= 10`, `(3, 10) <= sys.version_info` and
+    `not sys.version_info < (3, 10)` are the same test written three other
+    ways, all three of them invisible to it, and each one restores the defect.
+    Deciding the condition by EVALUATING it is the same size of code and does
+    not have to be extended once per spelling.
+
+    Deliberately tiny: constants, tuples of them, `sys.version_info` and the
+    ways a piece of it is spelled (a subscript, `[:2]` or `[0]`; the named
+    fields), the six order comparisons, `and`/`or`, and `not`. Anything else is
+    `_UNDECIDED`, and an `_UNDECIDED` anywhere in a condition makes the whole
+    condition undecided — which the reach walk treats as "either side may run",
+    the conservative direction.
     """
-    if not isinstance(test, ast.Compare) or len(test.ops) != 1:
-        return None
-    if not isinstance(test.ops[0], ast.GtE):
-        return None
-    left = test.left
-    if isinstance(left, ast.Subscript):
-        left = left.value
-    if not (
-        isinstance(left, ast.Attribute)
-        and left.attr == "version_info"
-        and isinstance(left.value, ast.Name)
-        and left.value.id == "sys"
-    ):
-        return None
-    right = test.comparators[0]
-    if not isinstance(right, ast.Tuple) or not right.elts:
-        return None
-    parts = []
-    for element in right.elts:
-        if not isinstance(element, ast.Constant) or not isinstance(element.value, int):
-            return None
-        parts.append(element.value)
-    return tuple(parts)
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Tuple):
+        parts = [_floor_value(e, version) for e in node.elts]
+        return _UNDECIDED if any(p is _UNDECIDED for p in parts) else tuple(parts)
+    if _is_version_info(node):
+        return version
+    if isinstance(node, ast.Attribute) and _is_version_info(node.value):
+        if node.attr not in _VERSION_FIELDS:
+            return _UNDECIDED
+        return version[_VERSION_FIELDS.index(node.attr)]
+    if isinstance(node, ast.Subscript) and _is_version_info(node.value):
+        return _version_slice(version, node.slice)
+    if isinstance(node, ast.Compare):
+        left = _floor_value(node.left, version)
+        verdict = True
+        for op, comparator in zip(node.ops, node.comparators):
+            right = _floor_value(comparator, version)
+            compare = _COMPARISONS.get(type(op))
+            if compare is None or left is _UNDECIDED or right is _UNDECIDED:
+                return _UNDECIDED
+            try:
+                verdict = verdict and compare(left, right)
+            except TypeError:
+                return _UNDECIDED
+            left = right
+        return verdict
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        inner = _floor_value(node.operand, version)
+        return _UNDECIDED if inner is _UNDECIDED else (not inner)
+    if isinstance(node, ast.BoolOp):
+        values = [_floor_value(v, version) for v in node.values]
+        if any(v is _UNDECIDED for v in values):
+            return _UNDECIDED
+        return all(values) if isinstance(node.op, ast.And) else any(values)
+    return _UNDECIDED
 
 
-def _imports_under(statements) -> list[tuple[str, int]]:
-    """Every module name imported anywhere inside `statements`, with its line."""
-    out = []
-    for statement in statements:
-        for node in ast.walk(statement):
-            if isinstance(node, ast.Import):
-                out.extend((a.name.split(".")[0], node.lineno) for a in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                out.append((node.module.split(".")[0], node.lineno))
-    return out
+def _version_slice(version, node):
+    """`sys.version_info[...]` on `version`, or `_UNDECIDED`."""
+    if isinstance(node, ast.Slice):
+        bounds = []
+        for part in (node.lower, node.upper, node.step):
+            if part is None:
+                bounds.append(None)
+                continue
+            value = _floor_value(part, version)
+            if not isinstance(value, int) or isinstance(value, bool):
+                return _UNDECIDED
+            bounds.append(value)
+        return version[slice(*bounds)]
+    index = _floor_value(node, version)
+    if not isinstance(index, int) or isinstance(index, bool):
+        return _UNDECIDED
+    try:
+        return version[index]
+    except IndexError:
+        return _UNDECIDED
+
+
+def _decided_on(test, version):
+    """True/False if `test` decides on `version`, None if this cannot tell."""
+    value = _floor_value(test, version)
+    return None if value is _UNDECIDED else bool(value)
+
+
+def _dynamic_import_name(node) -> str | None:
+    """The module `__import__("x")` / `importlib.import_module("x")` names.
+
+    Neither binds an `ast.Import` node, and neither matches the column-0 regex
+    the main scan uses either. Only a literal first argument is read; a
+    computed one is not knowable here and is in the reach note.
+    """
+    func = node.func
+    dynamic = (isinstance(func, ast.Name) and func.id == "__import__") or (
+        isinstance(func, ast.Attribute) and func.attr == "import_module"
+    )
+    if not dynamic or not node.args:
+        return None
+    first = node.args[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value
+    return None
+
+
+class _FloorReach(ast.NodeVisitor):
+    """Every import REACHED when this source runs on one floor interpreter.
+
+    THE `else` IS THE HALF THAT WAS MISSING. The predecessor walked `node.body`
+    and never `node.orelse`, so the fallback the main scan's own remedy message
+    tells you to write — "put the import behind a `sys.version_info` branch …
+    with a fallback, and declare the fallback" — was the one place the guard
+    could not look, and on the floor it is the only side that RUNS.
+
+    A branch this can decide contributes only the side that interpreter takes;
+    one it cannot decide contributes both, which is the conservative direction:
+    a false positive here is a loud failure with a line number on it, a false
+    negative is the defect this exists to catch.
+    """
+
+    def __init__(self, version):
+        self.version = version
+        self.found: list[tuple[str, int]] = []
+
+    def visit_If(self, node):
+        self._branch(node.test, node.body, node.orelse)
+
+    def visit_IfExp(self, node):
+        # `x = __import__("tomllib") if sys.version_info >= (3, 10) else None`
+        # is a version branch that is not an `if` STATEMENT at all
+        self._branch(node.test, [node.body], [node.orelse])
+
+    def _branch(self, test, body, orelse):
+        taken = _decided_on(test, self.version)
+        if taken is not False:
+            for child in body:
+                self.visit(child)
+        if taken is not True:
+            for child in orelse:
+                self.visit(child)
+
+    def visit_Import(self, node):
+        self.found.extend((a.name.split(".")[0], node.lineno) for a in node.names)
+
+    def visit_ImportFrom(self, node):
+        if node.level == 0 and node.module:
+            self.found.append((node.module.split(".")[0], node.lineno))
+
+    def visit_Call(self, node):
+        name = _dynamic_import_name(node)
+        if name is not None:
+            self.found.append((name.split(".")[0], node.lineno))
+        self.generic_visit(node)
+
+
+def _version_branches(tree):
+    """Every `if` / conditional expression whose test reads `sys.version_info`."""
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.If, ast.IfExp))
+        and any(_is_version_info(child) for child in ast.walk(node.test))
+    ]
 
 
 def _weak_version_branches(text: str, floor: tuple[int, int]):
-    """`(lineno, name, threshold)` for each too-new import under a branch that
-    does not exclude `floor`."""
+    """`(lineno, name, condition)` for each too-new import a floor interpreter
+    REACHES through a `sys.version_info` branch."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return []
-    bad = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.If):
-            continue
-        threshold = _version_gate(node.test)
-        if threshold is None or threshold[:2] > floor:
-            continue
-        for name, lineno in _imports_under(node.body):
-            if _too_new_for_the_floor(name):
-                bad.append((lineno, name, threshold))
-    return bad
+    bad: dict[tuple[int, str], str] = {}
+    for node in _version_branches(tree):
+        for micro in _FLOOR_MICROS:
+            reach = _FloorReach((floor[0], floor[1], micro, "final", 0))
+            reach.visit(node)
+            for name, lineno in reach.found:
+                if _too_new_for_the_floor(name):
+                    bad[(lineno, name)] = ast.unparse(node.test)
+    return [(lineno, name, cond) for (lineno, name), cond in sorted(bad.items())]
 
 
 def test_requires_python_declares_a_floor_and_not_a_ceiling():
@@ -527,77 +729,160 @@ def test_requires_python_declares_a_floor_and_not_a_ceiling():
     assert value.replace(" ", "") == f">={floor[0]}.{floor[1]}", (value, floor)
 
 
-def test_a_version_branch_must_exclude_the_floor_it_guards_against():
-    """The CONDITION of the version branch, which nothing read.
+def test_no_version_branch_puts_a_too_new_import_where_the_floor_reaches_it():
+    """The side of the branch the floor RUNS, which nothing read.
 
     A `sys.version_info` branch is the remedy this module's main check tells
     you to apply, and that check accepts it on the strength of the indentation
-    it produces. The threshold is the part that does the work, and lowering it
-    to or below the declared floor puts the too-new import back on the floor
-    while every other test in this file stays green.
+    it produces. What does the work is which side of it a floor interpreter
+    reaches — and that is not only the threshold: the `else` is reached on the
+    floor by definition, and the fallback the remedy message asks for lives
+    there. Both undo the original defect while every other test in this file
+    stays green. The reach limit is in the note above; the spellings are in
+    `_REACHED_ON_THE_FLOOR`.
     """
     floor = _declared_floor()
     bad = []
     for path in _shipped_python_files():
-        for lineno, name, threshold in _weak_version_branches(
+        for lineno, name, condition in _weak_version_branches(
             path.read_text(encoding="utf-8"), floor
         ):
             bad.append(
                 f"  {path.relative_to(REPO).as_posix()}:{lineno}  imports "
-                f"`{name}` under `sys.version_info >= "
-                f"{'.'.join(str(p) for p in threshold)}`, which is TAKEN on the "
-                f"declared floor {floor[0]}.{floor[1]}"
+                f"`{name}` on a side of `{condition}` that CPython "
+                f"{floor[0]}.{floor[1]} reaches"
             )
     assert not bad, (
-        "a version branch guards a too-new import with a threshold that does "
-        "not exclude the floor, so the branch is taken there and the import "
-        "fails — a COLLECTION error in a test module, which is exit 2 and zero "
-        "tests for anyone on the floor. The indentation is not the guard; the "
-        "threshold is:\n" + "\n".join(bad)
+        "a `sys.version_info` branch puts a too-new import on the side the "
+        "declared floor actually runs, so the import fails there — a "
+        "COLLECTION error in a test module, which is exit 2 and zero tests "
+        "for anyone on the floor. The indentation is not the guard, and "
+        "neither is the `if` side alone; an `else` runs ON the floor by "
+        "definition:\n" + "\n".join(bad)
     )
 
 
-def test_the_version_branch_check_can_actually_see_a_lowered_threshold():
-    """Anti-vacuity, driven on the exact edit that restored the original defect.
 
-    Three ways this could be green while blind — a gate matcher that recognises
-    no branch, an import walker that finds no import, a comparison that never
-    fires — and all three are driven here against source text rather than
-    argued, on both sides of the boundary.
+# THE SPELLINGS, and this table IS the reach claim. Each row is source text and
+# whether THIS guard must flag it. Which rows actually break the floor was
+# measured by EXECUTING each snippet on uv-managed CPython 3.10.20 (with
+# `tomli` installed, so the shipped form's fallback really resolves) rather
+# than read off the page: 14 of these 17 raise `ModuleNotFoundError: No module
+# named 'tomllib'` there. Thirteen of the 14 are the rows marked `True`. The
+# fourteenth is the bare column-0 `import tomllib`, marked `False` because it
+# is `test_no_module_imports_a_stdlib_module_the_floor_lacks`'s business and
+# not this one's — that is the only row where "breaks the floor" and "this
+# guard must flag it" come apart, and it is here to keep the division visible.
+_SPELLINGS = (
+    # (label, source, must this guard flag it)
+    ("the shipped form", "if sys.version_info >= (3, 11):\n    import tomllib\n"
+     "else:\n    import tomli as tomllib\n", False),
+    ("lowered threshold",
+     "if sys.version_info >= (3, 10):\n    import tomllib\n", True),
+    ("lowered threshold, sliced",
+     "if sys.version_info[:2] >= (3, 10):\n    import tomllib\n", True),
+    ("the else-fallback the remedy message invites",
+     "if sys.version_info >= (3, 11):\n    import tomllib\n"
+     "else:\n    import tomllib\n", True),
+    ("the else-fallback, `from` form",
+     "if sys.version_info >= (3, 11):\n    from tomllib import loads\n"
+     "else:\n    from tomllib import loads\n", True),
+    ("inverted, with the import in the else",
+     "if sys.version_info < (3, 10):\n    raise SystemExit\n"
+     "else:\n    import tomllib\n", True),
+    ("the `.minor` field",
+     "if sys.version_info.minor >= 10:\n    import tomllib\n", True),
+    ("operands reversed",
+     "if (3, 10) <= sys.version_info:\n    import tomllib\n", True),
+    ("negated",
+     "if not sys.version_info < (3, 10):\n    import tomllib\n", True),
+    ("a `(major, minor)` pair",
+     "if (sys.version_info.major, sys.version_info.minor) >= (3, 10):\n"
+     "    import tomllib\n", True),
+    ("an elif landing on the floor",
+     "if sys.version_info >= (3, 12):\n    import tomllib\n"
+     "elif sys.version_info >= (3, 10):\n    import tomllib\n", True),
+    ("a micro threshold inside the floor series",
+     "if sys.version_info >= (3, 10, 5):\n    import tomllib\n", True),
+    ("a conditional expression and `__import__`",
+     'tomllib = __import__("tomllib") if sys.version_info >= (3, 10) else None\n',
+     True),
+    ("`importlib.import_module` in the else",
+     "if sys.version_info >= (3, 11):\n    import tomllib\n"
+     'else:\n    tomllib = importlib.import_module("tomllib")\n', True),
+    ("a threshold that really does exclude the floor",
+     "if sys.version_info >= (3, 11):\n    import tomllib\n", False),
+    ("no version branch at all — the other scan's business",
+     "import tomllib\n", False),
+    ("a version branch with nothing too-new in it",
+     "if sys.version_info >= (3, 10):\n    import pathlib\n", False),
+)
+
+# …and the ones it still does not see, which is the reach note made executable.
+# A row here going red is good news that needs the note above rewritten.
+# The first two were executed on 3.10.20 and both raise there. The third does
+# NOT raise on 3.10.20 — its window closed at 3.10.9 — and is reached on
+# 3.10.5 through 3.10.8, which `requires-python = ">=3.10"` permits; that is
+# precisely why two endpoints are not a proof.
+_MISSED_THOUGH_REACHED = (
+    ("the condition bound to a name first",
+     "PY311 = sys.version_info >= (3, 11)\nif PY311:\n    import tomllib\n"
+     "else:\n    import tomllib\n"),
+    ("a computed module name",
+     'if sys.version_info >= (3, 11):\n    import tomllib\nelse:\n'
+     '    tomllib = importlib.import_module("tom" + "llib")\n'),
+    ("true only strictly inside the floor series",
+     "if (3, 10, 5) <= sys.version_info < (3, 10, 9):\n    import tomllib\n"),
+)
+
+
+def test_the_version_branch_check_sees_every_spelling_it_claims_to():
+    """Anti-vacuity, driven on the whole table rather than on one edit.
+
+    Its predecessor drove ONE spelling — `>= (3, 11)` lowered to `>= (3, 10)` —
+    and the guard under it recognised exactly that one. Eleven other ways to
+    write the same condition, and the `else` the remedy message asks for, all
+    went through it green while breaking the floor. So the table above is the
+    unit of the claim, and the four ways this could be green while blind — a
+    condition evaluator that decides nothing, an import walk that finds no
+    import, a reach walk that never looks at the side the floor takes, a
+    comparison against the wrong version — are all driven by it.
     """
     floor = (3, 10)
-    shipped = "if sys.version_info >= (3, 11):\n    import tomllib\n"
-    lowered = "if sys.version_info >= (3, 10):\n    import tomllib\n"
-
-    # the matcher recognises the branch at all, in both spellings used here
-    assert _version_gate(ast.parse(shipped).body[0].test) == (3, 11)
-    assert _version_gate(
-        ast.parse("if sys.version_info[:2] >= (3, 11):\n    pass\n").body[0].test
-    ) == (3, 11)
-    assert _version_gate(ast.parse("if x >= (3, 11):\n    pass\n").body[0].test) is None
-
-    # the walker finds the import under the branch, in each form
-    assert _imports_under(ast.parse(shipped).body[0].body) == [("tomllib", 2)]
-    assert _imports_under(
-        ast.parse("if a:\n    from tomllib import loads\n").body[0].body
-    ) == [("tomllib", 2)]
-
-    # …and the verdict, which is inert on the floor for the reason the block
-    # above gives, so both directions are asserted against that fact
+    # inert ON the floor, for the reason `_too_new_for_the_floor` gives: there
+    # `tomllib` is not stdlib either, and the interpreter's own ImportError is
+    # what does the checking. So every positive row is asserted against that.
     above_the_floor = sys.version_info[:2] > _FLOOR_MEASURED_ON
-    assert bool(_weak_version_branches(lowered, floor)) is above_the_floor, (
-        "above the floor, `>= (3, 10)` guarding `import tomllib` must be seen; "
-        "ON the floor `tomllib` is not stdlib, so it does not read as too-new "
-        "and the interpreter's own ImportError is what does the checking"
-    )
-    assert not _weak_version_branches(shipped, floor), (
-        "the threshold that SHIPS must not be flagged — `>= (3, 11)` excludes "
-        "the 3.10 floor, which is the whole point of it"
-    )
-    # a branch with no too-new import in it is not this check's business
-    assert not _weak_version_branches(
-        "if sys.version_info >= (3, 10):\n    import pathlib\n", floor
-    )
+
+    for label, source, must_flag in _SPELLINGS:
+        seen = bool(_weak_version_branches(source, floor))
+        assert seen is (must_flag and above_the_floor), (
+            f"{label}: this guard must "
+            f"{'flag' if must_flag else 'leave alone'} this, and it "
+            f"{'flagged' if seen else 'did not flag'} it. Source:\n{source}"
+        )
+
+    for label, source in _MISSED_THOUGH_REACHED:
+        assert not _weak_version_branches(source, floor), (
+            f"{label}: the guard now SEES this, which the reach note above "
+            "says it does not. That note is the claim; move this row up into "
+            f"`_SPELLINGS` and rewrite the note. Source:\n{source}"
+        )
+
+    # the pieces, so a whole-table failure can be localised
+    assert _decided_on(
+        ast.parse("sys.version_info >= (3, 11)", mode="eval").body, (3, 10, 20)
+    ) is False
+    assert _decided_on(
+        ast.parse("sys.version_info.minor >= 10", mode="eval").body, (3, 10, 20)
+    ) is True
+    assert _decided_on(ast.parse("x >= (3, 11)", mode="eval").body, (3, 10, 20)) is None
+    assert _floor_value(
+        ast.parse("sys.version_info[:2]", mode="eval").body, (3, 10, 20)
+    ) == (3, 10)
+    reach = _FloorReach((3, 10, 20))
+    reach.visit(ast.parse("if sys.version_info >= (3, 11):\n    import tomllib\n"))
+    assert reach.found == [], reach.found
 
 
 def test_the_shipped_sweep_covers_every_allowlisted_root_with_python_in_it():
