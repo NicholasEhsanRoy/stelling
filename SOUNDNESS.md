@@ -4819,7 +4819,7 @@ verdicts:
   **WHAT IT WOULD COST JAX TO FIX THIS WAS MEASURED, AND THAT BELONGS ON
   THIS PAGE BECAUSE IT IS WHAT DECIDES HOW LONG A READER LIVES WITH IT.**
   It is also the honest answer to "why has nobody fixed it". Four
-  candidate fixes, one per site, each applied alone to jax's source and
+  candidate fixes, each applied alone to jax's source and
   run against jax's own test suite: jax at tag `jax-v0.11.0`
   (`a1521744`) as source against the installed jaxlib 0.11.0 wheel,
   CPython 3.12.3, NumPy 2.5.2, two tranches of 28 and 36 test modules,
@@ -4867,6 +4867,20 @@ verdicts:
   row "the two `.astype` sites"; read from its patch script, only one of
   the two is an `.astype` — the other is
   `out = np.asarray(object, dtype=dtype)`. The sites are as given here.)*
+
+  ***"One per site" was wrong and is dropped from the sentence above.***
+  Read from the receipts' `patch.py`, which is what was actually applied:
+  rows 1 and 2 patch the **same** site — both anchor on the same two
+  lines at `array_constructors.py:249-250`, one replacing the
+  `isinstance` tuple and the other adding an `elif` beside it — and row 4
+  patches **two** sites in one patch, `lax.py:1726` together with
+  `array_constructors.py:314`, as its own cell already says. So the rows
+  are not in one-to-one correspondence with the sites in either
+  direction, and no count of sites can be read off them. The entry
+  self-corrects a sentence later to "the four candidate fixes **priced**
+  there", which is the accurate word for a second reason: of the five
+  rows, four carry suite figures and row 1 carries none — it was proved
+  inert and given no run.
 
   **THE LAST ROW IS NOT OF 23,705, AND THIS TABLE'S HEADER SAID EVERY ROW
   WAS.** Recounted here from the archived XML: tranche 1 is **16,798**
