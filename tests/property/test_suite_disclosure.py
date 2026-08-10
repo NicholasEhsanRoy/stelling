@@ -361,3 +361,76 @@ def test_every_control_says_what_it_is_and_which_kind_of_evidence_it_is(control)
             f"{control.name} is registered as a commit control but carries a "
             f"mutation, which makes the revision it names misleading"
         )
+
+
+def test_two_controls_on_one_property_do_not_share_a_guard():
+    """Clause-specificity, which is the only thing that makes them two controls.
+
+    Several controls may name the SAME property — that is how a conjunctive
+    oracle gets a control per conjunct. What makes them separate evidence is
+    that each ``expect_message`` picks out its own conjunct's failure. If one
+    control's guard contains another's, the narrower control fires on the
+    broader one's failure and demonstrates nothing of its own.
+
+    Nothing that EXECUTES protected this before: broadening
+    ``cvc5-exit-tell``'s clause-(1) guard back to the leg tag ``[flat]`` — the
+    guard ``cvc5-flat`` already carries — left every gate in the repository
+    green, and ``tools/property_check.py`` still said ``1/1 controls fired``.
+    """
+    by_property: dict[str, list] = {}
+    for c in pc.CONTROLS:
+        by_property.setdefault(c.nodeid, []).append(c)
+    shared = []
+    for nodeid, controls in sorted(by_property.items()):
+        for a in controls:
+            for b in controls:
+                if a.name < b.name and (
+                    a.expect_message in b.expect_message
+                    or b.expect_message in a.expect_message
+                ):
+                    shared.append(
+                        f"{a.name} ({a.expect_message!r}) and {b.name} "
+                        f"({b.expect_message!r}) both name {nodeid}"
+                    )
+    assert not shared, (
+        "these controls name the same property with guards one of which "
+        "contains the other, so the narrower one fires on the broader one's "
+        "failure and demonstrates nothing of its own:\n  " + "\n  ".join(shared)
+    )
+
+
+def test_a_clause_specific_cvc5_guard_is_written_once_in_the_property():
+    """One count, two failure modes, and both have happened on this branch.
+
+    A guard registered for one clause of ``_judge``'s three-clause oracle
+    should be the sentence that clause's own ``return`` builds — so it occurs
+    in ``test_cvc5_protocol.py`` exactly once.
+
+    * **Zero** means the guard is not that sentence. Broadening
+      ``cvc5-exit-tell`` back to the leg tag ``[flat]`` gives zero, because the
+      leg tag is built as ``[{where}]`` and is stamped on all three messages.
+    * **Two or more** means the sentence is ALSO written somewhere pytest
+      echoes. A long traceback prints the entire source of every function on
+      it, docstring included, so a clause sentence quoted in ``_judge``'s
+      docstring lands in the captured output of any crash inside ``_judge``.
+      Measured, with the two sentences quoted there as they were: one
+      line-neutral defect in ``solvers.py`` that raises ``TypeError`` before
+      the oracle is evaluated scored ``3/3 controls fired`` against three probe
+      controls carrying the three shipped guard strings.
+      ``tools/property_check.py`` now matches the failure pytest RECORDS rather
+      than everything it echoes; this is the other half, and it fires on the
+      push that re-adds the quote rather than on the day somebody plants a
+      crash.
+    """
+    src = (HERE / "test_cvc5_protocol.py").read_text()
+    bad = []
+    for name in ("cvc5-exit-tell", "cvc5-phantom-model"):
+        control = pc.by_name(name)
+        n = src.count(control.expect_message)
+        if n != 1:
+            bad.append(f"{name}: {control.expect_message!r} occurs {n} times")
+    assert not bad, (
+        "each of these guards must occur EXACTLY ONCE in "
+        "tests/property/test_cvc5_protocol.py, in the `return` that builds its "
+        "clause's failure message:\n  " + "\n  ".join(bad)
+    )

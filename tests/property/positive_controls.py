@@ -70,6 +70,13 @@ class Control:
     # string, so a control carrying it checks only ``returncode != 0`` and
     # reports a collection error, an import failure or a typo'd nodeid as
     # FIRED. The default stays for the dataclass's sake and is refused.
+    #
+    # MATCHED AGAINST THE FAILURE pytest RECORDS, not against everything the
+    # run echoes: ``property_check.py`` reads the ``message`` attributes out of
+    # ``--junitxml``. A traceback prints the whole source of every function on
+    # it, docstring included, so a guard string is present in the OUTPUT of any
+    # crash inside the property's own helpers even when the oracle never ran.
+    # See ``tools/property_check.py``'s module docstring for the measurement.
     expect_message: str = ""
     scale: float = 1.0  # budget multiplier, where the search needs more room
 

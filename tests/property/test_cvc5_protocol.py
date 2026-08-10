@@ -352,12 +352,25 @@ def _judge(res, stdout, full, rc, census, *, where):
     says why: a registry entry does not have to name a commit, and four of its
     entries were already MUTANTS for exactly this reason. Deleting the ``or
     proc.returncode != 0`` half of the guard is that mutation, one place, this
-    leg, ci profile::
+    leg, ci profile: the ``rc != 0`` branch below fires on
+    ``'version 1.3.4\\nanswer sat\\nend 0\\n'`` at exit 1, in 0.5 s, and the
+    unmutated tip is green.
 
-        ACCEPTED A NONZERO-EXIT RUN (exit 1) as 'sat' [flat]
-          stdout: 'version 1.3.4\\nanswer sat\\nend 0\\n'
-
-    in 0.5 s, and green against the unmutated tip.
+    THE THREE FAILURE MESSAGES ARE DELIBERATELY NOT QUOTED IN THIS DOCSTRING.
+    pytest's long traceback prints a frame's ENTIRE function source, docstring
+    included, from ``def`` down to the failing line, and ``_judge`` is on the
+    traceback of anything that raises INSIDE it. A message quoted here is
+    therefore echoed into the output ``tools/property_check.py`` captures, and
+    a control whose ``expect_message`` is that message then scores a CRASH as a
+    demonstration. Measured, with the two clause sentences quoted here as they
+    were: one line-neutral defect in ``solvers.py``
+    (``values=tuple(sorted(values)),`` -> ``... or None,``) makes
+    ``sorted(res.values)`` raise ``TypeError`` before the oracle is evaluated
+    at all, and three probe controls carrying the three shipped guard strings
+    reported ``3/3 controls fired``. Read the messages off the ``return``s
+    below. ``property_check.py`` now matches ``expect_message`` against the
+    failure pytest RECORDS rather than against everything it echoes, which is
+    the half of this that a docstring cannot enforce.
 
     (3) THE MODEL IS EXACTLY THE VALUE RECORDS IN THE BYTES READ — DEMONSTRATED,
     by the ``cvc5-phantom-model`` mutant control, and the shape it needs was
@@ -369,13 +382,10 @@ def _judge(res, stdout, full, rc, census, *, where):
     ordinary draw. Dedupe the harvested model AFTER the terminator check
     (``tuple(sorted(values))`` -> ``tuple(sorted(set(values)))``) and the count
     in ``end <n>`` still matches, so clauses (1) and (2) both hold and only this
-    one can fail::
-
-        HARVESTED A MODEL THAT WAS NOT WRITTEN [flat]
-          parent harvested: [('x0', '0/1')]
-          actually present: [('x0', '0/1'), ('x0', '0/1')]
-          stdout: 'version 1.3.4\\nanswer sat\\nvalue x0 0/1\\nvalue x0 0/1\\nend 2\\n'
-
+    one can fail: the third branch below fires on
+    ``'version 1.3.4\\nanswer sat\\nvalue x0 0/1\\nvalue x0 0/1\\nend 2\\n'``,
+    reporting a harvested ``[('x0', '0/1')]`` against an actually-present
+    ``[('x0', '0/1'), ('x0', '0/1')]``,
     in 2.0 s, and green against the unmutated tip. ``_PAYLOADS`` is untouched,
     so the two example-efficiency figures in the module docstring keep
     describing the strategy that produced them.

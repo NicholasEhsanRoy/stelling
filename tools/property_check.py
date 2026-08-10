@@ -32,6 +32,21 @@ For ``--controls`` that means every control FAILED where it was supposed to
 fail; a control that passes is reported as ``CONTROL DID NOT FIRE`` and exits
 non-zero, because a control that cannot demonstrate its property is worth
 nothing.
+
+WHERE ``expect_message`` IS MATCHED, and why it is not the captured output.
+pytest's long traceback prints a frame's ENTIRE function source — docstring
+included — from ``def`` down to the failing line. So the strings a property
+BUILDS its failure messages from, and any string quoted in the docstring of a
+function on the traceback path, are echoed into the run's output whether or
+not the property's oracle ever ran. Matching ``expect_message`` against that
+output makes a CRASH indistinguishable from a demonstration. Measured, on
+``tests/property/test_cvc5_protocol.py`` with its two clause sentences quoted
+in ``_judge``'s docstring: a one-place defect that raises ``TypeError`` before
+the oracle is evaluated scored ``3/3 controls fired`` against three probe
+controls carrying the three shipped guard strings. So the match is made
+against the failure pytest itself RECORDS — the ``message`` attribute of each
+``<failure>``/``<error>`` in ``--junitxml``, which is the crash line and the
+exception's own text and nothing else. The same run now scores ``0/3``.
 """
 
 from __future__ import annotations
@@ -43,6 +58,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
@@ -92,7 +108,7 @@ def _apply(mutation, tree: pathlib.Path) -> None:
 
 
 def _run(tree, targets, *, python, profile, scale, extra_env=None, runxfail=False,
-         verbose=False, extra_args=()):
+         verbose=False, extra_args=(), junit=None):
     env = dict(os.environ)
     env["PYTHONPATH"] = str(pathlib.Path(tree) / "src")
     env["JAX_PLATFORMS"] = env.get("JAX_PLATFORMS", "cpu")
@@ -107,6 +123,8 @@ def _run(tree, targets, *, python, profile, scale, extra_env=None, runxfail=Fals
     ]
     if runxfail:
         argv.append("--runxfail")
+    if junit is not None:
+        argv.append(f"--junitxml={junit}")
     argv += list(targets)
     if verbose:
         print("   $ PYTHONPATH=%s STELLING_PROPERTY_PROFILE=%s %s"
@@ -119,6 +137,32 @@ def _tail(proc, n=25):
     out = (proc.stdout or "") + (proc.stderr or "")
     lines = out.strip().splitlines()
     return "\n".join("   | " + ln for ln in lines[-n:])
+
+
+def _crashes(junit) -> list[str]:
+    """What the run REPORTED as its failures, as pytest itself records them.
+
+    One string per ``<failure>``/``<error>``: pytest's ``message`` attribute,
+    which is the crash location's own text — the exception type and its
+    message — and NOT the traceback body. That distinction is the whole point
+    (see this module's docstring): the traceback body carries the property's
+    own source, so a guard string is present there even when nothing evaluated
+    the oracle.
+
+    An empty list is the honest answer for a run that produced no XML at all —
+    a pytest usage error, an interpreter that died before collection — and the
+    caller treats it as "did not carry", which is the safe direction.
+    """
+    try:
+        root = ET.parse(junit).getroot()
+    except (OSError, ET.ParseError):
+        return []
+    return [
+        child.get("message") or ""
+        for case in root.iter("testcase")
+        for child in case
+        if child.tag in ("failure", "error")
+    ]
 
 
 # ── the two modes ────────────────────────────────────────────────────────────
@@ -178,20 +222,38 @@ def check_controls(args) -> int:
             # need more room than a per-push budget, and burying that in a
             # global flag would make every control pay for the slowest one.
             scale = float(args.scale) * control.scale
+            junit = pathlib.Path(tmp) / "junit.xml"
             proc = _run(tree, [control.nodeid], python=args.python,
                         profile=args.profile, scale=scale,
                         runxfail=True, verbose=args.verbose,
-                        extra_env=_cross_env(args))
+                        extra_env=_cross_env(args), junit=junit)
             out = (proc.stdout or "") + (proc.stderr or "")
+            crashes = _crashes(junit)
             fired = proc.returncode != 0
-            carried = control.expect_message in out
+            carried = any(control.expect_message in c for c in crashes)
             if fired and carried:
                 print("   FIRED — the property failed where it is supposed to")
                 if args.verbose:
                     print(_tail(proc, 30))
+            elif fired and control.expect_message in out:
+                # The string is in the run's OUTPUT but not in any failure the
+                # run recorded, which is the shape a docstring or a message
+                # template echoed by the traceback produces. Reported as its
+                # own outcome rather than folded into "wrong failure", because
+                # the remedy is different: nothing is wrong with the control.
+                print(f"   FIRED, but the failure ITSELF did not carry "
+                      f"{control.expect_message!r} — the string is only in the "
+                      f"run's echoed output (a traceback prints the property's "
+                      f"own source, docstring included)")
+                for c in crashes:
+                    print(f"   what pytest recorded: {c.splitlines()[0][:120]}")
+                print(_tail(proc, 30))
+                failures.append((control.name, "echoed, not raised"))
             elif fired:
                 print(f"   FIRED, but the failure did not carry "
                       f"{control.expect_message!r}")
+                for c in crashes:
+                    print(f"   what pytest recorded: {c.splitlines()[0][:120]}")
                 print(_tail(proc, 30))
                 failures.append((control.name, "wrong failure"))
             else:
