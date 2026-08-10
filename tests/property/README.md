@@ -335,8 +335,14 @@ of the tree. `8ef8f75` is such a tree: counted independently over 1500 draws,
 (2) first, and which one comes first in the sequence decides what is reported.
 At the derandomized `ci` profile it is a clause-(1) example, reproducibly —
 `cvc5-exit-tell` fires at scale ×1, ×2 and ×4. At the RANDOMISED `dev` profile
-it is a clause-(2) one, three runs out of three at ×1 and again at ×2, and the
-control reports
+it is **either, run to run**. With `.hypothesis/` removed before every run:
+
+| `--profile dev` | FIRED | NOT DEMONSTRATED | runs |
+|---|---|---|---|
+| ×1 | 39 | 21 | 60 |
+| ×2 | 23 | 17 | 40 |
+
+and every refusal reports
 
 ```
 FIRED, but the failure did not carry 'ACCEPTED A NONZERO-EXIT RUN'
@@ -344,11 +350,25 @@ what pytest recorded: AssertionError: ACCEPTED A TRUNCATED RUN as 'sat' [flat]
 == 0/1 controls fired
 ```
 
-The direction is safe — a refusal, never a false green — but
+**That table replaces "three runs out of three at ×1 and again at ×2", which
+was a replay artefact and is withdrawn.** `dev` is `derandomize=False` and
+`_profiles.py` attaches a database only when `STELLING_PROPERTY_DB` is set,
+which `property_check.py` pops out of the environment — so hypothesis's default
+database at `<repo>/.hypothesis/examples` is live and shared across `--control`
+invocations. Driven, 16 chains of four runs with the database wiped only at the
+head of each chain: after a first run that reported clause (1), **33 of 33**
+follow-ups reported clause (1); after one that reported clause (2), **15 of 15**
+reported clause (2). Three consecutive runs are one draw and two replays.
+
+**If you are measuring a control at a randomised profile, wipe `.hypothesis/`
+between runs or you are measuring your own first answer.** That is the general
+lesson and it cost this entry two rounds.
+
+The direction is still safe — a refusal, never a false green — but
 `python tools/property_check.py --controls --profile dev` is an invocation this
-file documents, and it reports a control NOT DEMONSTRATED. See `_judge`'s
-docstring for why the obvious fix (pin the transcript as an `@example`) is not
-taken here.
+file documents, and on roughly a third to two fifths of independent runs it
+reports a control NOT DEMONSTRATED. See `_judge`'s docstring for why the
+obvious fix (pin the transcript as an `@example`) is not taken here.
 
 So: if your oracle is a conjunction, say in the control's `why` which conjunct
 its tree exercises, and register a control for each of the rest or write down

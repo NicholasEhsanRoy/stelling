@@ -381,17 +381,36 @@ def _judge(res, stdout, full, rc, census, *, where):
     and (1) on 323. Measured through ``property_check.py``::
 
         --control cvc5-exit-tell                    FIRED       x1, x2, x4
-        --control cvc5-exit-tell --profile dev      0/1 fired   3 of 3 runs
-          what pytest recorded: clause (2)'s sentence, not clause (1)'s
-        --control cvc5-exit-tell --profile dev --scale 2   0/1 fired
+        --control cvc5-exit-tell --profile dev      39 FIRED / 21 NOT, 60 runs
+        --control cvc5-exit-tell --profile dev --scale 2
+                                                    23 FIRED / 17 NOT, 40 runs
+
+    every NOT being ``0/1 controls fired``, "wrong failure", with what pytest
+    recorded being clause (2)'s sentence rather than clause (1)'s.
+
+    THE DEV FIGURE WAS TAKEN WITH AN INSTRUMENT THAT REPLAYS ITS OWN ANSWER,
+    and the table above is the re-measurement. It read ``0/1 fired  3 of 3
+    runs``, and again at ×2, which says the refusal is reproducible. It is not.
+    ``dev`` is ``derandomize=False``, and ``_profiles.py`` attaches a database
+    only when ``STELLING_PROPERTY_DB`` is set — which ``property_check.py``
+    pops out of the environment — so hypothesis's DEFAULT database at
+    ``<repo>/.hypothesis/examples`` is live and shared across ``--control``
+    invocations. Driven, 16 chains of four runs, the database wiped only at the
+    head of each chain: after a first run that reported clause (1), **33 of 33**
+    follow-ups reported clause (1); after one that reported clause (2), **15 of
+    15** reported clause (2). "3 runs of 3" was one independent draw and two
+    replays of it, in whichever direction the first landed. Every figure above
+    is with ``.hypothesis/`` removed before EVERY run.
 
     ``ci`` is derandomized and ``dev`` is not, so this is not a budget effect:
-    the clause-(1) demonstration is stable under ×4 at ``ci`` and absent at
-    ``dev``. The DIRECTION IS SAFE — the tool refuses rather than passes, and
-    no run of this can produce a false green — but
-    ``tools/property_check.py --controls --profile dev`` is a documented
-    invocation that reports this control NOT DEMONSTRATED, and that was not
-    written down anywhere until now.
+    the clause-(1) demonstration is stable under ×4 at ``ci`` and a coin-flip
+    at ``dev``. The DIRECTION IS SAFE — when the search reaches a clause-(2)
+    example first the tool refuses rather than passes, and no run of this can
+    produce a false green — but ``tools/property_check.py --controls --profile
+    dev`` is a documented invocation that reports this control NOT DEMONSTRATED
+    on roughly a third to two fifths of independent runs, and a reader who took
+    "3 of 3" for determinism would have been told the wrong thing in both
+    directions.
 
     WHY THE OBVIOUS FIX IS NOT TAKEN, measured rather than argued. Pinning
     ``'version 1.3.4\\nanswer sat\\nend 0\\n'`` at exit 1 as an ``@example`` on
