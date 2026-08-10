@@ -182,6 +182,6 @@ for s in stamps:
 print(f"  invocations per assert index: {spent}")
 print(
     "  (asserts #4/#5 are the posed symmetry pair M[..,0,1] <= M[..,1,0] "
-    "and converse — contracts.py:690/691; #0-#3 are the conditioning "
-    "conjuncts)"
+    "and converse — the assert_() pair in contracts.conditioning_2x2_field; "
+    "#0-#3 are the conditioning conjuncts)"
 )

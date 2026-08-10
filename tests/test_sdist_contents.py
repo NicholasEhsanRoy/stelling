@@ -68,18 +68,29 @@ re-include inside an excluded directory, POSIX character classes), and every
 disagreement found was in the smuggle direction. Only the parity test, which
 needs `uv`, catches that class.
 
-**WITHOUT `uv`, THREE TESTS SKIP, AND THIS USED TO SAY "a machine with no `uv`
+**WITHOUT `uv`, EIGHT TESTS SKIP, AND THIS USED TO SAY "a machine with no `uv`
 runs the scan alone".** It runs a good deal more than the scan and rather less
-than the module. Measured, a `PATH` with no `uv`: ``14 passed, 3 skipped``
-here, ``9 passed, 3 skipped`` at a4c16fe. What goes is everything that builds —
+than the module. Measured with `uv` off `PATH`: ``15 passed, 8 skipped`` here,
+``9 passed, 3 skipped`` at a4c16fe. What goes is everything that BUILDS, which
+is now most of what this module establishes —
 ``test_built_metadata_carries_no_relative_reference``,
-``test_the_untracked_scan_agrees_with_the_tarball``, and
-``test_an_arbitrary_new_file_does_not_ship``, which is the module's own
-headline property and the only one established by INTERVENTION. What stays is
-the model, its controls, and both dicts. Driven across the smuggling shapes
-this module carries: one of them, a committed dangling symlink, goes from
-``1 failed`` to ``14 passed, 3 skipped``; the rest stay red, because what
-catches them is model-side.
+``test_the_untracked_scan_agrees_with_the_tarball``,
+``test_an_arbitrary_new_file_does_not_ship`` (the allowlist's headline property
+and the only one established by INTERVENTION), the three wheel-member and
+wheel-install checks, and the two zero-dependency checks below. What stays is
+the model, its controls, both dicts, and the source-level pins.
+
+THE FIGURE ABOVE SAID "THREE" AND ``14 passed, 3 skipped`` UNTIL bbaa251, AND
+THE TREE HAD SIX. It was written when three tests built; the wheel tests were
+added under it and it was not moved — a stale count of skips inside the one
+paragraph whose subject is how much of this module a machine without `uv` does
+not run. Re-measured at bbaa251, before the two additions below: ``14 passed,
+6 skipped``. Nothing reads this number, which is how it drifted.
+
+Driven across the smuggling shapes this module carries: one of them, a
+committed dangling symlink, goes from ``1 failed`` to a green run with the
+build half skipped; the rest stay red, because what catches them is
+model-side.
 
 Making that skip a hard failure would be flaky in the environment where it
 matters least — a contributor's first `pytest`. Every pytest job in CI uses
@@ -140,14 +151,44 @@ from __future__ import annotations
 
 import email
 import glob as globlib
+import json
 import os
 import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
-import tomllib
 import zipfile
+
+# `tomllib` IS 3.11+, AND THIS FILE SHIPS TO 3.10 USERS. It was spelled
+# `import tomllib` at column 0 here, which is a COLLECTION error on the floor
+# `pyproject.toml` declares — and a collection error under default flags takes
+# down the whole session, not this module. Measured at 650e678 on uv-managed
+# CPython 3.10.20, core installed, `JAX_ENABLE_X64=1`::
+#
+#     pytest -q              rc=2, junitxml tests=48 failures=0 errors=1
+#                            skipped=47, "Interrupted: 1 error during collection"
+#     pytest --collect-only  1335 tests collected, 1 error
+#
+# against 1352 collected and no error on CPython 3.11.15. So a 3.10 user who
+# ran the suite the sdist ships got exit 2 and zero tests.
+#
+# The fallback's provider is not a hope: `pytest` itself declares
+# `tomli>=1; python_version < "3.11"` (read off `importlib.metadata.requires`
+# for pytest 9.1.1 in a 3.10.20 venv, where `tomli 2.4.1` was installed by
+# asking for pytest alone), so an environment able to run this suite at all
+# already has it. It is named in `[dependency-groups] dev` as well, because a
+# dependency borrowed from another package's requirement is one that package
+# can drop without anything here noticing.
+#
+# THE CLASS is held by `test_no_module_imports_a_stdlib_module_the_floor_lacks`
+# in `tests/test_zero_dep_import_discipline.py`, beside the heavy-import scan
+# whose blast radius is identical.
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # the 3.10 floor
+    import tomli as tomllib
 
 import pytest
 
@@ -466,6 +507,383 @@ def test_built_metadata_carries_no_relative_reference(tmp_path: pathlib.Path) ->
     assert images and links, "the built metadata carries no refs — check is vacuous"
     bad = [u for u in images + links if not u.startswith(("http://", "https://", "mailto:"))]
     assert not bad, "the published long description carries relative refs:\n  " + "\n  ".join(bad)
+
+
+# --- the WHEEL's member list ------------------------------------------------
+#
+# THE SDIST'S PROTECTION DID NOT REACH THE WHEEL, AND THE COMMENT SAYING SO
+# NAMED ONLY HALF THE GAP. `release.yml`'s header records that nothing checks
+# the wheel's member list, and argues a COUPLING protects it — one `uv build`
+# over one tree, and the sdist allowlist covers `/src`. The coupling was
+# measured in ONE DIRECTION: a planted `src/stelling/_relgate_probe.py` shipped
+# in the wheel too, 29 members against 28. That is the ADDITIVE direction.
+#
+# THE SUBTRACTIVE DIRECTION IS THE ONE THAT SHIPS AN UNIMPORTABLE PACKAGE, and
+# it was uncovered. Re-derived at 650e678 in a clone of this tree, with two
+# lines added to `pyproject.toml`::
+#
+#   [tool.hatch.build.targets.wheel]
+#   exclude = ["**/solvers.py", "**/contracts.py"]
+#
+#   uv build --offline           sdist 279 members (UNCHANGED), wheel 26 (from 28)
+#   the sdist gate               rc=0, "every one of 279 sdist members is
+#                                committed to this tree"
+#   the tag gate, TAG=v0.1.0     rc=0, "tag=v0.1.0 artifact version=0.1.0"
+#   the three test modules       39 passed, 0 failures, 0 errors
+#   pip install the wheel        `import stelling` OK
+#                                `import stelling.solvers` ->
+#                                ModuleNotFoundError: No module named
+#                                'stelling.solvers'
+#
+# Every gate green, and the artefact a user would get cannot import its own
+# solver module. The sdist allowlist cannot see this: it says which paths are
+# ALLOWED to ship, never which must, and the wheel target reads a different
+# table entirely. The two checks below are that missing "must", and the second
+# one asks the question of an INSTALLED artefact rather than of a file list —
+# because nothing in either workflow installs or imports what it publishes.
+
+
+def _wheel_package_members(wheel: pathlib.Path) -> set[str]:
+    """Every member of a built wheel that is the PACKAGE, not the metadata."""
+    with zipfile.ZipFile(wheel) as z:
+        names = z.namelist()
+    return {n for n in names if not n.split("/")[0].endswith(".dist-info")}
+
+
+def _package_files_in_tree(root: pathlib.Path) -> set[str]:
+    """What `[tool.hatch.build.targets.wheel] packages` has to put in a wheel.
+
+    Read off the tree rather than off a list written here, and in the wheel's
+    own spelling (`stelling/x.py`, not `src/stelling/x.py`) so the comparison
+    is a set equality with no translation step to get wrong.
+    """
+    pkg = root / "src" / "stelling"
+    return {
+        f"stelling/{path.relative_to(pkg).as_posix()}"
+        for path in pkg.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix not in (".pyc", ".pyo")
+    }
+
+
+def _build_into(root: pathlib.Path, out: pathlib.Path) -> pathlib.Path:
+    proc = subprocess.run(
+        ["uv", "build", "--offline", "--out-dir", str(out), str(root)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert proc.returncode == 0, f"build failed:\n{proc.stderr}"
+    wheels = sorted(out.glob("*.whl"))
+    assert len(wheels) == 1, f"expected one wheel, got {wheels}"
+    return wheels[0]
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_the_wheel_ships_every_module_of_the_package(tmp_path: pathlib.Path) -> None:
+    """An EQUALITY, so it fires in both directions.
+
+    A subset check would pass the wheel that dropped `solvers.py`; a superset
+    check would pass the wheel that gained an untracked stray. The sdist's
+    committed-members gate in `release.yml` already covers the second for the
+    tarball, and the coupling carries it to the wheel — but the coupling is
+    one-directional and the first was uncovered entirely.
+
+    Break it: add ``exclude = ["**/solvers.py"]`` under
+    ``[tool.hatch.build.targets.wheel]``. That is driven rather than suggested,
+    by the test below.
+    """
+    wheel = _build_into(REPO, tmp_path)
+    shipped = _wheel_package_members(wheel)
+    expected = _package_files_in_tree(REPO)
+    assert expected, "no package files found in the tree — this check is vacuous"
+    assert shipped == expected, (
+        "the built wheel's member list is not the package.\n"
+        f"  in the tree and NOT in the wheel: {sorted(expected - shipped)}\n"
+        f"  in the wheel and NOT in the tree: {sorted(shipped - expected)}\n"
+        "The first list is a package that cannot import its own modules once "
+        "installed; the second is a file distributed from nowhere. Neither is "
+        "visible to the sdist allowlist, which governs a different target."
+    )
+    # …and the artefact really was examined: a wheel with no `.py` in it would
+    # satisfy an equality against a tree with no `.py` in it
+    assert "stelling/__init__.py" in shipped
+    assert "stelling/solvers.py" in shipped
+    assert len([n for n in shipped if n.endswith(".py")]) > 10
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_a_wheel_that_dropped_a_module_is_caught_and_is_really_broken(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The intervention, and it establishes TWO things rather than one.
+
+    That the comparison above fires — and that the wheel it fires on is
+    genuinely unimportable, which is what makes the comparison worth having.
+    The second half is measured by INSTALLING the artefact, because a file list
+    is a proxy and the thing a user meets is an install.
+    """
+    staged = _tree_to_build(tmp_path)
+    cfg = staged / "pyproject.toml"
+    text = cfg.read_text(encoding="utf-8")
+    marker = '[tool.hatch.build.targets.wheel]\npackages = ["src/stelling"]'
+    assert marker in text, "the wheel target is not spelled as this test expects"
+    cfg.write_text(
+        text.replace(marker, marker + '\nexclude = ["**/solvers.py"]'),
+        encoding="utf-8",
+    )
+
+    out = tmp_path / "dist"
+    wheel = _build_into(staged, out)
+    shipped = _wheel_package_members(wheel)
+    expected = _package_files_in_tree(staged)
+    missing = expected - shipped
+    assert missing == {"stelling/solvers.py"}, (
+        f"the intervention did not drop exactly one module: {sorted(missing)}"
+    )
+
+    # AND THE ARTEFACT IS REALLY BROKEN, not merely short a line in a list.
+    # `python -m venv --without-pip` plus an unpack is what installing a
+    # `py3-none-any` wheel amounts to, and it needs no index.
+    venv = tmp_path / "bare"
+    made = subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(venv)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert made.returncode == 0, f"could not build a bare venv:\n{made.stderr}"
+    site = tmp_path / "site"
+    with zipfile.ZipFile(wheel) as z:
+        z.extractall(site)
+    python = venv / ("Scripts" if os.name == "nt" else "bin") / "python"
+    env = {**os.environ, "PYTHONPATH": str(site)}
+    probe = subprocess.run(
+        [str(python), "-c",
+         "import stelling, importlib.util;"
+         "print(stelling.__file__);"
+         "print(importlib.util.find_spec('stelling.solvers'))"],
+        capture_output=True, text=True, timeout=300, env=env,
+    )
+    assert probe.returncode == 0, f"probe crashed:\n{probe.stdout}\n{probe.stderr}"
+    lines = probe.stdout.strip().splitlines()
+    assert pathlib.Path(lines[0]).is_relative_to(site), (
+        f"the probe imported some other stelling: {lines}"
+    )
+    assert lines[-1] == "None", (
+        "the mutated wheel still resolves `stelling.solvers`, so this control "
+        f"is not demonstrating what it claims: {lines}"
+    )
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_the_built_wheel_installs_and_every_module_resolves(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The same question asked of an INSTALLED artefact, which is the gap.
+
+    `release.yml` builds both artefacts, reads the sdist's member list against
+    the index, reads the wheel's FILENAME, and uploads. Nothing anywhere
+    unpacks the wheel and asks whether it works. A member-list equality is a
+    static proxy for that; this is not.
+
+    ``find_spec`` rather than ``import``, deliberately: it resolves the module
+    without executing it, so this stays a question about the ARTEFACT and does
+    not become a question about whether jax is installed
+    (``stelling.harness`` raises ``OptionalDependencyError`` in a bare
+    environment by design — see `tests/test_import_hygiene.py`).
+    """
+    wheel = _build_into(REPO, tmp_path / "dist")
+    venv = tmp_path / "bare"
+    made = subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(venv)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert made.returncode == 0, f"could not build a bare venv:\n{made.stderr}"
+    site = tmp_path / "site"
+    with zipfile.ZipFile(wheel) as z:
+        z.extractall(site)
+    python = venv / ("Scripts" if os.name == "nt" else "bin") / "python"
+    env = {**os.environ, "PYTHONPATH": str(site)}
+
+    modules = sorted(
+        name[len("stelling/") : -len(".py")].replace("/", ".")
+        for name in _package_files_in_tree(REPO)
+        if name.endswith(".py") and not name.endswith("/__init__.py")
+    )
+    assert len(modules) > 10, modules
+    probe = subprocess.run(
+        [str(python), "-c",
+         "import json, sys, importlib.util;"
+         "names = json.loads(sys.argv[1]);"
+         "print(json.dumps({n: importlib.util.find_spec('stelling.' + n)"
+         " is not None for n in names}))",
+         json.dumps(modules)],
+        capture_output=True, text=True, timeout=300, env=env,
+    )
+    assert probe.returncode == 0, f"probe crashed:\n{probe.stdout}\n{probe.stderr}"
+    got = json.loads(probe.stdout.strip().splitlines()[-1])
+    unresolvable = sorted(n for n, ok in got.items() if not ok)
+    assert not unresolvable, (
+        "the built wheel installs, and these modules of it do not resolve: "
+        f"{unresolvable}. This is what publishing an unimportable package "
+        "looks like, and no gate in `.github/workflows/release.yml` can see it."
+    )
+
+    # and the artefact's own entry point runs — the release gate runs
+    # `python -m stelling` against the SOURCE tree, never against the wheel
+    cli = subprocess.run(
+        [str(python), "-m", "stelling"],
+        capture_output=True, text=True, timeout=300, env=env,
+    )
+    assert cli.returncode == 0, f"`python -m stelling` off the wheel failed:\n{cli.stdout}\n{cli.stderr}"
+
+
+# --- what a bare `pip install stelling` PULLS IN ----------------------------
+#
+# `[project] dependencies = []` is the project's headline promise, and
+# `pyproject.toml` states it in words one line above the field: "The core must
+# stay importable in a bare environment". It was checked at SOURCE level in
+# several places and at ARTEFACT level nowhere, and the source-level checks are
+# all about module-scope IMPORTS, which is a different question from what the
+# installer resolves.
+#
+# MEASURED at bbaa251, `dependencies = []` -> `["jax>=0.10"]`, that mutation
+# alone (CPython 3.11.15, `JAX_ENABLE_X64=1`, `-p no:randomly`, figures from
+# `--junitxml`):
+#
+#   the full suite       tests=1430 failures=0 errors=0 skipped=94 — GREEN
+#   `uv build --wheel`   succeeds, and the artefact's METADATA carries
+#                        `Requires-Dist: jax>=0.10` with NO marker on it
+#
+# An unmarked `Requires-Dist` is unconditional: every `pip install stelling`
+# resolves jax and jaxlib, including in the environments the promise is for.
+# Nothing in `src/`, `tests/` or `tools/` read the field — searched at bbaa251
+# for `Requires-Dist`, `requires_dist` and the `[project]` tables; the only
+# occurrences are a comment in `stelling/_optional.py` naming where the extras
+# are declared, and two synthetic `[project]` blocks written by tests here.
+#
+# So the promise is asked of the ARTEFACT below, which is the only place it is
+# true or false, and the intervention that would break it is driven.
+
+
+def _requires_dist(wheel: pathlib.Path) -> list[str]:
+    """Every `Requires-Dist` in a built wheel's METADATA, verbatim."""
+    with zipfile.ZipFile(wheel) as z:
+        name = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+        meta = email.message_from_string(z.read(name).decode())
+    return list(meta.get_all("Requires-Dist") or [])
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_the_built_wheel_pulls_nothing_in_by_default(tmp_path: pathlib.Path) -> None:
+    """The zero-dependency promise, asked of the artefact that carries it.
+
+    Every `Requires-Dist` in the published METADATA must be CONDITIONAL — that
+    is, carry an `extra ==` marker — because an unmarked one is what a bare
+    install resolves. `dependencies = []` in the source is what produces that,
+    and reading the source is what this deliberately does not do: the field is
+    one of several inputs the backend combines, and the artefact is the answer.
+
+    KNOWN OPEN, and the check below is a SUBSTRING test rather than a marker
+    evaluation. `"extra == …" in d` is satisfied by a marker that mentions an
+    extra without being conditional on one:
+    `jax>=0.10; extra == 'jax' or python_version >= '3'` passes this test, and
+    `packaging.markers.Marker(...).evaluate({"extra": ""})` on the shipped
+    METADATA line returns True — so a bare `pip install stelling` resolves jax
+    while this stays green. Closing it means evaluating the marker with
+    `extra=""`, or demanding the marker be exactly `extra == '…'`; both are a
+    decision about how much marker grammar this project wants to accept, so
+    neither is taken here.
+    """
+    wheel = _build_into(REPO, tmp_path / "dist")
+    declared = _requires_dist(wheel)
+    # anti-vacuity: a wheel with no `Requires-Dist` at all would satisfy an
+    # "every one of them is marked" check by having none, and that is exactly
+    # the shape of green this module keeps finding
+    assert len(declared) >= 4, (
+        "the built wheel declares almost no dependencies at all, so the check "
+        f"below has nothing to examine: {declared}"
+    )
+    assert any("extra == 'jax'" in d or 'extra == "jax"' in d for d in declared), (
+        f"the `jax` extra is gone from the built METADATA: {declared}"
+    )
+    unconditional = [d for d in declared if "extra ==" not in d]
+    assert not unconditional, (
+        "the built wheel declares dependencies that are NOT behind an extra, "
+        "so every `pip install stelling` resolves them — jax drags in jaxlib, "
+        "and the solver wheels are tens of megabytes each. `pyproject.toml` "
+        "says one line above `dependencies`: the core must stay importable in "
+        "a bare environment. That promise is about THIS list:\n  "
+        + "\n  ".join(unconditional)
+    )
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs `uv` to build")
+def test_a_core_dependency_would_be_caught_and_really_does_ship(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The intervention, on a copy, establishing both halves.
+
+    That the check above fires — and that the artefact it fires on really does
+    carry the dependency unconditionally, so what is refused is a wheel that
+    changes what a bare install resolves and not merely a line in a table.
+    """
+    staged = _tree_to_build(tmp_path)
+    cfg = staged / "pyproject.toml"
+    text = cfg.read_text(encoding="utf-8")
+    marker = "\ndependencies = []\n"
+    assert text.count(marker) == 1, (
+        "the core dependency list is not spelled as this test expects"
+    )
+    cfg.write_text(
+        text.replace(marker, '\ndependencies = ["jax>=0.10"]\n'), encoding="utf-8"
+    )
+
+    declared = _requires_dist(_build_into(staged, tmp_path / "dist"))
+    unconditional = [d for d in declared if "extra ==" not in d]
+    assert unconditional == ["jax>=0.10"], (
+        "the intervention did not put an unconditional dependency into the "
+        f"artefact, so it is not demonstrating what it claims: {declared}"
+    )
+
+
+def test_the_jax_extra_floor_is_the_lowest_series_stelling_is_tested_on() -> None:
+    """The two numbers `pyproject.toml` says must agree, compared.
+
+    The comment over the `[jax]` extra says `TESTED_JAX_SERIES` "is the claim
+    this floor must match" and "Widen this only after adding the lane, never
+    before". Nothing compared them. MEASURED at bbaa251, `jax = ["jax>=0.10"]`
+    -> `["jax>=0.5"]`, that mutation alone: the full suite came back
+    tests=1430 failures=0 errors=0 skipped=94, green — against a comment eight
+    lines long arguing that 0.5 is the wrong floor and why.
+
+    This is a COMPARISON and not a derivation, which is the distinction
+    `stelling/_optional.py` draws when it says the constant is "deliberately
+    NOT derived from the [jax] extra floor". Neither is computed from the
+    other; they are two written facts that must not disagree, and the direction
+    of repair is the one the comment gives — the floor follows the lane, never
+    the other way round.
+    """
+    from stelling._optional import TESTED_JAX_SERIES
+
+    cfg = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    extra = cfg["project"]["optional-dependencies"]["jax"]
+    m = re.fullmatch(r"jax>=(\d+)\.(\d+)", extra[0]) if len(extra) == 1 else None
+    assert m, (
+        f"the `[jax]` extra is now {extra!r}, and this reads a single "
+        "`jax>=X.Y`. Any other shape changes what a bootstrap install "
+        "resolves, and nothing else in this repository reads the field."
+    )
+    floor = (int(m.group(1)), int(m.group(2)))
+    tested = sorted(tuple(int(p) for p in s.split(".")) for s in TESTED_JAX_SERIES)
+    assert floor == tested[0], (
+        f"the `[jax]` extra floor is {floor[0]}.{floor[1]} and the lowest "
+        f"series stelling is tested against is {tested[0][0]}.{tested[0][1]}. "
+        "The comment over that extra says TESTED_JAX_SERIES is the claim the "
+        "floor must match, and that widening it is allowed only after a CI "
+        "lane exists for the new series. A floor below the tested range is a "
+        "bootstrap install that resolves a jax stelling abstains on: on 0.5.x "
+        "every contract comes back UNKNOWN. Move the FLOOR to match the lane, "
+        "not the lane to match the floor."
+    )
 
 
 # --- what hatchling ACTUALLY reads ----------------------------------------

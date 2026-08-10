@@ -17,12 +17,18 @@ WITHDRAWN. It read: "it cannot install `reuse 5.1.1`, cannot reach the
 network, and therefore cannot measure whether 5.1.1 and 6.2.0 read
 `REUSE.toml` the same way. That question is bounded, not closed." The
 *therefore* was wrong. reuse 5.1.1 was on the box the whole time, in pip's own
-wheel cache; assembled from there offline, it lints THIS tree identically to
-the pinned 6.2.0 — rc=0 at 331/331 from both, rc=1 at 302/331 from both with
-the `scratchpad/**` annotation deleted (the positive control), and the same
-331 paths from `lint --json`. The question is CLOSED on this tree, by
-measurement, and the commands are at the `reuse` job in
-`.github/workflows/ci.yml`.
+wheel cache; assembled from there offline, it lints THIS tree IDENTICALLY to
+the pinned 6.2.0 — the same rc and the same count from both, the same file
+PATHS from `lint --json` and not merely the same total, and deleting the
+`scratchpad/**` annotation (the positive control) moves both by the same files
+in the same direction. THE CLAIM IS THAT EQUALITY, not any of the numbers: the
+absolutes move with the next file added, so each is recorded with the commit it
+was read on. Re-measured 2026-08-09 at `53f9f84`: rc=0 350/350 from both, rc=1
+321/350 from both under the control, 350 paths from each with an empty
+symmetric difference. An earlier reading, at an unnamed tip, gave 331/331 and
+302/331 — the same equality at different values, which is the point. The
+question is CLOSED on this tree, by measurement, and the commands are at the
+`reuse` job in `.github/workflows/ci.yml`.
 
 None of which retires this file. A measurement is about the two versions it
 ran; a bump on either side makes it stale, and nothing but a test notices a

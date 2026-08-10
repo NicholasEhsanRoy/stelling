@@ -1962,8 +1962,14 @@ verdicts:
   its unit is tests; the rest of that run was 2451 passed and 2 skipped of
   2469 collected, a record of this commit that will move with the next added
   test. All 16 are in `tests/test_solver_audit_findings.py` and all 16 are the
-  same `AttributeError: 'bytes' object has no attribute 'encode'` at
-  `subprocess.py:2172`, because `input=` must become bytes when `text=` goes
+  same `AttributeError: 'bytes' object has no attribute 'encode'` raised
+  from `Popen._communicate`'s `self._input = self._input.encode(...)` in the
+  standard library's `subprocess` (`subprocess.py:2172` on CPython 3.12.3 —
+  the LINE NUMBER IS A PROPERTY OF THE INTERPRETER, not of this repository:
+  measured 2026-08-09, 2172 is that statement on CPython 3.12.3 and 3.11.15
+  and is a BLANK LINE on CPython 3.10.20, which `requires-python = ">=3.10"`
+  admits; cite the symbol, not the line), because `input=` must become bytes
+  when `text=` goes
   and six files shim `subprocess.run` with a `str` `CompletedProcess` —
   including `fuzz_transport.py`, `repro_forgery.py`, `repro_real_kill.py` and
   `probe_cvc5_value_channel.py`, the artefacts behind figures quoted in this
@@ -2269,8 +2275,11 @@ verdicts:
   **WHAT IT COST, AND WHERE THE FIXTURES WERE MEASURING THEMSELVES.**
   Applying (c) reddens **16 tests**, all in
   `tests/test_solver_audit_findings.py`, all one cause —
-  `AttributeError: 'bytes' object has no attribute 'encode'` at
-  `subprocess.py:2172`, because `input=` must become bytes when `text=` goes.
+  `AttributeError: 'bytes' object has no attribute 'encode'` from
+  `Popen._communicate`'s `self._input.encode(...)` in the standard library's
+  `subprocess` (line 2172 on CPython 3.12.3 and 3.11.15, a blank line on
+  3.10.20 — see the entry above on why the symbol is cited and the line is
+  not), because `input=` must become bytes when `text=` goes.
   That figure was reproduced here exactly, ids and frame, and it is the cost
   of a TOLERANT decode; a strict one reddens **31**, the extra 15 being the
   `str`-shim call sites, which is the same population the 16's report named
@@ -4082,5 +4091,176 @@ verdicts:
   `dynamic_slice` with an `int8` start over lengths 100/127/128/129/200
   did not exhibit a wrapped bound — refused anyway, because every dtype
   jnp's own indexing produces is `int32`/`int64` and the gate is free.
+
+- **2026-08-09 (pre-release): the integer-literal wrap is a KNOWN,
+  MEASURED, UNCLOSED source-to-trace divergence, and its direction is a
+  WRONG VERIFIED.** No verdict moves with this entry and no rule changes.
+  It closes a DISCLOSURE gap: the hazard was measured, priced, and left
+  open deliberately, and it was described nowhere a reader of this page
+  could have found it. It was not quite unmentioned — the index-clamp
+  entry above reaches for *"the shape of the integer-literal wrap
+  defect, one layer over"* as an analogy — which is the gap at its
+  sharpest: the shipped tree names this defect once, to explain
+  something else, and never says what it is. It is being written down
+  before 0.1.0 because a release is where an omission stops being
+  recoverable.
+
+  **The defect, in four lines of plain jax and no stelling idiom.**
+
+  ```python
+  OFFSET = jnp.full((), 256, jnp.int8)   # jax wraps 256 -> 0 HERE
+  @jax.jit
+  def shift(v): return (v + OFFSET).astype(jnp.float32)
+  x = any_array((), "int8", (0, 10));  assert_(shift(x) <= 10.0)
+  ```
+
+  `x + 256 ∈ [256, 266]`, so the predicate AS WRITTEN is false at all 11
+  declared points. **stelling returns VERIFIED.** Re-driven at `53f9f84`
+  before this entry was written, in all four cells — jax 0.11.0 and jax
+  0.10.2, `jax_enable_x64` on and off — and VERIFIED in every one. The
+  index-bounds transfer that landed at `53f9f84` does not touch it; the
+  reproducer contains no indexing.
+
+  **It is a wrong VERIFIED, not a lost one.** That is the expensive
+  direction, and it is the direction this defect has.
+
+  **The VERIFIED is not a blanket VERIFIED for this harness shape**, and
+  that is the control rather than an inference. Same three lines, same
+  declared box, only the literal changed, jax 0.11.0:
+
+  | `OFFSET` literal | what jax traces | verdict |
+  |---|---|---|
+  | `256` — wraps | `0` | **VERIFIED** (source-false at all 11 points) |
+  | `5` — no wrap | `5` | UNKNOWN |
+  | `0` — no wrap | `0` | VERIFIED (and source-true) |
+  | `-1` — no wrap | `-1` | VERIFIED (and source-true) |
+
+  stelling reads the traced constant faithfully in every row. It returns
+  VERIFIED at `256` for exactly the same reason it returns VERIFIED at
+  `0`: by the time it looks, those are the same program.
+
+  **Why no backward-cone rule closes it: the information is destroyed
+  before stelling sees it.** The wrap happens inside `jnp.full`, before
+  any array exists and before tracing begins. Measured at `53f9f84` on
+  jax 0.11.0, the ENTIRE jaxpr tree for the harness above holds exactly
+  **one** literal — `10.0:f32`, the comparison bound — and the string
+  `256` does not appear anywhere in it. The wrapped value enters as a
+  **constvar closed over by the `jit` sub-jaxpr** (`lambda c:i8[]; a:i8[]`),
+  not as an `ir.Literal` operand, and every rule in this family walks
+  literal operands.
+
+  Four families of jaxpr-level remedy were built and priced against a
+  purpose-built corpus and the full suite on both series — a
+  literal-immediate rule, a narrowing rule, a backward-cone rule and a
+  declaration-scoped rule, plus a cross-scope cone and an index-only
+  exemption. Every one is either blind at `jit`/`cond`/`custom_jvp`
+  boundaries (which is universal in real jax code), or structurally blind
+  to the constvar form above, or costs capability that is not the wrap's
+  to take — including `u.at[3].set(0.5)`, the commonest jax write there
+  is. *(That pricing is RESTATED here from the measurement round that did
+  it, not re-run for this entry; what IS re-measured here is the jaxpr
+  above, which is the fact the conclusion rests on.)* **No rule keyed on
+  integer literals in a backward cone can close this**, because there is
+  no integer literal in the cone to key on.
+
+  **It is jax's, it is deliberate, and it is in the shipping release.**
+  `jax/_src/lax/lax.py` wraps the narrowing conversion in
+  `try: ... except OverflowError: pass` — jax catches the overflow NumPy
+  raises and discards it — carrying the comment *"TODO(phawkins): remove
+  the try-except block here, which would be a breaking change to users in
+  the presence of overflows"*. **The line range is an installed-dependency
+  figure, not a repository figure**, so it is quoted with the version it
+  was read from: `lax.py:1747-1754` at jax **0.11.0**, and the same block
+  at `lax.py:1740-1747` at jax **0.10.2**. Cite the comment, not the
+  range.
+
+  That behaviour is against jax's own published promotion rule. **JEP
+  9407** states as a design goal *"Promotion should never lead to an
+  unhandled overflow."* **SUSPECTED, and labelled so deliberately**: JEP
+  9407 is not shipped inside the `jax` distribution, so the wording is
+  restated from the published JEP and could not be re-verified offline.
+  Grepping both installed trees for the sentence returns nothing; the
+  digits `9407` do match, in three files per tree, and every match is
+  noise — inside float literals in the SVD back-compat test data and
+  inside the unrelated bug number `TODO(b/278940799)` in
+  `jax2tf.py`. No reference to the JEP is present in either tree. The
+  `try/except` above IS verified, in both.
+
+  **And jax is inconsistent about which door raises**, which matters
+  because it means no remedy can be scoped by "where jax wraps" without
+  being scoped by an unstable surface. Measured at `53f9f84` on both
+  series, `int8`, literal `256`, identical results on jax 0.11.0 and jax
+  0.10.2:
+
+  | raises `OverflowError` | wraps in silence |
+  |---|---|
+  | `jnp.array(256, int8)` | `jnp.full((), 256, int8)` |
+  | `jnp.asarray(256, int8)` | `jnp.full_like(x, 256)` |
+  | `jnp.int8(256)` | `x + 256`, `x >= 256` |
+  | | `x.at[0].set(256)` |
+  | | `jnp.where(c, 256, x)` |
+  | | `jnp.clip(x, 256, 256)`, `jnp.maximum(x, 256)` |
+
+  The three that raise delegate to `np.asarray(..., dtype)` and inherit
+  NumPy's check. The eight that wrap go through the `try/except` above.
+
+  **A DECLARED BOX SOMETIMES CATCHES A WRAPPED `assume` BOUND, AND
+  NARROWNESS IS NOT WHAT DECIDES WHETHER IT DOES.** What catches one is
+  the wrapped bound landing OUTSIDE the declared box. Where it lands is a
+  fact about the wrap's arithmetic, not about the box, and it is not
+  something the user can see. Driven at `53f9f84` on both series with
+  `jax_enable_x64` on and off — four cells, identical in all four,
+  obligation `assert_(x.astype(jnp.float32) <= 10.0)` throughout:
+
+  | declaration | `assume` written | traced as | outcome |
+  |---|---|---|---|
+  | `int8 (-10, 10)` | `x >= 300` | `x >= 44` | **raises** `UnsatisfiableAssumptionError`; no verdict emits |
+  | `int8 (-128, 127)` | `x >= 300` | `x >= 44` | **REFUTED** |
+  | `int8 (-10, 10)` | `x >= 261` | `x >= 5` | **VERIFIED** |
+  | `int8 (-10, 10)` | `x >= 30` | `x >= 30` | **raises** `UnsatisfiableAssumptionError` |
+
+  Row 3 is a CONTROL and it is the row that matters: `261` wraps to `5`,
+  which is INSIDE the narrowest box in the table, so nothing refuses and
+  stelling returns VERIFIED over `[5, 10]` — a region the source's own
+  `assume` makes empty, since no `int8` is `>= 261`. **A narrow
+  declaration does not protect against a wrap that lands inside it.** Row
+  4 is the second control: the refusal in row 1 is not wrap-specific at
+  all, since an unwrapped `x >= 30` outside `(-10, 10)` raises the same
+  error by the same mechanism.
+
+  Row 2 corrects what this paragraph said on the branch it was extracted
+  from, which asserted that the full-range box "returns VERIFIED".
+  Measured, it returns REFUTED. The verdict at `(-128, 127)` is whatever
+  the obligation happens to be over `[44, 127]` — `<= 10.0` REFUTED,
+  `>= 10.0` VERIFIED, `<= 300.0` VERIFIED — so no direction can be stated
+  for that cell at all. That is the same reason narrowing cannot be sold
+  as a guard: neither cell's outcome is a property of the declaration.
+
+  **NOTHING IN THIS TREE CONSULTS ANY DIAGNOSTIC FOR THIS.** There is no
+  detector on `main`, no stamp field, no note, no verdict gate, and no
+  count that changes because of this entry. **A VERIFIED over a narrow
+  integer declaration is exactly as trustworthy as it was before this
+  entry was written** — which is the reason for writing it. A detector
+  was built on a branch and audited SHOULD-NOT-LAND, for producing
+  CONFIRMED findings on ordinary honest code (`jnp.zeros(256, jnp.int8)`
+  — a byte-indexed LUT, the canonical `int8` idiom) while filing the real
+  hazard as safe; it is not on `main` and this entry does not depend on
+  it. A reader must not read this disclosure as the announcement of a
+  guard.
+
+  **What a user can do today**, in decreasing order of how much it buys,
+  reordered against the branch this was extracted from because the
+  control above unseated its first item. **One thing here is a guard and
+  the rest are odds.** The guard: keep out-of-range constants out of
+  narrow integer dtypes by construction — `jnp.array`, `jnp.asarray` and
+  `jnp.int8` RAISE, measured above, and are the doors to prefer. Then:
+  treat a VERIFIED over a narrow integer declaration as a statement about
+  the program jax traced, which is what `Floats are judged in ℝ; integers
+  and converts are execution-faithful` above already says it is. Last,
+  and explicitly NOT a guard: a narrower declaration raises the chance
+  that a wrapped `assume` bound lands outside the box and gets refused,
+  but row 3 of the table above is a wrap that lands inside the narrowest
+  box there and returns VERIFIED. Narrowing a declaration is worth doing
+  for its own reasons; it does not close this.
 
 *(no releases yet)*

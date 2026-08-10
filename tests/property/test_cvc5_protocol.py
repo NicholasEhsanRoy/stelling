@@ -159,6 +159,23 @@ class _FakeProc:
     they are registered for was never reached, and ``expect_message`` is the
     only reason this was reported as NOT DEMONSTRATED rather than as a control
     that fired.
+
+    AND THE JOB THAT WOULD HAVE CAUGHT IT WAS THE JOB IT BROKE, which is the
+    consequence at the level a reviewer meets it. Driven at 53f9f84 on jax
+    0.10.2 + hypothesis 6.165.2, with the bytes-unconditional fixture in place:
+    ``property_check.py --control cvc5-flat`` → ``0/1 controls fired``, exit 1,
+    so ci.yml's ``property`` step was RED on every push on a HEALTHY tree.
+
+    RE-DRIVEN ON THE MERGE that brought this fixture's two independent repairs
+    together, by restoring the bytes-unconditional ``__init__`` alone and
+    changing nothing else: jax 0.11.0, hypothesis 6.165.2, ``JAX_ENABLE_X64=1``
+    — same ``0/1 controls fired``, same exit 1, the ``TypeError`` raised at
+    ``solvers.py:491`` inside the materialised ``0ad22bb`` tree. THE REPORTED
+    REASON IS NOT THE SAME STRING IN THE TWO RUNS, and the difference is not
+    this fixture's: at 53f9f84 it read ``FIRED, but the failure did not carry
+    '[flat]'``, and it now reads ``NOT DEMONSTRATED: cvc5-flat — wrong
+    failure``, because ``property_check.py`` gained that scoring in between.
+    The outcome and the exit code are what reproduced.
     """
 
     # Universal-newline decoding is what text mode DOES (``io.TextIOWrapper``

@@ -74,16 +74,42 @@ permissions:
 # a human reading a PR.
 #
 # NOT CONVERTED INTO A STEP, and the reason is that it cannot be driven here.
-# The two `grep -qE` gates named above (lines 361 and 632) work because each
-# compares one log against a constant INSIDE the job that produced it. A cross-lane equality needs the two
-# lanes' counts to meet — an artifact upload from each matrix leg and a
-# dependent job that downloads both — which is new workflow machinery on the
-# path between a tag and PyPI, and this box has no network and no runner, so it
-# could not be driven red before landing. Adding a gate whose failure mode has
+# The two `grep -qE` gates named above — the steps `the two acceptance tests
+# must RUN` and `the 18 acceptance tests must RUN`, cited by NAME because a
+# line number in this file goes stale the moment anything above it moves, and
+# this sentence said `(lines 361 and 632)` at 103f3b6 when they sat at 371 and
+# 642, having been correct at 70ed1a5 before edits to this file pushed them
+# down — work because each compares one log against a constant INSIDE the job
+# that produced it. A cross-lane equality needs the two lanes' counts to meet —
+# an artifact upload from each matrix leg and a dependent job that downloads
+# both — which is new workflow machinery on the path between a tag and PyPI,
+# and this box has no network and no runner, so it could not be driven red
+# before landing. Adding a gate whose failure mode has
 # never been observed is the defect this branch exists to remove, one level up.
 # Whoever has a runner should add it; the shape is: upload
 # `${RUNNER_TEMP}/counts-${{ matrix.jax }}` from each lane, then one job that
 # downloads both and `diff`s them.
+#
+# KNOWN-OPEN AND RECORDED RATHER THAN CHANGED: SIX LINE-ANCHORED GREPS OVER
+# COLOURED-CAPABLE LOGS. Counted in this file: `^SKIPPED` and `^2 passed` on
+# `acceptance.log`, `^SKIPPED` and `^18 passed` on `reproducer.log`, and
+# `^(XPASS |\[XPASS|FAILED .*\[XPASS)` and `^XFAIL ` on `property.txt`. Each is
+# a `^`-anchored match over a log written by `… | tee`, and each decides
+# green/red on a step that `exit 1`s. pytest paints its short-summary lines
+# whenever it believes a human is watching, and it believes that whenever
+# `FORCE_COLOR` is set — an SGR escape then sits between the start of the line
+# and the word being anchored, and every one of these greps misses on output
+# that visibly contains what it is looking for. `^SKIPPED` and the XPASS
+# alternation FAIL OPEN when they miss; `^2 passed`, `^18 passed` and the
+# `^XFAIL ` count fail closed. This is safe here only because GitHub Actions
+# does not set `FORCE_COLOR` on the runner — it is a property of the host, not
+# of these steps. The same class was live and costing something in
+# `tests/test_skip_inventory.py`, whose three children now set `PY_COLORS=0`
+# for exactly this reason; `tools/property_check.py` does too. Adding
+# `PY_COLORS: 0` to these steps is the same one-line fix, and is NOT done here
+# because no runner is available on this box to drive it either way, and a
+# workflow edit that cannot be observed is the shape of change this file's own
+# header argues against.
 #
 # (measured in all three environments at 486862c; the two jax lanes re-measured
 # at bf905b9 and equal to each other there. Records of two commits, not
@@ -130,8 +156,14 @@ jobs:
           fi
       - run: .venv/bin/python -m stelling
 
-  # The FLOATING lane: `[jax]` is `jax>=0.5`, so this resolves whatever jax
-  # is newest. That is deliberate — it is the lane that meets a new series
+  # The FLOATING lane: `[jax]` carries NO UPPER BOUND, so this resolves
+  # whatever jax is newest. (This said "`[jax]` is `jax>=0.5`".
+  # `pyproject.toml` has read `jax = ["jax>=0.10"]` since c3ff79d — which
+  # raised the floor to the verified one and left a comment there saying
+  # `>=0.5` "was wrong twice over and measurably so" — so the figure was
+  # already false when this line was last edited. What makes the lane float is
+  # the missing ceiling, not the floor, so the sentence survived its own
+  # figure.) That is deliberate — it is the lane that meets a new series
   # first — but it means this job alone can only ever test ONE series, and
   # which one is decided by PyPI rather than by this file. Job id and name
   # are left alone on purpose: they may be named in branch protection, which
@@ -175,9 +207,13 @@ jobs:
   #
   # `stelling._optional.TESTED_JAX_SERIES` claims ("0.10", "0.11") — that BOTH
   # series are verified. But every jax lane in this workflow installed
-  # `.[solvers,jax]`, whose floor is `jax>=0.5`, so every one of them resolved
+  # `.[solvers,jax]`, whose floor WAS `jax>=0.5` at the time (it is `jax>=0.10`
+  # today; c3ff79d raised it, AFTER this lane landed at 1053714, and this
+  # sentence was left in the present tense), so every one of them resolved
   # the newest jax and the 0.10 half of that claim rested on a developer's
-  # one-off re-verification run, never on CI. A constant asserting two series
+  # one-off re-verification run, never on CI. The FLOOR was never the
+  # mechanism — the absent ceiling is, and it is still absent, which is why
+  # this lane is still needed. A constant asserting two series
   # while the machine only ever checks one is exactly the kind of unbacked
   # claim this project does not ship.
   #
@@ -712,28 +748,53 @@ jobs:
   # a module 6.2.0 neither has nor imports (6.0.0 replaced it with
   # python-magic). Only 5.1.1 can fail that way.
   #
-  #   tree                                    | 6.2.0        | 5.1.1
-  #   ----------------------------------------|--------------|--------------
-  #   this branch's tip                        | rc=0 331/331 | rc=0 331/331
-  #   same, `scratchpad/**` annotation deleted | rc=1 302/331 | rc=1 302/331
+  # THE RESULT IS AN AGREEMENT, AND AN AGREEMENT IS THE ONE FORM THAT DOES NOT
+  # ROT. The table below is written as a comparison between two versions on one
+  # commit, so re-running it needs no number from this file to compare against —
+  # which is the same rule step 4a below insists on for the action. The absolute
+  # counts are given only as a record of the run, and each is stamped with the
+  # commit it was read on; they will move with the next file added and that is
+  # expected. What must not move is the EQUALITY of the two columns.
+  #
+  #   RE-MEASURED 2026-08-09 at 53f9f84 (the first table below is the reading
+  #   at that commit; the second is what stood here, read at an unnamed tip of
+  #   the branch that closed this question, kept so the two are comparable):
+  #
+  #   tree, at 53f9f84                         | 6.2.0        | 5.1.1
+  #   -----------------------------------------|--------------|--------------
+  #   as committed                             | rc=0 350/350 | rc=0 350/350
+  #   same, `scratchpad/**` annotation deleted | rc=1 321/350 | rc=1 321/350
+  #
+  #   the earlier reading, unnamed commit      | rc=0 331/331 | rc=0 331/331
+  #   same, annotation deleted                 | rc=1 302/331 | rc=1 302/331
+  #
+  # BOTH READINGS SAY THE SAME THING and the numbers are not the thing: the two
+  # columns are equal in every cell, and the annotation moves both versions by
+  # the same amount in the same direction — 29 files at 53f9f84 (350 − 321) and
+  # 29 at the earlier commit (331 − 302).
   #
   # The second row is the POSITIVE CONTROL and it is the whole point: without
   # it, two rc=0s prove only that both programs ran. Deleting the one block
-  # this skew is ABOUT moves both versions, by the same 29 files, in the same
+  # this skew is ABOUT moves both versions, by the same files, in the same
   # direction. The agreement is on the mechanism, not on an accident.
   #
-  # STRONGER THAN THE COUNTS: `lint --json` at the tip gives 331 file paths
-  # from each version and the two SETS are equal — empty symmetric difference.
-  # Same files, not merely the same total.
+  # STRONGER THAN THE COUNTS: `lint --json` gives the same file PATHS from each
+  # version, not merely the same total — the two SETS have an empty symmetric
+  # difference. Re-measured at 53f9f84 on the committed tree AND on the control
+  # tree: 350 paths from each version, symmetric difference 0 in both.
   #
   # THE ONE DIFFERENCE OBSERVED, and it is the one the changelog documents.
-  # `lint --lines` on the control tree emits 58 lines from each version, and
-  # the two are IDENTICAL AS SETS BUT NOT AS SEQUENCES: 6.2.0 sorts by path
-  # and interleaves the two categories per file, 5.1.1 emits all 29 "no license
-  # identifier" and then all 29 "no copyright notice". That is exactly the
-  # single hit in the 5.1.1 → 6.2.0 changelog window recorded below — the sort
-  # order of `reuse lint --lines` — and nothing else differed. `reuse lint`
-  # (no `--lines`) is what this job runs, and its rc and counts are equal.
+  # `lint --lines` on the control tree emits the SAME NUMBER of lines from each
+  # version (58 at 53f9f84 — two per file over the 29), and the two are
+  # IDENTICAL AS SETS BUT NOT AS SEQUENCES: 6.2.0 sorts by path and interleaves
+  # the two categories per file, 5.1.1 emits all the "no license identifier"
+  # lines and then all the "no copyright notice" ones. Verified as a set
+  # comparison (`diff <(sort a) <(sort b)` empty) and a sequence comparison
+  # (`diff a b` non-empty), so the claim is not resting on the count. That is
+  # exactly the single hit in the 5.1.1 → 6.2.0 changelog window recorded below
+  # — the sort order of `reuse lint --lines` — and nothing else differed.
+  # `reuse lint` (no `--lines`) is what this job runs, and on the committed tree
+  # it emits nothing from either version and exits 0 from both.
   #
   # WHAT IS STILL SUSPECTED, and it is now exactly one thing: that
   # `fsfe/reuse-action@v5` carries EXACTLY reuse 5.1.1. That is read off the
@@ -837,14 +898,18 @@ jobs:
   #      the SAME "N / N" as `reuse lint` run on the SAME COMMIT locally. Run
   #      both, compare the two; do not compare either against a number written
   #      here.
-  #      A LITERAL FIGURE ROTS, AND THIS ONE HAD. It said "284/284 — the figure
-  #      this tree gives under 6.2.0 locally", which was the merge-base's
-  #      count; every commit of the branch that carried the instruction gave
-  #      285/285, and `main` gives 292/292. Any pass that adds a file moves it
-  #      again, so the only instruction that survives is the comparison, not
-  #      the constant. What is being tested is that the action's reuse counts
-  #      the same files as the pinned local one — a difference of any size is
-  #      the signal, and equality at any value is the pass.
+  #      A LITERAL FIGURE ROTS, AND THIS ONE HAD — TWICE, INCLUDING IN THE
+  #      SENTENCE THAT SAYS SO. It first said "284/284 — the figure this tree
+  #      gives under 6.2.0 locally", which was the merge-base's count while
+  #      every commit of the branch carrying the instruction gave 285/285. The
+  #      correction then wrote "`main` gives 292/292", and by 53f9f84 `main`
+  #      gives 350/350 — measured, 2026-08-09. Four values for one sentence, in
+  #      a paragraph whose subject is that such values rot. THE FIGURE IS NOT
+  #      THE INSTRUCTION AND NEVER WAS: what is being tested is that the
+  #      action's reuse counts the same files as the pinned local one on THE
+  #      SAME COMMIT — a difference of any size is the signal, and equality at
+  #      any value is the pass. Run both, compare the two to each other, and do
+  #      not compare either against any number written in this file.
   #   3. if it does not, install the pin explicitly instead of using the
   #      action, and keep the two in one place:
   #      `pipx run reuse==6.2.0 lint` or `uvx --from reuse==6.2.0 reuse lint`.

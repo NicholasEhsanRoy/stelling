@@ -163,6 +163,16 @@ def _run(tree, targets, *, python, profile, scale, extra_env=None, runxfail=Fals
     env["JAX_PLATFORMS"] = env.get("JAX_PLATFORMS", "cpu")
     env["STELLING_PROPERTY_PROFILE"] = profile
     env["STELLING_PROPERTY_SCALE"] = str(scale)
+    # This child's output is READ, not merely echoed: `_verdict` decides
+    # ECHOED on `expect_message in out`, and pytest paints traceback source —
+    # docstrings included — whenever it believes a human is watching, which it
+    # does whenever `FORCE_COLOR` is set in the environment this inherits. An
+    # SGR escape landing inside the expected string turns a control that FIRED
+    # correctly into a WRONG verdict. Same rule the children of
+    # `tests/test_skip_inventory.py` follow, and set before `extra_env` so a
+    # caller that wants colour can still ask for it. The DEMONSTRATED path is
+    # unaffected either way: it reads the junit XML, which carries no colour.
+    env["PY_COLORS"] = "0"
     env.pop("STELLING_PROPERTY_DB", None)
     if extra_env:
         env.update(extra_env)

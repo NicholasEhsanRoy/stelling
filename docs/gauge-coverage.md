@@ -34,8 +34,19 @@ how the two faces drifted apart once already.
 | `dot_general` | **no** | **yes** | `param_gauge_dot.py` drives `TRANSFERS`/`interval_env` only; `tests/test_dot_general_interval.py` is containment |
 | `convert_element_type` | **no** | **yes** | `param_gauge_convert.py` drives `interval_env` only |
 | `square` | **yes** | **yes** | `tests/test_square_row_gauge_jax.py` drives both from one battery — the emission gates run the pipeline through `check`/`escalate` to a replayed witness, eagerly AND with the `square` fused inside a `jit`; `interval-containment-eager-and-jit` drives `interval_env` against the values jax computes on this target. Its transfer-face mutation is CAUGHT by the containment gate and ADMITTED by every emission gate, so the two faces are visibly independent rather than assumed to be |
-| the other 29 in the emission set | **no** | mostly yes | containment sweep (Run 11), which is transfer-face by construction |
-| the 6 transfers with no emission row | n/a | mostly yes | same |
+| every other member of the emission set | **no** | mostly yes | containment sweep (Run 11), which is transfer-face by construction |
+| every transfer with no emission row | n/a | mostly yes | same |
+
+*Those two rows read "the other 29" and "the 6" when the table was written, and
+the second had since gone FALSE: it was `39 − 33`, and neither population is
+that any more. Measured at `53f9f84`, the transfer registries hold primitives
+the emission set does not, and the difference is now well into double figures —
+`dynamic_slice` and `dynamic_update_slice` are only the two most recent. The
+live sizes and BOTH set differences are on `docs/supported-primitives.md`,
+which is generated from the registries and byte-compared by
+`tests/test_supported_primitives_doc.py`, so it cannot drift the way a constant
+typed here does. Read the counts there. What this table asserts is which FACES
+are gauged, and that claim does not depend on how many rows there are.*
 
 **Totals: 39 registered transfers, 33 in the emission set. Two primitives have
 both faces gauged.** Those three figures were measured when this table was
@@ -118,7 +129,10 @@ shape of program most likely to meet this bound.
 - **"35 of 39 transfers gauged, zero survivors"** was a *transfer-face* figure.
   Containment cannot see an emission gate at all — it compares a box against an
   executed value, and an emission plan produces neither. So that sweep says
-  nothing about 33 emission rows.
+  nothing about the emission set — not one row of it, whatever its size, which
+  `docs/supported-primitives.md` reports and this sentence deliberately does
+  not restate. (It said "33 emission rows"; the emission set is not 33 any
+  more, and the *nothing* is what the sentence is for.)
 - **The two rows the project built by hand are gauged in opposite directions.**
   `param_gauge.py` was emission-only and `param_gauge_dot.py` is transfer-only,
   and each was quoted as coverage of its row.

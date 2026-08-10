@@ -6,9 +6,25 @@
 # disable them. Requires a (pending) Trusted Publisher configured on PyPI
 # for this repository + workflow + environment.
 #
-# TWO GATES STAND BETWEEN A TAG AND PyPI, because this is the one workflow
-# whose mistakes are immutable: a release on PyPI cannot be unpublished, only
-# yanked, and a yanked file still resolves for anyone who pins it.
+# EIGHT REFUSAL POINTS STAND BETWEEN A TAG AND PyPI — six `exit 1` sites
+# written below, plus two steps that refuse by their own exit code — because
+# this is the one workflow whose mistakes are immutable: a release on PyPI
+# cannot be unpublished, only yanked, and a yanked file still resolves for
+# anyone who pins it. This header used to say TWO, which was the count of
+# REASONS below and never the count of refusals; the sdist checks arrived after
+# it was written and it did not move.
+#
+# AND UNTIL `tests/test_release_gates.py` LANDED, NOTHING IN THIS REPOSITORY
+# READ THIS FILE. One test opened a workflow at all — `tests/test_reuse_pins.py`,
+# and only `ci.yml`. Six line-neutral mutations were applied here at once (the
+# `rm` deleted, `-ra` -> `-rs`, the `verdict=made` condition made always-true,
+# `publish: needs` losing `test`, this header's EIGHT -> TWELVE, and `comm -23`
+# -> `comm -12`, which makes the committed-members gate incapable of firing) and
+# the FULL SUITE STAYED GREEN on every one of them. That file is a text pin,
+# one test per mutation, driven RED against each of the six individually and
+# against all six at once. What it cannot do is check that any gate WORKS —
+# only that the literal the record describes is still the literal here. Each
+# gate's behaviour is recorded beside it, with the run that established it.
 #
 #   1. THE SUITE, on the tagged tree. `ci` runs on pushes to main and on pull
 #      requests — neither of which is this event. A GitHub Release can be cut
@@ -19,6 +35,59 @@
 #      a web form. Nothing connects them. Tagging `v0.2.0` on a tree that still
 #      says `0.1.0` publishes `stelling-0.1.0` under a release called v0.2.0 —
 #      silently, and permanently.
+#
+# SEVEN OF THE EIGHT WERE DRIVEN IN BOTH DIRECTIONS at a61c01f, step body by
+# step body under `bash -e` with the runner environment faked, in a venv built
+# by this job's own install step (CPython 3.11.15, jax/jaxlib 0.10.2, numpy
+# 2.4.6, cvc5 1.3.4, z3-solver 5.0.0.0, pytest 9.1.1). A refusal never observed
+# to refuse is not known to be a refusal, so each one carries the input that
+# made it fire, beside its own step. The `publish` job was NOT driven and must
+# not be: no tag was cut, nothing was uploaded to any index.
+#
+# THE EIGHTH CANNOT FIRE, and that is stated here rather than left as an
+# untested branch. The "examined nothing" loop guards three files; the
+# `explained.txt` arm is dead. `printf '%s\n' "${GENERATED}"` emits a newline
+# even for an empty `GENERATED`, so `generated.txt` is never empty, so
+# `explained.txt = sort -u tracked.txt generated.txt` is never empty either —
+# measured at 1 byte in the degenerate case, with an empty index AND an empty
+# `GENERATED`. The `members.txt` and `tracked.txt` arms both fire and are
+# driven; nothing is lost by the dead arm, and it is not a third check.
+#
+# NO STEP IN THIS FILE CHECKS THE WHEEL'S MEMBER LIST, AND THE ARGUMENT THAT
+# ONE WAS NOT NEEDED WAS HALF AN ARGUMENT. Step 2 reads only the wheel's
+# FILENAME. What was said to protect the wheel is a COUPLING rather than a
+# check — both artefacts come out of one `uv build` over one tree, and the
+# sdist allowlist covers `/src` — and the coupling was driven in ONE
+# DIRECTION: an untracked `src/stelling/_relgate_probe.py` shipped in the wheel
+# (29 members against a baseline of 28) AND in the sdist, where the
+# committed-members comparison caught it by name. That is a file ADDED.
+#
+# THE SUBTRACTIVE DIRECTION WAS UNCOVERED, AND IT IS THE ONE THAT SHIPS AN
+# UNIMPORTABLE PACKAGE. Re-driven at 650e678 in a clone of this tree, with
+# `exclude = ["**/solvers.py", "**/contracts.py"]` added under
+# `[tool.hatch.build.targets.wheel]`: the sdist stayed at 279 members, the
+# wheel went 28 -> 26, and EVERY GATE HERE STAYED GREEN — the sdist step rc=0
+# on "every one of 279 sdist members is committed to this tree", the tag step
+# rc=0 on `v0.1.0`, and `test_sdist_contents.py` + `test_import_hygiene.py` +
+# `test_release_doc_claims.py` 39 passed. The installed wheel: `import
+# stelling` fine, `import stelling.solvers` ModuleNotFoundError. The sdist
+# allowlist cannot see it, because an allowlist says which paths MAY ship and
+# never which MUST, and the wheel target reads a different table.
+#
+# WHAT CATCHES IT NOW is not a step here, and that is deliberate: it is three
+# tests in `tests/test_sdist_contents.py`, which run inside the suite above and
+# therefore refuse through refusal point 1 rather than adding a ninth. The
+# wheel's package members are compared to the tree's as an EQUALITY (so it
+# fires in both directions), the drop is driven as an intervention, and the
+# built wheel is UNPACKED INTO A BARE INTERPRETER and every module of it
+# resolved — the "nothing installs or imports a built artefact" gap, closed
+# where it can be measured on this box instead of guessed at on a runner.
+# Driven RED against exactly the mutation above: "in the tree and NOT in the
+# wheel: ['stelling/contracts.py', 'stelling/solvers.py']" and "these modules
+# of it do not resolve: ['contracts', 'solvers']".
+#
+# The sdist's own filename version is still never compared to the tag; same
+# build, so it agrees by construction.
 
 name: release
 on:
@@ -42,32 +111,65 @@ jobs:
       # Unnarrowed, and with the skip-inventory verdict asserted off a channel
       # the exit code cannot reach — same reasoning as the `ci` workflow. A
       # publish must not ride on a session that silently dropped its checks.
+      #
+      # REFUSAL POINT (implicit — pytest's own exit code). GREEN, driven at
+      # a61c01f in this job's own venv: `2519 passed, 16 skipped` (junitxml:
+      # 2535 tests, 0 failures, 0 errors), 157.9 s. RED, with one failure
+      # injected by a plugin: the step exits 1 HERE and the two verdict checks
+      # below are never reached — which is the order they want.
+      #
+      # THE PRECISION IS WHATEVER EACH MODULE CHOOSES. Neither workflow sets
+      # `JAX_ENABLE_X64`, and 52 of 97 test modules name `jax_enable_x64`
+      # themselves, so this green is a mixture by construction. That is a fact
+      # about the figure, not a defect: the modules that care pin it.
       - name: pytest, with the skip-inventory verdict asserted separately
         env:
           STELLING_SKIP_INVENTORY_VERDICT: ${{ runner.temp }}/verdict.txt
         run: |
           set -euo pipefail
           # ABSENCE is the signal this step buys, and it is only a signal if
-          # nothing else could have left a file here. Driven, under `bash -e`
-          # with the environment faked: with a verdict file already at the path
-          # and a pytest that writes none, the step exits 0 on a session that
-          # wrote nothing — a publish riding on an earlier run's verdict.
+          # nothing else could have left a file here. RE-DRIVEN IN BOTH
+          # DIRECTIONS at a61c01f, same inputs to each: a `verdict=made` file
+          # planted at the path, and a pytest that writes none (a plugin drops
+          # the environment variable, the route tests/conftest.py names in its
+          # own docstring). WITH this line the step exits 1 on "no verdict was
+          # written"; with this line DELETED the step exits 0 and `cat`s the
+          # planted file into the publish log. The line earns its place, and
+          # that is the measurement rather than the argument for it.
           rm -f "${RUNNER_TEMP}/verdict.txt"
-          # `-ra`, not `-rs`. Driven on one failing and one skipping test:
-          # `-rs` prints the SKIPPED line and omits `FAILED <nodeid>`, so the
-          # publish log of a red suite does not name what failed. `-ra` is a
-          # superset and the exit code is 1 either way.
+          # `-ra`, not `-rs`. Re-driven at a61c01f on the SAME red session, one
+          # injected failure: `-ra` prints `FAILED
+          # tests/test_verdict.py::test_every_contract_field_is_required`,
+          # `-rs` prints zero `FAILED` lines, and both exit 1. So the exit code
+          # is the same and the publish log of a red suite names what failed
+          # only under `-ra`.
           .venv/bin/python -m pytest -q -ra
           verdict="${RUNNER_TEMP}/verdict.txt"
+          # REFUSAL POINT. Driven red at a61c01f: with the recorder's
+          # environment variable removed the session exits 0 (`12 passed`)
+          # and leaves no file, and this exits 1.
           if [ ! -f "${verdict}" ]; then
             echo "::error title=no skip-inventory verdict was written::tests/conftest.py writes one on every way out of a session. There is no file, so the recorder was ignored, filtered out or never loaded — and pytest's own exit code cannot report that."
             exit 1
           fi
           cat "${verdict}"
+          # REFUSAL POINT, and the one that catches a NARROWED session, which
+          # nothing else here can see. Driven red at a61c01f with
+          # `pytest tests/test_verdict.py` appended: pytest exits 0 on
+          # `12 passed`, the recorder writes `verdict=withdrawn`, and this
+          # exits 1. (A narrowing that collects nothing does not reach here at
+          # all — pytest exits 5 and `set -e` stops above. Red either way.)
           if ! head -1 "${verdict}" | grep -qx 'verdict=made'; then
             echo "::error title=the completeness claim was not made::Refusing to publish on a session that could not claim the suite."
             exit 1
           fi
+      # REFUSAL POINT (implicit — this command's own exit code), and it is a
+      # real one rather than an informational print.
+      # Driven at a61c01f: 0 with z3 5.0.0.0 and cvc5 1.3.4 both reporting
+      # `[selfcheck: ok]`, and 1 with `STELLING_CVC5` pointed at a stub that
+      # answers `sat` to `(distinct x x)` — `[selfcheck FAILED: expected
+      # `unsat` for `x != x`, got 'sat']`. Missing optional dependencies stay
+      # informational; a BROKEN installed one is what turns this red.
       - run: .venv/bin/python -m stelling
 
   build:
@@ -78,12 +180,51 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v6
+      # Driven for real at a61c01f (no tag, nothing uploaded): 279-member
+      # `stelling-0.1.0.tar.gz` and 28-member `stelling-0.1.0-py3-none-any.whl`.
       - run: uv build
       # `tag_name` is attacker-influenced in the general case, so it goes
       # through the environment rather than being interpolated into the shell.
       # The comparison is against the BUILT ARTIFACT's name, not against
       # `__version__` read from the source: the filename is what gets uploaded,
       # so it is the thing that has to agree with the tag.
+      #
+      # REFUSAL POINT, driven at a61c01f over seven tags against the real
+      # `stelling-0.1.0-py3-none-any.whl`. PASSES on `v0.1.0` and `0.1.0`.
+      # REFUSES `v0.2.0`, `0.2.0`, the empty string, `v0.1.0 ` (trailing space)
+      # and `V0.1.0` — the last three are worth knowing, because a gate that
+      # normalised them would be a gate that could be talked past.
+      #
+      # ONE WEAKNESS, MEASURED, AND NOT REACHABLE FROM THIS WORKFLOW. `ls
+      # dist/*.whl` returns every match, and `basename` on a multi-line string
+      # returns whatever follows the LAST `/` — so with two wheels present
+      # this reads only the LAST one's version. Driven: a planted
+      # `stelling-0.2.0-…whl` beside the real 0.1.0 made this report
+      # `artifact version=0.2.0`, and it went red there.
+      #
+      # THE GREEN SHAPE WAS DESCRIBED BACKWARDS HERE AND IS NOW DRIVEN. This
+      # said the mirror image — "a STALE 0.1.0 beside a real 0.2.0, tagged
+      # v0.1.0" — would go green. It does not, and the reason is the same
+      # sentence two lines up: `ls` SORTS, so the LAST match is the HIGHEST
+      # version, and that is the one compared. Both shapes driven on a `dist/`
+      # of two empty files with the step body verbatim:
+      #
+      #   0.1.0 + 0.2.0, TAG=v0.1.0   "artifact version=0.2.0"   rc=1  RED
+      #   0.0.9 + 0.1.0, TAG=v0.1.0   "artifact version=0.1.0"   rc=0  GREEN
+      #
+      # So what goes green is a stray that sorts BEFORE the real wheel, not
+      # after — and it is worse than a wrong version string, because the
+      # comparison never sees the stray at all: `upload-artifact` takes the
+      # whole `dist/` directory, `download-artifact` restores it, and the
+      # publish step uploads every file in it. A 0.0.9 nobody tagged goes to
+      # PyPI beside the 0.1.0, permanently, with this step green.
+      #
+      # STILL NOT REACHABLE HERE, which is why it is recorded rather than
+      # patched: `actions/checkout@v4` gives this job a fresh clone, `dist/` is
+      # gitignored and has no tracked member, and one `uv build` fills it.
+      # The patch cannot be validated on a runner from here. With NO
+      # wheel at all, `ls` fails and `set -e` exits 2 before this compares
+      # anything — red, but not by this gate.
       - name: the tag and the artifact must agree
         env:
           TAG: ${{ github.event.release.tag_name }}
@@ -118,6 +259,25 @@ jobs:
       # ancestor `.gitignore`/`.hgignore` arriving keyed by basename, a
       # `force-include` table, a `hatch_build.py` hook — and every untracked
       # file, without modelling any of them.
+      #
+      # REFUSAL POINTS (three `exit 1` sites, two of which can fire), driven in
+      # both directions at a61c01f. GREEN on the real
+      # artefact: "every one of 279 sdist members is committed to this tree".
+      # RED, twice, by two different routes and each with a real plant:
+      #
+      #   * an `.hgignore` in the checkout's PARENT directory — the
+      #     force-include route `pyproject.toml` describes, re-verified here:
+      #     280 members against the 279 baseline, and this step printed
+      #     `.hgignore` and exited 1;
+      #   * an untracked `src/stelling/_relgate_probe.py` — a stray UNDER an
+      #     allowlisted directory, which the allowlist by design does not stop:
+      #     it shipped in both artefacts and this step named it and exited 1.
+      #
+      # AND A CONTROL, so the 279/279 green is not a green from having looked
+      # at nothing: the same probe named `_relgate_probe.so` — matched by
+      # `.gitignore`'s `*.so`, which hatchling reads — reached NEITHER the
+      # wheel (28 members, unchanged) nor the sdist, and this step stayed
+      # green. The route is closed, driven rather than assumed.
       - name: every sdist member is a committed file of the tagged tree
         env:
           # Written by the build backend from the project metadata; no tree
@@ -136,12 +296,24 @@ jobs:
           # way for the comparison below to come back empty because it looked
           # at nothing: an unreadable tarball, an index this job cannot see, a
           # `sed` that ate every line.
+          #
+          # Driven red at a61c01f on two of the three: a VALID but EMPTY
+          # tarball ("members.txt is empty", exit 1), and a checkout whose
+          # index is empty ("tracked.txt is empty", exit 1). Note what does
+          # NOT get here: a CORRUPT tarball dies in the pipeline above at
+          # tar's own rc 2, with no annotation. Still red, so still safe, but
+          # `pipefail` is what catches that one and not this loop — which is
+          # the sort of thing a comment naming "an unreadable tarball" would
+          # otherwise take credit for.
           for f in members.txt tracked.txt explained.txt; do
             if [ ! -s "${f}" ]; then
               echo "::error title=the sdist check examined nothing::${f} is empty, so the comparison below could not have found anything. Refusing to publish."
               exit 1
             fi
           done
+          # Driven red at a61c01f by asking for a member that is not there
+          # (`GENERATED=NOT-A-REAL-MEMBER`): "is not in
+          # dist/stelling-0.1.0.tar.gz. Refusing to publish.", exit 1.
           for required in "${GENERATED}" pyproject.toml README.md LICENSE; do
             if ! grep -qxF "${required}" members.txt; then
               echo "::error title=the sdist check is not looking at a real artefact::'${required}' is not in ${sdist}. Refusing to publish."
@@ -159,6 +331,13 @@ jobs:
       # A last look at what would ship, in the log, before it becomes immutable.
       # tests/test_sdist_contents.py already holds the allowlist shut; this is
       # here so the record of a release includes the file list it published.
+      #
+      # NOT a refusal, and driven to establish that rather than to assume it:
+      # at a61c01f it wrote 282 lines of manifest and exited 0. The only way it
+      # goes red is `set -u` on an unset `GITHUB_STEP_SUMMARY` (driven:
+      # "GITHUB_STEP_SUMMARY: unbound variable", exit 1), which a runner always
+      # sets. It asserts nothing about what it prints — the step before it is
+      # what does that.
       - name: the sdist manifest, for the record
         run: |
           set -euo pipefail

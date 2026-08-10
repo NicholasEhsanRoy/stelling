@@ -46,7 +46,9 @@ _OPTIONAL: dict[str, _Optional] = {
 # and merged Jaxpr/ClosedJaxpr — see design/maintenance-treadmill.md.
 #
 # EACH ENTRY HAS ITS OWN CI LANE, and until 2026-08-07 one of them did not.
-# Every jax job installed `.[solvers,jax]`, whose floor is `jax>=0.5`, so
+# Every jax job installed `.[solvers,jax]`, whose floor was `jax>=0.5` then and
+# is `jax>=0.10` now (c3ff79d, after the lane), and which has never had an
+# UPPER bound — which is the part that matters here, so
 # every job resolved the NEWEST jax: whatever this tuple said, CI only ever
 # exercised one series, and 0.10 rested on a developer's re-verification run.
 # `test-jax-0-10` in .github/workflows/ci.yml now pins `jax>=0.10,<0.11` and

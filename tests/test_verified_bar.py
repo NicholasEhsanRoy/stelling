@@ -3411,7 +3411,12 @@ def test_the_budget_cannot_reach_the_SLICE_fingerprint():
 # this tuple" is true of every one of them; "therefore unsampled" is false of
 # four. `60_000` drives a solver at eight sites —
 # `tests/test_dropped_assume.py:65,104,120,127`,
-# `tests/test_membership_idiom_hint.py:864,866`,
+# `tests/test_membership_idiom_hint.py`'s
+# `test_the_hint_survives_escalation_which_replaces_the_detail` (TWO sites in
+# that one test; this read `:864,866`, which is a blank line and the `def` of a
+# test that drives no solver at all — the real pair is 882/884, measured
+# 2026-08-09, and the symbol is written instead because the number is what
+# rotted),
 # `tests/test_reproduce_acceptance.py:70`,
 # `tests/test_square_acceptance_jaxfluids.py:62` — and `60000` is in
 # `test_the_budget_cannot_reach_the_SLICE_fingerprint`'s own sweep. `2000` is a

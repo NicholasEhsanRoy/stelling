@@ -255,3 +255,388 @@ def test_every_test_cited_in_core_prose_still_exists():
     assert _defined_test_names("def broken(:\n") is None, (
         "a file that does not parse is being reported as defining tests"
     )
+
+
+# --- line citations, in the SHIPPED tree ------------------------------------
+#
+# The scope is DERIVED from the sdist allowlist rather than typed, and that is
+# the correction this check embodies. A stale-figure sweep of this tree was
+# described as covering "the tracked, SHIPPED tree" and covered six of the 23
+# allowlisted roots — SOUNDNESS.md, docs/, README.md, ARCHITECTURE.md,
+# CONTRIBUTING.md, .github/. `/design`, `/corpus`, `/tests`, `/src` and
+# `/tools` all ship and were not swept, and TEN wrong own-source citations were
+# sitting in them, one of them repeated three times.
+#
+# THE DENOMINATOR SAID 22 AND WAS NEVER 22 — the third stale figure in a
+# paragraph whose subject is stale figures. Counted with this file's own
+# `_shipped_roots()` at 43973af, 650e678, 53f9f84 and a61c01f alike: 23. The
+# commit that introduced the sentence, and a commit body announcing a re-sweep
+# of "ALL 22 ROOTS", carry the same wrong number; those are immutable. This
+# comment and its twin in `tests/test_zero_dep_import_discipline.py` are the
+# SHIPPED copies, so they are the ones corrected.
+#
+# AND THE FIGURE IS READ NOW RATHER THAN TRUSTED. It survived because the only
+# thing standing over it was `assert len(roots) >= 20` — which 22, 23 and 40
+# all satisfy. A guard sitting exactly where the defect was, unable to see it.
+# `test_the_shipped_root_count_in_prose_matches_the_allowlist` below parses the
+# number out of this comment and out of its twin, and compares both with the
+# allowlist it is a count of.
+#
+# WHAT THIS CAN AND CANNOT DO, said plainly, because the gap is most of the
+# defect. It resolves a `file.ext:N` citation and asserts N is a line the file
+# HAS. That is the whole class it closes — line 1031 of `contracts.py` cited
+# in a file of 1022 lines. It cannot know whether line N says what the sentence around
+# it says, and eight of those ten were exactly that: off by 20, by 27, by 18,
+# pointing at a blank line or at the wrong helper. Nothing cheap catches those,
+# which is why the house rule is to cite a SYMBOL and why the fixes took that
+# form. This is the mechanical floor under the rule, not the rule.
+# KNOWN-OPEN AND MEASURED. Six citation shapes go unchecked. FOUR of them have
+# no live instance in the tree — those probes are synthetic, and `:99999` is a
+# line no file here has — so those four are gaps in reach, not defects on the
+# page. The RANGE shape has 58 live instances, six of which resolve to an
+# in-tree target, and every one of those six ends inside its target: measured,
+# so the shape is unchecked and currently carries nothing wrong.
+#
+# THE SIXTH HAD A LIVE INSTANCE WHILE THIS NOTE SAID NONE DID, which is the
+# sentence being corrected here. At 103f3b6 `.github/workflows/ci.yml` said its
+# two `grep -qE` gates were at "(lines 361 and 632)" and they were at 371 and
+# 642. The citation was CORRECT at 70ed1a5; ten lines added to that file on this
+# branch pushed the gates down and left the sentence behind. So the argument for
+# citing symbols rather than lines arrived as a live example inside the very
+# note that says the sweep cannot check citations. It is fixed by naming the two
+# steps, in the commit that corrected this paragraph.
+#
+# These are written down because "the sweep is derived from the allowlist" reads
+# like completeness and is not:
+#
+#   tools/property_venv.sh:99999   the REGEX declines it. The extension list is
+#                                  `py|md|yml|yaml|toml|cff`, and `.sh` is not
+#                                  in it; `_resolve_citation` resolves the path
+#                                  perfectly well when handed it directly, so
+#                                  the pattern is the whole of the limit.
+#   contracts.py#L99999            the REGEX declines it. It matches `path:N`
+#                                  and nothing else; the GitHub `#L` spelling
+#                                  is a different grammar.
+#   stelling/contracts.py:99999    the regex MATCHES this one — the RESOLVER
+#                                  returns None. A path with a slash is looked
+#                                  up as repo-relative, and `stelling/…` is not
+#                                  (the file is at `src/stelling/…`), so the
+#                                  citation is silently skipped rather than
+#                                  resolved and checked. This is the shape
+#                                  worth knowing about: it is the one that
+#                                  looks like a real path, and the SAME wrong
+#                                  line written as a bare basename would be
+#                                  caught, while the more specific spelling is
+#                                  not. (Written without its colon here on
+#                                  purpose — spelled out, this line would be a
+#                                  live wrong citation and the sweep below
+#                                  would flag this very comment. It was, once,
+#                                  while this note was being written.)
+#   "lines 361 and 632"            the REGEX declines it, and this is the shape
+#                                  that had the live instance. A SELF-
+#                                  REFERENTIAL citation — "line N" of the file
+#                                  the sentence is in — carries no path token
+#                                  at all, and the pattern needs `path` then a
+#                                  colon then `N`. The path spelling would not
+#                                  have caught it either: this sweep asks only
+#                                  whether the file HAS line N, and both
+#                                  numbers sit well inside a file of over a
+#                                  thousand lines, so that citation resolves
+#                                  and PASSES while pointing at a `run: |` and
+#                                  a `tee`, which is what they held. Which is
+#                                  the "cannot know whether line N says what
+#                                  the sentence says" limit above, met in the
+#                                  wild. Citing the STEP BY NAME is the fix and
+#                                  is the house rule already; nothing cheap
+#                                  checks it.
+#   a RANGE's second number        the regex takes the START and drops the rest:
+#                                  handed `contracts.py`, a colon, and
+#                                  `1020-99999`, `findall` returns
+#                                  `('contracts.py', '1020')`. So the END of
+#                                  every range citation is unchecked, and the
+#                                  test below asserts exactly that behaviour
+#                                  (`preconditions.py` + colon + `213-240` ->
+#                                  `('preconditions.py', '213')`) without
+#                                  saying what it costs. Measured across the
+#                                  266 swept files: 58 range citations, 6 with
+#                                  a target that resolves in-tree, and all 6
+#                                  ends are inside their target — so nothing is
+#                                  wrong today and nothing would notice if it
+#                                  were. Widening the regex to check the end
+#                                  too is a small change, but ranges also cite
+#                                  THIRD-PARTY sources here (hatchling's
+#                                  `builders/config.py`, the MIME socket), and
+#                                  which of those should resolve is the same
+#                                  decision as the entry above; left with it.
+#   an AMBIGUOUS bare basename     the regex takes it and the resolver answers
+#                                  with the ROOT file. `_resolve_citation`
+#                                  tries `_REPO / rel` FIRST, so a bare name
+#                                  that happens to name a file at the repo root
+#                                  resolves there however many other files
+#                                  carry it — `README.md` resolves to the
+#                                  267-line root one, and this tree has four
+#                                  files of that name (the root's, `docs/`'s at
+#                                  41 lines, `tests/property/`'s at 628, and
+#                                  `corpus/supply/affine_holdout/`'s at 40). A
+#                                  citation of the root README's line 250
+#                                  written inside `docs/README.md` would be
+#                                  checked against the wrong file and pass.
+#                                  NOT LIVE: measured, `README.md` is the only
+#                                  multi-bearer basename in the swept tree and
+#                                  zero citations of it exist. The docstring on
+#                                  `_resolve_citation` used to describe the
+#                                  other behaviour — "accepted only when
+#                                  exactly one file in the tree carries it" —
+#                                  and has been corrected to describe the code.
+#                                  Changing the CODE instead is the same
+#                                  ambiguity decision as the two entries above.
+#
+# The third was first reported as a regex miss. It is not; the regex takes it
+# and the resolver drops it. Same outcome, different mechanism, and the
+# mechanism is what a fix would have to address — `_resolve_citation` would
+# need a suffix-match fallback for slashed paths, which is a decision about
+# how much ambiguity to accept and is left to the principal. The last two
+# entries are that same decision wearing different clothes, which is why all
+# three are recorded rather than half-fixed.
+_LINE_CITATION = re.compile(
+    r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:py|md|yml|yaml|toml|cff)):(\d+)"
+)
+_REPO = Path(__file__).resolve().parent.parent
+
+
+def _shipped_roots():
+    """The `[tool.hatch.build.targets.sdist]` allowlist, read as TEXT.
+
+    Not with `tomllib`, which is 3.11+ while the declared floor is 3.10 — see
+    `tests/test_zero_dep_import_discipline.py`, where that is the whole
+    subject.
+    """
+    text = (_REPO / "pyproject.toml").read_text(encoding="utf-8")
+    text = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    block = re.search(
+        r"\[tool\.hatch\.build\.targets\.sdist\]\s*\ninclude\s*=\s*\[(.*?)^\]",
+        text, re.S | re.M,
+    )
+    assert block, "the sdist allowlist is not where this expects it"
+    return [m.group(1).lstrip("/") for m in re.finditer(r'"([^"]+)"', block.group(1))]
+
+
+def _shipped_text_files():
+    out = []
+    for root in _shipped_roots():
+        base = _REPO / root
+        if base.is_file():
+            out.append(base)
+        elif base.is_dir():
+            out.extend(
+                p for p in sorted(base.rglob("*"))
+                if p.is_file()
+                and p.suffix in (".py", ".md", ".yml", ".yaml", ".toml", ".cff")
+                and "__pycache__" not in p.parts
+            )
+    return out
+
+
+def _resolve_citation(rel: str):
+    """The file a citation names, or None when it names nothing in this repo.
+
+    Third-party targets (`subprocess.py`, jax's `lax.py`, hatchling's
+    `builders/config.py`) are the common case and must resolve to None rather
+    than to a same-named file here. `builders/config.py` resolves to nothing
+    because no such path exists; `solvers.py` resolves to
+    `src/stelling/solvers.py` because exactly one file is called that.
+
+    TWO RULES, IN THIS ORDER, and the first is the one the docstring used to
+    omit. A repo-relative path is tried FIRST, so a bare basename that names a
+    file at the repo root resolves there however many other files carry the
+    name. Only if that misses is the "exactly one bearer" rule applied — which
+    is what this used to claim was the whole of it, and it is not:
+    `README.md` resolves to the root README although four swept files are
+    called that. Not live (no `README.md` line citation exists in the tree, and
+    it is the only multi-bearer basename), and recorded in the reach note above
+    rather than changed, because which file an ambiguous basename should mean
+    is the same decision left to the principal there.
+    """
+    direct = _REPO / rel
+    if direct.is_file():
+        return direct
+    if "/" in rel:
+        return None
+    matches = [p for p in _shipped_text_files() if p.name == rel]
+    return matches[0] if len(matches) == 1 else None
+
+
+def test_no_shipped_page_cites_a_line_its_own_tree_does_not_have():
+    """A citation past the end of a file is a claim nothing can be.
+
+    Break it: change any `foo.py:12` in a shipped page to `foo.py:999999`.
+    Driven the other way at 650e678, before the citations were repaired:
+    `corpus/supply/affine_holdout/SCOUT_CASES.md` cited line 1031 of
+    `contracts.py`, and `src/stelling/contracts.py` is 1022 lines.
+    """
+    lengths: dict[Path, int] = {}
+    past_eof = []
+    checked = 0
+    for path in _shipped_text_files():
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for rel, cited in _LINE_CITATION.findall(line):
+                target = _resolve_citation(rel)
+                if target is None:
+                    continue
+                if target not in lengths:
+                    lengths[target] = len(
+                        target.read_text(encoding="utf-8").splitlines()
+                    )
+                checked += 1
+                if int(cited) > lengths[target]:
+                    past_eof.append(
+                        f"{path.relative_to(_REPO)}:{lineno} cites {rel}:{cited}, "
+                        f"and {target.relative_to(_REPO)} has "
+                        f"{lengths[target]} lines"
+                    )
+    assert not past_eof, (
+        "shipped page(s) cite a line that does not exist:\n  "
+        + "\n  ".join(past_eof)
+        + "\nCite the SYMBOL, not the line — a line number in a page nothing "
+        "regenerates is a claim nothing checks, and a wrong one sends a reader "
+        "to a line that reads plausibly."
+    )
+    # ...and it looked at something. A regex that stopped matching and a tree
+    # with no bad citations return the same empty list.
+    assert checked > 30, (
+        f"only {checked} in-repo line citation(s) resolved; the pattern has "
+        "stopped matching how they are written"
+    )
+
+
+def test_the_shipped_root_count_in_prose_matches_the_allowlist():
+    """The count two shipped comments state about the allowlist, DERIVED.
+
+    Both comments state a fraction — "six of the 23 allowlisted roots", "6
+    roots out of 23" — and the denominator is a fact about `pyproject.toml`
+    that nothing read. It said 22. The allowlist has held 23 root entries at
+    every commit anyone has looked at: 43973af, 650e678, 53f9f84 and a61c01f,
+    counted with the two parsers those files already use.
+
+    THIS DOCSTRING SAID THOSE FRACTIONS "explain their own scope" AND NEITHER
+    DOES. Both describe the OLD hand-typed sweep — the one that covered six
+    roots and was replaced — as a cautionary example. The current scope of
+    either sweep is derived from the allowlist and is not a fraction anywhere.
+    Corrected here rather than left, because a checker that misdescribes its
+    own subject is the thing this file exists to catch.
+
+    WHAT LET IT THROUGH IS THE INTERESTING PART. Both files carried a guard
+    over exactly this number — `assert len(roots) >= 20` — added in the same
+    pass that wrote the wrong figure. It is satisfied by 22, by 23, and by 40,
+    so it could not distinguish the count from the claim about the count. A
+    bound is not a check of a figure; the figure has to be read.
+
+    So it is read. `>= 20` stays nowhere; the number in the prose is parsed and
+    compared against the parsed allowlist, which means adding a root to
+    `pyproject.toml` now moves both comments or goes red, and neither comment
+    can drift from the other.
+
+    WHAT THIS DOES NOT BUY, measured rather than left to be assumed, because
+    "the number in the prose is parsed" reads like more than it is. Each
+    pattern is `re.findall` over the WHOLE FILE TEXT with an exactly-once
+    requirement, so what it pins is "somewhere in this file, exactly once,
+    these words appear with this number after them" — not "the sentence a
+    reader sees says this". Three consequences, each driven at cc5ce89 against
+    the two files' real text:
+
+    * the pattern here is welded to the CURRENT LINE WRAP (`(\\d+)\\s*\\n#\\s*`
+      demands the break, and a `#` at column 0 after it). Reflow the real
+      comment onto one line and it stops matching — `findall` returns `[]` and
+      this fails loudly, which is the safe half. Reflow it to say 22 AND add a
+      decoy that does match, and `findall` returns exactly `['23']`: green
+      tree, "22" on the page. Both decoy shapes work — a column-0 comment
+      anywhere in the file, and a triple-quoted assertion message in a function
+      that is never called.
+    * the zero-dep pattern has no wrap dependency, so a plain decoy makes it
+      two matches and this fails. Rewording the real sentence instead ("six
+      roots out of 22", spelled out, which the literal `6` in the pattern no
+      longer takes) plus one decoy gives exactly one match: green tree, "22" on
+      the page again.
+    * the NUMERATORS (`six`, `6`) are literals in the patterns, compared with
+      nothing. That direction is safe by accident and worth saying: change a
+      numerator and the pattern stops matching, so it goes red rather than
+      quiet.
+
+    Closing this means locating each sentence rather than searching for it —
+    anchoring on the enclosing comment block, or moving the figure out of prose
+    into a name the comment is generated from. Not done here; the shape of the
+    gap is written down so the guard is not read as more than a text search.
+    """
+    roots = _shipped_roots()
+    found = []
+    for path, pattern in (
+        (Path(__file__), r"covered six of the (\d+)\s*\n#\s*allowlisted roots"),
+        (
+            _REPO / "tests" / "test_zero_dep_import_discipline.py",
+            r"ends up covering 6 roots out of (\d+)",
+        ),
+    ):
+        text = path.read_text(encoding="utf-8")
+        matches = re.findall(pattern, text)
+        assert len(matches) == 1, (
+            f"{path.name}: the shipped root-count sentence no longer matches "
+            f"{pattern!r} exactly once (found {len(matches)}). The figure it "
+            "states is the thing under test, so this must fail loudly rather "
+            "than quietly check nothing."
+        )
+        found.append((path.name, int(matches[0])))
+
+    wrong = [(name, n) for name, n in found if n != len(roots)]
+    assert not wrong, (
+        f"the sdist allowlist has {len(roots)} root entries and these shipped "
+        "comments say otherwise. The denominator is a count OF THAT LIST, so "
+        "it moves whenever the list does:\n  "
+        + "\n  ".join(f"{name} says {n}" for name, n in wrong)
+        + f"\n  pyproject.toml has {len(roots)}: {sorted(roots)}"
+    )
+
+
+def test_the_citation_sweep_covers_the_whole_allowlist_and_the_resolver_works():
+    """The two ways the check above goes quiet without failing."""
+    roots = _shipped_roots()
+    swept = {p.relative_to(_REPO).parts[0] for p in _shipped_text_files()}
+    # the five roots the sweep this replaces did not reach
+    assert {"design", "corpus", "tests", "src", "tools"} <= swept, sorted(swept)
+    assert len(_shipped_text_files()) > 200
+    # …and the sweep stays INSIDE the allowlist. This was `len(roots) >= 20`,
+    # a bound that could not tell 22 from 23 and sat directly over a figure
+    # that was wrong by one — see
+    # `test_the_shipped_root_count_in_prose_matches_the_allowlist`, which now
+    # holds the count itself. What is worth asserting here is the relation:
+    # every root the sweep reaches is a root the sdist ships.
+    assert swept <= set(roots), sorted(swept - set(roots))
+
+    # the resolver: a bare basename with exactly one bearer resolves, a
+    # third-party path does not, and a bare name matching nothing does not
+    assert _resolve_citation("solvers.py") == _REPO / "src" / "stelling" / "solvers.py"
+    assert _resolve_citation("subprocess.py") is None
+    assert _resolve_citation("builders/config.py") is None
+    assert _resolve_citation("does_not_exist_anywhere.py") is None
+    assert _resolve_citation("pyproject.toml") == _REPO / "pyproject.toml"
+
+    # ...and the pattern reads the shapes these pages actually use. The
+    # samples are BUILT BY CONCATENATION so this file cannot cite anything
+    # itself — the same device `tests/test_import_hygiene.py` uses for the
+    # private-jax token, and here it is load-bearing: this file is INSIDE the
+    # swept tree and is deliberately not exempted from its own check. A
+    # checker that exempts itself is a checker whose own claims go unread.
+    colon = ":"
+    assert _LINE_CITATION.findall(f"(contracts.py{colon}1031), not by raw") == [
+        ("contracts.py", "1031")
+    ]
+    assert _LINE_CITATION.findall(f"`preconditions.py{colon}213-240`") == [
+        ("preconditions.py", "213")
+    ]
+    assert _LINE_CITATION.findall(f"`src/stelling/obligation.py{colon}886`") == [
+        ("src/stelling/obligation.py", "886")
+    ]
+    assert _LINE_CITATION.findall("no citation here") == []

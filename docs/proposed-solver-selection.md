@@ -9,18 +9,33 @@ SPDX-License-Identifier: Apache-2.0
 is not about plumbing. Everything below was measured against this tree; no
 code was changed for it.
 
+*Source references on this page name a SYMBOL and a FILE and deliberately
+carry no line number. They used to carry sixteen. Resolved against `53f9f84`
+on 2026-08-09, five of them no longer pointed at what the sentence said:
+`solvers.py:769`, cited as `_backends_for`, is `if error:` and the `def` is at
+1057; `solvers.py:979`, cited as `_absences`, is a BLANK LINE and the `def` is
+at 1267; `solvers.py:1050`, cited as the dispatch site, is blank;
+`contracts.py:942`, cited as `check_contract`, is the middle of an f-string and
+the `def` is at 952; `reproduce.py:258`, cited as `SIDECAR_KEYS`, is blank. A
+line number in a page nothing regenerates is a claim nothing checks, and a
+wrong one sends a reader to a line that reads plausibly. Symbols move too, but
+they move LOUDLY — `grep` comes back empty — and the one page here that does
+carry line numbers, `docs/supported-primitives.md`, gets them from
+`docs/gen_supported_primitives.py` and is byte-compared on every run by
+`tests/test_supported_primitives_doc.py`.*
+
 ## The capability, and why it is unreachable
 
-`SolverConfig.only` (`src/stelling/solvers.py:306`) restricts escalation to a
+`SolverConfig.only` (`src/stelling/solvers.py`) restricts escalation to a
 subset of `{"z3", "cvc5"}`. It is fully built: it validates its argument
-eagerly (an empty tuple and an unknown name both raise, `solvers.py:314-327`),
-it drives backend discovery (`_backends_for`, `solvers.py:769`), and it has a
+eagerly (an empty tuple and an unknown name both raise, `solvers.py`),
+it drives backend discovery (`_backends_for`, `solvers.py`), and it has a
 dedicated disclosure path that distinguishes a configured restriction from a
-missing install (`_absences`, `solvers.py:979`, whose docstring records that
+missing install (`_absences`, `solvers.py`, whose docstring records that
 the predecessor said "not installed" for both and that this was false).
 
 `check()` constructs `SolverConfig(timeout_ms=int(solver_timeout_ms))` at
-`src/stelling/preconditions.py:271` and never passes `only`. That is the
+`src/stelling/preconditions.py` and never passes `only`. That is the
 **only** `SolverConfig` construction in `src/` — grep confirms one site. So
 the capability is reachable from tests (56 `SolverConfig(...)` constructions
 across `tests/`, 30 of them passing `only=`) and from nowhere else. It is the
@@ -34,11 +49,11 @@ decide this.
 
 | site | change |
 |---|---|
-| `preconditions.check` (`preconditions.py:107`) | new keyword-only parameter, defaulting to `None` |
-| `preconditions._pipeline` (`preconditions.py:186`) | accept it and thread it to `_finish` |
-| `preconditions._pipeline` eager validation (`preconditions.py:213-240`) | validate at entry, like `vacuity_mode` and `refine` — and refuse it when `solver_timeout_ms is None`, since a portfolio restriction with no escalation is a caller error that would otherwise ride silently |
-| `preconditions._pipeline` (`preconditions.py:271`) | the one `SolverConfig(...)` construction gains `only=` |
-| `contracts.check_contract` (`contracts.py:942`) | new parameter, forwarded to `_pipeline` — it already forwards `solver_timeout_ms` and `refine` unchanged |
+| `preconditions.check` (`preconditions.py`) | new keyword-only parameter, defaulting to `None` |
+| `preconditions._pipeline` (`preconditions.py`) | accept it and thread it to `_finish` |
+| `preconditions._pipeline` eager validation (`preconditions.py`) | validate at entry, like `vacuity_mode` and `refine` — and refuse it when `solver_timeout_ms is None`, since a portfolio restriction with no escalation is a caller error that would otherwise ride silently |
+| `preconditions._pipeline` (`preconditions.py`) | the one `SolverConfig(...)` construction gains `only=` |
+| `contracts.check_contract` (`contracts.py`) | new parameter, forwarded to `_pipeline` — it already forwards `solver_timeout_ms` and `refine` unchanged |
 
 Five edits, two public signatures, one shared pipeline. The vacuity widen
 re-check needs nothing: it goes through the same `_finish`, so it inherits
@@ -62,7 +77,7 @@ not symmetric:
   re-derives it — there is no point to replay. **The second backend is the
   only independent check that exists on a solver-discharged `VERIFIED`.**
 
-The module docstring already states this (`solvers.py:36-46`) and the
+The module docstring already states this (`solvers.py`) and the
 degraded-portfolio note says it in the verdict, verbatim: *"a discharge is a
 universal claim over the whole declared box, so nothing downstream re-derives
 it the way exact-rational replay re-derives a witness."*
@@ -74,7 +89,7 @@ that already happens today.** Both halves matter, and they point in opposite
 directions.
 
 **Yes — under `only=`, the stamp discloses it, in a quotable field.**
-`SolverStamp.reason` is written at the dispatch site (`solvers.py:1050`) and
+`SolverStamp.reason` is written at the dispatch site (`solvers.py`) and
 carries the backend's *role*. Measured on the same obligation:
 
 ```text
@@ -108,7 +123,7 @@ solver_redundancy : ((0, ('cvc5 (wheel)',)),)
 
 Two `invoked=True` stamps, both reading "primary"/"secondary", and a decision
 that rests on one answer. The field that discloses it is
-**`Verdict.solver_redundancy`** (`verdict.py:369`) — `(assert index, labels of
+**`Verdict.solver_redundancy`** (`verdict.py`) — `(assert index, labels of
 the backends that ANSWERED)` — plus the `PORTFOLIO DEGRADED` render line and
 the notes. Its own comment says why it exists: *"The stamp's solver tuple
 records who was ASKED — that is its contract — so a two-backend stamp is
@@ -132,7 +147,7 @@ timed-out backend is not.
 2. **`only=` with no `solver_timeout_ms`.** Accepting it silently would let a
    caller believe they restricted a portfolio that never ran. Must raise.
 3. **The reproducer sidecar carries no redundancy field.** `SIDECAR_KEYS`
-   (`reproduce.py:258`) has `fragment` and a human `solver` line derived
+   (`reproduce.py`) has `fragment` and a human `solver` line derived
    from `witness.produced_by`, and nothing that says how many backends
    answered. Exposing `only=` makes one-backend runs ordinary, so the sidecar
    would start describing them routinely without disclosing what it is
@@ -158,7 +173,7 @@ timed-out backend is not.
   because they come from different mechanisms.
 - The same for `check_contract`, since it is a second front door.
 - `only=` without `solver_timeout_ms` raises at entry, before tracing (the
-  `vacuity_mode`/`refine` precedent at `preconditions.py:213-240`).
+  `vacuity_mode`/`refine` precedent at `preconditions.py`).
 - Every `SolverConfig.__post_init__` refusal (`only=()`, unknown names)
   surfaces through `check()` unchanged and eagerly — a validation that only
   fires deep in escalation is a validation a caller meets late.
@@ -166,7 +181,7 @@ timed-out backend is not.
   (the depth property `test_vacuity_depth.py` guards for `refine`).
 - The absence phrasing stays correct: excluded-by-config must never render as
   "not installed" through the public path either — `_absences` has a test at
-  `tests/test_constant_fold_portfolio.py:771`; it needs the `check()` twin.
+  `tests/test_constant_fold_portfolio.py`; it needs the `check()` twin.
 - A negative test that the default is byte-identical to today: `only=None`
   must produce the same stamp, notes, and content hash as the current call.
 
