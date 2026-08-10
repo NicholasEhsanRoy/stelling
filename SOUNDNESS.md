@@ -4256,8 +4256,14 @@ verdicts:
   is stated as a shape, not as an identification of the two.
 
   **THAT REASON IS TRUE OF THE REPRODUCER'S SHAPE AND IS NOT TRUE OF THE
-  CLASS, AND SINCE THE ENTRY HAS NOW BEEN WRONG THREE TIMES IN EXACTLY
-  THIS WAY THE NARROWING IS RECORDED RATHER THAN LEFT.** At two of the
+  CLASS, AND SINCE THE ENTRY HAD BY THEN BEEN WRONG THREE TIMES IN
+  EXACTLY THIS WAY THE NARROWING IS RECORDED RATHER THAN LEFT.** *(Three
+  was the count when this was written — the eleven-doors list read as a
+  census, the "concrete" row, and the `except OverflowError` route. It
+  has since been wrong a fourth time in the same way, at `jnp.full`'s
+  route through the guarded call, corrected below. No total is claimed
+  here, because which sentences belong to the class is a judgement and a
+  number would read as a measurement.)* At two of the
   eight doors that wrap — `jnp.where(c, 256, x)` and
   `jnp.clip(x, 256, 256)`, measured in all four cells and detailed under
   the fourth site below — the traced program is NOT what an honest
