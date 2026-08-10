@@ -4694,6 +4694,88 @@ verdicts:
   refuses. No spelling is the safe one at both ends, so no spelling can be
   recommended, and this entry recommends neither.
 
+  **WHAT IT WOULD COST JAX TO FIX THIS WAS MEASURED, AND THAT BELONGS ON
+  THIS PAGE BECAUSE IT IS WHAT DECIDES HOW LONG A READER LIVES WITH IT.**
+  It is also the honest answer to "why has nobody fixed it". Four
+  candidate fixes, one per site, each applied alone to jax's source and
+  run against jax's own test suite: jax at tag `jax-v0.11.0`
+  (`a1521744`) as source against the installed jaxlib 0.11.0 wheel,
+  CPython 3.12.3, NumPy 2.5.2, two tranches of 28 and 36 test modules,
+  **23,705 test cases**, every figure from `--junitxml`.
+
+  **That suite run is ANOTHER CONTEXT'S MEASUREMENT and is cited, not
+  claimed** — 23,705 cases is not a figure this entry re-ran. Its
+  receipts are committed at
+  `stelling-sweeps/receipts-jax-wrap-blast-radius/` (report, reproduction
+  facts, 946 run artefacts, scripts, transcript). What WAS re-derived
+  here is every delta in the table below, recomputed from the archived
+  junit XML with an independent analyser comparing per-testcase outcomes
+  between baseline and patched runs. All of them agree.
+
+  | candidate fix | site it changes | newly failing, of 23,705 |
+  |---|---|---|
+  | widen the `isinstance` gate to admit NumPy scalars/arrays | `array_constructors.py:249` | **no-op** — see below |
+  | leave the gate, add a real range check for them | `array_constructors.py:249-250` | **0** |
+  | delete the `try/except OverflowError` | `lax.py:1747-1754` | **0** |
+  | range-check the Python-`int` narrowing and the NumPy fallback | `lax.py:1726` **and** `array_constructors.py:314` | **1** |
+  | …and additionally the constant-folding site | `lax.py:5314` | **1031** |
+
+  *(The last two rows are cumulative: the fourth-site row is the fourth
+  row's patch PLUS the folding rule. The source report labels the fourth
+  row "the two `.astype` sites"; read from its patch script, only one of
+  the two is an `.astype` — the other is
+  `out = np.asarray(object, dtype=dtype)`. The sites are as given here.)*
+
+  **The first row's zero is not a suite figure and is not offered as
+  one.** Widening the gate changes nothing at all, because the check it
+  opens does not check the values it would newly admit: measured directly
+  here, all four cells, `dtypes.coerce_to_array(np.int64(256),
+  jnp.int8)` returns `array(0, dtype=int8)` **without raising**, while
+  the same call on the Python `int` `256` raises — NumPy 2's NEP 50
+  range-checks Python integers and casts NumPy ones. The patch was proved
+  inert and given no suite run, so its "0" means "changes nothing",
+  not "breaks nothing".
+
+  **The `1` is the pinned test.** The single case that range-checking the
+  narrowing breaks is `lax_test::LaxTest::testConvertElementTypeOOB`, with
+  `OverflowError: Python integer 4294967296 out of bounds for int32` —
+  the test commit `c2fe350455` added, failing for exactly the reason it
+  was written. That fix at `lax.py:1726` is, read against that commit's
+  diff, its revert for integer targets. **It is a policy reversal, not a
+  bug fix**, and that is the sharpest thing on this page about why the
+  defect is still here.
+
+  **The `1031` is not 1031 opinions, and it is the figure that decides
+  the answer.** 1030 of them carry one message — `Python integer
+  4294967295 out of bounds for int32`, `0xFFFFFFFF` narrowed to `int32` —
+  and it comes from jax's own PRNG: `jax/_src/random/threefry2x32.py:73`,
+  `k2 = convert(jnp.bitwise_and(seed, np.uint32(0xFFFFFFFF)))`, relying
+  on two's-complement mask reinterpretation. Making that one line
+  explicit collapses 1031 to **37**: 36 in `random_test`, the identical
+  idiom in the three other PRNG implementations (`philox2x32.py:149`,
+  `philox4x32.py:160`, `threefry4x32.py:213` — all four lines re-read at
+  the tag), and the 37th is `testConvertElementTypeOOB` again. **The true
+  cost of the only fix that reaches the case this entry opens with is
+  four lines of jax's own source plus one deliberately pinned test.**
+
+  **What that licenses, and what it does not.** It does not license "jax
+  will never fix this": four lines and a test is not a large bill. It
+  does not license "jax is about to": nothing was found that says so, and
+  nothing has been reported upstream from here. It licenses exactly one
+  thing, which is the thing a reader needs — **the cost is known, it is
+  small, and it is unpaid; and a VERIFIED over a narrow integer
+  declaration is unprotected for as long as it stays unpaid.**
+
+  **Four things those figures are not.** The denominator is emitted test
+  cases, not jax's suite: 64 of the 164 top-level `tests/*_test.py`
+  modules ran, and `pallas`/`mosaic`, GPU/TPU and multi-device never did.
+  It is also not the XML's own `tests` attribute, which totals 16,982
+  against tranche 1's 16,798 counted `testcase` elements. The `1031`
+  counts cases that PASSED at baseline and fail under the patch; the
+  archived XML shows two further cases moving from skipped to failed,
+  which that delta does not count. And none of it was measured on jax
+  0.10.2, so no row above is a four-cell figure.
+
   **NOTHING IN THIS TREE CONSULTS ANY DIAGNOSTIC FOR THIS.** There is no
   detector on `main`, no stamp field, no note, no verdict gate, and no
   count that changes because of this entry. **A VERIFIED over a narrow
