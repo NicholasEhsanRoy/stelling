@@ -424,12 +424,21 @@ def test_two_controls_on_one_property_do_not_share_a_guard():
     )
 
 
-def test_a_clause_specific_cvc5_guard_is_written_once_in_the_property():
+def test_a_clause_specific_guard_is_written_once_in_its_own_property():
     """One count, two failure modes, and both have happened on this branch.
 
-    A guard registered for one clause of ``_judge``'s three-clause oracle
-    should be the sentence that clause's own ``return`` builds — so it occurs
-    in ``test_cvc5_protocol.py`` exactly once.
+    A guard registered for one clause of a conjunctive oracle should be the
+    sentence that clause's own ``return`` builds — so it occurs in the module
+    that holds the property exactly once.
+
+    DERIVED, NOT LISTED. This named ``cvc5-exit-tell`` and
+    ``cvc5-phantom-model`` in a literal tuple, so a third clause control would
+    have shipped unchecked. The subjects are now every control that shares its
+    property with another control — which is what makes a guard clause-specific
+    in the first place — minus the ones whose guard is a bracketed LEG TAG such
+    as ``[flat]``, which is built as ``[{where}]`` and correctly occurs zero
+    times as a literal. ``checked`` is asserted non-empty, because a registry
+    edit that left no shared property would otherwise make this test vacuous.
 
     * **Zero** means the guard is not that sentence. Broadening
       ``cvc5-exit-tell`` back to the leg tag ``[flat]`` gives zero, because the
@@ -447,17 +456,32 @@ def test_a_clause_specific_cvc5_guard_is_written_once_in_the_property():
       push that re-adds the quote rather than on the day somebody plants a
       crash.
     """
-    src = (HERE / "test_cvc5_protocol.py").read_text()
-    bad = []
-    for name in ("cvc5-exit-tell", "cvc5-phantom-model"):
-        control = pc.by_name(name)
-        n = src.count(control.expect_message)
-        if n != 1:
-            bad.append(f"{name}: {control.expect_message!r} occurs {n} times")
+    by_property: dict[str, list] = {}
+    for c in pc.CONTROLS:
+        by_property.setdefault(c.nodeid, []).append(c)
+    bad, checked = [], []
+    for nodeid, controls in sorted(by_property.items()):
+        if len(controls) < 2:
+            continue
+        module = nodeid.split("::")[0]
+        src = (REPO / module).read_text()
+        for c in controls:
+            guard = c.expect_message
+            if guard.startswith("[") and guard.endswith("]"):
+                continue  # a leg tag, built as `[{where}]`
+            checked.append(c.name)
+            n = src.count(guard)
+            if n != 1:
+                bad.append(f"{c.name}: {guard!r} occurs {n} times in {module}")
+    assert checked, (
+        "no control shares its property with another one, so this test just "
+        "checked nothing. Either the registry lost its clause-specific "
+        "controls or this test stopped being able to find them."
+    )
     assert not bad, (
-        "each of these guards must occur EXACTLY ONCE in "
-        "tests/property/test_cvc5_protocol.py, in the `return` that builds its "
-        "clause's failure message:\n  " + "\n  ".join(bad)
+        "each of these guards must occur EXACTLY ONCE in the module that holds "
+        "its property, in the `return` that builds its clause's failure "
+        "message:\n  " + "\n  ".join(bad)
     )
 
 
@@ -699,4 +723,87 @@ def test_a_commit_control_names_the_revision_it_points_at_in_its_own_why():
         "these commit controls point at a revision their own `why` never "
         "mentions, so the field and the argument for it can drift apart "
         "without anything noticing:\n  " + "\n  ".join(bad)
+    )
+
+
+# The scope block the property job prints, and the step that backs it. Kept
+# here rather than in a workflow test because what it has to agree with is the
+# registry, which lives next door.
+_CI = REPO / ".github" / "workflows" / "ci.yml"
+_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+}
+
+
+def test_the_property_job_runs_the_controls_it_says_it_runs():
+    """The per-push `--control` list, and every count the job prints about it.
+
+    The list is read by nothing. A control could be dropped from the step —
+    which is how ``cvc5-exit-tell`` and ``cvc5-phantom-model`` spent their
+    first two commits, registered and run by nobody — or a name could be
+    misspelt, and the step would keep exiting 0 over a shorter list.
+
+    THE COUNTS ARE THE SAME PROBLEM AND HAVE ALREADY GONE WRONG. The scope
+    block is one ``cat <<'EOF'`` heredoc; it said "seven controls still fire"
+    twenty-four lines above "NINE of the twelve positive controls FIRE", both
+    about this job, both on the same push. Nothing reads a heredoc, so nothing
+    noticed. Every one of those numbers is derivable from the step itself and
+    from the registry, so it is derived here instead of trusted:
+
+    * how many FIRE            = the number of ``--control`` names in the step
+    * how many there are       = ``len(pc.CONTROLS)``
+    * how many are NOT run     = the difference
+
+    ``tests/property/README.md`` carries the same sentence about the same job
+    and is held to the same number.
+    """
+    ci = _CI.read_text()
+    readme = (HERE / "README.md").read_text()
+    ran = re.findall(r"^\s*--control\s+([\w-]+)", ci, re.M)
+    registered = {c.name for c in pc.CONTROLS}
+
+    assert ran, (
+        "the property job's step has no `--control` names at all. Either the "
+        "anti-vacuity step was deleted or this test can no longer find it, and "
+        "both are the same kind of silence."
+    )
+    assert len(set(ran)) == len(ran), f"a control is listed twice: {sorted(ran)}"
+    unknown = sorted(set(ran) - registered)
+    assert not unknown, (
+        "the property job runs `--control` names that are not in the registry, "
+        "so the step exits non-zero on every push with a KeyError rather than "
+        "on the push that breaks a property:\n  " + "\n  ".join(unknown)
+    )
+
+    bad = []
+    for text, where, pattern, want, what in (
+        (ci, "ci.yml", r"([A-Za-z]+) of the ([A-Za-z]+) positive controls FIRE",
+         (len(ran), len(pc.CONTROLS)), "the RUN block's count"),
+        (ci, "ci.yml", r"([A-Za-z]+) of the ([A-Za-z]+) positive controls\s+—",
+         (len(pc.CONTROLS) - len(ran), len(pc.CONTROLS)),
+         "the job header's NOT-RUN count"),
+        (ci, "ci.yml", r"([A-Za-z]+) controls still fire",
+         (len(ran),), "the rot-detector sentence"),
+        (readme, "tests/property/README.md", r"([A-Za-z]+) controls still fire",
+         (len(ran),), "the rot-detector sentence"),
+    ):
+        found = re.findall(pattern, text)
+        if not found:
+            bad.append(f"{where}: {what} is gone — {pattern!r} matches nothing")
+            continue
+        for match in found:
+            words = match if isinstance(match, tuple) else (match,)
+            got = tuple(_WORDS.get(w.lower()) for w in words)
+            if got != want:
+                bad.append(
+                    f"{where}: {what} reads {' of '.join(words)!r}, and the "
+                    f"step plus the registry say {want}"
+                )
+    assert not bad, (
+        "the property job prints counts about itself that its own "
+        "`--control` list and tests/property/positive_controls.py do not "
+        "support. A green tick plus a wrong number in the log is worse than "
+        "no number:\n  " + "\n  ".join(bad)
     )
