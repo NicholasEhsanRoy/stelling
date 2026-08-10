@@ -1121,8 +1121,25 @@ def test_f4wheel2_property_fuzz_no_definite_answer_from_an_incomplete_run():
 #
 # EVERY TEST IN THIS BLOCK MEASURES THE PARENT'S OWN IO CHOICE, so none of them
 # may name it: `_wheel_real_child` forwards whatever `_run_cvc5_wheel` asked
-# `subprocess.run` for. `_wheel_child` above pins `text=True` in the shim
-# itself, which would make these tests a measurement of the fixture.
+# `subprocess.run` for.
+#
+# THIS USED TO SAY `_wheel_child` "pins `text=True` in the shim itself, which
+# would make these tests a measurement of the fixture". That was true when it
+# was written and has not been since `420cc12`, which gave `_wheel_child` the
+# same repair: its `route` forwards the transport's own spawn kwargs and
+# carries a comment saying why. The description outlived the code by naming a
+# fixture as the counter-example to a rule that fixture had begun following.
+#
+# Corrected rather than deleted, because the contrast is still the reason
+# `_wheel_real_child` exists: a shim that names `text=True` itself makes every
+# test routed through it a measurement of the FIXTURE's io choice. Neither
+# helper does that now. What separates them is what they spawn —
+# `_wheel_child` a scripted child of this file's own, `_wheel_real_child` an
+# arbitrary program — and not how they open its streams.
+#
+# `_FakeProc` in `tests/property/test_cvc5_protocol.py` carries the same repair
+# and cites `_wheel_child` as precedent for it, so that file and this one
+# contradicted each other outright until this was fixed.
 
 
 def _stale_child(answer: str, payload: bytes) -> str:

@@ -290,6 +290,41 @@ def test_every_test_cited_in_core_prose_still_exists():
 # pointing at a blank line or at the wrong helper. Nothing cheap catches those,
 # which is why the house rule is to cite a SYMBOL and why the fixes took that
 # form. This is the mechanical floor under the rule, not the rule.
+# KNOWN-OPEN, MEASURED, AND LEFT OPEN ON PURPOSE. Three citation shapes go
+# unchecked. None has a live instance in the tree — every probe below is
+# synthetic, and `:99999` is a line no file here has — so these are gaps in
+# reach, not defects on the page. They are written down because "the sweep is
+# derived from the allowlist" reads like completeness and is not:
+#
+#   tools/property_venv.sh:99999   the REGEX declines it. The extension list is
+#                                  `py|md|yml|yaml|toml|cff`, and `.sh` is not
+#                                  in it; `_resolve_citation` resolves the path
+#                                  perfectly well when handed it directly, so
+#                                  the pattern is the whole of the limit.
+#   contracts.py#L99999            the REGEX declines it. It matches `path:N`
+#                                  and nothing else; the GitHub `#L` spelling
+#                                  is a different grammar.
+#   stelling/contracts.py:99999    the regex MATCHES this one — the RESOLVER
+#                                  returns None. A path with a slash is looked
+#                                  up as repo-relative, and `stelling/…` is not
+#                                  (the file is at `src/stelling/…`), so the
+#                                  citation is silently skipped rather than
+#                                  resolved and checked. This is the shape
+#                                  worth knowing about: it is the one that
+#                                  looks like a real path, and the SAME wrong
+#                                  line written as a bare basename would be
+#                                  caught, while the more specific spelling is
+#                                  not. (Written without its colon here on
+#                                  purpose — spelled out, this line would be a
+#                                  live wrong citation and the sweep below
+#                                  would flag this very comment. It was, once,
+#                                  while this note was being written.)
+#
+# The third was first reported as a regex miss. It is not; the regex takes it
+# and the resolver drops it. Same outcome, different mechanism, and the
+# mechanism is what a fix would have to address — `_resolve_citation` would
+# need a suffix-match fallback for slashed paths, which is a decision about
+# how much ambiguity to accept and is left to the principal.
 _LINE_CITATION = re.compile(
     r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:py|md|yml|yaml|toml|cff)):(\d+)"
 )

@@ -84,6 +84,16 @@ now a shorter list than the argument that used to stand for it:
   the part of the old sentence that was true, and it is true of the runner's
   own furniture rather than of gate behaviour in general.
 
+KNOWN-OPEN, AND IT IS A PLACEMENT PROBLEM RATHER THAN A COVERAGE ONE.
+`design/ci-readiness.md` is the document a release reviewer opens, and it says
+nothing about the declared floor, nothing about the fact that no job runs the
+floor interpreter, and nothing about these release gates being text pins over
+a workflow. So the facts recorded here are recorded where somebody already
+looking at `release.yml` will find them, and nowhere a reviewer deciding
+whether to release would look. That document is owned elsewhere and is not
+edited from here; the gap is recorded in this header so that it is at least
+written down on the surface it concerns.
+
 Read as TEXT and not with a YAML parser, deliberately: `yaml` is not a
 dependency of this project, and the zero-dep CI job — the one whose whole
 purpose is an environment with nothing in it — could not import one.
