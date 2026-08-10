@@ -217,6 +217,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# vscode
+.vscode/
+
 # Internal release working document — deliberately not distributed.
 # Gitignored as well as untracked: the sdist allowlist keeps it out of the
 # artefact, and this keeps a stray `git add -A` from putting it in the repo.
