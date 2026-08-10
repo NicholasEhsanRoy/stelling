@@ -366,24 +366,10 @@ def _judge(res, stdout, full, rc, census, *, where):
     fixture at ``8ef8f75``: ``'version 1.3.4\\nanswer sat\\nend 0\\n'`` at exit
     1 is a definite ``sat``, and ``'…\\nvalue x0 0/1\\nend 1\\n'`` at exit 137
     is a definite ``sat`` harvesting ``('x0', '0/1')``. Today's flat property
-    fails there in 0.4 s at the ci profile, on an INTACT transcript at exit 1,
-    so clause (2) holds on that example and the failure is this clause's own.
-
-    THE THREE FAILURE MESSAGES ARE DELIBERATELY NOT QUOTED IN THIS DOCSTRING.
-    pytest's long traceback prints a frame's ENTIRE function source, docstring
-    included, from ``def`` down to the failing line, and ``_judge`` is on the
-    traceback of anything that raises INSIDE it. A message quoted here is
-    therefore echoed into the output ``tools/property_check.py`` captures, and
-    a control whose ``expect_message`` is that message then scores a CRASH as a
-    demonstration. Measured, with the two clause sentences quoted here as they
-    were: one line-neutral defect in ``solvers.py``
-    (``values=tuple(sorted(values)),`` -> ``... or None,``) makes
-    ``sorted(res.values)`` raise ``TypeError`` before the oracle is evaluated
-    at all, and three probe controls carrying the three shipped guard strings
-    reported ``3/3 controls fired``. Read the messages off the ``return``s
-    below. ``property_check.py`` now matches ``expect_message`` against the
-    failure pytest RECORDS rather than against everything it echoes, which is
-    the half of this that a docstring cannot enforce.
+    fails there at the ci profile in about a second (0.4 s to 1.2 s across
+    runs, junit XML, on a box doing other work), on an INTACT transcript at
+    exit 1 — so clause (2) holds on that example and the failure is this
+    clause's own.
 
     (3) THE MODEL IS EXACTLY THE VALUE RECORDS IN THE BYTES READ — DEMONSTRATED,
     by the ``cvc5-phantom-model`` mutant control, and the shape it needs was
@@ -398,8 +384,10 @@ def _judge(res, stdout, full, rc, census, *, where):
     one can fail: the third branch below fires on
     ``'version 1.3.4\\nanswer sat\\nvalue x0 0/1\\nvalue x0 0/1\\nend 2\\n'``,
     reporting a harvested ``[('x0', '0/1')]`` against an actually-present
-    ``[('x0', '0/1'), ('x0', '0/1')]``,
-    in 2.0 s, and green against the unmutated tip. ``_PAYLOADS`` is untouched,
+    ``[('x0', '0/1'), ('x0', '0/1')]``. Green against the unmutated tip. It is
+    the slowest of the three cvc5 flat-leg controls and the ``2.0 s`` recorded
+    when it was registered did not reproduce: 5.6 s best of three, 9.1 s worst
+    (junit XML, on a box doing other work). ``_PAYLOADS`` is untouched,
     so the two example-efficiency figures in the module docstring keep
     describing the strategy that produced them.
 
@@ -425,6 +413,25 @@ def _judge(res, stdout, full, rc, census, *, where):
     ``value x9 1/2`` tail is what would put that route in the search, and the
     cost is re-measuring 673/8165; that trade is still open and still the
     principal's. It is no longer the price of demonstrating the clause.
+
+    ────────────────────────────────────────────────────────────────────────
+
+    HOW TO READ THIS DOCSTRING: **the three failure messages are deliberately
+    not quoted in it.** pytest's long traceback prints a frame's ENTIRE
+    function source, docstring included, from ``def`` down to the failing line,
+    and ``_judge`` is on the traceback of anything that raises INSIDE it. A
+    message quoted here is therefore echoed into the output
+    ``tools/property_check.py`` captures, and a control whose
+    ``expect_message`` is that message then scores a CRASH as a demonstration.
+    Measured, with two of the three quoted here as they were: one line-neutral
+    defect in ``solvers.py`` (``values=tuple(sorted(values)),`` -> ``... or
+    None,``) makes ``sorted(res.values)`` raise ``TypeError`` before the oracle
+    is evaluated at all, and three probe controls carrying the three shipped
+    guard strings reported ``3/3 controls fired``. Read the messages off the
+    ``return``s below instead. ``property_check.py`` now matches
+    ``expect_message`` against the failure pytest RECORDS rather than against
+    everything it echoes, which is the half of this a docstring cannot enforce,
+    and ``test_suite_disclosure.py`` fails on the push that re-adds a quote.
     """
     census.tag("driven")
     if res.answer not in DEFINITE:
