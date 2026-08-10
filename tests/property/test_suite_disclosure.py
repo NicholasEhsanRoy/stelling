@@ -81,21 +81,40 @@ def _property_modules():
     )
 
 
-def _tests_defined_in(path: pathlib.Path):
-    """``test_*`` functions and stateful ``TestCase`` bindings, parsed."""
+def _definitions_in(path: pathlib.Path) -> dict:
+    """``nodeid -> the ast node that DEFINES it``, for the two shapes here.
+
+    pytest collects two: a ``test_*`` function, and a ``TestCase`` bound off a
+    ``RuleBasedStateMachine``. For the second the node returned is the state
+    MACHINE CLASS where the binding names one in this file, because the
+    one-line binding holds none of the property and a caller below reads the
+    property's own source.
+    """
     tree = ast.parse(path.read_text())
-    out = []
+    classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
+    out = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if node.name.startswith("test_"):
-                out.append(f"tests/property/{path.name}::{node.name}")
+                out[f"tests/property/{path.name}::{node.name}"] = node
         elif isinstance(node, ast.Assign):
             for t in node.targets:
                 # `TestCvcTransport = CvcTransport.TestCase` — a unittest
                 # TestCase pytest collects as `::runTest`.
-                if isinstance(t, ast.Name) and t.id.startswith("Test"):
-                    out.append(f"tests/property/{path.name}::{t.id}::runTest")
+                if not (isinstance(t, ast.Name) and t.id.startswith("Test")):
+                    continue
+                held = node.value
+                owner = classes.get(held.value.id) if (
+                    isinstance(held, ast.Attribute)
+                    and isinstance(held.value, ast.Name)
+                ) else None
+                out[f"tests/property/{path.name}::{t.id}::runTest"] = owner or node
     return out
+
+
+def _tests_defined_in(path: pathlib.Path):
+    """``test_*`` functions and stateful ``TestCase`` bindings, parsed."""
+    return list(_definitions_in(path))
 
 
 def test_every_property_in_the_tree_has_a_registered_positive_control():
@@ -371,6 +390,34 @@ def test_every_control_says_what_it_is_and_which_kind_of_evidence_it_is(control)
         )
 
 
+# A guard that is exactly one bracketed word: the LEG TAG `_judge` stamps as
+# `[{where}]`. Deliberately a `fullmatch` on `\w+` rather than "starts with `[`
+# and ends with `]`" — the loose form exempted a guard such as
+# `[flat] … [stateful]` from every check below, and a leg tag is one word.
+_LEG_TAG = re.compile(r"\[(\w+)\]")
+
+
+def _property_stamps(nodeid: str, tag: str) -> bool | None:
+    """Does the property ``nodeid`` names write ``tag`` as a string literal?
+
+    ``[flat]`` is legitimate for a control on the flat leg because that leg's
+    own body says ``where="flat"``, and illegitimate for one on any other leg
+    for the same reason. The whole module is the wrong scope for that question:
+    ``stateful`` occurs in ``test_cvc5_protocol.py`` too, which is exactly how
+    ``[stateful]`` on the flat property passed unnoticed.
+
+    ``None`` when the definition cannot be found at all, which is its own
+    report rather than a pass.
+    """
+    path = REPO / nodeid.split("::")[0]
+    node = _definitions_in(path).get(nodeid)
+    if node is None:
+        return None
+    return any(
+        isinstance(n, ast.Constant) and n.value == tag for n in ast.walk(node)
+    )
+
+
 def test_two_controls_on_one_property_do_not_share_a_guard():
     """Clause-specificity, which is the only thing that makes them two controls.
 
@@ -385,22 +432,41 @@ def test_two_controls_on_one_property_do_not_share_a_guard():
     guard ``cvc5-flat`` already carries — left every gate in the repository
     green, and ``tools/property_check.py`` still said ``1/1 controls fired``.
 
-    AND NOTHING THAT EXECUTES PROTECTS IT NOW EITHER; THIS TEST IS THE WHOLE
-    PROTECTION. Adding ``cvc5-exit-tell`` and ``cvc5-phantom-model`` to the
-    per-push ``--control`` list was written up as closing the other half —
-    "it now fails two assertions in ``test_suite_disclosure.py`` AND breaks a
-    job that runs the control". Re-measured with the guard broadened to
-    ``[flat]`` and the two controls in the step::
+    AND NOTHING THAT EXECUTES PROTECTS IT NOW EITHER. Adding ``cvc5-exit-tell``
+    and ``cvc5-phantom-model`` to the per-push ``--control`` list was written up
+    as closing the other half — "it now fails two assertions in
+    ``test_suite_disclosure.py`` AND breaks a job that runs the control".
+    Re-measured with the guard broadened to ``[flat]`` and the two controls in
+    the step::
 
         == 9/9 controls fired        exit 0
 
     The RUN of the control does not notice, and cannot: ``[flat]`` is stamped
     on all three of ``_judge``'s messages, so the clause-(2) failure
     ``cvc5-flat`` already finds satisfies it. What goes red is this file — two
-    assertions, both static — and those already ran in that job before the
-    controls were added to it. The job is red either way, so the sentence is
-    literally satisfiable; the causal reading it invites, that executing the
-    control is what catches the broadening, is false.
+    assertions, both static: THIS one, on the substring containment, and
+    ``test_a_clause_specific_guard_is_written_once_in_its_own_property``, on
+    the rule that at most one control on a property may carry a leg tag at all.
+    Both already ran in that job before the controls were added to it. The job
+    is red either way, so the sentence is literally satisfiable; the causal
+    reading it invites, that executing the control is what catches the
+    broadening, is false.
+
+    THE SECOND OF THOSE TWO WENT MISSING FOR ONE COMMIT and this paragraph went
+    on claiming it. As shipped at ``bc5c0e4`` the clause-specific test exempted
+    every bracketed guard with a ``continue``, so the count above was wrong in
+    the direction that flatters it. Measured, static failures in this file, one
+    broadening at a time::
+
+                                        at bc5c0e4   now
+        cvc5-exit-tell -> [flat]             1         2
+        cvc5-exit-tell -> [stateful]         0         1
+
+    ``[stateful]`` — a bracketed tag the flat property never stamps, so THIS
+    test cannot see it either, neither string containing the other — was caught
+    by nothing static at all, and only by the control run reporting "wrong
+    failure". Both rows are red in this file again, the second of them from the
+    clause-specific test alone.
     """
     by_property: dict[str, list] = {}
     for c in pc.CONTROLS:
@@ -435,14 +501,11 @@ def test_a_clause_specific_guard_is_written_once_in_its_own_property():
     ``cvc5-phantom-model`` in a literal tuple, so a third clause control would
     have shipped unchecked. The subjects are now every control that shares its
     property with another control — which is what makes a guard clause-specific
-    in the first place — minus the ones whose guard is a bracketed LEG TAG such
-    as ``[flat]``, which is built as ``[{where}]`` and correctly occurs zero
-    times as a literal. ``checked`` is asserted non-empty, because a registry
-    edit that left no shared property would otherwise make this test vacuous.
+    in the first place. ``checked`` and ``tagged`` are both asserted non-empty,
+    because a registry edit that left no shared property, or none carrying a
+    leg tag, would otherwise make one of the two branches below vacuous.
 
-    * **Zero** means the guard is not that sentence. Broadening
-      ``cvc5-exit-tell`` back to the leg tag ``[flat]`` gives zero, because the
-      leg tag is built as ``[{where}]`` and is stamped on all three messages.
+    * **Zero** means the guard is not that sentence.
     * **Two or more** means the sentence is ALSO written somewhere pytest
       echoes. A long traceback prints the entire source of every function on
       it, docstring included, so a clause sentence quoted in ``_judge``'s
@@ -455,20 +518,81 @@ def test_a_clause_specific_guard_is_written_once_in_its_own_property():
       than everything it echoes; this is the other half, and it fires on the
       push that re-adds the quote rather than on the day somebody plants a
       crash.
+
+    A BRACKETED LEG TAG SUCH AS ``[flat]`` IS EXEMPT FROM THE COUNT AND NOT
+    FROM THIS TEST, and that difference is what this paragraph exists for. The
+    tag is built as ``[{where}]``, so it correctly occurs zero times as a
+    literal and the count is simply the wrong instrument for it. Exempting it
+    with a ``continue`` — which is what shipped — left the tag's SHAPE
+    unconstrained instead: measured on this file's own suite, repointing
+    ``cvc5-exit-tell``'s guard at ``[stateful]``, a bracketed tag the flat
+    property never stamps, gave **zero** static failures here, and the only
+    thing that noticed was the control RUN coming back "wrong failure". So a
+    leg tag gets two rules of its own rather than a pass:
+
+    * it must be a tag THIS property stamps — the tag has to appear as a string
+      literal inside the definition the nodeid names, which is where
+      ``where="flat"`` is written. ``[stateful]`` on the flat property fails
+      here;
+    * at most ONE control on a property may carry one. A leg tag matches every
+      failure of that leg, so it cannot tell two clauses apart, and a second
+      one is a broadening however it is spelt. ``[flat]`` on ``cvc5-exit-tell``
+      fails here — alongside
+      ``test_two_controls_on_one_property_do_not_share_a_guard``, which catches
+      that spelling by substring.
+
+    MEASURED, static failures in this file, with the broadening applied to
+    ``cvc5-exit-tell``'s ``expect_message`` and nothing else changed::
+
+                          before   after
+        -> ``[flat]``       1        2
+        -> ``[stateful]``   0        1
+
+    Unmutated it is green with ``cvc5-flat``'s own ``[flat]`` going THROUGH
+    both rules rather than round them, and that is driven rather than assumed:
+    change the flat leg's ``where="flat"`` to anything else and this test fails
+    on ``cvc5-flat``.
     """
     by_property: dict[str, list] = {}
     for c in pc.CONTROLS:
         by_property.setdefault(c.nodeid, []).append(c)
-    bad, checked = [], []
+    bad, checked, tagged = [], [], []
     for nodeid, controls in sorted(by_property.items()):
         if len(controls) < 2:
             continue
         module = nodeid.split("::")[0]
         src = (REPO / module).read_text()
+        legs = [c for c in controls if _LEG_TAG.fullmatch(c.expect_message)]
+        if len(legs) > 1:
+            bad.append(
+                f"{nodeid}: {', '.join(sorted(c.name for c in legs))} all carry "
+                f"a bracketed LEG TAG, which matches every failure of that leg "
+                f"and so cannot pick out one clause. At most one control on a "
+                f"property may carry one; the rest must name their own clause's "
+                f"sentence"
+            )
         for c in controls:
             guard = c.expect_message
-            if guard.startswith("[") and guard.endswith("]"):
-                continue  # a leg tag, built as `[{where}]`
+            tag = _LEG_TAG.fullmatch(guard)
+            if tag:
+                # Built as `[{where}]`, so counting it as a literal is the
+                # wrong instrument. What IS checkable is that this property is
+                # the leg that stamps it.
+                tagged.append(c.name)
+                stamps = _property_stamps(nodeid, tag.group(1))
+                if stamps is None:
+                    bad.append(
+                        f"{c.name}: {nodeid} has no definition this file can "
+                        f"find, so its leg tag {guard!r} cannot be checked"
+                    )
+                elif not stamps:
+                    bad.append(
+                        f"{c.name}: {guard!r} is a leg tag {nodeid} never "
+                        f"stamps — {tag.group(1)!r} is not written as a string "
+                        f"literal anywhere in that property's own definition, "
+                        f"so no failure of it can carry the guard"
+                    )
+                continue
             checked.append(c.name)
             n = src.count(guard)
             if n != 1:
@@ -478,10 +602,21 @@ def test_a_clause_specific_guard_is_written_once_in_its_own_property():
         "checked nothing. Either the registry lost its clause-specific "
         "controls or this test stopped being able to find them."
     )
+    assert tagged, (
+        "no control on a shared property carries a bracketed leg tag, so the "
+        "leg-tag branch above checked nothing. That branch is the one a "
+        "broadened guard escapes through; if the registry legitimately has no "
+        "leg tag left on a shared property, say so here rather than leaving "
+        "the branch silent."
+    )
     assert not bad, (
-        "each of these guards must occur EXACTLY ONCE in the module that holds "
-        "its property, in the `return` that builds its clause's failure "
-        "message:\n  " + "\n  ".join(bad)
+        "a guard on a property that has more than one control has to pick out "
+        "ONE clause's failure. A clause SENTENCE does that by occurring "
+        "EXACTLY ONCE in the module that holds the property, in the `return` "
+        "that builds it. A bracketed LEG TAG does not do it at all — it is "
+        "stamped on every message of that leg — so at most one control per "
+        "property may carry one, and it must be a tag that property "
+        "stamps:\n  " + "\n  ".join(bad)
     )
 
 

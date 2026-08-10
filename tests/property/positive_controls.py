@@ -359,13 +359,25 @@ CONTROLS = (
     # clause-(2) failure `cvc5-flat` already finds — i.e. it would fire without
     # demonstrating the clause it is registered for, which is the exact
     # distinction these two entries exist to make.
-    # `test_suite_disclosure.py` now asserts that distinction two ways, because
-    # broadening either guard back to `[flat]` left every gate green. Those two
-    # STATIC assertions are the whole protection: measured with the guard
-    # broadened and both controls in the per-push step, the executing control
-    # run reports `9/9 controls fired`, exit 0. Running a control does not and
-    # cannot catch a guard that has been widened to a string its property's
-    # every failure carries.
+    #
+    # STATIC ASSERTIONS IN `test_suite_disclosure.py` ARE THE WHOLE PROTECTION,
+    # and how many of them fire depends on how the guard is broadened. Measured
+    # on this tree, static failures in that file, one broadening at a time:
+    #
+    #   cvc5-exit-tell     -> `[flat]`      2  (the shared-guard test, on the
+    #   cvc5-phantom-model -> `[flat]`      2   substring; and the clause-
+    #                                           specific one, on two leg tags
+    #                                           landing on one property)
+    #   cvc5-exit-tell     -> `[stateful]`  1  (the clause-specific one alone:
+    #                                           a leg tag this property never
+    #                                           stamps)
+    #
+    # The executing run catches neither `[flat]` broadening: with the guard
+    # widened and both controls in the per-push step, `property_check.py`
+    # reports `9/9 controls fired`, exit 0. It DOES refuse `[stateful]` —
+    # `0/1 controls fired`, "wrong failure" — because that string is in no
+    # message the flat leg builds. Running a control does not and cannot catch
+    # a guard widened to a string its property's every failure carries.
     Control(
         name="cvc5-exit-tell",
         nodeid=f"{_CVC5}::test_the_parent_never_trusts_an_unspoken_transcript_flat",
