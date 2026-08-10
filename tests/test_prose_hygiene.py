@@ -290,12 +290,14 @@ def test_every_test_cited_in_core_prose_still_exists():
 # pointing at a blank line or at the wrong helper. Nothing cheap catches those,
 # which is why the house rule is to cite a SYMBOL and why the fixes took that
 # form. This is the mechanical floor under the rule, not the rule.
-# KNOWN-OPEN AND MEASURED. Four citation shapes go unchecked. Three of them
-# have no live instance in the tree — those probes are synthetic, and `:99999`
-# is a line no file here has — so those three are gaps in reach, not defects on
-# the page.
+# KNOWN-OPEN AND MEASURED. Six citation shapes go unchecked. FOUR of them have
+# no live instance in the tree — those probes are synthetic, and `:99999` is a
+# line no file here has — so those four are gaps in reach, not defects on the
+# page. The RANGE shape has 58 live instances, six of which resolve to an
+# in-tree target, and every one of those six ends inside its target: measured,
+# so the shape is unchecked and currently carries nothing wrong.
 #
-# THE FOURTH HAD A LIVE INSTANCE WHILE THIS NOTE SAID NONE DID, which is the
+# THE SIXTH HAD A LIVE INSTANCE WHILE THIS NOTE SAID NONE DID, which is the
 # sentence being corrected here. At 103f3b6 `.github/workflows/ci.yml` said its
 # two `grep -qE` gates were at "(lines 361 and 632)" and they were at 371 and
 # 642. The citation was CORRECT at 70ed1a5; ten lines added to that file on this
@@ -347,12 +349,55 @@ def test_every_test_cited_in_core_prose_still_exists():
 #                                  wild. Citing the STEP BY NAME is the fix and
 #                                  is the house rule already; nothing cheap
 #                                  checks it.
+#   a RANGE's second number        the regex takes the START and drops the rest:
+#                                  handed `contracts.py`, a colon, and
+#                                  `1020-99999`, `findall` returns
+#                                  `('contracts.py', '1020')`. So the END of
+#                                  every range citation is unchecked, and the
+#                                  test below asserts exactly that behaviour
+#                                  (`preconditions.py` + colon + `213-240` ->
+#                                  `('preconditions.py', '213')`) without
+#                                  saying what it costs. Measured across the
+#                                  266 swept files: 58 range citations, 6 with
+#                                  a target that resolves in-tree, and all 6
+#                                  ends are inside their target — so nothing is
+#                                  wrong today and nothing would notice if it
+#                                  were. Widening the regex to check the end
+#                                  too is a small change, but ranges also cite
+#                                  THIRD-PARTY sources here (hatchling's
+#                                  `builders/config.py`, the MIME socket), and
+#                                  which of those should resolve is the same
+#                                  decision as the entry above; left with it.
+#   an AMBIGUOUS bare basename     the regex takes it and the resolver answers
+#                                  with the ROOT file. `_resolve_citation`
+#                                  tries `_REPO / rel` FIRST, so a bare name
+#                                  that happens to name a file at the repo root
+#                                  resolves there however many other files
+#                                  carry it — `README.md` resolves to the
+#                                  267-line root one, and this tree has four
+#                                  files of that name (the root's, `docs/`'s at
+#                                  41 lines, `tests/property/`'s at 628, and
+#                                  `corpus/supply/affine_holdout/`'s at 40). A
+#                                  citation of the root README's line 250
+#                                  written inside `docs/README.md` would be
+#                                  checked against the wrong file and pass.
+#                                  NOT LIVE: measured, `README.md` is the only
+#                                  multi-bearer basename in the swept tree and
+#                                  zero citations of it exist. The docstring on
+#                                  `_resolve_citation` used to describe the
+#                                  other behaviour — "accepted only when
+#                                  exactly one file in the tree carries it" —
+#                                  and has been corrected to describe the code.
+#                                  Changing the CODE instead is the same
+#                                  ambiguity decision as the two entries above.
 #
 # The third was first reported as a regex miss. It is not; the regex takes it
 # and the resolver drops it. Same outcome, different mechanism, and the
 # mechanism is what a fix would have to address — `_resolve_citation` would
 # need a suffix-match fallback for slashed paths, which is a decision about
-# how much ambiguity to accept and is left to the principal.
+# how much ambiguity to accept and is left to the principal. The last two
+# entries are that same decision wearing different clothes, which is why all
+# three are recorded rather than half-fixed.
 _LINE_CITATION = re.compile(
     r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:py|md|yml|yaml|toml|cff)):(\d+)"
 )
@@ -399,10 +444,20 @@ def _resolve_citation(rel: str):
 
     Third-party targets (`subprocess.py`, jax's `lax.py`, hatchling's
     `builders/config.py`) are the common case and must resolve to None rather
-    than to a same-named file here — so a BARE basename is accepted only when
-    exactly one file in the tree carries it. `builders/config.py` resolves to
-    nothing because no such path exists; `solvers.py` resolves to
+    than to a same-named file here. `builders/config.py` resolves to nothing
+    because no such path exists; `solvers.py` resolves to
     `src/stelling/solvers.py` because exactly one file is called that.
+
+    TWO RULES, IN THIS ORDER, and the first is the one the docstring used to
+    omit. A repo-relative path is tried FIRST, so a bare basename that names a
+    file at the repo root resolves there however many other files carry the
+    name. Only if that misses is the "exactly one bearer" rule applied — which
+    is what this used to claim was the whole of it, and it is not:
+    `README.md` resolves to the root README although four swept files are
+    called that. Not live (no `README.md` line citation exists in the tree, and
+    it is the only multi-bearer basename), and recorded in the reach note above
+    rather than changed, because which file an ambiguous basename should mean
+    is the same decision left to the principal there.
     """
     direct = _REPO / rel
     if direct.is_file():
