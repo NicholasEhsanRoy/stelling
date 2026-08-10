@@ -62,13 +62,26 @@ python tools/property_check.py --rev  fb34e0d
 
 # demonstrate every positive control (each must FAIL where it is supposed to)
 python tools/property_check.py --controls \
-    --other-python /path/to/venv-with-the-other-jax-series
+    --other-python ~/.cache/stelling-property/jax-0.10.2/bin/python
 
 # the cross-series differential needs two interpreters
-STELLING_PROPERTY_OTHER_PYTHON=/path/to/venv-jax-0.10/bin/python \
+STELLING_PROPERTY_OTHER_PYTHON=~/.cache/stelling-property/jax-0.10.2/bin/python \
   PYTHONPATH=$PWD/src $VENV/bin/python -m pytest -ra \
   tests/property/test_cross_series.py
 ```
+
+**The second interpreter needs `hypothesis` too, not just the other jax
+series**, so build it with `tools/property_venv.sh 0.10.2` and do not reach for
+a shared jax venv. The child runs `_corpus.py` as a script, `_corpus` imports
+`_grammar`, and `_grammar` imports `hypothesis` at module scope — the corpus
+itself is seeded by `random.Random`, but the module it lives beside is not.
+Measured, pointed at a jax 0.10.2 venv without hypothesis: the child dies with
+`ModuleNotFoundError: No module named 'hypothesis'`, the property's three
+anti-vacuity guards never run, and the control is reported as a *wrong failure*
+rather than as a demonstration. This is the canonical copy of that command —
+`ci.yml`'s own comment names this file as where it lives — and it said
+`/path/to/venv-with-the-other-jax-series` for as long as the instruction was
+wrong.
 
 Budgets are chosen by `STELLING_PROPERTY_PROFILE`:
 
@@ -107,7 +120,7 @@ against ~60 s and is still green against a mutant a three-line probe catches.
 
 What the per-push job does buy, and it is worth having: the strategies still
 draw their boundary classes, the registered mutations still apply, every
-property still has a control, seven controls still fire, and the suite still
+property still has a control, nine controls still fire, and the suite still
 runs at all. **That is rot, caught on the push that causes it — not a soundness
 argument.**
 
@@ -294,6 +307,85 @@ applied to a scratch copy, and `test_suite_disclosure.py` asserts statically
 that `old` still occurs exactly once, so a mutant that stops matching fails on
 the commit that moves the line rather than the next time somebody runs the
 controls.
+
+**A control that fires does not say *which part* of your oracle it
+demonstrated.** `tools/property_check.py` checks two things — the run came back
+RED, and the failure carried `expect_message` — and neither of them knows that
+your oracle is a conjunction. If it has three clauses and the tree you point at
+violates one, the control is green and two clauses have been demonstrated by
+nothing.
+
+That is not hypothetical here. `test_cvc5_protocol.py`'s oracle is
+`exit 0 AND nothing truncated AND the model equals the value records read`, and
+`0ad22bb` — the commit `cvc5-flat` and `cvc5-stateful` both point at — violates
+the middle clause and only the middle clause: measured over the flat leg's own
+1500 `ci` examples with all three evaluated independently, **5 violations, all
+of them clause (2)**. The other two are demonstrated by two controls added for
+the purpose — `cvc5-exit-tell` at commit `8ef8f75`, and `cvc5-phantom-model`, a
+mutant — whose `expect_message` is the clause's own sentence rather than the
+leg tag `[flat]`, because `[flat]` is stamped on all three messages and would
+have been satisfied by the failure `cvc5-flat` already finds.
+
+**And one of those two demonstrates its clause only at the `ci` profile.** A
+short-circuiting oracle reports a failing example against ONE clause — the
+first that fails — so a tree violating two clauses demonstrates whichever the
+search reaches first, and that is a property of the example sequence and not
+of the tree. `8ef8f75` is such a tree: counted independently over 1500 draws,
+**458 examples violate clause (1) and 284 violate clause (2)**, `_judge` tests
+(2) first, and which one comes first in the sequence decides what is reported.
+At the derandomized `ci` profile it is a clause-(1) example, reproducibly —
+`cvc5-exit-tell` fires at scale ×1, ×2 and ×4. At the RANDOMISED `dev` profile
+it is **either, run to run**. With `.hypothesis/` removed before every run:
+
+| `--profile dev` | FIRED | NOT DEMONSTRATED | runs |
+|---|---|---|---|
+| ×1 | 39 | 21 | 60 |
+| ×2 | 23 | 17 | 40 |
+
+and every refusal is the clause-(2) failure, of which this is one — the
+answer is drawn data, so `'sat'` below varies run to run:
+
+```
+FIRED, but the failure did not carry 'ACCEPTED A NONZERO-EXIT RUN'
+what pytest recorded: AssertionError: ACCEPTED A TRUNCATED RUN as 'sat' [flat]
+== 0/1 controls fired
+```
+
+**That table replaces "three runs out of three at ×1 and again at ×2", which
+was a replay artefact and is withdrawn.** `dev` is `derandomize=False` and
+`_profiles.py` attaches a database only when `STELLING_PROPERTY_DB` is set,
+which `property_check.py` pops out of the environment — so hypothesis's default
+database at `<repo>/.hypothesis/examples` is live and shared across `--control`
+invocations. Driven, 16 chains of four runs with the database wiped only at the
+head of each chain: after a first run that reported clause (1), **33 of 33**
+follow-ups reported clause (1); after one that reported clause (2), **15 of 15**
+reported clause (2). Three consecutive runs are one draw and two replays.
+
+**If you are measuring a control at a randomised profile, wipe `.hypothesis/`
+between runs or you are measuring your own first answer.** That is the general
+lesson and it cost this entry two rounds.
+
+The direction is still safe — a refusal, never a false green — but
+`python tools/property_check.py --controls --profile dev` is an invocation this
+file documents, and on roughly a third to two fifths of independent runs it
+reports a control NOT DEMONSTRATED. See `_judge`'s docstring for why the
+obvious fix (pin the transcript as an `@example`) is not taken here.
+
+So: if your oracle is a conjunction, say in the control's `why` which conjunct
+its tree exercises, and register a control for each of the rest or write down
+that you did not. **If the tree violates more than one conjunct, say which
+profile the demonstration holds at**, because "the control fires" is then a
+claim about the sequence too. The measurements for this one are in `_judge`'s
+docstring in `test_cvc5_protocol.py`.
+
+**Reach for `git log -S` before you reach for a mutation.** Both of those
+started life as mutants, on the ground that the defect had never been in this
+tree, and for clause (1) that was false: `git log -S "or proc.returncode != 0"
+-- src/stelling/solvers.py` names the commit that ADDED the guard, so its
+parent carries the defect and the entry is a `commit` control. For clause (3)
+the same question has an empty answer — `git log -S "sorted(set(values))"`
+finds nothing — and that is what makes `cvc5-phantom-model` honestly a mutant.
+`kind` is only load-bearing if the question is actually asked.
 
 **If the unbiased search cannot build the shape, pin it and say so.** Several
 controls here needed an `@example`, because the shape is a conjunction of
