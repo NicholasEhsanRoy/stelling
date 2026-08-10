@@ -1895,8 +1895,13 @@ verdicts:
   — `declare-const … Real`, `… Bool`", and that command returns exactly ONE
   line: `smt.py:490: lines.append(f"(declare-const {inp.name} Real)")`. There
   is no `declare-const … Bool` to find. `Bool` reaches the script through
-  `define-fun`, at `smt.py:503-509` — `sort = "Bool" if out.aval.dtype ==
-  "bool" else "Real"`, emitted as `(define-fun t{id} () {sort} …)`. So the
+  `define-fun`, at `smt.py:504-510` — `sort = "Bool" if out.aval.dtype ==
+  "bool" else "Real"`, emitted as `(define-fun t{id} () {sort} …)`. *(The
+  range first written here was `503-509`, which starts on the closing line of
+  a docstring and stops one line SHORT of `510` — one of the two `{sort}`
+  emitters its own next sentence names. Re-derived: `504` is the `sort =`
+  assignment and `506`/`510` are the two emitters, so `504-510` is the block
+  that carries `Bool`.)* So the
   two commands that carry the claim are `git grep -n 'declare-'
   src/stelling/smt.py` (**one** line, `Real`, and therefore no `declare-sort`
   and no `declare-datatypes` either) and `git grep -n 'lines.append(f"(define-
@@ -1966,10 +1971,11 @@ verdicts:
   from `Popen._communicate`'s `self._input = self._input.encode(...)` in the
   standard library's `subprocess` (`subprocess.py:2172` on CPython 3.12.3 —
   the LINE NUMBER IS A PROPERTY OF THE INTERPRETER, not of this repository:
-  measured 2026-08-09, 2172 is that statement on CPython 3.12.3 and 3.11.15
-  and is a BLANK LINE on CPython 3.10.20, which `requires-python = ">=3.10"`
-  admits; cite the symbol, not the line), because `input=` must become bytes
-  when `text=` goes
+  measured 2026-08-09, 2172 is that statement on CPython 3.12.3 and 3.11.15;
+  on CPython 3.10.20, which `requires-python = ">=3.10"` admits, the file is
+  2122 lines long, so 2172 is 50 lines PAST END OF FILE and the statement is
+  at `:2078`; cite the symbol, not the line), because `input=` must become
+  bytes when `text=` goes
   and six files shim `subprocess.run` with a `str` `CompletedProcess` —
   including `fuzz_transport.py`, `repro_forgery.py`, `repro_real_kill.py` and
   `probe_cvc5_value_channel.py`, the artefacts behind figures quoted in this
@@ -2277,8 +2283,9 @@ verdicts:
   `tests/test_solver_audit_findings.py`, all one cause —
   `AttributeError: 'bytes' object has no attribute 'encode'` from
   `Popen._communicate`'s `self._input.encode(...)` in the standard library's
-  `subprocess` (line 2172 on CPython 3.12.3 and 3.11.15, a blank line on
-  3.10.20 — see the entry above on why the symbol is cited and the line is
+  `subprocess` (line 2172 on CPython 3.12.3 and 3.11.15; on 3.10.20 that
+  file is 2122 lines, so 2172 is past its end and the statement is at 2078
+  — see the entry above on why the symbol is cited and the line is
   not), because `input=` must become bytes when `text=` goes.
   That figure was reproduced here exactly, ids and frame, and it is the cost
   of a TOLERANT decode; a strict one reddens **31**, the extra 15 being the
@@ -4096,14 +4103,51 @@ verdicts:
   MEASURED, UNCLOSED source-to-trace divergence, and its direction is a
   WRONG VERIFIED.** No verdict moves with this entry and no rule changes.
   It closes a DISCLOSURE gap: the hazard was measured, priced, and left
-  open deliberately, and it was described nowhere a reader of this page
-  could have found it. It was not quite unmentioned — the index-clamp
-  entry above reaches for *"the shape of the integer-literal wrap
-  defect, one layer over"* as an analogy — which is the gap at its
-  sharpest: the shipped tree names this defect once, to explain
-  something else, and never says what it is. It is being written down
-  before 0.1.0 because a release is where an omission stops being
-  recoverable.
+  open deliberately, and it was described nowhere a reader of THIS PAGE
+  could have found it.
+
+  **THE SCOPE OF THAT GAP WAS OVERSTATED WHEN THIS ENTRY LANDED, AND THE
+  CORRECTION IS RECORDED RATHER THAN QUIETLY SWAPPED.** The sentence
+  here read: *"the shipped tree names this defect once, to explain
+  something else, and never says what it is."* Measured at `650e678`,
+  `git grep -nEi 'integer[- ]literal wrap|literal wrap' -- .
+  ':!SOUNDNESS.md'` returns **12 lines in 9 files** — `ci.yml:936`,
+  `CONTRIBUTING.md:30`, `design/index-bounds-round.md:248`,
+  `src/stelling/propagate.py:1669`, and eight sites under
+  `tests/property/` (`_grammar.py` ×2, `positive_controls.py`,
+  `test_metamorphic.py`, `test_oracle.py` ×3, `test_suite_disclosure.py`).
+  Every one of those nine paths is inside the sdist allowlist in
+  `pyproject.toml`, and `propagate.py` is in the wheel as well, so all 12
+  ship. **At least four of them say what the defect IS**, not merely that
+  it exists. `tests/property/positive_controls.py:91-93`, verbatim: *"an
+  out-of-dtype-range integer literal wraps mod 2\*\*bits before tracing, so
+  stelling returns VERIFIED for a predicate that is false at every declared
+  point"*. `tests/property/test_oracle.py:123-125` says the same in its own
+  words (*"…so stelling verifies a predicate that is false at every
+  declared point"*), `:17` gives the mechanism and why an execution oracle
+  cannot see it, and `_grammar.py:32` names the mechanism again. *(Those
+  first two anchors were written `:91` and `:123`, which is where each
+  quoted string STARTS; the quoted words run on to `:93` and `:125`. A
+  grep hit is the first line of a wrapped string literal, and citing it
+  alone points a reader at a third of the sentence being quoted.)* That
+  grep is a FLOOR, not a census: a wider pattern
+  (`out-of-dtype-range|wraps mod 2|wrapping before tracing`) finds
+  **13 lines in 5 files**, including `tests/property/README.md:165` —
+  and it is NOT a superset. Measured at `b2e3a15`, the two greps share
+  only four lines (`_grammar.py:32`, `positive_controls.py:91`,
+  `test_oracle.py:17` and `:123`); their union is **21 lines**. So the
+  wider pattern is a different net, not a bigger one, and "finds more" is
+  true only of the count.
+
+  **What IS true, measured the same way, is the narrower claim this entry
+  should have made**: at `53f9f84` the same grep run against `SOUNDNESS.md`
+  alone returns **one** line — `SOUNDNESS.md:3843`, inside the index-clamp
+  entry above, reaching for *"the shape of the integer-literal wrap
+  defect, one layer over"* as an ANALOGY for a different decision. The
+  page a reader consults for soundness disclosures named it once, in
+  passing, to explain something else. The test suite and CI said what it
+  was; this page did not. It is being written down before 0.1.0 because a
+  release is where an omission stops being recoverable.
 
   **The defect, in four lines of plain jax and no stelling idiom.**
 
@@ -4117,16 +4161,20 @@ verdicts:
   `x + 256 ∈ [256, 266]`, so the predicate AS WRITTEN is false at all 11
   declared points. **stelling returns VERIFIED.** Re-driven at `53f9f84`
   before this entry was written, in all four cells — jax 0.11.0 and jax
-  0.10.2, `jax_enable_x64` on and off — and VERIFIED in every one. The
-  index-bounds transfer that landed at `53f9f84` does not touch it; the
-  reproducer contains no indexing.
+  0.10.2, `jax_enable_x64` on and off — and VERIFIED in every one; driven
+  again at `650e678`, same four cells, `vacuity_mode="inputs-only"`, both
+  interval-only and with the solver portfolio at 20 s, VERIFIED in all
+  eight. The index-bounds transfer that landed at `53f9f84` does not touch
+  it; the reproducer contains no indexing.
 
   **It is a wrong VERIFIED, not a lost one.** That is the expensive
   direction, and it is the direction this defect has.
 
   **The VERIFIED is not a blanket VERIFIED for this harness shape**, and
   that is the control rather than an inference. Same three lines, same
-  declared box, only the literal changed, jax 0.11.0:
+  declared box, only the literal changed, jax 0.11.0 (re-derived at
+  `650e678`, interval-only and with the solver portfolio at 20 s, same
+  four rows either way):
 
   | `OFFSET` literal | what jax traces | verdict |
   |---|---|---|
@@ -4139,42 +4187,507 @@ verdicts:
   VERIFIED at `256` for exactly the same reason it returns VERIFIED at
   `0`: by the time it looks, those are the same program.
 
-  **Why no backward-cone rule closes it: the information is destroyed
-  before stelling sees it.** The wrap happens inside `jnp.full`, before
-  any array exists and before tracing begins. Measured at `53f9f84` on
-  jax 0.11.0, the ENTIRE jaxpr tree for the harness above holds exactly
-  **one** literal — `10.0:f32`, the comparison bound — and the string
-  `256` does not appear anywhere in it. The wrapped value enters as a
-  **constvar closed over by the `jit` sub-jaxpr** (`lambda c:i8[]; a:i8[]`),
-  not as an `ir.Literal` operand, and every rule in this family walks
-  literal operands.
+  **Why no backward-cone rule closes it: the wrapped value is
+  indistinguishable from an honest one by the time stelling sees it.**
+  The wrap happens inside `jnp.full`, at eager time, before the harness is
+  traced at all — and, per the mechanism section below, at a `.astype`
+  cast that leaves no trace of the value it narrowed. Re-derived at
+  `b2e3a15` in all four cells, via `stelling.harness.trace` and
+  `ir.ClosedJaxpr.to_dict(include_metadata=False)`, jax's default
+  configuration: **the transcribed tree for the wrapped `256` is
+  byte-identical to the tree for an honestly written `0`** — and the same
+  comparison against an honestly written `5` differs, so the comparison is
+  live and not vacuously true. `0` is the third row of the control table
+  above, where stelling returns VERIFIED and the source is TRUE. The two
+  rows are one program, exactly, at the level any rule could read them.
+  That is the fact the conclusion below rests on.
+
+  **THE "NO INTEGER LITERAL IN THE CONE" READING OF THAT IS A FACT ABOUT
+  ONE SPELLING OF THE REPRODUCER, NOT ABOUT THE DEFECT, AND IS NARROWED
+  HERE.** For the reproducer exactly as written above, the figure holds
+  and re-derives in all four cells: the ENTIRE jaxpr tree holds exactly
+  **one** `ir.Literal` — `10.0:f32`, the comparison bound — the string
+  `256` appears nowhere in it, and the wrapped value enters as a
+  **constvar closed over by the `jit` sub-jaxpr**, printed by jax as
+  `{ lambda c:i8[]; a:i8[]. … }`. But that is a fact about `OFFSET` being
+  CLOSED OVER by the jitted function, and two respellings that change
+  nothing about the defect put the wrapped value into the cone as an
+  ordinary integer literal — both measured in all four cells at `b2e3a15`:
+
+  * pass `OFFSET` as an ARGUMENT to the jitted function instead of closing
+    over it, and the tree holds **two** `ir.Literal` operands, the second
+    being the wrapped value as an `int8` `0` operand of the `jit`
+    equation; there are then no constvars anywhere (top-level `consts=()`,
+    sub-jaxpr `constvars=[]`), and jax prints the sub-jaxpr
+    `{ lambda ; c:i8[] a:i8[]. … }` with the value at the call site as
+    `] 0:i8[] a`;
+  * or leave the reproducer alone and set jax's own transitional
+    `jax_use_simplified_jaxpr_constants` (default `False` in **both**
+    installed series, and carrying jax's warning that it "will exist only
+    briefly, while we transition users. DO NOT RELY ON THIS FLAG"), and
+    the closure spelling itself inlines the wrapped value as `0:i8[]` into
+    the `add`.
+
+  So a rule cannot be sold as safe on the ground that the value is not
+  there to be seen: in two of the three configurations measured it IS
+  there. What does not change across any of them is the equality above —
+  wrapped `256` and honest `0` transcribe to the same tree in all four
+  cells, in both spellings, with the flag and without it.
 
   Four families of jaxpr-level remedy were built and priced against a
   purpose-built corpus and the full suite on both series — a
   literal-immediate rule, a narrowing rule, a backward-cone rule and a
   declaration-scoped rule, plus a cross-scope cone and an index-only
   exemption. Every one is either blind at `jit`/`cond`/`custom_jvp`
-  boundaries (which is universal in real jax code), or structurally blind
-  to the constvar form above, or costs capability that is not the wrap's
-  to take — including `u.at[3].set(0.5)`, the commonest jax write there
-  is. *(That pricing is RESTATED here from the measurement round that did
-  it, not re-run for this entry; what IS re-measured here is the jaxpr
-  above, which is the fact the conclusion rests on.)* **No rule keyed on
-  integer literals in a backward cone can close this**, because there is
-  no integer literal in the cone to key on.
+  boundaries (which is universal in real jax code), or costs capability
+  that is not the wrap's to take — including `u.at[3].set(0.5)`, the
+  commonest jax write there is. *(That pricing is RESTATED here from the
+  measurement round that did it, not re-run for this entry. Its third
+  clause read "or structurally blind to the constvar form above"; that
+  clause is WITHDRAWN, because the constvar form is one spelling's and the
+  measurement above finds the value in the cone under the other two. What
+  IS re-measured here is the tree equality, which is the fact the
+  conclusion rests on.)* **No rule keyed on integer literals in a backward
+  cone can close this** — not because there is nothing to key on, but
+  because what there is to key on is the same `0:i8[]` an honest program
+  writes, so a rule that fires on the wrapped row fires on the honest one
+  too. That is the same SHAPE of failure as the one that got the detector
+  branch audited SHOULD-NOT-LAND, below — firing on honest code — and it
+  is stated as a shape, not as an identification of the two.
 
-  **It is jax's, it is deliberate, and it is in the shipping release.**
-  `jax/_src/lax/lax.py` wraps the narrowing conversion in
+  **THAT REASON IS TRUE OF THE REPRODUCER'S SHAPE AND IS NOT TRUE OF THE
+  CLASS, AND SINCE THE ENTRY HAD BY THEN BEEN KNOWN WRONG THREE TIMES IN
+  EXACTLY THIS WAY THE NARROWING IS RECORDED RATHER THAN LEFT.** *(Three
+  was the count KNOWN when this was written — the eleven-doors list read
+  as a census, the "concrete" row, and the `except OverflowError` route.
+  A fourth was already on the page and had not been found yet: `jnp.full`'s
+  route through the guarded call, which entered at `d5cfd60` — the commit
+  before this paragraph — and was corrected below only after a later pass
+  measured it. So three is what the author knew, not what the page held,
+  and the difference runs in the direction that flatters. No total is
+  claimed here, because which sentences belong to the class is a
+  judgement and a number would read as a measurement.)* At two of the
+  eight doors that wrap — `jnp.where(c, 256, x)` and
+  `jnp.clip(x, 256, 256)`, measured in all four cells and detailed under
+  the fourth site below — the traced program is NOT what an honest
+  program writes: the constant survives as a live `256:i32[]` /
+  `256:i64[]` operand with the narrowing still standing as a
+  `convert_element_type` equation, where an honest `0` would put `0` in
+  its place. So "there is nothing to key on but sameness" is a fact about
+  the `jnp.full` spelling this entry reproduces in, not about every door.
+  What is withdrawn is sameness as the reason that covers all of them.
+
+  **AND THE GROUND THIS ENTRY PUT UNDER THE CONCLUSION IN ITS PLACE IS
+  ALSO FALSE, MEASURED, SO THE CONCLUSION IS NARROWED HERE RATHER THAN
+  RE-FOUNDED ON A SECOND ASSERTION.** What was written was: *"The
+  conclusion above is not withdrawn, because at those two doors it rests
+  on the OTHER clause already stated — the difference is inside a nested
+  `jit` sub-jaxpr, which is where every priced remedy was blind — and not
+  on sameness."* Re-derived with `jax.make_jaxpr` in all four cells, at
+  both doors, against an honest `0` written in the same place: **the
+  nested `jit` sub-jaxpr — jax's own `_where` and `clip` — is
+  BYTE-IDENTICAL between the wrapped `256` and the honest `0`.** The
+  whole difference is at the CALL SITE, in the ENCLOSING jaxpr, and jax
+  prints it there: at `jnp.where` the `jit` equation's operands read
+  `] b 256:i32[] a` against `] b 0:i32[] a` (`i64[]` at
+  `JAX_ENABLE_X64=1`), and at `jnp.clip` the same substitution happens
+  twice. Nothing has to be descended into to see it.
+
+  What IS inside that sub-jaxpr is the NARROWING — the
+  `convert_element_type` equation and its `int8` target, one at
+  `jnp.where` and two at `jnp.clip`, with **zero** such equations in the
+  enclosing jaxpr, all four cells. That is what the paragraph on the
+  fourth site below already says correctly, and it is the honest form of
+  what "nested" is true of here: at top level the operand reads as an
+  in-range `int32`/`int64` `256`, and the dtype that makes it wrong sits
+  one level down.
+
+  **That does not re-establish the conclusion, and is not offered as
+  doing so.** The `jit` equation's OUTPUT aval — `int8[3]` — is in the
+  enclosing jaxpr too, so whether a rule could key on the call-site
+  literal together with that output is a question no measurement here
+  answers; no such rule was built and none was priced. **So the
+  conclusion is narrowed to the spelling it was measured on**: it holds
+  through `jnp.full`, where wrapped and honest transcribe to the same
+  tree, and at `jnp.where` and `jnp.clip` it is recorded as UNMEASURED
+  and is not claimed. No remedy is proposed on the strength of any of
+  this, none was built, and none was priced.
+
+  **It is jax's, it is deliberate, and it is in the shipping release —
+  BUT NOT BY THE MECHANISM THIS ENTRY FIRST NAMED, AND THAT CLAIM IS
+  RETRACTED HERE RATHER THAN QUIETLY SWAPPED.** What this paragraph said
+  was that `jax/_src/lax/lax.py` "wraps the narrowing conversion in
   `try: ... except OverflowError: pass` — jax catches the overflow NumPy
-  raises and discards it — carrying the comment *"TODO(phawkins): remove
+  raises and discards it", carrying the comment *"TODO(phawkins): remove
   the try-except block here, which would be a breaking change to users in
-  the presence of overflows"*. **The line range is an installed-dependency
-  figure, not a repository figure**, so it is quoted with the version it
-  was read from: `lax.py:1747-1754` at jax **0.11.0**, and the same block
-  at `lax.py:1740-1747` at jax **0.10.2**. Cite the comment, not the
-  range.
+  the presence of overflows"*. **The comment is accurate and so are the
+  line ranges. The causal claim built on them is false.**
 
-  That behaviour is against jax's own published promotion rule. **JEP
+  **THAT LEFT THE WORD "DELIBERATE" STANDING ON A COMMENT BESIDE A BLOCK
+  THAT DOES NOT RUN FOR THIS CASE. IT NOW RESTS ON A COMMIT AND A TEST,
+  WHICH ARE BETTER EVIDENCE AND ARE ABOUT A DIFFERENT PATH.** Both read
+  in a clone of jax's own repository at tag `jax-v0.11.0`, commit
+  `a1521744c6dc074443fe549f19f48d7197abf759`, working tree clean:
+
+  * **The test.** `tests/lax_test.py:201-203`, entire:
+
+    ```
+    def testConvertElementTypeOOB(self):
+      out = lax.convert_element_type(2 ** 32, 'int32')
+      self.assertEqual(out, 0)
+    ```
+
+    It does not assert that jax raises. **It asserts the wrapped value.**
+    *(That fence is deliberately unlabelled. This page holds exactly one
+    ```` ```python ```` fence — the reproducer above — and
+    `tests/test_soundness_wrap_reproducer.py` asserts that count before
+    reading it, so a second labelled fence turns **15** cases red —
+    measured by planting one. *(It was **nine** when that figure was
+    written; the tripwire has since grown a second door, and six more
+    cases read the fence.)* Quoted foreign code goes in a bare fence.)*
+
+  * **The commit that put it there.** `c2fe350455` (Jake VanderPlas,
+    2023-04-04), subject *"future-proof lax.convert_element_type"*, body
+    *"In the future, np.array(large_value, 'int32') will error"*. Its
+    whole diff is two files, five inserted lines and one deleted: it
+    changed `operand = np.asarray(operand, new_dtype)` — which raises —
+    to `operand = np.asarray(operand).astype(new_dtype)` — which
+    truncates — inside the `type(operand) is int` fast path, **and added
+    `testConvertElementTypeOOB` in the same diff**. Verified: the commit
+    is an ancestor of the 0.11.0 tag, and the expression it introduced is
+    the one standing today at `lax.py:1726` (**0.11.0**) and `lax.py:1724`
+    (**0.10.2**) — the line the table below names as where `jnp.full`
+    loses the value, and therefore the line this entry's own four-line
+    reproducer dies on. *(The statement AROUND that expression has been
+    reshaped since — `408bd93e3d` rewrote the `TypedNdArray` construction
+    — so the commit created the EXPRESSION, not the line as it now
+    reads.)*
+
+  **Which path each applies to, said explicitly, because this entry has
+  twice been wrong by taking something true of one door for something
+  true of the class.** The commit and the test are about the
+  `type(operand) is int` fast path at `lax.py:1726`/`1724`. The
+  `TODO(phawkins)` quoted above, at `lax.py:1747-1748` on the block
+  `1747-1754`, is about the guarded call BELOW that fast path — the one
+  measured below to execute zero times for this case, whose live routes
+  are a Python float and an `int` subclass. Two paths, one recorded
+  intent each, pointing opposite ways: the `TODO` records an intent to
+  REMOVE a swallow, the commit records a choice to KEEP a truncation and
+  pinned it with a test that fails if it is undone.
+
+  **What this does NOT support, in either direction.** Not "jax will
+  never fix this" — the commit's own message anticipates NumPy starting
+  to error, and the `TODO` says its block should go. Not "jax is about to"
+  — nothing was found that says so, and nothing has been reported
+  upstream from here. What it supports is narrower and is all the entry
+  claims: on this one path the truncation was chosen over a raise, on
+  purpose, and it is pinned. **That it is the ONLY test in the jax repo
+  asserting a wrapped value is REPORTED by the measurement context whose
+  receipts are cited below, and is not re-derived here** — proving a
+  negative over a test suite is not something this entry did. What WAS
+  re-derived at that tag: of all **17** mentions of `OverflowError`
+  anywhere under `tests/`, **15 assert that it is RAISED** (14
+  `assertRaises`/`assertRaisesRegex` calls plus one continuation line of
+  a fifteenth) and the remaining two are comments saying an out-of-bounds
+  value leads to one. **None of the 17 asserts a value.** And
+  `api_test.py:8351` `test_integer_overflow` is parameterised over six
+  entry paths ×
+  `jtu.JIT_IMPLEMENTATION`, running as **10** cases after its own
+  exclusion clause, every one of which asserts `OverflowError`.
+
+  Measured by instrumenting the code object of
+  `jax._src.lax.lax._convert_element_type` with `sys.monitoring` LINE
+  events LOCAL to that one code object, then sweeping the eleven doors
+  below × four constant spellings (Python `int`, `np.int64`, 0-d
+  `np.ndarray`, 0-d `jnp` array) × seven written values × four narrow
+  target dtypes: **1144 runs at `JAX_ENABLE_X64=0` and 1232 at `=1` per
+  series, `_convert_element_type` entered on 607 and 655 of them
+  respectively, and the `except OverflowError:` line executed ZERO
+  times** — jax 0.11.0 and jax 0.10.2, both x64 settings, all four cells,
+  NumPy 2.5.1. **The instrument carries its own positive control**: in the
+  same process the same probe sees that line execute exactly once for
+  `jnp.full((), 1e308, jnp.int8)` and for
+  `lax.convert_element_type(1e308, jnp.int8)` — a Python FLOAT out of the
+  target integer's range, whose answer is `127`, saturated, not wrapped.
+  So the zero is a fact about the integer path, not about the probe.
+
+  **Where the value is actually destroyed**, per door class, by
+  line-execution count inside that same code object. Line numbers are
+  installed-dependency figures and carry their version; the constant is a
+  bare Python literal:
+
+  | door class | the line that destroys the value | does anything raise there? |
+  |---|---|---|
+  | `jnp.array`, `jnp.asarray`, `jnp.int8` | nothing in `lax` — `_convert_element_type` is **entered 0 times**. jax runs an explicit overflow check first, at `jax/_src/numpy/array_constructors.py:249-250` (same line numbers in both series), which calls `dtypes.coerce_to_array`, whose `return np.asarray(x, dtype)` — `dtypes.py:478` at **0.11.0**, `dtypes.py:507` at **0.10.2** — is what raises | yes — that IS the raise |
+  | `jnp.full`, `jnp.full_like` | `arr = np.asarray(operand).astype(new_dtype)`, on the `type(operand) is int` fast path — `lax.py:1726` at **0.11.0**, `lax.py:1724` at **0.10.2** | no: `.astype` is a cast, and truncates in silence |
+  | `x + 256`, `x >= 256`, `jnp.where`, `jnp.clip`, `jnp.maximum` | the `256` has already been promoted to a weakly-typed `int32`/`int64` **Tracer** by the time it arrives (`JitTracer(~int32[])` / `~int64[]`); no Python-level fast path applies, so the entry falls through to `convert_element_type_p.bind` and the narrowing is the primitive's own | no |
+  | `x.at[0].set` | same fall-through, but the operand is **concrete** — `ArrayImpl(256, dtype=int32/int64, weak_type=True)` | no |
+
+  **That last split was one row until now, reading "already promoted to a
+  CONCRETE `int32`/`int64` array" for all six; per-entry tracing at
+  `b2e3a15`, all four cells, says concrete at `x.at[0].set` and a Tracer
+  at the other five.** It changes no conclusion — both take `bind` — and
+  it is corrected because the row is the section's own evidence and a
+  reader reasoning from "concrete" would reason about a value that is not
+  there to read.
+
+  The `x.at[0].set` row is where the entry's own earlier grouping went
+  wrong, and it is worth naming because it is the trap this whole section
+  is about: that door DOES execute `np.asarray(operand).astype(new_dtype)`
+  once, so a line-count alone puts it in the `jnp.full` row — but per-entry
+  tracing shows the operand on that entry is the INDEX `0` (`int -> int32`)
+  and the operand carrying `256` is a separate entry,
+  `ArrayImpl(int32/int64 256) -> int8`, which takes the `bind` path. A
+  count of line hits is not an attribution.
+
+  *(A second thing a count is not: a repeatable figure. The attribution
+  above is a FIRST-CALL measurement, taken with one door per fresh
+  interpreter. jax caches its traces, so the same door called again with a
+  constant of the same jit signature enters `_convert_element_type` ZERO
+  times — measured at `b2e3a15`, and stated here because an entry count
+  taken second in a process is a fact about the cache, not the door.)*
+
+  **THERE IS A FOURTH SITE — WHERE `x + 256` ACTUALLY DIES — AND NOTHING
+  ELSE ON THIS PAGE NAMES IT.** The third row of the table
+  above ends at `convert_element_type_p.bind` and says the narrowing is
+  "the primitive's own". That is true, and it is not an address. The
+  address is `_convert_elt_type_folding_rule` in `jax/_src/lax/lax.py` —
+  the primitive's CONSTANT-FOLDING rule, registered into
+  `pe.const_fold_rules` and called from `try_constant_folding` in
+  `jax/_src/interpreters/partial_eval.py` — and the line inside it that
+  destroys the value is `out = out.astype(new_dtype)`: **`lax.py:5314` at
+  jax 0.11.0** and **`lax.py:5304` at jax 0.10.2** (the function's `def`
+  at `5295` and `5285` respectively). Read from the two installed trees,
+  and the 0.11.0 file is byte-identical to the same path in a clone of
+  jax at tag `jax-v0.11.0`.
+
+  Measured in all four cells by substituting a recording wrapper for that
+  rule: `jax.jit(lambda v: v + 256)(jnp.zeros((3,), jnp.int8))` returns
+  `[0 0 0]`, and the rule is called with the constant still INTACT —
+  `TypedInt(256, dtype=int32)` at `JAX_ENABLE_X64=0`, `int64` at `=1` —
+  with `new_dtype=int8`, returning `TypedNdArray(0, dtype=int8)`. That is
+  a per-call attribution, not a line count: the 256 goes in whole and
+  comes out zero, there.
+
+  **It is disjoint from the `.astype` site above, in both directions.**
+  Measured differentially in-process at 0.11.0, `JAX_ENABLE_X64=1`, by
+  installing range-checking wrappers one at a time: a check on the
+  `type(operand) is int` `.astype` site makes `jnp.full((), 256,
+  jnp.int8)` and `lax.convert_element_type(2 ** 32, 'int32')` raise and
+  leaves `jit(x + 256)` returning `[0 0 0]`; a check on the folding rule
+  makes `jit(x + 256)` raise and leaves those two returning `0`. The
+  other two sites are already established above as not on this path at
+  all: the `except` executes zero times for it, and the
+  `array_constructors.py:249-250` gate belongs to the three construction
+  doors, which `x + 256` is not one of.
+
+  **AND THIS IS EXACTLY THE DISTINCTION THIS ENTRY KEEPS GETTING WRONG,
+  SO IT IS SPELLED OUT: THIS SITE IS NOT WHERE THIS ENTRY'S OWN
+  REPRODUCER DIES.** The four-line reproducer at the top writes its
+  constant through `jnp.full`, so it dies at the `.astype` site, and a
+  range check THERE fixes it — measured, both `x64` cells, with only that
+  check installed: `jnp.full((), 256, jnp.int8)` raises while
+  `jit(x + 256)` still returns `[0 0 0]`. `x + 256` is a DIFFERENT door
+  of the eleven, reached by writing the constant inline instead, and it
+  is the one no fix at the three sites above reaches. Same defect, same
+  wrong VERIFIED, two narrowing sites — and a remedy priced against one
+  of them buys nothing at the other.
+
+  **It is not a LAST site either, and it is not offered as one.** Two
+  measurements bound it, both in all four cells. First, it is reached
+  only through TRACING: evaluated EAGERLY, all eight doors that wrap give
+  the same answers they give under `jit`, and the folding rule is called
+  **zero** times across all eight — so eager code loses the constant
+  somewhere else again, unmeasured here. Second,
+  two of those eight do not reach it even under `jit` —
+  `jnp.where(c, 256, x)` and `jnp.clip(x, 256, 256)` cross into jax's own
+  `jit`-wrapped internal `_where` / `clip`, so the constant survives into
+  the jaxpr as a live `256:i32[]` / `256:i64[]` operand with the
+  narrowing left standing as a `convert_element_type` EQUATION, and the
+  answer is still `0`. **In that shape the source's own constant is
+  present and unwrapped in the traced program, and no Python line
+  performs the narrowing at trace time at all.** That is recorded as
+  existing, not analysed: no verdict was driven through it, and it is not
+  offered as something to detect on — the equation sits inside a nested
+  `jit` sub-jaxpr, which is exactly where the priced remedies above were
+  already blind. It does not disturb the tree-equality measured further
+  up, which is about the reproducer as written, through `jnp.full`.
+
+  **That check at `array_constructors.py:249-250` is the ONLY explicit
+  overflow check jax runs on a constant, and its gate is a Python
+  `isinstance`:** `if isinstance(object, (bool, int, float, complex)):`.
+  Respell the constant as `np.int64(256)` — how a value read out of a
+  NumPy table arrives — and a NumPy scalar is none of those four types, so
+  **the CHECK is skipped entirely: `array_constructors.py:250`, the body,
+  executes 0 times, all four cells.** *(This sentence carried the range
+  `249-250` and said "that line is skipped entirely". Re-measured with
+  `sys.monitoring` LINE events local to `array_constructors.array`'s own
+  code object: line **249**, the `isinstance` gate, executes **once** —
+  it has to, to decide — and line **250** executes **zero** times. The
+  substance was right and the range was not, and on a page that cites
+  jax's source by line the two are not the same claim. Control, same
+  probe, same four cells: the bare Python literal `256` executes BOTH
+  lines once, `OverflowError` propagates out of 250, and 314 is never
+  reached.)*
+  The value falls through to
+  `out = np.asarray(object, dtype=dtype)` at `array_constructors.py:314` —
+  same line number in both series — where NumPy CASTS it. Traced line by
+  line, `out` is `array(0, dtype=int8)` on the very next line executed. By
+  the time `lax._convert_element_type` is called, from
+  `array_constructors.py:338`, its operand is **already an `int8` `0`**;
+  the `arr = operand.astype(new_dtype, copy=False)` at `lax.py:1731` that
+  0.11.0 then runs is a no-op on an already-narrowed array, and 0.10.2,
+  which has no such branch, reaches the identical answer. Directly above
+  that call, at `array_constructors.py:310-313` in **both** series, jax
+  carries its own comment about it: *"falling back to numpy here fails to
+  overflow for lists containing large integers … More correct would be to
+  call coerce_to_array on each leaf, but this may have performance
+  implications."* It is also where `jnp.array([256], int8)`
+  raises — NumPy applies its Python-int bound check per element — which is
+  why a Python list of those numbers raises and the NumPy array of the same
+  numbers does not.
+
+  **THAT COMMENT IS STALE, AND THIS ENTRY QUOTED IT AS THOUGH IT
+  DESCRIBED CURRENT BEHAVIOUR.** *(It was also cited as being ON line
+  314; it is on 310-313, annotating the call at 314. The entry has spent
+  a commit on a citation off by one line before now.)* Measured in all
+  four cells at NumPy **2.5.1**, every list spelling the comment is about
+  now RAISES rather than overflowing silently: `jnp.array([256], int8)`,
+  `[[256]]`, `[1, 256]`, `[np.int64(256)]` and `(256,)` all raise
+  `OverflowError: Python integer 256 out of bounds for int8`, and
+  `[2**100]` raises `OverflowError: Python int too large to convert to C
+  long`. **What still goes through line 314 in silence is a NumPy ARRAY
+  or a NumPy SCALAR, which is not what the comment is about**:
+  `jnp.array(np.array([256]), int8)` returns `[0]` and
+  `jnp.array(np.int64(256), int8)` returns `0` — the two spellings the
+  table further down already lists as wrapping. So the comment is quoted
+  here as jax's own record OF the site, and no longer as evidence about
+  what the site does. *(Reported at NumPy 2.5.2 by the measurement whose
+  receipts are cited below; re-derived here one patch version earlier, at
+  NumPy 2.5.1, on both jax series and both `x64` settings. What it would
+  do at some third NumPy is not a fact this page has.)*
+
+  `jnp.full` / `jnp.full_like` take a third route again. With an
+  `np.generic` constant they destroy it **inside the `try` itself**, at
+  `np.asarray(operand, dtype=new_dtype)` (`lax.py:1750` at 0.11.0,
+  `lax.py:1743` at 0.10.2): measured, that line executes twice and the
+  `except` beneath it zero times, because under NumPy 2.5.1 `np.asarray`
+  CASTS an `np.generic` rather than raising. At the NumPy level in the same
+  interpreters: `np.asarray(256, dtype=np.int8)` raises `OverflowError`,
+  while `np.asarray(np.int64(256), dtype=np.int8)` and
+  `np.asarray(256).astype(np.int8)` both return `0` with no exception and
+  no warning. **That is the correction at its sharpest: the one door class
+  whose wrap really does happen inside the guarded call is the class for
+  which NumPy declines to raise, so the `except` beneath it has nothing to
+  catch.**
+
+  **The block is not dead code, and this entry does not claim it is.**
+  It executes for the Python float above, and for an `int` SUBCLASS — an
+  `enum.IntEnum` member, or any `class MyInt(int)` — because the fast path
+  above it tests `type(operand) is int` EXACTLY, so a subclass skips it,
+  reaches the guarded call, NumPy raises, jax swallows it, and `256`
+  becomes `0`. Measured in all four cells:
+  `lax.convert_element_type(Colour.RED, jnp.int8)` with `Colour.RED = 256`
+  executes the `except` once and returns `0`. That route is real and is
+  the one the `TODO` describes.
+
+  **AND TWO OF THE ELEVEN DOORS BELOW TAKE IT. THIS PARAGRAPH SAID THEY DO
+  NOT, AND THAT IS CORRECTED HERE RATHER THAN QUIETLY SWAPPED.** It read:
+  *"It is not the route any of the eleven doors below takes."* Measured at
+  `b2e3a15`, `sys.monitoring` LINE events local to that same code object,
+  in all four cells: with `class Colour(IntEnum): RED = 256`,
+  **`jnp.full((), Colour.RED, jnp.int8)` and `jnp.full_like(x, Colour.RED)`
+  each execute `except OverflowError:` — `lax.py:1753` at 0.11.0,
+  `lax.py:1746` at 0.10.2 — exactly once, and return `0`**; identical for
+  a bare `class MyInt(int)`. Per-entry attribution confirms the swallowed
+  operand IS the constant (`Colour(<Colour.RED: 256>) -> int8`), not some
+  other entry of the same call. The constant class is the one this entry
+  introduces one sentence earlier, so the route and the doors were never
+  disjoint populations; the sentence simply had not been driven through
+  them. The other nine are unchanged: the three construction doors RAISE
+  for an `int` subclass (it passes the `isinstance(object, (bool, int,
+  float, complex))` gate), and the six remaining doors never reach the
+  guarded call. *(INFERRED, not measured, and now narrowed by the above:
+  because the `except` body runs on none of the 1144/1232 runs — whose
+  four spellings do not include an `int` subclass — deleting the `except`
+  clause alone cannot change any of THOSE; but it WOULD change the two
+  `int`-subclass rows just measured, which would raise instead of
+  returning `0`.)*
+
+  **THE REST OF THAT INFERENCE HAS NOW BEEN DRIVEN, AND IT IS FALSE.** It
+  ran on: *"and deleting the whole `try` block would additionally change
+  the `np.generic` rows, whose wrap is the `try` body."* The second half
+  is right; the first does not follow from it. Measured in all four cells
+  by editing `_convert_element_type`'s source IN MEMORY — read from the
+  installed file, re-`exec`'d against the module's own globals, and
+  re-bound onto `jax._src.lax.lax`, which is where `lax.full` looks the
+  name up; no installed tree is modified — **with the whole `try`
+  STATEMENT deleted, body
+  included, `jnp.full((), np.int64(256), jnp.int8)` still returns `0`.**
+  The narrowing simply moves to the fall-through
+  `convert_element_type_p.bind`, which narrows the same way. **The
+  instrument carries its own control**: planting a `RuntimeError` — which
+  `except OverflowError` does not catch — as the block's first statement
+  makes that same call raise in all four cells, so the edit is live and
+  the body really is on that path, while the bare-literal
+  `jnp.full((), 256, jnp.int8)` is untouched by it and still returns `0`.
+
+  **AND THE BLOCK IS FREE TO DELETE, WHICH IS A DIFFERENT FACT FROM
+  WHETHER DELETING IT WOULD HELP.** Removing the `try/except` outright
+  changes **0** of the 23,705 jax test cases in the cost measurement
+  below — the joint-cheapest of the four candidate fixes priced there,
+  and the only one of them that covers the `int`-subclass route measured
+  just above, because it is the only one ON that route. **It also
+  reaches neither narrowing this entry is about**, so neither the
+  reproducer at the top nor the inline spelling changes under it.
+
+  **THE REASON GIVEN FOR THAT WAS WRONG AT ONE OF THE TWO DOORS, AND SO
+  WAS THE LINE THAT FOLLOWED IT. IT IS THE SAME MISTAKE THIS ENTRY KEEPS
+  MAKING AND IS RECORDED, NOT SWAPPED.** What it read was: *"it is not on
+  the path `x + 256` takes and not on the path `jnp.full` takes … Cheapest
+  to land, and it shuts the door nobody came through."* `x + 256` is
+  right — that dies at the folding rule. **`jnp.full` is a fact about the
+  BARE PYTHON LITERAL, written as a fact about the door** — and the
+  `np.generic` paragraph above (*"`jnp.full` / `jnp.full_like` take a
+  third route again … they destroy it inside the `try` itself"*) says the
+  opposite, on the same page, in the entry's own words. Measured with
+  `sys.monitoring` LINE events local to `_convert_element_type`, all four
+  cells: `jnp.full((), np.int64(256), jnp.int8)` — how a value read out of
+  a NumPy table arrives — executes `try:` → `np.asarray(operand,
+  dtype=new_dtype)` → `return stage(x)` (`1749`/`1750`/`1752` at
+  **0.11.0**, `1742`/`1743`/`1745` at **0.10.2**) and loses the value at
+  `1750`/`1743`, INSIDE the block, because `np.asarray(np.int64(256),
+  dtype=np.int8)` is `0` and raises nothing. The bare literal reaches none
+  of those lines: the `type(operand) is int` fast path at `1725`/`1723`
+  takes it first. **So somebody does come through that door, and it costs
+  a verdict**: the four-line reproducer with `jnp.full` left exactly as
+  written and `OFFSET`'s constant supplied as `LUT[7]` (i.e.
+  `np.int64(256)`) returns **VERIFIED — source-false at all 11 declared
+  points — in all four cells**, interval-only, no solver invoked.
+
+  **What survives is the conclusion, on the other measurement rather than
+  on that reason.** Deleting the block does not change that row either —
+  measured just above, the answer stays `0` — so "it reaches neither
+  narrowing this entry is about" holds, but because the fall-through
+  narrows identically, NOT because the block is off the path. Cheapest to
+  land; and what it changes is the `int`-subclass rows and — measured in
+  all four cells under the deletion the receipts actually applied, which
+  drops the `try:`/`except` and KEEPS the body — the Python-float route,
+  where `lax.convert_element_type(1e308, jnp.int8)` raises instead of
+  saturating to `127`. Neither is the route this entry's wrong VERIFIED
+  comes through. *(That is a different edit from the whole-statement
+  deletion measured above, and the two do not have the same effect: with
+  the body kept, the float route raises; with the statement gone
+  entirely, it saturates to `127` as it does today.)*
+
+  **The line range is an installed-dependency figure, not a repository
+  figure**, so it is quoted with the version it was read from:
+  `lax.py:1747-1754` at jax **0.11.0**, and the same block at
+  `lax.py:1740-1747` at jax **0.10.2** — both re-read and both correct.
+  Cite the comment, not the range; and do not cite either as the cause of
+  the integer wrap.
+
+  The silent narrowing is against jax's own published promotion rule. **JEP
   9407** states as a design goal *"Promotion should never lead to an
   unhandled overflow."* **SUSPECTED, and labelled so deliberately**: JEP
   9407 is not shipped inside the `jax` distribution, so the wording is
@@ -4183,14 +4696,17 @@ verdicts:
   digits `9407` do match, in three files per tree, and every match is
   noise — inside float literals in the SVD back-compat test data and
   inside the unrelated bug number `TODO(b/278940799)` in
-  `jax2tf.py`. No reference to the JEP is present in either tree. The
-  `try/except` above IS verified, in both.
+  `jax2tf.py`. No reference to the JEP is present in either tree. All of
+  that re-derives at `650e678` against both installed trees. The
+  `try/except` above IS PRESENT in both — verified by reading; what it does
+  and does not do is measured above.
 
   **And jax is inconsistent about which door raises**, which matters
   because it means no remedy can be scoped by "where jax wraps" without
-  being scoped by an unstable surface. Measured at `53f9f84` on both
-  series, `int8`, literal `256`, identical results on jax 0.11.0 and jax
-  0.10.2:
+  being scoped by an unstable surface. Measured at `53f9f84` and
+  re-measured at `650e678` on both series, `int8`, **the constant written
+  as a bare Python literal `256` in every cell of both columns** —
+  identical on jax 0.11.0 and jax 0.10.2:
 
   | raises `OverflowError` | wraps in silence |
   |---|---|
@@ -4202,15 +4718,90 @@ verdicts:
   | | `jnp.clip(x, 256, 256)`, `jnp.maximum(x, 256)` |
 
   The three that raise delegate to `np.asarray(..., dtype)` and inherit
-  NumPy's check. The eight that wrap go through the `try/except` above.
+  NumPy's check — re-measured, and the only part of the original sentence
+  that survives. The rest of it read *"the eight that wrap go through the
+  `try/except` above"*; **not one of them does**, and where each of them
+  actually loses the value is the table further up.
+
+  **ELEVEN IS A SAMPLE, NOT A CENSUS, AND THIS ENTRY NEVER SAID SO.** It
+  does not claim the eleven are exhaustive, but a reader counting doors
+  will read a table for a list. Measured at `b2e3a15`, `int8`, bare Python
+  literal, identical in all four cells, eight more that wrap to `0` in
+  silence and are named nowhere above: `jnp.arange(256, 257, int8)`,
+  `jnp.pad(x, 1, constant_values=256)`, `jnp.select([c], [256], x)`,
+  `x.at[0].add(256)`, `jnp.minimum(x, 256)`, `lax.full((), 256, int8)`,
+  `jnp.astype(jnp.asarray(256), int8)`, `jnp.ones((), int8) * 256`. They
+  are recorded as more of the same shape, not as a new one, and the count
+  is still a FLOOR.
+
+  **ONE OF THEM IS A DIFFERENT SHAPE, AND THE ENTRY'S "WRAPS MOD 2\*\*bits"
+  FRAMING DOES NOT DESCRIBE IT AT ALL.** Measured at `b2e3a15`, all four
+  cells: **`jnp.linspace(256, 256, 1, dtype=jnp.int8)` returns `127`. It
+  SATURATES; it does not wrap.** So does `jnp.linspace(300, 300, 1, int8)`
+  (`127`), and `−300` clamps to `−128`; at `int16`, `70000` clamps to
+  `32767` while `256` passes through untouched. That is a SECOND
+  source-to-trace divergence with a different arithmetic, and every
+  sentence on this page that says "wraps mod `2**bits`" is about the first
+  one only. Its direction is not stated here, because it was not measured:
+  a clamp moves a constant toward zero-magnitude rather than around the
+  ring, so whether it costs a VERIFIED or a REFUTED depends on the
+  obligation, and no reproducer for it was driven. **What is claimed is
+  only that it exists, is silent, and is not the shape this entry
+  describes.** The saturating direction is not new to the page — the
+  instrument's positive control above saturates `1e308` to `127` — but
+  that is a Python FLOAT, and this is an out-of-range INTEGER going the
+  same way, which nothing above accounts for.
+
+  **THE "BARE PYTHON LITERAL" QUALIFIER ON THAT TABLE IS LOAD-BEARING AND
+  WAS NOT THERE WHEN THE TABLE LANDED.** Per the mechanism above, jax's
+  explicit check fires only for `isinstance(object, (bool, int, float,
+  complex))`, and the fallback at `array_constructors.py:314` is what
+  raises for a Python list or tuple of such scalars — measured, both
+  `jnp.array([256], int8)` and `jnp.array([256.0], int8)` raise there. So
+  the raise is a joint fact about the door AND the argument's Python type,
+  and the table,
+  pinning one literal in both columns, reads as a fact about the function
+  alone. Measured at `650e678`, three doors × thirteen
+  spellings of the value 256, target `int8`, **identical in all four cells
+  (jax 0.11.0 and 0.10.2 × `JAX_ENABLE_X64` 0 and 1): 15 raise, 24 wrap
+  silently to `0`, and the split is the same at all three doors** — it
+  tracks the argument, not the door:
+
+  | at `jnp.array`, `jnp.asarray` AND `jnp.int8` | argument spellings of 256 |
+  |---|---|
+  | raises `OverflowError` | `256`, `256.0`, `[256]`, `(256,)`, `[[256]]` |
+  | wraps to `0`, in silence | `np.int64(256)`, `np.int16(256)`, `np.float64(256.)`, `np.array(256)`, `np.array([256])`, `np.array([256], np.int16)`, `jnp.array(256)`, `jnp.array([256])` |
+
+  Neither factor alone predicts the outcome, and both directions were
+  driven: `jnp.array(int(LUT[7]), int8)` RAISES where
+  `jnp.array(LUT[7], int8)` wraps for the same `LUT[7]`; and the very same
+  Python `int` that raises at `jnp.array` wraps at
+  `jnp.full((), int(LUT[7]), int8)` and at `x + int(LUT[7])`. A whole
+  table goes through quietly: `jnp.array(LUT, int8)` with
+  `LUT = np.array([1,2,3,4,5,6,7,256], np.int64)` returns
+  `[1 2 3 4 5 6 7 0]`, while `jnp.array(LUT.tolist(), int8)` raises. **Not
+  one of the 24 wrapping combinations emits a warning of any kind** under
+  `warnings.simplefilter("always")`.
+
+  **Driven end to end, this is the same wrong VERIFIED and not a smaller
+  one.** The four-line reproducer at the top of this entry, with `jnp.full`
+  replaced by each of the three doors and `OFFSET`'s constant supplied as
+  `LUT[7]` (i.e. `np.int64(256)`), returns **VERIFIED — source-false at all
+  11 declared points — through `jnp.array`, through `jnp.asarray` and
+  through `jnp.int8`**, in all four cells, at `650e678`, `vacuity_mode=
+  "inputs-only"` with the solver portfolio at 20 s. With the bare literal
+  the same three doors raise before a harness exists. The door did not
+  change; the constant's provenance did.
 
   **A DECLARED BOX SOMETIMES CATCHES A WRAPPED `assume` BOUND, AND
   NARROWNESS IS NOT WHAT DECIDES WHETHER IT DOES.** What catches one is
   the wrapped bound landing OUTSIDE the declared box. Where it lands is a
   fact about the wrap's arithmetic, not about the box, and it is not
-  something the user can see. Driven at `53f9f84` on both series with
-  `jax_enable_x64` on and off — four cells, identical in all four,
-  obligation `assert_(x.astype(jnp.float32) <= 10.0)` throughout:
+  something the user can see. Driven at `53f9f84` and re-driven at
+  `650e678` on both series with `jax_enable_x64` on and off — four cells,
+  identical in all four, obligation
+  `assert_(x.astype(jnp.float32) <= 10.0)` throughout, **the `assume`
+  bound written as a bare Python literal**:
 
   | declaration | `assume` written | traced as | outcome |
   |---|---|---|---|
@@ -4236,6 +4827,170 @@ verdicts:
   for that cell at all. That is the same reason narrowing cannot be sold
   as a guard: neither cell's outcome is a property of the declaration.
 
+  **The bound's SPELLING moves this table too, and in the opposite
+  direction from the doors table, which is why neither spelling can be
+  recommended.** Re-run at `650e678` with the identical four rows and the
+  bound written `np.int64(300)` / `np.int64(261)` / `np.int64(30)` instead
+  of the literal, all four cells: `x >= np.int64(300)` does NOT wrap — jax
+  widens `x` to `int32`/`int64` and compares against `300:i32[]`/`300:i64[]`
+  — and every one of the four rows then raises
+  `UnsatisfiableAssumptionError`, including the row that returned VERIFIED
+  with the literal. **The two ends run opposite.** At the three
+  construction doors the bare Python literal is the spelling that RAISES
+  and `np.int64` is the spelling that wraps in silence; at an `assume`
+  bound it is the bare Python literal that wraps and `np.int64` that
+  refuses. No spelling is the safe one at both ends, so no spelling can be
+  recommended, and this entry recommends neither.
+
+  **WHAT IT WOULD COST JAX TO FIX THIS WAS MEASURED, AND THAT BELONGS ON
+  THIS PAGE BECAUSE IT IS WHAT DECIDES HOW LONG A READER LIVES WITH IT.**
+  It is also the honest answer to "why has nobody fixed it". Four
+  candidate fixes, each applied alone to jax's source and
+  run against jax's own test suite: jax at tag `jax-v0.11.0`
+  (`a1521744`) as source against the installed jaxlib 0.11.0 wheel,
+  CPython 3.12.3, NumPy 2.5.2, two tranches of 28 and 36 test modules,
+  **23,705 test cases**, every figure from `--junitxml`. Three of the
+  fixes were run over both tranches; the fourth was not, and the table
+  below carries a denominator per row because of it.
+
+  **That suite run is ANOTHER CONTEXT'S MEASUREMENT and is cited, not
+  claimed** — 23,705 cases is not a figure this entry re-ran. Its
+  receipts (report, reproduction facts, 946 run artefacts, scripts,
+  transcript) are committed at `receipts-jax-wrap-blast-radius/` in
+  `stelling-sweeps`, **a SEPARATE repository held beside this one and not
+  shipped with it** — so a reader of the distribution cannot open it, and
+  neither can a reader of THIS repository. That is stated rather than
+  papered over: the figures below are only as good as a receipt the
+  reader may not have.
+
+  *(The contrast drawn here when this citation landed was with "every
+  `scratchpad/` path cited elsewhere on this page", as though those were
+  openable from the distribution. **They are not.** `/scratchpad` is not
+  in the sdist allowlist in `pyproject.toml` — `tests/test_sdist_contents.py`
+  withholds it deliberately, and nothing force-includes it — so not one
+  of the **30 distinct `scratchpad/` paths** this page cites is openable
+  from a distribution either. The true contrast is with a reader of the
+  REPOSITORY: `git ls-files scratchpad` is **80** files, all 30 cited
+  paths resolve inside it, and these receipts are in neither the tree nor
+  the tarball.)*
+
+  What WAS re-derived here, and can be
+  re-derived from those artefacts by anyone who does have them, is every
+  delta in the table below — recomputed from the archived junit XML with
+  an independent analyser comparing per-testcase outcomes between the
+  baseline and patched runs. All of them agree with the report.
+
+  | candidate fix | site it changes | newly failing | of |
+  |---|---|---|---|
+  | widen the `isinstance` gate to admit NumPy scalars/arrays | `array_constructors.py:249` | **no-op** — see below | — |
+  | leave the gate, add a real range check for them | `array_constructors.py:249-250` | **0** | 23,705 |
+  | delete the `try/except OverflowError` | `lax.py:1747-1754` | **0** | 23,705 |
+  | range-check the Python-`int` narrowing and the NumPy fallback | `lax.py:1726` **and** `array_constructors.py:314` | **1** | 23,705 |
+  | …and additionally the constant-folding site | `lax.py:5314` | **1031** | **16,798** |
+
+  *(The last two rows are cumulative: the fourth-site row is the fourth
+  row's patch PLUS the folding rule. The source report labels the fourth
+  row "the two `.astype` sites"; read from its patch script, only one of
+  the two is an `.astype` — the other is
+  `out = np.asarray(object, dtype=dtype)`. The sites are as given here.)*
+
+  ***"One per site" was wrong and is dropped from the sentence above.***
+  Read from the receipts' `patch.py`, which is what was actually applied:
+  rows 1 and 2 patch the **same** site — both anchor on the same two
+  lines at `array_constructors.py:249-250`, one replacing the
+  `isinstance` tuple and the other adding an `elif` beside it — and row 4
+  patches **two** sites in one patch, `lax.py:1726` together with
+  `array_constructors.py:314`, as its own cell already says. So the rows
+  are not in one-to-one correspondence with the sites in either
+  direction, and no count of sites can be read off them. The entry
+  self-corrects a sentence later to "the four candidate fixes **priced**
+  there", which is the accurate word for a second reason: of the five
+  rows, four carry suite figures and row 1 carries none — it was proved
+  inert and given no run.
+
+  **THE LAST ROW IS NOT OF 23,705, AND THIS TABLE'S HEADER SAID EVERY ROW
+  WAS.** Recounted here from the archived XML: tranche 1 is **16,798**
+  counted `testcase` elements across 28 modules, tranche 2 is **6,907**
+  across 36, the two module lists are disjoint, and 23,705 is their sum.
+  Both tranches are archived for the gate-plus-range-check, the
+  `try/except` deletion and the two-site fix — 64 XMLs each. **The
+  folding-site patch has 28 XMLs and no tranche 2: it was never run for
+  it**, and the source report's own fix table records that with a dash.
+  So the `1031`, and the `37` it collapses to below, are **of 16,798**,
+  and neither may be read against the full denominator or set beside the
+  `0`/`0`/`1` rows as if it were. The receipts' corrections block now
+  records this too.
+
+  **The first row's zero is not a suite figure and is not offered as
+  one.** Widening the gate changes nothing at all, because the check it
+  opens does not check the values it would newly admit: measured directly
+  here, all four cells, `dtypes.coerce_to_array(np.int64(256),
+  jnp.int8)` returns `array(0, dtype=int8)` **without raising**, while
+  the same call on the Python `int` `256` raises — NumPy 2's NEP 50
+  range-checks Python integers and casts NumPy ones. The patch was proved
+  inert and given no suite run, so its "0" means "changes nothing",
+  not "breaks nothing".
+
+  **The `1` is the pinned test.** The single case that range-checking the
+  narrowing breaks is `lax_test::LaxTest::testConvertElementTypeOOB`, with
+  `OverflowError: Python integer 4294967296 out of bounds for int32` —
+  the test commit `c2fe350455` added, failing for exactly the reason it
+  was written. That fix at `lax.py:1726` is, read against that commit's
+  diff, its revert for integer targets. **It is a policy reversal, not a
+  bug fix**, and that is the sharpest thing on this page about why the
+  defect is still here.
+
+  **The `1031` — of 16,798, per the note above — is not 1031 opinions,
+  and it is the figure that decides
+  the answer.** 1030 of them carry one message — `Python integer
+  4294967295 out of bounds for int32`, `0xFFFFFFFF` narrowed to `int32` —
+  and it comes from jax's own PRNG: `jax/_src/random/threefry2x32.py:73`,
+  `k2 = convert(jnp.bitwise_and(seed, np.uint32(0xFFFFFFFF)))`, relying
+  on two's-complement mask reinterpretation. Making that one line
+  explicit collapses 1031 to **37**, of the same 16,798: 36 in
+  `random_test`, the identical
+  idiom in the three other PRNG implementations (`philox2x32.py:149`,
+  `philox4x32.py:160`, `threefry4x32.py:213` — all four lines re-read at
+  the tag), and the 37th is `testConvertElementTypeOOB` again. **The true
+  cost of the only fix that reaches `x + 256` is four lines of jax's own
+  source plus one deliberately pinned test.**
+
+  **Read the rows against the doors, not against "the defect", because
+  they do not all buy the same thing.** The `1`-cost fix reaches the
+  narrowing this entry's own reproducer dies on, `jnp.full` — measured
+  above, with only that check installed it raises. The `1031`-cost fix is
+  what it takes to reach `x + 256` as well. Neither covers the other, so
+  there is no single row here that is "the price of closing this"; there
+  are two prices for two doors, and the cheap one leaves the entry's
+  eleven-door table mostly untouched.
+
+  **What that licenses, and what it does not.** It does not license "jax
+  will never fix this": four lines and a test is not a large bill. It
+  does not license "jax is about to": nothing was found that says so, and
+  nothing has been reported upstream from here. It licenses exactly one
+  thing, which is the thing a reader needs — **the cost is known, it is
+  small, and it is unpaid; and a VERIFIED over a narrow integer
+  declaration is unprotected for as long as it stays unpaid.**
+
+  **Four things those figures are not.** The denominator is emitted test
+  cases, not jax's suite: 64 of the 164 top-level `tests/*_test.py`
+  modules ran, and `pallas`/`mosaic` and GPU/TPU never did. *(That list
+  said "and multi-device" too, and **that is false**: `multi_device_test`
+  is one of the 36 tranche-2 modules — 20 cases, 19 passed, 1 skipped —
+  and so are `pmap_test` (289 cases, 206 passed, 83 skipped) and
+  `shard_map_test` (452 cases, 438 passed, 14 skipped), all counted here
+  from the archived baseline XML. `pallas`/`mosaic` and GPU/TPU genuinely
+  did not run: no module of either name appears in either tranche. A
+  limits list that names something as unmeasured when it was measured
+  understates the run in the direction that flatters it, which is the
+  direction to correct first.)*
+  It is also not the XML's own `tests` attribute, which totals 16,982
+  against tranche 1's 16,798 counted `testcase` elements. The `1031`
+  counts cases that PASSED at baseline and fail under the patch; the
+  archived XML shows two further cases moving from skipped to failed,
+  which that delta does not count. And none of it was measured on jax
+  0.10.2, so no row above is a four-cell figure.
+
   **NOTHING IN THIS TREE CONSULTS ANY DIAGNOSTIC FOR THIS.** There is no
   detector on `main`, no stamp field, no note, no verdict gate, and no
   count that changes because of this entry. **A VERIFIED over a narrow
@@ -4248,19 +5003,78 @@ verdicts:
   it. A reader must not read this disclosure as the announcement of a
   guard.
 
-  **What a user can do today**, in decreasing order of how much it buys,
-  reordered against the branch this was extracted from because the
-  control above unseated its first item. **One thing here is a guard and
-  the rest are odds.** The guard: keep out-of-range constants out of
-  narrow integer dtypes by construction — `jnp.array`, `jnp.asarray` and
-  `jnp.int8` RAISE, measured above, and are the doors to prefer. Then:
-  treat a VERIFIED over a narrow integer declaration as a statement about
-  the program jax traced, which is what `Floats are judged in ℝ; integers
-  and converts are execution-faithful` above already says it is. Last,
-  and explicitly NOT a guard: a narrower declaration raises the chance
-  that a wrapped `assume` bound lands outside the box and gets refused,
-  but row 3 of the table above is a wrap that lands inside the narrowest
-  box there and returns VERIFIED. Narrowing a declaration is worth doing
-  for its own reasons; it does not close this.
+  **What a user can do today. NOTHING BELOW IS A GUARD, AND THE VERSION OF
+  THIS LIST THAT LANDED WITH THIS ENTRY SAID OTHERWISE.** It read: *"One
+  thing here is a guard and the rest are odds. The guard: keep out-of-range
+  constants out of narrow integer dtypes by construction — `jnp.array`,
+  `jnp.asarray` and `jnp.int8` RAISE, measured above, and are the doors to
+  prefer."* **THAT IS WITHDRAWN.** Measured above: those three doors raise
+  for a Python scalar and wrap in silence for a NumPy scalar, a NumPy array
+  or a jnp array, and the reproducer driven through each of them with the
+  constant arriving as `LUT[7]` returns the same VERIFIED, source-false at
+  all 11 declared points, in all four cells. A reader who followed that
+  advice would have moved the wrap rather than removed it, and would have
+  been told they were protected while doing so. That is the worst thing
+  this page could do, so the retraction is written here rather than the
+  sentence deleted.
+
+  **No replacement guard is offered, because the search for one came back
+  empty, and the search is stated so it can be re-run.** At `650e678`, all
+  four cells: (i) not one of the 24 wrapping door × spelling combinations
+  emits a warning of any kind under `warnings.simplefilter("always")`, and
+  none becomes an exception under `-W error`; (ii) wrapping
+  `np.errstate(all="raise")` around each of the eleven doors changes
+  nothing; (iii) a `FutureWarning` out of `x.at[k].set(np.int64(...))` —
+  *"scatter inputs have incompatible types: cannot safely cast value from
+  …"* — and it is a DTYPE-class warning, not a value one. Its control: it
+  fires identically for `np.int64(3)`, which is in range and does not
+  wrap, and is silent for `np.int8(3)`. Escalating it would flag ordinary
+  in-range code — the same failure that got the detector branch audited
+  SHOULD-NOT-LAND — and would still see none of the other ten doors. It is
+  not a wrap detector and is not offered as one.
+
+  **CLAUSE (iii) SAID THAT WARNING WAS THE ONLY CATCHABLE SIGNAL ANYWHERE
+  IN THE ELEVEN. IT IS NOT, AND SINCE THIS PARAGRAPH INVITES THE READER TO
+  RE-RUN THE SEARCH, THE CORRECTION IS RECORDED HERE.** The words removed
+  above were *"the only catchable signal found anywhere in the eleven is"*.
+  Measured at `b2e3a15`, all four cells: under
+  `jax_numpy_dtype_promotion="strict"` — a jax setting, not a stelling one,
+  default `"standard"` — **six of the eleven doors raise
+  `TypePromotionError` for the NumPy-scalar spelling**: `x + c`, `x >= c`,
+  `x.at[0].set`, `jnp.where`, `jnp.clip`, `jnp.maximum`. That is a second
+  catchable signal, and the search as stated does find it.
+
+  **It is not a wrap detector either, and its control is the same
+  control.** Measured in the same four cells: it fires identically for the
+  in-range `np.int64(3)` (6 of 11, same doors), is silent for `np.int8(3)`
+  (0 of 11), and — the direction that decides it — is silent for the bare
+  Python literal `256` (0 of 11), which is the spelling that wraps at
+  eight of the eleven doors. So it separates DTYPES, not values: it flags
+  honest in-range code and misses the wrap the entry's own reproducer is
+  written in. Strict promotion is worth its own reasons; it does not close
+  this, and no replacement guard is offered.
+
+  What is left buys no protection, and is written as what it is:
+
+  * Treat a VERIFIED over a narrow integer declaration as a statement
+    about the program jax TRACED — which is what `Floats are judged in ℝ;
+    integers and converts are execution-faithful` above already says it
+    is. This lowers nothing; it names what the verdict was ever about.
+  * **NOT a guard:** a narrower declaration raises the chance that a
+    wrapped `assume` bound lands outside the box and gets refused, but row
+    3 of the table above is a wrap that lands inside the narrowest box
+    there and returns VERIFIED. Narrowing a declaration is worth doing for
+    its own reasons; it does not close this.
+  * **NOT a guard, and recorded here to foreclose the inference the doors
+    table invites:** forcing a constant through Python `int()` does restore
+    the raise at `jnp.array` / `jnp.asarray` / `jnp.int8`, because it opens
+    the `isinstance(object, (bool, int, float, complex))` gate at
+    `array_constructors.py:249` — measured, `jnp.array(int(LUT[7]), int8)`
+    raises where `jnp.array(LUT[7], int8)` wraps. It does nothing at the
+    other eight doors, which never reach that gate: the same Python `int`
+    wraps in silence through `jnp.full((), int(LUT[7]), int8)` and through
+    `x + int(LUT[7])`, both `0`. It protects exactly the call sites
+    somebody remembered to write it at, which is the property a guard does
+    not have.
 
 *(no releases yet)*
