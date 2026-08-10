@@ -4265,6 +4265,76 @@ verdicts:
   the presence of overflows"*. **The comment is accurate and so are the
   line ranges. The causal claim built on them is false.**
 
+  **THAT LEFT THE WORD "DELIBERATE" STANDING ON A COMMENT BESIDE A BLOCK
+  THAT DOES NOT RUN FOR THIS CASE. IT NOW RESTS ON A COMMIT AND A TEST,
+  WHICH ARE BETTER EVIDENCE AND ARE ABOUT A DIFFERENT PATH.** Both read
+  in a clone of jax's own repository at tag `jax-v0.11.0`, commit
+  `a1521744c6dc074443fe549f19f48d7197abf759`, working tree clean:
+
+  * **The test.** `tests/lax_test.py:201-203`, entire:
+
+    ```
+    def testConvertElementTypeOOB(self):
+      out = lax.convert_element_type(2 ** 32, 'int32')
+      self.assertEqual(out, 0)
+    ```
+
+    It does not assert that jax raises. **It asserts the wrapped value.**
+    *(That fence is deliberately unlabelled. This page holds exactly one
+    ```` ```python ```` fence — the reproducer above — and
+    `tests/test_soundness_wrap_reproducer.py` asserts that count before
+    reading it, so a second labelled fence turns nine tests red. Quoted
+    foreign code goes in a bare fence.)*
+
+  * **The commit that put it there.** `c2fe350455` (Jake VanderPlas,
+    2023-04-04), subject *"future-proof lax.convert_element_type"*, body
+    *"In the future, np.array(large_value, 'int32') will error"*. Its
+    whole diff is two files, five inserted lines and one deleted: it
+    changed `operand = np.asarray(operand, new_dtype)` — which raises —
+    to `operand = np.asarray(operand).astype(new_dtype)` — which
+    truncates — inside the `type(operand) is int` fast path, **and added
+    `testConvertElementTypeOOB` in the same diff**. Verified: the commit
+    is an ancestor of the 0.11.0 tag, and the expression it introduced is
+    the one standing today at `lax.py:1726` (**0.11.0**) and `lax.py:1724`
+    (**0.10.2**) — the line the table below names as where `jnp.full`
+    loses the value, and therefore the line this entry's own four-line
+    reproducer dies on. *(The statement AROUND that expression has been
+    reshaped since — `408bd93e3d` rewrote the `TypedNdArray` construction
+    — so the commit created the EXPRESSION, not the line as it now
+    reads.)*
+
+  **Which path each applies to, said explicitly, because this entry has
+  twice been wrong by taking something true of one door for something
+  true of the class.** The commit and the test are about the
+  `type(operand) is int` fast path at `lax.py:1726`/`1724`. The
+  `TODO(phawkins)` quoted above, at `lax.py:1747-1748` on the block
+  `1747-1754`, is about the guarded call BELOW that fast path — the one
+  measured below to execute zero times for this case, whose live routes
+  are a Python float and an `int` subclass. Two paths, one recorded
+  intent each, pointing opposite ways: the `TODO` records an intent to
+  REMOVE a swallow, the commit records a choice to KEEP a truncation and
+  pinned it with a test that fails if it is undone.
+
+  **What this does NOT support, in either direction.** Not "jax will
+  never fix this" — the commit's own message anticipates NumPy starting
+  to error, and the `TODO` says its block should go. Not "jax is about to"
+  — nothing was found that says so, and nothing has been reported
+  upstream from here. What it supports is narrower and is all the entry
+  claims: on this one path the truncation was chosen over a raise, on
+  purpose, and it is pinned. **That it is the ONLY test in the jax repo
+  asserting a wrapped value is REPORTED by the measurement context whose
+  receipts are cited below, and is not re-derived here** — proving a
+  negative over a test suite is not something this entry did. What WAS
+  re-derived at that tag: of all **17** mentions of `OverflowError`
+  anywhere under `tests/`, **15 assert that it is RAISED** (14
+  `assertRaises`/`assertRaisesRegex` calls plus one continuation line of
+  a fifteenth) and the remaining two are comments saying an out-of-bounds
+  value leads to one. **None of the 17 asserts a value.** And
+  `api_test.py:8351` `test_integer_overflow` is parameterised over six
+  entry paths ×
+  `jtu.JIT_IMPLEMENTATION`, running as **10** cases after its own
+  exclusion clause, every one of which asserts `OverflowError`.
+
   Measured by instrumenting the code object of
   `jax._src.lax.lax._convert_element_type` with `sys.monitoring` LINE
   events LOCAL to that one code object, then sweeping the eleven doors
