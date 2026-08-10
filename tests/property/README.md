@@ -326,10 +326,36 @@ mutant — whose `expect_message` is the clause's own sentence rather than the
 leg tag `[flat]`, because `[flat]` is stamped on all three messages and would
 have been satisfied by the failure `cvc5-flat` already finds.
 
+**And one of those two demonstrates its clause only at the `ci` profile.** A
+short-circuiting oracle reports a failing example against ONE clause — the
+first that fails — so a tree violating two clauses demonstrates whichever the
+search reaches first, and that is a property of the example sequence and not
+of the tree. `8ef8f75` is such a tree: counted independently over 1500 draws,
+**458 examples violate clause (1) and 284 violate clause (2)**, `_judge` tests
+(2) first, and which one comes first in the sequence decides what is reported.
+At the derandomized `ci` profile it is a clause-(1) example, reproducibly —
+`cvc5-exit-tell` fires at scale ×1, ×2 and ×4. At the RANDOMISED `dev` profile
+it is a clause-(2) one, three runs out of three at ×1 and again at ×2, and the
+control reports
+
+```
+FIRED, but the failure did not carry 'ACCEPTED A NONZERO-EXIT RUN'
+what pytest recorded: AssertionError: ACCEPTED A TRUNCATED RUN as 'sat' [flat]
+== 0/1 controls fired
+```
+
+The direction is safe — a refusal, never a false green — but
+`python tools/property_check.py --controls --profile dev` is an invocation this
+file documents, and it reports a control NOT DEMONSTRATED. See `_judge`'s
+docstring for why the obvious fix (pin the transcript as an `@example`) is not
+taken here.
+
 So: if your oracle is a conjunction, say in the control's `why` which conjunct
 its tree exercises, and register a control for each of the rest or write down
-that you did not. The measurements for this one are in `_judge`'s docstring in
-`test_cvc5_protocol.py`.
+that you did not. **If the tree violates more than one conjunct, say which
+profile the demonstration holds at**, because "the control fires" is then a
+claim about the sequence too. The measurements for this one are in `_judge`'s
+docstring in `test_cvc5_protocol.py`.
 
 **Reach for `git log -S` before you reach for a mutation.** Both of those
 started life as mutants, on the ground that the defect had never been in this

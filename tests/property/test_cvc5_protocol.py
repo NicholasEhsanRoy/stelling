@@ -369,6 +369,44 @@ def _judge(res, stdout, full, rc, census, *, where):
     fails there at the ci profile on an INTACT transcript at exit 1 — so
     clause (2) holds on that example and the failure is this clause's own.
 
+    **AT THE ci PROFILE**, AND THAT IS A CLAIM ABOUT THE SEQUENCE, NOT ABOUT
+    THE TREE. ``8ef8f75`` predates the splitlines fix too, so it violates
+    clause (2) as well as clause (1); this function returns on the FIRST
+    clause that fails and tests (2) first; so which clause a run reports is
+    decided by which violating example the search reaches first. Counted
+    independently over 1500 draws at ``8ef8f75`` — by a separate non-raising
+    counter, so these are that counter's totals and not ``search``'s
+    sequence — 458 examples violate clause (1), 284 violate clause (2), 607
+    violate at least one, and this function would report (2) on 284 of them
+    and (1) on 323. Measured through ``property_check.py``::
+
+        --control cvc5-exit-tell                    FIRED       x1, x2, x4
+        --control cvc5-exit-tell --profile dev      0/1 fired   3 of 3 runs
+          what pytest recorded: clause (2)'s sentence, not clause (1)'s
+        --control cvc5-exit-tell --profile dev --scale 2   0/1 fired
+
+    ``ci`` is derandomized and ``dev`` is not, so this is not a budget effect:
+    the clause-(1) demonstration is stable under ×4 at ``ci`` and absent at
+    ``dev``. The DIRECTION IS SAFE — the tool refuses rather than passes, and
+    no run of this can produce a false green — but
+    ``tools/property_check.py --controls --profile dev`` is a documented
+    invocation that reports this control NOT DEMONSTRATED, and that was not
+    written down anywhere until now.
+
+    WHY THE OBVIOUS FIX IS NOT TAKEN, measured rather than argued. Pinning
+    ``'version 1.3.4\\nanswer sat\\nend 0\\n'`` at exit 1 as an ``@example`` on
+    ``search`` makes the demonstration seed-independent and it WORKS — driven,
+    the control fires at ``dev`` as well as at ``ci``. It also edits
+    ``search``'s own source, and hypothesis keys its derandomized sequence on
+    ``function_digest(search)``: driven, the example this property reports at
+    ``0ad22bb`` moved from ``'…answer unknown\\nvalue x0_0 0/1\\nend 1'`` to
+    ``'…answer sat\\nopaque x0 q\\nopaque x0 q\\nend 2'``. Every figure in this
+    docstring attributed to the SHIPPED digest — the two census rows above,
+    the 4-and-1 split, "byte-identical, in order, at both trees" — and the
+    673/8165 example-efficiency pair in the module docstring would then be
+    describing a sequence that no longer exists. That re-take is the price of
+    the pin; it is not paid here, and the claim is qualified instead.
+
     THE COST, WITH ITS INSTRUMENT NAMED, because the two figures this entry
     has carried are of two different ones and neither said which. Three runs
     each, on a box doing other work: **0.45 / 0.38 / 0.28 s** of junit XML

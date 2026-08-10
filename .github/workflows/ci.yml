@@ -1117,6 +1117,20 @@ jobs:
               flat leg's own 1500 examples at `0ad22bb`, all three clauses
               evaluated independently, 5 violations, every one of them clause
               (2) `no truncation`, none of clause (1) or (3).
+            * CLAUSE (1)'s CONTROL DEMONSTRATES CLAUSE (1) AT THIS PROFILE AND
+              NOT AT EVERY PROFILE. `8ef8f75` violates clauses (1) AND (2) —
+              counted independently over 1500 draws, 458 examples violate (1)
+              and 284 violate (2) — and the oracle returns on the FIRST clause
+              that fails, testing (2) first. So which clause gets reported is
+              decided by which violating example the search reaches first,
+              which is a fact about the example sequence. This job runs the
+              derandomized `ci` profile, where it is reproducibly a clause-(1)
+              example (stable at x1, x2 and x4). Under `--profile dev`, which
+              is randomised, it is a clause-(2) one and the control comes back
+              NOT DEMONSTRATED — 3 runs of 3. That direction is safe, it is
+              never a false green, and it is written down in `_judge`'s
+              docstring with the reason the transcript is not pinned as an
+              `@example` instead.
             * A THREE-CLAUSE ORACLE IS NOT A THREE-WAY CENSUS. The line two
               blocks up — "a definite answer requires exit 0, no truncation,
               and a harvested model equal to the value records in the bytes
