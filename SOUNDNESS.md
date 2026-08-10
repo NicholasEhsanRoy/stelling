@@ -4823,7 +4823,9 @@ verdicts:
   run against jax's own test suite: jax at tag `jax-v0.11.0`
   (`a1521744`) as source against the installed jaxlib 0.11.0 wheel,
   CPython 3.12.3, NumPy 2.5.2, two tranches of 28 and 36 test modules,
-  **23,705 test cases**, every figure from `--junitxml`.
+  **23,705 test cases**, every figure from `--junitxml`. Three of the
+  fixes were run over both tranches; the fourth was not, and the table
+  below carries a denominator per row because of it.
 
   **That suite run is ANOTHER CONTEXT'S MEASUREMENT and is cited, not
   claimed** — 23,705 cases is not a figure this entry re-ran. Its
@@ -4839,19 +4841,32 @@ verdicts:
   an independent analyser comparing per-testcase outcomes between the
   baseline and patched runs. All of them agree with the report.
 
-  | candidate fix | site it changes | newly failing, of 23,705 |
-  |---|---|---|
-  | widen the `isinstance` gate to admit NumPy scalars/arrays | `array_constructors.py:249` | **no-op** — see below |
-  | leave the gate, add a real range check for them | `array_constructors.py:249-250` | **0** |
-  | delete the `try/except OverflowError` | `lax.py:1747-1754` | **0** |
-  | range-check the Python-`int` narrowing and the NumPy fallback | `lax.py:1726` **and** `array_constructors.py:314` | **1** |
-  | …and additionally the constant-folding site | `lax.py:5314` | **1031** |
+  | candidate fix | site it changes | newly failing | of |
+  |---|---|---|---|
+  | widen the `isinstance` gate to admit NumPy scalars/arrays | `array_constructors.py:249` | **no-op** — see below | — |
+  | leave the gate, add a real range check for them | `array_constructors.py:249-250` | **0** | 23,705 |
+  | delete the `try/except OverflowError` | `lax.py:1747-1754` | **0** | 23,705 |
+  | range-check the Python-`int` narrowing and the NumPy fallback | `lax.py:1726` **and** `array_constructors.py:314` | **1** | 23,705 |
+  | …and additionally the constant-folding site | `lax.py:5314` | **1031** | **16,798** |
 
   *(The last two rows are cumulative: the fourth-site row is the fourth
   row's patch PLUS the folding rule. The source report labels the fourth
   row "the two `.astype` sites"; read from its patch script, only one of
   the two is an `.astype` — the other is
   `out = np.asarray(object, dtype=dtype)`. The sites are as given here.)*
+
+  **THE LAST ROW IS NOT OF 23,705, AND THIS TABLE'S HEADER SAID EVERY ROW
+  WAS.** Recounted here from the archived XML: tranche 1 is **16,798**
+  counted `testcase` elements across 28 modules, tranche 2 is **6,907**
+  across 36, the two module lists are disjoint, and 23,705 is their sum.
+  Both tranches are archived for the gate-plus-range-check, the
+  `try/except` deletion and the two-site fix — 64 XMLs each. **The
+  folding-site patch has 28 XMLs and no tranche 2: it was never run for
+  it**, and the source report's own fix table records that with a dash.
+  So the `1031`, and the `37` it collapses to below, are **of 16,798**,
+  and neither may be read against the full denominator or set beside the
+  `0`/`0`/`1` rows as if it were. The receipts' corrections block now
+  records this too.
 
   **The first row's zero is not a suite figure and is not offered as
   one.** Widening the gate changes nothing at all, because the check it
@@ -4872,13 +4887,15 @@ verdicts:
   bug fix**, and that is the sharpest thing on this page about why the
   defect is still here.
 
-  **The `1031` is not 1031 opinions, and it is the figure that decides
+  **The `1031` — of 16,798, per the note above — is not 1031 opinions,
+  and it is the figure that decides
   the answer.** 1030 of them carry one message — `Python integer
   4294967295 out of bounds for int32`, `0xFFFFFFFF` narrowed to `int32` —
   and it comes from jax's own PRNG: `jax/_src/random/threefry2x32.py:73`,
   `k2 = convert(jnp.bitwise_and(seed, np.uint32(0xFFFFFFFF)))`, relying
   on two's-complement mask reinterpretation. Making that one line
-  explicit collapses 1031 to **37**: 36 in `random_test`, the identical
+  explicit collapses 1031 to **37**, of the same 16,798: 36 in
+  `random_test`, the identical
   idiom in the three other PRNG implementations (`philox2x32.py:149`,
   `philox4x32.py:160`, `threefry4x32.py:213` — all four lines re-read at
   the tag), and the 37th is `testConvertElementTypeOOB` again. **The true
