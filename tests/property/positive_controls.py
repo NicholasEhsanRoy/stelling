@@ -359,7 +359,12 @@ CONTROLS = (
     # demonstrating the clause it is registered for, which is the exact
     # distinction these two entries exist to make.
     # `test_suite_disclosure.py` now asserts that distinction two ways, because
-    # broadening either guard back to `[flat]` left every gate green.
+    # broadening either guard back to `[flat]` left every gate green. Those two
+    # STATIC assertions are the whole protection: measured with the guard
+    # broadened and both controls in the per-push step, the executing control
+    # run reports `9/9 controls fired`, exit 0. Running a control does not and
+    # cannot catch a guard that has been widened to a string its property's
+    # every failure carries.
     Control(
         name="cvc5-exit-tell",
         nodeid=f"{_CVC5}::test_the_parent_never_trusts_an_unspoken_transcript_flat",

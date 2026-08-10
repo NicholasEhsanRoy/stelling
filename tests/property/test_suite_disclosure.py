@@ -376,6 +376,23 @@ def test_two_controls_on_one_property_do_not_share_a_guard():
     ``cvc5-exit-tell``'s clause-(1) guard back to the leg tag ``[flat]`` — the
     guard ``cvc5-flat`` already carries — left every gate in the repository
     green, and ``tools/property_check.py`` still said ``1/1 controls fired``.
+
+    AND NOTHING THAT EXECUTES PROTECTS IT NOW EITHER; THIS TEST IS THE WHOLE
+    PROTECTION. Adding ``cvc5-exit-tell`` and ``cvc5-phantom-model`` to the
+    per-push ``--control`` list was written up as closing the other half —
+    "it now fails two assertions in ``test_suite_disclosure.py`` AND breaks a
+    job that runs the control". Re-measured with the guard broadened to
+    ``[flat]`` and the two controls in the step::
+
+        == 9/9 controls fired        exit 0
+
+    The RUN of the control does not notice, and cannot: ``[flat]`` is stamped
+    on all three of ``_judge``'s messages, so the clause-(2) failure
+    ``cvc5-flat`` already finds satisfies it. What goes red is this file — two
+    assertions, both static — and those already ran in that job before the
+    controls were added to it. The job is red either way, so the sentence is
+    literally satisfiable; the causal reading it invites, that executing the
+    control is what catches the broadening, is false.
     """
     by_property: dict[str, list] = {}
     for c in pc.CONTROLS:
