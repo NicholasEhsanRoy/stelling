@@ -4454,14 +4454,35 @@ verdicts:
   `array_constructors.py:338`, its operand is **already an `int8` `0`**;
   the `arr = operand.astype(new_dtype, copy=False)` at `lax.py:1731` that
   0.11.0 then runs is a no-op on an already-narrowed array, and 0.10.2,
-  which has no such branch, reaches the identical answer. Line 314 carries
-  jax's own comment about precisely this: *"falling back to numpy here
-  fails to overflow for lists containing large integers … More correct
-  would be to call coerce_to_array on each leaf, but this may have
-  performance implications."* It is also where `jnp.array([256], int8)`
+  which has no such branch, reaches the identical answer. Directly above
+  that call, at `array_constructors.py:310-313` in **both** series, jax
+  carries its own comment about it: *"falling back to numpy here fails to
+  overflow for lists containing large integers … More correct would be to
+  call coerce_to_array on each leaf, but this may have performance
+  implications."* It is also where `jnp.array([256], int8)`
   raises — NumPy applies its Python-int bound check per element — which is
   why a Python list of those numbers raises and the NumPy array of the same
   numbers does not.
+
+  **THAT COMMENT IS STALE, AND THIS ENTRY QUOTED IT AS THOUGH IT
+  DESCRIBED CURRENT BEHAVIOUR.** *(It was also cited as being ON line
+  314; it is on 310-313, annotating the call at 314. The entry has spent
+  a commit on a citation off by one line before now.)* Measured in all
+  four cells at NumPy **2.5.1**, every list spelling the comment is about
+  now RAISES rather than overflowing silently: `jnp.array([256], int8)`,
+  `[[256]]`, `[1, 256]`, `[np.int64(256)]` and `(256,)` all raise
+  `OverflowError: Python integer 256 out of bounds for int8`, and
+  `[2**100]` raises `OverflowError: Python int too large to convert to C
+  long`. **What still goes through line 314 in silence is a NumPy ARRAY
+  or a NumPy SCALAR, which is not what the comment is about**:
+  `jnp.array(np.array([256]), int8)` returns `[0]` and
+  `jnp.array(np.int64(256), int8)` returns `0` — the two spellings the
+  table further down already lists as wrapping. So the comment is quoted
+  here as jax's own record OF the site, and no longer as evidence about
+  what the site does. *(Reported at NumPy 2.5.2 by the measurement whose
+  receipts are cited below; re-derived here one patch version earlier, at
+  NumPy 2.5.1, on both jax series and both `x64` settings. What it would
+  do at some third NumPy is not a fact this page has.)*
 
   `jnp.full` / `jnp.full_like` take a third route again. With an
   `np.generic` constant they destroy it **inside the `try` itself**, at
