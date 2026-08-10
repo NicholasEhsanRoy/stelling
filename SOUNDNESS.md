@@ -4332,8 +4332,10 @@ verdicts:
     *(That fence is deliberately unlabelled. This page holds exactly one
     ```` ```python ```` fence — the reproducer above — and
     `tests/test_soundness_wrap_reproducer.py` asserts that count before
-    reading it, so a second labelled fence turns nine tests red. Quoted
-    foreign code goes in a bare fence.)*
+    reading it, so a second labelled fence turns **15** cases red —
+    measured by planting one. *(It was **nine** when that figure was
+    written; the tripwire has since grown a second door, and six more
+    cases read the fence.)* Quoted foreign code goes in a bare fence.)*
 
   * **The commit that put it there.** `c2fe350455` (Jake VanderPlas,
     2023-04-04), subject *"future-proof lax.convert_element_type"*, body

@@ -29,6 +29,23 @@ test: if `jnp.full((), 256, jnp.int8)` ever raises, saturates, or
 preserves its value, :func:`test_the_fence_still_wraps` goes red and the
 entry gets rewritten instead of rotting.
 
+**TWO DOORS, BECAUSE THE ENTRY NOW PRICES TWO AND THIS FILE WATCHED ONE.**
+``SOUNDNESS.md`` records that the reproducer's constant, written through
+``jnp.full``, dies at the ``type(operand) is int`` ``.astype`` in
+``lax.py``, while the inline spelling ``x + 256`` dies somewhere else
+entirely — in ``convert_element_type``'s CONSTANT-FOLDING rule — and that
+neither of the two priced fixes reaches the other door. It calls those
+"two prices for two doors". A jax that fixed only the folding site would
+therefore leave this file's original five assertions **completely green**
+while half of what the entry claims had become false. Measured, not
+argued: with a range check installed on
+``pe.const_fold_rules[convert_element_type_p]`` so that ``x + 256`` raises
+and ``jnp.full((), 256, jnp.int8)`` still returns ``0``, this file ran
+**11 passed, 0 failed** — the whole tripwire, blind. So
+:func:`test_the_other_door_still_wraps` and
+:func:`test_the_other_door_still_returns_a_wrong_VERIFIED` watch that door
+too, and under the same simulation they are the tests that go red.
+
 **It runs the fence, it does not restate it.** The reproducer is read out
 of ``SOUNDNESS.md``, parsed, and executed — so a reproducer that stops
 running, or that is edited into something this file no longer describes,
@@ -44,6 +61,24 @@ Six of six go red, each with a message naming which of the three happened;
 unmutated, both pass. That is the property this file exists for, and it is
 a measurement rather than a claim about what the assertions ought to do.
 
+**And the two doors were measured against each other, which is what makes
+them two.** Two simulated fixes, each installed alone, on jax 0.11.0 AND
+jax 0.10.2, both ``x64`` cells:
+
+* a range check on ``pe.const_fold_rules[convert_element_type_p]`` — jax
+  fixed at the folding site only, so ``x + 256`` raises and
+  ``jnp.full((), 256, jnp.int8)`` still returns ``0``: **4 failed, 13
+  passed**, and the four are exactly this file's second-door cases;
+* a range check on the ``type(operand) is int`` narrowing in
+  ``lax._convert_element_type`` — jax fixed at the fence's door only, so
+  ``jnp.full((), 256, jnp.int8)`` raises and ``x + 256`` still returns
+  ``[0 0 0]``: **4 failed, 13 passed**, and the four are exactly the
+  fence's cases.
+
+Neither simulation is visible to the other door's tests. Before the
+second door was added, the first of those two ran **11 passed, 0 failed** —
+which is the reason it was added.
+
 **Controls, because an assertion that cannot go red proves nothing.**
 :func:`test_control_the_probe_reports_a_raise_where_jax_already_refuses`
 drives the same probe through ``jnp.array``, which raises for this
@@ -52,7 +87,16 @@ take, and the probe reports it rather than passing. The in-range control
 shows the wrap check is not satisfied by every constant, and the verdict
 control re-drives the entry's own ``5`` row, which is UNKNOWN: the
 VERIFIED asserted here is not something this harness shape returns
-regardless.
+regardless. The second door carries the same two controls, for the same
+reason: :func:`test_control_the_other_door_does_not_wrap_in_range` and,
+inside the verdict test, the check that the predicate really is false at
+every declared point before any verdict is asked for.
+
+**Both doors are derived from the fence, not typed in twice.** The second
+door writes the SAME constant, at the same dtype, over the same declared
+box, against the same bound — all four read out of ``SOUNDNESS.md``'s one
+fence. Only the spelling differs, which is the whole point of it being a
+second door.
 
 Interval-only throughout: no solver is invoked, so this file says the
 same thing in every environment that has jax.
@@ -188,6 +232,26 @@ def _traced_constant(door, written, dtype):
         return type(exc)
 
 
+def _inline_offset(written, dtype):
+    """What `x + written` puts in the trace, at `dtype`. THE SECOND DOOR.
+
+    The constant is closed over as a Python value, never passed as a jit
+    argument — a jit argument is a tracer and nothing is folded, which is a
+    different program from the one ``SOUNDNESS.md`` is about. ``x`` is
+    zeros, so the value read back IS the narrowed constant.
+
+    Returns the traced array, or the exception type if jax refuses.
+    """
+
+    def f(v):
+        return v + written
+
+    try:
+        return jax.jit(f)(jnp.zeros((3,), dtype))
+    except OverflowError as exc:
+        return type(exc)
+
+
 @pytest.fixture(params=[False, True], ids=["x64=0", "x64=1"])
 def x64(request):
     """Both cells. `JAX_ENABLE_X64` is load-bearing everywhere else on this
@@ -266,6 +330,103 @@ def test_the_fence_still_returns_a_wrong_VERIFIED(x64):
         f"the reproducer returns {verdict.status}, not VERIFIED. Either the "
         f"wrap is gone or the pipeline moved; SOUNDNESS.md's entry says "
         f"VERIFIED and must be re-driven either way."
+    )
+
+
+def test_the_other_door_still_wraps(x64):
+    """THE TRIPWIRE, SECOND DOOR: `x + 256`, the inline spelling.
+
+    ``SOUNDNESS.md`` prices this door separately from the fence's, at a
+    separate site (the constant-folding rule), and says only the more
+    expensive of its two candidate fixes reaches it. A jax that fixed the
+    fence's door alone would leave this red; a jax that fixed this one
+    alone would leave the fence's tests green. Neither may pass silently.
+    """
+    facts = _fence_facts(_fence())
+    written = facts["written"]
+    npdtype = getattr(np, facts["dtype"])
+    bits = np.iinfo(npdtype).bits
+
+    got = _inline_offset(written, getattr(jnp, facts["dtype"]))
+    assert got is not OverflowError, (
+        f"`x + {written}` at {facts['dtype']} now RAISES under jit. jax has "
+        f"fixed the narrowing at the constant-folding site, which "
+        f"SOUNDNESS.md names as the one no cheap fix reaches and prices at "
+        f"1031 newly failing cases: the entry's 'two prices for two doors' "
+        f"is no longer true and must be rewritten."
+    )
+    assert str(got.dtype) == facts["dtype"], (
+        f"`x + {written}` no longer produces {facts['dtype']} — it produced "
+        f"{got.dtype}. jax has widened rather than narrowed at this door, "
+        f"which is a fix by another name: rewrite the entry."
+    )
+    value = int(np.asarray(got)[0])
+    assert value != written, (
+        f"`x + {written}` no longer destroys the constant at this door; it "
+        f"came back as {value}. SOUNDNESS.md describes an OPEN defect at "
+        f"two doors and this is one of them: rewrite the entry."
+    )
+    assert value == written % (2**bits), (
+        f"the constant is still destroyed at this door, but no longer by "
+        f"wrapping mod 2**{bits}: {written} became {value}. The entry's "
+        f"framing is 'wraps mod 2**bits' and no longer describes this door."
+    )
+
+
+def test_the_other_door_still_returns_a_wrong_VERIFIED(x64):
+    """The second door, end to end and interval-only. Same declared box,
+    same bound, same constant as the fence — only the spelling differs."""
+    facts = _fence_facts(_fence())
+    lo, hi = facts["box"]
+    written, bound = facts["written"], facts["bound"]
+    points = list(range(int(lo), int(hi) + 1))
+    false_at = [p for p in points if not (p + written <= bound)]
+    assert points and len(false_at) == len(points), (
+        "the inline spelling's predicate is no longer false at every "
+        "declared point in exact integer arithmetic, so a VERIFIED here "
+        "would not be wrong"
+    )
+
+    @jax.jit
+    def shift(v):
+        return (v + written).astype(jnp.float32)
+
+    def harness():
+        return assert_(
+            shift(any_array((), facts["decl_dtype"], (lo, hi))) <= bound
+        )
+
+    try:
+        closed = trace(harness)
+    except OverflowError as exc:
+        pytest.fail(
+            f"tracing the inline spelling now RAISES ({exc}). jax has fixed "
+            f"the narrowing at this door, so SOUNDNESS.md's claim that it "
+            f"costs the same wrong VERIFIED as the fence's is no longer "
+            f"true: rewrite the entry."
+        )
+    verdict = make_verdict(
+        closed,
+        propagate(closed),
+        stelling_version="(this tree)",
+        jax_version=jax.__version__,
+        precision_config=f"jax_enable_x64={x64}",
+    )
+    assert verdict.status == "VERIFIED", (
+        f"the inline spelling returns {verdict.status}, not VERIFIED. "
+        f"SOUNDNESS.md says this door costs the same wrong VERIFIED as the "
+        f"fence's and must be re-driven either way."
+    )
+
+
+def test_control_the_other_door_does_not_wrap_in_range(x64):
+    """CONTROL for the second door: an in-range constant survives it, so
+    `!= written` above is a real discrimination and not a tautology."""
+    facts = _fence_facts(_fence())
+    got = _inline_offset(5, getattr(jnp, facts["dtype"]))
+    assert got is not OverflowError, "an in-range 5 was refused by `x + 5`"
+    assert int(np.asarray(got)[0]) == 5, (
+        f"an in-range 5 did not survive `x + 5`: {np.asarray(got).tolist()!r}"
     )
 
 
