@@ -4387,6 +4387,59 @@ verdicts:
   times — measured at `b2e3a15`, and stated here because an entry count
   taken second in a process is a fact about the cache, not the door.)*
 
+  **THERE IS A FOURTH SITE, IT IS WHERE THE HEADLINE CASE ACTUALLY DIES,
+  AND NOTHING ELSE ON THIS PAGE NAMES IT.** The third row of the table
+  above ends at `convert_element_type_p.bind` and says the narrowing is
+  "the primitive's own". That is true, and it is not an address. The
+  address is `_convert_elt_type_folding_rule` in `jax/_src/lax/lax.py` —
+  the primitive's CONSTANT-FOLDING rule, registered into
+  `pe.const_fold_rules` and called from `try_constant_folding` in
+  `jax/_src/interpreters/partial_eval.py` — and the line inside it that
+  destroys the value is `out = out.astype(new_dtype)`: **`lax.py:5314` at
+  jax 0.11.0** and **`lax.py:5304` at jax 0.10.2** (the function's `def`
+  at `5295` and `5285` respectively). Read from the two installed trees,
+  and the 0.11.0 file is byte-identical to the same path in a clone of
+  jax at tag `jax-v0.11.0`.
+
+  Measured in all four cells by substituting a recording wrapper for that
+  rule: `jax.jit(lambda v: v + 256)(jnp.zeros((3,), jnp.int8))` returns
+  `[0 0 0]`, and the rule is called with the constant still INTACT —
+  `TypedInt(256, dtype=int32)` at `JAX_ENABLE_X64=0`, `int64` at `=1` —
+  with `new_dtype=int8`, returning `TypedNdArray(0, dtype=int8)`. That is
+  a per-call attribution, not a line count: the 256 goes in whole and
+  comes out zero, there.
+
+  **The three sites this entry anatomises are disjoint from it, in both
+  directions.** Measured differentially in-process at 0.11.0,
+  `JAX_ENABLE_X64=1`, by installing range-checking wrappers one at a
+  time: a check on the `type(operand) is int` `.astype` site makes
+  `jnp.full((), 256, jnp.int8)` and `lax.convert_element_type(2 ** 32,
+  'int32')` raise and leaves `jit(x + 256)` returning `[0 0 0]`; a check
+  on the folding rule makes `jit(x + 256)` raise and leaves those two
+  returning `0`. **A reader pricing a remedy from the mechanism section
+  above would have priced one that does not reach the case this entry
+  opens with.**
+
+  **It is not a LAST site either, and it is not offered as one.** Two
+  measurements bound it, both in all four cells. First, it is reached
+  only through TRACING: evaluated EAGERLY, all eight doors that wrap give
+  the same answers they give under `jit`, and the folding rule is called
+  **zero** times across all eight — so eager code loses the constant
+  somewhere else again, unmeasured here. Second,
+  two of those eight do not reach it even under `jit` —
+  `jnp.where(c, 256, x)` and `jnp.clip(x, 256, 256)` cross into jax's own
+  `jit`-wrapped internal `_where` / `clip`, so the constant survives into
+  the jaxpr as a live `256:i32[]` / `256:i64[]` operand with the
+  narrowing left standing as a `convert_element_type` EQUATION, and the
+  answer is still `0`. **In that shape the source's own constant is
+  present and unwrapped in the traced program, and no Python line
+  performs the narrowing at trace time at all.** That is recorded as
+  existing, not analysed: no verdict was driven through it, and it is not
+  offered as something to detect on — the equation sits inside a nested
+  `jit` sub-jaxpr, which is exactly where the priced remedies above were
+  already blind. It does not disturb the tree-equality measured further
+  up, which is about the reproducer as written, through `jnp.full`.
+
   **That check at `array_constructors.py:249-250` is the ONLY explicit
   overflow check jax runs on a constant, and its gate is a Python
   `isinstance`:** `if isinstance(object, (bool, int, float, complex)):`.
