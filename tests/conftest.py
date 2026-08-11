@@ -1210,10 +1210,40 @@ def tripwire_plugin_args() -> tuple[str, ...]:
 
     So the argument is decided by asking the environment rather than by
     assuming either answer.
+
+    AND THE QUESTION HAD TO BE THE RIGHT ONE. This asked *"is the distribution
+    installed?"* when what it needs is *"will the nested session AUTOLOAD
+    it?"*, and the two answers differ under
+    ``PYTEST_DISABLE_PLUGIN_AUTOLOAD=1``, a common CI hygiene setting: the
+    entry point is still declared, so the probe below said "already
+    registered", no ``-p`` was passed, and the nested sessions ran with no
+    tripwire in them at all. Measured in an installed environment: **17
+    failed**, the same seventeen the entry-point probe was added to fix. The
+    environment variable is checked first for that reason.
     """
     import importlib.metadata
+    import os
 
+    if os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD"):
+        return ("-p", TRIPWIRE_PLUGIN)
     for entry in importlib.metadata.entry_points(group="pytest11"):
         if entry.value.split(":")[0] == TRIPWIRE_PLUGIN:
             return ()
     return ("-p", TRIPWIRE_PLUGIN)
+
+
+def xdist_plugin_args() -> tuple[str, ...]:
+    """``("-p", "xdist")`` where a nested session would not autoload it.
+
+    Same question as :func:`tripwire_plugin_args` about a different plugin.
+    xdist reaches a session by ``pytest11`` entry point exactly as the
+    tripwire does, so ``PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`` takes ``-n 2`` away
+    from the nested sessions too — and a test that asks for two workers and
+    gets none reports what a one-process run reports, which is not nothing but
+    is not what it claims to measure.
+    """
+    import os
+
+    if os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD"):
+        return ("-p", "xdist")
+    return ()

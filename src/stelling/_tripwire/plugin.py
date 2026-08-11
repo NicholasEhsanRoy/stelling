@@ -47,6 +47,22 @@ import pytest
 #: prose so the check and the documentation cannot drift apart.
 OPT_IN_PLUGIN = "stelling.overflow"
 
+#: The ``pytest11`` entry point's NAME in ``pyproject.toml``, and therefore the
+#: name this module is registered under when ``stelling/overflow.py`` has to
+#: register it by hand because autoload is off.
+#:
+#: IT HAS TO BE THIS NAME AND NOT THE DOTTED ONE, measured: ``-p`` plugins are
+#: consumed in ``Config._preparse`` BEFORE ``load_setuptools_entrypoints``, so
+#: registering under ``stelling._tripwire.plugin`` first makes the entry point
+#: loader register the same module object a second time and raise ``ValueError:
+#: Plugin already registered under a different name`` — an INTERNALERROR before
+#: a single test collects, on the documented spelling, in the default
+#: environment. Under this name the loader's own ``get_plugin(ep.name)`` guard
+#: sees it and skips.
+#:
+#: ``tests/test_tripwire_plugin.py`` pins it against ``pyproject.toml``.
+ENTRY_POINT_NAME = "stelling_overflow"
+
 #: Key under which a worker's payload travels back to the controller.
 WORKER_KEY = "stelling_overflow"
 

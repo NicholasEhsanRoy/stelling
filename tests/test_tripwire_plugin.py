@@ -466,3 +466,107 @@ def test_the_entry_point_declaration_is_what_makes_any_of_this_reachable():
         f"{OPT_IN} and the name the plugin looks for have drifted apart: "
         f"{optin.OPT_IN_PLUGIN!r}"
     )
+    # ...and the NAME of the entry point, which the opt-in module registers
+    # under by hand when autoload is off. It has to be this name and not the
+    # dotted one, because `-p` is consumed before the entry point loader runs
+    # and the loader's own guard is `get_plugin(ep.name)`.
+    assert optin.ENTRY_POINT_NAME in targets, (
+        f"the pytest11 entry point names are {sorted(targets)}; "
+        f"stelling.overflow registers under {optin.ENTRY_POINT_NAME!r}, so "
+        "with autoload ON and `-p stelling.overflow` the loader would "
+        "register the same module a second time and raise ValueError before "
+        "a single test collects"
+    )
+
+
+def test_the_documented_spellings_work_WITHOUT_the_entry_point(pytester, monkeypatch):
+    """``PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`` is a common CI hygiene setting, and
+    it turns off the ``pytest11`` entry point that is the only thing making the
+    plugin reachable.
+
+    Measured before this: **every documented switch-on spelling was inert,
+    with no error and no warning.** ``pytest_plugins = ["stelling.overflow"]``
+    was silently green, ``-p stelling.overflow`` was silently green, and only
+    the undocumented ``-p stelling._tripwire.plugin`` worked. Nothing in
+    ``README.md`` or ``docs/`` mentioned the dependency. A silent no-op is the
+    worst available behaviour for a tool whose subject is instruments that are
+    not running.
+
+    Subprocess sessions: the environment variable is read once, in the child's
+    own ``Config._preparse``, and an in-process nested session would inherit
+    this process's already-loaded plugins and measure nothing.
+    """
+    pytester.makepyfile(WRAPPING_TEST)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+
+    result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", OPT_IN)
+    result.assert_outcomes(passed=1)
+    assert "you wrote 300" in result.stdout.str(), (
+        f"-p {OPT_IN} is a documented spelling and it did nothing at all "
+        "with plugin autoload disabled"
+    )
+
+    pytester.makeconftest(f'pytest_plugins = ["{OPT_IN}"]')
+    result = pytester.runpytest_subprocess("-p", "no:cacheprovider")
+    result.assert_outcomes(passed=1)
+    assert "you wrote 300" in result.stdout.str(), (
+        "the one line in conftest.py that the docs open with did nothing at "
+        "all with plugin autoload disabled"
+    )
+
+    # THE THIRD SPELLING CANNOT BE MADE TO WORK, and what matters is that it
+    # fails LOUDLY. `--stelling-overflow` is registered BY the plugin, so with
+    # no entry point and nothing naming a module there is no such flag; pytest
+    # exits 4 with "unrecognized arguments". That is the acceptable end of
+    # this — a silent green is not.
+    pytester.makeconftest("")
+    flag_only = pytester.runpytest_subprocess(
+        "-p", "no:cacheprovider", "--stelling-overflow=require"
+    )
+    assert flag_only.ret != 0
+    assert "unrecognized arguments: --stelling-overflow" in (
+        flag_only.stdout.str() + flag_only.stderr.str()
+    )
+
+    # THE CONTROL, and it is the half that a "just always register it" repair
+    # would fail: with autoload disabled and no opt-in, the tripwire stays off
+    # rather than arming because this module happened to get imported.
+    quiet = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", "no:randomly")
+    assert "stelling overflow tripwire" not in quiet.stdout.str()
+
+
+@pytest.mark.parametrize("autoload", ["on", "off"])
+def test_naming_the_opt_in_module_is_never_a_DOUBLE_registration(
+    pytester, monkeypatch, autoload
+):
+    """The other direction, and it is not hypothetical: registering the same
+    module object under two names raises ``ValueError: Plugin already
+    registered under a different name``, which is an INTERNALERROR before a
+    single test collects — strictly worse than the silent no-op it replaces.
+
+    Two ways to hit it, and the repair needs a different guard for each:
+
+    * the entry point got there first (autoload on, the module named in a
+      ``conftest.py``) — ``pluginmanager.is_registered`` is the guard;
+    * WE get there first (autoload on, ``-p stelling.overflow``), because
+      ``-p`` is consumed in ``Config._preparse`` *before*
+      ``load_setuptools_entrypoints`` — registering under the ENTRY POINT's
+      name is the guard, since the loader's own check is
+      ``get_plugin(ep.name)``. Measured: the dotted name fails here.
+    """
+    if autoload == "off":
+        monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    else:
+        monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", raising=False)
+
+    pytester.makepyfile(WRAPPING_TEST)
+    pytester.makeconftest(f'pytest_plugins = ["{OPT_IN}"]')
+    for extra in (("-p", OPT_IN), ()):
+        result = pytester.runpytest_subprocess(
+            "-p", "no:cacheprovider", *extra, "--stelling-overflow=auto"
+        )
+        both = result.stdout.str() + result.stderr.str()
+        assert "INTERNALERROR" not in both, both[-2500:]
+        assert "already registered under a different name" not in both
+        result.assert_outcomes(passed=1)
+        assert "you wrote 300" in result.stdout.str()

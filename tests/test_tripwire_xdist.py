@@ -34,9 +34,13 @@ xdist = pytest.importorskip(
 )
 
 from conftest import TRIPWIRE_PLUGIN as PLUGIN  # noqa: E402
-from conftest import tripwire_plugin_args  # noqa: E402
+from conftest import tripwire_plugin_args, xdist_plugin_args  # noqa: E402
 
-PLUGIN_ARGS = tripwire_plugin_args()
+# xdist reaches a nested session by the same `pytest11` entry point the
+# tripwire does, so `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` takes `-n 2` away from
+# these sessions as well -- and every one of them then measures a one-process
+# run while claiming to measure two workers.
+PLUGIN_ARGS = tripwire_plugin_args() + xdist_plugin_args()
 
 TWO_FILES = {
     "test_alpha": """

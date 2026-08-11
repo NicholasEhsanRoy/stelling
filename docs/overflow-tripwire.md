@@ -220,5 +220,20 @@ occurred".
 | `--stelling-overflow=off` | off, even if the plugin above is loaded |
 | *(nothing)* | off — the default |
 
+### If your CI sets `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`
+
+`--stelling-overflow` is a flag **registered by a plugin**, and the plugin
+reaches your session through a `pytest11` entry point. That entry point is what
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` — a common CI hygiene setting — switches off.
+
+The first two spellings above work anyway: naming `stelling.overflow`, in
+`conftest.py` or with `-p`, loads the plugin itself. **The flag on its own does
+not**, and it does not fail quietly — pytest exits 4 with
+`unrecognized arguments: --stelling-overflow`. Name the module as well:
+
+```console
+$ pytest -p stelling.overflow --stelling-overflow=require
+```
+
 Tested against JAX 0.10.2 and 0.11.0. A newer JAX arms anyway and the report
 says so; the probe is the contract and the version is a disclosure.
