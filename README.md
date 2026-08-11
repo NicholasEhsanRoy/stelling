@@ -209,6 +209,7 @@ you actually run on. `v.render()` prints the whole stamp.
 | [Reading a verdict](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reading-a-verdict.md) | the statuses, every stamp line, and the two vacuity instruments |
 | [Preconditions guide](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/preconditions.md) | ready-made obligation templates and posing guidance |
 | [Choosing a solver backend](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/choosing-a-solver-backend.md) | z3, cvc5, or both — how obligations are routed, what each backend decided, and what one alone costs |
+| [The overflow tripwire](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md) | one line in `conftest.py`, then run your existing suite: JAX silently narrows out-of-range integer constants (`x + 256` on `int8` reaches the jaxpr as `add a 0:i8[]`), and this reports each one with your line quoted, the arithmetic, and a reproducer |
 | [Reproducing a witness](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reproducing-a-witness.md) | emit a runnable file that executes a REFUTED's witness through **your own program, with stelling uninstalled** — the one check that does not trust this tool |
 | [SOUNDNESS.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/SOUNDNESS.md) | what a verdict is permitted to claim |
 | [docs/](https://github.com/NicholasEhsanRoy/stelling/tree/main/docs/) | index, including the project-state and ledger records |

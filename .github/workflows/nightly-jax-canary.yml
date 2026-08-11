@@ -1,0 +1,125 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+
+# The overflow tripwire is attached to a PRIVATE jax registry
+# (`const_fold_rules`, keyed on `convert_element_type_p`). No public or
+# `jax.extend` surface exports it — measured on both tested series, seven
+# candidate modules, `design/private-jax-boundary.md` carries the table — so
+# there is no stability contract underneath it and the only honest way to know
+# it still works is to run it against tomorrow's jax before tomorrow's users
+# do.
+#
+# THREE PROPERTIES, ALL LOAD-BEARING, and each one is a way this job could be
+# theatre instead of a canary:
+#
+#   1. IT RUNS THE SHIPPED `arm()`. Not a copy of the probe, not a
+#      re-implementation: `stelling._tripwire.arm()`, the same call
+#      `pytest_configure` makes. A canary exercising a different probe is
+#      testing nothing about the thing that ships.
+#   2. IT HAS A CONTROL — the identical probe against the PINNED series, in
+#      the same workflow, on the same runner. Without it a red run cannot
+#      distinguish "upstream broke us" from "we broke ourselves", and the
+#      first thing anyone would do is re-run it to find out.
+#   3. INFRASTRUCTURE FAILURE MUST NOT PAGE. The nightly index URL below is
+#      NOT verified current; jax's nightly hosting has moved before and may
+#      move again. An install that cannot reach it is infra, not signal, and
+#      takes a distinct non-failing path that says so.
+#
+# The jax version and the const-fold rule's sha1 go into
+# `$GITHUB_STEP_SUMMARY` on every run, red or green, so a failure is
+# diagnosable from the summary page without re-running anything. The hash is
+# RECORDED, never gated on: refusing to arm because someone reflowed a comment
+# upstream is the failure mode `PLAN-tripwire.md` §5 names.
+name: nightly jax canary
+
+on:
+  schedule:
+    # 04:17 UTC. Off the hour on purpose — the top of the hour is when every
+    # scheduled workflow on GitHub queues at once.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-jax-canary
+  cancel-in-progress: false
+
+jobs:
+  # PROPERTY 2. The control runs first and it is the one that may not be
+  # yellow: if the pinned series cannot arm the tripwire, the problem is in
+  # this repository and the nightly result below is uninterpretable.
+  control:
+    name: control — the pinned series
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      - run: uv pip install -e ".[jax]" pytest
+      - name: arm the SHIPPED tripwire and report what it attached to
+        env:
+          JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
+        run: .venv/bin/python .github/scripts/tripwire_canary.py --require
+
+  nightly:
+    name: nightly jax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv
+      - run: uv pip install -e "." pytest
+
+      # PROPERTY 3. `continue-on-error` so an unreachable index, a yanked
+      # nightly or a resolver change cannot page anybody. The step's outcome
+      # is read below and turned into a distinct, NON-FAILING path.
+      - name: install a jax nightly
+        id: install
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          uv pip install --prerelease=allow \
+            --index-url https://us-python.pkg.dev/ml-oss-artifacts-published/jax-public-nightly-artifacts-registry/simple/ \
+            --extra-index-url https://pypi.org/simple \
+            jax jaxlib
+
+      - name: no nightly available — infrastructure, not signal
+        if: steps.install.outcome != 'success'
+        run: |
+          {
+            echo "### nightly jax canary: SKIPPED (infrastructure)"
+            echo
+            echo "The jax nightly index could not be installed from. That URL"
+            echo "is not verified current and jax's nightly hosting has moved"
+            echo "before, so this is treated as infrastructure and not as a"
+            echo "signal about the tripwire. Nothing was measured this run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # PROPERTY 1. The shipped `arm()`, and `--require` so a tripwire that
+      # cannot arm on tomorrow's jax is RED here rather than quietly disabled.
+      # That is the whole point of the canary: `auto` is right for a user's
+      # suite and wrong for the alarm.
+      - name: arm the SHIPPED tripwire against the nightly
+        if: steps.install.outcome == 'success'
+        env:
+          JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
+        run: .venv/bin/python .github/scripts/tripwire_canary.py --require
+
+      # The tripwire's own tests against the nightly. `arm()` returning
+      # `armed` says the hook is live; these say it still finds the right
+      # thing, still suppresses jax's own PRNG mask, and still reports
+      # where/clip as UNCOVERED — which is the assertion most likely to go
+      # stale in the SAFE direction and go unnoticed.
+      - name: the tripwire's own tests, against the nightly
+        if: steps.install.outcome == 'success'
+        env:
+          JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
+        run: |
+          .venv/bin/python -m pytest -q -ra \
+            tests/test_tripwire_arm.py tests/test_tripwire_record.py \
+            tests/test_tripwire_plugin.py

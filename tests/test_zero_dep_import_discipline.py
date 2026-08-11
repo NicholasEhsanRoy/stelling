@@ -211,7 +211,12 @@ _ANY_MODULE_SCOPE_IMPORT = re.compile(r"^(import|from)\s+([A-Za-z_][A-Za-z_0-9]*
 # in `tests/test_prose_hygiene.py::
 # test_the_shipped_root_count_in_prose_matches_the_allowlist`, which reads this
 # comment too.
-_SHIPPED_PY_ROOTS_PIN = ("corpus", "docs", "src", "tests", "tools")
+# `.github` joined the set when the nightly jax canary landed
+# (`.github/scripts/tripwire_canary.py`). It is not a new ROOT — `.github` has
+# always been allowlisted — it is a root that has always shipped and now holds
+# Python, which is exactly the movement this pin exists to make visible, and
+# which the derivation picked up on its own.
+_SHIPPED_PY_ROOTS_PIN = (".github", "corpus", "docs", "src", "tests", "tools")
 
 
 def _sdist_roots() -> list[str]:

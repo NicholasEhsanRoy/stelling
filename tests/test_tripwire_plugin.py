@@ -50,7 +50,24 @@ WRAPPING_TEST = """
 def _isolate(pytester, monkeypatch):
     """Nested sessions arm the hook in THIS process, because ``runpytest`` is
     in-process by default. Leaving one armed would silently instrument the
-    rest of the outer suite."""
+    rest of the outer suite.
+
+    ``PYTHONPATH`` is rewritten to an ABSOLUTE path to the tree this suite
+    imported. A subprocess session runs with its cwd inside pytester's tmpdir,
+    so a developer running with a relative ``PYTHONPATH=src`` gets
+    ``No module named 'stelling._tripwire'`` there and nowhere else —
+    measured. CI installs with ``-e`` and would never have seen it.
+    """
+    import os
+    import pathlib as _pathlib
+
+    import stelling
+
+    src = str(_pathlib.Path(stelling.__file__).resolve().parents[1])
+    existing = os.environ.get("PYTHONPATH", "")
+    monkeypatch.setenv(
+        "PYTHONPATH", os.pathsep.join([src, existing]) if existing else src
+    )
     monkeypatch.setenv("JAX_PLATFORMS", "cpu")
     yield
     from stelling import _tripwire
@@ -259,9 +276,21 @@ def test_the_report_does_not_depend_on_the_order_the_findings_fired(pytester):
     name = path.name
 
     def section(result):
+        """The tripwire's report and nothing after it.
+
+        Cut at pytest's own summary line, which carries a WALL CLOCK — two
+        runs differ at `3 passed in 0.07s` vs `0.09s` and the comparison
+        below would be about the runner's speed rather than about the
+        report. Measured, on the first run of this test.
+        """
         lines = result.stdout.str().splitlines()
         start = next(i for i, line in enumerate(lines) if "overflow tripwire" in line)
-        return lines[start:]
+        body = []
+        for line in lines[start:]:
+            if " passed in " in line or " warning" in line:
+                break
+            body.append(line)
+        return body
 
     forward = section(
         pytester.runpytest_subprocess(
