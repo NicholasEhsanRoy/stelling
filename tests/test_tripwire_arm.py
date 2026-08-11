@@ -389,3 +389,47 @@ def test_jax_s_own_prng_mask_is_suppressed_and_named_not_blamed_on_the_caller(ar
     assert suppressed.became == -1
     assert "threefry" in suppressed.file
     assert suppressed.origin == record.ORIGIN_JAX
+
+
+def test_strict_promotion_is_orthogonal_to_this_defect_not_a_weaker_form(armed):
+    """The report tells a user what to do instead, so what it tells them has
+    to be true. ``PLAN-tripwire.md`` §8 says strict dtype promotion makes "6
+    of 11 doors" raise; re-measured here it makes **none** of the wrapping
+    spellings raise and **every** non-wrapping one, which is the opposite
+    relationship and the one the report now states.
+
+    Both directions in one test, because either half alone is satisfiable by
+    a promotion setting that does nothing and by one that rejects everything.
+    """
+    _, rec = armed
+    x = jnp.zeros(3, jnp.int8)
+    with jax.numpy_dtype_promotion("strict"):
+        # the spelling that WRAPS is not rejected, and still wraps
+        assert int((x + 256)[0]) == 0
+        # every concrete-dtype operand IS rejected -- and none of them wraps
+        import numpy as np
+
+        for operand in (np.int64(256), np.int32(256), jnp.int32(256), True):
+            with pytest.raises(Exception) as caught:
+                x + operand
+            assert "TypePromotion" in type(caught.value).__name__, caught.value
+
+    # the control: those same operands are fine, and lossless, without strict
+    import numpy as np
+
+    for operand in (np.int64(256), np.int32(256), jnp.int32(256)):
+        assert int(np.asarray(x + operand).ravel()[0]) == 256, (
+            "an operand strict promotion rejects would have LOST its value "
+            "anyway, which would make strict a partial mitigation after all"
+        )
+
+
+def test_hoisting_the_constant_really_does_raise(armed):
+    """The other half of what the report suggests. ``jnp.array(N, dtype)``
+    raises for a Python int, which is what turns a silent wrap into an
+    immediate error at the definition site."""
+    for ctor in (jnp.array, jnp.asarray):
+        with pytest.raises(OverflowError):
+            ctor(256, jnp.int8)
+    # in range, so it is the VALUE being rejected and not the spelling
+    assert int(jnp.array(127, jnp.int8)) == 127

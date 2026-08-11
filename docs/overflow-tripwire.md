@@ -36,6 +36,19 @@ you could turn into one — six supported mechanisms were measured against it
 and all six leave it silent. `checkify.all_checks` returns `None` on it while
 its out-of-bounds and divide-by-zero controls throw.
 
+`jax.numpy_dtype_promotion("strict")` is worth singling out, because it looks
+like it should help and is **exactly orthogonal**. Measured on both tested
+series, x64 on and off: strict promotion raises `TypePromotionError` for every
+*concrete*-dtype operand — `np.int64(256)`, `np.int32(256)`, `jnp.int32(256)`,
+`jnp.array(256, jnp.int32)`, even `True` — and for **none** of the Python-int
+spellings. And it is the Python int that wraps: every operand strict rejects
+would have kept its value. Adopt it as a discipline if you like it; it is not
+a weaker form of this check.
+
+What does help, one constant at a time, is **hoisting the literal to its own
+definition site**: `jnp.array(256, jnp.int8)` and `jnp.asarray(256, jnp.int8)`
+both raise `OverflowError` for a Python int, in all four measured cells.
+
 The tripwire attaches to the site where the value actually dies and reports
 each one like this:
 
@@ -72,7 +85,7 @@ clean" are not the same sentence and this tool will never print the second one.
 
 | door | status | measured |
 |---|---|---|
-| `x + N`, `x * N`, `x >= N`, `x.at[i].set(N)`, `jnp.maximum(x, N)` under a trace | **covered** | fires |
+| `x + N`, `x * N`, `x >= N`, `x.at[i].set(N)`, `jnp.maximum(x, N)`, `jnp.minimum(x, N)` under a trace | **covered** | fires |
 | **eager execution** (outside `jit`) | **UNCOVERED** | 0 invocations, and the value still wraps |
 | **`jnp.where(pred, N, x)`** | **UNCOVERED** | 0 invocations, traced and jitted, both tested series |
 | **`jnp.clip(x, lo, N)`** | **UNCOVERED** | 0 invocations, traced and jitted, both tested series |

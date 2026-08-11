@@ -258,11 +258,14 @@ def _suggestions(finding: record.Finding) -> list[str]:
         "so the next reader does not have to guess.",
         f"- hoisting the constant to its own definition site turns this "
         f"silent wrap into an immediate error: `jnp.array({finding.written}, "
-        f"jnp.{finding.to_dtype})` raises OverflowError for a Python int "
-        "(measured on both tested jax series).",
-        "- `jax.numpy_dtype_promotion('strict')` makes several of these "
-        "spellings raise a TypePromotionError. It fires for in-range values "
-        "too, so it is a discipline to adopt, not a wrap detector.",
+        f"jnp.{finding.to_dtype})` and `jnp.asarray(...)` raise OverflowError "
+        "for a Python int (measured, both tested jax series, x64 on and off).",
+        "- `jax.numpy_dtype_promotion('strict')` does NOT catch this. "
+        "Measured on both series: it raises TypePromotionError for every "
+        "CONCRETE-dtype operand (np.int64(N), jnp.int32(N), even True) and "
+        "for NONE of the Python-int spellings -- and it is the Python int "
+        "that wraps, while every operand strict rejects would have kept its "
+        "value. It is orthogonal to this defect, not a weaker form of it.",
     ]
 
 
