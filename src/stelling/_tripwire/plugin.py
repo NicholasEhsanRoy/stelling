@@ -86,7 +86,6 @@ class _State:
         self.workers_ready = 0
         self.workers_reported = 0
         self.worker_statuses: dict[str, str] = {}
-        self.notes: list[str] = []
 
 
 def pytest_addoption(parser):
@@ -327,11 +326,16 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         return
     from stelling._tripwire import report
 
-    notes = tuple(state.notes)
+    # NO GENERAL `notes` LIST. There was one, appended to in
+    # ``pytest_unconfigure``, which runs after this function has written the
+    # summary -- so it was a disclosure channel that could not disclose. The
+    # notes that exist are the ones computed HERE, where there is still a
+    # report to put them in.
+    notes: tuple[str, ...] = ()
     status = state.status
     if state.role == "controller":
         status = _controller_status(state)
-        notes = notes + _worker_notes(state)
+        notes = _worker_notes(state)
     if status is None:  # pragma: no cover - defensive
         return
 
