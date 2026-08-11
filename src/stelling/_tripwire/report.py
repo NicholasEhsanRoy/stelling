@@ -38,6 +38,12 @@ from stelling._tripwire import record
 
 HEADER = "stelling overflow tripwire"
 
+#: How many frames of the call chain to print per finding. The chain is
+#: already narrowed to the traced region; this bounds a deeply recursive one
+#: without ever hiding the writer, which is the innermost frame and therefore
+#: always in the window.
+CHAIN_LIMIT = 8
+
 #: What the instrument provably does not see. Printed on every run, findings
 #: or not, because "N narrowings on traced code you executed" is true and "no
 #: other problems" is the false-clearance error this project has already had
@@ -219,8 +225,16 @@ def render_finding(index: int, finding: record.Finding) -> list[str]:
     lines.append("    REPRODUCE")
     lines.extend(f"        {line}" for line in reproducer(finding))
     if len(finding.chain) > 1:
-        lines.append("    CHAIN     your frames, outermost first:")
-        lines.extend(f"        {f}:{ln} in {fn}" for f, ln, fn in finding.chain)
+        lines.append(
+            "    CHAIN     your frames inside the traced call, outermost first:"
+        )
+        shown = finding.chain[-CHAIN_LIMIT:]
+        if len(finding.chain) > CHAIN_LIMIT:
+            lines.append(
+                f"        ... {len(finding.chain) - CHAIN_LIMIT} outer frame(s) "
+                "not shown"
+            )
+        lines.extend(f"        {f}:{ln} in {fn}" for f, ln, fn in shown)
     lines.append("    INFERENCE (not observed -- these are suggestions, not claims)")
     lines.extend(f"        {line}" for line in _suggestions(finding))
     return lines

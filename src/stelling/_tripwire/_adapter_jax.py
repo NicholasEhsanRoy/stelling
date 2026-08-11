@@ -371,7 +371,7 @@ def _make_wrapper(original, recorder: record.Recorder, jaxroot: str):
                     to_dtype=to_dtype,
                     became=became,
                     origin=origin,
-                    chain=record.user_chain(frames, jaxroot),
+                    chain=record.user_chain(frames, jaxroot, TRACE_ENTRY_NAMES),
                     literal_visible=str(written) in text,
                 )
             )

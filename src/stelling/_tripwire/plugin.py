@@ -209,6 +209,12 @@ def pytest_sessionfinish(session, exitstatus):
             session.exitstatus = REQUIRE_EXITSTATUS
 
 
+# ``optionalhook=True`` on both: these are xdist's hooks, and without xdist
+# installed pluggy refuses to register a plugin declaring hooks nothing has
+# defined -- measured, `PluginValidationError: unknown hook
+# 'pytest_testnodedown'`, an INTERNALERROR before a single test collects. The
+# tripwire must be usable in an environment that has never heard of xdist.
+@pytest.hookimpl(optionalhook=True)
 def pytest_testnodeready(node):
     """Count workers EXPECTED.
 
@@ -221,6 +227,7 @@ def pytest_testnodeready(node):
     _state(node.config).workers_ready += 1
 
 
+@pytest.hookimpl(optionalhook=True)
 def pytest_testnodedown(node, error):
     """Absorb a worker's payload on the controller."""
     state = _state(node.config)

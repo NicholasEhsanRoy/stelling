@@ -209,8 +209,17 @@ def test_an_all_jax_stack_with_no_frames_inside_the_entry_is_unattributed():
     assert record.attribute((), JAXROOT) == (None, record.ORIGIN_UNKNOWN)
 
 
-def test_the_user_chain_keeps_every_non_jax_frame_outermost_first():
-    assert record.user_chain(USER_STACK, JAXROOT) == (
+def test_the_user_chain_is_the_traced_region_not_the_whole_stack():
+    """Everything outside the trace entry is the runner that got you here --
+    forty lines of runpy/pluggy/_pytest under a real pytest session, measured.
+    The frames that carry the cross-module story are the ones inside."""
+    assert record.user_chain(USER_STACK, JAXROOT) == (("/home/u/t.py", 54, "widen"),)
+    # ... and with no trace entry to anchor on, the lenient fallback keeps all
+    renamed = tuple(
+        (f, ln, "moved" if fn == "trace_to_jaxpr_nocache" else fn)
+        for f, ln, fn in USER_STACK
+    )
+    assert record.user_chain(renamed, JAXROOT) == (
         ("/home/u/t.py", 10, "<module>"),
         ("/home/u/t.py", 54, "widen"),
     )
