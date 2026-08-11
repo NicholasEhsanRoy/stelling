@@ -44,7 +44,13 @@ its out-of-bounds and divide-by-zero controls throw.
 like it should help and does not. Measured over an 11-door grid on both tested
 series with x64 on and off — the raise-or-wrap pattern identical in all four
 cells — for a *concrete*-dtype operand (`np.int64(256)`, `np.int32(256)`,
-`jnp.int32(256)`, `jnp.array(256, jnp.int32)`, even `True`):
+`jnp.int32(256)`, `jnp.array(256, jnp.int32)`, `np.bool_(True)`):
+
+A bare Python `bool` is **not** one of these, and this list said `True` until it
+was measured: `np.bool_(True)` is rejected at all six promoting doors, but
+`x.at[0].set(True)` is accepted silently under strict — five of six, not six.
+The operand spelling had been carried over verbatim from a sentence that was
+retracted for being wider than its measurement.
 
 | | strict promotion |
 |---|---|

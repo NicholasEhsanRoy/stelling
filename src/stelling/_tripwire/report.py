@@ -65,6 +65,20 @@ UNCOVERED = (
     "narrowing survives as a `convert_element_type` on a sub-jaxpr VARIABLE "
     "with the literal at the enclosing call site, so no constant is folded "
     "and nothing here can see it. THE VALUE STILL WRAPS.",
+    # MEASURED on both series with x64 on and off, with a live control in the
+    # same process. These matter more than the rest of this list because they
+    # sit beside `x + N` and `x * N`, which ARE covered, so a reader scanning
+    # for "operators are covered" would take the wrong answer away.
+    "BINARY OPERATORS THAT ARE NOT COVERED, next to ones that are: `x % N`, "
+    "`x // N` (and `jnp.remainder`, `jnp.floor_divide`, `divmod`), and "
+    "`jnp.searchsorted(a, N)`. Measured on `int8` with N=300: `x % 300` on "
+    "`[100, 50, 10]` gives `[12, 6, 10]` where the source says `[100, 50, "
+    "10]`; `x // 300` gives `[2, 1, 0]` where the source says `[0, 0, 0]`; "
+    "`searchsorted` gives 1 where the source says 3 -- all with 0 fires. Same "
+    "mechanism as `where`/`clip`: the constant is an argument to an inner "
+    "`jit` sub-jaxpr whose `convert_element_type` narrows a VARIABLE. `x % "
+    "300` also logs 3 in-range visits into the denominator above. THE VALUE "
+    "STILL WRAPS.",
     "doors where the value is ALREADY NARROWED BEFORE this site, so the rule "
     "receives something IN RANGE and does not fire -- AND THE VISIT IS "
     "COUNTED IN THE DENOMINATOR ABOVE, which is why a large denominator is "
@@ -326,10 +340,27 @@ def _suggestions(finding: record.Finding) -> list[str]:
     return [
         f"- if {finding.written} was meant literally, {finding.to_dtype} "
         f"cannot hold it ({span}); a wider dtype is the fix.",
-        f"- if the wrap was intended -- masking is common and legitimate, and "
-        f"jax's own PRNG does it -- write it explicitly, e.g. "
-        f"`x & 0x{(1 << (record.INT_DTYPES[finding.to_dtype][1])) - 1:X}`, "
-        "so the next reader does not have to guess.",
+        (
+            f"- if the wrap was intended -- masking is common and legitimate, "
+            f"and jax's own PRNG does it -- write it explicitly, e.g. "
+            f"`x & 0x{(1 << (record.INT_DTYPES[finding.to_dtype][1])) - 1:X}`, "
+            "so the next reader does not have to guess."
+            if finding.to_dtype.startswith("uint")
+            # MEASURED, and this bullet used to say the same thing for signed
+            # dtypes, where it is wrong twice over. An all-ones mask written as
+            # a POSITIVE hex literal is itself out of range for a signed dtype:
+            # on int8 `x & 0xFF` reaches the jaxpr as `and a -1:i8[]`, so it
+            # would trip THIS check on the next run -- and `x & -1` is the
+            # identity, so it masks nothing. int8/int16/int32 fire, uint8/uint16
+            # do not. A tool whose suggested fix is an instance of the defect it
+            # reports is not one to take advice from.
+            else f"- if the wrap was intended, note that on a SIGNED dtype "
+            f"there is no all-ones mask to write: the constant would itself be "
+            f"out of range for {finding.to_dtype} and would trip this check, "
+            f"and masking with every bit set is the identity in any case. "
+            f"Record the intent in a comment, or narrow deliberately with "
+            f"`.astype(jnp.{finding.to_dtype})`."
+        ),
         f"- hoisting the constant to its own definition site turns this "
         f"silent wrap into an immediate error: `jnp.array({finding.written}, "
         f"jnp.{finding.to_dtype})` and `jnp.asarray(...)` raise OverflowError "
@@ -337,8 +368,8 @@ def _suggestions(finding: record.Finding) -> list[str]:
         "- `jax.numpy_dtype_promotion('strict')` is a discipline, not a "
         "weaker form of this check. Measured over an 11-door grid, both "
         "tested jax series, x64 on and off, the same in all four cells: for "
-        "a CONCRETE-dtype operand (np.int64(N), jnp.int32(N), even True) it "
-        "raises TypePromotionError at the SIX doors that promote an operand "
+        "a CONCRETE-dtype operand (np.int64(N), jnp.int32(N), np.bool_(True)) "
+        "it raises TypePromotionError at the SIX doors that promote an operand "
         "against an array -- x + N, x >= N, x.at[i].set(N), jnp.where, "
         "jnp.clip, jnp.maximum -- and is silent at the FIVE construction "
         "doors -- jnp.array, jnp.asarray, jnp.int8, jnp.full, jnp.full_like "
