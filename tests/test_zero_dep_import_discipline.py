@@ -202,7 +202,7 @@ _ANY_MODULE_SCOPE_IMPORT = re.compile(r"^(import|from)\s+([A-Za-z_][A-Za-z_0-9]*
 
 # Every allowlisted sdist root that holds a `.py`. DERIVED from the allowlist
 # rather than typed, because a hand-typed list of areas to sweep is how a
-# "sweep of the shipped tree" ends up covering 6 roots out of 23.
+# "sweep of the shipped tree" ends up covering 6 roots out of 24.
 #
 # THAT DENOMINATOR READ 22 AND THE ALLOWLIST HAS NEVER HELD 22 — measured with
 # `_sdist_roots()` at 43973af, 650e678, 53f9f84 and a61c01f: 23 at every one.

@@ -261,7 +261,7 @@ def test_every_test_cited_in_core_prose_still_exists():
 #
 # The scope is DERIVED from the sdist allowlist rather than typed, and that is
 # the correction this check embodies. A stale-figure sweep of this tree was
-# described as covering "the tracked, SHIPPED tree" and covered six of the 23
+# described as covering "the tracked, SHIPPED tree" and covered six of the 24
 # allowlisted roots — SOUNDNESS.md, docs/, README.md, ARCHITECTURE.md,
 # CONTRIBUTING.md, .github/. `/design`, `/corpus`, `/tests`, `/src` and
 # `/tools` all ship and were not swept, and TEN wrong own-source citations were
