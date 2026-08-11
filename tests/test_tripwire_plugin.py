@@ -27,11 +27,13 @@ pytest_plugins = ["pytester"]
 # runs in the zero-dep lane). The tests that need a live hook gate here.
 jax = pytest.importorskip("jax")
 
-# The always-registered plugin, spelled the way `-p` wants it. In an installed
-# stelling this arrives through the `pytest11` entry point in pyproject.toml;
-# a nested pytester session inherits neither the entry point nor the parent's
-# plugins, so it is named explicitly.
-PLUGIN = "stelling._tripwire.plugin"
+from conftest import TRIPWIRE_PLUGIN as PLUGIN
+from conftest import tripwire_plugin_args
+
+# `("-p", PLUGIN)` where the distribution is not installed, `()` where it is
+# and the `pytest11` entry point has already registered the module. Adding
+# both is a hard error -- see `conftest.tripwire_plugin_args`.
+PLUGIN_ARGS = tripwire_plugin_args()
 OPT_IN = "stelling.overflow"
 
 WRAPPING_TEST = """
@@ -76,7 +78,7 @@ def _isolate(pytester, monkeypatch):
 
 
 def _run(pytester, *args):
-    return pytester.runpytest("-p", PLUGIN, "-p", "no:cacheprovider", *args)
+    return pytester.runpytest(*PLUGIN_ARGS, "-p", "no:cacheprovider", *args)
 
 
 # --- the opt-in -------------------------------------------------------------
@@ -294,13 +296,13 @@ def test_the_report_does_not_depend_on_the_order_the_findings_fired(pytester):
 
     forward = section(
         pytester.runpytest_subprocess(
-            "-p", PLUGIN, "-p", "no:cacheprovider", "--stelling-overflow=auto",
+            *PLUGIN_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=auto",
             f"{name}::test_a", f"{name}::test_b", f"{name}::test_c",
         )
     )
     reverse = section(
         pytester.runpytest_subprocess(
-            "-p", PLUGIN, "-p", "no:cacheprovider", "--stelling-overflow=auto",
+            *PLUGIN_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=auto",
             f"{name}::test_c", f"{name}::test_b", f"{name}::test_a",
         )
     )

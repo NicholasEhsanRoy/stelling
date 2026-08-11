@@ -33,7 +33,10 @@ xdist = pytest.importorskip(
     "xdist", reason="needs pytest-xdist to drive a real worker split"
 )
 
-PLUGIN = "stelling._tripwire.plugin"
+from conftest import TRIPWIRE_PLUGIN as PLUGIN  # noqa: E402
+from conftest import tripwire_plugin_args  # noqa: E402
+
+PLUGIN_ARGS = tripwire_plugin_args()
 
 TWO_FILES = {
     "test_alpha": """
@@ -61,7 +64,7 @@ TWO_FILES = {
 
 def _run(pytester, *args):
     return pytester.runpytest_subprocess(
-        "-p", PLUGIN, "-p", "no:cacheprovider", "--stelling-overflow=auto", *args
+        *PLUGIN_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=auto", *args
     )
 
 
@@ -170,7 +173,7 @@ def test_require_fails_the_session_when_a_worker_cannot_arm(pytester):
         """
     )
     broken = pytester.runpytest_subprocess(
-        "-p", PLUGIN, "-p", "no:cacheprovider",
+        *PLUGIN_ARGS, "-p", "no:cacheprovider",
         "--stelling-overflow=require", "-n", "2",
     )
     assert broken.ret != 0, (

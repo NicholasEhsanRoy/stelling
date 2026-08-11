@@ -1185,3 +1185,35 @@ def pytest_terminal_summary(terminalreporter) -> None:
         )
         terminalreporter.write_line(message)
         _DELIVERED.append(verdict)
+
+
+# ---------------------------------------------------------------------------
+# One shared helper for the tripwire's pytester tests, which is here because
+# both of them need it and it must not drift between them.
+# ---------------------------------------------------------------------------
+
+TRIPWIRE_PLUGIN = "stelling._tripwire.plugin"
+
+
+def tripwire_plugin_args() -> tuple[str, ...]:
+    """``("-p", <plugin>)``, or ``()`` if the entry point already registers it.
+
+    MEASURED, AND IT IS NOT A CONVENIENCE. A nested ``pytester`` session loads
+    setuptools entry points of its own, so in an environment where stelling is
+    actually INSTALLED the plugin is already registered there under its entry
+    point name — and adding ``-p stelling._tripwire.plugin`` on top raises
+    ``ValueError: Plugin already registered under a different name:
+    stelling_overflow=...``. Seventeen tests failed that way in a throwaway
+    venv with a real ``pip install -e``, and passed in the two shared dev
+    venvs, which have the source on ``PYTHONPATH`` and no distribution
+    metadata. CI installs with ``-e``, so CI is the installed case.
+
+    So the argument is decided by asking the environment rather than by
+    assuming either answer.
+    """
+    import importlib.metadata
+
+    for entry in importlib.metadata.entry_points(group="pytest11"):
+        if entry.value.split(":")[0] == TRIPWIRE_PLUGIN:
+            return ()
+    return ("-p", TRIPWIRE_PLUGIN)
