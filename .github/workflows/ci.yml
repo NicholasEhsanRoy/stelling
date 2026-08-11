@@ -181,9 +181,26 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv venv
-      - run: uv pip install -e ".[solvers,jax]" pytest
+      # `pytest-xdist` IN EXACTLY ONE LANE, and it is this one.
+      #
+      # It is a DEV dependency and never a runtime one, and the skip that
+      # gates `tests/test_tripwire_xdist.py` on its absence is properly
+      # declared — but no lane installed it, so the five aggregation tests
+      # skipped in every one. They are the only executable evidence for both
+      # of the items `PLAN-tripwire.md` §2 lists as ASSUMED and for acceptance
+      # criterion 4 ("`-n 2` aggregation reports the true total; a lost worker
+      # is visible"), which left that criterion verified locally and nowhere
+      # else.
+      #
+      # One lane and not all: the zero-dep job and the jax-0.10 lane must keep
+      # NOT having it, or the skip rule in `tests/test_skip_inventory.py` stops
+      # being exercised in the direction that matters. Nothing here runs with
+      # `-n` — these tests spawn their own workers in subprocesses.
+      - run: uv pip install -e ".[solvers,jax]" pytest pytest-xdist
       - name: RESOLVED jax (floating — whatever is newest)
         run: .venv/bin/python -c "import jax, jaxlib; print('jax', jax.__version__, 'jaxlib', jaxlib.__version__)"
+      - name: pytest-xdist is present, so the aggregation tests do NOT skip here
+        run: .venv/bin/python -c "import xdist; print('pytest-xdist', xdist.__version__)"
       # The verdict channel; see the block above `jobs:` for why it is here.
       - name: pytest, with the skip-inventory verdict asserted off a file channel
         env:

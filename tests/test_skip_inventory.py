@@ -486,8 +486,13 @@ RULES = (
             "`pytest-xdist` is not installed. It is a DEV dependency and never "
             "a runtime one — the tripwire's xdist aggregation is a guardrail "
             "for users who already run `-n auto`, not a dependency it imposes "
-            "— so the two shared jax venvs and the zero-dep CI job do not have "
-            "it and the aggregation tests gate at collection"
+            "— so the zero-dep CI job, the jax-0.10 lane and the shared dev "
+            "venvs do not have it and the aggregation tests gate at "
+            "collection. The `tests (solvers + jax)` lane DOES install it, "
+            "deliberately: those tests are the only executable evidence for "
+            "acceptance criterion 4 and for both items PLAN-tripwire.md §2 "
+            "lists as assumed, and a skip declared in EVERY lane is still a "
+            "criterion nothing ever ran"
         ),
         reasons=frozenset({"needs pytest-xdist to drive a real worker split"}),
         legitimate=lambda: importlib.util.find_spec("xdist") is None,
