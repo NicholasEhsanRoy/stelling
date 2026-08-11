@@ -147,3 +147,33 @@ def test_the_payload_is_primitives_and_survives_execnet(pytester):
     assert "CONFIRMED recomputed from (300, int8) without the hook: 44" in out
     assert "int8 holds that as 44" in out
     assert "test_alpha.py:" in out and "test_beta.py:" in out
+
+
+def test_require_fails_the_session_when_a_worker_cannot_arm(pytester):
+    """The controller cannot raise ``UsageError`` at configure time, because it
+    is not the process that arms. So ``require`` under xdist has to escalate
+    from what the workers reported, and this is the only place that path runs.
+
+    The anchor is broken inside each WORKER via a conftest, which is the only
+    way to reach a process the parent does not own. It goes through the
+    adapter's API — rule 2 covers ``tests/`` with no exemption, and that
+    includes a conftest this file writes.
+    """
+    pytester.makepyfile(**TWO_FILES)
+    pytester.makeconftest(
+        """
+        def pytest_configure(config):
+            if hasattr(config, "workerinput"):
+                from stelling._tripwire import _adapter_jax as adapter
+
+                adapter.detach("entry")
+        """
+    )
+    broken = pytester.runpytest_subprocess(
+        "-p", PLUGIN, "-p", "no:cacheprovider",
+        "--stelling-overflow=require", "-n", "2",
+    )
+    assert broken.ret != 0, (
+        "require under xdist did not fail although no worker could arm"
+    )
+    assert "no-entry" in broken.stdout.str()

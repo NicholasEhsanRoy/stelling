@@ -316,15 +316,27 @@ def _int_or_none(value) -> int | None:
 
 
 def _make_wrapper(original, recorder: record.Recorder, jaxroot: str):
-    """Build the recording wrapper. Nothing in here may raise into a trace."""
+    """Build the recording wrapper. Nothing in here may raise into a trace.
 
-    def stelling_const_fold_probe(consts, params, out_avals):
-        result = original(consts, params, out_avals)
+    ``*args, **kwargs`` rather than the measured ``(consts, params,
+    out_avals)``. jax calls the rule positionally today; a release that added
+    a keyword would make a fixed signature raise ``TypeError`` **inside the
+    user's trace**, and a measurement instrument does not get to break the
+    thing it measures. ``arm()``'s self-check catches that and disables the
+    tool either way — that is the fail-closed floor — but delegating verbatim
+    means a purely additive change upstream costs nothing at all.
+    """
+
+    def stelling_const_fold_probe(*args, **kwargs):
+        result = original(*args, **kwargs)
         try:
             recorder.invocations += 1
             if result is None:
                 return result
             recorder.folded += 1
+
+            consts = (args[0] if args else kwargs.get("consts")) or ()
+            params = (args[1] if len(args) > 1 else kwargs.get("params")) or {}
 
             written = _int_or_none(consts[0] if consts else None)
             became = _int_or_none(result[0] if result else None)
