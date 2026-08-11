@@ -48,19 +48,41 @@ CHAIN_LIMIT = 8
 #: or not, because "N narrowings on traced code you executed" is true and "no
 #: other problems" is the false-clearance error this project has already had
 #: to withdraw twice.
+#: EVERY ITEM WAS MEASURED WITH A LIVE CONTROL IN THE SAME PROCESS, on jax
+#: 0.11.0 and 0.10.2 with x64 on and off, and the value still wraps in every
+#: one. The list has never claimed to be complete and this run never claims a
+#: clean bill of health — but a reader is invited to read it as the answer to
+#: "what does it not see", so a door that is known and unnamed is a defect of
+#: this tuple.
 UNCOVERED = (
     "eager execution -- outside `jit`, the constant reaches XLA as an "
     "argument and is truncated there; the const-fold site is never reached "
     "(measured: 0 invocations, and the value still wraps)",
-    "`jnp.where(pred, N, x)` and `jnp.clip(x, lo, N)` -- measured 0 "
-    "invocations on both tested jax series, traced and jitted alike. The "
+    "doors where the const-fold site is never reached AT ALL (0 "
+    "invocations): `jnp.where(pred, N, x)`; `jnp.clip` at EITHER bound -- "
+    "`jnp.clip(x, lo, N)` and `jnp.clip(x, N, None)`; "
+    "`jnp.pad(x, k, constant_values=N)`. For `where` and `clip` the "
     "narrowing survives as a `convert_element_type` on a sub-jaxpr VARIABLE "
     "with the literal at the enclosing call site, so no constant is folded "
-    "and nothing here can see it. The value still wraps.",
+    "and nothing here can see it.",
+    "doors where the value is ALREADY NARROWED BEFORE this site, so the rule "
+    "receives something IN RANGE and does not fire -- AND THE VISIT IS "
+    "COUNTED IN THE DENOMINATOR ABOVE, which is why a large denominator is "
+    "not evidence of coverage: `jnp.full(shape, N, dt)`, "
+    "`jnp.full_like(x, N)`, `lax.convert_element_type(N, dt)`, "
+    "`lax.select(p, jnp.full(shape, N, dt), x)`, "
+    "`jnp.take(x, i, mode='fill', fill_value=N)`, and an operand that was "
+    "already an array (the rule declines to fold non-scalars). numpy "
+    "truncates on the way in and the rule sees the wrapped value.",
+    "anything inside a scoped `with jax.disable_jit():`, which swallows a "
+    "door that is otherwise COVERED: `a + 200` on `int8` inside the block "
+    "produces a jaxpr BYTE-IDENTICAL to the one that fires outside it and 0 "
+    "fires, because the constant is narrowed before the site and the rule is "
+    "handed -56 instead of 200. Process-wide `JAX_DISABLE_JIT=1` is a "
+    "different case and is handled: `arm()` reports `not-invoked` and the "
+    "tool disables itself rather than reporting a quiet zero.",
     "anything traced BEFORE the tripwire was armed -- jit caches mean a "
     "function traced earlier in the process is never re-traced",
-    "narrowings whose operand was already an array (measured: the rule "
-    "declines to fold non-scalars, so the wrap has happened before this site)",
 )
 
 

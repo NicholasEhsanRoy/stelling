@@ -23,6 +23,8 @@ import pytest
 jax = pytest.importorskip("jax")
 jnp = pytest.importorskip("jax.numpy")
 
+np = pytest.importorskip("numpy")
+
 from stelling import _tripwire  # noqa: E402
 from stelling._tripwire import _adapter_jax as adapter  # noqa: E402
 from stelling._tripwire import record  # noqa: E402
@@ -356,6 +358,153 @@ def test_where_and_clip_are_uncovered_and_the_value_still_wraps(armed, label, bu
 
     jax.make_jaxpr(control)(x)
     assert rec.fires == before + 1, "the live positive control did not fire"
+
+
+# The doors that reach the const-fold site with a value numpy ALREADY
+# narrowed, so the rule is handed something in range, does not fire -- and
+# counts the visit in the printed denominator. That last part is why they had
+# to be named: a large denominator is not evidence of coverage.
+PRE_NARROWED_DOORS = {
+    "jnp.full": lambda a: a + jnp.full(a.shape, 300, jnp.int8),
+    "jnp.full_like": lambda a: a + jnp.full_like(a, 300),
+    "lax.convert_element_type": lambda a: a
+    + jax.lax.convert_element_type(300, jnp.int8),
+    "lax.select": lambda a: jax.lax.select(
+        a == 0, jnp.full(a.shape, 300, jnp.int8), a
+    ),
+    # measured: 4 invocations, 3 integer const-folds, all of them in range --
+    # the fill value arrives already truncated to 44
+    "jnp.take fill_value": lambda a: jnp.take(
+        a, jnp.array([99]), mode="fill", fill_value=300
+    ),
+}
+
+# The doors that never reach the site at all -- 0 invocations, not 0 fires.
+UNREACHED_DOORS = {
+    "jnp.pad": lambda a: jnp.pad(a, 1, constant_values=300),
+    "jnp.clip LOWER bound": lambda a: jnp.clip(a, 300, None),
+}
+
+
+@pytest.mark.parametrize("label", sorted({**PRE_NARROWED_DOORS, **UNREACHED_DOORS}))
+def test_the_silent_doors_are_NAMED_and_each_one_is_measured(armed, label):
+    """Every door named UNCOVERED, driven: it wraps, and it produces no fire.
+
+    None of these was in the doors table or in ``report.UNCOVERED``. The report
+    never claimed the list was complete and always printed "never a clean bill
+    of health", so that obligation was met — but a reader is invited to read
+    the table as the answer to "what does it not see", and a door that is known
+    and unnamed is a defect of the table.
+
+    THE TWO CLASSES ARE DIFFERENT AND THE SECOND IS THE ONE WORTH KNOWING.
+    ``UNCOVERED``'s old item 4 said "the operand was already an ARRAY"; the
+    real class is "already narrowed before this site", scalars included — numpy
+    truncates on the way in, the rule is handed a value that is IN RANGE, and
+    the visit is COUNTED IN THE DENOMINATOR.
+
+    Both halves, with a live control in the same process, because "0 fires" is
+    also what a dead instrument produces.
+    """
+    door = {**PRE_NARROWED_DOORS, **UNREACHED_DOORS}[label]
+    _, rec = armed
+    x = jnp.zeros(5, jnp.int8)
+
+    fires, invocations = rec.fires, rec.invocations
+    out = jax.jit(door)(x)
+    d_fires = rec.fires - fires
+    d_invocations = rec.invocations - invocations
+
+    assert d_fires == 0, (
+        f"{label} fired: it is named UNCOVERED in report.UNCOVERED and in "
+        "docs/overflow-tripwire.md, and both must now be corrected."
+    )
+    assert int(np.asarray(out).ravel()[0]) == 44, (
+        f"{label} did not wrap 300 to 44, so it is not a hole at all"
+    )
+    if label in UNREACHED_DOORS:
+        assert d_invocations == 0, (
+            f"{label} is documented as never reaching the site, and it "
+            f"reached it {d_invocations} time(s)"
+        )
+    else:
+        assert d_invocations > 0, (
+            f"{label} is documented as reaching the site with an already "
+            "narrowed value and COUNTING it in the denominator; it did not "
+            "reach the site at all, so the disclosure names the wrong cause"
+        )
+
+    # the live control, in this same process and at a fresh shape
+    before = rec.fires
+    jax.make_jaxpr(lambda a: a + 301)(jnp.zeros(6, jnp.int8))
+    assert rec.fires == before + 1, "the live positive control did not fire"
+
+
+def test_a_SCOPED_disable_jit_swallows_a_door_that_is_otherwise_COVERED(armed):
+    """``with jax.disable_jit():`` and ``a + 200`` on ``int8``.
+
+    The jaxpr is BYTE-IDENTICAL to the one that fires outside the block, the
+    value still wraps to -56, and the tripwire sees nothing: the constant is
+    narrowed before the site and the rule is handed -56 instead of 200. So the
+    denominator counts the visit and the finding never exists.
+
+    Process-wide ``JAX_DISABLE_JIT=1`` is a different case and IS handled --
+    ``arm()`` returns ``not-invoked`` and the tool disables itself, driven in
+    ``test_attached_but_never_invoked_is_caught_which_a_presence_check_misses``
+    -- so only the scoped block is silently blind.
+    """
+    _, rec = armed
+
+    def outside(a):
+        return a + 200
+
+    def inside(a):  # identical body, distinct code object -> distinct cache key
+        return a + 200
+
+    x = jnp.zeros(5, jnp.int8)
+
+    before = rec.fires
+    jaxpr_out = str(jax.make_jaxpr(outside)(x))
+    assert rec.fires == before + 1, "the control did not fire outside the block"
+
+    with jax.disable_jit():
+        before = rec.fires
+        jaxpr_in = str(jax.make_jaxpr(inside)(x))
+        assert rec.fires == before, (
+            "the scoped disable_jit block fired after all, and the UNCOVERED "
+            "entry naming it must be corrected"
+        )
+        assert int(np.asarray(inside(x)).ravel()[0]) == -56, "it did not wrap"
+
+    assert jaxpr_in == jaxpr_out, (
+        "the two jaxprs differ, so this test is measuring two different "
+        f"programs rather than one door going blind:\n{jaxpr_out}\n{jaxpr_in}"
+    )
+
+
+def test_every_door_this_file_measures_is_NAMED_in_the_report():
+    """The tuple a reader reads, held against the doors driven above.
+
+    A measurement that never reaches ``UNCOVERED`` is a door the reader is not
+    told about, which is exactly the finding this commit closes.
+    """
+    from stelling._tripwire import report
+
+    text = " ".join(report.UNCOVERED)
+    for name in (
+        "jnp.full(shape, N, dt)", "jnp.full_like(x, N)",
+        "lax.convert_element_type(N, dt)", "lax.select(",
+        "jnp.pad(", "jnp.take(", "jnp.clip(x, N, None)", "jnp.clip(x, lo, N)",
+        "jnp.where(pred, N, x)", "jax.disable_jit()", "eager execution",
+        "JAX_DISABLE_JIT=1",
+    ):
+        assert name in text, f"report.UNCOVERED does not name {name}"
+    assert "already narrowed before this site" in text.lower() or (
+        "ALREADY NARROWED BEFORE this site" in text
+    ), "the class is still described as 'operand was already an array'"
+    assert "COUNTED IN THE DENOMINATOR" in text, (
+        "a pre-narrowed visit counts in the printed denominator, and that is "
+        "the part that makes a large denominator not evidence of coverage"
+    )
 
 
 def test_eager_execution_is_uncovered_and_the_value_still_wraps(armed):

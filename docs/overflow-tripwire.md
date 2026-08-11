@@ -96,20 +96,45 @@ earn.
 Stated first, and printed on every run, because "no findings" and "your code is
 clean" are not the same sentence and this tool will never print the second one.
 
+**This table is a floor, not a census** — and read it as the answer to "what
+does it not see", because that is what it is for. Every row was measured with a
+live control in the same process, on both tested series with x64 on and off,
+and **the value wraps in every UNCOVERED row**.
+
 | door | status | measured |
 |---|---|---|
 | `x + N`, `x * N`, `x >= N`, `x.at[i].set(N)`, `jnp.maximum(x, N)`, `jnp.minimum(x, N)` under a trace | **covered** | fires |
-| **eager execution** (outside `jit`) | **UNCOVERED** | 0 invocations, and the value still wraps |
-| **`jnp.where(pred, N, x)`** | **UNCOVERED** | 0 invocations, traced and jitted, both tested series |
-| **`jnp.clip(x, lo, N)`** | **UNCOVERED** | 0 invocations, traced and jitted, both tested series |
-| anything traced **before** the plugin armed | **UNCOVERED** | jit caches; it is never re-traced |
+| **eager execution** (outside `jit`) | **UNCOVERED** | 0 invocations |
+| **`jnp.where(pred, N, x)`** | **UNCOVERED** | 0 invocations |
+| **`jnp.clip(x, lo, N)`** *and* **`jnp.clip(x, N, None)`** — *either* bound | **UNCOVERED** | 0 invocations |
+| **`jnp.pad(x, k, constant_values=N)`** | **UNCOVERED** | 0 invocations |
+| **`jnp.take(x, i, mode='fill', fill_value=N)`** | **UNCOVERED** | 0 fires (3 in-range visits counted) |
+| **`jnp.full(shape, N, dt)`**, **`jnp.full_like(x, N)`** | **UNCOVERED** | 0 fires; the rule sees the already-wrapped value and **counts it in the denominator** |
+| **`lax.convert_element_type(N, dt)`** | **UNCOVERED** | as above |
+| **`lax.select(p, jnp.full(shape, N, dt), x)`** | **UNCOVERED** | as above |
 | an operand that was already an array | **UNCOVERED** | the fold declines non-scalars, so the wrap already happened |
+| **inside `with jax.disable_jit():`** | **UNCOVERED** | 0 fires on a jaxpr *byte-identical* to one that fires outside the block |
+| anything traced **before** the plugin armed | **UNCOVERED** | jit caches; it is never re-traced |
 
-The `where`/`clip` hole has a structural cause rather than a bug: the literal
-sits at the enclosing call site and the `convert_element_type` inside the
-sub-jaxpr operates on a **variable**, so no constant is folded and there is
-nothing for a const-fold hook to see. The value still wraps. Other mechanisms
-may reach these; none is built.
+There are two distinct causes, and the second is the one worth knowing about.
+
+**The site is never reached.** `where`, `clip` at either bound, `pad` and
+`take` never fold a constant here: the literal sits at the enclosing call site
+and the `convert_element_type` inside the sub-jaxpr operates on a **variable**.
+Other mechanisms may reach these; none is built.
+
+**The value is already narrowed before the site.** `jnp.full`, `jnp.full_like`,
+`lax.convert_element_type`, `lax.select` and a scoped `jax.disable_jit()` all
+truncate through numpy first, so the rule is handed a value that is *in range*
+and does not fire — **and that visit is counted in the printed denominator.**
+So a large denominator is not evidence of coverage. Measured: `x + 300` on
+`int8` hands the rule `300`; `jnp.full((), 300, int8)` hands it `44`. Inside
+`with jax.disable_jit():`, `a + 200` hands it `-56` where the same line outside
+the block hands it `200` — same jaxpr, byte for byte, and no fire.
+
+Process-wide `JAX_DISABLE_JIT=1` is a different case and is handled: `arm()`
+reports `not-invoked` and the tool disables itself rather than reporting a quiet
+zero. Only the scoped block is silently blind.
 
 Eager execution is uncatchable from Python at all: warm dispatch is eleven
 frames of C++ fast path, the constant arrives as a `pjit` argument, and XLA
