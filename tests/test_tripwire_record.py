@@ -503,3 +503,45 @@ def test_a_changed_rule_hash_is_visible_in_the_status_line():
     moved = _rendered(record.Recorder(), _Status(rule_hash="def", known_hash="abc"))
     assert "sha1 abc (as tested)" in same
     assert "sha1 def (CHANGED upstream)" in moved
+
+
+def test_every_failure_code_is_explained_and_documented():
+    """The codes are advertised as stable and greppable, in three places: the
+    tuple, the explanation table, and ``docs/overflow-tripwire.md``. A code
+    added to one and not the others is a code a user greps for and a user
+    reads about, in different sets.
+
+    Also the property that makes "disabled never reads as unprotected" true of
+    EVERY code rather than of the ones someone remembered.
+    """
+    import pathlib
+
+    from stelling import _tripwire
+
+    missing = [c for c in _tripwire.FAILURE_CODES if c not in _tripwire._EXPLAIN]
+    assert not missing, f"failure codes with no explanation: {missing}"
+    extra = [c for c in _tripwire._EXPLAIN if c not in _tripwire.FAILURE_CODES]
+    assert not extra, f"explanations for codes nothing can return: {extra}"
+
+    for code in _tripwire.FAILURE_CODES:
+        text = _tripwire.Status(code=code).explanation
+        assert "Static checking is unaffected" in text, (
+            f"[{code}] does not say what still works, so it reads as "
+            "'you are unprotected'"
+        )
+
+    page = (pathlib.Path(__file__).resolve().parents[1] / "docs" / "overflow-tripwire.md").read_text(
+        encoding="utf-8"
+    )
+    undocumented = [c for c in _tripwire.FAILURE_CODES if f"`{c}`" not in page]
+    assert not undocumented, (
+        f"docs/overflow-tripwire.md does not name {undocumented}, and it "
+        "presents the list as complete"
+    )
+    # ...and the open-ended one, which is the only code not in the tuple
+    assert "`unexpected:<ExcType>`" in page
+
+    # an unknown code still explains itself rather than rendering `None`
+    fallback = _tripwire.Status(code="unexpected:ValueError").explanation
+    assert "does not have a name for" in fallback
+    assert "Static checking is unaffected" in fallback
