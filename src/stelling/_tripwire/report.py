@@ -64,7 +64,7 @@ UNCOVERED = (
     "`jnp.pad(x, k, constant_values=N)`. For `where` and `clip` the "
     "narrowing survives as a `convert_element_type` on a sub-jaxpr VARIABLE "
     "with the literal at the enclosing call site, so no constant is folded "
-    "and nothing here can see it.",
+    "and nothing here can see it. THE VALUE STILL WRAPS.",
     "doors where the value is ALREADY NARROWED BEFORE this site, so the rule "
     "receives something IN RANGE and does not fire -- AND THE VISIT IS "
     "COUNTED IN THE DENOMINATOR ABOVE, which is why a large denominator is "
@@ -73,14 +73,16 @@ UNCOVERED = (
     "`lax.select(p, jnp.full(shape, N, dt), x)`, "
     "`jnp.take(x, i, mode='fill', fill_value=N)`, and an operand that was "
     "already an array (the rule declines to fold non-scalars). numpy "
-    "truncates on the way in and the rule sees the wrapped value.",
+    "truncates on the way in and the rule sees the wrapped value, so THE "
+    "VALUE STILL WRAPS and nothing here can tell.",
     "anything inside a scoped `with jax.disable_jit():`, which swallows a "
     "door that is otherwise COVERED: `a + 200` on `int8` inside the block "
     "produces a jaxpr BYTE-IDENTICAL to the one that fires outside it and 0 "
     "fires, because the constant is narrowed before the site and the rule is "
     "handed -56 instead of 200. Process-wide `JAX_DISABLE_JIT=1` is a "
     "different case and is handled: `arm()` reports `not-invoked` and the "
-    "tool disables itself rather than reporting a quiet zero.",
+    "tool disables itself rather than reporting a quiet zero. Inside the "
+    "scoped block THE VALUE STILL WRAPS.",
     "anything traced BEFORE the tripwire was armed -- jit caches mean a "
     "function traced earlier in the process is never re-traced",
 )
@@ -212,7 +214,8 @@ def render_suppressed(rec: record.Recorder) -> list[str]:
         )
     lines.append(
         "    These are filtered out of the findings above because the "
-        "constant was written inside jax rather than outside it -- jax's PRNG seed mask "
+        "constant was written inside jax rather than outside it -- jax's "
+        "PRNG seed mask "
         "(0xFFFFFFFF -> -1) is the known instance and is deliberate. The "
         "filter is on by default; they are counted here so that a filter and "
         "a blind instrument do not look the same."
