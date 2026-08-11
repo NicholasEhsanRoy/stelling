@@ -279,6 +279,34 @@ bounds over horizons no test can reach.
 
 ---
 
+## Disclaimer and recommended practice
+
+Stelling is open-source software provided as-is under the Apache-2.0
+license, with no warranty of any kind. A VERIFIED verdict is a statement
+about a mathematical model under stated assumptions — it is not a
+guarantee about your deployed system, and the stamp exists precisely to
+name the gap between the two.
+
+**Do not rely on any single tool for safety-critical decisions.** Stelling
+is one layer in a verification stack, not a replacement for the others:
+
+- **Testing** (pytest, unittest) — exercises concrete inputs and catches
+  regressions no static tool looks for
+- **Property-based testing** ([hypothesis](https://hypothesis.readthedocs.io/))
+  — generates adversarial inputs and finds edge cases no author anticipated
+- **Runtime checking** (`jax.experimental.checkify`) — catches OOB, NaN,
+  and division by zero at execution time, which stelling does not attempt
+- **Type checking** (jaxtyping, mypy, pyright) — catches shape and type
+  mismatches at definition time
+- **Code review and domain expertise** — the only instrument that can judge
+  whether the declared envelope matches the physical system
+
+We are actively working to make stelling as correct and useful as
+possible, and we disclose its limitations in every verdict it produces. If
+you find a defect, please report it.
+
+---
+
 ## Documentation
 
 | | |
