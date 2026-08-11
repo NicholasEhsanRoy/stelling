@@ -5,23 +5,206 @@
 [![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/NicholasEhsanRoy/stelling/blob/main/LICENSE)
 
 # Stelling
-Inspired by Kani, Stelling is an assertion-based verifier for JAX array
-programs. Today it checks stated box invariants of continuous flows by
-forward interval propagation over the traced jaxpr — outward-rounded —
-escalating obligations the intervals cannot decide to an SMT portfolio
-(cvc5/Z3, opt-in extras), with a stamp on every verdict naming its own
-assumptions.
-<!-- capability-exempt: roadmap -->
-The roadmap (`design/founding.md`) aims it further: index safety, and
-bounds over horizons no test can reach.
-<!-- /capability-exempt -->
+
+An assertion-based verifier for JAX array programs — inspired by
+[Kani](https://github.com/model-checking/kani) for Rust. Prove stated
+properties of traced computations over declared input regions, with a stamp
+on every verdict naming its own assumptions.
 
 *stelling is not affiliated with or endorsed by the JAX project.*
 
-**Start here: [docs/quickstart.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/quickstart.md)** — install, one
-runnable harness, a stamped verdict, in four files. The
-[Quickstart](#quickstart) section below is the two-minute version, and
-[docs/](https://github.com/NicholasEhsanRoy/stelling/tree/main/docs/) indexes the rest.
+---
+
+## JAX silently narrows integer constants during tracing
+
+<!-- doc-example: illustrative -->
+```python
+x = jnp.int8(100)
+y = x + 256          # you wrote 256
+```
+
+The jaxpr — the trace JAX actually executes — contains:
+
+```
+add a 0:i8[]         # JAX silently made it 0
+```
+
+No error. No warning. Verify it yourself: `jax.make_jaxpr(lambda x: x + 256)(jnp.zeros(1, jnp.int8))` prints `add a 0:i8[]` — the 256 is gone.
+([full reproducer](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md))
+
+Six mechanisms were measured against it (`numpy_dtype_promotion("strict")`,
+`enable_checks`, `debug_nans`, `debug_infs`, `np.errstate(over='raise')`,
+`warnings.simplefilter('error')`) and **all six leave it silent**.
+`checkify.all_checks` returns `None` on it while its out-of-bounds and
+divide-by-zero controls throw.
+
+### Check your existing test suite with a single flag
+
+```sh
+pip install stelling
+pytest -p stelling.overflow
+```
+
+The tripwire hooks the exact site where the value dies and reports each
+narrowing with your source line, the arithmetic, an independent
+recomputation, and a one-line reproducer. It costs nothing until you switch
+it on — measured overhead is within noise over 60 cold traces.
+
+### Why this matters
+
+A silently wrapped constant does not crash. The program runs, the loss
+decreases, the simulation looks healthy. The integer you wrote and the
+integer in the trace are different numbers, and nothing told you. This is
+relevant anywhere JAX traces integer arithmetic:
+
+- **Quantized inference** — a scaling factor or zero-point that wraps
+  produces outputs in the wrong numerical range, silently
+- **Finite-volume solvers** — a grid constant or stencil coefficient that
+  wraps causes the discretisation to converge on a physically impossible
+  state
+- **Sensor pipelines** — an ADC offset or calibration constant that wraps
+  inverts the measurement, and downstream checks pass because they verify
+  the traced program, not the written one
+- **Control systems** — an actuator limit or safety threshold that wraps
+  can suppress a protective action
+
+If you then **verify** a property of that trace — "output stays within
+bounds" — the verifier is correct about a program you did not write. A
+VERIFIED over a corrupted trace is worse than no verification at all: it
+actively suppresses the signal that something is wrong.
+
+The tripwire detects this at trace time, and the static verifier refuses to
+certify a trace it flagged — the verdict is UNKNOWN with a note naming what
+was narrowed. A VERIFIED with the tripwire armed is a statement that the
+trace is faithful to what was written AND that the property holds.
+
+---
+
+## Where Stelling fits
+
+| tool | focus | scope |
+|---|---|---|
+| **`jax.experimental.checkify`** | runtime checks: NaN, OOB indexing, div-by-zero | operates on the jaxpr after constant folding — integer-literal narrowing has already completed before the transform runs |
+| **jaxtyping** | static shape and dtype checking via type hints | verifies types, not values — `int8` is the correct type; whether `256` fits in it is a different question |
+| **stelling** | trace-time overflow detection + static SMT-backed proof of algorithmic properties over declared input regions | the `jnp.full` / eager-execution paths where the literal is destroyed before the trace exists ([documented](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md)) |
+
+These tools are complementary. checkify catches runtime faults stelling
+cannot see; jaxtyping catches shape mismatches at definition time; stelling
+catches the trace-time value corruption both are blind to and proves
+properties neither attempts.
+
+---
+
+## Quickstart — prove a property
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+
+
+def harness():
+    # ANY float64 array of 8 elements, every element in [0.1, 10.0]
+    a = any_array((8,), jnp.float64, (0.1, 10.0))
+    a_face = 0.5 * (a + jnp.roll(a, -1))          # your own construction
+    return assert_(a_face > 0.0)                  # the obligation
+
+
+v = check(harness, vacuity_mode="inputs-only")
+print(v.status)
+print("semantics :", v.stamp.semantics.split(":")[0])
+print("solver    :", v.stamp.solver.reason)
+print("nonvacuity:", v.stamp.nonvacuity)
+print("coverage  :", v.stamp.coverage)
+```
+
+prints:
+
+```
+VERIFIED
+semantics : real (ℝ)
+solver    : no solver invoked: escalation was NOT ATTEMPTED (solver_timeout_ms not set); every obligation was judged by outward-rounded interval arithmetic alone
+nonvacuity: UNCHECKED — no membership conditions declared
+coverage  : 9 eqns: 8 known (89%); 1 transparent
+```
+
+VERIFIED here is about *every* array the declaration admits, not a
+sample — and the stamp says in what arithmetic, with what help, over how
+much of the query, and whether anyone has tied the declared box to data
+you actually run on. `v.render()` prints the whole stamp.
+
+**Full walkthrough:** [docs/quickstart.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/quickstart.md)
+
+---
+
+## Installation
+
+```sh
+pip install stelling              # zero dependencies; never touches JAX
+pip install stelling[solvers]     # adds both SMT backends (cvc5 + z3)
+```
+
+Stelling has **zero required dependencies**. JAX and the SMT solvers are opt-in
+extras, imported lazily on first use, so a bare install never touches the JAX
+(or CUDA stack) already managing your environment:
+
+| extra | installs | notes |
+|---|---|---|
+| `stelling[z3]` | `z3-solver` (MIT) | Z3 backend — the `QF_LRA` (linear) primary |
+| `stelling[cvc5]` | `cvc5` (BSD-3-Clause) | cvc5 backend, official PyPI wheels — the `QF_NRA` (polynomial) primary |
+| `stelling[solvers]` | both solvers | **the one to install.** The escalation portfolio uses whichever is installed; absence just means UNKNOWNs stay UNKNOWN (`design/solver-integration-build.md`) |
+| `stelling[jax]` | `jax` (CPU) | bootstrap **only** — never use it if jax is already installed |
+| `stelling[all]` | = `[solvers]` | deliberately excludes jax |
+
+Installing one backend rather than both does not weaken what a verdict
+claims — it removes the cross-check behind every discharge, and the verdict
+discloses that itself. Measured, in both directions:
+[docs/choosing-a-solver-backend.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/choosing-a-solver-backend.md).
+
+At runtime Stelling always uses whichever JAX is importable in your
+environment — the `[jax]` extra is bootstrap convenience plus a documented
+tested-version floor, not a binding. `[all]` deliberately excludes jax: the
+extra people type reflexively must never let the resolver touch a working
+jax install (a bump can desync CUDA plugin wheels). Nothing is vendored;
+both solver backends install from their official PyPI wheels on Linux,
+macOS, and Windows.
+
+`python -m stelling` prints which optional dependencies are installed and
+runs a one-formula smoke test against each available solver.
+
+### cvc5: wheel vs external binary
+
+The `cvc5` extra installs the official PyPI wheel — the non-GPL "BSD
+version" build. Verified against cvc5 1.3.4: the wheel bundles libpoly, so
+the cylindrical-algebraic-coverings solver (`nl-cov`) that nonlinear real
+arithmetic leans on is fully functional. What the wheel lacks is the `cvc5`
+CLI and the GPL-gated performance components — CLN (exact-arithmetic
+speed), glpk-cut-log (LP acceleration), and CoCoALib (Gröbner-basis
+speedups inside coverings, finite-field theory). The official GitHub
+release binaries are built the same way (libpoly yes, GPL components no),
+so a source build with `./configure.sh --gpl --auto-download` is the only
+route to those.
+
+To point stelling at a different cvc5 — a nightly, a distro or custom
+build, or (if you genuinely need the GPL components) your own source build:
+
+```sh
+export STELLING_CVC5=/path/to/cvc5   # or just put `cvc5` on PATH
+```
+
+Plainly: the near-term value of the external-binary route is nightlies and
+alternative builds, and the SMT-LIB 2 subprocess transport it rides on is
+the same one a later dReal-style backend will use. The GPL source build is
+a documented possibility, not an expectation — nobody does it casually.
+Either way, an external solver stays a separate program you chose to
+install: nothing links into stelling, and its Apache-2.0 licensing is
+unaffected. `python -m stelling` reports both transports, including which
+optional components a discovered binary was built with.
+
+---
 
 ## What it does — and what it doesn't, measured
 
@@ -89,116 +272,12 @@ runnable harness, a stamped verdict, in four files. The
   (`design/supply-probe.md`, `design/layer-probe.md`).
 <!-- /capability-exempt -->
 
-## Installation
+<!-- capability-exempt: roadmap -->
+The roadmap (`design/founding.md`) aims it further: index safety, and
+bounds over horizons no test can reach.
+<!-- /capability-exempt -->
 
-Not yet on PyPI — install from a clone:
-
-```sh
-pip install -e ".[solvers]"   # both SMT backends; never touches JAX
-pip install -e ".[jax]"       # bootstrap ONLY: for an environment with no JAX at all
-```
-
-Stelling has **zero required dependencies**. JAX and the SMT solvers are opt-in
-extras, imported lazily on first use, so a bare install never touches the JAX
-(or CUDA stack) already managing your environment:
-
-| extra | installs | notes |
-|---|---|---|
-| `stelling[z3]` | `z3-solver` (MIT) | Z3 backend — the `QF_LRA` (linear) primary |
-| `stelling[cvc5]` | `cvc5` (BSD-3-Clause) | cvc5 backend, official PyPI wheels — the `QF_NRA` (polynomial) primary |
-| `stelling[solvers]` | both solvers | **the one to install.** The escalation portfolio uses whichever is installed; absence just means UNKNOWNs stay UNKNOWN (`design/solver-integration-build.md`) |
-| `stelling[jax]` | `jax` (CPU) | bootstrap **only** — never use it if jax is already installed |
-| `stelling[all]` | = `[solvers]` | deliberately excludes jax |
-
-Installing one backend rather than both does not weaken what a verdict
-claims — it removes the cross-check behind every discharge, and the verdict
-discloses that itself. Measured, in both directions:
-[docs/choosing-a-solver-backend.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/choosing-a-solver-backend.md).
-
-At runtime Stelling always uses whichever JAX is importable in your
-environment — the `[jax]` extra is bootstrap convenience plus a documented
-tested-version floor, not a binding. `[all]` deliberately excludes jax: the
-extra people type reflexively must never let the resolver touch a working
-jax install (a bump can desync CUDA plugin wheels). Nothing is vendored;
-both solver backends install from their official PyPI wheels on Linux,
-macOS, and Windows.
-
-`python -m stelling` prints which optional dependencies are installed and
-runs a one-formula smoke test against each available solver.
-
-### cvc5: wheel vs external binary
-
-The `cvc5` extra installs the official PyPI wheel — the non-GPL "BSD
-version" build. Verified against cvc5 1.3.4: the wheel bundles libpoly, so
-the cylindrical-algebraic-coverings solver (`nl-cov`) that nonlinear real
-arithmetic leans on is fully functional. What the wheel lacks is the `cvc5`
-CLI and the GPL-gated performance components — CLN (exact-arithmetic
-speed), glpk-cut-log (LP acceleration), and CoCoALib (Gröbner-basis
-speedups inside coverings, finite-field theory). The official GitHub
-release binaries are built the same way (libpoly yes, GPL components no),
-so a source build with `./configure.sh --gpl --auto-download` is the only
-route to those.
-
-To point stelling at a different cvc5 — a nightly, a distro or custom
-build, or (if you genuinely need the GPL components) your own source build:
-
-```sh
-export STELLING_CVC5=/path/to/cvc5   # or just put `cvc5` on PATH
-```
-
-Plainly: the near-term value of the external-binary route is nightlies and
-alternative builds, and the SMT-LIB 2 subprocess transport it rides on is
-the same one a later dReal-style backend will use. The GPL source build is
-a documented possibility, not an expectation — nobody does it casually.
-Either way, an external solver stays a separate program you chose to
-install: nothing links into stelling, and its Apache-2.0 licensing is
-unaffected. `python -m stelling` reports both transports, including which
-optional components a discovered binary was built with.
-
-## Quickstart
-
-A **harness** is a zero-argument function that declares its inputs,
-states its obligations, and returns them. Everything it calls comes from
-one module — `stelling.harness`:
-
-```python
-import jax
-jax.config.update("jax_enable_x64", True)
-import jax.numpy as jnp
-
-from stelling.harness import any_array, assert_
-from stelling.preconditions import check
-
-
-def harness():
-    # ANY float64 array of 8 elements, every element in [0.1, 10.0]
-    a = any_array((8,), jnp.float64, (0.1, 10.0))
-    a_face = 0.5 * (a + jnp.roll(a, -1))          # your own construction
-    return assert_(a_face > 0.0)                  # the obligation
-
-
-v = check(harness, vacuity_mode="inputs-only")
-print(v.status)
-print("semantics :", v.stamp.semantics.split(":")[0])
-print("solver    :", v.stamp.solver.reason)
-print("nonvacuity:", v.stamp.nonvacuity)
-print("coverage  :", v.stamp.coverage)
-```
-
-prints:
-
-```
-VERIFIED
-semantics : real (ℝ)
-solver    : no solver invoked: escalation was NOT ATTEMPTED (solver_timeout_ms not set); every obligation was judged by outward-rounded interval arithmetic alone
-nonvacuity: UNCHECKED — no membership conditions declared
-coverage  : 9 eqns: 8 known (89%); 1 transparent
-```
-
-VERIFIED here is about *every* array the declaration admits, not a
-sample — and the stamp says in what arithmetic, with what help, over how
-much of the query, and whether anyone has tied the declared box to data
-you actually run on. `v.render()` prints the whole stamp.
+---
 
 ## Documentation
 
@@ -209,7 +288,7 @@ you actually run on. `v.render()` prints the whole stamp.
 | [Reading a verdict](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reading-a-verdict.md) | the statuses, every stamp line, and the two vacuity instruments |
 | [Preconditions guide](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/preconditions.md) | ready-made obligation templates and posing guidance |
 | [Choosing a solver backend](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/choosing-a-solver-backend.md) | z3, cvc5, or both — how obligations are routed, what each backend decided, and what one alone costs |
-| [The overflow tripwire](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md) | one line in `conftest.py`, then run your existing suite: JAX silently narrows out-of-range integer constants (`x + 256` on `int8` reaches the jaxpr as `add a 0:i8[]`), and this reports the ones it sees — with your line quoted, the arithmetic, and a reproducer — over a printed denominator and a printed list of the doors it does **not** watch |
+| [The overflow tripwire](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/overflow-tripwire.md) | full reference: every door it watches, every door it does not, xdist aggregation, and the gate that refuses to verify a corrupted trace |
 | [Reproducing a witness](https://github.com/NicholasEhsanRoy/stelling/blob/main/docs/reproducing-a-witness.md) | emit a runnable file that executes a REFUTED's witness through **your own program, with stelling uninstalled** — the one check that does not trust this tool |
 | [SOUNDNESS.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/SOUNDNESS.md) | what a verdict is permitted to claim |
 | [docs/](https://github.com/NicholasEhsanRoy/stelling/tree/main/docs/) | index, including the project-state and ledger records |

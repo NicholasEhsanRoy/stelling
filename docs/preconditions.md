@@ -15,10 +15,9 @@ expensive computation — and when they fail, they fail **silently**: the
 solver converges to something, the flags look healthy, and the answer is
 wrong.
 
-Install: not yet on PyPI, so `pip install -e .` from a clone, into the
-environment that already has your JAX (stelling never touches your
-resolver); add `pip install -e ".[solvers]"` if you want the SMT step
-below.
+Install: `pip install stelling` into the environment that already has your
+JAX (stelling never touches your resolver); add `pip install
+stelling[solvers]` if you want the SMT step below.
 
 Stelling checks these **over a declared range, not at a point**. A test
 runs your code at some inputs; a verdict here holds for *every* value in

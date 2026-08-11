@@ -19,8 +19,8 @@ function name are not placeholders.
 ## Install
 
 ```sh
-pip install -e .              # into the environment that already has your JAX
-pip install -e ".[solvers]"   # optional: adds the SMT step (never touches JAX)
+pip install stelling              # into the environment that already has your JAX
+pip install stelling[solvers]     # optional: adds the SMT step (never touches JAX)
 ```
 
 Stelling needs a JAX in the environment to trace a harness; it never
@@ -93,6 +93,14 @@ people first:
    itself. [Reading a verdict](reading-a-verdict.md#the-two-vacuity-instruments)
    explains both and tells you how to clear the second one; §3 below is
    the short version.
+
+**One more thing VERIFIED does not say on its own:** that the trace is
+faithful to what you wrote. JAX silently wraps out-of-range integer
+constants before they reach the jaxpr — if your code has one, the verifier
+is correct about a program you did not write. Enable the
+[overflow tripwire](overflow-tripwire.md) (`pytest -p stelling.overflow`)
+and a VERIFIED with the tripwire armed means both: the trace is faithful
+AND the property holds.
 
 ## 2. The three judgments
 
@@ -172,7 +180,7 @@ reproducible event, so you name its budget or it does not happen. Omit
 it and the run is interval-only, which the stamp records in the solver
 line as `escalation was NOT ATTEMPTED (solver_timeout_ms not set)`, as in
 §1 above. Escalation also needs a solver installed
-(`pip install -e ".[solvers]"`).
+(`pip install stelling[solvers]`).
 
 ## 3. Tying the box to real data
 

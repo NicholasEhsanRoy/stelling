@@ -33,7 +33,29 @@ way into a JAX trace. On an `int8` array, `x + 256` reaches the jaxpr as
 add a 0:i8[]
 ```
 
-The `256` you wrote is destroyed. No error, no warning, no `RuntimeWarning`
+The `256` you wrote is destroyed. Reproduce it yourself (verified on JAX
+0.10.2 and 0.11.0 — the output is byte-identical on both):
+
+<!-- doc-example: illustrative -->
+```python
+import jax
+import jax.numpy as jnp
+
+def add_offset(x):
+    return x + 256
+
+jaxpr = jax.make_jaxpr(add_offset)(jnp.zeros(1, jnp.int8))
+print(jaxpr)
+# { lambda ; a:i8[1]. let b:i8[1] = add a 0:i8[] in (b,) }
+#                                          ^^^^
+#                               256 is gone — JAX traced 0
+
+result = jax.jit(add_offset)(jnp.int8([100, 50, -10]))
+print(result.tolist())
+# [100, 50, -10]  — the function is x + 0 = x, not x + 256
+```
+
+No error, no warning, no `RuntimeWarning`
 you could turn into one — six supported mechanisms were measured against it
 (`numpy_dtype_promotion('strict')`, `enable_checks`, `debug_nans`,
 `debug_infs`, `np.errstate(over='raise')`, `warnings.simplefilter('error')`)

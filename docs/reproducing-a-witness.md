@@ -53,8 +53,8 @@ sidecar's `execution.detail` says which. **Read it, not the status.**
 ## A complete example you can run
 
 Everything below is here. No other package, no fixture, nothing to stand in
-for — `pip install -e ".[solvers]"` from a clone, two files, and the output
-is what it prints. A witness only exists because a solver found one, so the
+for — `pip install stelling[solvers]`, two files, and the output is what it
+prints. A witness only exists because a solver found one, so the
 solver extra is the part you cannot skip.
 
 Install it into the environment that already has your JAX, and do **not**
