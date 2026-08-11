@@ -58,7 +58,9 @@ def test_scatter_add_with_a_present_none_combiner_is_not_modelled_as_add():
     scatter-add is not covered by the VERIFIED bar, so nothing downstream
     would have caught it.
     """
-    # public surface only — private jax modules are banned repo-wide
+    # public surface only. Private jax modules are banned everywhere in
+    # `tests/` and everywhere under `src/` except `_tripwire/_adapter_jax.py`,
+    # which carries the one exemption -- see `design/private-jax-boundary.md`.
     from jax.lax import (
         GatherScatterMode,
         ScatterDimensionNumbers,

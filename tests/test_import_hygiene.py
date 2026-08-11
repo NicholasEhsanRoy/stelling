@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 # SPDX-License-Identifier: Apache-2.0
 
-"""Import hygiene: jax only in _jax_compat; private jax modules nowhere;
-solvers never at module level — the zero-dep surface must import clean.
+"""Import hygiene: jax only in _jax_compat; private jax modules in exactly one
+file; solvers never at module level — the zero-dep surface must import clean.
 
 Two kinds of check live here and they measure different things.
 
@@ -58,6 +58,25 @@ JAX_IMPORT = re.compile(r"^\s*(import jax\b|from jax\b)")
 PRIVATE_JAX = "jax." + "_src"
 SOLVER_MODULES = ("z3", "cvc5")
 
+# THE TWO EXEMPTIONS, AND THEY ARE NOT THE SAME KIND OF THING.
+#
+# Rule 1's is a BASE NAME, matching `--exclude=_jax_compat.py` in the hook —
+# grep's `--exclude` matches a base name when searching recursively, so any
+# file under src/ called that is exempt in both controls. That is deliberate
+# and is recorded as measured in the hook's own comment
+# (`src/zzsub/_jax_compat.py` with a bare `import jax`: Passed in both).
+#
+# Rule 2's is a full repo-relative PATH, matching the hook's anchored
+# `grep -v "^src/stelling/_tripwire/_adapter_jax\.py:"`. It has to be a path:
+# `--exclude` cannot express one (spelled with slashes it is silently inert,
+# measured on GNU grep 3.11), and a base name would exempt a decoy at any
+# other path. `design/private-jax-boundary.md` carries that table, and the
+# measured reason the exemption exists at all — the registry the tripwire
+# attaches to is exported by no public or `jax.extend` module on either tested
+# series.
+JAX_IMPORT_EXEMPT_NAME = "_jax_compat.py"
+PRIVATE_JAX_EXEMPT_PATH = Path("src/stelling/_tripwire/_adapter_jax.py")
+
 # The install line inside what `require("jax")` promises the user. This is a
 # hard-coded literal, so it pins the message against a silent reword but says
 # nothing about the doc: docs/harness-api.md quotes the WHOLE sentence, and
@@ -84,7 +103,7 @@ def test_jax_imported_only_in_compat_module():
     """
     offenders = []
     for path in (REPO / "src").rglob("*.py"):
-        if path.name == "_jax_compat.py":
+        if path.name == JAX_IMPORT_EXEMPT_NAME:
             continue
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
             if JAX_IMPORT.match(line):
@@ -93,15 +112,196 @@ def test_jax_imported_only_in_compat_module():
 
 
 def test_private_jax_modules_banned_everywhere():
+    """One file may name a private jax module, and it is named by PATH.
+
+    The exemption is not a widening of the rule above and does not inherit
+    from it: ``_tripwire/_adapter_jax.py`` is exempt from *this* check and is
+    still subject to :func:`test_jax_imported_only_in_compat_module`, so an
+    ``import jax`` added to it reddens the suite exactly as it would in any
+    other module. That is the whole relaxation — one rule, one path — and
+    ``design/private-jax-boundary.md`` records the measurement that closed the
+    alternatives, including the seven public and ``jax.extend`` modules that do
+    not export the registry the adapter is for.
+
+    ``tests/`` is still covered with no exemption but this file's own (which
+    is why :data:`PRIVATE_JAX` is built by concatenation as well): the
+    tripwire's tests reach the registry through the adapter's API and never
+    name it. The pre-commit hook scans ``src/`` only — a deliberate difference
+    in SCOPE, not in the exempt set, and
+    :func:`test_the_hook_and_this_file_exempt_the_same_set` is what holds the
+    exempt set together.
+    """
     offenders = []
     for directory in ("src", "tests"):
         for path in (REPO / directory).rglob("*.py"):
             if path.name == Path(__file__).name:
                 continue
+            if path.relative_to(REPO) == PRIVATE_JAX_EXEMPT_PATH:
+                continue
             for lineno, line in enumerate(path.read_text().splitlines(), 1):
                 if PRIVATE_JAX in line:
                     offenders.append(f"{path.relative_to(REPO)}:{lineno}: {line.strip()}")
-    assert not offenders, f"{PRIVATE_JAX} is banned outright:\n" + "\n".join(offenders)
+    assert not offenders, (
+        f"{PRIVATE_JAX} may only be named in {PRIVATE_JAX_EXEMPT_PATH}:\n"
+        + "\n".join(offenders)
+        + "\nThat file exists because the const-fold registry is exported by no "
+        "public or `jax.extend` module on either tested series. If you need the "
+        "same thing, call it — do not add a second bearer."
+    )
+
+
+def test_the_private_jax_exemption_is_load_bearing_and_is_exactly_one_file():
+    """An exemption nothing uses is an exemption nobody watches biting.
+
+    Both directions in one list, which is the acceptance criterion the plan
+    states as "the private-module token appears in exactly one file under
+    ``src/``" — spelled that way here, and everywhere else in this file,
+    because :data:`PRIVATE_JAX` is built by concatenation precisely so that
+    this file cannot match itself. It is also exempt by name in the check
+    above, and relying on that instead would be one control where there are
+    currently two.
+
+    * the exempt path really does name the private module — so the check above
+      is exercised rather than decorative, and a deletion of the tripwire has
+      to take the exemption with it;
+    * and nothing else under ``src/`` does.
+    """
+    bearers = sorted(
+        str(path.relative_to(REPO))
+        for path in (REPO / "src").rglob("*.py")
+        if PRIVATE_JAX in path.read_text(encoding="utf-8")
+    )
+    assert bearers == [str(PRIVATE_JAX_EXEMPT_PATH)], (
+        f"exactly one file under src/ may name {PRIVATE_JAX}, and it is "
+        f"{PRIVATE_JAX_EXEMPT_PATH}. Found: {bearers}.\n"
+        "An empty list means the exemption now points at a file that does not "
+        "use it: remove the exemption from BOTH this file and the "
+        "jax-import-hygiene hook, or the next file to want it inherits a hole "
+        "nobody decided to leave."
+    )
+
+
+def _hook_entry(hook_id: str) -> str:
+    """The ``entry:`` scalar of one local pre-commit hook, folded to one line.
+
+    Read as text rather than parsed: this file is deliberately dependency-free
+    (a YAML parser is not a core dependency, and the zero-dep lane runs these
+    checks). The scalar is sliced by INDENTATION so that the hook's comment
+    block — which quotes both exemption spellings, including the ones measured
+    NOT to work — cannot be mistaken for the code that runs.
+    """
+    lines = (REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8").splitlines()
+    start = next(
+        (i for i, line in enumerate(lines) if line.strip() == f"- id: {hook_id}"),
+        None,
+    )
+    assert start is not None, f"no hook with id {hook_id!r} in .pre-commit-config.yaml"
+    item_indent = len(lines[start]) - len(lines[start].lstrip())
+
+    for i in range(start + 1, len(lines)):
+        stripped = lines[i].lstrip()
+        indent = len(lines[i]) - len(stripped)
+        if stripped.startswith("- id: ") and indent == item_indent:
+            break  # the next hook: this one has no entry
+        if not stripped.startswith("entry:"):
+            continue
+        body = []
+        for j in range(i + 1, len(lines)):
+            nxt = lines[j]
+            if nxt.strip() and (len(nxt) - len(nxt.lstrip())) <= indent:
+                break
+            body.append(nxt.strip())
+        return " ".join(body)
+    raise AssertionError(f"hook {hook_id!r} has no entry: scalar")
+
+
+def test_the_hook_and_this_file_exempt_the_same_set():
+    """The two controls have a recorded history of disagreeing, so it is read.
+
+    The hook and these checks are meant to be logically identical on WHAT is
+    exempt; they differ on scope by design (the hook scans ``src/``, this file
+    scans ``src/`` and ``tests/``). The first half of the hook was
+    unenforceable for a period and its exemption was once by line CONTENT, both
+    recorded in its own comment — a divergence here is not hypothetical.
+
+    Derived from the shipped config, not restated: the exemption spellings are
+    parsed out of the ``entry:`` that actually runs and compared with the
+    constants these checks use. Adding a third exemption to either side, or
+    moving one, fails here.
+    """
+    entry = _hook_entry("jax-import-hygiene")
+
+    # rule 1: every `--exclude` in the entry, base names by construction
+    excludes = set(re.findall(r"--exclude=([^\s;)]+)", entry))
+    assert excludes == {JAX_IMPORT_EXEMPT_NAME}, (
+        f"the hook's --exclude set is {sorted(excludes)}; this file exempts "
+        f"{JAX_IMPORT_EXEMPT_NAME!r} by name and nothing else. A `--exclude` "
+        "spelled with slashes is silently inert (measured, GNU grep 3.11), so "
+        "a path added here would be an exemption in name only."
+    )
+
+    # rule 2: the anchored path filter(s), which is how a PATH is expressed
+    anchored = re.findall(r'grep -v "\^([^"]+):"', entry)
+    assert len(anchored) == 1, (
+        f"expected exactly one anchored path exemption in the hook, found "
+        f"{anchored}. Every one of them is a file allowed to name "
+        f"{PRIVATE_JAX}, and this file exempts exactly one."
+    )
+    assert Path(anchored[0].replace("\\.", ".")) == PRIVATE_JAX_EXEMPT_PATH, (
+        f"the hook exempts {anchored[0]!r} and this file exempts "
+        f"{PRIVATE_JAX_EXEMPT_PATH}. They must be the same file."
+    )
+
+
+def test_importing_stelling_pulls_in_no_jax():
+    """``import stelling`` imports no jax, read from ``sys.modules``.
+
+    Load-bearing for the zero-dep posture and newly at risk: the tripwire is a
+    package under ``src/stelling/`` whose whole purpose is to reach into jax,
+    and a plugin that armed a hook at import time would take this down without
+    touching any of the checks above. Measured in a fresh interpreter, because
+    the suite's own process has jax loaded long before this runs.
+
+    Carries its own positive control: where jax IS installed, the probe forces
+    it in and confirms it can see it. Without that, an environment with no jax
+    reports the same empty list for the wrong reason.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(
+            """
+            import importlib.util, json, sys
+
+            import stelling
+
+            out = {
+                "file": stelling.__file__,
+                "jax_modules": sorted(
+                    m for m in sys.modules if m.split(".")[0] == "jax"
+                ),
+                "jax_installed": importlib.util.find_spec("jax") is not None,
+            }
+            if out["jax_installed"]:
+                __import__("jax")
+                out["visible_when_forced"] = "jax" in sys.modules
+            print(json.dumps(out))
+            """
+        )],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env={**os.environ, "PYTHONPATH": str(SRC), "JAX_PLATFORMS": "cpu"},
+    )
+    assert proc.returncode == 0, f"probe crashed:\n{proc.stdout}\n{proc.stderr}"
+    got = json.loads(proc.stdout.strip().splitlines()[-1])
+
+    assert Path(got["file"]).resolve().parents[1] == SRC, got
+    assert got["jax_modules"] == [], (
+        "`import stelling` pulled jax in: " + ", ".join(got["jax_modules"])
+        + ". The core is zero-dep and jax is an extra; whatever imported it "
+        "must reach it inside a function through stelling._optional instead."
+    )
+    if got["jax_installed"]:
+        assert got["visible_when_forced"] is True, got
 
 
 def _module_level_statements(tree: ast.Module):

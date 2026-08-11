@@ -117,8 +117,14 @@ sentence after the table — and all three are checked.
 - SPDX headers are inserted automatically by the pre-commit hook; don't
   fight it.
 - Only `src/stelling/_jax_compat.py` may import jax. Everything else
-  consumes the jax-free `stelling.ir`. Private jax modules are banned
-  everywhere. Both rules are enforced by a pre-commit hook and by tests.
+  consumes the jax-free `stelling.ir`. Private jax modules (`jax._src`) are
+  banned everywhere except one file — `src/stelling/_tripwire/_adapter_jax.py`,
+  which reaches a registry that no public or `jax.extend` module exports on
+  either tested series, measured rather than assumed. That file is still
+  subject to the first rule. Both rules are enforced by a pre-commit hook and
+  by tests, which are held to the same exempt set; the reasoning and the
+  rejected alternatives are in
+  [design/private-jax-boundary.md](design/private-jax-boundary.md).
 - Any change that can flip a verdict on any query is a soundness event and
   needs an entry in [SOUNDNESS.md](SOUNDNESS.md), whatever the semver bump
   says.
