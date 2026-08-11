@@ -331,6 +331,31 @@ def _int_or_none(value) -> int | None:
         return None
 
 
+# Per-THREAD stack of gate fire counters. Each _pipeline invocation pushes
+# a 0; the wrapper increments stack[-1]; _pipeline pops and reads its own
+# count. Empty when no gate is active — selfcheck and session-wide
+# accumulation go only to recorder.fires.
+#
+# Thread-local because the stack is POSITIONAL: push/increment/pop must be
+# on the same thread to maintain LIFO semantics. A shared list under a
+# ThreadPoolExecutor would let thread A's narrowing increment thread B's
+# counter (the top of a shared stack is whoever pushed last, not whoever
+# is tracing). JAX tracing is single-threaded, but a test harness in a
+# ThreadPoolExecutor is not JAX's to forbid.
+import threading as _threading
+
+_gate_fire_local = _threading.local()
+
+
+def _gate_fire_stack() -> list[int]:
+    """The current thread's gate-fire stack (created on first access)."""
+    try:
+        return _gate_fire_local.stack
+    except AttributeError:
+        _gate_fire_local.stack = []
+        return _gate_fire_local.stack
+
+
 def _make_wrapper(original, recorder: record.Recorder, jaxroot: str):
     """Build the recording wrapper. Nothing in here may raise into a trace.
 
@@ -373,6 +398,9 @@ def _make_wrapper(original, recorder: record.Recorder, jaxroot: str):
                 return result
 
             recorder.fires += 1
+            stack = _gate_fire_stack()
+            if stack:
+                stack[-1] += 1
             frames = _stack(2)
             index, origin = record.attribute(frames, jaxroot, TRACE_ENTRY_NAMES)
             if origin == record.ORIGIN_JAX:
@@ -635,6 +663,10 @@ def selfcheck() -> str:
     shape = (_probe_seq,)
 
     saved = recorder.as_payload()
+    # Isolate the probe from any active gate: push our own stack entry so
+    # probe fires go HERE and not into a gate that happens to be active.
+    stack = _gate_fire_stack()
+    stack.append(0)
     try:
         recorder.reset()
         try:
@@ -667,5 +699,6 @@ def selfcheck() -> str:
             return "cries-wolf"
         return "armed"
     finally:
+        stack.pop()
         recorder.reset()
         recorder.absorb(saved)

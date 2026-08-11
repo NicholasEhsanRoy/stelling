@@ -244,6 +244,46 @@ def is_armed() -> bool:
         return False
 
 
+def fires_count() -> int | None:
+    """Total narrowing fires observed (including repeats), or None if not armed.
+
+    Used by the gate to detect disarm-during-trace (before is int, after is
+    None → unsafe). The per-gate fire count comes from ``_push_gate`` /
+    ``_pop_gate`` instead.
+    """
+    try:
+        from stelling._tripwire import _adapter_jax as adapter
+
+        rec = adapter._installed.get("recorder")
+        if rec is None:
+            return None
+        return rec.fires
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _push_gate() -> None:
+    """Begin a gated trace. The wrapper will increment this gate's counter."""
+    from stelling._tripwire import _adapter_jax as adapter
+
+    adapter._gate_fire_stack().append(0)
+
+
+def _pop_gate() -> int:
+    """End a gated trace. Returns narrowings observed during THIS trace only.
+
+    Each gate invocation pushes a counter; the fold-rule wrapper increments
+    only the top of the stack; this pops it. Nested ``check()`` calls each
+    get their own counter and never contaminate the outer gate.
+    """
+    from stelling._tripwire import _adapter_jax as adapter
+
+    stack = adapter._gate_fire_stack()
+    if stack:
+        return stack.pop()
+    return 0
+
+
 def live_check() -> str:
     """``armed``, ``detached`` or ``foreign-patch``. Never raises.
 

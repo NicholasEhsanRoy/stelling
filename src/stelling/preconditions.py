@@ -239,7 +239,72 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
             f"refine must be None or 'affine', got {refine!r}"
         )
 
-    cj = trace(harness)
+    from stelling._tripwire import (
+        _pop_gate, _push_gate, fires_count as _fires_count,
+    )
+    from stelling._tripwire import _adapter_jax as _adapter
+
+    armed = _fires_count() is not None
+    if armed:
+        recorder_before = _adapter._installed.get("recorder")
+        _push_gate()
+        try:
+            # Fresh closure defeats jax.make_jaxpr's identity cache, ensuring
+            # the fold rule fires fresh and the gate can observe narrowings.
+            cj = trace(lambda: harness())
+        finally:
+            narrowings = _pop_gate()
+        # If the recorder changed (disarm/rearm during trace) or the tripwire
+        # was disarmed, the wrapper may have stopped firing mid-trace while
+        # narrowings had already occurred. Refuse to certify.
+        recorder_after = _adapter._installed.get("recorder")
+        if recorder_after is not recorder_before or _fires_count() is None:
+            narrowings = max(narrowings, 1)
+    else:
+        cj = trace(harness)
+        narrowings = 0
+
+    if narrowings > 0:
+        from stelling.verdict import Stamp, Verdict, solver_absent
+
+        versions = dict(
+            stelling_version=_stelling.__version__,
+            jax_version=jax_version(),
+            precision_config=f"jax_enable_x64={x64_enabled()}",
+        )
+        reason = (
+            f"trace unfaithful: {narrowings} integer narrowing(s) detected "
+            f"during tracing — the jaxpr does not represent the program as "
+            f"written. Enable the overflow tripwire (pytest -p stelling."
+            f"overflow) to see which constants were narrowed."
+        )
+        stamp = Stamp(
+            stelling_version=versions["stelling_version"],
+            jax_version=versions["jax_version"],
+            precision_config=versions["precision_config"],
+            device_class="none: no concrete execution in this verdict",
+            arithmetic_mode="not reached: trace gate refused",
+            semantics="not reached: trace gate refused",
+            query_content_hash=cj.content_hash(),
+            nonvacuity="not reached: trace gate refused",
+            solver=solver_absent(
+                "not reached: the trace gate refused before propagation"
+            ),
+            transfer_tiers=(),
+            transfer_provenance=(),
+            assumptions=(),
+            coverage="not reached: trace gate refused",
+            top_despite_coverage=None,
+        )
+        v = Verdict(
+            status="UNKNOWN",
+            obligations=(),
+            stamp=stamp,
+            notes=(reason,),
+            witnesses=(),
+        )
+        return v, cj
+
     p = propagate(cj)
     versions = dict(
         stelling_version=_stelling.__version__,

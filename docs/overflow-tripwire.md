@@ -263,14 +263,17 @@ your trace — if its own bookkeeping fails it counts the failure, discloses it
 in the report, and carries on, because an instrument that breaks the suite it
 is measuring is worse than no instrument.
 
-## What it does not do to your verdicts
+## What it does to your verdicts
 
-Nothing. A fire does **not** change any stelling verdict today. If the
-tripwire fires while stelling is tracing a harness, the trace is not faithful
-to the source as written and the query arguably should be downgraded to
-UNKNOWN — but that is a change to what VERIFIED means, it is reserved, and it
-is not wired. Do not read a green stelling verdict as "and no narrowing
-occurred".
+When the tripwire is armed and a narrowing fires during a `stelling.harness.
+trace()` call, the verdict is **UNKNOWN** — the pipeline refuses to propagate
+or judge a jaxpr that does not represent the program as written. The note says
+how many narrowings were detected and directs you to the tripwire report for
+details.
+
+When the tripwire is NOT armed (the default), this gate is inactive and
+verdicts are unaffected. The gate is a function of the tripwire's state at
+trace time, never of whether the plugin is installed.
 
 ## Configuration reference
 
