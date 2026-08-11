@@ -61,6 +61,20 @@ solvers = ["stelling[z3,cvc5]"]
 # can desync CUDA plugin wheels).
 all = ["stelling[z3,cvc5]"]
 
+# REGISTERED ALWAYS, ACTIVE NEVER. This entry point is loaded by every pytest
+# run in an environment where stelling is installed, which is exactly why the
+# module behind it adds one command-line flag and does nothing else: it
+# imports no jax and installs no hook unless the user opts in with
+# `pytest_plugins = ["stelling.overflow"]`, `-p stelling.overflow`, or
+# `--stelling-overflow=auto`. Someone who installed stelling for the verifier
+# must not find their suite instrumented because of it.
+#
+# pytest is NOT a runtime dependency and must not become one: the module named
+# here imports `pytest` at module scope, which is safe precisely because
+# nothing loads it except pytest itself.
+[project.entry-points.pytest11]
+stelling_overflow = "stelling._tripwire.plugin"
+
 [project.urls]
 Homepage = "https://github.com/NicholasEhsanRoy/stelling"
 Repository = "https://github.com/NicholasEhsanRoy/stelling"
