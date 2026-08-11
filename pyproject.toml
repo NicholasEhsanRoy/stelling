@@ -178,6 +178,7 @@ include = [
   "/.github",
   "/pyproject.toml",
   "/README.md",
+  "/CHANGELOG.md",
   "/LICENSE",
   "/REUSE.toml",
   "/CITATION.cff",

@@ -339,9 +339,12 @@ pytest
 Every source file carries an SPDX header (template in `.license-header.txt`);
 the pre-commit hook inserts it into new files automatically. Commits must be
 signed off (`git commit -s`) — see [CONTRIBUTING.md](https://github.com/NicholasEhsanRoy/stelling/blob/main/CONTRIBUTING.md) and
-[DCO](https://github.com/NicholasEhsanRoy/stelling/blob/main/DCO). Only `stelling/_jax_compat.py` may import jax; everything else
-consumes the jax-free `stelling.ir`, and both rules are enforced by hooks
-and tests.
+[DCO](https://github.com/NicholasEhsanRoy/stelling/blob/main/DCO). Two import rules, both enforced by hooks and tests: (1) only
+`stelling/_jax_compat.py` may spell `import jax` / `from jax` — the
+churn boundary; (2) `jax._src` is banned everywhere except one pinned
+file (`_tripwire/_adapter_jax.py`, which reaches the private
+constant-fold registry via `importlib.import_module`). Everything else
+consumes the jax-free `stelling.ir`.
 
 ## License
 
