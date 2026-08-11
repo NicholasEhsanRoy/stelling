@@ -72,13 +72,25 @@ def _rule_line() -> str:
 
 
 def render_status(status) -> list[str]:
-    """The one-or-two lines that say whether the instrument is live."""
+    """The lines that say whether the instrument is live.
+
+    §4 REQUIRES THREE THIRDS OF EVERY MESSAGE: what happened, what it means,
+    and what still works. This rendered ``status.detail`` as the middle third,
+    and ``arm()`` leaves ``detail`` empty for every one of the failure codes —
+    so the primary channel printed ``NOT ARMED [no-module] --`` with a dangling
+    dash and no middle third at all. The middle third only ever reached the
+    ``require`` ``UsageError`` and the canary, both of which read
+    ``Status.explanation``. It is ``Status.meaning`` that is never empty, so it
+    is what goes here; ``detail`` is the extra, printed when there is one.
+    """
     lines = []
     if status.armed:
         detail = f"armed -- {status.detail}" if status.detail else "armed"
         lines.append(detail)
     else:
-        lines.append(f"NOT ARMED [{status.code}] -- {status.detail}")
+        lines.append(f"NOT ARMED [{status.code}] -- {status.meaning}")
+        if status.detail:
+            lines.append(f"    detail: {status.detail}")
         lines.append(
             "    Static checking is unaffected: `stelling.preconditions.check` "
             "and every verdict path work exactly as before. What is disabled "

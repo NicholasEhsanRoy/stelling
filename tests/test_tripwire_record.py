@@ -311,21 +311,25 @@ def test_merging_two_workers_sums_counts_rather_than_duplicating_findings():
 # --- the report is a witness ------------------------------------------------
 
 
-class _Status:
-    def __init__(self, code="armed", detail="", rule_hash=None, known_hash=None):
-        self.code = code
-        self.detail = detail
-        self.rule_hash = rule_hash
-        self.known_hash = known_hash
-        self.rule_name = "_convert_elt_type_folding_rule"
+def _Status(code="armed", detail="", rule_hash=None, known_hash=None):
+    """THE SHIPPED ``Status``, not a stand-in.
 
-    @property
-    def armed(self):
-        return self.code == "armed"
+    It was a hand-written stub whose ``explanation`` returned ``detail``, and
+    the render tests below therefore could not see that the primary channel
+    prints ``NOT ARMED [no-module] --`` with nothing after the dash. A stub
+    that reimplements the object under test measures the stub. ``Status``
+    imports only :mod:`dataclasses`, so this stays runnable in a bare
+    interpreter, which is the reason the stub existed.
+    """
+    from stelling._tripwire import Status
 
-    @property
-    def explanation(self):
-        return self.detail
+    return Status(
+        code=code,
+        detail=detail,
+        rule_hash=rule_hash,
+        known_hash=known_hash,
+        rule_name="_convert_elt_type_folding_rule",
+    )
 
 
 def _rendered(rec, status=None):
@@ -503,6 +507,35 @@ def test_a_disabled_tripwire_says_what_still_works():
     text = _rendered(record.Recorder(), _Status(code="no-registry", detail="moved"))
     assert "NOT ARMED [no-registry]" in text
     assert "Static checking is unaffected" in text
+
+
+def test_the_primary_channel_carries_all_THREE_thirds_for_every_code():
+    """§4: every message says what happened, what it MEANS, and what still
+    works — and the middle third is the one the terminal used to drop.
+
+    ``render_status`` printed ``status.detail``, which ``arm()`` leaves empty
+    for all of the failure codes, so the shipped line was
+    ``NOT ARMED [no-module] --``: a dangling dash where the meaning belongs.
+    ``docs/overflow-tripwire.md`` says the summary states "what the code
+    means", and only the ``require`` ``UsageError`` and the canary did.
+
+    Driven over EVERY code rather than one, because the defect was that the
+    codes with a non-empty detail (``below-floor``, ``unexpected:*``) read
+    fine and hid the rest.
+    """
+    from stelling import _tripwire
+
+    for code in _tripwire.FAILURE_CODES + ("unexpected:ValueError",):
+        first = _rendered(record.Recorder(), _Status(code=code)).splitlines()[2]
+        assert first.startswith(f"NOT ARMED [{code}] -- "), first
+        assert not first.endswith("--"), f"[{code}] renders a dangling dash"
+        meaning = first.split(" -- ", 1)[1].strip()
+        assert len(meaning) > 30, f"[{code}] has no middle third: {first!r}"
+        assert meaning == _tripwire.Status(code=code).meaning
+
+    # the detail, when arming produced one, is kept rather than displaced
+    text = _rendered(record.Recorder(), _Status(code="below-floor", detail="jax 0.4.7"))
+    assert "older than the version" in text and "detail: jax 0.4.7" in text
 
 
 def test_a_changed_rule_hash_is_visible_in_the_status_line():
