@@ -16,8 +16,8 @@ or, without editing anything:
 
 Either one turns ``--stelling-overflow`` from ``off`` to ``auto``: the
 tripwire arms, your existing suite runs unchanged, and out-of-range integer
-narrowings in your own traced code are reported in the terminal summary with
-the line you wrote, the arithmetic, and a reproducer. Add
+narrowings in the traced code you ran are reported in the terminal summary
+with the writing line quoted, the arithmetic, and a reproducer. Add
 ``--stelling-overflow=require`` if you want a session that cannot arm it to
 fail.
 

@@ -66,10 +66,12 @@ each one like this:
 ```
 [1] model/quantize.py:41 in to_int8
     41 | return (x - 128) * 300
-    RULE      attribution: the innermost frame of YOUR code inside the traced
-              region -- not the entry point, and not jax's caller
-    OBSERVED  you wrote 300; int8 holds that as 44. Both halves read at the
-              site: the rule received 300 (int64) and returned 44 (int8).
+    RULE      attribution: the innermost frame OUTSIDE JAX inside the traced
+              region -- your own code, or a library you called that is not
+              jax. Not the entry point, and not jax's caller
+    OBSERVED  the constant written there is 300; int8 holds that as 44. Both
+              halves read at the site: the rule received 300 (int64) and
+              returned 44 (int8).
     ARITHMETIC 300 mod 2**8 = 44, which is < 2**7, so 44
     CONFIRMED recomputed from (300, int8) without the hook: 44. Agrees with
               what ran, so this is reported.
@@ -126,6 +128,13 @@ written by jax inside jax, and blaming your `jax.random.key(...)` line for it
 would be wrong. It is filtered out of the findings and listed separately, with
 the jax file and line that wrote it, so that a filter and a blind instrument
 do not look the same.
+
+**"Outside jax" is not the same as "yours".** The filter has exactly one
+boundary — jax's own source tree — so a constant written inside a third-party
+library you called is a finding, reported at *that library's* file and line.
+Driven with a real module in a venv's `site-packages`: the site is named
+correctly and is checkable, which is why the report quotes the writing line and
+prints the call chain instead of telling you what you wrote.
 
 **Findings fire once per trace, not once per call.** Twenty calls of one
 jitted function is one finding. Two runs of one suite produce byte-identical

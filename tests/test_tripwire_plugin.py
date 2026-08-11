@@ -116,7 +116,7 @@ def test_one_line_in_conftest_switches_it_on(pytester):
     out = result.stdout.str()
     assert "stelling overflow tripwire" in out
     assert "armed" in out
-    assert "you wrote 300" in out
+    assert "the constant written there is 300" in out
     assert "int8 holds that as 44" in out
 
 
@@ -124,14 +124,14 @@ def test_dash_p_switches_it_on_too(pytester):
     pytester.makepyfile(WRAPPING_TEST)
     result = _run(pytester, "-p", OPT_IN)
     result.assert_outcomes(passed=1)
-    assert "you wrote 300" in result.stdout.str()
+    assert "the constant written there is 300" in result.stdout.str()
 
 
 def test_the_flag_switches_it_on_without_the_module(pytester):
     pytester.makepyfile(WRAPPING_TEST)
     result = _run(pytester, "--stelling-overflow=auto")
     result.assert_outcomes(passed=1)
-    assert "you wrote 300" in result.stdout.str()
+    assert "the constant written there is 300" in result.stdout.str()
 
 
 def test_the_flag_wins_over_the_module_so_off_means_off(pytester):
@@ -194,7 +194,7 @@ def test_an_armed_tripwire_does_not_crash_under_dash_W_error_either(pytester):
     pytester.makepyfile(WRAPPING_TEST)
     result = _run(pytester, "--stelling-overflow=auto", "-W", "error::UserWarning")
     assert result.ret == 0
-    assert "you wrote 300" in result.stdout.str()
+    assert "the constant written there is 300" in result.stdout.str()
 
 
 def test_require_plus_a_broken_anchor_fails_and_names_the_code(pytester):
@@ -217,7 +217,7 @@ def test_require_with_a_working_anchor_is_green(pytester):
     pytester.makepyfile(WRAPPING_TEST)
     result = _run(pytester, "--stelling-overflow=require")
     assert result.ret == 0
-    assert "you wrote 300" in result.stdout.str()
+    assert "the constant written there is 300" in result.stdout.str()
 
 
 # --- staying armed, which is a different property from arming ---------------
@@ -261,10 +261,10 @@ def test_a_hook_that_LEFT_does_not_still_report_armed(pytester):
     assert "NOT ARMED [detached]" in out, out[-3000:]
     assert result.ret != 0, "require passed a session that did not stay armed"
     # what it DID see is still reported, and it says what it is
-    assert "you wrote 400" in out
+    assert "the constant written there is 400" in out
     assert "PARTIAL" in out and "not a total" in out
     # and what it did not see is not silently absent from a confident total
-    assert "you wrote 500" not in out
+    assert "the constant written there is 500" not in out
 
 
 def test_the_same_session_with_the_hook_LEFT_ALONE_is_green(pytester):
@@ -277,7 +277,7 @@ def test_the_same_session_with_the_hook_LEFT_ALONE_is_green(pytester):
     assert result.ret == 0
     out = result.stdout.str()
     assert "NOT ARMED" not in out and "PARTIAL" not in out
-    assert "you wrote 400" in out and "you wrote 500" in out
+    assert "the constant written there is 400" in out and "the constant written there is 500" in out
 
 
 def test_a_registry_rebind_surfaces_as_foreign_patch_IN_THE_REPORT(pytester):
@@ -324,7 +324,7 @@ def test_a_registry_rebind_surfaces_as_foreign_patch_IN_THE_REPORT(pytester):
     assert "NOT ARMED [foreign-patch]" in out, out[-3000:]
     assert "left in place rather than clobbered" in out
     assert result.ret != 0
-    assert "you wrote 400" in out and "PARTIAL" in out
+    assert "the constant written there is 400" in out and "PARTIAL" in out
 
 
 # --- the report, as a session ----------------------------------------------
@@ -346,7 +346,7 @@ def test_a_clean_session_still_reports_its_denominator(pytester):
     result = _run(pytester, "--stelling-overflow=auto")
     result.assert_outcomes(passed=1)
     out = result.stdout.str()
-    assert "no out-of-range integer narrowings in your own code" in out
+    assert "no out-of-range integer narrowings outside jax" in out
     assert "ZERO invocations" not in out, (
         "the nested session reported a zero denominator: the hook was not "
         "live, so its clean report measured nothing."
@@ -414,7 +414,7 @@ def test_the_report_does_not_depend_on_the_order_the_findings_fired(pytester):
         )
     )
     joined = "\n".join(forward)
-    assert "[3]" in joined and "you wrote 300" in joined, joined
+    assert "[3]" in joined and "the constant written there is 300" in joined, joined
     assert forward == reverse
 
 
@@ -501,7 +501,7 @@ def test_the_documented_spellings_work_WITHOUT_the_entry_point(pytester, monkeyp
 
     result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-p", OPT_IN)
     result.assert_outcomes(passed=1)
-    assert "you wrote 300" in result.stdout.str(), (
+    assert "the constant written there is 300" in result.stdout.str(), (
         f"-p {OPT_IN} is a documented spelling and it did nothing at all "
         "with plugin autoload disabled"
     )
@@ -509,7 +509,7 @@ def test_the_documented_spellings_work_WITHOUT_the_entry_point(pytester, monkeyp
     pytester.makeconftest(f'pytest_plugins = ["{OPT_IN}"]')
     result = pytester.runpytest_subprocess("-p", "no:cacheprovider")
     result.assert_outcomes(passed=1)
-    assert "you wrote 300" in result.stdout.str(), (
+    assert "the constant written there is 300" in result.stdout.str(), (
         "the one line in conftest.py that the docs open with did nothing at "
         "all with plugin autoload disabled"
     )
@@ -569,4 +569,4 @@ def test_naming_the_opt_in_module_is_never_a_DOUBLE_registration(
         assert "INTERNALERROR" not in both, both[-2500:]
         assert "already registered under a different name" not in both
         result.assert_outcomes(passed=1)
-        assert "you wrote 300" in result.stdout.str()
+        assert "the constant written there is 300" in result.stdout.str()

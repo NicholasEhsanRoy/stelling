@@ -367,12 +367,51 @@ def test_every_finding_carries_the_six_things_that_make_it_a_witness(written_sou
 
     assert f"{written_source}:2" in text  # 1: the site, with file:line
     assert "2 | return x + 256" in text  # 1: the user's OWN line, quoted
-    assert "innermost frame of YOUR code" in text  # 1: the rule, stated
-    assert "you wrote 256" in text and "int8 holds that as 0" in text  # 2
+    assert "innermost frame OUTSIDE JAX" in text  # 1: the rule, stated
+    assert "the constant written there is 256" in text  # 2
+    assert "int8 holds that as 0" in text  # 2
     assert "256 mod 2**8 = 0" in text  # 3: the arithmetic
     assert "jax.make_jaxpr(lambda a: a + 256)" in text  # 4: a reproducer
     assert "CONFIRMED" in text and "without the hook: 0" in text  # 5
     assert "OBSERVED" in text and "INFERENCE (not observed" in text  # 6
+
+
+def test_a_THIRD_PARTY_constant_is_not_reported_as_something_YOU_wrote():
+    """The origin filter has exactly one boundary — jax's own tree — and the
+    report described it as "your own code".
+
+    Driven with a real module in a venv's ``site-packages``: a constant written
+    inside a third-party library came back under *"1 distinct out-of-range
+    integer narrowing(s) in your own code"*, with *"you wrote 128"* and
+    *"RULE attribution: the innermost frame of YOUR code"*. The site was named
+    correctly and is checkable — the framing around it was the wrong claim, and
+    it sends a reader looking for something they did not write.
+
+    The same shape here, at report level, where every branch of it is
+    reachable without installing anything.
+    """
+    rec = record.Recorder()
+    rec.invocations, rec.folded, rec.int_narrowings = 4, 3, 2
+    rec.add(
+        _finding(
+            file="/venv/lib/python3.12/site-packages/thirdparty/_kernels.py",
+            line=8,
+            func="apply_gain",
+            written=128,
+            became=-128,
+        )
+    )
+    text = _rendered(rec)
+
+    # the site is named, and that is the half that was already right
+    assert "site-packages/thirdparty/_kernels.py:8 in apply_gain" in text
+    # ...and nothing around it says whose code it is
+    assert "in your own code" not in text
+    assert "you wrote 128" not in text
+    assert "YOUR code" not in text
+    assert "written outside jax" in text
+    assert "not the same as BY YOU" in text
+    assert "innermost frame OUTSIDE JAX" in text
 
 
 def test_a_finding_whose_replay_disagrees_is_withheld_not_printed():
@@ -392,7 +431,7 @@ def test_a_finding_whose_replay_disagrees_is_withheld_not_printed():
     assert "WITHHELD" in text
     assert "recomputing the narrowing independently" in text
     assert "bug in the instrument" in text
-    assert "you wrote 256" not in text
+    assert "the constant written there is 256" not in text
     assert "REPRODUCE" not in text
     assert "1 are WITHHELD as disagreements" in text
 
@@ -416,7 +455,7 @@ def test_the_denominator_is_printed_even_with_nothing_to_report():
     text = _rendered(rec)
     assert "3011 integer const-folds inspected" in text
     assert "4812 rule invocations" in text
-    assert "no out-of-range integer narrowings in your own code" in text
+    assert "no out-of-range integer narrowings outside jax" in text
 
 
 def test_a_zero_denominator_is_called_out_rather_than_read_as_clean():
@@ -536,7 +575,7 @@ def test_a_non_armed_status_does_not_DISCARD_what_was_measured():
     rec.add(_finding(written=300, became=44))
     carried = _rendered(rec, _Status(code="mixed", detail="worker statuses: armed, no-entry"))
     assert "denominator: 4 integer const-folds" in carried
-    assert "you wrote 300" in carried
+    assert "the constant written there is 300" in carried
     assert "PARTIAL" in carried and "not a total" in carried
     assert "never a clean bill of health" in carried
 

@@ -75,9 +75,9 @@ def _run(pytester, *args):
 def _findings(result) -> set[str]:
     """The written values the report named, read back out of the text."""
     return {
-        line.split("you wrote ")[1].split(";")[0]
+        line.split("written there is ")[1].split(";")[0]
         for line in result.stdout.str().splitlines()
-        if "you wrote " in line
+        if "written there is " in line
     }
 
 

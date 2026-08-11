@@ -64,10 +64,21 @@ UNCOVERED = (
 )
 
 
+#: What the origin filter actually separates, said in the report's own words.
+#: IT IS "NOT JAX", NOT "YOURS". A constant written inside a third-party
+#: library in site-packages passes the filter and is a real narrowing at a real
+#: site -- but calling it "your own code" and "you wrote 128" tells a reader to
+#: go and look for something they did not write. Driven with a real module in a
+#: venv's site-packages: the file and line were correct and checkable, and the
+#: framing around them was wrong.
+OUTSIDE_JAX = "outside jax"
+
+
 def _rule_line() -> str:
     return (
-        "attribution: the innermost frame of YOUR code inside the traced "
-        "region -- not the entry point, and not jax's caller"
+        "attribution: the innermost frame OUTSIDE JAX inside the traced "
+        "region -- your own code, or a library you called that is not jax. "
+        "Not the entry point, and not jax's caller"
     )
 
 
@@ -179,7 +190,7 @@ def render_suppressed(rec: record.Recorder) -> list[str]:
         )
     lines.append(
         "    These are filtered out of the findings above because the "
-        "constant was written inside jax, not by you -- jax's PRNG seed mask "
+        "constant was written inside jax rather than outside it -- jax's PRNG seed mask "
         "(0xFFFFFFFF -> -1) is the known instance and is deliberate. The "
         "filter is on by default; they are counted here so that a filter and "
         "a blind instrument do not look the same."
@@ -248,10 +259,11 @@ def render_finding(index: int, finding: record.Finding) -> list[str]:
         return lines
 
     lines.append(
-        f"    OBSERVED  you wrote {finding.written}; {finding.to_dtype} holds "
-        f"that as {finding.became}. Both halves read at the site: the rule "
-        f"received {finding.written} ({finding.from_dtype}) and returned "
-        f"{finding.became} ({finding.to_dtype})."
+        f"    OBSERVED  the constant written there is {finding.written}; "
+        f"{finding.to_dtype} holds that as {finding.became}. Both halves read "
+        f"at the site: the rule received {finding.written} "
+        f"({finding.from_dtype}) and returned {finding.became} "
+        f"({finding.to_dtype})."
     )
     lines.append(f"    ARITHMETIC {record.arithmetic_sentence(finding.written, finding.to_dtype)}")
     lines.append(
@@ -371,8 +383,8 @@ def render(status, rec: record.Recorder, notes: tuple[str, ...] = ()) -> list[st
     lines.append("")
     if findings:
         lines.append(
-            f"{len(findings)} distinct out-of-range integer narrowing(s) in "
-            "your own code"
+            f"{len(findings)} distinct out-of-range integer narrowing(s) "
+            f"written {OUTSIDE_JAX}"
             + (
                 f", of which {len(disagreements)} are WITHHELD as "
                 "disagreements (see below)"
@@ -381,13 +393,20 @@ def render(status, rec: record.Recorder, notes: tuple[str, ...] = ()) -> list[st
             )
             + ":"
         )
+        lines.append(
+            f"({OUTSIDE_JAX}, which is not the same as BY YOU: the filter "
+            "separates jax's own constants from everything else, so a "
+            "constant written inside a library you called is reported at that "
+            "library's file and line. The site is named for exactly that "
+            "reason -- check it before assuming it is yours.)"
+        )
         lines.append("")
         for index, finding in enumerate(findings, 1):
             lines.extend(render_finding(index, finding))
             lines.append("")
     else:
         lines.append(
-            "no out-of-range integer narrowings in your own code, over the "
+            f"no out-of-range integer narrowings {OUTSIDE_JAX}, over the "
             "denominator above."
         )
         lines.append("")
