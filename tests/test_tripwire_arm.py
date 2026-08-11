@@ -536,6 +536,49 @@ def test_the_report_states_the_measured_strict_promotion_result(armed):
     assert "it is the Python int that wraps" not in bullet
 
 
+@pytest.mark.parametrize(
+    ("written", "dtype"),
+    [(300, "int8"), (256, "int8"), (-200, "int8"), (70000, "int16"), (256, "uint8")],
+)
+def test_the_reproducer_is_RUN_and_its_prediction_matched(armed, written, dtype):
+    """§10a.4 exists so a user can confirm a finding themselves in seconds, and
+    nothing ran it.
+
+    The predicted output was wrong every single time — it said
+    ``it prints 44:int8[]`` and jaxprs print ``44:i8[]``. Over the findings of
+    a real session: 13 of 13 reproduced the value, 0 of 13 printed the claimed
+    text. A mutant making the predicted value wrong by one survived the whole
+    suite, because the prediction was compared against nothing.
+
+    So this EXECUTES the emitted lines and matches the comment against the
+    jaxpr they print, character for character.
+    """
+    from stelling._tripwire import report
+
+    finding = record.Finding(
+        file=__file__, line=1, func="f", written=written, from_dtype="int32",
+        to_dtype=dtype, became=record.narrow(written, dtype),
+        origin=record.ORIGIN_USER,
+    )
+    setup, call, comment = report.reproducer(finding)
+    assert setup == "import jax, jax.numpy as jnp"
+
+    namespace: dict = {}
+    exec(setup, namespace)  # noqa: S102 - the point is that the emitted line runs
+    printed = str(eval(call[len("print(") : -1], namespace))  # noqa: S307
+
+    predicted = comment.split("it prints ", 1)[1]
+    assert predicted in printed, (
+        f"the reproducer predicts `{predicted}` and the jaxpr it prints is "
+        f"`{printed.strip()}`"
+    )
+    # ...and the prediction is not vacuous: a value off by one is not in there
+    off_by_one = predicted.replace(
+        str(finding.recomputed), str(finding.recomputed + 1), 1
+    )
+    assert off_by_one not in printed, off_by_one
+
+
 def test_hoisting_the_constant_really_does_raise(armed):
     """The other half of what the report suggests. ``jnp.array(N, dtype)``
     raises for a Python int, which is what turns a silent wrap into an

@@ -188,14 +188,25 @@ def render_suppressed(rec: record.Recorder) -> list[str]:
 
 
 def reproducer(finding: record.Finding) -> list[str]:
-    """Two lines a user can paste into a REPL, derived from the finding."""
-    expected = finding.recomputed
+    """Two lines a user can paste into a REPL, derived from the finding.
+
+    THE PREDICTED OUTPUT IS THE POINT OF IT, and it was wrong every time: this
+    said ``it prints 44:int8[]`` and a jaxpr prints ``44:i8[]``. Measured over
+    the findings of a real session, 13 of 13 reproduced the value and 0 of 13
+    printed the predicted text. A reproducer nothing runs is a template, and a
+    prediction that is never right is worse than none — it is the one line
+    here a reader can catch the instrument out on.
+
+    ``tests/test_tripwire_arm.py`` now EXECUTES these lines and matches the
+    comment against the real jaxpr, which is also what makes a wrong predicted
+    value fail rather than survive.
+    """
     return [
         "import jax, jax.numpy as jnp",
         f"print(jax.make_jaxpr(lambda a: a + {finding.written})"
         f"(jnp.zeros((), jnp.{finding.to_dtype})))",
         f"# the {finding.written} is not in the jaxpr: it prints "
-        f"{expected}:{finding.to_dtype}[]",
+        f"{finding.recomputed}:{record.jaxpr_dtype(finding.to_dtype)}[]",
     ]
 
 

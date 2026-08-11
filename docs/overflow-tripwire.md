@@ -76,7 +76,7 @@ each one like this:
     REPRODUCE
         import jax, jax.numpy as jnp
         print(jax.make_jaxpr(lambda a: a + 300)(jnp.zeros((), jnp.int8)))
-        # the 300 is not in the jaxpr: it prints 44:int8[]
+        # the 300 is not in the jaxpr: it prints 44:i8[]
     INFERENCE (not observed -- these are suggestions, not claims)
         ...
 ```
