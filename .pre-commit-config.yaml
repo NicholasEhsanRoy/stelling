@@ -252,6 +252,23 @@ repos:
         # subdirectory under `src/`: both greps report `exited 2 … an ERROR,
         # not "no match"`, the census stays quiet (files were examined), and a
         # violation planted alongside is still printed.
+        #
+        # DRIVEN, BOTH DIRECTIONS, hook and test on the same tree at the same
+        # moment — a widened exemption that quietly stops biting is the failure
+        # this hook has already had once:
+        #
+        #   plant                                       hook     test
+        #   none (the real adapter, which names it)     Passed   green
+        #   src/zz_outside.py names jax._src            Failed   red
+        #   src/…/_zz_decoy/_adapter_jax.py             Failed   red
+        #     (SAME base name, other path — this is the
+        #      row a `--exclude` exemption would pass)
+        #   import jax added to the exempt adapter      Failed   red
+        #     (rule 1 was not widened, and this is what
+        #      says so rather than the sentence above)
+        #   tests/zz_plant.py names jax._src            Passed   red
+        #     (the hook scans src/ only; that is a
+        #      SCOPE difference, driven not assumed)
         language: system
         entry: >-
           bash -c 'census() { grep -rc "" "$@" 2>/dev/null | wc -l; };

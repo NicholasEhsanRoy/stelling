@@ -186,6 +186,45 @@ the fix is the same one `library-identifier-hygiene` uses — branch on grep's
 own exit status *before* filtering, and keep 2 (error) distinguished from 1
 (no match) on both greps.
 
+## Driven, both directions
+
+Hook and test on the same tree at the same moment, one plant at a time, with
+the plant removed and the control re-run after each. jax 0.11.0,
+`JAX_ENABLE_X64=1`, `PY_COLORS=0`. The test column is
+`tests/test_import_hygiene.py -k "banned_everywhere or load_bearing or
+only_in_compat"`.
+
+| plant | hook | test |
+|---|---|---|
+| none — the real adapter, which does name the private module | Passed | 3 passed |
+| `src/stelling/_zz_outside.py` names it | **Failed**, line printed | **2 failed** |
+| `src/stelling/_zz_decoy/_adapter_jax.py` — same base name, other path | **Failed**, line printed | **2 failed** |
+| `import jax` added to the exempt adapter | **Failed** | **1 failed** (`test_jax_imported_only_in_compat_module`) |
+| `tests/zz_plant.py` names it | Passed | **1 failed** |
+
+Row 3 is the one the mechanism was chosen for: with a base-name `--exclude` it
+would read Passed/green in both columns. Row 4 is what makes "rule 1 was not
+widened" a measurement rather than a sentence. Row 5 is the scope difference,
+driven — the hook scans `src/` only and the test scans `src/` and `tests/`,
+and they still exempt the same set.
+
+The agreement check itself was mutated rather than trusted. Three divergences
+introduced into the hook's `entry:`, one at a time:
+
+| mutant | result |
+|---|---|
+| hook exempts a different path than the test | **red** |
+| hook grows a second anchored exemption | **red** |
+| hook adds a base-name `--exclude` to the second check | **red** |
+
+Census and exit-code behaviour re-driven in a standalone repository built from
+this tree, since capturing grep's output to filter it is a change to the shape
+those two properties live in: `src/` moved away and `src/` present with no
+`.py` under it both give *"examined 0 and 0 files … this hook checked
+NOTHING"*, exit 1; an unreadable subdirectory under `src/` gives *"exited 2 …
+an ERROR, not 'no match'"* on **both** greps, and a violation planted beside it
+is still printed.
+
 ## What this exemption does not relax
 
 - Rule 1 is unchanged. `jax._src` being permitted in one file does not permit
