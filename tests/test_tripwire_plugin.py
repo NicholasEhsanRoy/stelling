@@ -307,3 +307,53 @@ def test_the_report_does_not_depend_on_the_order_the_findings_fired(pytester):
     joined = "\n".join(forward)
     assert "[3]" in joined and "you wrote 300" in joined, joined
     assert forward == reverse
+
+
+def test_the_entry_point_declaration_is_what_makes_any_of_this_reachable():
+    """Everything above runs with ``-p stelling._tripwire.plugin`` spelled out,
+    because a nested pytester session inherits no entry points. So none of it
+    can see the one declaration the whole adoption story rests on: a
+    ``pytest11`` entry point that a rename, a typo or a deleted section would
+    silently unregister, leaving `pytest_plugins = ["stelling.overflow"]` a
+    line that does nothing at all.
+
+    Read out of ``pyproject.toml`` and resolved against the module, rather
+    than restated: the module named must import, and must define
+    ``pytest_addoption``, or it is registered and inert.
+    """
+    import importlib
+    import pathlib
+    import re
+
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    text = (repo / "pyproject.toml").read_text(encoding="utf-8")
+    section = re.search(
+        r"^\[project\.entry-points\.pytest11\]\s*$(.*?)(?=^\[|\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert section, (
+        "pyproject.toml has no [project.entry-points.pytest11] section. "
+        "Without it `pip install stelling` registers no plugin, "
+        "`--stelling-overflow` does not exist, and the one-line conftest "
+        "snippet in docs/overflow-tripwire.md is inert."
+    )
+    targets = dict(re.findall(r'^\s*(\w+)\s*=\s*"([^"]+)"', section.group(1), re.MULTILINE))
+    assert targets, section.group(1)
+    assert PLUGIN in targets.values(), (
+        f"the pytest11 entry points are {sorted(targets.values())}; the plugin "
+        f"module is {PLUGIN}"
+    )
+    for module_name in targets.values():
+        module = importlib.import_module(module_name)
+        assert hasattr(module, "pytest_addoption"), (
+            f"{module_name} is registered as a pytest plugin and defines no "
+            "hooks, so it is registered and inert"
+        )
+    # ...and the opt-in module the docs tell people to name really exists and
+    # really is the one the plugin checks for
+    optin = importlib.import_module(OPT_IN)
+    assert optin.OPT_IN_PLUGIN == OPT_IN, (
+        f"{OPT_IN} and the name the plugin looks for have drifted apart: "
+        f"{optin.OPT_IN_PLUGIN!r}"
+    )
