@@ -699,14 +699,67 @@ def _property_check():
     return module
 
 
-def _score_one_probe(module, monkeypatch, work, argument):
-    """Run the real ``main()`` over one synthetic control; return (exit, out)."""
-    (work / "repo" / "src").mkdir(parents=True)
+# A NAIVE locator, written out here rather than imported. It is independent of
+# how `tools/property_check.py` PRIMARILY reads the file (a real TOML parse)
+# and NARROWER than the regex that file falls back to when no parser imports
+# (which also reads quoted table keys and quoted entry-point names). It
+# cross-checks the parser from below, and says nothing about the fallback —
+# the fallback-vs-parser pin elsewhere in this file does that. Claiming
+# more than that would be the thing it exists to catch.
+_PYTEST11_SECTION = re.compile(
+    r"^\[project\.entry-points\.pytest11\]\s*$(.*?)(?=^\[|\Z)", re.M | re.S
+)
+
+
+def _plant_entry_point(src: pathlib.Path, *pairs) -> None:
+    """Declare ``pytest11`` entry points ON THE TREE the child will import.
+
+    ``pairs`` are ``(entry point name, module target)``.
+
+    A synthetic ``.dist-info`` beside the package, inside the ``src/`` that
+    ``property_check.py`` puts on the child's ``PYTHONPATH``.
+    ``importlib.metadata`` finds distributions by scanning ``sys.path`` for
+    ``*.dist-info``, so this is a real entry point to the child in the sense
+    that matters: pytest autoloads it at ``Config.parse``, before collection,
+    with no exception handling around the import.
+
+    NO INSTALL, and that is the point of doing it this way. The event being
+    reproduced only happens where stelling is installed as a distribution —
+    CI installs with ``-e``, the two shared dev venvs do not — so a test that
+    depended on the real entry point would be a test that runs in CI and
+    skips on the machine the fix is written on. This one runs everywhere and
+    reproduces the same pytest code path.
+    """
+    info = src / "probe_dist-0.0.0.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: probe-dist\nVersion: 0.0.0\n"
+    )
+    (info / "entry_points.txt").write_text(
+        "[pytest11]\n" + "".join(f"{n} = {t}\n" for n, t in pairs)
+    )
+
+
+def _score_one_probe(module, monkeypatch, work, argument, plant=None,
+                     preamble="", nodeid=None):
+    """Run the real ``main()`` over one synthetic control; return (exit, out).
+
+    ``plant``, if given, is called with the probe repository's ``src/`` before
+    the tree is materialised — the hook the environment probes below use to
+    put a ``pytest11`` entry point where the child will autoload it.
+    ``preamble`` is prepended to the probe module (an import that fails makes
+    it uncollectable), and ``nodeid`` overrides what the control points at (a
+    nodeid matching nothing is the registry's own way of running no test).
+    """
+    src = work / "repo" / "src"
+    src.mkdir(parents=True)
+    if plant is not None:
+        plant(src)
     probe = work / "test_probe.py"
-    probe.write_text(_PROBE_ORACLE % (argument, argument))
+    probe.write_text(preamble + _PROBE_ORACLE % (argument, argument))
     control = pc.Control(
         name="probe",
-        nodeid=str(probe),
+        nodeid=nodeid or str(probe),
         kind="mutant",
         at="HEAD",
         why=(
@@ -787,6 +840,365 @@ def test_the_control_runner_scores_a_crash_before_the_oracle_as_not_demonstrated
         "output — a traceback prints the property's own source, docstring "
         "included — must be NOT DEMONSTRATED, never FIRED:\n  "
         + "\n  ".join(bad)
+    )
+
+
+def test_the_control_runner_says_a_session_that_never_ran_never_ran(
+    tmp_path, monkeypatch, capsys
+):
+    """A control that reports on nothing must not be reported as a failure.
+
+    THE SHAPE, MEASURED AT 260527b, on the nine per-push controls. The commit
+    added ``stelling._tripwire`` and a ``pytest11`` entry point naming it. The
+    child pytest that runs a control takes its ``stelling`` from
+    ``PYTHONPATH=<tree>/src`` — the REVISION's — and its entry points from the
+    installed distribution metadata — the CHECKOUT's. For every control pinned
+    to a commit older than that package the two disagree, pytest died at
+    ``Config.parse`` with ``ModuleNotFoundError``, no test was collected, no
+    junit XML was written, and the runner printed:
+
+        FIRED, but the failure did not carry 'REFUTED OVER AN EMPTY ADMITTED
+        REGION'
+
+    which is false twice. It did not fire, and there was no failure to carry
+    anything. A clean partition — all five controls whose tree is ``HEAD``
+    FIRED (``_materialise`` copies the working tree, which has the package),
+    all four pinned to a commit reported as above — read in the log as four
+    broken properties. (Of the nine, ``at="HEAD"`` and ``kind="commit"``
+    happen to name the same two groups; ``at`` is the discriminant, and
+    ``oracle-wrap``, outside the nine, is ``kind="commit"`` at ``at="HEAD"``.)
+
+    The fault itself is closed in ``_run``, and
+    ``test_the_control_runner_blocks_this_projects_own_pytest_plugin`` holds
+    that shut. This test is about the SENTENCE, which is the general half: any
+    session that dies before reaching a test produces this, and the runner's
+    own rule — the echoed output is not evidence — is exactly what says it
+    must not be scored against ``expect_message`` at all.
+
+    FOUR RUNS AND TWO UNIT ROWS. The first run FIRES, so the three faults are
+    measured against a probe that is known to work; the three faults are three
+    distinct routes into ``_reported``, because a remedy for one of them
+    passes a test that drives one of them. The unit rows hold the rule's shape
+    where no run can see it: what it decides WITHOUT the discriminator, and
+    that the discriminator is consulted before the echoed-output match.
+    """
+    module = _property_check()
+    # The row that FIRES: same oracle, same argument, same probe, so the only
+    # thing that differs from row to row below is the fault planted with it.
+    argument = _PROBE_CASES["the guard's own clause"][0]
+
+    alive = tmp_path / "alive"
+    alive.mkdir()
+    got_alive = _score_one_probe(module, monkeypatch, alive, argument)
+    out_alive = capsys.readouterr().out
+
+    # THREE SPELLINGS OF "NOTHING RAN", and each reaches `_reported` by a
+    # different route. Measured on pytest 9.1.1, exit code and XML in
+    # `_reported`'s docstring: no XML at all, XML with no `<testcase>`, and
+    # XML whose one `<testcase>` is a collection failure. A remedy that
+    # covered only the first passes a test that drives only the first — which
+    # is what this test did until the second and third rows were added.
+    faults = {
+        "a plugin that cannot import": dict(
+            plant=lambda src: _plant_entry_point(
+                src, ("probe_dead_plugin", "probe_dead_plugin_module")
+            ),
+            expect="No module named 'probe_dead_plugin_module'",
+        ),
+        "a nodeid that matches nothing": dict(
+            nodeid="does_not_exist.py::test_nothing_is_called_this",
+            expect="does_not_exist.py",
+        ),
+        "a test module that cannot import": dict(
+            preamble="import probe_module_that_is_not_there\n",
+            expect="No module named 'probe_module_that_is_not_there'",
+        ),
+        "a module that skips at import": dict(
+            preamble="import pytest\npytest.importorskip('nonexistent_module_probe')\n",
+            expect="nonexistent_module_probe",
+        ),
+    }
+
+    bad = []
+    if got_alive != 0 or "FIRED — the property failed" not in out_alive:
+        bad.append(
+            f"the unplanted run did not FIRE (exit {got_alive}), so this test "
+            f"proves nothing about what the faults changed:\n{out_alive}"
+        )
+    for label, spec in faults.items():
+        expect = spec.pop("expect")
+        work = tmp_path / label.replace(" ", "_")
+        work.mkdir()
+        got = _score_one_probe(module, monkeypatch, work, argument, **spec)
+        out = capsys.readouterr().out
+        if got != 1:
+            bad.append(f"{label}: returned {got}, expected 1")
+        if f"NOT DEMONSTRATED: probe — {module.NEVER_RAN}" not in out:
+            bad.append(
+                f"{label}: not reported as {module.NEVER_RAN!r}:\n{out}"
+            )
+        # THE SENTENCE ITSELF, ASSERTED POSITIVELY. Constraining it only by
+        # what it must NOT say leaves every other wrong sentence admissible:
+        # measured, replacing the whole `NEVER_RAN` branch's `print` with the
+        # FIRED line — this change's own condemned verdict, in the spelling it
+        # exists to abolish — left the suite at 27 passed, while the real tool
+        # printed "FIRED — the property failed where it is supposed to" for a
+        # session that had reported on nothing.
+        if "THE PROPERTY NEVER RAN" not in out:
+            bad.append(
+                f"{label}: the run was summarised as {module.NEVER_RAN!r} but "
+                f"the line a reader actually reads does not say so:\n{out}"
+            )
+        if "FIRED" in out:
+            bad.append(
+                f"{label}: a session that reported on no test was described "
+                f"as having FIRED:\n{out}"
+            )
+        if expect not in out:
+            bad.append(
+                f"{label}: the run did not fail the way this row needs it to "
+                f"fail — {expect!r} is not in what it printed:\n{out}"
+            )
+        # The sentence this exists to stop. It is the ONE thing a reader acts on.
+        if "did not carry" in out:
+            bad.append(
+                f"{label}: a session that ran no test was still described in "
+                f"terms of a failure that did not carry the guard:\n{out}"
+            )
+    # And the branch is load-bearing: those are the inputs the old rule saw —
+    # red, nothing recorded, the guard nowhere — and its answer was WRONG.
+    if module._verdict(_PROBE_GUARD, [], "", fired=True, reported=True) != module.WRONG:
+        bad.append(
+            "the rule WITHOUT the `reported` discriminator no longer scores "
+            "these inputs as a wrong failure, so this test has stopped "
+            "measuring the difference the discriminator makes"
+        )
+    # WHERE the branch sits, which the docstring calls out as deliberate and
+    # which no run above can see: a session that died echoing its own guard
+    # must still be NEVER_RAN, not ECHOED.
+    if module._verdict(_PROBE_GUARD, [], _PROBE_GUARD,
+                       fired=True, reported=False) != module.NEVER_RAN:
+        bad.append(
+            "`NEVER_RAN` no longer comes ahead of the echoed-output match, so "
+            "a session that died before running anything can be scored on a "
+            "string in its own traceback"
+        )
+    # A `pytest_internalerror` session writes classname="pytest", which is not
+    # a report on any test. Synthetic XML because triggering rc 3 in a child
+    # requires a conftest that breaks pytest itself.
+    internal_xml = tmp_path / "internal.xml"
+    internal_xml.write_text(
+        '<?xml version="1.0"?><testsuites><testsuite>'
+        '<testcase classname="pytest" name="internal">'
+        '<error message="internal error"/></testcase>'
+        '</testsuite></testsuites>'
+    )
+    if module._reported(internal_xml):
+        bad.append(
+            "a session with only classname='pytest' (internal error) was "
+            "treated as having reported on a test — `_reported` must key "
+            "positively on shapes that look like real tests"
+        )
+    assert not bad, (
+        "tools/property_check.py described a run that reported on no test at "
+        "all as though it had reported on the property. Every outcome here is "
+        "NOT DEMONSTRATED either way — nothing goes from red to green — so "
+        "what is at stake is only what the log SAYS, which is the whole "
+        "product of an anti-vacuity mechanism:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_the_control_runner_blocks_this_projects_own_pytest_plugin(
+    tmp_path, monkeypatch, capsys
+):
+    """The fault above, reproduced with this project's own entry point.
+
+    ``property_check.py`` joins the checkout's TESTS to a revision's SOURCE
+    with ``PYTHONPATH`` and nothing else, which is the separation the whole
+    file exists for. The cost of it is that the environment's distribution
+    metadata still describes the checkout, and a ``pytest11`` entry point is
+    loaded from metadata and resolved against ``sys.path``. Those two are
+    permanently allowed to disagree, for every revision older than any module
+    the entry point names, so the runner blocks the plugin by name.
+
+    TWO RUNS ON ONE TREE, differing only in whether the block is in place.
+    Both plant a ``stelling`` with no ``_tripwire`` in it and an entry point
+    naming ``stelling._tripwire.plugin`` — the shape a control pinned to any
+    revision before 260527b has in an installed environment.
+
+    THE NAME IS NOT WRITTEN DOWN TWICE, and this test is what says so. A
+    membership assertion — "the blocked name is one of the declared ones" —
+    permits the declaration to GROW, and the second entry point reopens the
+    fault for every commit-pinned control at once with every gate still green.
+    Measured: with a second name added to ``pyproject.toml`` and nothing else
+    changed, a probe whose tree carries both goes from FIRED to NEVER RAN.
+    So the block reads the table, and the last row here drives a two-entry
+    ``pyproject.toml`` rather than asserting anything about today's one.
+    """
+    module = _property_check()
+    declared = module._entry_points_to_block()
+
+    # THE FLOOR, DRIVEN. "Fails onto the known name, never below it" is a
+    # claim about a path no other row here takes, and asserting the floor name
+    # is in today's answer asserts nothing: the declaration contains it, so
+    # the assertion holds even with the fallback deleted. Point the runner at
+    # a file that is not there instead.
+    monkeypatch.setattr(module, "PYPROJECT", tmp_path / "not-a-file.toml")
+    assert module._entry_points_to_block() == (module.TRIPWIRE_ENTRY_POINT,), (
+        "with no pyproject.toml to read, the runner blocks "
+        f"{module._entry_points_to_block()} — it is supposed to fall onto "
+        f"{module.TRIPWIRE_ENTRY_POINT!r}, never below it, because a checkout "
+        "the file did not ship to still runs controls against revisions that "
+        "predate the plugin."
+    )
+    monkeypatch.undo()
+
+    # A NAIVE READ OF THE FILE, held against what the runner decided. This is
+    # independent of the runner's PRIMARY path — a real TOML parse — and
+    # NARROWER than the runner's FALLBACK (which also reads quoted table keys
+    # and quoted names), so it cross-checks both from below. What it catches
+    # is a parser that reads the file and comes back with less than is plainly
+    # written in it.
+    section = _PYTEST11_SECTION.search(
+        (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert section is not None, (
+        "pyproject.toml has no [project.entry-points.pytest11] section, so "
+        "tools/property_check.py is blocking a name nothing declares"
+    )
+    # THE FALLBACK, HELD AGAINST THE PARSER on the file that actually ships.
+    # It is narrower by construction and says so; what it must not be is
+    # narrower HERE, because then the one environment that has no TOML parser
+    # blocks less than every other environment and nothing anywhere says so.
+    # `sys.modules[name] = None` is what makes `import name` raise.
+    raw = (REPO / "pyproject.toml").read_bytes()
+    parsed = module._declared_pytest11(raw)
+    with monkeypatch.context() as no_toml:
+        no_toml.setitem(sys.modules, "tomllib", None)
+        no_toml.setitem(sys.modules, "tomli", None)
+        fallback = module._declared_pytest11(raw)
+    assert fallback == parsed and parsed, (
+        f"on this project's own pyproject.toml the TOML parse returns "
+        f"{sorted(parsed)} and the no-parser fallback returns "
+        f"{sorted(fallback)}. They have to agree on the spelling that ships, "
+        f"or a 3.10 environment without `tomli` silently blocks less."
+    )
+
+    in_file = set(re.findall(r"^\s*([\w.-]+)\s*=", section.group(1), re.M))
+    assert in_file, (
+        "the naive regex found no entry-point names in the "
+        "[project.entry-points.pytest11] section — if all names are quoted "
+        "the cross-check is vacuous and this test guarantees nothing"
+    )
+    assert module.TRIPWIRE_ENTRY_POINT in in_file, (
+        f"TRIPWIRE_ENTRY_POINT is {module.TRIPWIRE_ENTRY_POINT!r} but "
+        f"pyproject.toml declares {sorted(in_file)} — the floor name must be "
+        f"one of the shipped names or the fallback blocks a plugin nothing "
+        f"declares"
+    )
+    assert in_file <= set(declared), (
+        f"pyproject.toml declares {sorted(in_file)}; the runner blocks "
+        f"{sorted(declared)}. `-p no:` matches the entry point NAME, so any "
+        f"declared name the runner does not follow restores the crash it was "
+        f"written to stop, on every commit-pinned control at once."
+    )
+
+    name = module.TRIPWIRE_ENTRY_POINT
+
+    def plant(src):
+        (src / "stelling").mkdir()
+        (src / "stelling" / "__init__.py").write_text("")
+        _plant_entry_point(src, (name, "stelling._tripwire.plugin"))
+
+    argument = _PROBE_CASES["the guard's own clause"][0]
+
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    got_blocked = _score_one_probe(module, monkeypatch, blocked, argument, plant=plant)
+    out_blocked = capsys.readouterr().out
+
+    # The same tree with the block aimed elsewhere. This is the state the
+    # `property` job was in at 260527b. BOTH sources have to be moved: the
+    # runner reads the declaration and falls back to the floor name, so
+    # changing one alone leaves the other still blocking.
+    monkeypatch.setattr(module, "PYPROJECT", tmp_path / "no-such-pyproject.toml")
+    monkeypatch.setattr(module, "TRIPWIRE_ENTRY_POINT", "nothing-is-named-this")
+    unblocked = tmp_path / "unblocked"
+    unblocked.mkdir()
+    got_unblocked = _score_one_probe(
+        module, monkeypatch, unblocked, argument, plant=plant
+    )
+    out_unblocked = capsys.readouterr().out
+
+    bad = []
+    if got_blocked != 0 or "FIRED — the property failed" not in out_blocked:
+        bad.append(
+            f"with the block in place the probe still did not run "
+            f"(exit {got_blocked}):\n{out_blocked}"
+        )
+    if "No module named 'stelling._tripwire'" not in out_unblocked:
+        bad.append(
+            "with the block removed the session did NOT die on the planted "
+            "entry point, so the run above demonstrates nothing about the "
+            f"block:\n{out_unblocked}"
+        )
+    if got_unblocked != 1:
+        bad.append(f"the unblocked run returned {got_unblocked}, expected 1")
+
+    # THE SECOND ENTRY POINT — the commit that adds one, which a membership
+    # assertion would have let through. The TREE is the same in both runs
+    # below and carries both plugins; only the DECLARATION the runner reads
+    # differs, so the second run is what the first would be if the block were
+    # a name written down here instead of a table read from the file.
+    monkeypatch.undo()
+    later = ("stelling_second", "stelling._later_thing.plugin")
+
+    def plant_two(src):
+        (src / "stelling").mkdir()
+        (src / "stelling" / "__init__.py").write_text("")
+        _plant_entry_point(src, (name, "stelling._tripwire.plugin"), later)
+
+    outs = {}
+    for label, table in (
+        ("both declared", [(name, "stelling._tripwire.plugin"), later]),
+        ("only the first declared", [(name, "stelling._tripwire.plugin")]),
+    ):
+        home = tmp_path / label.replace(" ", "_")
+        home.mkdir()
+        pyproject = home / "pyproject.toml"
+        pyproject.write_text(
+            "[project]\nname = 'probe'\n\n[project.entry-points.pytest11]\n"
+            + "".join(f'{n} = "{t}"\n' for n, t in table)
+            + "\n[tool.after-the-table]\nignored = true\n"
+        )
+        monkeypatch.setattr(module, "PYPROJECT", pyproject)
+        run = home / "run"
+        run.mkdir()
+        outs[label] = (
+            _score_one_probe(module, monkeypatch, run, argument, plant=plant_two),
+            capsys.readouterr().out,
+        )
+
+    got, out = outs["both declared"]
+    if got != 0 or "FIRED — the property failed" not in out:
+        bad.append(
+            f"with two entry points declared and two planted, the probe did "
+            f"not run (exit {got}). The runner is not blocking everything "
+            f"`pyproject.toml` declares:\n{out}"
+        )
+    got, out = outs["only the first declared"]
+    if got != 1 or "No module named 'stelling._later_thing'" not in out:
+        bad.append(
+            f"with the second entry point planted but NOT declared, the "
+            f"session did not die on it (exit {got}), so the run above "
+            f"demonstrates nothing about reading the table:\n{out}"
+        )
+    assert not bad, (
+        "the `-p no:` block in tools/property_check.py is not what keeps this "
+        "project's own pytest plugins out of the children it starts. Without "
+        "it every control pinned to a revision older than a module an entry "
+        "point names dies before collection, and nine controls report as "
+        "four broken properties:\n  " + "\n  ".join(bad)
     )
 
 
