@@ -154,7 +154,12 @@ def test_the_private_jax_exemption_is_load_bearing_and_is_exactly_one_file():
     """An exemption nothing uses is an exemption nobody watches biting.
 
     Both directions in one list, which is the acceptance criterion the plan
-    states as "``jax._src`` appears in exactly one file under ``src/``":
+    states as "the private-module token appears in exactly one file under
+    ``src/``" — spelled that way here, and everywhere else in this file,
+    because :data:`PRIVATE_JAX` is built by concatenation precisely so that
+    this file cannot match itself. It is also exempt by name in the check
+    above, and relying on that instead would be one control where there are
+    currently two.
 
     * the exempt path really does name the private module — so the check above
       is exercised rather than decorative, and a deletion of the tripwire has
