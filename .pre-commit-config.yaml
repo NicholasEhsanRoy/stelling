@@ -136,7 +136,7 @@ repos:
           done; exit $rc' --
         files: \.(py|pyi|sh|toml|ya?ml)$
       - id: jax-import-hygiene
-        name: jax only in _jax_compat; private jax modules banned
+        name: jax only in _jax_compat; jax._src only in _tripwire/_adapter_jax.py
         # TWO checks, combined through `rc` rather than through `set -e`.
         # They were `! grep …; ! grep …` under `set -e`, and bash documents
         # that errexit is IGNORED when a command's return value is inverted
@@ -196,6 +196,62 @@ repos:
         # examined, including empty files, which `grep -l` would drop. The two
         # checks scan different sets (only the first exempts `_jax_compat.py`),
         # so they are counted separately.
+        #
+        # THE SECOND CHECK NOW HAS AN EXEMPTION, AND IT IS SPELLED DIFFERENTLY
+        # FROM THE FIRST ON PURPOSE. `src/stelling/_tripwire/_adapter_jax.py`
+        # may name `jax._src`; nothing else may, here or in `tests/`. The
+        # reason it needs to, and the seven public / `jax.extend` modules that
+        # were driven on both series and do NOT export the registry it is
+        # after, are in `design/private-jax-boundary.md`.
+        #
+        # `--exclude` CANNOT SPELL THIS EXEMPTION, and the way it fails is the
+        # dangerous way. Measured, GNU grep 3.11, recursive, on a scratch tree
+        # with the same layout — the adapter, and a decoy at a DIFFERENT path
+        # carrying the same base name:
+        #
+        #   --exclude=src/stelling/_tripwire/_adapter_jax.py
+        #                          adapter REPORTED   decoy reported
+        #   --exclude=_adapter_jax.py
+        #                          adapter exempt     decoy EXEMPT TOO
+        #   grep -v "^src/stelling/_tripwire/_adapter_jax\.py:"
+        #                          adapter exempt     decoy reported
+        #
+        # A path-spelled `--exclude` reads exactly like a path pin and is
+        # inert: grep's `--exclude` matches a BASE NAME when searching
+        # recursively. That would leave the hook reddening on the adapter while
+        # the test — which compares the repo-relative path — passes it, which
+        # is this hook's own recorded failure mode from the other direction.
+        # And a base-name `--exclude` is not a pin at all: it exempts any file
+        # under `src/` with that name, which is what the FIRST check
+        # deliberately does for `_jax_compat.py` (measured above:
+        # `src/zzsub/_jax_compat.py` Passed) and what the second must not.
+        #
+        # So the second check filters grep's OUTPUT on an anchored path prefix
+        # — the shape `library-identifier-hygiene` below already uses, and for
+        # the same reason: grep's output always begins with the path, so `^`
+        # means file CONTENT cannot mask a hit the way it did in this hook's
+        # first version.
+        #
+        # THE FILTER HAS A TRAP AND THE STRUCTURE AVOIDS IT. With no hits at
+        # all, `printf "%s\n" "$hits"` emits one EMPTY line and `grep -v`
+        # matches it, so a filter applied unconditionally reports "a violation
+        # survived" over a clean tree. Measured. Hence the branch on grep's own
+        # status FIRST, with 2 (error) still distinguished from 1 (no match),
+        # and the same distinction applied to the filter's own status: a filter
+        # that errors is not "everything was exempt".
+        #
+        # AND CAPTURING COSTS A REPORT THAT USED TO BE FREE. This check's grep
+        # wrote to stdout; now its output is captured so it can be filtered, so
+        # the ERROR branch has to re-print it or the matches grep found before
+        # failing are swallowed — the exact case the paragraph above says the
+        # exit code exists for. Written back to stderr there, guarded on the
+        # capture being non-empty so a clean tree does not gain a blank line —
+        # and UNFILTERED, because on an error path nothing is being certified
+        # and the exempt file's own lines are part of what the scan saw. Driven
+        # in a standalone repository built from this tree, with an unreadable
+        # subdirectory under `src/`: both greps report `exited 2 … an ERROR,
+        # not "no match"`, the census stays quiet (files were examined), and a
+        # violation planted alongside is still printed.
         language: system
         entry: >-
           bash -c 'census() { grep -rc "" "$@" 2>/dev/null | wc -l; };
@@ -208,9 +264,14 @@ repos:
           grep -rnE "^[[:space:]]*(import jax\b|from jax\b)" src --include="*.py" --exclude=_jax_compat.py; s=$?;
           if [ $s -eq 0 ]; then rc=1;
           elif [ $s -ne 1 ]; then echo "jax-import-hygiene: grep exited $s scanning src/ for jax imports — an ERROR, not \"no match\"." >&2; rc=1; fi;
-          grep -rn "jax\._src" src --include="*.py"; s=$?;
-          if [ $s -eq 0 ]; then rc=1;
-          elif [ $s -ne 1 ]; then echo "jax-import-hygiene: grep exited $s scanning src/ for jax._src — an ERROR, not \"no match\"." >&2; rc=1; fi;
+          hits=$(grep -rn "jax\._src" src --include="*.py"); s=$?;
+          if [ $s -gt 1 ]; then if [ -n "$hits" ]; then printf "%s\n" "$hits" >&2; fi;
+          echo "jax-import-hygiene: grep exited $s scanning src/ for jax._src — an ERROR, not \"no match\". Any lines above are what it did find before failing." >&2; rc=1;
+          elif [ $s -eq 0 ]; then
+          unexempt=$(printf "%s\n" "$hits" | grep -v "^src/stelling/_tripwire/_adapter_jax\.py:"); f=$?;
+          if [ $f -gt 1 ]; then echo "jax-import-hygiene: the exemption filter exited $f — an ERROR, not \"every hit is exempt\"." >&2; rc=1;
+          elif [ $f -eq 0 ]; then printf "%s\n" "$unexempt" >&2;
+          echo "jax-import-hygiene: jax._src is banned outside src/stelling/_tripwire/_adapter_jax.py — the lines above name it elsewhere. See design/private-jax-boundary.md." >&2; rc=1; fi; fi;
           exit $rc'
         pass_filenames: false
         always_run: true

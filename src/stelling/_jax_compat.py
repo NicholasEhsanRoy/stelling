@@ -8,8 +8,12 @@ every analysis, encoder, and report consumes the IR and never jax. When jax
 churns — and ``jax.extend`` explicitly reserves the right to — the blast
 radius is this file.
 
-Only public and ``jax.extend`` surfaces are used. Private jax modules are
-banned repo-wide (enforced by a pre-commit hook and a test, not a comment).
+Only public and ``jax.extend`` surfaces are used here, and this module has no
+exemption from that. Private jax modules are banned everywhere but one file —
+``_tripwire/_adapter_jax.py``, which no verdict path imports — and keeping
+them out of *this* one is the point: everything a verdict claims is derived
+from what this file produces. Enforced by a pre-commit hook and a test, not by
+this comment; ``design/private-jax-boundary.md`` is the reasoning.
 """
 
 from __future__ import annotations
