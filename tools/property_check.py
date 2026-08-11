@@ -103,6 +103,7 @@ from __future__ import annotations
 import argparse
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -112,9 +113,128 @@ import xml.etree.ElementTree as ET
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
 PROPERTY_DIR = REPO / "tests" / "property"
+PYPROJECT = REPO / "pyproject.toml"
+
+#: The ``pytest11`` entry point this project declared first, kept as a FLOOR
+#: rather than as the answer: :func:`_entry_points_to_block` reads the live
+#: declaration and blocks all of it, and falls back to this name alone if it
+#: cannot. See :func:`_run` for what the block is for.
+TRIPWIRE_ENTRY_POINT = "stelling_overflow"
+
+#: The `[project.entry-points.pytest11]` table, up to the next table header,
+#: and the names in it. Used ONLY when no TOML parser can be imported — see
+#: `_declared_pytest11`, which says what these do not read.
+_PYTEST11 = re.compile(
+    r"""^\[project\.entry-points\.(?:pytest11|"pytest11"|'pytest11')\]\s*$"""
+    r"(.*?)(?=^\[|\Z)",
+    re.M | re.S,
+)
+_ENTRY_NAME = re.compile(r"""^\s*["']?([\w.-]+)["']?\s*=""", re.M)
 
 sys.path.insert(0, str(PROPERTY_DIR))
 import positive_controls as pc  # noqa: E402
+
+
+def _entry_points_to_block() -> tuple[str, ...]:
+    """Every ``pytest11`` entry point name this project declares.
+
+    READ, NOT RESTATED, and the difference is the whole point. A hard-coded
+    name closes the entry point that exists today and reopens the fault on the
+    commit that adds the second one — measured: a second name under
+    ``[project.entry-points.pytest11]`` puts every commit-pinned control back
+    to dying before collection, with the whole test suite still green, because
+    a membership assertion against the declaration permits the declaration to
+    grow.
+
+    THE FLOOR IS A FLOOR AND NOTHING ABOVE IT IS GUARANTEED. This said "FAILS
+    CLOSED ON THE FLOOR, never open", which read as a property of the whole
+    result and is a property of one name in it. :data:`TRIPWIRE_ENTRY_POINT`
+    is in the answer whatever happens — an absent ``pyproject.toml``, an
+    unparsable one, a checkout the file did not ship to. Every OTHER declared
+    name fails OPEN, and silently: if this function does not see it, nothing
+    blocks it and nothing says so. That is why the parse below is a real one.
+    """
+    names = {TRIPWIRE_ENTRY_POINT}
+    try:
+        raw = PYPROJECT.read_bytes()
+    except OSError:
+        return tuple(sorted(names))
+    names.update(_declared_pytest11(raw))
+    return tuple(sorted(names))
+
+
+def _declared_pytest11(raw: bytes) -> set:
+    """The declared names, by a real TOML parse where one can be had.
+
+    ``tomllib`` is 3.11+ and this project's floor is 3.10, so the import is
+    INSIDE the function and falls back to ``tomli`` — the same shape, and for
+    the same measured reason, as ``tests/test_sdist_contents.py``: spelled at
+    column 0 it is a collection error on the floor, exit 2, zero tests. pytest
+    itself requires ``tomli`` below 3.11, so every environment that can run
+    this tool at all has one of the two.
+
+    WHY NOT THE REGEX ALONE, which is what this did first. TOML has more than
+    one spelling of one table, and the regex reads one of them. Driven, five
+    legal spellings of the same declaration, every one of them collapsing the
+    answer to the floor name:
+
+        [project.entry-points."pytest11"]        quoted table key
+        [project.entry-points]                   + `pytest11 = {…}` inline
+          indented header                        legal, and not `^\\[`
+        "second.thing" = "…"                     quoted entry point name
+        [project.entry-points.pytest11]  # note  trailing comment
+
+    Four of those hit the "no such section" path, which is at least loud. The
+    quoted ENTRY POINT NAME was silent: the section matched, the name did not,
+    and a name this function does not return is a name nothing blocks. The
+    regexes now read the quoted spellings of both, which shrinks that set
+    without emptying it — the fallback is still a regex, and still narrower
+    than the parser it stands in for. It runs only where neither ``tomllib``
+    nor ``tomli`` imports.
+
+    ``tomllib.loads`` wants ``str``; the bytes are decoded as UTF-8 because
+    TOML MANDATES UTF-8, which makes it the specification rather than a guess.
+    ``pyproject.toml`` carries 33 non-ASCII bytes today, the first an em-dash
+    at offset 1257, so a locale-decided decode is not hypothetical: under
+    ``LC_ALL=C`` with UTF-8 mode off, ``read_text()`` raised
+    ``UnicodeDecodeError`` — a ``ValueError``, NOT an ``OSError``, so the
+    caller's fallback did not catch it and the tool died with a traceback
+    before running anything.
+
+    THAT LAST REPAIR IS NOT DRIVEN BY ANY TEST, and this is the disclosure
+    rather than the closure. Reverting the explicit decode leaves every test
+    in this repository green, because the environments they run in have a
+    UTF-8 locale and the fault needs one that does not — which no in-process
+    fixture can arrange, and which PEP 538 and PEP 540 make hard to reach on a
+    modern Linux default anyway. A test that mocked the locale would measure
+    the mock. Ten other mutations of this change are each caught by exactly
+    one test; this one is caught by none, and is here because it is right and
+    costs nothing, not because anything watches it.
+    """
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+    except ImportError:
+        tomllib = None
+    if tomllib is not None:
+        try:
+            table = (
+                tomllib.loads(raw.decode("utf-8"))
+                .get("project", {})
+                .get("entry-points", {})
+                .get("pytest11", {})
+            )
+        except (UnicodeDecodeError, ValueError, AttributeError):
+            return set()
+        return set(table) if isinstance(table, dict) else set()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return set()
+    table = _PYTEST11.search(text)
+    return set(_ENTRY_NAME.findall(table.group(1))) if table else set()
 
 
 # ── materialising the tree under test ────────────────────────────────────────
@@ -176,8 +296,66 @@ def _run(tree, targets, *, python, profile, scale, extra_env=None, runxfail=Fals
     env.pop("STELLING_PROPERTY_DB", None)
     if extra_env:
         env.update(extra_env)
+    # THE CHILD MUST NOT LOAD THIS PROJECT'S OWN pytest PLUGIN, and the reason
+    # is the `PYTHONPATH` line at the top of this function rather than anything
+    # about what the plugin does.
+    #
+    # `PYTHONPATH=<tree>/src` is the whole mechanism of this file: the child's
+    # `stelling` is the REVISION's, not the checkout's. Its `pytest11` entry
+    # point, though, comes from the DISTRIBUTION METADATA in the environment,
+    # which describes the checkout — and pytest loads entry points before it
+    # collects anything, with no exception handling: an entry point naming a
+    # module the tree on `PYTHONPATH` does not have kills the session at
+    # `Config.parse`, before a single test is seen.
+    #
+    # Measured at 260527b, the commit that added `stelling._tripwire`, in the
+    # `property` CI job (which installs with `-e`, so the metadata is there):
+    # a clean partition of the nine per-push controls. All five whose tree is
+    # `HEAD` — `_materialise` COPIES the working tree's `src/`, which has the
+    # package — came back FIRED. All four pinned to a `commit` — `git archive`
+    # of a revision that predates it — came back `ModuleNotFoundError: No
+    # module named 'stelling._tripwire'` and were reported NOT DEMONSTRATED.
+    # Nothing was wrong with those four properties or those four trees.
+    #
+    # This is PERMANENT for any revision older than a module the entry point
+    # names, so it is fixed here and not by moving the pin. Blocking is by
+    # entry point NAME, which is what `-p no:` matches, and the names are READ
+    # from `pyproject.toml` rather than written here: a rename OR AN ADDITION
+    # that this file did not follow would silently restore the crash on every
+    # commit-pinned control at once. See `_entry_points_to_block`.
+    #
+    # NOT `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`, and the reason written here first
+    # was FALSE: it said that would take hypothesis's own plugin away from the
+    # property suite, "the one plugin these runs cannot do without". Measured,
+    # in the installed venv, with autoload disabled and no `-p no:` at all:
+    # `test_a_refuted_is_false_at_some_admitted_point` -> `1 passed`, and two
+    # commit-pinned controls -> `2/2 controls fired`, exit 0, DEMONSTRATED off
+    # the recorded junit message. The suite plainly can do without it.
+    #
+    # The real reason is scope. `-p no:<name>` changes exactly one thing about
+    # the child; disabling autoload changes what EVERY plugin does in it, and
+    # this child is an instrument whose readings are compared across trees and
+    # across machines. What the property suite needs from hypothesis's plugin
+    # was never the question — what it needs is to be the same instrument in
+    # CI, in a dev venv, and on a box with pytest-randomly installed.
+    #
+    # TWO COSTS, DISCLOSED. `src/stelling/overflow.py` registers the same
+    # plugin under this same name by hand, so a future `pytest_plugins =
+    # ["stelling.overflow"]` under `tests/property/` would be blocked in these
+    # children — and pluggy's `register()` returns None for a blocked name
+    # rather than raising, so it would be blocked SILENTLY. Nothing opts in
+    # today (the plugin is registered always and active never). The day the
+    # property suite wants the tripwire armed, this block is what stops it.
+    #
+    # And these children can no longer notice that this project's own plugin
+    # is BROKEN, because they never load it. That is the right scope for this
+    # tool — a control's verdict must depend on the tree, not on whether some
+    # plugin in the environment imports — and it is covered next door:
+    # `tests/test_tripwire_plugin.py` pins the entry point against
+    # `pyproject.toml` and drives the plugin itself.
     argv = [
         python, "-m", "pytest", "-ra", "-p", "no:cacheprovider",
+        *[arg for name in _entry_points_to_block() for arg in ("-p", f"no:{name}")],
         "--no-header", *extra_args,
     ]
     if runxfail:
@@ -225,7 +403,10 @@ def _crashes(junit) -> list[str]:
 
     An empty list is the honest answer for a run that produced no XML at all —
     a pytest usage error, an interpreter that died before collection — and the
-    caller treats it as "did not carry", which is the safe direction.
+    caller treats it as "did not carry", which is the safe direction. WHICH IS
+    NOT THE SAME AS THE RIGHT SENTENCE, and this docstring used to stop here
+    as though it were: see :func:`_reported`, which is what separates "ran and
+    recorded the wrong failure" from "never ran".
     """
     try:
         root = ET.parse(junit).getroot()
@@ -237,6 +418,80 @@ def _crashes(junit) -> list[str]:
         for child in case
         if child.tag in ("failure", "error")
     ]
+
+
+def _reported(junit) -> bool:
+    """Did pytest get far enough to report on ANY test?
+
+    THE QUESTION THIS ANSWERS is the one `_crashes` alone cannot: a run that
+    recorded nothing and a run that recorded the wrong thing both produce an
+    empty crash list, and they are not the same event. The first says nothing
+    whatever about the property; the second says the property ran and failed
+    somewhere else.
+
+    THREE SPELLINGS, and the third was missing from this function while this
+    docstring already claimed the general question. Measured on pytest 9.1.1,
+    each with the exit code it produces:
+
+    * a plugin that could not import           rc 1, NO XML AT ALL
+    * a nodeid that matches nothing            rc 4, XML, zero ``<testcase>``
+    * a TEST MODULE that could not import      rc 2, XML, ONE ``<testcase>``
+      with ``classname=""`` and a single ``<error message="collection
+      failure">``
+
+    The third is the near neighbour of the event that produced this file's
+    remedy, one step to the left: the checkout's property module imports
+    something the REVISION's ``src/`` does not have. Keying only on "is there
+    a ``<testcase>``" answered yes to it, and it was printed as ``FIRED, but
+    the failure did not carry '…'`` — the exact sentence the rest of this
+    change exists to stop. A collection failure is pytest reporting that it
+    could not reach a test, so it is not a report ON a test.
+
+    THE DISCRIMINATOR IS THE EMPTY ``classname``, which pytest writes for a
+    collection failure and never for a test that ran (a test's ``classname``
+    is its module path). It is a convention, not a guarantee, so the fail
+    direction matters: if pytest ever stopped writing it, a collection failure
+    would score ``WRONG`` again — the safe-but-wrongly-worded behaviour this
+    replaced, never a green verdict.
+
+    MEASURED, and the reason this exists. At 260527b every control pinned to a
+    commit older than ``stelling._tripwire`` died at entry-point load, wrote no
+    XML, and was printed as ``FIRED, but the failure did not carry '…'`` —
+    which is false twice over: it did not fire, and there was no failure to
+    carry anything. Four of the nine per-push controls, reported in the shape
+    of a property defect, over an environment fault. The remedy for the fault
+    is in :func:`_run`; this is the remedy for the sentence.
+    """
+    try:
+        root = ET.parse(junit).getroot()
+    except (OSError, ET.ParseError):
+        return False
+    return any(
+        not _is_collection_failure(case) for case in root.iter("testcase")
+    )
+
+
+def _is_collection_failure(case) -> bool:
+    """pytest's shape for "I could not reach this module", measured at 9.1.1.
+
+    THREE CONDITIONS, not the one the caller's docstring names. The empty
+    ``classname`` is the discriminating one; the other two — exactly one
+    child, and that child an ``<error>`` — are there so that this cannot
+    swallow a ``<testcase>`` of some shape nobody has seen. Only the first is
+    load-bearing today: dropping the other two leaves every test in this
+    repository green, measured. They are cheap, and the direction they fail in
+    is to call something a real report that pytest called a collection
+    failure, which is the pre-existing behaviour rather than a new risk.
+
+    Checked at 9.1.1 under ``junit_family=xunit1`` and ``junit_logging=all``:
+    the shape does not move.
+    """
+    children = list(case)
+    return (
+        not case.get("classname")
+        and len(children) == 1
+        and children[0].tag == "error"
+    )
 
 
 # ── the decision ─────────────────────────────────────────────────────────────
@@ -255,26 +510,54 @@ DEMONSTRATED = "demonstrated"
 ECHOED = "echoed, not raised"
 WRONG = "wrong failure"
 DID_NOT_FIRE = "passed where it must fail"
+NEVER_RAN = "the session reported on no test at all"
 
 
-def _verdict(expect_message, crashes, out, *, fired) -> str:
+def _verdict(expect_message, crashes, out, *, fired, reported=True) -> str:
     """Did this run demonstrate the defect, and if not, in which way not?
 
-    ``crashes`` is ``_crashes(junit)`` — what pytest RECORDED. ``out`` is
-    everything the run echoed. The order of the three tests below is the whole
+    ``crashes`` is ``_crashes(junit)`` — what pytest RECORDED. ``reported`` is
+    ``_reported(junit)`` — whether it recorded anything at all. ``out`` is
+    everything the run echoed. The order of the tests below is the whole
     decision procedure:
 
+    * green -> ``DID_NOT_FIRE``, which is the failure this registry exists for;
+    * red, and pytest reported on NO test -> ``NEVER_RAN``. It comes SECOND, on
+      purpose, and ahead of every match: a session that died in configuration
+      still echoes a traceback, and this file's own rule is that the echoed
+      output is not evidence. Scoring it against ``expect_message`` at all is
+      how four controls came to be printed as "FIRED, but the failure did not
+      carry …" over a missing module;
     * the guard is in a RECORDED failure -> ``DEMONSTRATED``;
     * the guard is only in the echoed output -> ``ECHOED``, its own outcome
       because the remedy differs (nothing is wrong with the control; a
       docstring or a message template on the traceback path put it there);
-    * red, and the guard is nowhere -> ``WRONG``;
-    * green -> ``DID_NOT_FIRE``, which is the failure this registry exists for.
+    * red, and the guard is nowhere -> ``WRONG``.
 
-    Everything except the first is NOT DEMONSTRATED and exits non-zero.
+    Everything except ``DEMONSTRATED`` is NOT DEMONSTRATED and exits non-zero,
+    so the added outcome moves no verdict from red to green. What it moves is
+    what the report SAYS, which is the whole product of this tool.
+
+    IT CAN MOVE ONE VERDICT THE OTHER WAY, and the argument that it cannot was
+    written here first and was wrong. It said ``_crashes`` reads only from
+    ``<testcase>``, so a non-empty crash list implies ``reported`` — it does
+    not: ``_crashes`` reads the ``<error>`` child of a COLLECTION-FAILURE
+    ``<testcase>`` too, and on a real rc-2 run ``_crashes`` returns
+    ``['collection failure']`` while ``_reported`` returns ``False``. Since
+    ``NEVER_RAN`` is tested first, a control whose ``expect_message`` were a
+    substring of ``collection failure`` would move from ``DEMONSTRATED`` to
+    ``NEVER_RAN`` — green to RED, the safe direction, and not true of any of
+    the twelve guards registered today (checked against the registry). Worth
+    keeping in view for the same reason the module docstring keeps
+    ``reorder``'s lower-case ``transposed`` in view.
+
+    ``reported`` defaults to ``True`` so that the three-argument call still
+    means what it always meant: "pytest ran and this is what it recorded".
     """
     if not fired:
         return DID_NOT_FIRE
+    if not reported:
+        return NEVER_RAN
     if any(expect_message in c for c in crashes):
         return DEMONSTRATED
     if expect_message in out:
@@ -347,11 +630,33 @@ def check_controls(args) -> int:
             out = (proc.stdout or "") + (proc.stderr or "")
             crashes = _crashes(junit)
             verdict = _verdict(control.expect_message, crashes, out,
-                               fired=proc.returncode != 0)
+                               fired=proc.returncode != 0,
+                               reported=_reported(junit))
             if verdict == DEMONSTRATED:
                 print("   FIRED — the property failed where it is supposed to")
                 if args.verbose:
                     print(_tail(proc, 30))
+            elif verdict == NEVER_RAN:
+                # NOT a statement about the property, and deliberately worded
+                # so that it cannot be read as one. pytest exited non-zero
+                # having reported on no test, so the tree, the mutation and
+                # the oracle are all unexamined.
+                #
+                # AND NOT A STATEMENT ABOUT THE ENVIRONMENT EITHER, which is
+                # what this said first. The environment is the likeliest
+                # culprit, not the only one: a nodeid this registry spells
+                # wrongly reaches here too, and that is a defect in the
+                # CONTROL. Naming a culprit is the one thing the tool cannot
+                # do from what it has, so it names the candidates.
+                print("   THE PROPERTY NEVER RAN — pytest exited without "
+                      "reporting on any test, so this run says nothing about "
+                      "the property, the tree or the mutation. Something "
+                      "stopped the session before it reached a test: a plugin "
+                      "that could not import, a test module that could not "
+                      "import, an interpreter that failed to start, or a "
+                      "nodeid in the registry that matches nothing.")
+                print(_tail(proc, 30))
+                failures.append((control.name, NEVER_RAN))
             elif verdict == ECHOED:
                 # The string is in the run's OUTPUT but not in any failure the
                 # run recorded, which is the shape a docstring or a message
