@@ -20,6 +20,10 @@ $ pytest -p stelling.overflow
 $ pytest --stelling-overflow=auto     # the same thing, as a flag
 ```
 
+(The flag on its own needs the plugin to have been autoloaded. If your CI sets
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`, name the module too — see
+[below](#if-your-ci-sets-pytest_disable_plugin_autoload1).)
+
 ## What it finds
 
 An out-of-dtype-range Python integer constant is **silently narrowed** on its
