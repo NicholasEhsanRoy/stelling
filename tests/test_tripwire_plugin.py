@@ -419,9 +419,12 @@ def test_the_report_does_not_depend_on_the_order_the_findings_fired(pytester):
 
 
 def test_the_entry_point_declaration_is_what_makes_any_of_this_reachable():
-    """Everything above runs with ``-p stelling._tripwire.plugin`` spelled out,
-    because a nested pytester session inherits no entry points. So none of it
-    can see the one declaration the whole adoption story rests on: a
+    """Everything above runs with ``-p stelling._tripwire.plugin`` spelled out
+    WHERE THE DISTRIBUTION IS NOT INSTALLED, and with nothing extra where it
+    is — this said "a nested pytester session inherits no entry points" and
+    ``tests/conftest.py::tripwire_plugin_args`` records the measured opposite,
+    which is the reason that helper exists. Either way none of those runs can
+    see the one declaration the whole adoption story rests on: a
     ``pytest11`` entry point that a rename, a typo or a deleted section would
     silently unregister, leaving `pytest_plugins = ["stelling.overflow"]` a
     line that does nothing at all.

@@ -65,13 +65,21 @@ REGISTRY_ATTR = "const_fold_rules"
 # minor version.
 # ---------------------------------------------------------------------------
 
-#: Below this, refuse without probing. The rule's source is measurably
-#: different on 0.5.1 (sha1 ``f5f2d0057376``), so probing there would be
-#: probing a function this tool has never read.
+#: Below this, refuse without probing. 0.4.8 is the release nearest jax commit
+#: ``c2fe350455``, which created the line that wraps: below it there is no
+#: reason to believe the rule this tool attaches to does what it attaches for.
 #:
-#: THE PRECISION IS NOT MEASURED AND SAYS SO. 0.4.8 is the release nearest
-#: jax commit ``c2fe350455``, which created the line that wraps. Nothing here
-#: has been run on 0.4.8, and stelling's own floor is ``jax>=0.10`` anyway
+#: THE 0.5.1 HASH DOES NOT JUSTIFY THIS BOUND, and this comment used to say it
+#: did — *"the rule's source is measurably different on 0.5.1 (sha1
+#: ``f5f2d0057376``), so probing there would be probing a function this tool
+#: has never read"*. 0.5.1 is ABOVE 0.4.8, so the floor does not exclude it and
+#: it IS probed. The differing hash is a disclosure that the rule's source
+#: moves inside the range this tool will arm on — which is exactly why §5 makes
+#: the probe the authority and records the hash rather than gating on it — and
+#: not an argument for where the floor sits.
+#:
+#: THE PRECISION IS NOT MEASURED AND SAYS SO. Nothing here has been run on
+#: 0.4.8, and stelling's own floor is ``jax>=0.10`` anyway
 #: (``pyproject.toml``), so in every environment stelling supports this bound
 #: is inert. It is a refusal boundary, not a support claim.
 _FLOOR = (0, 4, 8)
@@ -299,11 +307,19 @@ def _stack(skip: int) -> tuple[record.Frame, ...]:
 def _int_or_none(value) -> int | None:
     """A Python int from a folded constant, or None.
 
-    MEASURED, and the reason for the shape check: the rule is invoked with
-    NON-SCALAR constants too (it returns None for them, so nothing folds), and
-    ``int()`` on those raises ``TypeError: only 0-dimensional arrays can be
-    converted to Python scalars``. A wrapper that assumed scalars would crash
-    the user's trace on the first array constant it met.
+    MEASURED, and the shape check is a CHEAP EARLY RETURN rather than a crash
+    guard. The rule is invoked with NON-SCALAR constants too (it returns None
+    for them, so nothing folds), and ``int()`` on those raises ``TypeError:
+    only 0-dimensional arrays can be converted to Python scalars`` — re-driven
+    on ``np.ndarray`` and ``jax.Array`` alike.
+
+    This used to say a wrapper without the check "would crash the user's
+    trace on the first array constant it met". It would not, twice over: the
+    ``except`` two lines below catches ``TypeError`` itself, and the wrapper's
+    own ``except Exception`` catches anything that escaped and counts it in
+    ``internal_errors``. What the check buys is not safety but silence — no
+    raised-and-caught exception per non-scalar constant, and no
+    ``internal_errors`` count for something entirely ordinary.
     """
     if value is None:
         return None
@@ -583,10 +599,14 @@ def selfcheck() -> str:
     lambdas so that the attributed frame is a real module — the same path a
     user's code takes, including the stack walk and the source quote.
 
-    EACH RUN USES A FRESH INPUT SHAPE, and that is not tidiness. Measured:
-    jax's trace cache is process-wide and outlives disarm/rearm, so tracing
-    ``_probe.over`` at the *same* avals a second time reaches the const-fold
-    site **zero** times. A probe with a fixed shape therefore passes exactly
+    EACH RUN USES A FRESH INPUT SHAPE, and that is not tidiness. Measured on
+    both tested series: jax's trace cache is process-wide and outlives
+    disarm/rearm, so tracing ``_probe.over`` at the *same* avals reaches the
+    const-fold site ``[1, 0, 0]`` times over three runs — once, and then never
+    again. (``f86bafe`` recorded that sequence as "same shape three times, 0
+    invocations each", which is wrong in its first element: the first trace
+    does reach the site, which is the only reason a fixed-shape probe passed
+    at all. Shapes 1, 2, 3 give ``[1, 1, 1]``, as that commit says.) A probe with a fixed shape therefore passes exactly
     once per process and reports ``not-invoked`` for ever after — which would
     make a second ``arm()`` in one process, and every test that arms twice,
     look like a broken hook. The shape is the cheapest thing in the cache key

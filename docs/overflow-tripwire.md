@@ -93,8 +93,11 @@ earn.
 
 ## What it does NOT find
 
-Stated first, and printed on every run, because "no findings" and "your code is
+Printed on every run, findings or not, because "no findings" and "your code is
 clean" are not the same sentence and this tool will never print the second one.
+(In the terminal report it comes LAST, under *what this run did NOT look at*.
+This section used to say "stated first", which it is not here — it is the second
+section — and is not there either.)
 
 **This table is a floor, not a census** — and read it as the answer to "what
 does it not see", because that is what it is for. Every row was measured with a
@@ -142,9 +145,14 @@ truncates it.
 
 ## Reading the report
 
-**The denominator is always printed.** `0 findings over 3,011 integer
-const-folds inspected` is evidence; `0 findings` is indistinguishable from a
-dead hook, and this tool will not print the second one either. A run whose
+**The denominator is always printed**, in the form the tool actually prints it:
+
+```
+denominator: 3011 integer const-folds inspected (3288 constants folded, 9412 rule invocations).
+```
+
+A count is evidence; `0 findings` on its own is indistinguishable from a dead
+hook, and this tool will not print the second one either. A run whose
 denominator is zero says so in as many words.
 
 **Suppressed narrowings are named, not dropped.** JAX's own PRNG seed mask

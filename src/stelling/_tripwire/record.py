@@ -385,8 +385,14 @@ class Recorder:
     a :class:`Finding`; nothing jax-shaped is stored.
 
     The counters exist because §8's first disclosure obligation is the
-    denominator: *"0 findings over 4,812 narrowing conversions"* is evidence
-    and *"0 findings"* is indistinguishable from a hook that never ran.
+    denominator. A count is evidence and *"0 findings"* on its own is
+    indistinguishable from a hook that never ran. The line
+    :func:`report.render_denominator` builds is what fixes the wording, and it
+    is quoted here in the format it prints rather than paraphrased with an
+    invented figure::
+
+        denominator: 3011 integer const-folds inspected (3288 constants
+        folded, 9412 rule invocations).
     """
 
     #: every entry into the wrapper, folded or not
