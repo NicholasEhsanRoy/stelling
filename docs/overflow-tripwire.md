@@ -141,7 +141,11 @@ this tool at any time. When that happens:
 
 The codes are stable and greppable: `no-module`, `no-registry`, `no-entry`,
 `not-invoked`, `cries-wolf`, `mis-attributed`, `below-floor`, `foreign-patch`,
-`unexpected:<ExcType>`.
+`no-worker-reported`, `mixed`, `unexpected:<ExcType>`.
+
+The last two belong to an xdist **controller**, which never arms and whose
+status is its workers' agreement: `no-worker-reported` when not one worker
+sent a status back, `mixed` when they disagreed.
 
 The message never travels by `warnings.warn`. Under `-W error::UserWarning` —
 common in scientific repos — a "safely disabled" warning becomes an exception

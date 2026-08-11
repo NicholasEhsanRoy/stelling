@@ -524,6 +524,7 @@ def test_every_failure_code_is_explained_and_documented():
     EVERY code rather than of the ones someone remembered.
     """
     import pathlib
+    import re
 
     from stelling import _tripwire
 
@@ -549,6 +550,26 @@ def test_every_failure_code_is_explained_and_documented():
     )
     # ...and the open-ended one, which is the only code not in the tuple
     assert "`unexpected:<ExcType>`" in page
+
+    # AND THE OTHER DIRECTION, which is the one that made this check
+    # one-sided: the three assertions above are all "tuple => elsewhere", so
+    # dropping a code from BOTH the tuple and the table left this green while
+    # the doc went on advertising it. The doc's own sentence is the third
+    # register, so it is read back and compared, not merely searched.
+    marker = "The codes are stable and greppable:"
+    assert marker in page, "the doc no longer advertises the list at all"
+    sentence = page.split(marker, 1)[1].split("\n\n", 1)[0]
+    advertised = set(re.findall(r"`([a-z:<>A-Za-z-]+)`", sentence)) - {
+        "unexpected:<ExcType>"
+    }
+    unreturnable = sorted(advertised - set(_tripwire.FAILURE_CODES))
+    assert not unreturnable, (
+        f"docs/overflow-tripwire.md advertises {unreturnable} as greppable "
+        "and nothing can return them"
+    )
+    assert advertised == set(_tripwire.FAILURE_CODES), (
+        "the doc's list and FAILURE_CODES are supposed to BE the same list"
+    )
 
     # an unknown code still explains itself rather than rendering `None`
     fallback = _tripwire.Status(code="unexpected:ValueError").explanation
