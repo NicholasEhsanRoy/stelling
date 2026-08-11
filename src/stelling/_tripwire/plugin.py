@@ -235,11 +235,20 @@ def pytest_sessionfinish(session, exitstatus):
     """Two jobs, in the one hook pytest gives for the end of a session.
 
     On a **worker**: populate ``workeroutput`` before xdist's own sender takes
-    it. ``tryfirst=True`` is the ordering claim, and it is measured rather
-    than cited — ``tests/test_tripwire_xdist.py`` runs a real two-worker
-    session in a subprocess and asserts both payloads arrived. The payload is
-    primitives only (dict / list / tuple / str / int / bool), which is what
-    execnet serialises.
+    it. The payload is primitives only (dict / list / tuple / str / int /
+    bool), which is what execnet serialises.
+
+    ``tryfirst=True`` IS A PRECAUTION AND NOT WHAT MAKES THAT WORK, and this
+    used to say the ordering was "measured rather than cited". It was not:
+    ``tests/test_tripwire_xdist.py`` asserts the payloads ARRIVED, which they
+    do under ``trylast`` too — driven, the whole tripwire suite passes with
+    ``tryfirst`` flipped to ``trylast``. The reason is upstream and is now
+    pinned rather than assumed: xdist's own
+    ``WorkerInteractor.pytest_sessionfinish`` is a **hookwrapper**, so it
+    yields to every other implementation, whatever their ordering, and sends
+    only afterwards. ``tryfirst`` is kept because it costs nothing and is what
+    a plain sender would need; the test that would fail if xdist stopped being
+    a wrapper is the one that names this.
 
     On a **controller or single process** under ``require``: escalate. The
     controller cannot raise ``UsageError`` at configure time, because it is

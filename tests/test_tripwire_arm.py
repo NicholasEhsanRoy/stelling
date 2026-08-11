@@ -144,6 +144,40 @@ def test_attached_but_never_invoked_is_caught_which_a_presence_check_misses(disa
     assert rec.invocations == 0
 
 
+def test_ARM_ITSELF_refuses_on_a_blind_hook_and_does_not_leave_it_installed(disarmed):
+    """The test above drives ``selfcheck`` directly, and nothing drove the
+    GATE.
+
+    Deleting the ``selfcheck()`` call from ``arm()`` — so that arming reports
+    ``armed`` for an attached-but-blind hook — survived the entire suite: the
+    probe was tested and the decision that consumes it was not. The whole
+    fail-closed contract is that decision.
+
+    ``restore()`` is the other half: a refused arm must not leave a wrapper in
+    the registry, or the tool is disabled AND still in the way.
+    """
+    rec = record.Recorder()
+    assert adapter.install(rec) == "installed"
+    assert adapter.detach("bypass") == "detached"
+
+    status, _ = _tripwire.arm()
+    assert not status.armed, (
+        "arm() reported armed for a hook that is attached and never invoked, "
+        "which is what a jax version bump actually produces"
+    )
+    assert status.code == "not-invoked"
+    assert "Static checking is unaffected" in status.explanation
+
+    adapter.reattach()
+    assert _tripwire.disarm() in ("not-armed", "restored"), (
+        "a refused arm left its wrapper installed"
+    )
+
+    # the positive control: the same arm() on the same registry does arm
+    again, _ = _tripwire.arm()
+    assert again.armed, "the control did not arm, so the refusal above is not news"
+
+
 def test_a_hook_that_records_everything_is_caught_as_cries_wolf(disarmed, monkeypatch):
     """The other direction, and the reason the probe runs both.
 
@@ -275,6 +309,84 @@ def test_a_user_written_wrap_is_found_with_both_halves_observed(armed):
     assert finding.func == "widen"
     assert finding.line == widen.__code__.co_firstlineno + 1
     assert finding.agrees, "the independent recomputation disagreed with the hook"
+
+
+@pytest.mark.parametrize(
+    ("written", "dtype", "became"),
+    [
+        (-200, "int8", 56),
+        (-129, "int8", 127),
+        (-1, "uint8", 255),
+        (-40000, "int16", 25536),
+    ],
+)
+def test_a_NEGATIVE_out_of_range_constant_fires_too(armed, written, dtype, became):
+    """The range check has two sides and only one was driven.
+
+    ``in_range(...) or written < 0`` — every negative out-of-range constant
+    silently accepted, ``int8 + (-200)`` wrapping to 56 and vanishing — survived
+    the ENTIRE suite. Every wrap this file traced was positive, so half the
+    predicate was never exercised on a real trace.
+
+    Driven through the live hook rather than through :func:`record.in_range`,
+    because the mutant is in the wrapper's use of it.
+    """
+    _, rec = armed
+    x = jnp.zeros((7 + abs(written) % 5,), getattr(jnp, dtype))
+
+    before = rec.count
+    jax.make_jaxpr(lambda a: a + written)(x)
+    assert rec.count == before + 1, (
+        f"{written} -> {dtype} did not produce a finding; a negative "
+        "out-of-range constant is being accepted silently"
+    )
+    finding = next(f for f in rec.findings.values() if f.written == written)
+    assert finding.became == became and finding.agrees
+
+    # ...and the value really is destroyed, which is what makes it a finding
+    assert int(np.asarray(jax.jit(lambda a: a + written)(x)).ravel()[0]) == became
+
+
+def test_the_LITERAL_VISIBLE_note_is_decided_at_the_site_not_asserted(armed):
+    """``literal_visible = False`` — every finding carrying the "not textually
+    on that line" caveat — survived the entire suite.
+
+    Every test that exercised the note built a :class:`record.Finding` by hand
+    with the flag already set, so the wrapper's own decision was never
+    measured. Here the flag comes off a real trace, both ways, and the
+    difference between the two lines is the only difference between them.
+    """
+    _, rec = armed
+    x = jnp.zeros((9,), jnp.int8)
+
+    def on_the_line(a):
+        return a + 300
+
+    limit = 301
+
+    def behind_a_name(a):
+        return a + limit
+
+    jax.make_jaxpr(on_the_line)(x)
+    jax.make_jaxpr(behind_a_name)(jnp.zeros((10,), jnp.int8))
+
+    visible = next(f for f in rec.findings.values() if f.written == 300)
+    hidden = next(f for f in rec.findings.values() if f.written == 301)
+    assert visible.literal_visible, (
+        "`return a + 300` has the literal on the line and the finding says it "
+        "does not, so every finding carries the caveat and it means nothing"
+    )
+    assert not hidden.literal_visible, (
+        "`return a + limit` does not have the literal on the line, so the "
+        "caveat is what tells a reader to check the chain"
+    )
+
+    from stelling._tripwire import report
+
+    assert "not textually on that line" not in "\n".join(
+        report.render_finding(1, visible)
+    )
+    assert "not textually on that line" in "\n".join(report.render_finding(1, hidden))
 
 
 def test_an_in_range_constant_is_counted_and_not_reported(armed):

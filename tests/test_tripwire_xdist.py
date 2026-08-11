@@ -200,6 +200,37 @@ def test_ONE_broken_worker_does_not_discard_what_the_OTHER_one_found(pytester):
     )
 
 
+def test_what_actually_delivers_the_payload_is_XDIST_S_HOOKWRAPPER():
+    """§2's first assumed item, and it was assumed in the wrong place.
+
+    ``plugin.py`` said ``tryfirst=True`` on ``pytest_sessionfinish`` was "the
+    ordering claim, measured rather than cited", and pointed at the tests
+    above. They do not measure it: they assert the payloads ARRIVED, and the
+    payloads arrive under ``trylast`` as well — driven, the whole tripwire
+    suite passes with the flag flipped.
+
+    The real reason is upstream: xdist's own
+    ``WorkerInteractor.pytest_sessionfinish`` is a **hookwrapper**, so it
+    yields to every other implementation regardless of ordering and sends
+    ``workeroutput`` afterwards. That is what this pins. If xdist ever ships a
+    plain implementation instead, ``tryfirst`` becomes load-bearing, the
+    ordering needs measuring for real, and this fails first.
+    """
+    from xdist.remote import WorkerInteractor
+
+    opts = getattr(WorkerInteractor.pytest_sessionfinish, "pytest_impl", None)
+    assert opts is not None, (
+        "xdist's sessionfinish is no longer a declared hookimpl, so the "
+        "ordering assumption this plugin rests on has to be re-measured"
+    )
+    assert opts.get("hookwrapper") or opts.get("wrapper"), (
+        "xdist's WorkerInteractor.pytest_sessionfinish is no longer a wrapper "
+        f"({opts}). Being one is what let every other implementation run "
+        "before the payload was sent, whatever its ordering. `tryfirst=True` "
+        "in stelling's plugin is now load-bearing and untested."
+    )
+
+
 def test_require_fails_the_session_when_a_worker_cannot_arm(pytester):
     """The controller cannot raise ``UsageError`` at configure time, because it
     is not the process that arms. So ``require`` under xdist has to escalate
