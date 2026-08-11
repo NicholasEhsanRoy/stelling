@@ -295,13 +295,56 @@ def _suggestions(finding: record.Finding) -> list[str]:
     ]
 
 
+def measured_anything(rec: record.Recorder) -> bool:
+    """Whether this recorder holds anything at all worth printing.
+
+    The discriminator between "not armed and nothing was measured" — a
+    ``no-module`` session, where the status line IS the whole report — and
+    "not armed and something was measured anyway", which is every partial:
+    an xdist controller whose armed workers reported, or a single process
+    whose hook was detached part-way through.
+    """
+    return bool(
+        rec.invocations
+        or rec.findings
+        or rec.suppressed
+        or rec.internal_errors
+        or rec.dropped_over_cap
+    )
+
+
+#: §6's lost-worker disclosure, generalised. A partial is a partial whether the
+#: missing part is a worker that died or a stretch of the session that ran
+#: uninstrumented, and it gets the same words for the same reason.
+PARTIAL_BANNER = (
+    "    PARTIAL: the status above is not `armed`, and the figures below were "
+    "collected anyway -- by an armed xdist worker, or before this session's "
+    "hook stopped being the live one. They cover the INSTRUMENTED PART of "
+    "this run and no more.",
+    "    That is a PARTIAL and not a total, in the same sense as a lost xdist "
+    "worker and for the same reason: presenting what arrived as a total "
+    "would be a confident wrong answer. A zero below is a fact about the "
+    "part that was measured.",
+)
+
+
 def render(status, rec: record.Recorder, notes: tuple[str, ...] = ()) -> list[str]:
-    """The whole section, in a stable order. Two runs must agree byte for byte."""
+    """The whole section, in a stable order. Two runs must agree byte for byte.
+
+    A NON-ARMED STATUS USED TO RETURN HERE, and under xdist that threw away
+    everything the armed workers had collected: one broken worker of two makes
+    the controller's status ``mixed``, and every finding the other worker
+    serialised back was dropped with no count and no mention. The status is
+    the report's headline, not its gate — what is withheld from a partial is
+    the CLAIM that it is a total, and that is what the banner withholds.
+    """
     lines = [HEADER, "=" * len(HEADER)]
     lines.extend(render_status(status))
     lines.extend(notes)
     if not status.armed:
-        return lines
+        if not measured_anything(rec):
+            return lines
+        lines.extend(PARTIAL_BANNER)
 
     lines.append("")
     lines.extend(render_denominator(rec))

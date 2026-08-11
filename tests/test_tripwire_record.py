@@ -509,6 +509,43 @@ def test_a_disabled_tripwire_says_what_still_works():
     assert "Static checking is unaffected" in text
 
 
+def test_a_non_armed_status_does_not_DISCARD_what_was_measured():
+    """A non-armed status used to return before the denominator, so anything
+    already collected was dropped with no count and no mention.
+
+    That is not hypothetical under xdist: one broken worker of two makes the
+    controller's status ``mixed``, and every finding the OTHER worker
+    serialised back went in the bin. ``tests/test_tripwire_xdist.py`` drives
+    that as a real two-worker session; this is the same property at the level
+    where every branch of it is reachable.
+
+    Both directions, because "print it anyway" is satisfiable by a renderer
+    that prints a denominator of zero for a ``no-module`` session and calls it
+    disclosure.
+    """
+    empty = _rendered(record.Recorder(), _Status(code="no-module"))
+    assert "denominator:" not in empty, (
+        "nothing was measured, so there is no partial to disclose and a "
+        "denominator of zero is noise"
+    )
+    assert "PARTIAL" not in empty
+
+    rec = record.Recorder()
+    rec.invocations = 9
+    rec.int_narrowings = 4
+    rec.add(_finding(written=300, became=44))
+    carried = _rendered(rec, _Status(code="mixed", detail="worker statuses: armed, no-entry"))
+    assert "denominator: 4 integer const-folds" in carried
+    assert "you wrote 300" in carried
+    assert "PARTIAL" in carried and "not a total" in carried
+    assert "never a clean bill of health" in carried
+
+    # and the armed rendering is unchanged, byte for byte, banner and all
+    armed = _rendered(rec)
+    assert "PARTIAL" not in armed
+    assert armed.splitlines()[3] == "" and armed.splitlines()[4].startswith("denominator:")
+
+
 def test_the_primary_channel_carries_all_THREE_thirds_for_every_code():
     """§4: every message says what happened, what it MEANS, and what still
     works — and the middle third is the one the terminal used to drop.

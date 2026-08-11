@@ -152,6 +152,50 @@ def test_the_payload_is_primitives_and_survives_execnet(pytester):
     assert "test_alpha.py:" in out and "test_beta.py:" in out
 
 
+def test_ONE_broken_worker_does_not_discard_what_the_OTHER_one_found(pytester):
+    """The controller's status is its workers' agreement, so one broken worker
+    of two makes it ``mixed`` — and a non-armed status used to return before
+    the denominator, throwing away every finding the armed worker had
+    serialised back, with no count and no mention of the loss.
+
+    The existing xdist tests could not see it: they break the anchor in EVERY
+    worker or in none, and both of those agree.
+
+    The control is the same run with both workers healthy: a report that
+    printed nothing either way would satisfy half of this, and one that lost
+    nothing because nothing was ever found would satisfy the other.
+    """
+    pytester.makepyfile(**TWO_FILES)
+    pytester.makeconftest(
+        """
+        def pytest_configure(config):
+            # exactly ONE worker of the two, so they disagree
+            if getattr(config, "workerinput", {}).get("workerid") == "gw0":
+                from stelling._tripwire import _adapter_jax as adapter
+
+                adapter.detach("entry")
+        """
+    )
+    half = _run(pytester, "-n", "2")
+    half.assert_outcomes(passed=2)
+    out = half.stdout.str()
+
+    assert "NOT ARMED [mixed]" in out
+    assert "no-entry" in out, "the broken worker's code is not disclosed"
+    assert _findings(half), (
+        "the healthy worker's findings were discarded because the CONTROLLER "
+        f"was not armed. {out[-3000:]}"
+    )
+    assert _findings(half) < {"300", "400"}, (
+        "a broken worker found something, so the anchor was not broken"
+    )
+    denominator = [ln for ln in out.splitlines() if ln.startswith("denominator:")]
+    assert len(denominator) == 1 and " 0 integer const-folds" not in denominator[0]
+    assert "PARTIAL" in out and "not a total" in out, (
+        "a partial was presented without saying it is one"
+    )
+
+
 def test_require_fails_the_session_when_a_worker_cannot_arm(pytester):
     """The controller cannot raise ``UsageError`` at configure time, because it
     is not the process that arms. So ``require`` under xdist has to escalate
