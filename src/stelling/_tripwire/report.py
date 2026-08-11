@@ -137,13 +137,27 @@ def render_uncovered() -> list[str]:
 
 
 def render_suppressed(rec: record.Recorder) -> list[str]:
-    """§10a.9: suppressed fires are named and counted, never silently dropped."""
-    if not (rec.suppressed_jax or rec.unattributed or rec.suppressed):
-        return []
+    """§10a.9: suppressed fires are named and counted, never silently dropped.
+
+    PRINTED EVEN WHEN THE COUNT IS ZERO. A filter that only announces itself
+    when it catches something is invisible on exactly the runs a reader would
+    use to judge the instrument, and "no mention of a filter" and "no filter"
+    then look the same. The line below says the filter is on and what it took,
+    including nothing.
+    """
     lines = [
-        f"suppressed: {rec.suppressed_jax} narrowing(s) written by jax itself "
-        f"and {rec.unattributed} with no attributable frame. Named, not dropped:"
+        f"jax-internal filter: ON. {rec.suppressed_jax} narrowing(s) written "
+        f"by jax itself and {rec.unattributed} with no attributable frame were "
+        "kept out of the findings above."
     ]
+    if not (rec.suppressed_jax or rec.unattributed or rec.suppressed):
+        lines.append(
+            "    Nothing was suppressed this run. The filter is stated anyway: "
+            "a filter that only speaks up when it catches something is "
+            "indistinguishable from no filter at all."
+        )
+        return lines
+    lines.append("    Named, not dropped:")
     for finding in rec.sorted_suppressed():
         lines.append(
             f"  - {finding.written} ({finding.from_dtype}) -> {finding.became} "

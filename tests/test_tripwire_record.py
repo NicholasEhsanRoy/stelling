@@ -455,9 +455,18 @@ def test_a_suppressed_fire_is_named_and_counted_not_dropped():
         )
     )
     text = _rendered(rec)
-    assert "suppressed: 1 narrowing(s) written by jax itself" in text
+    assert "jax-internal filter: ON. 1 narrowing(s) written by jax itself" in text
+    assert "Named, not dropped:" in text
     assert "threefry2x32.py:73" in text
     assert "4294967295" in text and "-1" in text
+
+    # ...and the filter says it is on even when it caught nothing, or a clean
+    # run and a run with no filter print the same thing
+    clean = record.Recorder()
+    clean.invocations = clean.int_narrowings = 5
+    clean_text = _rendered(clean)
+    assert "jax-internal filter: ON. 0 narrowing(s)" in clean_text
+    assert "Nothing was suppressed this run" in clean_text
 
 
 def test_a_line_that_does_not_contain_the_literal_says_so(written_source):
