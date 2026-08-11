@@ -391,37 +391,149 @@ def test_jax_s_own_prng_mask_is_suppressed_and_named_not_blamed_on_the_caller(ar
     assert suppressed.origin == record.ORIGIN_JAX
 
 
-def test_strict_promotion_is_orthogonal_to_this_defect_not_a_weaker_form(armed):
-    """The report tells a user what to do instead, so what it tells them has
-    to be true. ``PLAN-tripwire.md`` §8 says strict dtype promotion makes "6
-    of 11 doors" raise; re-measured here it makes **none** of the wrapping
-    spellings raise and **every** non-wrapping one, which is the opposite
-    relationship and the one the report now states.
+#: The eleven doors ``SOUNDNESS.md`` enumerates, as callables of
+#: ``(array, operand)``. Split by SHAPE, because that split is the finding:
+#: six promote an operand against an array and five construct an array from an
+#: operand, and strict dtype promotion only has an opinion about the first
+#: kind.
+PROMOTING_DOORS = {
+    "x + N": lambda x, c: x + c,
+    "x >= N": lambda x, c: x >= c,
+    "x.at[0].set(N)": lambda x, c: x.at[0].set(c),
+    "jnp.where": lambda x, c: jnp.where(x > 0, c, x),
+    "jnp.clip": lambda x, c: jnp.clip(x, c, c),
+    "jnp.maximum": lambda x, c: jnp.maximum(x, c),
+}
+CONSTRUCTION_DOORS = {
+    "jnp.array": lambda x, c: jnp.array(c, jnp.int8),
+    "jnp.asarray": lambda x, c: jnp.asarray(c, jnp.int8),
+    "jnp.int8": lambda x, c: jnp.int8(c),
+    "jnp.full": lambda x, c: jnp.full((), c, jnp.int8),
+    "jnp.full_like": lambda x, c: jnp.full_like(x, c),
+}
+ELEVEN_DOORS = {**CONSTRUCTION_DOORS, **PROMOTING_DOORS}
 
-    Both directions in one test, because either half alone is satisfiable by
-    a promotion setting that does nothing and by one that rejects everything.
-    """
-    _, rec = armed
-    x = jnp.zeros(3, jnp.int8)
+
+def _rejected_under_strict(operand_factory) -> set[str]:
+    """Which of the eleven raise ``TypePromotionError`` under strict promotion."""
+    rejected = set()
     with jax.numpy_dtype_promotion("strict"):
-        # the spelling that WRAPS is not rejected, and still wraps
-        assert int((x + 256)[0]) == 0
-        # every concrete-dtype operand IS rejected -- and none of them wraps
-        import numpy as np
+        x = jnp.zeros(3, jnp.int8)
+        operand = operand_factory()
+        for name, door in ELEVEN_DOORS.items():
+            try:
+                door(x, operand)
+            except Exception as exc:  # noqa: BLE001
+                if "TypePromotion" in type(exc).__name__:
+                    rejected.add(name)
+    return rejected
 
-        for operand in (np.int64(256), np.int32(256), jnp.int32(256), True):
-            with pytest.raises(Exception) as caught:
-                x + operand
-            assert "TypePromotion" in type(caught.value).__name__, caught.value
 
-    # the control: those same operands are fine, and lossless, without strict
+@pytest.mark.filterwarnings("ignore:scatter inputs have incompatible types")
+def test_strict_promotion_is_a_DTYPE_check_measured_over_the_WHOLE_door_set():
+    """The report tells a user what to do instead, so what it tells them has
+    to be true — and it was pinned at ONE door of eleven.
+
+    ``SOUNDNESS.md`` says *"six of the eleven doors raise TypePromotionError
+    for the NumPy-scalar spelling"*, and that is TRUE as written. It was
+    replaced by three unqualified sentences, all three false, held by a test
+    that ran ``x + operand`` and nothing else: a verbatim copy of that test
+    passes alongside every assertion below.
+
+    Re-measured across all eleven, and each of the three is pinned in the
+    direction it failed:
+
+    1. *"raises for every CONCRETE-dtype operand"* — false at 5 of 11. The
+       construction doors take no promotion path at all and narrow in silence.
+    2. *"every operand strict rejects would have kept its value"* — false at
+       ``x.at[0].set(np.int64(256))``, which strict rejects and standard wraps
+       to 0. Substituting that one door into the old test fails it on its
+       author's own control message.
+    3. *"it is the Python int that wraps"*, as an exclusive — false for a
+       weakly-typed ``jax.Array``, which strict never rejects and which wraps
+       at every wrapping door.
+
+    Needs no armed tripwire: this is a claim about jax, and the report only
+    repeats it. Identical on 0.11.0 and 0.10.2, x64 on and off.
+    """
     import numpy as np
 
-    for operand in (np.int64(256), np.int32(256), jnp.int32(256)):
-        assert int(np.asarray(x + operand).ravel()[0]) == 256, (
-            "an operand strict promotion rejects would have LOST its value "
-            "anyway, which would make strict a partial mitigation after all"
+    assert len(ELEVEN_DOORS) == 11
+
+    # (1) six of eleven, and WHICH six, for the NumPy-scalar spelling
+    assert _rejected_under_strict(lambda: np.int64(256)) == set(PROMOTING_DOORS)
+    for name, door in CONSTRUCTION_DOORS.items():
+        with jax.numpy_dtype_promotion("strict"):
+            got = int(np.asarray(door(jnp.zeros(3, jnp.int8), np.int64(256))).ravel()[0])
+        assert got == 0, (
+            f"{name} under strict promotion returned {got}. 'strict raises "
+            "for every concrete-dtype operand' rests on this door being "
+            "unreachable, and it is not."
         )
+
+    # (2) it separates DTYPES and not values: the IN-RANGE control fires the
+    # same way, a narrow one does not fire at all, and a rejection is no sign
+    # the value would have survived
+    assert _rejected_under_strict(lambda: np.int64(3)) == set(PROMOTING_DOORS)
+    assert _rejected_under_strict(lambda: np.int8(3)) == set()
+    wrapped = int(
+        np.asarray(jnp.zeros(3, jnp.int8).at[0].set(np.int64(256))).ravel()[0]
+    )
+    assert wrapped == 0, (
+        "x.at[0].set(np.int64(256)) kept its value, which would make 'every "
+        "operand strict rejects would have kept its value' true after all"
+    )
+
+    # (3) the Python int is rejected NOWHERE -- and it is not the only one
+    assert _rejected_under_strict(lambda: 256) == set()
+    weak = jnp.asarray(256)
+    assert weak.weak_type, "jnp.asarray(256) stopped being weakly typed"
+    assert _rejected_under_strict(lambda: jnp.asarray(256)) == set()
+    assert int(np.asarray(jnp.zeros(3, jnp.int8) + weak).ravel()[0]) == 0, (
+        "a weakly-typed jax.Array is a second spelling strict exempts and "
+        "that loses its value, so 'it is the Python int that wraps' is not "
+        "the exclusive the report made of it"
+    )
+
+    # ...and the control for all of it: without strict, none of the eleven
+    # raises, so the sets above are about the SETTING and not about the doors
+    x = jnp.zeros(3, jnp.int8)
+    for name, door in ELEVEN_DOORS.items():
+        door(x, np.int64(256))
+
+
+def test_the_report_states_the_measured_strict_promotion_result(armed):
+    """The bullet printed beside every finding, read back against the
+    measurement above rather than against itself.
+
+    It is a claim about jax that the report REPEATS, and the way it went wrong
+    was that nothing tied the words to the grid.
+    """
+    from stelling._tripwire import report
+
+    _, rec = armed
+    rec.add(
+        record.Finding(
+            file=__file__, line=1, func="f", written=300, from_dtype="int32",
+            to_dtype="int8", became=44, origin=record.ORIGIN_USER,
+        )
+    )
+    bullet = next(
+        line for line in report.render(_tripwire.Status(code="armed"), rec)
+        if "numpy_dtype_promotion" in line
+    )
+    assert "SIX doors" in bullet and "FIVE construction" in bullet
+    for door in ("x + N", "x >= N", "x.at[i].set(N)", "jnp.where", "jnp.clip",
+                 "jnp.maximum"):
+        assert door in bullet, f"the bullet names six doors and not {door}"
+    for door in ("jnp.array", "jnp.asarray", "jnp.int8", "jnp.full",
+                 "jnp.full_like"):
+        assert door in bullet
+    assert "IN-RANGE" in bullet
+    # the three retracted claims must not come back
+    assert "every CONCRETE-dtype operand" not in bullet
+    assert "would have kept its value" not in bullet
+    assert "it is the Python int that wraps" not in bullet
 
 
 def test_hoisting_the_constant_really_does_raise(armed):

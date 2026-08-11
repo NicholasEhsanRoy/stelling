@@ -37,13 +37,24 @@ and all six leave it silent. `checkify.all_checks` returns `None` on it while
 its out-of-bounds and divide-by-zero controls throw.
 
 `jax.numpy_dtype_promotion("strict")` is worth singling out, because it looks
-like it should help and is **exactly orthogonal**. Measured on both tested
-series, x64 on and off: strict promotion raises `TypePromotionError` for every
-*concrete*-dtype operand — `np.int64(256)`, `np.int32(256)`, `jnp.int32(256)`,
-`jnp.array(256, jnp.int32)`, even `True` — and for **none** of the Python-int
-spellings. And it is the Python int that wraps: every operand strict rejects
-would have kept its value. Adopt it as a discipline if you like it; it is not
-a weaker form of this check.
+like it should help and does not. Measured over an 11-door grid on both tested
+series with x64 on and off — the raise-or-wrap pattern identical in all four
+cells — for a *concrete*-dtype operand (`np.int64(256)`, `np.int32(256)`,
+`jnp.int32(256)`, `jnp.array(256, jnp.int32)`, even `True`):
+
+| | strict promotion |
+|---|---|
+| the **6** doors that promote an operand against an array — `x + N`, `x >= N`, `x.at[i].set(N)`, `jnp.where`, `jnp.clip`, `jnp.maximum` | raises `TypePromotionError` |
+| the **5** construction doors — `jnp.array`, `jnp.asarray`, `jnp.int8`, `jnp.full`, `jnp.full_like` | **silent**, and the operand narrows |
+| the same doors with the *in-range* `np.int64(3)` | raises at the same 6 |
+| a bare Python `int`, at any of the 11 | never raises |
+| a weakly-typed `jax.Array` (`jnp.asarray(256)`), at any of the 11 | never raises, and it wraps |
+
+So it separates **dtypes, not values**: it flags in-range code and misses the
+spellings that actually lose the value. Nor is a rejection a sign the value was
+safe — `x.at[0].set(np.int64(256))` raises under strict and wraps to `0` under
+standard, so that operand was losing its value too. Adopt strict promotion for
+its own reasons; it is not a weaker form of this check.
 
 What does help, one constant at a time, is **hoisting the literal to its own
 definition site**: `jnp.array(256, jnp.int8)` and `jnp.asarray(256, jnp.int8)`

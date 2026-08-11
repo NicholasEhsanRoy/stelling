@@ -286,12 +286,18 @@ def _suggestions(finding: record.Finding) -> list[str]:
         f"silent wrap into an immediate error: `jnp.array({finding.written}, "
         f"jnp.{finding.to_dtype})` and `jnp.asarray(...)` raise OverflowError "
         "for a Python int (measured, both tested jax series, x64 on and off).",
-        "- `jax.numpy_dtype_promotion('strict')` does NOT catch this. "
-        "Measured on both series: it raises TypePromotionError for every "
-        "CONCRETE-dtype operand (np.int64(N), jnp.int32(N), even True) and "
-        "for NONE of the Python-int spellings -- and it is the Python int "
-        "that wraps, while every operand strict rejects would have kept its "
-        "value. It is orthogonal to this defect, not a weaker form of it.",
+        "- `jax.numpy_dtype_promotion('strict')` is a discipline, not a "
+        "weaker form of this check. Measured over an 11-door grid, both "
+        "tested jax series, x64 on and off, the same in all four cells: for "
+        "a CONCRETE-dtype operand (np.int64(N), jnp.int32(N), even True) it "
+        "raises TypePromotionError at the SIX doors that promote an operand "
+        "against an array -- x + N, x >= N, x.at[i].set(N), jnp.where, "
+        "jnp.clip, jnp.maximum -- and is silent at the FIVE construction "
+        "doors -- jnp.array, jnp.asarray, jnp.int8, jnp.full, jnp.full_like "
+        "-- where that same operand narrows without a word. It rejects the "
+        "IN-RANGE np.int64(3) at exactly those same six, so it separates "
+        "DTYPES and not values; and it rejects a Python int at none of the "
+        "eleven, which is the spelling in front of you.",
     ]
 
 
