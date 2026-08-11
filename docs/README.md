@@ -26,6 +26,7 @@ harness, a stamped verdict, in four files.
 | | |
 |---|---|
 | [State of the project at 0.1.0](state-0.1.0.md) | what has been measured, and what has not |
+| [Supported primitives](supported-primitives.md) | which jaxpr primitives have a registered transfer, generated from the live registry |
 | [Verdict ledger](verdict-ledger.md) | every recorded verdict that moved, and why |
 | [Gauge coverage](gauge-coverage.md) | which primitive faces are gauged, per face |
 
