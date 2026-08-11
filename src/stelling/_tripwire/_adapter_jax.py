@@ -521,6 +521,33 @@ def is_armed() -> bool:
     return _installed["registry"].get(_installed["primitive"]) is _installed["wrapper"]
 
 
+def live_check() -> str:
+    """Whether the tripwire is STILL live, and if not, which way it went.
+
+    :func:`is_armed` answers only yes or no, and the two nos are different
+    failures a user has to be told apart:
+
+    ``armed``
+        our wrapper is still the live registry entry.
+    ``detached``
+        we hold no installation any more. Something called :func:`restore` —
+        a mid-session ``disarm()``, or a NESTED pytest session that also
+        enabled the tripwire, whose ``pytest_unconfigure`` restores the
+        original and disarms the outer one along with itself.
+    ``foreign-patch``
+        we still hold an installation and the live entry is not ours: someone
+        rebound the registry over us. The same condition :func:`restore`
+        reports, reached before the report is written instead of after.
+
+    Returns a string, like everything else here.
+    """
+    if not _installed:
+        return "detached"
+    if _installed["registry"].get(_installed["primitive"]) is _installed["wrapper"]:
+        return "armed"
+    return "foreign-patch"
+
+
 def selfcheck() -> str:
     """Probe the armed hook **in both directions**, and return a status code.
 

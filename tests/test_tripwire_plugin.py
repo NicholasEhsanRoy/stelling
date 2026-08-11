@@ -220,6 +220,113 @@ def test_require_with_a_working_anchor_is_green(pytester):
     assert "you wrote 300" in result.stdout.str()
 
 
+# --- staying armed, which is a different property from arming ---------------
+
+DETACHES_MIDWAY = """
+    import jax
+    import jax.numpy as jnp
+
+    def test_1_before():
+        jax.make_jaxpr(lambda a: a + 400)(jnp.zeros((41,), jnp.int8))
+
+    def test_2_detach():
+        from stelling import _tripwire
+        assert _tripwire.disarm() == "restored"
+
+    def test_3_after_and_invisible():
+        jax.make_jaxpr(lambda a: a + 500)(jnp.zeros((42,), jnp.int8))
+"""
+
+
+def test_a_hook_that_LEFT_does_not_still_report_armed(pytester):
+    """The status line and the denominator are claims about the whole session
+    and were both fixed at ``pytest_configure``, with nothing re-checking
+    them.
+
+    So a session whose hook came out of the registry half way through printed
+    ``armed`` over a denominator that had stopped growing, and
+    ``--stelling-overflow=require`` — the mode a user picks precisely because
+    they depend on the tripwire — exited **0** while never seeing the
+    ``x + 500`` that ran after the detachment. `is_armed()` existed, cost
+    nothing, and was consulted nowhere.
+
+    This is the feature's own thesis inverted: *a zero with a dead instrument
+    is the failure this project keeps finding*.
+    """
+    pytester.makepyfile(DETACHES_MIDWAY)
+    result = _run(pytester, "--stelling-overflow=require")
+    result.assert_outcomes(passed=3)
+    out = result.stdout.str()
+
+    assert "NOT ARMED [detached]" in out, out[-3000:]
+    assert result.ret != 0, "require passed a session that did not stay armed"
+    # what it DID see is still reported, and it says what it is
+    assert "you wrote 400" in out
+    assert "PARTIAL" in out and "not a total" in out
+    # and what it did not see is not silently absent from a confident total
+    assert "you wrote 500" not in out
+
+
+def test_the_same_session_with_the_hook_LEFT_ALONE_is_green(pytester):
+    """The control for the test above, and it is not decoration: a check that
+    called every session detached would satisfy the assertions there.
+
+    Same three tests, same ``require``, without the ``disarm()``."""
+    pytester.makepyfile(DETACHES_MIDWAY.replace('_tripwire.disarm() == "restored"', "True"))
+    result = _run(pytester, "--stelling-overflow=require")
+    assert result.ret == 0
+    out = result.stdout.str()
+    assert "NOT ARMED" not in out and "PARTIAL" not in out
+    assert "you wrote 400" in out and "you wrote 500" in out
+
+
+def test_a_registry_rebind_surfaces_as_foreign_patch_IN_THE_REPORT(pytester):
+    """``foreign-patch`` is advertised in ``docs/overflow-tripwire.md`` as a
+    stable, greppable code, and it could not appear in any report: ``arm()``
+    has no route that returns it, and its only surfacing was a note appended
+    in ``pytest_unconfigure``, which runs AFTER the summary is written.
+
+    It is reachable now because the same end-of-session check that catches a
+    detachment distinguishes the two ways of not being armed — we hold no
+    installation (``detached``) against we hold one and the live entry is not
+    ours (``foreign-patch``). They are different things to tell a user.
+
+    A SUBPROCESS SESSION, and that is forced rather than tidy. The contract
+    for a foreign patch is that the tripwire does NOT clobber it, so an
+    in-process run leaves somebody else's wrapper in this interpreter's
+    registry for the rest of the outer suite — measured, it moves
+    ``registry_size`` and ``rule_hash`` and fails two tests in
+    ``test_tripwire_arm.py`` that pass in isolation.
+    """
+    pytester.makepyfile(
+        """
+        import jax
+        import jax.numpy as jnp
+
+        def test_1_fires():
+            jax.make_jaxpr(lambda a: a + 400)(jnp.zeros((43,), jnp.int8))
+
+        def test_2_someone_else_patches_over_us():
+            from stelling._tripwire import _adapter_jax as adapter
+            reg = adapter._installed["registry"]
+            prim = adapter._installed["primitive"]
+            original = adapter._installed["original"]
+            def somebody_elses_wrapper(*a, **k):
+                return original(*a, **k)
+            reg[prim] = somebody_elses_wrapper
+        """
+    )
+    result = pytester.runpytest_subprocess(
+        *PLUGIN_ARGS, "-p", "no:cacheprovider", "--stelling-overflow=require"
+    )
+    result.assert_outcomes(passed=2)
+    out = result.stdout.str()
+    assert "NOT ARMED [foreign-patch]" in out, out[-3000:]
+    assert "left in place rather than clobbered" in out
+    assert result.ret != 0
+    assert "you wrote 400" in out and "PARTIAL" in out
+
+
 # --- the report, as a session ----------------------------------------------
 
 

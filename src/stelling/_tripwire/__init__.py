@@ -37,6 +37,7 @@ FAILURE_CODES = (
     "mis-attributed",
     "below-floor",
     "foreign-patch",
+    "detached",
     "no-worker-reported",
     "mixed",
 )
@@ -82,8 +83,18 @@ _EXPLAIN = {
         "was written against."
     ),
     "foreign-patch": (
-        "something else replaced the tripwire's wrapper while the session ran. "
-        "Not restoring over it."
+        "the tripwire armed and something else replaced its wrapper in the "
+        "registry before the session ended, so an unmeasured part of this run "
+        "ran uninstrumented. Whatever replaced it is left in place rather "
+        "than clobbered."
+    ),
+    "detached": (
+        "the tripwire armed and was taken back out of the registry before the "
+        "session ended -- a mid-run `disarm()`, or a nested pytest session "
+        "that enabled the tripwire and restored the original when it "
+        "finished. An unmeasured part of this run therefore ran "
+        "uninstrumented, and anything reported below covers only the part "
+        "that did not."
     ),
     # The two codes an xdist CONTROLLER can carry. It never arms -- with `-n
     # auto` it runs no tests -- so its status is its workers' agreement, and
@@ -231,6 +242,21 @@ def is_armed() -> bool:
         return adapter.is_armed()
     except Exception:  # noqa: BLE001
         return False
+
+
+def live_check() -> str:
+    """``armed``, ``detached`` or ``foreign-patch``. Never raises.
+
+    What :func:`arm` established at the start of a session is not still true
+    at the end of it, and the report is written at the end. See
+    :func:`_adapter_jax.live_check`.
+    """
+    try:
+        from stelling._tripwire import _adapter_jax as adapter
+
+        return adapter.live_check()
+    except Exception as exc:  # noqa: BLE001
+        return f"unexpected:{type(exc).__name__}"
 
 
 def _safe(fn):

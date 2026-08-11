@@ -141,11 +141,25 @@ this tool at any time. When that happens:
 
 The codes are stable and greppable: `no-module`, `no-registry`, `no-entry`,
 `not-invoked`, `cries-wolf`, `mis-attributed`, `below-floor`, `foreign-patch`,
-`no-worker-reported`, `mixed`, `unexpected:<ExcType>`.
+`detached`, `no-worker-reported`, `mixed`, `unexpected:<ExcType>`.
 
 The last two belong to an xdist **controller**, which never arms and whose
 status is its workers' agreement: `no-worker-reported` when not one worker
 sent a status back, `mixed` when they disagreed.
+
+### It can also stop being armed part-way through
+
+The status is checked again at the END of the session, not only when it arms,
+because a hook that left the registry in the middle of a run is the case where
+`armed` over a small denominator is most misleading. `detached` means it was
+taken back out — a mid-run `disarm()`, or a nested pytest session that enabled
+the tripwire and restored the original when it finished — and `foreign-patch`
+means something rebound the registry over the top of it.
+
+Either way the figures already collected are still printed, under a **PARTIAL**
+banner in the same words a lost xdist worker gets: they cover the instrumented
+part of the run and no more. Under `--stelling-overflow=require` the session
+fails, because it did not stay armed.
 
 The message never travels by `warnings.warn`. Under `-W error::UserWarning` —
 common in scientific repos — a "safely disabled" warning becomes an exception

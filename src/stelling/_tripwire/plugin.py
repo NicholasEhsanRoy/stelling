@@ -39,6 +39,8 @@ guardrail exists to prevent. The reporter cannot be escalated.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 #: The module a user names to switch this on. Named here rather than only in
@@ -162,12 +164,48 @@ def pytest_unconfigure(config):
         return
     from stelling import _tripwire
 
-    if _tripwire.disarm() == "foreign-patch":
-        state.notes.append(
-            "    NOTE: something else replaced the tripwire's const-fold "
-            "wrapper during this session; it was left in place rather than "
-            "clobbered."
-        )
+    # Whatever this returns is NOT a disclosure route: ``pytest_unconfigure``
+    # runs after the terminal summary has already been written, so a note
+    # appended here is never printed. `foreign-patch` reaches the report
+    # through :func:`_revalidate`, which runs while there is still a report to
+    # put it in.
+    _tripwire.disarm()
+
+
+def _revalidate(state) -> None:
+    """Ask the hook whether it is STILL live, at the end of the session.
+
+    THE STATUS LINE AND THE DENOMINATOR ARE A CLAIM ABOUT THE WHOLE SESSION
+    AND WERE BOTH FIXED AT ``pytest_configure``. Nothing re-checked them, so a
+    hook that came out of the registry part-way through still printed
+    ``armed`` over a denominator that stopped growing when it left. Driven
+    three ways, and the sharpest is that under ``--stelling-overflow=require``
+    the session exited 0, printed ``armed``, printed ``denominator: 1``, and
+    had never seen the ``x + 500`` on ``int8`` that ran after the detachment:
+
+    * a mid-session ``_tripwire.disarm()``;
+    * a NESTED pytest session that also enables the tripwire — its
+      ``pytest_unconfigure`` restores the original and disarms the outer one
+      along with itself;
+    * a registry rebind over the top of us.
+
+    ``_adapter_jax.is_armed()`` existed, cost nothing, and was consulted
+    nowhere. This is that check, plus the distinction between the two ways of
+    not being armed, which are two different things to tell a user.
+
+    Being honest about it is the other half, and it is §6's: what was counted
+    up to the point of detachment is a PARTIAL, and
+    :data:`report.PARTIAL_BANNER` says so in the same words a lost xdist
+    worker gets.
+    """
+    if state.status is None or not state.status.armed:
+        return
+    from stelling import _tripwire
+
+    live = _tripwire.live_check()
+    if live == "armed":
+        return
+    state.status = dataclasses.replace(state.status, code=live)
 
 
 # ---------------------------------------------------------------------------
@@ -190,11 +228,20 @@ def pytest_sessionfinish(session, exitstatus):
     On a **controller or single process** under ``require``: escalate. The
     controller cannot raise ``UsageError`` at configure time, because it is
     not the process that arms.
+
+    And before either: RE-VALIDATE. This hook is the last point at which the
+    session's own status can still reach both the exit code and the report,
+    and :func:`_revalidate` is what makes the status a statement about the
+    session rather than about its first millisecond. A worker re-validates
+    too, so what crosses to the controller is what was true at the end of the
+    worker's run.
     """
     config = session.config
     state = config.stash.get(_KEY, None)
     if state is None or state.mode == "off" or state.recorder is None:
         return
+
+    _revalidate(state)
 
     if _is_worker(config):
         payload = state.recorder.as_payload()
