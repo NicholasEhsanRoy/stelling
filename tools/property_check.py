@@ -454,6 +454,24 @@ def _reported(junit) -> bool:
     would score ``WRONG`` again — the safe-but-wrongly-worded behaviour this
     replaced, never a green verdict.
 
+    KEYED POSITIVELY, NOT BY SUBTRACTION. The first implementation asked
+    ``any(not _is_collection_failure(case) ...)``, subtracting one known-bad
+    shape. Two more shapes exist that are not real test reports and not
+    collection failures in that sense:
+
+    * ``classname="pytest" name="internal"`` — a ``pytest_internalerror``
+      session, rc 3, where pytest itself broke. Not a collection failure
+      (classname is not empty), not a test report.
+    * ``classname="" ... <skipped>`` — a module gated by ``importorskip``,
+      rc 5, where pytest chose not to collect. Same empty classname as the
+      ``<error>`` shape, different child tag.
+
+    Subtracting each one is a race against shapes nobody has seen yet. The
+    positive key — a testcase "looks like a test" when its ``classname`` is
+    present AND is not ``"pytest"`` — handles all known shapes and any future
+    shape that shares either marker, which is the right default for an
+    instrument whose failure mode is to say something it cannot support.
+
     MEASURED, and the reason this exists. At 260527b every control pinned to a
     commit older than ``stelling._tripwire`` died at entry-point load, wrote no
     XML, and was printed as ``FIRED, but the failure did not carry '…'`` —
@@ -467,31 +485,25 @@ def _reported(junit) -> bool:
     except (OSError, ET.ParseError):
         return False
     return any(
-        not _is_collection_failure(case) for case in root.iter("testcase")
+        case.get("classname") and case.get("classname") != "pytest"
+        for case in root.iter("testcase")
     )
 
 
 def _is_collection_failure(case) -> bool:
     """pytest's shape for "I could not reach this module", measured at 9.1.1.
 
-    THREE CONDITIONS, not the one the caller's docstring names. The empty
-    ``classname`` is the discriminating one; the other two — exactly one
-    child, and that child an ``<error>`` — are there so that this cannot
-    swallow a ``<testcase>`` of some shape nobody has seen. Only the first is
-    load-bearing today: dropping the other two leaves every test in this
-    repository green, measured. They are cheap, and the direction they fail in
-    is to call something a real report that pytest called a collection
-    failure, which is the pre-existing behaviour rather than a new risk.
+    THE DISCRIMINATOR IS THE EMPTY ``classname``, and nothing else is needed.
+    pytest writes ``classname=""`` for TWO collection-level events — an
+    ``<error>`` when the module could not import, and a ``<skipped>`` when it
+    was gated by ``importorskip`` — and never for a test that ran (a test's
+    ``classname`` is its module path). Keying on the child's tag would miss
+    the second shape; keying on the empty classname catches both.
 
     Checked at 9.1.1 under ``junit_family=xunit1`` and ``junit_logging=all``:
     the shape does not move.
     """
-    children = list(case)
-    return (
-        not case.get("classname")
-        and len(children) == 1
-        and children[0].tag == "error"
-    )
+    return not case.get("classname")
 
 
 # ── the decision ─────────────────────────────────────────────────────────────

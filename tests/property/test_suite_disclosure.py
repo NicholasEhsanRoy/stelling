@@ -701,8 +701,10 @@ def _property_check():
 
 # A NAIVE locator, written out here rather than imported. It is independent of
 # how `tools/property_check.py` PRIMARILY reads the file (a real TOML parse)
-# and identical to the regex that file falls back to when no parser imports,
-# so it cross-checks the parser and says nothing about the fallback. Claiming
+# and NARROWER than the regex that file falls back to when no parser imports
+# (which also reads quoted table keys and quoted entry-point names). It
+# cross-checks the parser from below, and says nothing about the fallback —
+# the fallback-vs-parser pin elsewhere in this file does that. Claiming
 # more than that would be the thing it exists to catch.
 _PYTEST11_SECTION = re.compile(
     r"^\[project\.entry-points\.pytest11\]\s*$(.*?)(?=^\[|\Z)", re.M | re.S
@@ -911,6 +913,10 @@ def test_the_control_runner_says_a_session_that_never_ran_never_ran(
             preamble="import probe_module_that_is_not_there\n",
             expect="No module named 'probe_module_that_is_not_there'",
         ),
+        "a module that skips at import": dict(
+            preamble="import pytest\npytest.importorskip('nonexistent_module_probe')\n",
+            expect="nonexistent_module_probe",
+        ),
     }
 
     bad = []
@@ -977,6 +983,22 @@ def test_the_control_runner_says_a_session_that_never_ran_never_ran(
             "a session that died before running anything can be scored on a "
             "string in its own traceback"
         )
+    # A `pytest_internalerror` session writes classname="pytest", which is not
+    # a report on any test. Synthetic XML because triggering rc 3 in a child
+    # requires a conftest that breaks pytest itself.
+    internal_xml = tmp_path / "internal.xml"
+    internal_xml.write_text(
+        '<?xml version="1.0"?><testsuites><testsuite>'
+        '<testcase classname="pytest" name="internal">'
+        '<error message="internal error"/></testcase>'
+        '</testsuite></testsuites>'
+    )
+    if module._reported(internal_xml):
+        bad.append(
+            "a session with only classname='pytest' (internal error) was "
+            "treated as having reported on a test — `_reported` must key "
+            "positively on shapes that look like real tests"
+        )
     assert not bad, (
         "tools/property_check.py described a run that reported on no test at "
         "all as though it had reported on the property. Every outcome here is "
@@ -1032,10 +1054,11 @@ def test_the_control_runner_blocks_this_projects_own_pytest_plugin(
     monkeypatch.undo()
 
     # A NAIVE READ OF THE FILE, held against what the runner decided. This is
-    # independent of the runner's PRIMARY path — a real TOML parse — and it is
-    # the same regex as the runner's FALLBACK, which it therefore does not
-    # check. What it catches is a parser that reads the file and comes back
-    # with less than is plainly written in it.
+    # independent of the runner's PRIMARY path — a real TOML parse — and
+    # NARROWER than the runner's FALLBACK (which also reads quoted table keys
+    # and quoted names), so it cross-checks both from below. What it catches
+    # is a parser that reads the file and comes back with less than is plainly
+    # written in it.
     section = _PYTEST11_SECTION.search(
         (REPO / "pyproject.toml").read_text(encoding="utf-8")
     )
@@ -1062,6 +1085,17 @@ def test_the_control_runner_blocks_this_projects_own_pytest_plugin(
     )
 
     in_file = set(re.findall(r"^\s*([\w.-]+)\s*=", section.group(1), re.M))
+    assert in_file, (
+        "the naive regex found no entry-point names in the "
+        "[project.entry-points.pytest11] section — if all names are quoted "
+        "the cross-check is vacuous and this test guarantees nothing"
+    )
+    assert module.TRIPWIRE_ENTRY_POINT in in_file, (
+        f"TRIPWIRE_ENTRY_POINT is {module.TRIPWIRE_ENTRY_POINT!r} but "
+        f"pyproject.toml declares {sorted(in_file)} — the floor name must be "
+        f"one of the shipped names or the fallback blocks a plugin nothing "
+        f"declares"
+    )
     assert in_file <= set(declared), (
         f"pyproject.toml declares {sorted(in_file)}; the runner blocks "
         f"{sorted(declared)}. `-p no:` matches the entry point NAME, so any "
