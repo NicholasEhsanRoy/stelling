@@ -99,6 +99,11 @@ _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
 # ``restore`` refuses to clobber someone else's patch.
 _installed: dict = {}
 
+#: Bumped once per :func:`selfcheck`, and used as the probe's input length.
+#: jax's trace cache is process-wide, so a probe that traced the same avals
+#: twice would reach the const-fold site zero times the second time. Measured.
+_probe_seq: int = 0
+
 
 def _parse_version(text: str) -> tuple[int, int, int] | None:
     """``(major, minor, micro)``, or None if unparseable.
@@ -401,7 +406,7 @@ def install(recorder: record.Recorder) -> str:
         registry[primitive] = wrapper
         _installed.update(
             {"registry": registry, "primitive": primitive,
-             "original": original, "wrapper": wrapper}
+             "original": original, "wrapper": wrapper, "recorder": recorder}
         )
     except Exception as exc:  # noqa: BLE001
         _installed.clear()
@@ -433,6 +438,70 @@ def restore() -> str:
     return "restored"
 
 
+#: Saved state for :func:`detach`. Separate from ``_installed`` because
+#: detaching is deliberately something that happens *to* an armed tripwire.
+_detached: dict = {}
+
+
+def detach(mode: str) -> str:
+    """Break the tripwire the way a jax release would. Returns a status code.
+
+    THIS IS SHIPPED CODE WITH A TEST-SUPPORT PURPOSE, and it is here rather
+    than in ``tests/`` for one reason: rule 2 bans naming the private jax
+    module in ``tests/`` with no exemption, so a test that reached into the
+    registry to break it would have to name what only this file may name. The
+    alternative — asserting the fail-closed contract instead of driving it —
+    is the shape of control this repository has been burned by.
+    ``design/private-jax-boundary.md`` records the rule; ``PLAN-tripwire.md``
+    §9 records the two rows this exists for.
+
+    ``mode="entry"``
+        remove the rule the tripwire keys on. :func:`locate` then answers
+        ``no-entry``, which is the "anchor removed" row.
+    ``mode="bypass"``
+        put the original rule back under an armed tripwire, so the wrapper is
+        attached and never invoked. That is what a version bump actually
+        produces, and what a presence check misses.
+
+    :func:`reattach` undoes either. Nothing here leaks a jax object: both
+    arguments and both return values are strings.
+    """
+    registry = _registry()
+    if registry is None:
+        return "no-registry"
+    try:
+        primitive = _primitive()
+    except Exception as exc:  # noqa: BLE001
+        return f"unexpected:{type(exc).__name__}"
+    if _detached:
+        return "already-detached"
+    current = registry.get(primitive)
+    _detached.update({"registry": registry, "primitive": primitive, "entry": current})
+    if mode == "entry":
+        registry.pop(primitive, None)
+        return "detached"
+    if mode == "bypass":
+        registry[primitive] = _installed.get("original", current)
+        return "detached"
+    _detached.clear()
+    return f"unknown-mode:{mode}"
+
+
+def reattach() -> str:
+    """Undo :func:`detach`. ``not-detached`` if there is nothing to undo."""
+    if not _detached:
+        return "not-detached"
+    registry = _detached["registry"]
+    primitive = _detached["primitive"]
+    entry = _detached["entry"]
+    if entry is None:
+        registry.pop(primitive, None)
+    else:
+        registry[primitive] = entry
+    _detached.clear()
+    return "reattached"
+
+
 def is_armed() -> bool:
     """Whether the wrapper this process installed is still the live entry."""
     if not _installed:
@@ -440,7 +509,7 @@ def is_armed() -> bool:
     return _installed["registry"].get(_installed["primitive"]) is _installed["wrapper"]
 
 
-def selfcheck(recorder: record.Recorder) -> str:
+def selfcheck() -> str:
     """Probe the armed hook **in both directions**, and return a status code.
 
     A positive-only self-check passes on a hook replaced by "record
@@ -475,19 +544,42 @@ def selfcheck(recorder: record.Recorder) -> str:
     lambdas so that the attributed frame is a real module — the same path a
     user's code takes, including the stack walk and the source quote.
 
+    EACH RUN USES A FRESH INPUT SHAPE, and that is not tidiness. Measured:
+    jax's trace cache is process-wide and outlives disarm/rearm, so tracing
+    ``_probe.over`` at the *same* avals a second time reaches the const-fold
+    site **zero** times. A probe with a fixed shape therefore passes exactly
+    once per process and reports ``not-invoked`` for ever after — which would
+    make a second ``arm()`` in one process, and every test that arms twice,
+    look like a broken hook. The shape is the cheapest thing in the cache key
+    that is ours to vary.
+
     The recorder's counters are saved and restored: a self-check must not
     appear in the user's denominator.
+
+    IT TAKES NO RECORDER, and that is a correction rather than a style
+    choice. It used to take one, and a caller who passed anything other than
+    the recorder :func:`install` closed over got ``not-invoked`` from a
+    perfectly live hook — the probe read a counter nothing was writing to.
+    The wrapper's recorder is the only one that can answer, so the wrapper's
+    recorder is the one this reads.
     """
+    recorder = _installed.get("recorder")
+    if recorder is None:
+        return "not-invoked"
     from stelling._jax_compat import jax as _jax  # public jax, via the boundary
     from stelling._jax_compat import jnp as _jnp
 
     from stelling._tripwire import _probe
 
+    global _probe_seq
+    _probe_seq += 1
+    shape = (_probe_seq,)
+
     saved = recorder.as_payload()
     try:
         recorder.reset()
         try:
-            _jax.make_jaxpr(_probe.over)(_jnp.zeros((), _jnp.int8))
+            _jax.make_jaxpr(_probe.over)(_jnp.zeros(shape, _jnp.int8))
         except Exception as exc:  # noqa: BLE001
             return f"unexpected:{type(exc).__name__}"
         if recorder.invocations == 0:
@@ -507,7 +599,7 @@ def selfcheck(recorder: record.Recorder) -> str:
 
         recorder.reset()
         try:
-            _jax.make_jaxpr(_probe.under)(_jnp.zeros((), _jnp.int8))
+            _jax.make_jaxpr(_probe.under)(_jnp.zeros(shape, _jnp.int8))
         except Exception as exc:  # noqa: BLE001
             return f"unexpected:{type(exc).__name__}"
         if recorder.invocations == 0:

@@ -132,6 +132,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import importlib
+import importlib.util
 import os
 import pathlib
 import re
@@ -226,6 +227,25 @@ def _wheel(name: str) -> bool:
     makes those gates not fire, and a gate that did not fire is not accused.
     """
     return _optional.available(name)
+
+
+def _jax_x64_is_on() -> bool:
+    """Whether this session runs with 64-bit dtypes enabled.
+
+    Read from jax rather than from ``os.environ``, because a conftest or a
+    test module can turn it on without the variable being set, and this
+    predicate is used to call a skip WRONG. Answers False when jax is absent,
+    which is the safe direction: the gate it governs cannot fire in a
+    jax-less lane anyway, since the module gates on jax first.
+    """
+    if not _optional.available("jax"):
+        return False
+    try:
+        import jax  # noqa: PLC0415 - deliberately lazy; the zero-dep lane has none
+
+        return bool(jax.config.read("jax_enable_x64"))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 # --- what may be gated on ----------------------------------------------------
@@ -445,6 +465,32 @@ RULES = (
         when="`git` is not on PATH",
         reasons=frozenset({"needs git"}),
         legitimate=lambda: shutil.which("git") is None,
+    ),
+    Rule(
+        when=(
+            "`JAX_ENABLE_X64` is ON, where jax's own PRNG seed mask does not "
+            "narrow. The tripwire's one honest fire across jax's whole test "
+            "suite is `4294967295 -> -1 (int32)` from `threefry2x32.py:73`, "
+            "and it happens at x64=0 ONLY: at x64=1 the mask fits its dtype "
+            "and nothing narrows. A test asserting that fire is suppressed and "
+            "named would pass at x64=1 having measured nothing, which is the "
+            "beautiful zero this suite exists to refuse — so it skips, loudly, "
+            "in the configuration where its subject does not occur. Computable "
+            "from here, so BOTH directions are asserted"
+        ),
+        reasons=frozenset({"the threefry mask fires only at x64=0"}),
+        legitimate=_jax_x64_is_on,
+    ),
+    Rule(
+        when=(
+            "`pytest-xdist` is not installed. It is a DEV dependency and never "
+            "a runtime one — the tripwire's xdist aggregation is a guardrail "
+            "for users who already run `-n auto`, not a dependency it imposes "
+            "— so the two shared jax venvs and the zero-dep CI job do not have "
+            "it and the aggregation tests gate at collection"
+        ),
+        reasons=frozenset({"needs pytest-xdist to drive a real worker split"}),
+        legitimate=lambda: importlib.util.find_spec("xdist") is None,
     ),
     Rule(
         when="this tree is not a git checkout — an unpacked sdist, say",

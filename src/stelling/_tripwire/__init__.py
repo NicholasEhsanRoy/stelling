@@ -163,7 +163,7 @@ def arm(recorder=None):
         if installed not in ("installed", "already-armed"):
             return status(installed), rec
 
-        probe = adapter.selfcheck(rec)
+        probe = adapter.selfcheck()
         if probe != "armed":
             adapter.restore()
             return status(probe), rec
