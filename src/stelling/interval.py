@@ -1927,6 +1927,26 @@ def reduce_or(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
     return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
 
 
+def is_finite(a: IntervalArray) -> IntervalArray:
+    """Three-valued ``isfinite``: definitely true when both endpoints are
+    finite (every value in a bounded interval is finite); unknown when
+    either endpoint is ±inf (the interval reaches infinity, so some values
+    may not be finite). The real-mode propagation uses ±inf as endpoints
+    for half-open intervals, so an infinite endpoint means the interval
+    is unbounded on that side — a value there may or may not be finite."""
+    los, his = [], []
+    for lo, hi in zip(a.los, a.his):
+        if math.isfinite(lo) and math.isfinite(hi):
+            # bounded interval: every value is finite -> definitely true
+            los.append(1.0)
+            his.append(1.0)
+        else:
+            # unbounded: some values may be infinite -> unknown
+            los.append(0.0)
+            his.append(1.0)
+    return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
+
+
 # -- structural ops (exact: no arithmetic, no bump) ---------------------------
 
 

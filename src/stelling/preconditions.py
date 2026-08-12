@@ -105,7 +105,7 @@ def scalar_nonzero(dtype, envelope):
 
 
 def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None,
-          strict=False):
+          solver=None, strict=False):
     """Run a precondition harness end-to-end and return the stamped
     :class:`stelling.verdict.Verdict` — with the vacuity check built in:
     **this entry point cannot return an unchecked VERIFIED.**
@@ -151,6 +151,10 @@ def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None,
     mechanism note names affine, and the VERIFIED widen re-check runs at
     the same depth (refined iff the original refined).
 
+    ``solver``: restrict the SMT portfolio to a single solver by name
+    (``"z3"`` or ``"cvc5"``). ``None`` (default) uses the full installed
+    portfolio. Only meaningful when ``solver_timeout_ms`` is also passed.
+
     Version, precision, and solver stamps are filled from the live
     environment; the precision entry records the *actual*
     ``jax_enable_x64`` state at trace time, not an assumption.
@@ -164,6 +168,7 @@ def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None,
             vacuity_mode=vacuity_mode,
             solver_timeout_ms=solver_timeout_ms,
             refine=refine,
+            solver=solver,
         )
     except ir.TranscriptionError as e:
         # stelling could not READ the query. That is a capability gap, not a
@@ -183,7 +188,8 @@ def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None,
     return verdict
 
 
-def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
+def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None,
+              solver=None):
     """The one pipeline behind :func:`check` — trace, propagate, optional
     affine refinement (``refine="affine"``, never on by default), optional
     solver escalation, stamped verdict assembly, and the VERIFIED widen
@@ -237,6 +243,10 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
     if refine not in (None, "affine"):
         raise ValueError(
             f"refine must be None or 'affine', got {refine!r}"
+        )
+    if solver is not None and solver not in ("z3", "cvc5"):
+        raise ValueError(
+            f"solver must be None, 'z3', or 'cvc5', got {solver!r}"
         )
 
     from stelling._tripwire import (
@@ -333,7 +343,8 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None):
             )
         from stelling.solvers import SolverConfig, escalate, make_solver_verdict
 
-        esc = escalate(closed, prop, SolverConfig(timeout_ms=int(solver_timeout_ms)))
+        only = (solver,) if solver is not None else None
+        esc = escalate(closed, prop, SolverConfig(timeout_ms=int(solver_timeout_ms), only=only))
         return (
             make_solver_verdict(
                 closed, prop, esc, refinement=refinement, **versions

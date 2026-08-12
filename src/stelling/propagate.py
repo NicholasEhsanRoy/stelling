@@ -689,6 +689,14 @@ def _t_convert(eqn, params, ins):
         return [a]
     if _in_range_int_narrowing(a, src, dst):
         return [a]
+    if (src, dst) == ("int64", "float64") and _finite_point(a):
+        # A point interval at an integer value float64 represents exactly
+        # (any integer in [-2**53, 2**53]) passes through: the conversion
+        # is the identity on that value. Outside that range float64 rounds,
+        # so non-point intervals and out-of-range points decline below.
+        bound = 2**53
+        if all(-bound <= x <= bound for x in (*a.los, *a.his)):
+            return [a]
     if "float" in src and dst in _INT_RANGE:
         # float -> integer truncates toward zero; trunc is monotone, so
         # [trunc(lo), trunc(hi)] brackets — but only while the values fit the
@@ -1246,6 +1254,10 @@ def _t_reduce_or(eqn, params, ins):
             f"{dtypes}"
         )
     return [iv.reduce_or(ins[0], tuple(_req(params, "axes", "reduce_or")))]
+
+
+def _t_is_finite(eqn, params, ins):
+    return [iv.is_finite(ins[0])]
 
 
 def _scatter_index_dtype_covers(indices_dtype: str | None, axis_len: int) -> bool:
@@ -2720,6 +2732,7 @@ def _integer_exponent(params) -> int | None:
 _TAINT_STOPS = frozenset({
     "exp",
     "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
+    "is_finite",
 })
 
 # The primitives whose OUTPUT can be a product XLA is free to contract into a
@@ -3081,6 +3094,7 @@ TRANSFERS = {
     "and": (_t_bool_logic("and", iv.logical_and), TIER_EXACT),
     "or": (_t_bool_logic("or", iv.logical_or), TIER_EXACT),
     "reduce_or": (_t_reduce_or, TIER_EXACT),
+    "is_finite": (_t_is_finite, TIER_EXACT),
     # the sum over the reduced axes. Sound under ℝ for EVERY association
     # order at once (in ℝ they all denote the same number); the ieee
     # counterpart cannot reuse that and declines — see IEEE_TRANSFERS.
@@ -3266,6 +3280,7 @@ _INT_NON_COMPUTING = frozenset({
     "split",
     "max", "min", "select_n",
     "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
+    "is_finite",
     "convert_element_type",
     "stop_gradient", "reshape", "squeeze", "slice", "scatter", "gather",
     "dynamic_slice", "dynamic_update_slice",
@@ -3340,6 +3355,10 @@ _INT_NON_COMPUTING_EXEMPT: dict[str, str] = {
     "reduce_or": (
         "bool-only by its own dtype guard; a three-valued OR-fold whose "
         "outputs are booleans"
+    ),
+    "is_finite": (
+        "produces booleans; tests whether its operand is finite, cannot "
+        "introduce an out-of-range integer value"
     ),
     "convert_element_type": (
         "carries its own exact-conversions whitelist plus the float->int "
@@ -4046,6 +4065,25 @@ def _ieee_reduce_or(eqn, params, ins, flags):
     return [iv.reduce_or(a, tuple(_req(params, "axes", "reduce_or")))], [False]
 
 
+def _ieee_is_finite(eqn, params, ins, flags):
+    """``is_finite`` under ieee: same bounded-interval logic as real mode,
+    PLUS: if the operand carries maybe-NaN, ``isfinite(NaN)`` is False, so
+    every element that was definite-true degrades to unknown — a maybe-NaN
+    operand's finiteness is not decidable."""
+    r = iv.is_finite(ins[0])
+    if flags[0]:
+        # maybe-NaN: isfinite(NaN) is False, so definite-true ([1,1])
+        # degrades to unknown ([0,1])
+        los, his = [], []
+        for lo, hi in zip(r.los, r.his):
+            if lo == 1.0 and hi == 1.0:
+                lo, hi = iv.BOOL_UNKNOWN
+            los.append(lo)
+            his.append(hi)
+        r = iv.IntervalArray(shape=r.shape, los=tuple(los), his=tuple(his))
+    return [r], [False]
+
+
 # the selector dtypes jax's select_n accepts (measured: lax.select_n
 # rejects float selectors at trace time) — the ONLY dtypes for which
 # "a selector value is never NaN" is a fact rather than an assumption
@@ -4223,6 +4261,12 @@ def _ieee_convert(eqn, params, ins, flags):
         # F5b) is an exact integer identity — no float semantics, no
         # flush hazard — so it passes under ieee exactly as in real mode
         return [ins[0]], [flags[0]]
+    if (src, dst) == ("int64", "float64") and _finite_point(ins[0]):
+        # int64 point at an exactly-representable value: integer identity,
+        # no float semantics involved — same as the real-mode rule
+        bound = 2**53
+        if all(-bound <= x <= bound for x in (*ins[0].los, *ins[0].his)):
+            return [ins[0]], [flags[0]]
     if "float" in src and dst in _INT_RANGE:
         if flags[0]:
             raise iv.IntervalError(
@@ -4295,6 +4339,7 @@ IEEE_TRANSFERS = {
     "and": (_ieee_bool_logic("and", iv.logical_and), TIER_EXACT),
     "or": (_ieee_bool_logic("or", iv.logical_or), TIER_EXACT),
     "reduce_or": (_ieee_reduce_or, TIER_EXACT),
+    "is_finite": (_ieee_is_finite, TIER_EXACT),
     # (ii) censused DOWN to the association-free cases: <=2 contributors
     # are exact (0 or 1 addition; IEEE add is commutative), >=3 declines —
     # float addition is not associative and the jaxpr fixes no order
