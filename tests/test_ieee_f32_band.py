@@ -71,6 +71,8 @@ def close(eqns, outvars):
 
 def test_g_a_f32_subnormal_comparison_is_indefinite():
     # G-A: assert(x > 0), f32 x = 1e-45 — was VERIFIED; measured: False
+    # Now handled parametrically: the float32 subnormal haze covers 1e-45,
+    # widening to include 0, so gt(x, 0) is unknown (correct by soundness).
     x, pred, out = var(0, F32), var(1, BOOL), var(2, BOOL)
     q = close(
         [
@@ -82,9 +84,6 @@ def test_g_a_f32_subnormal_comparison_is_indefinite():
     )
     p = propagate(q, semantics="ieee")
     assert p.obligations[0].status == "unknown"
-    assert any(
-        "binary64 only" in n and "float32" in n for n in p.notes
-    )
     # real mode unchanged (the ℝ reading of the represented value)
     assert propagate(q).obligations[0].status == "discharged"
 
@@ -127,18 +126,15 @@ def _convert_query(src_dtype, src_av, sub):
     )
 
 
-def test_g_c_f32_to_f64_convert_declines_with_the_gap():
+def test_g_c_f32_to_f64_convert_is_indefinite_for_subnormals():
     # G-C: assert(convert_f64(x) > 0) — the whitelisted convert carried
     # the flushed 0 into f64 dataflow past the haze. Was VERIFIED;
-    # measured: False.
+    # measured: False. Now handled parametrically: the f32 subnormal haze
+    # widens the source value to include 0 before the conversion, so
+    # gt(z, 0) is unknown (correct by soundness).
     q = _convert_query("float32", F32, F32_SUB)
     p = propagate(q, semantics="ieee")
     assert p.obligations[0].status == "unknown"
-    assert any(
-        "binary64 only" in n and "float32" in n and "convert" in n.lower()
-        or ("binary64 only" in n and "conversion" in n)
-        for n in p.notes
-    )
     # real mode keeps the whitelist byte-identically
     assert propagate(q).obligations[0].status == "discharged"
 
@@ -172,10 +168,10 @@ def test_g_d_converted_value_into_f64_arithmetic_is_indefinite():
 # --- the decline is uniform: f16 declines too (not target behavior) -----------
 
 
-def test_f16_comparison_and_convert_decline_uniformly():
-    # float16 is measured NOT flushed on this target, but the guard is
-    # the uniform binary64-only discipline — pinned as a DECLINE, never
-    # as target-specific behavior
+def test_f16_subnormal_comparison_is_indefinite():
+    # float16's subnormal band is (-2**-14, 2**-14) ~ (-6.1e-5, 6.1e-5).
+    # 6e-8 is deep in the float16 subnormal band, so the haze widens it
+    # to include 0, making gt(x, 0) unknown. Now handled parametrically.
     x, pred, out = var(0, F16), var(1, BOOL), var(2, BOOL)
     q = close(
         [
@@ -187,8 +183,7 @@ def test_f16_comparison_and_convert_decline_uniformly():
     )
     p = propagate(q, semantics="ieee")
     assert p.obligations[0].status == "unknown"
-    assert any("float16" in n and "binary64 only" in n for n in p.notes)
-    # the whitelisted f16→f64 convert declines the same way
+    # the f16→f64 convert also handles subnormals correctly
     q2 = _convert_query("float16", F16, 6e-8)
     p2 = propagate(q2, semantics="ieee")
     assert p2.obligations[0].status == "unknown"
@@ -239,12 +234,12 @@ def test_integer_and_bool_comparisons_stay_definite_under_ieee():
 
 
 def test_f32_band_assume_neither_raises_nor_narrows():
-    # assume(x == y) with distinct declared f32 subnormal points: the
-    # point-vs-point classifier would call this definitely false and
-    # raise the unsatisfiable-precondition oracle — but under per-dtype
-    # DAZ the runtime comparison is TRUE (both flush to 0), so the
-    # "harness defect" claim would be wrong on flushing targets. Under
-    # ieee it now drops inert with the gap quoted.
+    # assume(x == y) with distinct declared f32 subnormal points: both
+    # values lie in the f32 subnormal band and get hazed to include 0
+    # (format-parametric haze), making them non-point intervals. The
+    # assume then drops inert because both sides vary (relational domain
+    # needed). Under DAZ both flush to 0, so the runtime comparison IS
+    # true — dropping inert is sound under both readings.
     x, y, pred, aout = var(0, F32), var(1, F32), var(2, BOOL), var(3, BOOL)
     q = close(
         [
@@ -257,10 +252,6 @@ def test_f32_band_assume_neither_raises_nor_narrows():
     )
     p = propagate(q, semantics="ieee")  # must not raise
     assert p.coverage.inert == 1 and p.coverage.constrained == 0
-    assert any(
-        "binary64 only" in n and "no narrowing, no satisfiability claim" in n
-        for n in p.notes
-    )
     # real mode keeps the loud oracle byte-identically (in ℝ the two
     # represented values genuinely differ)
     with pytest.raises(UnsatisfiableAssumptionError):

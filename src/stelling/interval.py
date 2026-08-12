@@ -1374,6 +1374,15 @@ def pow_(a: IntervalArray, b: IntervalArray) -> IntervalArray:
 
 MIN_NORMAL = 2.0**-1022  # smallest positive normal binary64
 
+# Format-parametric smallest normals: 2**emin for each supported format.
+# Used by the parametric subnormal haze (_elt_haze_fmt) when the caller
+# specifies a format narrower than binary64.
+_MIN_NORMAL_FOR_EMIN: dict[int, float] = {
+    -14: 2.0**-14,      # float16
+    -126: 2.0**-126,    # float32, bfloat16
+    -1022: 2.0**-1022,  # float64
+}
+
 
 def _band_touching(lo: float, hi: float) -> bool:
     """Does [lo, hi] contain a point of the OPEN subnormal band
@@ -1381,11 +1390,25 @@ def _band_touching(lo: float, hi: float) -> bool:
     return (hi > 0.0 and lo < MIN_NORMAL) or (lo < 0.0 and hi > -MIN_NORMAL)
 
 
+def _band_touching_fmt(lo: float, hi: float, min_normal: float) -> bool:
+    """Format-parametric band touching: does [lo, hi] contain a point of
+    the open subnormal band (-min_normal, min_normal) excluding {0}?"""
+    return (hi > 0.0 and lo < min_normal) or (lo < 0.0 and hi > -min_normal)
+
+
 def _elt_haze(lo: float, hi: float) -> tuple[float, float]:
     """One element of the subnormal haze: hull a band-touching interval
     with 0 (identity when the interval already contains 0 or stays clear
     of the band)."""
     if _band_touching(lo, hi):
+        return min(lo, 0.0), max(hi, 0.0)
+    return lo, hi
+
+
+def _elt_haze_fmt(lo: float, hi: float, min_normal: float) -> tuple[float, float]:
+    """Format-parametric element haze: hull a band-touching interval with 0,
+    using the format's own min_normal threshold."""
+    if _band_touching_fmt(lo, hi, min_normal):
         return min(lo, 0.0), max(hi, 0.0)
     return lo, hi
 
@@ -1417,6 +1440,30 @@ def subnormal_haze(a: IntervalArray) -> tuple[IntervalArray, bool]:
     return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his)), True
 
 
+def subnormal_haze_fmt(
+    a: IntervalArray, min_normal: float
+) -> tuple[IntervalArray, bool]:
+    """Format-parametric subnormal haze: uses the format's own min_normal
+    threshold instead of the binary64 constant. Semantics identical to
+    :func:`subnormal_haze` but with a caller-specified band width.
+
+    For float64 (min_normal = 2**-1022), this is byte-identical to
+    :func:`subnormal_haze`. For float32 (min_normal = 2**-126), the band
+    is ~270 orders of magnitude wider — correctly covering the float32
+    subnormal region that the binary64 haze cannot see.
+    """
+    changed = False
+    los, his = list(a.los), list(a.his)
+    for i, (lo, hi) in enumerate(zip(a.los, a.his)):
+        nlo, nhi = _elt_haze_fmt(lo, hi, min_normal)
+        if nlo != lo or nhi != hi:
+            los[i], his[i] = nlo, nhi
+            changed = True
+    if not changed:
+        return a, False
+    return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his)), True
+
+
 def _ieee_binary(a: IntervalArray, b: IntervalArray, f):
     shape, xs, ys = _pair_elements(a, b)
     los, his = [], []
@@ -1431,6 +1478,28 @@ def _ieee_binary(a: IntervalArray, b: IntervalArray, f):
         lo, hi, nan_here = f(alo, ahi, blo, bhi)
         # FTZ face: a subnormal result may flush to 0
         lo, hi = _elt_haze(lo, hi)
+        los.append(lo)
+        his.append(hi)
+        made_nan = made_nan or nan_here
+    return (
+        IntervalArray(shape=shape, los=tuple(los), his=tuple(his)),
+        made_nan,
+    )
+
+
+def _ieee_binary_fmt(a: IntervalArray, b: IntervalArray, f, min_normal: float):
+    """Format-parametric version of _ieee_binary: uses the format's own
+    min_normal for the subnormal haze (both DAZ on operands and FTZ on
+    results). The corner hull arithmetic is still in native float64, which
+    is exact for all narrower formats' endpoints."""
+    shape, xs, ys = _pair_elements(a, b)
+    los, his = [], []
+    made_nan = False
+    for (alo, ahi), (blo, bhi) in zip(xs, ys):
+        alo, ahi = _elt_haze_fmt(alo, ahi, min_normal)
+        blo, bhi = _elt_haze_fmt(blo, bhi, min_normal)
+        lo, hi, nan_here = f(alo, ahi, blo, bhi)
+        lo, hi = _elt_haze_fmt(lo, hi, min_normal)
         los.append(lo)
         his.append(hi)
         made_nan = made_nan or nan_here
@@ -1497,6 +1566,119 @@ def ieee_div(a: IntervalArray, b: IntervalArray):
         return _corner_hull(corners, made_nan)
 
     return _ieee_binary(a, b, f)
+
+
+def ieee_add_fmt(a: IntervalArray, b: IntervalArray, min_normal: float):
+    """Format-parametric ieee_add: subnormal haze uses format's band."""
+    def f(alo, ahi, blo, bhi):
+        corners = (alo + blo, alo + bhi, ahi + blo, ahi + bhi)
+        return _corner_hull(corners, False)
+
+    return _ieee_binary_fmt(a, b, f, min_normal)
+
+
+def ieee_sub_fmt(a: IntervalArray, b: IntervalArray, min_normal: float):
+    """Format-parametric ieee_sub: subnormal haze uses format's band."""
+    def f(alo, ahi, blo, bhi):
+        corners = (alo - blo, alo - bhi, ahi - blo, ahi - bhi)
+        return _corner_hull(corners, False)
+
+    return _ieee_binary_fmt(a, b, f, min_normal)
+
+
+def ieee_mul_fmt(a: IntervalArray, b: IntervalArray, min_normal: float):
+    """Format-parametric ieee_mul: subnormal haze uses format's band."""
+    def f(alo, ahi, blo, bhi):
+        a0, b0 = alo <= 0.0 <= ahi, blo <= 0.0 <= bhi
+        ainf = alo == -_INF or ahi == _INF
+        binf = blo == -_INF or bhi == _INF
+        made_nan = (a0 and binf) or (b0 and ainf)
+        corners = (alo * blo, alo * bhi, ahi * blo, ahi * bhi)
+        return _corner_hull(corners, made_nan)
+
+    return _ieee_binary_fmt(a, b, f, min_normal)
+
+
+def ieee_div_fmt(a: IntervalArray, b: IntervalArray, min_normal: float):
+    """Format-parametric ieee_div: subnormal haze uses format's band."""
+    def f(alo, ahi, blo, bhi):
+        a0, b0 = alo <= 0.0 <= ahi, blo <= 0.0 <= bhi
+        ainf = alo == -_INF or ahi == _INF
+        binf = blo == -_INF or bhi == _INF
+        made_nan = (a0 and b0) or (ainf and binf)
+        if b0:
+            return -_INF, _INF, made_nan
+        corners = (alo / blo, alo / bhi, ahi / blo, ahi / bhi)
+        return _corner_hull(corners, made_nan)
+
+    return _ieee_binary_fmt(a, b, f, min_normal)
+
+
+def ieee_sqrt_fmt(a: IntervalArray, min_normal: float):
+    """Format-parametric ieee_sqrt: subnormal haze uses format's band."""
+    los, his = [], []
+    made_nan = False
+    for lo, hi in zip(a.los, a.his):
+        lo, hi = _elt_haze_fmt(lo, hi, min_normal)
+        nan_here = lo < 0.0
+        if hi < 0.0:
+            rlo, rhi = -_INF, _INF
+        else:
+            d_lo = lo if lo > 0.0 else 0.0
+            rlo = math.sqrt(d_lo)
+            rhi = _INF if hi == _INF else math.sqrt(hi)
+        rlo, rhi = _elt_haze_fmt(rlo, rhi, min_normal)
+        los.append(rlo)
+        his.append(rhi)
+        made_nan = made_nan or nan_here
+    return (
+        IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his)),
+        made_nan,
+    )
+
+
+def ieee_reduce_sum_fmt(
+    a: IntervalArray, axes: tuple[int, ...], min_normal: float
+):
+    """Format-parametric ieee_reduce_sum: subnormal haze uses format's band."""
+    ax = _check_axes(a, axes, "reduce_sum")
+    out_shape, out_n, n_contrib = _reduced_shape(a, ax)
+    if n_contrib > 2:
+        raise IntervalError(REDUCE_SUM_IEEE_ORDER_DECLINE.format(n=n_contrib))
+    buckets: list[list[tuple[float, float]]] = [[] for _ in range(out_n)]
+    if a.size:
+        for coord in _coords(a.shape):
+            i = _flat_index(coord, a.shape)
+            j = _flat_index(
+                tuple(c for k, c in enumerate(coord) if k not in ax), out_shape
+            )
+            buckets[j].append((a.los[i], a.his[i]))
+    los, his = [], []
+    made_nan = False
+    for parts in buckets:
+        if not parts:
+            los.append(0.0)
+            his.append(0.0)
+            continue
+        if len(parts) == 1:
+            lo, hi = _elt_haze_fmt(*parts[0], min_normal)
+            los.append(lo)
+            his.append(hi)
+            continue
+        (alo, ahi), (blo, bhi) = parts
+        alo, ahi = _elt_haze_fmt(alo, ahi, min_normal)
+        blo, bhi = _elt_haze_fmt(blo, bhi, min_normal)
+        lo, hi, nan_here = _corner_hull(
+            (alo + blo, alo + bhi, ahi + blo, ahi + bhi), False
+        )
+        lo, hi = _elt_haze_fmt(lo, hi, min_normal)
+        los.append(lo)
+        his.append(hi)
+        made_nan = made_nan or nan_here
+    return (
+        IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his)),
+        made_nan,
+    )
 
 
 def ieee_sqrt(a: IntervalArray):
