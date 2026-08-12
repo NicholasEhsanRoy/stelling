@@ -2971,17 +2971,38 @@ def _t_div(eqn, params, ins):
     if not _is_integer_dtype(dtype):
         divisor = ins[1]
         if iv.straddles_zero(divisor):
-            # Format the divisor interval for the message. For a scalar
-            # show [lo, hi]; for an array show the element that straddles.
-            for i, (lo, hi) in enumerate(zip(divisor.los, divisor.his)):
+            # Decompose straddle: point-at-zero, one-sided boundary, or
+            # true straddle (lo < 0 < hi).
+            has_point_zero = False
+            has_true_straddle = False
+            for lo, hi in zip(divisor.los, divisor.his):
                 if lo <= 0.0 <= hi:
-                    span = f"[{lo}, {hi}]"
-                    if divisor.size > 1:
-                        span = f"element {i} spans {span}"
-                    break
-            raise iv.IntervalError(
-                DIV_STRADDLE_DECLINE.format(divisor=span)
-            )
+                    if lo == 0.0 and hi == 0.0:
+                        has_point_zero = True
+                    elif lo < 0.0 and hi > 0.0:
+                        has_true_straddle = True
+            if has_point_zero:
+                # Division by literal zero: decline
+                raise iv.IntervalError(
+                    "div: the divisor interval contains the point [0, 0] "
+                    "— division by zero is undefined"
+                )
+            if has_true_straddle:
+                # True straddle: decline with the existing message
+                for i, (lo, hi) in enumerate(
+                    zip(divisor.los, divisor.his)
+                ):
+                    if lo < 0.0 and hi > 0.0:
+                        span = f"[{lo}, {hi}]"
+                        if divisor.size > 1:
+                            span = f"element {i} spans {span}"
+                        break
+                raise iv.IntervalError(
+                    DIV_STRADDLE_DECLINE.format(divisor=span)
+                )
+            # All straddling elements are one-sided boundaries:
+            # boundary-aware division
+            return [iv.boundary_div(ins[0], divisor)]
         return [iv.div(*ins)]
     return _int_overflow_guard(eqn, "div", [iv.int_div(*ins)])
 
@@ -3824,6 +3845,16 @@ def _ieee_format_min_normal(fmt: tuple[int, int, int]) -> float:
     """The smallest positive normal for a format: 2**emin."""
     _, emin, _ = fmt
     return iv._MIN_NORMAL_FOR_EMIN.get(emin, 2.0**emin)
+
+
+def _ieee_format_min_positive(fmt: tuple[int, int, int]) -> float:
+    """The smallest positive value (subnormal) for a format: 2**(emin-p+1).
+
+    In ieee mode, ``x > 0`` genuinely means ``x >= min_positive`` because
+    there is no representable value between 0 and this threshold.
+    """
+    p, emin, _ = fmt
+    return math.ldexp(1.0, emin - p + 1)
 
 
 def _ieee_round_box(box: iv.IntervalArray, fmt: tuple[int, int, int]) -> iv.IntervalArray:
@@ -6805,6 +6836,36 @@ class _Propagator:
                 f"nothing was verified)",
             )
             return
+        # IEEE strict-inequality auto-bump: in ieee mode, the value set IS
+        # the format's representable floats, and there is no value between
+        # k and the next representable value above/below k. So x > k in
+        # the format genuinely means x >= next_up(k), and we can bump the
+        # closed boundary to exclude k EXACTLY. This is UNSOUND in real
+        # mode (reals in (k, next_up(k)) would be excluded) and is only
+        # applied when the target has a known float format.
+        if self.semantics == "ieee" and cmp in ("gt", "lt"):
+            target_dtype = target_atom.aval.dtype or ""
+            target_fmt = _FLOAT_FORMATS.get(target_dtype)
+            if target_fmt is not None:
+                min_pos = _ieee_format_min_positive(target_fmt)
+                if cmp == "gt":
+                    bumped_los = tuple(
+                        max(lo, min_pos) if lo == k else lo
+                        for lo, k in zip(new.los, ks)
+                    )
+                    if bumped_los != new.los:
+                        new = iv.IntervalArray(
+                            shape=new.shape, los=bumped_los, his=new.his
+                        )
+                else:  # lt
+                    bumped_his = tuple(
+                        min(hi, -min_pos) if hi == k else hi
+                        for hi, k in zip(new.his, ks)
+                    )
+                    if bumped_his != new.his:
+                        new = iv.IntervalArray(
+                            shape=new.shape, los=new.los, his=bumped_his
+                        )
         # audit F8: an assume whose predicate is DEFINITELY TRUE over the
         # target's whole box certifies itself, exactness aside — pred true
         # on the box superset is true on the whole current domain, so the

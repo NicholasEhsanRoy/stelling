@@ -131,9 +131,9 @@ def test_div_assume_narrows_past_straddle():
     [1, 10] before the division. The narrowed divisor no longer straddles
     zero, so the transfer proceeds and the obligation can decide.
 
-    Note: assume(b > 0) narrows to [0, 10] in closed-interval arithmetic
-    (the open boundary at 0 becomes a closed one), and [0, 10] still
-    contains zero. Using >= 1 gives a clean [1, 10] that excludes zero."""
+    Note: assume(b > 0) now also works — in real mode it narrows to [0, 10]
+    which boundary-aware division handles, and in ieee mode it bumps to
+    [min_positive, 10]. Using >= 1 here gives the cleanest test shape."""
     a, b = var(0), var(1)
     # assume(b >= 1): we need a ge comparison and a stelling_assume
     pred_assume = var(2, BOOL)
@@ -167,9 +167,11 @@ def test_div_assume_narrows_past_straddle():
 # --- edge cases ---------------------------------------------------------------
 
 
-def test_div_straddle_at_exactly_zero():
-    """b declared as [0, 1]: the interval contains zero (lo <= 0 <= hi),
-    so it straddles and declines."""
+def test_div_boundary_at_zero_lower():
+    """b declared as [0, 1]: zero at the lower boundary only. With
+    boundary-aware division, this computes [a_lo/hi, +inf] rather than
+    declining — the obligation can decide (a/b > 0 with a > 0, b > 0
+    gives a positive quotient)."""
     a, b = var(0), var(1)
     q_out, pred, out = var(2), var(3, BOOL), var(4, BOOL)
     query = close(
@@ -183,8 +185,10 @@ def test_div_straddle_at_exactly_zero():
         [out],
     )
     p = propagate(query)
-    assert p.obligations[0].status == "unknown"
-    assert any("straddles zero" in n for n in p.notes)
+    # Boundary-aware division: a=[1,5], b=[0,1] gives [1/1, +inf] = [1, inf]
+    # gt(result, 0) is definitely true
+    assert p.obligations[0].status == "discharged"
+    assert not any("straddles zero" in n for n in p.notes)
 
 
 def test_div_negative_divisor_does_not_decline():

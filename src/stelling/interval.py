@@ -631,6 +631,76 @@ def div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     return _binary(a, b, f)
 
 
+def _boundary_div_lo(num: float, den: float) -> float:
+    """Sound lower endpoint for a single finite boundary-div quotient."""
+    if num == 0.0:
+        return 0.0
+    if not _exactable(num, den):
+        return _down(num / den)
+    return _exact_down(Fraction(num) / Fraction(den))
+
+
+def _boundary_div_hi(num: float, den: float) -> float:
+    """Sound upper endpoint for a single finite boundary-div quotient."""
+    if num == 0.0:
+        return 0.0
+    if not _exactable(num, den):
+        return _up(num / den)
+    return _exact_up(Fraction(num) / Fraction(den))
+
+
+def boundary_div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    """Division when the divisor has zero at exactly ONE boundary.
+
+    Precondition: every element of ``b`` that straddles zero has zero at
+    exactly one boundary (i.e., lo == 0 with hi > 0, or hi == 0 with lo < 0).
+    No element may be [0, 0] or a true straddle (lo < 0 < hi).
+
+    For elements where the divisor does NOT contain zero, normal division
+    is used. For one-sided boundary elements, the result is computed with
+    the appropriate infinite endpoint.
+    """
+    def f(alo, ahi, blo, bhi):
+        b_contains_zero = blo <= 0.0 <= bhi
+        if not b_contains_zero:
+            # Normal division (no zero in divisor)
+            for x in (alo, ahi):
+                for y in (blo, bhi):
+                    if (x == _INF or x == -_INF) and (y == _INF or y == -_INF):
+                        return -_INF, _INF
+            if _exactable(alo, ahi, blo, bhi):
+                ex = [Fraction(x) / Fraction(y)
+                      for x in (alo, ahi) for y in (blo, bhi)]
+                return _exact_down(min(ex)), _exact_up(max(ex))
+            quotients = [x / y for x in (alo, ahi) for y in (blo, bhi)]
+            return _down(min(quotients)), _up(max(quotients))
+        # One-sided boundary: zero at exactly one end
+        if blo == 0.0:
+            # b = [0, hi], hi > 0: divisor approaches 0 from above
+            if alo >= 0.0:
+                # Non-negative / positive-approaching-0: [alo/hi, +inf]
+                return _boundary_div_lo(alo, bhi), _INF
+            elif ahi <= 0.0:
+                # Non-positive / positive-approaching-0: [-inf, ahi/hi]
+                return -_INF, _boundary_div_hi(ahi, bhi)
+            else:
+                # Dividend straddles zero: both ±inf reachable
+                return -_INF, _INF
+        else:
+            # b = [lo, 0], lo < 0: divisor approaches 0 from below
+            if alo >= 0.0:
+                # Non-negative / negative-approaching-0: [-inf, alo/lo]
+                return -_INF, _boundary_div_hi(alo, blo)
+            elif ahi <= 0.0:
+                # Non-positive / negative-approaching-0: [ahi/lo, +inf]
+                return _boundary_div_lo(ahi, blo), _INF
+            else:
+                # Dividend straddles zero: both ±inf reachable
+                return -_INF, _INF
+
+    return _binary(a, b, f)
+
+
 def maximum(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     # max is monotone in both args: no rounding, endpoints are real values
     return _binary(a, b, lambda alo, ahi, blo, bhi: (max(alo, blo), max(ahi, bhi)))
@@ -1558,10 +1628,30 @@ def ieee_div(a: IntervalArray, b: IntervalArray):
         # VALUE under ieee, not NaN.
         made_nan = (a0 and b0) or (ainf and binf)
         if b0:
-            # the denominator attains 0: quotients reach ±inf with signs
-            # set by which side of 0 the denominator approaches — ⊤ is the
-            # sound hull (and the only closed-interval answer offered here)
-            return -_INF, _INF, made_nan
+            # Boundary-aware: if zero sits at exactly one boundary,
+            # compute a tighter result than full [-inf, +inf].
+            if blo == 0.0 and bhi == 0.0:
+                # [0, 0]: division by literal zero — ⊤
+                return -_INF, _INF, made_nan
+            elif blo == 0.0:
+                # [0, hi], hi > 0: divisor approaches 0 from above
+                if alo >= 0.0:
+                    return alo / bhi if alo != 0.0 else 0.0, _INF, made_nan
+                elif ahi <= 0.0:
+                    return -_INF, ahi / bhi if ahi != 0.0 else 0.0, made_nan
+                else:
+                    return -_INF, _INF, made_nan
+            elif bhi == 0.0:
+                # [lo, 0], lo < 0: divisor approaches 0 from below
+                if alo >= 0.0:
+                    return -_INF, alo / blo if alo != 0.0 else 0.0, made_nan
+                elif ahi <= 0.0:
+                    return ahi / blo if ahi != 0.0 else 0.0, _INF, made_nan
+                else:
+                    return -_INF, _INF, made_nan
+            else:
+                # True straddle (lo < 0 < hi): ⊤
+                return -_INF, _INF, made_nan
         corners = (alo / blo, alo / bhi, ahi / blo, ahi / bhi)
         return _corner_hull(corners, made_nan)
 
@@ -1607,7 +1697,27 @@ def ieee_div_fmt(a: IntervalArray, b: IntervalArray, min_normal: float):
         binf = blo == -_INF or bhi == _INF
         made_nan = (a0 and b0) or (ainf and binf)
         if b0:
-            return -_INF, _INF, made_nan
+            # Boundary-aware: tighter result for one-sided boundaries
+            if blo == 0.0 and bhi == 0.0:
+                return -_INF, _INF, made_nan
+            elif blo == 0.0:
+                # [0, hi], hi > 0
+                if alo >= 0.0:
+                    return alo / bhi if alo != 0.0 else 0.0, _INF, made_nan
+                elif ahi <= 0.0:
+                    return -_INF, ahi / bhi if ahi != 0.0 else 0.0, made_nan
+                else:
+                    return -_INF, _INF, made_nan
+            elif bhi == 0.0:
+                # [lo, 0], lo < 0
+                if alo >= 0.0:
+                    return -_INF, alo / blo if alo != 0.0 else 0.0, made_nan
+                elif ahi <= 0.0:
+                    return ahi / blo if ahi != 0.0 else 0.0, _INF, made_nan
+                else:
+                    return -_INF, _INF, made_nan
+            else:
+                return -_INF, _INF, made_nan
         corners = (alo / blo, alo / bhi, ahi / blo, ahi / bhi)
         return _corner_hull(corners, made_nan)
 
