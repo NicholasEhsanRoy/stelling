@@ -63,6 +63,14 @@ ARITHMETIC_MODE_INTERVAL_IEEE = (
     "interval/f64/native-endpoints+maybe-nan (stelling.interval)"
 )
 
+# Format-parametric ieee arithmetic mode strings. For queries using only
+# float64, the legacy string above is used byte-identically. For queries
+# involving narrower formats, the format is recorded in the stamp.
+ARITHMETIC_MODE_INTERVAL_IEEE_FMT = (
+    "interval/ieee-parametric/native-f64-endpoints+format-rounding+maybe-nan "
+    "(stelling.interval)"
+)
+
 # The representation names how brackets are computed; the SEMANTICS names
 # which arithmetic the verdict is *about*. They are different fields because
 # the gap between them is where false-VERIFIED lives: `t + dt > t` is
@@ -94,6 +102,14 @@ SEMANTICS_IEEE = (
     "program's IEEE binary64 round-to-nearest float execution over the "
     "declared sets; the exact-real (ℝ) value is NOT what is claimed — a "
     "predicate can hold in floats and fail in ℝ, and vice versa"
+)
+
+SEMANTICS_IEEE_FMT = (
+    "ieee (IEEE-754 parametric): obligations judged about the traced "
+    "program's IEEE round-to-nearest float execution in the declared "
+    "format (float32/float16/bfloat16/float64) over the declared sets; "
+    "interval endpoints computed in native float64 then rounded outward "
+    "to the target format's ULP grid"
 )
 
 
@@ -1480,6 +1496,18 @@ def top_despite_coverage_note(propagation: Propagation) -> str | None:
     )
 
 
+def _query_has_non_f64_float(closed) -> bool:
+    """Whether the query contains any non-float64 float dtype in its
+    equations' operands or results. Used to select the parametric ieee
+    stamp when narrower formats are present."""
+    for eqn in closed.jaxpr.eqns:
+        for v in (*eqn.invars, *eqn.outvars):
+            dtype = getattr(getattr(v, "aval", None), "dtype", None) or ""
+            if "float" in dtype and dtype != "float64":
+                return True
+    return False
+
+
 def make_verdict(
     closed,
     propagation: Propagation,
@@ -1536,8 +1564,15 @@ def make_verdict(
     # a consequence of ℝ semantics and must NOT ride in an ieee stamp; the
     # ieee stamp carries the native-binary64-endpoint assumption instead.
     if propagation.semantics == "ieee":
-        semantics = SEMANTICS_IEEE
-        arithmetic_mode = ARITHMETIC_MODE_INTERVAL_IEEE
+        # Detect whether the query uses non-float64 formats by checking
+        # the declarations (stelling_any equations) for non-f64 float dtypes
+        _has_non_f64 = _query_has_non_f64_float(closed)
+        if _has_non_f64:
+            semantics = SEMANTICS_IEEE_FMT
+            arithmetic_mode = ARITHMETIC_MODE_INTERVAL_IEEE_FMT
+        else:
+            semantics = SEMANTICS_IEEE
+            arithmetic_mode = ARITHMETIC_MODE_INTERVAL_IEEE
         convention = IEEE_ENDPOINT_ASSUMPTION
         solver_reason = (
             "no solver invoked: every obligation was judged by native-"

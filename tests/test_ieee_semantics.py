@@ -444,7 +444,10 @@ def test_eq_definite_false_survives_the_flag():
 # --- census: the binary64-only guard on the arithmetic core -------------------
 
 
-def test_f32_arithmetic_declines_with_the_gap_quoted():
+def test_f32_arithmetic_is_handled_parametrically():
+    # Float32 arithmetic is now handled parametrically (0.2.0 feature).
+    # add(x, x) with x in [1, 2] produces z in [2, 4], and le(z, 100) is
+    # discharged (the format rounding doesn't change this broad assertion).
     x, z = var(0, F32), var(1, F32)
     pred, out = var(2, BOOL), var(3, BOOL)
     q = assert_query(
@@ -457,9 +460,9 @@ def test_f32_arithmetic_declines_with_the_gap_quoted():
         out,
     )
     p = propagate(q, semantics="ieee")
-    assert p.obligations[0].status == "unknown"  # ⊤-maybe-NaN, never a definite
-    assert any("binary64-only" in n for n in p.notes)
-    assert p.coverage.unknown >= 1
+    assert p.obligations[0].status == "discharged"
+    # No "binary64-only" decline note
+    assert not any("binary64-only" in n for n in p.notes)
     # the same query under real semantics still discharges (ℝ claim)
     assert propagate(q).obligations[0].status == "discharged"
 
@@ -479,7 +482,7 @@ def test_int_arithmetic_declines_under_ieee():
     )
     p = propagate(q, semantics="ieee")
     assert p.obligations[0].status == "unknown"
-    assert any("binary64-only" in n for n in p.notes)
+    assert any("no supported float format" in n for n in p.notes)
 
 
 # --- census: pow declines maybe-NaN operands ----------------------------------

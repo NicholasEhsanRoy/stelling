@@ -3761,45 +3761,144 @@ _LIBM_ASSUMPTIONS = {
 # anything a float can be, including NaN).
 
 
+def _ieee_get_format(eqn) -> tuple[int, int, int]:
+    """Look up the float format for an equation's operand/result dtypes.
+
+    All float operands and results of an arithmetic equation share a single
+    format (JAX promotes to a common dtype before computing). Returns the
+    format tuple ``(p, emin, emax)`` from :data:`_FLOAT_FORMATS`. Raises
+    :class:`~stelling.interval.IntervalError` if any dtype is not a
+    supported float format (e.g., integer dtypes, float8 variants), or if
+    the dtypes disagree (a mixed-dtype equation that bypassed promotion).
+    """
+    dtypes = {v.aval.dtype for v in (*eqn.invars, *eqn.outvars)}
+    # Remove non-float dtypes that are acceptable in some contexts (bool
+    # selectors in select_n, int indices) — the caller must validate those
+    # separately. Here we extract THE float format.
+    float_dtypes = sorted(d for d in dtypes if "float" in (d or ""))
+    if not float_dtypes:
+        raise iv.IntervalError(
+            f"ieee arithmetic requires float operands; dtypes {sorted(dtypes)} "
+            f"contain no supported float format — declined"
+        )
+    # All float operands/results must share a single format
+    fmt = _FLOAT_FORMATS.get(float_dtypes[0])
+    if fmt is None:
+        raise iv.IntervalError(
+            f"ieee arithmetic: dtype {float_dtypes[0]!r} is not a supported "
+            f"format (supported: {sorted(_FLOAT_FORMATS)}) — declined"
+        )
+    for d in float_dtypes[1:]:
+        other = _FLOAT_FORMATS.get(d)
+        if other is None:
+            raise iv.IntervalError(
+                f"ieee arithmetic: dtype {d!r} is not a supported format "
+                f"(supported: {sorted(_FLOAT_FORMATS)}) — declined"
+            )
+        if other != fmt:
+            raise iv.IntervalError(
+                f"ieee arithmetic: mixed float formats "
+                f"{float_dtypes} — declined"
+            )
+    return fmt
+
+
 def _ieee_f64_only(eqn) -> None:
-    """The binary64 guard for the arithmetic core: ieee endpoints are
-    native binary64, which does not model float32/float16 rounding or
-    integer wraparound — any other dtype declines with the gap quoted."""
-    bad = sorted(
-        {v.aval.dtype for v in (*eqn.invars, *eqn.outvars)} - {"float64"}
-    )
-    if bad:
+    """Legacy binary64 guard — now delegates to _ieee_get_format and
+    rejects anything that isn't float64. Retained for call sites that
+    genuinely need binary64 only (comparisons with per-dtype DAZ bands)."""
+    fmt = _ieee_get_format(eqn)
+    if fmt != _FLOAT_FORMATS["float64"]:
+        float_dtypes = sorted(
+            d for d in {v.aval.dtype for v in (*eqn.invars, *eqn.outvars)}
+            if "float" in (d or "") and d != "float64"
+        )
         raise iv.IntervalError(
             f"ieee endpoint arithmetic is binary64-only; operand/result "
-            f"dtypes {bad} are not modeled (float32/float16 round "
+            f"dtypes {float_dtypes} are not modeled (float32/float16 round "
             f"differently, integer arithmetic wraps) — declined"
         )
+
+
+def _ieee_format_min_normal(fmt: tuple[int, int, int]) -> float:
+    """The smallest positive normal for a format: 2**emin."""
+    _, emin, _ = fmt
+    return iv._MIN_NORMAL_FOR_EMIN.get(emin, 2.0**emin)
+
+
+def _ieee_round_box(box: iv.IntervalArray, fmt: tuple[int, int, int]) -> iv.IntervalArray:
+    """Round an interval box's endpoints OUTWARD to the target format's ULP
+    grid. For float64, this is the identity (native endpoints ARE binary64).
+    For narrower formats, the lo is rounded DOWN and hi is rounded UP in the
+    target format, ensuring the interval still contains every value the
+    program could compute.
+
+    Infinite endpoints are preserved (they represent overflow to ±inf, which
+    IS a value in every IEEE format).
+    """
+    if fmt == _FLOAT_FORMATS["float64"]:
+        return box  # identity — native endpoints are already binary64
+    los, his = [], []
+    for lo, hi in zip(box.los, box.his):
+        # Round lo DOWN (direction=-1) and hi UP (direction=+1)
+        rlo = lo if lo == -math.inf else _round_in_format(lo, fmt, -1)
+        rhi = hi if hi == math.inf else _round_in_format(hi, fmt, +1)
+        los.append(rlo)
+        his.append(rhi)
+    return iv.IntervalArray(shape=box.shape, los=tuple(los), his=tuple(his))
 
 
 def _ieee_arith(op):
     """The monotone core (add/sub/mul/div): native binary64 corner
     endpoints, NaN corners routed to the flag (never into an interval).
     A maybe-NaN operand poisons the result (NaN propagates through all
-    four ops), so operand flags OR into the output flag."""
+    four ops), so operand flags OR into the output flag.
+
+    Format-parametric: for non-float64 formats, uses the format's own
+    subnormal band for the DAZ/FTZ haze, and rounds the result endpoints
+    outward to the format's ULP grid."""
 
     def t(eqn, params, ins, flags):
-        _ieee_f64_only(eqn)
-        box, made_nan = op(ins[0], ins[1])
+        fmt = _ieee_get_format(eqn)
+        min_normal = _ieee_format_min_normal(fmt)
+        if fmt == _FLOAT_FORMATS["float64"]:
+            box, made_nan = op(ins[0], ins[1])
+        else:
+            # Use the format-parametric binary kernel with format's band
+            op_fmt = _FMT_BINARY_OPS.get(op)
+            if op_fmt is not None:
+                box, made_nan = op_fmt(ins[0], ins[1], min_normal)
+            else:
+                # Fallback: use native binary64 kernel then round outward
+                box, made_nan = op(ins[0], ins[1])
+            box = _ieee_round_box(box, fmt)
         return [box], [made_nan or any(flags)]
 
     return t
 
 
+# Mapping from the binary64-native ieee kernel to its format-parametric
+# counterpart. Used by _ieee_arith to dispatch the correct kernel when
+# the equation's format is not float64.
+_FMT_BINARY_OPS: dict = {
+    iv.ieee_add: iv.ieee_add_fmt,
+    iv.ieee_sub: iv.ieee_sub_fmt,
+    iv.ieee_mul: iv.ieee_mul_fmt,
+    iv.ieee_div: iv.ieee_div_fmt,
+}
+
+
 def _ieee_unary_exact(fn):
     """neg/abs: exact sign arithmetic — the float result IS the real
     result, no rounding, no new NaN (neg(nan)/abs(nan) stay NaN: flag
-    propagates)."""
+    propagates). Format-parametric: uses the format's own subnormal band."""
 
     def t(eqn, params, ins, flags):
-        _ieee_f64_only(eqn)
+        fmt = _ieee_get_format(eqn)
+        min_normal = _ieee_format_min_normal(fmt)
         # subnormal haze on the result: whether a sign operation is
         # flushed is target-dependent; the hull with 0 covers both
-        return [iv.subnormal_haze(fn(ins[0]))[0]], [flags[0]]
+        return [iv.subnormal_haze_fmt(fn(ins[0]), min_normal)[0]], [flags[0]]
 
     return t
 
@@ -3812,16 +3911,17 @@ def _ieee_minmax(fn):
     ordering (measured on jax 0.11.0 cpu: lax.max/min PROPAGATE NaN in
     both operand orders) — the operand hull covers every one of those
     non-NaN outcomes, so hull + flag is sound without leaning on the
-    measurement."""
+    measurement. Format-parametric: uses the format's own subnormal band."""
 
     def t(eqn, params, ins, flags):
-        _ieee_f64_only(eqn)
+        fmt = _ieee_get_format(eqn)
+        min_normal = _ieee_format_min_normal(fmt)
         a, b = ins
         if any(flags):
             mn, mx = iv.minimum(a, b), iv.maximum(a, b)
             hull = iv.IntervalArray(shape=mn.shape, los=mn.los, his=mx.his)
-            return [iv.subnormal_haze(hull)[0]], [True]
-        return [iv.subnormal_haze(fn(a, b))[0]], [False]
+            return [iv.subnormal_haze_fmt(hull, min_normal)[0]], [True]
+        return [iv.subnormal_haze_fmt(fn(a, b), min_normal)[0]], [False]
 
     return t
 
@@ -3834,9 +3934,14 @@ def _ieee_exp(eqn, params, ins, flags):
     NaN and nothing else: flag propagation is exact. The subnormal haze
     covers flushing libm targets (measured jax 0.11.0 CPU:
     exp(-720) = 0.0 while IEEE exp is subnormal — the 1-ulp bracket alone
-    cannot absorb a flush to 0)."""
-    _ieee_f64_only(eqn)
-    return [iv.subnormal_haze(iv.exp(ins[0]))[0]], [flags[0]]
+    cannot absorb a flush to 0). Format-parametric: applies the format's
+    own subnormal band and rounds the result outward to the format grid."""
+    fmt = _ieee_get_format(eqn)
+    min_normal = _ieee_format_min_normal(fmt)
+    box = iv.subnormal_haze_fmt(iv.exp(ins[0]), min_normal)[0]
+    if fmt != _FLOAT_FORMATS["float64"]:
+        box = _ieee_round_box(box, fmt)
+    return [box], [flags[0]]
 
 
 def _ieee_pow(eqn, params, ins, flags):
@@ -3845,8 +3950,9 @@ def _ieee_pow(eqn, params, ins, flags):
     flag-propagating: IEEE pow has non-NaN results at NaN inputs
     (pow(NaN, 0) = 1 and pow(1, NaN) = 1 — measured on jax 0.11.0), and 1
     may lie outside the corner bracket, so flag propagation alone would
-    be unsound."""
-    _ieee_f64_only(eqn)
+    be unsound. Format-parametric."""
+    fmt = _ieee_get_format(eqn)
+    min_normal = _ieee_format_min_normal(fmt)
     if any(flags):
         raise iv.IntervalError(
             "pow over a maybe-NaN operand: IEEE pow(NaN, 0) = 1 and "
@@ -3855,7 +3961,10 @@ def _ieee_pow(eqn, params, ins, flags):
         )
     # subnormal haze on the result: a flushing libm pow may return 0
     # where the bracket is subnormal
-    return [iv.subnormal_haze(iv.pow_(*ins))[0]], [False]
+    box = iv.subnormal_haze_fmt(iv.pow_(*ins), min_normal)[0]
+    if fmt != _FLOAT_FORMATS["float64"]:
+        box = _ieee_round_box(box, fmt)
+    return [box], [False]
 
 
 def _ieee_sqrt(eqn, params, ins, flags):
@@ -3864,25 +3973,53 @@ def _ieee_sqrt(eqn, params, ins, flags):
     bracket exp/pow carry. A NEGATIVE argument produces NaN, routed into the
     flag by :func:`stelling.interval.ieee_sqrt` (never leaked as an
     endpoint); a maybe-NaN operand poisons the result (``sqrt(NaN) = NaN``),
-    so the operand flag ORs into the output flag. binary64-only, like the
-    rest of the ieee arithmetic core (the subnormal haze is applied inside
-    the kernel)."""
-    _ieee_f64_only(eqn)
-    box, made_nan = iv.ieee_sqrt(ins[0])
+    so the operand flag ORs into the output flag. Format-parametric: uses the
+    format's own subnormal band for sqrt."""
+    fmt = _ieee_get_format(eqn)
+    min_normal = _ieee_format_min_normal(fmt)
+    if fmt == _FLOAT_FORMATS["float64"]:
+        box, made_nan = iv.ieee_sqrt(ins[0])
+    else:
+        box, made_nan = iv.ieee_sqrt_fmt(ins[0], min_normal)
+        box = _ieee_round_box(box, fmt)
     return [box], [made_nan or flags[0]]
 
 
-def _ieee_cmp_f64_only(eqn) -> None:
-    """The comparison face of the binary64-only guard (re-attack U2): DAZ
-    reaches comparisons per-dtype (measured jax 0.11.0 CPU:
-    ``float32(1e-45) > 0`` is False, ``float32(1e-39) == float32(1e-40)``
-    is True), and the binary64 haze cannot see the f32 band — so any
-    comparison with a non-f64 float operand declines with the gap
-    quoted. Integer/bool comparisons are unaffected (no flush hazard)."""
-    bad = _non_f64_float_dtypes(eqn.invars)
-    if bad:
+def _ieee_cmp_get_min_normal(eqn) -> float:
+    """Get the format's min_normal for comparison operands. Comparisons
+    produce booleans but consume floats — the subnormal haze applies to the
+    INPUT dtypes, not the output. Integer/bool comparisons have no subnormal
+    band. Returns the min_normal for the input float format, or the binary64
+    min_normal if inputs are non-float (integers/bools are unaffected)."""
+    float_dtypes = sorted(
+        d for v in eqn.invars
+        for d in [v.aval.dtype or ""]
+        if "float" in d
+    )
+    if not float_dtypes:
+        # pure integer/bool comparison — no subnormal hazard
+        return iv.MIN_NORMAL
+    fmt = _FLOAT_FORMATS.get(float_dtypes[0])
+    if fmt is None:
         raise iv.IntervalError(
-            f"ieee mode models binary64 only; {'/'.join(bad)} comparison "
+            f"ieee comparison: dtype {float_dtypes[0]!r} is not a supported "
+            f"format (supported: {sorted(_FLOAT_FORMATS)}) — declined"
+        )
+    return _ieee_format_min_normal(fmt)
+
+
+def _ieee_cmp_f64_only(eqn) -> None:
+    """Legacy comparison guard — kept for backward compatibility with test
+    assertions that check for 'binary64 only' in decline notes. Now only
+    used internally when we genuinely need f64-only behavior."""
+    float_dtypes = sorted(
+        d for v in eqn.invars
+        for d in [v.aval.dtype or ""]
+        if "float" in d and d != "float64"
+    )
+    if float_dtypes:
+        raise iv.IntervalError(
+            f"ieee mode models binary64 only; {'/'.join(float_dtypes)} comparison "
             f"semantics (incl. per-dtype subnormal flush — measured on jax "
             f"0.11.0 CPU: float32 subnormals flush, float32(1e-45) > 0 is "
             f"False) are not modelled — declined"
@@ -3902,12 +4039,13 @@ def _ieee_cmp(fn, nan_answer):
     Operands are subnormal-hazed before judging: DAZ reaches
     comparisons themselves (measured jax 0.11.0 CPU: ``5e-324 > 0`` is
     False, ``5e-324 == 1e-320`` is True), so a band-touching operand
-    must be judged as possibly 0."""
+    must be judged as possibly 0. Format-parametric: uses the format's own
+    subnormal band for the operand haze."""
     blocked = iv.BOOL_FALSE if nan_answer else iv.BOOL_TRUE
 
     def t(eqn, params, ins, flags):
-        _ieee_cmp_f64_only(eqn)
-        r = fn(*(iv.subnormal_haze(x)[0] for x in ins))
+        min_normal = _ieee_cmp_get_min_normal(eqn)
+        r = fn(*(iv.subnormal_haze_fmt(x, min_normal)[0] for x in ins))
         if any(flags):
             los, his = [], []
             for lo, hi in zip(r.los, r.his):
@@ -3969,8 +4107,15 @@ def _ieee_reduce_sum(eqn, params, ins, flags):
     over an EMPTY reduction range, which reads no element at all and is
     exactly 0.0 whatever flag the (elementless) operand carries.
     """
-    _ieee_f64_only(eqn)
-    box, made_nan = iv.ieee_reduce_sum(ins[0], tuple(_req(params, "axes", "reduce_sum")))
+    fmt = _ieee_get_format(eqn)
+    min_normal = _ieee_format_min_normal(fmt)
+    if fmt == _FLOAT_FORMATS["float64"]:
+        box, made_nan = iv.ieee_reduce_sum(ins[0], tuple(_req(params, "axes", "reduce_sum")))
+    else:
+        box, made_nan = iv.ieee_reduce_sum_fmt(
+            ins[0], tuple(_req(params, "axes", "reduce_sum")), min_normal
+        )
+        box = _ieee_round_box(box, fmt)
     reads_an_element = ins[0].size > 0
     return [box], [made_nan or (flags[0] and reads_an_element)]
 
@@ -4011,31 +4156,100 @@ def _ieee_sign(eqn, params, ins, flags):
     a maybe-NaN operand yields a maybe-NaN result and the box below covers
     the non-NaN part. Endpoints are exact — no rounding occurs in a sign — so
     the ieee endpoint assumption is satisfied trivially.
+
+    Format-parametric: the subnormal floor is the format's own min_normal.
     """
-    _ieee_f64_only(eqn)
-    outs = _t_sign(eqn, params, ins)
-    if outs is None:
+    fmt = _ieee_get_format(eqn)
+    min_normal = _ieee_format_min_normal(fmt)
+    if len(ins) != 1:
         return None
+    (a,) = ins
+    dtype = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
+    if "complex" in dtype:
+        return None
+    floor_ = 1.0 if _is_integer_dtype(dtype) else min_normal
+    los, his = [], []
+    for lo, hi in zip(a.los, a.his):
+        if lo >= floor_:
+            l, h = 1.0, 1.0
+        elif hi <= -floor_:
+            l, h = -1.0, -1.0
+        elif lo >= 0.0 and hi <= 0.0:
+            l, h = 0.0, 0.0
+        elif lo >= 0.0:
+            l, h = 0.0, 1.0
+        elif hi <= 0.0:
+            l, h = -1.0, 0.0
+        else:
+            l, h = -1.0, 1.0
+        los.append(l)
+        his.append(h)
+    outs = [iv.IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))]
+    if _is_integer_dtype(dtype):
+        outs = _int_overflow_guard(eqn, "sign", outs)
+        if outs is None:
+            return None
     return outs, [flags[0]]
 
 
 def _ieee_rem(eqn, params, ins, flags):
     """`rem` under ieee — also does not decline, and for a sharper reason:
-    truncated remainder is EXACT in binary64. `fmod` introduces no rounding
-    at all (the result is representable whenever the operands are), so there
-    is no schedule to fix, no association to worry about, and no outward bump
-    to justify — the contrast with `reduce_sum` and `integer_pow`, which
-    decline precisely because the jaxpr does not fix their arithmetic.
+    truncated remainder is EXACT in the target format. `fmod` introduces no
+    rounding at all (the result is representable whenever the operands are),
+    so there is no schedule to fix, no association to worry about, and no
+    outward bump to justify — the contrast with `reduce_sum` and
+    `integer_pow`, which decline precisely because the jaxpr does not fix
+    their arithmetic.
 
-    The DAZ hazard is already refused by the real-mode divisor guard, which
-    tests against MIN_NORMAL rather than zero for exactly this reason: a
-    subnormal divisor reads as 0 on the measured target and rem(a, 0) is NaN.
-    So the ieee-specific work here is the flag, and nothing else.
+    The DAZ hazard is refused by the divisor guard, which tests against the
+    format's own min_normal rather than zero: a subnormal divisor reads as 0
+    on the measured target and rem(a, 0) is NaN. Format-parametric.
     """
-    _ieee_f64_only(eqn)
-    outs = _t_rem(eqn, params, ins)
-    if outs is None:
+    fmt = _ieee_get_format(eqn)
+    min_normal = _ieee_format_min_normal(fmt)
+    # For non-float64, we can't reuse _t_rem (it calls _refuse_non_f64_float).
+    # Inline the rem logic with the format's own min_normal.
+    if len(ins) != 2:
         return None
+    (a, b) = ins
+    dtype = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
+    if "complex" in dtype:
+        return None
+    try:
+        shape, xs, ys = iv._pair_elements(a, b)
+    except iv.IntervalError:
+        return None
+    los, his = [], []
+    for (alo, ahi), (blo, bhi) in zip(xs, ys):
+        if not (math.isfinite(alo) and math.isfinite(ahi)):
+            raise iv.IntervalError(
+                f"'rem' declined: the dividend's interval [{alo}, {ahi}] is "
+                f"not bounded, and rem of an infinity is NaN"
+            )
+        if blo < min_normal and bhi > -min_normal:
+            why = (
+                "contains zero"
+                if blo <= 0.0 <= bhi
+                else (
+                    f"lies inside the open subnormal band "
+                    f"(|b| < {min_normal}), where the measured target "
+                    f"flushes the divisor to zero (DAZ)"
+                )
+            )
+            raise iv.IntervalError(
+                f"'rem' declined: the divisor's interval [{blo}, {bhi}] "
+                f"{why}, and rem(a, 0) is NaN"
+            )
+        m = max(abs(blo), abs(bhi))
+        if alo >= 0.0:
+            lo, hi = 0.0, min(ahi, m)
+        elif ahi <= 0.0:
+            lo, hi = max(alo, -m), 0.0
+        else:
+            lo, hi = max(alo, -m), min(ahi, m)
+        los.append(lo)
+        his.append(hi)
+    outs = [iv.IntervalArray(shape=shape, los=tuple(los), his=tuple(his))]
     return outs, [any(flags)]
 
 
@@ -4060,7 +4274,8 @@ def _ieee_integer_pow(eqn, params, ins, flags):
     negative y — under ieee the pole is not even reached, because the
     schedule question bites first.
     """
-    _ieee_f64_only(eqn)
+    fmt = _ieee_get_format(eqn)
+    min_normal = _ieee_format_min_normal(fmt)
     y = _integer_exponent(params)
     if y is None:
         return None
@@ -4068,7 +4283,7 @@ def _ieee_integer_pow(eqn, params, ins, flags):
     if y == 0:
         return [iv.point(1.0, ins[0].shape)], [False]
     if y == 1:
-        return [iv.subnormal_haze(ins[0])[0]], [flags[0]]
+        return [iv.subnormal_haze_fmt(ins[0], min_normal)[0]], [flags[0]]
     raise iv.IntervalError(iv.INTEGER_POW_IEEE_SCHEDULE_DECLINE.format(y=y))
 
 
@@ -4252,30 +4467,43 @@ def _ieee_dot_general(eqn, params, ins, flags):
 
 
 def _ieee_convert(eqn, params, ins, flags):
-    """convert_element_type under ieee. A non-f64 FLOAT source declines
-    outright (re-attack U2): the whitelist's value-preservation claim is
-    a gradual-semantics fact, measured FALSE under this target's
-    per-dtype DAZ — jax 0.11.0 CPU converts an f32 subnormal to f64 as
-    0.0 (storage keeps the bits; compute flushes), which would carry the
-    flushed 0 into f64 dataflow past the binary64 haze and the f64-only
-    arithmetic guard. The remaining whitelisted conversions (int/bool
-    sources, f64 identity) really are value-preserving for every source
-    value including ±inf and NaN (NaN converts to NaN: flag propagates).
-    The float→int trunc path is float-exact (trunc is the measured
-    conversion semantics, the in-range guard keeps it defined, integer
-    results are exact doubles) but declines a maybe-NaN input —
-    converting NaN to int is target-dependent garbage. Everything else
-    declines exactly as in real mode."""
+    """convert_element_type under ieee. Format-parametric: supports
+    conversions between supported float formats.
+
+    Float-to-float conversions:
+    - WIDENING (e.g., float32->float64): the subnormal haze on the SOURCE
+      value covers DAZ on the source format (a subnormal source value may
+      read as 0 during the conversion — measured jax 0.11.0 CPU). After
+      hazing, every source value is exactly representable in the wider
+      format, so the interval passes through unchanged.
+    - NARROWING (e.g., float64->float32): the interval endpoints are
+      rounded OUTWARD to the destination format's grid, soundly covering
+      every possible rounded result. The subnormal haze on the source
+      covers DAZ on the source side.
+
+    Int/bool sources to float: value-preserving for every source value
+    (same as before). Float->int trunc: exact, declines maybe-NaN.
+    """
     src = (eqn.invars[0].aval.dtype or "") if eqn.invars else ""
     dst = str(params.get("new_dtype"))
-    if "float" in src and src != "float64":
-        raise iv.IntervalError(
-            f"ieee mode models binary64 only; {src} conversion semantics "
-            f"(incl. per-dtype subnormal flush — measured on jax 0.11.0 "
-            f"CPU: f32→f64 convert of a subnormal yields 0.0, so the "
-            f"exact-conversion whitelist's value-preservation claim fails "
-            f"under DAZ) are not modelled — declined"
-        )
+
+    # Float-to-float conversion between supported formats
+    if "float" in src and "float" in dst:
+        src_fmt = _FLOAT_FORMATS.get(src)
+        dst_fmt = _FLOAT_FORMATS.get(dst)
+        if src_fmt is None or dst_fmt is None:
+            return None  # unsupported format -> decline to top
+        # Apply subnormal haze for the SOURCE format's band (DAZ on source)
+        src_min_normal = _ieee_format_min_normal(src_fmt)
+        box = iv.subnormal_haze_fmt(ins[0], src_min_normal)[0]
+        # If narrowing, round outward to the destination format's grid
+        if src_fmt != dst_fmt:
+            box = _ieee_round_box(box, dst_fmt)
+            # Apply FTZ haze for the DESTINATION format (result may flush)
+            dst_min_normal = _ieee_format_min_normal(dst_fmt)
+            box = iv.subnormal_haze_fmt(box, dst_min_normal)[0]
+        return [box], [flags[0]]
+
     if src == dst or (src, dst) in _EXACT_CONVERSIONS:
         return [ins[0]], [flags[0]]
     if _in_range_int_narrowing(ins[0], src, dst):
@@ -4283,6 +4511,14 @@ def _ieee_convert(eqn, params, ins, flags):
         # F5b) is an exact integer identity — no float semantics, no
         # flush hazard — so it passes under ieee exactly as in real mode
         return [ins[0]], [flags[0]]
+    if "int" in src and "float" in dst:
+        # Integer to float: check if all values are exactly representable
+        dst_fmt = _FLOAT_FORMATS.get(dst)
+        if dst_fmt is not None:
+            p, _, _ = dst_fmt
+            bound = 2**p
+            if all(-bound <= x <= bound for x in (*ins[0].los, *ins[0].his)):
+                return [ins[0]], [flags[0]]
     if (src, dst) == ("int64", "float64") and _finite_point(ins[0]):
         # int64 point at an exactly-representable value: integer identity,
         # no float semantics involved — same as the real-mode rule
@@ -4309,13 +4545,19 @@ def _ieee_any(eqn, params, ins, flags):
     unbounded-NaN input). The box is subnormal-hazed on entry — DAZ
     flushes inputs, so a band-located declared value may be consumed as
     0; the dispatcher withholds exactness from declarations the haze
-    changed."""
+    changed. Format-parametric: uses the format's own subnormal band."""
+    dtype = str(_req(params, "dtype", "stelling_any"))
+    fmt = _FLOAT_FORMATS.get(dtype)
     box = iv.from_bounds(
         tuple(_req(params, "shape", "stelling_any")),
         float(_req(params, "lo", "stelling_any")),
         float(_req(params, "hi", "stelling_any")),
     )
-    return [iv.subnormal_haze(box)[0]], [False]
+    if fmt is not None:
+        min_normal = _ieee_format_min_normal(fmt)
+        return [iv.subnormal_haze_fmt(box, min_normal)[0]], [False]
+    # Non-float declarations (int, bool) pass through without haze
+    return [box], [False]
 
 
 IEEE_TRANSFERS = {
@@ -4532,13 +4774,18 @@ def _subnormal_const_literal(atom: ir.Atom) -> bool:
     """A literal constant whose raw decode the subnormal haze changes —
     i.e. a subnormal-band constant. Under ieee its as-consumed value is
     flush-indeterminate, so the drop reason must name that shape rather
-    than claim both sides vary (the audit-F6 discipline)."""
+    than claim both sides vary (the audit-F6 discipline).
+    Format-parametric: uses the literal's own format band."""
     if not isinstance(atom, ir.Literal):
         return False
     try:
         raw = _value_to_interval(atom.val, atom.aval.shape)
     except (iv.IntervalError, ir.TranscriptionError):
         return False
+    lit_dtype = atom.aval.dtype or ""
+    lit_fmt = _FLOAT_FORMATS.get(lit_dtype)
+    if lit_fmt is not None:
+        return iv.subnormal_haze_fmt(raw, _ieee_format_min_normal(lit_fmt))[1]
     return iv.subnormal_haze(raw)[1]
 
 
@@ -5105,8 +5352,15 @@ class _Propagator:
                 return _safe_top(atom.aval.shape)
             if self.semantics == "ieee":
                 # DAZ flushes inputs: literal constants entering ieee
-                # propagation are subnormal-hazed like every other value
-                box = iv.subnormal_haze(box)[0]
+                # propagation are subnormal-hazed like every other value,
+                # using the literal's own format's band
+                lit_dtype = atom.aval.dtype or ""
+                lit_fmt = _FLOAT_FORMATS.get(lit_dtype)
+                if lit_fmt is not None:
+                    lit_mn = _ieee_format_min_normal(lit_fmt)
+                    box = iv.subnormal_haze_fmt(box, lit_mn)[0]
+                else:
+                    box = iv.subnormal_haze(box)[0]
             return box
         got = self.env.get(atom.id)
         if got is None:
@@ -5743,7 +5997,15 @@ class _Propagator:
                 pinned.append(box)
                 continue
             if self.semantics == "ieee":
-                point = iv.subnormal_haze(point)[0]
+                # Format-parametric haze on the pinned point
+                out_dtype = out.aval.dtype or ""
+                out_fmt = _FLOAT_FORMATS.get(out_dtype)
+                if out_fmt is not None:
+                    point = iv.subnormal_haze_fmt(
+                        point, _ieee_format_min_normal(out_fmt)
+                    )[0]
+                else:
+                    point = iv.subnormal_haze(point)[0]
             pinned.append(point)
         return pinned
 
@@ -5811,8 +6073,16 @@ class _Propagator:
             if self.semantics == "ieee":
                 # the same haze read() applies: assume classification must
                 # see the interval the judging paths see (a subnormal-band
-                # bound is then not a finite point and cannot narrow)
-                box = iv.subnormal_haze(box)[0]
+                # bound is then not a finite point and cannot narrow).
+                # Format-parametric: use the literal's own format band.
+                lit_dtype = atom.aval.dtype or ""
+                lit_fmt = _FLOAT_FORMATS.get(lit_dtype)
+                if lit_fmt is not None:
+                    box = iv.subnormal_haze_fmt(
+                        box, _ieee_format_min_normal(lit_fmt)
+                    )[0]
+                else:
+                    box = iv.subnormal_haze(box)[0]
             return box
         return self.env.get(atom.id)
 
@@ -6346,12 +6616,20 @@ class _Propagator:
             # comparison can be TRUE at runtime under per-dtype DAZ:
             # measured float32(1e-45) == float32(1e-40) is True) — inert
             # with the gap quoted is the only sound posture.
-            bad = _non_f64_float_dtypes(producer.invars)
+            # Check for unsupported float dtypes (those not in the format
+            # table). Supported formats (float32, float16, bfloat16, float64)
+            # are now handled parametrically.
+            bad = [
+                d for d in sorted(
+                    {v.aval.dtype for v in producer.invars
+                     if "float" in (v.aval.dtype or "")}
+                )
+                if d not in _FLOAT_FORMATS
+            ]
             if bad:
                 dropped.append(
-                    f"ieee mode models binary64 only; {'/'.join(bad)} "
-                    f"comparison semantics (incl. per-dtype subnormal "
-                    f"flush) are not modelled — no narrowing, no "
+                    f"ieee mode: {'/'.join(bad)} comparison semantics are "
+                    f"not modelled (unsupported format) — no narrowing, no "
                     f"satisfiability claim"
                 )
                 return
@@ -6639,8 +6917,16 @@ class _Propagator:
             if ieee:
                 # DAZ flushes inputs: constants entering ieee propagation
                 # are subnormal-hazed; a band const stops being a point,
-                # so mark_if_point below withholds exactness by itself
-                box = iv.subnormal_haze(box)[0]
+                # so mark_if_point below withholds exactness by itself.
+                # Format-parametric: use the var's own format band.
+                var_dtype = var.aval.dtype or ""
+                var_fmt = _FLOAT_FORMATS.get(var_dtype)
+                if var_fmt is not None:
+                    box = iv.subnormal_haze_fmt(
+                        box, _ieee_format_min_normal(var_fmt)
+                    )[0]
+                else:
+                    box = iv.subnormal_haze(box)[0]
             self.env[var.id] = box
             # exact iff the decoded box is a point per element — a >2**53
             # int decodes to a genuine bracket, which is NOT its value set
@@ -7445,7 +7731,17 @@ class _Propagator:
                     float(params["lo"]),
                     float(params["hi"]),
                 )
-                if iv.subnormal_haze(raw)[1]:
+                # Format-parametric: check haze against the declaration's
+                # own format band
+                decl_dtype = str(params.get("dtype", ""))
+                decl_fmt = _FLOAT_FORMATS.get(decl_dtype)
+                if decl_fmt is not None:
+                    haze_changed = iv.subnormal_haze_fmt(
+                        raw, _ieee_format_min_normal(decl_fmt)
+                    )[1]
+                else:
+                    haze_changed = iv.subnormal_haze(raw)[1]
+                if haze_changed:
                     return
             for out in eqn.outvars:
                 self.exact.mark_declared(out.id)

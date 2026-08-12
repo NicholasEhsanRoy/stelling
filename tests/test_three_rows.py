@@ -346,14 +346,22 @@ def test_ieee_reduce_sum_propagates_maybe_nan_but_not_over_an_empty_range():
     assert (outs[0].los[0], outs[0].his[0]) == (0.0, 0.0)
 
 
-def test_ieee_reduce_sum_declines_non_binary64():
+def test_ieee_reduce_sum_handles_float32_parametrically():
+    """Float32 reduce_sum is now handled parametrically (0.2.0 feature),
+    with the result rounded outward to the float32 grid."""
     t = IEEE_TRANSFERS["reduce_sum"][0]
     x, s = var(0, aval((2,), "float32")), var(1, aval((), "float32"))
     e = eqn("reduce_sum", [x], s, [("axes", (0,))])
     a = iv.IntervalArray(shape=(2,), los=(0.0, 0.0), his=(1.0, 1.0))
-    with pytest.raises(iv.IntervalError) as exc:
-        t(e, e.params_dict(), [a], [False])
-    assert "binary64-only" in str(exc.value)
+    result = t(e, e.params_dict(), [a], [False])
+    # Should produce a valid result (not raise)
+    assert result is not None
+    boxes, flags = result
+    assert len(boxes) == 1
+    assert boxes[0].shape == ()
+    # Sum of [0,1] + [0,1] should contain [0, 2]
+    assert boxes[0].los[0] <= 0.0
+    assert boxes[0].his[0] >= 2.0
 
 
 # =============================================================================
@@ -582,11 +590,22 @@ def test_ieee_integer_pow_decline_is_a_noted_top_never_a_crash():
     assert sole(q).obligations[0].status == "discharged"  # real still decides
 
 
-def test_ieee_integer_pow_declines_non_binary64():
+def test_ieee_integer_pow_handles_float32_parametrically():
+    """Float32 integer_pow is now handled parametrically (0.2.0 feature)."""
     box = iv.IntervalArray(shape=(), los=(1.0,), his=(2.0,))
-    with pytest.raises(iv.IntervalError) as e:
-        ieee_pow_call(0, box, dtype="float32")
-    assert "binary64-only" in str(e.value)
+    # y=0 should give exactly 1.0 regardless of format
+    result = ieee_pow_call(0, box, dtype="float32")
+    assert result is not None
+    boxes, flags = result
+    assert boxes[0].los[0] == 1.0
+    assert boxes[0].his[0] == 1.0
+    assert flags[0] is False  # y=0 clears the flag
+    # y=1 should give the input back (hazed)
+    result1 = ieee_pow_call(1, box, dtype="float32")
+    assert result1 is not None
+    boxes1, flags1 = result1
+    assert boxes1[0].los[0] <= 1.0
+    assert boxes1[0].his[0] >= 2.0
 
 
 def test_ieee_integer_pow_negative_decline_is_stricter_than_the_pole_rule():
