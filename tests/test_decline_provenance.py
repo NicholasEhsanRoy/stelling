@@ -185,12 +185,15 @@ def test_intermediate_producer_is_named_with_its_span():
 
 
 def test_convert_decline_quotes_the_literal_operand_and_its_dtype():
+    # Use 2**53+1: an int64 value NOT exactly representable in float64, so
+    # the conversion declines (values <= 2**53 pass through as point intervals)
+    big = 2**53 + 1
     c, pred, out = var(0), var(1, BOOL), var(2, BOOL)
     q = close(
         [
             eqn(
                 "convert_element_type",
-                [lit(5, I64)],
+                [lit(big, I64)],
                 c,
                 params=(("new_dtype", "float64"),),
                 src=("lib.py:88 (rhs)",),
@@ -206,7 +209,7 @@ def test_convert_decline_quotes_the_literal_operand_and_its_dtype():
     # the int64 is now in the note, next to the cast it fed
     assert "'convert_element_type' declined this form at lib.py:88 (rhs):" in note
     assert "'int64' -> 'float64'" in note
-    assert "operand 0 is the literal 5 (int64)" in note
+    assert f"operand 0 is the literal {big} (int64)" in note
     assert p.obligations[0].status == "unknown"
     assert p.coverage.unknown == 1
 
