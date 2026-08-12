@@ -2937,6 +2937,14 @@ def _integer_pow_budget(box, y: int) -> None:
         )
 
 
+DIV_STRADDLE_DECLINE = (
+    "div: the divisor interval {divisor} straddles zero — real division is "
+    "undefined at 0 and the quotient's image is unbounded over this box. "
+    "Remedies: narrow the divisor's declared envelope to exclude zero, or "
+    "add assume(divisor > 0) / assume(divisor < 0) before the division"
+)
+
+
 def _t_div(eqn, params, ins):
     """``div``. On floats this is real division, unchanged. On INTEGERS it
     is not: jax integer division TRUNCATES toward zero (measured:
@@ -2947,6 +2955,19 @@ def _t_div(eqn, params, ins):
     the overflow guard exists for, so it routes through the same guard."""
     dtype = (eqn.outvars[0].aval.dtype or "") if eqn.outvars else ""
     if not _is_integer_dtype(dtype):
+        divisor = ins[1]
+        if iv.straddles_zero(divisor):
+            # Format the divisor interval for the message. For a scalar
+            # show [lo, hi]; for an array show the element that straddles.
+            for i, (lo, hi) in enumerate(zip(divisor.los, divisor.his)):
+                if lo <= 0.0 <= hi:
+                    span = f"[{lo}, {hi}]"
+                    if divisor.size > 1:
+                        span = f"element {i} spans {span}"
+                    break
+            raise iv.IntervalError(
+                DIV_STRADDLE_DECLINE.format(divisor=span)
+            )
         return [iv.div(*ins)]
     return _int_overflow_guard(eqn, "div", [iv.int_div(*ins)])
 

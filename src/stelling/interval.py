@@ -457,6 +457,14 @@ def top(shape: tuple[int, ...]) -> IntervalArray:
     return from_bounds(shape, -_INF, _INF)
 
 
+def straddles_zero(a: IntervalArray) -> bool:
+    """True when ANY element of ``a`` has an interval containing zero.
+
+    An interval ``[lo, hi]`` contains zero iff ``lo <= 0 <= hi``.
+    Used by the ``div`` transfer to detect the decline condition."""
+    return any(lo <= 0.0 <= hi for lo, hi in zip(a.los, a.his))
+
+
 BOOL_TRUE = (1.0, 1.0)
 BOOL_FALSE = (0.0, 0.0)
 BOOL_UNKNOWN = (0.0, 1.0)
