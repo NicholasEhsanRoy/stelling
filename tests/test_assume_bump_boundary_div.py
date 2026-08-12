@@ -292,3 +292,131 @@ def test_boundary_div_negative_boundary_divisor():
     assert result.los[0] == -INF
     # upper bound: alo/blo = 2/(-3) (rounded outward)
     assert result.his[0] <= -2.0/3.0 + 1e-15
+
+
+# --- General ieee bump: works for all k values --------------------------------
+
+def test_assume_gt_negative_bumps_correctly():
+    """assume(x > -5) in ieee float64: narrows to [nextafter(-5, inf), hi],
+    which is approximately -4.999...9. assert(x > -1) is still UNKNOWN
+    because the interval includes values in [-5+eps, -1]."""
+    x = var(0)
+    pred_assume = var(1, BOOL)
+    assume_out = var(2, BOOL)
+    pred = var(3, BOOL)
+    out = var(4, BOOL)
+    query = close(
+        [
+            any_eqn(x, -10.0, 10.0),
+            # assume(x > -5)
+            eqn("gt", [x, lit(-5.0)], pred_assume),
+            eqn("stelling_assume", [pred_assume], assume_out),
+            # assert(x > -1): still indeterminate (values in (-5, -1] exist)
+            eqn("gt", [x, lit(-1.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(query, semantics="ieee")
+    assert p.obligations[0].status == "unknown", (
+        f"expected unknown (values in (-5, -1] exist), "
+        f"got {p.obligations[0].status}; notes: {p.notes}"
+    )
+    # Verify the narrowing note shows the bumped value (not -5.0 exactly)
+    narrowing_notes = [n for n in p.notes if "narrowed var 0" in n]
+    assert narrowing_notes, f"expected a narrowing note, got: {p.notes}"
+    note = narrowing_notes[0]
+    # The bumped lo should be nextafter(-5, inf) ≈ -4.999999999999999
+    assert "-5.0," not in note, (
+        f"lo should be bumped past -5.0 in ieee mode, got: {note}"
+    )
+    assert "-4.9999999999" in note, (
+        f"expected bumped lo near -5, got: {note}"
+    )
+
+
+def test_assume_gt_positive_bumps_in_f32():
+    """assume(x > 1.0) in ieee float32: narrows to [1 + 2^-23, hi].
+    assert(x >= 1 + 2^-23) should verify."""
+    import math
+    next_f32_above_1 = 1.0 + 2**-23  # = 1.0000001192092896
+    x = var(0, F32)
+    pred_assume = var(1, BOOL)
+    assume_out = var(2, BOOL)
+    pred = var(3, BOOL)
+    out = var(4, BOOL)
+    query = close(
+        [
+            any_eqn(x, 0.5, 2.0, dtype="float32"),
+            # assume(x > 1.0)
+            eqn("gt", [x, lit(1.0, F32)], pred_assume),
+            eqn("stelling_assume", [pred_assume], assume_out),
+            # assert(x >= next_f32_above_1): should verify since lo = next_f32_above_1
+            eqn("ge", [x, lit(next_f32_above_1, F32)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(query, semantics="ieee")
+    assert p.obligations[0].status == "discharged", (
+        f"expected discharged (x >= 1+2^-23 after bump), "
+        f"got {p.obligations[0].status}; notes: {p.notes}"
+    )
+
+
+def test_assume_lt_negative_bumps_in_f64():
+    """assume(x < -5) in ieee float64: narrows to [lo, nextafter(-5, -inf)].
+    assert(x < -5) should then verify (since hi < -5)."""
+    x = var(0)
+    pred_assume = var(1, BOOL)
+    assume_out = var(2, BOOL)
+    pred = var(3, BOOL)
+    out = var(4, BOOL)
+    query = close(
+        [
+            any_eqn(x, -10.0, 10.0),
+            # assume(x < -5)
+            eqn("lt", [x, lit(-5.0)], pred_assume),
+            eqn("stelling_assume", [pred_assume], assume_out),
+            # assert(x < -5): should verify since hi = nextafter(-5, -inf) < -5
+            eqn("lt", [x, lit(-5.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(query, semantics="ieee")
+    assert p.obligations[0].status == "discharged", (
+        f"expected discharged (hi < -5 after bump), "
+        f"got {p.obligations[0].status}; notes: {p.notes}"
+    )
+
+
+def test_real_mode_never_bumps_nonzero():
+    """In real mode, assume(x > -5) narrows to [-5, 10] — NO bump,
+    because reals exist between -5 and nextafter(-5, inf)."""
+    x = var(0)
+    pred_assume = var(1, BOOL)
+    assume_out = var(2, BOOL)
+    pred = var(3, BOOL)
+    out = var(4, BOOL)
+    query = close(
+        [
+            any_eqn(x, -10.0, 10.0),
+            # assume(x > -5)
+            eqn("gt", [x, lit(-5.0)], pred_assume),
+            eqn("stelling_assume", [pred_assume], assume_out),
+            # assert(x >= -5): should verify in real mode (lo = -5, -5 >= -5)
+            eqn("ge", [x, lit(-5.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(query, semantics="real")
+    assert p.obligations[0].status == "discharged"
+    # Verify the narrowing is [-5, 10] (no bump)
+    env = interval_env(query, assume_mode="constrain")
+    x_box = env.get(0)
+    assert x_box is not None
+    assert x_box.los[0] == -5.0, (
+        f"expected lo = -5.0 in real mode, got {x_box.los[0]}"
+    )

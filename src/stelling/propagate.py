@@ -3857,6 +3857,29 @@ def _ieee_format_min_positive(fmt: tuple[int, int, int]) -> float:
     return math.ldexp(1.0, emin - p + 1)
 
 
+def _format_nextafter(k: float, direction: int, fmt: tuple[int, int, int]) -> float:
+    """The smallest representable value in ``fmt`` strictly past ``k`` in
+    ``direction`` (+1 up, -1 down).
+
+    Strategy: step once in binary64 (always at least as fine as any
+    supported format), then round to the target format's grid in the same
+    direction. The result is always on the far side of k in the format,
+    so the closed interval ``[result, hi]`` exactly represents the open
+    ``(k, hi]`` restricted to the format's values.
+
+    For ``k == 0`` upward this produces the format's smallest positive
+    subnormal. For ``k == 0`` downward, the negative counterpart.
+    """
+    if not math.isfinite(k):
+        return k  # nothing beyond +-inf
+    # Step once in float64 (the finest grid we can represent)
+    stepped = math.nextafter(k, math.inf if direction > 0 else -math.inf)
+    # Round to the target format's grid in the same direction. This is
+    # >= stepped for direction +1 (so >= the true next) and <= stepped
+    # for direction -1 — always on the sound side.
+    return _round_in_format(stepped, fmt, direction)
+
+
 def _ieee_round_box(box: iv.IntervalArray, fmt: tuple[int, int, int]) -> iv.IntervalArray:
     """Round an interval box's endpoints OUTWARD to the target format's ULP
     grid. For float64, this is the identity (native endpoints ARE binary64).
@@ -6838,19 +6861,21 @@ class _Propagator:
             return
         # IEEE strict-inequality auto-bump: in ieee mode, the value set IS
         # the format's representable floats, and there is no value between
-        # k and the next representable value above/below k. So x > k in
-        # the format genuinely means x >= next_up(k), and we can bump the
-        # closed boundary to exclude k EXACTLY. This is UNSOUND in real
-        # mode (reals in (k, next_up(k)) would be excluded) and is only
-        # applied when the target has a known float format.
+        # k and the next representable value above/below k in the format.
+        # So x > k genuinely means x >= nextafter(k) in that format, and
+        # we can bump the closed boundary to exclude k EXACTLY. This is
+        # UNSOUND in real mode (reals in (k, nextafter(k)) would be
+        # excluded) and is only applied when the target has a known float
+        # format. The bump uses _format_nextafter which handles all k
+        # values correctly, including k=0.
         if self.semantics == "ieee" and cmp in ("gt", "lt"):
             target_dtype = target_atom.aval.dtype or ""
             target_fmt = _FLOAT_FORMATS.get(target_dtype)
             if target_fmt is not None:
-                min_pos = _ieee_format_min_positive(target_fmt)
                 if cmp == "gt":
                     bumped_los = tuple(
-                        max(lo, min_pos) if lo == k else lo
+                        _format_nextafter(k, +1, target_fmt)
+                        if lo == k else lo
                         for lo, k in zip(new.los, ks)
                     )
                     if bumped_los != new.los:
@@ -6859,7 +6884,8 @@ class _Propagator:
                         )
                 else:  # lt
                     bumped_his = tuple(
-                        min(hi, -min_pos) if hi == k else hi
+                        _format_nextafter(k, -1, target_fmt)
+                        if hi == k else hi
                         for hi, k in zip(new.his, ks)
                     )
                     if bumped_his != new.his:
