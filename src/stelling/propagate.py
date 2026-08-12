@@ -1114,7 +1114,8 @@ def _t_rem(eqn, params, ins):
     interval printed — the three properties two independently-blinded external
     agents rated 9/10 on stelling's **escalation-face** `div` guard: names the
     primitive, gives the reason, PRINTS THE BOX. Note that is the *emission*
-    guard; real-mode `_t_div` does not refuse at all, it returns ⊤ silently.
+    guard; real-mode `_t_div` now declines with DIV_STRADDLE_DECLINE when the
+    divisor straddles zero (previously it returned ⊤ silently).
     This row is deliberately stricter than its sibling, and the attribution is
     to the message that earned the rating, not to `div`'s transfer.
 
