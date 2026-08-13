@@ -105,8 +105,8 @@ sentence and the sentence did not survive re-derivation (2026-08-03,
 
    ```
    neither       1  ['iota']
-   transfer only 6  ['sign', 'unstack', 'copy', 'rem', 'abs', 'pow']
-   both          2  ['square', 'convert_element_type']
+   transfer only 5  ['sign', 'unstack', 'copy', 'rem', 'abs']
+   both          3  ['square', 'convert_element_type', 'pow']
    ```
 
    **The figures in this clause that NOTHING re-derives**, listed because the

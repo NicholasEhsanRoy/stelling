@@ -238,7 +238,8 @@ def _square_body(term: str) -> str:
 # and `tests/test_constant_fold_portfolio.py` pins the `select_n` case
 # end to end through the real z3/cvc5 portfolio.
 _FOLDABLE = frozenset(
-    {"add", "sub", "mul", "div", "neg", "max", "min", "square", "integer_pow"}
+    {"add", "sub", "mul", "div", "neg", "max", "min", "square", "integer_pow",
+     "pow"}
 )
 
 
@@ -357,6 +358,15 @@ def _fold_values(eqn: ir.JaxprEqn, ins) -> tuple | None:
         if y < 0 and any(ins[0][i] == 0 for i in idx[0]):
             return None  # no rational value; the slice guard already refuses
         return tuple(ins[0][i] ** y for i in idx[0])
+    if prim == "pow":
+        # pow [base, exponent_literal]: the _validate guard ensures only
+        # integer exponents reach here. Fold as base ** int(exp) — exact
+        # Fraction arithmetic, same as integer_pow.
+        ia, ib = idx
+        y = int(float(ins[1][ib[0]]))  # scalar exponent, same for all
+        if y < 0 and any(ins[0][ia[i]] == 0 for i in range(len(ia))):
+            return None  # no rational value
+        return tuple(ins[0][ia[i]] ** y for i in range(len(ia)))
     ia, ib = idx
     left = [ins[0][i] for i in ia]
     right = [ins[1][i] for i in ib]
@@ -686,6 +696,28 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
                 base = ins[0][i]
                 prod = base if n == 1 else f"(* {' '.join([base] * n)})"
                 bodies.append(prod if y > 0 else f"(/ 1.0 {prod})")
+            names[out.id] = define(out, bodies)
+            continue
+        if prim == "pow":
+            # pow [base, exponent_literal]: the _validate guard ensures only
+            # positive integer exponents reach here (SMT-LIB2 ^ only accepts
+            # positive integers in z3/cvc5). Emit as product expansion, same
+            # as integer_pow.
+            ia, ib = _pair_elementwise(eqn)
+            # The exponent is a scalar literal; read its integer value
+            exp_val = int(float(_decode_elements(eqn.invars[1].val)[0]))
+            if exp_val == 0:
+                names[out.id] = ("1.0",) * n_out
+                continue
+            if exp_val == 1:
+                names[out.id] = tuple(ins[0][ia[i]] for i in range(n_out))
+                continue
+            n = abs(exp_val)
+            bodies = []
+            for i in range(n_out):
+                base = ins[0][ia[i]]
+                prod = base if n == 1 else f"(* {' '.join([base] * n)})"
+                bodies.append(prod if exp_val > 0 else f"(/ 1.0 {prod})")
             names[out.id] = define(out, bodies)
             continue
         if prim == "square":
