@@ -23,18 +23,28 @@ from stelling import ir
 def reaches_output(jaxpr: ir.Jaxpr) -> frozenset[int]:
     """Return the set of Var IDs that transitively reach an output of *jaxpr*.
 
-    Algorithm: seed the live set with the jaxpr's output variables, then
-    walk equations in REVERSE order.  For each equation whose output
-    vars intersect the live set, add its input vars to the live set.
-    One reverse pass suffices because jaxpr equations are topologically
-    sorted (each equation's inputs are defined by earlier equations or
-    by the jaxpr's own invars/constvars).
+    Algorithm: seed the live set with the jaxpr's output variables AND
+    every ``stelling_assert`` equation's outvars, then walk equations in
+    REVERSE order.  For each equation whose output vars intersect the
+    live set, add its input vars to the live set.
+
+    ``stelling_assert`` outvars are seeded unconditionally because an
+    assert is a DECLARATION — the user stated an obligation about its
+    operand, and that operand is live by intent regardless of whether
+    the harness function happens to return the assert's output value.
+    Without this, ``assert_(pred)`` without a ``return`` makes the
+    predicate operand appear dead, downgrading real violations.
     """
     live: set[int] = set()
     # Seed: the jaxpr's output atoms (Vars only; Literals have no ID).
     for atom in jaxpr.outvars:
         if isinstance(atom, ir.Var):
             live.add(atom.id)
+    # Seed: every stelling_assert outvar — asserts are always relevant.
+    for eqn in jaxpr.eqns:
+        if eqn.primitive == "stelling_assert":
+            for out in eqn.outvars:
+                live.add(out.id)
 
     # Walk in reverse topological order.
     for eqn in reversed(jaxpr.eqns):

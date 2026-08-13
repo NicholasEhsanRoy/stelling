@@ -115,7 +115,7 @@ for h in (assert_not_returned, nonvacuity_not_returned,
 prints:
 
 ```
-assert_not_returned      -> UNKNOWN  nonvacuity=UNCHECKED
+assert_not_returned      -> REFUTED  nonvacuity=UNCHECKED
 nonvacuity_not_returned  -> VERIFIED nonvacuity=FAILED
 assume_not_returned      -> VERIFIED nonvacuity=UNCHECKED
 assume_actually_removed  -> UNKNOWN  nonvacuity=UNCHECKED
@@ -123,11 +123,10 @@ assume_actually_removed  -> UNKNOWN  nonvacuity=UNCHECKED
 
 Every un-returned statement was still recorded in the traced jaxpr. The
 membership condition still FAILS, and the assumption still narrows.
-The assert in `assert_not_returned` is violated but **downgraded to
-UNKNOWN**: since 0.2.0, the reaches-output reachability conjunct detects
-that the violated variable does not flow to any output of the harness
-function (the caller never sees the bad value). The violation is real
-but dead, so stelling cannot call it a finding.
+The assert in `assert_not_returned` is **REFUTED** — asserts are
+declarations of intent, and their operands are live regardless of whether
+the harness returns the assert's output value. The user stated an
+obligation; the obligation is violated; the verdict says so.
 
 The last two rows are the pair to read together — their Python differs
 only in whether `assume` is *called* — and the un-returned call is what

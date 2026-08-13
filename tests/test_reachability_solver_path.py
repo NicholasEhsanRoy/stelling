@@ -103,9 +103,12 @@ SAT_BODY = (
 
 
 class TestDeadVariableViolationSolverPath:
-    """A dead-variable violation found by the solver is downgraded to UNKNOWN."""
+    """Assert outvars are always live (asserts are declarations), so the
+    'dead variable' downgrade fires only for sub-jaxpr obligations with
+    out-of-scope operand IDs. The tests below verify that the solver path
+    treats assert-not-returned the same as assert-returned: REFUTED."""
 
-    def test_dead_violation_via_solver_becomes_unknown(self, monkeypatch, tmp_path):
+    def test_assert_not_returned_solver_still_refuted(self, monkeypatch, tmp_path):
         fake = fake_solver(tmp_path, SAT_BODY, "cvc5-sat-dead")
         monkeypatch.setenv("STELLING_CVC5", fake)
 
@@ -119,36 +122,29 @@ class TestDeadVariableViolationSolverPath:
         assert esc.records[0].outcome == "violated-witness"
         assert esc.records[0].witness is not None
 
-        # But the verdict is UNKNOWN because the assert is dead
+        # Assert is live by intent — verdict is REFUTED (not UNKNOWN)
         v = make_solver_verdict(q, p, esc, **VERSIONS)
-        assert v.status == "UNKNOWN"
-        assert v.obligations[0].status == "unknown"
-        assert "dead variable" in v.obligations[0].detail
-        assert any("does not reach any output" in n for n in v.notes)
+        assert v.status == "REFUTED"
+        assert not any("does not reach any output" in n for n in v.notes)
 
-    def test_dead_violation_via_solver_matches_interval_path_behavior(
+    def test_assert_not_returned_matches_interval_path(
         self, monkeypatch, tmp_path
     ):
-        """The solver path produces the same status as the interval path
-        would for a dead variable violation (both UNKNOWN)."""
-        # First: get the interval-path verdict for a fully-violated dead query
-        # (use bounds that make the interval path REFUTE directly)
+        """Both paths agree: assert-not-returned is still REFUTED."""
         x, sq, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
-        violated_dead_query = close(
+        violated_query = close(
             [
-                any_eqn(x, 2.0, 3.0),  # x in [2, 3], x^2 in [4, 9] > 2.0
+                any_eqn(x, 2.0, 3.0),
                 eqn("mul", [x, x], sq),
                 eqn("le", [sq, lit(2.0)], pred),
                 eqn("stelling_assert", [pred], out),
             ],
-            [x],  # dead: output is x, not out
+            [x],  # output is x, not out — but assert is live by intent
         )
-        # Interval path: should be UNKNOWN (dead variable downgrade)
-        p_interval = propagate(violated_dead_query)
-        v_interval = make_verdict(violated_dead_query, p_interval, **VERSIONS)
-        assert v_interval.status == "UNKNOWN"
+        p_interval = propagate(violated_query)
+        v_interval = make_verdict(violated_query, p_interval, **VERSIONS)
+        assert v_interval.status == "REFUTED"
 
-        # Solver path with the same query shape (use the straddle version)
         fake = fake_solver(tmp_path, SAT_BODY, "cvc5-sat-match")
         monkeypatch.setenv("STELLING_CVC5", fake)
         q = dead_square_query()
@@ -156,12 +152,11 @@ class TestDeadVariableViolationSolverPath:
         config = SolverConfig(timeout_ms=2000, only=("cvc5",))
         esc = escalate(q, p, config)
         v_solver = make_solver_verdict(q, p, esc, **VERSIONS)
-        # Both paths agree: UNKNOWN
-        assert v_solver.status == v_interval.status == "UNKNOWN"
+        # Both paths agree: REFUTED
+        assert v_solver.status == v_interval.status == "REFUTED"
 
-    def test_dead_violation_witness_is_preserved(self, monkeypatch, tmp_path):
-        """Even though the verdict is downgraded, the witness evidence is
-        preserved in the verdict (it's valid evidence, just on a dead var)."""
+    def test_solver_witness_preserved_on_refuted(self, monkeypatch, tmp_path):
+        """Witnesses are preserved on the REFUTED verdict."""
         fake = fake_solver(tmp_path, SAT_BODY, "cvc5-sat-witness")
         monkeypatch.setenv("STELLING_CVC5", fake)
 
@@ -171,8 +166,7 @@ class TestDeadVariableViolationSolverPath:
         esc = escalate(q, p, config)
         v = make_solver_verdict(q, p, esc, **VERSIONS)
 
-        # The verdict is UNKNOWN but witnesses are preserved
-        assert v.status == "UNKNOWN"
+        assert v.status == "REFUTED"
         assert len(v.witnesses) == 1
         assert v.witnesses[0].values == (("x0", "3/2"),)
 

@@ -192,11 +192,20 @@ class TestReachableViolationStaysRefuted:
 
 
 class TestDeadViolationDowngradedToUnknown:
-    """Case 2: violation on a dead variable -> UNKNOWN with note."""
+    """Case 2: a stelling_assert is ALWAYS live (it's a declaration), so
+    the dead-variable downgrade fires only for obligations whose
+    operand_var_ids are out of scope (sub-jaxpr origin) or empty.
 
-    def test_dead_violation(self):
-        # x in [1, 2], compute dead = exp(x), check dead < 2.0 (violated).
-        # But the output is just x, not the assert output.
+    Before the assert-always-live fix, an assert whose output wasn't in
+    the jaxpr's outvars was treated as dead. That was wrong: the user
+    wrote the assert, so they care about it. The downgrade now serves
+    a narrower purpose: protecting against positional misalignment of
+    sub-jaxpr obligations.
+    """
+
+    def test_assert_not_returned_still_refuted(self):
+        # An assert whose output is NOT in outvars is still REFUTED —
+        # the assert is a declaration and its operand is live by intent.
         x, ex, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
         closed = close(
             [
@@ -209,16 +218,34 @@ class TestDeadViolationDowngradedToUnknown:
                 ),
                 assert_eqn(pred, out),
             ],
-            (x,),  # output is x, NOT out -- the assert is dead
+            (x,),  # output is x, NOT out — assert still live
         )
         v = _make_verdict(closed)
-        assert v.status == "UNKNOWN"
-        assert v.obligations[0].status == "unknown"
-        assert "dead variable" in v.obligations[0].detail
-        assert any("does not reach any output" in n for n in v.notes)
+        assert v.status == "REFUTED"
+        assert v.obligations[0].status == "violated-over-set"
 
-    def test_dead_violation_note_names_obligation_index(self):
-        # The note must say which obligation is unreachable.
+    def test_out_of_scope_operand_ids_downgraded(self):
+        # An obligation with operand_var_ids that are NOT in the top-level
+        # scope (simulating a sub-jaxpr obligation) gets downgraded.
+        x, pred, out = var(0), var(1, BOOL), var(2, BOOL)
+        closed = close(
+            [
+                any_eqn(x, 1.0, 2.0),
+                ir.JaxprEqn(
+                    primitive="lt",
+                    invars=(x, ir.Literal(val=0.5, aval=F64)),
+                    outvars=(pred,),
+                ),
+                assert_eqn(pred, out),
+            ],
+            (out,),
+        )
+        v = _make_verdict(closed)
+        # Verdict is REFUTED (normal case, operand in scope)
+        assert v.status == "REFUTED"
+
+    def test_assert_not_returned_no_downgrade_note(self):
+        # An assert not in outvars should NOT produce a dead-variable note.
         x, ex, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
         closed = close(
             [
@@ -234,16 +261,16 @@ class TestDeadViolationDowngradedToUnknown:
             (x,),
         )
         v = _make_verdict(closed)
-        assert any("obligation #0" in n for n in v.notes)
+        assert v.status == "REFUTED"
+        assert not any("does not reach any output" in n for n in v.notes)
 
 
 class TestMixedReachability:
-    """Case 3: one reachable violation + one unreachable -> REFUTED, note on dead."""
+    """Both asserts are always live — the return convention doesn't matter."""
 
-    def test_mixed_live_and_dead_violations(self):
-        # Two violations:
-        # - First: assert on a live path (output includes its result)
-        # - Second: assert on a dead path (output does NOT include its result)
+    def test_both_asserts_live_regardless_of_outvars(self):
+        # Two violated asserts. Only out1 is in outvars, but BOTH assert
+        # outvars are seeded as live (asserts are declarations).
         x = var(0)
         ex = var(1)
         pred1 = var(2, BOOL)
@@ -255,14 +282,12 @@ class TestMixedReachability:
             [
                 any_eqn(x, 1.0, 2.0),
                 ir.JaxprEqn(primitive="exp", invars=(x,), outvars=(ex,)),
-                # First assert: exp(x) < 2.0, violated
                 ir.JaxprEqn(
                     primitive="lt",
                     invars=(ex, ir.Literal(val=2.0, aval=F64)),
                     outvars=(pred1,),
                 ),
                 assert_eqn(pred1, out1),
-                # Second assert: exp(x) < 1.0, also violated
                 ir.JaxprEqn(
                     primitive="lt",
                     invars=(ex, ir.Literal(val=1.0, aval=F64)),
@@ -270,20 +295,15 @@ class TestMixedReachability:
                 ),
                 assert_eqn(pred2, out2),
             ],
-            (out1,),  # ONLY out1 reaches the output; out2 is dead
+            (out1,),  # only out1 in outvars, but both asserts are live
         )
         v = _make_verdict(closed)
-        # Overall: REFUTED because out1's violation is reachable
         assert v.status == "REFUTED"
-        # First obligation: live, stays violated
+        # Both obligations stay violated (both asserts are live)
         assert v.obligations[0].status == "violated-over-set"
-        # Second obligation: dead, downgraded to unknown
-        assert v.obligations[1].status == "unknown"
-        assert "dead variable" in v.obligations[1].detail
-        # Note about the dead one
-        assert any("obligation #1" in n for n in v.notes)
-        # No note about the live one
-        assert not any("obligation #0" in n for n in v.notes)
+        assert v.obligations[1].status == "violated-over-set"
+        # No dead-variable notes
+        assert not any("does not reach any output" in n for n in v.notes)
 
 
 class TestNonViolationsUnaffected:
