@@ -704,6 +704,14 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
                 if vals[0] is not None:
                     consts[out.id] = tuple(vals[0][i] for i in idx)
             continue
+        if prim == "is_finite":
+            # Under real semantics with bounded operands, is_finite is a
+            # tautology (Reals have no infinity). Emit constant true.
+            # The _validate guard ensures we only reach here when the
+            # operand's interval has finite endpoints.
+            (idx,) = _pair_elementwise(eqn)
+            names[out.id] = define(out, ["true" for _ in idx])
+            continue
         if prim in ("neg", "not"):
             (idx,) = _pair_elementwise(eqn)
             op = "-" if prim == "neg" else "not"

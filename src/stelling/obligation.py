@@ -181,7 +181,7 @@ _IDENTITY_HARNESS = frozenset({"stelling_assume", "stelling_nonvacuity"})
 _SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
     | {"reduce_sum", "select_n", "convert_element_type", "scatter-add",
-       "dot_general", "scatter"}
+       "dot_general", "scatter", "is_finite"}
 )
 
 # Emitted primitives that COMPUTE a new numeric value, and therefore can
@@ -224,7 +224,8 @@ _INT_OVERFLOW_EMITTED = frozenset(
 # (copies of in-range values), so they are int-safe by construction.
 _INT_SAFE_EMITTED = frozenset(
     _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
-    | {"max", "min", "select_n", "convert_element_type", "scatter"}
+    | {"max", "min", "select_n", "convert_element_type", "scatter",
+       "is_finite"}
 )
 
 if _INT_OVERFLOW_EMITTED | _INT_SAFE_EMITTED != _SUPPORTED:
@@ -283,6 +284,11 @@ _INT_SAFE_EMITTED_REASONS: dict[str, str] = {
     "convert_element_type": (
         "whitelist-guarded in _validate: only value-preserving conversions "
         "emit (identity or the bool->{0,1} ite)"
+    ),
+    "is_finite": (
+        "emits constant true: under real semantics all declared variables "
+        "are finite rationals by construction, so is_finite is a tautology "
+        "over the emitted sort. Result sort Bool — no numeric value created"
     ),
 }
 
@@ -1751,6 +1757,26 @@ class _Slicer:
                     f"must be one float dtype: the accumulate is Real "
                     f"addition, and jax integer addition wraps on overflow"
                 )
+        if prim == "is_finite":
+            # is_finite emits constant `true` — sound ONLY when the operand's
+            # interval has finite endpoints (the real-number tautology holds).
+            # When the interval reaches ±inf (overflow, unbounded declaration),
+            # emitting `true` would let the solver certify a property that is
+            # provably false in IEEE execution. Decline in that case.
+            operand = eqn.invars[0]
+            iv_box = self.env.get(operand.id if hasattr(operand, "id") else None)
+            if iv_box is None:
+                raise _Decline(
+                    f"'is_finite' operand has no propagated interval: "
+                    f"cannot verify finiteness without bounds"
+                )
+            import math
+            if any(not math.isfinite(v) for v in (*iv_box.los, *iv_box.his)):
+                raise _Decline(
+                    f"'is_finite' operand interval has non-finite endpoints "
+                    f"(lo={iv_box.los}, hi={iv_box.his}): cannot emit as "
+                    f"constant true — the value may not be finite"
+                )
         if prim == "select_n":
             if len(eqn.invars) != 3:
                 raise _Decline(
@@ -2234,7 +2260,7 @@ def slice_unknown_obligations(
 _REPLAY_SUPPORTED = (
     _ARITH | _COMPARE | _BOOL_OPS | _STRUCTURAL | _IDENTITY_HARNESS
     | {"reduce_sum", "select_n", "convert_element_type", "scatter-add",
-       "dot_general", "scatter"}
+       "dot_general", "scatter", "is_finite"}
 )
 
 if _REPLAY_SUPPORTED != _SUPPORTED:
@@ -2412,6 +2438,10 @@ def _root_elements(
             elif prim == "not":
                 (idx,) = _pair_elementwise(eqn)
                 out = tuple(not ins[0][i] for i in idx)
+            elif prim == "is_finite":
+                # Under real semantics all values are finite rationals.
+                (idx,) = _pair_elementwise(eqn)
+                out = tuple(True for _ in idx)
             elif prim == "integer_pow":
                 (idx,) = _pair_elementwise(eqn)
                 y = int(params["y"])
