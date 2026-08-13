@@ -460,12 +460,12 @@ def test_div_guard_declines_naming_the_straddling_element():
     y = var(2, F64_ARR[3])
     pred = var(3, BOOL_ARR[3])
     out = var(4, BOOL_ARR[3])
-    # divisor = x + [1, -1, 3]: element intervals [1,2], [-1,0], [3,4] —
-    # element 1 touches zero, elements 0 and 2 are safely nonzero
+    # divisor = x + [1, -0.5, 3]: element intervals [1,2], [-0.5,0.5], [3,4] —
+    # element 1 truly straddles zero, elements 0 and 2 are safely nonzero
     q = close(
         [
             any_eqn(x, 0.0, 1.0, shape=(3,)),
-            eqn("add", [x, arr_lit([1.0, -1.0, 3.0])], d),
+            eqn("add", [x, arr_lit([1.0, -0.5, 3.0])], d),
             eqn("div", [x, d], y),
             eqn("lt", [y, lit(10.0)], pred),
             eqn("stelling_assert", [pred], out),

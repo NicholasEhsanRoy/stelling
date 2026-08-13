@@ -123,11 +123,13 @@ def test_kernels_haze_operands_and_results():
     box, made_nan = iv.ieee_mul(s(1e-160, 1e-160), s(1e-160, 1e-160))
     assert not made_nan
     assert (box.los[0], box.his[0]) == (0.0, 1e-160 * 1e-160)
-    # DAZ face: a subnormal divisor may read 0 — the 0-in-divisor path
-    # (⊤) fires, and subnormal/subnormal is a DAZ-created 0/0 (flagged)
+    # DAZ face: a subnormal divisor may read 0 — the boundary-aware path
+    # fires ([0, TINY] has zero at the lower boundary), and
+    # subnormal/subnormal is a DAZ-created 0/0 (flagged). The non-NaN
+    # quotients are [0, +inf] (non-negative / non-negative).
     box, made_nan = iv.ieee_div(s(TINY, TINY), s(TINY, TINY))
     assert made_nan
-    assert (box.los[0], box.his[0]) == (-INF, INF)
+    assert (box.los[0], box.his[0]) == (0.0, INF)
     # DAZ-amplification: subnormal × inf can be 0 × inf = NaN at runtime
     box, made_nan = iv.ieee_mul(s(1e-310, 2e-308), s(5.0, INF))
     assert made_nan
