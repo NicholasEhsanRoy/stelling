@@ -1497,6 +1497,84 @@ def top_despite_coverage_note(propagation: Propagation) -> str | None:
     )
 
 
+_VIOLATION_STATUSES = frozenset({"violated-over-set", "violated-witness"})
+
+
+def _apply_reachability_conjunct(
+    closed,
+    obligations: tuple[ObligationReport, ...],
+    status: str,
+) -> tuple[tuple[ObligationReport, ...], tuple[str, ...], str]:
+    """Downgrade violations on dead variables (unreachable outputs).
+
+    A violated obligation whose predicate operand does NOT reach any output
+    of the harness function is a violation on a dead variable: the caller
+    never observes the bad value.  Downgrade from the violation status to
+    ``"unknown"`` with a note explaining why.  Only REFUTED verdicts are
+    affected; VERIFIED and UNKNOWN are returned unchanged.
+
+    Matching is by IDENTITY: each ObligationReport carries the Var IDs of
+    its assert equation's invars (operand_var_ids), populated by the
+    propagator at construction.  No positional indexing against the jaxpr's
+    equation list -- obligations from sub-jaxprs (forced cond branches, jit
+    bodies) interleave with top-level ones and positional mapping misaligns.
+
+    Returns ``(obligations, reachability_notes, status)`` where *status* may
+    be downgraded from REFUTED to UNKNOWN if all violations were unreachable.
+    """
+    if status != "REFUTED":
+        return obligations, (), status
+    live = reaches_output(closed.jaxpr)
+    scope = defined_vars(closed.jaxpr)
+    downgraded: list[ObligationReport] = []
+    reachability_notes: list[str] = []
+    for ob in obligations:
+        if ob.status not in _VIOLATION_STATUSES:
+            downgraded.append(ob)
+            continue
+        # If the obligation carries no operand_var_ids (unexamined,
+        # or from a path that did not record them), fail-safe: never
+        # downgrade what we cannot prove dead.
+        if not ob.operand_var_ids:
+            downgraded.append(ob)
+            continue
+        # If the obligation's var IDs are not in the top-level
+        # jaxpr's scope, the obligation came from a sub-jaxpr (cond
+        # branch, etc.) and the top-level walk cannot judge it.
+        # Fail-safe: keep as violated.
+        if not any(vid in scope for vid in ob.operand_var_ids):
+            downgraded.append(ob)
+        elif any(vid in live for vid in ob.operand_var_ids):
+            # Reachable: the violation stays.
+            downgraded.append(ob)
+        else:
+            # Unreachable: downgrade to UNKNOWN with a note.
+            reachability_notes.append(
+                f"obligation #{ob.index} is violated but the violated "
+                f"variable does not reach any output of the harness "
+                f"function"
+            )
+            downgraded.append(
+                ObligationReport(
+                    index=ob.index,
+                    status="unknown",
+                    detail=(
+                        f"{ob.status} but unreachable: the "
+                        f"predicate operand does not flow to any output "
+                        f"of the traced function (dead variable)"
+                    ),
+                    source_info=ob.source_info,
+                    operand_var_ids=ob.operand_var_ids,
+                )
+            )
+    obligations = tuple(downgraded)
+    # Re-evaluate status: if all violations were unreachable, no
+    # reachable violation remains to drive REFUTED.
+    if not any(o.status in _VIOLATION_STATUSES for o in obligations):
+        status = "UNKNOWN"
+    return obligations, tuple(reachability_notes), status
+
+
 def _query_has_non_f64_float(closed) -> bool:
     """Whether the query contains any non-float64 float dtype in its
     equations' operands or results. Used to select the parametric ieee
@@ -1537,68 +1615,9 @@ def make_verdict(
         status = "UNKNOWN"
 
     # -- reaches-output conjunct ------------------------------------------------
-    #
-    # A violated obligation whose predicate operand does NOT reach any output
-    # of the harness function is a violation on a dead variable: the caller
-    # never observes the bad value.  Downgrade from REFUTED to UNKNOWN with a
-    # note explaining why.  Only REFUTED verdicts are affected; VERIFIED and
-    # UNKNOWN are unchanged.
-    #
-    # Matching is by IDENTITY: each ObligationReport carries the Var IDs of
-    # its assert equation's invars (operand_var_ids), populated by the
-    # propagator at construction.  No positional indexing against the jaxpr's
-    # equation list — obligations from sub-jaxprs (forced cond branches, jit
-    # bodies) interleave with top-level ones and positional mapping misaligns.
-    obligations = propagation.obligations
-    reachability_notes: list[str] = []
-    if status == "REFUTED":
-        live = reaches_output(closed.jaxpr)
-        scope = defined_vars(closed.jaxpr)
-        downgraded: list[ObligationReport] = []
-        for ob in obligations:
-            if ob.status != "violated-over-set":
-                downgraded.append(ob)
-                continue
-            # If the obligation carries no operand_var_ids (unexamined,
-            # or from a path that did not record them), fail-safe: never
-            # downgrade what we cannot prove dead.
-            if not ob.operand_var_ids:
-                downgraded.append(ob)
-                continue
-            # If the obligation's var IDs are not in the top-level
-            # jaxpr's scope, the obligation came from a sub-jaxpr (cond
-            # branch, etc.) and the top-level walk cannot judge it.
-            # Fail-safe: keep as REFUTED.
-            if not any(vid in scope for vid in ob.operand_var_ids):
-                downgraded.append(ob)
-            elif any(vid in live for vid in ob.operand_var_ids):
-                # Reachable: the violation stays.
-                downgraded.append(ob)
-            else:
-                # Unreachable: downgrade to UNKNOWN with a note.
-                reachability_notes.append(
-                    f"obligation #{ob.index} is violated but the violated "
-                    f"variable does not reach any output of the harness "
-                    f"function"
-                )
-                downgraded.append(
-                    ObligationReport(
-                        index=ob.index,
-                        status="unknown",
-                        detail=(
-                            f"violated-over-set but unreachable: the "
-                            f"predicate operand does not flow to any output "
-                            f"of the traced function (dead variable)"
-                        ),
-                        source_info=ob.source_info,
-                        operand_var_ids=ob.operand_var_ids,
-                    )
-                )
-        obligations = tuple(downgraded)
-        # Re-evaluate status: if all violations were unreachable, no
-        # reachable violation remains to drive REFUTED.
-        if not any(o.status == "violated-over-set" for o in obligations):
-            status = "UNKNOWN"
+    obligations, reachability_notes, status = _apply_reachability_conjunct(
+        closed, propagation.obligations, status
+    )
 
     checks = propagation.nonvacuity_checks
     if not checks:
