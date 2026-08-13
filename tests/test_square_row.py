@@ -185,7 +185,7 @@ def test_the_import_time_censuses_still_hold_with_square_in_them():
 def test_the_row_did_not_widen_the_emission_set_past_square():
     """A negative control on the registry itself: the adjacent nonlinear
     rows stay out, so "square emits" is a statement about square."""
-    for prim in ("sqrt", "exp", "pow", "abs", "sign", "rem", "log"):
+    for prim in ("sqrt", "exp", "abs", "sign", "rem", "log"):
         assert prim not in OB._SUPPORTED, prim
 
 

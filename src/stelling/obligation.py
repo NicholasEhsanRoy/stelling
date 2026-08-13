@@ -148,7 +148,7 @@ _SCALAR_STRUCT_FMT = {
 }
 
 _ARITH = frozenset(
-    {"add", "sub", "mul", "neg", "div", "integer_pow", "max", "min",
+    {"add", "sub", "mul", "neg", "div", "integer_pow", "pow", "max", "min",
      # `square` is jax's own primitive on this series, NOT sugar for
      # integer_pow(y=2) — `jnp.square(x)` binds `square_p` and a slice that
      # traverses one had no emission at all, so a property genuinely false
@@ -199,7 +199,7 @@ _SUPPORTED = (
 # harness primitives are identities, `div` already carries its own stricter
 # float-only guard, and `convert_element_type` is whitelist-guarded.
 _INT_OVERFLOW_EMITTED = frozenset(
-    {"add", "sub", "mul", "neg", "div", "integer_pow", "reduce_sum",
+    {"add", "sub", "mul", "neg", "div", "integer_pow", "pow", "reduce_sum",
      # `square` multiplies its operand by itself, so it computes a value the
      # operand did not contain and can leave an integer dtype's range —
      # `mul`'s class exactly, and the class `integer_pow` was found in
@@ -1724,6 +1724,42 @@ class _Slicer:
                         f"'integer_pow' with negative exponent {y}: "
                         f"{DIV_GUARD_REASON}{problem}"
                     )
+        if prim == "pow":
+            # pow has TWO invars: [base, exponent]. The exponent must be a
+            # Literal (constant) — variable-exponent pow is not emittable
+            # because SMT-LIB2 ^ requires a concrete exponent in QF_NRA.
+            if not isinstance(eqn.invars[1], ir.Literal):
+                raise _Decline(
+                    f"'pow' with variable exponent: only literal-exponent "
+                    f"pow is emittable (the exponent must be a compile-time "
+                    f"constant)"
+                )
+            # The emission expands pow to explicit products (same as
+            # integer_pow), so the exponent must be an integer. Non-integer
+            # exponents (e.g. 0.5 for sqrt) have no standard SMT-LIB2
+            # emission in QF_NRA, so the obligation declines.
+            exp_val = _decode_elements(eqn.invars[1].val)[0]
+            exp_float = float(exp_val)
+            if exp_float != int(exp_float):
+                raise _Decline(
+                    f"'pow' with non-integer exponent {exp_float}: "
+                    f"only integer exponents can be expanded to products "
+                    f"for SMT-LIB2 emission"
+                )
+            y = int(exp_float)
+            if abs(y) > INTEGER_POW_EXPANSION_CAP:
+                raise _Decline(
+                    f"'pow' exponent {y} exceeds the v1 expansion "
+                    f"cap ({INTEGER_POW_EXPANSION_CAP})"
+                )
+            if y < 0:
+                base = self._resolve_for_guard(eqn.invars[0])
+                problem = _zero_element_problem(base, self.env)
+                if problem is not None:
+                    raise _Decline(
+                        f"'pow' with negative exponent {y}: "
+                        f"{DIV_GUARD_REASON}{problem}"
+                    )
         if prim in _INT_OVERFLOW_EMITTED:
             # SMT-LIB2 Reals are unbounded; jax integers wrap. Emitting a
             # computed integer as a Real would let the solver prove a claim
@@ -2174,6 +2210,18 @@ class _Slicer:
                 y = eqn.params_dict().get("y")
                 if y not in (0, 1):
                     nonlinear = True
+            if prim == "pow" and ins_dep[0]:
+                # pow with a literal exponent != 1.0 is nonlinear when
+                # the base depends on a declaration (same logic as
+                # integer_pow: exponent 1.0 is the identity, 0.0 is
+                # constant — but any other value produces a nonlinear term).
+                exp_atom = eqn.invars[1]
+                if isinstance(exp_atom, ir.Literal):
+                    exp_val = _decode_elements(exp_atom.val)[0]
+                    if exp_val not in (0.0, 1.0):
+                        nonlinear = True
+                else:
+                    nonlinear = True  # variable exponent is always nonlinear
             if prim == "square" and ins_dep[0]:
                 # unconditionally nonlinear when the operand depends on a
                 # declaration: `square` has no exponent param to fall back
@@ -2473,6 +2521,13 @@ def _root_elements(
                 (idx,) = _pair_elementwise(eqn)
                 y = int(params["y"])
                 out = tuple(ins[0][i] ** y for i in idx)
+            elif prim == "pow":
+                # pow [base, exponent_literal]: the _validate guard ensures
+                # only integer exponents reach here. Replay as exact
+                # Fraction ** int, same arithmetic as integer_pow.
+                ia, ib = _pair_elementwise(eqn)
+                y = int(float(ins[1][ib[0]]))  # scalar exponent
+                out = tuple(ins[0][ia[i]] ** y for i in range(n_out))
             elif prim == "square":
                 (idx,) = _pair_elementwise(eqn)
                 out = tuple(_square_value(ins[0][i]) for i in idx)
