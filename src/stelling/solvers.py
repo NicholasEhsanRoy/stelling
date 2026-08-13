@@ -1296,6 +1296,7 @@ def _dispatch_obligation(
     backends: tuple[_Backend, ...],
     missing: tuple[str, ...],
     ledger: _Ledger,
+    relational_assumes: tuple[ir.JaxprEqn, ...] = (),
 ) -> ObligationEscalation:
     ordered = tuple(
         sorted(
@@ -1306,9 +1307,17 @@ def _dispatch_obligation(
     scripts: dict[str, Script] = {}
     for backend in ordered:
         if backend.flavor not in scripts:
-            scripts[backend.flavor] = emit(sl, backend.flavor, config.timeout_ms)
+            scripts[backend.flavor] = emit(
+                sl, backend.flavor, config.timeout_ms,
+                relational_assumes=relational_assumes,
+            )
     wall_s = _wall_seconds(config.timeout_ms)
     notes: list[str] = []
+    if relational_assumes:
+        notes.append(
+            f"assert #{sl.index}: {len(relational_assumes)} relational "
+            f"assume(s) forwarded to solver as axiom(s)"
+        )
     absences = _absences(config, ordered, missing)
     if len(ordered) == 1:
         notes.append(
@@ -1745,7 +1754,10 @@ def escalate(
             continue
         ledger_start = len(ledger.stamps)
         try:
-            record = _dispatch_obligation(item, config, backends, missing, ledger)
+            record = _dispatch_obligation(
+                item, config, backends, missing, ledger,
+                relational_assumes=propagation.relational_assumes,
+            )
         except (SolverDisagreement, EmissionInfidelityError):
             raise  # loud by design
         except Exception as e:  # noqa: BLE001 — guard rule: degrade, quoted

@@ -297,6 +297,14 @@ class Propagation:
     # top-level ⊤ bound to a value nothing reads is counted, because this
     # walks the env rather than the live set.
     top_boxes: tuple[tuple[str, int], ...] = ()
+    # Relational assumes the interval domain could not apply: comparison
+    # equations whose BOTH operands are non-constant (non-point intervals),
+    # so no variable can be narrowed independently. Recorded so the solver
+    # escalation can emit them as additional axioms — the constraint the
+    # user stated is sound, it merely cannot be represented in the
+    # non-relational interval domain. Each entry is the comparison equation
+    # (ir.JaxprEqn with primitive in _ASSUME_CMPS) the assume consumed.
+    relational_assumes: tuple[ir.JaxprEqn, ...] = ()
 
     @property
     def all_discharged(self) -> bool:
@@ -5424,6 +5432,11 @@ class _Propagator:
         # constrained assume being present, and a dropped one is not
         # present at all.
         self.assume_dropped = False
+        # comparison equations from relational assume drops: both operands
+        # vary, so the interval domain cannot narrow, but the solver can use
+        # the constraint as an axiom. Accumulated during the walk; surfaced
+        # on the Propagation result for the emission to read.
+        self.relational_assumes: list[ir.JaxprEqn] = []
         # the NON-EMPTINESS CERTIFICATE's answer for this run, written by
         # :func:`propagate` after the walk finishes and before the
         # withholding reads it (:func:`_region_witness`). False here means
@@ -6798,6 +6811,17 @@ class _Propagator:
                 dropped.append(_NONFINITE_BOUND_REASON)
             else:
                 dropped.append(_RELATIONAL_REASON)
+                # Record for solver forwarding: both operands genuinely
+                # vary, so this is a constraint the solver CAN use as an
+                # axiom even though the interval domain cannot represent it.
+                # Only under real semantics (ieee declines escalation
+                # wholly) and only when both sides are ir.Var (not literals).
+                if (
+                    self.semantics == "real"
+                    and isinstance(a, ir.Var)
+                    and isinstance(b, ir.Var)
+                ):
+                    self.relational_assumes.append(producer)
             return
         if point_a:
             target_atom, target_box, bound, bound_atom = b, box_b, box_a, a
@@ -8729,4 +8753,5 @@ def propagate(
         narrowing_uncertified=p.narrowing_uncertified,
         region_inhabited=p.region_inhabited,
         top_boxes=_top_boxes(closed, p.env),
+        relational_assumes=tuple(p.relational_assumes),
     )
