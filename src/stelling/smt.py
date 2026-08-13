@@ -420,13 +420,26 @@ def _options(solver: str, logic: str, timeout_ms: int) -> tuple[tuple[str, str],
     raise ValueError(f"no option profile for solver {solver!r}")
 
 
-def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
+def emit(
+    sl: ObligationSlice,
+    solver: str,
+    timeout_ms: int,
+    relational_assumes: tuple[ir.JaxprEqn, ...] = (),
+) -> Script:
     """Emit the escalation script for one obligation slice.
 
     The same slice emits a per-solver flavor differing only in the option
     block (option names are solver-specific); the logical content —
     declarations, bounds, definitions, the negated predicate — is
     identical, so both portfolio members see the same query.
+
+    ``relational_assumes`` are comparison equations from dropped relational
+    ``assume`` predicates: both operands vary, so the interval domain could
+    not narrow, but the constraint the user stated is SOUND and can be
+    emitted as an additional axiom for the solver. Only assumes whose
+    operand variables are IN the slice (have terms in ``names``) are emitted;
+    others are silently skipped (their variables are not in the backward
+    cone, so no SMT term exists for them).
     """
     if timeout_ms <= 0:
         raise ValueError(f"timeout_ms must be positive, got {timeout_ms}")
@@ -741,6 +754,48 @@ def emit(sl: ObligationSlice, solver: str, timeout_ms: int) -> Script:
             else:
                 bodies.append(f"({sym[prim]} {a} {b})")
         names[out.id] = define(out, bodies)
+
+    # -- relational assumes: user-stated constraints the interval domain
+    # could not apply, emitted as POSITIVE axioms the solver may assume.
+    # Only emitted when BOTH operand variables have terms in this slice
+    # (they are in the backward cone); otherwise silently skipped.
+    _ASSUME_CMP_SYM = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "="}
+    for ra_eqn in relational_assumes:
+        cmp_sym = _ASSUME_CMP_SYM.get(ra_eqn.primitive)
+        if cmp_sym is None:
+            continue  # not a supported comparison
+        if len(ra_eqn.invars) != 2:
+            continue
+        lhs_atom, rhs_atom = ra_eqn.invars
+        # Both operands must have terms in the slice
+        lhs_terms = term(lhs_atom) if (
+            isinstance(lhs_atom, ir.Literal)
+            or names.get(lhs_atom.id) is not None
+        ) else None
+        rhs_terms = term(rhs_atom) if (
+            isinstance(rhs_atom, ir.Literal)
+            or names.get(rhs_atom.id) is not None
+        ) else None
+        if lhs_terms is None or rhs_terms is None:
+            continue  # operand not in the slice's backward cone
+        if not lhs_terms or not rhs_terms:
+            continue  # zero-size operand
+        # Emit the POSITIVE form of the constraint as an axiom.
+        # For array-shaped operands, the assume is universal: every element
+        # pair must satisfy the comparison.
+        try:
+            idx = _pair_elementwise(ra_eqn)
+        except Exception:
+            continue  # shapes don't broadcast; skip silently
+        if len(idx) == 2:
+            ia, ib = idx
+            for i in range(len(ia)):
+                a_term = lhs_terms[ia[i]]
+                b_term = rhs_terms[ib[i]]
+                lines.append(f"(assert ({cmp_sym} {a_term} {b_term}))")
+        elif len(idx) == 1:
+            # unary — should not happen for a comparison, but be safe
+            continue
 
     root_terms = term(sl.root)
     if len(root_terms) == 1:
