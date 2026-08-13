@@ -316,27 +316,23 @@ class TestNonViolationsUnaffected:
 # A cond with an assert inside a branch BEFORE a top-level assert: the
 # sub-jaxpr obligation must NOT be incorrectly downgraded.
 
-try:
-    import jax
-    import jax.numpy as jnp
-    from stelling.harness import any_array, assert_
-    from stelling.preconditions import check
-
-    _HAS_JAX = True
-except ImportError:
-    _HAS_JAX = False
-
 import pytest
 
 
 class TestSubJaxprInterleavingNotDowngraded:
     """Sub-jaxpr obligations interleaved with top-level ones stay correct."""
 
-    @pytest.mark.skipif(not _HAS_JAX, reason="requires jax")
     def test_cond_branch_violation_not_downgraded(self):
         """A violation inside a forced cond branch stays REFUTED even when
         a later top-level assert exists -- the positional index must not
         misalign and incorrectly downgrade the branch obligation."""
+        jax = pytest.importorskip("jax")
+        jnp = pytest.importorskip("jax.numpy")
+        from stelling.harness import any_array, assert_
+        from stelling.preconditions import check
+
+        saved_x64 = jax.config.jax_enable_x64
+        jax.config.update("jax_enable_x64", True)
         jax.config.update("jax_enable_x64", True)
 
         def h():
@@ -350,5 +346,8 @@ class TestSubJaxprInterleavingNotDowngraded:
             )
             return branch_result
 
-        v = check(h, vacuity_mode="all")
-        assert v.status == "REFUTED"
+        try:
+            v = check(h, vacuity_mode="all")
+            assert v.status == "REFUTED"
+        finally:
+            jax.config.update("jax_enable_x64", saved_x64)
