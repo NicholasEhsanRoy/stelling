@@ -57,12 +57,44 @@ SPDX-License-Identifier: Apache-2.0
   restricts the SMT portfolio to one backend. The verdict explicitly
   discloses degraded redundancy.
 
+### SMT emission extensions
+
+- **`is_finite` emission** (guarded): emits constant `true` when the
+  operand's propagated interval has finite endpoints; declines when
+  infinite (sound: bounded reals are finite by construction). Unblocks
+  solver escalation on every harness containing `jnp.isfinite()`.
+
+- **`pow` emission** (integer exponents): `x**2`, `x**3`, `x**(-1)` etc.
+  expand to explicit products in SMT-LIB2. Non-integer exponents (0.5 for
+  sqrt) decline — SMT-LIB2 QF_NRA has no standard real-power operator.
+
+- **Relational assumes forwarded to solver**: when `assume(e1 < e2)`
+  involves two variable operands (a constraint the interval domain cannot
+  apply), the comparison is recorded and emitted as a positive axiom
+  alongside the negated obligation. The solver sees the full constraint
+  set.
+
+- **Emission guards resolve through inlined aliases**: guards (div, is_finite)
+  now follow the slicer's alias chain to find propagated intervals for
+  variables defined inside transparent calls (jit, custom_jvp_call).
+
+### Inductive step verification
+
+- **`stelling.inductive.check_inductive_step`**: verify that a loop body
+  preserves declared bounds in one step. VERIFIED means the invariant
+  holds for all iterations by induction. Constructs the harness
+  automatically from the body function and declared state bounds.
+
 ### Known limitations (0.2.0)
 
 - `assume(x > 0)` in real mode still narrows to `[0, hi]` (closed
   intervals cannot represent open bounds in exact reals). The IEEE bump
   is exact; the real-mode overapproximation is sound. In real mode,
   boundary-aware division handles the resulting `[0, hi]` gracefully.
+- The dependency problem (A ∧ ¬A = unknown in intervals) is inherent to
+  the non-relational domain. Solver escalation is the designed remedy.
+- `check_inductive_step` supports scalar state only (one entry per
+  element for vector state).
 
 ---
 
