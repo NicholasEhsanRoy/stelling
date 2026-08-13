@@ -303,18 +303,111 @@ def test_pow_integer_exponent_refutes():
     )
 
 
-def test_pow_non_integer_exponent_declines():
-    """x in [1, 4], x**0.5 has a non-integer exponent and must decline.
+def test_pow_rational_exponent_verifies():
+    """x in [1, 4], x**0.5 >= 1 with rational exponent auxiliary encoding.
 
-    The decline produces UNKNOWN (interval-only cannot decide) and the
-    note mentions the non-integer exponent."""
+    Since 0.2.0, rational exponents p/q with q <= 6 are emitted via
+    auxiliary-variable polynomial constraints (y^q = x^p). sqrt(x) >= 1
+    on [1, 4] is VERIFIED by both solvers."""
     def h():
         x = any_array((), "float64", (1.0, 4.0))
         return (assert_(x ** 0.5 >= 1.0),)
 
     v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
-    # Must not be VERIFIED — the emission declines.
-    assert v.status == "UNKNOWN"
-    assert any("non-integer exponent" in n for n in v.notes), (
-        f"expected decline note about non-integer exponent; notes: {v.notes}"
+    assert v.status == "VERIFIED", (
+        f"expected VERIFIED for sqrt(x) >= 1 on [1,4], got {v.status}; "
+        f"notes: {v.notes}"
     )
+
+
+@need_solver
+def test_pow_rational_exponent_refutes():
+    """x in [1, 4], x**0.5 <= 1 must REFUTE (sqrt(4) = 2 > 1)."""
+    def h():
+        x = any_array((), "float64", (1.0, 4.0))
+        return (assert_(x ** 0.5 <= 1.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
+    assert v.status == "REFUTED", (
+        f"expected REFUTED for sqrt(x) <= 1 on [1,4], got {v.status}; "
+        f"notes: {v.notes}"
+    )
+
+
+@need_solver
+def test_pow_cube_root_verifies():
+    """x in [1, 8], x**(1/3) >= 1 must VERIFY (cbrt(x) >= 1 for x >= 1)."""
+    def h():
+        x = any_array((), "float64", (1.0, 8.0))
+        return (assert_(x ** (1.0/3.0) >= 1.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
+    assert v.status == "VERIFIED", (
+        f"expected VERIFIED for cbrt(x) >= 1 on [1,8], got {v.status}; "
+        f"notes: {v.notes}"
+    )
+
+
+@need_solver
+def test_pow_two_thirds_verifies():
+    """x in [1, 8], x**(2/3) >= 1 must VERIFY."""
+    def h():
+        x = any_array((), "float64", (1.0, 8.0))
+        return (assert_(x ** (2.0/3.0) >= 1.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
+    assert v.status == "VERIFIED", (
+        f"expected VERIFIED for x^(2/3) >= 1 on [1,8], got {v.status}; "
+        f"notes: {v.notes}"
+    )
+
+
+def test_pow_large_denominator_exponent_declines():
+    """x in [1, 4], x**(1/7) has denominator > 6 and must decline.
+
+    Exponents whose rational representation has a denominator exceeding
+    RATIONAL_POW_DENOMINATOR_CAP are declined to avoid solver timeout."""
+    def h():
+        x = any_array((), "float64", (1.0, 4.0))
+        return (assert_(x ** (1.0/7.0) >= 1.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
+    assert v.status == "UNKNOWN"
+    assert any("non-rational exponent" in n or "cap" in n for n in v.notes), (
+        f"expected decline note about denominator cap; notes: {v.notes}"
+    )
+
+
+@need_solver
+def test_pow_rational_negative_base_declines():
+    """SOUNDNESS: x in [-4, -1], x**0.5 must NOT verify.
+
+    JAX returns NaN for pow(negative, fractional). The Real encoding
+    would either have no solution (even q -> UNSAT -> false VERIFIED)
+    or model something JAX doesn't compute (odd q). The base-interval
+    guard declines this to UNKNOWN."""
+    def h():
+        x = any_array((), "float64", (-4.0, -1.0))
+        return (assert_(x ** 0.5 >= 99999.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
+    assert v.status != "VERIFIED", (
+        f"UNSOUND: rational pow on negative base was certified; "
+        f"notes: {v.notes}"
+    )
+    assert v.status == "UNKNOWN"
+    assert any("negative" in n for n in v.notes), (
+        f"expected decline note about negative base; notes: {v.notes}"
+    )
+
+
+@need_solver
+def test_pow_rational_straddle_base_declines():
+    """x in [-1, 4], x**0.5 declines because base can be negative."""
+    def h():
+        x = any_array((), "float64", (-1.0, 4.0))
+        return (assert_(x ** 0.5 >= 0.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
+    assert v.status == "UNKNOWN"
+    assert any("negative" in n for n in v.notes)

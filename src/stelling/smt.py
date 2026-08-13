@@ -59,6 +59,7 @@ from stelling import ir
 from stelling.obligation import (
     QF_NRA,
     ObligationSlice,
+    RATIONAL_POW_DENOMINATOR_CAP,
     _decode_elements,
     _dot_general_plan,
     _group_reduce_sum,
@@ -359,11 +360,14 @@ def _fold_values(eqn: ir.JaxprEqn, ins) -> tuple | None:
             return None  # no rational value; the slice guard already refuses
         return tuple(ins[0][i] ** y for i in idx[0])
     if prim == "pow":
-        # pow [base, exponent_literal]: the _validate guard ensures only
-        # integer exponents reach here. Fold as base ** int(exp) — exact
-        # Fraction arithmetic, same as integer_pow.
+        # pow [base, exponent_literal]: integer exponents fold as
+        # base ** int(exp); rational exponents cannot be folded exactly
+        # (the result is generally irrational), so they return None.
         ia, ib = idx
-        y = int(float(ins[1][ib[0]]))  # scalar exponent, same for all
+        exp_float = float(ins[1][ib[0]])
+        if exp_float != int(exp_float):
+            return None  # rational exponent: no exact Fraction fold
+        y = int(exp_float)
         if y < 0 and any(ins[0][ia[i]] == 0 for i in range(len(ia))):
             return None  # no rational value
         return tuple(ins[0][ia[i]] ** y for i in range(len(ia)))
@@ -712,27 +716,57 @@ def emit(
             names[out.id] = define(out, bodies)
             continue
         if prim == "pow":
-            # pow [base, exponent_literal]: the _validate guard ensures only
-            # positive integer exponents reach here (SMT-LIB2 ^ only accepts
-            # positive integers in z3/cvc5). Emit as product expansion, same
-            # as integer_pow.
+            # pow [base, exponent_literal]: integer exponents emit as
+            # product expansion; rational exponents p/q emit as auxiliary
+            # variables with polynomial constraints (y^q = x^p).
             ia, ib = _pair_elementwise(eqn)
-            # The exponent is a scalar literal; read its integer value
-            exp_val = int(float(_decode_elements(eqn.invars[1].val)[0]))
-            if exp_val == 0:
-                names[out.id] = ("1.0",) * n_out
+            # The exponent is a scalar literal
+            exp_float = float(_decode_elements(eqn.invars[1].val)[0])
+            if exp_float == int(exp_float):
+                # Integer exponent: product expansion (same as integer_pow)
+                exp_val = int(exp_float)
+                if exp_val == 0:
+                    names[out.id] = ("1.0",) * n_out
+                    continue
+                if exp_val == 1:
+                    names[out.id] = tuple(ins[0][ia[i]] for i in range(n_out))
+                    continue
+                n = abs(exp_val)
+                bodies = []
+                for i in range(n_out):
+                    base = ins[0][ia[i]]
+                    prod = base if n == 1 else f"(* {' '.join([base] * n)})"
+                    bodies.append(prod if exp_val > 0 else f"(/ 1.0 {prod})")
+                names[out.id] = define(out, bodies)
                 continue
-            if exp_val == 1:
-                names[out.id] = tuple(ins[0][ia[i]] for i in range(n_out))
+            else:
+                # Rational exponent p/q: auxiliary-variable encoding.
+                # Introduce y with y^q = x^p (and y >= 0 when q is even).
+                from stelling.obligation import RATIONAL_POW_DENOMINATOR_CAP
+                frac = Fraction(exp_float).limit_denominator(
+                    RATIONAL_POW_DENOMINATOR_CAP
+                )
+                p, q = frac.numerator, frac.denominator
+                made = []
+                for i in range(n_out):
+                    base = ins[0][ia[i]]
+                    aux_name = f"aux_{out.id}_{i}" if n_out > 1 else f"aux_{out.id}"
+                    lines.append(f"(declare-const {aux_name} Real)")
+                    # y >= 0 when q is even (ensures unique real root)
+                    if q % 2 == 0:
+                        lines.append(f"(assert (>= {aux_name} 0.0))")
+                    # y^q = x^p
+                    lhs = f"(* {' '.join([aux_name] * q)})"
+                    if p == 1:
+                        rhs = base
+                    elif p == 0:
+                        rhs = "1.0"
+                    else:
+                        rhs = f"(* {' '.join([base] * p)})"
+                    lines.append(f"(assert (= {lhs} {rhs}))")
+                    made.append(aux_name)
+                names[out.id] = tuple(made)
                 continue
-            n = abs(exp_val)
-            bodies = []
-            for i in range(n_out):
-                base = ins[0][ia[i]]
-                prod = base if n == 1 else f"(* {' '.join([base] * n)})"
-                bodies.append(prod if exp_val > 0 else f"(/ 1.0 {prod})")
-            names[out.id] = define(out, bodies)
-            continue
         if prim == "square":
             (idx,) = _pair_elementwise(eqn)
             names[out.id] = define(out, [_square_body(ins[0][i]) for i in idx])
