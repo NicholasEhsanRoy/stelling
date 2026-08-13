@@ -2095,8 +2095,8 @@ def test_taint_stops_are_exactly_the_argued_exemptions():
     exempt — `pow(x, 2)` is a multiply after expansion, which is precisely
     the simplification class this finding is about."""
     assert _TAINT_STOPS == frozenset({
-        "exp", "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
-        "is_finite",
+        "exp", "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "not",
+        "reduce_or", "is_finite",
     })
     for p in ("pow", "integer_pow", "div", "neg", "abs", "max", "min",
               "reduce_sum", "convert_element_type", "select_n", "slice"):

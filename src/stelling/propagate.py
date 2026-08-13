@@ -1253,6 +1253,17 @@ def _t_bool_logic(name, op):
     return t
 
 
+def _t_not(eqn, params, ins):
+    """Kleene NOT on bools — ``~a`` on boolean arrays."""
+    dtypes = [v.aval.dtype for v in eqn.invars]
+    if any(d != "bool" for d in dtypes):
+        raise iv.IntervalError(
+            f"'not' transfer covers bool operands only; got dtypes "
+            f"{dtypes}"
+        )
+    return [iv.logical_not(ins[0])]
+
+
 def _t_reduce_or(eqn, params, ins):
     dtypes = [v.aval.dtype for v in eqn.invars]
     if any(d != "bool" for d in dtypes):
@@ -2738,7 +2749,7 @@ def _integer_exponent(params) -> int | None:
 #    product. The chain genuinely restarts.
 _TAINT_STOPS = frozenset({
     "exp",
-    "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
+    "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "not", "reduce_or",
     "is_finite",
 })
 
@@ -3142,6 +3153,7 @@ TRANSFERS = {
     "ne": (lambda eqn, p, ins: [iv.ne(*ins)], TIER_EXACT),
     "and": (_t_bool_logic("and", iv.logical_and), TIER_EXACT),
     "or": (_t_bool_logic("or", iv.logical_or), TIER_EXACT),
+    "not": (_t_not, TIER_EXACT),
     "reduce_or": (_t_reduce_or, TIER_EXACT),
     "is_finite": (_t_is_finite, TIER_EXACT),
     # the sum over the reduced axes. Sound under ℝ for EVERY association
@@ -3328,7 +3340,7 @@ _INT_NON_COMPUTING = frozenset({
     # at a static index, so it cannot introduce an out-of-range integer
     "split",
     "max", "min", "select_n",
-    "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "reduce_or",
+    "lt", "gt", "le", "ge", "eq", "ne", "and", "or", "not", "reduce_or",
     "is_finite",
     "convert_element_type",
     "stop_gradient", "reshape", "squeeze", "slice", "scatter", "gather",
@@ -3400,6 +3412,10 @@ _INT_NON_COMPUTING_EXEMPT: dict[str, str] = {
     "or": (
         "bool-only by its own dtype guard (the bitwise integer form "
         "declines inside the transfer); Kleene logic on {0, 1}"
+    ),
+    "not": (
+        "bool-only by its own dtype guard (the bitwise integer form "
+        "declines inside the transfer); Kleene NOT on {0, 1}"
     ),
     "reduce_or": (
         "bool-only by its own dtype guard; a three-valued OR-fold whose "
@@ -4148,6 +4164,25 @@ def _ieee_bool_logic(name, op):
     return t
 
 
+def _ieee_not(eqn, params, ins, flags):
+    """Kleene NOT on bools under ieee semantics. A maybe-NaN flag on a
+    bool operand is a decline artifact (⊤-maybe-NaN); that operand's
+    elements read as unknown before the NOT."""
+    dtypes = [v.aval.dtype for v in eqn.invars]
+    if any(d != "bool" for d in dtypes):
+        raise iv.IntervalError(
+            f"'not' transfer covers bool operands only; got dtypes "
+            f"{dtypes}"
+        )
+    [a] = ins
+    [f] = flags
+    if f:
+        a = iv.IntervalArray(
+            shape=a.shape, los=(0.0,) * a.size, his=(1.0,) * a.size
+        )
+    return [iv.logical_not(a)], [False]
+
+
 def _ieee_reduce_sum(eqn, params, ins, flags):
     """reduce_sum under ieee — the ONE row of this build whose real-mode
     argument does not survive the dial.
@@ -4662,6 +4697,7 @@ IEEE_TRANSFERS = {
     # (ii) Kleene logic; flagged bool operands read as unknown
     "and": (_ieee_bool_logic("and", iv.logical_and), TIER_EXACT),
     "or": (_ieee_bool_logic("or", iv.logical_or), TIER_EXACT),
+    "not": (_ieee_not, TIER_EXACT),
     "reduce_or": (_ieee_reduce_or, TIER_EXACT),
     "is_finite": (_ieee_is_finite, TIER_EXACT),
     # (ii) censused DOWN to the association-free cases: <=2 contributors
