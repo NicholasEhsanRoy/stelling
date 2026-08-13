@@ -8,6 +8,7 @@ SPDX-License-Identifier: Apache-2.0
 Prove that a loop body preserves its invariant in one step — and by
 induction, for all steps.
 
+<!-- doc-example: illustrative -->
 ```python
 from stelling.inductive import check_inductive_step
 
@@ -33,6 +34,7 @@ the iteration count, it holds for all steps.
 
 ## The body function
 
+<!-- doc-example: illustrative -->
 ```python
 def loop_body(state, constants):
     x = state["position"]
@@ -53,6 +55,7 @@ keys as `state_bounds`.
 Each entry is `((lo, hi), dtype)` for scalar state, or
 `((lo, hi), dtype, shape)` for array-valued state:
 
+<!-- doc-example: illustrative -->
 ```python
 state_bounds = {
     "temperature": ((200.0, 5000.0), "float64", (100,)),  # 100-element array
@@ -88,6 +91,7 @@ When the interval domain returns UNKNOWN (a common outcome for non-trivial
 bodies where outputs touch the boundary), pass `solver_timeout_ms` to
 escalate:
 
+<!-- doc-example: illustrative -->
 ```python
 v = check_inductive_step(
     body=loop_body,

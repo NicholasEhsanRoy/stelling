@@ -1777,7 +1777,7 @@ def escalate(
                 notes=(f"assert #{item.index}: {reason}",),
             )
         records.append(record)
-    if propagation.assume_dropped:
+    if propagation.assume_dropped and not propagation.relational_assumes:
         # F7's no-op half, solver side, and it must be ONE-SIDED. Declining
         # escalation outright was the first attempt and it was wrong: it
         # suppressed unsat too, and a relational assume that stays inert in
@@ -1788,6 +1788,13 @@ def escalate(
         # So only VIOLATIONS are withheld. A discharge over a superset implies
         # a discharge over the intended set; a witness over a superset may lie
         # entirely outside the precondition, which is the measured defect.
+        #
+        # EXCEPTION: when relational assumes are FORWARDED to the solver as
+        # axioms (propagation.relational_assumes is non-empty), the solver
+        # ran WITH the precondition. Its witness satisfies the assume by
+        # construction — it's a genuine violation, not an artifact of the
+        # wider domain. The reason for withholding ("solver ran without the
+        # constraint") no longer applies.
         records = [
             r if r.outcome not in (OB_VIOLATED_WITNESS, OB_VIOLATED_CONSTANT)
             else ObligationEscalation(

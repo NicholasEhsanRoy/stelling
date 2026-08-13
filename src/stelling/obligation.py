@@ -140,7 +140,7 @@ INTEGER_POW_EXPANSION_CAP = 64
 # pow with rational exponent p/q is encoded as an auxiliary variable
 # y with y^q = x^p. Beyond this denominator the polynomial degree
 # risks solver timeout, so the obligation declines.
-RATIONAL_POW_DENOMINATOR_CAP = 6
+RATIONAL_POW_DENOMINATOR_CAP = 64
 
 _FLOAT_INPUT_DTYPES = frozenset({"float16", "float32", "float64"})
 

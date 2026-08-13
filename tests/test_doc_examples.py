@@ -19,8 +19,8 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                40
-      marked illustrative — not run                 11
+    ```python blocks                                44
+      marked illustrative — not run                 15
       EXECUTED (exit 0 required)                    29
         marked run-only — output not compared        3
         OUTPUT COMPARED against a fence             26
@@ -139,8 +139,8 @@ SRC = REPO / "src"
 # The inventory the docstring states. A change here is a change to what
 # this file promises, so it must be made deliberately and in both places.
 EXPECTED_INVENTORY = {
-    "python_blocks": 40,
-    "illustrative": 11,
+    "python_blocks": 44,
+    "illustrative": 15,
     "executed": 29,
     "run_only": 3,
     "compared": 26,

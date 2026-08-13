@@ -363,13 +363,14 @@ def test_pow_two_thirds_verifies():
 
 
 def test_pow_large_denominator_exponent_declines():
-    """x in [1, 4], x**(1/7) has denominator > 6 and must decline.
+    """x in [1, 4], x**(1/97) has denominator > 64 and must decline.
 
     Exponents whose rational representation has a denominator exceeding
-    RATIONAL_POW_DENOMINATOR_CAP are declined to avoid solver timeout."""
+    RATIONAL_POW_DENOMINATOR_CAP are declined to avoid emitting
+    extremely high-degree polynomials."""
     def h():
         x = any_array((), "float64", (1.0, 4.0))
-        return (assert_(x ** (1.0/7.0) >= 1.0),)
+        return (assert_(x ** (1.0/97.0) >= 1.0),)
 
     v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
     assert v.status == "UNKNOWN"
