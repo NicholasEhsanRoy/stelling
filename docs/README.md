@@ -19,6 +19,7 @@ harness, a stamped verdict, in four files.
 | [Choosing a solver backend](choosing-a-solver-backend.md) | z3, cvc5, or both: how obligations are routed by fragment, what each backend decided in a measured battery, and what installing only one costs |
 | [Reproducing a witness](reproducing-a-witness.md) | emitting a runnable file that executes a REFUTED's witness through your own program, without importing stelling |
 | [The overflow tripwire](overflow-tripwire.md) | one line in `conftest.py`: find the integer constants JAX silently narrows in the traced code you run, and read exactly which doors it does not watch |
+| [Inductive step verification](../src/stelling/inductive.py) | `check_inductive_step(body, state_bounds)`: prove a loop body preserves its invariant in one step — VERIFIED means it holds for all iterations |
 | [Norms](norms.md) | twenty-three rules, each earned by a specific failure and each naming the instances that earned it — the reasoning behind what a contribution is asked for |
 
 ## Records

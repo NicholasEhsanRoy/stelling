@@ -64,9 +64,12 @@ SPDX-License-Identifier: Apache-2.0
   infinite (sound: bounded reals are finite by construction). Unblocks
   solver escalation on every harness containing `jnp.isfinite()`.
 
-- **`pow` emission** (integer exponents): `x**2`, `x**3`, `x**(-1)` etc.
-  expand to explicit products in SMT-LIB2. Non-integer exponents (0.5 for
-  sqrt) decline — SMT-LIB2 QF_NRA has no standard real-power operator.
+- **`pow` emission** (integer AND rational exponents): integer exponents
+  (`x**2`, `x**3`, `x**(-1)`) expand to explicit products. Rational
+  exponents (`x**(1/2)`, `x**(1/3)`, `x**(2/3)`) emit as auxiliary-variable
+  polynomial constraints (`y^q = x^p` with sign constraints) — both z3 and
+  cvc5 handle these in QF_NRA. Denominator capped at 6; base must be
+  non-negative (JAX returns NaN for `pow(negative, fractional)`).
 
 - **Relational assumes forwarded to solver**: when `assume(e1 < e2)`
   involves two variable operands (a constraint the interval domain cannot
@@ -84,6 +87,8 @@ SPDX-License-Identifier: Apache-2.0
   preserves declared bounds in one step. VERIFIED means the invariant
   holds for all iterations by induction. Constructs the harness
   automatically from the body function and declared state bounds.
+  Supports scalar and array-shaped state variables (shape specified per
+  variable in the bounds declaration).
 
 ### Known limitations (0.2.0)
 
@@ -93,8 +98,9 @@ SPDX-License-Identifier: Apache-2.0
   boundary-aware division handles the resulting `[0, hi]` gracefully.
 - The dependency problem (A ∧ ¬A = unknown in intervals) is inherent to
   the non-relational domain. Solver escalation is the designed remedy.
-- `check_inductive_step` supports scalar state only (one entry per
-  element for vector state).
+- Rational pow requires non-negative base (JAX returns NaN for
+  `pow(negative, fractional)`). Denominator capped at 6 to bound solver
+  time.
 
 ---
 
