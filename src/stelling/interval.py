@@ -661,6 +661,20 @@ def boundary_div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     the appropriate infinite endpoint.
     """
     def f(alo, ahi, blo, bhi):
+        # Precondition validation: reject divisors that are not valid
+        # one-sided-boundary cases. A function must be correct regardless of
+        # who calls it — wrong results are worse than crashes.
+        if blo < 0.0 < bhi:
+            raise IntervalError(
+                f"boundary_div requires a one-sided-boundary divisor, but got "
+                f"a true straddle [{blo}, {bhi}] (lo < 0 < hi); use div() for "
+                f"divisors that span both signs"
+            )
+        if blo == 0.0 and bhi == 0.0:
+            raise IntervalError(
+                f"boundary_div requires a one-sided-boundary divisor, but got "
+                f"point-at-zero [0, 0]; division by zero has no finite result"
+            )
         b_contains_zero = blo <= 0.0 <= bhi
         if not b_contains_zero:
             # Normal division (no zero in divisor)
