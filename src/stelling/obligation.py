@@ -137,6 +137,11 @@ ELEMENT_BUDGET = 512
 # script stops being auditable by eye and the emission declines instead.
 INTEGER_POW_EXPANSION_CAP = 64
 
+# pow with rational exponent p/q is encoded as an auxiliary variable
+# y with y^q = x^p. Beyond this denominator the polynomial degree
+# risks solver timeout, so the obligation declines.
+RATIONAL_POW_DENOMINATOR_CAP = 6
+
 _FLOAT_INPUT_DTYPES = frozenset({"float16", "float32", "float64"})
 
 # scalar decoders for size-1 ir.Array literals/consts (numpy dtype .str)
@@ -1734,31 +1739,48 @@ class _Slicer:
                     f"pow is emittable (the exponent must be a compile-time "
                     f"constant)"
                 )
-            # The emission expands pow to explicit products (same as
-            # integer_pow), so the exponent must be an integer. Non-integer
-            # exponents (e.g. 0.5 for sqrt) have no standard SMT-LIB2
-            # emission in QF_NRA, so the obligation declines.
             exp_val = _decode_elements(eqn.invars[1].val)[0]
             exp_float = float(exp_val)
-            if exp_float != int(exp_float):
-                raise _Decline(
-                    f"'pow' with non-integer exponent {exp_float}: "
-                    f"only integer exponents can be expanded to products "
-                    f"for SMT-LIB2 emission"
-                )
-            y = int(exp_float)
-            if abs(y) > INTEGER_POW_EXPANSION_CAP:
-                raise _Decline(
-                    f"'pow' exponent {y} exceeds the v1 expansion "
-                    f"cap ({INTEGER_POW_EXPANSION_CAP})"
-                )
-            if y < 0:
-                base = self._resolve_for_guard(eqn.invars[0])
-                problem = _zero_element_problem(base, self.env)
-                if problem is not None:
+            if exp_float == int(exp_float):
+                # Integer exponent: expand to products (same as integer_pow).
+                y = int(exp_float)
+                if abs(y) > INTEGER_POW_EXPANSION_CAP:
                     raise _Decline(
-                        f"'pow' with negative exponent {y}: "
-                        f"{DIV_GUARD_REASON}{problem}"
+                        f"'pow' exponent {y} exceeds the v1 expansion "
+                        f"cap ({INTEGER_POW_EXPANSION_CAP})"
+                    )
+                if y < 0:
+                    base = self._resolve_for_guard(eqn.invars[0])
+                    problem = _zero_element_problem(base, self.env)
+                    if problem is not None:
+                        raise _Decline(
+                            f"'pow' with negative exponent {y}: "
+                            f"{DIV_GUARD_REASON}{problem}"
+                        )
+            else:
+                # Non-integer exponent: accept only if it is a rational
+                # p/q with q <= RATIONAL_POW_DENOMINATOR_CAP (to avoid
+                # solver timeouts on large polynomial constraints).
+                frac = Fraction(exp_float).limit_denominator(
+                    RATIONAL_POW_DENOMINATOR_CAP
+                )
+                # Verify the limited fraction is close to the original float
+                if abs(float(frac) - exp_float) > 1e-12:
+                    raise _Decline(
+                        f"'pow' with non-rational exponent {exp_float}: "
+                        f"cannot be represented as p/q with q <= "
+                        f"{RATIONAL_POW_DENOMINATOR_CAP}"
+                    )
+                if frac.numerator < 0:
+                    raise _Decline(
+                        f"'pow' with negative rational exponent {frac}: "
+                        f"negative rational exponents are not supported"
+                    )
+                if frac.denominator > RATIONAL_POW_DENOMINATOR_CAP:
+                    raise _Decline(
+                        f"'pow' rational exponent {frac} has denominator "
+                        f"{frac.denominator} exceeding the cap "
+                        f"{RATIONAL_POW_DENOMINATOR_CAP} (solver timeout risk)"
                     )
         if prim in _INT_OVERFLOW_EMITTED:
             # SMT-LIB2 Reals are unbounded; jax integers wrap. Emitting a
@@ -2215,6 +2237,8 @@ class _Slicer:
                 # the base depends on a declaration (same logic as
                 # integer_pow: exponent 1.0 is the identity, 0.0 is
                 # constant — but any other value produces a nonlinear term).
+                # Rational exponents produce auxiliary polynomial constraints
+                # (y^q = x^p), which are inherently nonlinear.
                 exp_atom = eqn.invars[1]
                 if isinstance(exp_atom, ir.Literal):
                     exp_val = _decode_elements(exp_atom.val)[0]
@@ -2522,12 +2546,23 @@ def _root_elements(
                 y = int(params["y"])
                 out = tuple(ins[0][i] ** y for i in idx)
             elif prim == "pow":
-                # pow [base, exponent_literal]: the _validate guard ensures
-                # only integer exponents reach here. Replay as exact
-                # Fraction ** int, same arithmetic as integer_pow.
+                # pow [base, exponent_literal]: integer exponents replay as
+                # exact Fraction ** int; rational exponents p/q replay as
+                # the real p/q-th power via float (the replay checks the
+                # violation direction, not exact equality).
                 ia, ib = _pair_elementwise(eqn)
-                y = int(float(ins[1][ib[0]]))  # scalar exponent
-                out = tuple(ins[0][ia[i]] ** y for i in range(n_out))
+                exp_float = float(ins[1][ib[0]])
+                if exp_float == int(exp_float):
+                    y = int(exp_float)
+                    out = tuple(ins[0][ia[i]] ** y for i in range(n_out))
+                else:
+                    # Rational exponent: replay as float arithmetic.
+                    # The auxiliary-variable encoding is exact over Reals,
+                    # but replay only needs to confirm violation direction.
+                    out = tuple(
+                        Fraction(float(ins[0][ia[i]]) ** exp_float)
+                        for i in range(n_out)
+                    )
             elif prim == "square":
                 (idx,) = _pair_elementwise(eqn)
                 out = tuple(_square_value(ins[0][i]) for i in idx)

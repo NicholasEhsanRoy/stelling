@@ -281,3 +281,84 @@ def test_constants_are_traced_not_declared():
         constants={"tiny": 0.01},
     )
     assert v.status == "VERIFIED"
+
+
+# --- Array-shaped state (0.2.0) -----------------------------------------------
+
+
+def test_array_shape_damping_verifies():
+    """Element-wise damping on shape=(3,) arrays should VERIFY.
+
+    0.9 * v where v in [-10, 10]^3: output in [-9, 9]^3, within bounds."""
+
+    def body(state, constants):
+        return {"position": constants["damping"] * state["position"]}
+
+    v = check_inductive_step(
+        body=body,
+        state_bounds={"position": ((-10.0, 10.0), "float64", (3,))},
+        constants={"damping": 0.9},
+    )
+    assert v.status == "VERIFIED", (
+        f"expected VERIFIED for element-wise damping, got {v.status}; "
+        f"notes: {v.notes}"
+    )
+
+
+def test_array_shape_one_element_escapes_refutes():
+    """A body where one element of a vector escapes should REFUTE.
+
+    With v in [1, 5]^3, 3.0 * v = [3, 15]^3 which exceeds 5.
+    REFUTED with a solver witness."""
+
+    def body(state, constants):
+        return {"velocity": 3.0 * state["velocity"]}
+
+    v = check_inductive_step(
+        body=body,
+        state_bounds={"velocity": ((1.0, 5.0), "float64", (3,))},
+        solver_timeout_ms=30_000,
+    )
+    assert v.status == "REFUTED", (
+        f"expected REFUTED for expansive vector, got {v.status}; "
+        f"notes: {v.notes}"
+    )
+
+
+def test_array_shape_backward_compatible():
+    """Existing scalar tests still pass with the 2-tuple API."""
+
+    def body(state, constants):
+        return {"x": 0.5 * state["x"]}
+
+    v = check_inductive_step(
+        body=body,
+        state_bounds={"x": ((-10.0, 10.0), "float64")},
+    )
+    assert v.status == "VERIFIED"
+
+
+def test_array_shape_invalid_shape_raises():
+    """Non-tuple or negative shape raises TypeError."""
+
+    def body(state, constants):
+        return {"x": state["x"]}
+
+    with pytest.raises(TypeError, match="shape must be a tuple"):
+        check_inductive_step(
+            body=body,
+            state_bounds={"x": ((-10.0, 10.0), "float64", "not_a_tuple")},
+        )
+
+
+def test_array_shape_explicit_scalar():
+    """Explicit shape=() is equivalent to the 2-tuple API."""
+
+    def body(state, constants):
+        return {"x": 0.5 * state["x"]}
+
+    v = check_inductive_step(
+        body=body,
+        state_bounds={"x": ((-10.0, 10.0), "float64", ())},
+    )
+    assert v.status == "VERIFIED"

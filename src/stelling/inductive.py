@@ -54,16 +54,18 @@ def check_inductive_step(
         JAX-traceable.  Receives one array per state variable and a dict
         of constants, returns a dict of arrays (the new state) with the
         same keys as ``state_bounds``.
-    state_bounds : dict[str, tuple[tuple[float, float], dtype]]
+    state_bounds : dict[str, tuple]
         Declared bounds for each state variable.  Keys are variable names;
-        values are ``((lo, hi), dtype)`` where ``(lo, hi)`` is the invariant
-        interval and ``dtype`` is a JAX-compatible dtype string or object.
+        values are either:
 
-        Each state variable is declared as a **scalar** (shape ``()``).
-        For vector-valued state, declare one entry per element (e.g.,
-        ``{"x0": ..., "x1": ..., "x2": ...}`` for a 3-element vector).
-        This is a deliberate scope constraint — array-shape state would
-        need per-element obligation indexing that this v1 does not build.
+        * ``((lo, hi), dtype)`` — scalar state (shape ``()``), backward
+          compatible with v0.1.
+        * ``((lo, hi), dtype, shape)`` — array state with the given shape.
+          The same bounds apply elementwise to every element of the array.
+
+        ``(lo, hi)`` is the invariant interval, ``dtype`` is a
+        JAX-compatible dtype string or object, and ``shape`` is a tuple of
+        non-negative integers (e.g. ``(3,)`` for a 3-vector).
     constants : dict[str, any] or None
         Extra parameters held constant across iterations, passed directly
         to ``body``.  Not declared as symbolic inputs; their concrete values
@@ -114,7 +116,9 @@ def check_inductive_step(
     if constants is None:
         constants = {}
 
-    # Validate the shape of each state_bounds entry
+    # Validate the shape of each state_bounds entry and normalize to
+    # (bounds, dtype, shape) triples.
+    _normalized_bounds = {}
     for name, spec in state_bounds.items():
         if not isinstance(name, str):
             raise TypeError(
@@ -122,18 +126,32 @@ def check_inductive_step(
                 f"for key {name!r}"
             )
         try:
-            bounds, dtype = spec
+            if len(spec) == 3:
+                bounds, dtype, shape = spec
+            elif len(spec) == 2:
+                bounds, dtype = spec
+                shape = ()
+            else:
+                raise ValueError("wrong length")
             lo, hi = bounds
         except (TypeError, ValueError) as e:
             raise TypeError(
-                f"state_bounds[{name!r}] must be ((lo, hi), dtype), "
-                f"got {spec!r}"
+                f"state_bounds[{name!r}] must be ((lo, hi), dtype) or "
+                f"((lo, hi), dtype, shape), got {spec!r}"
             ) from e
         if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
             raise TypeError(
                 f"state_bounds[{name!r}] bounds must be numeric, "
                 f"got lo={lo!r}, hi={hi!r}"
             )
+        if not isinstance(shape, tuple) or not all(
+            isinstance(d, int) and d >= 0 for d in shape
+        ):
+            raise TypeError(
+                f"state_bounds[{name!r}] shape must be a tuple of "
+                f"non-negative integers, got {shape!r}"
+            )
+        _normalized_bounds[name] = ((lo, hi), dtype, shape)
 
     # -- Build the harness -------------------------------------------------------
     def harness():
@@ -141,8 +159,8 @@ def check_inductive_step(
 
         # Declare each state variable with the invariant bounds
         state = {}
-        for name, ((lo, hi), dtype) in state_bounds.items():
-            state[name] = any_array((), dtype, (lo, hi))
+        for name, ((lo, hi), dtype, shape) in _normalized_bounds.items():
+            state[name] = any_array(shape, dtype, (lo, hi))
 
         # Run one step of the body
         new_state = body(state, constants)
@@ -168,8 +186,9 @@ def check_inductive_step(
             )
 
         # Assert: each output must stay within the invariant bounds
+        # (assert_ is elementwise on arrays, so >= and <= broadcast correctly)
         obligations = []
-        for name, ((lo, hi), _dtype) in state_bounds.items():
+        for name, ((lo, hi), _dtype, _shape) in _normalized_bounds.items():
             out = new_state[name]
             obligations.append(assert_(out >= lo))
             obligations.append(assert_(out <= hi))
@@ -201,7 +220,7 @@ def check_inductive_step(
     elif verdict.status == "REFUTED":
         # Identify which state variables escaped
         escaped = []
-        for i, (name, _) in enumerate(state_bounds.items()):
+        for i, name in enumerate(_normalized_bounds.keys()):
             lo_idx = 2 * i
             hi_idx = 2 * i + 1
             for ob in verdict.obligations:
