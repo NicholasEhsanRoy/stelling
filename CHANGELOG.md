@@ -59,16 +59,10 @@ SPDX-License-Identifier: Apache-2.0
 
 ### Known limitations (0.2.0)
 
-- The reachability conjunct is applied only in the interval-verdict path
-  (`make_verdict`), not in the solver-verdict path (`make_solver_verdict`).
-  The same harness may give UNKNOWN (interval, dead-variable downgrade)
-  vs REFUTED (solver, no downgrade).
 - `assume(x > 0)` in real mode still narrows to `[0, hi]` (closed
   intervals cannot represent open bounds in exact reals). The IEEE bump
-  is exact; the real-mode overapproximation is sound.
-- `boundary_div` is a pipeline-internal helper and does not validate its
-  preconditions (callers in `_t_div` do). Direct use with a true straddle
-  or `[0, 0]` divisor is unsupported.
+  is exact; the real-mode overapproximation is sound. In real mode,
+  boundary-aware division handles the resulting `[0, hi]` gracefully.
 
 ---
 
