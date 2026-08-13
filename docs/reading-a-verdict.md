@@ -632,6 +632,22 @@ in this order:
 5. **Boundary tightness.** An obligation whose threshold is not exactly
    representable can land in the rounding gap; see
    [preconditions.md](preconditions.md#state-thresholds-as-representable-values-where-you-can).
+6. **Compound boolean conditions.** A `jnp.where(cond1 & cond2, ...)` goes
+   UNKNOWN when either `cond1` or `cond2` is undecidable, OR when the
+   primitive for `&` has no transfer. Since 0.2.0 the boolean logic
+   transfers (`and`, `or`, `not`) are registered, so two decidable
+   predicates combined with `&` or `|` produce a decidable result. If the
+   UNKNOWN persists after upgrading, one of the component predicates is
+   genuinely undecidable over the declared box.
+7. **The dependency problem (correlated conditions).** Interval arithmetic
+   evaluates each operand independently. If the same variable appears in
+   two places — e.g., `cond & ~cond`, or two `jnp.where` calls guarding
+   on the same predicate — the tool has no memory that they share a source
+   and cannot prove their logical relationship. The result is a safe but
+   imprecise UNKNOWN. **Remedy:** pass `solver_timeout_ms` — the SMT
+   encoding is inherently relational and WILL prove the mutual exclusion.
+   This is the designed escalation path for constraints the interval domain
+   cannot express.
 
 ## Further
 

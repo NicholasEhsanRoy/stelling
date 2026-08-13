@@ -616,6 +616,40 @@ whenever an obligation or a membership condition comes back undecided**,
 because it names the primitive that stopped the analysis whatever that
 primitive is, at any size, on any spelling.
 
+## `jnp.where` and selector decidability
+
+`jnp.where(cond, a, b)` traces to a `select_n` primitive. When the
+condition's interval is **provably one-sided** (`[True, True]` or
+`[False, False]` over the entire declared box), stelling uses only the
+reachable branch — the unreachable branch's interval is discarded, no
+matter how wide it is. This is standard branch pruning in abstract
+interpretation.
+
+When the condition is **undecidable** (`[False, True]` — some inputs
+make it True, others False), `select_n` takes the hull of both branches.
+The result is the union of both possible outcomes, which is sound but
+imprecise: every obligation downstream gets the merged interval.
+
+**What makes a condition decidable:**
+- `x > threshold` where the input's interval is entirely above or below
+  the threshold (e.g., `x ∈ [5, 10]` and threshold = 3 → always True)
+- `jnp.isfinite(x)` where the input is bounded (always True for bounded
+  declarations)
+- Compound conditions: `cond1 & cond2` is decidable if both components
+  are decidable (the `and` transfer propagates three-valued logic)
+
+**What does NOT help (the dependency problem):**
+If the same condition appears in two places — `jnp.where(cond, a, b)` and
+later `jnp.where(~cond, c, d)` — interval arithmetic does NOT track that
+they are the same variable negated. Each `where` is evaluated
+independently. `cond & ~cond` evaluates to `[0, 1]` (unknown) rather than
+`[0, 0]` (definitely False) because the domain is non-relational.
+
+**Remedy:** pass `solver_timeout_ms` — the SMT encoding carries the full
+constraint set and WILL prove mutual exclusions, contradictions, and
+correlated conditions that intervals cannot express. This is the designed
+escalation path; the interval pass is the fast-but-imprecise first layer.
+
 ## `trace(harness)`
 
 Traces a nullary harness and transcribes it into the jax-free
