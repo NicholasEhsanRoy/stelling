@@ -115,17 +115,23 @@ for h in (assert_not_returned, nonvacuity_not_returned,
 prints:
 
 ```
-assert_not_returned      -> REFUTED  nonvacuity=UNCHECKED
+assert_not_returned      -> UNKNOWN  nonvacuity=UNCHECKED
 nonvacuity_not_returned  -> VERIFIED nonvacuity=FAILED
 assume_not_returned      -> VERIFIED nonvacuity=UNCHECKED
 assume_actually_removed  -> UNKNOWN  nonvacuity=UNCHECKED
 ```
 
-Every un-returned statement was still recorded: the obligation still
-REFUTES, the membership condition still FAILS, and the assumption still
-narrows. The last two rows are the pair to read together — their Python
-differs only in whether `assume` is *called* — and the un-returned call
-is what makes the difference between VERIFIED and UNKNOWN. They are two
+Every un-returned statement was still recorded in the traced jaxpr. The
+membership condition still FAILS, and the assumption still narrows.
+The assert in `assert_not_returned` is violated but **downgraded to
+UNKNOWN**: since 0.2.0, the reaches-output reachability conjunct detects
+that the violated variable does not flow to any output of the harness
+function (the caller never sees the bad value). The violation is real
+but dead, so stelling cannot call it a finding.
+
+The last two rows are the pair to read together — their Python differs
+only in whether `assume` is *called* — and the un-returned call is what
+makes the difference between VERIFIED and UNKNOWN. They are two
 different queries, and measurably so: 6 equations against 4, and
 different content hashes. That is the point. Calling `assume` puts a
 `stelling_assume` equation in the traced jaxpr; not returning its result
@@ -135,11 +141,11 @@ does not take it back out.
 removing it from the return.** An `assume` you drop from the return list
 is still in force, and a VERIFIED still rides on it. Delete the call.
 
-Returning them anyway is this project's convention and worth keeping —
-it is what makes an obligation visible to a reader and to a linter, and
-it is the defence if some future tracing path *does* prune an unused
-equation. It is a discipline, not a mechanism, and the measurement above
-is what the mechanism actually does today.
+**Return your asserts.** An `assert_` whose output is not returned is
+still recorded and still evaluated, but the reachability conjunct
+downgrades its violation to UNKNOWN because the violated variable is
+dead (does not flow to any output). Return it to keep the violation
+consequential.
 
 ## `any_array(shape, dtype, bounds)`
 

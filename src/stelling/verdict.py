@@ -39,6 +39,7 @@ from dataclasses import dataclass, fields
 
 from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
 from stelling.propagate import ObligationReport, Propagation
+from stelling.reachability import obligation_operand_ids, reaches_output
 
 __all__ = [
     "declined",
@@ -1535,6 +1536,58 @@ def make_verdict(
     else:
         status = "UNKNOWN"
 
+    # -- reaches-output conjunct ------------------------------------------------
+    #
+    # A violated obligation whose predicate operand does NOT reach any output
+    # of the harness function is a violation on a dead variable: the caller
+    # never observes the bad value.  Downgrade from REFUTED to UNKNOWN with a
+    # note explaining why.  Only REFUTED verdicts are affected; VERIFIED and
+    # UNKNOWN are unchanged.
+    obligations = propagation.obligations
+    reachability_notes: list[str] = []
+    if status == "REFUTED":
+        live = reaches_output(closed.jaxpr)
+        operand_ids = obligation_operand_ids(closed)
+        downgraded: list[ObligationReport] = []
+        for i, ob in enumerate(obligations):
+            if ob.status != "violated-over-set":
+                downgraded.append(ob)
+                continue
+            # Check if this obligation's operand variables reach an output.
+            # operand_ids[i] holds the Var IDs of the assert's invars.
+            # If the obligation comes from a sub-jaxpr (cond branch, etc.)
+            # there is no matching top-level assert — assume LIVE (fail
+            # safe: never downgrade what we cannot prove dead).
+            if i >= len(operand_ids):
+                downgraded.append(ob)
+            elif any(vid in live for vid in operand_ids[i]):
+                # Reachable: the violation stays.
+                downgraded.append(ob)
+            else:
+                # Unreachable: downgrade to UNKNOWN with a note.
+                reachability_notes.append(
+                    f"obligation #{ob.index} is violated but the violated "
+                    f"variable does not reach any output of the harness "
+                    f"function"
+                )
+                downgraded.append(
+                    ObligationReport(
+                        index=ob.index,
+                        status="unknown",
+                        detail=(
+                            f"violated-over-set but unreachable: the "
+                            f"predicate operand does not flow to any output "
+                            f"of the traced function (dead variable)"
+                        ),
+                        source_info=ob.source_info,
+                    )
+                )
+        obligations = tuple(downgraded)
+        # Re-evaluate status: if all violations were unreachable, no
+        # reachable violation remains to drive REFUTED.
+        if not any(o.status == "violated-over-set" for o in obligations):
+            status = "UNKNOWN"
+
     checks = propagation.nonvacuity_checks
     if not checks:
         nonvacuity = "UNCHECKED — no membership conditions declared"
@@ -1552,8 +1605,8 @@ def make_verdict(
         nonvacuity = "undecided — a membership condition could not be decided"
 
     notes = propagation.notes + undecided_cause_note(
-        propagation.coverage, propagation.obligations
-    )
+        propagation.coverage, obligations
+    ) + tuple(reachability_notes)
     if status == "VERIFIED" and not nonvacuity.startswith("checked"):
         notes = notes + (
             f"nonvacuity {nonvacuity.split(' — ')[0]}: this VERIFIED may be "
@@ -1618,7 +1671,7 @@ def make_verdict(
     )
     return Verdict(
         status=status,
-        obligations=propagation.obligations,
+        obligations=obligations,
         stamp=stamp,
         notes=notes,
     )
