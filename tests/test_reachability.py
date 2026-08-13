@@ -11,11 +11,9 @@ Three cases per the design:
 
 from __future__ import annotations
 
-import pytest
-
 from stelling import ir
 from stelling.propagate import propagate
-from stelling.reachability import obligation_operand_ids, reaches_output
+from stelling.reachability import defined_vars, reaches_output
 from stelling.verdict import make_verdict
 
 F64 = ir.Aval(kind="ShapedArray", shape=(), dtype="float64")
@@ -110,18 +108,45 @@ def test_reaches_output_literal_output():
     assert 0 not in live  # x is never used for the output
 
 
-# -- Unit tests for obligation_operand_ids ------------------------------------
+# -- Unit tests for defined_vars -----------------------------------------------
 
 
-def test_obligation_operand_ids_basic():
-    """Maps obligation indices to their assert invars."""
-    x, pred, out = var(0), var(1, BOOL), var(2, BOOL)
+def test_defined_vars_includes_all_equation_outvars():
+    """defined_vars returns all Var IDs in the top-level scope."""
+    x, y, z = var(0), var(1), var(2)
+    jaxpr = ir.Jaxpr(
+        constvars=(),
+        invars=(),
+        outvars=(z,),
+        eqns=(
+            any_eqn(x, 0.0, 1.0),
+            ir.JaxprEqn(primitive="exp", invars=(x,), outvars=(y,)),
+            ir.JaxprEqn(primitive="exp", invars=(y,), outvars=(z,)),
+        ),
+    )
+    scope = defined_vars(jaxpr)
+    assert scope == frozenset({0, 1, 2})
+
+
+def test_operand_var_ids_propagated():
+    """ObligationReport carries operand_var_ids from propagation."""
+    x, ex, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
     closed = close(
-        [any_eqn(x, 0.0, 1.0), assert_eqn(pred, out)],
+        [
+            any_eqn(x, 1.0, 2.0),
+            ir.JaxprEqn(primitive="exp", invars=(x,), outvars=(ex,)),
+            ir.JaxprEqn(
+                primitive="lt",
+                invars=(ex, ir.Literal(val=2.0, aval=F64)),
+                outvars=(pred,),
+            ),
+            assert_eqn(pred, out),
+        ],
         (out,),
     )
-    ids = obligation_operand_ids(closed)
-    assert ids == [[1]]  # obligation #0's invar is var 1
+    p = propagate(closed)
+    # The obligation should carry the var ID of the assert's invar (pred = var 2)
+    assert p.obligations[0].operand_var_ids == (2,)
 
 
 # -- Integration tests: verdict assembly with reachability --------------------
@@ -285,3 +310,45 @@ class TestNonViolationsUnaffected:
         assert v.obligations[0].status == "discharged"
         # No reachability notes (not applicable to non-violations)
         assert not any("does not reach any output" in n for n in v.notes)
+
+
+# -- Interleaving test (jax required) -----------------------------------------
+# A cond with an assert inside a branch BEFORE a top-level assert: the
+# sub-jaxpr obligation must NOT be incorrectly downgraded.
+
+try:
+    import jax
+    import jax.numpy as jnp
+    from stelling.harness import any_array, assert_
+    from stelling.preconditions import check
+
+    _HAS_JAX = True
+except ImportError:
+    _HAS_JAX = False
+
+import pytest
+
+
+class TestSubJaxprInterleavingNotDowngraded:
+    """Sub-jaxpr obligations interleaved with top-level ones stay correct."""
+
+    @pytest.mark.skipif(not _HAS_JAX, reason="requires jax")
+    def test_cond_branch_violation_not_downgraded(self):
+        """A violation inside a forced cond branch stays REFUTED even when
+        a later top-level assert exists -- the positional index must not
+        misalign and incorrectly downgrade the branch obligation."""
+        jax.config.update("jax_enable_x64", True)
+
+        def h():
+            x = any_array((), jnp.float64, (1.0, 2.0))
+            # cond whose predicate is always True (x > 0 for x in [1,2])
+            branch_result = jax.lax.cond(
+                x > 0.0,
+                lambda v: assert_(v > 5.0),  # violated: x in [1,2] < 5
+                lambda v: assert_(v > -9.0),
+                x,
+            )
+            return branch_result
+
+        v = check(h, vacuity_mode="all")
+        assert v.status == "REFUTED"

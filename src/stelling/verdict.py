@@ -39,7 +39,7 @@ from dataclasses import dataclass, fields
 
 from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
 from stelling.propagate import ObligationReport, Propagation
-from stelling.reachability import obligation_operand_ids, reaches_output
+from stelling.reachability import defined_vars, reaches_output
 
 __all__ = [
     "declined",
@@ -1543,24 +1543,35 @@ def make_verdict(
     # never observes the bad value.  Downgrade from REFUTED to UNKNOWN with a
     # note explaining why.  Only REFUTED verdicts are affected; VERIFIED and
     # UNKNOWN are unchanged.
+    #
+    # Matching is by IDENTITY: each ObligationReport carries the Var IDs of
+    # its assert equation's invars (operand_var_ids), populated by the
+    # propagator at construction.  No positional indexing against the jaxpr's
+    # equation list — obligations from sub-jaxprs (forced cond branches, jit
+    # bodies) interleave with top-level ones and positional mapping misaligns.
     obligations = propagation.obligations
     reachability_notes: list[str] = []
     if status == "REFUTED":
         live = reaches_output(closed.jaxpr)
-        operand_ids = obligation_operand_ids(closed)
+        scope = defined_vars(closed.jaxpr)
         downgraded: list[ObligationReport] = []
-        for i, ob in enumerate(obligations):
+        for ob in obligations:
             if ob.status != "violated-over-set":
                 downgraded.append(ob)
                 continue
-            # Check if this obligation's operand variables reach an output.
-            # operand_ids[i] holds the Var IDs of the assert's invars.
-            # If the obligation comes from a sub-jaxpr (cond branch, etc.)
-            # there is no matching top-level assert — assume LIVE (fail
-            # safe: never downgrade what we cannot prove dead).
-            if i >= len(operand_ids):
+            # If the obligation carries no operand_var_ids (unexamined,
+            # or from a path that did not record them), fail-safe: never
+            # downgrade what we cannot prove dead.
+            if not ob.operand_var_ids:
                 downgraded.append(ob)
-            elif any(vid in live for vid in operand_ids[i]):
+                continue
+            # If the obligation's var IDs are not in the top-level
+            # jaxpr's scope, the obligation came from a sub-jaxpr (cond
+            # branch, etc.) and the top-level walk cannot judge it.
+            # Fail-safe: keep as REFUTED.
+            if not any(vid in scope for vid in ob.operand_var_ids):
+                downgraded.append(ob)
+            elif any(vid in live for vid in ob.operand_var_ids):
                 # Reachable: the violation stays.
                 downgraded.append(ob)
             else:
@@ -1580,6 +1591,7 @@ def make_verdict(
                             f"of the traced function (dead variable)"
                         ),
                         source_info=ob.source_info,
+                        operand_var_ids=ob.operand_var_ids,
                     )
                 )
         obligations = tuple(downgraded)

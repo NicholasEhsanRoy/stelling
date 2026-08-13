@@ -46,17 +46,20 @@ def reaches_output(jaxpr: ir.Jaxpr) -> frozenset[int]:
     return frozenset(live)
 
 
-def obligation_operand_ids(closed: ir.ClosedJaxpr) -> list[list[int]]:
-    """For each stelling_assert equation (in traversal order), return the
-    list of Var IDs among its invars.
+def defined_vars(jaxpr: ir.Jaxpr) -> frozenset[int]:
+    """Return ALL Var IDs defined in *jaxpr*'s top-level scope.
 
-    Obligation #N corresponds to the Nth stelling_assert equation
-    encountered in the jaxpr's equation list.  The returned list is
-    parallel to propagation.obligations.
+    This includes constvars, invars, and all equation outvars.  Used to
+    determine whether an obligation's operand_var_ids belong to THIS
+    jaxpr's scope (and thus can be judged by :func:`reaches_output`)
+    or to a sub-jaxpr's scope (where the top-level walk cannot decide).
     """
-    result: list[list[int]] = []
-    for eqn in closed.jaxpr.eqns:
-        if eqn.primitive == "stelling_assert":
-            ids = [atom.id for atom in eqn.invars if isinstance(atom, ir.Var)]
-            result.append(ids)
-    return result
+    ids: set[int] = set()
+    for v in jaxpr.constvars:
+        ids.add(v.id)
+    for v in jaxpr.invars:
+        ids.add(v.id)
+    for eqn in jaxpr.eqns:
+        for v in eqn.outvars:
+            ids.add(v.id)
+    return frozenset(ids)
