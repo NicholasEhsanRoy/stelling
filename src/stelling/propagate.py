@@ -210,6 +210,12 @@ class ObligationReport:
     status: str  # "discharged" | "unknown" | "violated-over-set"
     detail: str
     source_info: tuple[str, ...]
+    # The Var IDs of the stelling_assert equation's invars (the predicate
+    # operand).  Populated by the propagator for top-level and descended-into
+    # obligations; empty for unexamined obligations (inside opaque sub-jaxprs).
+    # Used by the reaches-output reachability conjunct to determine whether
+    # the violated variable flows to a function output.
+    operand_var_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -7721,6 +7727,9 @@ class _Propagator:
                     status=status,
                     detail=detail,
                     source_info=eqn.source_info,
+                    operand_var_ids=tuple(
+                        a.id for a in eqn.invars if isinstance(a, ir.Var)
+                    ),
                 )
             )
         if eqn.primitive == "stelling_nonvacuity":
