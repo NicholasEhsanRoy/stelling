@@ -104,8 +104,8 @@ def scalar_nonzero(dtype, envelope):
     return scalar, assert_(scalar != 0.0)
 
 
-def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None,
-          solver=None, strict=False):
+def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
+          refine=None, solver=None, strict=False):
     """Run a precondition harness end-to-end and return the stamped
     :class:`stelling.verdict.Verdict` — with the vacuity check built in:
     **this entry point cannot return an unchecked VERIFIED.**
@@ -162,10 +162,22 @@ def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None,
     from stelling import ir
     from stelling.verdict import declined as _declined
 
+    if semantics not in ("real", "ieee"):
+        raise ValueError(f"semantics must be 'real' or 'ieee', got {semantics!r}")
+    if semantics == "ieee" and solver_timeout_ms is not None:
+        raise ValueError(
+            "solver_timeout_ms and semantics='ieee' are contradictory: "
+            "the SMT backends emit over the reals (QF_LRA/QF_NRA) and "
+            "cannot model format-specific rounding or overflow. Remove "
+            "solver_timeout_ms for ieee mode, or use semantics='real' "
+            "for solver escalation."
+        )
+
     try:
         verdict, _ = _pipeline(
             harness,
             vacuity_mode=vacuity_mode,
+            semantics=semantics,
             solver_timeout_ms=solver_timeout_ms,
             refine=refine,
             solver=solver,
@@ -188,8 +200,8 @@ def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None,
     return verdict
 
 
-def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None,
-              solver=None):
+def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
+              refine=None, solver=None):
     """The one pipeline behind :func:`check` — trace, propagate, optional
     affine refinement (``refine="affine"``, never on by default), optional
     solver escalation, stamped verdict assembly, and the VERIFIED widen
@@ -315,7 +327,7 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None,
         )
         return v, cj
 
-    p = propagate(cj)
+    p = propagate(cj, semantics=semantics)
     versions = dict(
         stelling_version=_stelling.__version__,
         jax_version=jax_version(),
@@ -389,7 +401,7 @@ def _pipeline(harness, *, vacuity_mode, solver_timeout_ms, refine=None,
         )
         return dataclasses.replace(v, stamp=stamp), cj
 
-    wide, wide_ref = _finish(wcj, propagate(wcj))
+    wide, wide_ref = _finish(wcj, propagate(wcj, semantics=semantics))
     still = [
         o.index for o in wide.obligations if o.status == "discharged"
     ]

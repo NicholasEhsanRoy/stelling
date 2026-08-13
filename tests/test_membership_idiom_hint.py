@@ -712,16 +712,17 @@ def test_a_top_upstream_of_the_predicate_gets_no_hint():
 
 
 def test_a_predicate_that_IS_another_primitives_top_gets_no_hint():
-    """The gate's own mutant: here the predicate itself is an artifact ⊤, so
-    a gate widened to "any ⊤" would fire, and `jnp.all` is still not the thing
-    to delete."""
+    """The gate's own mutant: here the predicate is a correctly-evaluated
+    NOT(definitely-true) = definitely-false, so the obligation is
+    violated-over-set. No hint should fire (the hint is about membership
+    idioms on UNKNOWN obligations, not violated ones)."""
     def h():
         x = any_array((3,), "float64", (1.0, 2.0))
         return (assert_(jnp.logical_not(x >= LO)),)
 
     p = _run(h)
-    assert p.obligations[0].status == "unknown"
-    assert p.coverage.unknown_primitives == (("not", 1),)
+    assert p.obligations[0].status == "violated-over-set"
+    assert p.coverage.unknown_primitives == ()
     assert _hinted(p) == []
 
 

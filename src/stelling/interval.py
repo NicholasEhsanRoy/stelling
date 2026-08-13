@@ -2213,6 +2213,17 @@ def logical_or(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     return _binary(a, b, f)
 
 
+def logical_not(a: IntervalArray) -> IntervalArray:
+    """Kleene NOT: ¬true = false, ¬false = true, ¬unknown = unknown.
+    On the {0,1} encoding: flip endpoints — ``[1 - hi, 1 - lo]``."""
+    los, his = [], []
+    for lo, hi in zip(a.los, a.his):
+        lo, hi = _bool3(lo, hi)
+        los.append(1.0 - hi)
+        his.append(1.0 - lo)
+    return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
+
+
 def reduce_or(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
     """Three-valued OR-fold over ``axes``: output shape is the input shape
     with those axes removed. The fold identity is definite-false (an OR
