@@ -1782,6 +1782,28 @@ class _Slicer:
                         f"{frac.denominator} exceeding the cap "
                         f"{RATIONAL_POW_DENOMINATOR_CAP} (solver timeout risk)"
                     )
+                # Base must be non-negative: JAX returns NaN for
+                # pow(negative, fractional), so the Real encoding (which
+                # always has a solution for odd q, or no solution for even q)
+                # does not model JAX's execution. Same guard pattern as the
+                # div-straddle and is_finite guards.
+                base = self._resolve_for_guard(eqn.invars[0])
+                base_iv = self.env.get(
+                    base.id if hasattr(base, "id") else None
+                )
+                if base_iv is None:
+                    raise _Decline(
+                        f"'pow' with rational exponent {frac}: base has no "
+                        f"propagated interval — cannot verify non-negativity"
+                    )
+                for i, lo in enumerate(base_iv.los):
+                    if lo < 0.0:
+                        raise _Decline(
+                            f"'pow' with rational exponent {frac}: base "
+                            f"interval includes negative values (lo={lo}); "
+                            f"JAX returns NaN for pow(negative, fractional) "
+                            f"— the Real encoding does not model this"
+                        )
         if prim in _INT_OVERFLOW_EMITTED:
             # SMT-LIB2 Reals are unbounded; jax integers wrap. Emitting a
             # computed integer as a Real would let the solver prove a claim

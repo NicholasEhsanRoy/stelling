@@ -376,3 +376,38 @@ def test_pow_large_denominator_exponent_declines():
     assert any("non-rational exponent" in n or "cap" in n for n in v.notes), (
         f"expected decline note about denominator cap; notes: {v.notes}"
     )
+
+
+@need_solver
+def test_pow_rational_negative_base_declines():
+    """SOUNDNESS: x in [-4, -1], x**0.5 must NOT verify.
+
+    JAX returns NaN for pow(negative, fractional). The Real encoding
+    would either have no solution (even q -> UNSAT -> false VERIFIED)
+    or model something JAX doesn't compute (odd q). The base-interval
+    guard declines this to UNKNOWN."""
+    def h():
+        x = any_array((), "float64", (-4.0, -1.0))
+        return (assert_(x ** 0.5 >= 99999.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
+    assert v.status != "VERIFIED", (
+        f"UNSOUND: rational pow on negative base was certified; "
+        f"notes: {v.notes}"
+    )
+    assert v.status == "UNKNOWN"
+    assert any("negative" in n for n in v.notes), (
+        f"expected decline note about negative base; notes: {v.notes}"
+    )
+
+
+@need_solver
+def test_pow_rational_straddle_base_declines():
+    """x in [-1, 4], x**0.5 declines because base can be negative."""
+    def h():
+        x = any_array((), "float64", (-1.0, 4.0))
+        return (assert_(x ** 0.5 >= 0.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
+    assert v.status == "UNKNOWN"
+    assert any("negative" in n for n in v.notes)
