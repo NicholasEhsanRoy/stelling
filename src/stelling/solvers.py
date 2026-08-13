@@ -1297,7 +1297,7 @@ def _dispatch_obligation(
     missing: tuple[str, ...],
     ledger: _Ledger,
     relational_assumes: tuple[ir.JaxprEqn, ...] = (),
-) -> ObligationEscalation:
+) -> tuple[ObligationEscalation, int]:
     ordered = tuple(
         sorted(
             backends,
@@ -1311,6 +1311,10 @@ def _dispatch_obligation(
                 sl, backend.flavor, config.timeout_ms,
                 relational_assumes=relational_assumes,
             )
+    # The count of relational assumes ACTUALLY emitted for this obligation's
+    # script. Identical across flavors (the logical content is the same; only
+    # the option block differs), so we take it from any script.
+    n_emitted = next(iter(scripts.values())).relational_assumes_emitted if scripts else 0
     wall_s = _wall_seconds(config.timeout_ms)
     notes: list[str] = []
     if relational_assumes:
@@ -1462,7 +1466,7 @@ def _dispatch_obligation(
 
     if "unsat" in answers:
         agreed = [b.label for b, _, raw, _ in runs if raw.answer == "unsat"]
-        return ObligationEscalation(
+        return (ObligationEscalation(
             index=sl.index,
             outcome=OB_DISCHARGED,
             detail=(
@@ -1474,7 +1478,7 @@ def _dispatch_obligation(
             witness=None,
             notes=tuple(notes) + degraded_notes(universal=True),
             answered_by=answered,
-        )
+        ), n_emitted)
 
     if "sat" in answers:
         sat_problems: list[str] = []
@@ -1525,7 +1529,7 @@ def _dispatch_obligation(
                     sl, values, solver_label=backend.label,
                     script_text=script.text,
                 )
-                return ObligationEscalation(
+                return (ObligationEscalation(
                     index=sl.index,
                     outcome=OB_VIOLATED_CONSTANT,
                     detail=(
@@ -1539,7 +1543,7 @@ def _dispatch_obligation(
                     witness=None,
                     notes=tuple(notes) + degraded_notes(universal=False),
                     answered_by=answered,
-                )
+                ), n_emitted)
             witness = make_validated_witness(
                 sl,
                 values,
@@ -1558,7 +1562,7 @@ def _dispatch_obligation(
                     "; violating element(s) of the assert operand: "
                     + ", ".join(str(i) for i in witness.violating_elements)
                 )
-            return ObligationEscalation(
+            return (ObligationEscalation(
                 index=sl.index,
                 outcome=OB_VIOLATED_WITNESS,
                 detail=(
@@ -1570,20 +1574,20 @@ def _dispatch_obligation(
                 witness=witness,
                 notes=tuple(notes) + degraded_notes(universal=False),
                 answered_by=answered,
-            )
+            ), n_emitted)
         detail_tail = (
             "; ".join(sat_problems)
             if sat_problems
             else "witness not independently replayable"
         )
-        return ObligationEscalation(
+        return (ObligationEscalation(
             index=sl.index,
             outcome=OB_UNKNOWN,
             detail=f"solver reported sat; {detail_tail} — UNKNOWN by policy",
             invocations=invocations(),
             witness=None,
             notes=tuple(notes),
-        )
+        ), n_emitted)
 
     reasons = (
         "; ".join(
@@ -1591,14 +1595,14 @@ def _dispatch_obligation(
         )
         or "every invocation's transport failed before its solver could run"
     )
-    return ObligationEscalation(
+    return (ObligationEscalation(
         index=sl.index,
         outcome=OB_UNKNOWN,
         detail=f"solver escalation did not decide ({reasons}); a timeout is never a VERIFIED",
         invocations=invocations(),
         witness=None,
         notes=tuple(notes),
-    )
+    ), n_emitted)
 
 
 # -- escalation over a propagated query ---------------------------------------
@@ -1738,10 +1742,10 @@ def escalate(
         )
     env = interval_env(closed)
     ledger = _Ledger()
-    records: list[ObligationEscalation] = []
+    records: list[tuple[ObligationEscalation, int]] = []
     for item in slice_unknown_obligations(closed, propagation, env):
         if isinstance(item, DeclinedObligation):
-            records.append(
+            records.append((
                 ObligationEscalation(
                     index=item.index,
                     outcome=OB_UNKNOWN,
@@ -1749,12 +1753,14 @@ def escalate(
                     invocations=(),
                     witness=None,
                     notes=(f"assert #{item.index}: escalation declined — {item.reason}",),
-                )
-            )
+                ),
+                0,
+            ))
             continue
         ledger_start = len(ledger.stamps)
+        n_emitted = 0
         try:
-            record = _dispatch_obligation(
+            record, n_emitted = _dispatch_obligation(
                 item, config, backends, missing, ledger,
                 relational_assumes=propagation.relational_assumes,
             )
@@ -1776,8 +1782,8 @@ def escalate(
                 witness=None,
                 notes=(f"assert #{item.index}: {reason}",),
             )
-        records.append(record)
-    if propagation.assume_dropped and not propagation.relational_assumes:
+        records.append((record, n_emitted))
+    if propagation.assume_dropped:
         # F7's no-op half, solver side, and it must be ONE-SIDED. Declining
         # escalation outright was the first attempt and it was wrong: it
         # suppressed unsat too, and a relational assume that stays inert in
@@ -1789,26 +1795,32 @@ def escalate(
         # a discharge over the intended set; a witness over a superset may lie
         # entirely outside the precondition, which is the measured defect.
         #
-        # EXCEPTION: when relational assumes are FORWARDED to the solver as
-        # axioms (propagation.relational_assumes is non-empty), the solver
-        # ran WITH the precondition. Its witness satisfies the assume by
-        # construction — it's a genuine violation, not an artifact of the
-        # wider domain. The reason for withholding ("solver ran without the
-        # constraint") no longer applies.
+        # PER-OBLIGATION GRANULARITY: when ALL relational assumes were
+        # ACTUALLY EMITTED for a specific obligation's script (n_emitted ==
+        # len(relational_assumes)), the solver ran WITH the full constraint
+        # set. Its witness satisfies the assume by construction — it's a
+        # genuine violation, not an artifact of the wider domain. Only
+        # un-withhold when ALL were emitted; if any were skipped (operands
+        # not in the backward cone), the solver ran over a wider domain and
+        # the witness might violate the missing assume.
+        n_total = len(propagation.relational_assumes)
         records = [
-            r if r.outcome not in (OB_VIOLATED_WITNESS, OB_VIOLATED_CONSTANT)
-            else ObligationEscalation(
+            (r, ne) if (
+                r.outcome not in (OB_VIOLATED_WITNESS, OB_VIOLATED_CONSTANT)
+                or (n_total > 0 and ne == n_total)
+            )
+            else (ObligationEscalation(
                 index=r.index,
                 outcome=OB_UNKNOWN,
                 detail=f"violation WITHHELD from REFUTED: {DROPPED_ASSUME_REFUSAL}",
                 invocations=r.invocations,
                 witness=None,
                 notes=r.notes + (DROPPED_ASSUME_REFUSAL,),
-            )
-            for r in records
+            ), ne)
+            for r, ne in records
         ]
     return Escalation(
-        records=tuple(records), notes=(), ledger=ledger,
+        records=tuple(r for r, _ in records), notes=(), ledger=ledger,
         semantics=propagation.semantics, query_sha256=query_sha256,
     )
 

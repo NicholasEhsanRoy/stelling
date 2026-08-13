@@ -164,6 +164,10 @@ class Script:
     # hand-built Script (tests, downstream tooling) stays constructible; an
     # empty value is not a claim of anything and never narrows the bar.
     slice_sha256: str = ""
+    # How many of the relational assumes were ACTUALLY emitted into this
+    # script (i.e. both operands had terms in the slice's backward cone).
+    # Zero when no relational assumes were passed or all were skipped.
+    relational_assumes_emitted: int = 0
 
     def stamp_options(self) -> tuple[tuple[str, str], ...]:
         """The option set as the stamp records it: the exact emitted
@@ -826,6 +830,7 @@ def emit(
     # Only emitted when BOTH operand variables have terms in this slice
     # (they are in the backward cone); otherwise silently skipped.
     _ASSUME_CMP_SYM = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "="}
+    n_relational_emitted = 0
     for ra_eqn in relational_assumes:
         cmp_sym = _ASSUME_CMP_SYM.get(ra_eqn.primitive)
         if cmp_sym is None:
@@ -859,6 +864,7 @@ def emit(
                 a_term = lhs_terms[ia[i]]
                 b_term = rhs_terms[ib[i]]
                 lines.append(f"(assert ({cmp_sym} {a_term} {b_term}))")
+            n_relational_emitted += 1
         elif len(idx) == 1:
             # unary — should not happen for a comparison, but be safe
             continue
@@ -881,4 +887,5 @@ def emit(
         options=options,
         sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         slice_sha256=slice_fingerprint(sl),
+        relational_assumes_emitted=n_relational_emitted,
     )
