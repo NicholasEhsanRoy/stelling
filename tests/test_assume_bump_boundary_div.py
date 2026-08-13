@@ -420,3 +420,42 @@ def test_real_mode_never_bumps_nonzero():
     assert x_box.los[0] == -5.0, (
         f"expected lo = -5.0 in real mode, got {x_box.los[0]}"
     )
+
+
+# --- Precondition guards: boundary_div rejects invalid divisors ---------------
+
+
+def test_boundary_div_rejects_point_at_zero():
+    """boundary_div([1,2], [0,0]) raises IntervalError, not ZeroDivisionError."""
+    a = iv.IntervalArray(shape=(), los=(1.0,), his=(2.0,))
+    b = iv.IntervalArray(shape=(), los=(0.0,), his=(0.0,))
+    with pytest.raises(iv.IntervalError, match="point-at-zero"):
+        iv.boundary_div(a, b)
+
+
+def test_boundary_div_rejects_true_straddle():
+    """boundary_div([1,2], [-1,1]) raises IntervalError, not wrong result."""
+    a = iv.IntervalArray(shape=(), los=(1.0,), his=(2.0,))
+    b = iv.IntervalArray(shape=(), los=(-1.0,), his=(1.0,))
+    with pytest.raises(iv.IntervalError, match="true straddle"):
+        iv.boundary_div(a, b)
+
+
+def test_boundary_div_valid_positive_boundary():
+    """boundary_div([1,2], [0,5]) still works (valid one-sided boundary)."""
+    a = iv.IntervalArray(shape=(), los=(1.0,), his=(2.0,))
+    b = iv.IntervalArray(shape=(), los=(0.0,), his=(5.0,))
+    result = iv.boundary_div(a, b)
+    # a >= 0 and b = [0, 5]: result is [1/5, +inf]
+    assert result.his[0] == INF
+    assert result.los[0] >= 0.2 - 1e-15  # approximately 1/5
+
+
+def test_boundary_div_valid_negative_boundary():
+    """boundary_div([1,2], [-5,0]) still works (valid one-sided boundary)."""
+    a = iv.IntervalArray(shape=(), los=(1.0,), his=(2.0,))
+    b = iv.IntervalArray(shape=(), los=(-5.0,), his=(0.0,))
+    result = iv.boundary_div(a, b)
+    # a >= 0 and b = [-5, 0]: result is [-inf, 1/(-5)]
+    assert result.los[0] == -INF
+    assert result.his[0] <= -0.2 + 1e-15  # approximately -1/5
