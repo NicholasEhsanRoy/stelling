@@ -5,6 +5,73 @@ SPDX-License-Identifier: Apache-2.0
 
 # Changelog
 
+## 0.2.0 — unreleased
+
+### New transfers and precision improvements
+
+- **`is_finite` transfer**: returns definite-true for bounded intervals,
+  definite-false for point-at-infinity (`[inf, inf]`), unknown otherwise.
+  Unlocks the `jnp.where(jnp.isfinite(x), ...)` pattern that MADDENING's
+  Aitken relaxation depends on — `select_n` can now prune unreachable
+  branches when the selector's `isfinite` result is decidable.
+
+- **`int64→float64` point-interval conversion rule**: when an integer
+  constant is cast to float64 and is exactly representable (in [-2^53,
+  2^53]), the interval passes through instead of declining to top.
+  Unblocks 41 jax-md `safe_mask` sites.
+
+- **Boundary-aware division**: when the divisor has zero at exactly one
+  boundary (`[0, hi]` or `[lo, 0]`) — the case `assume(x > 0)` produces
+  — compute a meaningful result instead of declining. True straddles and
+  point-at-zero still decline with an actionable message.
+
+- **Div-straddle decline**: when float division has a divisor spanning
+  zero (true straddle), the transfer now declines with a message naming
+  the interval and suggesting remedies, instead of silently returning
+  `[-inf, inf]`.
+
+### Float32 / float16 / bfloat16 IEEE mode
+
+- **Format-parametric IEEE semantics**: the existing `semantics="ieee"`
+  mode (previously binary64-only) now supports all four catalogued
+  formats. Each operation rounds interval endpoints outward to the target
+  format's ULP grid, models per-format subnormal flush, and handles
+  format-specific overflow.
+
+- **IEEE assume-bump** (`_format_nextafter`): `assume(x > k)` in IEEE
+  mode narrows to `[nextafter_fmt(k, +inf), hi]` — the smallest
+  representable value strictly above k in the target format. Works for
+  all k, all formats. In combination with boundary-aware division, the
+  `assume(b > 0); a / b` pattern produces decidable quotients.
+
+### Verification pipeline
+
+- **Reachability conjunct**: a backward walk from the jaxpr's outputs
+  identifies variables that flow to an output. Violated obligations on
+  "dead" variables (computed but never observed by the caller) are
+  downgraded from REFUTED to UNKNOWN with a note. The fail-safe is
+  always REFUTED: obligations that cannot be proven dead keep their
+  status.
+
+- **Solver selection API**: `check(..., solver="z3")` or `solver="cvc5"`
+  restricts the SMT portfolio to one backend. The verdict explicitly
+  discloses degraded redundancy.
+
+### Known limitations (0.2.0)
+
+- The reachability conjunct is applied only in the interval-verdict path
+  (`make_verdict`), not in the solver-verdict path (`make_solver_verdict`).
+  The same harness may give UNKNOWN (interval, dead-variable downgrade)
+  vs REFUTED (solver, no downgrade).
+- `assume(x > 0)` in real mode still narrows to `[0, hi]` (closed
+  intervals cannot represent open bounds in exact reals). The IEEE bump
+  is exact; the real-mode overapproximation is sound.
+- `boundary_div` is a pipeline-internal helper and does not validate its
+  preconditions (callers in `_t_div` do). Direct use with a true straddle
+  or `[0, 0]` divisor is unsupported.
+
+---
+
 ## 0.1.0 — 2026-08-12
 
 Initial release.
