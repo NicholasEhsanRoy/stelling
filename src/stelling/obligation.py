@@ -1431,6 +1431,34 @@ class _Slicer:
         self._next_id += 1
         return vid
 
+    def _resolve_for_guard(self, atom: ir.Atom) -> ir.Atom:
+        """Find an atom whose id IS in self.env, for guard lookups.
+
+        When the slicer inlines a transparent call, it rewrites equations
+        to use renumbered inner var IDs. The guard (div-straddle, is_finite)
+        needs the PROPAGATED interval, which was computed for the ORIGINAL
+        outer var IDs. The alias system maps outer→inner (for emission),
+        so we search REVERSE: find which outer var (in env) aliases TO
+        an atom chain ending at this one.
+
+        Falls back to the atom itself if no resolution is found (the env
+        lookup will then succeed or fail on its own).
+        """
+        if not isinstance(atom, ir.Var):
+            return atom
+        if atom.id in self.env:
+            return atom
+        # Reverse search: find an outer var whose alias chain ends at atom
+        for outer_id, target in self.aliases.items():
+            if isinstance(target, ir.Var) and target.id == atom.id:
+                if outer_id in self.env:
+                    return ir.Var(id=outer_id, aval=atom.aval)
+                # The outer might itself alias somewhere — recurse
+                return self._resolve_for_guard(
+                    ir.Var(id=outer_id, aval=atom.aval)
+                )
+        return atom
+
     def _renumber(self, inner: ir.ClosedJaxpr) -> dict[int, int]:
         """A fresh id for every binding the inner scope introduces.
 
@@ -1675,11 +1703,9 @@ class _Slicer:
                     f"'div' on dtype {dt!r}: jax integer division truncates, "
                     f"which Real division does not model"
                 )
-            problem = _zero_element_problem(eqn.invars[1], self.env)
+            divisor = self._resolve_for_guard(eqn.invars[1])
+            problem = _zero_element_problem(divisor, self.env)
             if problem is not None:
-                # the per-element div guard: every divisor element must
-                # have an interval definitely excluding 0; any element
-                # straddling declines, naming the element
                 raise _Decline(f"'div': {DIV_GUARD_REASON}{problem}")
         if prim == "integer_pow":
             y = params.get("y")
@@ -1691,7 +1717,8 @@ class _Slicer:
                     f"cap ({INTEGER_POW_EXPANSION_CAP})"
                 )
             if y < 0:
-                problem = _zero_element_problem(eqn.invars[0], self.env)
+                base = self._resolve_for_guard(eqn.invars[0])
+                problem = _zero_element_problem(base, self.env)
                 if problem is not None:
                     raise _Decline(
                         f"'integer_pow' with negative exponent {y}: "
@@ -1763,8 +1790,8 @@ class _Slicer:
             # When the interval reaches ±inf (overflow, unbounded declaration),
             # emitting `true` would let the solver certify a property that is
             # provably false in IEEE execution. Decline in that case.
-            operand = eqn.invars[0]
-            iv_box = self.env.get(operand.id if hasattr(operand, "id") else None)
+            resolved = self._resolve_for_guard(eqn.invars[0])
+            iv_box = self.env.get(resolved.id if hasattr(resolved, "id") else None)
             if iv_box is None:
                 raise _Decline(
                     f"'is_finite' operand has no propagated interval: "
