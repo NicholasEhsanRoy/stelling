@@ -78,8 +78,11 @@ from stelling.obligation import (
 )
 from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
 from stelling.propagate import (
+    CONDITIONAL_ON_PRECONDITION,
+    UNCERTIFIED_PRECONDITION_PREFIX,
     ObligationReport,
     Propagation,
+    UnsatisfiableAssumptionError,
     interval_env,
     unaccounted_assumes,
 )
@@ -181,6 +184,120 @@ IEEE_SEMANTICS_REFUSAL = (
 # cross-check the design promises", and measuring the answer against
 # whatever happened to be installed answers a different, easier question.
 PORTFOLIO_SIZE = 2
+
+# -- the admitted region: is the precondition the discharge rests on empty? ---
+#
+# AUDIT 0.2.0 S7, AND THE ASYMMETRY IT IS ABOUT. A relational assume is inert
+# in the interval domain, so `propagate._unsatisfiable` — the empty-declared-
+# set oracle — never sees it: that oracle meets a box with a half-space, and
+# `x < y` is not a half-space on either box. Since 0.2.0 the same assume is
+# EMITTED to the solver as a positive axiom. If the emitted axiom set is
+# unsatisfiable — on its own (`x<y, y<z, z<x`) or against the declared boxes
+# (`dt ∈ [5,10]`, `dt_max ∈ [0,1]`, `assume(dt < dt_max)`) — then
+# `boxes ∧ axioms ∧ ¬P` is unsat for that reason ALONE, for every P, and the
+# obligation discharges. Measured: a harness whose assert is false at every
+# declared point returned VERIFIED, and deleting the assume returned REFUTED.
+#
+# The non-relational form of the identical mistake — `dt ∈ [5,10]`,
+# `assume(dt < 1.0)` — raises `UnsatisfiableAssumptionError` and calls it a
+# harness defect. 0.2.0's forwarding built a route around that refusal. This
+# is the refusal, on the route.
+#
+# THE QUESTION IS ASKED OF THE SAME SOLVER THAT PRODUCED THE DISCHARGE, on
+# the same text minus one line (`smt.emit(..., states_obligation=False)`):
+# did this `unsat` come from the obligation, or from the precondition? A
+# backend that answers `unsat` to `boxes ∧ axioms` has said its own `unsat`
+# on `boxes ∧ axioms ∧ ¬P` was about the precondition. Nothing has to be
+# believed across solvers for that reading — it is one backend's two answers.
+REGION_EMPTY = "empty"  # the assumed region is EMPTY: a harness defect
+REGION_INHABITED = "inhabited"  # a model was returned: a point of the region
+REGION_UNCERTIFIED = "uncertified"  # nobody decided it; may be either
+# and the fourth value, which is an ABSENCE rather than an outcome: this
+# obligation's script states no relational axiom, so the region it was judged
+# over is the declared boxes alone and the empty case is already the
+# propagation's `UnsatisfiableAssumptionError`. No script is emitted, no
+# solver is asked, and nothing is stamped.
+REGION_NOT_ASKED = "not-asked"
+
+# The stamped may-be-vacuous line SOUNDNESS.md's constraining-assume policy
+# requires and audit 0.2.0 S7 measured absent ("definite REFUTEDs under an
+# uncertified precondition are withheld to UNKNOWN with the reason disclosed,
+# uncertified VERIFIEDs carry a stamped may-be-vacuous line"). Shares the
+# `UNCERTIFIED_PRECONDITION_PREFIX` of the propagation's two, because it is
+# the same fact reached by a third mechanism and the readers that qualify a
+# claim on it must not have to enumerate mechanisms.
+UNCERTIFIED_REGION_ASSUMPTION = (
+    f"{UNCERTIFIED_PRECONDITION_PREFIX}: an obligation discharged on a script "
+    f"carrying forwarded relational axiom(s), and the solver could not decide "
+    f"whether the declared boxes and those axioms admit any point at all — so "
+    f"the discharge may be vacuous (true of an empty region). The claim is "
+    f"still sound: every admitted point satisfies the obligation, and there "
+    f"may be none"
+)
+
+# The conditionality line a forwarded relational axiom earns, in the same
+# words the NARROWING half already stamps ("the verdict holds where the
+# precondition holds"). It was missing, and its absence is why nothing
+# downstream — `Verdict.render`'s conditional wording, the inductive-step
+# note (audit 0.2.0 M5) — could see that a solver discharge had ASSUMED the
+# user's precondition rather than proved something without it.
+def relational_assume_assumption(indices: tuple[int, ...]) -> str:
+    return (
+        f"forwarded relational assume(s) on obligation(s) "
+        f"{', '.join(f'#{i}' for i in indices)}: "
+        f"{CONDITIONAL_ON_PRECONDITION} — the solver was given the assume(s) "
+        f"as positive axiom(s), so the outcome is over the declared boxes "
+        f"INTERSECTED with them, not over the declared boxes"
+    )
+
+
+def _region_answer(answers: frozenset) -> str:
+    """The admitted region's status from the raw answers to its script.
+
+    A PURE FUNCTION on the answer set, kept out of the invocation loop so
+    the rule can be read, and tested, without a solver.
+
+    **The sat/unsat disagreement is not a case here**, deliberately: the
+    caller refuses it with :class:`SolverDisagreement` before reaching this
+    function, which is the same posture the obligation script's own
+    disagreement already takes — "never a silent pick, never a tiebreak".
+    Picking either way would be a tiebreak: ``unsat`` wins and a solver bug
+    is reported to the user as a defect in their harness; ``sat`` wins and a
+    discharge is stamped clean while a backend says the region it rests on
+    is empty. Neither is an answer, and there is already a name for that.
+
+    Everything else falls to UNCERTIFIED, including a region script both
+    backends timed out on. That is the honest reading — an undecided
+    emptiness question decides nothing — and it is the case the stamped
+    may-be-vacuous line exists for.
+    """
+    if "unsat" in answers:
+        return REGION_EMPTY
+    if "sat" in answers:
+        return REGION_INHABITED
+    return REGION_UNCERTIFIED
+
+
+def _region_clause(region: str) -> str:
+    """The admitted-region status ON THE OBLIGATION'S OWN DETAIL LINE.
+
+    Same reasoning as :func:`degraded_clause`'s: a VERIFIED is read one
+    obligation at a time, and a caveat that lives only in the notes is a
+    caveat that arrives after the line a reader stops at. Silent on the two
+    statuses that qualify nothing — an inhabited region and a check that had
+    no reason to run — because a qualification printed on every line is a
+    qualification nobody reads. (:data:`REGION_EMPTY` never reaches here; it
+    raises.)
+    """
+    if region != REGION_UNCERTIFIED:
+        return ""
+    return (
+        " [MAY BE VACUOUS: this obligation's script carries forwarded "
+        "relational axiom(s) and no mechanism established that the declared "
+        "boxes admit a point satisfying them — the discharge is sound and "
+        "may be true of an empty region]"
+    )
+
 
 OB_DISCHARGED = "discharged"
 OB_VIOLATED_WITNESS = "violated-witness"
@@ -437,6 +554,28 @@ class Escalation:
     ledger: _Ledger = field(default_factory=_Ledger)
     semantics: str = "real"
     query_sha256: str = ""
+    # WHICH DISCHARGES REST ON A PRECONDITION NOBODY SETTLED: the indices of
+    # the obligations whose admitted-region check came back UNDECIDED (audit
+    # 0.2.0 S7). `make_solver_verdict` turns a non-empty tuple into the
+    # stamped may-be-vacuous line SOUNDNESS.md's constraining-assume policy
+    # requires and the audit measured absent. The EMPTY case is not here
+    # because it never becomes a verdict — it raises.
+    region_uncertified: tuple[int, ...] = ()
+    # ... AND WHICH RESTED ON THE PRECONDITION AT ALL: the indices whose
+    # script stated at least one forwarded relational assume as a positive
+    # axiom. A solver answer under a granted precondition is a CONDITIONAL
+    # answer, exactly as an interval narrowing's is, and until this field
+    # existed only the narrowing half said so in the stamp — which is how
+    # `check_inductive_step` came to print "the invariant is preserved by one
+    # step" for a step preserved only inside an assumed sub-region (audit
+    # 0.2.0 M5).
+    #
+    # NEITHER FIELD DECIDES ANYTHING. They are read by the stamp assembly and
+    # by nothing that produces or withholds a verdict — deliberately, and for
+    # the reason `_bar_domain`'s comment gives about record fields: a datum a
+    # record carries about its own cleanliness must not be able to buy that
+    # record an outcome.
+    conditional_on_assumes: tuple[int, ...] = ()
 
     @property
     def invocations(self) -> tuple[SolverStamp, ...]:
@@ -1319,7 +1458,40 @@ def _dispatch_obligation(
     backends: tuple[_Backend, ...],
     missing: tuple[str, ...],
     ledger: _Ledger,
-) -> tuple[ObligationEscalation, tuple[int, ...]]:
+    *,
+    region_certified: bool = False,
+) -> tuple[ObligationEscalation, tuple[int, ...], str]:
+    """Escalate one obligation slice. Returns ``(record, emitted origins,
+    admitted-region status)``.
+
+    ``region_certified`` is ``Propagation.region_inhabited``, THE HYBRID
+    HALF of the S7 repair: the propagation's own probe already searched the
+    declared set for a point at which EVERY assume of the query is
+    definitely true, and when it found one there is nothing left to ask. A
+    point satisfying every assume satisfies this slice's axioms (a subset of
+    them) and lies in the declared box (hence in any narrowed box, which is
+    a superset of the true assumed region), so the region this slice's
+    script describes is inhabited and no ``unsat`` on it can be explained by
+    emptiness. The extra solver call is then skipped entirely.
+
+    It is only the cheap half, and the audit's option (a) — refusing to
+    discharge whenever this certificate is absent — is NOT what runs here,
+    because the certificate is ONE-SIDED: False means "no witness was found"
+    on a grid of at most 16 probe points, and it means that on satisfiable
+    preconditions all the time. Refusing on it would turn every relational
+    assume the probe happened to miss into UNKNOWN, which is not a repair of
+    a vacuity defect but a withdrawal of the feature. So False falls through
+    to the question actually being asked, and only ``unsat`` on the
+    admitted-region script — a solver's own universal claim, on the same
+    text minus one line — refuses a run.
+
+    The status is one of :data:`REGION_INHABITED`, :data:`REGION_EMPTY`
+    (which does not return: it raises), :data:`REGION_UNCERTIFIED`, or
+    :data:`REGION_NOT_ASKED`. Every return site that did no solver work, and
+    every outcome other than a discharge, reports ``REGION_NOT_ASKED``: the
+    check exists to audit a DISCHARGE, and an obligation nobody discharged
+    has no discharge to audit.
+    """
     ordered = tuple(
         sorted(
             backends,
@@ -1503,6 +1675,111 @@ def _dispatch_obligation(
 
     if "unsat" in answers:
         agreed = [b.label for b, _, raw, _ in runs if raw.answer == "unsat"]
+        # -- DID THIS `unsat` COME FROM THE OBLIGATION OR FROM THE
+        # PRECONDITION? (audit 0.2.0 S7.) Asked only where it can have a
+        # second answer: a script with NO forwarded axiom describes the
+        # declared boxes alone, and an empty box is already the propagation's
+        # own `UnsatisfiableAssumptionError`, raised before any solver runs.
+        # So the cost is one extra call per relational-assume-bearing
+        # DISCHARGE and exactly zero everywhere else — including on every
+        # `sat`, every timeout, and every query without an assume.
+        region = REGION_NOT_ASKED
+        if sl.assumes and region_certified:
+            # the propagation's probe already found a point of the declared
+            # set satisfying every assume of the query; nothing is left to ask
+            region = REGION_INHABITED
+            notes.append(
+                f"assert #{sl.index}: admitted-region check not needed — the "
+                f"propagation's non-emptiness certificate already exhibits a "
+                f"point of the declared set satisfying every assume of this "
+                f"query, so this discharge is not vacuous"
+            )
+        elif sl.assumes:
+            region_answers: set[str] = set()
+            region_runs: list[tuple[_Backend, Script, _RawResult]] = []
+            for backend, script, raw, _ in runs:
+                if raw.answer != "unsat":
+                    # only a backend whose own `unsat` is about to be
+                    # credited is asked to audit it. Its two answers are one
+                    # backend's, so the reading needs nothing believed across
+                    # solvers: "I proved boxes ∧ axioms ∧ ¬P unsat" and "I
+                    # prove boxes ∧ axioms unsat" is a backend reporting that
+                    # its own first answer was about the precondition.
+                    continue
+                region_script = emit(
+                    sl, backend.flavor, config.timeout_ms,
+                    states_obligation=False,
+                )
+                stamp = SolverStamp(
+                    invoked=True,
+                    reason=(
+                        f"admitted-region check ({sl.fragment}): are the "
+                        f"declared boxes and the forwarded relational "
+                        f"axiom(s) of assert #{sl.index} satisfiable at all"
+                    ),
+                    name=backend.name,
+                    version=backend.version(),
+                    transport=backend.transport,
+                    options=region_script.stamp_options(),
+                )
+                ledger.stamps.append(stamp)
+                region_raw = backend.run(ledger, region_script.text, wall_s)
+                region_runs.append((backend, region_script, region_raw))
+                region_answers.add(region_raw.answer)
+                notes.append(
+                    f"assert #{sl.index}: admitted-region check — "
+                    f"{backend.label} answered {region_raw.answer} on the "
+                    f"declared boxes and the forwarded axiom(s) alone"
+                )
+            if "sat" in region_answers and "unsat" in region_answers:
+                # the same posture the obligation script's own disagreement
+                # takes, for the same reason: one of the solvers, or this
+                # emission, is wrong, and there is no honest tiebreak
+                raise SolverDisagreement(
+                    obligation_index=sl.index,
+                    verdicts=tuple(
+                        (b.label, r.answer) for b, _, r in region_runs
+                    ),
+                    options=tuple(
+                        (b.label, s.stamp_options()) for b, s, _ in region_runs
+                    ),
+                    scripts=tuple(
+                        (b.flavor, s.text) for b, s, _ in region_runs
+                    ),
+                )
+            region = _region_answer(frozenset(region_answers))
+            if region == REGION_EMPTY:
+                who = " and ".join(
+                    b.label for b, _, r in region_runs if r.answer == "unsat"
+                )
+                # the LAST frame, which is the user's own line — the same
+                # `source_info[-1]` convention every `where` in
+                # `stelling.propagate` uses, and the reason it is not the
+                # whole tuple is that the whole tuple is jax's internal
+                # bind stack with the harness line buried at the end
+                where = "; ".join(
+                    dict.fromkeys(
+                        sa.source_info[-1] if sa.source_info
+                        else "unknown location"
+                        for sa in sl.assumes
+                    )
+                ) or "unknown location"
+                raise UnsatisfiableAssumptionError(
+                    f"unsatisfiable assume at {where}: the "
+                    f"{len(sl.assumes)} relational assume(s) forwarded to the "
+                    f"solver as axiom(s) for assert #{sl.index} admit no "
+                    f"point of the declared set — {who} answered unsat on the "
+                    f"declared boxes and those axiom(s) ALONE, with the "
+                    f"negated obligation removed, so this obligation's "
+                    f"discharge is explained by the precondition and says "
+                    f"nothing about the obligation. The declared set as "
+                    f"assumed is empty and every downstream obligation would "
+                    f"be vacuous (harness defect; nothing was verified)"
+                )
+            if region == REGION_UNCERTIFIED:
+                notes.append(
+                    f"assert #{sl.index}: {UNCERTIFIED_REGION_ASSUMPTION}"
+                )
         return (ObligationEscalation(
             index=sl.index,
             outcome=OB_DISCHARGED,
@@ -1510,12 +1787,13 @@ def _dispatch_obligation(
                 f"discharged by solver escalation ({sl.fragment}): the box "
                 f"with the negated predicate is unsat per {' and '.join(agreed)}"
                 + degraded_clause(universal=True)
+                + _region_clause(region)
             ),
             invocations=invocations(),
             witness=None,
             notes=tuple(notes) + degraded_notes(universal=True),
             answered_by=answered,
-        ), emitted_origins)
+        ), emitted_origins, region)
 
     if "sat" in answers:
         sat_problems: list[str] = []
@@ -1580,7 +1858,7 @@ def _dispatch_obligation(
                     witness=None,
                     notes=tuple(notes) + degraded_notes(universal=False),
                     answered_by=answered,
-                ), emitted_origins)
+                ), emitted_origins, REGION_NOT_ASKED)
             witness = make_validated_witness(
                 sl,
                 values,
@@ -1611,7 +1889,7 @@ def _dispatch_obligation(
                 witness=witness,
                 notes=tuple(notes) + degraded_notes(universal=False),
                 answered_by=answered,
-            ), emitted_origins)
+            ), emitted_origins, REGION_NOT_ASKED)
         detail_tail = (
             "; ".join(sat_problems)
             if sat_problems
@@ -1624,7 +1902,7 @@ def _dispatch_obligation(
             invocations=invocations(),
             witness=None,
             notes=tuple(notes),
-        ), emitted_origins)
+        ), emitted_origins, REGION_NOT_ASKED)
 
     reasons = (
         "; ".join(
@@ -1639,7 +1917,7 @@ def _dispatch_obligation(
         invocations=invocations(),
         witness=None,
         notes=tuple(notes),
-    ), emitted_origins)
+    ), emitted_origins, REGION_NOT_ASKED)
 
 
 # -- escalation over a propagated query ---------------------------------------
@@ -1780,6 +2058,11 @@ def escalate(
     env = interval_env(closed)
     ledger = _Ledger()
     records: list[tuple[ObligationEscalation, int]] = []
+    # WHICH DISCHARGES REST ON A PRECONDITION NOBODY SETTLED, and which rest
+    # on one that was granted at all — read by `make_solver_verdict` for the
+    # two stamped lines, and by nothing that decides a verdict.
+    region_uncertified: list[int] = []
+    conditional_on_assumes: list[int] = []
     for item in slice_unknown_obligations(closed, propagation, env):
         if isinstance(item, DeclinedObligation):
             records.append((
@@ -1800,11 +2083,22 @@ def escalate(
             # the slice already carries this query's relational assumes,
             # translated into its own id namespace by `slice_unknown_
             # obligations` — there is no second channel for them, by design
-            record, emitted_origins = _dispatch_obligation(
+            record, emitted_origins, region = _dispatch_obligation(
                 item, config, backends, missing, ledger,
+                region_certified=propagation.region_inhabited,
             )
-        except (SolverDisagreement, EmissionInfidelityError):
-            raise  # loud by design
+            if region == REGION_UNCERTIFIED:
+                region_uncertified.append(item.index)
+        except (SolverDisagreement, EmissionInfidelityError,
+                UnsatisfiableAssumptionError):
+            # loud by design. The third is the S7 refusal: an empty admitted
+            # region is a HARNESS DEFECT, the same class the interval oracle
+            # already raises for the non-relational form of the identical
+            # mistake, and `preconditions.check` names that class among the
+            # two it deliberately does not convert to a status. Degrading it
+            # to UNKNOWN here would be the guard rule applied to the one
+            # thing the guard rule exempts.
+            raise
         except Exception as e:  # noqa: BLE001 — guard rule: degrade, quoted
             # defensive: a failure on a validated slice is a bug, but
             # mid-analysis the guard rule still applies — UNKNOWN, quoted.
@@ -1821,6 +2115,11 @@ def escalate(
                 witness=None,
                 notes=(f"assert #{item.index}: {reason}",),
             )
+        if emitted_origins:
+            # this obligation's script STATED at least one of the user's
+            # relational assumes as a positive axiom, so whatever the solver
+            # answered about it was answered with the precondition granted
+            conditional_on_assumes.append(item.index)
         records.append((record, emitted_origins))
     if propagation.assume_dropped:
         # F7's no-op half, solver side, and it must be ONE-SIDED. Declining
@@ -1906,6 +2205,8 @@ def escalate(
     return Escalation(
         records=tuple(r for r, _ in records), notes=(), ledger=ledger,
         semantics=propagation.semantics, query_sha256=query_sha256,
+        region_uncertified=tuple(region_uncertified),
+        conditional_on_assumes=tuple(conditional_on_assumes),
     )
 
 
@@ -2675,6 +2976,20 @@ def make_solver_verdict(
         arithmetic_mode = ARITHMETIC_MODE_INTERVAL
         convention = REAL_CONVENTION_ASSUMPTION
     assumptions = tuple(sorted({*propagation.assumptions, convention}))
+    # THE ESCALATION'S OWN TWO ASSUMPTION LINES (audit 0.2.0 S7 and M5).
+    # Appended after the sorted set, the same append-only mechanics the
+    # refinement and vacuity lines use, and derived from the escalation
+    # rather than from a flag: what the solver was GIVEN and what it could
+    # not SETTLE are facts about the escalation, and no other object holds
+    # them. Order is fixed — conditionality first, because it says what the
+    # claim is about, then the may-be-vacuous line, which says what was not
+    # established about it.
+    if escalation.conditional_on_assumes:
+        assumptions = assumptions + (
+            relational_assume_assumption(escalation.conditional_on_assumes),
+        )
+    if escalation.region_uncertified:
+        assumptions = assumptions + (UNCERTIFIED_REGION_ASSUMPTION,)
     if refinement is not None:
         # a stamped line records the refinement was enabled (domain,
         # registry, ops actually used) — appended after the sorted set,

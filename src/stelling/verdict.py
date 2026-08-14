@@ -38,7 +38,11 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 
 from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
-from stelling.propagate import ObligationReport, Propagation
+from stelling.propagate import (
+    CONDITIONAL_ON_PRECONDITION,
+    ObligationReport,
+    Propagation,
+)
 from stelling.reachability import defined_vars, reaches_output
 
 __all__ = [
@@ -489,7 +493,7 @@ class Verdict:
                 # stamped constrained-assume assumption line is the
                 # semantic carrier of conditionality.
                 if any(
-                    "the verdict holds where the precondition holds" in a
+                    CONDITIONAL_ON_PRECONDITION in a
                     for a in self.stamp.assumptions
                 ):
                     lines.append(

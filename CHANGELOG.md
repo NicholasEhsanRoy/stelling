@@ -161,6 +161,71 @@ SPDX-License-Identifier: Apache-2.0
     disposition, reason and source line, instead of restating the rule.
   * `Propagation.assume_dropped` is unchanged and still gates the rule.
 
+- **SOUNDNESS FIX — a discharge is no longer accepted when an EMPTY assumed
+  region alone explains it.** See the SOUNDNESS.md entry. A relational
+  `assume` is inert in the interval domain, so the empty-declared-set oracle
+  (`UnsatisfiableAssumptionError`) never saw it — that oracle meets a box
+  with a half-space. Since 0.2.0 the same assume is emitted to the solver as
+  a positive axiom, and an unsatisfiable axiom set makes
+  `boxes ∧ axioms ∧ ¬P` unsat for every `P`: every obligation discharged and
+  the verdict was VERIFIED. Measured: `dt ∈ [5, 10]`, `dt_max ∈ [0, 1]`,
+  `assume(dt < dt_max)`, `assert_(dt + dt_max <= 1.0)` — VERIFIED, and
+  REFUTED with the assume deleted (audit 0.2.0 S7). The non-relational form
+  of the identical mistake has always been refused; this closes the route
+  around that refusal. Development-only; no released version is affected —
+  at `v0.1.0` no assume reaches the solver at all.
+
+  What changed, user-visible:
+
+  * **`check()` and `check_inductive_step()` now raise
+    `stelling.propagate.UnsatisfiableAssumptionError` when a forwarded
+    relational assume set admits no point of the declared set.** Same class,
+    same closing sentence ("harness defect; nothing was verified"), as the
+    non-relational refusal. `check()` already documents that class among the
+    two it does not convert to a status.
+  * Before crediting an `unsat`, the backend that produced it is asked one
+    more question — the same script with the negated obligation removed
+    (`stelling.smt.emit(..., states_obligation=False)`) — and only on an
+    obligation that discharged with at least one forwarded axiom on its
+    script. **Zero extra solver calls on a query with no relational
+    assume**, and none when the propagation's own non-emptiness certificate
+    (`Propagation.region_inhabited`) already settled the question. Measured
+    on the 288-harness sweep, where every harness carries a relational
+    assume: 324 admitted-region invocations out of 1044 total, +11% wall.
+  * An undecided admitted-region check does not withdraw the discharge; it
+    stamps it. The obligation detail gains `[MAY BE VACUOUS: …]` and the
+    stamp gains an `assumes:` line beginning `precondition satisfiability
+    uncertified` — the may-be-vacuous line SOUNDNESS.md's constraining-assume
+    policy already required and this path did not emit.
+  * **A forwarded relational axiom now stamps its conditionality.** New
+    `assumes:` line `forwarded relational assume(s) on obligation(s) …`,
+    carrying the same `the verdict holds where the precondition holds`
+    phrase an interval narrowing has always carried.
+  * The `vacuity checked …` line appends `WHAT THIS MEASUREMENT DOES NOT
+    SAY: …` whenever the stamp carries any `precondition satisfiability
+    uncertified` line: widening a bound can make an unsatisfiable
+    precondition satisfiable again, so a re-check that fails to re-derive an
+    obligation is not, there, evidence that the VERIFIED is substantive.
+  * `stelling.solvers.Escalation` gained `region_uncertified` and
+    `conditional_on_assumes` (obligation indices). Neither decides a
+    verdict; both feed the stamp.
+  * **`check_inductive_step`: an `assume` in the body no longer gets the
+    unconditional note.** An assume is a precondition on the whole query, so
+    a VERIFIED means "every state in the ASSUMED SUB-REGION stays in bounds
+    after one step" — not the inductive step, because the successor need not
+    re-enter that sub-region. The note now begins `inductive step
+    CONDITIONAL — NOT the inductive step` and names the fix (put the
+    restriction in `state_bounds`); the module docstring and
+    `docs/inductive-step.md` say the same (audit 0.2.0 M5). Measured:
+    `x -> 1.5x` on `[-1, 1]` under `|x| <= 0.5` is VERIFIED and iterating
+    from the admitted `x = 0.4` leaves the invariant at step 3.
+  * **`check_inductive_step`'s REFUTED note no longer names the wrong
+    variable** when `body` declares its own `assert_` (audit 0.2.0 M4). The
+    obligation-to-state-variable map was positional against an index that
+    every body obligation shifts; the offset is now derived. A REFUTED whose
+    violated obligations are all the body's own says so instead of blaming
+    the invariant.
+
 - **z3 tactic workaround for high-degree polynomials**: when a solver
   obligation contains a rational-pow auxiliary variable (`y^q = x^p`
   encoding), z3 uses a custom tactic chain (`simplify`, `solve-eqs`,

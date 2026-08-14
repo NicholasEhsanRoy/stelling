@@ -76,6 +76,23 @@ declared box. Combined with:
 
 this gives boundedness for all time.
 
+**"ANY point in the declared box" is the load-bearing phrase, and an
+`assume` in the body takes it away.** An `assume` is a precondition on the
+whole query, so the claim becomes "every state in the ASSUMED SUB-REGION
+stays within bounds after one step" — which is not the inductive step, and
+does not give boundedness for all time: the successor state need not
+re-enter the sub-region, so there is nothing to apply the second step to.
+
+The verdict says which of the two it is. An unconditional VERIFIED appends
+a note beginning *"inductive step: all state variables stay within declared
+bounds after one iteration"*; a conditional one appends *"inductive step
+CONDITIONAL — NOT the inductive step: an assume in the body is a
+precondition on the whole query …"*.
+
+State the restriction in `state_bounds` instead. There the successor is
+checked against the same set the predecessor was drawn from, which is what
+closes the induction.
+
 ## What VERIFIED does NOT mean
 
 - **Convergence.** The state stays bounded but may not approach a fixed
@@ -84,6 +101,26 @@ this gives boundedness for all time.
 - **Attractiveness.** States outside the box are not analyzed.
 - **Correctness of the initial state.** You must verify separately that
   your starting state satisfies the invariant.
+- **The inductive step at all, if the body states an `assume`.** See the
+  section above. Measured: body `x -> 1.5 * x` on the invariant `[-1, 1]`
+  under `assume(x <= 0.5)` and `assume(x >= -0.5)` is VERIFIED, and
+  iterating from the *admitted* start `x = 0.4` gives
+  `0.4, 0.6, 0.9, 1.35` — outside the invariant at step 3.
+
+## Contradictory assumes are refused, not verified
+
+If the body's assumes admit no state at all, every obligation over them is
+vacuously true and a VERIFIED would mean nothing. That is a harness defect,
+so `check_inductive_step` raises
+`stelling.propagate.UnsatisfiableAssumptionError` rather than returning a
+verdict — the same class, and the same sentence ("harness defect; nothing
+was verified"), that an unsatisfiable non-relational assume already raised.
+
+Before that refusal existed (audit 0.2.0 S7', 0.2.0 development builds
+only) the body `x, y -> (x + y) * 10` on `[-1, 1]²` under `assume(x < y)`
+and `assume(y < x)` returned VERIFIED with "the invariant is preserved by
+one step" — and from `x = y = 0.5`, inside the invariant, one step gives
+`10.0`.
 
 ## Solver escalation
 

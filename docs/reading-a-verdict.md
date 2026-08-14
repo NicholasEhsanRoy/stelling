@@ -611,6 +611,49 @@ A CI consumer should treat `envelope not load-bearing` as a flag: here
 the obligation is a theorem — `max(a, 0) >= 0` for every `a` — and the
 declared envelope did no work at all.
 
+### When the precondition itself is empty
+
+A relational `assume` that the interval domain cannot apply is forwarded to
+the solver as a positive axiom, and a forwarded axiom set can be
+unsatisfiable — against the declared boxes (`dt ∈ [5, 10]`,
+`dt_max ∈ [0, 1]`, `assume(dt < dt_max)`) or on its own (`assume(x < y)`,
+`assume(y < z)`, `assume(z < x)`). Then `boxes ∧ axioms ∧ ¬P` is unsat *for
+every* `P`, and a discharge says nothing about the obligation.
+
+Before accepting such a discharge, `check()` asks the backend that answered
+`unsat` one more question, on the same script with the negated obligation
+removed: are the declared boxes and those axioms satisfiable at all?
+
+* **`unsat`** — the admitted region is empty. Every obligation over it
+  would be vacuously true, so this is a harness defect and `check()`
+  **raises `stelling.propagate.UnsatisfiableAssumptionError`** rather than
+  returning a verdict. It is the same class, and the same closing sentence
+  (*"harness defect; nothing was verified"*), that a non-relational
+  `assume(dt < 1.0)` over `dt ∈ [5, 10]` has always raised. Fix the
+  declaration or the precondition; nothing was verified.
+* **`sat`** — a point of the region exists. The discharge stands, clean.
+* **undecided** — nobody answered. The discharge stands (it is sound —
+  every admitted point satisfies the obligation, and there may be none) and
+  it stops being clean: the obligation's detail line carries `[MAY BE
+  VACUOUS: …]` and the stamp carries an `assumes:` line beginning
+  `precondition satisfiability uncertified`.
+
+The extra question is asked only where it can have a second answer — an
+obligation that discharged *and* whose script carries a forwarded axiom —
+and it is skipped when the propagation's own non-emptiness certificate
+already exhibited a point of the declared set satisfying every assume. On a
+query with no relational assume it costs nothing at all.
+
+**The vacuity line reads differently on an uncertified run.** `vacuity
+checked … no obligation discharges with the declared bounds widened` is
+read as *this VERIFIED is substantive*, and on a run whose assumed region
+was never shown non-empty it can mean the opposite: widening a bound can
+make an unsatisfiable precondition satisfiable again, so the re-check fails
+to re-derive the obligation for a reason that has nothing to do with the
+envelope doing work. The line therefore appends `WHAT THIS MEASUREMENT DOES
+NOT SAY: …` whenever the stamp carries any `precondition satisfiability
+uncertified` line.
+
 ## Reading an UNKNOWN
 
 An UNKNOWN always says why, in the notes and in the coverage line. Work
@@ -686,6 +729,15 @@ in this order:
    was either applied to the box, definitely true over it, or emitted to
    that obligation's own script. When one was not, the withholding note
    names it.
+
+   **And an assume that DID reach the solver makes the outcome conditional,
+   which the stamp now says.** An axiom the solver was given is a premise
+   the answer rests on, so a VERIFIED under one is a claim about the
+   declared boxes *intersected with* your precondition, not about the
+   declared boxes. Look for the `assumes:` line beginning `forwarded
+   relational assume(s) on obligation(s) …` — it carries the same phrase
+   *"the verdict holds where the precondition holds"* that an interval
+   narrowing has always carried.
 9. **Rational pow with large denominator.** `x**(1/n)` with `n > 128`
    declines emission because the auxiliary polynomial `y^n = x` risks
    solver timeout at extreme degrees. The decline note names the exponent

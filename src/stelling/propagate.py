@@ -188,15 +188,35 @@ TIER_SOUND_LIBM = "sound-libm"
 
 class UnsatisfiableAssumptionError(ValueError):
     """An assume's precondition is definitely false on the whole
-    over-approximated domain: the meet of the constrained variable's
-    propagated interval with the assumed half-space is empty, so the
-    declared set contains no point satisfying the precondition and every
-    downstream obligation would be vacuously "verified".
+    over-approximated domain: the declared set contains no point satisfying
+    the precondition, so every downstream obligation would be vacuously
+    "verified".
 
     This is the empty-declared-set refusal class — a harness defect, like
     the unbound-var :class:`stelling.ir.TranscriptionError` — so
     degrade-don't-crash does not apply: raised loudly, never a VERIFIED,
-    never silent.
+    never silent. :func:`stelling.preconditions.check` names it among the
+    two classes it deliberately does NOT convert to a status.
+
+    **TWO DETECTORS, ONE CLASS, AND THE SECOND IS WHY THIS DOCSTRING
+    CHANGED.** The original is the interval one, in this module: the meet of
+    a constrained variable's propagated interval with the assumed half-space
+    is empty (also the strict-boundary collapse and the definitely-false
+    constant comparison). It works on BOXES, so it cannot see a RELATIONAL
+    assume — `x < y` is not a half-space on either box — and 0.2.0 began
+    forwarding exactly those to the solver as positive axioms, where an
+    unsatisfiable axiom set discharged every obligation instead (audit 0.2.0
+    S7). The second detector is :func:`stelling.solvers._dispatch_obligation`,
+    which asks the backend that answered ``unsat`` whether the declared boxes
+    and the forwarded axioms ALONE are also ``unsat``.
+
+    Same class deliberately, and not a new one: it is the same defect, the
+    same sentence is right for it ("harness defect; nothing was verified"),
+    and a caller who already handles the non-relational form must not have
+    to learn a second name for the relational one. The scope is the same
+    too — an assume is a precondition on the WHOLE QUERY, and a slice's
+    axioms are a subset of the query's assumes, so a slice whose region is
+    empty proves the query's is.
     """
 
 # 2**53: the largest magnitude below which every int is exactly a double.
@@ -6521,8 +6541,8 @@ class _Propagator:
                         f"already within the assumed region {_render_box(box)}"
                     )
                 self.assumptions.add(
-                    f"constrained assume at {where}: the verdict holds "
-                    f"where the precondition holds — narrowed var {var_id} "
+                    f"constrained assume at {where}: "
+                    f"{CONDITIONAL_ON_PRECONDITION} — narrowed var {var_id} "
                     f"to {_render_box(box)}"
                 )
                 if not certified:
@@ -8447,6 +8467,23 @@ UNCERTIFIED_REACHABILITY_REFUSAL = (
 )
 
 
+# THE CONDITIONALITY PHRASE, and it is a constant because it is READ.
+#
+# A stamped assumption containing it means: this verdict was reached with the
+# user's precondition GRANTED, so it claims something about the assumed
+# region and not about the declared box. `stelling.verdict.Verdict.render`
+# keys its conditional REFUTED wording on it, and
+# `stelling.inductive.check_inductive_step` keys the M5 caveat on it — both
+# by substring, on whatever mechanism granted the precondition.
+#
+# It was a bare literal in two files while only ONE mechanism (the interval
+# narrowing) wrote it. The forwarded relational axiom is a second, and its
+# conditionality was invisible to every one of those readers: audit 0.2.0 M5
+# is what that invisibility looks like from the inductive-step API, where
+# "the invariant is preserved by one step" was printed for a step preserved
+# only inside an assumed sub-region the successor state need not re-enter.
+CONDITIONAL_ON_PRECONDITION = "the verdict holds where the precondition holds"
+
 # The two STAMPED assumptions an uncertified assume state adds, and the
 # one that SUPERSEDES them.
 #
@@ -8458,14 +8495,24 @@ UNCERTIFIED_REACHABILITY_REFUSAL = (
 # to rest on; leaving a known-false one in the stamp is a disclosure
 # defect whatever the verdict says, so the swap is done once, at the same
 # place the certificate's answer is known.
+# THE PREFIX IS THE JOIN, not a shared opening phrase. Several mechanisms
+# can leave a run's precondition satisfiability unsettled — a narrowing on an
+# over-approximated box, a dropped conjunct, and (from the solver layer) an
+# undecided admitted-region check — and every consumer that must qualify a
+# claim on "the precondition may be empty" has to see ALL of them or it
+# qualifies some verdicts and not others for no reason a reader can state.
+# A consumer therefore tests the PREFIX, never a member of a list it would
+# have to be taught to extend. `stelling.solvers.UNCERTIFIED_REGION_ASSUMPTION`
+# is built from it for exactly that reason.
+UNCERTIFIED_PRECONDITION_PREFIX = "precondition satisfiability uncertified"
 UNCERTIFIED_NARROWING_ASSUMPTION = (
-    "precondition satisfiability uncertified: a constraining assume "
+    f"{UNCERTIFIED_PRECONDITION_PREFIX}: a constraining assume "
     "narrowed an over-approximated intermediate whose box may exceed its "
     "true image — the conditional claim may be vacuous; the inert-mode "
     "control is the visibility instrument"
 )
 UNCERTIFIED_DROP_ASSUMPTION = (
-    "precondition satisfiability uncertified: a constraining assume "
+    f"{UNCERTIFIED_PRECONDITION_PREFIX}: a constraining assume "
     "dropped at least one conjunct, so the narrowed set is a superset of "
     "the assumed region and that region was not shown non-empty — the "
     "conditional claim may be vacuous; the inert-mode control is the "

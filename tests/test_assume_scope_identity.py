@@ -782,12 +782,27 @@ def test_emit_takes_no_relational_assumes_parameter():
     """The type IS the fix. ``emit`` used to accept raw comparison equations,
     which is how an assume stated in one scope's ids reached a lookup keyed on
     another's. There is no such parameter now: the axioms come off the slice,
-    whose ``SliceAssume`` values cannot express a foreign name."""
+    whose ``SliceAssume`` values cannot express a foreign name.
+
+    The parameter set is pinned EXACTLY, and the pin is about what a caller
+    can INTRODUCE. ``states_obligation`` (audit 0.2.0 S7's admitted-region
+    script) adds nothing to the axiom loop and can only REMOVE the one
+    ``(assert (not root))`` line, so it cannot express a name at all — but it
+    is named here rather than waved through by a subset test, because "a
+    parameter that lets a caller state something extra" is exactly the shape
+    this test exists to refuse, and a subset test would let the next one in
+    silently."""
     import inspect
 
-    params = set(inspect.signature(smt.emit).parameters)
+    sig = inspect.signature(smt.emit)
+    params = set(sig.parameters)
     assert "relational_assumes" not in params, params
-    assert params == {"sl", "solver", "timeout_ms"}, params
+    assert params == {"sl", "solver", "timeout_ms", "states_obligation"}, params
+    # and the one that IS new is keyword-only, a bool, defaulting to the
+    # pre-existing behaviour: every caller that does not name it emits the
+    # byte-identical script it emitted before
+    p = sig.parameters["states_obligation"]
+    assert p.kind is inspect.Parameter.KEYWORD_ONLY and p.default is True
 
 
 def test_a_skipped_assume_is_disclosed_in_the_verdict_notes():

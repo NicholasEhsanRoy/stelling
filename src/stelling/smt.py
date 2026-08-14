@@ -496,6 +496,8 @@ def emit(
     sl: ObligationSlice,
     solver: str,
     timeout_ms: int,
+    *,
+    states_obligation: bool = True,
 ) -> Script:
     """Emit the escalation script for one obligation slice.
 
@@ -503,6 +505,33 @@ def emit(
     block (option names are solver-specific); the logical content —
     declarations, bounds, definitions, the negated predicate — is
     identical, so both portfolio members see the same query.
+
+    ``states_obligation=False`` emits **the admitted-region script**: the
+    identical text with the one ``(assert (not <root>))`` line removed, so
+    what remains is exactly the declared boxes conjoined with the relational
+    axioms this slice states — the region the obligation was judged over,
+    and nothing about the obligation itself. ``unsat`` on it means that
+    region is EMPTY, which is the only reading under which an ``unsat`` on
+    the full script says nothing about the obligation (audit 0.2.0 S7).
+
+    THAT IT IS THE SAME FUNCTION IS THE POINT, not an economy. The question
+    the admitted-region script answers is "did *this* discharge's ``unsat``
+    come from the obligation or from the precondition", and it is only that
+    question if the two texts agree about every declaration, every bound,
+    every definition, every axiom, the logic, and the option block. A second
+    emitter — or this one with a second set of rules under a flag — could
+    drift on any of them and the comparison would silently become a
+    comparison of two different queries. Exactly one line differs, and it is
+    the line whose presence is the whole difference between the two
+    questions. Both texts still end ``(check-sat) (get-model)``: a ``sat``
+    here is a POINT of the admitted region, and a model that can be read is
+    what makes the answer constructive rather than merely negative.
+
+    The returned :class:`Script`'s ``relational_assumes_emitted`` and
+    ``emitted_origins`` are unchanged by the flag — the axiom loop is the
+    same loop — but no rule may be built on them from an admitted-region
+    script: the withholding join is about the script the OBLIGATION was
+    decided on.
 
     THE RELATIONAL AXIOMS COME FROM THE SLICE AND FROM NOWHERE ELSE.
     ``sl.assumes`` are :class:`stelling.obligation.SliceAssume` values, whose
@@ -574,6 +603,14 @@ def emit(
     lines: list[str] = [
         f"; stelling escalation: obligation #{sl.index} ({sl.fragment})"
     ]
+    if not states_obligation:
+        # a dumped script, and the `smt2_sha256` a stamp carries, must say
+        # WHICH of the two questions it asked; the sha alone cannot
+        lines.append(
+            "; admitted-region check: the declared boxes and the forwarded "
+            "relational axiom(s) ALONE, with the negated obligation removed "
+            "— unsat here means the assumed region is empty"
+        )
     for key, value in options:
         lines.append(f"(set-option {key} {value})")
     lines.append(f"(set-logic {sl.fragment})")
@@ -949,7 +986,14 @@ def emit(
         # the array assert is the universal elementwise claim: its negation
         # is satisfied where AT LEAST ONE element predicate fails
         negated = f"(not (and {' '.join(root_terms)}))"
-    lines.append(f"(assert {negated})")
+    if states_obligation:
+        lines.append(f"(assert {negated})")
+    # `term(sl.root)` runs either way, and deliberately: it is a lookup, not
+    # an emission — every `define-fun` the root needs was already written by
+    # the equation loop — and running it on both paths keeps the root's own
+    # validation (the unbound-variable raise) on the admitted-region path
+    # too. A script that declined to look at its root would be a script whose
+    # emission ran under different rules from the one it is compared against.
     lines.append("(check-sat)")
     lines.append("(get-model)")
     text = "\n".join(lines) + "\n"
