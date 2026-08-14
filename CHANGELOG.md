@@ -20,10 +20,15 @@ SPDX-License-Identifier: Apache-2.0
   2^53]), the interval passes through instead of declining to top.
   Unblocks 41 jax-md `safe_mask` sites.
 
-- **Boundary-aware division**: when the divisor has zero at exactly one
-  boundary (`[0, hi]` or `[lo, 0]`) — the case `assume(x > 0)` produces
-  — compute a meaningful result instead of declining. True straddles and
-  point-at-zero still decline with an actionable message.
+- **Boundary-aware division, REAL MODE ONLY**: when the divisor has zero
+  at exactly one boundary (`[0, hi]` or `[lo, 0]`) — the case
+  `assume(x > 0)` produces — compute a meaningful result instead of
+  declining. True straddles and point-at-zero still decline with an
+  actionable message. **Under `semantics="ieee"` the tightening is
+  WITHDRAWN**: an IEEE format has two zeros and an interval endpoint has
+  no sign bit, so a divisor box reaching zero divides to `[-inf, inf]`
+  there. See the S10 entry under Soundness fixes; the two kernels
+  disagree deliberately and `interval.IEEE_ZERO_DIVISOR_TOP` says why.
 
 - **Div-straddle decline**: when float division has a divisor spanning
   zero (true straddle), the transfer now declines with a message naming
@@ -41,8 +46,13 @@ SPDX-License-Identifier: Apache-2.0
 - **IEEE assume-bump** (`_format_nextafter`): `assume(x > k)` in IEEE
   mode narrows to `[nextafter_fmt(k, +inf), hi]` — the smallest
   representable value strictly above k in the target format. Works for
-  all k, all formats. In combination with boundary-aware division, the
-  `assume(b > 0); a / b` pattern produces decidable quotients.
+  all k, all formats. **The `assume(b > 0); a / b` pattern does NOT
+  produce a decidable quotient in ieee mode** (it does in real mode):
+  `nextafter_fmt(0, +inf)` is the format's smallest subnormal, which the
+  DAZ haze immediately hulls back to 0, and a zero-containing divisor is
+  ⊤ under ieee since the S10 fix. An assume whose bound is above the
+  format's subnormal band (`assume(b > 1e-30)` in float32, say) keeps its
+  quotient.
 
 ### Verification pipeline
 
@@ -106,6 +116,43 @@ SPDX-License-Identifier: Apache-2.0
   `QF_LRA` while the emission wrote `(* aux aux)`, and both backends
   refused the script.
 
+- **An IEEE divisor box that reaches zero divides to ⊤** (audit 0.2.0
+  S10; see [SOUNDNESS.md](SOUNDNESS.md)): `ieee_div`/`ieee_div_fmt` read
+  `[lo, 0]` as *"the divisor approaches 0 from below"* and returned a
+  one-signed infinity. Under IEEE the divisor does not approach zero, it
+  IS zero at that endpoint, and the sign of `x/0` comes from the ZERO's
+  sign bit — which an interval endpoint cannot carry. `+0.0 == 0.0`, so
+  `+0.0` is a value of `[lo, 0]` and the excluded `-inf` is a value of
+  the program. **FALSE VERIFIED in all four formats**, a 0.2.0
+  regression against `v0.1.0` (measured: `v0.1.0` returns `(-inf, inf)`
+  where the pre-fix tree returned `(2.0, inf)`). Verdicts move
+  **VERIFIED → UNKNOWN** wherever an ieee-mode division has a divisor box
+  reaching zero. The boundary-aware branch also raised
+  `IntervalError("NaN endpoint")` on `[-inf,-inf] / [-inf, 0]`; returning
+  ⊤ before any endpoint arithmetic removes that too. Real-mode
+  `boundary_div` is unchanged and is not wrong for this reason — ℝ has
+  one zero and `a/0` is undefined there.
+
+- **`mul` is exact when its corner products are representable** (audit
+  0.2.0 M16): it was the only arithmetic transfer with no exact-rational
+  path, bumping every endpoint outward unconditionally. `[2,3]×[2,3]`
+  boxed to `[3.9999999999999996, 9.000000000000002]` for an image that is
+  exactly `[4, 9]`, and the exactly-zero corner of `[0,4]×[0,4]` bumped to
+  `-5e-324` — below zero, which defeats `reduce_sum`'s nonnegative clamp.
+  A sum of squares written `x*x` therefore became a true straddle and the
+  division consuming it declined, while `x**2` and `jnp.square(x)`
+  verified: one real property, three spellings, two verdicts — on exactly
+  the `assume(x > 0)` sum-of-squares shape boundary-aware division was
+  added for. Sound in both directions (the weak spelling only lost
+  precision), so no verdict was wrong; verdicts move **UNKNOWN →
+  VERIFIED/REFUTED** where the lost ulp was what prevented a decision.
+  `mul` now takes the same `_exactable`/`Fraction` route `add` and `div`
+  already had, confined the same way (an infinite endpoint keeps the bump,
+  because `Fraction(inf)` raises and `0·±inf = 0` is an endpoint
+  convention). The ieee `mul` kernels deliberately do NOT change: under
+  ieee the value IS `fl(x*y)`, which the native corner products already
+  compute exactly.
+
 - **Relational assumes forwarded to solver**: when `assume(e1 < e2)`
   involves two variable operands (a constraint the interval domain cannot
   apply), the comparison is recorded and emitted as a positive axiom
@@ -146,6 +193,16 @@ SPDX-License-Identifier: Apache-2.0
   intervals cannot represent open bounds in exact reals). The IEEE bump
   is exact; the real-mode overapproximation is sound. In real mode,
   boundary-aware division handles the resulting `[0, hi]` gracefully.
+- **The interval domain cannot represent the sign of an IEEE zero**, so
+  under `semantics="ieee"` every divisor box that reaches zero divides to
+  ⊤ — including the one-sided shapes real mode tightens, and including
+  the ones the subnormal haze creates by hulling a strictly-signed
+  interval with `0.0`. Closing this needs a signed-zero lattice threaded
+  through every kernel that can produce or consume one, which is a larger
+  feature and was deliberately not built here: a half-done version would
+  put a trustworthy sign bit on values only some producers set, which is
+  the defect S10 already was. Declining to tighten is the sound posture in
+  the meantime.
 - The dependency problem (A ∧ ¬A = unknown in intervals) is inherent to
   the non-relational domain. Solver escalation is the designed remedy.
 - Rational pow requires non-negative base (JAX returns NaN for

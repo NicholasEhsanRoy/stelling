@@ -165,8 +165,13 @@ def test_structural_ops_are_exact():
 
 
 def test_scalar_literal_broadcasts_against_array():
+    # The broadcast pairing is the subject; the endpoints are EXACT now that
+    # `mul` takes the exact-rational route `add` and `div` already had (audit
+    # 0.2.0 M16). This read `r.los[0] < 20.0 < r.his[0]` while the transfer
+    # bumped every endpoint unconditionally.
     r = iv.mul(iv.from_values((2,), [2.0, 3.0]), iv.point(10.0))
-    assert r.los[0] < 20.0 < r.his[0] and r.los[1] < 30.0 < r.his[1]
+    assert (r.los[0], r.his[0]) == (20.0, 20.0)
+    assert (r.los[1], r.his[1]) == (30.0, 30.0)
 
 
 def test_maximum_minimum_are_exact_monotone():

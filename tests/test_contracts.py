@@ -44,6 +44,7 @@ def _x64():
     jax.config.update("jax_enable_x64", old)
 
 
+from stelling import interval as iv  # noqa: E402
 from stelling._jax_compat import trace  # noqa: E402
 from stelling._optional import available  # noqa: E402
 from stelling.contracts import (  # noqa: E402
@@ -333,8 +334,18 @@ def test_t2_pin_exact_closed_extremum_encoding_at_the_contrast_boundary():
     Over chi in [0, 199] with C = 200, the extreme field (one element at
     mu = 200, one at mu = 1) attains max = C*min EXACTLY; the closed
     obligation holds over the whole envelope with equality attained, so
-    the correct implementation VERIFIES (by QF_LRA escalation — the
-    interval comparison straddles at the shared endpoint 200).
+    the correct implementation VERIFIES.
+
+    **It now verifies at the interval leg, and that is a SHARPER exactness
+    pin than the escalation it used to take.** This asserted "solver
+    escalation (QF_LRA)" in the obligation's detail, with the reason *"the
+    interval comparison straddles at the shared endpoint 200"* — the
+    straddle was `mul`'s outward bump, which put `C*min`'s lower endpoint at
+    199.99999999999997 instead of 200. Audit 0.2.0 M16 made `mul` exact on
+    representable corners, so the fold's `C*min` box starts at exactly 200,
+    `max <= C*min` is decided where equality is attained, and nothing but an
+    exact encoding could decide it there: one ulp of slack anywhere in the
+    fold and this obligation goes back to undecided.
 
     Counterfactuals measured to flip this query: (i) a strict posing
     (max < C*min) REFUTES — its negation is satisfiable exactly at the
@@ -349,7 +360,40 @@ def test_t2_pin_exact_closed_extremum_encoding_at_the_contrast_boundary():
         solver_timeout_ms=20000,
     )
     assert cv.requires_status == "VERIFIED"
+    ob = cv.requires.obligations[1]
+    assert ob.status == "discharged"
+    assert ob.detail.startswith("definitely true for all")
+
+
+@needs_solver
+def test_t2_pin_the_fold_still_escalates_where_intervals_cannot_decide():
+    """The escalation companion the test above used to be.
+
+    With the fold exact, `max <= C*min` over a field of n >= 2 elements is
+    interval-decidable exactly when it is true — the envelope admits a field
+    attaining both extrema, so `hi <= C*lo` is simultaneously the truth
+    condition and the interval test. The gap reopens at n = 1, where max and
+    min are the SAME element and the property (`mu <= 2*mu` for mu >= 1) is
+    true for a reason the non-relational domain cannot see. That is the
+    dependency problem, not a rounding pad, so no exactness work can close
+    it — and it keeps the fold's QF_LRA emission under test.
+    """
+    cv = check_contract(
+        _t2((1,), (0.0, 199.0), bound=2.0),
+        vacuity_mode="inputs-only",
+        solver_timeout_ms=20000,
+    )
+    assert cv.requires_status == "VERIFIED"
     assert "solver escalation (QF_LRA)" in cv.requires.obligations[1].detail
+
+    # and the same contrast over a field that CAN spread refutes, with the
+    # witness the fold exists to find
+    cv2 = check_contract(
+        _t2((2,), (0.0, 199.0), bound=2.0),
+        vacuity_mode="inputs-only",
+        solver_timeout_ms=20000,
+    )
+    assert cv2.requires_status == "REFUTED"
 
 
 # --- T2: the budget decline is loud ------------------------------------------
@@ -522,8 +566,18 @@ def test_widen_recheck_solver_invocations_are_stamped_and_tagged(monkeypatch):
     relies on — measured 10 spawns vs 2 stamped before the fix (audit
     j_spawncount.py). Every invocation must now be stamped, the
     re-check's tagged apart from the original run's; and on the inert
-    (all-point) path there is no re-run, so spawns == stamps with no
-    tagged entries."""
+    (all-point) path there is no re-run.
+
+    **The inert half changed shape at audit 0.2.0 M16 and is weaker for
+    it.** It used to be an all-point envelope that still ESCALATED —
+    `mul`'s unconditional bump turned point operands into non-point boxes,
+    so the conditioning obligations straddled and the solver ran with
+    nothing to re-check. With `mul` exact on representable corners a point
+    envelope stays a point all the way through, the interval leg decides
+    every obligation, and no solver is spawned at all. The claim survives
+    in its strongest form (no re-check, asserted as no invocation), but the
+    "invoked, yet nothing tagged" configuration is no longer reachable
+    through this contract and nothing else in this file poses it."""
     import stelling.solvers as sv
 
     real_run = sv._Backend.run
@@ -550,7 +604,9 @@ def test_widen_recheck_solver_invocations_are_stamped_and_tagged(monkeypatch):
     untagged = [s for s in stamps if s not in tagged]
     assert tagged and untagged  # both the original asks and the re-check's
 
-    # the inert path (all-point envelope): no re-run, nothing tagged
+    # the inert path (all-point envelope): no re-run — and since M16, no
+    # invocation whatsoever, so the stamp records the ABSENCE rather than an
+    # empty tuple of invocations
     count["spawns"] = 0
     cv0 = check_contract(
         _t1((0.0, 0.0), (0.0, 0.0), (0.0, 0.0)),
@@ -558,12 +614,12 @@ def test_widen_recheck_solver_invocations_are_stamped_and_tagged(monkeypatch):
         solver_timeout_ms=20000,
     )
     assert cv0.requires_status == "VERIFIED"
+    assert all(o.status == "discharged" for o in cv0.requires.obligations)
     stamps0 = cv0.requires.stamp.solver
-    assert isinstance(stamps0, tuple)
-    assert len(stamps0) == count["spawns"]
-    assert not any(
-        s.reason.startswith("vacuity widen re-check: ") for s in stamps0
-    )
+    assert count["spawns"] == 0
+    assert not isinstance(stamps0, tuple)  # the recorded-absence stamp
+    assert stamps0.invoked is False
+    assert "no solver invoked" in stamps0.reason
     assert any(
         "vacuity instrument inert" in a
         for a in cv0.requires.stamp.assumptions
@@ -746,12 +802,19 @@ def test_t3_triple_vs_array_paths_pose_the_same_conditioning():
     four PLUS the two symmetry obligations — indices 0-3 stable across
     both paths, 4-5 the symmetry pair.
 
-    Measured seam, pinned here: even at an all-point envelope the
-    symmetry pair STRADDLES when the off-diagonal is a computed product
-    (0.0 * t propagates to the outward-rounded [-5e-324, 5e-324], and
-    equal non-point boxes straddle <= in both directions) — the array
-    path is interval-UNKNOWN where the triple path is interval-VERIFIED,
-    and the pair needs the (trivial) solver step to close."""
+    **The seam this test was written for has CLOSED, and the closure is the
+    pin now.** It read: *"even at an all-point envelope the symmetry pair
+    STRADDLES when the off-diagonal is a computed product (0.0 * t
+    propagates to the outward-rounded [-5e-324, 5e-324], and equal non-point
+    boxes straddle <= in both directions) — the array path is
+    interval-UNKNOWN where the triple path is interval-VERIFIED, and the
+    pair needs the (trivial) solver step to close."* That box was `mul`'s
+    unconditional bump; since audit 0.2.0 M16 `0.0 * t` propagates to the
+    exact point `[0, 0]`, the symmetry pair is two equal POINT boxes, `<=`
+    decides in both directions, and the array path verifies at the interval
+    leg with no solver at all. The obligation COUNTS and their order are
+    what the test guards; the two paths now agree on status as well, which
+    is what the docstring above always said they should pose."""
 
     def triple(t):
         return 1.0 + t, 0.0 * t, 1.0 + t
@@ -771,15 +834,12 @@ def test_t3_triple_vs_array_paths_pose_the_same_conditioning():
         conditioning_2x2_field((), "float64", (0.0, 0.0), 8.0, family),
         vacuity_mode="inputs-only",
     )
-    assert cv4.requires_status == "UNKNOWN"
+    assert cv4.requires_status == "VERIFIED"
     assert len(cv4.requires.obligations) == 6  # + the posed symmetry pair
-    assert [o.status for o in cv4.requires.obligations] == (
-        ["discharged"] * 4 + ["unknown"] * 2
-    )
-    straddles = [
-        o.detail for o in cv4.requires.obligations if "straddles" in o.detail
-    ]
-    assert len(straddles) == 2  # the pair, quoted in numbers, on the details
+    assert [o.status for o in cv4.requires.obligations] == ["discharged"] * 6
+    # nothing straddles any more, and the reason is the exact product
+    assert not any("straddles" in o.detail for o in cv4.requires.obligations)
+    assert iv.mul(iv.point(0.0), iv.from_bounds((), 0.0, 0.0)).his[0] == 0.0
     # both faces declare the same per-matrix ensures shape
     assert cv3.ensures_status == ENSURES_DECLARED
     assert "every matrix of the family" in cv4.ensures.statement

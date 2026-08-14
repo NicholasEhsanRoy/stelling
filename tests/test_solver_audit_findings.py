@@ -39,15 +39,26 @@ from test_verdict import full_stamp_kwargs, invoked_stamp
 
 
 def true_over_box_query():
-    """x in [-1, 1], assert(x*x <= 1.0): TRUE at every point of the box in
+    """x in [-1, 1], assert(x*x >= 0.0): TRUE at every point of the box in
     ℝ — the only honest escalated verdicts are VERIFIED or UNKNOWN; the
-    outward-rounded interval straddles, so it escalates."""
+    interval leg straddles, so it escalates.
+
+    The bound was `x*x <= 1.0` and the straddle came from `mul`'s outward
+    rounding, which audit 0.2.0 M16 removed: `mul([-1,1],[-1,1])` is now the
+    exact `[-1, 1]` and `<= 1.0` discharges without a solver, so the query
+    stopped reaching the escalation these tests are about. `>= 0.0` straddles
+    the SAME box for a reason no exactness discipline can remove — the
+    dependency problem: the interval domain cannot see that the two operands
+    of `mul` are the same variable, so its box for `x*x` is `[-1, 1]` and not
+    the true image `[0, 1]`. Still true at every point, still a query whose
+    only honest escalated verdicts are VERIFIED or UNKNOWN.
+    """
     x, sq, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
     return close(
         [
             any_eqn(x, -1.0, 1.0),
             eqn("mul", [x, x], sq),
-            eqn("le", [sq, lit(1.0)], pred),
+            eqn("ge", [sq, lit(0.0)], pred),
             eqn("stelling_assert", [pred], out),
         ],
         [out],

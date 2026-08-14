@@ -38,6 +38,14 @@ assert #0: unknown — undecided for 2/2 element(s)
 Both agents hit it. In one case the whole cause was `0.5 * x` losing an exact
 zero endpoint; coverage was 100%, there were no ⊤, and no note.
 
+> **That particular instance no longer arises**, and the record above is kept
+> as it was measured rather than rewritten: audit 0.2.0 M16 gave `mul` the
+> exact-rational route `add` and `div` already had, so `0.5 * x` over `[0, 4]`
+> is now exactly `[0.0, 2.0]` and that obligation discharges. The message
+> design below is unaffected — an endpoint can still miss a bound by one ulp
+> wherever a transfer must *bracket* (`exp`, `pow`, `sqrt`), and that is where
+> the shipped sentence is exercised now.
+
 **Proposed:**
 ```
 assert #0: unknown — undecided for 2/2 element(s).

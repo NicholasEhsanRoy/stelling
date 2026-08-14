@@ -69,10 +69,9 @@ def close(eqns, outvars):
 
 # --- Test 1: assume(b > 0) + a/b > 0 in ieee float32 -> VERIFIED -----------
 
-def test_assume_gt0_div_positive_ieee_f32():
-    """assume(b > 0) + assert_(a/b > 0) in ieee float32: the bump
-    excludes zero from b's interval, and boundary-aware division gives
-    [positive, +inf], which is definitely > 0."""
+def _assume_div_f32_query(bound: float):
+    """assume(b > bound) + assert_(a/b > 0) over a in [1, 10], b in [-10, 10],
+    all float32."""
     a = var(0, F32)
     b = var(1, F32)
     pred_assume = var(2, BOOL)
@@ -80,22 +79,61 @@ def test_assume_gt0_div_positive_ieee_f32():
     q_out = var(4, F32)
     pred = var(5, BOOL)
     out = var(6, BOOL)
-    query = close(
+    return close(
         [
             any_eqn(a, 1.0, 10.0, dtype="float32"),
             any_eqn(b, -10.0, 10.0, dtype="float32"),
-            # assume(b > 0)
-            eqn("gt", [b, lit(0.0, F32)], pred_assume),
+            eqn("gt", [b, lit(bound, F32)], pred_assume),
             eqn("stelling_assume", [pred_assume], assume_out),
-            # a / b
             eqn("div", [a, b], q_out),
-            # assert a/b > 0
             eqn("gt", [q_out, lit(0.0, F32)], pred),
             eqn("stelling_assert", [pred], out),
         ],
         [out],
     )
-    p = propagate(query, semantics="ieee")
+
+
+def test_assume_gt0_div_ieee_f32_no_longer_decides_and_this_is_the_price():
+    """**A COVERAGE LOSS, recorded as one — audit 0.2.0 S10.**
+
+    This asserted `discharged`: the ieee assume-bump narrows `b` to
+    `[2**-149, 10]`, which excludes zero, and boundary-aware division then
+    gave `[a_lo/10, +inf]`.
+
+    The bump lands on the format's smallest SUBNORMAL, which is inside the
+    subnormal band by construction, so the DAZ haze immediately hulls the
+    divisor back to `[0, 10]` (measured: `_elt_haze_fmt(2**-149, 10, 2**-126)
+    == (0.0, 10.0)`). The kernel is then handed a divisor box containing
+    zero — and cannot tell WHICH zero, because `_elt_haze_fmt` hulls with the
+    positive literal `0.0` and an endpoint carries no sign bit. Under IEEE
+    `a / -0.0` is `-inf` for positive `a`, so the old `[positive, +inf]`
+    excluded an attainable value.
+
+    The DAZ flush of a positive subnormal does produce `+0.0` on the targets
+    measured — so the old answer was right for a reason the domain does not
+    carry. Restoring it needs the zero's sign IN THE DOMAIN, threaded through
+    every kernel that can produce or consume one; inferring it here from the
+    haze's own provenance would put a sign bit on a value only some producers
+    set, which is the half-done version S10 exists to warn about.
+
+    **The row is not dead**, and the companion below is the boundary: an
+    assume whose bound is ABOVE the format's subnormal band keeps its
+    tightening, because no haze puts zero back.
+    """
+    p = propagate(_assume_div_f32_query(0.0), semantics="ieee")
+    assert p.obligations[0].status == "unknown", (
+        f"expected unknown after S10; got {p.obligations[0].status}"
+    )
+    assert any("narrowed var 1" in n for n in p.notes), p.notes
+
+
+def test_assume_above_the_subnormal_band_still_divides_in_ieee_f32():
+    """The other side of the same boundary: `assume(b > 1e-30)` in float32
+    narrows to a divisor the haze leaves alone (1e-30 is far above float32's
+    smallest normal, 2**-126), so no zero re-enters and the quotient is
+    bounded away from 0. Boundary-aware division is withdrawn only where the
+    divisor box actually reaches zero."""
+    p = propagate(_assume_div_f32_query(1e-30), semantics="ieee")
     assert p.obligations[0].status == "discharged", (
         f"expected discharged, got {p.obligations[0].status}; notes: {p.notes}"
     )

@@ -5362,4 +5362,298 @@ verdicts:
   test can separate it; and `.is_integer()` versus `== int(...)` differs
   only at inf/nan, which the literal decoder refuses earlier.
 
+- **2026-08-15 (pre-release): an IEEE divisor box that reaches zero was
+  divided as if the zero had a sign, and it flipped verdicts in ALL FOUR
+  FORMATS.** Audit 0.2.0 S10 (found by that audit's IEEE-formats lens as
+  § F2), fixed in `interval.ieee_div` and `interval.ieee_div_fmt`.
+
+  **The defect.** Both kernels special-cased a divisor interval touching
+  zero at exactly one boundary. `b = [lo, 0]` with `lo < 0` was read —
+  the comment said so — as *"divisor approaches 0 from below"*, so for a
+  non-positive dividend the quotient was `[ahi/blo, +inf]`, excluding
+  `-inf`. **Under IEEE the divisor does not approach zero; it IS zero at
+  that endpoint, and the sign of `x/0` is `sign(x)` XOR the SIGN BIT OF
+  THE ZERO.** `+0.0 == 0.0`, so `+0.0` is a value of `[lo, 0]`; there the
+  quotient is `-inf`, which the box did not contain. An interval endpoint
+  has no sign bit, so *which boundary is zero* is not enough information
+  to make the tightening at all — no test on the endpoints' positions
+  could have repaired it.
+
+  **Measured, all four formats** (`audit-0.2.0-ieee/F2b_div_all_formats.py`,
+  re-run here on this branch before and after; harness `a = [-2,-2]`,
+  `x = [-1, 0]`, `assert(a/x > 0)`, and its mirror `a = [2,2]`,
+  `x = [0, 1]` at `-0.0`):
+
+  ```
+                      before        after      jax at the zero
+    float16          VERIFIED      UNKNOWN     y = -inf,  y > 0 -> False
+    bfloat16         VERIFIED      UNKNOWN     y = -inf,  y > 0 -> False
+    float32          VERIFIED      UNKNOWN     y = -inf,  y > 0 -> False
+    float64          VERIFIED      UNKNOWN     y = -inf,  y > 0 -> False
+  ```
+
+  Eight false VERIFIEDs (four formats × two mirror shapes), every one of
+  them refuted by executing the same harness in jax at a point of its own
+  declared box.
+
+  **IT IS A 0.2.0 REGRESSION, and the lens that found it got that
+  wrong.** § F2 concluded it "predates 0.2.0" from the fact that binary64
+  is affected — which conflates the *format* with the *feature*. Measured
+  at the kernel on both trees, `v0.1.0` extracted with `git archive` and
+  run by `PYTHONPATH` (no worktree, repo untouched), this branch's base at
+  `f0b34cd`:
+
+  ```
+  --- v0.1.0 ---
+  ieee_div([-2,-2], [-1,0]) -> (-inf, inf)   contains -inf? True
+  ieee_div([2,2],   [0,1])  -> (-inf, inf)   contains -inf? True
+  hasattr(iv, "ieee_div_fmt") False   hasattr(iv, "boundary_div") False
+  --- pre-fix tree (f0b34cd) ---
+  ieee_div([-2,-2], [-1,0]) -> (2.0, inf)    contains -inf? False
+  ieee_div([2,2],   [0,1])  -> (2.0, inf)    contains -inf? False
+  hasattr(iv, "ieee_div_fmt") True    hasattr(iv, "boundary_div") True
+  ```
+
+  0.1.0 returned the sound hull for any zero-containing divisor. The
+  boundary-aware branch arrived at `3328c9b` (2026-08-13, *"IEEE
+  assume-bump + boundary-aware division"*), one day after the `v0.1.0`
+  tag and in no tag since — `git describe --tags --contains 3328c9b`
+  names none. **So the released 0.1.0 is NOT affected**, including
+  through `propagate(closed, semantics="ieee")`, which was 0.1.0's only
+  door to ieee mode.
+
+  **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID, and how to
+  recognise one.** Any verdict produced by a tree containing `3328c9b`
+  and not this fix, whose stamp names **ieee** semantics (arithmetic mode
+  `interval/ieee` or `interval/ieee-fmt`, any of the four formats), on a
+  query containing a float `div` **whose divisor's propagated box reaches
+  zero at exactly one boundary** — `[0, hi]` or `[lo, 0]`. Only the
+  DEFINITE directions are at risk: a VERIFIED or a set-level REFUTED that
+  the interval leg decided downstream of such a division. An UNKNOWN was
+  never wrong, and no released verdict is affected because 0.2.0 has not
+  shipped.
+
+  Three shapes reach it, and the third needs no signed-zero reasoning in
+  the harness at all:
+
+  * a declared box with an endpoint at zero (`any_array(..., (-1.0, 0.0))`);
+  * `assume(b > 0)` in ieee mode — the bump lands on the format's smallest
+    SUBNORMAL, which the DAZ haze then hulls back to `[0, hi]`;
+  * **any subnormal-reaching divisor**, because `_elt_haze_fmt` hulls a
+    band-touching interval with the positive literal `0.0` and thereby
+    manufactures a zero endpoint whose sign the model has already
+    discarded. The 0.2.0 audit's fuzzer found six further instances of
+    this class through this route alone.
+
+  **What to re-run.** Any recorded ieee-mode verdict matching the shape
+  above: re-run it on a tree with this fix and take the new verdict. A
+  cheap pre-filter that needs no re-run: if the query has no `div`, or if
+  every divisor's propagated box is bounded away from zero *and* clear of
+  the format's subnormal band, the verdict is unaffected.
+
+  **The fix, and the shape NOT chosen.** A zero-containing divisor now
+  divides to ⊤ under ieee, with no case split on where the zero sits —
+  which is what `v0.1.0` did, and which is not merely the conservative
+  answer but the EXACT hull: whenever the dividend can be nonzero both
+  `±inf` are attainable and no narrower closed interval holds both, and
+  in the only remaining case (dividend exactly `[0,0]`) every quotient is
+  `0/0 = NaN` or `±0`, where the NaN flag is already set. The alternative
+  was to carry the zero's sign in the IEEE domain so a box could
+  distinguish "reaches `-0.0`" from "reaches `+0.0`". That is strictly
+  more capable and was rejected on cost and on hazard: it is a new
+  lattice element that must be threaded through every kernel that can
+  produce or consume a signed zero (the haze, `neg`/`abs`, `select_n`,
+  the comparisons, `reduce_sum`'s seed, every conversion), and a
+  half-done version is worse than none — it would put a trustworthy sign
+  bit on values that only some producers set, which is what this defect
+  already was. It would also buy little today: the declaration surface
+  has no way to say "this input reaches `+0.0` but not `-0.0`", and the
+  haze's manufactured zeros have no determinate sign to record (the same
+  audit measured `x + x` flushing to `-0.0` while `jnp.sum` seeds `+0.0`
+  on the same backend). Recorded here as a decision, with its reasons, so
+  that re-adding a tightening requires arguing against them.
+
+  **THE REAL-MODE `boundary_div` IS NOT WRONG FOR THIS REASON AND WAS NOT
+  CHANGED** — the two kernels disagree deliberately, and the claim was
+  verified rather than assumed. ℝ has one zero and `a/0` is undefined
+  there, so the box must cover only `b ≠ 0`. Checked in exact rational
+  arithmetic over ten one-sided-boundary cases with values crowding the
+  zero endpoint (relative offsets down to `1e-300` of the span):
+  **31,350 quotients, 0 containment failures.** So `[2, ∞)` is right for
+  `[-2,-2] / [-1,0]` in ℝ and ⊤ is right for the same operands under
+  ieee. `tests/test_ieee_zero_divisor_and_mul_exact.py` pins that
+  DIFFERENCE with its reasoning, because the next reader to see the two
+  kernels side by side will assume they should agree.
+
+  **The coverage this costs, measured and named.** In ieee mode the
+  advertised pair *"IEEE assume-bump + boundary-aware division"* no longer
+  decides `assume(b > 0); a / b`: the bump lands on the format's smallest
+  subnormal, the DAZ haze hulls that back to `[0, hi]` (measured on
+  float32: `_elt_haze_fmt(2**-149, 10.0, 2**-126) == (0.0, 10.0)`), and a
+  zero-containing divisor is now ⊤. That pin was a passing test asserting
+  `discharged`; it now asserts `unknown` and says why. **The row is not
+  dead** — an assume whose bound clears the format's subnormal band keeps
+  its quotient, measured on the same query at `assume(b > 1e-30)` in
+  float32, which still discharges — and real mode is untouched. That is
+  the whole price: one shape, in one mode, and both sides of the boundary
+  are pinned.
+
+  **Also removed by the fix, and found only by driving the kernel:** the
+  boundary branch could RAISE. `ieee_div([-inf,-inf], [-inf, 0])` took
+  the `bhi == 0` arm and computed `ahi/blo = -inf/-inf = NaN`, which
+  `IntervalArray.__post_init__` rejects — an `IntervalError` out of a
+  kernel whose contract is to degrade, not to crash. 20 such box pairs in
+  the binary64 sweep below, 16/20/16 in the three narrow formats.
+
+  **The sweep, and what the previous one missed.** An exact containment
+  sweep drives `ieee_div`, `ieee_div_fmt`, `mul` and `ieee_mul` over every
+  ordered endpoint pair from a 24-value adversarial pool (`±0.0`,
+  `±5e-324`, `±2.225e-308`, `±1e300`, `±FMAX`, `±inf`, `nextafter`
+  neighbours, and magnitudes subnormal in a *narrower* format), 301 boxes
+  and 90,601 box pairs, checking that every returned box contains every
+  value the arithmetic can produce at points of the operand boxes — with
+  **`+0.0` and `-0.0` kept apart on the input side**, which is exactly
+  what the earlier sweep did not do (it drove real-mode `div` and
+  `boundary_div`, never `ieee_div`, and deduplicated its sample points
+  with `==`, under which the two zeros are one point). Real-mode `mul` is
+  judged against exact rational products; the ieee kernels against the
+  target format's own arithmetic, composed with `_ieee_round_box` exactly
+  as `_ieee_arith` composes them.
+
+  ```
+                          pre-fix (f0b34cd)          post-fix
+  real mul   / R          0 / 1,366,561              0 / 1,366,561
+  ieee_div   / f64        40,032 / 6,707,920         0 / 6,708,100
+                          + 20 RAISED                + 0 RAISED
+  ieee_mul   / f64        0 / 6,708,100              0 / 6,708,100
+  ieee_div_fmt/float32     8,760 / 792,008           0 / 792,100
+  ieee_div_fmt/float16     6,904 / 495,524           0 / 495,616
+  ieee_div_fmt/bfloat16    7,800 / 659,252           0 / 659,344
+  ieee_mul_fmt/*           0                         0
+  ```
+
+  A NaN result is checked against the `made_nan` flag rather than
+  containment; 116,548 of the binary64 division samples are NaN and every
+  one of them is flagged. **What the generator could not produce**, said
+  plainly: it samples a finite subset of each box (endpoints, both zeros,
+  `nextafter` neighbours, a fixed constant pool) rather than every float,
+  so it is a containment *battery*, not a proof; it drives the kernels
+  directly and the `_ieee_arith`/`_ieee_round_box` composition, not the
+  traced pipeline; and it says nothing about the transfers this batch did
+  not touch.
+
+- **2026-08-15 (pre-release, same batch): `mul` was the only arithmetic
+  transfer with no exact-rational path, and the missing ulp decided
+  verdicts.** Audit 0.2.0 M16. **Sound in both directions — no verdict
+  was ever wrong — and it is in this log because it MOVED verdicts**, in
+  the UNKNOWN → definite direction, on a shape the release advertises.
+
+  `add` routes through `_exactable` → `Fraction` and returns the exact
+  endpoint when it is representable; `div` has the same branch; `mul`
+  bumped unconditionally. Measured on this branch, before and after:
+
+  ```
+                              before                              after
+  mul([2,3],[2,3])   (3.9999999999999996, 9.000000000000002)   (4.0, 9.0)
+  mul([0,4],[0,4])   (-5e-324, 16.000000000000004)             (0.0, 16.0)
+  reduce_sum(x*x)    (-1e-323, 32.00000000000001)              (0.0, 32.0)
+  ```
+
+  The exactly-zero corner bumped **below zero**, which defeats
+  `reduce_sum`'s nonnegative clamp: `Σ xᵢ²` became a true straddle, so
+  `boundary_div` was never reached and the division declined — with a
+  message recommending `assume(divisor > 0)`, which the caller had
+  effectively already done. The same real property, three spellings, on
+  this branch:
+
+  ```
+                     before      after
+    via_mul         UNKNOWN    VERIFIED
+    via_ipow       VERIFIED    VERIFIED
+    via_square     VERIFIED    VERIFIED
+  ```
+
+  **The verdict depended on how the user spelled "squared"**, and the
+  spelling that lost is the `safe_mask` sum-of-squares residual that the
+  0.2.0 boundary-division row was built for. Clamping `mul`'s sign as a
+  special case would have been a bandaid: it leaves `[2,3]×[2,3]` inexact,
+  and the inexactness is the defect.
+
+  **The ieee `mul` kernels deliberately do NOT take this route**, and the
+  reason is not symmetry-of-effort: under ieee the value the program has
+  IS `fl(x*y)`, and the native binary64 corner products already ARE that
+  value — exactly for binary64 operands, and exactly for the narrower
+  formats too (a product of two float32/bfloat16/float16 values needs at
+  most 48 significand bits and stays well inside binary64's exponent
+  range, after which `_ieee_round_box` rounds outward onto the target
+  grid). Routing through `Fraction` there would bracket the REAL product
+  and widen by up to an ulp on each side, and would be wrong in kind at
+  overflow: two binary64 operands near `FMAX` multiply to `inf` on the
+  target, so the true image is the point `[inf, inf]`, where the exact
+  route would report `[FMAX, inf]` and name a value the program cannot
+  compute.
+
+  **Measured coverage effects, counted rather than characterised.**
+  Fifteen pre-existing tests changed status across the two fixes — **13
+  from this one, 2 from S10** — and each is re-posed with its reason in
+  place. (A sixteenth, `test_no_untracked_file_anywhere_would_ship`,
+  reddened only because the new test file was untracked; not a behaviour
+  change.)
+
+  From `mul`, the interval leg now decides what a solver used to, or what
+  nothing used to: the JAX-Fluids `beta_0 >= 0` acceptance control (a sum
+  of squares — now discharged by intervals, which is why the escalating
+  control moved to `beta_1 <= 18.0`, true over the box with a measured
+  vertex maximum of 17.333… against a propagated box reaching 18.333…);
+  the T2 coefficient-contrast obligation at the equality-attaining
+  boundary (`C*min` starts at exactly 200 now, so the closed contrast
+  decides where it used to escalate — and the escalation pin moved to the
+  n = 1 field, where max and min are the same element and the dependency
+  problem keeps it undecidable for good); the T3 symmetry pair at an
+  all-point envelope (`0.0 * t` is the exact `[0,0]`, so the seam between
+  the triple and array paths closed); the all-point contract envelope,
+  which no longer invokes a solver at all; and four unit pins that
+  asserted the bump directly.
+
+  Three audit-pinned constructions had to be re-posed onto transfers that
+  still bracket, because their subject was the pad and never `mul`: the
+  uncertified-precondition channel B (audit F7) moved to `sqrt`, whose
+  endpoints are irrational in general so that no exactness discipline can
+  ever remove its bracket — it is the THIRD transfer to carry that
+  channel, after `add` and `mul` were each converted out from under it,
+  and the note predicting this move was already in the file; the
+  undecided-detail exhibit moved to `exp`; and the emission-infidelity
+  alarm's `true_over_box_query` moved from `x*x <= 1.0` to `x*x >= 0.0`,
+  which straddles for a reason no exactness work can remove (the interval
+  domain cannot see that the two operands are the same variable).
+
+  **In the other direction the loss is the S10 entry's, not this one's**:
+  nothing here made any verdict less decidable.
+
+  Both fixes are pinned by `tests/test_ieee_zero_divisor_and_mul_exact.py`
+  (191 cases, of which **118 fail against the pre-fix tree** — measured by
+  copying the file into a `git archive` of `f0b34cd` and running it
+  there). Suite: **3127 passed, 10 skipped**, from a 2931/10 baseline on
+  this branch, with the skip SET unchanged (hypothesis ×6, xdist ×1,
+  blackjax ×2, x64-threefry ×1).
+
+  **Each fix was reverted ALONE and the suite re-run, so the coverage is
+  attributed rather than assumed** (the guard-coverage-by-mutation norm;
+  reverting both at once would only have shown that *something* is
+  pinned). Both mutations are live:
+
+  | reverted alone | tests red | where |
+  |---|---|---|
+  | S10 (the ieee boundary branch restored) | **113** | 111 in the new file, plus the ieee-f32 assume-bump price pin and the subnormal-haze pin |
+  | M16 (`mul`'s bump restored) | **14** | 7 in the new file, 3 in `test_contracts.py`, and one each in `test_interval.py`, `test_ieee_semantics.py`, `test_square_acceptance_jaxfluids.py`, `test_undecided_detail.py` |
+
+  Both mutant runs also red `test_skip_inventory.py` and skip one extra
+  test; that is an artifact of running them from a non-git copy of the
+  tree (`test_reuse_pins` needs `git ls-files`), it appears identically
+  under both, and it is excluded from the counts above rather than
+  quietly included. The re-posed constructions — channel B on `sqrt`, the
+  undecided-detail exhibit on `exp`, `true_over_box_query` on `x*x >= 0`
+  — stay GREEN under the M16 revert, which is the check that they were
+  moved onto durable subjects rather than merely edited until they passed.
+
 *(no releases yet)*

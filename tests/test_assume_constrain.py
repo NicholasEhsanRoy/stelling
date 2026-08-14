@@ -1396,22 +1396,30 @@ def _rounding_pad_query():
     # past the strict boundary, so the collapse detector cannot fire; the
     # true region of v > 1 is empty over x ∈ [0, 1].
     #
-    # This channel USES `mul` deliberately. It was `add [x, 0.0]` until
-    # `add` moved to the exact-when-representable discipline, at which
-    # point `x + 0.0` became exact, the box stopped exceeding its image,
-    # `v > 1` collapsed onto [1.0, 1.0], and stelling correctly raised
-    # UnsatisfiableAssumptionError — a harness defect, not a guard failure.
-    # `mul` still carries an unconditional one-ulp bump (see the two
-    # endpoint disciplines in interval.py), so `x * 1.0` reproduces the
-    # padded box this channel exists to exercise. If `mul` is ever
-    # converted too, this channel needs the same treatment again.
+    # This channel USES `sqrt` deliberately, and it is the THIRD transfer to
+    # carry it. It was `add [x, 0.0]` until `add` moved to the
+    # exact-when-representable discipline, at which point `x + 0.0` became
+    # exact, the box stopped exceeding its image, `v > 1` collapsed onto
+    # [1.0, 1.0], and stelling correctly raised UnsatisfiableAssumptionError
+    # — a harness defect, not a guard failure. It was then `mul [x, 1.0]`,
+    # with a note saying "if `mul` is ever converted too, this channel needs
+    # the same treatment again"; audit 0.2.0 M16 converted it, and this is
+    # that treatment.
+    #
+    # `sqrt` is the durable choice rather than the next transfer down the
+    # list: its endpoints are IRRATIONAL in general, so the pad is not an
+    # artifact any exactness discipline can remove — the transfer must
+    # bracket. Measured here: sqrt([0, 1]) -> [0.0, 1.0000000000000002],
+    # whose true image is exactly [0, 1]. If some future sqrt returns the
+    # exact endpoint at the perfect squares, pick a box whose endpoint is
+    # not one (e.g. [0, 2] against the bound sqrt(2)).
     x, v, ap, aout, p2, out = (
         var(0), var(1), var(2, boolav()), var(3, boolav()), var(4, boolav()), var(5, boolav()),
     )
     return close(
         [
             any_eqn(x, 0.0, 1.0),
-            eqn("mul", [x, lit(1.0)], v),
+            eqn("sqrt", [x], v),
             eqn("gt", [v, lit(1.0)], ap),
             eqn("stelling_assume", [ap], aout),
             eqn("le", [v, lit(0.5)], p2),

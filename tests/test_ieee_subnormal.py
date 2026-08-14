@@ -123,13 +123,19 @@ def test_kernels_haze_operands_and_results():
     box, made_nan = iv.ieee_mul(s(1e-160, 1e-160), s(1e-160, 1e-160))
     assert not made_nan
     assert (box.los[0], box.his[0]) == (0.0, 1e-160 * 1e-160)
-    # DAZ face: a subnormal divisor may read 0 — the boundary-aware path
-    # fires ([0, TINY] has zero at the lower boundary), and
-    # subnormal/subnormal is a DAZ-created 0/0 (flagged). The non-NaN
-    # quotients are [0, +inf] (non-negative / non-negative).
+    # DAZ face: a subnormal divisor may read 0, so the haze hulls it to
+    # [0, TINY] and the quotient is ⊤ — subnormal/subnormal is a DAZ-created
+    # 0/0 (flagged), and the flushed divisor is a ZERO WHOSE SIGN THE HAZE
+    # HAS ALREADY DISCARDED (`_elt_haze` hulls with the positive literal
+    # 0.0). The box read [0, +inf] until audit 0.2.0 S10 withdrew the
+    # boundary-aware branch: at a flushed -0.0 the quotient is -inf, and
+    # nothing in the box could say which zero the target produced (measured
+    # in that audit: `x + x` flushes to -0.0 while `jnp.sum` seeds +0.0 on
+    # the same backend). This is the DAZ route to S10 — no signed-zero
+    # reasoning in the DECLARATION at all, the haze manufactures it.
     box, made_nan = iv.ieee_div(s(TINY, TINY), s(TINY, TINY))
     assert made_nan
-    assert (box.los[0], box.his[0]) == (0.0, INF)
+    assert (box.los[0], box.his[0]) == (-INF, INF)
     # DAZ-amplification: subnormal × inf can be 0 × inf = NaN at runtime
     box, made_nan = iv.ieee_mul(s(1e-310, 2e-308), s(5.0, INF))
     assert made_nan
