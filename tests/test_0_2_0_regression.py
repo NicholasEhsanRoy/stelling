@@ -144,7 +144,7 @@ HAVE_CVC5 = _optional.available("cvc5") or _optional.cvc5_binary() is not None
 HAVE_SOLVER = HAVE_Z3 or HAVE_CVC5
 
 need_solver = pytest.mark.skipif(
-    not HAVE_SOLVER, reason="needs at least one solver (z3 or cvc5)"
+    not HAVE_SOLVER, reason="needs an SMT solver"
 )
 
 

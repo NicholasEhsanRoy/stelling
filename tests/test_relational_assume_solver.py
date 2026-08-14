@@ -347,7 +347,7 @@ try:
 except Exception:
     HAVE_SOLVER = False
 
-need_solver = pytest.mark.skipif(not HAVE_SOLVER, reason="needs z3 or cvc5")
+need_solver = pytest.mark.skipif(not HAVE_SOLVER, reason="needs an SMT solver")
 
 
 @need_solver
