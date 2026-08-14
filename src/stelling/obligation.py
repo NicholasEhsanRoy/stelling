@@ -3075,17 +3075,29 @@ def witness_is_valid(
             # a missing or inexact value: the replay conjunct below names
             # it precisely (ReplayError), so membership defers
             continue
+        # _fraction_text, not str(): `v` is a SOLVER MODEL value, so its
+        # terms are unbounded and `{v}` raises ValueError past CPython's
+        # int -> str cap. The raise would land HERE, inside the message of
+        # the LOUD alarm — the one that means the emitted problem does not
+        # mean the obligation — replacing its diagnosis with a traceback
+        # out of `fractions.py`. That is worse than the same hazard in a
+        # decline message, not better, because this is the channel that
+        # exists to be read. The bounds are `Fraction(float)` and cannot
+        # reach the cap, but they go through the same helper so nobody has
+        # to re-derive that to see the line is safe.
         if inp.lo != float("-inf") and v < Fraction(inp.lo):
             return (
-                f"the model escapes the declared box ({inp.name} = {v} is "
-                f"below its declared lower bound {Fraction(inp.lo)}); the "
-                f"box constraints were part of the emitted problem"
+                f"the model escapes the declared box ({inp.name} = "
+                f"{_fraction_text(v)} is below its declared lower bound "
+                f"{_fraction_text(Fraction(inp.lo))}); the box constraints "
+                f"were part of the emitted problem"
             )
         if inp.hi != float("inf") and v > Fraction(inp.hi):
             return (
-                f"the model escapes the declared box ({inp.name} = {v} is "
-                f"above its declared upper bound {Fraction(inp.hi)}); the "
-                f"box constraints were part of the emitted problem"
+                f"the model escapes the declared box ({inp.name} = "
+                f"{_fraction_text(v)} is above its declared upper bound "
+                f"{_fraction_text(Fraction(inp.hi))}); the box constraints "
+                f"were part of the emitted problem"
             )
     try:
         holds = evaluate_predicate(sl, values)

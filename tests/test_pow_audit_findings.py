@@ -501,6 +501,47 @@ def test_a_decline_message_survives_an_unrenderable_operand():
     )
 
 
+def test_the_box_escape_alarm_survives_an_unrenderable_model_value():
+    """The LOUD alarm's own message may not crash on the model it accuses.
+
+    ``witness_is_valid``'s box-membership conjunct interpolates the model
+    value, and a model value is unbounded — the same ``int`` -> ``str``
+    hazard as the decline messages above, but on the *worse* side of the
+    channel line. A decline that crashes costs an UNKNOWN; THIS message is
+    the diagnosis of "the emitted problem does not mean the obligation",
+    so a ``ValueError`` here replaces the one explanation a reader gets
+    with a traceback out of ``fractions.py`` and leaves an
+    emission-infidelity report unattributable.
+
+    The declared bound cannot reach the cap (it is ``Fraction`` of a
+    binary64), so only the model value can trip this — which is why it
+    outlived the decline-message pass: the hazard is on the operand
+    nobody controls."""
+    limit = sys.get_int_max_str_digits()
+    huge = Fraction(3 ** 10000, 2)
+    assert huge.numerator.bit_length() / math.log2(10) > limit
+
+    x, pred = var(0), var(1, BOOL)
+    sl = ObligationSlice(
+        index=0,
+        fragment="QF_LRA",
+        inputs=(SliceInput(name="x0", var_id=0, lo=0.0, hi=1.0),),
+        consts=(),
+        eqns=(eqn("le", [x, lit(2.0)], pred),),
+        root=pred,
+        source_info=(),
+    )
+    # the model escapes the declared box [0, 1]: the emission-infidelity
+    # conjunct, which must RETURN a string rather than raise
+    why = witness_is_valid(sl, {"x0": huge})
+    assert why is not None
+    assert "escapes the declared box" in why
+    assert f"{huge.numerator.bit_length()}-bit integer" in why
+    assert "above its declared upper bound 1" in why  # the bound still renders
+
+    assert sys.get_int_max_str_digits() == limit
+
+
 def test_a_declined_replay_reaches_its_handler_and_stays_unknown(
     monkeypatch, tmp_path
 ):
