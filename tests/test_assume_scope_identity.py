@@ -42,7 +42,7 @@ import pytest
 
 from stelling import ir
 
-pytest.importorskip("jax", reason="needs jax")
+pytest.importorskip("jax")
 
 import jax  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
