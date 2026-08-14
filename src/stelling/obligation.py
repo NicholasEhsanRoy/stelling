@@ -418,6 +418,16 @@ class SliceAssume:
     invars: tuple[ir.Atom, ...]  # SLICE-scope atoms, alias-resolved
     pairs: tuple[tuple[int, int], ...]  # (lhs element, rhs element) per output
     source_info: tuple[str, ...] = ()
+    # WHICH forwarded assume this is: the index of the
+    # :class:`stelling.propagate.RelationalAssume` it was translated from, in
+    # the tuple the slicer was handed. It is the IDENTITY a downstream join is
+    # keyed on — `stelling.propagate.unaccounted_assumes` asks whether the
+    # assume that produced ledger entry *k* is among the ones a given script
+    # emitted, and no count can answer that. `-1` is the "did not come from a
+    # propagation" value a hand-built SliceAssume carries, and it matches no
+    # ledger entry, so a hand-built slice can never release a withheld
+    # violation.
+    origin: int = -1
 
 
 @dataclass(frozen=True)
@@ -448,6 +458,14 @@ class ObligationSlice:
     # attached to it. Before this pair existed the emission had five silent
     # `continue`s and a run could lose a user-stated constraint with nothing
     # said about it.
+    #
+    # A COUNT OF THIS PARTITION IS NOT ENOUGH FOR THE WITHHOLDING RULE, which
+    # is why every carried assume also names WHICH forwarded assume it is
+    # (:attr:`SliceAssume.origin`). "How many of them arrived" cannot answer
+    # "did the one that constrains this witness arrive"; two rounds of false
+    # REFUTED came out of asking the first question and reading the answer as
+    # the second (audit 0.2.0 S6, and the branch-scoping regression that
+    # followed it).
     assumes: tuple[SliceAssume, ...] = ()
     assumes_skipped: tuple[str, ...] = ()
 
@@ -642,14 +660,27 @@ def _render_scope(path: tuple) -> str:
     """A scope path in words, for a decline the reader can act on.
 
     The path is positional (:data:`stelling.propagate.ScopePath`), so this is
-    the only place it becomes prose; nothing reads it back."""
+    the only place it becomes prose; nothing reads it back.
+
+    THE ``cond`` ARM IS UNREACHABLE FROM THE ONLY CALLER, and says so here
+    rather than reading as a live case. The one caller is
+    :meth:`_Slicer._carry_assumes`, which renders the scope of a
+    :class:`stelling.propagate.RelationalAssume`; and the propagator increments
+    ``branch_depth`` BEFORE it pushes any ``("cond", pos, i)`` step, while its
+    forwarding guard refuses to forward at all while ``branch_depth`` is
+    nonzero. So no ``RelationalAssume`` can carry a cond step, and this arm
+    cannot fire through that path. It is kept because the function is a
+    renderer of a general type: a path is data, a caller that hands it one
+    with a cond step in it should get prose rather than a ``repr``, and the
+    ``else`` beneath it exists for exactly the same reason.
+    """
     if not path:
         return "the top level"
     parts = []
     for step in path:
         if len(step) == 2 and step[0] == "call":
             parts.append(f"the body of equation {step[1]}")
-        elif len(step) == 3 and step[0] == "cond":
+        elif len(step) == 3 and step[0] == "cond":  # unreachable; see docstring
             parts.append(f"branch {step[2]} of the cond at equation {step[1]}")
         else:  # an unrecognised step is quoted, never guessed at
             parts.append(repr(step))
@@ -2122,10 +2153,41 @@ class _Slicer:
 
         carried: list[SliceAssume] = []
         skipped: list[str] = []
-        for ra in self.relational_assumes:
+        for origin, ra in enumerate(self.relational_assumes):
             eqn = ra.eqn
             at = f" at {ra.where}" if ra.where else ""
             head = f"relational assume{at} not forwarded to the solver: "
+            # THE NEXT THREE SKIPS ARE SCREENED BY THE PROPAGATOR FIRST, and
+            # are DEFENCE IN DEPTH rather than live paths. Written down here
+            # because a reader who takes them for live paths will look for
+            # (and "fix") a cause that does not exist:
+            #
+            #   * the two `eqn.*` shape screens — `_Walker._classify_
+            #     assumed_pred` forwards only a producer whose primitive is in
+            #     `_ASSUME_CMPS` and whose `invars` are exactly two `ir.Var`s
+            #     (it drops on `prim not in _ASSUME_CMPS` and on
+            #     `len(producer.invars) != 2` before ever reaching the forward
+            #     site), and `_ASSUME_CMPS` is the same set as `ASSUME_CMP_SYM`
+            #     here. Their reachable trigger is a `RelationalAssume`
+            #     assembled by hand;
+            #   * `remap is None` — this was written for a scope the slicer
+            #     does not descend, which means a `cond` branch, and a
+            #     branch-scoped relational assume is no longer forwarded at
+            #     all (`branch_depth` is incremented before the branch's scope
+            #     step is pushed, and the forwarding guard refuses while it is
+            #     nonzero), so no forwarded assume can name a scope for that
+            #     reason. What is left reachable is narrow and is not a cond:
+            #     the propagator descends a transparent wrapper on
+            #     `len(inner.jaxpr.invars) == len(ins)` while `_flatten`
+            #     additionally requires the outvar and constvar counts to
+            #     match, so a wrapper malformed in exactly that way is
+            #     descended by one and left opaque by the other. jax tracing
+            #     does not produce one.
+            #
+            # All three are kept: each names an assume and a reason, which is
+            # the posture this whole method exists to enforce, and none of
+            # them can mint anything — a skip is a disclosed loss of
+            # precision, and the withholding rule reads the skip.
             if eqn.primitive not in ASSUME_CMP_SYM:
                 skipped.append(
                     head + f"the assumed comparison {eqn.primitive!r} has no "
@@ -2157,9 +2219,34 @@ class _Slicer:
                     effects=renamed.effects,
                     source_info=renamed.source_info,
                 )
-                # the SAME pairing the slice's own equations go through, run
-                # on the RESOLVED operands: whatever indices come out of here
-                # index the very term tuples the emission will build
+                # The SAME pairing the slice's own equations go through, run on
+                # the RESOLVED operands: whatever indices come out of here
+                # index the very term tuples the emission will build.
+                #
+                # BELT AND BRACES BEHIND THE IDENTITY REPAIR, and measured to
+                # be exactly that — not the M6 repair, which an earlier
+                # version of this comment credited it with. Substituting
+                # `renamed` for `probe` here reddens 0 of the suite's 2954
+                # collected tests on this tree, because alias resolution cannot
+                # change an aval: `_flatten` binds an inner invar to the
+                # call's operand atom and an outer outvar to the inner result
+                # atom, both of which jax has already type-checked equal, and
+                # `_renumber_eqn` renames without touching avals. So the two
+                # calls see the same shapes on every reachable input and
+                # return the same indices.
+                #
+                # What actually closed M6's crash and its silent truncation is
+                # the SCOPE-CORRECT IDENTITY: `remap` above resolves the
+                # assume's operands through the rename of the scope they were
+                # traced in, so they can no longer land on an unrelated term
+                # of a different shape — which is where the mismatched indices
+                # came from. Reading `probe` is kept because it is the
+                # honest reading (the emission indexes the resolved operands'
+                # terms, so the indices should come from the resolved
+                # operands), not because a case is known that distinguishes
+                # it. `docs/norms.md` § "Guard coverage is proven by mutation,
+                # not by construction": no such case has been constructed, so
+                # none is claimed.
                 idx = _pair_elementwise(probe)
                 counts = [n_terms(a) for a in probe.invars]
             except _Decline as d:
@@ -2195,15 +2282,21 @@ class _Slicer:
                     "constrains nothing"
                 )
                 continue
-            # ARITY IS CHECKED, AND `_pair_elementwise` ABOVE IS THE CHECK
-            # (audit M6). The crash and the silent truncation were one missing
-            # check with two directions, and their shared cause was that the
-            # element indices came from the ASSUME EQUATION's shapes while the
-            # terms came from whatever the ids happened to resolve to. That
-            # call runs on the RESOLVED operands, against the comparison's own
-            # output shape, and declines — quoted, into `skipped` — when they
-            # do not broadcast; so the indices and the terms now come from one
-            # pair of shapes rather than two.
+            # ARITY IS CHECKED, AND `_pair_elementwise` ABOVE IS THE CHECK.
+            # The M6 crash and the M6 silent truncation were one missing check
+            # with two directions, and their shared cause was that the element
+            # indices came from the ASSUME EQUATION's shapes while the terms
+            # came from whatever the ids HAPPENED TO RESOLVE TO — a foreign
+            # scope's id landing on an unrelated term of a different shape.
+            # THE SCOPE-CORRECT RESOLUTION ABOVE IS WHAT REMOVES THAT: an
+            # operand is now resolved through the rename of the scope it was
+            # traced in, or the assume is skipped with a reason, so no id lands
+            # on an unrelated term at all. `_pair_elementwise` running on the
+            # resolved operands makes the indices and the terms come from one
+            # pair of shapes rather than two, and it declines — quoted, into
+            # `skipped` — when they do not broadcast. It is the check for the
+            # shapes; it is not what closed M6, and the mutation measurement
+            # at the call site says so.
             #
             # There is deliberately NO second arity check here comparing
             # `counts` against the operands' avals. The one place that holds
@@ -2220,6 +2313,7 @@ class _Slicer:
                     invars=probe.invars,
                     pairs=tuple(zip(ia, ib)),
                     source_info=eqn.source_info,
+                    origin=origin,
                 )
             )
         return tuple(carried), tuple(skipped)

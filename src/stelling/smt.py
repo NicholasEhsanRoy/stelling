@@ -191,16 +191,37 @@ class Script:
     #   and `solvers._escalate`'s un-withholding read it as "the solver ran
     #   with the full constraint set" (audit S8).
     #
-    #   WHAT IT STILL DOES NOT SAY. It is a count, not a per-assume identity:
-    #   nothing here binds axiom line k to assume k for a reader downstream.
-    #   Every axiom is about the right terms; which line came from which
-    #   assume is not recoverable from this integer. It also says nothing
-    #   about whether the assume set is SATISFIABLE — an `unsat` on a script
+    #   WHAT IT STILL DOES NOT SAY. It is a count, and a count cannot answer
+    #   "did assume #k arrive" — only "how many did". It also says nothing
+    #   about whether the assume set is SATISFIABLE: an `unsat` on a script
     #   carrying axioms may come from the obligation or from a contradictory
     #   precondition, and this number cannot tell them apart.
     #
+    #   THE FIRST OF THOSE IS WHY `emitted_origins` EXISTS AND WHY NO RULE MAY
+    #   BE BUILT ON THIS FIELD. `solvers._escalate` releases a withheld
+    #   violation only when every assume the user wrote is accounted for, and
+    #   it asks that question of the propagation's per-assume ledger, joined
+    #   on identity. Reading a count instead produced a false REFUTED twice:
+    #   once because the denominator counted only the RELATIONAL assumes while
+    #   the flag gating it is set by any drop at all (audit 0.2.0 S6), and
+    #   once because the propagator stopped forwarding branch-scoped assumes
+    #   and the denominator silently shrank to match the numerator. Both are
+    #   the same shape — an equality between two populations nothing forces to
+    #   be one population — and it is not available on this field.
+    #
     # Zero when the slice carries no assumes.
     relational_assumes_emitted: int = 0
+    # WHICH forwarded assumes this script states, by their index in the tuple
+    # the propagation forwarded (`SliceAssume.origin`) — the identity the
+    # count above is not. Always `len(emitted_origins) ==
+    # relational_assumes_emitted`, because both are read off `sl.assumes` and
+    # the axiom loop has no skip; the count is kept because it is the shape
+    # the disclosure note is written in, not because a rule reads it.
+    #
+    # A hand-built `SliceAssume` carries `origin == -1`, which is in this
+    # tuple and matches no ledger entry — so a slice assembled outside the
+    # slicer can add axioms but can never release a withheld violation.
+    emitted_origins: tuple[int, ...] = ()
 
     def stamp_options(self) -> tuple[tuple[str, str], ...]:
         """The option set as the stamp records it: the exact emitted
@@ -877,13 +898,28 @@ def emit(
     # and said nothing about it. They are checks now, at the one place that
     # can name the assume, and their outcome is on the slice.
     #
-    # The two `raise`s below are not that class. They fire only if a slice
-    # was hand-built with a `SliceAssume` its own fields contradict, which
-    # the production path cannot produce; they are the same posture as
-    # `term()`'s unbound-variable raise, and they exist so that a mismatch is
-    # a message rather than an `IndexError` out of a tuple subscript (audit
-    # M6, whose crash arm was exactly that subscript).
-    n_relational_emitted = 0
+    # The two `raise`s below are not that class, and neither is REACHED on any
+    # shape the production path builds. They fire only if a slice was
+    # hand-built with a `SliceAssume` whose own fields contradict each other:
+    # `_carry_assumes` computes `pairs` from the very operands it stores in
+    # `invars`, and the emission holds one term per element of each operand's
+    # aval, so the term count and the pair indices agree by construction.
+    # MEASURED, not argued from that construction: deleting the term-count
+    # raise reddens 0 of the suite's 2954 collected tests on this tree.
+    #
+    # M6'S CRASH IS NOT WHAT THESE CLOSE, which an earlier version of this
+    # comment implied. That crash was a bare tuple subscript indexing terms
+    # a FOREIGN scope's id had resolved to; what removed it is the
+    # scope-correct identity in `_carry_assumes`, after which no such term
+    # tuple can be reached. These stay as the residual message-not-traceback
+    # posture — the same one as `term()`'s unbound-variable raise — for a
+    # `SliceAssume` this module did not build. Kept, not credited.
+    #
+    # WHICH assumes were stated, not only how many. The two are written from
+    # the same loop, in the same place, so they cannot come apart; the
+    # identity is what the withholding rule joins on and the count is what the
+    # disclosure note is phrased in.
+    emitted_origins: list[int] = []
     for sa in sl.assumes:
         cmp_sym = ASSUME_CMP_SYM[sa.primitive]
         sides = tuple(term(a) for a in sa.invars)
@@ -904,7 +940,7 @@ def emit(
                     f"declined this"
                 )
             lines.append(f"(assert ({cmp_sym} {sides[0][i]} {sides[1][j]}))")
-        n_relational_emitted += 1
+        emitted_origins.append(sa.origin)
 
     root_terms = term(sl.root)
     if len(root_terms) == 1:
@@ -924,5 +960,6 @@ def emit(
         options=options,
         sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         slice_sha256=slice_fingerprint(sl),
-        relational_assumes_emitted=n_relational_emitted,
+        relational_assumes_emitted=len(emitted_origins),
+        emitted_origins=tuple(emitted_origins),
     )

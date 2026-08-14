@@ -1350,11 +1350,32 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
                 # that the solver was ever asked THIS question. Narrowing on
                 # it would be narrowing on an index, which is how a mispaired
                 # `closed` cleared this bar.
+                #
+                # THE SENTENCE SAYS WHAT THIS FUNCTION MEASURED, NOT WHAT THE
+                # ESCALATION IS. It used to end "so the escalation is not
+                # evidence about this query", and that is a claim this code
+                # cannot make and which is FALSE on a shape reached routinely:
+                # `slice_obligation` is called here with no propagation, so
+                # the re-derived slice carries no relational assumes, while
+                # the slice the escalation ran on may carry several. The two
+                # then have the SAME `slice_sha256` — `smt.slice_fingerprint`
+                # walks `sl.eqns` and never `sl.assumes` — and differ only in
+                # `smt2_sha256`, by the `(assert ...)` axiom lines. The
+                # escalation is about this query; the re-derivation simply was
+                # not given the axioms and so cannot recognise it. Measured:
+                # a two-obligation query whose assume-constrained obligation
+                # is discharged with a forwarded axiom and whose other
+                # obligation contains a `scatter` falls back to the whole
+                # query here, VERIFIED -> UNKNOWN. That mechanism (the audit's
+                # open question about what the bar's re-derivation may see) is
+                # unfixed and is not this note's business; stating it wrongly
+                # was.
                 return fallback(
                     f"no recorded solver invocation for the decided "
                     f"obligation #{index} reproduces both this query's slice "
-                    f"of it and the script that slice emits, so the "
-                    f"escalation is not evidence about this query"
+                    f"of it and the script that slice emits, so this "
+                    f"re-derivation could not identify any recorded "
+                    f"escalation as one about this obligation of this query"
                 )
             found = _barred_in_eqns(sliced.eqns)
             if found:
