@@ -57,6 +57,7 @@ from fractions import Fraction
 
 from stelling import ir
 from stelling.obligation import (
+    ASSUME_CMP_SYM,
     QF_NRA,
     ObligationSlice,
     RATIONAL_POW_DENOMINATOR_CAP,
@@ -164,9 +165,41 @@ class Script:
     # hand-built Script (tests, downstream tooling) stays constructible; an
     # empty value is not a claim of anything and never narrows the bar.
     slice_sha256: str = ""
-    # How many of the relational assumes were ACTUALLY emitted into this
-    # script (i.e. both operands had terms in the slice's backward cone).
-    # Zero when no relational assumes were passed or all were skipped.
+    # HOW MANY OF THE PROPAGATION'S FORWARDED RELATIONAL ASSUMES THIS SCRIPT
+    # STATES, ABOUT THE TERMS THEIR OPERANDS DENOTE. The invariant, stated
+    # precisely because a downstream rule is built on it:
+    #
+    #   Let R be the tuple the propagation forwarded and the slicer was given
+    #   (`propagation.relational_assumes`). Then for every element of R,
+    #   exactly one of two things happened, and this number counts the first:
+    #
+    #     * it was translated into this slice's id namespace, its operands
+    #       resolved to atoms that DO have terms here, its element pairing
+    #       recomputed from those resolved operands, and one `(assert ...)`
+    #       per output element written from those very terms — so the axiom
+    #       the solver saw is the predicate the user wrote, over the values
+    #       the user wrote it about;
+    #
+    #     * or it could not be, and the reason is a sentence in
+    #       `ObligationSlice.assumes_skipped`.
+    #
+    #   Hence `relational_assumes_emitted + len(sl.assumes_skipped) == len(R)`
+    #   and `relational_assumes_emitted == len(R)` means EVERY forwarded
+    #   assume constrained this query, correctly. That is what makes it usable
+    #   as evidence rather than as a tally: before audit 0.2.0 S5-B2 this
+    #   number also incremented for an axiom resolved against unrelated terms,
+    #   and `solvers._escalate`'s un-withholding read it as "the solver ran
+    #   with the full constraint set" (audit S8).
+    #
+    #   WHAT IT STILL DOES NOT SAY. It is a count, not a per-assume identity:
+    #   nothing here binds axiom line k to assume k for a reader downstream.
+    #   Every axiom is about the right terms; which line came from which
+    #   assume is not recoverable from this integer. It also says nothing
+    #   about whether the assume set is SATISFIABLE — an `unsat` on a script
+    #   carrying axioms may come from the obligation or from a contradictory
+    #   precondition, and this number cannot tell them apart.
+    #
+    # Zero when the slice carries no assumes.
     relational_assumes_emitted: int = 0
 
     def stamp_options(self) -> tuple[tuple[str, str], ...]:
@@ -442,7 +475,6 @@ def emit(
     sl: ObligationSlice,
     solver: str,
     timeout_ms: int,
-    relational_assumes: tuple[ir.JaxprEqn, ...] = (),
 ) -> Script:
     """Emit the escalation script for one obligation slice.
 
@@ -451,13 +483,20 @@ def emit(
     declarations, bounds, definitions, the negated predicate — is
     identical, so both portfolio members see the same query.
 
-    ``relational_assumes`` are comparison equations from dropped relational
-    ``assume`` predicates: both operands vary, so the interval domain could
-    not narrow, but the constraint the user stated is SOUND and can be
-    emitted as an additional axiom for the solver. Only assumes whose
-    operand variables are IN the slice (have terms in ``names``) are emitted;
-    others are silently skipped (their variables are not in the backward
-    cone, so no SMT term exists for them).
+    THE RELATIONAL AXIOMS COME FROM THE SLICE AND FROM NOWHERE ELSE.
+    ``sl.assumes`` are :class:`stelling.obligation.SliceAssume` values, whose
+    operands are atoms of THIS slice by construction, already alias-resolved
+    and already known to have terms here. There is deliberately no parameter
+    through which a caller can hand this function an assume stated in some
+    other scope's ids: that parameter existed until audit 0.2.0 S5-B2, and
+    what it made possible was an axiom emitted about unrelated values — the
+    CONVERSE of the user's own precondition, discharging an obligation false
+    at every admitted point. A wrong resolution is now unconstructable rather
+    than unlikely, because the only type that reaches the axiom loop cannot
+    express a foreign name.
+
+    See :attr:`Script.relational_assumes_emitted` for what the emitted count
+    means and what a caller may conclude from it.
     """
     if timeout_ms <= 0:
         raise ValueError(f"timeout_ms must be positive, got {timeout_ms}")
@@ -827,47 +866,45 @@ def emit(
 
     # -- relational assumes: user-stated constraints the interval domain
     # could not apply, emitted as POSITIVE axioms the solver may assume.
-    # Only emitted when BOTH operand variables have terms in this slice
-    # (they are in the backward cone); otherwise silently skipped.
-    _ASSUME_CMP_SYM = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "="}
+    #
+    # This loop has NO skip. Every decision about whether an assume can be
+    # stated in this slice was made by `_Slicer._carry_assumes`, WITH a
+    # sentence attached to every rejection (`sl.assumes_skipped`); what
+    # arrives here is the set that can be, translated into this slice's own
+    # names. The five silent `continue`s that used to sit here — unsupported
+    # comparison, wrong arity, operand out of the cone, zero-size operand,
+    # shapes that do not broadcast — each cost a constraint the user wrote
+    # and said nothing about it. They are checks now, at the one place that
+    # can name the assume, and their outcome is on the slice.
+    #
+    # The two `raise`s below are not that class. They fire only if a slice
+    # was hand-built with a `SliceAssume` its own fields contradict, which
+    # the production path cannot produce; they are the same posture as
+    # `term()`'s unbound-variable raise, and they exist so that a mismatch is
+    # a message rather than an `IndexError` out of a tuple subscript (audit
+    # M6, whose crash arm was exactly that subscript).
     n_relational_emitted = 0
-    for ra_eqn in relational_assumes:
-        cmp_sym = _ASSUME_CMP_SYM.get(ra_eqn.primitive)
-        if cmp_sym is None:
-            continue  # not a supported comparison
-        if len(ra_eqn.invars) != 2:
-            continue
-        lhs_atom, rhs_atom = ra_eqn.invars
-        # Both operands must have terms in the slice
-        lhs_terms = term(lhs_atom) if (
-            isinstance(lhs_atom, ir.Literal)
-            or names.get(lhs_atom.id) is not None
-        ) else None
-        rhs_terms = term(rhs_atom) if (
-            isinstance(rhs_atom, ir.Literal)
-            or names.get(rhs_atom.id) is not None
-        ) else None
-        if lhs_terms is None or rhs_terms is None:
-            continue  # operand not in the slice's backward cone
-        if not lhs_terms or not rhs_terms:
-            continue  # zero-size operand
-        # Emit the POSITIVE form of the constraint as an axiom.
-        # For array-shaped operands, the assume is universal: every element
-        # pair must satisfy the comparison.
-        try:
-            idx = _pair_elementwise(ra_eqn)
-        except Exception:
-            continue  # shapes don't broadcast; skip silently
-        if len(idx) == 2:
-            ia, ib = idx
-            for i in range(len(ia)):
-                a_term = lhs_terms[ia[i]]
-                b_term = rhs_terms[ib[i]]
-                lines.append(f"(assert ({cmp_sym} {a_term} {b_term}))")
-            n_relational_emitted += 1
-        elif len(idx) == 1:
-            # unary — should not happen for a comparison, but be safe
-            continue
+    for sa in sl.assumes:
+        cmp_sym = ASSUME_CMP_SYM[sa.primitive]
+        sides = tuple(term(a) for a in sa.invars)
+        for side, atom, got in zip(("left", "right"), sa.invars, sides):
+            want = _size(_shape_of(atom))
+            if len(got) != want:
+                raise ValueError(
+                    f"emission has {len(got)} term(s) for the {side} operand "
+                    f"of a forwarded {sa.primitive!r} assume whose aval holds "
+                    f"{want} — slice validation should have declined this"
+                )
+        for i, j in sa.pairs:
+            if i >= len(sides[0]) or j >= len(sides[1]):
+                raise ValueError(
+                    f"a forwarded {sa.primitive!r} assume pairs element "
+                    f"({i}, {j}) against {len(sides[0])} and "
+                    f"{len(sides[1])} term(s) — slice validation should have "
+                    f"declined this"
+                )
+            lines.append(f"(assert ({cmp_sym} {sides[0][i]} {sides[1][j]}))")
+        n_relational_emitted += 1
 
     root_terms = term(sl.root)
     if len(root_terms) == 1:

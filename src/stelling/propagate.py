@@ -173,6 +173,7 @@ __all__ = [
     "IEEE_TRANSFERS",
     "ObligationReport",
     "Propagation",
+    "RelationalAssume",
     "TIGHTENED_DOMAIN_REAL_REFUSAL",
     "TRANSFERS",
     "UnsatisfiableAssumptionError",
@@ -200,6 +201,65 @@ class UnsatisfiableAssumptionError(ValueError):
 
 # 2**53: the largest magnitude below which every int is exactly a double.
 _EXACT_INT = 9007199254740992
+
+
+# -- scope-qualified variable identity ----------------------------------------
+#
+# THE DEFECT THIS TYPE EXISTS FOR (audit 0.2.0 S5-B2, a FALSE VERIFIED).
+#
+# An IR var id is unique only WITHIN ONE SCOPE. `_jax_compat._Transcriber`
+# numbers with one global counter keyed by `id(jax Var)`, and jax REUSES jaxpr
+# objects, so the same id is legitimately bound in several scopes; and
+# `obligation._Slicer` renumbers every inlined scope from
+# `max(top-level ids) + 1`, a maximum that does not see sub-jaxpr ids at all.
+#
+# A relational `assume` traced inside a `jit`/`custom_jvp` body is recorded by
+# its producing comparison equation, whose operands carry THAT BODY'S ids. The
+# emission used to resolve them with a bare `names.get(atom.id)` against the
+# slice's renumbered table — an integer lookup with no scope check. When the
+# two ranges met, a foreign id resolved to an unrelated term and the axiom was
+# emitted about the wrong values: measured as the CONVERSE of the user's own
+# precondition, discharging an obligation that is false at every admitted
+# point.
+#
+# A raw `int` cannot carry the missing information, which is why the fix is a
+# type and not a bounds check. Raising the fresh-id base above every scope's
+# ids would remove the collision and leave the defect: the lookup would simply
+# MISS, and the run would lose a user-stated constraint with nothing said
+# about it.
+#
+# A scope path addresses one scope INSTANCE in the IR tree by position, not by
+# object identity and not by traversal convention: each step names the index of
+# the equation whose body is being entered, tagged with the kind of descent, so
+# `("call", 4)` (the body of top-level equation 4) can never denote the same
+# scope as `("cond", 4, 1)` (branch 1 of the cond at equation 4). The
+# propagator records the path it was in when it forwarded; the slicer records
+# the same path when it renumbers; and a key that does not match resolves to
+# NOTHING rather than to something else. Divergence therefore costs a
+# disclosed skip, never a forged axiom.
+ScopeStep = tuple  # ("call", eqn_index) | ("cond", eqn_index, branch_index)
+ScopePath = tuple  # tuple[ScopeStep, ...]; () is the top-level scope
+
+
+@dataclass(frozen=True)
+class RelationalAssume:
+    """One relational ``assume`` forwarded for solver emission, WITH THE
+    SCOPE ITS OPERAND IDS BELONG TO.
+
+    ``eqn`` is the comparison equation the assume consumed (primitive in
+    ``_ASSUME_CMPS``), exactly as the propagator met it — so its operand ids
+    are ids of ``scope``, and are meaningless anywhere else. Nothing may
+    resolve them without first mapping ``scope`` to the namespace it is being
+    resolved into; :meth:`stelling.obligation._Slicer._carry_assumes` is the
+    one place that mapping happens.
+
+    ``where`` is the assume's source location, quoted into the disclosure when
+    the assume cannot be carried into a given obligation's slice.
+    """
+
+    scope: ScopePath
+    eqn: ir.JaxprEqn
+    where: str = ""
 
 
 @dataclass(frozen=True)
@@ -302,9 +362,17 @@ class Propagation:
     # so no variable can be narrowed independently. Recorded so the solver
     # escalation can emit them as additional axioms — the constraint the
     # user stated is sound, it merely cannot be represented in the
-    # non-relational interval domain. Each entry is the comparison equation
-    # (ir.JaxprEqn with primitive in _ASSUME_CMPS) the assume consumed.
-    relational_assumes: tuple[ir.JaxprEqn, ...] = ()
+    # non-relational interval domain.
+    #
+    # Each entry is a :class:`RelationalAssume`: the comparison equation the
+    # assume consumed AND the scope path its operand ids belong to. The scope
+    # is not decoration — see that type's own note. A BRANCH-SCOPED assume is
+    # never here: a precondition that holds only when a `cond` branch is taken
+    # is not a fact about the query, and asserting it globally would constrain
+    # the whole query by something the program does not guarantee (audit
+    # 0.2.0 S5-B1). Those are dropped with the reason quoted, exactly as
+    # `_unsatisfiable` already degrades inside a branch.
+    relational_assumes: tuple[RelationalAssume, ...] = ()
 
     @property
     def all_discharged(self) -> bool:
@@ -4848,6 +4916,19 @@ _NONFINITE_BOUND_REASON = (
     "or undecodable, e.g. ±inf/NaN) — no closed half-space represents it"
 )
 
+# Audit 0.2.0 S5-B1: a relational assume traced inside a `cond` branch is a
+# BRANCH-SCOPED precondition. Forwarding it to the solver would assert it over
+# the whole query, which the program does not guarantee — the other branch is
+# real. It is dropped, and the drop says which of the two facts about it
+# stopped the forwarding.
+_BRANCH_SCOPED_REASON = (
+    "and it is stated inside a cond branch, so it is a branch-scoped "
+    "precondition, not a fact about the query — a branch-scoped precondition "
+    "is not forwarded to the solver as an axiom (it would constrain the "
+    "whole query by something that holds only when the branch is taken), and "
+    "this build does not emit it as an implication either"
+)
+
 
 def _finite_point(box: iv.IntervalArray | None) -> bool:
     """Every element is a degenerate finite interval (``lo == hi``,
@@ -5380,6 +5461,16 @@ class _Propagator:
         # the SAME `ir` query object the real run walked, so identity is
         # stable across them and needs no synthetic numbering.
         self._branch_path: list[tuple[int, int]] = []
+        # THE SCOPE THIS WALK IS CURRENTLY INSIDE, as a positional address in
+        # the IR tree (:data:`ScopePath`). Empty at top level; one step is
+        # pushed per descent, tagged with the kind of scope it enters, and
+        # popped in a `finally`. Deliberately NOT `_branch_path`: that one is
+        # keyed on `id(eqn)` and exists to distinguish DYNAMIC occurrences of
+        # one assert within a single process, while this must be reproducible
+        # by a second walker (the slicer) that never sees the propagator's
+        # objects. Positions in a fixed `eqns` list are a property of the IR;
+        # object addresses are not.
+        self._scope_path: ScopePath = ()
         # probe index, or None on a real run. When set, every declaration's
         # box is replaced by a single POINT of that box (:func:`_probe_point`),
         # which is what turns propagation into a witness evaluator.
@@ -5435,8 +5526,10 @@ class _Propagator:
         # comparison equations from relational assume drops: both operands
         # vary, so the interval domain cannot narrow, but the solver can use
         # the constraint as an axiom. Accumulated during the walk; surfaced
-        # on the Propagation result for the emission to read.
-        self.relational_assumes: list[ir.JaxprEqn] = []
+        # on the Propagation result for the emission to read. Each entry
+        # carries the SCOPE its operand ids belong to — see
+        # :class:`RelationalAssume`.
+        self.relational_assumes: list[RelationalAssume] = []
         # the NON-EMPTINESS CERTIFICATE's answer for this run, written by
         # :func:`propagate` after the walk finishes and before the
         # withholding reads it (:func:`_region_witness`). False here means
@@ -6810,18 +6903,51 @@ class _Propagator:
             elif _nonfinite_const(a, box_a) or _nonfinite_const(b, box_b):
                 dropped.append(_NONFINITE_BOUND_REASON)
             else:
-                dropped.append(_RELATIONAL_REASON)
                 # Record for solver forwarding: both operands genuinely
                 # vary, so this is a constraint the solver CAN use as an
                 # axiom even though the interval domain cannot represent it.
                 # Only under real semantics (ieee declines escalation
                 # wholly) and only when both sides are ir.Var (not literals).
+                #
+                # AND ONLY OUTSIDE A COND BRANCH (audit 0.2.0 S5-B1). What is
+                # forwarded is a POSITIVE, QUERY-GLOBAL axiom: the solver is
+                # told the comparison holds everywhere. Inside a possibly
+                # untaken branch that is a claim the program does not make —
+                # the assume is branch-scoped and the other branch is real,
+                # which is the same reading `_unsatisfiable` already applies
+                # one screen up when it degrades a branch-local
+                # unsatisfiability instead of raising. Asserting it globally
+                # constrains the whole query by a precondition that holds
+                # only on the branch, and there is nothing downstream that
+                # withholds a discharge obtained that way.
+                #
+                # The branch-scoped case is NOT emitted as an implication in
+                # this build: an implication needs the branch predicate in
+                # the slice's own namespace, which the slicer does not carry
+                # (it never descends a cond). Saying so in the reason is
+                # honest; emitting the antecedent-free axiom is not. The drop
+                # still sets `assume_dropped` through the caller, so every
+                # definite violation stays withheld — the conservative
+                # direction.
+                reason = _RELATIONAL_REASON
                 if (
                     self.semantics == "real"
                     and isinstance(a, ir.Var)
                     and isinstance(b, ir.Var)
                 ):
-                    self.relational_assumes.append(producer)
+                    if self.branch_depth:
+                        reason = (
+                            f"{_RELATIONAL_REASON}; {_BRANCH_SCOPED_REASON}"
+                        )
+                    else:
+                        self.relational_assumes.append(
+                            RelationalAssume(
+                                scope=self._scope_path,
+                                eqn=producer,
+                                where=where,
+                            )
+                        )
+                dropped.append(reason)
             return
         if point_a:
             target_atom, target_box, bound, bound_atom = b, box_b, box_a, a
@@ -7100,8 +7226,12 @@ class _Propagator:
             out.id: e for e in jaxpr.eqns for out in e.outvars
         }
         try:
-            for eqn in jaxpr.eqns:
-                self.eqn(eqn)
+            # the POSITION rides with the equation: it is the only part of a
+            # scope path that this level can supply, and a descent one frame
+            # down needs it to address the scope it is entering
+            # (:data:`ScopePath`).
+            for pos, eqn in enumerate(jaxpr.eqns):
+                self.eqn(eqn, pos)
         finally:
             self.producers = prev_producers
         return [self.read(o) for o in jaxpr.outvars]
@@ -7166,7 +7296,10 @@ class _Propagator:
         if self.semantics == "ieee":
             self.nan[var.id] = True
 
-    def eqn(self, eqn: ir.JaxprEqn) -> None:
+    def eqn(self, eqn: ir.JaxprEqn, pos: int = 0) -> None:
+        """Judge one equation. ``pos`` is this equation's index in its own
+        scope's ``eqns`` list — the address component a descent from here
+        needs to name the scope it enters (:data:`ScopePath`)."""
         params = eqn.params_dict()
         refusal = self._shape_refusal(eqn)
         if refusal is not None:
@@ -7210,10 +7343,16 @@ class _Propagator:
                 outer_exact = self.exact
                 outer_nan = self.nan
                 outer_taint = self.taint
+                outer_scope = self._scope_path
                 self.env = {}
                 self.exact = exactness.ExactSet()
                 self.nan = {}
                 self.taint = {}
+                # the ids bound below belong to THIS scope and to no other:
+                # the path is what lets a relational assume recorded down
+                # here be resolved later, and what stops it being resolved
+                # against a namespace it does not belong to.
+                self._scope_path = outer_scope + (("call", pos),)
                 out_flags = None
                 out_taints = None
                 try:
@@ -7232,6 +7371,7 @@ class _Propagator:
                     self.exact = outer_exact
                     self.nan = outer_nan
                     self.taint = outer_taint
+                    self._scope_path = outer_scope
                 for out, val, iout in zip(
                     eqn.outvars, outs, inner.jaxpr.outvars
                 ):
@@ -7329,6 +7469,7 @@ class _Propagator:
             outer_exact = self.exact
             outer_nan = self.nan
             outer_taint = self.taint
+            outer_scope = self._scope_path
             results = []
             branch_flags = []  # ieee: per-branch outvar flags
             branch_taints = []  # ieee: per-branch outvar product-taints
@@ -7361,6 +7502,13 @@ class _Propagator:
                     self.exact = exactness.ExactSet()
                     self.nan = {}
                     self.taint = {}
+                    # a branch scope is TAGGED differently from a call scope,
+                    # so a branch's ids can never be resolved through a call's
+                    # rename even if the two sit at the same equation index.
+                    # The slicer never descends a cond, so this step never
+                    # appears in its map and any path containing one resolves
+                    # to nothing — which is the right answer, not a near miss.
+                    self._scope_path = outer_scope + (("cond", pos, i),)
                     self._branch_path.append((id(eqn), i))
                     try:
                         results.append(
@@ -7386,6 +7534,7 @@ class _Propagator:
                 self.exact = outer_exact
                 self.nan = outer_nan
                 self.taint = outer_taint
+                self._scope_path = outer_scope
             branch_refused = [
                 any(
                     isinstance(branches[i].jaxpr.outvars[j], ir.Var)

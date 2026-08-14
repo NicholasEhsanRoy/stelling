@@ -1314,7 +1314,6 @@ def _dispatch_obligation(
     backends: tuple[_Backend, ...],
     missing: tuple[str, ...],
     ledger: _Ledger,
-    relational_assumes: tuple[ir.JaxprEqn, ...] = (),
 ) -> tuple[ObligationEscalation, int]:
     ordered = tuple(
         sorted(
@@ -1325,21 +1324,26 @@ def _dispatch_obligation(
     scripts: dict[str, Script] = {}
     for backend in ordered:
         if backend.flavor not in scripts:
-            scripts[backend.flavor] = emit(
-                sl, backend.flavor, config.timeout_ms,
-                relational_assumes=relational_assumes,
-            )
+            scripts[backend.flavor] = emit(sl, backend.flavor, config.timeout_ms)
     # The count of relational assumes ACTUALLY emitted for this obligation's
     # script. Identical across flavors (the logical content is the same; only
     # the option block differs), so we take it from any script.
     n_emitted = next(iter(scripts.values())).relational_assumes_emitted if scripts else 0
     wall_s = _wall_seconds(config.timeout_ms)
     notes: list[str] = []
-    if relational_assumes:
+    if sl.assumes:
         notes.append(
-            f"assert #{sl.index}: {len(relational_assumes)} relational "
+            f"assert #{sl.index}: {len(sl.assumes)} relational "
             f"assume(s) forwarded to solver as axiom(s)"
         )
+    for reason in sl.assumes_skipped:
+        # A DROPPED CONSTRAINT IS NEVER SILENT. This is the disclosure half of
+        # the fix: the emission's skips used to be `continue` statements, so a
+        # user-stated precondition could vanish between the propagation and
+        # the script with nothing in the verdict distinguishing the run from
+        # one where it applied. Each reason names one assume and why this
+        # obligation's slice could not state it.
+        notes.append(f"assert #{sl.index}: {reason}")
     absences = _absences(config, ordered, missing)
     if len(ordered) == 1:
         notes.append(
@@ -1778,9 +1782,11 @@ def escalate(
         ledger_start = len(ledger.stamps)
         n_emitted = 0
         try:
+            # the slice already carries this query's relational assumes,
+            # translated into its own id namespace by `slice_unknown_
+            # obligations` — there is no second channel for them, by design
             record, n_emitted = _dispatch_obligation(
                 item, config, backends, missing, ledger,
-                relational_assumes=propagation.relational_assumes,
             )
         except (SolverDisagreement, EmissionInfidelityError):
             raise  # loud by design

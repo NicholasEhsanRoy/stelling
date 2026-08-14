@@ -78,6 +78,50 @@ SPDX-License-Identifier: Apache-2.0
   alongside the negated obligation. The solver sees the full constraint
   set.
 
+- **SOUNDNESS FIX — a forwarded assume is now resolved by a scope-correct
+  identity; it could previously be emitted about the wrong values.**
+  See the SOUNDNESS.md log entry for the full account. In brief: a
+  relational `assume` traced inside a `jit` / `custom_jvp` body was
+  forwarded as its producing comparison equation, whose operand ids belong
+  to that body, and `smt.emit` resolved them with a bare integer lookup
+  against the slice's *renumbered* table. When the two id ranges met, the
+  axiom was emitted about unrelated terms — measured as the CONVERSE of
+  the user's own precondition, returning VERIFIED on an obligation false at
+  every admitted point. Development-only; no released version is affected.
+
+  What changed, user-visible:
+
+  * `propagation.relational_assumes` now holds
+    `stelling.propagate.RelationalAssume` records (the comparison equation
+    plus the scope path its operand ids belong to), not bare
+    `ir.JaxprEqn`s.
+  * `ObligationSlice` carries `assumes` (translated into the slice's own id
+    namespace) and `assumes_skipped` (one quoted reason per assume this
+    obligation cannot state). The two partition the assumes the slicer was
+    given, so *emitted versus requested* is derivable from the slice alone.
+  * `stelling.smt.emit` no longer takes a `relational_assumes` parameter —
+    the axioms come off the slice. `Script.relational_assumes_emitted` now
+    counts assumes emitted **about the terms their operands denote**.
+  * `slice_obligation` gained a `relational_assumes=` keyword;
+    `slice_unknown_obligations` passes the propagation's.
+  * **Every skipped assume is disclosed** in the verdict notes, naming the
+    assume's source line and the reason. Emission previously skipped
+    silently in five places.
+  * **An assume inside a `jit` / `custom_jvp` body is now forwarded
+    CORRECTLY rather than skipped**, which decides obligations that
+    previously returned UNKNOWN. Measured on a 702-harness generated sweep:
+    192 UNKNOWN→VERIFIED and 96 UNKNOWN→REFUTED, no harness moving away
+    from a decided verdict, and zero verdict changes on the 78
+    top-level-assume harnesses. Of the 192, **120 are vacuous** — an
+    `unsat` assume set now reaches the solver from a `jit` body as it
+    already did from top level; see the SOUNDNESS.md entry.
+  * **A relational assume inside a `lax.cond` branch is no longer forwarded
+    at all.** It is a branch-scoped precondition, not a fact about the
+    query; the drop says so and keeps violations withheld.
+  * `smt.emit` no longer raises `IndexError` on a shape-mismatched assume,
+    and no longer emits a partial axiom over element 0 of an unrelated
+    array (both arms of the same missing check).
+
 - **z3 tactic workaround for high-degree polynomials**: when a solver
   obligation contains a rational-pow auxiliary variable (`y^q = x^p`
   encoding), z3 uses a custom tactic chain (`simplify`, `solve-eqs`,
@@ -117,6 +161,23 @@ SPDX-License-Identifier: Apache-2.0
 - Rational pow requires non-negative base (JAX returns NaN for
   `pow(negative, fractional)`). Denominator capped at 128 to bound
   polynomial degree.
+- A relational `assume` inside a `lax.cond` branch is **not** forwarded to
+  the solver, and is not emitted as an implication either — the drop says
+  so. Branch-scoped preconditions therefore buy no solver precision.
+- An **unsatisfiable** set of relational assumes makes the emitted script
+  `unsat` for a reason unrelated to the obligation, and the discharge that
+  follows is vacuous. The unsatisfiable-precondition refusal consults the
+  interval domain, which by construction cannot decide a relational
+  assume, so it does not see this. Correct forwarding widens the reach of
+  this pre-existing limitation from top-level assumes to `jit`-carried
+  ones; see the SOUNDNESS.md entry of 2026-08-14.
+- An obligation discharged with a **forwarded relational axiom cannot
+  narrow the VERIFIED bar**: the bar's re-derivation re-slices without the
+  propagation, so its script does not carry the axiom and the two do not
+  match. In a query containing a barred primitive the bar therefore falls
+  back to the whole query. Conservative (a wider bar, never a narrower
+  one), pre-existing, and made more frequently reachable by this release;
+  see the SOUNDNESS.md entry of 2026-08-14.
 
 ---
 

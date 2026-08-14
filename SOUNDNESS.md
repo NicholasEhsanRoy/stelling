@@ -5077,4 +5077,207 @@ verdicts:
     somebody remembered to write it at, which is the property a guard does
     not have.
 
+- **2026-08-14 (0.2.0 development, unreleased): FALSE VERIFIED — a
+  forwarded relational `assume` was resolved by a bare integer, and a
+  bare integer does not say which scope it is an id in.** An `assume`
+  whose two sides both vary cannot be applied in the interval domain, so
+  since 0.2.0 it is forwarded to the solver as a positive axiom. The
+  propagator recorded the assume's producing comparison equation, whose
+  operands are `ir.Var`s **in whatever scope the assume was traced** —
+  inside a `jit` or `custom_jvp` body, that body's ids. `smt.emit` then
+  resolved them with `names.get(atom.id)`, an integer lookup with no
+  scope check, against a table keyed by the **slicer's renumbered** ids.
+  The slicer allocates its fresh ids from `max(top-level ids) + 1`
+  (`obligation.py`), a maximum taken over the top-level jaxpr only, so a
+  sub-jaxpr's ids can land exactly where `_fresh()` allocates. A foreign
+  id then resolved to an unrelated term and **the axiom was emitted about
+  the wrong values.** A fabricated conjunct can only shrink the model set,
+  so its failure direction is `unsat` → discharged → **VERIFIED**, and
+  nothing downstream withholds a discharge.
+
+  **Measured, and it is the converse of what the user wrote.** Harness:
+  two `float64` declarations in `[-10, 10]`, `assert_(x - y <= 0.0)`, and
+  `assume(p < q)` inside a jitted helper called as `side(y, x)` — i.e.
+  the precondition `y < x`, under which `x - y > 0` at every admitted
+  point. The emitted script asserted `(< x0 x1)`, which is `x < y`.
+  Exhaustive 201×201 grid over the declared box: **20100 admitted points,
+  20100 violations of the assert**, and stelling returned VERIFIED.
+  It also ran the other way: the same mechanism minted a REFUTED whose
+  witness `x=1, y=0` violates the user's own `assume(x < y)`, because
+  `Script.relational_assumes_emitted` incremented for a fabricated axiom
+  exactly as for a real one and the per-obligation un-withholding rule
+  reads that count as "the solver ran with the full constraint set".
+
+  **Two further defects, same site.** (1) A relational assume traced
+  inside a `lax.cond` branch was forwarded as a **query-global** axiom,
+  although the same file's `_unsatisfiable` already consults `branch_depth`
+  and deliberately degrades inside a branch — *"the assume is
+  branch-scoped and the other branch is real"*. A precondition that holds
+  only when a branch is taken constrained the whole query. (2) The
+  emission derived element indices from the assume equation's own shapes
+  and applied them to whatever term tuple the ids resolved to; with
+  colliding ids of different shapes that indexed out of range
+  (`IndexError` out of the public `stelling.smt.emit`, degraded to UNKNOWN
+  with the error quoted) or, in the other direction, **truncated in
+  silence** — one `(assert (< t16_0 t17_0))` over element 0 of an
+  unrelated 4-element array, with `relational_assumes_emitted == 1` and no
+  note of any kind, and the un-withholding rule released a REFUTED on it.
+
+  **WHICH VERSIONS ARE AFFECTED: 0.2.0 development builds only, and that
+  is verified rather than assumed.** At `v0.1.0` the string
+  `relational_assumes` does not occur anywhere in `src/`
+  (`git grep -n relational_assumes v0.1.0 -- src/` is empty) and
+  `smt.emit`'s signature is `(sl, solver, timeout_ms)` — there is no
+  parameter and no field through which a foreign scope's ids can reach the
+  emission. The fresh-id base `max(top_ids, default=0) + 1` **does** exist
+  at `v0.1.0`; what did not exist was any consumer of a foreign id, so the
+  id collision had nothing to collide with. **No released verdict is
+  affected.**
+
+  **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID, and how to recognise
+  one.** Any verdict produced by a 0.2.0 development build on a query
+  that has *both*: (a) at least one `assume` comparing two varying
+  quantities — its notes then carry `assume constraint DROPPED … `
+  `(relational: both sides vary …)`; and (b) that assume traced inside a
+  `jit` / `custom_jvp_call` / `custom_vjp_call` / `remat2` body or inside
+  a `lax.cond` branch rather than at top level. On such a run, the
+  escalation note `assert #N: K relational assume(s) forwarded to solver
+  as axiom(s)` was the *only* record that anything was forwarded, and it
+  said nothing about **what** was forwarded. Both directions are in
+  scope: a VERIFIED may have been discharged by an axiom that is not the
+  user's precondition, and a REFUTED may have been released by the
+  un-withholding rule on the same non-evidence. A verdict on a query
+  whose every `assume` is at top level, or which has no relational
+  assume at all, is not affected — top-level assumes carry top-level ids
+  and there is nothing to translate.
+
+  **WHAT TO RE-RUN.** Every recorded verdict on an assume-carrying
+  harness, under this build. The verdicts are now self-describing on
+  exactly this point: each assume the obligation's slice could not state
+  produces its own note, naming the assume's source line and the reason,
+  and `Script.relational_assumes_emitted` now counts only assumes emitted
+  **about the terms their operands denote** — so `emitted == requested`
+  is a statement about content and not only a tally.
+
+  **THE FIX IS A TYPE, NOT A BOUNDS CHECK, and that is deliberate.**
+  Raising the fresh-id base above every id in every scope removes the
+  collision and leaves the defect: the lookup would then simply MISS, the
+  axiom would be dropped, and a run would lose a constraint the user
+  wrote with nothing said about it. Instead the propagator now records a
+  `RelationalAssume` carrying the **scope path** its operand ids belong to
+  — a positional address in the IR tree, tagged by descent kind, so
+  `("call", 4)` can never denote the scope `("cond", 4, 1)` denotes — and
+  the slicer records the same path against the rename it applied when it
+  inlined that scope. The translation happens once, in
+  `_Slicer._carry_assumes`, and its output is a `SliceAssume` whose
+  operands are atoms **of that slice**, alias-resolved and already known
+  to have terms there. `smt.emit` no longer has a `relational_assumes`
+  parameter at all: there is no channel through which a foreign name can
+  be presented to it, so a wrong resolution is unconstructable rather than
+  unlikely — the posture of the hardening-pass entry above. A scope the
+  slicer did not inline has no entry, so a divergence costs a **disclosed
+  skip**, never a forged axiom.
+
+  **VERDICTS MOVE, AND THE MOVEMENT IS ALL IN ONE DIRECTION.** Measured on
+  a 702-harness generated sweep — an `assume` at top level or inside a
+  `jit` / `cond` / `custom_jvp` body, 2–3 declarations, 0–2 trailing
+  top-level statements walking the one-statement id window, satisfiable and
+  unsatisfiable assume sets, the assume's operands written either over the
+  body's arguments or over its own intermediates, and the obligation's value
+  computed either inside that body or outside it — run against `main` at
+  `095bfd4` and against this build:
+
+  | before → after | count | which |
+  |---|---|---|
+  | UNKNOWN → VERIFIED | 192 | `jit` / `custom_jvp` assumes now forwarded correctly |
+  | UNKNOWN → REFUTED | 96 | same, refuting direction |
+  | UNKNOWN → UNKNOWN | 342 | 156 `cond`, 156 whose operands are outside the obligation's cone, 30 other |
+  | VERIFIED → VERIFIED | 48 | top-level assumes, unchanged |
+  | REFUTED → REFUTED | 24 | top-level assumes, unchanged |
+
+  **Not one of the 78 top-level-assume harnesses changed status** — the
+  population the previous behaviour handled correctly — and **no harness
+  moved away from a decided verdict.** The 288 that moved split evenly
+  across the id window, 96 at each of 0, 1 and 2 trailing statements, which
+  is the window closing measured directly: on `main` the answer depended on
+  that count, and it no longer does.
+
+  Every VERIFIED was attacked by sampling the admitted domain on a grid and
+  evaluating the assert in exact `Fraction` arithmetic; every REFUTED by
+  checking its witness lies in the declared box and satisfies every assume.
+  **0 false VERIFIED and 0 false REFUTED on both trees.**
+
+  **THE SWEEP DID NOT ITSELF REPRODUCE THE FALSE VERIFIED**, and that is
+  recorded rather than glossed. The collision needs a second condition
+  beyond the id ranges meeting — the colliding ids must be ids that carry
+  NAMES in the slice — and no generated shape here happens to satisfy it.
+  What the sweep measures is that the fix mints no new wrong answer, and
+  what it costs and buys in coverage. The false verdicts are reproduced by
+  the audit's own archived harnesses, and those are what moved:
+  `t11_false_verified_no_cond` VERIFIED → **REFUTED**, its axiom now reading
+  `(assert (< x1 x0))` where it read `(assert (< x0 x1))` — the converse —
+  on a query whose assert is false at all 20100 admitted grid points;
+  `t03_false_refuted` REFUTED → UNKNOWN; `05_false_verified` and
+  `06_fv_unrelated` VERIFIED → UNKNOWN; and `16_fv_controls` case C, a dead
+  `lax.cond` moved from before the assert to after it, VERIFIED → UNKNOWN,
+  so that moving it no longer moves the verdict.
+
+  **ONE CONSEQUENCE THAT IS NOT AN IMPROVEMENT, DISCLOSED HERE RATHER
+  THAN LEFT TO BE FOUND.** Forwarding correctly also forwards
+  *contradictory* preconditions correctly. An unsatisfiable relational
+  assume set makes the emitted script `unsat` for a reason that has
+  nothing to do with the obligation, and the discharge that follows is
+  **vacuous** — the standing finding that an unsatisfiable relational
+  assume discharges everything, which this build does not fix and which
+  the unsatisfiable-precondition refusal still does not see (it consults
+  the interval domain, which by construction cannot decide a relational
+  assume). Before this fix that failure was reachable only through a
+  top-level assume; it is now reachable through a `jit`-carried one too.
+  In the sweep above, VERIFIEDs with **no admitted point on the grid** went
+  from **30 to 150** — the 120 new ones are exactly the `unsat` assume sets
+  carried by a `jit` or `custom_jvp` body, 60 each, and every one of the 192
+  new VERIFIEDs is either one of those 120 or one of the 72 with a sampled
+  admitted region (the smallest sampled 3276 admitted points and found no
+  violation). None of the 120 is a new *kind* of error; all of them are the
+  standing one, reached from a new place. The honest summary is that this
+  entry closes the "the axiom is about the wrong values" hole and widens the
+  surface of the separate "the axioms contradict each other" hole; the
+  second is filed, unfixed, and its own batch.
+
+  **A SECOND CONSEQUENCE THAT IS NOT AN IMPROVEMENT, ALSO DISCLOSED.** The
+  VERIFIED bar narrows per obligation only when the recorded invocation
+  reproduces both the slice's fingerprint and the script that slice emits
+  (`verdict._evidence_is_about`), and its re-derivation calls
+  `slice_obligation` with no propagation and therefore with no assumes. A
+  script that carries a relational axiom is not reproduced by one that does
+  not, so **an obligation discharged with a forwarded axiom cannot narrow
+  the bar** and a query containing any barred primitive falls back to the
+  whole-query set. Measured: a two-obligation query whose first obligation
+  is scatter-free and assume-constrained and whose second contains a
+  `scatter` — obligation #0 goes `withheld` → `discharged` with this fix,
+  and the verdict stays UNKNOWN, now reading "no recorded solver invocation
+  for the decided obligation #0 reproduces both this query's slice of it and
+  the script that slice emits". The direction is a WIDER bar, so nothing is
+  minted; what is lost is the narrowing, on exactly the runs where an axiom
+  decided the obligation. This is the audit's own open question 4, it
+  predates this fix, and this fix makes it reachable more often because more
+  scripts now carry an axiom. Left alone deliberately: repairing it means
+  deciding what the bar's re-derivation is allowed to see, and that function
+  is emphatic in its own docstring about being handed no record-supplied
+  value. Filed, unfixed, not this batch.
+
+  Also fixed at the same site: `smt.emit` cannot raise `IndexError` on a
+  wrong-arity assume (the pairing is computed once, from the resolved
+  operands, by the same `_pair_elementwise` the slice's equations go
+  through; the residual check in the emission raises with a message), and
+  it cannot emit a partial axiom over element 0 of an unrelated array.
+  Full suite green: 2910 passed, 10 skipped, against 2863 / 10 on `main`,
+  with the same skip SET (hypothesis ×6, pytest-xdist ×1, blackjax ×2, the
+  x64-only threefry mask ×1 — all environment-driven, none of them this
+  change's). Every construction here is a permanent regression test
+  (`tests/test_assume_scope_identity.py`), including the shape where a
+  bare integer lookup CANNOT be right by accident — the assume's operands
+  are the body's own intermediates rather than its arguments, so the
+  invariant is checked where the coincidence is unavailable.
+
 *(no releases yet)*
