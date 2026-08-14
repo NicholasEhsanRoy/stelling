@@ -506,7 +506,25 @@ def _run_z3(script_text: str, wall_s: float) -> _RawResult:
         return _RawResult(answer="not-run", detail=str(e))
     version = z3.get_version_string()
     ctx = z3.Context()  # fresh context: no symbol/option leakage across runs
-    solver = z3.Solver(ctx=ctx)
+    # TACTIC WORKAROUND for degree-80 factoring pathology. When the script
+    # contains a rational-pow auxiliary variable (the `y^q = x^p` encoding),
+    # the default z3 Solver() times out on the high-degree polynomial that
+    # results (measured: d=80 from `x**(1/80)` on perfect-square bounds
+    # timed out every run at 10s). The tactic chain below restores the z3
+    # cross-check for these scripts (measured: 0.35-0.6s on d=80).
+    if "(declare-const aux_" in script_text:
+        tactic = z3.Then(
+            z3.Tactic("simplify", ctx=ctx),
+            z3.Tactic("solve-eqs", ctx=ctx),
+            z3.With(z3.Tactic("factor", ctx=ctx), num_primes=4),
+            z3.Tactic("purify-arith", ctx=ctx),
+            z3.Tactic("tseitin-cnf", ctx=ctx),
+            z3.Tactic("nlsat", ctx=ctx),
+            ctx=ctx,
+        )
+        solver = tactic.solver()
+    else:
+        solver = z3.Solver(ctx=ctx)
     box: dict[str, object] = {}
 
     def work() -> None:

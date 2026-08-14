@@ -648,6 +648,18 @@ in this order:
    encoding is inherently relational and WILL prove the mutual exclusion.
    This is the designed escalation path for constraints the interval domain
    cannot express.
+8. **Relational assume with `assume(x < y)`.** A comparison between two
+   variable operands cannot be applied in the interval domain (it would
+   need a relational constraint). Since 0.2.0, these are forwarded to the
+   solver as positive axioms alongside the negated obligation. If the
+   UNKNOWN persists WITH a solver, check whether the assume's operands are
+   in the backward cone of the obligation's slice — only assumes whose
+   operands appear in the slice's dependency set are emitted.
+9. **Rational pow with large denominator.** `x**(1/n)` with `n > 128`
+   declines emission because the auxiliary polynomial `y^n = x` risks
+   solver timeout at extreme degrees. The decline note names the exponent
+   and the cap. For denominators up to 128, both solvers handle the
+   polynomial (z3 via an automatic tactic workaround, cvc5 natively).
 
 ## Further
 

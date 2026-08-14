@@ -227,6 +227,28 @@ licensing, not probed here. Only a source build with `./configure.sh --gpl
 None of the nonlinear rows in the table above were re-run against a GPL
 build, so nothing here says what those components would be worth.
 
+## z3 and high-degree rational pow (automatic workaround)
+
+When a rational exponent like `x**(1/80)` is emitted, the auxiliary-variable
+encoding produces a degree-80 polynomial (`y^80 = x`). z3's default solver
+times out on this class of problem (measured: >10s at degree 80 with
+perfect-square bounds `[1, 100]`). Since 0.2.0, stelling automatically
+detects rational-pow auxiliary variables in the emitted script and switches
+z3 to a custom tactic chain:
+
+```
+simplify -> solve-eqs -> factor(num_primes=4) -> purify-arith -> tseitin-cnf -> nlsat
+```
+
+This restores the z3 cross-check (measured: 0.35-0.6s at degree 80). cvc5
+handles these polynomials natively and requires no workaround. The tactic is
+transparent to the user: no configuration is needed, the portfolio runs at
+full redundancy, and the verdict discloses no difference.
+
+The workaround fires only when the script contains `(declare-const aux_...)`
+declarations (the marker for rational-pow auxiliary variables). All other
+scripts use z3's default `Solver()` unchanged.
+
 ## Related
 
 - [Reading a verdict](reading-a-verdict.md) — the stamp's solver lines and
