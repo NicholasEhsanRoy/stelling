@@ -65,7 +65,14 @@ from stelling.obligation import (
     witness_is_valid,
 )
 from stelling.propagate import propagate
-from stelling.solvers import SolverConfig, escalate, make_solver_verdict
+from stelling.solvers import (
+    EmissionInfidelityError,
+    SolverConfig,
+    _require_valid_refutation,
+    escalate,
+    make_solver_verdict,
+    make_validated_witness,
+)
 from test_obligation_slice import BOOL, any_eqn, close, eqn, lit, sole_slice, var
 from test_solver_dispatch import VERSIONS, fake_solver
 
@@ -397,7 +404,14 @@ def narrowing_convert_slice():
         eqns=(
             eqn("convert_element_type", [x], y,
                 params=[("new_dtype", "float32")]),
-            eqn("le", [y, lit(2.0)], pred),
+            # 5.0, NOT the box's 2.0. The two must differ or the emission
+            # assertion below cannot discriminate: with both at 2.0 the
+            # substring it looks for also matches the box constraint line
+            # `(assert (<= x0 2.0))`, which is emitted whatever the
+            # conversion does — so the assertion passed even with the
+            # identity replaced, and its failure message described
+            # something it could not detect.
+            eqn("le", [y, lit(5.0)], pred),
         ),
         root=pred,
         source_info=(),
@@ -438,10 +452,12 @@ def test_a_value_changing_conversion_accuses_the_script():
 
     # THE EMISSION FACT THE CHANNEL RESTS ON. The narrowing is not
     # approximated in the script, or flagged in it — it is absent: the
-    # predicate is written directly over the declared constant, so the
-    # script says `x0 <= 2` about a program that says `f32(x0) <= 2`.
+    # predicate is written directly over the declared input, so the
+    # script says `x0 <= 5` about a program that says `f32(x0) <= 5`.
+    # The bound is the predicate's, distinct from the box's, so this
+    # matches the CONVERTED term's line and nothing else.
     script = smt.emit(sl, "z3", 5_000).text
-    assert "(<= x0 2.0)" in script, (
+    assert "(<= x0 5.0)" in script, (
         f"the emission no longer writes a narrowing convert_element_type as "
         f"the identity; re-derive which channel the replay's refusal belongs "
         f"to before changing it\n{script}"
@@ -540,6 +556,54 @@ def test_the_box_escape_alarm_survives_an_unrenderable_model_value():
     assert "above its declared upper bound 1" in why  # the bound still renders
 
     assert sys.get_int_max_str_digits() == limit
+
+
+def test_the_dispatch_layer_renders_a_model_value_through_the_same_renderer():
+    """Rendering a solver model value is ONE discipline, and `solvers.py`
+    is on the other side of the module boundary from it.
+
+    ``witness_is_valid`` was made safe first, and that was not enough: the
+    box-escape alarm assembled its diagnosis without raising and then
+    ``_require_valid_refutation`` died on the very next statement,
+    stringifying the same values to attach them to the exception. The
+    success path had it too — a replay-confirmed REFUTED crashed while its
+    ``Witness`` was being built. Both are the loud paths: one is the alarm
+    that means the emitted problem does not mean the obligation, the other
+    is a correct refutation.
+
+    ``fraction_text`` is public for exactly this reason. Nothing else in
+    ``src/`` imports a private name across modules, so the alternative to
+    exporting it was a second renderer — and a second renderer is how the
+    first one came to be missing here."""
+    huge = Fraction(3 ** 10000, 2)
+    x, pred = var(0), var(1, BOOL)
+    eqns = (eqn("le", [x, lit(2.0)], pred),)
+    bits = huge.numerator.bit_length()
+
+    # the ALARM path: the model escapes [0, 1], so this must raise the
+    # emission-infidelity error carrying the values, not a ValueError
+    escaping = ObligationSlice(
+        index=0, fragment="QF_LRA",
+        inputs=(SliceInput(name="x0", var_id=0, lo=0.0, hi=1.0),),
+        consts=(), eqns=eqns, root=pred, source_info=(),
+    )
+    with pytest.raises(EmissionInfidelityError) as exc:
+        _require_valid_refutation(
+            escaping, {"x0": huge}, solver_label="probe", script_text=""
+        )
+    assert exc.value.values == (("x0", f"<{bits}-bit integer>/2"),)
+
+    # the SUCCESS path: unbounded box, so the refutation is real and the
+    # Witness must be constructible
+    unbounded = ObligationSlice(
+        index=0, fragment="QF_LRA",
+        inputs=(SliceInput(name="x0", var_id=0, lo=0.0, hi=float("inf")),),
+        consts=(), eqns=eqns, root=pred, source_info=(),
+    )
+    w = make_validated_witness(
+        unbounded, {"x0": huge}, "probe", solver_label="probe", script_text=""
+    )
+    assert w.values == (("x0", f"<{bits}-bit integer>/2"),)
 
 
 def test_a_declined_replay_reaches_its_handler_and_stays_unknown(

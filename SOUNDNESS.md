@@ -5203,19 +5203,46 @@ verdicts:
     (`ReplayError` and not the `ReplayDeclined` subclass), together with
     the emission fact the channel rests on.
 
-    **A decline message may not crash on the operand it declines.** Both
-    refusals in `_exact_rational_power` interpolate the base, and the base
-    is a solver model value that nothing bounds; CPython raises
-    `ValueError` on `int` → `str` past `sys.get_int_max_str_digits()`
-    (4300), so `Fraction(3**10000, 2)` turned a clean decline into a crash
-    out of the public `evaluate_predicate` / `witness_is_valid` — the
-    UNKNOWN-with-reason replaced by a `ValueError` raised from a
-    formatting expression. Same hazard `smt._renderable` exists for, same
-    posture: detect by attempting the conversion, report the operand's
-    `bit_length()` instead of 4300 digits, and never raise the
-    process-global limit on a caller's behalf. Introduced by this change
-    and repaired before release; no verdict was ever affected, because the
-    crash replaced a decline that was already UNKNOWN.
+    **A message about a solver model may not crash on the model.** A model
+    value is unbounded, and CPython raises `ValueError` on `int` → `str`
+    past `sys.get_int_max_str_digits()` (4300), so `Fraction(3**10000, 2)`
+    turns a message into a crash. Same hazard `smt._renderable` exists
+    for, same posture: detect by attempting the conversion, report the
+    operand's `bit_length()` instead of 4300 digits, never raise the
+    process-global limit on a caller's behalf. **Six sites, found in three
+    passes, and the order matters more than the count:**
+
+    * Both refusals in `_exact_rational_power` — a clean decline became a
+      `ValueError` out of the public `evaluate_predicate`. Introduced by
+      this change.
+    * Both box-escape messages in `witness_is_valid` — **pre-existing**,
+      and on the worse side of the channel line: that string is the
+      diagnosis of *the emitted problem does not mean the obligation*, so
+      the crash replaced the loud alarm's only explanation with a
+      traceback out of `fractions.py`.
+    * `_require_valid_refutation` and `make_validated_witness` in
+      `solvers.py` — **also pre-existing, and they are why a third pass
+      was needed.** Repairing `witness_is_valid` alone did not achieve its
+      own stated purpose: the alarm assembled its diagnosis safely and
+      then died one statement later, stringifying the same values to
+      attach them to the exception. The second is on the *success* path —
+      a replay-confirmed REFUTED crashing while its `Witness` was built.
+
+    The renderer is therefore public (`obligation.fraction_text`) rather
+    than duplicated: it renders the same values on both sides of a module
+    boundary, and a second renderer is exactly how it came to be missing
+    in `solvers.py`. Nothing else in `src/` imports a private name across
+    modules.
+
+    No verdict was ever affected. The two decline sites replaced an
+    UNKNOWN that was already UNKNOWN; the four alarm and witness sites
+    replace one raise with another, or lose a correct REFUTED to a
+    formatting cap — never a wrong verdict. Reachability was measured
+    rather than assumed: 26 real backend runs over boxes and exponents
+    chosen to maximise model size (denormal boxes, one-ulp-wide boxes at
+    `1e±300`, `q` up to 128) produced a largest model value of **16
+    decimal digits** against the 4300-digit cap, so none of the six is
+    reachable from `check()` on any query yet constructed.
 
   * **The fragment stamp gated on the wrong property.** A non-integer
     `pow` was recorded nonlinear only when its base descended from a
@@ -5286,9 +5313,13 @@ verdicts:
   are rewritten at dyadic exponents of the same shape (`0.125`, `0.75`,
   `1/16`, `1/128`) so the rows keep their subjects, and each carries the
   reason its exponent changed. Every construction above is a permanent
-  regression test (`tests/test_pow_audit_findings.py`, 66 cases); eight
+  regression test (`tests/test_pow_audit_findings.py`, 68 cases); ten
   targeted mutations — one per finding, plus one per repair above — were
   applied to a copy of the source and each was measured to redden at
-  least one of them.
+  least one of them. Two mutations were measured NOT to redden anything
+  and are recorded rather than counted: re-deriving the rational inside
+  `emit` is the identity on a fraction the guard already admitted, so no
+  test can separate it; and `.is_integer()` versus `== int(...)` differs
+  only at inf/nan, which the literal decoder refuses earlier.
 
 *(no releases yet)*

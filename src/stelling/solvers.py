@@ -75,6 +75,7 @@ from stelling.obligation import (
     DeclinedObligation,
     ObligationSlice,
     ReplayDeclined,
+    fraction_text,
     slice_unknown_obligations,
     violating_elements,
     witness_is_valid,
@@ -1248,10 +1249,21 @@ def _require_valid_refutation(
     an out-of-box or non-violating model must never mint a REFUTED)."""
     problem = witness_is_valid(sl, values)
     if problem is not None:
+        # fraction_text, not str(): these are SOLVER MODEL values and
+        # their terms are unbounded, so `str()` raises ValueError past
+        # CPython's int -> str cap. `witness_is_valid` above already
+        # renders the same values safely to build `problem` — leaving
+        # bare `str()` here meant the alarm assembled its diagnosis and
+        # then died one statement later trying to attach the values it
+        # was about, which is the failure the safe rendering was added to
+        # prevent, one line further on.
         raise EmissionInfidelityError(
             obligation_index=sl.index,
             solver=solver_label,
-            values=tuple((inp.name, str(values[inp.name])) for inp in sl.inputs),
+            values=tuple(
+                (inp.name, fraction_text(values[inp.name]))
+                for inp in sl.inputs
+            ),
             script_text=script_text,
             detail=problem,
         )
@@ -1274,7 +1286,13 @@ def make_validated_witness(
     )
     return Witness(
         obligation_index=sl.index,
-        values=tuple((inp.name, str(values[inp.name])) for inp in sl.inputs),
+        # fraction_text, not str(): the SUCCESS path has the same hazard.
+        # The refutation is real and replay-confirmed by the line above,
+        # and the witness would then crash while being rendered — a
+        # correct REFUTED lost to a formatting cap.
+        values=tuple(
+            (inp.name, fraction_text(values[inp.name])) for inp in sl.inputs
+        ),
         produced_by=produced_by,
         replay=_REPLAY_SENTENCE,
         # which element(s) of an ARRAY assert operand are false at the

@@ -82,6 +82,7 @@ __all__ = [
     "ReplayError",
     "SliceInput",
     "evaluate_predicate",
+    "fraction_text",
     "slice_obligation",
     "slice_unknown_obligations",
     "violating_elements",
@@ -2698,11 +2699,20 @@ def _int_text(n: int) -> str:
         return f"{'-' if n < 0 else ''}<{n.bit_length()}-bit integer>"
 
 
-def _fraction_text(fr: Fraction) -> str:
+def fraction_text(fr: Fraction) -> str:
     """``fr`` rendered the way ``str(Fraction)`` renders it — ``n`` when the
     denominator is 1, ``n/d`` otherwise — with every term through
     :func:`_int_text`, so an unrenderable term degrades to its bit length
-    rather than raising."""
+    rather than raising.
+
+    PUBLIC because a solver model value is rendered on BOTH sides of the
+    module boundary and there must be one renderer for it. ``solvers.py``
+    stringifies the same values when it builds the ``Witness`` and when it
+    raises :exc:`EmissionInfidelityError`; both used bare ``str()`` and so
+    kept the exact crash this function exists to prevent — the box-escape
+    alarm returned its diagnosis safely and then died one statement later
+    rendering the same value. Nothing else in ``src/`` imports a private
+    name across modules and this is not the place to start."""
     if fr.denominator == 1:
         return _int_text(fr.numerator)
     return f"{_int_text(fr.numerator)}/{_int_text(fr.denominator)}"
@@ -2735,14 +2745,14 @@ def _exact_rational_power(base: Fraction, p: int, q: int) -> Fraction:
         # of a point that should not exist.
         raise ReplayDeclined(
             f"replay cannot evaluate x^({p}/{q}) at the negative base "
-            f"{_fraction_text(base)}: it has no real value for even q, and "
+            f"{fraction_text(base)}: it has no real value for even q, and "
             f"jax computes NaN here"
         )
     root_num = _exact_integer_root(base.numerator, q)
     root_den = _exact_integer_root(base.denominator, q)
     if root_num is None or root_den is None:
         raise ReplayDeclined(
-            f"{_fraction_text(base)}^({p}/{q}) is irrational — "
+            f"{fraction_text(base)}^({p}/{q}) is irrational — "
             f"{_int_text(base.numerator)} and/or "
             f"{_int_text(base.denominator)} is not a perfect {q}-th power — "
             f"and the replay is exact rational arithmetic; it will not decide "
@@ -3075,7 +3085,7 @@ def witness_is_valid(
             # a missing or inexact value: the replay conjunct below names
             # it precisely (ReplayError), so membership defers
             continue
-        # _fraction_text, not str(): `v` is a SOLVER MODEL value, so its
+        # fraction_text, not str(): `v` is a SOLVER MODEL value, so its
         # terms are unbounded and `{v}` raises ValueError past CPython's
         # int -> str cap. The raise would land HERE, inside the message of
         # the LOUD alarm — the one that means the emitted problem does not
@@ -3088,15 +3098,15 @@ def witness_is_valid(
         if inp.lo != float("-inf") and v < Fraction(inp.lo):
             return (
                 f"the model escapes the declared box ({inp.name} = "
-                f"{_fraction_text(v)} is below its declared lower bound "
-                f"{_fraction_text(Fraction(inp.lo))}); the box constraints "
+                f"{fraction_text(v)} is below its declared lower bound "
+                f"{fraction_text(Fraction(inp.lo))}); the box constraints "
                 f"were part of the emitted problem"
             )
         if inp.hi != float("inf") and v > Fraction(inp.hi):
             return (
                 f"the model escapes the declared box ({inp.name} = "
-                f"{_fraction_text(v)} is above its declared upper bound "
-                f"{_fraction_text(Fraction(inp.hi))}); the box constraints "
+                f"{fraction_text(v)} is above its declared upper bound "
+                f"{fraction_text(Fraction(inp.hi))}); the box constraints "
                 f"were part of the emitted problem"
             )
     try:
