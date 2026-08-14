@@ -81,7 +81,12 @@ from stelling.obligation import (
     witness_is_valid,
 )
 from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
-from stelling.propagate import ObligationReport, Propagation, interval_env
+from stelling.propagate import (
+    ObligationReport,
+    Propagation,
+    interval_env,
+    unaccounted_assumes,
+)
 from stelling.smt import Script, emit
 from stelling.verdict import (
     ARITHMETIC_MODE_INTERVAL,
@@ -1369,8 +1374,7 @@ def _dispatch_obligation(
     backends: tuple[_Backend, ...],
     missing: tuple[str, ...],
     ledger: _Ledger,
-    relational_assumes: tuple[ir.JaxprEqn, ...] = (),
-) -> tuple[ObligationEscalation, int]:
+) -> tuple[ObligationEscalation, tuple[int, ...]]:
     ordered = tuple(
         sorted(
             backends,
@@ -1380,21 +1384,36 @@ def _dispatch_obligation(
     scripts: dict[str, Script] = {}
     for backend in ordered:
         if backend.flavor not in scripts:
-            scripts[backend.flavor] = emit(
-                sl, backend.flavor, config.timeout_ms,
-                relational_assumes=relational_assumes,
-            )
-    # The count of relational assumes ACTUALLY emitted for this obligation's
-    # script. Identical across flavors (the logical content is the same; only
-    # the option block differs), so we take it from any script.
-    n_emitted = next(iter(scripts.values())).relational_assumes_emitted if scripts else 0
+            scripts[backend.flavor] = emit(sl, backend.flavor, config.timeout_ms)
+    # WHICH of the propagation's forwarded relational assumes this
+    # obligation's script actually states, by their index in the tuple the
+    # propagation forwarded (`smt.Script.emitted_origins`). Identical across
+    # flavors — the logical content is the same and only the option block
+    # differs — so it is taken from any script.
+    #
+    # An IDENTITY, not the count that used to be read here. The count answers
+    # "how many arrived"; the rule at the end of `_escalate` has to answer
+    # "did the assume that constrains this witness arrive", and reading the
+    # first as the second produced a false REFUTED twice (audit 0.2.0 S6, and
+    # the branch-scoping regression that followed it).
+    emitted_origins = (
+        next(iter(scripts.values())).emitted_origins if scripts else ()
+    )
     wall_s = _wall_seconds(config.timeout_ms)
     notes: list[str] = []
-    if relational_assumes:
+    if sl.assumes:
         notes.append(
-            f"assert #{sl.index}: {len(relational_assumes)} relational "
+            f"assert #{sl.index}: {len(sl.assumes)} relational "
             f"assume(s) forwarded to solver as axiom(s)"
         )
+    for reason in sl.assumes_skipped:
+        # A DROPPED CONSTRAINT IS NEVER SILENT. This is the disclosure half of
+        # the fix: the emission's skips used to be `continue` statements, so a
+        # user-stated precondition could vanish between the propagation and
+        # the script with nothing in the verdict distinguishing the run from
+        # one where it applied. Each reason names one assume and why this
+        # obligation's slice could not state it.
+        notes.append(f"assert #{sl.index}: {reason}")
     absences = _absences(config, ordered, missing)
     if len(ordered) == 1:
         notes.append(
@@ -1551,7 +1570,7 @@ def _dispatch_obligation(
             witness=None,
             notes=tuple(notes) + degraded_notes(universal=True),
             answered_by=answered,
-        ), n_emitted)
+        ), emitted_origins)
 
     if "sat" in answers:
         sat_problems: list[str] = []
@@ -1618,7 +1637,7 @@ def _dispatch_obligation(
                         witness=None,
                         notes=tuple(notes) + degraded_notes(universal=False),
                         answered_by=answered,
-                    ), n_emitted)
+                    ), emitted_origins)
                 witness = make_validated_witness(
                     sl,
                     values,
@@ -1694,7 +1713,7 @@ def _dispatch_obligation(
                 witness=witness,
                 notes=tuple(notes) + degraded_notes(universal=False),
                 answered_by=answered,
-            ), n_emitted)
+            ), emitted_origins)
         detail_tail = (
             "; ".join(sat_problems)
             if sat_problems
@@ -1707,7 +1726,7 @@ def _dispatch_obligation(
             invocations=invocations(),
             witness=None,
             notes=tuple(notes),
-        ), n_emitted)
+        ), emitted_origins)
 
     reasons = (
         "; ".join(
@@ -1722,7 +1741,7 @@ def _dispatch_obligation(
         invocations=invocations(),
         witness=None,
         notes=tuple(notes),
-    ), n_emitted)
+    ), emitted_origins)
 
 
 # -- escalation over a propagated query ---------------------------------------
@@ -1874,15 +1893,17 @@ def escalate(
                     witness=None,
                     notes=(f"assert #{item.index}: escalation declined — {item.reason}",),
                 ),
-                0,
+                (),
             ))
             continue
         ledger_start = len(ledger.stamps)
-        n_emitted = 0
+        emitted_origins: tuple[int, ...] = ()
         try:
-            record, n_emitted = _dispatch_obligation(
+            # the slice already carries this query's relational assumes,
+            # translated into its own id namespace by `slice_unknown_
+            # obligations` — there is no second channel for them, by design
+            record, emitted_origins = _dispatch_obligation(
                 item, config, backends, missing, ledger,
-                relational_assumes=propagation.relational_assumes,
             )
         except (SolverDisagreement, EmissionInfidelityError):
             raise  # loud by design
@@ -1902,7 +1923,7 @@ def escalate(
                 witness=None,
                 notes=(f"assert #{item.index}: {reason}",),
             )
-        records.append((record, n_emitted))
+        records.append((record, emitted_origins))
     if propagation.assume_dropped:
         # F7's no-op half, solver side, and it must be ONE-SIDED. Declining
         # escalation outright was the first attempt and it was wrong: it
@@ -1915,30 +1936,75 @@ def escalate(
         # a discharge over the intended set; a witness over a superset may lie
         # entirely outside the precondition, which is the measured defect.
         #
-        # PER-OBLIGATION GRANULARITY: when ALL relational assumes were
-        # ACTUALLY EMITTED for a specific obligation's script (n_emitted ==
-        # len(relational_assumes)), the solver ran WITH the full constraint
-        # set. Its witness satisfies the assume by construction — it's a
-        # genuine violation, not an artifact of the wider domain. Only
-        # un-withhold when ALL were emitted; if any were skipped (operands
-        # not in the backward cone), the solver ran over a wider domain and
-        # the witness might violate the missing assume.
-        n_total = len(propagation.relational_assumes)
-        records = [
-            (r, ne) if (
-                r.outcome not in (OB_VIOLATED_WITNESS, OB_VIOLATED_CONSTANT)
-                or (n_total > 0 and ne == n_total)
+        # PER-OBLIGATION GRANULARITY, AND THE RELEASE TEST IS A LEDGER READ,
+        # NOT AN ARITHMETIC ONE. A definite violation may be released only
+        # when EVERY assume the user wrote is accounted for on this
+        # obligation's query — each one either applied in the interval domain
+        # (so the judged set is already inside it), certainly true over the
+        # boxes in force (so it excluded nothing), or emitted to THIS
+        # obligation's script about the terms its operands denote (so the
+        # model satisfies it by construction). Any other disposition — dropped
+        # for any reason at all, branch-scoped, forwarded but skipped for this
+        # slice, never classified — means the solver ran over a SUPERSET of
+        # the admitted region and its witness may lie outside it.
+        #
+        # WHY NOT TWO COUNTS. That is what stood here, and the shape failed
+        # twice:
+        #
+        #   * audit 0.2.0 S6 — `n_total` counted only the RELATIONAL assumes
+        #     while `assume_dropped` (the gate above) is set by any drop
+        #     reason at all: a predicate from a primitive outside
+        #     {ge,gt,le,lt,eq}, `and` on non-bool, wrong operand count, a
+        #     non-finite or subnormal constant bound, an out-of-scope
+        #     producer. One satisfied relational assume then read as "all of
+        #     them" and released a violation whose witness broke a
+        #     differently-dropped assume;
+        #   * and then, on top of the S5-B1 repair, the propagator stopped
+        #     putting BRANCH-SCOPED relational assumes into
+        #     `relational_assumes` at all — which moved the denominator. One
+        #     ordinary assume emitted plus one branch-scoped assume dropped
+        #     satisfied `1 == 1`, and a REFUTED came back whose witness runs
+        #     the branch and falsifies its precondition.
+        #
+        # Both are one defect: an equality between two populations that
+        # nothing forces to be the same population, maintained in two files.
+        # `propagation.assume_ledger` has one entry per assumed conjunct the
+        # propagator classified, written where it was classified, and
+        # `unaccounted_assumes` whitelists the dispositions that are inside
+        # the judged set. A drop reason added later has to NAME a disposition
+        # to be recorded, and a name the whitelist has not been taught is
+        # unaccounted — so a new reason refuses rather than shrinking a
+        # denominator nobody re-derived.
+        released = []
+        for r, origins in records:
+            if r.outcome not in (OB_VIOLATED_WITNESS, OB_VIOLATED_CONSTANT):
+                released.append((r, origins))
+                continue
+            missing = unaccounted_assumes(propagation.assume_ledger, origins)
+            if not missing:
+                released.append((r, origins))
+                continue
+            # the withholding NAMES the conjunct that caused it. The general
+            # refusal says what the rule is; without the reason a reader
+            # cannot tell which of their assumes the solver never saw.
+            because = (
+                f"{DROPPED_ASSUME_REFUSAL} — unaccounted for on this "
+                f"obligation: "
+                + "; ".join(
+                    f"[{m.kind}] {m.reason}"
+                    + (f" (at {m.where})" if m.where else "")
+                    for m in missing
+                )
             )
-            else (ObligationEscalation(
+            released.append((ObligationEscalation(
                 index=r.index,
                 outcome=OB_UNKNOWN,
-                detail=f"violation WITHHELD from REFUTED: {DROPPED_ASSUME_REFUSAL}",
+                detail=f"violation WITHHELD from REFUTED: {because}",
                 invocations=r.invocations,
                 witness=None,
-                notes=r.notes + (DROPPED_ASSUME_REFUSAL,),
-            ), ne)
-            for r, ne in records
-        ]
+                notes=r.notes + (because,),
+            ), origins))
+        records = released
     return Escalation(
         records=tuple(r for r, _ in records), notes=(), ledger=ledger,
         semantics=propagation.semantics, query_sha256=query_sha256,

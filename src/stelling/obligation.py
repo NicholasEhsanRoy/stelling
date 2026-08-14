@@ -72,6 +72,7 @@ from stelling.propagate import (
     _INT_DTYPE_BOUNDS,
     TRANSFERS,
     Propagation,
+    RelationalAssume,
 )
 
 __all__ = [
@@ -80,6 +81,7 @@ __all__ = [
     "ObligationSlice",
     "ReplayDeclined",
     "ReplayError",
+    "SliceAssume",
     "SliceInput",
     "evaluate_predicate",
     "fraction_text",
@@ -91,6 +93,14 @@ __all__ = [
 
 QF_LRA = "QF_LRA"
 QF_NRA = "QF_NRA"
+
+# The comparison primitives a forwarded relational assume can be emitted as,
+# with their SMT-LIB2 spellings. ONE definition, read by the slicer (which
+# decides what may be carried into a slice) and by the emission (which writes
+# it): a `SliceAssume` therefore cannot exist for a comparison the emission
+# has no rule for, and the emission's "unsupported comparison" skip — one of
+# the five silent `continue`s this fix removed — has no reachable case left.
+ASSUME_CMP_SYM = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "="}
 
 # The reason text the division guard quotes, verbatim per the design.
 DIV_GUARD_REASON = (
@@ -468,6 +478,53 @@ class SliceInput:
 
 
 @dataclass(frozen=True)
+class SliceAssume:
+    """One relational ``assume`` CARRIED INTO THIS SLICE'S ID NAMESPACE.
+
+    THE TYPE IS THE FIX (audit 0.2.0 S5-B2). A
+    :class:`stelling.propagate.RelationalAssume` names its operands with the
+    ids of the scope it was traced in — inside a ``jit`` body those are that
+    body's ids, and the slicer renumbers every inlined body. Resolving them
+    with a bare integer lookup against the slice's table is what emitted an
+    axiom about unrelated values, measured as the CONVERSE of the user's own
+    precondition.
+
+    A ``SliceAssume`` exists only where that translation has already happened
+    and succeeded: ``invars`` are atoms of THIS slice, alias-resolved exactly
+    as :meth:`_Slicer._rewrite` resolves an equation's operands, and each one
+    is known to have a term in the emitted script. An assume that could not be
+    translated is not a ``SliceAssume`` at all — it is a quoted reason in
+    :attr:`ObligationSlice.assumes_skipped`. There is therefore no value of
+    this type that names a term its operands do not denote, and no parameter
+    anywhere through which an untranslated assume can reach emission.
+
+    ``pairs`` is the elementwise pairing — ``(lhs element, rhs element)`` per
+    element of the comparison's broadcast output — computed HERE, from the
+    resolved operands' own avals, by the same
+    :func:`_pair_elementwise` the slice's equations go through. The emission
+    indexes term tuples with it and never re-derives it: the arity crash and
+    the silent truncation (audit M6, id-collision findings 3 and 4) were both
+    the emission deriving indices from one pair of shapes and applying them to
+    terms of another.
+    """
+
+    primitive: str  # lt | le | gt | ge | eq
+    invars: tuple[ir.Atom, ...]  # SLICE-scope atoms, alias-resolved
+    pairs: tuple[tuple[int, int], ...]  # (lhs element, rhs element) per output
+    source_info: tuple[str, ...] = ()
+    # WHICH forwarded assume this is: the index of the
+    # :class:`stelling.propagate.RelationalAssume` it was translated from, in
+    # the tuple the slicer was handed. It is the IDENTITY a downstream join is
+    # keyed on — `stelling.propagate.unaccounted_assumes` asks whether the
+    # assume that produced ledger entry *k* is among the ones a given script
+    # emitted, and no count can answer that. `-1` is the "did not come from a
+    # propagation" value a hand-built SliceAssume carries, and it matches no
+    # ledger entry, so a hand-built slice can never release a withheld
+    # violation.
+    origin: int = -1
+
+
+@dataclass(frozen=True)
 class ObligationSlice:
     """A validated, emittable expression slice for one unknown obligation."""
 
@@ -484,6 +541,27 @@ class ObligationSlice:
     # total emitted element-terms (input elements + term-producing output
     # elements), the number the single budget gate judged; <= ELEMENT_BUDGET
     element_terms: int = 1
+    # The relational assumes this slice CAN state, already in this slice's own
+    # id namespace, and the quoted reason for every one it cannot. The two are
+    # a partition of the assumes the slicer was handed:
+    #
+    #     len(assumes) + len(assumes_skipped) == len(relational_assumes given)
+    #
+    # so a caller holding the slice can derive "emitted versus requested"
+    # without consulting the propagation, and every shortfall has a sentence
+    # attached to it. Before this pair existed the emission had five silent
+    # `continue`s and a run could lose a user-stated constraint with nothing
+    # said about it.
+    #
+    # A COUNT OF THIS PARTITION IS NOT ENOUGH FOR THE WITHHOLDING RULE, which
+    # is why every carried assume also names WHICH forwarded assume it is
+    # (:attr:`SliceAssume.origin`). "How many of them arrived" cannot answer
+    # "did the one that constrains this witness arrive"; two rounds of false
+    # REFUTED came out of asking the first question and reading the answer as
+    # the second (audit 0.2.0 S6, and the branch-scoping regression that
+    # followed it).
+    assumes: tuple[SliceAssume, ...] = ()
+    assumes_skipped: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -762,6 +840,37 @@ def _index_box(shape: tuple[int, ...], base: int) -> iv.IntervalArray:
 
 def _shape_of(atom: ir.Atom) -> tuple[int, ...]:
     return tuple(atom.aval.shape)
+
+
+def _render_scope(path: tuple) -> str:
+    """A scope path in words, for a decline the reader can act on.
+
+    The path is positional (:data:`stelling.propagate.ScopePath`), so this is
+    the only place it becomes prose; nothing reads it back.
+
+    THE ``cond`` ARM IS UNREACHABLE FROM THE ONLY CALLER, and says so here
+    rather than reading as a live case. The one caller is
+    :meth:`_Slicer._carry_assumes`, which renders the scope of a
+    :class:`stelling.propagate.RelationalAssume`; and the propagator increments
+    ``branch_depth`` BEFORE it pushes any ``("cond", pos, i)`` step, while its
+    forwarding guard refuses to forward at all while ``branch_depth`` is
+    nonzero. So no ``RelationalAssume`` can carry a cond step, and this arm
+    cannot fire through that path. It is kept because the function is a
+    renderer of a general type: a path is data, a caller that hands it one
+    with a cond step in it should get prose rather than a ``repr``, and the
+    ``else`` beneath it exists for exactly the same reason.
+    """
+    if not path:
+        return "the top level"
+    parts = []
+    for step in path:
+        if len(step) == 2 and step[0] == "call":
+            parts.append(f"the body of equation {step[1]}")
+        elif len(step) == 3 and step[0] == "cond":  # unreachable; see docstring
+            parts.append(f"branch {step[2]} of the cond at equation {step[1]}")
+        else:  # an unrecognised step is quoted, never guessed at
+            parts.append(repr(step))
+    return " → ".join(parts)
 
 
 def _pair_elementwise(eqn: ir.JaxprEqn) -> list[list[int]]:
@@ -1554,7 +1663,19 @@ class _Slicer:
         closed: ir.ClosedJaxpr,
         env: Mapping[int, iv.IntervalArray],
         top_primitives: frozenset[str] | None = None,
+        relational_assumes: tuple[RelationalAssume, ...] = (),
     ) -> None:
+        # The relational assumes the propagation forwarded, each carrying the
+        # SCOPE its operand ids belong to. They are translated into this
+        # slice's namespace in :meth:`_carry_assumes`, per obligation, and the
+        # untranslatable ones come out as quoted reasons — never as silence,
+        # and never as an id resolved in a namespace it does not belong to.
+        self.relational_assumes = tuple(relational_assumes)
+        # scope path -> the rename this slicer applied when it inlined that
+        # scope. `()` is the top level, whose ids the slicer never renames, so
+        # its rename is the empty (identity) map. Written by `_flatten`, read
+        # only by `_carry_assumes`.
+        self._scope_remaps: dict[tuple, dict[int, int]] = {(): {}}
         # the primitives the interval RUN recorded as fallen-to-⊤ (from
         # coverage.unknown_primitives), or None when the caller has no run
         # record. MESSAGE WORDING ONLY (blinded-lens audit R2/R3): the
@@ -1698,7 +1819,7 @@ class _Slicer:
             )
         self.defined.add(vid)
 
-    def _flatten(self, eqns) -> None:
+    def _flatten(self, eqns, path: tuple = ()) -> None:
         """The transparent call descent for the COMPUTATION slice: inline
         every well-formed transparent wrapper's equations (jit,
         custom_jvp_call, custom_vjp_call, remat2 — the same set the
@@ -1711,7 +1832,7 @@ class _Slicer:
         sub-jaxpr, arity mismatch, const mismatch) is left in place as an
         opaque equation, which the validator declines with the form
         quoted."""
-        for eqn in eqns:
+        for pos, eqn in enumerate(eqns):
             if eqn.primitive in DEFAULT_TRANSPARENT:
                 # coverage.call_body, the canonical accessor — see the note
                 # there: remat2's body is a bare Jaxpr on jax 0.10 and a
@@ -1732,6 +1853,15 @@ class _Slicer:
                     # therefore the env lookups that ride on it) landing on
                     # the same outer atoms as before.
                     remap = self._renumber(inner)
+                    # THE RENAME IS RECORDED, not only applied. It is the only
+                    # thing that can translate a name from that scope into
+                    # this slice, and the propagation hands us assumes stated
+                    # in exactly those names. Keyed by the scope's positional
+                    # address, which the propagator computes the same way from
+                    # the same tree — so a key either denotes this scope or
+                    # denotes nothing.
+                    inner_path = path + (("call", pos),)
+                    self._scope_remaps[inner_path] = remap
                     for var, val in zip(inner.jaxpr.constvars, inner.consts):
                         nid = remap[var.id]
                         self._define(nid, f"inner constvar of {eqn.primitive!r}")
@@ -1742,7 +1872,8 @@ class _Slicer:
                         self._define(nid, f"inner invar of {eqn.primitive!r}")
                         self.aliases[nid] = atom
                     self._flatten(
-                        [self._renumber_eqn(e, remap) for e in inner.jaxpr.eqns]
+                        [self._renumber_eqn(e, remap) for e in inner.jaxpr.eqns],
+                        inner_path,
                     )
                     for out, iatom in zip(eqn.outvars, inner.jaxpr.outvars):
                         self._define(out.id, f"outvar of {eqn.primitive!r}")
@@ -2133,6 +2264,238 @@ class _Slicer:
             source_info=eqn.source_info,
         )
 
+    def _carry_assumes(
+        self,
+        ordered: tuple[ir.JaxprEqn, ...],
+        slice_inputs: list[SliceInput],
+        used_consts: dict[int, object],
+    ) -> tuple[tuple[SliceAssume, ...], tuple[str, ...]]:
+        """Translate every forwarded relational assume into THIS slice's id
+        namespace, or say why it cannot be. Returns ``(carried, skipped)``,
+        a partition of ``self.relational_assumes``.
+
+        THE ONE PLACE A FOREIGN-SCOPE ID IS EVER RESOLVED. The translation is
+        the slicer's own rename — the same ``remap`` the inlining applied to
+        the scope's equations — followed by the same alias resolution
+        :meth:`_rewrite` applies to an equation's operands. So an operand that
+        is a jit body's own intermediate lands on the term that intermediate
+        got, and an operand that is the jit's *invar* lands on the caller's
+        atom, which is what an inlined invar means. There is no arithmetic on
+        ids anywhere in here and no lookup keyed on a bare integer: a scope
+        the slicer did not inline has no entry, and its assume is SKIPPED WITH
+        A REASON rather than resolved against a namespace it does not belong
+        to.
+
+        Every rejection produces a sentence. That is not politeness: the
+        emission's five silent ``continue``s each cost a constraint the user
+        wrote, and a run that quietly drops one answers a question nobody
+        asked. It also makes the count derivable — see
+        :attr:`ObligationSlice.assumes`.
+        """
+        if not self.relational_assumes:
+            return (), ()
+        # Every id the emission will hold a term for, derived IN THE SAME
+        # ORDER AND BY THE SAME RULE the emission derives `names` by: the
+        # decoded constants first, then one term appended per declared input
+        # ELEMENT, then one tuple per equation. Deriving it here is what lets
+        # the arity check happen before any term tuple is indexed (audit M6),
+        # and mirroring the order rather than restating it is what keeps the
+        # two from disagreeing about an id that is both.
+        #
+        # THE THIRD LOOP TAKES `outvars[0]` AND NOTHING ELSE, because that is
+        # what the emission takes: every row of its equation loop binds
+        # `out = eqn.outvars[0]` and writes exactly one `names[out.id]`. A
+        # second outvar has no term there either, so claiming one here would
+        # send a carried assume to the emission's unbound-variable raise —
+        # an internal error quoted into an UNKNOWN — where the honest answer
+        # is the disclosed skip this returns.
+        term_count: dict[int, int] = {}
+        for cid, cval in used_consts.items():
+            term_count[cid] = len(cval) if isinstance(cval, tuple) else 1
+        for inp in slice_inputs:
+            term_count[inp.var_id] = term_count.get(inp.var_id, 0) + 1
+        for e in ordered:
+            out = e.outvars[0]
+            term_count[out.id] = _size(_shape_of(out))
+
+        def n_terms(atom: ir.Atom) -> int | None:
+            """How many element terms the emission will have for this atom,
+            or None when it will have none at all."""
+            if isinstance(atom, ir.Literal):
+                vals = _decode_elements(atom.val)  # declines undecodables
+                for v in vals:
+                    if not isinstance(v, bool):
+                        _numeric_fraction(v)  # declines non-finite
+                return len(vals)
+            return term_count.get(atom.id)
+
+        carried: list[SliceAssume] = []
+        skipped: list[str] = []
+        for origin, ra in enumerate(self.relational_assumes):
+            eqn = ra.eqn
+            at = f" at {ra.where}" if ra.where else ""
+            head = f"relational assume{at} not forwarded to the solver: "
+            # THE NEXT THREE SKIPS ARE SCREENED BY THE PROPAGATOR FIRST, and
+            # are DEFENCE IN DEPTH rather than live paths. Written down here
+            # because a reader who takes them for live paths will look for
+            # (and "fix") a cause that does not exist:
+            #
+            #   * the two `eqn.*` shape screens — `_Walker._classify_
+            #     assumed_pred` forwards only a producer whose primitive is in
+            #     `_ASSUME_CMPS` and whose `invars` are exactly two `ir.Var`s
+            #     (it drops on `prim not in _ASSUME_CMPS` and on
+            #     `len(producer.invars) != 2` before ever reaching the forward
+            #     site), and `_ASSUME_CMPS` is the same set as `ASSUME_CMP_SYM`
+            #     here. Their reachable trigger is a `RelationalAssume`
+            #     assembled by hand;
+            #   * `remap is None` — this was written for a scope the slicer
+            #     does not descend, which means a `cond` branch, and a
+            #     branch-scoped relational assume is no longer forwarded at
+            #     all (`branch_depth` is incremented before the branch's scope
+            #     step is pushed, and the forwarding guard refuses while it is
+            #     nonzero), so no forwarded assume can name a scope for that
+            #     reason. What is left reachable is narrow and is not a cond:
+            #     the propagator descends a transparent wrapper on
+            #     `len(inner.jaxpr.invars) == len(ins)` while `_flatten`
+            #     additionally requires the outvar and constvar counts to
+            #     match, so a wrapper malformed in exactly that way is
+            #     descended by one and left opaque by the other. jax tracing
+            #     does not produce one.
+            #
+            # All three are kept: each names an assume and a reason, which is
+            # the posture this whole method exists to enforce, and none of
+            # them can mint anything — a skip is a disclosed loss of
+            # precision, and the withholding rule reads the skip.
+            if eqn.primitive not in ASSUME_CMP_SYM:
+                skipped.append(
+                    head + f"the assumed comparison {eqn.primitive!r} has no "
+                    f"SMT emission rule"
+                )
+                continue
+            if len(eqn.invars) != 2 or not eqn.outvars:
+                skipped.append(
+                    head + f"the assumed comparison {eqn.primitive!r} has "
+                    f"{len(eqn.invars)} operand(s) and {len(eqn.outvars)} "
+                    f"result(s), not the binary form the emission writes"
+                )
+                continue
+            remap = self._scope_remaps.get(ra.scope)
+            if remap is None:
+                skipped.append(
+                    head + f"it was stated in {_render_scope(ra.scope)}, "
+                    f"which this obligation's slice does not inline, so its "
+                    f"operands name nothing here"
+                )
+                continue
+            try:
+                renamed = self._renumber_eqn(eqn, remap)
+                probe = ir.JaxprEqn(
+                    primitive=renamed.primitive,
+                    invars=tuple(self._resolve(a) for a in renamed.invars),
+                    outvars=renamed.outvars,
+                    params=renamed.params,
+                    effects=renamed.effects,
+                    source_info=renamed.source_info,
+                )
+                # The SAME pairing the slice's own equations go through, run on
+                # the RESOLVED operands: whatever indices come out of here
+                # index the very term tuples the emission will build.
+                #
+                # BELT AND BRACES BEHIND THE IDENTITY REPAIR, and measured to
+                # be exactly that — not the M6 repair, which an earlier
+                # version of this comment credited it with. Substituting
+                # `renamed` for `probe` here reddens 0 of the suite's 2954
+                # collected tests on this tree, because alias resolution cannot
+                # change an aval: `_flatten` binds an inner invar to the
+                # call's operand atom and an outer outvar to the inner result
+                # atom, both of which jax has already type-checked equal, and
+                # `_renumber_eqn` renames without touching avals. So the two
+                # calls see the same shapes on every reachable input and
+                # return the same indices.
+                #
+                # What actually closed M6's crash and its silent truncation is
+                # the SCOPE-CORRECT IDENTITY: `remap` above resolves the
+                # assume's operands through the rename of the scope they were
+                # traced in, so they can no longer land on an unrelated term
+                # of a different shape — which is where the mismatched indices
+                # came from. Reading `probe` is kept because it is the
+                # honest reading (the emission indexes the resolved operands'
+                # terms, so the indices should come from the resolved
+                # operands), not because a case is known that distinguishes
+                # it. `docs/norms.md` § "Guard coverage is proven by mutation,
+                # not by construction": no such case has been constructed, so
+                # none is claimed.
+                idx = _pair_elementwise(probe)
+                counts = [n_terms(a) for a in probe.invars]
+            except _Decline as d:
+                skipped.append(head + d.reason)
+                continue
+            if len(idx) != 2:
+                skipped.append(
+                    head + f"the assumed comparison paired into {len(idx)} "
+                    f"operand index list(s), not two"
+                )
+                continue
+            missing = [
+                side for side, c in zip(("left", "right"), counts) if c is None
+            ]
+            if missing:
+                # "its left and right operandS ARE", not "operand is": the
+                # sentence is read by whoever lost the constraint, and a
+                # reason that does not parse reads as a template rather than
+                # as a finding
+                noun, verb, pron = (
+                    ("operands", "are", "them") if len(missing) == 2
+                    else ("operand", "is", "it")
+                )
+                skipped.append(
+                    head + f"its {' and '.join(missing)} {noun} {verb} not "
+                    f"in this obligation's backward cone, so no term for "
+                    f"{pron} exists in this slice"
+                )
+                continue
+            if any(c == 0 for c in counts):
+                skipped.append(
+                    head + "an operand has zero elements, so the comparison "
+                    "constrains nothing"
+                )
+                continue
+            # ARITY IS CHECKED, AND `_pair_elementwise` ABOVE IS THE CHECK.
+            # The M6 crash and the M6 silent truncation were one missing check
+            # with two directions, and their shared cause was that the element
+            # indices came from the ASSUME EQUATION's shapes while the terms
+            # came from whatever the ids HAPPENED TO RESOLVE TO — a foreign
+            # scope's id landing on an unrelated term of a different shape.
+            # THE SCOPE-CORRECT RESOLUTION ABOVE IS WHAT REMOVES THAT: an
+            # operand is now resolved through the rename of the scope it was
+            # traced in, or the assume is skipped with a reason, so no id lands
+            # on an unrelated term at all. `_pair_elementwise` running on the
+            # resolved operands makes the indices and the terms come from one
+            # pair of shapes rather than two, and it declines — quoted, into
+            # `skipped` — when they do not broadcast. It is the check for the
+            # shapes; it is not what closed M6, and the mutation measurement
+            # at the call site says so.
+            #
+            # There is deliberately NO second arity check here comparing
+            # `counts` against the operands' avals. The one place that holds
+            # both the indices and the term tuples is the emission, and that is
+            # where the residual check lives — as a raise with a message
+            # rather than a bare tuple subscript. A copy here would be
+            # unreachable (the terms a slice holds for an atom are sized by
+            # that atom's own aval), and an unreachable guard is a second
+            # implementation of an invariant that no mutation can prove.
+            ia, ib = idx
+            carried.append(
+                SliceAssume(
+                    primitive=probe.primitive,
+                    invars=probe.invars,
+                    pairs=tuple(zip(ia, ib)),
+                    source_info=eqn.source_info,
+                    origin=origin,
+                )
+            )
+        return tuple(carried), tuple(skipped)
+
     def slice(self, index: int, assert_eqn: ir.JaxprEqn) -> ObligationSlice:
         if self.poisoned is not None:
             raise _Decline(self.poisoned)
@@ -2395,6 +2758,9 @@ class _Slicer:
                         )
                     )
         fragment = self._fragment(tuple(slice_inputs), ordered)
+        assumes, assumes_skipped = self._carry_assumes(
+            ordered, slice_inputs, used_consts
+        )
         return ObligationSlice(
             index=index,
             fragment=fragment,
@@ -2404,6 +2770,8 @@ class _Slicer:
             root=root,
             source_info=assert_eqn.source_info,
             element_terms=element_terms,
+            assumes=assumes,
+            assumes_skipped=assumes_skipped,
         )
 
     def _validated_rewrite(self, eqn: ir.JaxprEqn) -> ir.JaxprEqn:
@@ -2487,6 +2855,7 @@ def slice_obligation(
     env: Mapping[int, iv.IntervalArray],
     *,
     top_primitives: frozenset[str] | None = None,
+    relational_assumes: tuple[RelationalAssume, ...] = (),
 ) -> ObligationSlice | DeclinedObligation:
     """Extract the slice for obligation ``index`` (top-level assert order),
     or decline with the reason quoted. Never raises on legal queries.
@@ -2495,7 +2864,15 @@ def slice_obligation(
     primitives the interval RUN recorded as fallen-to-⊤, from
     ``propagation.coverage.unknown_primitives`` — the unsupported-
     primitive decline describes the interval leg's run behaviour from
-    this record and claims neither direction when it is ``None``."""
+    this record and claims neither direction when it is ``None``.
+
+    ``relational_assumes`` are the propagation's forwarded relational
+    assumes. A slice built WITHOUT them states none: the axioms are part of
+    what the slice claims, so a re-derivation that was not given them is not
+    the same slice and its emitted script is not the same script. That is why
+    :func:`stelling.verdict._bar_scope`'s re-derivation, which has no
+    propagation to draw them from, still fails to reproduce an
+    assume-carrying script — unchanged by this fix, and its own finding."""
     jaxpr = closed.jaxpr
     asserts = [e for e in jaxpr.eqns if e.primitive == "stelling_assert"]
     if index >= len(asserts):
@@ -2508,7 +2885,9 @@ def slice_obligation(
         )
     assert_eqn = asserts[index]
     try:
-        return _Slicer(closed, env, top_primitives).slice(index, assert_eqn)
+        return _Slicer(
+            closed, env, top_primitives, relational_assumes
+        ).slice(index, assert_eqn)
     except _Decline as d:
         return DeclinedObligation(
             index=index, reason=d.reason, source_info=assert_eqn.source_info
@@ -2553,7 +2932,13 @@ def slice_unknown_obligations(
         name for name, _ in propagation.coverage.unknown_primitives
     )
     return tuple(
-        slice_obligation(closed, o.index, env, top_primitives=tops)
+        slice_obligation(
+            closed,
+            o.index,
+            env,
+            top_primitives=tops,
+            relational_assumes=propagation.relational_assumes,
+        )
         for o in unknown
     )
 

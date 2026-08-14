@@ -110,8 +110,11 @@ class TestRecording:
         p = propagate(cj)
         assert len(p.relational_assumes) == 1
         ra = p.relational_assumes[0]
-        assert ra.primitive == "lt"
-        assert len(ra.invars) == 2
+        # the record carries the comparison AND the scope its operand ids
+        # belong to; here the assume is at top level, so the scope is empty
+        assert ra.scope == ()
+        assert ra.eqn.primitive == "lt"
+        assert len(ra.eqn.invars) == 2
 
     def test_non_relational_assume_not_recorded(self):
         """assume(x < 5.0) where one side is constant: NOT recorded as
@@ -147,8 +150,8 @@ class TestRecording:
         ], [aout1, aout2])
         p = propagate(cj)
         assert len(p.relational_assumes) == 2
-        assert p.relational_assumes[0].primitive == "lt"
-        assert p.relational_assumes[1].primitive == "le"
+        assert p.relational_assumes[0].eqn.primitive == "lt"
+        assert p.relational_assumes[1].eqn.primitive == "le"
 
     def test_relational_assume_not_recorded_under_ieee(self):
         """Under ieee semantics, relational assumes are NOT recorded (ieee
@@ -211,50 +214,58 @@ class TestEmission:
         positive constraint is emitted as an assertion."""
         cj, p, sl = self._make_slice_with_relational("lt")
         assert len(p.relational_assumes) == 1
-        # Emit with relational assumes
-        script = emit(sl, "z3", 5000, relational_assumes=p.relational_assumes)
+        # the SLICE carries the assume, translated into its own id namespace;
+        # there is no emit parameter for one (audit 0.2.0 S5-B2)
+        assert len(sl.assumes) == 1 and sl.assumes_skipped == ()
+        script = emit(sl, "z3", 5000)
         # The script should contain the positive assertion: (assert (< x0 x1))
         assert "(assert (< x0 x1))" in script.text
+        assert script.relational_assumes_emitted == 1
 
-    def test_relational_assume_not_emitted_without_param(self):
-        """Without passing relational_assumes, no axiom is emitted."""
-        cj, p, sl = self._make_slice_with_relational("lt")
-        # Emit WITHOUT relational assumes (the default)
-        script = emit(sl, "z3", 5000)
-        # The only assert should be the negated obligation
-        assert_lines = [
-            l for l in script.text.splitlines()
-            if l.startswith("(assert") and "not" not in l
-            and "<=" in l  # bound assertions use <=
-        ]
-        # bound assertions only (no relational)
+    def test_relational_assume_not_emitted_when_the_slice_carries_none(self):
+        """A slice built WITHOUT the propagation's relational assumes states
+        none, and its script carries no axiom.
+
+        The pre-0.2.0-fix shape of this test passed ``relational_assumes`` to
+        ``emit`` and checked the default. There is no such parameter now: the
+        axioms are part of what the SLICE claims, so "was it forwarded" is a
+        question about the slice. That is the point of the change — a caller
+        cannot hand the emission an assume the slice does not vouch for."""
+        from stelling.obligation import slice_obligation
+
+        cj, p, _sl = self._make_slice_with_relational("lt")
+        bare = slice_obligation(cj, 0, interval_env(cj))  # no assumes given
+        assert isinstance(bare, ObligationSlice)
+        assert bare.assumes == () and bare.assumes_skipped == ()
+        script = emit(bare, "z3", 5000)
+        assert script.relational_assumes_emitted == 0
         for line in script.text.splitlines():
             if line.startswith("(assert") and "(< x0 x1)" in line:
-                pytest.fail("relational assume emitted without being passed")
+                pytest.fail("relational assume emitted from a slice without one")
 
     def test_relational_assume_le(self):
         """assume(x <= y) emits (assert (<= x0 x1))."""
         cj, p, sl = self._make_slice_with_relational("le")
-        script = emit(sl, "z3", 5000, relational_assumes=p.relational_assumes)
+        script = emit(sl, "z3", 5000)
         assert "(assert (<= x0 x1))" in script.text
 
     def test_relational_assume_ge(self):
         """assume(x >= y) emits (assert (>= x0 x1))."""
         cj, p, sl = self._make_slice_with_relational("ge")
-        script = emit(sl, "z3", 5000, relational_assumes=p.relational_assumes)
+        script = emit(sl, "z3", 5000)
         assert "(assert (>= x0 x1))" in script.text
 
     def test_relational_assume_gt(self):
         """assume(x > y) emits (assert (> x0 x1))."""
         cj, p, sl = self._make_slice_with_relational("gt")
-        script = emit(sl, "z3", 5000, relational_assumes=p.relational_assumes)
+        script = emit(sl, "z3", 5000)
         assert "(assert (> x0 x1))" in script.text
 
     def test_relational_assume_precedes_negated_obligation(self):
         """The relational axiom appears BEFORE the negated obligation in the
         script (it is an assumption, not the query)."""
         cj, p, sl = self._make_slice_with_relational("lt")
-        script = emit(sl, "z3", 5000, relational_assumes=p.relational_assumes)
+        script = emit(sl, "z3", 5000)
         lines = script.text.splitlines()
         rel_idx = next(
             i for i, l in enumerate(lines)
@@ -270,7 +281,12 @@ class TestEmission:
 
     def test_relational_assume_skipped_when_operands_not_in_slice(self):
         """If the relational assume's operand variables are NOT in the
-        obligation's backward cone, the assume is silently skipped."""
+        obligation's backward cone, the assume is skipped — WITH A REASON.
+
+        "Silently" was the pre-fix behaviour and the reason it changed: the
+        emission had five bare ``continue``s, each costing a constraint the
+        user wrote, and nothing in the verdict distinguished a run that
+        applied a precondition from one that dropped it."""
         # Build a query where z is declared but not in the obligation slice
         x = var(0, f64())
         y = var(1, f64())
@@ -301,8 +317,17 @@ class TestEmission:
         # z (x2) should NOT be in the slice inputs
         input_names = {inp.name for inp in sl.inputs}
         assert "x2" not in input_names
-        # emit with the relational assume -- it should be SKIPPED
-        script = emit(sl, "z3", 5000, relational_assumes=p.relational_assumes)
+        # the assume is not carried, and the slice SAYS SO
+        assert sl.assumes == ()
+        assert len(sl.assumes_skipped) == 1
+        assert "backward cone" in sl.assumes_skipped[0]
+        # the partition is exact, so "emitted vs requested" is derivable
+        assert (
+            len(sl.assumes) + len(sl.assumes_skipped)
+            == len(p.relational_assumes)
+        )
+        script = emit(sl, "z3", 5000)
+        assert script.relational_assumes_emitted == 0
         for line in script.text.splitlines():
             if line.startswith("(assert") and "(< x0 x2)" in line:
                 pytest.fail(

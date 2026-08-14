@@ -173,6 +173,7 @@ __all__ = [
     "IEEE_TRANSFERS",
     "ObligationReport",
     "Propagation",
+    "RelationalAssume",
     "TIGHTENED_DOMAIN_REAL_REFUSAL",
     "TRANSFERS",
     "UnsatisfiableAssumptionError",
@@ -200,6 +201,202 @@ class UnsatisfiableAssumptionError(ValueError):
 
 # 2**53: the largest magnitude below which every int is exactly a double.
 _EXACT_INT = 9007199254740992
+
+
+# -- scope-qualified variable identity ----------------------------------------
+#
+# THE DEFECT THIS TYPE EXISTS FOR (audit 0.2.0 S5-B2, a FALSE VERIFIED).
+#
+# An IR var id is unique only WITHIN ONE SCOPE. `_jax_compat._Transcriber`
+# numbers with one global counter keyed by `id(jax Var)`, and jax REUSES jaxpr
+# objects, so the same id is legitimately bound in several scopes; and
+# `obligation._Slicer` renumbers every inlined scope from
+# `max(top-level ids) + 1`, a maximum that does not see sub-jaxpr ids at all.
+#
+# A relational `assume` traced inside a `jit`/`custom_jvp` body is recorded by
+# its producing comparison equation, whose operands carry THAT BODY'S ids. The
+# emission used to resolve them with a bare `names.get(atom.id)` against the
+# slice's renumbered table — an integer lookup with no scope check. When the
+# two ranges met, a foreign id resolved to an unrelated term and the axiom was
+# emitted about the wrong values: measured as the CONVERSE of the user's own
+# precondition, discharging an obligation that is false at every admitted
+# point.
+#
+# A raw `int` cannot carry the missing information, which is why the fix is a
+# type and not a bounds check. Raising the fresh-id base above every scope's
+# ids would remove the collision and leave the defect: the lookup would simply
+# MISS, and the run would lose a user-stated constraint with nothing said
+# about it.
+#
+# A scope path addresses one scope INSTANCE in the IR tree by position, not by
+# object identity and not by traversal convention: each step names the index of
+# the equation whose body is being entered, tagged with the kind of descent, so
+# `("call", 4)` (the body of top-level equation 4) can never denote the same
+# scope as `("cond", 4, 1)` (branch 1 of the cond at equation 4). The
+# propagator records the path it was in when it forwarded; the slicer records
+# the same path when it renumbers; and a key that does not match resolves to
+# NOTHING rather than to something else. Divergence therefore costs a
+# disclosed skip, never a forged axiom.
+ScopeStep = tuple  # ("call", eqn_index) | ("cond", eqn_index, branch_index)
+ScopePath = tuple  # tuple[ScopeStep, ...]; () is the top-level scope
+
+
+@dataclass(frozen=True)
+class RelationalAssume:
+    """One relational ``assume`` forwarded for solver emission, WITH THE
+    SCOPE ITS OPERAND IDS BELONG TO.
+
+    ``eqn`` is the comparison equation the assume consumed (primitive in
+    ``_ASSUME_CMPS``), exactly as the propagator met it — so its operand ids
+    are ids of ``scope``, and are meaningless anywhere else. Nothing may
+    resolve them without first mapping ``scope`` to the namespace it is being
+    resolved into; :meth:`stelling.obligation._Slicer._carry_assumes` is the
+    one place that mapping happens.
+
+    ``where`` is the assume's source location, quoted into the disclosure when
+    the assume cannot be carried into a given obligation's slice.
+    """
+
+    scope: ScopePath
+    eqn: ir.JaxprEqn
+    where: str = ""
+
+
+# -- the assume disposition ledger --------------------------------------------
+#
+# THE FOUR DISPOSITIONS. Every assumed conjunct the propagator classifies
+# leaves exactly one :class:`AssumeDisposition` on
+# :attr:`Propagation.assume_ledger`, recorded AT THE POINT OF CLASSIFICATION,
+# and the four names below are the whole space a classification may land in.
+# The question a reader downstream is asking is: is the region this run
+# JUDGED contained in the region the user's `assume`s describe?
+#
+#   ``applied``   the interval domain narrowed (or confirmed already within)
+#                 the target variable with this conjunct, so every point the
+#                 run judges satisfies it by construction.
+#   ``no-op``     the conjunct was not applied, but its own value is
+#                 definitely TRUE over the boxes in force
+#                 (:meth:`_Walker._conjunct_certainly_true`), so it excluded
+#                 nothing and its absence widened nothing: the judged set IS
+#                 the assumed region for this conjunct.
+#   ``forwarded`` relational (both sides vary), so the interval domain cannot
+#                 represent it and it was handed to the solver layer as
+#                 element ``forwarded_index`` of
+#                 :attr:`Propagation.relational_assumes`. Accounted for on a
+#                 given obligation ONLY IF that obligation's script emitted
+#                 it — see :func:`unaccounted_assumes`.
+#   ``dropped``   anything else: no narrowing, no certainty, nothing given to
+#                 the solver. The run judged a SUPERSET of the assumed region.
+#
+# WHY A LEDGER AND NOT A COUNT. The rule that releases a definite violation
+# from withholding used to compare two integers — how many relational assumes
+# the propagation forwarded against how many a script emitted — and that shape
+# failed twice. Once because the denominator counted only the RELATIONAL
+# subset while the flag it was gated on (``assume_dropped``) is set by ANY
+# drop reason at all (audit 0.2.0 S6), so one satisfied relational assume
+# released a violation whose witness broke a differently-dropped one. Once
+# because a change on the propagator's side — no longer forwarding a
+# branch-scoped assume — silently moved the denominator, and `1 == 1` released
+# a violation whose branch-scoped precondition the solver had never been told.
+#
+# Both are one failure: an arithmetic comparison between two populations that
+# nothing forces to be the same population. A ledger cannot fail that way,
+# because the release test counts nothing — it asks whether EVERY entry names
+# an accounted-for disposition. A drop reason added later has to name a
+# disposition to be recorded at all, and a name this module does not know is
+# UNACCOUNTED (:func:`unaccounted_assumes` whitelists, never blacklists), so a
+# new reason fails closed instead of shrinking a denominator nobody
+# re-derived.
+ASSUME_APPLIED = "applied"
+ASSUME_NOOP = "no-op"
+ASSUME_FORWARDED = "forwarded"
+ASSUME_DROPPED = "dropped"
+
+
+@dataclass(frozen=True)
+class AssumeDisposition:
+    """What became of ONE assumed conjunct, recorded where it was decided.
+
+    ``kind`` is one of :data:`ASSUME_APPLIED`, :data:`ASSUME_NOOP`,
+    :data:`ASSUME_FORWARDED`, :data:`ASSUME_DROPPED`. ``reason`` is the
+    sentence already written into the run's notes for this conjunct, so a
+    withholding can NAME the conjunct that caused it rather than restate the
+    rule. ``where`` is the assume's source location.
+
+    ``forwarded_index`` is meaningful only for :data:`ASSUME_FORWARDED`: it is
+    this conjunct's index in :attr:`Propagation.relational_assumes`, and it is
+    the identity a downstream join is keyed on. It is ``-1`` on every other
+    kind, and ``-1`` matches no emitted origin.
+    """
+
+    kind: str
+    reason: str = ""
+    where: str = ""
+    forwarded_index: int = -1
+
+
+def unaccounted_assumes(
+    ledger: tuple["AssumeDisposition", ...],
+    emitted_origins: tuple[int, ...],
+) -> tuple["AssumeDisposition", ...]:
+    """The ledger entries this obligation's solver query did NOT account for.
+
+    ``emitted_origins`` are the ``relational_assumes`` INDICES the
+    obligation's emitted script states as axioms
+    (:attr:`stelling.smt.Script.emitted_origins`) — not a count of them, and
+    not re-derived here from anything.
+
+    **THE TWO ARGUMENTS MUST INDEX THE SAME TUPLE**, and nothing in this
+    signature enforces it. Both are indices into ONE propagation's
+    ``relational_assumes``: the ledger's ``forwarded_index`` is written by
+    the propagator, and the origins reach the script through
+    ``obligation.SliceAssume.origin``, which
+    :meth:`stelling.obligation._Slicer._carry_assumes` fills from the tuple
+    it was HANDED. Inside :func:`stelling.solvers.escalate` that is the same
+    tuple by construction — ``slice_unknown_obligations`` passes
+    ``propagation.relational_assumes`` and nothing else can. A caller
+    driving :func:`stelling.obligation.slice_obligation`'s public
+    ``relational_assumes=`` keyword with some OTHER tuple and then joining
+    against this propagation's ledger would be comparing indices into two
+    different lists; do not. (`main` had the same exposure through
+    ``smt.emit``'s removed ``relational_assumes`` parameter.)
+
+    An entry is accounted for when the region the solver ran over is inside
+    the region that entry describes:
+
+      * ``applied`` and ``no-op`` — the judged set is already inside the
+        conjunct's region, so the solver needs to be told nothing;
+      * ``forwarded`` — only when THIS obligation's script emitted THAT
+        assume, so the model satisfies it by construction.
+
+    Everything else — including a ``kind`` this function does not recognise —
+    is unaccounted, and an empty result is the only thing that may release a
+    definite violation from withholding. THE MEMBERSHIP TEST IS A WHITELIST
+    AND MUST STAY ONE: a disposition added later that this function has not
+    been taught is a disposition nobody has shown the judged set to be inside
+    of, and the failure direction of guessing is a witness outside the
+    precondition presented as a refutation.
+    """
+    emitted = frozenset(emitted_origins)
+    return tuple(
+        e for e in ledger
+        if not (
+            e.kind in (ASSUME_APPLIED, ASSUME_NOOP)
+            or (e.kind == ASSUME_FORWARDED and e.forwarded_index in emitted)
+        )
+    )
+
+
+def _drop(reason: str) -> AssumeDisposition:
+    """The ordinary disposition: this conjunct was not applied, not certainly
+    true, and not given to the solver.
+
+    Every classification site that gives up on a conjunct goes through here,
+    so `dropped` is the default and a site has to say something OTHER than
+    this to be treated as accounted for. That is the direction the whitelist
+    in :func:`unaccounted_assumes` is built to fail in: a reason added later
+    that nobody thought about is a drop."""
+    return AssumeDisposition(kind=ASSUME_DROPPED, reason=reason)
 
 
 @dataclass(frozen=True)
@@ -302,9 +499,33 @@ class Propagation:
     # so no variable can be narrowed independently. Recorded so the solver
     # escalation can emit them as additional axioms — the constraint the
     # user stated is sound, it merely cannot be represented in the
-    # non-relational interval domain. Each entry is the comparison equation
-    # (ir.JaxprEqn with primitive in _ASSUME_CMPS) the assume consumed.
-    relational_assumes: tuple[ir.JaxprEqn, ...] = ()
+    # non-relational interval domain.
+    #
+    # Each entry is a :class:`RelationalAssume`: the comparison equation the
+    # assume consumed AND the scope path its operand ids belong to. The scope
+    # is not decoration — see that type's own note. A BRANCH-SCOPED assume is
+    # never here: a precondition that holds only when a `cond` branch is taken
+    # is not a fact about the query, and asserting it globally would constrain
+    # the whole query by something the program does not guarantee (audit
+    # 0.2.0 S5-B1). Those are dropped with the reason quoted, exactly as
+    # `_unsatisfiable` already degrades inside a branch.
+    relational_assumes: tuple[RelationalAssume, ...] = ()
+    # EVERY assumed conjunct this run classified, with what became of it —
+    # one :class:`AssumeDisposition` per classification, in classification
+    # order, filled in by the propagator as it decides. See the block comment
+    # above that type for the four dispositions and for why the rule that
+    # releases a withheld violation reads this and not a pair of counts.
+    #
+    # It is a SUPERSET of `relational_assumes` in the sense that matters: an
+    # entry of kind `forwarded` carries the index of its `relational_assumes`
+    # element, and every OTHER assumed conjunct — dropped for any reason at
+    # all, branch-scoped, inert-mode, unclassified — has an entry here and
+    # has none there. That is exactly the gap audit 0.2.0 S6 fell through.
+    #
+    # Empty when the run classified no assume. It is NOT empty merely because
+    # no assume constrained anything: a run that dropped every assume has an
+    # entry per drop, which is the case the release test must refuse.
+    assume_ledger: tuple[AssumeDisposition, ...] = ()
 
     @property
     def all_discharged(self) -> bool:
@@ -4848,6 +5069,19 @@ _NONFINITE_BOUND_REASON = (
     "or undecodable, e.g. ±inf/NaN) — no closed half-space represents it"
 )
 
+# Audit 0.2.0 S5-B1: a relational assume traced inside a `cond` branch is a
+# BRANCH-SCOPED precondition. Forwarding it to the solver would assert it over
+# the whole query, which the program does not guarantee — the other branch is
+# real. It is dropped, and the drop says which of the two facts about it
+# stopped the forwarding.
+_BRANCH_SCOPED_REASON = (
+    "and it is stated inside a cond branch, so it is a branch-scoped "
+    "precondition, not a fact about the query — a branch-scoped precondition "
+    "is not forwarded to the solver as an axiom (it would constrain the "
+    "whole query by something that holds only when the branch is taken), and "
+    "this build does not emit it as an implication either"
+)
+
 
 def _finite_point(box: iv.IntervalArray | None) -> bool:
     """Every element is a degenerate finite interval (``lo == hi``,
@@ -5380,6 +5614,16 @@ class _Propagator:
         # the SAME `ir` query object the real run walked, so identity is
         # stable across them and needs no synthetic numbering.
         self._branch_path: list[tuple[int, int]] = []
+        # THE SCOPE THIS WALK IS CURRENTLY INSIDE, as a positional address in
+        # the IR tree (:data:`ScopePath`). Empty at top level; one step is
+        # pushed per descent, tagged with the kind of scope it enters, and
+        # popped in a `finally`. Deliberately NOT `_branch_path`: that one is
+        # keyed on `id(eqn)` and exists to distinguish DYNAMIC occurrences of
+        # one assert within a single process, while this must be reproducible
+        # by a second walker (the slicer) that never sees the propagator's
+        # objects. Positions in a fixed `eqns` list are a property of the IR;
+        # object addresses are not.
+        self._scope_path: ScopePath = ()
         # probe index, or None on a real run. When set, every declaration's
         # box is replaced by a single POINT of that box (:func:`_probe_point`),
         # which is what turns propagation into a witness evaluator.
@@ -5435,8 +5679,18 @@ class _Propagator:
         # comparison equations from relational assume drops: both operands
         # vary, so the interval domain cannot narrow, but the solver can use
         # the constraint as an axiom. Accumulated during the walk; surfaced
-        # on the Propagation result for the emission to read.
-        self.relational_assumes: list[ir.JaxprEqn] = []
+        # on the Propagation result for the emission to read. Each entry
+        # carries the SCOPE its operand ids belong to — see
+        # :class:`RelationalAssume`.
+        self.relational_assumes: list[RelationalAssume] = []
+        # ONE :class:`AssumeDisposition` PER ASSUMED CONJUNCT THIS WALK
+        # CLASSIFIES, in classification order, written by
+        # :meth:`_assume_constrain` (and by the inert-mode arm of the
+        # `stelling_assume` handler, which classifies nothing and says so).
+        # `relational_assumes` above is the FORWARDED SUBSET of this; the
+        # gap between the two is what a rule reading only the subset cannot
+        # see (audit 0.2.0 S6).
+        self.assume_ledger: list[AssumeDisposition] = []
         # the NON-EMPTINESS CERTIFICATE's answer for this run, written by
         # :func:`propagate` after the walk finishes and before the
         # withholding reads it (:func:`_region_witness`). False here means
@@ -6219,21 +6473,25 @@ class _Propagator:
         superset of the true assumed region. Everything else stays inert
         with the reason disclosed."""
         narrowed: list[tuple[int, iv.IntervalArray, bool, bool]] = []
-        dropped: list[str] = []
+        # ONE ENTRY PER CLASSIFIED CONJUNCT THAT DID NOT NARROW, CARRYING ITS
+        # OWN DISPOSITION. This used to be `dropped: list[str]` alongside a
+        # parallel `harmless: list[bool]`, with a fail-safe that rebuilt
+        # `harmless` as all-False whenever the two lengths disagreed —
+        # because `harmless[i]` is only meaningful as the verdict on
+        # `dropped[i]`, and a misalignment could mark a RESTRICTING drop
+        # harmless, the one direction that produces a wrong REFUTED.
+        #
+        # The verdict now rides ON the record it is a verdict about, so there
+        # are no two lists to come apart and the fail-safe has nothing left to
+        # be safe against: an :class:`AssumeDisposition` cannot be handed
+        # another conjunct's kind, because it is not addressed by an index at
+        # all. This is also what the solver-side release rule reads (see
+        # :func:`unaccounted_assumes`) — the same records, not a count taken
+        # over them.
+        dropped: list[AssumeDisposition] = []
         vacuous: list[str] = []
-        harmless: list[bool] = []
         self._apply_assumed_pred(eqn.invars[0], where, narrowed, dropped,
-                                 vacuous, harmless)
-        if len(harmless) != len(dropped):
-            # FAIL-SAFE, not a belt-and-braces check. `harmless[i]` is only
-            # meaningful as the verdict on `dropped[i]`; if the two ever
-            # came apart, an index could carry another conjunct's verdict
-            # and a RESTRICTING drop could read as harmless — the one
-            # direction that produces a wrong REFUTED. Attribution lost is
-            # therefore attribution refused: every drop counts as
-            # restricting, which is exactly the behaviour of not having the
-            # discriminant at all.
-            harmless = [False] * len(dropped)
+                                 vacuous)
         for desc in vacuous:
             # audit F2: the branch-scoped unsatisfiability disclosure
             self.notes.append(
@@ -6286,7 +6544,7 @@ class _Propagator:
                         f"— the conditional claim may be vacuous"
                     )
                     self.assumptions.add(UNCERTIFIED_NARROWING_ASSUMPTION)
-            for i, reason in enumerate(dropped):
+            for i, disp in enumerate(dropped):
                 # a conjunction can mix constrainable and inert conjuncts;
                 # the un-narrowable part is still a drop and still says so.
                 # The hint rides the FIRST such conjunct: it is a fact about
@@ -6304,7 +6562,7 @@ class _Propagator:
                 # where the region really did widen, which is the case that
                 # withholds every refutation.
                 widened = "a superset"
-                if i < len(harmless) and harmless[i]:
+                if disp.kind == ASSUME_NOOP:
                     widened = (
                         "NOT a superset: this conjunct is definitely TRUE "
                         "over the boxes in force, so it excluded nothing "
@@ -6312,7 +6570,8 @@ class _Propagator:
                     )
                 self.notes.append(
                     f"assume conjunct DROPPED at {where}: constraining "
-                    f"proceeded without this conjunct — {widened} ({reason})"
+                    f"proceeded without this conjunct — {widened} "
+                    f"({disp.reason})"
                     + (self._membership_hint_for(eqn.invars[0]) if i == 0 else "")
                 )
             # a conjunct whose own value is definitely TRUE over the boxes
@@ -6322,10 +6581,7 @@ class _Propagator:
             # harmless: a branch-scoped unsatisfiable conjunct is the
             # region being EMPTY in that branch, which is the very thing
             # being guarded against.
-            restricting = [
-                r for i, r in enumerate(dropped)
-                if not (i < len(harmless) and harmless[i])
-            ]
+            restricting = [d for d in dropped if d.kind != ASSUME_NOOP]
             if restricting or vacuous:
                 # F7's NO-OP HALF, on the MIXED-CONJUNCTION path. The `else:`
                 # branch below applies exactly this rule to an assume that
@@ -6381,7 +6637,10 @@ class _Propagator:
                 # unsatisfiable conjunct already carries the directed note
                 # above; everything else gets the pre-existing DROPPED
                 # disclosure with the reason(s) appended
-                reasons = "; ".join(dropped) if dropped else "unclassified predicate"
+                reasons = (
+                    "; ".join(d.reason for d in dropped) if dropped
+                    else "unclassified predicate"
+                )
                 self.notes.append(
                     ASSUME_DROP_NOTE.format(where=where) + f" ({reasons})"
                     + self._membership_hint_for(eqn.invars[0])
@@ -6443,6 +6702,41 @@ class _Propagator:
             # withholding they both cause is the same withholding; the
             # sentence that explains it is not the same sentence.
             self.assume_dropped = True
+        # -- THE LEDGER, WRITTEN ONCE PER ASSUME AND FROM BOTH PATHS ---------
+        #
+        # Every conjunct this assume produced leaves exactly one entry, and
+        # the three sources below are the whole classification: what narrowed,
+        # what did not (already carrying its own kind), and what was
+        # branch-scoped unsatisfiable. It is deliberately OUTSIDE the
+        # `if narrowed:` / `else:` split — a mixed assume writes from both —
+        # and deliberately AFTER the flag decisions, so no path can set
+        # `assume_dropped` and forget to say which conjunct did it.
+        #
+        # A `vacuous` conjunct is `dropped`, never `no-op`: it is the assumed
+        # region being EMPTY on the branch it was written on, which is the
+        # opposite of excluding nothing.
+        self.assume_ledger.extend(
+            AssumeDisposition(
+                kind=ASSUME_APPLIED,
+                reason=f"narrowed var {var_id} to {_render_box(box)}",
+                where=where,
+            )
+            for var_id, box, _changed, _certified in narrowed
+        )
+        # `where` is a property of the ASSUME, not of a conjunct of it, so it
+        # is stamped once here rather than threaded through every
+        # classification site
+        self.assume_ledger.extend(
+            dataclasses.replace(d, where=where) for d in dropped
+        )
+        self.assume_ledger.extend(
+            AssumeDisposition(
+                kind=ASSUME_DROPPED,
+                reason=f"unsatisfiable within this cond branch ({desc})",
+                where=where,
+            )
+            for desc in vacuous
+        )
 
     def _conjunct_certainly_true(self, atom: ir.Atom) -> bool:
         """Whether this assumed conjunct's OWN value is definitely true at
@@ -6580,54 +6874,65 @@ class _Propagator:
         atom: ir.Atom,
         where: str,
         narrowed: list[tuple[int, iv.IntervalArray, bool, bool]],
-        dropped: list[str],
+        dropped: list["AssumeDisposition"],
         vacuous: list[str],
-        harmless: list[bool] | None = None,
     ) -> None:
-        """Classify one assumed conjunct, and record whether each drop it
-        produced was a NO-OP drop.
+        """Classify one assumed conjunct, and upgrade to :data:`ASSUME_NOOP`
+        every disposition it produced that its own value makes a NO-OP.
 
-        ``harmless`` runs parallel to ``dropped``: entry *i* says whether
-        the conjunct that produced ``dropped[i]`` was certainly true, so a
-        caller can tell "this assume ran over a superset" from "this
-        assume dropped something that was not restricting anything". The
-        recursion fills it leaf-first and each call only ever extends it
-        to match ``dropped``, so a conjunct's reason and its verdict stay
-        on the same index no matter how deep the ``and`` tree goes.
+        THE SUBTREE CLASSIFIES INTO ITS OWN LIST, and only that list is
+        upgraded. Not a tidiness choice: the upgrade is the one place a
+        conjunct's verdict is written onto records, and giving it a private
+        list means there is no index into a shared one, hence no arithmetic
+        that could reach a SIBLING's disposition. A conjunct already recorded
+        cannot be re-verdicted by a later one, whatever the recursion does
+        below.
+
+        The entries in that private list are the ones produced anywhere in
+        THIS subtree — this node's own leaf classification, or a descendant's
+        if the node is an ``and`` that decomposed. Both are upgraded by the
+        same test, and the justification is one argument that does not go
+        through the ``and`` transfer's soundness: if ``A ∧ B`` is
+        ``[1, 1]`` at every element of the boxes in force then A and B are
+        each true at every point of those boxes, so dropping any conjunct of
+        that subtree excluded nothing. (The one shape where ``all(A ∧ B)``
+        would NOT imply ``all(A)`` is a broadcast that loses an operand
+        element, which happens only into a zero-size output — measured over
+        all 256 ordered pairs of a 16-shape set at the vacuous-predicate gate
+        in :meth:`_classify_assumed_pred` — and a zero-size box is never
+        certainly true, because :meth:`_conjunct_certainly_true` refuses an
+        empty box.)
+
+        THE VERDICT RIDES ON THE RECORD. This used to extend a parallel
+        ``harmless: list[bool]`` and the caller read it by index, with a
+        fail-safe for the case where the two lengths disagreed. The verdict
+        is now written onto the disposition it is a verdict about, so there
+        is no index to misread and a RESTRICTING drop cannot be handed
+        another conjunct's "harmless" — the direction that produces a wrong
+        REFUTED.
+
+        A :data:`ASSUME_FORWARDED` entry is upgraded too, and keeps its
+        ``forwarded_index``. That is deliberate and it is the pre-existing
+        rule, not a new one: a relational conjunct that is definitely true
+        over the boxes in force excluded nothing, so the judged set is inside
+        it whether or not any script emits it, and treating it otherwise
+        would withhold refutations on assumes that constrain nothing.
         """
-        n_before = len(dropped)
-        self._classify_assumed_pred(atom, where, narrowed, dropped, vacuous,
-                                    harmless)
-        if harmless is None or len(dropped) <= len(harmless):
-            # every drop below this node was attributed by the recursive
-            # call that produced it; nothing here is this atom's own
-            return
-        # the drops this call added itself (a leaf classification) all
-        # belong to THIS conjunct, and stand or fall with its own value.
-        # A parent `and` needs no upgrade pass: a sound `and` transfer
-        # cannot return [1, 1] from an operand that was not [1, 1], so a
-        # certainly-true parent has only certainly-true children, already
-        # marked by their own calls.
-        #
-        # `n_before == len(harmless)` here, because every call returns with
-        # the two lists the same length — which is what puts this atom's
-        # verdict on exactly its own reasons. Not asserted: an assert is
-        # stripped under `-O`, and a misalignment could mark a RESTRICTING
-        # drop harmless, which is the unsound direction. The caller's read
-        # is fail-safe instead (a missing entry reads as not-harmless), and
-        # the one arithmetic below cannot over-extend.
-        harmless.extend(
-            [self._conjunct_certainly_true(atom)] * (len(dropped) - len(harmless))
-        )
+        mine: list[AssumeDisposition] = []
+        self._classify_assumed_pred(atom, where, narrowed, mine, vacuous)
+        if mine and self._conjunct_certainly_true(atom):
+            mine = [
+                dataclasses.replace(d, kind=ASSUME_NOOP) for d in mine
+            ]
+        dropped.extend(mine)
 
     def _classify_assumed_pred(
         self,
         atom: ir.Atom,
         where: str,
         narrowed: list[tuple[int, iv.IntervalArray, bool, bool]],
-        dropped: list[str],
+        dropped: list["AssumeDisposition"],
         vacuous: list[str],
-        harmless: list[bool] | None = None,
     ) -> None:
         if _atom_element_count(atom) == 0:
             # THE VACUOUS-PREDICATE GATE. `assume` reads its predicate
@@ -6670,25 +6975,25 @@ class _Propagator:
             # (`(k >= 2.0) & (z >= 2.0)` on k in [-1, 1]) used to raise
             # UnsatisfiableAssumptionError — "harness defect; nothing was
             # verified" — about a precondition that is true everywhere.
-            dropped.append(
+            dropped.append(_drop(
                 f"the assumed predicate has shape "
                 f"{tuple(atom.aval.shape)} with zero elements: a universal "
                 f"over no elements is true at every point of the declared "
                 f"set, so it constrains nothing and licenses no narrowing "
                 f"of the values it is written about"
-            )
+            ))
             return
         if isinstance(atom, ir.Literal):
-            dropped.append(
+            dropped.append(_drop(
                 f"predicate is a literal ({atom.val!r}), not a traced comparison"
-            )
+            ))
             return
         producer = self.producers.get(atom.id)
         if producer is None:
-            dropped.append(
+            dropped.append(_drop(
                 "the predicate's producing equation is not visible in this "
                 "scope (constvar, invar, or cross-scope value)"
-            )
+            ))
             return
         prim = producer.primitive
         if prim == "and":
@@ -6696,24 +7001,24 @@ class _Propagator:
             # classifying each independently. jax's `and` is BITWISE — it
             # is the logical connective on bool operands only.
             if any(v.aval.dtype != "bool" for v in producer.invars):
-                dropped.append(
+                dropped.append(_drop(
                     "'and' on non-bool operands is bit arithmetic, not "
                     "conjunction"
-                )
+                ))
                 return
             for conj in producer.invars:
                 self._apply_assumed_pred(conj, where, narrowed, dropped,
-                                         vacuous, harmless)
+                                         vacuous)
             return
         if prim not in _ASSUME_CMPS:
-            dropped.append(
+            dropped.append(_drop(
                 f"predicate produced by {prim!r} admits no sound box narrowing"
-            )
+            ))
             return
         if len(producer.invars) != 2:
-            dropped.append(
+            dropped.append(_drop(
                 f"comparison {prim!r} with {len(producer.invars)} operand(s)"
-            )
+            ))
             return
         if self.semantics == "ieee":
             # re-attack U2's swept surface: assume classification consumes
@@ -6736,11 +7041,11 @@ class _Propagator:
                 if d not in _FLOAT_FORMATS
             ]
             if bad:
-                dropped.append(
+                dropped.append(_drop(
                     f"ieee mode: {'/'.join(bad)} comparison semantics are "
                     f"not modelled (unsupported format) — no narrowing, no "
                     f"satisfiability claim"
-                )
+                ))
                 return
         a, b = producer.invars
         box_a, box_b = self._quiet_interval(a), self._quiet_interval(b)
@@ -6756,9 +7061,9 @@ class _Propagator:
             try:
                 result = _CMP_FN[prim](box_a, box_b)
             except iv.IntervalError as e:
-                dropped.append(
+                dropped.append(_drop(
                     f"point comparison sides do not broadcast ({e})"
-                )
+                ))
                 return
             if any(
                 (lo, hi) == iv.BOOL_FALSE
@@ -6786,16 +7091,16 @@ class _Propagator:
             ):
                 # the interval parts compare definitely true, but a NaN
                 # side would falsify — "definitely true" cannot be claimed
-                dropped.append(
+                dropped.append(_drop(
                     "a comparison side may be NaN under ieee semantics "
                     "(NaN falsifies the comparison) — the assumed "
                     "comparison is not certified true; dropped"
-                )
+                ))
                 return
-            dropped.append(
+            dropped.append(_drop(
                 "both comparison sides are point intervals — nothing to "
                 "narrow (the assumed comparison is definitely true)"
-            )
+            ))
             return
         if not point_a and not point_b:
             # audit F6: a constant-but-not-finite bound (±inf, NaN, an
@@ -6806,22 +7111,70 @@ class _Propagator:
             if self.semantics == "ieee" and (
                 _subnormal_const_literal(a) or _subnormal_const_literal(b)
             ):
-                dropped.append(_SUBNORMAL_BOUND_REASON)
+                dropped.append(_drop(_SUBNORMAL_BOUND_REASON))
             elif _nonfinite_const(a, box_a) or _nonfinite_const(b, box_b):
-                dropped.append(_NONFINITE_BOUND_REASON)
+                dropped.append(_drop(_NONFINITE_BOUND_REASON))
             else:
-                dropped.append(_RELATIONAL_REASON)
                 # Record for solver forwarding: both operands genuinely
                 # vary, so this is a constraint the solver CAN use as an
                 # axiom even though the interval domain cannot represent it.
                 # Only under real semantics (ieee declines escalation
                 # wholly) and only when both sides are ir.Var (not literals).
+                #
+                # AND ONLY OUTSIDE A COND BRANCH (audit 0.2.0 S5-B1). What is
+                # forwarded is a POSITIVE, QUERY-GLOBAL axiom: the solver is
+                # told the comparison holds everywhere. Inside a possibly
+                # untaken branch that is a claim the program does not make —
+                # the assume is branch-scoped and the other branch is real,
+                # which is the same reading `_unsatisfiable` already applies
+                # one screen up when it degrades a branch-local
+                # unsatisfiability instead of raising. Asserting it globally
+                # constrains the whole query by a precondition that holds
+                # only on the branch, and there is nothing downstream that
+                # withholds a discharge obtained that way.
+                #
+                # The branch-scoped case is NOT emitted as an implication in
+                # this build: an implication needs the branch predicate in
+                # the slice's own namespace, which the slicer does not carry
+                # (it never descends a cond). Saying so in the reason is
+                # honest; emitting the antecedent-free axiom is not. The drop
+                # still sets `assume_dropped` through the caller, so every
+                # definite violation stays withheld — the conservative
+                # direction.
+                #
+                # THE DISPOSITION IS RECORDED HERE, WHERE THE DECISION IS
+                # MADE, and it is `forwarded` in exactly the case something
+                # was appended to `relational_assumes` — carrying THAT
+                # element's index, which is the identity the solver-side
+                # release rule joins on. The branch-scoped case takes the
+                # ordinary `dropped` disposition like every other drop, and
+                # that is the whole repair for the false REFUTED the S5-B1
+                # fix above opened: the release rule can no longer be
+                # satisfied by a count that quietly stopped including it.
+                reason = _RELATIONAL_REASON
+                kind, fwd = ASSUME_DROPPED, -1
                 if (
                     self.semantics == "real"
                     and isinstance(a, ir.Var)
                     and isinstance(b, ir.Var)
                 ):
-                    self.relational_assumes.append(producer)
+                    if self.branch_depth:
+                        reason = (
+                            f"{_RELATIONAL_REASON}; {_BRANCH_SCOPED_REASON}"
+                        )
+                    else:
+                        kind = ASSUME_FORWARDED
+                        fwd = len(self.relational_assumes)
+                        self.relational_assumes.append(
+                            RelationalAssume(
+                                scope=self._scope_path,
+                                eqn=producer,
+                                where=where,
+                            )
+                        )
+                dropped.append(AssumeDisposition(
+                    kind=kind, reason=reason, forwarded_index=fwd,
+                ))
             return
         if point_a:
             target_atom, target_box, bound, bound_atom = b, box_b, box_a, a
@@ -6835,31 +7188,31 @@ class _Propagator:
             # comparison), so a half-space built from its interval could
             # certify a vacuous precondition — no certified half-space
             # represents a maybe-NaN bound; inert is the sound posture
-            dropped.append(
+            dropped.append(_drop(
                 "the comparison bound may be NaN under ieee semantics "
                 "(its producer carries maybe-NaN) — no certified "
                 "half-space represents it"
-            )
+            ))
             return
         if not isinstance(target_atom, ir.Var):
-            dropped.append(
+            dropped.append(_drop(
                 "the varying comparison side is a literal, not an "
                 "environment variable"
-            )
+            ))
             return
         if target_box is None:
-            dropped.append(
+            dropped.append(_drop(
                 f"var {target_atom.id} has no propagated interval to narrow"
-            )
+            ))
             return
         # bound shape: a scalar broadcast over the variable, or an exact
         # elementwise match — nothing else (general broadcasting between
         # the bound and the variable is not attempted; inert is sound).
         if not (bound.is_scalar() or bound.shape == target_box.shape):
-            dropped.append(
+            dropped.append(_drop(
                 f"bound shape {bound.shape} is neither scalar nor equal to "
                 f"the constrained variable's shape {target_box.shape}"
-            )
+            ))
             return
         n = target_box.size
         ks = bound.los * n if bound.is_scalar() else bound.los
@@ -7100,8 +7453,12 @@ class _Propagator:
             out.id: e for e in jaxpr.eqns for out in e.outvars
         }
         try:
-            for eqn in jaxpr.eqns:
-                self.eqn(eqn)
+            # the POSITION rides with the equation: it is the only part of a
+            # scope path that this level can supply, and a descent one frame
+            # down needs it to address the scope it is entering
+            # (:data:`ScopePath`).
+            for pos, eqn in enumerate(jaxpr.eqns):
+                self.eqn(eqn, pos)
         finally:
             self.producers = prev_producers
         return [self.read(o) for o in jaxpr.outvars]
@@ -7166,7 +7523,10 @@ class _Propagator:
         if self.semantics == "ieee":
             self.nan[var.id] = True
 
-    def eqn(self, eqn: ir.JaxprEqn) -> None:
+    def eqn(self, eqn: ir.JaxprEqn, pos: int = 0) -> None:
+        """Judge one equation. ``pos`` is this equation's index in its own
+        scope's ``eqns`` list — the address component a descent from here
+        needs to name the scope it enters (:data:`ScopePath`)."""
         params = eqn.params_dict()
         refusal = self._shape_refusal(eqn)
         if refusal is not None:
@@ -7210,10 +7570,16 @@ class _Propagator:
                 outer_exact = self.exact
                 outer_nan = self.nan
                 outer_taint = self.taint
+                outer_scope = self._scope_path
                 self.env = {}
                 self.exact = exactness.ExactSet()
                 self.nan = {}
                 self.taint = {}
+                # the ids bound below belong to THIS scope and to no other:
+                # the path is what lets a relational assume recorded down
+                # here be resolved later, and what stops it being resolved
+                # against a namespace it does not belong to.
+                self._scope_path = outer_scope + (("call", pos),)
                 out_flags = None
                 out_taints = None
                 try:
@@ -7232,6 +7598,7 @@ class _Propagator:
                     self.exact = outer_exact
                     self.nan = outer_nan
                     self.taint = outer_taint
+                    self._scope_path = outer_scope
                 for out, val, iout in zip(
                     eqn.outvars, outs, inner.jaxpr.outvars
                 ):
@@ -7329,6 +7696,7 @@ class _Propagator:
             outer_exact = self.exact
             outer_nan = self.nan
             outer_taint = self.taint
+            outer_scope = self._scope_path
             results = []
             branch_flags = []  # ieee: per-branch outvar flags
             branch_taints = []  # ieee: per-branch outvar product-taints
@@ -7361,6 +7729,25 @@ class _Propagator:
                     self.exact = exactness.ExactSet()
                     self.nan = {}
                     self.taint = {}
+                    # a branch scope is TAGGED differently from a call scope,
+                    # so a branch's ids can never be resolved through a call's
+                    # rename even if the two sit at the same equation index.
+                    # The slicer never descends a cond, so this step never
+                    # appears in its map and any path containing one resolves
+                    # to nothing — which is the right answer, not a near miss.
+                    #
+                    # NO FORWARDED ASSUME EVER CARRIES ONE OF THESE STEPS, and
+                    # this comment used to read as though some might.
+                    # `branch_depth` is incremented ABOVE, before this line
+                    # runs, and the forwarding site refuses while it is
+                    # nonzero — so the resolution described in the previous
+                    # paragraph is a property of a path that
+                    # `RelationalAssume` cannot hold. It is kept because the
+                    # TAGGING is what makes that true by construction rather
+                    # than by the guard alone: if a later batch forwards
+                    # branch-scoped assumes as implications, the path it hands
+                    # the slicer will already be un-confusable with a call's.
+                    self._scope_path = outer_scope + (("cond", pos, i),)
                     self._branch_path.append((id(eqn), i))
                     try:
                         results.append(
@@ -7386,6 +7773,7 @@ class _Propagator:
                 self.exact = outer_exact
                 self.nan = outer_nan
                 self.taint = outer_taint
+                self._scope_path = outer_scope
             branch_refused = [
                 any(
                     isinstance(branches[i].jaxpr.outvars[j], ir.Var)
@@ -7492,6 +7880,22 @@ class _Propagator:
                         else ""
                     )
                 )
+                # THE LEDGER MUST BE TOTAL OVER THE ASSUMES THE WALK SEES,
+                # and this arm sees one and classifies nothing. An empty
+                # ledger has to mean "no assume", never "an assume nobody
+                # wrote down" — the second reading is what makes a release
+                # rule default open. `assume_mode="inert"` never sets
+                # `assume_dropped`, so today nothing downstream consults
+                # this entry; recording it is what keeps that a fact about
+                # the gate rather than about the ledger.
+                self.assume_ledger.append(AssumeDisposition(
+                    kind=ASSUME_DROPPED,
+                    reason=(
+                        "assume_mode='inert': the predicate was not "
+                        "classified at all"
+                    ),
+                    where=where,
+                ))
             in_taints = (
                 [self.read_taint(a) for a in eqn.invars]
                 if self.semantics == "ieee"
@@ -8754,4 +9158,5 @@ def propagate(
         region_inhabited=p.region_inhabited,
         top_boxes=_top_boxes(closed, p.env),
         relational_assumes=tuple(p.relational_assumes),
+        assume_ledger=tuple(p.assume_ledger),
     )

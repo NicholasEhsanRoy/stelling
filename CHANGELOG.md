@@ -112,6 +112,89 @@ SPDX-License-Identifier: Apache-2.0
   alongside the negated obligation. The solver sees the full constraint
   set.
 
+- **SOUNDNESS FIX — a forwarded assume is now resolved by a scope-correct
+  identity; it could previously be emitted about the wrong values.**
+  See the SOUNDNESS.md log entry for the full account. In brief: a
+  relational `assume` traced inside a `jit` / `custom_jvp` body was
+  forwarded as its producing comparison equation, whose operand ids belong
+  to that body, and `smt.emit` resolved them with a bare integer lookup
+  against the slice's *renumbered* table. When the two id ranges met, the
+  axiom was emitted about unrelated terms — measured as the CONVERSE of
+  the user's own precondition, returning VERIFIED on an obligation false at
+  every admitted point. Development-only; no released version is affected.
+
+  What changed, user-visible:
+
+  * `propagation.relational_assumes` now holds
+    `stelling.propagate.RelationalAssume` records (the comparison equation
+    plus the scope path its operand ids belong to), not bare
+    `ir.JaxprEqn`s.
+  * `ObligationSlice` carries `assumes` (translated into the slice's own id
+    namespace) and `assumes_skipped` (one quoted reason per assume this
+    obligation cannot state). The two partition the assumes the slicer was
+    given, so *emitted versus requested* is derivable from the slice alone.
+  * `stelling.smt.emit` no longer takes a `relational_assumes` parameter —
+    the axioms come off the slice. `Script.relational_assumes_emitted` now
+    counts assumes emitted **about the terms their operands denote**, and
+    `Script.emitted_origins` names *which* ones, by their index in the
+    propagation's forwarded tuple (`SliceAssume.origin`).
+  * `slice_obligation` gained a `relational_assumes=` keyword;
+    `slice_unknown_obligations` passes the propagation's.
+  * **Once escalation dispatches, every assume the slice declines to state
+    is disclosed** in the verdict notes, naming the assume's source line and
+    the reason. Emission previously skipped silently in five places. The
+    per-assume disclosure is produced *at dispatch*, so a run refused before
+    dispatch — a constraining assume present, `semantics="ieee"`, no solver
+    installed — or an obligation whose slice declines does not carry one; on
+    those runs the propagator's own coarse `assume constraint DROPPED` note
+    is still emitted, so no assume goes unmentioned, but it names no
+    per-obligation reason.
+  * **An assume inside a `jit` / `custom_jvp` body is now forwarded
+    CORRECTLY rather than skipped**, which decides obligations that
+    previously returned UNKNOWN. Measured on a **288-harness** generated
+    sweep (`sweep_assume_scope.py`, the instrument's full product:
+    4 carriers × 2 ndecls × 3 tails × 3 assume-sets × 2 exprs × 2 orders):
+    **96 UNKNOWN→VERIFIED and 36 UNKNOWN→REFUTED**, no harness moving away
+    from a decided verdict, and zero verdict changes on the **72**
+    top-level-assume harnesses. Of the 96 new VERIFIEDs, **48 are vacuous**
+    — an `unsat` assume set now reaches the solver from a `jit` body as it
+    already did from top level; see the SOUNDNESS.md entry.
+  * **A relational assume inside a `lax.cond` branch is no longer forwarded
+    at all.** It is a branch-scoped precondition, not a fact about the
+    query; the drop says so and keeps violations withheld.
+  * `smt.emit` no longer raises `IndexError` on a shape-mismatched assume,
+    and no longer emits a partial axiom over element 0 of an unrelated
+    array (both arms of the same missing check).
+
+- **SOUNDNESS FIX — a withheld violation is released only when every
+  `assume` is accounted for, and that is now decided by a per-assume
+  LEDGER rather than by two counts.** See the SOUNDNESS.md entry. The rule
+  compared `len(propagation.relational_assumes)` against a script's emitted
+  count, and that shape produced a false REFUTED twice: once because the
+  denominator counted only the *relational* assumes while the flag gating
+  the rule is set by any drop reason at all (audit 0.2.0 S6), and once
+  because no longer forwarding branch-scoped assumes silently moved the
+  denominator, so `1 == 1` released a witness whose branch precondition the
+  solver had never been told. Development-only; no released version is
+  affected.
+
+  What changed, user-visible:
+
+  * `Propagation.assume_ledger` — one
+    `stelling.propagate.AssumeDisposition` per assumed conjunct the
+    propagator classified, with kind `applied`, `no-op`, `forwarded` or
+    `dropped`. It is written where the classification happens and is TOTAL
+    over the assumes the walk sees, including inert mode.
+  * `stelling.propagate.unaccounted_assumes(ledger, emitted_origins)` is
+    the release test: a definite violation is released only when it returns
+    empty. It joins on identity, counts nothing, and **whitelists** the
+    accounted-for dispositions — a kind it has not been taught is
+    unaccounted, so a drop reason added later refuses rather than defaults
+    open.
+  * The withholding note now NAMES the conjunct that caused it, with its
+    disposition, reason and source line, instead of restating the rule.
+  * `Propagation.assume_dropped` is unchanged and still gates the rule.
+
 - **z3 tactic workaround for high-degree polynomials**: when a solver
   obligation contains a rational-pow auxiliary variable (`y^q = x^p`
   encoding), z3 uses a custom tactic chain (`simplify`, `solve-eqs`,
@@ -123,9 +206,19 @@ SPDX-License-Identifier: Apache-2.0
 - **Per-obligation withholding refinement**: when relational assumes are
   only partially emitted for a given obligation slice (some operands fall
   outside the backward cone), the solver ran over a wider domain than
-  intended. The per-obligation withholding now un-withholds a violation
-  ONLY when ALL relational assumes were actually emitted for that specific
-  obligation's script — a genuine violation from the constrained domain.
+  intended. A definite violation is un-withheld ONLY when every assume the
+  user wrote is accounted for on **that** obligation's query — see the
+  ledger entry above for the rule that decides it.
+
+- **An assume that excludes nothing no longer withholds forever.** An
+  assume whose entire content is a conjunct definitely TRUE over the boxes
+  in force (`x ∈ [0,10]`, `assume(x >= -1. | x >= -2.)`) took the whole-drop
+  path, which sets the withholding flag unconditionally, and the old release
+  test could never fire on it. The ledger records that conjunct as `no-op`
+  and the violation is released — the rule the mixed-conjunction path
+  already applied to the same class of conjunct. Measured: UNKNOWN → REFUTED
+  at `x = 6`, which is in the declared box, satisfies the assume, and
+  falsifies the assert.
 
 - **Emission guards resolve through inlined aliases**: guards (div, is_finite)
   now follow the slicer's alias chain to find propagated intervals for
@@ -166,6 +259,23 @@ SPDX-License-Identifier: Apache-2.0
   replayable" and the obligation stays UNKNOWN rather than resting on a
   rounded float. Deciding those points needs exact algebraic (not
   rational) arithmetic in the replay, which this release does not have.
+- A relational `assume` inside a `lax.cond` branch is **not** forwarded to
+  the solver, and is not emitted as an implication either — the drop says
+  so. Branch-scoped preconditions therefore buy no solver precision.
+- An **unsatisfiable** set of relational assumes makes the emitted script
+  `unsat` for a reason unrelated to the obligation, and the discharge that
+  follows is vacuous. The unsatisfiable-precondition refusal consults the
+  interval domain, which by construction cannot decide a relational
+  assume, so it does not see this. Correct forwarding widens the reach of
+  this pre-existing limitation from top-level assumes to `jit`-carried
+  ones; see the SOUNDNESS.md entry of 2026-08-14.
+- An obligation discharged with a **forwarded relational axiom cannot
+  narrow the VERIFIED bar**: the bar's re-derivation re-slices without the
+  propagation, so its script does not carry the axiom and the two do not
+  match. In a query containing a barred primitive the bar therefore falls
+  back to the whole query. Conservative (a wider bar, never a narrower
+  one), pre-existing, and made more frequently reachable by this release;
+  see the SOUNDNESS.md entry of 2026-08-14.
 
 ---
 

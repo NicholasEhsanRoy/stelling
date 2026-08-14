@@ -405,47 +405,82 @@ def test_an_indeterminate_dropped_conjunct_does_NOT(monkeypatch):
     assert _prop(_restricting_relational).assume_dropped is True
 
 
-def test_the_attribution_fail_safe_refuses_a_misaligned_verdict(monkeypatch):
-    """`harmless[i]` is only meaningful as the verdict on `dropped[i]`.
+def _both_kinds(harmless_first: bool):
+    """One assume mixing a conjunct that excludes NOTHING with one that
+    really widens, so the two verdicts have to land on the right reasons.
 
-    If the two ever came apart, an index could carry another conjunct's
-    verdict and a RESTRICTING drop could read as harmless — the one
-    direction that produces a wrong REFUTED. `_assume_constrain` therefore
-    throws the whole attribution away rather than salvage part of it:
-    attribution lost is attribution refused.
-
-    Nothing in the suite drives that branch — full-suite mutation of the
-    fail-safe reddened 0 of 2180 tests, because the invariant it guards
-    holds everywhere the recursion is exercised. A fail-safe for an
-    invariant that holds is exactly the thing that rots unnoticed, so it
-    is driven here directly.
+    ``a <= b`` over a ∈ [0,1], b ∈ [5,6] is definitely TRUE at every point
+    of the declared boxes, so dropping it widened nothing. ``(c > 5) or
+    (d > 5)`` over c ∈ [0,10], d ∈ [5,6] is indeterminate on both sides, so
+    dropping it really does widen — and `or` has no narrowing rule at all,
+    which is a DIFFERENT drop reason from the relational one and therefore
+    a different disposition to confuse it with.
     """
-    real = P._Propagator._apply_assumed_pred
+    def h():
+        a = any_array((), "float64", (0.0, 1.0))
+        b = any_array((), "float64", (5.0, 6.0))
+        c = any_array((), "float64", (0.0, 10.0))
+        d = any_array((), "float64", (5.0, 6.0))
+        excludes_nothing = a <= b
+        widens = jnp.logical_or(c > 5.0, d > 5.0)
+        assume(
+            (excludes_nothing & widens) if harmless_first
+            else (widens & excludes_nothing)
+        )
+        return (assert_(a > 5.0),)
+    return h
 
-    def desync(self, atom, where, narrowed, dropped, vacuous, harmless=None):
-        real(self, atom, where, narrowed, dropped, vacuous, harmless)
-        if harmless is not None and dropped:
-            # one entry too many, AT THE FRONT: the lists come apart and
-            # index 0 now carries a verdict that is not conjunct 0's.
-            # Appending instead would be too weak a probe — a salvaging
-            # `harmless[:len(dropped)]` would still read the right value at
-            # index 0 by luck, and this test would pass against the very
-            # behaviour it exists to forbid.
-            harmless.insert(0, True)
 
-    monkeypatch.setattr(P._Propagator, "_apply_assumed_pred", desync)
-    # `_restricting_relational`'s drop REALLY widens (a ∈ [0,10], b ∈ [5,6],
-    # so `a <= b` is indeterminate). Misread as harmless it restores the
-    # wrong REFUTED.
-    assert _prop(_restricting_relational).assume_dropped is True, (
-        "a misaligned attribution must be refused wholesale, not indexed "
-        "into — reading harmless[0] here marks a restricting drop harmless"
+@pytest.mark.parametrize("harmless_first", [True, False], ids=["ht", "th"])
+def test_a_conjunct_s_verdict_cannot_land_on_another_conjunct_s_reason(
+    harmless_first,
+):
+    """Replaces `test_the_attribution_fail_safe_refuses_a_misaligned_verdict`,
+    whose subject no longer exists.
+
+    That test drove a FAIL-SAFE: the classifier kept the drop reasons in
+    `dropped: list[str]` and their no-op verdicts in a parallel
+    `harmless: list[bool]`, read by index, and `_assume_constrain` threw the
+    whole attribution away whenever the two lengths disagreed — because a
+    RESTRICTING drop misread as harmless is the one direction that produces
+    a wrong REFUTED. Nothing in the suite drove that branch, so it was
+    driven directly.
+
+    There is no parallel list now. Each classification produces one
+    `AssumeDisposition` carrying BOTH its reason and its kind, and
+    `_apply_assumed_pred` upgrades a subtree's own private list rather than
+    indexing into a shared one — so a verdict has no index at which it could
+    reach a sibling's record, and the fail-safe has nothing left to be safe
+    against. What survives the change is the PROPERTY the fail-safe existed
+    for, and that is what this pins: the kind and the reason on every entry
+    describe the SAME conjunct, in either source order.
+
+    Order is the discriminant. An off-by-one in a by-index scheme is
+    invisible when the harmless conjunct happens to come first and shows up
+    as a wrong REFUTED when it comes second, so both orders are run and both
+    are asserted against the reason, never against the position.
+    """
+    p = _prop(_both_kinds(harmless_first))
+    by_kind = {}
+    for e in p.assume_ledger:
+        by_kind.setdefault(e.kind, []).append(e)
+    assert set(by_kind) == {P.ASSUME_NOOP, P.ASSUME_DROPPED}, (
+        f"expected exactly one no-op and one drop, got "
+        f"{[(e.kind, e.reason[:40]) for e in p.assume_ledger]}"
     )
-    # the flag above is the fail-safe's whole effect; the end-to-end
-    # consequence is read with the certificate's independent route closed,
-    # since that region really is inhabited (see `_no_certificate`)
-    _no_certificate(monkeypatch)
-    assert _run(_restricting_relational).status == "UNKNOWN"
+    (noop,) = by_kind[P.ASSUME_NOOP]
+    (drop,) = by_kind[P.ASSUME_DROPPED]
+    assert "relational" in noop.reason, (
+        f"the no-op verdict landed on the wrong conjunct's reason: "
+        f"{noop.reason!r}"
+    )
+    assert "'or'" in drop.reason, (
+        f"the restricting conjunct did not keep its own reason: "
+        f"{drop.reason!r}"
+    )
+    # and the consequence the fail-safe was protecting: a restricting drop
+    # marks the run, whichever order it was written in
+    assert p.assume_dropped is True
 
 
 def test_a_non_bool_and_is_refused_as_a_conjunction_and_says_so():

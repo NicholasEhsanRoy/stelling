@@ -652,9 +652,40 @@ in this order:
    variable operands cannot be applied in the interval domain (it would
    need a relational constraint). Since 0.2.0, these are forwarded to the
    solver as positive axioms alongside the negated obligation. If the
-   UNKNOWN persists WITH a solver, check whether the assume's operands are
-   in the backward cone of the obligation's slice — only assumes whose
-   operands appear in the slice's dependency set are emitted.
+   UNKNOWN persists WITH a solver **and the escalation reached the solver
+   at all**, the verdict says which assume the obligation's slice could not
+   state, and why — one note per assume, quoting its source line. A run
+   refused *before* dispatch carries no such note: escalation declines
+   outright when any assume CONSTRAINED a box, under `semantics="ieee"`,
+   and when no solver is installed, and an obligation whose slice declines
+   never reaches the per-assume disclosure either. On those runs the
+   propagator's own `assume constraint DROPPED` note is still emitted, so
+   nothing goes unmentioned, but it names no obligation and no per-obligation
+   reason. Three reasons account for nearly all of the per-assume notes:
+
+   * **the operands are not in the obligation's backward cone.** Only terms
+     the slice holds can be constrained; an assume about values this
+     obligation does not depend on is not stated in its query.
+   * **the assume sits inside a `cond` branch.** A precondition that holds
+     only when a branch is taken is not a fact about the query, so it is
+     never asserted globally — the other branch is real. This build does
+     not emit it as an implication either, and the note says so. Such an
+     assume is not forwarded at all, so this reason appears in the
+     propagator's DROPPED note rather than in a per-obligation one.
+   * **the assume sits inside a wrapper this obligation's slice did not
+     inline.** An assume inside a `jit` / `custom_jvp` / `custom_vjp` /
+     `remat` body IS forwarded — its operands are translated into the
+     slice's own id namespace — but only when the slice inlined that body;
+     a wrapper left opaque (arity or constant mismatch) takes its assumes
+     with it.
+
+   **Any assume that did not reach the solver keeps every definite violation
+   withheld from REFUTED**, because the query then ran over a superset of
+   the region you asked about — and that is decided per assume, not by a
+   count of them: a violation is released only when EVERY assume you wrote
+   was either applied to the box, definitely true over it, or emitted to
+   that obligation's own script. When one was not, the withholding note
+   names it.
 9. **A non-integer `pow` exponent that is not a small dyadic rational.**
    This is the item most likely to surprise you, so it is stated in full.
 
