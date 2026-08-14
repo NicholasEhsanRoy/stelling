@@ -21,8 +21,10 @@ raises** :exc:`SolverDisagreement` (a bug oracle, never a tiebreak); a
 dispatch path's only witness-construction site, whose single validator
 (:func:`stelling.obligation.witness_is_valid`) checks box membership AND
 the exact-rational violation as one conjunction — a failing conjunct
-raises :exc:`EmissionInfidelityError`, and a non-rational model leaves
-the obligation UNKNOWN by policy. ``unknown``/timeout is UNKNOWN, never
+raises :exc:`EmissionInfidelityError`, and a witness the replay cannot
+evaluate exactly (a non-rational model value, or a rational-``pow`` point
+whose exact value is irrational — :exc:`stelling.obligation.ReplayDeclined`)
+leaves the obligation UNKNOWN by policy. ``unknown``/timeout is UNKNOWN, never
 VERIFIED. Every invocation is stamped **at the moment of invocation**:
 the fully-populated :class:`SolverStamp` is appended to an append-only
 ledger BEFORE the transport runs, so the record of the ask can never be
@@ -72,6 +74,7 @@ from stelling import verdict as _verdict
 from stelling.obligation import (
     DeclinedObligation,
     ObligationSlice,
+    ReplayDeclined,
     slice_unknown_obligations,
     violating_elements,
     witness_is_valid,
@@ -1537,40 +1540,61 @@ def _dispatch_obligation(
                 )
                 continue
             values = _complete_values(sl, got, notes)
-            if not sl.inputs:
-                # audit F5: a constants-only obligation has no witness
-                # values to render; the SAME validator decides the
-                # refutation is real (membership vacuously true; violation
-                # via the empty-environment replay of the closed formula)
-                # — an honest REFUTED, no fabricated witness.
-                _require_valid_refutation(
-                    sl, values, solver_label=backend.label,
+            try:
+                if not sl.inputs:
+                    # audit F5: a constants-only obligation has no witness
+                    # values to render; the SAME validator decides the
+                    # refutation is real (membership vacuously true;
+                    # violation via the empty-environment replay of the
+                    # closed formula) — an honest REFUTED, no fabricated
+                    # witness.
+                    _require_valid_refutation(
+                        sl, values, solver_label=backend.label,
+                        script_text=script.text,
+                    )
+                    return (ObligationEscalation(
+                        index=sl.index,
+                        outcome=OB_VIOLATED_CONSTANT,
+                        detail=(
+                            f"constant refutation: the obligation has no "
+                            f"declared inputs and its predicate is definitely "
+                            f"false — {_REPLAY_SENTENCE}; {backend.label} "
+                            f"({sl.fragment}) answered sat in agreement"
+                            + degraded_clause(universal=False)
+                        ),
+                        invocations=invocations(),
+                        witness=None,
+                        notes=tuple(notes) + degraded_notes(universal=False),
+                        answered_by=answered,
+                    ), n_emitted)
+                witness = make_validated_witness(
+                    sl,
+                    values,
+                    produced_by=(
+                        f"{backend.name} {stamp.version} ({backend.transport})"
+                    ),
+                    solver_label=backend.label,
                     script_text=script.text,
                 )
-                return (ObligationEscalation(
-                    index=sl.index,
-                    outcome=OB_VIOLATED_CONSTANT,
-                    detail=(
-                        f"constant refutation: the obligation has no declared "
-                        f"inputs and its predicate is definitely false — "
-                        f"{_REPLAY_SENTENCE}; {backend.label} ({sl.fragment}) "
-                        f"answered sat in agreement"
-                        + degraded_clause(universal=False)
-                    ),
-                    invocations=invocations(),
-                    witness=None,
-                    notes=tuple(notes) + degraded_notes(universal=False),
-                    answered_by=answered,
-                ), n_emitted)
-            witness = make_validated_witness(
-                sl,
-                values,
-                produced_by=(
-                    f"{backend.name} {stamp.version} ({backend.transport})"
-                ),
-                solver_label=backend.label,
-                script_text=script.text,
-            )
+            except ReplayDeclined as declined:
+                # NOT an emission-infidelity finding, and the distinction
+                # is the whole of audit 0.2.0 S3: the replay is refusing a
+                # point whose exact value is not rational, which says
+                # nothing about whether the script meant the obligation.
+                # Same posture, same words, as a model carrying a
+                # non-rational value a few lines above — the witness is
+                # not independently replayable, so it does not become a
+                # REFUTED and it does not raise.
+                sat_problems.append(
+                    f"{backend.label}: witness not independently replayable "
+                    f"({declined})"
+                )
+                notes.append(
+                    f"assert #{sl.index}: {backend.label} reported sat; "
+                    f"witness not independently replayable ({declined}) — by "
+                    f"policy this stays UNKNOWN"
+                )
+                continue
             elements = ""
             if witness.violating_elements:
                 # the array assert is a universal elementwise claim; the

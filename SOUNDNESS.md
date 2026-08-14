@@ -5077,4 +5077,186 @@ verdicts:
     somebody remembered to write it at, which is the property a guard does
     not have.
 
+- **2026-08-14 (pre-release): the rational-`pow` row emitted about a
+  DIFFERENT REAL FUNCTION than the program computes, and discharged it —
+  `x ** 0.1` was enough.** Direction: **wrong VERIFIED → UNKNOWN**, plus
+  **RAISE → Verdict** on the refutation side. Every affected VERIFIED was
+  a claim about an expression the harness does not contain.
+
+  A non-integer `pow` exponent was rationalised —
+  `Fraction(e).limit_denominator(128)` — and admitted whenever
+  `abs(float(frac) - e) <= 1e-12`. **That test cannot see the
+  substitution it exists to detect.** A traced exponent is a binary64
+  literal and a binary64 IS a dyadic rational: `0.1` denotes
+  `3602879701896397/36028797018963968`, not `1/10`. `float(Fraction(1,10))`
+  rounds back to the same double, so the measured error was **exactly
+  0.0** while the two rationals differ by `5.55e-18` — and the emission
+  then constrained `aux^10 = x0`, the exact tenth root. No threshold on a
+  binary64 distance can exclude this; the comparison had to be between
+  rationals, which is what it is now.
+
+      x = any_array((), "float64", (1.0, 1e300))
+      assert_(x ** 0.1 <= 1e30)
+
+  returned **VERIFIED** with both backends answering `unsat`, a
+  well-formed script, and no degradation note. It is false at the
+  declared upper bound: `jnp` executes `1e300 ** 0.1` to
+  `1.0000000000000038e+30 > 1e30`, and the exact real value of the traced
+  expression at 120 significant digits is
+  `1.000000000000003839824955626497…e+30` — above the bound — while the
+  exact real value of the EMITTED expression, `x^(1/10)`, is
+  `1.000000000000000005250476025520…e+30`, below it. The two oracles
+  agree with each other and disagree with the script: the discrepancy is
+  entirely the exponent substitution, not the documented ℝ-vs-float gap.
+  The error is amplified by the base — `x^(a+ε) = x^a·e^(ε·ln x)`, so
+  `ε = 5.55e-18` over a box reaching `1e300` is a relative `3.8e-15`,
+  about 17 ulps — and the guard never looked at the declared box, so it
+  could not have bounded it.
+
+  The second admission route was the tolerance itself: `limit_denominator`
+  always succeeds, so `0.5000000000001` was admitted as `1/2`,
+  `2.0000000000001` as `2`, and `1e-13` as `0` — the last emitting
+  `aux = 1.0` for an expression that ranges over `[0, 1.000000000069]`.
+  All three were measured VERIFIED with a violation at the box maximum.
+
+  **Which verdicts are retroactively invalid.** Any VERIFIED, from
+  0.2.0 development only, whose harness contains `x ** e` with `e` a
+  non-integer float whose exact binary64 value is **not** a dyadic
+  rational `p/2^k` with `max(p, 2^k) <= 128`. In practice that is *every*
+  non-integer exponent except the ones a reader would call exact
+  anyway — `0.5`, `0.25`, `0.125`, `0.75`, `1.5`, `2.5`, `1/64`, `1/128`
+  and their kin are faithful and unaffected; `x ** (1.0/3.0)`,
+  `x ** (2.0/3.0)`, `x ** 0.1`, `x ** (1.0/10.0)`, `x ** (1.0/80.0)`,
+  `x ** 0.7`, `x ** (1.0/7.0)` were all substitutions. **The row does not
+  exist in `v0.1.0`** — verified at the tag: `pow` is absent from
+  `obligation._ARITH`, so a `pow` slice there declines as an unsupported
+  primitive and no released verdict can be affected. Interval-only
+  verdicts are also unaffected: the interval leg alone answered UNKNOWN
+  on every construction above, and the false VERIFIED was minted by the
+  solver escalation.
+
+  **What to re-run:** any recorded verdict from a harness containing a
+  non-integer `pow` exponent. Re-`check()` it. An `escalation declined —
+  'pow' exponent … denotes exactly p/q` note where a solver discharge
+  used to be is this change, and the old VERIFIED was about a different
+  function. A verdict that stays VERIFIED had a dyadic exponent and was
+  always about the traced one.
+
+  **THREE MORE DEFECTS ON THE SAME ROW, CLOSED IN THE SAME CHANGE,
+  because they are one defect seen from different sides.**
+
+  * **`q == 1` emitted a unary `(* aux)`.** SMT-LIB2's `Reals` theory
+    declares `*` `:left-assoc` with arity ≥ 2, so that is not a term of
+    the logic — and the two backends disagree about it silently. **cvc5
+    1.3.4 SEGFAULTS** (the child dies with SIGSEGV and the parent reports
+    a protocol violation, so the transport's degrade-don't-crash design
+    is what kept the process alive); z3 accepts it and reads it as
+    `aux`. Reachable only through the rationalisation above
+    (`2.0000000000001 → 2/1`), and it turned a stelling emission bug into
+    a note blaming cvc5. Every repeated product now renders through one
+    helper (`smt._repeated_product`) that is correct at n = 0, 1 and ≥ 2;
+    the `n == 1` arm is unreachable from today's callers and is there
+    because "the n-fold product" has exactly one right answer at n = 1
+    and a helper correct only for its current callers is how `(* aux)`
+    got written.
+
+  * **The replay was float64 under a verdict sentence claiming exact
+    rational arithmetic.** Every REFUTED witness carries *"confirmed by
+    independent exact-rational replay (fractions.Fraction arithmetic,
+    pure Python, no solver)"*, while the rational-`pow` branch computed
+    `Fraction(float(base) ** exp)` — a binary64 libm `pow`, rounded, then
+    wrapped in a `Fraction`. False as provenance, and near a predicate
+    boundary the rounding decided the answer. It also made the **public
+    `check()` RAISE**: on `x ** 0.5 <= 2.0` over a box starting just
+    above `4.0`, cvc5's model is a real violation and the emission is
+    exactly right, but the float replay evaluated `float(w) ** 0.5` to
+    `2.0`, called the predicate TRUE, and `_require_valid_refutation`
+    raised `EmissionInfidelityError` — the one alarm that means *the
+    emitted problem does not mean the obligation*, fired at a correct
+    emission, naming the wrong culprit. The replay now extracts exact
+    integer `q`-th roots (integer Newton, confirmed by exponentiation, no
+    float anywhere) and, where the true value is irrational, REFUSES
+    through the channel the codebase already had for a model nothing can
+    replay — `witness not independently replayable`, UNKNOWN by policy.
+    `witness_is_valid` no longer flattens "the replay cannot evaluate
+    this" into "the emission is unfaithful": the first propagates as
+    `ReplayDeclined` and degrades, the second still raises. The
+    `OverflowError` the float `pow` produced on large operands
+    (`x ** 1.5` over `[1e200, 1e250]`, uncaught, losing the whole
+    escalation) is gone with the float, confirmed by re-running the
+    reproducer rather than by inference.
+
+  * **The fragment stamp gated on the wrong property.** A non-integer
+    `pow` was recorded nonlinear only when its base descended from a
+    declaration — but the aux encoding introduces `aux^q = x^p`, a
+    product of a fresh symbol with itself, which is nonlinear whatever
+    the base is. A rational `pow` over a declaration-independent base
+    (reachable: put the constant inside a `jit`) was stamped `QF_LRA`
+    while the emission wrote `(* aux aux)`, and **both** backends refused
+    the script — so no verdict was minted from the mislabel, but the
+    whole obligation was lost and the notes attributed it to the solvers.
+    A more lenient backend that auto-widened the logic would have turned
+    it into a single-backend discharge, which is the direction with no
+    backstop.
+
+  **Cost, measured against an independent exact oracle, and it is real.**
+  852 harnesses of the shape `∀x ∈ [lo, hi]: x**e <= bound` — 37
+  exponents × 6 boxes × 4 bound placements, one of them exactly at the
+  box maximum's value so escalation rather than the interval leg is what
+  decides. Because `x**e` is monotone for `e > 0` on a positive box, each
+  claim is true iff `hi^p <= bound^q` where `p/q = Fraction(e)`, which is
+  an **exact comparison in ℚ** for every dyadic exponent here (120-digit
+  `decimal` for the rest, with a guard band); no stelling, no jax and no
+  solver in that oracle. Both trees, same battery:
+
+  |  | VERIFIED | of which FALSE | REFUTED | of which false | UNKNOWN | RAISED |
+  |---|---|---|---|---|---|---|
+  | before | 358 | **26** | 263 | 0 | 155 | **76** |
+  | after | 285 | **0** | 164 | 0 | 403 | **0** |
+
+  The moves: **26 VERIFIED → UNKNOWN where the old VERIFIED was FALSE**
+  against the oracle; 47 VERIFIED → UNKNOWN and 139 REFUTED → UNKNOWN
+  where the old verdict was right — the genuine capability loss, all 186
+  of them at a non-dyadic exponent and all declining at admission; and
+  the 76 raises becoming 40 correct REFUTEDs and 36 UNKNOWNs. **0 moves
+  into VERIFIED or REFUTED from a definite verdict**, and no post-fix
+  verdict in the battery disagrees with the oracle.
+
+  **On the 432 cases whose exponent survives — every dyadic — the only
+  change in the battery is that 40 crashes became correct REFUTEDs.**
+  180 VERIFIED before and after, 124 REFUTED before and 164 after, 88
+  UNKNOWN before and after, and those 88 are the same 88: models carrying
+  a non-rational value, which were already `witness not independently
+  replayable` and still are. So the exact replay costs nothing measurable
+  where the emission is faithful; the whole cost is the exponents that
+  were being substituted.
+
+  Admitting non-dyadic exponents soundly is a larger feature — the
+  substitution stamped as an assumption, its amplified error
+  `|x^a − x^(p/q)| ≤ x^a·(e^{|δ|·ln hi} − 1)` bounded against the
+  obligation's slack over the declared box, and the discharge direction
+  barred until that bound exists — and it was deliberately not built
+  here; it is recorded in the CHANGELOG's known-limitations list instead.
+
+  **Also in this change, not a verdict move:** the rational branch's
+  NUMERATOR was unbounded, so `x ** 100.5` (emitting `aux^2 = x^201`) was
+  admitted while the strictly smaller `x ** 100` declined at the integer
+  cap of 64, and `x ** 1000000000000.5` built a 600 KB script from a
+  one-line harness before dying of MemoryError. One cap now bounds the
+  degree of the emitted equation on both sides, and both `pow` caps state
+  the quantity they bound.
+
+  **Why no test caught it.** The suite's rational-`pow` coverage was
+  written in the idiom the defect hides in: `x ** (1.0/3.0)`,
+  `x ** (2.0/3.0)`, `x ** (1.0/10.0)`, `x ** (1.0/80.0)` (twice) — five
+  rows, all asserting VERIFIED, every one of them an exponent the
+  emission was substituting. They passed because the solver agreed with
+  the script, and nothing compared the script to the harness. Those five
+  are rewritten at dyadic exponents of the same shape (`0.125`, `0.75`,
+  `1/16`, `1/128`) so the rows keep their subjects, and each carries the
+  reason its exponent changed. Every construction above is a permanent
+  regression test (`tests/test_pow_audit_findings.py`, 62 cases); six
+  targeted mutations — one per finding — were applied to a copy of the
+  source and each was measured to redden at least one of them.
+
 *(no releases yet)*

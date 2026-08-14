@@ -655,11 +655,44 @@ in this order:
    UNKNOWN persists WITH a solver, check whether the assume's operands are
    in the backward cone of the obligation's slice — only assumes whose
    operands appear in the slice's dependency set are emitted.
-9. **Rational pow with large denominator.** `x**(1/n)` with `n > 128`
-   declines emission because the auxiliary polynomial `y^n = x` risks
-   solver timeout at extreme degrees. The decline note names the exponent
-   and the cap. For denominators up to 128, both solvers handle the
-   polynomial (z3 via an automatic tactic workaround, cvc5 natively).
+9. **A non-integer `pow` exponent that is not a small dyadic rational.**
+   This is the item most likely to surprise you, so it is stated in full.
+
+   A non-integer exponent is not emitted as an exponent. It is emitted as
+   a **substitution**: `x ** e` becomes a fresh SMT variable `aux` with
+   the polynomial constraint `aux^q = x^p`, where `p/q` is the exponent as
+   a rational. That encoding is exact — but only if `p/q` really is the
+   exponent your program computes.
+
+   It usually is not. A traced exponent is a **binary64 literal, and a
+   binary64 is a dyadic rational**: `0.1` denotes
+   `3602879701896397/36028797018963968`, not `1/10`. Analysing `x^(1/10)`
+   would be analysing a different real function from the one the program
+   evaluates, and a discharge (`unsat`) is a universal claim with nothing
+   downstream to re-derive it. So escalation admits the exponent **only
+   when the rational it emits IS the traced literal's exact value**:
+
+   * **admitted** — `0.5`, `0.25`, `0.125`, `0.75`, `1.5`, `2.5`,
+     `1.0/64.0`, `1.0/128.0`: every exponent whose exact binary64 value is
+     a dyadic rational `p/2^k` with `max(p, 2^k) <= 128`. Both solvers
+     handle those polynomials (z3 via an automatic tactic workaround on
+     scripts declaring an `aux`, cvc5 natively);
+   * **declined to UNKNOWN** — `0.1`, `1.0/3.0`, `2.0/3.0`, `1.0/10.0`,
+     `1.0/80.0`, `0.5000000000001`, `1e-13`, `sqrt(2.0)`: their exact
+     denominators are powers of two far above the cap. The note quotes the
+     literal's exact rational value and the nearby rational that would
+     have been substituted for it.
+
+   `x ** 100.5` declines too, for a different reason the note names
+   separately: the exponent is exactly `201/2`, but `aux^2 = x^201` is a
+   degree-201 polynomial, over the same cap. The cap bounds **both** sides
+   of that equation.
+
+   **Remedy:** if the exponent is meant to be a square/cube/nth root of an
+   exact power of two, write it as one (`x ** 0.5`, `x ** 0.25`). If it is
+   genuinely `x ** (1.0/3.0)`, escalation cannot decide it in this
+   release — the interval leg still judges it, and the verdict says
+   UNKNOWN rather than guessing.
 
 ## Further
 
