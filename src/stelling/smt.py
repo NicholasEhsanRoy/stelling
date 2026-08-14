@@ -59,7 +59,7 @@ from stelling import ir
 from stelling.obligation import (
     QF_NRA,
     ObligationSlice,
-    RATIONAL_POW_DENOMINATOR_CAP,
+    pow_exponent_rational,
     _decode_elements,
     _dot_general_plan,
     _group_reduce_sum,
@@ -212,6 +212,47 @@ def _square_body(term: str) -> str:
     emission tests.
     """
     return f"(* {term} {term})"
+
+
+def _repeated_product(term: str, n: int) -> str:
+    """``term`` multiplied by itself ``n`` times, as a WELL-FORMED
+    SMT-LIB2 term. The single renderer for every repeated product the
+    emission writes.
+
+    SMT-LIB2's ``Reals`` theory declares ``*`` ``:left-assoc`` with arity
+    at least two, so ``(* t)`` is not a term of the logic. It is also not
+    a term the two backends refuse the same way: **cvc5 1.3.4 SEGFAULTS**
+    on a script containing one (the child process dies with SIGSEGV and
+    the parent reports a protocol violation), while z3 accepts it and
+    silently reads it as ``t`` — so an emission that wrote one lost half
+    the portfolio and blamed the backend for it (audit 0.2.0 S2). Three
+    of the four sites that write repeated products got ``n == 1`` right by
+    hand and the fourth did not; a helper is the form of the fix that
+    cannot be got wrong at the fifth site.
+
+    ``n == 1`` returns the term itself and ``n == 0`` returns ``1.0`` —
+    the identity of an empty product. **Both arms are unreachable from
+    the callers as they stand today** (the integer branches special-case
+    0 and 1 before the count is taken, and the rational branch's exponent
+    is non-integer, so ``q >= 2`` and ``p != 0``). They are here because
+    the function's contract is "the n-fold product of a term", the
+    degenerate cases of that contract have exactly one correct answer
+    each, and the alternative — a helper that is only correct for the
+    arguments its callers happen to pass — is how ``(* aux)`` got written
+    in the first place.
+
+    :func:`_square_body` deliberately does NOT route through here: it is a
+    named mutation seam for the ``square`` row's gauge and has to stay
+    separately mutable, or a mutation of one row's emission would move the
+    other's too.
+    """
+    if n < 0:
+        raise ValueError(f"repeated product needs n >= 0, got {n}")
+    if n == 0:
+        return "1.0"
+    if n == 1:
+        return term
+    return f"(* {' '.join([term] * n)})"
 
 
 # The real-arithmetic elementwise primitives whose value is fixed the
@@ -714,8 +755,7 @@ def emit(
             n = abs(y)
             bodies = []
             for i in idx:
-                base = ins[0][i]
-                prod = base if n == 1 else f"(* {' '.join([base] * n)})"
+                prod = _repeated_product(ins[0][i], n)
                 bodies.append(prod if y > 0 else f"(/ 1.0 {prod})")
             names[out.id] = define(out, bodies)
             continue
@@ -726,7 +766,11 @@ def emit(
             ia, ib = _pair_elementwise(eqn)
             # The exponent is a scalar literal
             exp_float = float(_decode_elements(eqn.invars[1].val)[0])
-            if exp_float == int(exp_float):
+            # `is_integer()`, matching the admission guard's test exactly
+            # (obligation._Slicer._validate): the two must agree about
+            # WHICH branch an exponent takes, and `== int(exp_float)`
+            # raises on a non-finite one where this returns False.
+            if exp_float.is_integer():
                 # Integer exponent: product expansion (same as integer_pow)
                 exp_val = int(exp_float)
                 if exp_val == 0:
@@ -738,18 +782,23 @@ def emit(
                 n = abs(exp_val)
                 bodies = []
                 for i in range(n_out):
-                    base = ins[0][ia[i]]
-                    prod = base if n == 1 else f"(* {' '.join([base] * n)})"
+                    prod = _repeated_product(ins[0][ia[i]], n)
                     bodies.append(prod if exp_val > 0 else f"(/ 1.0 {prod})")
                 names[out.id] = define(out, bodies)
                 continue
             else:
                 # Rational exponent p/q: auxiliary-variable encoding.
                 # Introduce y with y^q = x^p (and y >= 0 when q is even).
-                from stelling.obligation import RATIONAL_POW_DENOMINATOR_CAP
-                frac = Fraction(exp_float).limit_denominator(
-                    RATIONAL_POW_DENOMINATOR_CAP
-                )
+                #
+                # p/q is the EXACT rational the traced binary64 literal
+                # denotes — the same derivation the admission guard ran
+                # (obligation.pow_exponent_rational), not a second,
+                # independently-drifting rationalisation of the float. The
+                # predecessor re-ran `limit_denominator(128)` here, so the
+                # script was about x^(1/10) where the program computes
+                # x^0.1: a different function, discharged with nothing
+                # downstream to catch it (audit 0.2.0 S1).
+                frac = pow_exponent_rational(exp_float)
                 p, q = frac.numerator, frac.denominator
                 made = []
                 for i in range(n_out):
@@ -759,15 +808,12 @@ def emit(
                     # y >= 0 when q is even (ensures unique real root)
                     if q % 2 == 0:
                         lines.append(f"(assert (>= {aux_name} 0.0))")
-                    # y^q = x^p
-                    lhs = f"(* {' '.join([aux_name] * q)})"
-                    if p == 1:
-                        rhs = base
-                    elif p == 0:
-                        rhs = "1.0"
-                    else:
-                        rhs = f"(* {' '.join([base] * p)})"
-                    lines.append(f"(assert (= {lhs} {rhs}))")
+                    # y^q = x^p, both sides through the one renderer that
+                    # cannot write a unary (* t) — see _repeated_product.
+                    lines.append(
+                        f"(assert (= {_repeated_product(aux_name, q)} "
+                        f"{_repeated_product(base, p)}))"
+                    )
                     made.append(aux_name)
                 names[out.id] = tuple(made)
                 continue

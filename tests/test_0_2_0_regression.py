@@ -335,47 +335,71 @@ def test_pow_rational_exponent_refutes():
 
 
 @need_solver
-def test_pow_cube_root_verifies():
-    """x in [1, 8], x**(1/3) >= 1 must VERIFY (cbrt(x) >= 1 for x >= 1)."""
+def test_pow_eighth_root_verifies():
+    """x in [1, 8], x**0.125 >= 1 must VERIFY (a denominator-8 aux encoding).
+
+    **This test used to be `x ** (1.0/3.0)` and expected VERIFIED.** It was
+    encoding the defect audit 0.2.0 S1 names: `1.0/3.0` is the binary64
+    ``6004799503160661/18014398509481984``, NOT one third, and the
+    predecessor rationalised it to ``1/3`` and emitted ``aux^3 = x`` — a
+    problem about a different function, discharged with nothing downstream
+    to re-derive it. The exponent now has to BE the traced literal, so a
+    cube root declines (covered in ``test_pow_audit_findings.py``). The
+    row's real subject — a rational exponent with a denominator above 2
+    discharging through the aux encoding — is kept here at an exponent
+    that is exactly what it looks like."""
     def h():
         x = any_array((), "float64", (1.0, 8.0))
-        return (assert_(x ** (1.0/3.0) >= 1.0),)
+        return (assert_(x ** 0.125 >= 1.0),)
 
     v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
     assert v.status == "VERIFIED", (
-        f"expected VERIFIED for cbrt(x) >= 1 on [1,8], got {v.status}; "
+        f"expected VERIFIED for x^(1/8) >= 1 on [1,8], got {v.status}; "
         f"notes: {v.notes}"
     )
 
 
 @need_solver
-def test_pow_two_thirds_verifies():
-    """x in [1, 8], x**(2/3) >= 1 must VERIFY."""
+def test_pow_three_quarters_verifies():
+    """x in [1, 8], x**0.75 >= 1 must VERIFY — numerator > 1, denominator > 2.
+
+    **Was `x ** (2.0/3.0)`, expecting VERIFIED**, for the same reason as
+    the row above: that literal is
+    ``6004799503160661/9007199254740992``, not two thirds. ``0.75`` is
+    exactly ``3/4``, so the emitted ``aux^4 = x^3`` is about the traced
+    function, and the case still exercises the p != 1 arm of the
+    encoding."""
     def h():
         x = any_array((), "float64", (1.0, 8.0))
-        return (assert_(x ** (2.0/3.0) >= 1.0),)
+        return (assert_(x ** 0.75 >= 1.0),)
 
     v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
     assert v.status == "VERIFIED", (
-        f"expected VERIFIED for x^(2/3) >= 1 on [1,8], got {v.status}; "
+        f"expected VERIFIED for x^(3/4) >= 1 on [1,8], got {v.status}; "
         f"notes: {v.notes}"
     )
 
 
 def test_pow_large_denominator_exponent_declines():
-    """x in [1, 4], x**(1/191) has denominator > 128 and must decline.
+    """x in [1, 4], x**(1.0/191.0) must decline — its exact denominator is huge.
 
-    Exponents whose rational representation has a denominator exceeding
-    RATIONAL_POW_DENOMINATOR_CAP (128) are declined to avoid emitting
-    extremely high-degree polynomials."""
+    The traced literal is ``3018119122007453/576460752303423488``: the
+    binary64 nearest one 191st, and a dyadic rational whose denominator is
+    2^59. The encoding would be that degree, far over
+    RATIONAL_POW_DEGREE_CAP (128), so escalation declines. Before the S1
+    fix this declined too, but for a reason that was not true — the
+    message claimed the exponent "cannot be represented as p/q with
+    q <= 128" when it can be represented exactly, at a power-of-two
+    denominator."""
     def h():
         x = any_array((), "float64", (1.0, 4.0))
         return (assert_(x ** (1.0/191.0) >= 1.0),)
 
     v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
     assert v.status == "UNKNOWN"
-    assert any("non-rational exponent" in n or "cap" in n for n in v.notes), (
-        f"expected decline note about denominator cap; notes: {v.notes}"
+    assert any("denotes exactly" in n and "cap" in n for n in v.notes), (
+        f"expected decline note quoting the exact rational and the cap; "
+        f"notes: {v.notes}"
     )
 
 
@@ -425,44 +449,53 @@ need_z3 = pytest.mark.skipif(
 
 
 @need_z3
-def test_z3_tactic_workaround_degree_80_verifies():
-    """x**(1/80) on [1, 100] must VERIFY with z3 using the tactic chain.
+def test_z3_tactic_workaround_high_degree_verifies():
+    """x**(1/128) on [1, 100] must VERIFY with z3 using the tactic chain.
 
-    The auxiliary-variable encoding for x**(1/80) produces a degree-80
-    polynomial (y^80 = x) with perfect-square bounds [1, 100]. Without
-    the tactic workaround, z3's default Solver() times out on this
-    (measured: >10s). The custom tactic chain (simplify, solve-eqs,
-    factor, purify-arith, tseitin-cnf, nlsat) restores the z3
-    cross-check (measured: 0.35-0.6s).
+    The auxiliary-variable encoding produces a degree-128 polynomial
+    (y^128 = x). Without the tactic workaround, z3's default Solver()
+    times out on this class (measured at degree 80: >10s). The custom
+    tactic chain (simplify, solve-eqs, factor, purify-arith, tseitin-cnf,
+    nlsat) restores the z3 cross-check (measured here at degree 128:
+    0.31s).
+
+    **Was `x ** (1.0/80.0)`.** That literal is not one eightieth — 80 is
+    not a power of two, so its binary64 is a dyadic rational of degree
+    2^59, and after the audit 0.2.0 S1 fix an exponent must BE the
+    rational the emission writes. Degree 80 is unreachable through this
+    row now: every admissible denominator is a power of two. 128 is the
+    nearest reachable degree ABOVE 80, so the row still covers the
+    pathology it was written for, at a degree the old test never reached.
 
     This test runs with ONLY z3 and verifies it discharges within the
     timeout (not timing out)."""
     def h():
         x = any_array((), "float64", (1.0, 100.0))
-        return (assert_(x ** (1.0/80.0) >= 1.0),)
+        return (assert_(x ** (1.0/128.0) >= 1.0),)
 
     v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=30_000,
               solver="z3")
     assert v.status == "VERIFIED", (
-        f"expected VERIFIED for x^(1/80) >= 1 on [1,100] with z3, "
+        f"expected VERIFIED for x^(1/128) >= 1 on [1,100] with z3, "
         f"got {v.status}; notes: {v.notes}"
     )
 
 
 @need_solver
-def test_z3_tactic_workaround_degree_80_both_solvers():
-    """x**(1/80) on [1, 100] must VERIFY with both solvers (full portfolio).
+def test_z3_tactic_workaround_high_degree_both_solvers():
+    """x**(1/128) on [1, 100] must VERIFY with both solvers (full portfolio).
 
     The z3 tactic workaround ensures BOTH solvers discharge this obligation,
     so the portfolio is not degraded. Before the workaround, z3 timed out
-    and only cvc5 answered."""
+    and only cvc5 answered. (Was `x ** (1.0/80.0)` — see the row above for
+    why that exponent is no longer emittable.)"""
     def h():
         x = any_array((), "float64", (1.0, 100.0))
-        return (assert_(x ** (1.0/80.0) >= 1.0),)
+        return (assert_(x ** (1.0/128.0) >= 1.0),)
 
     v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=30_000)
     assert v.status == "VERIFIED", (
-        f"expected VERIFIED for x^(1/80) >= 1 on [1,100], got {v.status}; "
+        f"expected VERIFIED for x^(1/128) >= 1 on [1,100], got {v.status}; "
         f"notes: {v.notes}"
     )
     # With the tactic workaround, the portfolio should NOT be degraded
@@ -492,22 +525,29 @@ def test_z3_tactic_workaround_does_not_fire_on_non_aux_scripts():
 
 
 # ---------------------------------------------------------------------------
-# Rational pow with denominators > 6 (0.2.0 — cap raised to 64)
+# Rational pow with denominators above the original cap of 6
 # ---------------------------------------------------------------------------
 
 
 @need_solver
-def test_pow_denominator_10_verifies():
-    """x in [1, 100], x**(1/10) >= 1 — denominator 10, within the cap of 64.
+def test_pow_denominator_16_verifies():
+    """x in [1, 100], x**(1/16) >= 1 — denominator 16, within the cap of 128.
 
-    This tests that denominators > 6 (the old cap) now work correctly."""
+    This tests that denominators > 6 (the original cap) work correctly.
+
+    **Was `x ** (1.0/10.0)`.** One tenth is not a binary64: that literal
+    is ``3602879701896397/36028797018963968``, and the predecessor emitted
+    ``aux^10 = x`` about it — the headline case of audit 0.2.0 S1, which
+    minted a false VERIFIED on ``x**0.1 <= 1e30`` over ``[1, 1e300]``.
+    A denominator above the original cap is still what this row is for;
+    16 is one that a binary64 exponent can actually denote."""
     def h():
         x = any_array((), "float64", (1.0, 100.0))
-        return (assert_(x ** (1.0/10.0) >= 1.0),)
+        return (assert_(x ** (1.0/16.0) >= 1.0),)
 
     v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=30_000)
     assert v.status == "VERIFIED", (
-        f"expected VERIFIED for x^(1/10) >= 1 on [1,100], got {v.status}; "
+        f"expected VERIFIED for x^(1/16) >= 1 on [1,100], got {v.status}; "
         f"notes: {v.notes}"
     )
 

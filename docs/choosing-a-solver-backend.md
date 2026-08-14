@@ -39,8 +39,18 @@ one of exactly two fragments by `stelling.obligation._Slicer._fragment`:
 
 | fragment | when | primary | secondary |
 |---|---|---|---|
-| `QF_LRA` | every operation on declaration-dependent values is linear | **z3** | cvc5 |
-| `QF_NRA` | some `mul` of two dependent operands, `div` by a dependent operand, `square`, or `integer_pow` with exponent ∉ {0, 1} | **cvc5** | z3 |
+| `QF_LRA` | every operation on declaration-dependent values is linear, and no `pow` has a non-integer exponent | **z3** | cvc5 |
+| `QF_NRA` | some `mul` of two dependent operands, `div` by a dependent operand, `square`, `integer_pow` with exponent ∉ {0, 1}, `pow` with a *dependent* base at an exponent ∉ {0, 1}, **or any `pow` with a non-integer exponent** | **cvc5** | z3 |
+
+The last clause does not mention dependence, and that is deliberate. A
+non-integer `pow` exponent emits an **auxiliary-variable encoding**: the
+script declares a fresh `aux` and asserts `aux^q = x^p`. `aux^q` is a
+product of a fresh symbol with itself, so it is nonlinear whatever the
+base is — a *constant* base does not make the script linear, and the
+constant fold does not remove it (the value is generally irrational, so
+there is nothing exact to fold to). Stamping such a slice `QF_LRA` shipped
+`(* aux aux)` under a linear logic, and both backends refused it; that
+read as two flaky solvers rather than as one wrong label.
 
 There are no other fragments. "Primary" is **ordering, not selection**:
 every installed backend runs on every fragment. Read off the stamp of a

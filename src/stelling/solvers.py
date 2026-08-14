@@ -21,8 +21,10 @@ raises** :exc:`SolverDisagreement` (a bug oracle, never a tiebreak); a
 dispatch path's only witness-construction site, whose single validator
 (:func:`stelling.obligation.witness_is_valid`) checks box membership AND
 the exact-rational violation as one conjunction — a failing conjunct
-raises :exc:`EmissionInfidelityError`, and a non-rational model leaves
-the obligation UNKNOWN by policy. ``unknown``/timeout is UNKNOWN, never
+raises :exc:`EmissionInfidelityError`, and a witness the replay cannot
+evaluate exactly (a non-rational model value, or a rational-``pow`` point
+whose exact value is irrational — :exc:`stelling.obligation.ReplayDeclined`)
+leaves the obligation UNKNOWN by policy. ``unknown``/timeout is UNKNOWN, never
 VERIFIED. Every invocation is stamped **at the moment of invocation**:
 the fully-populated :class:`SolverStamp` is appended to an append-only
 ledger BEFORE the transport runs, so the record of the ask can never be
@@ -72,6 +74,8 @@ from stelling import verdict as _verdict
 from stelling.obligation import (
     DeclinedObligation,
     ObligationSlice,
+    ReplayDeclined,
+    fraction_text,
     slice_unknown_obligations,
     violating_elements,
     witness_is_valid,
@@ -1245,10 +1249,21 @@ def _require_valid_refutation(
     an out-of-box or non-violating model must never mint a REFUTED)."""
     problem = witness_is_valid(sl, values)
     if problem is not None:
+        # fraction_text, not str(): these are SOLVER MODEL values and
+        # their terms are unbounded, so `str()` raises ValueError past
+        # CPython's int -> str cap. `witness_is_valid` above already
+        # renders the same values safely to build `problem` — leaving
+        # bare `str()` here meant the alarm assembled its diagnosis and
+        # then died one statement later trying to attach the values it
+        # was about, which is the failure the safe rendering was added to
+        # prevent, one line further on.
         raise EmissionInfidelityError(
             obligation_index=sl.index,
             solver=solver_label,
-            values=tuple((inp.name, str(values[inp.name])) for inp in sl.inputs),
+            values=tuple(
+                (inp.name, fraction_text(values[inp.name]))
+                for inp in sl.inputs
+            ),
             script_text=script_text,
             detail=problem,
         )
@@ -1269,9 +1284,49 @@ def make_validated_witness(
     _require_valid_refutation(
         sl, values, solver_label=solver_label, script_text=script_text
     )
+    # `Witness.values` is DATA, not a message. Its contract is
+    # `(input name, exact rational)` (`verdict.Witness`) and
+    # `reproduce._point` parses it back with `Fraction()` to re-execute
+    # the harness at the point. So the bit-length fallback that makes a
+    # MESSAGE safe is the wrong instrument here: it would mint a REFUTED
+    # whose witness is not the value the solver produced and cannot be
+    # re-executed, moving a contained failure onto another module's public
+    # surface as a broken contract. Applying a message renderer to a data
+    # field is the category error.
+    #
+    # Fail closed instead — `smt._renderable`'s posture: detect by
+    # attempting the conversion, and when it cannot be done exactly,
+    # decline. `ReplayDeclined` is the channel that already means "no
+    # usable witness here"; the caller's handler turns it into UNKNOWN
+    # with the reason quoted and does not raise.
+    #
+    # NOT a remote hazard. Measured through `check()` on a traced harness
+    # — `x ** 0.5` nested eight deep on `[1, 1e300]` with the threshold
+    # under the box maximum — a REFUTED witness carries a model term of
+    # **4091 digits against the 4300-digit cap: 95% of it, with no
+    # decline yet observed**. An earlier note here claimed "16 decimal
+    # digits", which measured the wrong quantity (a rendered `n/d` string
+    # from harnesses that never nested `pow`) and made the margin look
+    # like 99.6% when it is 5%. So this arm is close to live: it costs
+    # nothing measurable today, and the reason to keep it is not that the
+    # input is unreachable but that it is nearly reached.
+    rendered = []
+    for inp in sl.inputs:
+        v = values[inp.name]
+        try:
+            rendered.append((inp.name, str(v)))
+        except ValueError as e:
+            raise ReplayDeclined(
+                f"the model value for {inp.name} cannot be recorded "
+                f"exactly: it is {fraction_text(v)} and CPython refuses to "
+                f"render it ({e}). A witness carries the exact rational so "
+                f"the reproducer can re-execute the harness at that point; "
+                f"a summarised value would name a different point, so no "
+                f"witness is issued"
+            ) from e
     return Witness(
         obligation_index=sl.index,
-        values=tuple((inp.name, str(values[inp.name])) for inp in sl.inputs),
+        values=tuple(rendered),
         produced_by=produced_by,
         replay=_REPLAY_SENTENCE,
         # which element(s) of an ARRAY assert operand are false at the
@@ -1537,40 +1592,87 @@ def _dispatch_obligation(
                 )
                 continue
             values = _complete_values(sl, got, notes)
-            if not sl.inputs:
-                # audit F5: a constants-only obligation has no witness
-                # values to render; the SAME validator decides the
-                # refutation is real (membership vacuously true; violation
-                # via the empty-environment replay of the closed formula)
-                # — an honest REFUTED, no fabricated witness.
-                _require_valid_refutation(
-                    sl, values, solver_label=backend.label,
+            try:
+                if not sl.inputs:
+                    # audit F5: a constants-only obligation has no witness
+                    # values to render; the SAME validator decides the
+                    # refutation is real (membership vacuously true;
+                    # violation via the empty-environment replay of the
+                    # closed formula) — an honest REFUTED, no fabricated
+                    # witness.
+                    _require_valid_refutation(
+                        sl, values, solver_label=backend.label,
+                        script_text=script.text,
+                    )
+                    return (ObligationEscalation(
+                        index=sl.index,
+                        outcome=OB_VIOLATED_CONSTANT,
+                        detail=(
+                            f"constant refutation: the obligation has no "
+                            f"declared inputs and its predicate is definitely "
+                            f"false — {_REPLAY_SENTENCE}; {backend.label} "
+                            f"({sl.fragment}) answered sat in agreement"
+                            + degraded_clause(universal=False)
+                        ),
+                        invocations=invocations(),
+                        witness=None,
+                        notes=tuple(notes) + degraded_notes(universal=False),
+                        answered_by=answered,
+                    ), n_emitted)
+                witness = make_validated_witness(
+                    sl,
+                    values,
+                    produced_by=(
+                        f"{backend.name} {stamp.version} ({backend.transport})"
+                    ),
+                    solver_label=backend.label,
                     script_text=script.text,
                 )
-                return (ObligationEscalation(
-                    index=sl.index,
-                    outcome=OB_VIOLATED_CONSTANT,
-                    detail=(
-                        f"constant refutation: the obligation has no declared "
-                        f"inputs and its predicate is definitely false — "
-                        f"{_REPLAY_SENTENCE}; {backend.label} ({sl.fragment}) "
-                        f"answered sat in agreement"
-                        + degraded_clause(universal=False)
-                    ),
-                    invocations=invocations(),
-                    witness=None,
-                    notes=tuple(notes) + degraded_notes(universal=False),
-                    answered_by=answered,
-                ), n_emitted)
-            witness = make_validated_witness(
-                sl,
-                values,
-                produced_by=(
-                    f"{backend.name} {stamp.version} ({backend.transport})"
-                ),
-                solver_label=backend.label,
-                script_text=script.text,
-            )
+            except ReplayDeclined as declined:
+                # NOT an emission-infidelity finding, and the distinction
+                # is the whole of audit 0.2.0 S3: the replay is refusing a
+                # point whose exact value is not rational, which says
+                # nothing about whether the script meant the obligation.
+                # Same posture, same words, as a model carrying a
+                # non-rational value a few lines above — the witness is
+                # not independently replayable, so it does not become a
+                # REFUTED and it does not raise.
+                #
+                # PREEMPTED BY THE TWO INSTALLED WHEELS ON THE `pow` ROW,
+                # and reachable through any transport that is not them.
+                # For a rational-`pow` slice the model carries the `aux`
+                # constant, and under `aux >= 0 ∧ aux^q = x^p ∧ x >= 0` we
+                # have `aux = x^(p/q)` exactly — so `aux` is an algebraic
+                # numeral precisely when the exact value is irrational,
+                # which is the one case `_exact_rational_power` refuses.
+                # Both wheels flag such a value as `nonrational` (z3:
+                # `is_algebraic_value`; cvc5: the driver's `opaque`
+                # record), so the `raw.nonrational` branch above catches
+                # it first. Measured on those two: every `nonrational=False`
+                # model on this row had a rational `aux`, where the exact
+                # replay succeeds.
+                #
+                # THAT IS A STATEMENT ABOUT THE TWO WHEELS ONLY. The
+                # external cvc5-BINARY transport is not installed here and
+                # its model parser (`_model_values_from_text`) has never
+                # been driven by a real algebraic model; a transport that
+                # reports a rational-looking model without flagging it
+                # lands here, and the `pow` row's replay declines on the
+                # exact value. `tests/test_pow_audit_findings.py` drives
+                # exactly that shape (a fake binary answering `sat` with
+                # `x0 = 2` on `x**0.5 <= 1.0`) and pins the outcome: an
+                # UNKNOWN quoting the replay's own reason — never a
+                # REFUTED, never a fabricated witness, never a raise.
+                sat_problems.append(
+                    f"{backend.label}: witness not independently replayable "
+                    f"({declined})"
+                )
+                notes.append(
+                    f"assert #{sl.index}: {backend.label} reported sat; "
+                    f"witness not independently replayable ({declined}) — by "
+                    f"policy this stays UNKNOWN"
+                )
+                continue
             elements = ""
             if witness.violating_elements:
                 # the array assert is a universal elementwise claim; the

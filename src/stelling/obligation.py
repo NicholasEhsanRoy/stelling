@@ -40,7 +40,9 @@ one-to-one onto top-level asserts — **declines**, with the primitive and
 form (and, for the budget, the count and the budget) quoted, and the
 obligation stays UNKNOWN. Declines never raise; :exc:`ReplayError` is
 raised only by the replay evaluator, whose caller treats it as an
-emission-infidelity signal.
+emission-infidelity signal — except for its :exc:`ReplayDeclined`
+subclass, which says the replay itself cannot evaluate the point exactly
+and degrades the witness to UNKNOWN instead of accusing the emission.
 
 The index bookkeeping (element pairing, structural routing, reduction
 grouping) is computed by ONE set of helpers, driven through the very
@@ -76,9 +78,11 @@ __all__ = [
     "DeclinedObligation",
     "ELEMENT_BUDGET",
     "ObligationSlice",
+    "ReplayDeclined",
     "ReplayError",
     "SliceInput",
     "evaluate_predicate",
+    "fraction_text",
     "slice_obligation",
     "slice_unknown_obligations",
     "violating_elements",
@@ -133,17 +137,80 @@ DIV_GUARD_REASON = (
 # UNKNOWN with the number quoted, never a hang.
 ELEMENT_BUDGET = 512
 
-# integer_pow exponents are expanded to explicit products; beyond this the
-# script stops being auditable by eye and the emission declines instead.
+# THE TWO POW CAPS BOUND ONE QUANTITY: the DEGREE of a polynomial the
+# `pow`/`integer_pow` rows write into the emitted script. Nothing else is
+# being gated here — not the exponent's magnitude, not the operand count —
+# and stating the quantity once is the point: the predecessor capped
+# `integer_pow`'s |y| and the rational branch's DENOMINATOR while leaving
+# its NUMERATOR unbounded, so `x ** 100.5` (an emitted degree-201 product)
+# was admitted while the strictly smaller `x ** 100` was declined at 64,
+# and `x ** 1000000000000.5` built a 600 KB script from a one-line harness
+# before dying of MemoryError (audit 0.2.0 M7). The two caps still differ,
+# and the reason is the construct each bounds, written out below.
+
+# Degree of a product expanded INLINE into a `define-fun` body:
+# `integer_pow(x, y)` and `pow(x, y)` at integer y both write
+# `(* x x … x)` with |y| factors. Beyond this the script stops being
+# auditable by eye and the emission declines instead. This form declares
+# no auxiliary variable, so the z3 tactic workaround in
+# :mod:`stelling.solvers` — which keys on `aux_` declarations — does not
+# fire on it, and the default solver path is what has to carry it.
 INTEGER_POW_EXPANSION_CAP = 64
 
-# pow with rational exponent p/q is encoded as an auxiliary variable
-# y with y^q = x^p. Beyond this denominator the polynomial degree
-# risks solver timeout, so the obligation declines. Raised to 128
-# from 64: measurements showed both solvers handle all degrees up to
-# 100 in <1s (cvc5 natively, z3 via the custom tactic workaround in
-# solvers.py that fires on scripts containing aux_ declarations).
-RATIONAL_POW_DENOMINATOR_CAP = 128
+# Degree of the auxiliary-variable EQUATION a non-integer exponent emits:
+# `pow` at exponent p/q declares a fresh `aux` and asserts
+# `aux^q = x^p`, whose degree is max(p, q) — BOTH sides, which is why one
+# cap governs numerator and denominator alike. Beyond this the polynomial
+# risks solver timeout, so the obligation declines. 128 rather than the
+# expansion cap's 64: measurements showed both solvers handle every
+# denominator up to 100 AT NUMERATOR 1 in <1 s on this construct (cvc5
+# natively, z3 via the custom tactic chain in solvers.py that fires on
+# scripts containing `aux_` declarations, which every emission of this
+# shape has). The numerator qualifier is load-bearing and is the subject
+# of the next paragraph. Whether the inline expansion could afford the
+# same 128 is unmeasured, and raising it would ADMIT harnesses that
+# decline today — the direction that needs the measurement, not the
+# direction that needs a comment.
+#
+# THE p=1 FAMILY IS THE EASY ONE, so the sweep above says nothing about
+# the worst admitted case. The admitted set is small enough to measure
+# whole, and it was: every admissible exponent has q a power of two,
+# since the exact value of a binary64 is dyadic
+# (:func:`pow_exponent_rational`), so the reachable denominators are
+# exactly 2, 4, 8, 16, 32, 64, 128, the numerators are the odd values
+# below 128, and the admitted set is 7 x 64 = 448 pairs. All 448 were
+# run (2026-08-14) as
+#
+#     x = any_array((), "float64", (1.0, 100.0))
+#     assert_(x ** (p / q) >= 1.0)
+#
+# at `solver_timeout_ms=60000` on the default portfolio. Every one of the
+# 448 was decided BY A SOLVER on the obligation itself — `unsat` in
+# QF_NRA from both wheels, never discharged by interval propagation and
+# never timed out (worst single backend 53.6 s) — so these are solve
+# costs and not the cost of some easier query. Portfolio wall, the two
+# backends in sequence:
+#
+#     x**(1/128)     0.41 s  (cvc5  0.06 + z3  0.30)  the cheap corner
+#     x**(127/128)  49.25 s  (cvc5 30.13 + z3 19.11)  both sides at cap
+#     x**(105/128)  73.47 s  (cvc5 19.82 + z3 53.64)  THE WORST OF 448
+#     x**(127/2)     0.11 s  (cvc5  0.07 + z3  0.03)  degree 127, one
+#                                                     below 127/128's
+#
+# Read off that: cost tracks the DENOMINATOR, not the degree max(p, q)
+# the cap bounds — `x**63.5` is degree 127 and costs 0.11 s — and within
+# the q=128 row it is not monotone in the numerator either (p=105 is
+# 73 s, p=113 is 41 s, p=127 is 49 s). So "both sides near the cap" was
+# the wrong guess at the worst case, by 49%, and no closed form is
+# offered here in place of the sweep. The per-row worst rises 0.9, 6.5,
+# 6.5, 7.6, 9.0, 19.1, 73.5 s for q = 2 … 128. Seconds are
+# machine-specific (24-core x86-64, cvc5 1.3.4 wheel, z3 5.0.0 wheel);
+# the ordering is the content.
+#
+# Every one of the 448 is a solve that FINISHES, bounded by the caller's
+# own `solver_timeout_ms`, and a timeout is never a VERIFIED; none is a
+# pathological script of the kind this cap exists to refuse.
+RATIONAL_POW_DEGREE_CAP = 128
 
 _FLOAT_INPUT_DTYPES = frozenset({"float16", "float32", "float64"})
 
@@ -351,6 +418,33 @@ class ReplayError(RuntimeError):
     """
 
 
+class ReplayDeclined(ReplayError):
+    """The replay REFUSES this point: the exact value is not a rational,
+    so no amount of care in this evaluator can decide the predicate there.
+
+    A subclass, so every ``except ReplayError`` handler still catches it —
+    but the dispatch layer separates the two, and the separation is the
+    whole point. ``ReplayError`` means *the emitted problem does not mean
+    the obligation*: an alarm about the EMISSION, raised loudly, because
+    a solver model that escapes the box or satisfies the predicate is
+    evidence the script was wrong. ``ReplayDeclined`` means *the replay
+    cannot keep up with a correct emission*, which is a fact about the
+    replay, not about the script, and it costs a REFUTED rather than
+    earning an exception.
+
+    Before the separation, ``x ** 0.5`` over a box starting just above
+    ``4.0`` made the public ``check()`` RAISE: cvc5's model
+    ``4 + 2^-108`` is a real violation (``sqrt`` of it exceeds 2 in the
+    reals) and the emission ``aux^2 = x0, aux >= 0`` is exactly right,
+    but the replay evaluated ``float(w) ** 0.5 == 2.0`` and reported the
+    predicate TRUE — so the one alarm that means "the emission is wrong"
+    fired at a correct emission and named the wrong culprit
+    (audit 0.2.0 S3). The dispatch layer now routes this to UNKNOWN with
+    ``witness not independently replayable``, the posture it already had
+    for a model containing a non-rational value.
+    """
+
+
 @dataclass(frozen=True)
 class SliceInput:
     """One ELEMENT of a ``stelling_any`` declaration reachable from the
@@ -504,6 +598,98 @@ def _numeric_fraction(v) -> Fraction:
             f"non-finite constant {v!r} has no exact Real emission"
         )
     return Fraction(v)  # exact dyadic rational of the f64 value
+
+
+def pow_exponent_rational(exp_float: float) -> Fraction:
+    """The EXACT real the traced ``pow`` exponent literal denotes.
+
+    ONE DERIVATION, TWO READERS: the admission guard
+    (:meth:`_Slicer._validate`) and the emission
+    (:func:`stelling.smt.emit`) both call this, so the rational the guard
+    admitted and the rational the script is written about cannot drift
+    apart. Both take :class:`fractions.Fraction` of the *binary64 value*,
+    which is exact and finite for every finite double — a binary64 IS a
+    dyadic rational, and ``Fraction(0.1)`` is
+    ``3602879701896397/36028797018963968``, not ``1/10``.
+
+    **The predecessor rationalised with ``limit_denominator(128)`` and
+    admitted the result whenever ``abs(float(frac) - exp_float) <= 1e-12``
+    (audit 0.2.0 S1).** That test cannot see the substitution it exists to
+    detect: ``float(Fraction(1, 10))`` rounds back to the same binary64,
+    so the measured error for ``0.1`` was exactly ``0.0`` while the two
+    rationals differ by ``5.55e-18`` — and the emitted problem was about
+    ``x^(1/10)``, a DIFFERENT function from the ``x^0.1`` the program
+    computes. Since an ``unsat`` is a universal claim with nothing
+    downstream to re-derive it, that minted false VERIFIEDs. No threshold
+    on a binary64 distance can fix it; the comparison has to be between
+    rationals, and taking the exact one removes the comparison entirely.
+    """
+    return Fraction(exp_float)
+
+
+def rational_pow_problem(exp_float: float) -> str | None:
+    """``None`` when a NON-INTEGER ``pow`` exponent is emittable through
+    the auxiliary-variable encoding, else the reason it is not — written
+    so a reader can act on it.
+
+    Emittable means: the exact rational
+    (:func:`pow_exponent_rational`) is non-negative and the degree of the
+    equation ``aux^q = x^p`` stays within
+    :data:`RATIONAL_POW_DEGREE_CAP`. Nothing here approximates: an
+    exponent that is not a dyadic rational of small degree DECLINES to
+    UNKNOWN rather than being analysed as a nearby rational, because a
+    nearby rational is a different function.
+    """
+    if not math.isfinite(exp_float):
+        return (
+            f"'pow' exponent {exp_float!r} is not finite, so it denotes no "
+            f"real and has no exact rational encoding"
+        )
+    frac = pow_exponent_rational(exp_float)
+    p, q = frac.numerator, frac.denominator
+    if p < 0:
+        return (
+            f"'pow' with negative rational exponent {frac}: negative "
+            f"rational exponents are not supported"
+        )
+    degree = max(p, q)
+    if degree <= RATIONAL_POW_DEGREE_CAP:
+        return None
+    if q <= RATIONAL_POW_DEGREE_CAP:
+        # The exponent IS a small dyadic; only the emitted polynomial's
+        # size is the problem, and nothing is being approximated. Say so,
+        # rather than borrowing the wording of the other branch.
+        return (
+            f"'pow' exponent {exp_float!r} is exactly {p}/{q}, and the "
+            f"auxiliary encoding aux^{q} = x^{p} would be a degree-"
+            f"{degree} polynomial — over the emission cap "
+            f"{RATIONAL_POW_DEGREE_CAP} "
+            f"(stelling.obligation.RATIONAL_POW_DEGREE_CAP), which bounds "
+            f"BOTH sides of that equation, so a large numerator declines "
+            f"exactly as a large denominator does. Escalation declines "
+            f"rather than emit it; nothing about the exponent is "
+            f"approximated"
+        )
+    # The literal is a binary64 and therefore IS an exact dyadic rational —
+    # say which one, and say that the low-denominator rational the reader
+    # has in mind is a different number. A message reading "cannot be
+    # represented as p/q with q <= 128" would be FALSE: it can, exactly,
+    # and the denominator is a power of two.
+    near = Fraction(p, q).limit_denominator(RATIONAL_POW_DEGREE_CAP)
+    return (
+        f"'pow' exponent {exp_float!r} denotes exactly {p}/{q} — a binary64 "
+        f"literal IS a dyadic rational, so that is the exponent's value and "
+        f"not an approximation of it — and its auxiliary encoding "
+        f"aux^q = x^p would be degree {degree}, over the emission cap "
+        f"{RATIONAL_POW_DEGREE_CAP} "
+        f"(stelling.obligation.RATIONAL_POW_DEGREE_CAP). Emitting about the "
+        f"nearby rational {near} instead would be analysing a DIFFERENT "
+        f"function from the one the program computes — x^({near}) and "
+        f"x^{exp_float!r} do not agree, and a discharge has nothing "
+        f"downstream to catch the difference — so this declines to UNKNOWN. "
+        f"Exponents whose exact binary64 value is a small dyadic rational "
+        f"(0.5, 0.25, 0.125, 1.5, 1/128) do escalate"
+    )
 
 
 def _is_bool_dtype(aval: ir.Aval) -> bool:
@@ -1744,7 +1930,13 @@ class _Slicer:
                 )
             exp_val = _decode_elements(eqn.invars[1].val)[0]
             exp_float = float(exp_val)
-            if exp_float == int(exp_float):
+            # `is_integer()` rather than `== int(exp_float)`: the latter
+            # RAISES on an infinite or NaN exponent instead of declining.
+            # Unreachable today (literal decode declines non-finite
+            # constants in an earlier pass), but this branch should not
+            # depend on that ordering to avoid a crash — the non-integer
+            # arm below quotes a non-finite exponent as a decline.
+            if exp_float.is_integer():
                 # Integer exponent: expand to products (same as integer_pow).
                 y = int(exp_float)
                 if abs(y) > INTEGER_POW_EXPANSION_CAP:
@@ -1761,30 +1953,16 @@ class _Slicer:
                             f"{DIV_GUARD_REASON}{problem}"
                         )
             else:
-                # Non-integer exponent: accept only if it is a rational
-                # p/q with q <= RATIONAL_POW_DENOMINATOR_CAP (to avoid
-                # solver timeouts on large polynomial constraints).
-                frac = Fraction(exp_float).limit_denominator(
-                    RATIONAL_POW_DENOMINATOR_CAP
-                )
-                # Verify the limited fraction is close to the original float
-                if abs(float(frac) - exp_float) > 1e-12:
-                    raise _Decline(
-                        f"'pow' with non-rational exponent {exp_float}: "
-                        f"cannot be represented as p/q with q <= "
-                        f"{RATIONAL_POW_DENOMINATOR_CAP}"
-                    )
-                if frac.numerator < 0:
-                    raise _Decline(
-                        f"'pow' with negative rational exponent {frac}: "
-                        f"negative rational exponents are not supported"
-                    )
-                if frac.denominator > RATIONAL_POW_DENOMINATOR_CAP:
-                    raise _Decline(
-                        f"'pow' rational exponent {frac} has denominator "
-                        f"{frac.denominator} exceeding the cap "
-                        f"{RATIONAL_POW_DENOMINATOR_CAP} (solver timeout risk)"
-                    )
+                # Non-integer exponent: the aux encoding is emitted about
+                # the EXACT rational the literal denotes, or not at all.
+                # No rationalisation, no tolerance — see
+                # :func:`pow_exponent_rational` for why a binary64
+                # distance cannot police a substitution of one real for
+                # another (audit 0.2.0 S1).
+                problem = rational_pow_problem(exp_float)
+                if problem is not None:
+                    raise _Decline(problem)
+                frac = pow_exponent_rational(exp_float)
                 # Base must be non-negative: JAX returns NaN for
                 # pow(negative, fractional), so the Real encoding (which
                 # always has a solution for odd q, or no solution for even q)
@@ -2257,20 +2435,41 @@ class _Slicer:
                 y = eqn.params_dict().get("y")
                 if y not in (0, 1):
                     nonlinear = True
-            if prim == "pow" and ins_dep[0]:
-                # pow with a literal exponent != 1.0 is nonlinear when
-                # the base depends on a declaration (same logic as
-                # integer_pow: exponent 1.0 is the identity, 0.0 is
-                # constant — but any other value produces a nonlinear term).
-                # Rational exponents produce auxiliary polynomial constraints
-                # (y^q = x^p), which are inherently nonlinear.
+            if prim == "pow":
+                # TWO different reasons, and only one of them is about the
+                # base's dependence.
+                #
+                # (a) A NON-INTEGER exponent emits the auxiliary-variable
+                # encoding: a fresh `aux` constrained by `aux^q = x^p`.
+                # `aux^q` is a product of a fresh symbol with ITSELF, so
+                # the emitted script is nonlinear whatever the base is —
+                # a constant base does not make it linear, and the
+                # constant fold never removes it (smt._fold_values
+                # declines rational exponents: the value is generally
+                # irrational). Stamping such a slice QF_LRA shipped
+                # `(* aux aux)` under a linear logic and BOTH backends
+                # refused the script, losing the whole obligation and
+                # blaming the solvers for stelling's own label
+                # (audit 0.2.0 M9).
+                #
+                # (b) An INTEGER exponent outside {0, 1} expands to a
+                # product of the base with itself — nonlinear exactly when
+                # the base descends from a declaration, same rule as
+                # integer_pow; a constant base folds to a numeral and the
+                # decision problem really is linear.
                 exp_atom = eqn.invars[1]
-                if isinstance(exp_atom, ir.Literal):
-                    exp_val = _decode_elements(exp_atom.val)[0]
-                    if exp_val not in (0.0, 1.0):
-                        nonlinear = True
-                else:
+                if not isinstance(exp_atom, ir.Literal):
                     nonlinear = True  # variable exponent is always nonlinear
+                else:
+                    exp_f = float(_decode_elements(exp_atom.val)[0])
+                    # `is_integer()` rather than `== int(...)`: it is False
+                    # for inf/nan instead of raising on them, and a
+                    # non-finite exponent has already declined by here
+                    # anyway (literal decode, pass 2).
+                    if not exp_f.is_integer():
+                        nonlinear = True                       # (a)
+                    elif ins_dep[0] and exp_f not in (0.0, 1.0):
+                        nonlinear = True                       # (b)
             if prim == "square" and ins_dep[0]:
                 # unconditionally nonlinear when the operand depends on a
                 # declaration: `square` has no exponent param to fall back
@@ -2448,6 +2647,131 @@ def _scalar_binop(prim: str, a, b):
     )
 
 
+def _exact_integer_root(n: int, q: int) -> int | None:
+    """The exact integer ``q``-th root of the non-negative integer ``n``,
+    or ``None`` when ``n`` is not a perfect ``q``-th power.
+
+    Integer Newton iteration on ``int`` only — no float ever touches this,
+    which is the requirement: ``round(n ** (1 / q))`` agrees with the
+    truth for small ``n`` and stops agreeing exactly where the replay
+    matters, at operands with more significant bits than a double holds.
+    The answer is CONFIRMED by exponentiation before it is returned, so a
+    wrong iteration cannot yield a wrong root — only ``None``.
+    """
+    if n < 0 or q < 1:
+        return None
+    if n in (0, 1) or q == 1:
+        return n
+    x = 1 << -(-n.bit_length() // q)  # ceil(bits/q): an over-estimate
+    while True:
+        y = ((q - 1) * x + n // x ** (q - 1)) // q
+        if y >= x:
+            break
+        x = y
+    return x if x**q == n else None
+
+
+def _int_text(n: int) -> str:
+    """``n`` as decimal digits, or its BIT LENGTH when CPython refuses to
+    render it.
+
+    THE HAZARD :func:`stelling.smt._renderable` EXISTS FOR, met at the other
+    end. CPython caps ``int`` -> ``str`` at ``sys.get_int_max_str_digits()``
+    (4300 since 3.11) and RAISES ``ValueError`` past it. There the integer
+    was being written into a script; here it is being written into a REFUSAL
+    MESSAGE, where the raise is worse — a clean decline becomes a crash out
+    of :func:`evaluate_predicate` / :func:`witness_is_valid`, both public,
+    and the escalation that was about to record "witness not independently
+    replayable" records a ``ValueError`` from a formatting expression
+    instead. Nothing bounds the operand: it is a solver model value, and
+    ``Fraction(3**10000, 2)`` (a 15850-bit numerator) is already over the
+    cap.
+
+    Same posture as ``_renderable``: detect by ATTEMPTING the conversion,
+    never by raising ``sys.set_int_max_str_digits`` — a global process
+    mutation, performed by a library, on behalf of a caller who did not ask
+    for it. The fallback reports magnitude instead of digits, which is what
+    a reader of a decline needs; 4300 digits of numerator identify nothing.
+    """
+    try:
+        return str(n)
+    except ValueError:
+        return f"{'-' if n < 0 else ''}<{n.bit_length()}-bit integer>"
+
+
+def fraction_text(fr: Fraction) -> str:
+    """``fr`` rendered the way ``str(Fraction)`` renders it — ``n`` when the
+    denominator is 1, ``n/d`` otherwise — with every term through
+    :func:`_int_text`, so an unrenderable term degrades to its bit length
+    rather than raising.
+
+    PUBLIC because a solver model value is described on BOTH sides of the
+    module boundary and there must be one renderer for it:
+    ``solvers._require_valid_refutation`` attaches the same values to an
+    :exc:`EmissionInfidelityError`, and it used bare ``str()``, so the
+    box-escape alarm here returned its diagnosis safely and then died one
+    statement later rendering the same value.
+
+    **Public rather than imported privately, and the first reason given
+    for that was wrong.** It was "nothing else in ``src/`` imports a
+    private name across modules" — measured by AST, there are **50**, and
+    ``smt.py`` alone takes thirteen from this module. The real reason is
+    narrower and survives: this renderer is part of a *disclosure*
+    contract, not an internal helper. What a verdict says about a model
+    value is published surface, ``smt._renderable`` is the same discipline
+    at the other end, and a rendering rule that two modules must agree on
+    should be nameable by both. Note the counterpart restriction: only a
+    MESSAGE may be rendered this way. ``Witness.values`` is data with a
+    parsed contract, and ``make_validated_witness`` deliberately does NOT
+    call this — it declines instead."""
+    if fr.denominator == 1:
+        return _int_text(fr.numerator)
+    return f"{_int_text(fr.numerator)}/{_int_text(fr.denominator)}"
+
+
+def _exact_rational_power(base: Fraction, p: int, q: int) -> Fraction:
+    """``base ** (p / q)`` as an exact rational, or
+    :exc:`ReplayDeclined` when that real is irrational.
+
+    ``p/q`` is in lowest terms with ``q >= 2`` and ``p > 0`` (the
+    admission guard refuses a negative rational exponent, and a
+    denominator of 1 is the integer branch). Under those conditions
+    ``base^(p/q)`` is rational exactly when ``base``'s numerator and
+    denominator are both perfect ``q``-th powers, so the test IS the
+    computation: extract both roots exactly, or decline.
+
+    **The predecessor computed ``Fraction(float(base) ** exp_float)``** —
+    a binary64 libm ``pow``, rounded, wrapped in a ``Fraction`` — while
+    every REFUTED witness carried the sentence "confirmed by independent
+    exact-rational replay (fractions.Fraction arithmetic, pure Python, no
+    solver)". That sentence was false for these slices, and near the
+    predicate boundary the rounding decided the answer (audit 0.2.0 S3).
+    It also raised ``OverflowError`` on large operands, uncaught, which
+    took out the whole escalation (M8); exact rational arithmetic has no
+    overflow to raise.
+    """
+    if base < 0:
+        # No real q-th root for even q, and the guard already refuses a
+        # base interval reaching below zero — declining is the safe read
+        # of a point that should not exist.
+        raise ReplayDeclined(
+            f"replay cannot evaluate x^({p}/{q}) at the negative base "
+            f"{fraction_text(base)}: it has no real value for even q, and "
+            f"jax computes NaN here"
+        )
+    root_num = _exact_integer_root(base.numerator, q)
+    root_den = _exact_integer_root(base.denominator, q)
+    if root_num is None or root_den is None:
+        raise ReplayDeclined(
+            f"{fraction_text(base)}^({p}/{q}) is irrational — "
+            f"{_int_text(base.numerator)} and/or "
+            f"{_int_text(base.denominator)} is not a perfect {q}-th power — "
+            f"and the replay is exact rational arithmetic; it will not decide "
+            f"this point with a rounded float"
+        )
+    return Fraction(root_num, root_den) ** p
+
+
 def _root_elements(
     sl: ObligationSlice, values: Mapping[str, Fraction]
 ) -> tuple[bool, ...]:
@@ -2571,21 +2895,26 @@ def _root_elements(
                 y = int(params["y"])
                 out = tuple(ins[0][i] ** y for i in idx)
             elif prim == "pow":
-                # pow [base, exponent_literal]: integer exponents replay as
-                # exact Fraction ** int; rational exponents p/q replay as
-                # the real p/q-th power via float (the replay checks the
-                # violation direction, not exact equality).
+                # pow [base, exponent_literal]. The exponent arrives here
+                # as the EXACT Fraction of the literal (_numeric_fraction
+                # on the decoded binary64) — the replay never round-trips
+                # it through a float, so it is reading the same real the
+                # admission guard and the emission read.
                 ia, ib = _pair_elementwise(eqn)
-                exp_float = float(ins[1][ib[0]])
-                if exp_float == int(exp_float):
-                    y = int(exp_float)
+                exp = ins[1][ib[0]]
+                if exp.denominator == 1:
+                    y = exp.numerator
                     out = tuple(ins[0][ia[i]] ** y for i in range(n_out))
                 else:
-                    # Rational exponent: replay as float arithmetic.
-                    # The auxiliary-variable encoding is exact over Reals,
-                    # but replay only needs to confirm violation direction.
+                    # Rational exponent: EXACT when the value is rational,
+                    # and a refusal otherwise. Replaying a float here is
+                    # what made check() raise on a correct emission
+                    # (audit 0.2.0 S3) — the replay is the one thing that
+                    # makes a REFUTED trustworthy, so it either does exact
+                    # arithmetic or says it cannot.
+                    p, q = exp.numerator, exp.denominator
                     out = tuple(
-                        Fraction(float(ins[0][ia[i]]) ** exp_float)
+                        _exact_rational_power(ins[0][ia[i]], p, q)
                         for i in range(n_out)
                     )
             elif prim == "square":
@@ -2608,6 +2937,25 @@ def _root_elements(
                 # (the emission declines such a slice before replay sees it),
                 # which is precisely why it could sit here unnoticed.
                 if not (src == dst or (src, dst) in _EXACT_CONVERSIONS):
+                    # ReplayError, NOT ReplayDeclined, and the channel is the
+                    # whole content of this branch. The emission writes a
+                    # non-bool `convert_element_type` as the IDENTITY on its
+                    # operand (:func:`stelling.smt.emit`, the
+                    # `names[out.id] = tuple(ins[0][i] for i in idx)` line), so
+                    # a script carrying a value-changing narrowing has the
+                    # rounding simply ABSENT — it states a different function
+                    # from the one the harness computes. A witness that reaches
+                    # here therefore accuses the SCRIPT, which is exactly what
+                    # ReplayError means. It is NOT the replay falling behind a
+                    # correct emission, which is the other channel
+                    # (:exc:`ReplayDeclined`) and which the rational-pow
+                    # refusal above genuinely is: there the emitted
+                    # `aux^q = x^p` means the obligation exactly and only this
+                    # evaluator cannot finish it. Being unreachable is why a
+                    # demotion to a decline is SILENT — reverting this one word
+                    # left the whole suite green — so the channel itself is
+                    # pinned, in tests/test_pow_audit_findings.py, together
+                    # with the identity emission it rests on.
                     raise ReplayError(
                         f"replay cannot re-derive a value-changing conversion "
                         f"{src!r} -> {dst!r}: the exact rational would have to "
@@ -2732,6 +3080,15 @@ def witness_is_valid(
     Returns None when the refutation is real, else a human-readable
     string naming the failing conjunct (for the loud
     emission-infidelity error).
+
+    **A returned string means the EMISSION is wrong.** When the replay
+    instead REFUSES the point — it cannot produce the exact value at all
+    — :exc:`ReplayDeclined` propagates out of here rather than being
+    flattened into that string. The two are different findings and the
+    caller routes them differently: an unfaithful emission is loud, an
+    unreplayable witness degrades to UNKNOWN. Flattening them made
+    ``check()`` raise ``EmissionInfidelityError`` at emissions that were
+    correct (audit 0.2.0 S3).
     """
     for inp in sl.inputs:
         v = values.get(inp.name)
@@ -2739,20 +3096,34 @@ def witness_is_valid(
             # a missing or inexact value: the replay conjunct below names
             # it precisely (ReplayError), so membership defers
             continue
+        # fraction_text, not str(): `v` is a SOLVER MODEL value, so its
+        # terms are unbounded and `{v}` raises ValueError past CPython's
+        # int -> str cap. The raise would land HERE, inside the message of
+        # the LOUD alarm — the one that means the emitted problem does not
+        # mean the obligation — replacing its diagnosis with a traceback
+        # out of `fractions.py`. That is worse than the same hazard in a
+        # decline message, not better, because this is the channel that
+        # exists to be read. The bounds are `Fraction(float)` and cannot
+        # reach the cap, but they go through the same helper so nobody has
+        # to re-derive that to see the line is safe.
         if inp.lo != float("-inf") and v < Fraction(inp.lo):
             return (
-                f"the model escapes the declared box ({inp.name} = {v} is "
-                f"below its declared lower bound {Fraction(inp.lo)}); the "
-                f"box constraints were part of the emitted problem"
+                f"the model escapes the declared box ({inp.name} = "
+                f"{fraction_text(v)} is below its declared lower bound "
+                f"{fraction_text(Fraction(inp.lo))}); the box constraints "
+                f"were part of the emitted problem"
             )
         if inp.hi != float("inf") and v > Fraction(inp.hi):
             return (
-                f"the model escapes the declared box ({inp.name} = {v} is "
-                f"above its declared upper bound {Fraction(inp.hi)}); the "
-                f"box constraints were part of the emitted problem"
+                f"the model escapes the declared box ({inp.name} = "
+                f"{fraction_text(v)} is above its declared upper bound "
+                f"{fraction_text(Fraction(inp.hi))}); the box constraints "
+                f"were part of the emitted problem"
             )
     try:
         holds = evaluate_predicate(sl, values)
+    except ReplayDeclined:
+        raise  # the caller degrades to UNKNOWN; see this function's docstring
     except ReplayError as e:
         return f"the replay could not evaluate it ({e})"
     if holds:

@@ -64,13 +64,47 @@ SPDX-License-Identifier: Apache-2.0
   infinite (sound: bounded reals are finite by construction). Unblocks
   solver escalation on every harness containing `jnp.isfinite()`.
 
-- **`pow` emission** (integer AND rational exponents): integer exponents
-  (`x**2`, `x**3`, `x**(-1)`) expand to explicit products. Rational
-  exponents (`x**(1/2)`, `x**(1/3)`, `x**(2/3)`, up to `x**(1/80)`) emit
-  as auxiliary-variable polynomial constraints (`y^q = x^p` with sign
-  constraints) — both z3 and cvc5 handle these in QF_NRA. Denominator
-  capped at 128; base must be non-negative (JAX returns NaN for
-  `pow(negative, fractional)`).
+- **`pow` emission** (integer AND non-integer exponents): integer
+  exponents (`x**2`, `x**3`, `x**(-1)`) expand to explicit products.
+  Non-integer exponents emit as auxiliary-variable polynomial constraints
+  (`aux^q = x^p` with sign constraints) — both z3 and cvc5 handle these in
+  QF_NRA. **The rational `p/q` must be the exact value of the traced
+  binary64 literal**, which admits `x**0.5`, `x**0.25`, `x**0.75`,
+  `x**1.5`, `x**(1.0/64.0)`, `x**(1.0/128.0)` — every dyadic — and
+  declines `x**0.1`, `x**(1.0/3.0)`, `x**(1.0/80.0)` to UNKNOWN, because
+  those literals are NOT the low-denominator rationals they are written
+  as and emitting about a nearby rational is emitting about a different
+  function. One cap (128) bounds the degree of the emitted equation on
+  both sides, so a large numerator (`x**100.5` → `aux^2 = x^201`) declines
+  exactly as a large denominator does. Base must be non-negative (JAX
+  returns NaN for `pow(negative, fractional)`).
+
+### Soundness fixes
+
+- **Rational-`pow` exponent identity** (audit 0.2.0 S1; see
+  [SOUNDNESS.md](SOUNDNESS.md)): the exponent was rationalised with
+  `Fraction(e).limit_denominator(128)` and admitted on a *binary64*
+  distance test, which measures exactly `0.0` for `0.1`. Verdicts move
+  **VERIFIED → UNKNOWN** on every non-dyadic non-integer `pow` exponent;
+  affects 0.2.0 development only.
+
+- **No emitted term is a unary `(* t)`** (audit 0.2.0 S2): `q == 1` wrote
+  an application SMT-LIB2's `Reals` theory does not define — cvc5 1.3.4
+  segfaults on it, z3 reads it as the operand. Every repeated product now
+  goes through one renderer (`smt._repeated_product`).
+
+- **The rational-`pow` replay is exact** (audit 0.2.0 S3, M8): it computed
+  `Fraction(float(base) ** exp)` while every REFUTED witness claimed
+  "independent exact-rational replay". It now extracts exact integer
+  `q`-th roots, or declines the witness through the existing
+  "witness not independently replayable" channel. The public `check()` no
+  longer raises `EmissionInfidelityError` on correct emissions, and the
+  replay's `OverflowError` on large operands is gone with the float.
+
+- **The fragment stamp follows the aux encoding** (audit 0.2.0 M9): a
+  non-integer `pow` over a declaration-independent base was stamped
+  `QF_LRA` while the emission wrote `(* aux aux)`, and both backends
+  refused the script.
 
 - **Relational assumes forwarded to solver**: when `assume(e1 < e2)`
   involves two variable operands (a constraint the interval domain cannot
@@ -115,8 +149,23 @@ SPDX-License-Identifier: Apache-2.0
 - The dependency problem (A ∧ ¬A = unknown in intervals) is inherent to
   the non-relational domain. Solver escalation is the designed remedy.
 - Rational pow requires non-negative base (JAX returns NaN for
-  `pow(negative, fractional)`). Denominator capped at 128 to bound
-  polynomial degree.
+  `pow(negative, fractional)`). One cap (128) bounds the degree of the
+  emitted `aux^q = x^p` on both sides.
+- **A non-integer `pow` exponent escalates only when it is a small dyadic
+  rational**, because that is the only case where the emitted rational IS
+  the traced binary64 literal. `x**(1.0/3.0)` and `x**0.1` decline to
+  UNKNOWN. Admitting them soundly is a larger feature and was deliberately
+  not built in this round: it needs the substitution *stamped as an
+  assumption*, its amplified error `|x^a − x^(p/q)| ≤ x^a·(e^{|δ|·ln hi} − 1)`
+  bounded against the obligation's slack over the declared box, and the
+  discharge direction barred until that bound exists. Declining is the
+  sound posture in the meantime.
+- **A REFUTED through a non-integer `pow` needs a witness whose exact
+  value is rational.** The replay extracts exact `q`-th roots; where the
+  true value is irrational it reports "witness not independently
+  replayable" and the obligation stays UNKNOWN rather than resting on a
+  rounded float. Deciding those points needs exact algebraic (not
+  rational) arithmetic in the replay, which this release does not have.
 
 ---
 
