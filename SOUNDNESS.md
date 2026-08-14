@@ -5210,7 +5210,8 @@ verdicts:
     for, same posture: detect by attempting the conversion, report the
     operand's `bit_length()` instead of 4300 digits, never raise the
     process-global limit on a caller's behalf. **Six sites, found in three
-    passes, and the order matters more than the count:**
+    passes — each pass found the previous one incomplete, so treat the
+    count as the number found, not the number that exist:**
 
     * Both refusals in `_exact_rational_power` — a clean decline became a
       `ValueError` out of the public `evaluate_predicate`. Introduced by
@@ -5220,29 +5221,52 @@ verdicts:
       diagnosis of *the emitted problem does not mean the obligation*, so
       the crash replaced the loud alarm's only explanation with a
       traceback out of `fractions.py`.
-    * `_require_valid_refutation` and `make_validated_witness` in
-      `solvers.py` — **also pre-existing, and they are why a third pass
-      was needed.** Repairing `witness_is_valid` alone did not achieve its
-      own stated purpose: the alarm assembled its diagnosis safely and
-      then died one statement later, stringifying the same values to
-      attach them to the exception. The second is on the *success* path —
-      a replay-confirmed REFUTED crashing while its `Witness` was built.
+    * `solvers._require_valid_refutation` — **also pre-existing, and it is
+      why a third pass was needed.** Repairing `witness_is_valid` alone did
+      not achieve its own stated purpose: the alarm assembled its
+      diagnosis safely and then died one statement later, stringifying the
+      same values to attach them to the exception.
+    * `solvers.make_validated_witness` — pre-existing, on the *success*
+      path, and **it is not the same problem and does not get the same
+      answer**. `Witness.values` is DATA with a parsed contract —
+      `(input name, exact rational)`, which `reproduce._point` reads back
+      with `Fraction()` to re-execute the harness at the point — so a
+      summarised value would name a *different* point and break that
+      contract on another module's public surface. It fails closed
+      instead: an unrenderable model declines through `ReplayDeclined`,
+      the dispatch degrades to UNKNOWN with the reason quoted, and no
+      REFUTED is minted from a witness that cannot be re-executed. Applying
+      a message renderer to a data field is the category error, and it was
+      made once here before the audit caught it.
 
-    The renderer is therefore public (`obligation.fraction_text`) rather
-    than duplicated: it renders the same values on both sides of a module
-    boundary, and a second renderer is exactly how it came to be missing
-    in `solvers.py`. Nothing else in `src/` imports a private name across
-    modules.
+    The renderer is public (`obligation.fraction_text`) because what a
+    verdict says about a model value is *disclosure*, `smt._renderable` is
+    the same discipline at the other end, and a rendering rule two modules
+    must agree on should be nameable by both. **The reason first given for
+    making it public was false** — "nothing else in `src/` imports a
+    private name across modules"; measured by AST there are **50**, and
+    `smt.py` alone takes thirteen from `obligation.py`. Recorded because
+    this log is where a wrong justification for a published-surface change
+    belongs, not only the change.
 
-    No verdict was ever affected. The two decline sites replaced an
-    UNKNOWN that was already UNKNOWN; the four alarm and witness sites
-    replace one raise with another, or lose a correct REFUTED to a
-    formatting cap — never a wrong verdict. Reachability was measured
-    rather than assumed: 26 real backend runs over boxes and exponents
-    chosen to maximise model size (denormal boxes, one-ulp-wide boxes at
-    `1e±300`, `q` up to 128) produced a largest model value of **16
-    decimal digits** against the 4300-digit cap, so none of the six is
+    No verdict was ever affected. The decline sites replaced an UNKNOWN
+    that was already UNKNOWN; the alarm sites replace one raise with
+    another; the witness site now declines where it previously crashed
+    inside a guard that already degraded to UNKNOWN. Reachability was
+    measured rather than assumed: 26 real backend runs over boxes and
+    exponents chosen to maximise model size (denormal boxes, one-ulp-wide
+    boxes at `1e±300`, `q` up to 128) produced a largest model value of
+    **16 decimal digits** against the 4300-digit cap, so none of these is
     reachable from `check()` on any query yet constructed.
+
+    Two further rendering sites were swept and **assessed as safe rather
+    than repaired**, and are listed so the inventory is not read as
+    exhaustive-by-omission: `solvers.py`'s cvc5 external-binary parser and
+    its z3 wheel transport both meet an over-cap numeral and degrade to
+    UNKNOWN (`values=[]` and a quoted `ValueError` respectively). The
+    first labels a genuinely *rational* over-cap model `nonrational=True`
+    — sound in direction, untrue as a label, and left as a known
+    inaccuracy rather than silently corrected here.
 
   * **The fragment stamp gated on the wrong property.** A non-integer
     `pow` was recorded nonlinear only when its base descended from a

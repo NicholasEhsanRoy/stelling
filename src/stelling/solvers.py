@@ -1284,15 +1284,41 @@ def make_validated_witness(
     _require_valid_refutation(
         sl, values, solver_label=solver_label, script_text=script_text
     )
+    # `Witness.values` is DATA, not a message. Its contract is
+    # `(input name, exact rational)` (`verdict.Witness`) and
+    # `reproduce._point` parses it back with `Fraction()` to re-execute
+    # the harness at the point. So the bit-length fallback that makes a
+    # MESSAGE safe is the wrong instrument here: it would mint a REFUTED
+    # whose witness is not the value the solver produced and cannot be
+    # re-executed, moving a contained failure onto another module's public
+    # surface as a broken contract. Applying a message renderer to a data
+    # field is the category error.
+    #
+    # Fail closed instead — `smt._renderable`'s posture: detect by
+    # attempting the conversion, and when it cannot be done exactly,
+    # decline. `ReplayDeclined` is the channel that already means "no
+    # usable witness here"; the caller's handler turns it into UNKNOWN
+    # with the reason quoted and does not raise. Unreachable from
+    # `check()` on any query yet constructed (largest observed model
+    # value: 16 decimal digits against a 4300-digit cap), so this refuses
+    # rather than guesses at no measurable cost.
+    rendered = []
+    for inp in sl.inputs:
+        v = values[inp.name]
+        try:
+            rendered.append((inp.name, str(v)))
+        except ValueError as e:
+            raise ReplayDeclined(
+                f"the model value for {inp.name} cannot be recorded "
+                f"exactly: it is {fraction_text(v)} and CPython refuses to "
+                f"render it ({e}). A witness carries the exact rational so "
+                f"the reproducer can re-execute the harness at that point; "
+                f"a summarised value would name a different point, so no "
+                f"witness is issued"
+            ) from e
     return Witness(
         obligation_index=sl.index,
-        # fraction_text, not str(): the SUCCESS path has the same hazard.
-        # The refutation is real and replay-confirmed by the line above,
-        # and the witness would then crash while being rendered — a
-        # correct REFUTED lost to a formatting cap.
-        values=tuple(
-            (inp.name, fraction_text(values[inp.name])) for inp in sl.inputs
-        ),
+        values=tuple(rendered),
         produced_by=produced_by,
         replay=_REPLAY_SENTENCE,
         # which element(s) of an ARRAY assert operand are false at the

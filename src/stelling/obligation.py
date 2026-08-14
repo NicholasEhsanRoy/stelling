@@ -2705,14 +2705,25 @@ def fraction_text(fr: Fraction) -> str:
     :func:`_int_text`, so an unrenderable term degrades to its bit length
     rather than raising.
 
-    PUBLIC because a solver model value is rendered on BOTH sides of the
-    module boundary and there must be one renderer for it. ``solvers.py``
-    stringifies the same values when it builds the ``Witness`` and when it
-    raises :exc:`EmissionInfidelityError`; both used bare ``str()`` and so
-    kept the exact crash this function exists to prevent — the box-escape
-    alarm returned its diagnosis safely and then died one statement later
-    rendering the same value. Nothing else in ``src/`` imports a private
-    name across modules and this is not the place to start."""
+    PUBLIC because a solver model value is described on BOTH sides of the
+    module boundary and there must be one renderer for it:
+    ``solvers._require_valid_refutation`` attaches the same values to an
+    :exc:`EmissionInfidelityError`, and it used bare ``str()``, so the
+    box-escape alarm here returned its diagnosis safely and then died one
+    statement later rendering the same value.
+
+    **Public rather than imported privately, and the first reason given
+    for that was wrong.** It was "nothing else in ``src/`` imports a
+    private name across modules" — measured by AST, there are **50**, and
+    ``smt.py`` alone takes thirteen from this module. The real reason is
+    narrower and survives: this renderer is part of a *disclosure*
+    contract, not an internal helper. What a verdict says about a model
+    value is published surface, ``smt._renderable`` is the same discipline
+    at the other end, and a rendering rule that two modules must agree on
+    should be nameable by both. Note the counterpart restriction: only a
+    MESSAGE may be rendered this way. ``Witness.values`` is data with a
+    parsed contract, and ``make_validated_witness`` deliberately does NOT
+    call this — it declines instead."""
     if fr.denominator == 1:
         return _int_text(fr.numerator)
     return f"{_int_text(fr.numerator)}/{_int_text(fr.denominator)}"

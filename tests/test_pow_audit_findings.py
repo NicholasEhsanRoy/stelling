@@ -593,17 +593,37 @@ def test_the_dispatch_layer_renders_a_model_value_through_the_same_renderer():
         )
     assert exc.value.values == (("x0", f"<{bits}-bit integer>/2"),)
 
-    # the SUCCESS path: unbounded box, so the refutation is real and the
-    # Witness must be constructible
+    # the SUCCESS path is NOT the same problem, and must not get the same
+    # answer. `Witness.values` is DATA — `reproduce._point` parses it back
+    # with `Fraction()` to re-execute the harness — so a summarised value
+    # would name a different point and break that contract on another
+    # module's public surface. Fail closed: decline, so the dispatch
+    # degrades to UNKNOWN with the reason quoted (the caller's
+    # `except ReplayDeclined`), rather than minting a REFUTED whose
+    # witness is not the value the solver produced.
     unbounded = ObligationSlice(
         index=0, fragment="QF_LRA",
         inputs=(SliceInput(name="x0", var_id=0, lo=0.0, hi=float("inf")),),
         consts=(), eqns=eqns, root=pred, source_info=(),
     )
-    w = make_validated_witness(
-        unbounded, {"x0": huge}, "probe", solver_label="probe", script_text=""
+    with pytest.raises(ReplayDeclined) as declined:
+        make_validated_witness(
+            unbounded, {"x0": huge}, "probe",
+            solver_label="probe", script_text="",
+        )
+    assert "cannot be recorded exactly" in str(declined.value)
+
+    # and the refutation it declined to witness IS real — the decline is
+    # about recording the point, not about the point being wrong
+    assert witness_is_valid(unbounded, {"x0": huge}) is None
+
+    # a renderable model still produces a witness whose values round-trip
+    small = make_validated_witness(
+        unbounded, {"x0": Fraction(7, 2)}, "probe",
+        solver_label="probe", script_text="",
     )
-    assert w.values == (("x0", f"<{bits}-bit integer>/2"),)
+    assert small.values == (("x0", "7/2"),)
+    assert Fraction(small.values[0][1]) == Fraction(7, 2)
 
 
 def test_a_declined_replay_reaches_its_handler_and_stays_unknown(
