@@ -363,14 +363,14 @@ def test_pow_two_thirds_verifies():
 
 
 def test_pow_large_denominator_exponent_declines():
-    """x in [1, 4], x**(1/97) has denominator > 64 and must decline.
+    """x in [1, 4], x**(1/191) has denominator > 128 and must decline.
 
     Exponents whose rational representation has a denominator exceeding
-    RATIONAL_POW_DENOMINATOR_CAP are declined to avoid emitting
+    RATIONAL_POW_DENOMINATOR_CAP (128) are declined to avoid emitting
     extremely high-degree polynomials."""
     def h():
         x = any_array((), "float64", (1.0, 4.0))
-        return (assert_(x ** (1.0/97.0) >= 1.0),)
+        return (assert_(x ** (1.0/191.0) >= 1.0),)
 
     v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
     assert v.status == "UNKNOWN"
@@ -412,3 +412,118 @@ def test_pow_rational_straddle_base_declines():
     v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000)
     assert v.status == "UNKNOWN"
     assert any("negative" in n for n in v.notes)
+
+
+# ---------------------------------------------------------------------------
+# z3 tactic workaround for degree-80 factoring pathology (0.2.0)
+# ---------------------------------------------------------------------------
+
+
+need_z3 = pytest.mark.skipif(
+    not HAVE_Z3, reason="needs z3 wheel"
+)
+
+
+@need_z3
+def test_z3_tactic_workaround_degree_80_verifies():
+    """x**(1/80) on [1, 100] must VERIFY with z3 using the tactic chain.
+
+    The auxiliary-variable encoding for x**(1/80) produces a degree-80
+    polynomial (y^80 = x) with perfect-square bounds [1, 100]. Without
+    the tactic workaround, z3's default Solver() times out on this
+    (measured: >10s). The custom tactic chain (simplify, solve-eqs,
+    factor, purify-arith, tseitin-cnf, nlsat) restores the z3
+    cross-check (measured: 0.35-0.6s).
+
+    This test runs with ONLY z3 and verifies it discharges within the
+    timeout (not timing out)."""
+    def h():
+        x = any_array((), "float64", (1.0, 100.0))
+        return (assert_(x ** (1.0/80.0) >= 1.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=30_000,
+              solver="z3")
+    assert v.status == "VERIFIED", (
+        f"expected VERIFIED for x^(1/80) >= 1 on [1,100] with z3, "
+        f"got {v.status}; notes: {v.notes}"
+    )
+
+
+@need_solver
+def test_z3_tactic_workaround_degree_80_both_solvers():
+    """x**(1/80) on [1, 100] must VERIFY with both solvers (full portfolio).
+
+    The z3 tactic workaround ensures BOTH solvers discharge this obligation,
+    so the portfolio is not degraded. Before the workaround, z3 timed out
+    and only cvc5 answered."""
+    def h():
+        x = any_array((), "float64", (1.0, 100.0))
+        return (assert_(x ** (1.0/80.0) >= 1.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=30_000)
+    assert v.status == "VERIFIED", (
+        f"expected VERIFIED for x^(1/80) >= 1 on [1,100], got {v.status}; "
+        f"notes: {v.notes}"
+    )
+    # With the tactic workaround, the portfolio should NOT be degraded
+    # (both solvers answer successfully)
+    if HAVE_Z3 and HAVE_CVC5:
+        assert not any("PORTFOLIO DEGRADED" in n for n in v.notes), (
+            f"z3 tactic workaround failed — portfolio is still degraded; "
+            f"notes: {v.notes}"
+        )
+
+
+@need_z3
+def test_z3_tactic_workaround_does_not_fire_on_non_aux_scripts():
+    """Linear/simple nonlinear scripts without aux_ must still use default Solver.
+
+    Ensures the tactic workaround does not regress the common case."""
+    def h():
+        x = any_array((), "float64", (1.0, 4.0))
+        return (assert_(x * x >= 1.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=20_000,
+              solver="z3")
+    assert v.status == "VERIFIED", (
+        f"expected VERIFIED for x^2 >= 1 on [1,4] with z3 default solver, "
+        f"got {v.status}; notes: {v.notes}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rational pow with denominators > 6 (0.2.0 — cap raised to 64)
+# ---------------------------------------------------------------------------
+
+
+@need_solver
+def test_pow_denominator_10_verifies():
+    """x in [1, 100], x**(1/10) >= 1 — denominator 10, within the cap of 64.
+
+    This tests that denominators > 6 (the old cap) now work correctly."""
+    def h():
+        x = any_array((), "float64", (1.0, 100.0))
+        return (assert_(x ** (1.0/10.0) >= 1.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=30_000)
+    assert v.status == "VERIFIED", (
+        f"expected VERIFIED for x^(1/10) >= 1 on [1,100], got {v.status}; "
+        f"notes: {v.notes}"
+    )
+
+
+@need_solver
+def test_pow_denominator_64_verifies():
+    """x in [1, 100], x**(1/64) >= 1 — denominator 64, within the cap of 128.
+
+    A high-degree polynomial (y^64 = x) that the z3 tactic workaround
+    handles. Tests mid-range denominators that were at the old cap."""
+    def h():
+        x = any_array((), "float64", (1.0, 100.0))
+        return (assert_(x ** (1.0/64.0) >= 1.0),)
+
+    v = check(h, vacuity_mode="inputs-only", solver_timeout_ms=30_000)
+    assert v.status == "VERIFIED", (
+        f"expected VERIFIED for x^(1/64) >= 1 on [1,100], got {v.status}; "
+        f"notes: {v.notes}"
+    )

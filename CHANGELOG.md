@@ -66,16 +66,32 @@ SPDX-License-Identifier: Apache-2.0
 
 - **`pow` emission** (integer AND rational exponents): integer exponents
   (`x**2`, `x**3`, `x**(-1)`) expand to explicit products. Rational
-  exponents (`x**(1/2)`, `x**(1/3)`, `x**(2/3)`) emit as auxiliary-variable
-  polynomial constraints (`y^q = x^p` with sign constraints) — both z3 and
-  cvc5 handle these in QF_NRA. Denominator capped at 6; base must be
-  non-negative (JAX returns NaN for `pow(negative, fractional)`).
+  exponents (`x**(1/2)`, `x**(1/3)`, `x**(2/3)`, up to `x**(1/80)`) emit
+  as auxiliary-variable polynomial constraints (`y^q = x^p` with sign
+  constraints) — both z3 and cvc5 handle these in QF_NRA. Denominator
+  capped at 128; base must be non-negative (JAX returns NaN for
+  `pow(negative, fractional)`).
 
 - **Relational assumes forwarded to solver**: when `assume(e1 < e2)`
   involves two variable operands (a constraint the interval domain cannot
   apply), the comparison is recorded and emitted as a positive axiom
   alongside the negated obligation. The solver sees the full constraint
   set.
+
+- **z3 tactic workaround for high-degree polynomials**: when a solver
+  obligation contains a rational-pow auxiliary variable (`y^q = x^p`
+  encoding), z3 uses a custom tactic chain (`simplify`, `solve-eqs`,
+  `factor`, `purify-arith`, `tseitin-cnf`, `nlsat`) instead of the
+  default `Solver()`. This restores the z3 cross-check on high-degree
+  polynomials (measured: d=80 from 10s+ timeout to 0.35-0.6s). The tactic
+  is activated automatically; cvc5 handles these natively.
+
+- **Per-obligation withholding refinement**: when relational assumes are
+  only partially emitted for a given obligation slice (some operands fall
+  outside the backward cone), the solver ran over a wider domain than
+  intended. The per-obligation withholding now un-withholds a violation
+  ONLY when ALL relational assumes were actually emitted for that specific
+  obligation's script — a genuine violation from the constrained domain.
 
 - **Emission guards resolve through inlined aliases**: guards (div, is_finite)
   now follow the slicer's alias chain to find propagated intervals for
@@ -99,8 +115,8 @@ SPDX-License-Identifier: Apache-2.0
 - The dependency problem (A ∧ ¬A = unknown in intervals) is inherent to
   the non-relational domain. Solver escalation is the designed remedy.
 - Rational pow requires non-negative base (JAX returns NaN for
-  `pow(negative, fractional)`). Denominator capped at 6 to bound solver
-  time.
+  `pow(negative, fractional)`). Denominator capped at 128 to bound
+  polynomial degree.
 
 ---
 
