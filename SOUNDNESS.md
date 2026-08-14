@@ -5252,12 +5252,28 @@ verdicts:
     No verdict was ever affected. The decline sites replaced an UNKNOWN
     that was already UNKNOWN; the alarm sites replace one raise with
     another; the witness site now declines where it previously crashed
-    inside a guard that already degraded to UNKNOWN. Reachability was
-    measured rather than assumed: 26 real backend runs over boxes and
-    exponents chosen to maximise model size (denormal boxes, one-ulp-wide
-    boxes at `1e±300`, `q` up to 128) produced a largest model value of
-    **16 decimal digits** against the 4300-digit cap, so none of these is
-    reachable from `check()` on any query yet constructed.
+    inside a guard that already degraded to UNKNOWN.
+
+    **Reachability — and the first figure recorded here was wrong, which
+    is the more useful half of this entry.** It said 26 backend runs over
+    boxes and exponents chosen to maximise model size produced a largest
+    model value of "16 decimal digits" against the 4300-digit cap, and
+    concluded the hazard was out of reach. That measured the wrong
+    quantity: the harnesses never nested `pow`, and the number counted a
+    rendered `n/d` string rather than the integer term the cap actually
+    applies to. Re-measured through `check()` on an ordinary traced
+    harness — `x ** 0.5` nested eight deep on `[1, 1e300]`, threshold
+    under the box maximum — a REFUTED witness carries a model term of
+    **4091 digits: 95% of the cap.** The term size roughly doubles per
+    nesting level (2035 at seven, 4091 at eight) and collapses again at
+    nine, where the solver picks a different model.
+
+    The conclusion the old sentence drew survives — nothing crossed the
+    cap in any run, and every gate degrades to UNKNOWN rather than
+    misreporting — but its *margin* does not, and the margin is the part a
+    future reader would rely on. These arms are not defence against
+    something unreachable; they are defence against something reached to
+    within five percent by a two-line harness.
 
     Two further rendering sites were swept and **assessed as safe rather
     than repaired**, and are listed so the inventory is not read as

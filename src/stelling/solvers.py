@@ -1298,10 +1298,18 @@ def make_validated_witness(
     # attempting the conversion, and when it cannot be done exactly,
     # decline. `ReplayDeclined` is the channel that already means "no
     # usable witness here"; the caller's handler turns it into UNKNOWN
-    # with the reason quoted and does not raise. Unreachable from
-    # `check()` on any query yet constructed (largest observed model
-    # value: 16 decimal digits against a 4300-digit cap), so this refuses
-    # rather than guesses at no measurable cost.
+    # with the reason quoted and does not raise.
+    #
+    # NOT a remote hazard. Measured through `check()` on a traced harness
+    # — `x ** 0.5` nested eight deep on `[1, 1e300]` with the threshold
+    # under the box maximum — a REFUTED witness carries a model term of
+    # **4091 digits against the 4300-digit cap: 95% of it, with no
+    # decline yet observed**. An earlier note here claimed "16 decimal
+    # digits", which measured the wrong quantity (a rendered `n/d` string
+    # from harnesses that never nested `pow`) and made the margin look
+    # like 99.6% when it is 5%. So this arm is close to live: it costs
+    # nothing measurable today, and the reason to keep it is not that the
+    # input is unreachable but that it is nearly reached.
     rendered = []
     for inp in sl.inputs:
         v = values[inp.name]
