@@ -5186,6 +5186,37 @@ verdicts:
     escalation) is gone with the float, confirmed by re-running the
     reproducer rather than by inference.
 
+    **WHICH REFUSALS ARE ON WHICH SIDE OF THAT LINE**, because the split
+    is a decision about who is accused and nothing downstream re-derives
+    it. `ReplayDeclined` is for a refusal whose emission is CORRECT and
+    which only this evaluator cannot finish — the rational-`pow` root
+    above, and nothing else today. The replay's other refusal, a
+    value-changing `convert_element_type`, is the opposite and stays
+    `ReplayError`: the emission writes a non-bool `convert_element_type`
+    as the IDENTITY on its operand, so a script carrying a
+    `float64 → float32` narrowing has the rounding simply absent and
+    states a different function from the one the harness computes — a
+    witness reaching that point accuses the script. Two guards decline
+    such a slice long before replay, which is exactly why the raise is a
+    tripwire and why demoting it to a decline was silent: reverting that
+    one word left the entire suite green. It is now pinned by CHANNEL
+    (`ReplayError` and not the `ReplayDeclined` subclass), together with
+    the emission fact the channel rests on.
+
+    **A decline message may not crash on the operand it declines.** Both
+    refusals in `_exact_rational_power` interpolate the base, and the base
+    is a solver model value that nothing bounds; CPython raises
+    `ValueError` on `int` → `str` past `sys.get_int_max_str_digits()`
+    (4300), so `Fraction(3**10000, 2)` turned a clean decline into a crash
+    out of the public `evaluate_predicate` / `witness_is_valid` — the
+    UNKNOWN-with-reason replaced by a `ValueError` raised from a
+    formatting expression. Same hazard `smt._renderable` exists for, same
+    posture: detect by attempting the conversion, report the operand's
+    `bit_length()` instead of 4300 digits, and never raise the
+    process-global limit on a caller's behalf. Introduced by this change
+    and repaired before release; no verdict was ever affected, because the
+    crash replaced a decline that was already UNKNOWN.
+
   * **The fragment stamp gated on the wrong property.** A non-integer
     `pow` was recorded nonlinear only when its base descended from a
     declaration — but the aux encoding introduces `aux^q = x^p`, a
@@ -5255,8 +5286,9 @@ verdicts:
   are rewritten at dyadic exponents of the same shape (`0.125`, `0.75`,
   `1/16`, `1/128`) so the rows keep their subjects, and each carries the
   reason its exponent changed. Every construction above is a permanent
-  regression test (`tests/test_pow_audit_findings.py`, 62 cases); six
-  targeted mutations — one per finding — were applied to a copy of the
-  source and each was measured to redden at least one of them.
+  regression test (`tests/test_pow_audit_findings.py`, 66 cases); eight
+  targeted mutations — one per finding, plus one per repair above — were
+  applied to a copy of the source and each was measured to redden at
+  least one of them.
 
 *(no releases yet)*

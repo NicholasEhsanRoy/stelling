@@ -161,25 +161,54 @@ INTEGER_POW_EXPANSION_CAP = 64
 # `aux^q = x^p`, whose degree is max(p, q) — BOTH sides, which is why one
 # cap governs numerator and denominator alike. Beyond this the polynomial
 # risks solver timeout, so the obligation declines. 128 rather than the
-# expansion cap's 64: measurements showed both solvers handle all degrees
-# up to 100 in <1 s on this construct (cvc5 natively, z3 via the custom
-# tactic chain in solvers.py that fires on scripts containing `aux_`
-# declarations, which every emission of this shape has). Whether the
-# inline expansion could afford the same 128 is unmeasured, and raising it
-# would ADMIT harnesses that decline today — the direction that needs the
-# measurement, not the direction that needs a comment.
+# expansion cap's 64: measurements showed both solvers handle every
+# denominator up to 100 AT NUMERATOR 1 in <1 s on this construct (cvc5
+# natively, z3 via the custom tactic chain in solvers.py that fires on
+# scripts containing `aux_` declarations, which every emission of this
+# shape has). The numerator qualifier is load-bearing and is the subject
+# of the next paragraph. Whether the inline expansion could afford the
+# same 128 is unmeasured, and raising it would ADMIT harnesses that
+# decline today — the direction that needs the measurement, not the
+# direction that needs a comment.
 #
-# THE WORST ADMITTED CASE IS NOT THE ONE THOSE MEASUREMENTS TIMED, and it
-# is stated rather than left to be discovered: cost is superlinear in the
-# PAIR, not in the degree alone. `x**(1/128)` (p=1, q=128) discharges on
-# [1, 100] in 0.43 s across the portfolio, while `x**(127/128)` — the
-# corner where both sides are near the cap — takes 47 s (z3 18 s, cvc5
-# 28 s). That is a solve that FINISHES, bounded by the caller's own
-# `solver_timeout_ms`, and a timeout is never a VERIFIED; it is not a
-# pathological script of the kind this cap exists to refuse. Every
-# admissible exponent has q a power of two, since the exact value of a
-# binary64 is dyadic (:func:`pow_exponent_rational`), so the reachable
-# denominators are exactly 2, 4, 8, 16, 32, 64, 128.
+# THE p=1 FAMILY IS THE EASY ONE, so the sweep above says nothing about
+# the worst admitted case. The admitted set is small enough to measure
+# whole, and it was: every admissible exponent has q a power of two,
+# since the exact value of a binary64 is dyadic
+# (:func:`pow_exponent_rational`), so the reachable denominators are
+# exactly 2, 4, 8, 16, 32, 64, 128, the numerators are the odd values
+# below 128, and the admitted set is 7 x 64 = 448 pairs. All 448 were
+# run (2026-08-14) as
+#
+#     x = any_array((), "float64", (1.0, 100.0))
+#     assert_(x ** (p / q) >= 1.0)
+#
+# at `solver_timeout_ms=60000` on the default portfolio. Every one of the
+# 448 was decided BY A SOLVER on the obligation itself — `unsat` in
+# QF_NRA from both wheels, never discharged by interval propagation and
+# never timed out (worst single backend 53.6 s) — so these are solve
+# costs and not the cost of some easier query. Portfolio wall, the two
+# backends in sequence:
+#
+#     x**(1/128)     0.41 s  (cvc5  0.06 + z3  0.30)  the cheap corner
+#     x**(127/128)  49.25 s  (cvc5 30.13 + z3 19.11)  both sides at cap
+#     x**(105/128)  73.47 s  (cvc5 19.82 + z3 53.64)  THE WORST OF 448
+#     x**(127/2)     0.11 s  (cvc5  0.07 + z3  0.03)  degree 127, one
+#                                                     below 127/128's
+#
+# Read off that: cost tracks the DENOMINATOR, not the degree max(p, q)
+# the cap bounds — `x**63.5` is degree 127 and costs 0.11 s — and within
+# the q=128 row it is not monotone in the numerator either (p=105 is
+# 73 s, p=113 is 41 s, p=127 is 49 s). So "both sides near the cap" was
+# the wrong guess at the worst case, by 49%, and no closed form is
+# offered here in place of the sweep. The per-row worst rises 0.9, 6.5,
+# 6.5, 7.6, 9.0, 19.1, 73.5 s for q = 2 … 128. Seconds are
+# machine-specific (24-core x86-64, cvc5 1.3.4 wheel, z3 5.0.0 wheel);
+# the ordering is the content.
+#
+# Every one of the 448 is a solve that FINISHES, bounded by the caller's
+# own `solver_timeout_ms`, and a timeout is never a VERIFIED; none is a
+# pathological script of the kind this cap exists to refuse.
 RATIONAL_POW_DEGREE_CAP = 128
 
 _FLOAT_INPUT_DTYPES = frozenset({"float16", "float32", "float64"})
@@ -2641,6 +2670,44 @@ def _exact_integer_root(n: int, q: int) -> int | None:
     return x if x**q == n else None
 
 
+def _int_text(n: int) -> str:
+    """``n`` as decimal digits, or its BIT LENGTH when CPython refuses to
+    render it.
+
+    THE HAZARD :func:`stelling.smt._renderable` EXISTS FOR, met at the other
+    end. CPython caps ``int`` -> ``str`` at ``sys.get_int_max_str_digits()``
+    (4300 since 3.11) and RAISES ``ValueError`` past it. There the integer
+    was being written into a script; here it is being written into a REFUSAL
+    MESSAGE, where the raise is worse — a clean decline becomes a crash out
+    of :func:`evaluate_predicate` / :func:`witness_is_valid`, both public,
+    and the escalation that was about to record "witness not independently
+    replayable" records a ``ValueError`` from a formatting expression
+    instead. Nothing bounds the operand: it is a solver model value, and
+    ``Fraction(3**10000, 2)`` (a 15850-bit numerator) is already over the
+    cap.
+
+    Same posture as ``_renderable``: detect by ATTEMPTING the conversion,
+    never by raising ``sys.set_int_max_str_digits`` — a global process
+    mutation, performed by a library, on behalf of a caller who did not ask
+    for it. The fallback reports magnitude instead of digits, which is what
+    a reader of a decline needs; 4300 digits of numerator identify nothing.
+    """
+    try:
+        return str(n)
+    except ValueError:
+        return f"{'-' if n < 0 else ''}<{n.bit_length()}-bit integer>"
+
+
+def _fraction_text(fr: Fraction) -> str:
+    """``fr`` rendered the way ``str(Fraction)`` renders it — ``n`` when the
+    denominator is 1, ``n/d`` otherwise — with every term through
+    :func:`_int_text`, so an unrenderable term degrades to its bit length
+    rather than raising."""
+    if fr.denominator == 1:
+        return _int_text(fr.numerator)
+    return f"{_int_text(fr.numerator)}/{_int_text(fr.denominator)}"
+
+
 def _exact_rational_power(base: Fraction, p: int, q: int) -> Fraction:
     """``base ** (p / q)`` as an exact rational, or
     :exc:`ReplayDeclined` when that real is irrational.
@@ -2668,16 +2735,17 @@ def _exact_rational_power(base: Fraction, p: int, q: int) -> Fraction:
         # of a point that should not exist.
         raise ReplayDeclined(
             f"replay cannot evaluate x^({p}/{q}) at the negative base "
-            f"{base}: it has no real value for even q, and jax computes "
-            f"NaN here"
+            f"{_fraction_text(base)}: it has no real value for even q, and "
+            f"jax computes NaN here"
         )
     root_num = _exact_integer_root(base.numerator, q)
     root_den = _exact_integer_root(base.denominator, q)
     if root_num is None or root_den is None:
         raise ReplayDeclined(
-            f"{base}^({p}/{q}) is irrational — {base.numerator} and/or "
-            f"{base.denominator} is not a perfect {q}-th power — and the "
-            f"replay is exact rational arithmetic; it will not decide "
+            f"{_fraction_text(base)}^({p}/{q}) is irrational — "
+            f"{_int_text(base.numerator)} and/or "
+            f"{_int_text(base.denominator)} is not a perfect {q}-th power — "
+            f"and the replay is exact rational arithmetic; it will not decide "
             f"this point with a rounded float"
         )
     return Fraction(root_num, root_den) ** p
@@ -2848,11 +2916,26 @@ def _root_elements(
                 # (the emission declines such a slice before replay sees it),
                 # which is precisely why it could sit here unnoticed.
                 if not (src == dst or (src, dst) in _EXACT_CONVERSIONS):
-                    # ReplayDeclined, not ReplayError: this is the replay
-                    # refusing an inexact evaluation, exactly like the
-                    # rational-pow refusal — a fact about this evaluator,
-                    # not evidence that the script was wrong.
-                    raise ReplayDeclined(
+                    # ReplayError, NOT ReplayDeclined, and the channel is the
+                    # whole content of this branch. The emission writes a
+                    # non-bool `convert_element_type` as the IDENTITY on its
+                    # operand (:func:`stelling.smt.emit`, the
+                    # `names[out.id] = tuple(ins[0][i] for i in idx)` line), so
+                    # a script carrying a value-changing narrowing has the
+                    # rounding simply ABSENT — it states a different function
+                    # from the one the harness computes. A witness that reaches
+                    # here therefore accuses the SCRIPT, which is exactly what
+                    # ReplayError means. It is NOT the replay falling behind a
+                    # correct emission, which is the other channel
+                    # (:exc:`ReplayDeclined`) and which the rational-pow
+                    # refusal above genuinely is: there the emitted
+                    # `aux^q = x^p` means the obligation exactly and only this
+                    # evaluator cannot finish it. Being unreachable is why a
+                    # demotion to a decline is SILENT — reverting this one word
+                    # left the whole suite green — so the channel itself is
+                    # pinned, in tests/test_pow_audit_findings.py, together
+                    # with the identity emission it rests on.
+                    raise ReplayError(
                         f"replay cannot re-derive a value-changing conversion "
                         f"{src!r} -> {dst!r}: the exact rational would have to "
                         f"be rounded to the destination format, and replay "

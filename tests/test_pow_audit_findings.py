@@ -26,13 +26,22 @@ re-derived in-repo:
   stamped ``QF_LRA`` while the emission wrote ``(* aux aux)``, and both
   backends refused the script.
 
-Everything above the solver divider runs with no jax and no solver.
+Plus the follow-up repairs to the S3 fix itself, in their own section: the
+``ReplayError`` / ``ReplayDeclined`` split decides WHO IS ACCUSED and
+nothing downstream re-derives it, so the channel of each refusal is pinned
+by type rather than by message text, its decline messages are pinned
+against crashing on an unbounded model operand, and the dispatch layer's
+``except ReplayDeclined`` is driven by the one transport shape that is not
+preempted by the installed wheels.
+
+Everything above the solver divider runs with no jax and no real solver.
 """
 
 from __future__ import annotations
 
 import math
 import re
+import sys
 from decimal import Decimal, getcontext
 from fractions import Fraction
 
@@ -46,13 +55,19 @@ from stelling.obligation import (
     ObligationSlice,
     RATIONAL_POW_DEGREE_CAP,
     ReplayDeclined,
+    ReplayError,
+    SliceInput,
     _exact_integer_root,
     _exact_rational_power,
+    evaluate_predicate,
     pow_exponent_rational,
     rational_pow_problem,
     witness_is_valid,
 )
+from stelling.propagate import propagate
+from stelling.solvers import SolverConfig, escalate, make_solver_verdict
 from test_obligation_slice import BOOL, any_eqn, close, eqn, lit, sole_slice, var
+from test_solver_dispatch import VERSIONS, fake_solver
 
 
 # --- S1: the emitted rational must denote the traced literal ------------------
@@ -133,6 +148,45 @@ def test_s1_every_admissible_denominator_is_a_power_of_two():
         assert q & (q - 1) == 0, f"{e!r} admitted with denominator {q}"
         assert q >= 2
     assert seen, "the sweep admitted nothing — it is not measuring anything"
+
+
+def test_the_admitted_exponent_set_is_the_448_pairs_the_cap_comment_swept():
+    """The admitted set is small enough to enumerate, and the cap's
+    comment now reports a sweep over ALL of it rather than an extremum
+    over a set nobody counted (the previous text named ``127/128`` "the
+    worst admitted case"; ``105/128`` is 49% worse, and both were reached
+    only by measuring the whole set).
+
+    This pins the set the comment claims to have covered — 7 reachable
+    denominators x 64 numerators = 448 pairs — so raising the cap, or
+    admitting a non-dyadic exponent, cannot leave those figures stale and
+    silent. Solver-free: it is the admission guard that is enumerated,
+    not the sweep."""
+    denominators = tuple(1 << k for k in range(1, 8))
+    admitted: set[tuple[int, int]] = set()
+    for q in denominators:
+        for p in range(1, RATIONAL_POW_DEGREE_CAP + 1):
+            if Fraction(p, q).denominator != q:
+                continue  # not in lowest terms: a smaller-q pair, counted there
+            e = p / q
+            assert Fraction(e) == Fraction(p, q), (
+                f"{p}/{q} is not the exact value of the literal {e!r}, so it "
+                f"is not a pair the guard can admit"
+            )
+            assert rational_pow_problem(e) is None, (p, q, e)
+            assert max(p, q) <= RATIONAL_POW_DEGREE_CAP
+            admitted.add((p, q))
+    assert sorted({q for _, q in admitted}) == list(denominators) == [
+        2, 4, 8, 16, 32, 64, 128
+    ]
+    assert all(
+        sum(1 for _, qq in admitted if qq == q) == 64 for q in denominators
+    )
+    assert len(admitted) == 448
+    # and the pair the comment reports as the worst, plus the one it used
+    # to name, are both in it — with 127/2 (degree 127) showing that the
+    # cost the comment reports does NOT track the degree the cap bounds
+    assert {(105, 128), (127, 128), (127, 2)} <= admitted
 
 
 # --- M7: the two caps bound one quantity, and both bind ----------------------
@@ -308,6 +362,190 @@ def test_m8_a_huge_rational_power_replays_without_overflowing():
     assert _exact_rational_power(base, 3, 2) == Fraction(10) ** 375
     with pytest.raises(ReplayDeclined):  # 10^249 is not a perfect square
         _exact_rational_power(Fraction(10) ** 249, 3, 2)
+
+
+# --- S3's two channels stay two channels -------------------------------------
+#
+# `ReplayDeclined` was introduced by the S3 fix to separate two things the
+# replay had been conflating. Which channel a refusal takes is a decision
+# about WHO IS ACCUSED, and nothing downstream re-derives it: a `ReplayError`
+# is an alarm about the EMISSION and reaches the caller as a raise, while a
+# `ReplayDeclined` costs a REFUTED and lands as UNKNOWN. The two tests below
+# pin the channel of the two refusals that are easiest to move by editing one
+# word, because reverting either word leaves the rest of the suite green.
+
+
+F32 = ir.Aval(kind="ShapedArray", shape=(), dtype="float32")
+
+
+def narrowing_convert_slice():
+    """A slice whose only real work is ``float64 -> float32``, built by
+    hand because NOTHING IN THE PIPELINE WILL BUILD IT: the interval
+    transfer refuses a value-changing conversion
+    (``propagate._EXACT_CONVERSIONS``) and the admission guard declines
+    the slice again on the same membership test
+    (``obligation._Slicer._validate``). Constructing the slice directly is
+    the honest way to say what is being simulated — a hole in those
+    guards, nothing more — and it simulates exactly the hole the audit
+    opened by neutering ``_validate``."""
+    x, y, pred = var(0), var(1, F32), var(2, BOOL)
+    return ObligationSlice(
+        index=0,
+        fragment="QF_LRA",
+        inputs=(SliceInput(name="x0", var_id=0, lo=1.0, hi=2.0),),
+        consts=(),
+        eqns=(
+            eqn("convert_element_type", [x], y,
+                params=[("new_dtype", "float32")]),
+            eqn("le", [y, lit(2.0)], pred),
+        ),
+        root=pred,
+        source_info=(),
+    )
+
+
+def test_a_value_changing_conversion_accuses_the_script():
+    """The replay's refusal of a value-changing ``convert_element_type``
+    is a ``ReplayError`` — an alarm about the emission — and never the
+    ``ReplayDeclined`` subclass.
+
+    The reason is on the emission side and is asserted here too: a
+    non-bool ``convert_element_type`` emits as the IDENTITY on its
+    operand, so a script carrying a ``float64 -> float32`` narrowing has
+    the rounding simply ABSENT and states a different function from the
+    one the harness computes. A witness reaching the replay through such
+    a script is evidence the script was wrong, which is what
+    ``ReplayError`` means; ``ReplayDeclined`` means the opposite — a
+    correct emission the replay cannot finish — and routes to UNKNOWN
+    without raising.
+
+    THE PATH IS UNREACHABLE TODAY: two independent guards decline this
+    slice before any solver sees it (see ``narrowing_convert_slice``).
+    This test exists because that is exactly what makes the raise a
+    tripwire — a demotion to ``ReplayDeclined`` costs nothing until the
+    day a guard has a hole, and then it costs the alarm. Reverting the
+    one word leaves the whole rest of the suite green."""
+    sl = narrowing_convert_slice()
+    with pytest.raises(ReplayError) as exc:
+        evaluate_predicate(sl, {"x0": Fraction(3, 2)})
+    assert not isinstance(exc.value, ReplayDeclined), (
+        f"the value-changing-conversion refusal has been demoted to the "
+        f"decline channel: it would now degrade to UNKNOWN instead of "
+        f"raising, and the emission for this conversion is the identity — "
+        f"so a witness here accuses the script, not the replay "
+        f"({exc.value})"
+    )
+
+    # THE EMISSION FACT THE CHANNEL RESTS ON. The narrowing is not
+    # approximated in the script, or flagged in it — it is absent: the
+    # predicate is written directly over the declared constant, so the
+    # script says `x0 <= 2` about a program that says `f32(x0) <= 2`.
+    script = smt.emit(sl, "z3", 5_000).text
+    assert "(<= x0 2.0)" in script, (
+        f"the emission no longer writes a narrowing convert_element_type as "
+        f"the identity; re-derive which channel the replay's refusal belongs "
+        f"to before changing it\n{script}"
+    )
+
+
+def test_a_decline_message_survives_an_unrenderable_operand():
+    """A refusal message may not crash on the operand it is refusing.
+
+    Both refusals in ``_exact_rational_power`` interpolate the base, and
+    the base is a SOLVER MODEL VALUE — nothing bounds it. CPython raises
+    ``ValueError`` on ``int`` -> ``str`` past
+    ``sys.get_int_max_str_digits()`` (4300), so ``Fraction(3**10000, 2)``
+    turned a clean decline into a crash out of ``evaluate_predicate`` and
+    ``witness_is_valid``, both public. Same hazard as
+    ``smt._renderable``, same posture: detect by attempting the
+    conversion, report magnitude instead of digits, never mutate the
+    process-global limit."""
+    limit = sys.get_int_max_str_digits()
+    huge = Fraction(3 ** 10000, 2)
+    # over the cap, whatever the cap is set to (never computed by str())
+    assert huge.numerator.bit_length() / math.log2(10) > limit
+    with pytest.raises(ValueError):
+        str(huge.numerator)  # the crash this message used to inherit
+
+    # the irrational refusal: 3^10000 IS a perfect square, the denominator 2
+    # is not, so this declines with both terms in the message
+    with pytest.raises(ReplayDeclined) as irr:
+        _exact_rational_power(huge, 1, 2)
+    assert f"{huge.numerator.bit_length()}-bit integer" in str(irr.value)
+
+    # the negative-base refusal, which short-circuits before the roots
+    with pytest.raises(ReplayDeclined) as neg:
+        _exact_rational_power(-huge, 1, 2)
+    assert f"-<{huge.numerator.bit_length()}-bit integer>" in str(neg.value)
+
+    # and through the public replay surface, which is what a caller sees
+    x, root, pred = var(0), var(1), var(2, BOOL)
+    sl = ObligationSlice(
+        index=0,
+        fragment="QF_NRA",
+        inputs=(SliceInput(name="x0", var_id=0, lo=0.0, hi=float("inf")),),
+        consts=(),
+        eqns=(
+            eqn("pow", [x, lit(0.5)], root),
+            eqn("le", [root, lit(2.0)], pred),
+        ),
+        root=pred,
+        source_info=(),
+    )
+    with pytest.raises(ReplayDeclined):  # a decline, NOT a ValueError
+        evaluate_predicate(sl, {"x0": huge})
+
+    assert sys.get_int_max_str_digits() == limit, (
+        "the replay raised the process-global int->str limit; that is a "
+        "library mutating a caller's interpreter (smt._renderable)"
+    )
+
+
+def test_a_declined_replay_reaches_its_handler_and_stays_unknown(
+    monkeypatch, tmp_path
+):
+    """The dispatch layer's ``except ReplayDeclined`` (solvers.py) is
+    REACHABLE, and this is the case that reaches it.
+
+    On the `pow` row the two INSTALLED wheels preempt it: the model
+    carries the ``aux`` constant, ``aux`` is algebraic exactly when the
+    exact value is irrational, and both wheels flag an algebraic model
+    value as ``nonrational`` a hundred lines earlier. What does NOT
+    preempt it is a transport that reports a rational-looking model
+    WITHOUT flagging — which is the shape of the external cvc5-binary
+    transport, not installed here and never driven by a real algebraic
+    model. The fake below is exactly that transport: ``sat`` with
+    ``x0 = 2`` on ``x**0.5 <= 1.0`` over ``[1, 9]``. The point is a
+    genuine violation (``sqrt 2 > 1``) and the emission ``aux^2 = x0,
+    aux >= 0`` is exactly right, so the replay's refusal is about the
+    REPLAY and must not become a raise, a REFUTED, or a fabricated
+    witness — it is an UNKNOWN quoting why."""
+    fake = fake_solver(
+        tmp_path,
+        'print("sat")\nprint("(")\n'
+        'print("  (define-fun x0 () Real 2.0)")\n'
+        'print(")")',
+        "cvc5-rational-but-irrational-root",
+    )
+    monkeypatch.setenv("STELLING_CVC5", fake)
+    q = pow_query(0.5, lo=1.0, hi=9.0, bound=1.0)
+    p = propagate(q)
+    assert [o.status for o in p.obligations] == ["unknown"]
+    esc = escalate(q, p, SolverConfig(timeout_ms=2000, only=("cvc5",)))
+    (record,) = esc.records
+    assert record.outcome == "unknown", (
+        f"a point the replay DECLINED became {record.outcome!r}: "
+        f"{record.detail}"
+    )
+    assert "not independently replayable" in record.detail
+    # ...through the DECLINE handler specifically, not the `nonrational`
+    # branch above it: the reason quoted is the replay's own refusal, which
+    # the `nonrational` branch never produces (it says "model contains a
+    # non-rational value" and never names the operand)
+    assert "is irrational" in record.detail, record.detail
+    assert record.witness is None
+    v = make_solver_verdict(q, p, esc, **VERSIONS)
+    assert v.status == "UNKNOWN" and v.witnesses == ()
 
 
 # --- M9: the fragment stamp follows the aux, not the base's dependence -------

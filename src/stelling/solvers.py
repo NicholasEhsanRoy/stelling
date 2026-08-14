@@ -1585,6 +1585,32 @@ def _dispatch_obligation(
                 # non-rational value a few lines above — the witness is
                 # not independently replayable, so it does not become a
                 # REFUTED and it does not raise.
+                #
+                # PREEMPTED BY THE TWO INSTALLED WHEELS ON THE `pow` ROW,
+                # and reachable through any transport that is not them.
+                # For a rational-`pow` slice the model carries the `aux`
+                # constant, and under `aux >= 0 ∧ aux^q = x^p ∧ x >= 0` we
+                # have `aux = x^(p/q)` exactly — so `aux` is an algebraic
+                # numeral precisely when the exact value is irrational,
+                # which is the one case `_exact_rational_power` refuses.
+                # Both wheels flag such a value as `nonrational` (z3:
+                # `is_algebraic_value`; cvc5: the driver's `opaque`
+                # record), so the `raw.nonrational` branch above catches
+                # it first. Measured on those two: every `nonrational=False`
+                # model on this row had a rational `aux`, where the exact
+                # replay succeeds.
+                #
+                # THAT IS A STATEMENT ABOUT THE TWO WHEELS ONLY. The
+                # external cvc5-BINARY transport is not installed here and
+                # its model parser (`_model_values_from_text`) has never
+                # been driven by a real algebraic model; a transport that
+                # reports a rational-looking model without flagging it
+                # lands here, and the `pow` row's replay declines on the
+                # exact value. `tests/test_pow_audit_findings.py` drives
+                # exactly that shape (a fake binary answering `sat` with
+                # `x0 = 2` on `x**0.5 <= 1.0`) and pins the outcome: an
+                # UNKNOWN quoting the replay's own reason — never a
+                # REFUTED, never a fabricated witness, never a raise.
                 sat_problems.append(
                     f"{backend.label}: witness not independently replayable "
                     f"({declined})"
