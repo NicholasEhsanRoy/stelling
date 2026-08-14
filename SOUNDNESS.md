@@ -5579,6 +5579,27 @@ verdicts:
   special case would have been a bandaid: it leaves `[2,3]×[2,3]` inexact,
   and the inexactness is the defect.
 
+  **THE FINDING'S OWN HEADLINE IS NOT QUITE TRUE, and the remainder is
+  left standing deliberately.** M16 says `mul` is "the only arithmetic
+  transfer with no exact-rational path". It was not: `dot_general` carries
+  an INLINED COPY of the same corner rule (`_prod` + `_down`/`_up`), and
+  its docstring cited *"`mul`'s rule"* as its authority — so converting
+  `mul` alone silently split one rule into two. Measured after this fix,
+  on the same operands:
+
+  ```
+  reduce_sum(mul(x, x))  over x in [0,4]^2  ->  (0.0, 32.0)
+  dot_general(x, x)      same contraction   ->  (-1e-323, 32.00000000000001)
+  ```
+
+  So the M16 shape survives one level up: a sum of squares written
+  `jnp.dot(x, x)` still loses its zero floor where `jnp.sum(x*x)` no
+  longer does. It is sound — a wider box only loses precision — and it is
+  NOT fixed here because a contraction's numerics rest on an
+  association-order argument this batch did not measure. The docstring now
+  states the divergence instead of claiming the rule it no longer follows,
+  so the next reader inherits a known gap rather than a false citation.
+
   **The ieee `mul` kernels deliberately do NOT take this route**, and the
   reason is not symmetry-of-effort: under ieee the value the program has
   IS `fl(x*y)`, and the native binary64 corner products already ARE that

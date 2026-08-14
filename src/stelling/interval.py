@@ -1271,11 +1271,25 @@ def dot_general(
     BETWEEN output elements are still lost, which is the ordinary image gap
     and not this function's concern.
 
-    Each term is a four-corner interval product (:func:`mul`'s rule, which
-    is exact for the corners and rounds outward once), and the terms are
+    Each term is a four-corner interval product — the corners computed in
+    float (so each is correctly rounded, not exact) and the extremum bumped
+    one ulp outward, which covers that rounding. The terms are then
     accumulated with the same exact-when-representable steps
     :func:`reduce_sum` uses — seeded with the first contributor, so a
-    one-term contraction spends no bumps at all.
+    one-term contraction spends only the product's bump.
+
+    **This is NO LONGER :func:`mul`'s rule, and the divergence is recorded
+    rather than hidden.** It was mul's rule, verbatim and inlined, until
+    audit 0.2.0 M16 gave `mul` the exact-when-representable route; this
+    function still carries the unconditional bump. The consequence is the
+    M16 shape one level up: `jnp.sum(x*x)` now floors at exactly 0 while
+    the same quantity written as a contraction does not, so a
+    sum-of-squares residual can still lose its floor by being spelled as a
+    dot product. Sound (a wider box only loses precision), and NOT fixed
+    here because changing a contraction's numerics needs its own
+    measurement of the association-order argument above — but the two
+    should be one implementation, and a reader must not take this
+    paragraph's silence for agreement.
 
     Under **R** semantics addition is associative, so the bracket bounds
     every association order XLA might pick at once. This reasoning is not

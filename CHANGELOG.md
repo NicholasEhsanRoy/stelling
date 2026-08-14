@@ -193,6 +193,14 @@ SPDX-License-Identifier: Apache-2.0
   intervals cannot represent open bounds in exact reals). The IEEE bump
   is exact; the real-mode overapproximation is sound. In real mode,
   boundary-aware division handles the resulting `[0, hi]` gracefully.
+- **`dot_general` still bumps its corner products unconditionally**, so a
+  sum of squares written as a contraction (`jnp.dot(x, x)`) loses the
+  exactly-zero floor that `jnp.sum(x * x)` now keeps — measured over
+  `x in [0,4]^2`: `(-1e-323, 32.00000000000001)` against `(0.0, 32.0)`.
+  It is the same shape M16 fixed in `mul`, one level up, and sound in the
+  same direction (a wider box only loses precision). Not converted in
+  this round: a contraction's bracket also carries the association-order
+  argument, which needs its own measurement.
 - **The interval domain cannot represent the sign of an IEEE zero**, so
   under `semantics="ieee"` every divisor box that reaches zero divides to
   ⊤ — including the one-sided shapes real mode tightens, and including
