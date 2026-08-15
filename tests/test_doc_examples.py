@@ -20,7 +20,7 @@ Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
     ```python blocks                                47
-      marked illustrative — not run                 16
+      marked illustrative — not run                 17
       EXECUTED (exit 0 required)                    30
         marked run-only — output not compared        3
         OUTPUT COMPARED against a fence             27
@@ -140,7 +140,7 @@ SRC = REPO / "src"
 # this file promises, so it must be made deliberately and in both places.
 EXPECTED_INVENTORY = {
     "python_blocks": 47,
-    "illustrative": 16,
+    "illustrative": 17,
     "executed": 30,
     "run_only": 3,
     "compared": 27,
