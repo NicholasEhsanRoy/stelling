@@ -63,11 +63,26 @@ MALFORMED = [
     ((3, 3), (3,), (((0, 0), (0,)), ((), ())), "lhs names a dim twice"),
     ((3,), (3,), (((5,), (0,)), ((), ())), "lhs dim out of range"),
     ((3,), (3,), (((0,), (5,)), ((), ())), "rhs dim out of range"),
+    # audit 0.2.0 B6/S12″: a NON-INTEGER dim. It passes the range test
+    # (`0 <= 0.0 < 3` is True) and then indexes a tuple with a float, which
+    # raised a raw `TypeError` — out of the public `propagate()` on the
+    # transfer side, and past `_dot_general_plan`'s `except IntervalError`
+    # on the emission side, where the blanket net absorbed it as an
+    # "internal error" decline. Two faces, two behaviours, one
+    # malformation: the S12 shape again, in the oracle's own contract.
+    ((3,), (3,), (((0.0,), (0,)), ((), ())), "lhs dim is a float"),
+    ((3,), (3,), (((0,), (0.0,)), ((), ())), "rhs dim is a float"),
+    ((3, 3), (3, 3), (((1,), (1,)), ((0.0,), (0,))), "batch dim is a float"),
+    ((3,), (3,), ((("0",), (0,)), ((), ())), "lhs dim is a string"),
 ]
 
 
 def _aval(shape):
     return ir.Aval(kind="ShapedArray", shape=tuple(shape), dtype="float64")
+
+
+def _bool_aval():
+    return ir.Aval(kind="ShapedArray", shape=(), dtype="bool")
 
 
 def _size(shape):
@@ -157,11 +172,13 @@ def _emission(lhs_shape, rhs_shape, dn, out_shape=None):
 def test_the_two_faces_agree_about_well_formedness(lhs, rhs, dn, label):
     """THE PROPERTY S12 VIOLATED, over both halves of the space.
 
-    Not "the emission declines these nine forms" — that would be satisfied
-    by a second copy of the predicate, which is the arrangement that
-    produced the defect. What is asserted is AGREEMENT: for every form,
-    both faces accept or both refuse. A check added to one side and not the
-    other fails this test on the row it was added for.
+    Not "the emission declines every malformed form" — that would be
+    satisfied by a second copy of the predicate, which is the arrangement
+    that produced the defect. What is asserted is AGREEMENT: for every
+    form, both faces accept or both refuse, with the SAME sentence. A check
+    added to one side and not the other fails this test on the row it was
+    added for — which is how the non-integer-dim rows below arrived, since
+    on `4d793cf` the transfer crashed on them and the emission declined.
 
     The well-formed half is what stops the test being satisfiable by
     declining everything.
@@ -292,3 +309,194 @@ def test_BOTH_faces_actually_ask_the_oracle(monkeypatch):
     assert len(calls) == 2, (
         "the emission plan computed its geometry without asking the oracle"
     )
+
+
+# ── the oracle's own CONTRACT (audit 0.2.0 B6/S12″) ──────────────────────
+
+
+MALFORMED_DIMENSION_NUMBERS = [
+    (0, "a bare int"),
+    ((0, 0), "a 2-tuple of scalars"),
+    ((((0,), (0,)), ((), ()), ((), ())), "three groups"),
+    (None, "None"),
+    ("xy", "a bare string"),
+    ((((0.0,), (0,)), ((), ())), "a float contracting dim"),
+    ((((0,), (0.0,)), ((), ())), "a float contracting dim on the rhs"),
+    # the BATCH extent loop specifically: the contracting dims here are
+    # well-formed and integral, so nothing refuses before the batch pair is
+    # indexed. (`(((0,), (0,)), ((0.5,), (0,)))` would NOT do — its rhs
+    # names dimension 0 twice and is refused two checks earlier, which
+    # would leave this row green over a broken batch path.)
+    ((((1,), (1,)), ((0.0,), (0,))), "a float batch dim"),
+    (((("0",), (0,)), ((), ())), "a string dim"),
+    ((((5,), (0,)), ((), ())), "a dim out of range"),
+    ((((0, 0), (0, 0)), ((), ())), "a duplicated dim"),
+    ((((0,), ()), ((), ())), "unpaired lists"),
+]
+
+
+@pytest.mark.parametrize(
+    "dn,label",
+    MALFORMED_DIMENSION_NUMBERS,
+    ids=[c[1] for c in MALFORMED_DIMENSION_NUMBERS],
+)
+def test_the_oracle_raises_IntervalError_AND_NOTHING_ELSE(dn, label):
+    """`dot_general_geometry` promises "Raises IntervalError on any
+    malformation", and the promise was false in exactly one line.
+
+    A non-integer entry in `dimension_numbers` passes the range test
+    (`0 <= 0.0 < 3` is True) and reaches `lhs_shape[i]`, where python
+    raises `TypeError: tuple indices must be integers or slices, not
+    float`. Both consumers catch `IntervalError` and nothing else, so on
+    `4d793cf` this was a raw crash out of the public `propagate()` — and,
+    on the emission side, an "internal error" decline. The docstring
+    asserting it could not happen was itself new in that commit, which is
+    why the finding is the CLAIM as much as the code.
+
+    Asserted as a type discipline rather than as a list of messages: any
+    exception that is not an `IntervalError` fails, so a future predicate
+    added here cannot reintroduce the class by raising something else.
+    """
+    with pytest.raises(iv.IntervalError):
+        iv.dot_general_geometry((3, 3), (3, 3), dn)
+    # and through the public transfer, which is the entry point that crashed
+    with pytest.raises(iv.IntervalError):
+        iv.dot_general(
+            iv.from_bounds((3, 3), 1.0, 2.0),
+            iv.from_bounds((3, 3), 1.0, 1.0),
+            dn,
+        )
+
+
+def test_a_float_dim_no_longer_crashes_the_public_propagation():
+    """The end-to-end half: `propagate()` is the public entry point, and
+    on `4d793cf` this document took it down with a `TypeError`. It now
+    returns, having declined the equation to ⊤ through the ordinary
+    no-sound-rule channel — and the emission quotes the SAME sentence,
+    which is the property this whole file is about."""
+    from stelling.propagate import propagate
+
+    dn = (((0.0,), (0,)), ((), ()))
+    q = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(),
+            outvars=(ir.Var(id=4, aval=_bool_aval()),),
+            eqns=(
+                ir.JaxprEqn(
+                    primitive="stelling_any",
+                    invars=(),
+                    outvars=(ir.Var(id=0, aval=_aval((3,))),),
+                    params=(
+                        ("shape", (3,)), ("dtype", "float64"),
+                        ("lo", 1.0), ("hi", 2.0),
+                    ),
+                ),
+                ir.JaxprEqn(
+                    primitive="stelling_any",
+                    invars=(),
+                    outvars=(ir.Var(id=1, aval=_aval((3,))),),
+                    params=(
+                        ("shape", (3,)), ("dtype", "float64"),
+                        ("lo", 1.0), ("hi", 1.0),
+                    ),
+                ),
+                ir.JaxprEqn(
+                    primitive="dot_general",
+                    invars=(
+                        ir.Var(id=0, aval=_aval((3,))),
+                        ir.Var(id=1, aval=_aval((3,))),
+                    ),
+                    outvars=(ir.Var(id=2, aval=_aval(())),),
+                    params=(
+                        ("dimension_numbers", dn),
+                        ("out_sharding", None),
+                        ("precision", None),
+                        ("preferred_element_type", "float64"),
+                    ),
+                ),
+                ir.JaxprEqn(
+                    primitive="le",
+                    invars=(
+                        ir.Var(id=2, aval=_aval(())),
+                        ir.Literal(val=99.0, aval=_aval(())),
+                    ),
+                    outvars=(ir.Var(id=3, aval=_bool_aval()),),
+                ),
+                ir.JaxprEqn(
+                    primitive="stelling_assert",
+                    invars=(ir.Var(id=3, aval=_bool_aval()),),
+                    outvars=(ir.Var(id=4, aval=_bool_aval()),),
+                ),
+            ),
+        )
+    )
+    p = propagate(q)  # must not raise
+    assert [o.status for o in p.obligations] == ["unknown"]
+    assert any("dot_general" in n for n in p.notes), p.notes
+
+
+# ── FIX 5: what the S12 extraction ACTUALLY changed, measured ────────────
+
+
+EXTRACTION_DELTAS = [
+    (0, "a bare int"),
+    ((0, 0), "a 2-tuple of scalars"),
+    ((((0,), (0,)), ((), ()), ((), ())), "three groups"),
+    (None, "None"),
+    ("xy", "a bare string"),
+]
+
+
+@pytest.mark.parametrize(
+    "dn,label", EXTRACTION_DELTAS, ids=[c[1] for c in EXTRACTION_DELTAS]
+)
+def test_the_extraction_DID_change_these_predicates_and_here_they_are(dn, label):
+    """"A pure extraction: no predicate changed" was not true, and the
+    honest sentence is this list.
+
+    Measured on `dee8bc2` against `4d793cf`, `interval.dot_general` with
+    each of these `dimension_numbers`:
+
+        dee8bc2:  TypeError: cannot unpack non-iterable int object
+                  TypeError: cannot unpack non-iterable int object
+                  ValueError: too many values to unpack (expected 2)
+                  TypeError: cannot unpack non-iterable NoneType object
+                  ValueError: not enough values to unpack (expected 2, got 1)
+        4d793cf:  IntervalError, all five
+
+    The extraction wrapped the `dimension_numbers` unpack in a `try` and
+    converted five raw unpack failures into the decline channel. Every one
+    is in the SAFE direction (a raw crash became a quoted refusal) and none
+    is reachable through `_t_dot_general`, whose `dimension_numbers` comes
+    from `_dot_general_row_form` and is a well-formed 2×2 by then — but
+    "no predicate changed" is a claim about the FUNCTION, and the function
+    is public. Pinned here so the narrowed claim has a measurement behind
+    it and so a later reader does not re-broaden it.
+    """
+    with pytest.raises(iv.IntervalError):
+        iv.dot_general(
+            iv.from_bounds((3,), 1.0, 2.0), iv.from_bounds((3,), 1.0, 1.0), dn
+        )
+
+
+def test_the_two_new_check_shape_calls_are_unreachable_for_an_IntervalArray():
+    """The other half of the narrowed Fix-5 claim, and it goes the other
+    way: the extraction added `check_shape(lhs_shape)` / `check_shape(
+    rhs_shape)` to the oracle, and for any `IntervalArray` operand those
+    cannot fire, because `IntervalArray.__post_init__` has already run the
+    identical check. So they are neutral for every caller of
+    `interval.dot_general` — the behavioural delta is only in
+    `dot_general_geometry`, which did not exist before the extraction and
+    therefore changed nothing.
+    """
+    with pytest.raises(iv.IntervalError):
+        iv.IntervalArray(shape=(-2,), los=(), his=())
+    with pytest.raises(iv.IntervalError):
+        iv.IntervalArray(shape=("x",), los=(), his=())
+    # the oracle refuses them directly, which is what those two calls buy
+    dn = (((0,), (0,)), ((), ()))
+    with pytest.raises(iv.IntervalError):
+        iv.dot_general_geometry((-2,), (3,), dn)
+    with pytest.raises(iv.IntervalError):
+        iv.dot_general_geometry((3,), ("x",), dn)

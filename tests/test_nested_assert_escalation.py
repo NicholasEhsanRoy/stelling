@@ -253,14 +253,17 @@ def test_an_obligation_whose_association_cannot_be_trusted_still_declines():
 
     The carried position is a claim about a PARTICULAR query. Hand
     `slice_unknown_obligations` a different one with the same number of
-    top-level asserts at the same positions and every obligation must
-    decline rather than be sliced out of a jaxpr it was never judged
-    against.
+    top-level asserts at the same positions and the `source_info` check
+    catches it, where the count check could not: 2 == 2, so the count
+    proceeded and sliced `asserts[o.index]` out of the wrong query.
 
-    The count check could not see this: 2 == 2, so it proceeded and sliced
-    `asserts[o.index]` out of the wrong query. The per-obligation mapping is
-    therefore not merely finer than what it replaced, it is strictly
-    stronger — which is the claim this test exists to make good.
+    THE CLAIM THIS TEST MAKES GOOD IS NARROWER THAN "STRICTLY STRONGER",
+    and that wording is gone deliberately (audit 0.2.0 B6). See
+    `test_two_queries_from_ONE_FACTORY_share_source_info_and_slice_through`
+    below for the measured boundary: the mapping is FINER than the count —
+    it answers per obligation what the count answered per query — and on
+    the wrong-query attack it catches strictly more than the count did, but
+    not all of it.
     """
     a = trace(both_top_level)
     b = trace(two_other_asserts)
@@ -290,3 +293,110 @@ def test_an_obligation_whose_association_cannot_be_trusted_still_declines():
     assert all("disagree" in i.reason for i in items), [
         i.reason for i in items
     ]
+
+
+def _same_line_factory(lo, hi):
+    """ONE factory, so both queries' asserts are traced at the SAME
+    `file:line` and carry byte-identical `source_info`. That is not exotic:
+    a parametrized harness built by a helper is the ordinary way to write
+    several related queries."""
+    def h():
+        c = any_array((2,), jnp.float64, (lo, hi))
+        return assert_(c * c - c >= 9900.0)
+    return h
+
+
+@need_both
+def test_two_queries_from_ONE_FACTORY_share_source_info_and_slice_through():
+    """THE BOUNDARY OF THE ASSOCIATION CHECK, measured — audit 0.2.0 B6.
+
+    The commit that introduced the per-obligation mapping called it
+    "strictly stronger than the count". It is not, and this is the
+    counterexample. Two queries traced from the same factory carry
+    byte-identical `source_info` on their asserts, at the same top-level
+    position, one obligation each — so ALL THREE guards pass and
+    `slice_unknown_obligations` slices obligation 0 of query A out of query
+    B, exactly as the count check would have. Measured:
+
+        source_info identical across the two queries: True
+        -> SLICED index=0, inputs bounded (0.0, 1.0)   <- B's declaration,
+                                                          not A's
+
+    WHERE CONTAINMENT ACTUALLY IS, and it is the same defence that
+    protected the count check: `make_solver_verdict` refuses to stamp an
+    escalation whose recorded query hash is not the hash of the query being
+    stamped. Asserted below so that nobody reads the association check as
+    the thing standing between a user and a wrong-query verdict.
+
+    Left as a boundary rather than closed here on purpose. The hazard is a
+    CALLER-PAIRING error and it reaches all three arguments alike —
+    `closed`, `propagation`, and `env`, the last of which is a plain dict
+    with no identity to check at all. A hash check on `propagation` inside
+    this one function would close one of the three channels while reading
+    as though it closed the question, which is the "check in one place the
+    other does not consult" shape this whole batch is about.
+    """
+    from stelling.ir import ClosedJaxpr  # noqa: F401  (documented door)
+    from stelling.obligation import ObligationSlice
+    from stelling.solvers import (
+        MispairedEscalationError,
+        SolverConfig,
+        escalate,
+        make_solver_verdict,
+    )
+
+    # A: c in [100, 101] -> min of c*c - c is 9900, so the claim is TRUE
+    # B: c in [0, 1]     -> c*c - c in [-1/4, 0], so the claim is FALSE
+    a = trace(_same_line_factory(100.0, 101.0))
+    b = trace(_same_line_factory(0.0, 1.0))
+
+    sa = [tuple(e.source_info) for e in a.jaxpr.eqns
+          if e.primitive == "stelling_assert"]
+    sb = [tuple(e.source_info) for e in b.jaxpr.eqns
+          if e.primitive == "stelling_assert"]
+    assert sa == sb, (
+        "the two queries' asserts no longer share source_info; the "
+        "boundary this test measures has moved"
+    )
+    assert a.content_hash() != b.content_hash(), (
+        "the two queries are the same query; the test measures nothing"
+    )
+
+    p_a = propagate(a)
+    assert [o.status for o in p_a.obligations] == ["unknown"]
+
+    # ALL THREE GUARDS PASS and the wrong-query slice comes out
+    (item,) = slice_unknown_obligations(b, p_a, interval_env(b))
+    assert isinstance(item, ObligationSlice), getattr(item, "reason", item)
+    assert [(i.lo, i.hi) for i in item.inputs] == [(0.0, 1.0), (0.0, 1.0)], (
+        "the slice did not come out of query B after all"
+    )
+
+    # containment, one layer up, on the query CONTENT HASH
+    esc = escalate(b, p_a, SolverConfig(timeout_ms=20_000))
+    versions = dict(
+        stelling_version="test",
+        jax_version=jax.__version__,
+        precision_config="jax_enable_x64=True",
+    )
+    with pytest.raises(MispairedEscalationError):
+        make_solver_verdict(a, p_a, esc, **versions)
+
+
+def test_the_truth_about_the_factory_pair_needs_no_verifier():
+    """The arithmetic the boundary test's labels rest on, stated in exact
+    rationals and in concrete jax, so neither label is taken on trust."""
+    from fractions import Fraction
+
+    # min of c^2 - c on [100, 101] is at c = 100 (the parabola's vertex is
+    # at 1/2, so the function is increasing on this interval)
+    lo = Fraction(100)
+    assert lo * lo - lo == Fraction(9900)
+    assert lo * lo - lo >= Fraction(9900), "query A's claim is TRUE"
+    # on [0, 1] the max is at the endpoints, value 0
+    assert not (Fraction(0) >= Fraction(9900)), "query B's claim is FALSE"
+
+    c = jnp.array([100.0, 100.0])
+    assert [float(v) for v in (c * c - c)] == [9900.0, 9900.0]
+    z = jnp.array([0.0, 1.0])
+    assert [float(v) for v in (z * z - z)] == [0.0, 0.0]

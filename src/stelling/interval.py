@@ -1424,8 +1424,29 @@ def dot_general_geometry(
     propagation leg) and by
     :func:`stelling.obligation._dot_general_plan` (the SMT emission and
     the exact-rational replay). Every well-formedness predicate this row
-    has lives here and nowhere else, so the two faces cannot hold
-    different opinions about whether an equation is admissible.
+    has lives here and nowhere else.
+
+    **WHAT THAT DOES AND DOES NOT BUY — corrected, audit 0.2.0 S12′.**
+    The sentence above used to continue "…so the two faces cannot hold
+    different opinions about whether an equation is admissible", and that
+    was FALSE AS WRITTEN. **The oracle is shared; its ARGUMENTS are not.**
+    :func:`dot_general` asks about the shapes of the PROPAGATED BOXES
+    (``a.shape``, ``b.shape``); ``_dot_general_plan`` asks this same
+    function about the shapes recorded on the equation's INVAR AVALS.
+    Where those disagree — which ``ir.ClosedJaxpr.from_dict`` accepts,
+    ``ir.py`` having scoped per-primitive shape inference out of
+    ``_validate_loaded`` in writing — the two faces reach different
+    answers again, and still in the asserting direction. Measured on
+    ``4d793cf``: the transfer AGREED the contraction had four terms and
+    printed the box ``[4, 8]``, the emission planned two, and the verdict
+    read VERIFIED at 100% coverage on a claim whose truth is ``8 <= 4.5``.
+
+    What this function guarantees is the narrower and true thing:
+    **given the same shapes, the two faces reach the same admissibility
+    answer, for the same stated reason.** That they are GIVEN the same
+    shapes is a separate property enforced separately, by
+    :meth:`stelling.obligation._Slicer._one_shape_per_value` — whose
+    docstring carries the two witnesses it uses and where each is blind.
 
     **This function exists because they did.** Audit 0.2.0 S12: the
     contracted-extent agreement check was written inline in
@@ -1452,8 +1473,13 @@ def dot_general_geometry(
     and disjoint — that oracle never sees a shape, this one never sees a
     param.
 
-    Raises :class:`IntervalError` on any malformation; the emission face
-    quotes it as a decline.
+    Raises :class:`IntervalError` on any malformation — and that promise
+    was false in exactly one line until audit 0.2.0 B6 (a non-integer dim
+    passed the range test and then indexed a tuple with a float, raising a
+    raw ``TypeError`` past both consumers' ``except IntervalError``). The
+    dims are now put through ``operator.index`` first, the same way
+    :func:`check_shape` already handles extents. The emission face quotes
+    the ``IntervalError`` as a decline.
     """
     check_shape(lhs_shape)
     check_shape(rhs_shape)
@@ -1468,6 +1494,33 @@ def dot_general_geometry(
             f"((lhs_contract, rhs_contract), (lhs_batch, rhs_batch)) form: "
             f"{dimension_numbers!r}"
         ) from None
+    # THE DIMS ARE INDICES, so they must be INTEGRAL before anything indexes
+    # with them — the same predicate, spelled the same way, that
+    # :func:`check_shape` above already applies to extents.
+    #
+    # This line is audit 0.2.0 B6/S12″ and the finding was the DOCSTRING, not
+    # only the code. A float dim passes the range test below (`0 <= 0.0 < 1`
+    # is True) and then reaches `lhs_shape[i]`, where python raises a raw
+    # `TypeError: tuple indices must be integers or slices, not float`. Both
+    # consumers catch `IntervalError` and nothing else — `propagate._t_dot_
+    # general` and `propagate.eqn` on the transfer side, `obligation.
+    # _dot_general_plan` on the emission side — so the promise three
+    # paragraphs up ("Raises IntervalError on any malformation") was false in
+    # exactly one line, and it was false in the direction that matters: a raw
+    # crash out of the public `propagate()` on a document `from_dict`
+    # accepts, and, on the emission side, a decline quoted as an "internal
+    # error" while the transfer face crashed instead. Two faces, two
+    # behaviours, from one malformation — which is the S12 shape again.
+    for name, dims in (("lhs", lc + lb), ("rhs", rc + rb)):
+        for d in dims:
+            try:
+                operator.index(d)
+            except TypeError:
+                raise IntervalError(
+                    f"dot_general {name} dimension {d!r} is not an integer "
+                    f"(malformed IR: from_dict does not coerce "
+                    f"dimension_numbers entries)"
+                ) from None
     for name, dims, shape in (
         ("lhs", lc + lb, lhs_shape), ("rhs", rc + rb, rhs_shape)
     ):

@@ -162,8 +162,10 @@ SPDX-License-Identifier: Apache-2.0
   the query — the position must name a `stelling_assert`, carry the same
   `source_info`, and be claimed by exactly one obligation — before slicing
   by it. An obligation failing any of those declines individually with the
-  reason quoted. The result is strictly stronger than the count check,
-  which could not tell one query from another of the same shape.
+  reason quoted. The result is FINER than the count check — it answers per
+  obligation what the count answered per query — and on the wrong-query
+  attack it catches strictly more than the count did, but not all of it;
+  see the narrowing under **M17′** below.
 
   **Measured** on a 246-harness / 684-obligation corpus of multi-assert
   queries with jit-nested asserts (jax 0.11.0, `JAX_ENABLE_X64=1`, z3 +
@@ -225,8 +227,8 @@ SPDX-License-Identifier: Apache-2.0
   ranges, duplicate dims, list pairing, extent agreement, and the derived
   output shape and contraction ranges.
   `tests/test_dot_general_both_faces.py` asserts the two faces AGREE over
-  six well-formed and nine malformed forms — agreement, not "the emission
-  declines these nine", because two copies of a predicate that happen to
+  a well-formed and a malformed half — agreement, not "the emission
+  declines these forms", because two copies of a predicate that happen to
   match is the arrangement that produced the defect.
 
   **No traced query is affected**: jax refuses to trace the equation
@@ -242,6 +244,83 @@ SPDX-License-Identifier: Apache-2.0
   posture `solvers.escalate` already takes around `_dispatch_obligation`,
   and its range test is two-sided, so an index past the start of the assert
   list declines instead of raising `IndexError`.
+
+  **The claim "the two faces cannot hold different opinions about whether
+  an equation is admissible" was too strong, and the residue was a live
+  soundness defect — see the next entry.**
+
+- **The emission may not model a DIFFERENT ARRAY than the propagation did:
+  one shape per value, checked for every primitive at once** (audit 0.2.0
+  **S12′**; reaches the released **0.1.0** through
+  `ir.ClosedJaxpr.from_dict` — see [SOUNDNESS.md](SOUNDNESS.md)). The S12
+  fix above gave `dot_general` a shape oracle both faces call. **The oracle
+  is shared; its ARGUMENTS are not**: `interval.dot_general` asks it about
+  the shapes of the propagated BOXES, `obligation._dot_general_plan` asks
+  the same function about the shapes recorded on the equation's INVAR
+  AVALS. Leave the declaration and the constant operand alone, edit only
+  those avals — which `from_dict` accepts — and the two faces disagree
+  again, in the asserting direction.
+
+  Worse than S12's own presentation, and this is what makes it hard to
+  recognise: there the transfer REFUSED and left a ⊤ in the coverage
+  record. Here it does not refuse. It agrees the contraction has four
+  terms, prints the box `[4, 8]`, and the verdict comes back **VERIFIED at
+  `4 eqns: 4 known (100%)`** on the claim `Σ <= 4.5`, whose truth in exact
+  rationals is `8 <= 9/2` — false. The same lie also mints a **false
+  REFUTED**, at a point where the predicate is true, carrying the sentence
+  *"confirmed by independent exact-rational replay"* — honest about the
+  arithmetic and false about the plan, because replay re-derives the same
+  truncated plan. A witness is independent of the SOLVER, never of the
+  plan, and that distinction is now stated where the claim is made.
+
+  **It is a class, not a row**: `reduce_sum` truncates identically through
+  `_group_reduce_sum`, and two further shapes reach it from inside a
+  `jax.jit` body. So the fix is not a third `dot_general` shape rule but
+  one cross-check in the slicer — `_Slicer._one_shape_per_value`, over
+  every equation of every slice before any plan is built: **no equation may
+  be modelled at a shape that disagrees with the shape the value actually
+  has.** Two witnesses to "actually has", complementary because each is
+  blind where the other sees: the value's BINDING SITE (needs no
+  propagation, so it reaches inside transparent call bodies, where no
+  interval environment holds a box at all) and the PROPAGATED BOX (the one
+  witness a consistently-applied lie cannot forge, blind outside the top
+  level). An operand the slicer cannot bind at all declines rather than
+  passing.
+
+  **Cost, measured** over every obligation slice the test suite builds
+  (10,488 equations; 13,261 operand references, all 13,261 with a binding
+  found; 23,749 atoms, 23,072 of them with a propagated box): **zero**
+  disagreements and **zero** declines on well-formed work.
+
+- **`interval.dot_general_geometry` keeps its documented contract on
+  non-integer `dimension_numbers`** (audit 0.2.0 **S12″**). A float or
+  string dim passed the range test (`0 <= 0.0 < 1` is True) and then
+  indexed a tuple with it, raising a raw `TypeError` — out of the public
+  `propagate()`, since both consumers catch `IntervalError` and nothing
+  else, and, on the emission side, as an *"internal error"* decline. The
+  dims now go through `operator.index` first, exactly as `check_shape`
+  already does for extents, and raise `IntervalError`. The crash was
+  pre-existing; the docstring asserting it could not happen was not.
+
+- **`slice_unknown_obligations` can no longer raise** (audit 0.2.0
+  **M17′**; a regression of the M17 fix above, caught and fixed before
+  release). Its association check called `tuple(...)` on a `source_info` it
+  had not established was iterable, and both callers (`solvers.escalate`,
+  `affine.refine_propagation`) iterate this function **in the `for`
+  header**, outside their own per-obligation nets — so on hand-built IR
+  carrying a non-tuple there, `escalate` raised `TypeError: 'int' object is
+  not iterable` and every obligation's verdict went with it. The comparison
+  is now total (a non-frame-list means the association cannot be CHECKED,
+  which gets its own decline sentence rather than the useless *"traced at 7
+  but records 7"*) and the per-obligation body is netted **per obligation**,
+  so a sibling still gets its own answer.
+
+  Also narrowed: the per-obligation association is **finer** than the count
+  check it replaced, not *strictly stronger*. Two queries traced from the
+  same factory carry identical `source_info` at the same position, so all
+  three guards pass and the wrong-query slice comes out — as it did under
+  the count. Containment is `make_solver_verdict`'s query-hash pairing,
+  which is the same defence the count check had.
 
 - **`exp` and `pow` under `semantics="ieee"` now require a DECLARED libm
   accuracy budget** (audit 0.2.0 **S9** and **S11**; S11 reaches the

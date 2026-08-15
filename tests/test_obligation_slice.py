@@ -101,6 +101,32 @@ def square_query(lo=1.0, hi=2.0, bound=2.0):
     )
 
 
+def two_unknown_obligations_query():
+    """Two top-level asserts, both left `unknown` by propagation.
+
+    Exists for the per-obligation containment half of
+    `test_slice_unknown_obligations_CANNOT_RAISE_from_its_OWN_body`: with
+    one obligation a net around the whole function and a net around one
+    obligation are indistinguishable, which is precisely the distinction
+    audit 0.2.0 M17 is about.
+    """
+    x = var(0)
+    sq, p0, o0 = var(1), var(2, BOOL), var(3, BOOL)
+    cu, p1, o1 = var(4), var(5, BOOL), var(6, BOOL)
+    return close(
+        [
+            any_eqn(x, 1.0, 2.0),
+            eqn("mul", [x, x], sq),
+            eqn("le", [sq, lit(2.0)], p0),
+            eqn("stelling_assert", [p0], o0),
+            eqn("mul", [sq, x], cu),
+            eqn("le", [cu, lit(4.0)], p1),
+            eqn("stelling_assert", [p1], o1),
+        ],
+        [o0, o1],
+    )
+
+
 def test_linear_slice_routes_qf_lra():
     sl = sole_slice(linear_query())
     assert isinstance(sl, ObligationSlice)
@@ -545,3 +571,110 @@ def test_slice_obligation_CANNOT_RAISE_an_unhandled_exception(monkeypatch):
     (plural,) = slice_unknown_obligations(q, p, interval_env(q))
     assert isinstance(plural, DeclinedObligation)
     assert "internal error" in plural.reason
+
+
+def test_slice_unknown_obligations_CANNOT_RAISE_from_its_OWN_body(monkeypatch):
+    """THE NET AROUND THE ASSOCIATION CHECK — audit 0.2.0 B6/M17′, and this
+    is a different net from the one above.
+
+    The test above injects into `_Slicer.slice`, which sits INSIDE
+    `slice_obligation`'s own `try`. So it cannot see an exception raised by
+    `slice_unknown_obligations`'s own body — the position lookup, the
+    one-to-one check, the `source_info` comparison — and the M17 fix put a
+    fresh raise exactly there: `tuple(eqns[pos].source_info)` on IR carrying
+    a non-tuple. `escalate` and `refine_propagation` both iterate this
+    function in the `for` HEADER, outside their per-obligation nets, so that
+    raise escaped the whole call.
+
+    Injected here rather than driven by a query BECAUSE the source_info
+    route is now closed at its root (`_frames` is total), and a net that
+    only ever runs on one closed route is a net nobody has driven. What is
+    asserted is the posture, per obligation: a DECLINE, quoted, naming the
+    exception class, saying *internal error* in those words — and, crucially,
+    the SIBLING obligation still gets its own answer. A net around the whole
+    function would have failed that second assertion, and answering a
+    per-obligation question with a whole-query outcome is the defect M17
+    exists to have fixed.
+    """
+    import stelling.obligation as OB
+
+    q = two_unknown_obligations_query()
+    p = propagate(q)
+    assert len([o for o in p.obligations if o.status == "unknown"]) == 2, (
+        "the fixture no longer has two unknown obligations; the containment "
+        "half of this test would measure nothing"
+    )
+
+    calls = {"n": 0}
+    real = OB._frames
+
+    def boom(v):
+        # fail for the FIRST obligation only, inside the association check
+        # and outside `slice_obligation` entirely
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TypeError("'int' object is not iterable")
+        return real(v)
+
+    monkeypatch.setattr(OB, "_frames", boom)
+    items = OB.slice_unknown_obligations(q, p, interval_env(q))
+
+    assert len(items) == 2, items
+    first, second = items
+    assert isinstance(first, DeclinedObligation), (
+        "the exception escaped slice_unknown_obligations"
+    )
+    assert "internal error" in first.reason, first.reason
+    assert "TypeError" in first.reason, first.reason
+    assert "'int' object is not iterable" in first.reason, first.reason
+    assert not isinstance(second, DeclinedObligation), (
+        "the sibling obligation declined with it: the net is around the "
+        "whole function rather than around one obligation"
+    )
+
+
+def test_a_non_tuple_source_info_declines_instead_of_raising():
+    """The route that actually escaped, driven by IR rather than injection.
+
+    `ir.ClosedJaxpr` is a public dataclass and `SOUNDNESS.md` names
+    hand-built IR as in scope (`from_dict` coerces at its own door and
+    nowhere else). With an `int` where the frames go, `4d793cf` raised
+    `TypeError: 'int' object is not iterable` out of `escalate`, where
+    `dee8bc2` returned a verdict for every obligation.
+
+    The decline says the association could not be CHECKED — deliberately
+    not that the two disagreed. "traced at 7 but records 7" is what the
+    disagreement sentence would print here, and it reads as the tool
+    contradicting itself.
+    """
+    q = square_query()
+    eqns = tuple(
+        ir.JaxprEqn(
+            primitive=e.primitive,
+            invars=e.invars,
+            outvars=e.outvars,
+            params=e.params,
+            effects=e.effects,
+            source_info=7,  # an int, not a tuple of frames
+        )
+        if e.primitive == "stelling_assert"
+        else e
+        for e in q.jaxpr.eqns
+    )
+    bad = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=q.jaxpr.constvars,
+            invars=q.jaxpr.invars,
+            outvars=q.jaxpr.outvars,
+            eqns=eqns,
+        ),
+        consts=q.consts,
+    )
+    p = propagate(bad)
+    (item,) = slice_unknown_obligations(bad, p, interval_env(bad))
+    assert isinstance(item, DeclinedObligation), item
+    assert "not a list of source frames" in item.reason, item.reason
+    assert "cannot be CHECKED" in item.reason, item.reason
+    assert "internal error" not in item.reason, (
+        "the total comparison is the repair; the net is only its backstop"
+    )
