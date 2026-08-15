@@ -1283,12 +1283,16 @@ def test_what_a_stray_index_ACTUALLY_DOES_all_four_of_them():
     enumerate what a stray index does. The enumeration has been wrong twice —
     first "a stray index does not slice" (one behaviour, and the wrong one),
     then a list of three presented as the whole space. There is a fourth: an
-    index past the START of the list raises `IndexError` out of
-    `slice_obligation` rather than declining, and reaches the whole-query set
-    through `_bar_scope`'s outer `except` instead of through a `fallback`
-    call. No soundness difference — it is named because "three behaviours"
-    was being read as closed and was not, and this test is what makes the
-    enumeration a measurement.
+    index past the START of the list.
+
+    That fourth one used to RAISE `IndexError` out of `slice_obligation` and
+    reach the whole-query set through `_bar_scope`'s outer `except` instead
+    of through a `fallback` call. Audit 0.2.0 S12's second half made
+    `slice_obligation`'s range test two-sided, so it now DECLINES like `99`
+    does — same destination, through the decline channel, and no longer a
+    raw exception out of a function documented never to raise on a legal
+    query. The pinned behaviour changed here deliberately, and this is the
+    test that says so.
 
     NOT PRESENTED AS EXHAUSTIVE EITHER. What is asserted is that each listed
     behaviour is the one claimed, and that every one of them ends at the
@@ -1310,9 +1314,10 @@ def test_what_a_stray_index_ACTUALLY_DOES_all_four_of_them():
     assert not isinstance(slice_obligation(closed, -1, env), DeclinedObligation)
     # 3. an index matching no assert equation DECLINES
     assert isinstance(slice_obligation(closed, 99, env), DeclinedObligation)
-    # 4. and one past the start RAISES rather than declining
-    with pytest.raises(IndexError):
-        slice_obligation(closed, -3, env)
+    # 4. and one past the start DECLINES TOO — it used to raise IndexError
+    past = slice_obligation(closed, -3, env)
+    assert isinstance(past, DeclinedObligation)
+    assert "no matching top-level stelling_assert equation" in past.reason
 
     for index in (1, -1, 99, -3):
         barred, why = V._bar_scope(closed, {index: ()})

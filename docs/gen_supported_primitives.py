@@ -612,11 +612,18 @@ def generate() -> str:
       + _q(_OBLIGATION,
            "Everything else — over-budget slices, transcendentals, unknown "
            "primitives, possibly-zero divisor elements, non-float input "
-           "declarations, obligations that cannot be mapped one-to-one onto "
-           "top-level asserts — **declines**, with the primitive and form "
-           "(and, for the budget, the count and the budget) quoted, and the "
-           "obligation stays UNKNOWN.")
-      + " Per-primitive recorded reasons:")
+           "declarations, and obligations whose ``stelling_assert`` is not a "
+           "top-level equation of the query (one written inside a "
+           "``jax.jit`` helper, a ``cond`` branch, or an undescended "
+           "``scan``/``while_loop`` body) — **declines**, with the primitive "
+           "and form (and, for the budget, the count and the budget) quoted, "
+           "and the obligation stays UNKNOWN.")
+      + " Each of those declines is one OBLIGATION's, never the query's: "
+      + _q(_OBLIGATION,
+           "**Every one of those declines is ONE obligation's**, including "
+           "the last: an unmappable assert costs its own escalation and "
+           "never its siblings'")
+      + ". Per-primitive recorded reasons:")
     w("")
     slice_endpoint_reason = _q(_OBLIGATION,
         "extracts the *expression slice* — the ir equations from the "

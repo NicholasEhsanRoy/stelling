@@ -601,6 +601,30 @@ class ObligationReport:
     # Used by the reaches-output reachability conjunct to determine whether
     # the violated variable flows to a function output.
     operand_var_ids: tuple[int, ...] = ()
+    # WHERE THIS OBLIGATION'S ASSERT LIVES, recorded by the walk that saw it:
+    # the position of the `stelling_assert` equation in the TOP-LEVEL
+    # `jaxpr.eqns`, or None when the obligation was recorded from inside a
+    # sub-jaxpr (a transparent call body, a `cond` branch, or an undescended
+    # `scan`/`while_loop` body via `_record_unexamined`).
+    #
+    # THE ASSOCIATION IS CARRIED, NOT INFERRED — audit 0.2.0 M17. Solver
+    # escalation slices a top-level `stelling_assert`, so it needs to know
+    # which one an obligation came from. It used to infer that by COUNTING:
+    # if the number of top-level asserts equalled the number of obligations,
+    # index k meant assert k; otherwise nothing could be mapped and EVERY
+    # unknown obligation declined escalation — so one `assert_` written
+    # inside a `jax.jit` helper silently cost solver escalation for every
+    # other obligation in the query.
+    #
+    # The count check was SOUND (this walk records exactly one obligation per
+    # top-level assert — the malformed-shape screen above EXEMPTS asserts so
+    # that it still does — so equal totals really do mean index k is assert
+    # k). It was simply the wrong SHAPE of instrument: a per-obligation
+    # question answered with a whole-query number. The walk knows the answer
+    # exactly, per obligation, at the moment it records one; this field is
+    # that answer, and `stelling.obligation.slice_unknown_obligations`
+    # VERIFIES it against the IR rather than trusting it.
+    top_level_eqn_pos: int | None = None
 
 
 @dataclass(frozen=True)
@@ -9891,6 +9915,16 @@ class _Propagator:
                     source_info=eqn.source_info,
                     operand_var_ids=tuple(
                         a.id for a in eqn.invars if isinstance(a, ir.Var)
+                    ),
+                    # `_scope_path` is () in the query's own scope and
+                    # nowhere else — every descent (transparent call, cond
+                    # branch) extends it and restores it — so this is the
+                    # exact test for "this assert is a top-level equation",
+                    # and `pos` is its index in that scope's `eqns`. An
+                    # obligation from any inner scope records None and is
+                    # declined individually downstream (M17).
+                    top_level_eqn_pos=(
+                        pos if self._scope_path == () else None
                     ),
                 )
             )

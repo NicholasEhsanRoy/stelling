@@ -487,3 +487,61 @@ def test_slice_obligation_out_of_range_declines():
     item = slice_obligation(q, 5, interval_env(q))
     assert isinstance(item, DeclinedObligation)
     assert "no matching" in item.reason
+
+
+def test_an_index_past_the_START_declines_rather_than_raising():
+    """AUDIT 0.2.0 S12, second half. A negative index WITHIN range has always
+    been Python indexing from the end and still is; one PAST the start used to
+    raise a raw `IndexError` out of a function documented never to raise on a
+    legal query, and reached the VERIFIED bar's whole-query fallback through
+    `verdict._bar_scope`'s outer `except` instead of through the decline
+    channel. The range test is two-sided now."""
+    q = square_query()  # exactly one top-level assert
+    env = interval_env(q)
+    assert not isinstance(slice_obligation(q, -1, env), DeclinedObligation)
+    for index in (-2, -7):
+        item = slice_obligation(q, index, env)
+        assert isinstance(item, DeclinedObligation), index
+        assert "no matching" in item.reason
+
+
+def test_slice_obligation_CANNOT_RAISE_an_unhandled_exception(monkeypatch):
+    """THE GUARD NET, driven by injection — the only way to drive it, and
+    saying so is the point.
+
+    `slice_obligation`'s contract is "never raises on legal queries", and its
+    caller (`stelling.solvers.escalate`) catches `_Decline` and nothing else —
+    worse, it iterates `slice_unknown_obligations` in the `for` HEADER, outside
+    its own per-obligation `except Exception`, so anything escaping here takes
+    every other obligation's verdict with it. Audit 0.2.0 S12 reached that
+    through a `dot_general` whose contracted extents disagreed: the plan
+    indexed off the end of the constant operand and raised `IndexError`.
+
+    That route is closed at its root (the shared shape oracle), so NOTHING
+    currently constructable reaches the net — which is exactly why it has to be
+    driven by injection rather than by a query, and why a test that waited for
+    a real exception would be a test that never runs. What is asserted is the
+    posture: an unexpected exception becomes a DECLINE, quoted, naming the
+    exception class and saying *internal error* in those words, so a stelling
+    defect reads as a stelling defect and not as an undecided obligation.
+    """
+    import stelling.obligation as OB
+
+    def boom(self, index, assert_eqn):
+        raise IndexError("tuple index out of range")
+
+    monkeypatch.setattr(OB._Slicer, "slice", boom)
+    q = square_query()
+    item = slice_obligation(q, 0, interval_env(q))
+    assert isinstance(item, DeclinedObligation), (
+        "the exception escaped slice_obligation"
+    )
+    assert "internal error" in item.reason
+    assert "IndexError" in item.reason
+    assert "tuple index out of range" in item.reason
+    # and it escapes the plural entry point no more than the singular one:
+    # that is the call site whose exception took the whole query with it
+    p = propagate(q)
+    (plural,) = slice_unknown_obligations(q, p, interval_env(q))
+    assert isinstance(plural, DeclinedObligation)
+    assert "internal error" in plural.reason

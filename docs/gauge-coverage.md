@@ -31,7 +31,7 @@ how the two faces drifted apart once already.
 |---|---|---|---|
 | `scatter` | **yes** | **yes** | `tests/test_scatter_gauge_jax.py` already drove both — `emission-agreement` runs the pipeline through `escalate`, `interval-soundness` and `point-box-exactness` drive the transfer. Now also `param_gauge.py` (both gates) and `scatter_containment.py` |
 | `scatter-add` | **yes** | **yes** | as above |
-| `dot_general` | **no** | **yes** | `param_gauge_dot.py` drives `TRANSFERS`/`interval_env` only; `tests/test_dot_general_interval.py` is containment |
+| `dot_general` | **partly** | **yes** | `param_gauge_dot.py` drives `TRANSFERS`/`interval_env` only and `tests/test_dot_general_interval.py` is containment, so the parameter-space gauge is still transfer-only. What is now driven from BOTH faces is the SHAPE half: `tests/test_dot_general_both_faces.py` runs six well-formed and nine malformed forms through the transfer and through `_dot_general_plan` and asserts they AGREE, and pins that each face obtains its geometry from `interval.dot_general_geometry` rather than deriving its own (audit 0.2.0 S12, where they did not) |
 | `convert_element_type` | **no** | **yes** | `param_gauge_convert.py` drives `interval_env` only |
 | `square` | **yes** | **yes** | `tests/test_square_row_gauge_jax.py` drives both from one battery — the emission gates run the pipeline through `check`/`escalate` to a replayed witness, eagerly AND with the `square` fused inside a `jit`; `interval-containment-eager-and-jit` drives `interval_env` against the values jax computes on this target. Its transfer-face mutation is CAUGHT by the containment gate and ADMITTED by every emission gate, so the two faces are visibly independent rather than assumed to be |
 | every other member of the emission set | **no** | mostly yes | containment sweep (Run 11), which is transfer-face by construction |
@@ -146,6 +146,13 @@ shape of program most likely to meet this bound.
 - **`dot_general`'s emission face is the largest ungauged surface**, because it
   is the only hand-built emission row besides the scatter pair and it carries a
   shared oracle whose retained checks are not exercised from the emission side.
+  Written before audit 0.2.0 S12, and S12 is what it was predicting: the row's
+  SHAPE rules lived only in the transfer, the emission re-derived the same
+  geometry by hand, and on disagreeing contracted extents one face raised while
+  the other emitted a truncated sum. The shape half is now a shared oracle with
+  a both-faces differential test (see the table); the *parameter-space* gauge —
+  `preferred_element_type`, `precision`, dtypes — is still transfer-only, so
+  this bullet stands, narrowed to that.
 
 ## Reading a survivor count correctly
 
@@ -167,7 +174,10 @@ int16 at n=32769). Reverting returned both counts to zero.
 The work is ordered by what is unrecoverable if wrong, not by what is missing:
 
 1. **`dot_general`'s emission face.** It is in the emission set, it is
-   hand-built, and no instrument drives it.
+   hand-built, and no *parameter-space* instrument drives it. Its shape rules
+   were the first thing to go wrong here (audit 0.2.0 S12) and are now shared
+   with the transfer and differentially tested; nothing in that repair says
+   anything about the params, which is what this item is now about.
 2. **The other 31 emission rows.** Mostly thin arithmetic plans, but "mostly" is
    an assumption this table exists to stop making.
 3. **Nothing about the transfer face is urgent** — it is the better-covered of

@@ -205,10 +205,21 @@ of these were measured; the text is what the tool printed:
 | an integer-dtype computation | `'add' on dtype 'int32': jax integer arithmetic wraps on overflow and SMT-LIB2 Reals are unbounded, so a Real emission does not model it` |
 | `dot_general` with two symbolic operands | `'dot_general' has NO constant operand: a sum of products of two symbolic operands is NONLINEAR arithmetic, outside this row's linear scope` |
 | an obligation over the emission budget (512 element terms) | `obligation not attempted: it needs 1024 element terms and 256 root conjuncts, and its element terms put it over the per-obligation emission budget of 512` |
+| an `assert_` written inside a `jax.jit` helper, a `cond` branch, or a `scan`/`while_loop` body | `the assert this obligation was recorded from is not a top-level equation of the query (it sits inside a sub-jaxpr — a transparent call body, a cond branch, or an undescended scan/while body), and escalation slices top-level asserts only` |
+| a `dot_general` whose operands' contracted (or batch) extents disagree — loadable through `from_dict`, never traceable, since jax refuses it | `'dot_general' declined: dot_general contracted dims disagree: lhs[0]=2 vs rhs[0]=4` |
 | any propagation under `semantics="ieee"`, or one that constrained an assume | escalation is refused wholly, before backend discovery |
 
 Installing the other backend does not move any of these. If your
 `UNKNOWN`s look like this, a solver extra is not what you are missing.
+
+**Every row above the last is ONE obligation's decline**, and the nested-
+assert row is the one where that had to be fixed: until audit 0.2.0 M17 a
+single `assert_` inside a `jit` declined escalation for *every* obligation
+in the query, so a set of asserts that each verified alone came back
+UNKNOWN together. That was widely mistaken for the element budget, which
+was always strictly per-obligation. If you are reading an UNKNOWN on a
+multi-assert query, read the per-obligation `detail`: each one now names
+its own cause.
 
 ## The cvc5 wheel, verified
 

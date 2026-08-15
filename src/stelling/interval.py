@@ -103,6 +103,7 @@ import sys
 from fractions import Fraction  # stdlib; the exact-endpoint route's arithmetic
 import operator
 from dataclasses import dataclass
+from typing import NamedTuple
 
 _INF = math.inf
 _FMAX = sys.float_info.max  # largest finite double: the outward-saturation endpoint
@@ -1398,6 +1399,132 @@ def reduce_sum(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
     return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
 
 
+class DotGeneralGeometry(NamedTuple):
+    """The index geometry of one well-formed ``dot_general``."""
+
+    lc: tuple[int, ...]          # lhs contracting dims, in jax's order
+    rc: tuple[int, ...]          # rhs contracting dims, paired with ``lc``
+    lb: tuple[int, ...]          # lhs batch dims
+    rb: tuple[int, ...]          # rhs batch dims, paired with ``lb``
+    # lhs / rhs dims that are neither batch nor contracted
+    lfree: tuple[int, ...]
+    rfree: tuple[int, ...]
+    out_shape: tuple[int, ...]   # batch dims, then lhs free, then rhs free
+    contracted_extents: tuple[int, ...]  # the AGREED extent of each contraction
+
+
+def dot_general_geometry(
+    lhs_shape, rhs_shape, dimension_numbers
+) -> DotGeneralGeometry:
+    """THE definition of a well-formed ``dot_general``, and the index
+    geometry that follows from it — **one definition, driven by both
+    faces**.
+
+    Called by :func:`dot_general` (the interval transfer, hence the whole
+    propagation leg) and by
+    :func:`stelling.obligation._dot_general_plan` (the SMT emission and
+    the exact-rational replay). Every well-formedness predicate this row
+    has lives here and nowhere else, so the two faces cannot hold
+    different opinions about whether an equation is admissible.
+
+    **This function exists because they did.** Audit 0.2.0 S12: the
+    contracted-extent agreement check was written inline in
+    :func:`dot_general` and the emission re-derived the same geometry
+    independently, iterating the LHS contraction extents alone. On
+    ``lhs=(2,) @ rhs=(4,)`` the transfer RAISED and the emission returned a
+    two-term combination — silently DROPPING two addends, the class this
+    codebase's own comments name as the unsound one — and because the
+    transfer's refusal lands the obligation at ⊤ → ``unknown``, the
+    truncating plan is exactly what solver escalation then runs. Over the
+    truncated reading ``Σ`` lay in ``[2, 4]`` and ``<= 4.5`` was
+    unsat-on-negation (VERIFIED); over the true four-term reading it lay in
+    ``[4, 8]`` and the threshold is violated. On ``lhs=(4,) @ rhs=(2,)`` the
+    same loop indexed off the end of the constant operand and raised a raw
+    ``IndexError`` out of a slicer that catches only ``_Decline``.
+
+    A check in one face that the other does not consult is the SHAPE of
+    that defect, not its repair — which is why this is a shared oracle and
+    not a second copy of the predicate in the emission. It is the same
+    discipline :func:`stelling.obligation._route_structural` already
+    follows for the structural rows (the interval function *is* the
+    routing) and that :func:`stelling.propagate._dot_general_row_form`
+    follows for this row's *params and dtypes*; the two are complementary
+    and disjoint — that oracle never sees a shape, this one never sees a
+    param.
+
+    Raises :class:`IntervalError` on any malformation; the emission face
+    quotes it as a decline.
+    """
+    check_shape(lhs_shape)
+    check_shape(rhs_shape)
+    lhs_shape = tuple(lhs_shape)
+    rhs_shape = tuple(rhs_shape)
+    try:
+        (lc, rc), (lb, rb) = dimension_numbers
+        lc, rc, lb, rb = tuple(lc), tuple(rc), tuple(lb), tuple(rb)
+    except (TypeError, ValueError):
+        raise IntervalError(
+            "dot_general dimension_numbers not in jax's "
+            f"((lhs_contract, rhs_contract), (lhs_batch, rhs_batch)) form: "
+            f"{dimension_numbers!r}"
+        ) from None
+    for name, dims, shape in (
+        ("lhs", lc + lb, lhs_shape), ("rhs", rc + rb, rhs_shape)
+    ):
+        if len(set(dims)) != len(dims):
+            raise IntervalError(
+                f"dot_general {name} names a dimension twice: {dims}"
+            )
+        for d in dims:
+            if not 0 <= d < len(shape):
+                raise IntervalError(
+                    f"dot_general {name} dimension {d} out of range for "
+                    f"shape {shape}"
+                )
+    if len(lc) != len(rc) or len(lb) != len(rb):
+        raise IntervalError(
+            "dot_general contracting/batch dimension lists must pair up: "
+            f"{dimension_numbers}"
+        )
+    for i, j in zip(lc, rc):
+        if lhs_shape[i] != rhs_shape[j]:
+            raise IntervalError(
+                f"dot_general contracted dims disagree: lhs[{i}]="
+                f"{lhs_shape[i]} vs rhs[{j}]={rhs_shape[j]}"
+            )
+    for i, j in zip(lb, rb):
+        if lhs_shape[i] != rhs_shape[j]:
+            raise IntervalError(
+                f"dot_general batch dims disagree: lhs[{i}]={lhs_shape[i]} vs "
+                f"rhs[{j}]={rhs_shape[j]}"
+            )
+    lfree = tuple(
+        i for i in range(len(lhs_shape)) if i not in lb and i not in lc
+    )
+    rfree = tuple(
+        j for j in range(len(rhs_shape)) if j not in rb and j not in rc
+    )
+    out_shape = (
+        tuple(lhs_shape[i] for i in lb)
+        + tuple(lhs_shape[i] for i in lfree)
+        + tuple(rhs_shape[j] for j in rfree)
+    )
+    check_shape(out_shape)
+    return DotGeneralGeometry(
+        lc=lc,
+        rc=rc,
+        lb=lb,
+        rb=rb,
+        lfree=lfree,
+        rfree=rfree,
+        out_shape=out_shape,
+        # the extents are read from the LHS only because they have just been
+        # checked EQUAL to the RHS's; that check is why reading one side is
+        # not the S12 truncation
+        contracted_extents=tuple(lhs_shape[i] for i in lc),
+    )
+
+
 def dot_general(
     a: IntervalArray,
     b: IntervalArray,
@@ -1450,48 +1577,16 @@ def dot_general(
     An EMPTY contraction (no contracted axes) is the outer product: the
     contracted index range is the single empty tuple, so each output element
     is one product and no accumulation happens.
-    """
-    (lc, rc), (lb, rb) = dimension_numbers
-    lc, rc, lb, rb = tuple(lc), tuple(rc), tuple(lb), tuple(rb)
-    for name, dims, arr in (("lhs", lc + lb, a), ("rhs", rc + rb, b)):
-        if len(set(dims)) != len(dims):
-            raise IntervalError(
-                f"dot_general {name} names a dimension twice: {dims}"
-            )
-        for d in dims:
-            if not 0 <= d < len(arr.shape):
-                raise IntervalError(
-                    f"dot_general {name} dimension {d} out of range for "
-                    f"shape {arr.shape}"
-                )
-    if len(lc) != len(rc) or len(lb) != len(rb):
-        raise IntervalError(
-            "dot_general contracting/batch dimension lists must pair up: "
-            f"{dimension_numbers}"
-        )
-    for i, j in zip(lc, rc):
-        if a.shape[i] != b.shape[j]:
-            raise IntervalError(
-                f"dot_general contracted dims disagree: lhs[{i}]="
-                f"{a.shape[i]} vs rhs[{j}]={b.shape[j]}"
-            )
-    for i, j in zip(lb, rb):
-        if a.shape[i] != b.shape[j]:
-            raise IntervalError(
-                f"dot_general batch dims disagree: lhs[{i}]={a.shape[i]} vs "
-                f"rhs[{j}]={b.shape[j]}"
-            )
 
-    lfree = tuple(i for i in range(len(a.shape)) if i not in lb and i not in lc)
-    rfree = tuple(j for j in range(len(b.shape)) if j not in rb and j not in rc)
-    batch_shape = tuple(a.shape[i] for i in lb)
-    out_shape = (
-        batch_shape
-        + tuple(a.shape[i] for i in lfree)
-        + tuple(b.shape[j] for j in rfree)
-    )
-    check_shape(out_shape)
-    contracted_ranges = [range(a.shape[i]) for i in lc]
+    Well-formedness and the index geometry come from
+    :func:`dot_general_geometry`, the oracle the SMT emission drives too —
+    read its docstring for why this function no longer owns those
+    predicates (audit 0.2.0 S12).
+    """
+    geom = dot_general_geometry(a.shape, b.shape, dimension_numbers)
+    lc, rc, lb, rb = geom.lc, geom.rc, geom.lb, geom.rb
+    lfree, rfree, out_shape = geom.lfree, geom.rfree, geom.out_shape
+    contracted_ranges = [range(n) for n in geom.contracted_extents]
 
     los: list[float] = []
     his: list[float] = []

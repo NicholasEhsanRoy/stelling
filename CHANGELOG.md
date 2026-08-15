@@ -142,6 +142,43 @@ SPDX-License-Identifier: Apache-2.0
   restricts the SMT portfolio to one backend. The verdict explicitly
   discloses degraded redundancy.
 
+- **An `assert_` nested in a `jit` no longer declines solver escalation for
+  every OTHER obligation in the query** (audit 0.2.0 **M17**). Escalation
+  slices top-level `stelling_assert` equations, and it used to decide
+  whether it could map obligations onto them by COUNTING: unequal totals
+  meant nothing could be mapped, so *every* unknown obligation declined.
+  One `assert_` written inside a `@jax.jit` helper — or a `cond` branch, or
+  a `scan` body — therefore cost escalation for the whole query. This is
+  the mechanism behind reports that "several asserts that each pass
+  individually come back UNKNOWN together"; it was widely attributed to the
+  per-obligation element budget, which was never involved.
+
+  The count check was *sound* (equal totals really did mean index `k` is
+  assert `k` — nothing was ever mis-sliced); it was simply a whole-query
+  answer to a per-obligation question. The walk now records, per
+  obligation, the position of the `stelling_assert` equation it came from
+  (`ObligationReport.top_level_eqn_pos`, `None` for anything inside a
+  sub-jaxpr), and `slice_unknown_obligations` VERIFIES that record against
+  the query — the position must name a `stelling_assert`, carry the same
+  `source_info`, and be claimed by exactly one obligation — before slicing
+  by it. An obligation failing any of those declines individually with the
+  reason quoted. The result is strictly stronger than the count check,
+  which could not tell one query from another of the same shape.
+
+  **Measured** on a 246-harness / 684-obligation corpus of multi-assert
+  queries with jit-nested asserts (jax 0.11.0, `JAX_ENABLE_X64=1`, z3 +
+  cvc5 wheels), run before and after: **244 of 584 previously-undecided
+  obligations became decided (41.8%)** — 123 discharged and 121
+  violated-with-witness — with **0** regressions and **0** disagreements
+  against an exact-`Fraction` oracle computed independently of stelling.
+  109 of the 208 nested-containing harnesses moved UNKNOWN → REFUTED. The
+  38 all-top-level control harnesses were byte-identical.
+
+  **A nested `assert_` is still not sliceable**, and its own obligation
+  still declines — with a reason that now names the actual cause instead of
+  an arithmetic mismatch. Every obligation still undecided after this fix,
+  on the corpus above, is a nested one.
+
 ### SMT emission extensions
 
 - **`is_finite` emission** (guarded): emits constant `true` when the
@@ -165,6 +202,46 @@ SPDX-License-Identifier: Apache-2.0
   returns NaN for `pow(negative, fractional)`).
 
 ### Soundness fixes
+
+- **`dot_general` shape well-formedness is now ONE definition, shared by
+  the interval transfer and the SMT emission** (audit 0.2.0 **S12**;
+  reaches the released **0.1.0** through `ir.ClosedJaxpr.from_dict` — see
+  [SOUNDNESS.md](SOUNDNESS.md)). `interval.dot_general` checked contracted-
+  and batch-extent agreement and raised; `obligation._dot_general_plan`
+  re-derived the same geometry from the **LHS alone**. On `lhs=(2,) @
+  rhs=(4,)` the transfer refused the equation while the emission returned a
+  two-term linear combination over a four-element constant operand —
+  **dropped addends, with no decline** — and because a refused transfer
+  binds ⊤, and ⊤ leaves the obligation `unknown`, the truncating plan is
+  exactly what solver escalation then ran. Measured: the four-term sum lies
+  in `[4, 8]` and `<= 4.5` does not hold; the truncated two-term sum lies in
+  `[2, 4]` and it does — a **false VERIFIED**. On `lhs=(4,) @ rhs=(2,)` the
+  same loop indexed off the end of the constant operand and raised a raw
+  `IndexError` out of `slice_obligation`, whose caller catches only
+  declines.
+
+  Neither face owns a shape predicate now: both call
+  `interval.dot_general_geometry`, which is the single definition of dim
+  ranges, duplicate dims, list pairing, extent agreement, and the derived
+  output shape and contraction ranges.
+  `tests/test_dot_general_both_faces.py` asserts the two faces AGREE over
+  six well-formed and nine malformed forms — agreement, not "the emission
+  declines these nine", because two copies of a predicate that happen to
+  match is the arrangement that produced the defect.
+
+  **No traced query is affected**: jax refuses to trace the equation
+  (`dot_general requires contracting dimensions to have the same shape`).
+  **No well-formed query changes verdict**: the oracle refuses exactly what
+  the transfer already refused. `from_dict` still accepts the document, by
+  decision — `ir.py` scopes per-primitive shape inference out of the door in
+  writing, and a rule there would leave the two faces free to disagree on
+  any hand-built query.
+
+  Also in this fix: `slice_obligation` can no longer raise. An unexpected
+  exception becomes a quoted `internal error` decline (UNKNOWN), the same
+  posture `solvers.escalate` already takes around `_dispatch_obligation`,
+  and its range test is two-sided, so an index past the start of the assert
+  list declines instead of raising `IndexError`.
 
 - **`exp` and `pow` under `semantics="ieee"` now require a DECLARED libm
   accuracy budget** (audit 0.2.0 **S9** and **S11**; S11 reaches the
@@ -572,6 +649,18 @@ SPDX-License-Identifier: Apache-2.0
 
 ### Known limitations (0.2.0)
 
+- **An `assert_` inside a sub-jaxpr does not reach the solver.** Solver
+  escalation slices top-level `stelling_assert` equations; an `assert_`
+  written inside a `jax.jit` helper, a `cond` branch or a `scan`/
+  `while_loop` body is judged by interval propagation and then declines
+  escalation, with the reason quoted per obligation. Since the M17 fix it
+  costs only ITS OWN escalation — its siblings are decided normally — but
+  it is still undecided, so a query containing one cannot reach VERIFIED on
+  the strength of the solver. Write the `assert_` at the top level of the
+  harness. Lifting this is a capability change rather than a repair, and
+  the `cond` case is not merely mechanical: a branch assert is
+  CONDITIONAL, so slicing it as an unconditional obligation would be
+  unsound.
 - **An `assume` inside a `scan` or `while_loop` body is not honoured.** The
   propagation does not enter those bodies, so such an assume narrows
   nothing and is not forwarded to the solver. It is now RECORDED as a

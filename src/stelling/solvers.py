@@ -3285,6 +3285,7 @@ def make_solver_verdict(
                 detail=detail,
                 source_info=ob.source_info,
                 operand_var_ids=ob.operand_var_ids,
+                top_level_eqn_pos=ob.top_level_eqn_pos,
             )
         )
     obligations = tuple(final)
@@ -3371,11 +3372,14 @@ def make_solver_verdict(
     # index 1 names an obligation INTERVALS decided and slices to
     # `['broadcast_in_dim','ge','scatter']`; index -1 is Python indexing and
     # slices the LAST obligation; index 99 declines; and index -3 (or lower)
-    # raises IndexError out of `slice_obligation`, which `_bar_scope`'s outer
-    # `except` turns into the same whole-query set. That FOURTH behaviour is
+    # declines too, with the same "no matching top-level stelling_assert
+    # equation" sentence -- it used to raise IndexError out of
+    # `slice_obligation`, which `_bar_scope`'s outer `except` turned into the
+    # same whole-query set, until audit 0.2.0 S12's second half made that
+    # range test two-sided. That FOURTH behaviour is
     # named because the version of this comment that listed three read as a
     # closed enumeration and was not one -- the same shape of claim this file
-    # keeps having to correct. What widens the bar for the first three is that
+    # keeps having to correct. What widens the bar for the first two is that
     # none of them carries a solver invocation whose recorded script hash AND
     # slice fingerprint both re-emit from the obligation it names -- see
     # `verdict._evidence_is_about`.

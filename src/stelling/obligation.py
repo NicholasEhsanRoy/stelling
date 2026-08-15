@@ -35,20 +35,33 @@ term); the exact n-ary ``reduce_sum``; and static-index ``scatter-add``
 operand element and its statically-known contributing update elements —
 duplicate indices contribute once each). Everything else — over-budget slices,
 transcendentals, unknown primitives, possibly-zero divisor elements,
-non-float input declarations, obligations that cannot be mapped
-one-to-one onto top-level asserts — **declines**, with the primitive and
+non-float input declarations, and obligations whose ``stelling_assert`` is
+not a top-level equation of the query (one written inside a ``jax.jit``
+helper, a ``cond`` branch, or an undescended ``scan``/``while_loop`` body)
+— **declines**, with the primitive and
 form (and, for the budget, the count and the budget) quoted, and the
-obligation stays UNKNOWN. Declines never raise; :exc:`ReplayError` is
+obligation stays UNKNOWN. **Every one of those declines is ONE
+obligation's**, including the last: an unmappable assert costs its own
+escalation and never its siblings' (audit 0.2.0 M17, where a single nested
+``assert_`` declined escalation for every obligation in the query).
+Declines never raise; :exc:`ReplayError` is
 raised only by the replay evaluator, whose caller treats it as an
 emission-infidelity signal — except for its :exc:`ReplayDeclined`
 subclass, which says the replay itself cannot evaluate the point exactly
 and degrades the witness to UNKNOWN instead of accusing the emission.
 
 The index bookkeeping (element pairing, structural routing, reduction
-grouping) is computed by ONE set of helpers, driven through the very
-:mod:`stelling.interval` functions the propagation transfers use, and is
-shared by slice validation, the SMT emission, and the replay — three
-consumers, one routing, so they cannot disagree with each other.
+grouping, and the ``dot_general`` contraction geometry) is computed by ONE
+set of helpers, driven through the very :mod:`stelling.interval` functions
+the propagation transfers use, and is shared by slice validation, the SMT
+emission, and the replay — three consumers, one routing, so they cannot
+disagree with each other. The ``dot_general`` row joined that discipline
+late and the gap was a soundness defect while it lasted: it re-derived its
+geometry from the LHS alone, so an equation whose contracted extents
+disagreed made :func:`stelling.interval.dot_general` RAISE while this
+module emitted a silently TRUNCATED sum (audit 0.2.0 S12). It now asks
+:func:`stelling.interval.dot_general_geometry`, which is that transfer's
+own well-formedness.
 
 Zero-dep: this module imports only the standard library and stelling's
 own jax-free modules.
@@ -1081,11 +1094,29 @@ def _dot_general_plan(eqns, consts, eqn: ir.JaxprEqn):
     the obligation leaves linear arithmetic entirely. That is a scope
     decision, not a capability gap, and the decline names it.
 
-    Admissibility is decided by
-    :func:`stelling.propagate._dot_general_row_form`, the SAME oracle the
-    interval transfer drives — built shared from the start rather than
-    extracted later, which is how the scatter row acquired a gate the
-    transfer had and the emission did not.
+    Admissibility is decided by TWO shared oracles, complementary and
+    disjoint, and between them they are the whole of it:
+
+    * :func:`stelling.propagate._dot_general_row_form` — the PARAMS and
+      DTYPES. Built shared from the start rather than extracted later,
+      which is how the scatter row acquired a gate the transfer had and the
+      emission did not. It never sees a shape.
+    * :func:`stelling.interval.dot_general_geometry` — the SHAPES: dim
+      ranges, duplicate dims, list pairing, batch- and contracted-EXTENT
+      agreement, and the derived ``out_shape`` and contraction ranges. It
+      never sees a param.
+
+    THE SECOND ONE IS AUDIT 0.2.0 S12 AND IT WAS LEARNED THE HARD WAY. The
+    extent-agreement check used to live inline in
+    :func:`stelling.interval.dot_general` while this function re-derived the
+    geometry from the LHS alone, so on ``lhs=(2,) @ rhs=(4,)`` the transfer
+    RAISED and this face returned a two-term combination — two of the
+    constant operand's four addends DROPPED, no decline — and on
+    ``lhs=(4,) @ rhs=(2,)`` it indexed off the end of the constant operand
+    and raised a raw ``IndexError`` out of a slicer that catches only
+    ``_Decline``. The two faces disagreed about whether the equation was
+    well-formed and the disagreement resolved in the ASSERTING direction.
+    Neither face owns a shape predicate now; both ask the oracle.
 
     TWO CHECKS THIS FACE MAKES THAT THE TRANSFER DOES NOT, each with its
     reason, per the shared-oracle discipline:
@@ -1142,14 +1173,16 @@ def _dot_general_plan(eqns, consts, eqn: ir.JaxprEqn):
     else:
         const_side, const_vals, sym_operand = 0, lhs_vals, 1
 
-    (lc, rc), (lb, rb) = dn
-    lfree = tuple(i for i in range(len(lhs_shape)) if i not in lb and i not in lc)
-    rfree = tuple(j for j in range(len(rhs_shape)) if j not in rb and j not in rc)
-    out_shape = (
-        tuple(lhs_shape[i] for i in lb)
-        + tuple(lhs_shape[i] for i in lfree)
-        + tuple(rhs_shape[j] for j in rfree)
-    )
+    try:
+        geom = iv.dot_general_geometry(lhs_shape, rhs_shape, dn)
+    except iv.IntervalError as e:
+        # the SHAPE oracle's refusal, quoted. The propagation face raises
+        # the identical sentence from the identical function, so an
+        # equation one face refuses cannot be planned by the other (S12)
+        raise _Decline(f"'dot_general' declined: {e}") from e
+    lc, rc, lb, rb = geom.lc, geom.rc, geom.lb, geom.rb
+    lfree, rfree, out_shape = geom.lfree, geom.rfree, geom.out_shape
+    contracted_ranges = [range(n) for n in geom.contracted_extents]
     if out_shape != _shape_of(eqn.outvars[0]):
         raise _Decline(
             f"'dot_general' output shape {_shape_of(eqn.outvars[0])} "
@@ -1169,7 +1202,10 @@ def _dot_general_plan(eqns, consts, eqn: ir.JaxprEqn):
         lcf = out_coord[nb:nb + nl]
         rcf = out_coord[nb + nl:]
         terms: list[tuple[Fraction, int]] = []
-        for c in itertools.product(*[range(lhs_shape[i]) for i in lc]):
+        # THE ORACLE'S extents, not the LHS's. Reading `lhs_shape[i]` here is
+        # exactly S12: on a shorter LHS it truncates the sum and on a shorter
+        # RHS it indexes off the constant operand.
+        for c in itertools.product(*contracted_ranges):
             ac = [0] * len(lhs_shape)
             bc = [0] * len(rhs_shape)
             for d, v in zip(lb, bcoord):
@@ -1825,10 +1861,13 @@ class _Slicer:
         custom_jvp_call, custom_vjp_call, remat2 — the same set the
         propagation descends), binding inner invars to the call's operand
         atoms and the call's outvars to the inner results, recursively.
-        Obligations/asserts remain top-level-only exactly as before — the
-        assert-count mapping in :func:`slice_unknown_obligations` is
-        untouched, and an inner ``stelling_assert`` still declines the
-        whole mapping there. A wrapper that resists sound inlining (no
+        Obligations/asserts remain top-level-only: an inner
+        ``stelling_assert`` is inlined here as an equation like any other,
+        but nothing SLICES it — :func:`slice_unknown_obligations` declines
+        the obligation it produced. What audit 0.2.0 M17 changed is that
+        the decline is now that ONE obligation's, quoted, instead of every
+        unknown obligation in the query; an inner assert did not become
+        sliceable. A wrapper that resists sound inlining (no
         sub-jaxpr, arity mismatch, const mismatch) is left in place as an
         opaque equation, which the validator declines with the form
         quoted."""
@@ -2854,11 +2893,25 @@ def slice_obligation(
     index: int,
     env: Mapping[int, iv.IntervalArray],
     *,
+    assert_position: int | None = None,
     top_primitives: frozenset[str] | None = None,
     relational_assumes: tuple[RelationalAssume, ...] = (),
 ) -> ObligationSlice | DeclinedObligation:
     """Extract the slice for obligation ``index`` (top-level assert order),
     or decline with the reason quoted. Never raises on legal queries.
+
+    ``assert_position`` separates the two things ``index`` used to be at
+    once: WHICH top-level ``stelling_assert`` to slice, and WHICH
+    obligation number to report. They coincide exactly when every
+    obligation is a top-level assert, and they stop coinciding the moment
+    one ``assert_`` is written inside a ``jax.jit`` helper — audit 0.2.0
+    M17. Callers that know the association (:func:`slice_unknown_
+    obligations`, which reads it off
+    :attr:`stelling.propagate.ObligationReport.top_level_eqn_pos`) pass it;
+    a caller that does not leaves it ``None`` and gets the old
+    ``index``-is-the-position reading, which is right for a query whose
+    asserts are all top-level and is the only thing an uninformed caller
+    can honestly assume.
 
     ``top_primitives`` (message wording only, never admission): the
     primitives the interval RUN recorded as fallen-to-⊤, from
@@ -2875,7 +2928,18 @@ def slice_obligation(
     assume-carrying script — unchanged by this fix, and its own finding."""
     jaxpr = closed.jaxpr
     asserts = [e for e in jaxpr.eqns if e.primitive == "stelling_assert"]
-    if index >= len(asserts):
+    position = index if assert_position is None else assert_position
+    # THE RANGE TEST IS TWO-SIDED, and the lower side is new. A negative
+    # index WITHIN range has always been Python indexing from the end and
+    # stays that way (it is measured in
+    # `test_what_a_stray_index_ACTUALLY_DOES_all_four_of_them`); one PAST the
+    # start used to raise a raw `IndexError` out of a function whose contract
+    # is the second line of this docstring, and reached the whole-query bar
+    # through `stelling.verdict._bar_scope`'s outer `except` rather than
+    # through the decline channel. An out-of-range index is not an internal
+    # error and should not be reported as one, so it is named here rather
+    # than left to the net below.
+    if not -len(asserts) <= position < len(asserts):
         return DeclinedObligation(
             index=index,
             reason=(
@@ -2883,7 +2947,7 @@ def slice_obligation(
                 f"stelling_assert equation"
             ),
         )
-    assert_eqn = asserts[index]
+    assert_eqn = asserts[position]
     try:
         return _Slicer(
             closed, env, top_primitives, relational_assumes
@@ -2891,6 +2955,35 @@ def slice_obligation(
     except _Decline as d:
         return DeclinedObligation(
             index=index, reason=d.reason, source_info=assert_eqn.source_info
+        )
+    except Exception as e:  # noqa: BLE001 — guard rule: degrade, quoted
+        # THIS FUNCTION'S CONTRACT IS THE SECOND LINE OF ITS DOCSTRING and
+        # it was breakable. Audit 0.2.0 S12's other half: a `dot_general`
+        # whose operands' contracted extents disagreed indexed off the end
+        # of the constant operand and raised a raw `IndexError` here — an
+        # exception class NO caller handles. `escalate` iterates
+        # `slice_unknown_obligations` in the FOR HEADER, outside its own
+        # per-obligation `except Exception` net, so the crash escaped the
+        # whole call and a batch caller lost every other obligation's
+        # verdict with it.
+        #
+        # The extent defect itself is fixed at its root (the shared shape
+        # oracle `_dot_general_plan` now drives), so this net catches
+        # NOTHING that is currently constructable — which is the point. It
+        # is the same posture, in the same words, that `stelling.solvers.
+        # escalate` already takes around `_dispatch_obligation`: mid-analysis
+        # a bug degrades to UNKNOWN, QUOTED, never silently and never as a
+        # crash. Quoted is what keeps it from being a swallow: the sentence
+        # names the exception class and its message, rides into the
+        # obligation's `detail`, and says INTERNAL ERROR in those words, so
+        # a reader sees a stelling defect rather than an undecided
+        # obligation.
+        return DeclinedObligation(
+            index=index,
+            reason=(
+                f"slice attempted; internal error: {type(e).__name__}: {e}"
+            ),
+            source_info=assert_eqn.source_info,
         )
 
 
@@ -2901,46 +2994,121 @@ def slice_unknown_obligations(
 ) -> tuple[ObligationSlice | DeclinedObligation, ...]:
     """Slices (or quoted declines) for exactly the obligations interval
     propagation left ``unknown``. Discharged and violated obligations are
-    already decided and are not re-decided."""
+    already decided and are not re-decided.
+
+    **THE ASSOCIATION IS PER-OBLIGATION, AND IT IS CHECKED RATHER THAN
+    GUESSED** — audit 0.2.0 M17. Escalation slices a top-level
+    ``stelling_assert``; an obligation recorded from inside a sub-jaxpr has
+    no such equation and must decline. This used to be decided by COUNTING:
+    when ``len(asserts) != len(propagation.obligations)`` nothing could be
+    mapped and EVERY unknown obligation declined. One ``assert_`` written
+    inside a ``jax.jit`` helper therefore cost solver escalation for every
+    other obligation in the query, and the resulting UNKNOWN was widely
+    misread as the per-obligation element budget (which is genuinely
+    per-obligation and was never the cause).
+
+    **The count check was SOUND, and stating that precisely is what says
+    where the defect actually is.** Every top-level ``stelling_assert``
+    records exactly one obligation (the walk visits every top-level
+    equation, and the malformed-shape screen explicitly EXEMPTS asserts
+    from declining so that they are still recorded), so
+    ``len(obligations) >= len(asserts)`` always, with equality exactly when
+    no obligation came from a sub-jaxpr — and under equality index ``k``
+    really is assert ``k``. Nothing was ever mis-sliced. The defect is
+    purely that the instrument answers a PER-OBLIGATION question with a
+    WHOLE-QUERY number: the unmappable obligation is one of them, and its
+    siblings are ordinary top-level equations with ordinary slices that
+    were being thrown away with it.
+
+    So the walk records where it saw each assert
+    (:attr:`stelling.propagate.ObligationReport.top_level_eqn_pos`) and
+    this function VERIFIES that record against the IR it was handed —
+    the position must name a top-level ``stelling_assert``, it must carry
+    the same ``source_info`` the obligation carries, and no two obligations
+    may claim it. An obligation failing any of those, or carrying no
+    position at all, declines individually with the reason quoted. The
+    safety property is unchanged and stated the same way: **an obligation
+    whose association cannot be trusted still declines** — what changed is
+    that its siblings no longer decline with it.
+    """
     unknown = [o for o in propagation.obligations if o.status == "unknown"]
-    asserts = [
-        e for e in closed.jaxpr.eqns if e.primitive == "stelling_assert"
-    ]
-    if len(asserts) != len(propagation.obligations):
-        # obligations were recorded from inside sub-jaxprs (transparent
-        # wrappers / cond branches): index-based mapping onto top-level
-        # asserts would be a guess, so every unknown obligation declines.
-        # The call descent inlines sub-jaxpr COMPUTATION only; obligations
-        # remain top-level-only, exactly as before.
-        return tuple(
-            DeclinedObligation(
-                index=o.index,
-                reason=(
-                    f"{len(propagation.obligations)} obligation(s) but "
-                    f"{len(asserts)} top-level stelling_assert equation(s): "
-                    f"asserts nested in sub-jaxprs cannot be mapped to "
-                    f"slices"
-                ),
-                source_info=o.source_info,
+    eqns = closed.jaxpr.eqns
+    # position in the top-level eqns -> ordinal among top-level asserts,
+    # which is the index `slice_obligation` selects by
+    ordinal_of_pos: dict[int, int] = {}
+    for pos, e in enumerate(eqns):
+        if e.primitive == "stelling_assert":
+            ordinal_of_pos[pos] = len(ordinal_of_pos)
+    claimants: dict[int, int] = {}
+    for o in propagation.obligations:
+        if o.top_level_eqn_pos is not None:
+            claimants[o.top_level_eqn_pos] = (
+                claimants.get(o.top_level_eqn_pos, 0) + 1
             )
-            for o in unknown
-        )
     # the run record rides along for message wording (audit R2/R3): the
     # unsupported-primitive decline describes what the interval leg did
     # on THIS run from the coverage instrument's own record
     tops = frozenset(
         name for name, _ in propagation.coverage.unknown_primitives
     )
-    return tuple(
-        slice_obligation(
+
+    def one(o) -> ObligationSlice | DeclinedObligation:
+        pos = o.top_level_eqn_pos
+        if pos is None:
+            return DeclinedObligation(
+                index=o.index,
+                reason=(
+                    "the assert this obligation was recorded from is not a "
+                    "top-level equation of the query (it sits inside a "
+                    "sub-jaxpr — a transparent call body, a cond branch, or "
+                    "an undescended scan/while body), and escalation slices "
+                    "top-level asserts only"
+                ),
+                source_info=o.source_info,
+            )
+        if pos not in ordinal_of_pos:
+            return DeclinedObligation(
+                index=o.index,
+                reason=(
+                    f"the recorded top-level position {pos} of this "
+                    f"obligation's assert does not name a stelling_assert "
+                    f"equation in the query handed to escalation: the "
+                    f"propagation and the query disagree, so no slice can be "
+                    f"attributed to it"
+                ),
+                source_info=o.source_info,
+            )
+        if claimants.get(pos, 0) != 1:
+            return DeclinedObligation(
+                index=o.index,
+                reason=(
+                    f"{claimants[pos]} obligations claim top-level assert "
+                    f"position {pos}: the association is not one-to-one, so "
+                    f"none of them may be sliced by it"
+                ),
+                source_info=o.source_info,
+            )
+        if tuple(eqns[pos].source_info) != tuple(o.source_info):
+            return DeclinedObligation(
+                index=o.index,
+                reason=(
+                    f"the assert at top-level position {pos} was traced at "
+                    f"{tuple(eqns[pos].source_info)!r} but this obligation "
+                    f"records {tuple(o.source_info)!r}: the propagation and "
+                    f"the query disagree, so no slice can be attributed to it"
+                ),
+                source_info=o.source_info,
+            )
+        return slice_obligation(
             closed,
             o.index,
             env,
+            assert_position=ordinal_of_pos[pos],
             top_primitives=tops,
             relational_assumes=propagation.relational_assumes,
         )
-        for o in unknown
-    )
+
+    return tuple(one(o) for o in unknown)
 
 
 # -- exact-rational replay ----------------------------------------------------

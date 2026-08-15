@@ -1318,14 +1318,19 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
       "obligation #99 has no matching top-level stelling_assert equation" —
       and that is the case the sentence was true of;
     * a negative index PAST the start (`-3` on the bar's two-obligation
-      fixture, and anything below it) raises `IndexError` out of
-      `slice_obligation` rather than declining, and is caught by this
-      function's outer `except` — the same whole-query set by a different
-      door. It is named because "three behaviours" was being read as a closed
-      enumeration and it was not one; the list above is the four that have
-      been MEASURED, and it is not claimed to be closed either.
+      fixture, and anything below it) DECLINES, with the same "no matching
+      top-level stelling_assert equation" sentence the `99` case gets. It
+      used to raise `IndexError` out of `slice_obligation` and reach the
+      whole-query set through this function's outer `except` instead — a
+      different door to the same place, and no soundness difference, but a
+      raw exception out of a function documented never to raise on a legal
+      query. Audit 0.2.0 S12's second half closed that class; the range test
+      in `slice_obligation` is two-sided now. It is named because "three
+      behaviours" was being read as a closed enumeration and it was not one;
+      the list above is the four that have been MEASURED, and it is not
+      claimed to be closed either.
 
-    All four end at the whole-query set, and the first three by the evidence
+    All four end at the whole-query set, and the first two by the evidence
     check rather than by the slicer: none of them carries an invocation whose
     script AND slice fingerprint both re-emit from the obligation it names. An
     EMPTY domain is the one case that silences the bar, and it is empty
@@ -1606,6 +1611,7 @@ def _apply_reachability_conjunct(
                     ),
                     source_info=ob.source_info,
                     operand_var_ids=ob.operand_var_ids,
+                    top_level_eqn_pos=ob.top_level_eqn_pos,
                 )
             )
     obligations = tuple(downgraded)
