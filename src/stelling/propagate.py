@@ -155,6 +155,7 @@ from __future__ import annotations
 import dataclasses
 import math
 from operator import index as _op_index
+import re
 import struct
 from dataclasses import dataclass
 
@@ -8483,6 +8484,73 @@ UNCERTIFIED_REACHABILITY_REFUSAL = (
 # "the invariant is preserved by one step" was printed for a step preserved
 # only inside an assumed sub-region the successor state need not re-enter.
 CONDITIONAL_ON_PRECONDITION = "the verdict holds where the precondition holds"
+
+# THE SCOPE OF A CONDITIONALITY LINE, and why reading it as whole-query was a
+# defect (audit B3, FRAGILE).
+#
+# Both mechanisms write `CONDITIONAL_ON_PRECONDITION`, and they are scoped
+# differently. An interval NARROWING changes the boxes every obligation of the
+# run is judged over, so its line is a fact about the whole query and names no
+# obligation. A FORWARDED relational axiom reaches exactly the obligations
+# whose scripts stated it, and `stelling.solvers.relational_assume_assumption`
+# says so — `… on obligation(s) #1, #3: <phrase> …`.
+#
+# Both consumers asked `any(CONDITIONAL_ON_PRECONDITION in a for a in
+# assumptions)`, which is the whole-query question, and got wrong answers on
+# runs where the two populations differ. MEASURED: one interval-refuted
+# obligation plus one solver obligation with a forwarded axiom made
+# `Verdict.render` call the refutation "conditional … judged over the
+# propagated superset of the precondition-narrowed set, not over the full
+# declared box" — while nothing had narrowed (a relational assume is inert in
+# the interval domain) and that obligation's own detail line said "over the
+# declared box". And body `{x,y} -> {0.5x, 0.5y}` on `[-1,1]²` with an assume
+# carried only into a body-assert's slice made `check_inductive_step` print
+# "inductive step CONDITIONAL — NOT the inductive step", while the four bound
+# obligations have single-variable cones, were judged over the full box, and
+# close the induction unconditionally (`|0.5·t| ≤ 0.5 ≤ 1`).
+#
+# So the read is SCOPED, and the failure direction of the parse is the safe
+# one: a line whose scope cannot be read is treated as whole-query, which
+# over-discloses rather than under-discloses.
+_CONDITIONAL_SCOPE = re.compile(r" on obligation\(s\) ((?:#\d+, )*#\d+):")
+
+
+def conditional_on_precondition(
+    assumptions: "tuple[str, ...] | list[str]",
+    indices: "frozenset[int] | set[int] | tuple[int, ...]",
+) -> bool:
+    """Does any stamped conditionality line bear on one of ``indices``?
+
+    ``indices`` are the obligations the caller's sentence is ABOUT — the
+    interval-refuted ones for :meth:`stelling.verdict.Verdict.render`, the
+    state-bound ones for :func:`stelling.inductive.check_inductive_step`. A
+    conditionality line that names obligations bears on those; one that names
+    none is whole-query and bears on all of them.
+
+    Asking with an EMPTY ``indices`` is the honest way to ask "is there a
+    conditionality this sentence can be about", and the answer is False: a
+    sentence about no obligation is conditional on nothing.
+    """
+    want = frozenset(indices)
+    if not want:
+        # a sentence about no obligation is conditional on nothing. Answered
+        # here rather than falling out of an empty intersection, because a
+        # whole-query line would otherwise return True for it and the caller
+        # would get "conditional" for a claim it is not making.
+        return False
+    for a in assumptions:
+        if CONDITIONAL_ON_PRECONDITION not in a:
+            continue
+        head = a.split(CONDITIONAL_ON_PRECONDITION, 1)[0]
+        m = _CONDITIONAL_SCOPE.search(head)
+        if m is None:
+            # whole-query: no obligation named, so it qualifies every one
+            return True
+        named = frozenset(int(tok[1:]) for tok in m.group(1).split(", "))
+        if named & want:
+            return True
+    return False
+
 
 # The two STAMPED assumptions an uncertified assume state adds, and the
 # one that SUPERSEDES them.

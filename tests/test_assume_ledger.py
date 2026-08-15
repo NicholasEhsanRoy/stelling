@@ -60,6 +60,29 @@ from stelling.propagate import (  # noqa: E402
 )
 
 
+@pytest.fixture(autouse=True, scope="module")
+def _x64():
+    """This module declares float64 inputs, so it must ask for x64 ITSELF.
+
+    It previously inherited x64 from a bare module-scope
+    `jax.config.update` in a *different* test module. pytest imports every
+    test module during COLLECTION, before any test runs, so that one call
+    set x64 for the whole session and every module silently rode on it.
+    That call had no restore and leaked into
+    `test_transcribe.py::test_content_hash_stable_across_processes`, which
+    compares an in-process hash against a clean subprocess — parent f64,
+    child f32, hashes differ. Removing it left this module declaring
+    float64 into a float32 session, where the declarations truncate, every
+    obligation declines, and the assertions fail on a
+    `DeclinedObligation`. A module-scoped fixture that saves and restores
+    is the house pattern and does not depend on collection order.
+    """
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    yield
+    jax.config.update("jax_enable_x64", old)
+
+
 def _prop(h, **kw):
     return P.propagate(transcribe(jax.make_jaxpr(h)()), **kw)
 

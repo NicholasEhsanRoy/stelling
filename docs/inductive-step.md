@@ -107,7 +107,7 @@ closes the induction.
   iterating from the *admitted* start `x = 0.4` gives
   `0.4, 0.6, 0.9, 1.35` — outside the invariant at step 3.
 
-## Contradictory assumes are refused, not verified
+## Contradictory assumes are refused, not verified — when one obligation sees the whole contradiction
 
 If the body's assumes admit no state at all, every obligation over them is
 vacuously true and a VERIFIED would mean nothing. That is a harness defect,
@@ -121,6 +121,27 @@ only) the body `x, y -> (x + y) * 10` on `[-1, 1]²` under `assume(x < y)`
 and `assume(y < x)` returned VERIFIED with "the invariant is preserved by
 one step" — and from `x = y = 0.5`, inside the invariant, one step gives
 `10.0`.
+
+**What the refusal cannot reach, and what it does instead** (audit B3). The
+refusal is one solver's `unsat` on one obligation's script, and a script
+states only the assumes whose operands lie in that obligation's backward
+cone. Spread the contradiction across cones — three state variables under
+`assume(x < y)`, `assume(y < z)`, `assume(z < x)`, where every obligation
+depends on at most two of them — and no script ever holds more than one link
+of the cycle. Nothing proves the region empty, and the call RETURNS.
+
+What it no longer does is return a *clean* verdict. A discharge that rested
+on a partial axiom set carries `[MAY BE VACUOUS: …]` on its own detail line
+and a stamped `precondition satisfiability uncertified`, so a reader is told
+the claim was never shown to be about anything. Measured on this build, body
+`{x, y, z} -> {0.6·(x - y) + 0.6, 0.5·y, 0.5·z}` on `[-1, 1]³` under that
+3-cycle: VERIFIED, both disclosures present, note `inductive step
+CONDITIONAL — NOT the inductive step`, and the assumed region admits no
+state at all.
+
+Closing the gap needs a whole-query admitted-region script — one emission
+naming every assume's operands, which no single obligation slice can — and
+that is not in this build.
 
 ## Solver escalation
 

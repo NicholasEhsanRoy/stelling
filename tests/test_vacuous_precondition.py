@@ -35,16 +35,47 @@ WHAT THESE TESTS PIN, in the order the repair reads:
 5. the disclosure: an undecided region stamps a may-be-vacuous line, and the
    vacuity sentence stops claiming substantiveness on such a run;
 6. the two inductive-step over-claims (M5's conditional step, M4's
-   positionally-mapped REFUTED note).
+   positionally-mapped REFUTED note);
+7. the SCOPE of both readings, which is audit B3 (below).
+
+AUDIT B3, TWO FINDINGS ON THE REPAIR ABOVE.
+
+**The check asked about the SLICE and the answer was read as being about the
+QUERY.** ``_carry_assumes`` drops every relational assume whose operands fall
+outside an obligation's backward cone, so the admitted-region script states a
+SUBSET of the query's axioms. ``unsat`` on a subset is sound — an empty
+relaxation proves the tighter set empty — but ``sat`` on one was read as
+:data:`REGION_INHABITED`, "a point of the region". Measured: ``x, y, z ∈
+[-10,10]``, ``assume(x<y); assume(y<z); assume(z<x)``, ``assert_(x - y <=
+0.0)``. The assert's cone is ``{x, y}``, so the script states only ``x<y``;
+``boxes ∧ (x<y)`` is satisfiable; VERIFIED, stamped CLEAN, over a precondition
+that admits no point at all. The repair is one condition —
+:data:`REGION_INHABITED` only when ``unaccounted_assumes`` is empty for this
+obligation — and section 7 pins both directions of it.
+
+**A per-obligation fact read as a whole-query one.** The stamped
+``forwarded relational assume(s) on obligation(s) #k`` line names the
+obligations it reaches; both readers asked ``any(... in assumptions)``, which
+is the whole-query question. Measured, an interval refutation called
+"conditional … judged over the propagated superset of the
+precondition-narrowed set" on a run where nothing narrowed, and an inductive
+step called "CONDITIONAL — NOT the inductive step" on a body whose bound
+obligations were judged over the full declared box.
 """
 
 from __future__ import annotations
 
 import inspect
+from fractions import Fraction
 
 import pytest
 
-pytest.importorskip("jax", reason="needs jax")
+# THE BARE IDIOM ON PURPOSE. A custom ``reason=`` replaces pytest's standard
+# "could not import 'jax'" message, and that message is what
+# ``test_skip_inventory.py``'s ``_IMPORT_GATE`` matches to disclose the gate —
+# a custom one reads as an UNDISCLOSED skip in every jax-less session, and
+# reddens the inventory in exactly the environment nobody runs locally.
+pytest.importorskip("jax")
 
 import jax  # noqa: E402
 
@@ -57,6 +88,7 @@ from stelling.propagate import (  # noqa: E402
     CONDITIONAL_ON_PRECONDITION,
     UNCERTIFIED_PRECONDITION_PREFIX,
     UnsatisfiableAssumptionError,
+    conditional_on_precondition,
     interval_env,
     propagate,
 )
@@ -67,6 +99,7 @@ from stelling.solvers import (  # noqa: E402
     REGION_UNCERTIFIED,
     UNCERTIFIED_REGION_ASSUMPTION,
     _region_answer,
+    relational_assume_assumption,
 )
 
 try:
@@ -82,6 +115,29 @@ except Exception:  # pragma: no cover - environment probe only
 need_solver = pytest.mark.skipif(not HAVE_SOLVER, reason="needs an SMT solver")
 
 TIMEOUT = 5000
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _x64():
+    """This module declares float64 inputs, so it must ask for x64 ITSELF.
+
+    Every harness here is `any_array((), "float64", …)`, and in a float32
+    session those declarations TRUNCATE: the obligations decline, the
+    escalation never runs, and the assertions fail on a
+    `DeclinedObligation` rather than on anything this file is about. CI runs
+    plain `pytest` with no `JAX_ENABLE_X64`, so a module that asks for
+    nothing is a module that only passes on a developer's machine.
+
+    A module-scoped fixture that SAVES AND RESTORES is the house pattern,
+    and the restore is the load-bearing half: a bare module-scope
+    `jax.config.update` runs at COLLECTION, before any test, and sets x64
+    for the whole session — which is how a cross-process hash comparison in
+    `test_transcribe.py` was broken by a module that never ran.
+    """
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    yield
+    jax.config.update("jax_enable_x64", old)
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +181,74 @@ def axiom_cycle():
     return assert_(x + y + z >= 100.0)
 
 
+def cone_split_cycle():
+    """AUDIT B3's shape: the SAME 3-cycle, spread across obligation cones.
+
+    ``assert_(x - y <= 0.0)`` has backward cone ``{x, y}``, so
+    ``_carry_assumes`` carries ``x < y`` and skips the other two — their
+    operands name nothing in this slice. The script the admitted-region check
+    is asked about is therefore ``boxes ∧ (x < y)``, which is satisfiable, and
+    reading that ``sat`` as "a point of the region" stamped a VERIFIED clean
+    over an EMPTY precondition (:func:`_cone_split_admits_no_point` is the
+    independent ground truth).
+
+    Distinct from :func:`axiom_cycle`, where the assert's cone contains all
+    three variables so the script states the whole contradiction and the
+    ``unsat`` route already refuses. The difference between the two harnesses
+    is one assert.
+    """
+    x = any_array((), "float64", (-10.0, 10.0))
+    y = any_array((), "float64", (-10.0, 10.0))
+    z = any_array((), "float64", (-10.0, 10.0))
+    assume(x < y)
+    assume(y < z)
+    assume(z < x)
+    return assert_(x - y <= 0.0)
+
+
+def cone_split_chain():
+    """THE CONE-SPLIT CONTROL: the same shape with the cycle broken.
+
+    ``x < y`` and ``y < z`` over the same boxes, the same
+    ``assert_(x - y <= 0.0)``, the same skipped assume — everything the
+    vacuous harness has except the emptiness. Its VERIFIED is substantive and
+    must STAY VERIFIED.
+
+    It is also where the repair's COST is measured. The region here really is
+    inhabited (``(0, 1, 2)``), and nothing on this run establishes that: the
+    script cannot state ``y < z`` — ``z`` is not in the cone — and the
+    propagation's probe grid finds no point at which a STRICT chain is
+    definitely true. So this VERIFIED is qualified, correctly and
+    conservatively. :func:`cone_split_chain_certified` is the same shape one
+    character different, and is not.
+    """
+    x = any_array((), "float64", (-10.0, 10.0))
+    y = any_array((), "float64", (-10.0, 10.0))
+    z = any_array((), "float64", (-10.0, 10.0))
+    assume(x < y)
+    assume(y < z)
+    return assert_(x - y <= 0.0)
+
+
+def cone_split_chain_certified():
+    """The cone-split control that stays CLEAN, and the reason the repair is
+    not "any skipped assume, a caveat forever".
+
+    ``<=`` where :func:`cone_split_chain` has ``<``. The propagation's
+    non-emptiness probe finds a point of the declared set at which every
+    assume of the query — including the one no script can state — is
+    definitely true, and that certificate is a WHOLE-QUERY answer: it settles
+    the emptiness question the per-obligation script cannot reach, so the
+    extra solver call is skipped and no caveat is stamped.
+    """
+    x = any_array((), "float64", (-10.0, 10.0))
+    y = any_array((), "float64", (-10.0, 10.0))
+    z = any_array((), "float64", (-10.0, 10.0))
+    assume(x <= y)
+    assume(y <= z)
+    return assert_(x - y <= 0.0)
+
+
 def satisfiable_assume():
     """THE CONTROL. ``x <= y`` is satisfiable over the declared boxes and the
     assert ``x - y <= 0`` is TRUE at every admitted point.
@@ -145,6 +269,27 @@ def _first_slice(harness):
     p = propagate(q)
     items = list(slice_unknown_obligations(q, p, interval_env(q)))
     return next(s for s in items if getattr(s, "assumes", None))
+
+
+def _cone_split_admits_no_point(n=21):
+    """GROUND TRUTH for :func:`cone_split_cycle`, computed here, exactly.
+
+    An ``n³`` grid of exact :class:`~fractions.Fraction` points spanning
+    ``[-10, 10]³``, counting those satisfying ``x < y ∧ y < z ∧ z < x``. No
+    float, no solver, no stelling: the emptiness this file's headline test
+    rests on is a fact about the harness, and a fact about the harness must
+    not be established by the tool under test. (It is also provable in one
+    line — a strict order has no 3-cycle, since the three give ``x < x`` — and
+    the grid is the measurement that catches a harness edited into a
+    different shape.)
+    """
+    lo, hi = Fraction(-10), Fraction(10)
+    pts = [lo + (hi - lo) * Fraction(i, n - 1) for i in range(n)]
+    return sum(
+        1
+        for x in pts for y in pts for z in pts
+        if x < y and y < z and z < x
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +319,143 @@ def test_an_unsatisfiable_forwarded_assume_refuses_instead_of_verifying(
     # ... and it says WHICH mechanism decided, and on what
     assert f"the {n_axioms} relational assume(s) forwarded" in msg
     assert "with the negated obligation removed" in msg
+
+
+def test_the_cone_split_harness_really_does_admit_no_point():
+    """The premise of every test below it, measured rather than asserted."""
+    assert _cone_split_admits_no_point() == 0
+
+
+def test_the_cone_split_slice_states_ONE_link_of_the_three():
+    """WHY the sat is not an answer, at the emission. The slice carries one
+    axiom and quotes a reason for each of the two it cannot state — so the
+    script the region check is asked about describes a STRICT RELAXATION of
+    the user's precondition, and no model of it is a point of that
+    precondition."""
+    sl = _first_slice(cone_split_cycle)
+    assert len(sl.assumes) == 1
+    assert len(sl.assumes_skipped) == 2
+    assert all(
+        "not in this obligation's backward cone" in r
+        for r in sl.assumes_skipped
+    )
+
+
+@need_solver
+def test_a_cone_split_empty_region_is_never_stamped_clean():
+    """AUDIT B3, THE BLOCKING FINDING. The discharge stands — it is sound over
+    the superset the solver ran on — and it may NOT read as substantive: the
+    admitted-region check answered ``sat`` about one link of a 3-cycle, which
+    settles nothing about the cycle.
+
+    Reverting the one condition in :func:`solvers._region_answer` restores
+    ``REGION_INHABITED`` here and reddens every assertion below.
+    """
+    v = check(
+        cone_split_cycle, vacuity_mode="inputs-only", solver_timeout_ms=TIMEOUT,
+    )
+    # the claim itself is sound and survives; what changes is what it says
+    assert v.status == "VERIFIED"
+    (ob,) = v.obligations
+    assert ob.status == "discharged"
+    assert "MAY BE VACUOUS" in ob.detail
+    assert UNCERTIFIED_REGION_ASSUMPTION in v.stamp.assumptions
+    # and the mechanism is named where it is TRUE — per obligation, because
+    # the solver DID decide, over the wrong question
+    mech = [n for n in v.notes if solvers.REGION_PARTIAL_MECHANISM in n]
+    assert len(mech) == 1, v.notes
+    # naming which conjuncts the check never saw, as the withholding does
+    assert mech[0].count("[forwarded]") == 2, mech[0]
+    assert solvers.REGION_UNDECIDED_MECHANISM not in mech[0]
+
+
+@need_solver
+def test_the_cone_split_control_with_the_cycle_broken_stays_VERIFIED():
+    """THE CONTROL THAT MAKES THE REPAIR A REPAIR: same boxes, same assert,
+    same skipped assume, satisfiable precondition — still VERIFIED. A repair
+    that withdrew the discharge would pass every emptiness test above and be
+    worthless."""
+    v = check(
+        cone_split_chain, vacuity_mode="inputs-only", solver_timeout_ms=TIMEOUT,
+    )
+    assert v.status == "VERIFIED"
+    (ob,) = v.obligations
+    assert ob.status == "discharged"
+
+
+@need_solver
+def test_the_cone_split_cost_is_a_caveat_on_an_INHABITED_region():
+    """THE PRICE, PINNED RATHER THAN ARGUED. On the satisfiable cone-split
+    chain nothing establishes non-emptiness — the script cannot state ``y<z``
+    and the probe grid finds no strict-chain point — so the VERIFIED is
+    qualified. Measured over a 48-harness cone-split family: 8 of 28
+    inhabited-region VERIFIEDs gain this caveat, 0 change verdict.
+
+    Pinned because it is the cost a future whole-query admitted-region script
+    would BUY BACK, and a silent change to it is a change to what a clean
+    VERIFIED means."""
+    v = check(
+        cone_split_chain, vacuity_mode="inputs-only", solver_timeout_ms=TIMEOUT,
+    )
+    (ob,) = v.obligations
+    assert "MAY BE VACUOUS" in ob.detail
+    assert UNCERTIFIED_REGION_ASSUMPTION in v.stamp.assumptions
+
+
+@need_solver
+def test_the_whole_query_certificate_still_clears_a_cone_split_run():
+    """... and the repair is NOT "a skipped assume, a caveat forever". The
+    propagation's non-emptiness probe answers the WHOLE-QUERY question, which
+    is the question the per-obligation script cannot reach, so a cone-split
+    run it certifies is clean AND pays no extra solver call."""
+    q = trace(cone_split_chain_certified)
+    p = propagate(q)
+    assert p.region_inhabited is True
+    v = check(
+        cone_split_chain_certified, vacuity_mode="inputs-only",
+        solver_timeout_ms=TIMEOUT,
+    )
+    assert v.status == "VERIFIED"
+    (ob,) = v.obligations
+    assert "MAY BE VACUOUS" not in ob.detail
+    assert not any(
+        a.startswith(UNCERTIFIED_PRECONDITION_PREFIX)
+        for a in v.stamp.assumptions
+    )
+    assert all(
+        "admitted-region check" not in s.reason
+        for s in (v.stamp.solver if isinstance(v.stamp.solver, tuple) else ())
+    )
+
+
+@need_solver
+def test_the_inductive_entry_point_stops_calling_a_cone_split_step_clean():
+    """The same hole through the public inductive API. Bound obligation #1
+    (``0.6(x-y)+0.6 <= 1``) discharges only because ``x < y`` was forwarded,
+    and ``x < y < z < x`` admits no state at all — so the step is BOTH
+    conditional and unestablished, and the verdict now says both.
+
+    The residual gap is named in the assertion at the end: it is still a
+    VERDICT and not a raise. Nothing here can prove the region empty, because
+    no single obligation's script ever states more than one link of the cycle.
+    """
+    def body(state, consts):
+        x, y, z = state["x"], state["y"], state["z"]
+        assume(x < y)
+        assume(y < z)
+        assume(z < x)
+        return {"x": 0.6 * (x - y) + 0.6, "y": 0.5 * y, "z": 0.5 * z}
+
+    bounds = {k: ((-1.0, 1.0), "float64") for k in ("x", "y", "z")}
+    v = check_inductive_step(body, bounds, solver_timeout_ms=TIMEOUT)
+    assert v.status == "VERIFIED"
+    assert UNCERTIFIED_REGION_ASSUMPTION in v.stamp.assumptions
+    assert "MAY BE VACUOUS" in v.obligations[1].detail
+    # M5's caveat fires too: this bound obligation IS one of the induction's
+    assert v.notes[-1].startswith("inductive step CONDITIONAL")
+    # ... and the sentence `docs/inductive-step.md` used to end on — "raises
+    # rather than returning a verdict" — is still FALSE for this shape.
+    assert v.status != "RAISED"
 
 
 @need_solver
@@ -357,8 +639,12 @@ def test_the_default_emission_is_byte_identical_to_before_the_flag():
 
 
 def test_the_region_rule_reads_unsat_as_empty_and_sat_as_inhabited():
-    assert _region_answer(frozenset({"unsat"})) == REGION_EMPTY
-    assert _region_answer(frozenset({"sat"})) == REGION_INHABITED
+    assert _region_answer(
+        frozenset({"unsat"}), accounts_for_every_assume=True
+    ) == REGION_EMPTY
+    assert _region_answer(
+        frozenset({"sat"}), accounts_for_every_assume=True
+    ) == REGION_INHABITED
 
 
 def test_an_undecided_region_script_certifies_nothing():
@@ -370,15 +656,54 @@ def test_an_undecided_region_script_certifies_nothing():
         frozenset({"timeout"}),
         frozenset({"failed", "not-run"}),
     ):
-        assert _region_answer(answers) == REGION_UNCERTIFIED
+        assert _region_answer(
+            answers, accounts_for_every_assume=True
+        ) == REGION_UNCERTIFIED
 
 
 def test_a_lone_definitive_answer_still_decides():
     """A degraded portfolio does not silence the check: one backend's own
     ``unsat`` on its own script is the reading the refusal rests on, and it
     needs nothing believed across solvers."""
-    assert _region_answer(frozenset({"unsat", "unknown"})) == REGION_EMPTY
-    assert _region_answer(frozenset({"sat", "timeout"})) == REGION_INHABITED
+    assert _region_answer(
+        frozenset({"unsat", "unknown"}), accounts_for_every_assume=True
+    ) == REGION_EMPTY
+    assert _region_answer(
+        frozenset({"sat", "timeout"}), accounts_for_every_assume=True
+    ) == REGION_INHABITED
+
+
+def test_sat_over_a_PARTIAL_axiom_set_certifies_nothing():
+    """AUDIT B3, as a pure function. A model of a relaxation is a point of the
+    relaxation and of nothing tighter, so the honest status is the one that
+    discloses — never the one that stamps clean."""
+    for answers in (frozenset({"sat"}), frozenset({"sat", "timeout"})):
+        assert _region_answer(
+            answers, accounts_for_every_assume=False
+        ) == REGION_UNCERTIFIED
+
+
+def test_unsat_is_EMPTY_however_partial_the_axiom_set():
+    """The other direction, and it is a different argument: the script's
+    axioms are a SUBSET of the query's assumes, so a relaxation with no point
+    at all proves the tighter set has none. Weakening this half would turn a
+    detected harness defect back into a silent one."""
+    assert _region_answer(
+        frozenset({"unsat"}), accounts_for_every_assume=False
+    ) == REGION_EMPTY
+    assert _region_answer(
+        frozenset({"unsat", "unknown"}), accounts_for_every_assume=False
+    ) == REGION_EMPTY
+
+
+def test_the_accounting_is_a_required_keyword():
+    """No default, because the two directions rest on different arguments and
+    a default would pick one of them for a caller who did not think about it.
+    The measured defect is exactly what picking the permissive one looks
+    like."""
+    p = inspect.signature(_region_answer).parameters["accounts_for_every_assume"]
+    assert p.kind is inspect.Parameter.KEYWORD_ONLY
+    assert p.default is inspect.Parameter.empty
 
 
 def test_the_four_region_statuses_are_distinct():
@@ -591,3 +916,133 @@ def test_the_positional_map_is_unshifted_without_a_body_assert():
     v = check_inductive_step(body, bounds)
     assert v.status == "REFUTED"
     assert "Escaped: a (above upper bound)" in v.notes[-1]
+
+
+# ---------------------------------------------------------------------------
+# 7. AUDIT B3: the SCOPE of a conditionality line
+#
+# Both mechanisms write `CONDITIONAL_ON_PRECONDITION` and they are scoped
+# differently. An interval NARROWING moves the boxes every obligation is
+# judged over, so its line is whole-query and names no obligation. A FORWARDED
+# relational axiom reaches only the obligations whose scripts stated it, and
+# says which. Both readers asked the whole-query question of both kinds.
+# ---------------------------------------------------------------------------
+
+
+def test_the_forwarded_line_names_its_obligations_and_the_reader_parses_them():
+    """The round trip, pinned: producer and reader agree on the idiom, so a
+    reworded scope cannot silently degrade every scoped read to whole-query.
+    """
+    line = relational_assume_assumption((1, 3))
+    assert conditional_on_precondition([line], {1})
+    assert conditional_on_precondition([line], {3})
+    assert conditional_on_precondition([line], {0, 3})
+    assert not conditional_on_precondition([line], {0})
+    assert not conditional_on_precondition([line], {2, 4})
+    assert not conditional_on_precondition([line], set())
+
+
+def test_a_whole_query_line_bears_on_every_obligation():
+    """The narrowing half, which had no scope and needs none: it moved the
+    boxes, so every obligation of the run was judged over the narrowed set."""
+    narrowing = (
+        f"constrained assume at foo.py:1 (h): {CONDITIONAL_ON_PRECONDITION} "
+        f"— narrowed var 3 to [0, 1]"
+    )
+    assert conditional_on_precondition([narrowing], {0})
+    assert conditional_on_precondition([narrowing], {7})
+    # ... and asking about no obligation is answered honestly, not by the
+    # accident of a non-empty intersection
+    assert not conditional_on_precondition([narrowing], set())
+
+
+def test_an_unparseable_scope_falls_back_to_whole_query():
+    """The failure direction of the parse is OVER-disclosure. A line whose
+    scope cannot be read qualifies everything, which costs a caveat; reading
+    it as scoped-to-nothing would drop a real one."""
+    mangled = (
+        f"forwarded relational assume(s) on obligations one and three: "
+        f"{CONDITIONAL_ON_PRECONDITION} — ..."
+    )
+    assert conditional_on_precondition([mangled], {0})
+
+
+def test_a_line_without_the_phrase_is_not_a_conditionality_line():
+    assert not conditional_on_precondition(
+        ["forwarded relational assume(s) on obligation(s) #0: something else"],
+        {0},
+    )
+
+
+@need_solver
+def test_an_interval_refutation_is_not_conditional_on_a_forwarded_axiom():
+    """AUDIT B3, CONSUMER (a). One interval-refuted obligation, one escalated
+    obligation with a forwarded axiom.
+
+    Both clauses of the conditional wording were FALSE on this run: nothing
+    narrowed (a relational assume is inert in the interval domain), and assert
+    #0's own detail line — printed four lines below the sentence — says it was
+    judged over the full declared box. A forwarded axiom lives in a SCRIPT,
+    and a script exists only where the interval domain gave up, so it can
+    never bear on a `violated-over-set`.
+    """
+    def mixed():
+        x = any_array((), "float64", (0.0, 10.0))
+        y = any_array((), "float64", (0.0, 10.0))
+        assume(x <= y)
+        assert_(x >= 20.0)            # interval-refuted over the declared box
+        return assert_(x - y <= 0.0)  # escalates, and states the axiom
+
+    v = check(mixed, vacuity_mode="inputs-only", solver_timeout_ms=TIMEOUT)
+    assert v.status == "REFUTED"
+    assert [o.status for o in v.obligations] == [
+        "violated-over-set", "discharged"
+    ]
+    # the conditionality is real and stays stamped — it is just not about
+    # the obligation the set-level sentence describes
+    assert any(
+        CONDITIONAL_ON_PRECONDITION in a for a in v.stamp.assumptions
+    ), v.stamp.assumptions
+    render = v.render()
+    assert "set-level, conditional" not in render
+    assert "not invariant as stated" in render
+    # the sentence and the detail line four rows down now agree
+    assert "over the declared box" in v.obligations[0].detail
+    assert "precondition-narrowed set" not in render
+
+
+@need_solver
+def test_the_inductive_note_is_unconditional_when_the_BOUND_obligations_are():
+    """AUDIT B3, CONSUMER (b). ``{x, y} -> {0.5x, 0.5y}`` on ``[-1, 1]²`` with
+    ``assume(x < y)`` carried only into a body-assert's slice.
+
+    The four bound obligations have single-variable cones, state no axiom, and
+    were judged over the full declared box: ``|0.5·t| <= 0.5 <= 1`` everywhere,
+    so the induction closes UNCONDITIONALLY. The note said the opposite — "NOT
+    the inductive step … the invariant does NOT follow for all iterations" —
+    which under-reports a real result on the strength of an obligation the
+    sentence is not about.
+    """
+    def body(state, consts):
+        x, y = state["x"], state["y"]
+        assume(x < y)
+        assert_(x - y <= 0.0)  # the body's own claim: index 0, conditional
+        return {"x": 0.5 * x, "y": 0.5 * y}
+
+    bounds = {
+        "x": ((-1.0, 1.0), "float64"),
+        "y": ((-1.0, 1.0), "float64"),
+    }
+    v = check_inductive_step(body, bounds, solver_timeout_ms=TIMEOUT)
+    assert v.status == "VERIFIED"
+    # obligation 0 is the body's, 1..4 are the harness's bound checks
+    assert [o.status for o in v.obligations] == ["discharged"] * 5
+    assert "solver escalation" in v.obligations[0].detail
+    assert all(
+        "definitely true" in o.detail for o in v.obligations[1:]
+    ), [o.detail for o in v.obligations]
+    # the conditionality is stamped, scoped to the obligation it reached
+    assert relational_assume_assumption((0,)) in v.stamp.assumptions
+    note = v.notes[-1]
+    assert note.startswith("inductive step: all state variables stay within")
+    assert "CONDITIONAL" not in note

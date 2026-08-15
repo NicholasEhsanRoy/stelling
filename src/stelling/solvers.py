@@ -204,11 +204,33 @@ PORTFOLIO_SIZE = 2
 # is the refusal, on the route.
 #
 # THE QUESTION IS ASKED OF THE SAME SOLVER THAT PRODUCED THE DISCHARGE, on
-# the same text minus one line (`smt.emit(..., states_obligation=False)`):
+# the same text minus one SEMANTIC line, plus an inert header comment
+# naming which question it asks (`smt.emit(..., states_obligation=False)`):
 # did this `unsat` come from the obligation, or from the precondition? A
 # backend that answers `unsat` to `boxes ∧ axioms` has said its own `unsat`
 # on `boxes ∧ axioms ∧ ¬P` was about the precondition. Nothing has to be
 # believed across solvers for that reading — it is one backend's two answers.
+#
+# AND THE TWO DIRECTIONS ARE NOT THE SAME ARGUMENT. A slice's axioms are a
+# SUBSET of the query's assumes — the slicer drops every assume whose operands
+# fall outside this obligation's backward cone, with a quoted reason
+# (`ObligationSlice.assumes_skipped`), and the propagator drops others before
+# that. `unsat` on a subset is `unsat` on the whole: an empty relaxation proves
+# the user's region empty, so REGION_EMPTY needs nothing further.
+#
+# `sat` on a subset is NOT `sat` on the whole, and reading it as one is what
+# audit B3 measured: `x, y, z ∈ [-10,10]`, `assume(x<y); assume(y<z);
+# assume(z<x)`, `assert_(x - y <= 0.0)`. The assert's cone is {x, y}, so only
+# `x<y` is carried; `boxes ∧ (x<y)` is satisfiable, the model was read as "a
+# point of the region", and the verdict was stamped CLEAN — over a precondition
+# that admits no point at all (the three conjuncts give `x < x`; measured, an
+# exact-`Fraction` 21³ grid over `[-10,10]³` admits 0 points, which
+# `test_the_cone_split_harness_really_does_admit_no_point` computes rather than
+# assumes). Hence :data:`REGION_INHABITED` is concluded
+# ONLY when the region the solver ran over is inside the region EVERY assume of
+# the query describes, which is exactly what `propagate.unaccounted_assumes`
+# already decides for the withholding-release rule — one predicate, one
+# argument, used in both directions.
 REGION_EMPTY = "empty"  # the assumed region is EMPTY: a harness defect
 REGION_INHABITED = "inhabited"  # a model was returned: a point of the region
 REGION_UNCERTIFIED = "uncertified"  # nobody decided it; may be either
@@ -226,13 +248,34 @@ REGION_NOT_ASKED = "not-asked"
 # `UNCERTIFIED_PRECONDITION_PREFIX` of the propagation's two, because it is
 # the same fact reached by a third mechanism and the readers that qualify a
 # claim on it must not have to enumerate mechanisms.
+#
+# IT STATES THE RULE, NOT A MECHANISM, and that is a change from the version
+# audit B3 read (it said "the solver could not decide", which is false on the
+# run where the solver decided `sat` over an axiom set that was not the whole
+# query's). The stamp is whole-run — one line however many obligations reached
+# it, by however many routes — so a mechanism named there would be a mechanism
+# claimed for obligations that did not hit it. The MECHANISM is named per
+# obligation, in the notes, by :func:`_region_uncertified_note`, which is where
+# it can be true.
 UNCERTIFIED_REGION_ASSUMPTION = (
     f"{UNCERTIFIED_PRECONDITION_PREFIX}: an obligation discharged on a script "
-    f"carrying forwarded relational axiom(s), and the solver could not decide "
-    f"whether the declared boxes and those axioms admit any point at all — so "
+    f"carrying forwarded relational axiom(s), and nothing established that the "
+    f"declared boxes admit a point satisfying EVERY assume of this query — so "
     f"the discharge may be vacuous (true of an empty region). The claim is "
     f"still sound: every admitted point satisfies the obligation, and there "
-    f"may be none"
+    f"may be none. The per-obligation note names which of the two mechanisms "
+    f"left it unestablished"
+)
+
+# The two mechanisms, named where naming them is true: on the obligation.
+REGION_UNDECIDED_MECHANISM = (
+    "the solver could not decide whether the declared boxes and those axioms "
+    "admit any point at all"
+)
+REGION_PARTIAL_MECHANISM = (
+    "the admitted-region check answered sat, but over the axioms THIS "
+    "obligation's script states — which are not every assume of this query, "
+    "so the model it found need not lie in the assumed region at all"
 )
 
 # The conditionality line a forwarded relational axiom earns, in the same
@@ -251,11 +294,34 @@ def relational_assume_assumption(indices: tuple[int, ...]) -> str:
     )
 
 
-def _region_answer(answers: frozenset) -> str:
+def _region_answer(answers: frozenset, *, accounts_for_every_assume: bool) -> str:
     """The admitted region's status from the raw answers to its script.
 
-    A PURE FUNCTION on the answer set, kept out of the invocation loop so
-    the rule can be read, and tested, without a solver.
+    A PURE FUNCTION on the answer set and one bit about the SCRIPT, kept out
+    of the invocation loop so the rule can be read, and tested, without a
+    solver.
+
+    ``accounts_for_every_assume`` says whether the region the solver ran over
+    is inside the region every assume of the query describes — i.e. whether
+    ``propagate.unaccounted_assumes`` came back empty for this obligation's
+    emitted origins. It is a REQUIRED keyword and has no default on purpose:
+    the two directions of this rule rest on different arguments, and a default
+    would have to pick one of them for a caller that did not think about it.
+
+    **The two directions.**
+
+    * ``unsat`` → :data:`REGION_EMPTY`, unconditionally. The script's axioms
+      are a SUBSET of the query's assumes, and a relaxation with no point at
+      all proves the tighter set has none. The accounting is irrelevant here.
+    * ``sat`` → :data:`REGION_INHABITED` **only when the accounting is
+      complete**. A model of a relaxation is a point of the relaxation; it is
+      a point of the user's region only if the relaxation IS the region.
+      Audit B3 measured the converse being used: a 3-cycle
+      ``x<y, y<z, z<x`` split across obligation cones so that each script
+      states one satisfiable link of it, `sat` on that link, and a VERIFIED
+      stamped clean over an empty precondition. With an assume unaccounted for
+      the honest answer is :data:`REGION_UNCERTIFIED` — nobody decided the
+      question that was asked.
 
     **The sat/unsat disagreement is not a case here**, deliberately: the
     caller refuses it with :class:`SolverDisagreement` before reaching this
@@ -273,9 +339,34 @@ def _region_answer(answers: frozenset) -> str:
     """
     if "unsat" in answers:
         return REGION_EMPTY
-    if "sat" in answers:
+    if "sat" in answers and accounts_for_every_assume:
         return REGION_INHABITED
     return REGION_UNCERTIFIED
+
+
+def _region_uncertified_note(index: int, missing: tuple) -> str:
+    """The per-obligation note, naming the mechanism that actually fired.
+
+    ``missing`` is this obligation's ``unaccounted_assumes`` result: empty
+    means the region script was asked the whole question and did not answer
+    it; non-empty means it answered a SMALLER question, and the entries say
+    which conjuncts were left out of it — the same naming the withholding
+    refusal does, for the same reason (a reader cannot otherwise tell which
+    of their assumes the check never saw).
+    """
+    if not missing:
+        return (
+            f"assert #{index}: {REGION_UNDECIDED_MECHANISM} — the discharge "
+            f"may be vacuous"
+        )
+    return (
+        f"assert #{index}: {REGION_PARTIAL_MECHANISM}. Unaccounted for on "
+        f"this obligation: "
+        + "; ".join(
+            f"[{m.kind}] {m.reason}" + (f" (at {m.where})" if m.where else "")
+            for m in missing
+        )
+    )
 
 
 def _region_clause(region: str) -> str:
@@ -288,14 +379,19 @@ def _region_clause(region: str) -> str:
     no reason to run — because a qualification printed on every line is a
     qualification nobody reads. (:data:`REGION_EMPTY` never reaches here; it
     raises.)
+
+    "satisfying EVERY assume of this query" rather than "satisfying them":
+    the second reads as a claim about the axioms the script states, which on
+    the partial-accounting route a model DID satisfy. What was not
+    established is membership of the user's region.
     """
     if region != REGION_UNCERTIFIED:
         return ""
     return (
         " [MAY BE VACUOUS: this obligation's script carries forwarded "
         "relational axiom(s) and no mechanism established that the declared "
-        "boxes admit a point satisfying them — the discharge is sound and "
-        "may be true of an empty region]"
+        "boxes admit a point satisfying EVERY assume of this query — the "
+        "discharge is sound and may be true of an empty region]"
     )
 
 
@@ -1460,9 +1556,20 @@ def _dispatch_obligation(
     ledger: _Ledger,
     *,
     region_certified: bool = False,
+    assume_ledger: tuple = (),
 ) -> tuple[ObligationEscalation, tuple[int, ...], str]:
     """Escalate one obligation slice. Returns ``(record, emitted origins,
     admitted-region status)``.
+
+    ``assume_ledger`` is ``Propagation.assume_ledger`` — the disposition of
+    every assumed conjunct the propagator classified. It is what lets a `sat`
+    on the admitted-region script be read as a point of the USER'S region
+    rather than of a relaxation of it: see :func:`_region_answer`. Defaulting
+    it to empty is the conservative direction, not a convenience — an empty
+    ledger accounts for nothing that was forwarded, so a caller that forgets
+    it gets :data:`REGION_UNCERTIFIED` and a disclosed caveat, never a clean
+    stamp. (A slice with no assumes never asks the question at all, so the
+    hand-built-slice callers in the tests are unaffected.)
 
     ``region_certified`` is ``Propagation.region_inhabited``, THE HYBRID
     HALF of the S7 repair: the propagation's own probe already searched the
@@ -1483,7 +1590,7 @@ def _dispatch_obligation(
     a vacuity defect but a withdrawal of the feature. So False falls through
     to the question actually being asked, and only ``unsat`` on the
     admitted-region script — a solver's own universal claim, on the same
-    text minus one line — refuses a run.
+    text minus one semantic line — refuses a run.
 
     The status is one of :data:`REGION_INHABITED`, :data:`REGION_EMPTY`
     (which does not return: it raises), :data:`REGION_UNCERTIFIED`, or
@@ -1747,7 +1854,23 @@ def _dispatch_obligation(
                         (b.flavor, s.text) for b, s, _ in region_runs
                     ),
                 )
-            region = _region_answer(frozenset(region_answers))
+            # THE SCOPE OF THE ANSWER, not just the answer (audit B3). The
+            # script states the axioms THIS slice could carry; every assume
+            # left out of it — skipped for the cone, dropped by the propagator,
+            # never classified — is a conjunct the model is free to violate.
+            # `unaccounted_assumes` is the project's existing name for exactly
+            # that question: it decides whether the region the solver ran over
+            # is inside the region every assume describes, and it already
+            # gates the release of a withheld violation. The two uses are the
+            # same predicate on the same ledger — a witness of the query is
+            # only a witness if it lies in the assumed region, and a model of
+            # the region script is only a point of that region for the same
+            # reason.
+            unaccounted = unaccounted_assumes(assume_ledger, emitted_origins)
+            region = _region_answer(
+                frozenset(region_answers),
+                accounts_for_every_assume=not unaccounted,
+            )
             if region == REGION_EMPTY:
                 who = " and ".join(
                     b.label for b, _, r in region_runs if r.answer == "unsat"
@@ -1779,6 +1902,9 @@ def _dispatch_obligation(
             if region == REGION_UNCERTIFIED:
                 notes.append(
                     f"assert #{sl.index}: {UNCERTIFIED_REGION_ASSUMPTION}"
+                )
+                notes.append(
+                    _region_uncertified_note(sl.index, unaccounted)
                 )
         return (ObligationEscalation(
             index=sl.index,
@@ -2086,6 +2212,7 @@ def escalate(
             record, emitted_origins, region = _dispatch_obligation(
                 item, config, backends, missing, ledger,
                 region_certified=propagation.region_inhabited,
+                assume_ledger=propagation.assume_ledger,
             )
             if region == REGION_UNCERTIFIED:
                 region_uncertified.append(item.index)

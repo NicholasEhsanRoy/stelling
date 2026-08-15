@@ -472,14 +472,18 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     # re-derive" — the instrument measured a dependence on the envelope, just
     # not the one the sentence is read as claiming.
     #
-    # The empty case no longer reaches here at all: `solvers._dispatch_
-    # obligation` raises `UnsatisfiableAssumptionError` on it, so there is no
-    # VERIFIED to stamp. What survives is the UNDECIDED case — a region check
-    # nobody could answer, or an interval narrowing/drop whose satisfiability
-    # was never certified — and on those the sentence must stop claiming what
-    # it has not established. Keyed on the shared prefix rather than on a
-    # list of mechanisms, so a mechanism added later qualifies the sentence
-    # without anyone remembering to come here.
+    # A DETECTED empty case no longer reaches here: `solvers._dispatch_
+    # obligation` raises `UnsatisfiableAssumptionError` when one obligation's
+    # script states the whole contradiction, so there is no VERIFIED to
+    # stamp. An UNDETECTED one still does, and the qualification is what it
+    # gets: a contradiction spread across obligation cones (audit B3) leaves
+    # every script with a satisfiable relaxation, so nothing proves the
+    # region empty, and it arrives here through the same uncertified line as
+    # the undecided case. What the qualification therefore covers: an
+    # undecided region check, a cone-split empty region, and an interval
+    # narrowing/drop whose satisfiability was never certified. Keyed on the
+    # shared prefix rather than on a list of mechanisms, so a mechanism added
+    # later qualifies the sentence without anyone remembering to come here.
     from stelling.propagate import UNCERTIFIED_PRECONDITION_PREFIX
 
     if any(

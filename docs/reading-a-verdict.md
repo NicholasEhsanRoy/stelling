@@ -631,18 +631,38 @@ removed: are the declared boxes and those axioms satisfiable at all?
   (*"harness defect; nothing was verified"*), that a non-relational
   `assume(dt < 1.0)` over `dt ∈ [5, 10]` has always raised. Fix the
   declaration or the precondition; nothing was verified.
-* **`sat`** — a point of the region exists. The discharge stands, clean.
-* **undecided** — nobody answered. The discharge stands (it is sound —
-  every admitted point satisfies the obligation, and there may be none) and
-  it stops being clean: the obligation's detail line carries `[MAY BE
-  VACUOUS: …]` and the stamp carries an `assumes:` line beginning
-  `precondition satisfiability uncertified`.
+* **`sat`, and this obligation's script stated *every* assume of the
+  query** — a point of the region exists. The discharge stands, clean.
+* **`sat`, but some assume was left out of this script** — nothing was
+  established. This is the case audit B3 found being read as the one above.
+  A script states only the assumes whose operands lie in the obligation's
+  backward cone, so it can describe a strict *relaxation* of your
+  precondition, and a model of a relaxation is not a point of the thing
+  relaxed. Treated as **undecided**, below. Measured: `x, y, z ∈ [-10,10]`
+  under `assume(x < y)`, `assume(y < z)`, `assume(z < x)` with
+  `assert_(x - y <= 0.0)` — the assert's cone is `{x, y}`, so the script
+  states only `x < y`, which is satisfiable; the query's precondition is
+  not, and the VERIFIED was stamped clean.
+* **undecided** — nobody answered, or nobody answered *this* question. The
+  discharge stands (it is sound — every admitted point satisfies the
+  obligation, and there may be none) and it stops being clean: the
+  obligation's detail line carries `[MAY BE VACUOUS: …]` and the stamp
+  carries an `assumes:` line beginning `precondition satisfiability
+  uncertified`. A note on the obligation names which of the two mechanisms
+  applied, and on the second one lists the assumes the check never saw.
 
 The extra question is asked only where it can have a second answer — an
 obligation that discharged *and* whose script carries a forwarded axiom —
 and it is skipped when the propagation's own non-emptiness certificate
 already exhibited a point of the declared set satisfying every assume. On a
 query with no relational assume it costs nothing at all.
+
+That certificate is also the one mechanism that reaches the whole query at
+once, so it is what clears a cone-split run: `assume(x <= y)`,
+`assume(y <= z)` with an assert on `{x, y}` is stamped clean because a
+probed point satisfies all three declarations' assumes, while the same
+harness with `<` is not — the probe grid finds no point at which a *strict*
+chain is definitely true. Both return VERIFIED; only the disclosure differs.
 
 **The vacuity line reads differently on an uncertified run.** `vacuity
 checked … no obligation discharges with the declared bounds widened` is

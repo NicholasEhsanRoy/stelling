@@ -39,9 +39,9 @@ from dataclasses import dataclass, fields
 
 from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
 from stelling.propagate import (
-    CONDITIONAL_ON_PRECONDITION,
     ObligationReport,
     Propagation,
+    conditional_on_precondition,
 )
 from stelling.reachability import defined_vars, reaches_output
 
@@ -484,7 +484,11 @@ class Verdict:
             # belongs ONLY to interval refutations. A witness-backed REFUTED
             # renders the witness instead — a concrete counterexample, a
             # strictly stronger refutation than the set-level one.
-            if any(o.status == "violated-over-set" for o in self.obligations):
+            refuted_over_set = frozenset(
+                o.index for o in self.obligations
+                if o.status == "violated-over-set"
+            )
+            if refuted_over_set:
                 # Wording honesty, second axis (audit F4): under a
                 # constraining assume the judgment ran over the
                 # precondition-narrowed set, and "the stated box is not
@@ -492,9 +496,20 @@ class Verdict:
                 # this verdict did not check. Render-only derivation: the
                 # stamped constrained-assume assumption line is the
                 # semantic carrier of conditionality.
-                if any(
-                    CONDITIONAL_ON_PRECONDITION in a
-                    for a in self.stamp.assumptions
+                #
+                # SCOPED TO THE OBLIGATIONS THIS SENTENCE IS ABOUT (audit B3).
+                # The sentence describes the `violated-over-set` obligations
+                # and nothing else, so only a conditionality that reaches ONE
+                # OF THEM may qualify it. A whole-query narrowing line does —
+                # it moved the boxes they were judged over. A forwarded
+                # relational axiom names the obligations whose SCRIPTS stated
+                # it, and a script exists only where the interval domain gave
+                # up, so it can never name one of these: measured, this
+                # sentence claimed a narrowing on a run where a relational
+                # assume was inert in the interval domain and the obligation's
+                # own detail line said "over the declared box".
+                if conditional_on_precondition(
+                    self.stamp.assumptions, refuted_over_set
                 ):
                     lines.append(
                         "  (set-level, conditional: at least one obligation is "

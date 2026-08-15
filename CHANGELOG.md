@@ -179,10 +179,15 @@ SPDX-License-Identifier: Apache-2.0
 
   * **`check()` and `check_inductive_step()` now raise
     `stelling.propagate.UnsatisfiableAssumptionError` when a forwarded
-    relational assume set admits no point of the declared set.** Same class,
-    same closing sentence ("harness defect; nothing was verified"), as the
+    relational assume set admits no point of the declared set** *and one
+    obligation's script states the whole contradiction*. Same class, same
+    closing sentence ("harness defect; nothing was verified"), as the
     non-relational refusal. `check()` already documents that class among the
-    two it does not convert to a status.
+    two it does not convert to a status. A contradiction spread across
+    obligation cones — `assume(x<y); assume(y<z); assume(z<x)` with an
+    assert depending on two of the three — cannot be refused, because no
+    script ever holds more than one link of it; it is DISCLOSED instead (see
+    two bullets down, and audit B3 in SOUNDNESS.md).
   * Before crediting an `unsat`, the backend that produced it is asked one
     more question — the same script with the negated obligation removed
     (`stelling.smt.emit(..., states_obligation=False)`) — and only on an
@@ -192,15 +197,27 @@ SPDX-License-Identifier: Apache-2.0
     (`Propagation.region_inhabited`) already settled the question. Measured
     on the 288-harness sweep, where every harness carries a relational
     assume: 324 admitted-region invocations out of 1044 total, +11% wall.
-  * An undecided admitted-region check does not withdraw the discharge; it
-    stamps it. The obligation detail gains `[MAY BE VACUOUS: …]` and the
-    stamp gains an `assumes:` line beginning `precondition satisfiability
-    uncertified` — the may-be-vacuous line SOUNDNESS.md's constraining-assume
-    policy already required and this path did not emit.
+  * An admitted-region check that does not settle the question does not
+    withdraw the discharge; it stamps it. The obligation detail gains
+    `[MAY BE VACUOUS: …]` and the stamp gains an `assumes:` line beginning
+    `precondition satisfiability uncertified` — the may-be-vacuous line
+    SOUNDNESS.md's constraining-assume policy already required and this path
+    did not emit. **Two ways not to settle it, both stamped, each naming its
+    mechanism on the obligation**: nobody answered, or the answer was `sat`
+    over an axiom set that is not the whole query's (audit B3 — a model of a
+    relaxation of your precondition is not a point of your precondition).
   * **A forwarded relational axiom now stamps its conditionality.** New
     `assumes:` line `forwarded relational assume(s) on obligation(s) …`,
     carrying the same `the verdict holds where the precondition holds`
-    phrase an interval narrowing has always carried.
+    phrase an interval narrowing has always carried. It names the
+    obligations it reaches, and the two readers of that phrase —
+    `Verdict.render`'s conditional REFUTED wording and the inductive-step
+    note — read the SCOPE (audit B3): a whole-query narrowing line qualifies
+    every obligation, a forwarded line only the ones it names. Before that,
+    a forwarded axiom on one obligation made an unrelated interval
+    refutation render as "conditional … judged over the propagated superset
+    of the precondition-narrowed set" and an unconditional inductive step
+    render as "CONDITIONAL — NOT the inductive step".
   * The `vacuity checked …` line appends `WHAT THIS MEASUREMENT DOES NOT
     SAY: …` whenever the stamp carries any `precondition satisfiability
     uncertified` line: widening a bound can make an unsatisfiable

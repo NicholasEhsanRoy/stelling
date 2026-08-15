@@ -514,6 +514,17 @@ def emit(
     region is EMPTY, which is the only reading under which an ``unsat`` on
     the full script says nothing about the obligation (audit 0.2.0 S7).
 
+    **THE AXIOMS THIS SLICE STATES ARE NOT NECESSARILY THE QUERY'S**, and
+    the sentence above says "this slice" for that reason.
+    ``_Slicer._carry_assumes`` skips every assume whose operands fall outside
+    the obligation's backward cone, so this script can describe a strict
+    RELAXATION of the user's precondition. That is why its two answers are
+    read ASYMMETRICALLY upstream (:func:`stelling.solvers._region_answer`,
+    audit B3): an empty relaxation proves the tighter set empty, a MODEL of a
+    relaxation proves nothing about the tighter set. Nothing here changes
+    with that accounting — this function's job is to make the two texts
+    comparable, not to decide what the comparison means.
+
     THAT IT IS THE SAME FUNCTION IS THE POINT, not an economy. The question
     the admitted-region script answers is "did *this* discharge's ``unsat``
     come from the obligation or from the precondition", and it is only that
@@ -521,11 +532,20 @@ def emit(
     every definition, every axiom, the logic, and the option block. A second
     emitter — or this one with a second set of rules under a flag — could
     drift on any of them and the comparison would silently become a
-    comparison of two different queries. Exactly one line differs, and it is
-    the line whose presence is the whole difference between the two
-    questions. Both texts still end ``(check-sat) (get-model)``: a ``sat``
-    here is a POINT of the admitted region, and a model that can be read is
-    what makes the answer constructive rather than merely negative.
+    comparison of two different queries. **Exactly one SEMANTIC line differs,
+    plus an inert header comment**: the removed ``(assert (not <root>))``,
+    whose presence is the whole difference between the two questions, and an
+    added ``; admitted-region check: …`` comment saying WHICH question this
+    text asks — a dumped script and the ``smt2_sha256`` a stamp carries must
+    be self-identifying, and the sha alone cannot do it. The comment is not a
+    divergence in the query; the project's own
+    ``test_the_admitted_region_script_is_the_obligation_script_minus_one_line``
+    measures both directions of the diff and pins that there is exactly one
+    of each. (The prose said "exactly one line" until audit B3 pointed out
+    that code, test and prose then disagreed with each other.) Both texts
+    still end ``(check-sat) (get-model)``: a ``sat`` here is a POINT of the
+    region THIS SCRIPT describes, and a model that can be read is what makes
+    the answer constructive rather than merely negative.
 
     The returned :class:`Script`'s ``relational_assumes_emitted`` and
     ``emitted_origins`` are unchanged by the flag — the axiom loop is the

@@ -34,14 +34,32 @@ step of a proof by induction).
   reads ``inductive step CONDITIONAL — NOT the inductive step`` — and the
   fix is to put the restriction in ``state_bounds``, where the successor is
   checked against the same set the predecessor was drawn from.
-* Anything at all, if the body's assumes CONTRADICT each other.  That is a
-  harness defect and it raises
+* Anything at all, if the body's assumes CONTRADICT each other AND ONE
+  OBLIGATION'S SCRIPT STATES THE WHOLE CONTRADICTION.  That is a harness
+  defect and it raises
   :class:`stelling.propagate.UnsatisfiableAssumptionError` rather than
   returning a verdict (audit 0.2.0 S7): an empty assumed region makes every
   obligation vacuously true, and before this refusal existed the body
   ``x, y -> (x + y) * 10`` on ``[-1, 1]²`` under ``assume(x < y)`` and
   ``assume(y < x)`` returned VERIFIED with "the invariant is preserved by
   one step" — from ``x = y = 0.5`` one step gives ``10.0``.
+
+  **THE QUALIFIER IS LOAD-BEARING AND THE RESIDUAL GAP IS REAL** (audit B3).
+  The refusal is a solver's ``unsat`` on ONE obligation's script, and a
+  script states only the assumes whose operands lie in that obligation's
+  backward cone.  Spread the contradiction across cones — three state
+  variables under ``assume(x < y)``, ``assume(y < z)``, ``assume(z < x)``,
+  where every obligation depends on at most two of them — and no script ever
+  holds more than one link of the cycle.  Nothing can prove the region empty
+  and the call RETURNS, VERIFIED.  What it no longer does is call that
+  VERIFIED clean: every discharge that rested on a partial axiom set carries
+  ``[MAY BE VACUOUS: …]`` on its own detail line and a stamped
+  ``precondition satisfiability uncertified``.  Measured on this build, body
+  ``{x, y, z} -> {0.6(x - y) + 0.6, 0.5y, 0.5z}`` on ``[-1, 1]³`` under that
+  3-cycle: VERIFIED, both disclosures present, and the assumed region admits
+  no state at all.  Closing the gap needs a WHOLE-QUERY admitted-region
+  script — one emission naming every assume's operands, which no obligation
+  slice can — and that is not in this build.
 
 This module imports jax-free (the harness import happens inside the function,
 at call time): importing it costs nothing in a bare environment, but *calling*
@@ -280,10 +298,30 @@ def check_inductive_step(
     # assume writes none either, and correctly so — a drop makes the judged
     # set a SUPERSET, so the VERIFIED proves more than the inductive step
     # needs, not less.
-    from stelling.propagate import CONDITIONAL_ON_PRECONDITION
+    #
+    # AND SCOPED TO THE BOUND OBLIGATIONS (audit B3). The note is about ONE
+    # claim — "all state variables stay within declared bounds after one
+    # iteration" — and that claim is exactly the `own` obligations the harness
+    # appended, indices `offset ..` above. A body-declared `assert_` is a
+    # different claim in the same verdict; its conditionality belongs on the
+    # stamp, where it is, and not in a sentence about the induction. Measured:
+    # body `{x,y} -> {0.5x, 0.5y}` on `[-1,1]²` with `assume(x<y)` carried only
+    # into a body-assert's slice printed "inductive step CONDITIONAL — NOT the
+    # inductive step … the invariant does NOT follow for all iterations", while
+    # the four bound obligations have single-variable cones, were judged over
+    # the full declared box, and close the induction outright: |0.5·t| ≤ 0.5 ≤ 1
+    # everywhere in [-1,1].
+    #
+    # A whole-query line (an interval narrowing) still fires, because it moved
+    # the boxes the bound obligations themselves were judged over — which is
+    # M5's own measured case and must stay caught.
+    from stelling.propagate import conditional_on_precondition
 
-    conditional = bool(verdict.stamp) and any(
-        CONDITIONAL_ON_PRECONDITION in a for a in verdict.stamp.assumptions
+    bound_obligations = frozenset(
+        ob.index for ob in verdict.obligations if ob.index >= offset
+    )
+    conditional = bool(verdict.stamp) and conditional_on_precondition(
+        verdict.stamp.assumptions, bound_obligations
     )
 
     if verdict.status == "VERIFIED":
