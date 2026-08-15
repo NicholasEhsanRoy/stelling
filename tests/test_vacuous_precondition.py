@@ -1283,10 +1283,24 @@ def test_an_empty_ledger_now_really_does_fail_CLOSED():
     ledger filtered to an empty result, which read as the positive claim, and
     the caveat DISAPPEARED. It is now a required argument AND an empty one
     fails the completeness test, so both halves of the sentence hold.
+
+    **SCOPED TO THE FORWARDED DOOR, and audit B9 measured what that left
+    out.** `cone_split_cycle`'s slice DOES forward `x < y`, so this drives
+    only the branch that emits a region script — as the assertion below
+    records. The `REGION_NOT_ASKED` branch, taken by a slice that forwards
+    nothing, shipped testing `unaccounted` alone and failed OPEN on exactly
+    this input. Its twin is `test_undescended_assume.py::
+    test_the_unasked_door_also_fails_CLOSED_on_an_incomplete_ledger`, on a
+    query with no forwarded axiom anywhere; a claim about "an empty ledger"
+    needs both, because there are two doors.
     """
     q = trace(cone_split_cycle)
     p = propagate(q)
     config = solvers.SolverConfig(timeout_ms=TIMEOUT)
+    # WHICH DOOR THIS TEST IS ABOUT, asserted rather than left to be inferred
+    # from the harness: the region script exists here, so the twin above is
+    # the only thing covering the other one.
+    assert p.relational_assumes != ()
     assert solvers.escalate(q, p, config).region_uncertified == (0,)
     starved = dataclasses.replace(p, assume_ledger=())
     assert solvers.escalate(q, starved, config).region_uncertified == (0,)
@@ -1376,3 +1390,68 @@ def test_the_static_assume_set_is_total_over_sub_jaxprs():
                in_cond_in_jit_in_scan):
         static = _assume_equation_ids(trace(fn).jaxpr)
         assert len(static) == raw_count(fn) == 2, fn.__name__
+
+
+def test_a_sub_jaxpr_held_in_a_LIST_is_not_invisible_to_the_static_walk():
+    """AUDIT B9. `coverage.sub_jaxprs` walked `tuple` and `NamedTupleParam`
+    and not `list`, so a sub-jaxpr held in a Python list was invisible to
+    every rule that rests on the static assume set.
+
+    THE FAILURE DIRECTION IS THE WHOLE POINT. An equation the walk does not
+    enter does not raise and does not shrink a verdict: it shrinks the
+    REQUIREMENT, so `_assume_equation_ids` returns a smaller set, the subset
+    test passes trivially, and `ledger_covers` answers True. Measured on this
+    tree before the one-word fix, on a hand-built `JaxprEqn` carrying the SAME
+    `scan` body under `jaxpr=[...]` instead of `jaxpr=(...)`: `static ids 0 /
+    ledger 0 / assume_dropped False / covers True` — the PRE-FIX state
+    presented as a satisfied postcondition, which is the one shape a
+    postcondition must never take.
+
+    Not reachable from `trace()` or `from_dict` — both build tuples, so this
+    was never a live soundness hole and is hardened rather than repaired. It
+    is hardened because `JaxprEqn` is a plain dataclass any caller can
+    construct, a params mapping is untyped, and three rules now rest on this
+    walk's totality (B3's non-emptiness gate, `ledger_covers`, and the
+    `REGION_NOT_ASKED` tightening this batch added).
+    """
+    from stelling import ir
+    from stelling.coverage import sub_jaxprs
+
+    q = trace(scan_body_cycle)
+    scan_eqn = next(e for e in q.jaxpr.eqns if e.primitive == "scan")
+    assert len(list(sub_jaxprs(scan_eqn))) == 1
+
+    # the SAME equation with its sub-jaxpr param moved tuple/bare -> list
+    listed_params = tuple(
+        (k, list(v)) if isinstance(v, tuple) and any(
+            isinstance(i, (ir.ClosedJaxpr, ir.Jaxpr)) for i in v
+        )
+        else (k, [v]) if isinstance(v, (ir.ClosedJaxpr, ir.Jaxpr))
+        else (k, v)
+        for k, v in scan_eqn.params
+    )
+    assert any(isinstance(v, list) for _, v in listed_params), listed_params
+    listed_eqn = ir.JaxprEqn(
+        primitive=scan_eqn.primitive, invars=scan_eqn.invars,
+        outvars=scan_eqn.outvars, params=listed_params,
+        effects=scan_eqn.effects, source_info=scan_eqn.source_info,
+    )
+    assert len(list(sub_jaxprs(listed_eqn))) == 1
+
+    listed = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            invars=q.jaxpr.invars, constvars=q.jaxpr.constvars,
+            outvars=q.jaxpr.outvars,
+            eqns=tuple(
+                listed_eqn if e is scan_eqn else e for e in q.jaxpr.eqns
+            ),
+        ),
+        consts=q.consts,
+    )
+    # and the three facts the rules read are the same on both spellings
+    for closed in (q, listed):
+        p = propagate(closed)
+        assert len(_assume_equation_ids(closed.jaxpr)) == 2
+        assert len(p.assume_ledger) == 2
+        assert p.assume_dropped is True
+        assert ledger_covers(p.assume_ledger, closed.jaxpr) is True

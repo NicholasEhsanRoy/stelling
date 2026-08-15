@@ -217,7 +217,32 @@ def call_body(eqn: ir.JaxprEqn) -> ir.ClosedJaxpr | None:
 
 
 def sub_jaxprs(eqn: ir.JaxprEqn) -> Iterable[ir.Jaxpr]:
-    """Yield every sub-jaxpr held in this equation's params, however nested."""
+    """Yield every sub-jaxpr held in this equation's params, however nested.
+
+    **THE SEQUENCE TEST IS ``(tuple, list)``, AND THE ``list`` HALF IS NOT
+    DEFENSIVE BREADTH.** This walk is what
+    :func:`stelling.propagate._assume_equation_ids` collects the STATIC assume
+    set with, so a sub-jaxpr it does not enter is a ``stelling_assume`` that
+    exists in the query and is missing from the requirement — the exact
+    direction that fails OPEN. Audit B9 measured it: a hand-built
+    :class:`ir.JaxprEqn` holding a sub-jaxpr in a Python ``list`` was invisible
+    here, and ``propagate`` accepted the equation and reported *static ids 0 /
+    ledger 0 / assume_dropped False / covers True* — the pre-fix state
+    presented as a satisfied postcondition.
+
+    No path inside stelling produces one: :func:`stelling.harness.trace` and
+    :meth:`ir.JaxprEqn.from_dict` both build tuples, so this is unreachable
+    from a real query and was never a live soundness hole. It is hardened
+    anyway because three rules now rest on this walk's totality (B3's
+    non-emptiness gate, ``ledger_covers``, and the ``REGION_NOT_ASKED``
+    tightening), ``JaxprEqn`` is a plain dataclass any caller can construct,
+    and a params mapping is untyped by construction: the tuple-ness of every
+    sub-jaxpr container is a property of today's decoder, not of the type, so
+    a future decoder that passed a list through would silently SHRINK the
+    requirement rather than fail. Nothing else in this function distinguishes
+    the two sequence types, and ``list`` is the only other one a decoder
+    plausibly yields.
+    """
     pending = [v for _, v in eqn.params]
     while pending:
         item = pending.pop()
@@ -225,7 +250,7 @@ def sub_jaxprs(eqn: ir.JaxprEqn) -> Iterable[ir.Jaxpr]:
             yield item.jaxpr
         elif isinstance(item, ir.Jaxpr):
             yield item
-        elif isinstance(item, tuple):
+        elif isinstance(item, (tuple, list)):
             pending.extend(item)
         elif isinstance(item, ir.NamedTupleParam):
             pending.extend(v for _, v in item.fields)

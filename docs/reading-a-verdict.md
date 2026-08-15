@@ -648,9 +648,14 @@ removed: are the declared boxes and those axioms satisfiable at all?
   obligation, and there may be none) and it stops being clean: the
   obligation's detail line carries `[MAY BE VACUOUS: …]` and the stamp
   carries an `assumes:` line beginning `precondition satisfiability
-  uncertified`. A note on the obligation names which of the **four**
-  mechanisms applied, and the three that can name conjuncts list the assumes
-  the check never saw.
+  uncertified`. A note on the obligation names which of the **five**
+  mechanisms applied, and the **two** that can name conjuncts list the
+  assumes the check never saw. The other three cannot, each for its own
+  reason: one fires when the whole question *was* asked and nobody
+  answered, so nothing was left out to list; the other two fire when the
+  propagation's assume ledger does not cover this query, so there is no
+  record the query's conjuncts can be read off — and a ledger that does not
+  cover this query need not be a ledger *of* it.
 
 The extra **solver call** is made only where it can have a second answer — an
 obligation that discharged *and* whose script carries a forwarded axiom — and
@@ -703,7 +708,7 @@ in this order:
 2. **`DROPPED` in the coverage line.** An assumption could not be
    honoured; the query ran over a superset. The note quotes what was
    dropped and why.
-2b. **`assume NEVER CLASSIFIED … it sits inside 'scan'` in the notes.** You
+3. **`assume NEVER CLASSIFIED … it sits inside 'scan'` in the notes.** You
    wrote an `assume` inside a `scan` or `while_loop` body, and the
    propagation does not descend those constructs — so it narrowed nothing,
    was not forwarded to the solver, and had no effect on the analysis. It is
@@ -713,23 +718,23 @@ in this order:
    at the top level of the harness, where it is honoured. A loop body's
    `assume` is a statement about a carry that changes from iteration to
    iteration, and this release does not model one.
-3. **The notes.** A declined transfer quotes its own reason, including
+4. **The notes.** A declined transfer quotes its own reason, including
    which conversion or which budget it exceeded.
-4. **`solver: none — … escalation was NOT ATTEMPTED`.** No solver has
+5. **`solver: none — … escalation was NOT ATTEMPTED`.** No solver has
    seen the query at all. Pass `solver_timeout_ms=<ms>` and re-run. The
    render says this itself on interval-only runs: *"This is NOT a finding
    that the property is undecidable."*
-5. **Boundary tightness.** An obligation whose threshold is not exactly
+6. **Boundary tightness.** An obligation whose threshold is not exactly
    representable can land in the rounding gap; see
    [preconditions.md](preconditions.md#state-thresholds-as-representable-values-where-you-can).
-6. **Compound boolean conditions.** A `jnp.where(cond1 & cond2, ...)` goes
+7. **Compound boolean conditions.** A `jnp.where(cond1 & cond2, ...)` goes
    UNKNOWN when either `cond1` or `cond2` is undecidable, OR when the
    primitive for `&` has no transfer. Since 0.2.0 the boolean logic
    transfers (`and`, `or`, `not`) are registered, so two decidable
    predicates combined with `&` or `|` produce a decidable result. If the
    UNKNOWN persists after upgrading, one of the component predicates is
    genuinely undecidable over the declared box.
-7. **The dependency problem (correlated conditions).** Interval arithmetic
+8. **The dependency problem (correlated conditions).** Interval arithmetic
    evaluates each operand independently. If the same variable appears in
    two places — e.g., `cond & ~cond`, or two `jnp.where` calls guarding
    on the same predicate — the tool has no memory that they share a source
@@ -738,7 +743,7 @@ in this order:
    encoding is inherently relational and WILL prove the mutual exclusion.
    This is the designed escalation path for constraints the interval domain
    cannot express.
-8. **Relational assume with `assume(x < y)`.** A comparison between two
+9. **Relational assume with `assume(x < y)`.** A comparison between two
    variable operands cannot be applied in the interval domain (it would
    need a relational constraint). Since 0.2.0, these are forwarded to the
    solver as positive axioms alongside the negated obligation. If the
@@ -785,44 +790,44 @@ in this order:
    relational assume(s) on obligation(s) …` — it carries the same phrase
    *"the verdict holds where the precondition holds"* that an interval
    narrowing has always carried.
-9. **A non-integer `pow` exponent that is not a small dyadic rational.**
-   This is the item most likely to surprise you, so it is stated in full.
+10. **A non-integer `pow` exponent that is not a small dyadic rational.**
+    This is the item most likely to surprise you, so it is stated in full.
 
-   A non-integer exponent is not emitted as an exponent. It is emitted as
-   a **substitution**: `x ** e` becomes a fresh SMT variable `aux` with
-   the polynomial constraint `aux^q = x^p`, where `p/q` is the exponent as
-   a rational. That encoding is exact — but only if `p/q` really is the
-   exponent your program computes.
+    A non-integer exponent is not emitted as an exponent. It is emitted as
+    a **substitution**: `x ** e` becomes a fresh SMT variable `aux` with
+    the polynomial constraint `aux^q = x^p`, where `p/q` is the exponent as
+    a rational. That encoding is exact — but only if `p/q` really is the
+    exponent your program computes.
 
-   It usually is not. A traced exponent is a **binary64 literal, and a
-   binary64 is a dyadic rational**: `0.1` denotes
-   `3602879701896397/36028797018963968`, not `1/10`. Analysing `x^(1/10)`
-   would be analysing a different real function from the one the program
-   evaluates, and a discharge (`unsat`) is a universal claim with nothing
-   downstream to re-derive it. So escalation admits the exponent **only
-   when the rational it emits IS the traced literal's exact value**:
+    It usually is not. A traced exponent is a **binary64 literal, and a
+    binary64 is a dyadic rational**: `0.1` denotes
+    `3602879701896397/36028797018963968`, not `1/10`. Analysing `x^(1/10)`
+    would be analysing a different real function from the one the program
+    evaluates, and a discharge (`unsat`) is a universal claim with nothing
+    downstream to re-derive it. So escalation admits the exponent **only
+    when the rational it emits IS the traced literal's exact value**:
 
-   * **admitted** — `0.5`, `0.25`, `0.125`, `0.75`, `1.5`, `2.5`,
-     `1.0/64.0`, `1.0/128.0`: every exponent whose exact binary64 value is
-     a dyadic rational `p/2^k` with `max(p, 2^k) <= 128`. Both solvers
-     handle those polynomials (z3 via an automatic tactic workaround on
-     scripts declaring an `aux`, cvc5 natively);
-   * **declined to UNKNOWN** — `0.1`, `1.0/3.0`, `2.0/3.0`, `1.0/10.0`,
-     `1.0/80.0`, `0.5000000000001`, `1e-13`, `sqrt(2.0)`: their exact
-     denominators are powers of two far above the cap. The note quotes the
-     literal's exact rational value and the nearby rational that would
-     have been substituted for it.
+    * **admitted** — `0.5`, `0.25`, `0.125`, `0.75`, `1.5`, `2.5`,
+      `1.0/64.0`, `1.0/128.0`: every exponent whose exact binary64 value is
+      a dyadic rational `p/2^k` with `max(p, 2^k) <= 128`. Both solvers
+      handle those polynomials (z3 via an automatic tactic workaround on
+      scripts declaring an `aux`, cvc5 natively);
+    * **declined to UNKNOWN** — `0.1`, `1.0/3.0`, `2.0/3.0`, `1.0/10.0`,
+      `1.0/80.0`, `0.5000000000001`, `1e-13`, `sqrt(2.0)`: their exact
+      denominators are powers of two far above the cap. The note quotes the
+      literal's exact rational value and the nearby rational that would
+      have been substituted for it.
 
-   `x ** 100.5` declines too, for a different reason the note names
-   separately: the exponent is exactly `201/2`, but `aux^2 = x^201` is a
-   degree-201 polynomial, over the same cap. The cap bounds **both** sides
-   of that equation.
+    `x ** 100.5` declines too, for a different reason the note names
+    separately: the exponent is exactly `201/2`, but `aux^2 = x^201` is a
+    degree-201 polynomial, over the same cap. The cap bounds **both** sides
+    of that equation.
 
-   **Remedy:** if the exponent is meant to be a square/cube/nth root of an
-   exact power of two, write it as one (`x ** 0.5`, `x ** 0.25`). If it is
-   genuinely `x ** (1.0/3.0)`, escalation cannot decide it in this
-   release — the interval leg still judges it, and the verdict says
-   UNKNOWN rather than guessing.
+    **Remedy:** if the exponent is meant to be a square/cube/nth root of an
+    exact power of two, write it as one (`x ** 0.5`, `x ** 0.25`). If it is
+    genuinely `x ** (1.0/3.0)`, escalation cannot decide it in this
+    release — the interval leg still judges it, and the verdict says
+    UNKNOWN rather than guessing.
 
 ## Further
 

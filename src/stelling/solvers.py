@@ -279,19 +279,24 @@ REGION_NOT_ASKED = "not-asked"
 # query's). The stamp is whole-run — one line however many obligations reached
 # it, by however many routes — so a mechanism named there would be a mechanism
 # claimed for obligations that did not hit it. The MECHANISM is named per
-# obligation, in the notes, by :func:`_region_uncertified_note`, which is where
-# it can be true.
+# obligation, in the notes, by :func:`_region_uncertified_note` and
+# :func:`_region_unasked_note`, which is where it can be true.
 UNCERTIFIED_REGION_ASSUMPTION = (
     f"{UNCERTIFIED_PRECONDITION_PREFIX}: an obligation discharged by the "
     f"solver, and nothing established that the declared boxes admit a point "
     f"satisfying EVERY assume of this query — so the discharge may be vacuous "
     f"(true of an empty region). The claim is still sound: every admitted "
     f"point satisfies the obligation, and there may be none. The "
-    f"per-obligation note names which of the four mechanisms left it "
+    f"per-obligation note names which of the five mechanisms left it "
     f"unestablished"
 )
 
-# The four mechanisms, named where naming them is true: on the obligation.
+# The five mechanisms, named where naming them is true: on the obligation.
+# TWO of them name conjuncts (`REGION_PARTIAL_MECHANISM` and
+# `REGION_UNASKED_MECHANISM`) and three cannot, each for its own reason: the
+# undecided one fires when the whole question WAS asked and nobody answered,
+# so there is nothing left out to list, and the two unrecorded ones fire when
+# the record is not one this query's conjuncts can be read off.
 REGION_UNDECIDED_MECHANISM = (
     "the solver could not decide whether the declared boxes and those axioms "
     "admit any point at all"
@@ -324,21 +329,44 @@ REGION_UNRECORDED_MECHANISM = (
     "there is no complete record to check the model against and the model "
     "need not satisfy the assumes missing from it"
 )
-# The FOURTH, and the one that is an ABSENCE of a check rather than an
-# undecided one: no region script was emitted at all, because this
+# The FOURTH AND FIFTH, and what they share is an ABSENCE of a check rather
+# than an undecided one: no region script was emitted at all, because this
 # obligation's slice carries no forwarded relational axiom and there is
-# therefore no smaller question to put to a solver — while the query DOES
-# carry assume(s) this obligation does not account for, so the region may
+# therefore no smaller question to put to a solver — while the region may
 # still be empty. Audit 0.2.0 S13's third door: the skip used to be
 # unconditional, on the ground that an empty region is already the
 # propagation's own refusal, which is false for an assume that never narrowed
 # anything (see `REGION_NOT_ASKED`).
-REGION_UNASKED_MECHANISM = (
+_REGION_UNASKED_PREFIX = (
     "no admitted-region check was asked — this obligation's slice carries no "
     "forwarded relational axiom, so there is no script to ask one about — and "
-    "this query carries assume(s) this obligation does not account for, so "
+)
+# The FOURTH: the record is complete and it names conjuncts this obligation
+# does not account for.
+REGION_UNASKED_MECHANISM = (
+    _REGION_UNASKED_PREFIX
+    + "this query carries assume(s) this obligation does not account for, so "
     "nothing established that the declared boxes admit a point satisfying "
     "every assume of it"
+)
+# The FIFTH, which is to the fourth what :data:`REGION_UNRECORDED_MECHANISM`
+# is to :data:`REGION_PARTIAL_MECHANISM`: the LEDGER ITSELF does not cover
+# this query, so the filter has nothing to return and the fourth sentence
+# would state a complete list that is not one.
+#
+# AND IT NAMES NOTHING, DELIBERATELY, which is a stronger reason here than on
+# the partial/unrecorded pair. `ledger_covers` joins on `eqn_id` against THIS
+# jaxpr, so the two ways it answers False are a hand-built or emptied ledger
+# and a ledger belonging to a DIFFERENT query. In the second case the entries
+# are not about this query at all, and rendering them as "unaccounted for on
+# this obligation" would attribute another query's conjuncts to this one.
+REGION_UNASKED_UNRECORDED_MECHANISM = (
+    _REGION_UNASKED_PREFIX
+    + "the propagation's assume ledger has no record for every "
+    "stelling_assume this query CONTAINS, so nothing established that the "
+    "declared boxes admit a point satisfying every assume of it, and no "
+    "conjunct can be named: a ledger that does not cover this query need not "
+    "be a ledger of this query"
 )
 
 # The conditionality line a forwarded relational axiom earns, in the same
@@ -458,18 +486,36 @@ def _name_dispositions(entries: tuple) -> str:
     )
 
 
-def _region_unasked_note(index: int, missing: tuple) -> str:
-    """The per-obligation sentence for the FOURTH mechanism: no region check
-    was asked, and the query still carries assume(s) this obligation does not
-    account for.
+def _region_unasked_note(
+    index: int, missing: tuple, *, every_assume_recorded: bool
+) -> str:
+    """The per-obligation sentence for the FOURTH and FIFTH mechanisms: no
+    region check was asked, and something about this query is still unsettled.
 
-    A separate function rather than a fifth branch of
+    A separate function rather than two more branches of
     :func:`_region_uncertified_note`, because the other three all begin "the
     admitted-region check answered ..." — on this run it answered nothing, it
     was never run, and quoting any of them would be a statement of mechanism
     that did not fire. The conjuncts are named in the same words the partial
     mechanism names them, through the same renderer.
+
+    ``every_assume_recorded`` is ``propagate.ledger_covers`` for this query,
+    and it is a REQUIRED keyword for the reason
+    :func:`_region_uncertified_note`'s is: a default here would be a guess
+    about which mechanism fired. It is checked FIRST, and the precedence is
+    the same one that function states with one argument added. There, an
+    incomplete record makes the other sentences false because ``missing``
+    cannot be the whole list. Here that holds too — and so does something
+    stronger: :func:`propagate.ledger_covers` joins on ``eqn_id`` against
+    THIS jaxpr, so a False answer includes the case of a ledger belonging to
+    a DIFFERENT query, whose entries are not conjuncts of this one at all.
+    Naming them would not merely understate, it would misattribute.
     """
+    if not every_assume_recorded:
+        return (
+            f"assert #{index}: {REGION_UNASKED_UNRECORDED_MECHANISM} — the "
+            f"discharge may be vacuous"
+        )
     return (
         f"assert #{index}: {REGION_UNASKED_MECHANISM}. Unaccounted for on "
         f"this obligation: " + _name_dispositions(missing)
@@ -491,14 +537,25 @@ def _region_clause(region: str) -> str:
     the second reads as a claim about the axioms the script states, which on
     the partial-accounting route a model DID satisfy. What was not
     established is membership of the user's region.
+
+    **IT STATES THE RULE AND NAMES NO MECHANISM**, for the reason
+    :data:`UNCERTIFIED_REGION_ASSUMPTION` states one line up and by the same
+    correction. This line used to open "this obligation's script carries
+    forwarded relational axiom(s)", which was true of every route that could
+    reach :data:`REGION_UNCERTIFIED` when it was written and became FALSE
+    when the unasked route was added — that route is reached precisely
+    BECAUSE the script carries none. Measured on the third-door harness (two
+    `scan`-body assumes, no relational axiom anywhere, the obligation
+    discharged): the detail line asserted a forwarded axiom on a script whose
+    `emitted_origins` is empty. The mechanism is named per obligation, in the
+    notes, where it can be true.
     """
     if region != REGION_UNCERTIFIED:
         return ""
     return (
-        " [MAY BE VACUOUS: this obligation's script carries forwarded "
-        "relational axiom(s) and no mechanism established that the declared "
-        "boxes admit a point satisfying EVERY assume of this query — the "
-        "discharge is sound and may be true of an empty region]"
+        " [MAY BE VACUOUS: no mechanism established that the declared boxes "
+        "admit a point satisfying EVERY assume of this query — the discharge "
+        "is sound and may be true of an empty region]"
     )
 
 
@@ -2129,7 +2186,7 @@ def _dispatch_obligation(
                         every_assume_recorded=every_assume_recorded,
                     )
                 )
-        elif unaccounted and not region_certified:
+        elif (unaccounted or not every_assume_recorded) and not region_certified:
             # NO AXIOM TO ASK ABOUT, AND STILL A QUESTION (audit 0.2.0 S13,
             # third door). This obligation's slice forwarded nothing, so there
             # is no smaller script and no solver call to make — but the query
@@ -2141,6 +2198,28 @@ def _dispatch_obligation(
             # exactly what the may-be-vacuous line says, and saying nothing
             # was the measured defect.
             #
+            # THE CONDITION IS THE NEGATION OF THE SIBLING'S, NOT HALF OF IT,
+            # and the half was a hole this branch shipped with (audit B9).
+            # `_region_answer` concludes an inhabited region from
+            # `accounts_for_every_assume=(not unaccounted and
+            # every_assume_recorded)`, and the two conjuncts are there because
+            # neither alone is the claim: `unaccounted_assumes` is a FILTER
+            # over the ledger, so an empty ledger yields an empty result, and
+            # an empty result read as the positive claim is the exact failure
+            # `every_assume_recorded` was added to close. Testing only
+            # `unaccounted` here reintroduced it one door over — the door this
+            # commit added, and the only one whose population is an assume the
+            # walk never entered. Measured on the third-door harness (two
+            # `scan`-body assumes `x < y` and `y < x`, an obligation the
+            # solver discharges, a region an exact 41x41 `Fraction` grid shows
+            # admits 0 points): with the real ledger, REGION_UNCERTIFIED and
+            # two disclosure notes; with `assume_ledger=()`, nothing disclosed
+            # at all — a clean stamp on a claim about nothing. So the test is
+            # `unaccounted or not every_assume_recorded`, which is
+            # `not (not unaccounted and every_assume_recorded)`: ONE predicate,
+            # spelled once in each direction, exactly as the forwarded branch
+            # reads it.
+            #
             # `region_certified` skips it for the same reason it skips the
             # forwarded branch above, and it is the same one-sided read: the
             # propagation's probe exhibited a point of the declared set
@@ -2151,7 +2230,12 @@ def _dispatch_obligation(
             # the probe cannot witness what it never evaluated.)
             region = REGION_UNCERTIFIED
             notes.append(f"assert #{sl.index}: {UNCERTIFIED_REGION_ASSUMPTION}")
-            notes.append(_region_unasked_note(sl.index, unaccounted))
+            notes.append(
+                _region_unasked_note(
+                    sl.index, unaccounted,
+                    every_assume_recorded=every_assume_recorded,
+                )
+            )
         return (ObligationEscalation(
             index=sl.index,
             outcome=OB_DISCHARGED,

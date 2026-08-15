@@ -82,6 +82,7 @@ from stelling.propagate import (  # noqa: E402
 )
 from stelling.solvers import (  # noqa: E402
     REGION_UNASKED_MECHANISM,
+    REGION_UNASKED_UNRECORDED_MECHANISM,
     UNCERTIFIED_REGION_ASSUMPTION,
 )
 
@@ -396,6 +397,89 @@ def test_the_reason_says_never_classified_and_names_the_construct(
     assert entry.where and "unknown location" not in entry.where
 
 
+def test_the_where_names_the_users_assume_line_and_never_a_line_in_jax():
+    """AUDIT B9. `where` used the `source_info[-1]` house convention, and for
+    a jax-WRAPPED loop body the outermost frame is a line in jax.
+
+    Measured on jax 0.11.0 before the repair: `lax.fori_loop` gave
+    `jax/_src/lax/control_flow/loops.py:2528
+    (_fori_scan_body_fun.<locals>.scanned_fun)` and `lax.map` gave
+    `loops.py:2784 (map.<locals>.<lambda>)`. The reason string's stated
+    purpose is "which of their assumes this was", and a line in jax answers
+    a different question. `scan` and `while_loop` were already right, which
+    is why this survived the batch that introduced it: those are the two
+    constructs the finding is named after, and they are the two jax does NOT
+    wrap.
+
+    `_assume_source` reads the frame that CALLED `stelling.harness.assume`
+    instead, which is the `assume(` line by construction at any nesting —
+    including through a user helper, where BOTH `[-1]` and "the last frame
+    outside jax" name the helper's caller rather than the call.
+    """
+    def in_fori():
+        x = any_array((), "float64", (-10.0, 10.0))
+        y = any_array((), "float64", (-10.0, 10.0))
+
+        def body(i, c):
+            assume(x < y)  # <- THE LINE THE READER IS OWED
+            return c
+
+        lax.fori_loop(0, 3, body, x)
+        return assert_(x - x <= 0.0)
+
+    def in_map():
+        x = any_array((), "float64", (-10.0, 10.0))
+        y = any_array((), "float64", (-10.0, 10.0))
+
+        def body(e):
+            assume(x < y)  # <- THE LINE THE READER IS OWED
+            return e
+
+        lax.map(body, jnp.zeros((3,)))
+        return assert_(x - x <= 0.0)
+
+    def via_helper():
+        x = any_array((), "float64", (-10.0, 10.0))
+        y = any_array((), "float64", (-10.0, 10.0))
+
+        def my_precondition(a, b):
+            assume(a < b)  # <- THE LINE THE READER IS OWED
+
+        def body(c, _):
+            my_precondition(x, y)
+            return c, 0.0
+
+        lax.scan(body, x, jnp.zeros((2,)))
+        return assert_(x - x <= 0.0)
+
+    import inspect
+
+    this_file = __file__
+    for harness, fn_name in ((in_fori, "body"), (in_map, "body"),
+                             (via_helper, "my_precondition")):
+        (entry,) = propagate(trace(harness)).assume_ledger
+        # never a line in jax's own source ...
+        assert "site-packages/jax" not in entry.where, (harness.__name__, entry.where)
+        assert "/jax/_src/" not in entry.where, (harness.__name__, entry.where)
+        # ... and specifically THIS file, THAT function
+        assert entry.where.startswith(this_file + ":"), (
+            harness.__name__, entry.where
+        )
+        assert entry.where.endswith(f".{fn_name})"), (harness.__name__, entry.where)
+        # and the line number is the `assume(` line, not the enclosing def
+        line = int(entry.where.split(":")[1].split(" ")[0])
+        src, start = inspect.getsourcelines(harness)
+        assert "assume(" in src[line - start], (harness.__name__, src[line - start])
+
+    # THE CONVENTION IS UNCHANGED WHERE IT WAS ALREADY RIGHT: `scan` and
+    # `while_loop` bodies are not wrapped by jax, so both readings agree.
+    for harness in (s13_scan, s13_while):
+        q = trace(harness)
+        ((eqn, _),) = _assume_equations(q.jaxpr).values()
+        (entry,) = propagate(q).assume_ledger
+        assert entry.where == eqn.source_info[-1], harness.__name__
+
+
 def test_the_static_walk_reports_the_enclosing_chain():
     """The mapping the reason is built from, on its own. One traversal
     serves both readers: the ids ARE this mapping's keys, so the totality
@@ -518,6 +602,80 @@ def test_the_unasked_note_states_the_absence_and_not_an_answer():
     assert not any("answered sat" in n for n in notes), notes
     assert not any("could not decide" in n for n in notes), notes
     assert any("NEVER CLASSIFIED" in n for n in notes), notes
+
+
+@need_solver
+def test_the_unasked_door_also_fails_CLOSED_on_an_incomplete_ledger():
+    """AUDIT B9. The door this change ADDED did not consult `ledger_covers`,
+    so it failed open in exactly the way `ledger_covers` exists to prevent.
+
+    `unaccounted_assumes` is a FILTER over the ledger: an empty ledger
+    filters to an empty result, and `elif unaccounted and ...` read that
+    emptiness as "every assume is accounted for". Its two sibling branches
+    both take the conjunction (`not unaccounted and every_assume_recorded`);
+    this one took half of it. Measured on `not_asked_scan`, whose region
+    `test_the_not_asked_region_admits_no_point` shows admits 0 points of an
+    exact 41x41 grid: with the real ledger, REGION_UNCERTIFIED and two
+    disclosure notes; with `assume_ledger=()`, `region_uncertified == ()` and
+    NOTHING disclosed at all — a clean stamp on a claim about nothing, which
+    is the defect this whole entry closes, still open one branch over.
+
+    Unreachable from `check()`, because `propagate` reconciles and
+    `ledger_covers` is its postcondition — but this is precisely the
+    population that postcondition was added for, so "defence in depth" was
+    not true of the door that needed it most.
+
+    `test_vacuous_precondition.py`'s `test_an_empty_ledger_now_really_does_
+    fail_CLOSED` is the same assertion on the OLD door; it drives
+    `cone_split_cycle`, whose slice DOES forward an axiom, so it could only
+    ever reach the forwarded branch. This is its twin on a query that
+    forwards nothing.
+    """
+    import dataclasses
+
+    q = trace(not_asked_scan)
+    p = propagate(q)
+    config = solvers.SolverConfig(timeout_ms=TIMEOUT)
+    # the premise: nothing forwarded, so it is the unasked door being taken
+    assert p.relational_assumes == ()
+    assert ledger_covers(p.assume_ledger, q.jaxpr) is True
+
+    starved = dataclasses.replace(p, assume_ledger=())
+    assert ledger_covers(starved.assume_ledger, q.jaxpr) is False
+    esc = solvers.escalate(q, starved, config)
+    assert [r.outcome for r in esc.records] == [solvers.OB_DISCHARGED]
+    assert esc.region_uncertified == (0,)
+
+    # and the note names the mechanism that ACTUALLY fired. With no record to
+    # filter there is no conjunct to list, so quoting the fourth sentence
+    # would promise a list and then print an empty one.
+    notes = esc.records[0].notes
+    assert any(REGION_UNASKED_UNRECORDED_MECHANISM in n for n in notes), notes
+    assert not any(REGION_UNASKED_MECHANISM in n for n in notes), notes
+    assert not any("Unaccounted for on this obligation:" in n for n in notes), notes
+    # ... and the mechanisms belonging to the door that WAS NOT taken stay out
+    assert not any("answered sat" in n for n in notes), notes
+
+
+@need_solver
+def test_the_may_be_vacuous_clause_claims_no_forwarded_axiom():
+    """AUDIT B9, found while fixing the above. `_region_clause` opened "this
+    obligation's script carries forwarded relational axiom(s)", which was
+    true of every route that could reach REGION_UNCERTIFIED when it was
+    written — and FALSE for the route this change added, which is reached
+    precisely BECAUSE the script carries none.
+
+    The line now states the RULE and names no mechanism, for the reason
+    `UNCERTIFIED_REGION_ASSUMPTION` already states one level up: the
+    mechanism is named per obligation, in the notes, where it can be true.
+    """
+    q = trace(not_asked_scan)
+    p = propagate(q)
+    assert p.relational_assumes == ()  # nothing is forwarded on this query
+    esc = solvers.escalate(q, p, solvers.SolverConfig(timeout_ms=TIMEOUT))
+    detail = esc.records[0].detail
+    assert "MAY BE VACUOUS" in detail, detail
+    assert "forwarded relational axiom" not in detail, detail
 
 
 # ---------------------------------------------------------------------------

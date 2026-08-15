@@ -9762,6 +9762,71 @@ def _withhold_uncertified_branch_refutations(closed, p, *, assume_mode, semantic
         )
 
 
+# The frame `stelling.harness.assume` binds the primitive from, as
+# `_jax_compat.Decoder.source` spells a frame: "<file>:<line> (<function>)".
+# Matched on BASENAME, not on the recorded absolute path, because a query can
+# be decoded from a `from_dict` produced on another machine and the path there
+# is that machine's. `harness.assume is _jax_compat.assume` (a re-export, not
+# a wrapper), so this is the only stelling frame on the stack and there is no
+# second spelling to keep in step.
+_ASSUME_BIND_FRAME = "_jax_compat.py:"
+
+
+def _assume_source(source_info: tuple) -> str:
+    """WHICH OF THE USER'S ``assume`` CALLS THIS EQUATION IS — the frame that
+    CALLED :func:`stelling.harness.assume`, not the outermost frame.
+
+    **A DEPARTURE FROM THE ``source_info[-1]`` HOUSE CONVENTION, SCOPED TO
+    THIS ONE READER, and measured rather than argued.** jax records the bind
+    stack innermost-first, so ``[-1]`` is the OUTERMOST frame — which is the
+    user's ``assume(`` line only when the user's harness function called it
+    directly. Audit B9 measured ten carriers on jax 0.11.0; ``[-1]`` names
+    something other than the ``assume(`` line in four of them, and twice that
+    something is a line in jax:
+
+      * ``lax.fori_loop`` — ``jax/_src/lax/control_flow/loops.py:2528
+        (_fori_scan_body_fun.<locals>.scanned_fun)``;
+      * ``lax.map`` — ``loops.py:2784 (map.<locals>.<lambda>)``;
+      * an ``assume`` written inside any helper the harness calls — the
+        helper's CALLER, not the ``assume(`` line.
+
+    ``scan``, ``while_loop``, ``cond``, ``jit``, ``scan``-in-``cond`` and
+    nested ``scan`` agree with ``[-1]`` on all six, so this changes nothing
+    where the convention was already right.
+
+    **WHY THIS READER AND NOT THE CONVENTION EVERYWHERE.** The convention is
+    correct for its usual population — an equation jax's own machinery
+    produced, where the outermost frame is the user's line — and
+    :data:`UNDESCENDED_ASSUME_REASON` is the first string to make LOOP-BODY
+    assumes visible, which is precisely where jax wraps the user's function
+    in one of its own. Changing the convention globally would be changing
+    every ``where`` in this module on the strength of one population's
+    evidence. Every other site keeps ``[-1]``.
+
+    **WHY THE CALLER OF ``assume`` AND NOT "THE LAST FRAME OUTSIDE jax".**
+    The stated purpose of this string is "the reader's next question is which
+    of their assumes this was", and the caller of ``assume`` answers exactly
+    that, by construction, for any nesting: it is the line the ``assume(``
+    token is on. "Last frame outside jax" answers a weaker question and still
+    gets the helper case wrong (it returns the helper's caller), and it would
+    need to recognise jax's installation directory from a string — which this
+    module cannot ask jax for, since it must stay importable with no jax at
+    all.
+
+    Falls back to the house convention when the landmark is absent — an
+    equation some other producer made, or a hand-built one — because a guess
+    about which frame is the user's is worse than the convention.
+    """
+    if not source_info:
+        return "unknown location"
+    for i, frame in enumerate(source_info):
+        if _ASSUME_BIND_FRAME in frame and frame.endswith("(assume)"):
+            if i + 1 < len(source_info):
+                return source_info[i + 1]
+            break
+    return source_info[-1]
+
+
 def _record_undescended_assumes(closed, p) -> None:
     """Record, as a DROPPED disposition, every ``stelling_assume`` the query
     contains and the walk never classified — audit 0.2.0 S13.
@@ -9816,7 +9881,7 @@ def _record_undescended_assumes(closed, p) -> None:
     for eqn_id, (eqn, path) in _assume_equations(closed.jaxpr).items():
         if eqn_id in recorded:
             continue
-        where = eqn.source_info[-1] if eqn.source_info else "unknown location"
+        where = _assume_source(eqn.source_info)
         inside = (
             " -> ".join(repr(prim) for prim in path) if path
             else "a sub-jaxpr this walk did not enter"

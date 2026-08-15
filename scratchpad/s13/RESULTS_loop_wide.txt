@@ -1,0 +1,90 @@
+ENVIRONMENT
+  jax 0.11.0, CPU, JAX_ENABLE_X64=1, vacuity_mode=inputs-only, solver_timeout_ms=5000
+  z3 5.0.0  cvc5 1.3.4
+  PRE  = 06d3bc6 (git archive of src/)
+  POST = this branch, fix/B9-undescended-assume
+
+PRE  (06d3bc6)
+==========================================================================
+generated harnesses: 240
+  RAISED UnsatisfiableAssumptionError 8
+  REFUTED                            224
+  VERIFIED                           8
+==========================================================================
+
+[exited with code 0]
+
+POST (this branch)
+==========================================================================
+generated harnesses: 240
+  RAISED UnsatisfiableAssumptionError 8
+  REFUTED                            24
+  UNKNOWN                            200
+  VERIFIED                           8
+==========================================================================
+
+
+==========================================================================
+rows: 240   moved: 200
+  REFUTED -> UNKNOWN       200
+--------------------------------------------------------------------------
+PARTITION of the REFUTED -> UNKNOWN rows (pre-fix witness scored in exact Fraction):
+  VACUOUS              40  20.0%
+  NO_CORRECT           40  20.0%
+  OTHER_WITNESS        40  20.0%
+  CORRECT_WITHHELD     80  40.0%
+  TOTAL               200
+--------------------------------------------------------------------------
+CORRECT_WITHHELD by carrier:
+  fori           16
+  nested_scan    16
+  scan           16
+  scan_in_cond   16
+  while          16
+==========================================================================
+
+WHY THE FIRST CORPUS SCORED ZERO -- category by assume set x assert
+(loop carriers only; 5 carriers x 2 statement orders = 10 rows per cell,
+ and every cell below is homogeneous across its 10 rows)
+
+              sub_le0     sub_ge0     add_le5   add_ge_m5
+  lt             none     CORRECT     CORRECT     other-w
+  le             none     CORRECT     CORRECT     other-w
+  gt          CORRECT        none     other-w     CORRECT
+  ge          CORRECT        none     other-w     CORRECT
+  unsat       vacuous     vacuous     vacuous     vacuous
+
+  CORRECT = a correct refutation with a correct witness, withheld
+  other-w = witness outside the precondition, but SOME admitted point
+            violates, so a correct refutation existed with another witness
+  none    = witness outside, and NO admitted grid point violates
+  vacuous = the assumed region admits no grid point at all
+
+Does the assert's violation region INTERSECT the assumed region?
+(exact 41x41 grid; this is the property that decides whether ANY correct
+ refutation exists, independent of which witness a solver happens to pick)
+
+  lt         disjoint         820         225         225
+  le         disjoint         820         240         240
+  gt              820    disjoint         225         225
+  ge              820    disjoint         240         240
+
+So 4 of the 16 satisfiable cells are disjoint -- those are the four
+`none` cells -- and in the other 12 a correct refutation exists. In 8 of
+those 12 the solver's OWN witness was already a correct one. Nothing here
+is special to `ge`/`gt`: `lt` and `le` produce CORRECT_WITHHELD too, with
+the right assert. What the first corpus did was pair `lt`/`le` with two
+asserts (`x0-x1<=0`, `x0+x1<=-5`) on which the solver's first model always
+landed outside the assumed region -- so its zero is a property of that
+PAIRING, not of the change.
+
+WORKED EXAMPLE  (fori|ge|add_ge_m5|assume_first)
+  assume(x0 >= x1) inside a lax.fori_loop body; assert_(x0 + x1 >= -5.0)
+  06d3bc6 REFUTED, witness x0=0, x1=-6
+    in the declared box [-10,10]^2 : True
+    satisfies every assume        : True
+    violates the assert           : True
+  exact 41x41 grid: 861 admitted, 240 of them violating
+  this branch: UNKNOWN.  A CORRECT refutation with a CORRECT
+  witness, withheld -- because nothing in the run honoured the
+  precondition, so nothing could tell this witness from a false one.

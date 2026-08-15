@@ -448,11 +448,23 @@ SPDX-License-Identifier: Apache-2.0
   [docs/harness-api.md](docs/harness-api.md#an-assume-inside-a-scan-or-while_loop-body-is-not-descended).
 
   Verdicts move **REFUTED → UNKNOWN** on harnesses of that shape, and a
-  discharge there gains a may-be-vacuous line. Measured over a 144-harness
-  loop-carrier corpus: 96 rows move, all REFUTED → UNKNOWN, and all 96 were
-  false REFUTEDs by exact `Fraction` ground truth; the 48 top-level control
-  rows are verdict-identical. Over the 288-harness `jit`/`cond`/`custom_jvp`
-  corpus: 0 verdicts and 0 caveat states move.
+  discharge there gains a may-be-vacuous line. **This costs correct
+  refutations, and the number is not zero.** Measured over a 240-harness
+  loop-carrier corpus (`scan`/`while_loop`/`fori_loop`/nested `scan`/
+  `scan`-in-`cond`/top control, comparison set `lt`/`le`/`gt`/`ge`, four
+  asserts in both directions), scoring every moved row against the pre-fix
+  run's own witness in exact `Fraction`: **200 rows move, and 80 of them —
+  40 % — were correct refutations carrying correct witnesses**, spread
+  evenly over all five loop carriers; 40 more were vacuous, 40 had no
+  correct refutation at all, 40 had one with a different witness. The 40
+  top-level control rows move 0. (A narrower 144-harness corpus scored 96
+  moved rows all false; that partition is a property of ITS `lt`/`le`,
+  one-assert-direction pairing — see
+  [SOUNDNESS.md](SOUNDNESS.md).) Over the 288-harness
+  `jit`/`cond`/`custom_jvp` corpus: 0 verdicts and 0 caveat states move —
+  though the tightening is not gated on loops, and two non-loop shapes
+  outside that corpus do gain a correct caveat (an assume inside a
+  `lax.cond` branch, and `assume(jnp.all(...))` with no control flow).
 
 ### Inductive step verification
 

@@ -404,6 +404,15 @@ judged over a superset, so a VERIFIED still holds on your region and every
 definite violation is withheld to UNKNOWN rather than reported as a
 counterexample.
 
+**That withholding costs real refutations, and the UNKNOWN cannot tell you
+which.** On a 240-harness loop-carrier corpus, 40 % of the withheld
+violations were genuine: the witness lay in the declared box, satisfied every
+assume, and falsified the assert. The withholding is still the right answer —
+nothing in the run honoured your precondition, so nothing could tell that
+witness from one your precondition excludes — but an UNKNOWN here means
+*undecided*, not *your program is fine*. Lift the `assume` to the top level
+to get a decision either way.
+
 It was not always recorded. Up to and including **0.1.0** an `assume` inside
 one of those bodies left no trace at all, and a REFUTED verdict on such a
 harness could name a point that assume excludes — see the entry in
