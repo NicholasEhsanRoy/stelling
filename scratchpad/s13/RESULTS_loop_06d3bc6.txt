@@ -1,0 +1,204 @@
+==========================================================================
+generated harnesses: 144
+  RAISED UnsatisfiableAssumptionError 16
+  REFUTED        108
+  UNKNOWN        4
+  VERIFIED       16
+FALSE REFUTED (witness outside the precondition): 96
+   scan|2|0|sat1|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|0|sat1|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|0|sat1|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|0|sat1|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|0|sat2|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|0|sat2|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|0|sat2|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|0|sat2|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|0|unsat|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|0|unsat|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|0|unsat|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|0|unsat|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|1|sat1|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|1|sat1|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|1|sat1|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|1|sat1|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|1|sat2|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|1|sat2|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|1|sat2|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|1|sat2|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|1|unsat|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|1|unsat|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|2|1|unsat|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|2|1|unsat|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|0|sat1|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|0|sat1|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|0|sat1|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|0|sat1|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|0|sat2|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|0|sat2|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|0|sat2|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|0|sat2|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|0|unsat|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|0|unsat|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|0|unsat|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|0|unsat|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|1|sat1|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|1|sat1|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|1|sat1|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|1|sat1|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|1|sat2|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|1|sat2|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|1|sat2|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|1|sat2|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|1|unsat|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|1|unsat|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   scan|3|1|unsat|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   scan|3|1|unsat|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|0|sat1|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|0|sat1|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|0|sat1|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|0|sat1|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|0|sat2|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|0|sat2|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|0|sat2|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|0|sat2|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|0|unsat|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|0|unsat|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|0|unsat|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|0|unsat|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|1|sat1|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|1|sat1|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|1|sat1|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|1|sat1|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|1|sat2|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|1|sat2|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|1|sat2|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|1|sat2|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|1|unsat|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|1|unsat|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|2|1|unsat|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|2|1|unsat|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|0|sat1|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|0|sat1|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|0|sat1|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|0|sat1|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|0|sat2|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|0|sat2|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|0|sat2|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|0|sat2|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|0|unsat|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|0|unsat|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|0|unsat|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|0|unsat|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|1|sat1|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|1|sat1|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|1|sat1|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|1|sat1|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|1|sat2|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|1|sat2|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|1|sat2|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|1|sat2|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|1|unsat|sub01|0.0|assume_last  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|1|unsat|sub01|0.0|assume_first  ["witness {'x0': '0', 'x1': '-1'} violates the precondition"]
+   while|3|1|unsat|add01|-5.0|assume_last  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+   while|3|1|unsat|add01|-5.0|assume_first  ["witness {'x0': '0', 'x1': '0'} violates the precondition"]
+FALSE VERIFIED (admitted point violates assert):  0
+VACUOUS VERIFIED (0 admitted points on the grid): 0
+VERDICTS THAT MENTION NO ASSUME AT ALL:           96
+   scan|2|0|sat1|sub01|0.0|assume_last
+   scan|2|0|sat1|sub01|0.0|assume_first
+   scan|2|0|sat1|add01|-5.0|assume_last
+   scan|2|0|sat1|add01|-5.0|assume_first
+   scan|2|0|sat2|sub01|0.0|assume_last
+   scan|2|0|sat2|sub01|0.0|assume_first
+   scan|2|0|sat2|add01|-5.0|assume_last
+   scan|2|0|sat2|add01|-5.0|assume_first
+   scan|2|0|unsat|sub01|0.0|assume_last
+   scan|2|0|unsat|sub01|0.0|assume_first
+   scan|2|0|unsat|add01|-5.0|assume_last
+   scan|2|0|unsat|add01|-5.0|assume_first
+   scan|2|1|sat1|sub01|0.0|assume_last
+   scan|2|1|sat1|sub01|0.0|assume_first
+   scan|2|1|sat1|add01|-5.0|assume_last
+   scan|2|1|sat1|add01|-5.0|assume_first
+   scan|2|1|sat2|sub01|0.0|assume_last
+   scan|2|1|sat2|sub01|0.0|assume_first
+   scan|2|1|sat2|add01|-5.0|assume_last
+   scan|2|1|sat2|add01|-5.0|assume_first
+   scan|2|1|unsat|sub01|0.0|assume_last
+   scan|2|1|unsat|sub01|0.0|assume_first
+   scan|2|1|unsat|add01|-5.0|assume_last
+   scan|2|1|unsat|add01|-5.0|assume_first
+   scan|3|0|sat1|sub01|0.0|assume_last
+   scan|3|0|sat1|sub01|0.0|assume_first
+   scan|3|0|sat1|add01|-5.0|assume_last
+   scan|3|0|sat1|add01|-5.0|assume_first
+   scan|3|0|sat2|sub01|0.0|assume_last
+   scan|3|0|sat2|sub01|0.0|assume_first
+   scan|3|0|sat2|add01|-5.0|assume_last
+   scan|3|0|sat2|add01|-5.0|assume_first
+   scan|3|0|unsat|sub01|0.0|assume_last
+   scan|3|0|unsat|sub01|0.0|assume_first
+   scan|3|0|unsat|add01|-5.0|assume_last
+   scan|3|0|unsat|add01|-5.0|assume_first
+   scan|3|1|sat1|sub01|0.0|assume_last
+   scan|3|1|sat1|sub01|0.0|assume_first
+   scan|3|1|sat1|add01|-5.0|assume_last
+   scan|3|1|sat1|add01|-5.0|assume_first
+   scan|3|1|sat2|sub01|0.0|assume_last
+   scan|3|1|sat2|sub01|0.0|assume_first
+   scan|3|1|sat2|add01|-5.0|assume_last
+   scan|3|1|sat2|add01|-5.0|assume_first
+   scan|3|1|unsat|sub01|0.0|assume_last
+   scan|3|1|unsat|sub01|0.0|assume_first
+   scan|3|1|unsat|add01|-5.0|assume_last
+   scan|3|1|unsat|add01|-5.0|assume_first
+   while|2|0|sat1|sub01|0.0|assume_last
+   while|2|0|sat1|sub01|0.0|assume_first
+   while|2|0|sat1|add01|-5.0|assume_last
+   while|2|0|sat1|add01|-5.0|assume_first
+   while|2|0|sat2|sub01|0.0|assume_last
+   while|2|0|sat2|sub01|0.0|assume_first
+   while|2|0|sat2|add01|-5.0|assume_last
+   while|2|0|sat2|add01|-5.0|assume_first
+   while|2|0|unsat|sub01|0.0|assume_last
+   while|2|0|unsat|sub01|0.0|assume_first
+   while|2|0|unsat|add01|-5.0|assume_last
+   while|2|0|unsat|add01|-5.0|assume_first
+   while|2|1|sat1|sub01|0.0|assume_last
+   while|2|1|sat1|sub01|0.0|assume_first
+   while|2|1|sat1|add01|-5.0|assume_last
+   while|2|1|sat1|add01|-5.0|assume_first
+   while|2|1|sat2|sub01|0.0|assume_last
+   while|2|1|sat2|sub01|0.0|assume_first
+   while|2|1|sat2|add01|-5.0|assume_last
+   while|2|1|sat2|add01|-5.0|assume_first
+   while|2|1|unsat|sub01|0.0|assume_last
+   while|2|1|unsat|sub01|0.0|assume_first
+   while|2|1|unsat|add01|-5.0|assume_last
+   while|2|1|unsat|add01|-5.0|assume_first
+   while|3|0|sat1|sub01|0.0|assume_last
+   while|3|0|sat1|sub01|0.0|assume_first
+   while|3|0|sat1|add01|-5.0|assume_last
+   while|3|0|sat1|add01|-5.0|assume_first
+   while|3|0|sat2|sub01|0.0|assume_last
+   while|3|0|sat2|sub01|0.0|assume_first
+   while|3|0|sat2|add01|-5.0|assume_last
+   while|3|0|sat2|add01|-5.0|assume_first
+   while|3|0|unsat|sub01|0.0|assume_last
+   while|3|0|unsat|sub01|0.0|assume_first
+   while|3|0|unsat|add01|-5.0|assume_last
+   while|3|0|unsat|add01|-5.0|assume_first
+   while|3|1|sat1|sub01|0.0|assume_last
+   while|3|1|sat1|sub01|0.0|assume_first
+   while|3|1|sat1|add01|-5.0|assume_last
+   while|3|1|sat1|add01|-5.0|assume_first
+   while|3|1|sat2|sub01|0.0|assume_last
+   while|3|1|sat2|sub01|0.0|assume_first
+   while|3|1|sat2|add01|-5.0|assume_last
+   while|3|1|sat2|add01|-5.0|assume_first
+   while|3|1|unsat|sub01|0.0|assume_last
+   while|3|1|unsat|sub01|0.0|assume_first
+   while|3|1|unsat|add01|-5.0|assume_last
+   while|3|1|unsat|add01|-5.0|assume_first
+==========================================================================
+EXIT=0

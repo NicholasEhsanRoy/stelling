@@ -1,0 +1,3 @@
+06d3bc6 : {'VERIFIED': 72, 'caveated': 18, 'clean': 54}
+fixed   : {'VERIFIED': 72, 'caveated': 18, 'clean': 54}
+row diff: 0 of 288 caveat states move (verified by json diff)

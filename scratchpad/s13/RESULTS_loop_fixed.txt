@@ -1,0 +1,12 @@
+==========================================================================
+generated harnesses: 144
+  RAISED UnsatisfiableAssumptionError 16
+  REFUTED        12
+  UNKNOWN        100
+  VERIFIED       16
+FALSE REFUTED (witness outside the precondition): 0
+FALSE VERIFIED (admitted point violates assert):  0
+VACUOUS VERIFIED (0 admitted points on the grid): 0
+VERDICTS THAT MENTION NO ASSUME AT ALL:           0
+==========================================================================
+EXIT=0

@@ -419,6 +419,53 @@ SPDX-License-Identifier: Apache-2.0
   now follow the slicer's alias chain to find propagated intervals for
   variables defined inside transparent calls (jit, custom_jvp_call).
 
+- **An `assume` inside a `scan` or `while_loop` body is recorded instead of
+  ignored** (audit 0.2.0 S13; see [SOUNDNESS.md](SOUNDNESS.md) — **this one
+  reaches the released 0.1.0**). The propagation descends the transparent
+  wrappers and `cond`; it does not enter a loop body, so a `stelling_assume`
+  written in one was never classified — and, the part that made it a
+  soundness defect rather than a precision limit, left no record that
+  anything had been ignored. Nothing withheld, and a REFUTED came back
+  naming a point the user's own precondition excludes. Measured on the
+  `v0.1.0` tag and on `main`: `assume(x <= y)` inside a `lax.scan` body with
+  `assert_(x - y <= 0.0)` returned REFUTED at `x = 0, y = -1`.
+
+  `propagate._record_undescended_assumes` now reconciles the assume ledger
+  against the STATIC set of assume equations the query contains, before
+  anything reads the run's assume state, and writes a `dropped` disposition,
+  a note naming the construct and the source line, and a stamped
+  `precondition satisfiability uncertified` assumption. The same missing
+  record reached three rules and all three now see it: the withholding rule
+  (**REFUTED → UNKNOWN**, the violation withheld and the reason quoted), the
+  admitted-region gate, and `REGION_NOT_ASKED` — which used to skip the
+  region question outright whenever no relational axiom was forwarded, on a
+  ground that is untrue for an assume that never narrowed anything.
+
+  **The loop is still not descended**, deliberately: a loop body's `assume`
+  is a per-iteration statement about a carry this analysis does not model.
+  Write the precondition at the top level of the harness to have it
+  honoured — see
+  [docs/harness-api.md](docs/harness-api.md#an-assume-inside-a-scan-or-while_loop-body-is-not-descended).
+
+  Verdicts move **REFUTED → UNKNOWN** on harnesses of that shape, and a
+  discharge there gains a may-be-vacuous line. **This costs correct
+  refutations, and the number is not zero.** Measured over a 240-harness
+  loop-carrier corpus (`scan`/`while_loop`/`fori_loop`/nested `scan`/
+  `scan`-in-`cond`/top control, comparison set `lt`/`le`/`gt`/`ge`, four
+  asserts in both directions), scoring every moved row against the pre-fix
+  run's own witness in exact `Fraction`: **200 rows move, and 80 of them —
+  40 % — were correct refutations carrying correct witnesses**, spread
+  evenly over all five loop carriers; 40 more were vacuous, 40 had no
+  correct refutation at all, 40 had one with a different witness. The 40
+  top-level control rows move 0. (A narrower 144-harness corpus scored 96
+  moved rows all false; that partition is a property of ITS `lt`/`le`,
+  one-assert-direction pairing — see
+  [SOUNDNESS.md](SOUNDNESS.md).) Over the 288-harness
+  `jit`/`cond`/`custom_jvp` corpus: 0 verdicts and 0 caveat states move —
+  though the tightening is not gated on loops, and two non-loop shapes
+  outside that corpus do gain a correct caveat (an assume inside a
+  `lax.cond` branch, and `assume(jnp.all(...))` with no control flow).
+
 ### Inductive step verification
 
 - **`stelling.inductive.check_inductive_step`**: verify that a loop body
@@ -430,6 +477,16 @@ SPDX-License-Identifier: Apache-2.0
 
 ### Known limitations (0.2.0)
 
+- **An `assume` inside a `scan` or `while_loop` body is not honoured.** The
+  propagation does not enter those bodies, so such an assume narrows
+  nothing and is not forwarded to the solver. It is now RECORDED as a
+  dropped assumption rather than ignored — the note names the construct and
+  the source line, the stamp carries `precondition satisfiability
+  uncertified`, and every definite violation is withheld to UNKNOWN — but
+  the precondition still does not constrain the analysis. Write it at the
+  top level of the harness. Descending the loop is a separate feature: a
+  loop body's assume is a per-iteration statement about a carry that
+  changes, and this release models neither.
 - `assume(x > 0)` in real mode still narrows to `[0, hi]` (closed
   intervals cannot represent open bounds in exact reals). The IEEE bump
   is exact; the real-mode overapproximation is sound. In real mode, the

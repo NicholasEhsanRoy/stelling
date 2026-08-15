@@ -79,6 +79,16 @@ CONJUNCTION with a completeness check of the ledger against the STATIC set of
 assume equations the query contains (``propagate.ledger_covers`` over
 ``_assume_equation_ids``, the same total machinery the non-emptiness
 certificate's own requirement rests on), and section 8 pins it.
+
+**AMENDED — AUDIT 0.2.0 S13 FIXED THE ROOT, so the sentence above about
+"leaves no entry to filter" is history and not current behaviour.** The same
+missing record reached two further rules, one of them producing a FALSE
+REFUTED on the released 0.1.0, so the repair moved to the propagation:
+``propagate._record_undescended_assumes`` reconciles the ledger against the
+static set and writes a ``dropped`` disposition, so an un-walked assume now
+leaves an entry that names its construct. The conjunction in section 8 is
+unchanged and still asked; which of its two halves catches the scan-body
+shape is not. ``tests/test_undescended_assume.py`` is that finding's file.
 """
 
 from __future__ import annotations
@@ -1140,10 +1150,22 @@ def test_the_inductive_note_is_unconditional_when_the_BOUND_obligations_are():
 # certificate's own requirement already rests on, which is why THAT path never
 # had this hole.
 #
-# SCOPE. This closes the un-recorded-assume route for the admitted-region
-# rule. It does NOT close the same root cause's other face, where an
-# unrecorded assume reaches the withholding rule; that is a separate item and
-# nothing here should be read as covering it.
+# SCOPE, AND WHAT AUDIT 0.2.0 S13 THEN DID TO IT. This closed the
+# un-recorded-assume route for the admitted-region rule and nothing else: the
+# same root cause reached the WITHHOLDING rule, where it produced a false
+# REFUTED, and reached `REGION_NOT_ASKED`, where it produced a clean VERIFIED
+# with no mention of an assume at all. S13 fixed the ROOT — `propagate`
+# reconciles its ledger against the static assume set — so an assume the walk
+# never entered is now a RECORDED `dropped` entry and reaches this rule
+# through `unaccounted_assumes`, where it can be NAMED. See
+# `tests/test_undescended_assume.py`.
+#
+# THE CONJUNCTION BELOW IS NOT THEREBY REDUNDANT, and the tests say which
+# half now carries which case: `ledger_covers` no longer discriminates the
+# scan-body shape (it is a postcondition of `propagate` and answers True),
+# and it still discriminates the STARVED ledger — a hand-built, emptied, or
+# foreign-jaxpr one — which `test_an_empty_ledger_now_really_does_fail_CLOSED`
+# measures.
 # ---------------------------------------------------------------------------
 
 
@@ -1152,22 +1174,34 @@ def test_the_scan_body_harness_really_does_admit_no_point():
     assert _scan_body_cycle_admits_no_point() == 0
 
 
-def test_the_ledger_does_not_record_an_assume_inside_a_scan_body():
-    """THE MECHANISM, with no solver in it. The query CONTAINS two assumes
-    and the propagation classified one, so a filter over the ledger is
-    reading a record that is missing a row — and cannot say so."""
+def test_the_ledger_records_the_assume_inside_the_scan_body():
+    """THE MECHANISM, with no solver in it.
+
+    WHAT THIS TEST USED TO MEASURE, and why the numbers moved. The query
+    CONTAINS two assumes and the WALK classified one, so the ledger had a
+    single row: a filter over it returned "nothing unaccounted for", the same
+    answer it gives on a query whose every assume IS recorded, and
+    `ledger_covers` was the only thing that could tell the two apart.
+
+    Audit 0.2.0 S13 fixed that at the root — `propagate` reconciles its
+    ledger against the static assume set before anything reads it — so BOTH
+    rows are present, the missing conjunct is the `dropped` one the filter
+    now returns, and `ledger_covers` is a postcondition. The completeness
+    question is still asked and still separate (see
+    `test_an_empty_ledger_now_really_does_fail_CLOSED` for the case it
+    decides); what changed is which half catches THIS shape.
+    """
     q = trace(scan_body_cycle)
     p = propagate(q)
-    # the query contains two; the walk classified one
     assert len(_assume_equation_ids(q.jaxpr)) == 2
-    assert len(p.assume_ledger) == 1
-    # ... and the filter cannot see the difference: with the one recorded
-    # assume emitted, its answer is the same "nothing unaccounted for" it
-    # gives on a query whose every assume IS recorded
-    assert unaccounted_assumes(p.assume_ledger, (0,)) == ()
-    # which is exactly why the completeness question has to be asked
-    # separately, and answers no
-    assert ledger_covers(p.assume_ledger, q.jaxpr) is False
+    assert len(p.assume_ledger) == 2
+    kinds = sorted(e.kind for e in p.assume_ledger)
+    assert kinds == ["dropped", "forwarded"]
+    # the filter now SEES the difference: with the forwarded assume emitted,
+    # the un-walked one is what is left over — and it can be named
+    (missing,) = unaccounted_assumes(p.assume_ledger, (0,))
+    assert "NEVER CLASSIFIED" in missing.reason and "'scan'" in missing.reason
+    assert ledger_covers(p.assume_ledger, q.jaxpr) is True
 
 
 @need_solver
@@ -1193,18 +1227,27 @@ def test_a_discharge_over_an_assume_nobody_recorded_is_not_stamped_clean():
 
 
 @need_solver
-def test_the_note_names_the_unrecorded_assume_and_not_the_other_mechanisms():
-    """The per-obligation sentence has to be TRUE on this run, and the two
-    it used to have to choose between are both false here: the solver DID
-    decide (it answered sat), and no conjunct can be listed as unaccounted
-    for, because the missing one was never written down."""
+def test_the_note_names_the_unwalked_assume_and_not_the_wrong_mechanism():
+    """The per-obligation sentence has to be TRUE on this run, and the
+    UNDECIDED one is false here: the solver DID decide, it answered sat.
+
+    It used to have to fall back to `REGION_UNRECORDED_MECHANISM`, which
+    could state the fact but not name the conjunct — "the missing one was
+    never written down". Since audit 0.2.0 S13 it IS written down, so the
+    PARTIAL mechanism fires and the note quotes the assume: which one, where
+    it is, and that nothing ever classified it. Strictly more information,
+    from the same repair.
+    """
     q = trace(scan_body_cycle)
     p = propagate(q)
     esc = solvers.escalate(q, p, solvers.SolverConfig(timeout_ms=TIMEOUT))
     notes = esc.records[0].notes
-    assert any(REGION_UNRECORDED_MECHANISM in n for n in notes), notes
+    assert any("NEVER CLASSIFIED" in n and "'scan'" in n for n in notes), notes
     assert any("answered sat" in n for n in notes), notes
     assert not any("could not decide" in n for n in notes), notes
+    # and the mechanism that CANNOT name a conjunct is no longer the one
+    # quoted, because there is now a conjunct to name
+    assert not any(REGION_UNRECORDED_MECHANISM in n for n in notes), notes
 
 
 def test_the_unrecorded_mechanism_is_reported_ahead_of_the_other_two():
@@ -1240,10 +1283,24 @@ def test_an_empty_ledger_now_really_does_fail_CLOSED():
     ledger filtered to an empty result, which read as the positive claim, and
     the caveat DISAPPEARED. It is now a required argument AND an empty one
     fails the completeness test, so both halves of the sentence hold.
+
+    **SCOPED TO THE FORWARDED DOOR, and audit B9 measured what that left
+    out.** `cone_split_cycle`'s slice DOES forward `x < y`, so this drives
+    only the branch that emits a region script — as the assertion below
+    records. The `REGION_NOT_ASKED` branch, taken by a slice that forwards
+    nothing, shipped testing `unaccounted` alone and failed OPEN on exactly
+    this input. Its twin is `test_undescended_assume.py::
+    test_the_unasked_door_also_fails_CLOSED_on_an_incomplete_ledger`, on a
+    query with no forwarded axiom anywhere; a claim about "an empty ledger"
+    needs both, because there are two doors.
     """
     q = trace(cone_split_cycle)
     p = propagate(q)
     config = solvers.SolverConfig(timeout_ms=TIMEOUT)
+    # WHICH DOOR THIS TEST IS ABOUT, asserted rather than left to be inferred
+    # from the harness: the region script exists here, so the twin above is
+    # the only thing covering the other one.
+    assert p.relational_assumes != ()
     assert solvers.escalate(q, p, config).region_uncertified == (0,)
     starved = dataclasses.replace(p, assume_ledger=())
     assert solvers.escalate(q, starved, config).region_uncertified == (0,)
@@ -1333,3 +1390,68 @@ def test_the_static_assume_set_is_total_over_sub_jaxprs():
                in_cond_in_jit_in_scan):
         static = _assume_equation_ids(trace(fn).jaxpr)
         assert len(static) == raw_count(fn) == 2, fn.__name__
+
+
+def test_a_sub_jaxpr_held_in_a_LIST_is_not_invisible_to_the_static_walk():
+    """AUDIT B9. `coverage.sub_jaxprs` walked `tuple` and `NamedTupleParam`
+    and not `list`, so a sub-jaxpr held in a Python list was invisible to
+    every rule that rests on the static assume set.
+
+    THE FAILURE DIRECTION IS THE WHOLE POINT. An equation the walk does not
+    enter does not raise and does not shrink a verdict: it shrinks the
+    REQUIREMENT, so `_assume_equation_ids` returns a smaller set, the subset
+    test passes trivially, and `ledger_covers` answers True. Measured on this
+    tree before the one-word fix, on a hand-built `JaxprEqn` carrying the SAME
+    `scan` body under `jaxpr=[...]` instead of `jaxpr=(...)`: `static ids 0 /
+    ledger 0 / assume_dropped False / covers True` — the PRE-FIX state
+    presented as a satisfied postcondition, which is the one shape a
+    postcondition must never take.
+
+    Not reachable from `trace()` or `from_dict` — both build tuples, so this
+    was never a live soundness hole and is hardened rather than repaired. It
+    is hardened because `JaxprEqn` is a plain dataclass any caller can
+    construct, a params mapping is untyped, and three rules now rest on this
+    walk's totality (B3's non-emptiness gate, `ledger_covers`, and the
+    `REGION_NOT_ASKED` tightening this batch added).
+    """
+    from stelling import ir
+    from stelling.coverage import sub_jaxprs
+
+    q = trace(scan_body_cycle)
+    scan_eqn = next(e for e in q.jaxpr.eqns if e.primitive == "scan")
+    assert len(list(sub_jaxprs(scan_eqn))) == 1
+
+    # the SAME equation with its sub-jaxpr param moved tuple/bare -> list
+    listed_params = tuple(
+        (k, list(v)) if isinstance(v, tuple) and any(
+            isinstance(i, (ir.ClosedJaxpr, ir.Jaxpr)) for i in v
+        )
+        else (k, [v]) if isinstance(v, (ir.ClosedJaxpr, ir.Jaxpr))
+        else (k, v)
+        for k, v in scan_eqn.params
+    )
+    assert any(isinstance(v, list) for _, v in listed_params), listed_params
+    listed_eqn = ir.JaxprEqn(
+        primitive=scan_eqn.primitive, invars=scan_eqn.invars,
+        outvars=scan_eqn.outvars, params=listed_params,
+        effects=scan_eqn.effects, source_info=scan_eqn.source_info,
+    )
+    assert len(list(sub_jaxprs(listed_eqn))) == 1
+
+    listed = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            invars=q.jaxpr.invars, constvars=q.jaxpr.constvars,
+            outvars=q.jaxpr.outvars,
+            eqns=tuple(
+                listed_eqn if e is scan_eqn else e for e in q.jaxpr.eqns
+            ),
+        ),
+        consts=q.consts,
+    )
+    # and the three facts the rules read are the same on both spellings
+    for closed in (q, listed):
+        p = propagate(closed)
+        assert len(_assume_equation_ids(closed.jaxpr)) == 2
+        assert len(p.assume_ledger) == 2
+        assert p.assume_dropped is True
+        assert ledger_covers(p.assume_ledger, closed.jaxpr) is True

@@ -84,6 +84,22 @@ narrowing is disclosed three ways: a ``constrained`` coverage category,
 an ``assume CONSTRAINED`` note, and a stamped assumption (the verdict
 holds where the precondition holds).
 
+**AN ASSUME THE WALK NEVER REACHES IS STILL RECORDED** (audit 0.2.0
+S13). The walk enters the transparent wrappers and ``cond``; it does not
+enter a ``scan`` or ``while_loop`` body, so a ``stelling_assume`` written
+in one is never classified — it narrows nothing and is not forwarded.
+Being unclassified is a precision limit; leaving NO RECORD of it was a
+soundness defect, because every rule that withholds a violation keys on
+the ledger or on the flag the ledger's writers set, and an empty ledger
+read as "no assume" released a witness the user's precondition excludes.
+:func:`_record_undescended_assumes` reconciles the ledger against the
+STATIC assume set (:func:`_assume_equations`) before anything reads the
+run's assume state, so the ledger is total over the assumes the query
+CONTAINS rather than over the ones the walk saw. The loop body is still
+not descended: a loop body's assume is a per-iteration statement about a
+carry this domain does not model, and reading one is a feature rather
+than a repair.
+
 Definite-verdict licensing splits by BOX EXACTNESS (audit F7): a box is
 exact iff it equals the variable's true value set — ``stelling_any``
 outputs and exact-point consts only; every transfer output is an
@@ -308,6 +324,24 @@ class RelationalAssume:
 #                 it — see :func:`unaccounted_assumes`.
 #   ``dropped``   anything else: no narrowing, no certainty, nothing given to
 #                 the solver. The run judged a SUPERSET of the assumed region.
+#                 It covers TWO situations a reader must be able to tell
+#                 apart, and the ``reason`` is where they are told apart: a
+#                 classifier looked at the conjunct and gave up, or NOBODY
+#                 LOOKED — the assume sits inside a sub-jaxpr the walk does
+#                 not enter (:func:`_record_undescended_assumes`, audit 0.2.0
+#                 S13). The kind is the same because what the verdict rests on
+#                 is the same; the sentence is not.
+#
+# THE LEDGER IS TOTAL OVER THE ASSUMES THE QUERY CONTAINS, not over the ones
+# the walk reached, and the difference is a released soundness finding. Until
+# audit 0.2.0 S13 the totality claim was scoped to the traversal, and it was
+# literally true: an assume inside a `scan` body left no entry because the
+# walk never saw it, so the ledger was empty AND consistent, `assume_dropped`
+# stayed False, and a definite violation was released with a witness the
+# user's own precondition excludes. :func:`propagate` now reconciles the
+# ledger against the STATIC set (:func:`_assume_equations`) before anything
+# reads it, so :func:`ledger_covers` is a POSTCONDITION of a propagation
+# rather than a question about the walk's reach.
 #
 # WHY A LEDGER AND NOT A COUNT. The rule that releases a definite violation
 # from withholding used to compare two integers — how many relational assumes
@@ -441,18 +475,30 @@ def ledger_covers(
     READ AS ANSWERING.** That function is a FILTER over the ledger, so its
     empty result has two causes that a caller reading a single value cannot
     tell apart: every recorded assume is accounted for, or *nothing is
-    recorded* for an assume that exists. The second is reachable — the
+    recorded* for an assume that exists. The second was reachable — the
     propagator does not descend ``scan`` or ``while_loop`` bodies, so a
-    ``stelling_assume`` inside one is never classified and leaves no ledger
-    entry at all. Measured: ``assume(x < y)`` at top level plus
-    ``assume(y < x)`` inside a ``lax.scan`` body gives a one-entry ledger, an
-    empty ``unaccounted_assumes``, and a CLEAN VERIFIED over a precondition
+    ``stelling_assume`` inside one was never classified and left no ledger
+    entry at all. Measured, before the repair: ``assume(x < y)`` at top level
+    plus ``assume(y < x)`` inside a ``lax.scan`` body gave a one-entry ledger,
+    an empty ``unaccounted_assumes``, and a CLEAN VERIFIED over a precondition
     that admits no point of any strict order.
 
     So the positive claim "the region the solver ran over is inside the region
     EVERY assume of the query describes" is the CONJUNCTION of the two: the
     filter says the recorded ones are accounted for, and this says the record
     is complete. Neither alone is that claim.
+
+    **WHAT THIS NOW ANSWERS, AND WHAT IT DOES NOT.**
+    :func:`_record_undescended_assumes` closed the hole at its root: a
+    propagation's ledger is reconciled against the static set before anything
+    reads it, so on a :class:`Propagation` produced by :func:`propagate` this
+    returns ``True`` BY CONSTRUCTION and the un-recorded assume reaches every
+    rule as an unaccounted-for ``dropped`` entry instead — which is what the
+    filter can see and name. This is therefore no longer the discriminator
+    for that case; it is the check that the postcondition holds, and it still
+    answers ``False`` for the two ways a caller can break the join: a ledger
+    from a DIFFERENT (or re-decoded) jaxpr than the one passed here, and a
+    hand-built or emptied ledger. Both are the conservative direction.
 
     The requirement is the STATIC set (:func:`_assume_equation_ids`) — every
     assume equation the query contains, whether or not any walk reached it —
@@ -485,6 +531,45 @@ def _drop(reason: str) -> AssumeDisposition:
     in :func:`unaccounted_assumes` is built to fail in: a reason added later
     that nobody thought about is a drop."""
     return AssumeDisposition(kind=ASSUME_DROPPED, reason=reason)
+
+
+# -- the assume the walk never reached (audit 0.2.0 S13) ----------------------
+#
+# `dropped` IS THE RIGHT KIND AND IT IS NOT THE WHOLE TRUTH. The kind says
+# what the reader's verdict rests on — no narrowing, no certainty, nothing
+# given to the solver, so the run judged a SUPERSET of the assumed region —
+# and that is exactly this case, which is why the whitelist in
+# :func:`unaccounted_assumes` and every rule keyed on it are already correct
+# for it without being taught anything. But a reader who is told only
+# "dropped" will look for the classifier that gave up, and there was none:
+# the propagator's walk does not enter a `scan` or `while_loop` body, so an
+# assume written inside one was never looked at. The reason has to say that,
+# and NAME THE CONSTRUCT, because the reader's next question is which of
+# their assumes this was and what to do about it (lift it out of the loop
+# body; the tool does not descend one).
+#
+# THE CHAIN, NOT THE INNERMOST NAME. `_record_undescended_assumes` renders
+# every enclosing primitive from the top down, so `jit` inside `scan` reads
+# `'scan' -> 'jit'`: the innermost name alone matches the source line but
+# misattributes the cause (it is the `scan` that is not entered), and the
+# outermost name alone disagrees with the source line. Both are in the
+# sentence, in order, and the reader can see which is which.
+UNDESCENDED_ASSUME_REASON = (
+    "NEVER CLASSIFIED: this assume sits inside {inside}, which the "
+    "propagation's walk does not enter, so no classifier ever saw it — it "
+    "narrowed nothing, was not forwarded to the solver, and had NO EFFECT on "
+    "the analysis; the judged set is a SUPERSET of the assumed region"
+)
+UNDESCENDED_ASSUME_NOTE = (
+    "assume NEVER CLASSIFIED at {where}: it sits inside {inside}, and the "
+    "propagation does not descend that construct — a loop body's assume is a "
+    "per-iteration statement about a carry the analysis does not track, so it "
+    "is recorded as DROPPED rather than silently ignored. It narrowed "
+    "nothing and was not given to the solver: VERIFIED still proves a "
+    "superset, and every definite violation is WITHHELD from REFUTED because "
+    "a witness of the superset may violate this assume. Write the "
+    "precondition at the top level of the harness to have it honoured"
+)
 
 
 @dataclass(frozen=True)
@@ -9058,6 +9143,14 @@ UNCERTIFIED_DROP_ASSUMPTION = (
     "conditional claim may be vacuous; the inert-mode control is the "
     "visibility instrument"
 )
+UNDESCENDED_ASSUME_ASSUMPTION = (
+    f"{UNCERTIFIED_PRECONDITION_PREFIX}: this query contains a "
+    "stelling_assume the propagation NEVER CLASSIFIED — it sits inside a "
+    "sub-jaxpr this walk does not enter — so it narrowed nothing, was not "
+    "forwarded to the solver, and had no effect on the analysis; the judged "
+    "set is a superset of the assumed region and that region was not shown "
+    "non-empty. The per-assume note names the construct and the source line"
+)
 REGION_INHABITED_ASSUMPTION = (
     "precondition satisfiability CERTIFIED: a probed point of the declared "
     "set — a value of each declaration's own dtype inside its own declared "
@@ -9324,6 +9417,38 @@ def _certificate_probe_count(elements: int) -> int:
     )
 
 
+def _assume_equations(jaxpr) -> dict:
+    """Every ``stelling_assume`` equation the query CONTAINS, keyed by
+    ``id()``, with the chain of primitives whose sub-jaxprs enclose it.
+
+    ONE TRAVERSAL, TWO READERS. :func:`_assume_equation_ids` is the
+    identity half and this is the whole thing; they are not two walks that
+    have to be kept agreeing, because the ids ARE this mapping's keys. That
+    matters because the id set's TOTALITY is the property two soundness
+    rules rest on and it was checked against an independent walk of the raw
+    jax jaxpr (``test_the_static_assume_set_is_total_over_sub_jaxprs``); a
+    second traversal added beside it would be a second thing to check, and
+    the audit finding this fixes is precisely a claim scoped to one
+    traversal while another one existed.
+
+    The value is ``(equation, enclosing_primitives)``, outermost first, so
+    ``()`` is a top-level assume and ``("scan", "jit")`` is one inside a
+    ``jit`` inside a ``scan`` body. It is what lets a disposition for an
+    assume nobody classified NAME the construct
+    (:data:`UNDESCENDED_ASSUME_REASON`).
+    """
+    found: dict = {}
+    stack = [(jaxpr, ())]
+    while stack:
+        j, path = stack.pop()
+        for e in j.eqns:
+            if e.primitive == "stelling_assume":
+                found.setdefault(id(e), (e, path))
+            inner = path + (e.primitive,)
+            stack.extend((sub, inner) for sub in sub_jaxprs(e))
+    return found
+
+
 def _assume_equation_ids(jaxpr) -> frozenset:
     """The identity of every ``stelling_assume`` equation the query
     CONTAINS — statically, sub-jaxprs included, whether or not any walk
@@ -9337,15 +9462,7 @@ def _assume_equation_ids(jaxpr) -> frozenset:
     evaluates simply makes the subset test fail and no certificate is
     issued.
     """
-    found: set[int] = set()
-    stack = [jaxpr]
-    while stack:
-        j = stack.pop()
-        for e in j.eqns:
-            if e.primitive == "stelling_assume":
-                found.add(id(e))
-            stack.extend(sub_jaxprs(e))
-    return frozenset(found)
+    return frozenset(_assume_equations(jaxpr))
 
 
 def _declared_element_count(jaxpr) -> int:
@@ -9645,6 +9762,148 @@ def _withhold_uncertified_branch_refutations(closed, p, *, assume_mode, semantic
         )
 
 
+# The frame `stelling.harness.assume` binds the primitive from, as
+# `_jax_compat.Decoder.source` spells a frame: "<file>:<line> (<function>)".
+# Matched on BASENAME, not on the recorded absolute path, because a query can
+# be decoded from a `from_dict` produced on another machine and the path there
+# is that machine's. `harness.assume is _jax_compat.assume` (a re-export, not
+# a wrapper), so this is the only stelling frame on the stack and there is no
+# second spelling to keep in step.
+_ASSUME_BIND_FRAME = "_jax_compat.py:"
+
+
+def _assume_source(source_info: tuple) -> str:
+    """WHICH OF THE USER'S ``assume`` CALLS THIS EQUATION IS — the frame that
+    CALLED :func:`stelling.harness.assume`, not the outermost frame.
+
+    **A DEPARTURE FROM THE ``source_info[-1]`` HOUSE CONVENTION, SCOPED TO
+    THIS ONE READER, and measured rather than argued.** jax records the bind
+    stack innermost-first, so ``[-1]`` is the OUTERMOST frame — which is the
+    user's ``assume(`` line only when the user's harness function called it
+    directly. Audit B9 measured ten carriers on jax 0.11.0; ``[-1]`` names
+    something other than the ``assume(`` line in four of them, and twice that
+    something is a line in jax:
+
+      * ``lax.fori_loop`` — ``jax/_src/lax/control_flow/loops.py:2528
+        (_fori_scan_body_fun.<locals>.scanned_fun)``;
+      * ``lax.map`` — ``loops.py:2784 (map.<locals>.<lambda>)``;
+      * an ``assume`` written inside any helper the harness calls — the
+        helper's CALLER, not the ``assume(`` line.
+
+    ``scan``, ``while_loop``, ``cond``, ``jit``, ``scan``-in-``cond`` and
+    nested ``scan`` agree with ``[-1]`` on all six, so this changes nothing
+    where the convention was already right.
+
+    **WHY THIS READER AND NOT THE CONVENTION EVERYWHERE.** The convention is
+    correct for its usual population — an equation jax's own machinery
+    produced, where the outermost frame is the user's line — and
+    :data:`UNDESCENDED_ASSUME_REASON` is the first string to make LOOP-BODY
+    assumes visible, which is precisely where jax wraps the user's function
+    in one of its own. Changing the convention globally would be changing
+    every ``where`` in this module on the strength of one population's
+    evidence. Every other site keeps ``[-1]``.
+
+    **WHY THE CALLER OF ``assume`` AND NOT "THE LAST FRAME OUTSIDE jax".**
+    The stated purpose of this string is "the reader's next question is which
+    of their assumes this was", and the caller of ``assume`` answers exactly
+    that, by construction, for any nesting: it is the line the ``assume(``
+    token is on. "Last frame outside jax" answers a weaker question and still
+    gets the helper case wrong (it returns the helper's caller), and it would
+    need to recognise jax's installation directory from a string — which this
+    module cannot ask jax for, since it must stay importable with no jax at
+    all.
+
+    Falls back to the house convention when the landmark is absent — an
+    equation some other producer made, or a hand-built one — because a guess
+    about which frame is the user's is worse than the convention.
+    """
+    if not source_info:
+        return "unknown location"
+    for i, frame in enumerate(source_info):
+        if _ASSUME_BIND_FRAME in frame and frame.endswith("(assume)"):
+            if i + 1 < len(source_info):
+                return source_info[i + 1]
+            break
+    return source_info[-1]
+
+
+def _record_undescended_assumes(closed, p) -> None:
+    """Record, as a DROPPED disposition, every ``stelling_assume`` the query
+    contains and the walk never classified — audit 0.2.0 S13.
+
+    **THE ROOT CAUSE, NOT ITS THREE SYMPTOMS.** The propagator descends the
+    :data:`stelling.coverage.DEFAULT_TRANSPARENT` wrappers and ``cond``; it
+    does not descend ``scan`` or ``while_loop``. An assume in one of those
+    bodies was therefore never classified — so it left NO ledger entry, and
+    an absent entry is invisible to every rule keyed on the ledger. Three
+    rules read it, and each failed in its own direction:
+
+      * the WITHHOLDING rule — ``assume_dropped`` stayed ``False``, nothing
+        withheld, and the solver returned a witness from OUTSIDE the assumed
+        region as a counterexample. Measured on the released ``v0.1.0`` and
+        on this tree: ``x, y in [-10, 10]``, ``assume(x <= y)`` inside a
+        ``lax.scan`` body, ``assert_(x - y <= 0.0)`` — REFUTED at
+        ``x = 0, y = -1``, which the user's own assume excludes. A FALSE
+        REFUTED, the worse direction;
+      * the ADMITTED-REGION gate — an empty region stamped entirely clean;
+      * ``REGION_NOT_ASKED`` — the region question skipped outright.
+
+    Fixing them one at a time would be fixing a missing record three times
+    over. The record is what is missing, so the record is what this writes,
+    and each rule then sees it through the machinery it already has.
+
+    **WHY THE STATIC SET AND NOT THE POINT OF NON-DESCENT.** The obvious
+    place is where the walk declines to enter — ``mark_unreached``, which
+    already catches an unexamined ``stelling_assert`` there. That would be a
+    fix scoped to A TRAVERSAL, which is the exact shape of the defect it is
+    repairing: it records only what the walk reaches, and an assume the walk
+    never reaches for some FOURTH reason is missed again in silence.
+    :func:`_assume_equations` is static and total — every assume equation
+    the query contains, whether or not any walk reaches it, checked against
+    an independent walk of the raw jax jaxpr — so reconciling the ledger
+    against it makes ``ledger_covers`` a POSTCONDITION of this function
+    rather than a hope about the walk. It costs one traversal of the jaxpr
+    and no probes, no solver calls.
+
+    **THE DIRECTION IS CONSERVATIVE, and it is not free.** Every one of
+    these entries makes ``unaccounted_assumes`` non-empty, which withholds
+    definite violations from REFUTED and caveats discharges. That is the
+    correct cost of an assume nobody honoured: a violation found over a
+    superset of the assumed region may be at a point the assume excludes,
+    and a discharge is sound but may be a claim about an empty region. It
+    does NOT descend the loop — a loop body's assume is a per-iteration
+    statement about a carry this analysis does not model, and inventing a
+    reading of it would be a much larger feature than not ignoring it.
+
+    Ordered by the static traversal, so the notes are reproducible.
+    """
+    recorded = {e.eqn_id for e in p.assume_ledger if e.eqn_id != -1}
+    for eqn_id, (eqn, path) in _assume_equations(closed.jaxpr).items():
+        if eqn_id in recorded:
+            continue
+        where = _assume_source(eqn.source_info)
+        inside = (
+            " -> ".join(repr(prim) for prim in path) if path
+            else "a sub-jaxpr this walk did not enter"
+        )
+        p.assume_ledger.append(AssumeDisposition(
+            kind=ASSUME_DROPPED,
+            reason=UNDESCENDED_ASSUME_REASON.format(inside=inside),
+            where=where,
+            eqn_id=eqn_id,
+        ))
+        p.notes.append(
+            UNDESCENDED_ASSUME_NOTE.format(where=where, inside=inside)
+        )
+        # THE SAME FLAG THE CLASSIFIER'S OWN DROP SETS, for the same reason
+        # and with the same one-sidedness: the judged set is a superset of
+        # the assumed region, so a discharge carries over and a definite
+        # violation does not. Set here rather than at the walk because the
+        # walk is what missed it.
+        p.assume_dropped = True
+        p.assumptions.add(UNDESCENDED_ASSUME_ASSUMPTION)
+
+
 def propagate(
     closed: ir.ClosedJaxpr,
     *,
@@ -9684,6 +9943,13 @@ def propagate(
             f"via any_array), got {len(closed.jaxpr.invars)} free invar(s)"
         )
     p.run(closed.jaxpr, list(closed.consts), [])
+    # BEFORE anything reads this run's assume state: reconcile the ledger
+    # against the assumes the query CONTAINS. The walk's ledger is total
+    # over what the WALK SAW, and audit 0.2.0 S13 is that the walk does not
+    # see a `scan` or `while_loop` body. It runs before the certificate and
+    # before the withholding because both read `assume_dropped`, and a flag
+    # set after its readers is a flag nobody read.
+    _record_undescended_assumes(closed, p)
     # BEFORE the withholding: the non-emptiness certificate. It is an
     # INPUT to the withholding's shared decision, so it has to be computed
     # first; it is one-sided, so computing it can only ever leave the

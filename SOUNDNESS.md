@@ -7207,4 +7207,414 @@ verdicts:
   commit's hunks rather than by predicting the merge. Its fifth and sixth
   files belong to branches this one does not contain.
 
+- **2026-08-15: FALSE REFUTED — an `assume` inside a `scan` or
+  `while_loop` body left no trace, so nothing withheld. PRESENT IN THE
+  RELEASED 0.1.0, in real mode, through the ordinary `check()` path.**
+  Audit 0.2.0 S13. This is the second finding of that audit to reach a
+  shipped version, and the more reachable of the two: unlike the `exp`
+  bracket (which needs `semantics="ieee"`, not exposed on `check()` in
+  0.1.0), this needs nothing but a solver timeout and an `assume` written
+  inside a loop body. It is also the worse direction — a **false REFUTED**
+  presents a point the user's own precondition excludes as a
+  counterexample to their program.
+
+  **THE MECHANISM.** `propagate`'s walk descends the transparent wrappers
+  (`jit`, `custom_jvp_call`, `custom_vjp_call`, `remat2`) and `cond`. It
+  does not descend `scan` or `while_loop`. A `stelling_assume` written in
+  one of those bodies was therefore never *classified*: it narrowed
+  nothing, it was not forwarded to the solver, and — the part that made it
+  a soundness defect rather than a precision limit — it left **no record
+  that anything had been ignored**. `Propagation.assume_dropped` stayed
+  `False` and `Propagation.assume_ledger` stayed empty, so the withholding
+  rule that exists precisely to stop a violation over a superset being
+  reported as a refutation never fired. The solver searched the
+  un-narrowed box and its witness was reported as a counterexample.
+
+  **Measured**, CPython 3.12.3 / jax 0.11.0 / numpy 2.5.1 / z3 5.0.0
+  (wheel) / Linux x86_64, `JAX_ENABLE_X64=1`, on a `git archive` export of
+  the **`v0.1.0` tag** (`e67688e`) run through `PYTHONPATH` with no
+  worktree, and independently on this branch's merge base
+  (`06d3bc6`). The fence below is PLAIN and not a python fence
+  deliberately: this page carries exactly one ```python fence — the
+  integer-wrap reproducer that `tests/test_soundness_wrap_reproducer.py`
+  executes — and that test asserts the count, so a second one cannot
+  silently become the fence it runs. This reproducer's executable form is
+  `s13_scan` in `tests/test_undescended_assume.py`.
+
+  ```
+  def h():
+      x = any_array((), "float64", (-10., 10.))
+      y = any_array((), "float64", (-10., 10.))
+      def body(c, _):
+          assume(c <= y)        # the carry is x throughout: x <= y
+          return c, 0.0
+      jax.lax.scan(body, x, jnp.zeros((2,)))
+      return assert_(x - y <= 0.0)     # exactly the assumed predicate
+  ```
+
+  ```
+  v0.1.0 (tag)   scan form   REFUTED  witness x=0, y=-1  (replay-confirmed)
+  v0.1.0 (tag)   while form  REFUTED  witness x=0, y=-1
+  06d3bc6        scan form   REFUTED  witness x=0, y=-1
+  06d3bc6        while form  REFUTED  witness x=0, y=-1
+  ```
+
+  `0 <= -1` is false, so the witness is **not an admitted point**. On an
+  exact 41×41 `Fraction` grid of `[-10,10]²` the assumed region has 861
+  admitted points and the assert is true at **all 861** — no admitted point
+  is a counterexample at all. The control, the identical precondition
+  written at the top level, VERIFIES on 0.2.0-dev and returns UNKNOWN on
+  0.1.0 (which had no relational forwarding).
+
+  **THE SAME MISSING RECORD REACHED THREE RULES.** Two were closed
+  separately and one with this entry:
+
+  * the **withholding** rule — the false REFUTED above;
+  * the **admitted-region gate** — an empty assumed region stamped an
+    entirely clean VERIFIED, including through `check_inductive_step`.
+    Closed in audit B3 by requiring `propagate.ledger_covers` (recorded in
+    the amended B3 entry above);
+  * **`REGION_NOT_ASKED`** — when an obligation's slice carries no
+    forwarded relational axiom the region question was skipped outright,
+    justified in the source by "the empty case is already the
+    propagation's `UnsatisfiableAssumptionError`". That refusal fires when
+    a NARROWING empties a box; an assume that never narrowed empties
+    nothing, so the ground was untrue. Measured on `06d3bc6`: two assumes
+    inside a `scan` body (`x < y`, `y < x`), no relational assume anywhere,
+    the obligation discharged by the solver — **VERIFIED, stamped entirely
+    clean, with no mention of an assume in the verdict at all**, over a
+    region the same exact 41×41 grid shows admits **0** points. Closed
+    here.
+
+  **THE FIX IS THE RECORD, NOT THE THREE RULES.**
+  `propagate._record_undescended_assumes` runs immediately after the walk
+  and before anything reads the run's assume state. It reconciles the
+  ledger against the **static** set of `stelling_assume` equations the
+  query contains — `_assume_equations`, whose totality is measured against
+  an independent walk of the raw jax jaxpr — and writes, for every assume
+  the walk never classified, a `dropped` disposition, a note, and a stamped
+  `precondition satisfiability uncertified` assumption. `ledger_covers` is
+  therefore now a **postcondition of a propagation** rather than a question
+  about the walk's reach, and each of the three rules sees the assume
+  through machinery it already had. The `REGION_NOT_ASKED` skip gained one
+  condition: it stays an absence only when this obligation accounts for
+  every assume of the query, or the propagation's own probe already
+  exhibited a point of the region.
+
+  **The disposition names the construct**, because "dropped" alone sends a
+  reader looking for a classifier that gave up and there was none:
+  `NEVER CLASSIFIED: this assume sits inside 'scan', which the
+  propagation's walk does not enter, so no classifier ever saw it …`, with
+  the enclosing chain outermost-first (`'scan' -> 'jit'`) so that a reader
+  can tell which name matches their source line and which one is the cause.
+
+  **WHAT IS NOT FIXED, deliberately.** The propagation still does not
+  descend `scan` or `while_loop`. A loop body's `assume` is a
+  per-iteration statement about a carry this analysis does not model, and
+  reading one is a feature, not a repair. What changed is that ignoring it
+  is now disclosed and paid for.
+
+  **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID.** Any verdict from
+  **0.1.0** or from any 0.2.0 development tree before this commit, in
+  **real** mode (`semantics="real"`, the default), on a harness where a
+  `stelling.harness.assume(...)` call is executed inside a `jax.lax.scan`
+  or `jax.lax.while_loop` body — including inside a `jit`/`custom_jvp`
+  wrapper that is itself inside one. Specifically:
+
+  * a **REFUTED** on such a harness may name a witness the precondition
+    excludes. It says nothing about the program. This is the invalid
+    direction and it needs a solver: `check(..., solver_timeout_ms=N)` or
+    `check_inductive_step` with one;
+  * a **VERIFIED** on such a harness is sound — the judged set contains the
+    admitted region, so every admitted point satisfies the obligation — but
+    may be a claim about an **empty** region, and nothing said so;
+  * an **UNKNOWN** is unaffected in either direction.
+
+  IEEE-mode verdicts cannot reach the false REFUTED (that mode never
+  escalates, so it mints no witnesses), but the missing record was the same
+  and its VERIFIEDs carry the same undisclosed vacuity.
+
+  **HOW A READER RECOGNISES ONE.** Search the harness source for `assume(`
+  inside a function passed to `lax.scan` or `lax.while_loop`. The verdict
+  itself is no help on the affected versions — that is the defect: on
+  `06d3bc6` and on `v0.1.0` such a run printed no note, no coverage
+  `DROPPED` count and no stamped assumption naming the assume. **On this
+  version and later, read the NOTES and the STAMP — not the coverage
+  line.** The note begins `assume NEVER CLASSIFIED at <file>:<line>` and
+  names the enclosing construct, and the stamp carries `precondition
+  satisfiability uncertified`. That is where
+  `docs/reading-a-verdict.md` sends a reader, and it is correct.
+
+  **THE COVERAGE LINE IS LEGITIMATELY SILENT, and an earlier wording of
+  this paragraph said a fixed run "prints all three".** It does not, and
+  audit B9 measured it on the repaired tree:
+
+  ```
+    coverage: 9 eqns: 6 known (67%); 1 ⊤ across 1 primitives (scan ×1); 2 unreached
+    'DROPPED' in coverage line: False
+  ```
+
+  The control — a top-level `jnp.all` assume the classifier drops — does
+  print it (`1 constraint(s) DROPPED (stelling_assume ×1)`), so the
+  difference is real and it is the right difference. `Coverage.total` is
+  `known + transparent + unknown + unreached + inert + constrained`: the
+  buckets are a PARTITION of the query's equations, `inert` is the one the
+  `DROPPED` count renders, and the scan-body `stelling_assume` is already
+  counted in `unreached` — the same line reports it, under the name that
+  is true of it. Adding it to `inert` as well would put one equation in
+  two cells of a partition and would claim the classifier declined an
+  equation it never saw. The code is right; the sentence was wrong. A
+  reader who greps the coverage line for `DROPPED` on a fixed tree would
+  conclude an affected run is unaffected.
+
+  **WHAT TO RE-RUN.** Re-run `check()` on this version. A previously
+  REFUTED harness of this shape will return **UNKNOWN** with
+  `violation WITHHELD from REFUTED` in the notes; a previously VERIFIED one
+  stays VERIFIED and gains `precondition satisfiability uncertified`. To
+  recover a decision, lift the `assume` out of the loop body to the top
+  level of the harness, where it is classified and forwarded — the control
+  above shows the same mathematics VERIFYING there.
+
+  **THE COVERAGE COST, measured on both sides.** Two corpora, same
+  environment as above, `vacuity_mode="inputs-only"`,
+  `solver_timeout_ms=5000`, ground truth by exact `Fraction` grids
+  computed in the instrument and not by stelling.
+
+  *A 144-harness corpus generated over the loop carriers*
+  (`scan` × 48, `while_loop` × 48, top-level control × 48; 2–3
+  declarations, satisfiable / chained / unsatisfiable assume sets, two
+  asserts, two statement orders, two tail lengths):
+
+  ```
+                                   06d3bc6      this commit
+    REFUTED                            108               12
+    UNKNOWN                              4              100
+    VERIFIED                            16               16
+    RAISED UnsatisfiableAssumption      16               16
+    FALSE REFUTED (witness outside
+      the user's precondition)          96                0
+    verdicts mentioning no assume       96                0
+  ```
+
+  96 rows move, every one of them REFUTED → UNKNOWN, and on THAT corpus
+  every one of the 96 was a false REFUTED. All 48 top-level control rows
+  are verdict-identical. Of the 96, on a 40-point-per-axis exact grid:
+  **32** had an assumed region with **0** admitted points; **32** had an
+  inhabited region at **none** of whose admitted points the assert is
+  false; and **32** had an inhabited region where *some* admitted point
+  does violate — so a correct REFUTED existed for those, with a different
+  witness, and it is now withheld.
+
+  **THAT PARTITION IS A PROPERTY OF THAT CORPUS AND NOT OF THIS CHANGE,
+  and stating it alone leaves the impression that nothing correct was
+  lost, which is false.** Audit B9 reproduced the corpus and the partition
+  exactly, then widened it; the widened figure is the one a reader needs.
+  The 144-harness corpus draws its assumes from `lt`/`le` only and points
+  every assert one way (`expr <= threshold`), and on both of those
+  pairings the solver's first model always lands outside the assumed
+  region — so the corpus cannot observe the worst category available: a
+  refutation that was correct, carrying a witness that was also correct,
+  now withheld.
+
+  *A 240-harness corpus built to see it*
+  (`scratchpad/s13/sweep_loop_assume_wide.py`, results in
+  `scratchpad/s13/RESULTS_loop_wide.txt`; carriers `scan` / `while_loop` /
+  `fori_loop` / nested `scan` / `scan`-in-`cond` / top-level control,
+  comparison set `lt`/`le`/`gt`/`ge` plus a contradictory pair, four
+  asserts in **both** directions, two statement orders; jax 0.11.0,
+  z3 5.0.0.0, cvc5 1.3.4, CPU, `JAX_ENABLE_X64=1`). Every moved row is
+  scored against the pre-fix run's OWN witness, pointwise, in exact
+  `Fraction`:
+
+  ```
+    rows                                       240
+    REFUTED (06d3bc6) -> UNKNOWN (this branch) 200
+
+      the assumed region admits no grid point           40   20 %
+      witness outside it, and no admitted grid point
+        violates — nothing correct was lost             40   20 %
+      witness outside it, but some admitted point does
+        — a correct REFUTED existed, other witness      40   20 %
+      witness IN the box, satisfies EVERY assume, and
+        violates the assert — A CORRECT REFUTATION
+        WITH A CORRECT WITNESS, WITHHELD                80   40 %
+  ```
+
+  **40 % of the withheld refutations were correct refutations carrying
+  correct witnesses**, spread evenly over all five loop carriers (16
+  each), all four satisfiable assume sets and all four asserts (20 each).
+  The 40 top-level control rows move **0**. A worked row:
+  `assume(x0 >= x1)` inside a `lax.fori_loop` body with
+  `assert_(x0 + x1 >= -5.0)` — `06d3bc6` returned REFUTED at
+  `x0 = 0, x1 = -6`, which lies in the declared box, satisfies the assume
+  and violates the assert; 861 of the grid's 1681 points are admitted and
+  240 of those violate; this branch returns UNKNOWN.
+
+  Nothing in this is special to `ge`/`gt`. What decides the category is
+  whether the assert's violation region MEETS the assumed region, which is
+  a property of the assume/assert **pair**: 12 of the 16 satisfiable cells
+  overlap, and in 8 of those 12 the solver's own witness was already a
+  correct one — `lt` and `le` among them. So the honest headline is not
+  "22 % of the corpus" and not "every one was false". It is that
+  withholding is the correct one-sided response to a precondition nothing
+  honoured, and that it costs real refutations, at a rate this corpus puts
+  at **40 % of the ones withheld** — recoverable only by descending the
+  loop.
+
+  *The 288-harness assume-scope corpus* (`jit`/`cond`/`custom_jvp`/top
+  carriers — no loop bodies), which is the regression control for
+  everything else: **0 of 288 verdicts move**, and **0 of 288 caveat
+  states move** (72 VERIFIED, 18 caveated, 54 clean, on both trees).
+
+  **WHAT THE `REGION_NOT_ASKED` TIGHTENING COSTS OUTSIDE A LOOP, which is
+  not nothing.** This entry claimed the tightening "costs nothing outside
+  the shape it was written for", and the 288-row control was the evidence.
+  That control is silent on the question rather than affirmative on it:
+  the new `elif` is not gated on loops at all — it fires for **any**
+  unaccounted ledger entry on a slice with no forwarded axiom — and the
+  288 rows happen to carry none. Audit B9 measured two **non-loop** shapes
+  that do move, from clean VERIFIED to caveated VERIFIED (same
+  environment; the control, an identical obligation with no assume
+  anywhere, stays clean on both trees):
+
+  * an assume written inside one `lax.cond` branch. The walk DOES descend
+    `cond`, but a branch-scoped assume narrows no box, so it is a dropped
+    conjunct on a slice with nothing forwarded;
+  * `assume(jnp.all(x >= 2.0))` on `x ∈ [-1,1]³` — a `reduce_and` the
+    classifier cannot narrow, and **no control flow at all**.
+
+  Both new caveats are CORRECT — in the second the assumed region really
+  is empty — so this is an under-claim rather than a defect in the code,
+  and it is `docs/reading-a-verdict.md` that already names the right
+  population: *"an assume that never narrowed anything (a `jnp.all(...)`
+  reduction, an unclassified predicate, one written inside a `scan`
+  body)"*. The population is **an assume that narrowed nothing**, of which
+  a loop-body assume is one member.
+
+  **THE `nonvacuity` FAILED FACE MOVES TOO, and nothing above measured
+  it.** `_withhold_uncertified_refutations` runs over two sinks, and the
+  second is `p.nonvacuity_checks`: a membership condition judged
+  definitely false over the judged set goes from `violated-over-set` to
+  `unknown`, with `nonvacuity FAILED face WITHHELD` in the notes. Measured
+  on both trees, `nonvacuity(x > 10.0)` on `x ∈ [1,2]` with an
+  `assume` in a `scan` body — `06d3bc6`: `violated-over-set`, no note;
+  this branch: `unknown`, note present; and the same condition with no
+  assume anywhere keeps `violated-over-set` on both. It is correct and
+  one-sided for the same reason the REFUTED withholding is (the FAILED
+  sentence is reserved for judgments an uncertified constraint has not
+  confounded), and it was undisclosed.
+
+  **PROPAGATION COST on a loop-assume query: 4–21×.** Recording the assume
+  sets `assume_dropped`, and `assume_dropped` is one of the three inputs
+  to `exactness.certifies_set_refutation` at `_region_witness`'s early
+  return — so a query that used to answer "nothing is withheld on this
+  run, pay for no certificate" now runs the probe search. Same query, both
+  trees, `jnp.sum(x) < jnp.sum(y)` in a `scan` body over two
+  `n`-element declarations (jax 0.11.0, CPU, `JAX_ENABLE_X64=1`, mean of
+  20 runs at `n ≤ 256` and 5 at `n = 1024`):
+
+  ```
+        n     06d3bc6   this branch    ratio
+        1     0.14 ms      2.09 ms      15x
+       32     0.72 ms     14.95 ms      21x
+      256     5.05 ms     52.34 ms      10x
+     1024    18.69 ms     78.14 ms     4.2x
+  ```
+
+  The ratio falls with `n` because the probe count is capped by declared
+  size (`_certificate_probe_count`) while the per-propagation cost keeps
+  growing. It is bounded by the two gates already documented above and is
+  paid only on queries carrying a dropped assume.
+
+  **WHAT AUDIT B9 FOUND IN THIS ENTRY'S OWN REPAIR, and what it changed.**
+
+  * **The `REGION_NOT_ASKED` branch did not consult `ledger_covers`** — it
+    tested `unaccounted` alone, and `unaccounted_assumes` is a FILTER over
+    the ledger, so an emptied ledger filtered to an empty result and was
+    read as "every assume accounted for". That is the exact failure
+    `every_assume_recorded` was added to close, reintroduced one branch
+    over — and on the one door whose population is an assume the walk
+    never entered, so the "defence in depth" claim was false where it
+    mattered most. Measured on the third-door harness, whose region an
+    exact 41×41 `Fraction` grid shows admits 0 points: with the real
+    ledger, `region_uncertified == (0,)` and two disclosure notes; with
+    `assume_ledger=()`, `region_uncertified == ()` and **nothing
+    disclosed** — a clean stamp on a claim about nothing. Unreachable from
+    `check()` (the reconciliation makes `ledger_covers` a postcondition),
+    hence FRAGILE rather than UNSOUND. The condition is now
+    `unaccounted or not every_assume_recorded`, which is the exact
+    negation of the sibling branch's `not unaccounted and
+    every_assume_recorded`: one predicate, spelled once in each direction.
+    A FIFTH mechanism sentence names the new case, and it names no
+    conjunct on purpose — `ledger_covers` joins on `eqn_id` against THIS
+    jaxpr, so a False answer includes a ledger belonging to a *different*
+    query, whose entries are not conjuncts of this one. The existing
+    empty-ledger test drives `cone_split_cycle`, whose slice DOES forward
+    an axiom, so it only ever exercised the other door; it now asserts
+    that scope and has a twin on a query that forwards nothing.
+  * **The `[MAY BE VACUOUS: …]` clause claimed a forwarded axiom.** It
+    opened *"this obligation's script carries forwarded relational
+    axiom(s)"* — true of every route to `REGION_UNCERTIFIED` when it was
+    written, and false for the route this entry added, which is taken
+    precisely because the script carries none. It now states the rule and
+    names no mechanism, for the reason `UNCERTIFIED_REGION_ASSUMPTION`
+    already gives one line up.
+  * **`where` named a line in jax's own source.** `source_info[-1]` is the
+    house convention, and jax records the bind stack innermost-first, so
+    the outermost frame is the user's line only when the user's function
+    called `assume` directly. This entry is the first to make LOOP-BODY
+    assumes visible, which is exactly where jax wraps the body in one of
+    its own. Measured over ten carriers on jax 0.11.0: `lax.fori_loop`
+    gave `jax/_src/lax/control_flow/loops.py:2528` and `lax.map` gave
+    `loops.py:2784`; an `assume` inside any helper the harness calls gave
+    the helper's caller. `_assume_source` reads the frame that CALLED
+    `stelling.harness.assume` instead, which is the `assume(` line by
+    construction at any nesting. `scan`, `while_loop`, `cond`, `jit`,
+    `scan`-in-`cond` and nested `scan` agree with the old reading on all
+    six, and every other `where` in the module keeps the convention.
+  * **`coverage.sub_jaxprs` walked `tuple` and not `list`** (hardening; not
+    reachable from `trace()` or `from_dict`, which both build tuples). A
+    hand-built `ir.JaxprEqn` holding a sub-jaxpr in a Python list was
+    invisible to the walk the STATIC assume set is collected with, and the
+    failure direction is the wrong one: it shrinks the REQUIREMENT, so the
+    subset test passes trivially. Measured before the one-word fix:
+    *static ids 0 / ledger 0 / assume_dropped False / covers True* — the
+    pre-fix state presented as a satisfied postcondition. Three rules now
+    rest on that walk's totality, so it is pinned by a test.
+
+  **AND ALL OF THEM TOGETHER MOVE NO VERDICT**, which is what their
+  reachability arguments predict and is measured rather than argued: the
+  240-harness corpus run against `7b5ceb3` (this branch before the B9
+  fixes) and against the fix commit differs in **0 of 240 verdicts** and
+  **0 of 240 witness sets**. The new disjunct is unreachable from
+  `check()` because the reconciliation makes `ledger_covers` a
+  postcondition of a propagation; the `where` frame and the
+  `[MAY BE VACUOUS: …]` clause are strings; the `sub_jaxprs` walk is
+  unreachable from `trace()`. What each one changes is what a run SAYS in
+  the state the argument does not cover.
+
+  **Suite**, this branch, both environments (CI runs plain `pytest` with
+  no `JAX_ENABLE_X64`):
+
+  ```
+                          passed   skipped
+  JAX_ENABLE_X64=1          3334       10
+  no JAX_ENABLE_X64 (CI)    3335        9
+  ```
+
+  The skip SET differs by exactly one member and by design
+  (`test_tripwire_arm.py`'s threefry case skips when x64 is on).
+  `tests/test_undescended_assume.py` is the finding's file (27 cases,
+  three of them audit B9's: the unasked door's empty-ledger twin, the
+  may-be-vacuous clause's axiom claim, and the `where` frame across ten
+  carriers). `tests/test_vacuous_precondition.py` gained the `list`-held
+  sub-jaxpr test. Four pre-existing tests changed and each is justified in
+  place: three in `tests/test_vacuous_precondition.py` — two measured the
+  defect itself (the ledger having ONE row for a two-assume query, and the
+  note falling back to the mechanism that cannot name a conjunct) and now
+  measure the repaired behaviour, and the empty-ledger test now asserts
+  the door it is scoped to. `docs/supported-primitives.md` was regenerated
+  because it embeds source line numbers; this batch's edits do not move
+  any it cites, so it is byte-identical.
+
 *(no releases yet)*

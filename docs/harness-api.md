@@ -388,6 +388,63 @@ so a VERIFIED still holds on your subset, but a REFUTED witness may
 violate the dropped assumption and must be checked against it before it
 is treated as a counterexample.
 
+### An `assume` inside a `scan` or `while_loop` body is not descended
+
+Write the precondition at the **top level of the harness**. stelling's
+propagation descends `jit`, `cond` and the other transparent wrappers; it
+does **not** enter a `scan` or `while_loop` body, so a `stelling_assume`
+written in one is never classified — it narrows nothing and is not forwarded
+to the solver.
+
+That is not silently ignored. Such an assume is recorded as a **dropped**
+assumption, with a note naming the construct and the source line
+(`assume NEVER CLASSIFIED at …: it sits inside 'scan'`) and a stamped
+`precondition satisfiability uncertified` assumption; the query is then
+judged over a superset, so a VERIFIED still holds on your region and every
+definite violation is withheld to UNKNOWN rather than reported as a
+counterexample.
+
+**That withholding costs real refutations, and the UNKNOWN cannot tell you
+which.** On a 240-harness loop-carrier corpus, 40 % of the withheld
+violations were genuine: the witness lay in the declared box, satisfied every
+assume, and falsified the assert. The withholding is still the right answer —
+nothing in the run honoured your precondition, so nothing could tell that
+witness from one your precondition excludes — but an UNKNOWN here means
+*undecided*, not *your program is fine*. Lift the `assume` to the top level
+to get a decision either way.
+
+It was not always recorded. Up to and including **0.1.0** an `assume` inside
+one of those bodies left no trace at all, and a REFUTED verdict on such a
+harness could name a point that assume excludes — see the entry in
+[SOUNDNESS.md](../SOUNDNESS.md).
+
+The construct is not descended because a loop body's `assume` is a statement
+about a **carry that changes from iteration to iteration**, and this release
+does not model one. If the precondition is really about the declared inputs,
+it belongs above the loop:
+
+<!-- doc-example: illustrative -->
+```python
+def not_honoured():
+    x = any_array((), "float64", (-10.0, 10.0))
+    y = any_array((), "float64", (-10.0, 10.0))
+
+    def body(c, _):
+        assume(x <= y)              # never classified: it sits inside 'scan'
+        return c, 0.0
+
+    lax.scan(body, x, jnp.zeros((2,)))
+    return assert_(x - y <= 0.0)    # UNKNOWN — the violation is withheld
+
+
+def honoured():
+    x = any_array((), "float64", (-10.0, 10.0))
+    y = any_array((), "float64", (-10.0, 10.0))
+    assume(x <= y)                  # relational: narrows nothing, but is
+                                    # forwarded to the solver as an axiom
+    return assert_(x - y <= 0.0)    # VERIFIED
+```
+
 ## Membership conditions (`nonvacuity`)
 
 `nonvacuity(pred)` states that the data you actually run on lies in the
