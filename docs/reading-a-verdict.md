@@ -648,14 +648,31 @@ removed: are the declared boxes and those axioms satisfiable at all?
   obligation, and there may be none) and it stops being clean: the
   obligation's detail line carries `[MAY BE VACUOUS: …]` and the stamp
   carries an `assumes:` line beginning `precondition satisfiability
-  uncertified`. A note on the obligation names which of the two mechanisms
-  applied, and on the second one lists the assumes the check never saw.
+  uncertified`. A note on the obligation names which of the **four**
+  mechanisms applied, and the three that can name conjuncts list the assumes
+  the check never saw.
 
-The extra question is asked only where it can have a second answer — an
-obligation that discharged *and* whose script carries a forwarded axiom —
-and it is skipped when the propagation's own non-emptiness certificate
-already exhibited a point of the declared set satisfying every assume. On a
-query with no relational assume it costs nothing at all.
+The extra **solver call** is made only where it can have a second answer — an
+obligation that discharged *and* whose script carries a forwarded axiom — and
+it is skipped when the propagation's own non-emptiness certificate already
+exhibited a point of the declared set satisfying every assume. On a query
+with no relational assume no script is emitted and no backend is invoked.
+
+**"No axiom to ask about" is not "nothing to disclose", and it used to be
+treated as one.** The skip rested on the ground that a script with no
+forwarded axiom describes the declared boxes alone, so an empty region would
+already have been the propagation's own `UnsatisfiableAssumptionError`. That
+refusal fires when a *narrowing* empties a box — and an assume that never
+narrowed anything (a `jnp.all(...)` reduction, an unclassified predicate, one
+written inside a `scan` body) empties nothing. Measured: two assumes inside a
+`lax.scan` body, `x < y` and `y < x`, no relational assume anywhere, and an
+obligation the solver discharges — VERIFIED, stamped entirely clean, with no
+mention of an assume in the verdict at all, over a region an exact 41×41
+`Fraction` grid shows admits 0 points. Since that repair, an obligation that
+does not account for every assume of the query carries the may-be-vacuous
+line whether or not there was an axiom to ask a solver about. Still no
+script and still no backend — the honest answer is that nobody decided it,
+not that nobody needed to.
 
 That certificate is also the one mechanism that reaches the whole query at
 once, so it is what clears a cone-split run: `assume(x <= y)`,
@@ -686,6 +703,16 @@ in this order:
 2. **`DROPPED` in the coverage line.** An assumption could not be
    honoured; the query ran over a superset. The note quotes what was
    dropped and why.
+2b. **`assume NEVER CLASSIFIED … it sits inside 'scan'` in the notes.** You
+   wrote an `assume` inside a `scan` or `while_loop` body, and the
+   propagation does not descend those constructs — so it narrowed nothing,
+   was not forwarded to the solver, and had no effect on the analysis. It is
+   recorded as a dropped assumption rather than ignored, which is why every
+   definite violation is withheld to UNKNOWN: a witness of the superset may
+   be a point your precondition excludes. **Remedy:** state the precondition
+   at the top level of the harness, where it is honoured. A loop body's
+   `assume` is a statement about a carry that changes from iteration to
+   iteration, and this release does not model one.
 3. **The notes.** A declined transfer quotes its own reason, including
    which conversion or which budget it exceeded.
 4. **`solver: none — … escalation was NOT ATTEMPTED`.** No solver has
