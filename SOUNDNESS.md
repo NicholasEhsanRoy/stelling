@@ -8290,6 +8290,95 @@ verdicts:
   contraction taint) is still exercised — and the first additionally pins
   that the undeclared call declines.
 
+- **2026-08-15 (B7): a VERDICT FLIPPED, `UNKNOWN` → `VERIFIED`, on every
+  assume-carrying query the VERIFIED bar looked at.** Audit 0.2.0 M10. The
+  direction is the LESS conservative one, so it is logged first and argued
+  rather than announced.
+
+  **What it was.** `verdict._bar_scope` narrows the bar from the whole query
+  to the decided obligations' own slices, and it earns the narrowing by
+  re-deriving each slice out of `closed` and re-emitting it: the recorded
+  invocation's `smt2_sha256` and `slice_sha256` must both come back. It
+  re-derived with `slice_obligation(closed, index, env)` and passed no
+  `relational_assumes`. `smt.emit` reads its axioms off `sl.assumes` and from
+  nowhere else, and `_Slicer` fills `sl.assumes` from the
+  `relational_assumes` it was constructed with — so on any query with a
+  forwarded relational assume the re-emitted script was the recorded script
+  MINUS the `(assert …)` axiom lines, `_evidence_is_about` returned False on
+  an HONEST record, and the bar fell back to the whole query.
+  `smt.slice_fingerprint` walks `sl.eqns` and never `sl.assumes`, so the two
+  slices agreed on `slice_sha256` and differed only on `smt2_sha256`: the one
+  pairing in which the bar's two hashes disagree about a record that is
+  telling the truth.
+
+  **Measured**, jax 0.11.0, python 3.12.3, `/home/nick/venvs/stelling-jax`,
+  z3 wheel + cvc5 wheel, x64: a two-obligation query — `assume(x <= y)` with
+  `assert x - y <= 0` discharged by the solver on the forwarded axiom, beside
+  `assert s >= 0` on `s = a.at[0].set(0.5)` which the intervals settle —
+  returned UNKNOWN with *"no recorded solver invocation for the decided
+  obligation #0 reproduces both this query's slice of it and the script that
+  slice emits"*, and now returns VERIFIED. The decided obligation's emitted
+  slice is `['sub', 'le']`: no barred primitive is on it, and the `scatter`
+  the query does contain is on an obligation no emission row was consulted
+  about.
+
+  **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID: NONE, and the asymmetry
+  is why.** Every verdict this changes was an UNKNOWN carrying a *"VERIFIED
+  withheld"* note. An UNKNOWN asserts nothing about the program, so nothing
+  that was claimed has become false; what was wrong was a claim about the
+  BAR's own reach — the note said the whole query was in scope when the
+  mechanism could not tell. Re-running such a query now returns VERIFIED, and
+  that VERIFIED rests on the same solver `unsat` the withheld one already
+  carried. **The direction that would matter — a VERIFIED becoming UNKNOWN,
+  or either becoming REFUTED — does not occur here**: the fix can only make
+  `_evidence_is_about` return True where it returned False, and True is the
+  NARROWING branch, so no verdict can be withheld by this change that was not
+  withheld before.
+
+  **Which versions are affected.** 0.2.0 development builds only, from the
+  landing of the per-obligation evidence check onward. On builds whose bar was
+  whole-query there was no re-derivation to be short of axioms.
+
+  **What to re-run to re-establish trust.** Any 0.2.0-development UNKNOWN
+  whose notes contain *"reproduces both this query's slice of it and the
+  script that slice emits"* AND whose query contains a `stelling_assume` over
+  two varying operands. Re-`check()` it. A VERIFIED is the corrected verdict;
+  an UNKNOWN that persists is withheld for a different reason and its note now
+  says which.
+
+  **What is NOT fixed, stated because the note's own sentence turns on it.**
+  The re-derivation still does not reproduce `assert_position`.
+  `slice_unknown_obligations` reads each obligation's `top_level_eqn_pos` off
+  the propagation; `_bar_scope` calls `slice_obligation` with the obligation
+  INDEX and no position, and the two coincide only when every obligation comes
+  from a top-level `stelling_assert`. Measured on the same tree: a query with
+  one `assert_` inside a `jax.jit` helper, one solver-decided top-level
+  obligation and a `scatter` elsewhere re-slices the WRONG assert and falls
+  back to the whole query — VERIFIED withheld on an honest record, exactly as
+  M10 did. That is conservative (it withholds, never mints), it is a distinct
+  defect from M10 rather than a residue of the fix, and closing it means
+  re-deriving through `slice_unknown_obligations` itself, which changes four
+  documented stray-index behaviours and is deliberately not done in this
+  batch.
+
+  **Two changes in this batch flip nothing, and that was established rather
+  than assumed.** (1) `smt.emit`'s `pow` branch now routes through three named
+  seams (`_pow_integer_body`, `_pow_rational_lines`, `_pow_aux_name`); the
+  extraction is behaviour-identical and `tests/test_smt_emission.py`,
+  `tests/test_array_emission.py`, `tests/test_pow_audit_findings.py` and
+  `tests/test_0_2_0_regression.py` are byte-level pins on that text — all 172
+  green before and after, and green with the seams REVERTED while four of the
+  new gauge's tests go red, which attributes the change to the gauge and not
+  to the emission. (2) `VERIFIED_BARRED_PRIMITIVES` is unchanged at
+  `{"scatter"}`; the batch's decision was to leave `pow` and `is_finite` out
+  of it, and `tests/test_bar_membership_policy.py` now carries that decision
+  with its cost measured both ways: adding `pow` turns 9 PRE-EXISTING tests
+  red, every one of them a `pow`-bearing VERIFIED becoming UNKNOWN, and
+  adding `is_finite` turns none red in this suite while still withholding a
+  purpose-built query that reaches the row. (Both flips also trip this
+  policy file's own detectors, which is what they are for: 11 and 2 red in
+  total.)
+
 **Releases reached by an entry in this log.** `v0.1.0`, the only release,
 is reached by the 2026-08-15 `exp`/`pow` libm-bracket entry (audit 0.2.0
 S11) through `propagate(closed, semantics="ieee")` — reproduced at the tag

@@ -644,11 +644,24 @@ def _approx(exact: str) -> str:
 # `outcome == OB_DISCHARGED and r.invocations` for the bar while discharging
 # on `outcome == OB_DISCHARGED` alone, and a record stripped of `invocations`
 # discharged its obligation while leaving the bar's domain. There is now one
-# predicate, in one place. Re-slicing is not a second implementation of the emitted slice:
-# `slice_obligation(closed, index, interval_env(closed))` is verbatim what
-# `slice_unknown_obligations` calls, whose only other argument
-# (`top_primitives`) is documented "message wording only, never admission",
-# and `tests/test_bar_walk_parity.py` pins the two against each other.
+# predicate, in one place. Re-slicing is not a second implementation of the
+# emitted slice: `slice_obligation` is the SAME function
+# `slice_unknown_obligations` calls, and `tests/test_bar_walk_parity.py` pins
+# the two against each other.
+#
+# THE ARGUMENTS ARE NOT ALL THE SAME ONES, AND THIS SENTENCE USED TO SAY THEY
+# WERE. It read "verbatim what `slice_unknown_obligations` calls, whose only
+# other argument (`top_primitives`) is documented message-wording-only". That
+# was false about TWO arguments, and one of them moved verdicts. Audit 0.2.0
+# M10: `relational_assumes` is not wording, it is the script's AXIOM LINES,
+# and omitting it made the re-emission fail to match an honest record on every
+# assume-carrying query — fixed, in `_bar_scope`, with the argument now
+# re-derived from `closed`. `assert_position` is the second and is NOT fixed:
+# `slice_unknown_obligations` reads it off each obligation's
+# `top_level_eqn_pos` and this call cannot, so a query holding an obligation
+# from inside a sub-jaxpr (audit 0.2.0 M17) re-slices a sibling's assert and
+# widens. Conservative, disclosed on `_bar_scope`, and measured rather than
+# reasoned about.
 #
 # THE MEMBERSHIP IS EXACT-NAME, SO `scatter-add` IS NOT UNDER THIS BAR, AND
 # THAT IS DELIBERATE. `scatter-add` is a separate primitive with separate
@@ -1351,15 +1364,53 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
 
     try:
         from stelling.obligation import DeclinedObligation, slice_obligation
-        from stelling.propagate import interval_env
+        from stelling.propagate import interval_env, propagate
 
         # a mapping is the contract; anything else lands in the except below
         # and widens, which is the direction a misread domain must fail in
         domain = dict(decided)
         env = interval_env(closed)
+        # THE FORWARDED RELATIONAL ASSUMES ARE PART OF THE SLICE, and a
+        # re-derivation that was not given them re-emits a DIFFERENT SCRIPT
+        # (audit 0.2.0 M10). `smt.emit` reads its axioms off `sl.assumes` and
+        # from nowhere else, `_Slicer` fills `sl.assumes` from the
+        # `relational_assumes` it was constructed with, and this call used to
+        # pass none — so on every assume-carrying query the re-emitted text
+        # differed from the recorded one by exactly the `(assert ...)` axiom
+        # lines, `_evidence_is_about` returned False, and the bar widened to
+        # the whole query. `smt.slice_fingerprint` walks `sl.eqns` and never
+        # `sl.assumes`, so the two slices agreed on `slice_sha256` and
+        # differed only on `smt2_sha256` — the one pairing where the bar's own
+        # two hashes disagree about an HONEST record.
+        #
+        # DERIVED FROM `closed`, NEVER READ OFF AN ARGUMENT, and that is the
+        # whole reason this is a second walk rather than a field. The axioms
+        # are an input to the re-emitted TEXT, hence to the narrowing
+        # decision; `make_solver_verdict`'s `propagation` argument is
+        # explicitly NOT bound to `closed` by the query pairing gate (its
+        # docstring measures that residue), so reading them off it would put a
+        # mispairable quantity into exactly the decision `barred_on_slice` was
+        # deleted for. `propagate` is handed `closed` and nothing else, so —
+        # by the same mirror argument :func:`_reproduced_evidence` carries —
+        # it cannot aim: it never sees a record.
+        #
+        # THE DEFAULT ARGUMENTS ARE THE RIGHT ONES FOR EVERY QUERY THAT CAN
+        # REACH HERE, which is a claim about `escalate` rather than about
+        # `propagate`. `semantics="ieee"` and a constrained assume each make
+        # `escalate` decline WHOLLY (`IEEE_SEMANTICS_REFUSAL`,
+        # `CONSTRAINED_ASSUME_REFUSAL`), so no record discharges, the domain
+        # is empty and there is no VERIFIED to withhold; `libm_budget` has no
+        # meaning outside ieee; and `refine="affine"` rebuilds the propagation
+        # with `dataclasses.replace`, which carries `relational_assumes`
+        # through unchanged. Any residue fails CLOSED: a tuple that differs
+        # from the escalation's re-emits a script that does not match, which
+        # widens.
+        forwarded = propagate(closed).relational_assumes
         per: dict[int, tuple[str, ...]] = {}
         for index in sorted(domain):
-            sliced = slice_obligation(closed, index, env)
+            sliced = slice_obligation(
+                closed, index, env, relational_assumes=forwarded
+            )
             if isinstance(sliced, DeclinedObligation):
                 return fallback(
                     f"the decided obligation #{index} does not slice out of "
@@ -1374,22 +1425,32 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
                 # THE SENTENCE SAYS WHAT THIS FUNCTION MEASURED, NOT WHAT THE
                 # ESCALATION IS. It used to end "so the escalation is not
                 # evidence about this query", and that is a claim this code
-                # cannot make and which is FALSE on a shape reached routinely:
-                # `slice_obligation` is called here with no propagation, so
-                # the re-derived slice carries no relational assumes, while
-                # the slice the escalation ran on may carry several. The two
-                # then have the SAME `slice_sha256` — `smt.slice_fingerprint`
-                # walks `sl.eqns` and never `sl.assumes` — and differ only in
-                # `smt2_sha256`, by the `(assert ...)` axiom lines. The
-                # escalation is about this query; the re-derivation simply was
-                # not given the axioms and so cannot recognise it. Measured:
-                # a two-obligation query whose assume-constrained obligation
-                # is discharged with a forwarded axiom and whose other
-                # obligation contains a `scatter` falls back to the whole
-                # query here, VERIFIED -> UNKNOWN. That mechanism (the audit's
-                # open question about what the bar's re-derivation may see) is
-                # unfixed and is not this note's business; stating it wrongly
-                # was.
+                # cannot make. The shape it was false on is now FIXED (audit
+                # 0.2.0 M10, the `relational_assumes=` argument above): the
+                # re-derivation was not given the forwarded axioms, so on
+                # every assume-carrying query it re-emitted a script short of
+                # the `(assert ...)` lines the escalation's carried, the two
+                # agreed on `slice_sha256` and differed only on
+                # `smt2_sha256`, and an honest record about THIS query failed
+                # to be recognised as one. Measured on the two-obligation
+                # fixture in `tests/test_verified_bar.py` (an assume-carrying
+                # obligation discharged with a forwarded axiom beside a
+                # `scatter`-bearing one the intervals settle): UNKNOWN with
+                # the sentence below, and VERIFIED once the argument is
+                # passed. Reverting that one argument alone puts it back.
+                #
+                # WHAT REMAINS TRUE, and it is what this sentence says: a
+                # failure here is a statement about THIS re-derivation, not
+                # about the escalation. Two residues can still produce one on
+                # an honest record. `assert_position` is not re-derived —
+                # `slice_unknown_obligations` reads each obligation's
+                # `top_level_eqn_pos` and this call cannot, so a query with
+                # an obligation recorded from inside a sub-jaxpr (audit 0.2.0
+                # M17) can shift the mapping for its siblings — and the
+                # propagation re-run here is `propagate`'s default
+                # configuration, which is the escalating one but is not read
+                # off the caller. Both widen, which is the direction they must
+                # fail in.
                 return fallback(
                     f"no recorded solver invocation for the decided "
                     f"obligation #{index} reproduces both this query's slice "

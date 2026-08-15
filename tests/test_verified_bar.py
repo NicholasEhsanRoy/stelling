@@ -91,7 +91,7 @@ jax = pytest.importorskip("jax")  # zero-dep CI has no jax
 import jax.numpy as jnp
 
 import stelling.verdict as V
-from stelling.harness import any_array, assert_, trace
+from stelling.harness import any_array, assert_, assume, trace
 from stelling.preconditions import check
 
 
@@ -1194,6 +1194,117 @@ def test_the_correct_pairing_still_narrows_and_the_hash_is_why():
     )
 
 
+def _assume_carrying_discharge_beside_a_scatter():
+    """An HONEST query the bar could not recognise its own record on — audit
+    0.2.0 M10.
+
+    Obligation 0 is ``x - y <= 0`` over two independently declared
+    ``[-10, 10]`` boxes: interval-undecidable (``[-20, 20]`` straddles), and
+    FALSE without the assume, so the ``assume(x <= y)`` forwarded to the
+    solver as an axiom is what discharges it. Its emitted slice is
+    ``['sub', 'le']`` — no barred primitive anywhere on it. Obligation 1 is
+    ``s >= 0`` where ``s = a.at[0].set(0.5)``: it carries the `scatter` and
+    the intervals settle it, so no emission row was consulted about it.
+
+    So nothing in this verdict can be wrong because the scatter row is wrong,
+    and the honest answer is VERIFIED — the same shape
+    :func:`_scatter_OFF_the_decided_slice` already pins, plus one forwarded
+    axiom. That axiom is the whole difference, and it used to cost the
+    verdict."""
+    x = any_array((), "float64", (-10.0, 10.0))
+    y = any_array((), "float64", (-10.0, 10.0))
+    assume(x <= y)
+    a = any_array((3,), "float64", (0.0, 1.0))
+    s = a.at[0].set(0.5)
+    return (assert_(x - y <= 0.0), assert_(s >= 0.0))
+
+
+def test_a_FORWARDED_AXIOM_does_not_cost_the_verdict_its_scope():
+    """AUDIT 0.2.0 M10. The re-derivation must be given the query's forwarded
+    relational assumes, or it re-emits a script the escalation never sent.
+
+    ``smt.emit`` reads its axioms off ``sl.assumes`` and from nowhere else,
+    and ``sl.assumes`` is filled from the ``relational_assumes`` the slicer
+    was constructed with. ``_bar_scope`` used to call ``slice_obligation``
+    without them, so on EVERY assume-carrying query the re-emitted text was
+    the recorded text minus the ``(assert ...)`` axiom lines,
+    ``_evidence_is_about`` returned False on an honest record, and the bar
+    fell back to the whole query.
+
+    Measured on this fixture before the fix: UNKNOWN, note *"no recorded
+    solver invocation for the decided obligation #0 reproduces both this
+    query's slice of it and the script that slice emits"*. After: VERIFIED.
+
+    THE DIRECTION IS THE LESS CONSERVATIVE ONE, which is why the anti-vacuity
+    below is not decoration: this test would pass on a build that had simply
+    stopped barring. So it asserts that the bar is still armed, that the query
+    really does carry the barred primitive, that a solver really decided
+    obligation #0, and that the axiom really was forwarded."""
+    assert V.VERIFIED_BARRED_PRIMITIVES, "the bar has been lifted"
+    closed = trace(_assume_carrying_discharge_beside_a_scatter)
+    assert V._barred_primitives(closed) == ("scatter",), (
+        "the whole-query barred set is empty on this fixture, so a bar that "
+        "widened to the whole query would cost nothing and this test could "
+        "not fail"
+    )
+    v = check(_assume_carrying_discharge_beside_a_scatter,
+              vacuity_mode="inputs-only", solver_timeout_ms=20000)
+    assert _obl_solves(v) > 0, (
+        "nothing was solver-decided, so the bar was never consulted"
+    )
+    assert any("relational assume(s) forwarded" in n for n in v.notes), (
+        f"no axiom was forwarded, so this fixture does not exercise M10 at "
+        f"all: {v.notes}"
+    )
+    assert v.status == "VERIFIED", (
+        f"{v.status}: an assume-carrying discharge on a scatter-FREE slice "
+        f"was withheld — the bar cannot recognise its own record once the "
+        f"query forwards an axiom (audit 0.2.0 M10). "
+        f"{[n for n in v.notes if 'withheld' in n]}"
+    )
+
+
+def test_the_two_bar_hashes_disagree_on_an_UNAXIOMED_re_derivation():
+    """THE MECHANISM of the test above, measured rather than inferred, and it
+    is the one pairing where the bar's two hashes disagree about an HONEST
+    record.
+
+    ``smt.slice_fingerprint`` walks ``sl.eqns`` and never ``sl.assumes``, so a
+    slice re-derived without the forwarded axioms has the SAME
+    ``slice_sha256`` as the one the escalation emitted and a DIFFERENT
+    ``smt2_sha256``. That is why the symptom was invisible to the fingerprint
+    conjunct that exists to catch a wrong slice: the slice was right, and only
+    the text was short.
+
+    Both directions are asserted, so this cannot pass by the two hashes having
+    become equal or by emission having stopped depending on the axioms."""
+    from stelling.obligation import DeclinedObligation, slice_obligation
+    from stelling.propagate import interval_env, propagate
+    from stelling.smt import emit, slice_fingerprint
+
+    closed = trace(_assume_carrying_discharge_beside_a_scatter)
+    prop = propagate(closed)
+    assert prop.relational_assumes, "no forwarded assume; nothing to measure"
+    env = interval_env(closed)
+    bare = slice_obligation(closed, 0, env)
+    full = slice_obligation(closed, 0, env,
+                            relational_assumes=prop.relational_assumes)
+    assert not isinstance(bare, DeclinedObligation)
+    assert not isinstance(full, DeclinedObligation)
+    assert len(bare.assumes) == 0 and len(full.assumes) == 1, (
+        (len(bare.assumes), len(full.assumes))
+    )
+    assert slice_fingerprint(bare) == slice_fingerprint(full), (
+        "the two slices' FINGERPRINTS differ, so the fingerprint conjunct "
+        "would already have caught this and M10 is not the defect described"
+    )
+    assert emit(bare, "z3", 20000).sha256 != emit(full, "z3", 20000).sha256, (
+        "the two slices emit the SAME SCRIPT, so the forwarded axiom reaches "
+        "no emitted line — either emission stopped writing axioms or this "
+        "fixture forwards none"
+    )
+
+
 def test_a_mispaired_PROPAGATION_cannot_empty_the_scope_either():
     """The other mispairing, and the one the recording design was built
     against: a propagation whose obligations are already `discharged` slices
@@ -1201,9 +1312,16 @@ def test_a_mispaired_PROPAGATION_cannot_empty_the_scope_either():
     from `(closed, propagation)` would come back empty while every existing
     gate passed.
 
-    The derivation does not take the propagation. It re-slices by INDEX out of
-    `closed`, so there is no propagation to mispair — asserted here rather
-    than argued, because it was the stated reason for recording.
+    The derivation does not take the propagation ARGUMENT. It re-slices by
+    INDEX out of `closed`, so there is no propagation to mispair — asserted
+    here rather than argued, because it was the stated reason for recording.
+
+    IT DOES NOW RE-DERIVE ONE, and that is not the same thing. Audit 0.2.0
+    M10's fix has `_bar_scope` call `propagate(closed)` for the forwarded
+    relational assumes, because the re-emitted script's axioms come from them.
+    That propagation is a function of `closed` alone and is never the caller's,
+    which is exactly what this test measures: the caller's is replaced here by
+    one whose obligations are all `discharged`, and the bar is unmoved.
     """
     import dataclasses
 
@@ -2110,11 +2228,22 @@ _DYNAMIC = ("__import__", "eval", "exec", "compile", "importlib")
 # re-derived with, which is the whole reason it may call out of the module at
 # all. The DECISION additionally re-slices the query, which is what it is FOR;
 # those are named rather than waved at, and they are not available to the zone.
+#
+# `propagate` is the fifth, added by audit 0.2.0 M10's fix, and it is named
+# with its reason because adding a member here is the whole cost of widening
+# the decision's reach. The re-emitted script's AXIOMS come from the slice's
+# forwarded relational assumes, so a re-derivation that is not given them
+# emits a different text and cannot recognise an honest record. They are a
+# function of the QUERY, and `make_solver_verdict`'s `propagation` argument is
+# not bound to the query by the pairing gate — so they are re-derived here
+# rather than read, and `propagate` is handed `closed` and nothing else, which
+# is what keeps it unable to aim.
 _EVIDENCE_ZONE_IMPORTS = (("stelling.smt", "emit"),)
 _EVIDENCE_DECISION_IMPORTS = _EVIDENCE_ZONE_IMPORTS + (
     ("stelling.obligation", "DeclinedObligation"),
     ("stelling.obligation", "slice_obligation"),
     ("stelling.propagate", "interval_env"),
+    ("stelling.propagate", "propagate"),
     ("stelling.coverage", "sub_jaxprs"),
 )
 

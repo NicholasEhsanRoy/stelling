@@ -299,6 +299,19 @@ def _repeated_product(term: str, n: int) -> str:
     named mutation seam for the ``square`` row's gauge and has to stay
     separately mutable, or a mutation of one row's emission would move the
     other's too.
+
+    THE ROW SEAMS SIT ABOVE THIS FUNCTION, NOT BESIDE IT, and the split is
+    the thing to keep. ``pow``'s two seams (:func:`_pow_integer_body`,
+    :func:`_pow_rational_lines`) both CALL this, so the well-formedness
+    argument above covers them and is not restated in either; what they own
+    is the row's own reading of its exponent, which is what
+    `tests/test_pow_row_gauge_jax.py` mutates. ``integer_pow``'s branch calls
+    this directly and has no seam yet, which is why a ``pow`` mutation cannot
+    move it — asserted rather than assumed, by that file's
+    ``test_the_pow_seams_do_not_move_the_integer_pow_row``. Mutating THIS
+    function moves every row that renders a repeated product, so it is
+    deliberately absent from every row battery: a catch on it would be
+    attributable to none of them.
     """
     if n < 0:
         raise ValueError(f"repeated product needs n >= 0, got {n}")
@@ -307,6 +320,101 @@ def _repeated_product(term: str, n: int) -> str:
     if n == 1:
         return term
     return f"(* {' '.join([term] * n)})"
+
+
+def _pow_integer_body(term: str, exp_val: int) -> str:
+    """``pow``'s emitted body at an INTEGER exponent: the ``|y|``-fold
+    product of the base, reciprocated when the exponent is negative.
+
+    A named seam for the ``pow`` row's gauge, exactly as
+    :func:`_square_body` is for ``square``'s — and it is a seam and not a
+    renderer, which is the distinction that keeps both properties. The
+    well-formedness of the product itself belongs to
+    :func:`_repeated_product` and is NOT restated here: one renderer, so
+    the ``(* t)`` that cost half the portfolio (audit 0.2.0 S2) cannot be
+    written at a fifth site. What this function adds is the ``pow`` row's
+    own reading of the exponent — its SIGN, which decides the reciprocal,
+    and its MAGNITUDE, which is the arity — and having that in one named
+    place is what lets a mutation battery express "the emitted exponent is
+    wrong" against THIS row.
+
+    ``integer_pow`` deliberately does NOT route through here, and the
+    reason is the one :func:`_square_body`'s docstring gives: they are two
+    rows with two gauges, and a mutation of one must not move the other or
+    the battery measures a primitive it did not name. The two therefore
+    write the same shape twice, on purpose; what they SHARE is the
+    renderer below them, which is where a well-formedness defect would
+    live.
+
+    ``exp_val`` of 0 or 1 never reaches here — the caller special-cases
+    both before the sign is taken — but neither is refused, because the
+    contract is "the body of ``base ** exp_val``" and both have exactly
+    one correct answer under it (``_repeated_product``'s own degenerate
+    arms).
+    """
+    prod = _repeated_product(term, abs(exp_val))
+    return prod if exp_val > 0 else f"(/ 1.0 {prod})"
+
+
+def _pow_aux_name(out_id: int, element: int, n_out: int) -> str:
+    """The auxiliary constant's name for ONE element of a rational-exponent
+    ``pow``.
+
+    A seam rather than an f-string at the call site, because the FRESHNESS is
+    a claim and a claim a gauge cannot mutate is a claim nobody measured. Two
+    elements of one vectorised ``pow`` are two independent values; a name
+    shared between them asserts they are equal, which is a statement about
+    the program that the program does not make — and it is exactly the shape
+    that discharges a false obligation about their difference.
+
+    The single-element spelling drops the element suffix, which is not
+    cosmetic: it is what the byte-level emission tests already pin, so the
+    two arms are kept rather than unified.
+    """
+    return f"aux_{out_id}_{element}" if n_out > 1 else f"aux_{out_id}"
+
+
+def _pow_rational_lines(aux_name: str, base: str, p: int, q: int) -> list[str]:
+    """The SMT-LIB2 lines ONE element of a rational-exponent ``pow``
+    emits: the fresh auxiliary constant, the even-``q`` non-negativity
+    guard, and the defining equation ``aux^q = x^p``.
+
+    THE WHOLE ENCODING IS HERE, AND THAT IS THE POINT. ``pow`` at
+    ``p/q`` cannot be written as a term at all — there is no SMT-LIB2
+    real-power operator to name — so this row is the one emission row
+    whose output is ASSERTED LINES rather than a body, and a gauge that
+    could only patch a body could express no mutation of it. Three
+    separable claims live in these three lines and each is independently
+    wrong-able:
+
+    * ``aux`` is a FRESH constant per element. Sharing one across
+      elements would assert that two outputs of a vectorised ``pow`` are
+      equal, which is a claim about the program;
+    * ``q`` EVEN admits two real roots and the guard picks the
+      non-negative one, which is the branch jax computes. Dropping it
+      leaves ``aux`` free to be the negative root and the solver may
+      discharge a false obligation with it, or refute a true one;
+    * the equation's SIDES are not interchangeable. ``aux^q = x^p`` says
+      ``aux = x^(p/q)``; swapping them says ``aux = x^(q/p)``, a
+      different function that agrees with the first only when ``p == q``.
+
+    Both sides go through :func:`_repeated_product`, so neither can be a
+    unary ``(* t)`` — audit 0.2.0 S2, where ``q == 1`` wrote one and cvc5
+    1.3.4 died on it. ``q >= 2`` and ``p != 0`` for every exponent that
+    reaches here (the caller takes the integer branch otherwise), so the
+    renderer's degenerate arms are unreachable from this site.
+
+    Returns the lines in EMISSION ORDER; the caller extends its script
+    with them and binds the output element's term to ``aux_name``.
+    """
+    lines = [f"(declare-const {aux_name} Real)"]
+    if q % 2 == 0:
+        lines.append(f"(assert (>= {aux_name} 0.0))")
+    lines.append(
+        f"(assert (= {_repeated_product(aux_name, q)} "
+        f"{_repeated_product(base, p)}))"
+    )
+    return lines
 
 
 # The real-arithmetic elementwise primitives whose value is fixed the
@@ -896,11 +1004,13 @@ def emit(
                 if exp_val == 1:
                     names[out.id] = tuple(ins[0][ia[i]] for i in range(n_out))
                     continue
-                n = abs(exp_val)
-                bodies = []
-                for i in range(n_out):
-                    prod = _repeated_product(ins[0][ia[i]], n)
-                    bodies.append(prod if exp_val > 0 else f"(/ 1.0 {prod})")
+                # through the row's OWN named seam (`_pow_integer_body`), not
+                # `_repeated_product` directly: the renderer is shared with
+                # `integer_pow` and a mutation of it would move both rows.
+                bodies = [
+                    _pow_integer_body(ins[0][ia[i]], exp_val)
+                    for i in range(n_out)
+                ]
                 names[out.id] = define(out, bodies)
                 continue
             else:
@@ -920,17 +1030,12 @@ def emit(
                 made = []
                 for i in range(n_out):
                     base = ins[0][ia[i]]
-                    aux_name = f"aux_{out.id}_{i}" if n_out > 1 else f"aux_{out.id}"
-                    lines.append(f"(declare-const {aux_name} Real)")
-                    # y >= 0 when q is even (ensures unique real root)
-                    if q % 2 == 0:
-                        lines.append(f"(assert (>= {aux_name} 0.0))")
-                    # y^q = x^p, both sides through the one renderer that
-                    # cannot write a unary (* t) — see _repeated_product.
-                    lines.append(
-                        f"(assert (= {_repeated_product(aux_name, q)} "
-                        f"{_repeated_product(base, p)}))"
-                    )
+                    aux_name = _pow_aux_name(out.id, i, n_out)
+                    # the declaration, the even-q root guard and the defining
+                    # equation are ONE named seam, so the row's gauge can
+                    # express a mutation of any of the three — see
+                    # `_pow_rational_lines`
+                    lines.extend(_pow_rational_lines(aux_name, base, p, q))
                     made.append(aux_name)
                 names[out.id] = tuple(made)
                 continue
