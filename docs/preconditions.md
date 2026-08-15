@@ -149,9 +149,16 @@ mesh machinery, no method internals.
   budget line in the decline tells you when you have left it.
 - **Float-exact claims by default.** The default verdict is about exact
   real arithmetic over your declared sets, and the stamp says so; an
-  opt-in `ieee` mode judges binary64 behaviour and stamps its own scope.
-  If your precondition is a float-boundary fact, read the stamp's
-  semantics line before trusting either mode blindly.
+  opt-in `ieee` mode judges IEEE behaviour in any of the four catalogued
+  formats and stamps its own scope. If your precondition is a
+  float-boundary fact, read the stamp's semantics line before trusting
+  either mode blindly.
+- **Judge `exp` or `pow` under `ieee` without being told what you are
+  assuming.** Those two transfers ride a *libm accuracy* claim, and under
+  `ieee` the claim has to be about the function your backend executes —
+  which stelling cannot see. They **decline by default** and you re-enable
+  them by declaring a budget; see
+  [the libm accuracy budget](#the-libm-accuracy-budget-exp-and-pow-under-ieee).
 
 ### What float-exact-by-default costs you, concretely
 
@@ -204,6 +211,113 @@ Each limit shows up in the verdict itself — as a quoted decline, an
 UNKNOWN with its reason, or a stamped assumption — never as a silent
 pass. That is the design: the tool tells you when it could not earn the
 claim, so a VERIFIED means exactly what it says.
+
+## The libm accuracy budget: `exp` and `pow` under `ieee`
+
+Under `semantics="ieee"` a verdict is a claim about **the float value your
+program computes**. stelling brackets `exp` by evaluating CPython's
+`math.exp` — the libm of the machine running the analysis — and bumping
+one ulp outward. Your program does not run that function. It runs whatever
+XLA compiled for your device, and a bracket of one function is not a
+bracket of another.
+
+Measured on jax 0.11.0 / jaxlib 0.11.0, CPU, x86_64, the gap is real and
+it is not small: exhaustively over every `float32` argument whose `exp` is
+normal and finite, XLA's result is up to **5.51 float32 ulps** from the
+true value — so it is not faithfully rounded at all, and no fixed widening
+of the bracket can be sound. On the *same* backend, `float16` and
+`bfloat16` `exp` are exhaustively **correctly rounded**, because they are
+evaluated in `float32` and rounded. One number cannot be right for both.
+
+So the two transfers that ride the claim **fail closed**:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
+
+from stelling.harness import any_array, assert_
+from stelling.preconditions import check
+
+
+def harness():
+    x = any_array((), "float32", (1.0, 2.0))
+    return assert_(jnp.exp(x) > 0.0)
+
+
+shut = check(harness, vacuity_mode="inputs-only", semantics="ieee")
+print("no budget   :", shut.status)
+print("names it    :",
+      "no DECLARED accuracy budget for float32" in shut.notes[0])
+
+open_ = check(harness, vacuity_mode="inputs-only", semantics="ieee",
+              libm_budget="xla-cpu-2026-08")
+print("declared    :", open_.status)
+print("stamped     :",
+      any("DECLARED, NOT VERIFIED" in a for a in open_.stamp.assumptions))
+```
+
+prints:
+
+```
+no budget   : UNKNOWN
+names it    : True
+declared    : VERIFIED
+stamped     : True
+```
+
+The decline is not a wall — it carries the measurement that justifies it
+and the exact line to write. `"xla-cpu-2026-08"` is a shipped profile: a
+**named, dated** set of per-`(op, format)` budgets measured on one jaxlib,
+on one device class, on one day. The name is what a stamp carries, so when
+jaxlib moves the name stays honest about what it measured and when, which
+a bare number can never be.
+
+To declare your own — because you measured your backend, or because you
+are willing to assume something about it:
+
+<!-- doc-example: illustrative -->
+```python
+from stelling.propagate import LibmBudget
+
+check(harness, vacuity_mode="inputs-only", semantics="ieee",
+      libm_budget=LibmBudget(
+          name="my-backend-2026-08",
+          basis="measured over 10^7 arguments on <device>, <date>",
+          ulps={("exp", "float32"): 6.0},
+      ))
+```
+
+A budget is **per `(op, format)` and never extrapolated**: one naming
+`("exp", "float64")` does nothing for `float32` `exp`, and a pair it does
+not name declines exactly as if no budget had been passed.
+
+`0.5` ulps means *correctly rounded*, and it costs nothing at all — the
+bracket is not widened by a single step, because round-to-nearest is
+monotone and the endpoints are rounded onto the format's grid anyway. `1`
+ulp means *faithfully rounded* and does cost. This is the same line
+`interval.sqrt` already draws for itself: sqrt is a correctly-rounded
+IEEE-754 basic operation, so it carries no libm demotion, needs no budget,
+and is unaffected by any of this.
+
+**What the stamp then says, and it is the whole point:**
+
+> ieee libm accuracy **DECLARED, NOT VERIFIED** — profile
+> `'xla-cpu-2026-08'`: exp@float32 <= 6 ulps. … Claim (2) is a
+> DECLARATION about a compiled function stelling cannot see, execute or
+> measure: if the target is worse than declared, the bracket may EXCLUDE
+> the value the program computes, and a VERIFIED resting on it is FALSE
+> with nothing here able to notice.
+
+A budget smaller than your backend's real error mints a VERIFIED stelling
+cannot catch. That is why the number has to be written down by a person,
+with a name and a basis, instead of defaulted to by the tool.
+
+`semantics="real"` is untouched by all of this and needs no budget: there
+the bracket is about the true real value, the host's own `math` module
+does satisfy the ±1-ulp assumption it rides on, and the divergence from
+your compiled program is the ℝ-versus-float gap the stamp already names.
+Passing `libm_budget` under `real` raises rather than being ignored.
 
 ## Precision configuration
 

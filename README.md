@@ -258,13 +258,17 @@ optional components a discovered binary was built with.
   `real`: obligations are judged in exact real arithmetic, and a
   predicate can hold in ℝ while failing in floats — that gap held a
   258-day bug upstream, which is why the stamp names its semantics per
-  verdict. An opt-in `ieee` mode now judges the censused binary64
-  behaviours (rounding collapse, overflow-as-value, NaN) and stamps
-  itself; it treats subnormal-band outcomes as indeterminate (measured:
-  this CPU target flushes subnormals; others may not), declines
-  non-binary64 floats with the gap quoted, and refuses solver
-  escalation (the SMT backends speak ℝ). Every counted or recorded
-  verdict to date is a `real`-mode verdict.
+  verdict. An opt-in `ieee` mode now judges the censused IEEE
+  behaviours (rounding collapse, overflow-as-value, NaN) in all four
+  catalogued formats and stamps itself; it treats subnormal-band
+  outcomes as indeterminate (measured: this CPU target flushes
+  subnormals in three of the four formats; others may not), refuses
+  solver escalation (the SMT backends speak ℝ), and **declines `exp` and
+  `pow` outright unless the caller declares an accuracy budget** for the
+  backend that will execute them — measured, XLA's `float32` `exp` is up
+  to 5.5 ulps from the true value, so a bracket built around this
+  machine's libm is not a bracket of the compiled program. Every counted
+  or recorded verdict to date is a `real`-mode verdict.
 - **Discharge the recorded incidents.** Against the 20 long-horizon
   failures this project mined from public trackers, hand proofs
   discharged **0 of 3** attempted; the box invariants it checks are

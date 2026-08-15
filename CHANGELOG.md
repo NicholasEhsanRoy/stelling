@@ -166,6 +166,42 @@ SPDX-License-Identifier: Apache-2.0
 
 ### Soundness fixes
 
+- **`exp` and `pow` under `semantics="ieee"` now require a DECLARED libm
+  accuracy budget** (audit 0.2.0 **S9** and **S11**; S11 reaches the
+  released **0.1.0** — see [SOUNDNESS.md](SOUNDNESS.md)). Under `ieee` a
+  verdict is a claim about the float value the program computes, and
+  stelling's bracket was built around CPython's `math.exp` — the libm of
+  the machine running the analysis. The program runs whatever XLA
+  compiled. Measured on jax 0.11.0 / jaxlib 0.11.0, CPU, x86_64,
+  exhaustively over every `float32` argument whose result is normal and
+  finite (2,237,668,968 of them), XLA's `exp` is out by up to **5.51
+  float32 ulps** — not faithfully rounded at all, so no fixed widening is
+  sound; in binary64 by up to **1.65 ulps** over 3,000,000 samples, which
+  is what leaks past a ±1-ulp bracket. On the *same* backend `float16`
+  and `bfloat16` `exp` are exhaustively **correctly rounded**, so one
+  number cannot be right for all four formats.
+
+  Both transfers therefore **fail closed** and are re-enabled by a
+  declaration:
+
+      check(harness, vacuity_mode="inputs-only", semantics="ieee",
+            libm_budget="xla-cpu-2026-08")
+
+  `"xla-cpu-2026-08"` is a shipped, **named and dated** profile of
+  per-`(op, format)` budgets; `stelling.propagate.LibmBudget` states your
+  own. The decline carries the measurement that justifies it and the exact
+  line to write. The budget widens the bracket by the declared ulps before
+  the format rounding, and is stamped as **declared, not verified** —
+  because a budget smaller than the backend's real error mints a VERIFIED
+  stelling cannot catch. A budget of `0.5` ulps (correctly rounded) widens
+  by nothing at all, which is `interval.sqrt`'s own argument generalised;
+  `sqrt` is a correctly-rounded basic operation, carries no libm demotion,
+  and needs no budget. `semantics="real"` is untouched and refuses the
+  argument. Verdicts move **VERIFIED → UNKNOWN** and **REFUTED → UNKNOWN**
+  on ieee-mode queries containing `exp` or `pow`; the coverage cost is one
+  extra 12 float32 / 6 binary64 grid steps of bracket width, and zero for
+  `float16`/`bfloat16`.
+
 - **Rational-`pow` exponent identity** (audit 0.2.0 S1; see
   [SOUNDNESS.md](SOUNDNESS.md)): the exponent was rationalised with
   `Fraction(e).limit_denominator(128)` and admitted on a *binary64*
@@ -310,6 +346,25 @@ SPDX-License-Identifier: Apache-2.0
 
 ### Known limitations (0.2.0)
 
+- **The libm accuracy budget is DECLARED, never verified.** stelling
+  widens the `exp`/`pow` bracket by the ulps you declare and stamps the
+  declaration; it has no way to measure the function your backend
+  executes, so a budget smaller than that function's real error mints a
+  VERIFIED nothing here can catch. The shipped profile
+  `"xla-cpu-2026-08"` is a measurement of **one** jaxlib on **one** device
+  class on **one** day, and its name says so; on any other target it is a
+  guess with a date on it. There is also no *residual* budget: an
+  `(op, format)` pair a budget does not name declines, and stelling never
+  extrapolates from one format to another (measured, the same backend
+  ranges over 0.50 to 5.51 ulps across the four formats for the same op).
+- **`sqrt` under `ieee` still brackets binary64 with a POINT** — no
+  outward bump at all — which is sound only because IEEE-754 *requires*
+  `sqrt` to be correctly rounded, so `math.sqrt` and the compiled `sqrt`
+  must agree bit for bit. That is a standard's guarantee rather than a
+  measurement, and it is a genuinely different footing from `exp`/`pow`,
+  which IEEE-754 does not constrain at all. A backend that violates it
+  (a fast-math build, an approximate reciprocal-sqrt path) is outside
+  what this mode can catch, and `sqrt` carries no budget dial to say so.
 - `assume(x > 0)` in real mode still narrows to `[0, hi]` (closed
   intervals cannot represent open bounds in exact reals). The IEEE bump
   is exact; the real-mode overapproximation is sound. In real mode, the

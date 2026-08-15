@@ -236,6 +236,25 @@ program you actually run — see
 [preconditions.md](preconditions.md#what-this-checks--and-what-it-doesnt-yet)
 for a two-primitive case where that gap is the whole answer.
 
+### One `assumes:` line says *declared, not verified* — read it differently
+
+Almost every stamped assumption is something stelling **did**: a
+convention it applied, a band it hulled with, a widening it performed. One
+is not. An `ieee` verdict over `exp` or `pow` carries
+
+```
+assumes: ieee libm accuracy DECLARED, NOT VERIFIED — profile
+  'xla-cpu-2026-08': exp@float32 <= 6 ulps. …
+```
+
+and that line records a claim **you** made about the function your backend
+executes, which stelling cannot see, execute or measure. If the backend is
+worse than the budget says, the propagated box may exclude the value the
+program computes and the VERIFIED above it is false, with nothing in the
+pipeline able to notice. The profile name is dated for exactly this
+reason: it tells a later reader *what was measured and when*. See
+[preconditions.md](preconditions.md#the-libm-accuracy-budget-exp-and-pow-under-ieee).
+
 ## `coverage-not-established:` — what the `coverage:` line did not settle
 
 `coverage:` is a **census**. It counts whether each equation's primitive

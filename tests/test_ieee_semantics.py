@@ -513,7 +513,12 @@ def test_pow_declines_flagged_operands_with_the_gap():
         pred,
         out,
     )
-    p = propagate(q, semantics="ieee")
+    # the LIBM BUDGET gate runs first and would decline for its own reason
+    # (audit 0.2.0 S9/S11), which would make this row pass for the wrong
+    # one — so the budget is declared and the maybe-NaN gap is what is
+    # left to measure. That the undeclared call declines too is pinned in
+    # tests/test_libm_budget.py.
+    p = propagate(q, semantics="ieee", libm_budget="xla-cpu-2026-08")
     assert p.obligations[0].status == "unknown"
     assert any("pow" in n and "maybe-NaN" in n for n in p.notes)
 
@@ -529,10 +534,18 @@ def test_pow_and_exp_keep_libm_brackets_when_nan_free():
         pred,
         out,
     )
-    p = propagate(q, semantics="ieee")
+    # NO BUDGET: the bracket is glibc's and the program runs XLA's, so the
+    # transfer declines (audit 0.2.0 S9/S11)
+    shut = propagate(q, semantics="ieee")
+    assert shut.obligations[0].status == "unknown"
+    assert any("DECLARED accuracy budget" in n for n in shut.notes)
+    # WITH ONE DECLARED: the libm bracket is what does the work again, now
+    # widened by the declared per-(op, format) ulps
+    p = propagate(q, semantics="ieee", libm_budget="xla-cpu-2026-08")
     assert p.obligations[0].status == "discharged"
     assert ("exp", "sound-libm") in dict(p.transfers_used).items()
     assert any("libm" in a for a in p.assumptions)  # the assumption still rides
+    assert any("DECLARED, NOT VERIFIED" in a for a in p.assumptions)
 
 
 # --- census: structural ops move flags with the data --------------------------

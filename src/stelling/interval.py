@@ -23,6 +23,20 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
   (:data:`EXP_LIBM_ASSUMPTION`). ``pow`` (strictly positive base only)
   makes the same demotion around ``math.pow`` at the monotone corners
   (:data:`POW_LIBM_ASSUMPTION`).
+
+  **THAT ASSUMPTION IS ABOUT THIS PROCESS'S libm, WHICH IS THE RIGHT ONE
+  HERE AND THE WRONG ONE UNDER ieee.** These brackets are about the TRUE
+  REAL value, and CPython's ``math`` module is what computes them, so
+  assuming *it* is faithful is exactly the assumption the bracket needs —
+  in real mode, where the verdict is about ℝ, nothing more is required.
+  Under ``semantics="ieee"`` the verdict is about the float the compiled
+  program computes, and that program runs a DIFFERENT ``exp``: measured,
+  XLA's float32 ``exp`` is up to 5.5 float32 ulps from the true value and
+  its binary64 ``exp`` up to 1.65 (audit 0.2.0 S9, S11). So the ieee
+  transfers widen these brackets by a DECLARED per-(op, format) budget
+  and decline without one — see
+  :class:`stelling.propagate.LibmBudget`. Nothing in this module changes
+  for that; the widening happens above it.
 * ``sqrt`` is a **correctly-rounded IEEE-754 basic operation** (error ≤
   0.5 ulp, like +, -, *, /), so it carries no libm-fidelity demotion:
   ``math.sqrt`` is bumped one ulp outward, which contains the true real
@@ -93,6 +107,13 @@ from dataclasses import dataclass
 _INF = math.inf
 _FMAX = sys.float_info.max  # largest finite double: the outward-saturation endpoint
 
+# The REAL-MODE stamp for the exp/pow brackets. It is a claim about the
+# libm of the process computing the bracket (CPython's `math`), which is
+# the claim a bracket of the TRUE REAL value needs. Under
+# `semantics="ieee"` it is NOT the whole claim — the verdict is about the
+# float a different, compiled libm produces — and stamping it alone there
+# was audit 0.2.0 S9/S11. The ieee stamp is
+# `stelling.propagate.LibmBudget.render`, which names both halves.
 EXP_LIBM_ASSUMPTION = (
     "exp endpoints assume a faithfully-rounded libm exp (error <= 1 ulp), "
     "bumped 1 ulp outward — the same demotion as the hand proofs' "

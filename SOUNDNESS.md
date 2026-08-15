@@ -6332,4 +6332,246 @@ verdicts:
     baseline, no x64 (CI)   3177        9
   ```
 
+- **2026-08-15 (B4): under `semantics="ieee"`, `exp` and `pow` were
+  bracketing the WRONG FUNCTION, and one half of it REACHES THE RELEASED
+  0.1.0.** Audit 0.2.0 S9 (float32) and S11 (binary64). FALSE VERIFIED and
+  FALSE REFUTED.
+
+  **The defect.** Under `ieee` semantics a verdict is a claim about the
+  float value **the program computes**. `iv.exp` brackets CPython's
+  `math.exp` — the libm of the machine running the analysis, glibc here —
+  with a ±1-binary64-ulp bump, under `EXP_LIBM_ASSUMPTION`; `iv.pow_` does
+  the same around `math.pow`. **The program does not run that function.**
+  It runs whatever XLA compiled for the device. A bracket of one function
+  is not a bracket of another, and the assumption stamped under the
+  verdict — *"exp endpoints assume a faithfully-rounded libm exp"* —
+  asserts a property of the analysis host's libm while being read as one
+  of the target's.
+
+  **Measured here**, on jax 0.11.0 / jaxlib 0.11.0, CPU backend, x86_64
+  Linux (glibc 2.39), CPython 3.12.3, eager and under `jit` (identical
+  results), as `|jnp.op(x) − true(x)|` in ulps of the target format —
+  binary64 reference for the narrow formats, 50-digit `decimal` for
+  binary64:
+
+  ```
+    op   format     population                                        max ulps
+    exp  float16    EXHAUSTIVE, all 63,487 finite args                  0.5000
+    exp  bfloat16   EXHAUSTIVE, all 65,279 finite args                  0.5000
+    exp  float32    EXHAUSTIVE over [-104, 88.73], 2,237,668,968 args   5.5112
+    exp  float64    3,000,000 sampled args                              1.6470
+    pow  float16    16,000,000 sampled (base, exp) pairs                0.5001
+    pow  bfloat16   16,000,000 sampled pairs                            0.5000
+    pow  float32    16,000,000 sampled pairs                            0.5380
+    pow  float64    1,045,976 sampled pairs, 60-digit reference         0.5059
+  ```
+
+  12,542 float32 arguments exceed 1 ulp, and 12,520 of them are inside
+  `[88.54634857177734, 88.72283172607422]` — a band holding exactly 23,133
+  float32 values, so **54.12% of the arguments there escape**, every one on
+  the low side. In binary64, 10,561 of 3,000,000 (0.35%) exceed 1 ulp,
+  which is exactly what a ±1-ulp bracket cannot hold.
+
+  **THE AUDIT'S OWN SUGGESTED REMEDY IS REFUTED BY ITS OWN
+  MEASUREMENT.** It proposed widening to ±2 ulps, "enough to cover any
+  faithfully-rounded implementation". At 5.51 measured float32 ulps this
+  backend's float32 `exp` is not faithfully rounded at all, so no fixed
+  widening is sound — the quantity is a property of a compiled function
+  stelling cannot see. Nor is one number right across formats: the same
+  backend is correctly rounded in float16 and eleven times worse than
+  faithful in float32, because float16 is evaluated in float32 and
+  rounded.
+
+  **The fix: fail closed, open it with a DECLARATION.** Under `ieee`, a
+  transfer whose backend accuracy stelling cannot establish declines —
+  carrying the measurement that justifies it and the exact line to write —
+  and the caller re-enables it by declaring a per-`(op, format)` budget:
+
+  ```
+    check(harness, vacuity_mode="inputs-only", semantics="ieee",
+          libm_budget="xla-cpu-2026-08")
+  ```
+
+  `"xla-cpu-2026-08"` is a shipped **named, dated** profile whose numbers
+  are the maxima above rounded up (0.5 / 0.5 / 6 / 2 for `exp`, 1.0
+  throughout for `pow`); `stelling.propagate.LibmBudget` declares your own
+  and requires a `name` and a `basis`. The budget widens the bracket by
+  that many format ulps before the outward round onto the format's grid,
+  and the verdict stamps it as **DECLARED, NOT VERIFIED**, saying in those
+  words that a budget smaller than the backend's real error mints a
+  VERIFIED nothing here can catch. A budget of `0.5` — correctly rounded —
+  widens by **nothing at all**: round-to-nearest is monotone and the
+  endpoints are rounded onto the grid anyway, so the mechanism cannot
+  punish a good platform. That is `interval.sqrt`'s own argument
+  generalised; `sqrt` is a correctly-rounded IEEE-754 basic operation,
+  carries no libm demotion, and is untouched.
+
+  **ONE SPACING SERVES BOTH ENDPOINTS, AND IT IS THE LARGER — the first
+  draft of the widening was unsound and this is where it was.** `ulp` is a
+  STEP function of the magnitude: it doubles at every binade boundary, so
+  `t − u·ulp(t)` is **not** monotone in `t` — it drops by half an ulp each
+  time `t` crosses a power of two upward. Widening the lower endpoint by
+  *its own* ulp is therefore not enough for a box straddling `2**k` from
+  below, where the declaration admits values as low as
+  `2**k − u·2**(k−p+1)` while `ulp(lo)` is only `2**(k−p)`, half of what
+  is needed. The rule is `U = max(ulp(lo), ulp(hi))` applied to both
+  endpoints, which restores `lo_out ≤ t − u·ulp(t)` and
+  `hi_out ≥ t + u·ulp(t)` for every `t` in the box. Caught by re-deriving
+  the monotonicity claim rather than by a test, and now held by one:
+  `test_the_widening_covers_every_binade_boundary_a_box_straddles`
+  discharges 372 endpoint obligations across the four formats, and its
+  positive control shows the per-endpoint rule fails **31 of 31**
+  boundaries. It costs nothing at a point argument — the containment
+  sweep's widths are unchanged — and it is invisible to any sweep built
+  from point declarations, which is exactly why it needed the derivation.
+
+  **BOTH DIRECTIONS.** A wider bracket makes VERIFIED and REFUTED harder
+  alike, so this closes S9's false-REFUTED half in the same change:
+  with the threshold moved between the executed value and the box, ieee
+  mode used to call the obligation *definitely false* where the float32
+  execution makes it true. Verified as its own row
+  (`test_s9_the_false_refuted_half_closes_too`).
+
+  **REAL MODE IS UNTOUCHED, and that is checked rather than assumed.**
+  There the bracket is about the true real value, CPython's own `math`
+  module does satisfy the ±1-ulp assumption it rides on, and the
+  divergence from the compiled program is the ℝ-versus-float gap the stamp
+  already names. `iv.exp` is byte-identical; a budget passed under
+  `semantics="real"` is REFUSED rather than ignored; and the real-mode
+  `exp` stamp still carries the unchanged `EXP_LIBM_ASSUMPTION`
+  (`test_real_mode_still_judges_exp_with_no_budget_at_all`, four formats).
+
+  **WHICH STELLING VERSIONS ARE AFFECTED.** S11 (binary64) is **0.1.0 code,
+  unchanged** and present in the released tag. S9 (float32) is the
+  format-parametric mode, 0.2.0 development only. Reproduced here on
+  `v0.1.0` itself, extracted with `git archive` and run by `PYTHONPATH`
+  (no worktree, repo untouched):
+
+  ```
+    v0.1.0 __version__ = 0.1.0
+    v0.1.0 iv.exp([X,X]) = (4.244390682998849e-95, 4.2443906829988504e-95)
+    jnp.exp(X)           =  4.244390682998851e-95     (one ulp ABOVE the box)
+    inside bracket?       False
+    v0.1.0 propagate(cj, semantics="ieee") -> ['discharged']
+  ```
+
+  at `X = -217.29998556254742`, an entirely ordinary argument. The
+  obligation was `assert_(jnp.exp(x) <= 4.2443906829988504e-95)`, the
+  verdict discharged it, and executing the same program in jax falsifies
+  it.
+
+  **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID, AND HOW A READER
+  RECOGNISES ONE.** A verdict is at risk when **all** of:
+
+  * its stamp's `semantics:` line says **ieee** (`ieee (IEEE-754 binary64)`
+    or the format-parametric wording) — a `real (ℝ)` verdict is not
+    affected in any version; and
+  * its `assumes:` lines contain **`exp endpoints assume a
+    faithfully-rounded libm exp`** or the `pow` counterpart, which is
+    stamped exactly when the query used that transfer; and
+  * the status is **definite** — VERIFIED, or a set-level REFUTED that the
+    interval leg decided downstream of the `exp`/`pow`. An UNKNOWN never
+    claimed anything.
+
+  In **0.1.0** that means: a verdict produced through
+  `propagate(closed, semantics="ieee")` on a query containing `exp` or
+  `pow`, in binary64 (the only format 0.1.0's ieee mode accepted).
+  **`check()` in 0.1.0 had no `semantics` keyword** — verified at the tag,
+  `def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None,
+  strict=False)` — so no verdict from the documented front door can be
+  affected; the exposure is exactly the `propagate` entry point, which the
+  0.1.0 CHANGELOG advertised.
+
+  In **0.2.0 development** the same applies in all four formats, and
+  float32 is the dangerous one: its escapes are dense (54% of the band)
+  rather than one-in-130,000.
+
+  **WHAT TO RE-RUN.** Any recorded ieee-mode verdict whose query contains
+  `exp` or `pow`. Re-run it on a tree with this fix. With no
+  `libm_budget` it will now be UNKNOWN with the decline quoted; with a
+  budget declared it is judged against a bracket widened by that
+  declaration. A verdict that stays VERIFIED under the shipped profile was
+  never resting on the missing ulps. The cheap pre-filter that needs no
+  re-run: **if the query contains no `exp` and no `pow`, or if the stamp
+  says `real`, it is unaffected.**
+
+  **The cost, measured.** Bracket width at a point argument, in
+  representable steps of the target format, before and after:
+
+  ```
+    format     arg      declared ulps   before   after
+    float16    3.0            0.5            1       1
+    bfloat16   3.0            0.5            1       1
+    float32    3.0            6              1      13
+    float32   88.7            6              1      13
+    float64    3.0            2              2       8
+    float64 -217.3            2              2       8
+  ```
+
+  float16 and bfloat16 cost **nothing**, which is the 0.5-ulp branch doing
+  its job. End to end, ordinary obligations survive — `exp(x) > 0` over
+  `[-2, 2]` is VERIFIED in every format, and `exp(x) <= e·(1+1e-7)` over
+  `[0, 1]` in binary64 — while obligations tight to the last ulp
+  (`exp(1) <= fl(e)`) move VERIFIED → UNKNOWN, which is the class the
+  finding was about.
+
+  **The sweep behind the profile is in the tree**, not only in this file:
+  `tests/test_libm_budget.py::test_the_declared_budget_brackets_what_the_backend_computes`
+  drives 4,003 containment checks across the four formats — including 300
+  arguments inside the measured float32 escape band and S11's own
+  argument — and asserts that exact count against
+  `LIBM_EXP_SWEEP_CHECKS`, the way `BOUNDARY_DIV_SWEEP_QUOTIENTS` is
+  asserted. A sibling row shows the sweep BITES: with the widening removed
+  the same arguments escape.
+
+  **Suite, both environments, same machine** (CPython 3.12.3, jax 0.11.0,
+  jaxlib 0.11.0, numpy 2.5.1, Linux x86_64, glibc 2.39):
+
+  ```
+                          passed   skipped
+    branch point 0fc6c13    3176       10      (x64=1)
+    branch point 0fc6c13    3177        9      (no x64, as CI runs)
+    after M12-M15           3206       10      (x64=1)
+    after the budget        3277       10      (x64=1)
+    after the budget        3278        9      (no x64, as CI runs)
+  ```
+
+  They reconcile exactly: `+30` in `tests/test_ieee_narrow_formats.py` for
+  M12–M15, then `+70` in `tests/test_libm_budget.py` and `+1` in
+  `tests/test_doc_examples.py` (whose executed-block inventory went 29 to
+  30 with the new documented example). The skip SET
+  is unchanged in both environments and the one-member difference between
+  them is still `test_tripwire_arm.py`'s `threefry` case, which skips
+  *"the threefry mask fires only at x64=0"* when x64 is on; the other nine
+  (hypothesis ×6, pytest-xdist ×1, blackjax ×2) are identical in both.
+
+  **Each part was reverted ALONE and the whole suite re-run**, so the
+  coverage is attributed rather than assumed:
+
+  | reverted alone | tests red |
+  |---|---|
+  | the budget gate removed from `exp` AND `pow` (the pre-fix bracket) | **23** |
+  | the gate kept but the WIDENING made a no-op | **9** |
+  | the stamp's *declared, not verified* line dropped | **4** |
+  | the widening using each endpoint's OWN ulp (the binade bug) | **1** |
+
+  Every mutation additionally reds
+  `test_supported_primitives_doc.py::test_committed_page_matches_live_registries`,
+  because the generated primitives page quotes source LINE NUMBERS and
+  every mutation shifts them; that is an artifact of mutating, not a
+  control, and is excluded from each count — the same treatment the B5
+  entry above gives it. The attribution runs were driven with a reduced
+  environment, whose own clean baseline is 3,269 passed / 18 skipped
+  rather than 3,277 / 10; the FAILED lists are what is read here, and the
+  totals reconcile against that baseline in every row.
+
+  Three pre-existing tests changed status and each was repaired rather
+  than relaxed: `test_ieee_semantics.py::test_pow_and_exp_keep_libm_brackets_when_nan_free`
+  and `::test_pow_declines_flagged_operands_with_the_gap`, and
+  `test_three_rows.py::test_exp_stops_the_taint_and_a_later_add_stays_definite`
+  all drove ieee `exp`/`pow` with no budget. Each now declares one — so the
+  property each was written for (the bracket, the maybe-NaN gap, the
+  contraction taint) is still exercised — and the first additionally pins
+  that the undeclared call declines.
+
 *(no releases yet)*
