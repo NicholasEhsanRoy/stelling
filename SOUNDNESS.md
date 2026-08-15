@@ -6354,20 +6354,23 @@ verdicts:
   `|jnp.op(x) − true(x)|` in ulps of the target format under
   `_libm_ulp_at`'s binade convention — binary64 reference for the narrow
   formats, 60-digit `decimal` for binary64. **Every row below was re-run
-  from scratch on 2026-08-15 for the B4 amendment**; where a re-run
-  disagreed with what this entry first recorded, the re-run is what
-  stands and the difference is named:
+  from scratch on 2026-08-15 for the B4 amendment.** An EXHAUSTIVE row has
+  one right answer and the re-run is what stands. A SAMPLED row does not:
+  it is a property of its draw, so the row keeps the LARGER of the two
+  draws' maxima — the budget must clear anything either saw — and names
+  both. `>` marks the four rows the amendment changed (three in the
+  figure, one in the population):
 
   ```
     op   format     population                                       max ulps
-    exp  float16    EXHAUSTIVE, 37,479 normal-finite results           0.500028
-    exp  bfloat16   EXHAUSTIVE, 34,145 normal-finite results           0.499988
-    exp  float32    EXHAUSTIVE, 2,237,668,967 normal-finite results    5.5112
-    exp  float64    3,000,000 sampled args, default_rng(20260815)      1.6660
-    pow  float16    16,000,000 sampled (base, exp) pairs               0.5001
-    pow  bfloat16   16,000,000 sampled pairs                          0.5000
-    pow  float32    16,000,000 sampled pairs                           0.5290
-    pow  float64    1,000,000 sampled pairs, 60-digit reference        0.5056
+  > exp  float16    EXHAUSTIVE, 37,479 normal-finite results           0.500028
+  > exp  bfloat16   EXHAUSTIVE, 34,145 normal-finite results           0.499988
+  > exp  float32    EXHAUSTIVE, 2,237,668,967 normal-finite results    5.5112
+  > exp  float64    3,000,000 sampled args, seed 20260815              1.6660
+    pow  float16    16,000,000 sampled pairs, seed 20260815            0.5001
+    pow  bfloat16   16,000,000 sampled pairs, seed 20260815            0.5000
+    pow  float32    16,000,000 sampled pairs, draw A (seed unrecorded) 0.5380
+    pow  float64     1,045,976 sampled pairs, draw A (seed unrecorded) 0.5059
   ```
 
   **Four of those rows corrected what this entry previously claimed**, and
@@ -6406,12 +6409,35 @@ verdicts:
     re-derivable from the design recorded, and dropped rather than
     repeated.
 
-  The other four re-runs agree within sampling noise and confirm the
-  original: `pow` never exceeds 1 ulp in any format, on 49,000,000 pairs
-  across the two campaigns. `pow float32` drew 0.5290 here against 0.5380
-  before and `pow float64` 0.5056 against 0.5059; the larger figure of
-  each pair is what `LIBM_MEASURED` keeps, since the budget must clear
-  anything either draw saw.
+  **The four `pow` rows were re-run too, and their provenance is now
+  recorded rather than assumed.** `pow` never exceeds 1 ulp in any format,
+  on 49,000,000 pairs across the two campaigns, so the declared 1.0 is not
+  in question — but a SAMPLED maximum is a property of the sample, and
+  until this amendment the rows named neither draw:
+
+  ```
+    format     draw A (c322cec)        draw B (B4, seed 20260815)   row
+    float16    16,000,000    0.5001    16,000,000  ->  0.5001       0.5001
+    bfloat16   16,000,000    0.5000    16,000,000  ->  0.5000       0.5000
+    float32    16,000,000    0.5380    16,000,000  ->  0.5290       0.5380
+    float64     1,045,976    0.5059     1,000,000  ->  0.5056       0.5059
+  ```
+
+  Draw B is `numpy.random.default_rng(20260815)` over four regions whose
+  distributions are written out in full above `LIBM_MEASURED`, and it was
+  **run twice: identical maxima and identical kept counts**
+  (12,642,619 / 15,907,789 / 15,907,360 / 999,989 pairs with a normal
+  finite result), so the seed reproduces it.
+
+  **Draw A's seed was never recorded and draw A cannot be re-run.** On the
+  two rows where the draws disagree it is the LARGER, so it is what the
+  row keeps — a budget must clear anything either draw saw — and each of
+  those rows now says in its own text that the figure it carries is the
+  unreproducible one. That is the honest position, not a comfortable one:
+  it is the same failure mode the auditor hit in round 1 when it flagged
+  `exp@float64` as stale because its own draw gave a different number, and
+  it is why `exp@float64` was rewritten to name its seed and both draws.
+  The four `pow` rows now do the same.
 
   12,542 float32 arguments exceed 1 ulp, and 12,520 of them are inside
   `[88.54634857177734, 88.72283172607422]` — a band holding exactly 23,133
@@ -6553,14 +6579,44 @@ verdicts:
   boundary above `lo` has `ulp = 2·ulp(lo)` and is where `g` dips lowest,
   and for `u < 2^(p−1)` every later boundary dips less. **The second case
   needs `u ≤ 2^(p−1)`, and past it there is no sound finite endpoint at
-  all**: `1 − u·2^(1−p)` turns non-positive and `g(2^k) → −∞`. That
-  threshold is 1024 for float16 and **128 for bfloat16** — under the 108.7
-  ulps this very backend's bfloat16 `exp` reaches on flushed subnormal
-  results, so a caller declaring a budget that covers its own backend is
-  in the neighbourhood of it. Past the threshold the widened endpoint is
-  `-inf`, clamped by `floor`; the `lo = -inf` arm is the mirror image
-  under `t ↦ −t` and saturates to `+inf`, latent today only because
-  `exp`/`pow` have range in `[0, ∞)`, and closed anyway.
+  all**: `1 − u·2^(1−p)` turns non-positive and `g(2^k) → −∞`. Past the
+  threshold the widened endpoint is `-inf`, clamped by `floor`; the
+  `lo = -inf` arm is the mirror image under `t ↦ −t` and saturates to
+  `+inf`, latent today only because `exp`/`pow` have range in `[0, ∞)`,
+  and closed anyway.
+
+  **THE THRESHOLD IS CROSSED BY ROUNDING UP, NOT BY MEASURING — and the
+  first two versions of this paragraph had that inequality backwards.**
+  They read *"1024 for float16 and 128 for bfloat16 — **under** the 108.7
+  ulps this backend's bfloat16 `exp` reaches on flushed subnormal
+  results"*. 128 > 108.7; the threshold is above the measurement, not
+  below it. The true statement is sharper, and it is a cap rather than an
+  anecdote: a subnormal result flushed to zero has error `t/tiny`, since
+  `_libm_ulp_at` floors a subnormal's ulp at `tiny`, and the largest
+  representable subnormal is `tiny·(2^(p−1) − 1)` — so **a flush measures
+  at most `2^(p−1) − 1` ulps, exactly one ulp BELOW the threshold, in
+  every format.** Re-derived here in exact `Fraction` arithmetic:
+
+  ```
+    format     p    largest subnormal / tiny        threshold 2**(p-1)
+    float16    11                       1023                      1024
+    bfloat16    8                        127                       128
+    float32    24                    8388607                   8388608
+    float64    53           4503599627370495          4503599627370496
+  ```
+
+  Over the open subnormal band the bound is `< 2^(p−1)`, a supremum that
+  is not attained. So the threshold sits just **above** anything that can
+  be observed, and this backend's bfloat16 `exp` flush at 108.698176 is
+  under 127 and therefore under 128. What crosses it is a caller ROUNDING
+  a measurement up — 108.7 rounds to 128 as readily as to 109, and
+  rounding up is this profile's own stated convention — a real and likely
+  route, but a declaration rather than an observation. The side condition
+  is necessary either way: control C below fails 1,538 obligations without
+  it. Now held by
+  `test_a_flush_to_zero_can_never_measure_up_to_the_threshold`, which
+  computes the table above rather than quoting it, so the direction cannot
+  drift back.
 
   Verifying the doubling on a copy is not enough to adopt it: the side
   condition was NOT part of the rule as proposed, and the sweep below
@@ -6738,6 +6794,8 @@ verdicts:
     after the budget        3278        9      (no x64, as CI runs)
     after the B4 amendment  3293       10      (x64=1)
     after the B4 amendment  3294        9      (no x64, as CI runs)
+    after the B4 re-audit   3295       10      (x64=1)
+    after the B4 re-audit   3296        9      (no x64, as CI runs)
   ```
 
   They reconcile exactly: `+30` in `tests/test_ieee_narrow_formats.py` for
@@ -6745,7 +6803,10 @@ verdicts:
   `tests/test_doc_examples.py` (whose executed-block inventory went 29 to
   30 with the new documented example), then `+14` in
   `tests/test_libm_budget.py` and `+2` in
-  `tests/test_ieee_narrow_formats.py` for B4. The skip SET is unchanged in
+  `tests/test_ieee_narrow_formats.py` for B4, then `+2` in
+  `tests/test_libm_budget.py` for the re-audit's two cosmetic items — the
+  flush-cap table and the sampled-row provenance, one test each. The skip
+  SET is unchanged in
   both environments and the one-member difference between them is still
   `test_tripwire_arm.py`'s `threefry` case, which skips *"the threefry
   mask fires only at x64=0"* when x64 is on; the other nine (hypothesis
@@ -6777,10 +6838,19 @@ verdicts:
   | the module-level `_assert_ieee_binary_kernels_are_format_parametric()` call deleted | **1** |
   | the module-level `_assert_libm_transfers_take_a_budget()` call deleted | **1** |
 
-  The last two were **0** before this amendment — that is the whole of
-  finding 6. The half-infinite rows are the whole of finding 1, and the
-  measure of how badly the instrument was aimed: reverting the *entire*
-  B4 widening fix reds nothing that existed before it.
+  and, for the two cosmetic items the re-audit returned:
+
+  | reverted alone | tests red |
+  |---|---|
+  | `_libm_ulp_at` stops flooring a subnormal's ulp at `tiny` (the flush cap's premise) | **4** |
+  | a `pow` row drops the seed of the draw that CAN be re-run | **1** |
+  | a `pow` row stops disclosing that its carried figure's seed was NEVER recorded | **1** |
+
+  The two deleted-census-call rows were **0** before this amendment — that
+  is the whole of finding 6. The half-infinite rows are the whole of
+  finding 1, and the measure of how badly the instrument was aimed:
+  reverting the *entire* B4 widening fix reds nothing that existed before
+  it.
   `test_supported_primitives_doc.py::test_committed_page_matches_live_registries`
   reds on every mutation that shifts a source line and is excluded from
   every count above, the same treatment the B5 entry gives it.

@@ -784,6 +784,34 @@ def test_the_signature_census_bites_when_no_transfer_rides_the_tier(
     assert "guards nothing" in str(e.value)
 
 
+def test_every_sampled_row_names_its_draw():
+    """A SAMPLED maximum is a property of the SAMPLE, not of the backend,
+    so the row has to say which sample. Without that a reader who re-runs
+    and gets a different number cannot tell *"the row is stale"* from
+    *"your draw differs"* — which is exactly how `exp@float64` was
+    mis-flagged in the first round of this audit (audit 0.2.0 B4).
+
+    Every sampled row names the seed of the draw that can be re-run and
+    names the other draw. The two rows whose carried figure comes from the
+    draw that CANNOT be re-run say so, in the row, beside the figure."""
+    import re
+
+    sampled = {k: v for k, v in LIBM_MEASURED.items()
+               if not v.startswith("EXHAUSTIVE")}
+    assert set(sampled) == {("exp", "float64"), ("pow", "float16"),
+                            ("pow", "bfloat16"), ("pow", "float32"),
+                            ("pow", "float64")}, sorted(sampled)
+    for key, prose in sampled.items():
+        assert "sampled" in prose, key
+        assert "20260815" in prose, key
+        assert re.search(r"[Dd]raw [AB]|earlier draw", prose), key
+
+    # the larger of the two draws is what each row keeps; on these two that
+    # is the unreproducible one, and the row must not hide it
+    for key in (("pow", "float32"), ("pow", "float64"), ("exp", "float64")):
+        assert "not recorded" in LIBM_MEASURED[key].lower(), key
+
+
 def test_an_unknown_profile_name_raises_where_it_was_written():
     def h():
         x = any_array((), "float64", (1.0, 2.0))
@@ -919,11 +947,11 @@ def test_widening_leaves_infinite_endpoints_alone():
 def test_a_budget_past_two_to_the_p_minus_one_unbounds_a_half_infinite_box():
     """The side condition on the doubling. ``g(2**k) = 2**k*(1 -
     u*2**(1-p))`` rises with ``k`` only while ``u <= 2**(p-1)``; past that
-    it falls without bound and NO finite lower endpoint is sound. bfloat16
-    reaches the threshold at 128 ulps — under the 108.7 this very backend's
-    bfloat16 ``exp`` measures on flushed subnormal results, so a caller
-    declaring a budget that covers its own backend is in the
-    neighbourhood."""
+    it falls without bound and NO finite lower endpoint is sound.
+
+    A caller reaches that threshold by ROUNDING UP, never by measuring —
+    the checkable half of which is
+    `test_a_flush_to_zero_can_never_measure_up_to_the_threshold`."""
     for fmt_name in ("float16", "bfloat16", "float32", "float64"):
         fmt = _FLOAT_FORMATS[fmt_name]
         thr = 2.0 ** (fmt[0] - 1)
@@ -939,6 +967,55 @@ def test_a_budget_past_two_to_the_p_minus_one_unbounds_a_half_infinite_box():
         # the mirror arm saturates upward
         b = iv.IntervalArray(shape=(), los=(-math.inf,), his=(-1.0,))
         assert _libm_widen_box(b, fmt, thr * 4.0, floor=None).his[0] == math.inf
+
+
+def test_a_flush_to_zero_can_never_measure_up_to_the_threshold():
+    """Which way round the ``2**(p-1)`` threshold sits, checked in exact
+    rationals rather than asserted in prose — the sentence arguing its
+    reachability was inverted twice before this test existed.
+
+    The worst error this module names is a subnormal result FLUSHED to
+    zero. `_libm_ulp_at` floors at ``tiny``, so that error is ``t/tiny``
+    for a true value ``t`` below ``2**emin``. The largest REPRESENTABLE
+    subnormal is ``tiny*(2**(p-1) - 1)``, so a flush measures at most
+    ``2**(p-1) - 1`` ulps — exactly one ulp UNDER the threshold, in every
+    format; over the open subnormal band the bound is ``< 2**(p-1)``, a
+    supremum that is not attained. The threshold is therefore just ABOVE
+    anything observable, and a caller crosses it only by rounding a
+    measurement up."""
+    from fractions import Fraction
+
+    caps = {}
+    for fmt_name, fmt in _FLOAT_FORMATS.items():
+        p, emin, _emax = fmt
+        tiny = Fraction(2) ** (emin - p + 1)
+        min_normal = Fraction(2) ** emin
+        threshold = Fraction(2) ** (p - 1)
+
+        # the helper really does floor a subnormal's ulp at `tiny`, which
+        # is what makes t/tiny the error in ulps
+        largest_sub = min_normal - tiny
+        assert _libm_ulp_at(float(largest_sub), fmt) == float(tiny), fmt_name
+        assert _libm_ulp_at(float(min_normal), fmt) == float(tiny), fmt_name
+
+        cap = largest_sub / tiny                    # exact, in ulps
+        assert cap == threshold - 1, (fmt_name, cap, threshold)
+        assert cap < threshold
+        assert min_normal / tiny == threshold       # the open-band supremum
+        caps[fmt_name] = (int(cap), int(threshold))
+
+    assert caps == {
+        "float16": (1023, 1024),
+        "bfloat16": (127, 128),
+        "float32": (8388607, 8388608),
+        "float64": (4503599627370495, 4503599627370496),
+    }, caps
+
+    # and the flush this backend actually produces is under BOTH
+    bf = _FLOAT_FORMATS["bfloat16"]
+    measured = 9.982350930569248e-39 / _libm_ulp_at(9.982350930569248e-39, bf)
+    assert 108.0 < measured < 109.0, measured
+    assert measured < caps["bfloat16"][0] < caps["bfloat16"][1]
 
 
 def test_widening_saturates_rather_than_producing_a_nan_endpoint():

@@ -4358,15 +4358,32 @@ def _libm_widen_box(
     ``g`` dips lowest, and for ``u < 2**(p-1)`` every boundary after it
     dips less.
 
-    **AND THAT SIDE CONDITION IS REACHABLE.** Past ``u = 2**(p-1)`` ulps —
-    1024 for float16, **128 for bfloat16**, which is BELOW the 108.7 ulps
-    this backend's bfloat16 ``exp`` really reaches on flushed subnormal
-    results, so a caller declaring a budget that covers its own backend is
-    in the neighbourhood — ``1 − u·2**(1-p)`` turns non-positive,
-    ``g(2**k) → −∞``, and the infimum over a half-infinite box is
-    UNBOUNDED: no finite lower endpoint is sound, and the doubled ``U``
-    would mint one. That arm returns ``-inf`` (then ``floor``), which is
-    the true bound rather than a giving-up.
+    **AND THAT SIDE CONDITION IS REACHABLE — BY ROUNDING UP, NOT BY
+    MEASURING.** Past ``u = 2**(p-1)`` ulps — 1024 for float16, **128 for
+    bfloat16**, 8388608 for float32 — ``1 − u·2**(1-p)`` turns
+    non-positive, ``g(2**k) → −∞``, and the infimum over a half-infinite
+    box is UNBOUNDED: no finite lower endpoint is sound, and the doubled
+    ``U`` would mint one. That arm returns ``-inf`` (then ``floor``),
+    which is the true bound rather than a giving-up.
+
+    **A MEASUREMENT CANNOT REACH THAT THRESHOLD**, and which way round
+    that goes is worth stating rather than waving at. The worst error this
+    module has a name for — a subnormal result FLUSHED to zero — is
+    ``t/tiny`` for a true value ``t`` under ``2**emin``, because
+    :func:`_libm_ulp_at` floors at ``tiny``. The largest representable
+    subnormal is ``tiny·(2**(p-1) − 1)``, so a flush measures at most
+    ``2**(p-1) − 1`` ulps: exactly ONE ulp under the threshold, in every
+    format — 1023 vs 1024, 127 vs 128, 8388607 vs 8388608,
+    4503599627370495 vs 4503599627370496. For a true value anywhere in the
+    open subnormal band the bound is ``< 2**(p-1)``, a supremum that is
+    not attained. **The threshold therefore sits just ABOVE anything that
+    can be observed**, and this backend's bfloat16 ``exp`` flush reaches
+    108.7 — under 127 and so under 128. What crosses the threshold is a
+    caller ROUNDING a measurement up, which is real and likely: 108.7
+    rounds to 128 as readily as to 109, and rounding up is this profile's
+    own stated convention. The side condition is necessary either way —
+    the extremiser sweep's control C fails 1,538 obligations without it —
+    but the route to it is a DECLARATION, not an observation.
 
     The upper side is the mirror image under ``t ↦ −t``, ``ulp`` being
     even: ``lo = -inf`` needs ``U = 2·ulp(hi)`` and saturates to ``+inf``
@@ -4455,6 +4472,38 @@ def _libm_widen_box(
 # jax, compare against a higher-precision reference. A figure a reader can
 # regenerate is worth more than a larger one they cannot, so these are the
 # measured maxima and :data:`XLA_CPU_2026_08` rounds each UP to its budget.
+#
+# **THE SAMPLED ROWS NAME THEIR DRAW, because a sampled maximum is not a
+# property of the backend — it is a property of the sample, and a reader who
+# re-runs and gets a different number must be able to tell "the row is stale"
+# from "your draw differs".** Two campaigns measured these:
+#
+#   DRAW A (c322cec) — the first campaign. Its regions are described below,
+#     but ITS SEED WAS NOT RECORDED, so draw A cannot be re-run. Where it is
+#     the larger of the two it is still what the row carries, because the
+#     budget must clear anything either draw saw; it is flagged as
+#     unreproducible each time.
+#   DRAW B (B4, 2026-08-15) — ``numpy.random.default_rng(20260815)``,
+#     re-measured from scratch for the amendment and re-run to confirm the
+#     seed reproduces it.
+#
+# Draw B's sampled designs, in full, because "four regions" is not a design:
+#
+#   exp@float64 — 3,000,000 arguments: 1,000,000 uniform on each of
+#     [-708, 709], [-40, 40], [-1, 1], drawn in that order.
+#   pow@* — n pairs, n/4 per region, drawn in this order, each cast to the
+#     target format, keeping the pairs whose true result is normal and
+#     finite:
+#       1. broad            base = 2**U(-20, 20),   exponent = U(-8, 8)
+#       2. under overflow   base = 2**U(0.5, 12),
+#                           exponent = U(0.80, 0.999)*emax / log2(base)
+#       3. bases near 1     base = 1 + U(-0.05, 0.05),
+#                           exponent = U(-400, 400)
+#       4. powers of two    base = 2**k, k ~ randint(-12, 13) (0 mapped to 1),
+#                           exponent = U(-emax/12, emax/12)
+#
+# References: binary64 for the three narrow formats; a 60-decimal-digit
+# ``decimal`` context (``prec=70``) for binary64 targets.
 LIBM_MEASURED: dict[tuple[str, str], str] = {
     ("exp", "float16"): (
         "EXHAUSTIVE over all 63,487 distinct finite float16 arguments, "
@@ -4499,29 +4548,49 @@ LIBM_MEASURED: dict[tuple[str, str], str] = {
         "10,559 (0.35%) above 1 ulp, so XLA's binary64 exp is not "
         "faithfully rounded either and a 1-ulp bracket around glibc's "
         "leaks in both directions. SAMPLED, NOT EXHAUSTIVE, and this row "
-        "is the demonstration of what that costs: an earlier draw of the "
-        "same size recorded 1.6470 as its maximum and this one beat it. A "
-        "sampled row bounds what was sampled and nothing more, which is "
-        "why the declared budget rounds up to the next integer rather than "
-        "to the figure above"
+        "is the demonstration of what that costs: draw A, an earlier draw "
+        "of the same size whose SEED WAS NOT RECORDED, reached 1.6470 and "
+        "this one beat it. Here the reproducible draw is also the larger, "
+        "so the row carries it. A sampled row bounds what was sampled and "
+        "nothing more, which is why the declared budget rounds up to the "
+        "next integer rather than to the figure above"
     ),
     ("pow", "float16"): (
-        "16,000,000 sampled (base, exponent) pairs over four regions — "
-        "broad, tuned to land just under overflow, bases near 1, "
-        "powers-of-two bases: max error 0.5001 ulps, none above 1 ulp"
+        "TWO INDEPENDENT DRAWS and the row carries the larger. Draw B "
+        "(seed 20260815, re-run to confirm the seed reproduces it exactly): "
+        "16,000,000 sampled (base, exponent) pairs over the four regions "
+        "above, 12,642,619 of them with a normal finite result, reaching "
+        "0.5001 with 509 above half an ulp. Draw A (the first campaign, "
+        "16,000,000 pairs, SEED NOT RECORDED so it cannot be re-run): also "
+        "0.5001. The two agree. max error 0.5001 ulps, none above 1 ulp"
     ),
     ("pow", "bfloat16"): (
-        "16,000,000 sampled (base, exponent) pairs over the same four "
-        "regions: max error 0.5000 ulps, none above 1 ulp"
+        "Draw B (seed 20260815, reproduced): 16,000,000 sampled pairs over "
+        "the same four regions, 15,907,789 with a normal finite result, "
+        "reaching 0.5000 with 74 above half an ulp. Draw A (first "
+        "campaign, 16,000,000 pairs, SEED NOT RECORDED): also 0.5000. The "
+        "two agree. max error 0.5000 ulps, none above 1 ulp"
     ),
     ("pow", "float32"): (
-        "16,000,000 sampled (base, exponent) pairs over the same four "
-        "regions: max error 0.5380 ulps, none above 1 ulp — pow does not "
-        "share exp's overflow-band path"
+        "THE TWO DRAWS DISAGREE AND THE ROW CARRIES THE LARGER, WHICH IS "
+        "THE ONE THAT CANNOT BE RE-RUN. Draw A (first campaign, "
+        "16,000,000 sampled pairs over the same four regions, SEED NOT "
+        "RECORDED) reached 0.5380. Draw B (seed 20260815, reproduced): "
+        "16,000,000 pairs, 15,907,360 with a normal finite result, only "
+        "0.5290, with 24,511 above half an ulp. A budget must clear "
+        "anything either draw saw, so the row states A's figure and the "
+        "declared 1.0 covers both with room. max error 0.5380 ulps, none "
+        "above 1 ulp in either draw — pow does not share exp's "
+        "overflow-band path"
     ),
     ("pow", "float64"): (
-        "1,045,976 sampled (base, exponent) pairs against a 60-digit "
-        "decimal reference: max error 0.5059 ulps, none above 1 ulp"
+        "The two draws disagree in the fourth decimal and the row carries "
+        "the larger, which again is the one that cannot be re-run. Draw A "
+        "(first campaign, 1,045,976 sampled pairs, 60-digit decimal "
+        "reference, SEED NOT RECORDED) reached 0.5059. Draw B (seed 20260815, "
+        "reproduced): 1,000,000 pairs against a 60-digit reference, 999,989 "
+        "with a normal finite result, reached 0.5056 with 853 above half "
+        "an ulp. max error 0.5059 ulps, none above 1 ulp in either draw"
     ),
 }
 
@@ -5896,7 +5965,10 @@ XLA_CPU_2026_08 = LibmBudget(
         "and a 60-digit decimal reference for binary64. exp is EXHAUSTIVE "
         "in all three narrow formats and, in float32, over every argument "
         "whose result is normal and finite; exp in float64 and pow "
-        "everywhere are SAMPLED and bound only what was sampled. EVERY exp "
+        "everywhere are SAMPLED and bound only what was sampled — those "
+        "five rows were drawn twice, the row keeps the larger maximum of "
+        "the two draws, and LIBM_MEASURED names each draw's seed or says "
+        "outright that it was not recorded. EVERY exp "
         "row is over the arguments whose RESULT IS NORMAL AND FINITE: a "
         "result that underflows to a subnormal is flushed to zero by this "
         "backend and is covered by the subnormal haze, not by an accuracy "
@@ -5927,9 +5999,12 @@ XLA_CPU_2026_08 = LibmBudget(
         # measured 1.6660 over 3M samples (and 1.6470 over an earlier,
         # independent 3M); 2 is that rounded up
         ("exp", "float64"): 2.0,
-        # measured 0.5001 / 0.5000 / 0.5380 / 0.5059 — every one a hair
-        # above correctly rounded and nowhere near faithful. 1.0 is the
-        # classic faithful-rounding claim and covers all four with room.
+        # measured 0.5001 / 0.5000 / 0.5380 / 0.5059, each the larger of
+        # two independent draws (the other gave 0.5001 / 0.5000 / 0.5290 /
+        # 0.5056) — every one a hair above correctly rounded and nowhere
+        # near faithful. 1.0 is the classic faithful-rounding claim and
+        # covers every figure in both draws with room, which is what makes
+        # the unrecorded seed on the larger draw survivable here.
         ("pow", "float16"): 1.0,
         ("pow", "bfloat16"): 1.0,
         ("pow", "float32"): 1.0,
