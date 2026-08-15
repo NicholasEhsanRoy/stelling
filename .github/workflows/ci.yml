@@ -68,7 +68,7 @@ permissions:
 #
 # ALL THREE OF THOSE ARE PROSE, NOT GATES — said here because two jobs down
 # this workflow does machine-check a pass count (`grep -qE '^2 passed'` on the
-# acceptance log, and `'^18 passed'` on the reproducer log), so a reader could
+# acceptance log, and `'^20 passed'` on the reproducer log), so a reader could
 # reasonably assume these are checked too. They are not. Nothing in this file
 # compares the two jax lanes to each other; the comparison is an instruction to
 # a human reading a PR.
@@ -92,7 +92,7 @@ permissions:
 #
 # KNOWN-OPEN AND RECORDED RATHER THAN CHANGED: SIX LINE-ANCHORED GREPS OVER
 # COLOURED-CAPABLE LOGS. Counted in this file: `^SKIPPED` and `^2 passed` on
-# `acceptance.log`, `^SKIPPED` and `^18 passed` on `reproducer.log`, and
+# `acceptance.log`, `^SKIPPED` and `^20 passed` on `reproducer.log`, and
 # `^(XPASS |\[XPASS|FAILED .*\[XPASS)` and `^XFAIL ` on `property.txt`. Each is
 # a `^`-anchored match over a log written by `… | tee`, and each decides
 # green/red on a step that `exit 1`s. pytest paints its short-summary lines
@@ -100,7 +100,7 @@ permissions:
 # `FORCE_COLOR` is set — an SGR escape then sits between the start of the line
 # and the word being anchored, and every one of these greps misses on output
 # that visibly contains what it is looking for. `^SKIPPED` and the XPASS
-# alternation FAIL OPEN when they miss; `^2 passed`, `^18 passed` and the
+# alternation FAIL OPEN when they miss; `^2 passed`, `^20 passed` and the
 # `^XFAIL ` count fail closed. This is safe here only because GitHub Actions
 # does not set `FORCE_COLOR` on the runner — it is a property of the host, not
 # of these steps. The same class was live and costing something in
@@ -462,7 +462,7 @@ jobs:
             exit 1
           fi
 
-  # THE REPRODUCER ACCEPTANCE SURFACE — 18 tests that ran in NO CI job.
+  # THE REPRODUCER ACCEPTANCE SURFACE — 20 tests that ran in NO CI job.
   #
   # Measured, by enumerating every gate in the suite: no test is skipped
   # everywhere, but 18 ran nowhere in CI, because neither library they gate on
@@ -682,8 +682,8 @@ jobs:
           # passing with fewer tests. 10 of these come from selecting the whole
           # of test_square_acceptance_jaxfluids.py, so adding a test to that
           # file is expected to fail this line: update the number deliberately.
-          if ! grep -qE '^18 passed' "${RUNNER_TEMP}/reproducer.log"; then
-            echo "::error title=not 18 passed::The reproducer acceptance is 18 tests: 14 gated on jaxfluids and 4 on maddening. A different number means one was renamed, deselected or added — see the log above and update this count deliberately rather than relaxing the check."
+          if ! grep -qE '^20 passed' "${RUNNER_TEMP}/reproducer.log"; then
+            echo "::error title=not 20 passed::The reproducer acceptance is 20 tests: 16 gated on jaxfluids and 4 on maddening. A different number means one was renamed, deselected or added — see the log above and update this count deliberately rather than relaxing the check."
             exit 1
           fi
       # The whole suite, in the one environment where jaxfluids and maddening

@@ -5362,7 +5362,6 @@ verdicts:
   test can separate it; and `.is_integer()` versus `== int(...)` differs
   only at inf/nan, which the literal decoder refuses earlier.
 
-<<<<<<< HEAD
 - **2026-08-14 (0.2.0 development, unreleased): FALSE VERIFIED — a
   forwarded relational `assume` was resolved by a bare integer, and a
   bare integer does not say which scope it is an id in.** An `assume`
@@ -6368,7 +6367,7 @@ verdicts:
   what `942df81` put on `main` after this branch forked — brought onto the
   branch so the two-environment claim above is a measurement rather than a
   prediction about a merge.
-=======
+
 - **2026-08-15 (pre-release): an IEEE divisor box that reaches zero was
   divided as if the zero had a sign, and it flipped verdicts in ALL FOUR
   FORMATS.** Audit 0.2.0 S10 (found by that audit's IEEE-formats lens as
@@ -7207,6 +7206,5 @@ verdicts:
   three property modules — are brought over by cherry-picking that
   commit's hunks rather than by predicting the merge. Its fifth and sixth
   files belong to branches this one does not contain.
->>>>>>> fix/B5-ieee-div-mul
 
 *(no releases yet)*
