@@ -611,6 +611,69 @@ A CI consumer should treat `envelope not load-bearing` as a flag: here
 the obligation is a theorem — `max(a, 0) >= 0` for every `a` — and the
 declared envelope did no work at all.
 
+### When the precondition itself is empty
+
+A relational `assume` that the interval domain cannot apply is forwarded to
+the solver as a positive axiom, and a forwarded axiom set can be
+unsatisfiable — against the declared boxes (`dt ∈ [5, 10]`,
+`dt_max ∈ [0, 1]`, `assume(dt < dt_max)`) or on its own (`assume(x < y)`,
+`assume(y < z)`, `assume(z < x)`). Then `boxes ∧ axioms ∧ ¬P` is unsat *for
+every* `P`, and a discharge says nothing about the obligation.
+
+Before accepting such a discharge, `check()` asks the backend that answered
+`unsat` one more question, on the same script with the negated obligation
+removed: are the declared boxes and those axioms satisfiable at all?
+
+* **`unsat`** — the admitted region is empty. Every obligation over it
+  would be vacuously true, so this is a harness defect and `check()`
+  **raises `stelling.propagate.UnsatisfiableAssumptionError`** rather than
+  returning a verdict. It is the same class, and the same closing sentence
+  (*"harness defect; nothing was verified"*), that a non-relational
+  `assume(dt < 1.0)` over `dt ∈ [5, 10]` has always raised. Fix the
+  declaration or the precondition; nothing was verified.
+* **`sat`, and this obligation's script stated *every* assume of the
+  query** — a point of the region exists. The discharge stands, clean.
+* **`sat`, but some assume was left out of this script** — nothing was
+  established. This is the case audit B3 found being read as the one above.
+  A script states only the assumes whose operands lie in the obligation's
+  backward cone, so it can describe a strict *relaxation* of your
+  precondition, and a model of a relaxation is not a point of the thing
+  relaxed. Treated as **undecided**, below. Measured: `x, y, z ∈ [-10,10]`
+  under `assume(x < y)`, `assume(y < z)`, `assume(z < x)` with
+  `assert_(x - y <= 0.0)` — the assert's cone is `{x, y}`, so the script
+  states only `x < y`, which is satisfiable; the query's precondition is
+  not, and the VERIFIED was stamped clean.
+* **undecided** — nobody answered, or nobody answered *this* question. The
+  discharge stands (it is sound — every admitted point satisfies the
+  obligation, and there may be none) and it stops being clean: the
+  obligation's detail line carries `[MAY BE VACUOUS: …]` and the stamp
+  carries an `assumes:` line beginning `precondition satisfiability
+  uncertified`. A note on the obligation names which of the two mechanisms
+  applied, and on the second one lists the assumes the check never saw.
+
+The extra question is asked only where it can have a second answer — an
+obligation that discharged *and* whose script carries a forwarded axiom —
+and it is skipped when the propagation's own non-emptiness certificate
+already exhibited a point of the declared set satisfying every assume. On a
+query with no relational assume it costs nothing at all.
+
+That certificate is also the one mechanism that reaches the whole query at
+once, so it is what clears a cone-split run: `assume(x <= y)`,
+`assume(y <= z)` with an assert on `{x, y}` is stamped clean because a
+probed point satisfies all three declarations' assumes, while the same
+harness with `<` is not — the probe grid finds no point at which a *strict*
+chain is definitely true. Both return VERIFIED; only the disclosure differs.
+
+**The vacuity line reads differently on an uncertified run.** `vacuity
+checked … no obligation discharges with the declared bounds widened` is
+read as *this VERIFIED is substantive*, and on a run whose assumed region
+was never shown non-empty it can mean the opposite: widening a bound can
+make an unsatisfiable precondition satisfiable again, so the re-check fails
+to re-derive the obligation for a reason that has nothing to do with the
+envelope doing work. The line therefore appends `WHAT THIS MEASUREMENT DOES
+NOT SAY: …` whenever the stamp carries any `precondition satisfiability
+uncertified` line.
+
 ## Reading an UNKNOWN
 
 An UNKNOWN always says why, in the notes and in the coverage line. Work
@@ -686,6 +749,15 @@ in this order:
    was either applied to the box, definitely true over it, or emitted to
    that obligation's own script. When one was not, the withholding note
    names it.
+
+   **And an assume that DID reach the solver makes the outcome conditional,
+   which the stamp now says.** An axiom the solver was given is a premise
+   the answer rests on, so a VERIFIED under one is a claim about the
+   declared boxes *intersected with* your precondition, not about the
+   declared boxes. Look for the `assumes:` line beginning `forwarded
+   relational assume(s) on obligation(s) …` — it carries the same phrase
+   *"the verdict holds where the precondition holds"* that an interval
+   narrowing has always carried.
 9. **A non-integer `pow` exponent that is not a small dyadic rational.**
    This is the item most likely to surprise you, so it is stated in full.
 

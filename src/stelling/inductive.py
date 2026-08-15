@@ -5,8 +5,9 @@
 
 Given a loop body and declared invariant bounds, verify that one step of the
 body preserves the invariant: if the state starts within bounds, it stays
-within bounds after one iteration.  When verified, induction gives the
-invariant for all iterations.
+within bounds after one iteration.  When verified **unconditionally**,
+induction gives the invariant for all iterations — see the assume caveat
+below for what makes a VERIFIED conditional instead.
 
 The single entry point is :func:`check_inductive_step`.  It constructs a
 harness that declares inputs at the invariant bounds, runs one step of the
@@ -22,6 +23,43 @@ step of a proof by induction).
 * That the initial state satisfies the invariant.  The user must verify
   separately that their starting state is within bounds.
 * Convergence, stability, or attractiveness.  Only boundedness preservation.
+* **The inductive step at all, if the body states an ``assume``** (audit
+  0.2.0 M5).  An ``assume`` inside the body is a precondition on the WHOLE
+  query, so a VERIFIED then reads "every state IN THE ASSUMED SUB-REGION
+  stays within bounds after one step" — and the induction does not close,
+  because the successor state need not re-enter that sub-region.  Measured:
+  body ``x -> 1.5x`` on ``[-1, 1]`` under ``assume(x <= 0.5)`` and
+  ``assume(x >= -0.5)`` is VERIFIED, and iterating from the admitted
+  ``x = 0.4`` leaves ``[-1, 1]`` at step 3.  The verdict says so — the note
+  reads ``inductive step CONDITIONAL — NOT the inductive step`` — and the
+  fix is to put the restriction in ``state_bounds``, where the successor is
+  checked against the same set the predecessor was drawn from.
+* Anything at all, if the body's assumes CONTRADICT each other AND ONE
+  OBLIGATION'S SCRIPT STATES THE WHOLE CONTRADICTION.  That is a harness
+  defect and it raises
+  :class:`stelling.propagate.UnsatisfiableAssumptionError` rather than
+  returning a verdict (audit 0.2.0 S7): an empty assumed region makes every
+  obligation vacuously true, and before this refusal existed the body
+  ``x, y -> (x + y) * 10`` on ``[-1, 1]²`` under ``assume(x < y)`` and
+  ``assume(y < x)`` returned VERIFIED with "the invariant is preserved by
+  one step" — from ``x = y = 0.5`` one step gives ``10.0``.
+
+  **THE QUALIFIER IS LOAD-BEARING AND THE RESIDUAL GAP IS REAL** (audit B3).
+  The refusal is a solver's ``unsat`` on ONE obligation's script, and a
+  script states only the assumes whose operands lie in that obligation's
+  backward cone.  Spread the contradiction across cones — three state
+  variables under ``assume(x < y)``, ``assume(y < z)``, ``assume(z < x)``,
+  where every obligation depends on at most two of them — and no script ever
+  holds more than one link of the cycle.  Nothing can prove the region empty
+  and the call RETURNS, VERIFIED.  What it no longer does is call that
+  VERIFIED clean: every discharge that rested on a partial axiom set carries
+  ``[MAY BE VACUOUS: …]`` on its own detail line and a stamped
+  ``precondition satisfiability uncertified``.  Measured on this build, body
+  ``{x, y, z} -> {0.6(x - y) + 0.6, 0.5y, 0.5z}`` on ``[-1, 1]³`` under that
+  3-cycle: VERIFIED, both disclosures present, and the assumed region admits
+  no state at all.  Closing the gap needs a WHOLE-QUERY admitted-region
+  script — one emission naming every assume's operands, which no obligation
+  slice can — and that is not in this build.
 
 This module imports jax-free (the harness import happens inside the function,
 at call time): importing it costs nothing in a bare environment, but *calling*
@@ -87,7 +125,11 @@ def check_inductive_step(
     -------
     stelling.verdict.Verdict
         The verdict.  ``VERIFIED`` means the invariant is preserved by one
-        step.  ``REFUTED`` means the body can escape the bounds from some
+        step — UNLESS the body states an ``assume``, in which case the claim
+        is restricted to the assumed sub-region and is NOT the inductive
+        step; the appended note says which of the two it is, and the module
+        docstring's "What this does NOT prove" list carries the reason.
+        ``REFUTED`` means the body can escape the bounds from some
         starting point within them.  ``UNKNOWN`` means the analysis could not
         decide — pass ``solver_timeout_ms`` to escalate undecided obligations
         to the SMT portfolio, which often resolves straddles the interval
@@ -106,6 +148,12 @@ def check_inductive_step(
         match ``state_bounds``.
     TypeError
         If ``state_bounds`` values have the wrong structure.
+    stelling.propagate.UnsatisfiableAssumptionError
+        If the body's assumes admit no state at all (a subclass of
+        ``ValueError``).  A harness defect, raised rather than returned for
+        the same reason :func:`stelling.preconditions.check` lets it through:
+        an empty assumed region makes every obligation vacuously true, so
+        nothing was verified and a status would say otherwise.
     """
     # -- Validate inputs eagerly, before tracing --------------------------------
     if not state_bounds:
@@ -210,6 +258,72 @@ def check_inductive_step(
     # -- Annotate the verdict with inductive-step context ------------------------
     import dataclasses
 
+    # WHOSE OBLIGATIONS ARE WHOSE (audit 0.2.0 M4). The harness appends
+    # exactly two obligations per state variable, in `_normalized_bounds`
+    # order, AFTER `body` has been traced — so a body that declares its own
+    # `assert_` puts those first and shifts every index by however many it
+    # declared. The predecessor read `lo_idx = 2*i` off the raw index and
+    # named the wrong variable and the wrong bound whenever it did; a softer
+    # misalignment produced an EMPTY `escaped` list and fell back to the
+    # generic sentence, which is how it stayed invisible.
+    #
+    # The offset is derivable rather than assumed: the count is fixed
+    # (`2 * len(_normalized_bounds)`) and the position is fixed (last), both
+    # by construction of the harness twenty lines up, and jaxpr equations are
+    # in trace order. A body assert inside a `jit` is bound where the `jit`
+    # is called, which is still before the loop below runs. If the arithmetic
+    # ever fails to hold — an obligation dropped from the report, say — the
+    # clamp below leaves the offset at 0 and the generic sentence is used,
+    # which is the same fallback the empty-`escaped` path already takes.
+    own = 2 * len(_normalized_bounds)
+    offset = max(len(verdict.obligations) - own, 0)
+
+    # DID AN ASSUME IN THE BODY MAKE THIS CLAIM CONDITIONAL (audit 0.2.0 M5).
+    # `check_inductive_step` traces `body` inside the harness, so an `assume`
+    # written in the body is a precondition on the WHOLE query — and a
+    # VERIFIED then means "for every state in the ASSUMED SUB-REGION, one
+    # step stays in bounds", which is not the inductive step: the successor
+    # state need not re-enter that sub-region, so the induction does not
+    # close and the invariant does NOT follow for all iterations.
+    #
+    # Read off the stamped conditionality line rather than off a count,
+    # because the two mechanisms that grant a precondition are different and
+    # both must be caught: an interval NARROWING (`stelling.propagate`) and a
+    # relational assume FORWARDED to the solver as a positive axiom
+    # (`stelling.solvers`). Only the first stamped anything before this
+    # build, which is precisely why M5's measured example — an assume that
+    # narrows — was disclosed while the forwarded half was silent. A
+    # disposition that excludes nothing (a conjunct definitely true over the
+    # boxes) writes no such line and correctly triggers no caveat; a DROPPED
+    # assume writes none either, and correctly so — a drop makes the judged
+    # set a SUPERSET, so the VERIFIED proves more than the inductive step
+    # needs, not less.
+    #
+    # AND SCOPED TO THE BOUND OBLIGATIONS (audit B3). The note is about ONE
+    # claim — "all state variables stay within declared bounds after one
+    # iteration" — and that claim is exactly the `own` obligations the harness
+    # appended, indices `offset ..` above. A body-declared `assert_` is a
+    # different claim in the same verdict; its conditionality belongs on the
+    # stamp, where it is, and not in a sentence about the induction. Measured:
+    # body `{x,y} -> {0.5x, 0.5y}` on `[-1,1]²` with `assume(x<y)` carried only
+    # into a body-assert's slice printed "inductive step CONDITIONAL — NOT the
+    # inductive step … the invariant does NOT follow for all iterations", while
+    # the four bound obligations have single-variable cones, were judged over
+    # the full declared box, and close the induction outright: |0.5·t| ≤ 0.5 ≤ 1
+    # everywhere in [-1,1].
+    #
+    # A whole-query line (an interval narrowing) still fires, because it moved
+    # the boxes the bound obligations themselves were judged over — which is
+    # M5's own measured case and must stay caught.
+    from stelling.propagate import conditional_on_precondition
+
+    bound_obligations = frozenset(
+        ob.index for ob in verdict.obligations if ob.index >= offset
+    )
+    conditional = bool(verdict.stamp) and conditional_on_precondition(
+        verdict.stamp.assumptions, bound_obligations
+    )
+
     if verdict.status == "VERIFIED":
         note = (
             "inductive step: all state variables stay within declared bounds "
@@ -217,12 +331,30 @@ def check_inductive_step(
             "ASSUMPTION: this does NOT verify that the initial state is within "
             "bounds; the user must check that separately."
         )
+        if conditional:
+            note = (
+                "inductive step CONDITIONAL — NOT the inductive step: an "
+                "assume in the body is a precondition on the whole query, so "
+                "what was verified is that every state IN THE ASSUMED "
+                "SUB-REGION stays within declared bounds after one iteration. "
+                "That does not close the induction: the successor state need "
+                "not re-enter the assumed sub-region, so the invariant does "
+                "NOT follow for all iterations. Measured instance: body "
+                "x -> 1.5x on invariant [-1, 1] under assumes |x| <= 0.5 is "
+                "VERIFIED, and iterating from the admitted x = 0.4 leaves "
+                "[-1, 1] at step 3. To verify the inductive step, state the "
+                "restriction in the DECLARED BOUNDS (state_bounds) instead of "
+                "in an assume — then the successor is checked against the "
+                "same set the predecessor was drawn from. ASSUMPTION: this "
+                "does NOT verify that the initial state is within bounds; the "
+                "user must check that separately."
+            )
     elif verdict.status == "REFUTED":
         # Identify which state variables escaped
         escaped = []
         for i, name in enumerate(_normalized_bounds.keys()):
-            lo_idx = 2 * i
-            hi_idx = 2 * i + 1
+            lo_idx = offset + 2 * i
+            hi_idx = offset + 2 * i + 1
             for ob in verdict.obligations:
                 if ob.index == lo_idx and ob.status in (
                     "violated-over-set", "violated-witness"
@@ -232,11 +364,30 @@ def check_inductive_step(
                     "violated-over-set", "violated-witness"
                 ):
                     escaped.append(f"{name} (above upper bound)")
+        violated_own = [
+            ob.index for ob in verdict.obligations
+            if ob.index >= offset
+            and ob.status in ("violated-over-set", "violated-witness")
+        ]
         if escaped:
             detail = ", ".join(escaped)
             note = (
                 f"inductive step REFUTED: the body can escape the declared "
                 f"bounds from a starting point within them. Escaped: {detail}"
+            )
+        elif offset and not violated_own:
+            # the REFUTED is entirely the BODY's own assert(s), not a bound
+            # escape — the generic sentence would have blamed the invariant
+            # for an obligation the invariant is not about (audit 0.2.0 M4's
+            # softer half, which fell through to it silently)
+            note = (
+                f"inductive step: the invariant bounds themselves were not "
+                f"refuted — every violated obligation of this run is an "
+                f"assert_ declared INSIDE the body (obligation index < "
+                f"{offset}), not one of the {own} bound checks this function "
+                f"appends. Whether the invariant is preserved is therefore "
+                f"NOT settled by this REFUTED: read the per-obligation "
+                f"statuses"
             )
         else:
             note = (

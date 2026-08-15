@@ -155,6 +155,7 @@ from __future__ import annotations
 import dataclasses
 import math
 from operator import index as _op_index
+import re
 import struct
 from dataclasses import dataclass
 
@@ -188,15 +189,35 @@ TIER_SOUND_LIBM = "sound-libm"
 
 class UnsatisfiableAssumptionError(ValueError):
     """An assume's precondition is definitely false on the whole
-    over-approximated domain: the meet of the constrained variable's
-    propagated interval with the assumed half-space is empty, so the
-    declared set contains no point satisfying the precondition and every
-    downstream obligation would be vacuously "verified".
+    over-approximated domain: the declared set contains no point satisfying
+    the precondition, so every downstream obligation would be vacuously
+    "verified".
 
     This is the empty-declared-set refusal class — a harness defect, like
     the unbound-var :class:`stelling.ir.TranscriptionError` — so
     degrade-don't-crash does not apply: raised loudly, never a VERIFIED,
-    never silent.
+    never silent. :func:`stelling.preconditions.check` names it among the
+    two classes it deliberately does NOT convert to a status.
+
+    **TWO DETECTORS, ONE CLASS, AND THE SECOND IS WHY THIS DOCSTRING
+    CHANGED.** The original is the interval one, in this module: the meet of
+    a constrained variable's propagated interval with the assumed half-space
+    is empty (also the strict-boundary collapse and the definitely-false
+    constant comparison). It works on BOXES, so it cannot see a RELATIONAL
+    assume — `x < y` is not a half-space on either box — and 0.2.0 began
+    forwarding exactly those to the solver as positive axioms, where an
+    unsatisfiable axiom set discharged every obligation instead (audit 0.2.0
+    S7). The second detector is :func:`stelling.solvers._dispatch_obligation`,
+    which asks the backend that answered ``unsat`` whether the declared boxes
+    and the forwarded axioms ALONE are also ``unsat``.
+
+    Same class deliberately, and not a new one: it is the same defect, the
+    same sentence is right for it ("harness defect; nothing was verified"),
+    and a caller who already handles the non-relational form must not have
+    to learn a second name for the relational one. The scope is the same
+    too — an assume is a precondition on the WHOLE QUERY, and a slice's
+    axioms are a subset of the query's assumes, so a slice whose region is
+    empty proves the query's is.
     """
 
 # 2**53: the largest magnitude below which every int is exactly a double.
@@ -327,12 +348,34 @@ class AssumeDisposition:
     this conjunct's index in :attr:`Propagation.relational_assumes`, and it is
     the identity a downstream join is keyed on. It is ``-1`` on every other
     kind, and ``-1`` matches no emitted origin.
+
+    ``eqn_id`` is ``id()`` of the ``stelling_assume`` EQUATION this conjunct
+    came out of — the same identity :func:`_assume_equation_ids` collects
+    statically and :attr:`_Propagator.assume_witness` is keyed on. It is what
+    :func:`ledger_covers` joins on, and it is why an empty
+    :func:`unaccounted_assumes` result can be told apart from an assume the
+    walk never reached: a filter over the ledger cannot see an assume that
+    left no entry, and the static set can. ``-1`` on a hand-built entry that
+    names no equation, which matches no static id.
+
+    **``eqn_id`` IS OUT OF THE EQUALITY, and that is not a convenience.** It
+    is a process-local join key — ``id()`` of an object in this run's memory —
+    and not part of what became of the conjunct: two dispositions with the
+    same kind, reason, location and forwarded index record the same
+    classification whichever trace of the same harness produced them. Leaving
+    it in ``__eq__`` would make every :class:`Propagation` unequal to a
+    propagation of a SECOND trace of the same harness, which is precisely the
+    comparison the certificate's one-sidedness is pinned by
+    (``test_a_failed_certificate_search_changes_nothing_at_all`` compares two
+    whole runs byte-for-byte). A field that cannot be compared across runs
+    must not be what a cross-run comparison fails on.
     """
 
     kind: str
     reason: str = ""
     where: str = ""
     forwarded_index: int = -1
+    eqn_id: int = dataclasses.field(default=-1, compare=False)
 
 
 def unaccounted_assumes(
@@ -384,6 +427,51 @@ def unaccounted_assumes(
             e.kind in (ASSUME_APPLIED, ASSUME_NOOP)
             or (e.kind == ASSUME_FORWARDED and e.forwarded_index in emitted)
         )
+    )
+
+
+def ledger_covers(
+    ledger: tuple["AssumeDisposition", ...],
+    jaxpr,
+) -> bool:
+    """Whether the ledger has a record for EVERY ``stelling_assume`` equation
+    ``jaxpr`` contains — sub-jaxprs included.
+
+    **THE QUESTION :func:`unaccounted_assumes` CANNOT ANSWER, AND MUST NOT BE
+    READ AS ANSWERING.** That function is a FILTER over the ledger, so its
+    empty result has two causes that a caller reading a single value cannot
+    tell apart: every recorded assume is accounted for, or *nothing is
+    recorded* for an assume that exists. The second is reachable — the
+    propagator does not descend ``scan`` or ``while_loop`` bodies, so a
+    ``stelling_assume`` inside one is never classified and leaves no ledger
+    entry at all. Measured: ``assume(x < y)`` at top level plus
+    ``assume(y < x)`` inside a ``lax.scan`` body gives a one-entry ledger, an
+    empty ``unaccounted_assumes``, and a CLEAN VERIFIED over a precondition
+    that admits no point of any strict order.
+
+    So the positive claim "the region the solver ran over is inside the region
+    EVERY assume of the query describes" is the CONJUNCTION of the two: the
+    filter says the recorded ones are accounted for, and this says the record
+    is complete. Neither alone is that claim.
+
+    The requirement is the STATIC set (:func:`_assume_equation_ids`) — every
+    assume equation the query contains, whether or not any walk reached it —
+    which is the same total machinery the non-emptiness certificate's
+    requirement already rests on, and the reason that path never had this
+    hole. Over-collecting is the safe direction: an equation nothing evaluates
+    simply fails the subset test, and the caller falls back to
+    :data:`stelling.solvers.REGION_UNCERTIFIED` and a disclosed caveat.
+
+    The join is on ``AssumeDisposition.eqn_id``, so ``ledger`` must be the
+    ledger of a propagation of THIS ``jaxpr`` object — the same discipline
+    :func:`unaccounted_assumes` states for its two arguments, and the same
+    object identity :func:`stelling.propagate._region_witness` already joins
+    its static requirement to its witness map on. A ledger from a different
+    (or re-decoded) jaxpr matches nothing and answers False, which is the
+    conservative direction.
+    """
+    return _assume_equation_ids(jaxpr) <= frozenset(
+        e.eqn_id for e in ledger if e.eqn_id != -1
     )
 
 
@@ -6521,8 +6609,8 @@ class _Propagator:
                         f"already within the assumed region {_render_box(box)}"
                     )
                 self.assumptions.add(
-                    f"constrained assume at {where}: the verdict holds "
-                    f"where the precondition holds — narrowed var {var_id} "
+                    f"constrained assume at {where}: "
+                    f"{CONDITIONAL_ON_PRECONDITION} — narrowed var {var_id} "
                     f"to {_render_box(box)}"
                 )
                 if not certified:
@@ -6715,11 +6803,19 @@ class _Propagator:
         # A `vacuous` conjunct is `dropped`, never `no-op`: it is the assumed
         # region being EMPTY on the branch it was written on, which is the
         # opposite of excluding nothing.
+        #
+        # `eqn_id` is stamped from the SAME three sources and for the same
+        # reason `where` is: it is a property of the ASSUME, not of a conjunct
+        # of it. It is what lets :func:`ledger_covers` ask whether the ledger
+        # has a record for every assume equation the query CONTAINS — the
+        # question a filter over the ledger cannot answer, because an assume
+        # nobody classified leaves nothing to filter.
         self.assume_ledger.extend(
             AssumeDisposition(
                 kind=ASSUME_APPLIED,
                 reason=f"narrowed var {var_id} to {_render_box(box)}",
                 where=where,
+                eqn_id=id(eqn),
             )
             for var_id, box, _changed, _certified in narrowed
         )
@@ -6727,13 +6823,14 @@ class _Propagator:
         # is stamped once here rather than threaded through every
         # classification site
         self.assume_ledger.extend(
-            dataclasses.replace(d, where=where) for d in dropped
+            dataclasses.replace(d, where=where, eqn_id=id(eqn)) for d in dropped
         )
         self.assume_ledger.extend(
             AssumeDisposition(
                 kind=ASSUME_DROPPED,
                 reason=f"unsatisfiable within this cond branch ({desc})",
                 where=where,
+                eqn_id=id(eqn),
             )
             for desc in vacuous
         )
@@ -7895,6 +7992,7 @@ class _Propagator:
                         "classified at all"
                     ),
                     where=where,
+                    eqn_id=id(eqn),
                 ))
             in_taints = (
                 [self.read_taint(a) for a in eqn.invars]
@@ -8447,6 +8545,90 @@ UNCERTIFIED_REACHABILITY_REFUSAL = (
 )
 
 
+# THE CONDITIONALITY PHRASE, and it is a constant because it is READ.
+#
+# A stamped assumption containing it means: this verdict was reached with the
+# user's precondition GRANTED, so it claims something about the assumed
+# region and not about the declared box. `stelling.verdict.Verdict.render`
+# keys its conditional REFUTED wording on it, and
+# `stelling.inductive.check_inductive_step` keys the M5 caveat on it — both
+# by substring, on whatever mechanism granted the precondition.
+#
+# It was a bare literal in two files while only ONE mechanism (the interval
+# narrowing) wrote it. The forwarded relational axiom is a second, and its
+# conditionality was invisible to every one of those readers: audit 0.2.0 M5
+# is what that invisibility looks like from the inductive-step API, where
+# "the invariant is preserved by one step" was printed for a step preserved
+# only inside an assumed sub-region the successor state need not re-enter.
+CONDITIONAL_ON_PRECONDITION = "the verdict holds where the precondition holds"
+
+# THE SCOPE OF A CONDITIONALITY LINE, and why reading it as whole-query was a
+# defect (audit B3, FRAGILE).
+#
+# Both mechanisms write `CONDITIONAL_ON_PRECONDITION`, and they are scoped
+# differently. An interval NARROWING changes the boxes every obligation of the
+# run is judged over, so its line is a fact about the whole query and names no
+# obligation. A FORWARDED relational axiom reaches exactly the obligations
+# whose scripts stated it, and `stelling.solvers.relational_assume_assumption`
+# says so — `… on obligation(s) #1, #3: <phrase> …`.
+#
+# Both consumers asked `any(CONDITIONAL_ON_PRECONDITION in a for a in
+# assumptions)`, which is the whole-query question, and got wrong answers on
+# runs where the two populations differ. MEASURED: one interval-refuted
+# obligation plus one solver obligation with a forwarded axiom made
+# `Verdict.render` call the refutation "conditional … judged over the
+# propagated superset of the precondition-narrowed set, not over the full
+# declared box" — while nothing had narrowed (a relational assume is inert in
+# the interval domain) and that obligation's own detail line said "over the
+# declared box". And body `{x,y} -> {0.5x, 0.5y}` on `[-1,1]²` with an assume
+# carried only into a body-assert's slice made `check_inductive_step` print
+# "inductive step CONDITIONAL — NOT the inductive step", while the four bound
+# obligations have single-variable cones, were judged over the full box, and
+# close the induction unconditionally (`|0.5·t| ≤ 0.5 ≤ 1`).
+#
+# So the read is SCOPED, and the failure direction of the parse is the safe
+# one: a line whose scope cannot be read is treated as whole-query, which
+# over-discloses rather than under-discloses.
+_CONDITIONAL_SCOPE = re.compile(r" on obligation\(s\) ((?:#\d+, )*#\d+):")
+
+
+def conditional_on_precondition(
+    assumptions: "tuple[str, ...] | list[str]",
+    indices: "frozenset[int] | set[int] | tuple[int, ...]",
+) -> bool:
+    """Does any stamped conditionality line bear on one of ``indices``?
+
+    ``indices`` are the obligations the caller's sentence is ABOUT — the
+    interval-refuted ones for :meth:`stelling.verdict.Verdict.render`, the
+    state-bound ones for :func:`stelling.inductive.check_inductive_step`. A
+    conditionality line that names obligations bears on those; one that names
+    none is whole-query and bears on all of them.
+
+    Asking with an EMPTY ``indices`` is the honest way to ask "is there a
+    conditionality this sentence can be about", and the answer is False: a
+    sentence about no obligation is conditional on nothing.
+    """
+    want = frozenset(indices)
+    if not want:
+        # a sentence about no obligation is conditional on nothing. Answered
+        # here rather than falling out of an empty intersection, because a
+        # whole-query line would otherwise return True for it and the caller
+        # would get "conditional" for a claim it is not making.
+        return False
+    for a in assumptions:
+        if CONDITIONAL_ON_PRECONDITION not in a:
+            continue
+        head = a.split(CONDITIONAL_ON_PRECONDITION, 1)[0]
+        m = _CONDITIONAL_SCOPE.search(head)
+        if m is None:
+            # whole-query: no obligation named, so it qualifies every one
+            return True
+        named = frozenset(int(tok[1:]) for tok in m.group(1).split(", "))
+        if named & want:
+            return True
+    return False
+
+
 # The two STAMPED assumptions an uncertified assume state adds, and the
 # one that SUPERSEDES them.
 #
@@ -8458,14 +8640,24 @@ UNCERTIFIED_REACHABILITY_REFUSAL = (
 # to rest on; leaving a known-false one in the stamp is a disclosure
 # defect whatever the verdict says, so the swap is done once, at the same
 # place the certificate's answer is known.
+# THE PREFIX IS THE JOIN, not a shared opening phrase. Several mechanisms
+# can leave a run's precondition satisfiability unsettled — a narrowing on an
+# over-approximated box, a dropped conjunct, and (from the solver layer) an
+# undecided admitted-region check — and every consumer that must qualify a
+# claim on "the precondition may be empty" has to see ALL of them or it
+# qualifies some verdicts and not others for no reason a reader can state.
+# A consumer therefore tests the PREFIX, never a member of a list it would
+# have to be taught to extend. `stelling.solvers.UNCERTIFIED_REGION_ASSUMPTION`
+# is built from it for exactly that reason.
+UNCERTIFIED_PRECONDITION_PREFIX = "precondition satisfiability uncertified"
 UNCERTIFIED_NARROWING_ASSUMPTION = (
-    "precondition satisfiability uncertified: a constraining assume "
+    f"{UNCERTIFIED_PRECONDITION_PREFIX}: a constraining assume "
     "narrowed an over-approximated intermediate whose box may exceed its "
     "true image — the conditional claim may be vacuous; the inert-mode "
     "control is the visibility instrument"
 )
 UNCERTIFIED_DROP_ASSUMPTION = (
-    "precondition satisfiability uncertified: a constraining assume "
+    f"{UNCERTIFIED_PRECONDITION_PREFIX}: a constraining assume "
     "dropped at least one conjunct, so the narrowed set is a superset of "
     "the assumed region and that region was not shown non-empty — the "
     "conditional claim may be vacuous; the inert-mode control is the "

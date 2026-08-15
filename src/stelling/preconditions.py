@@ -461,6 +461,44 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
                 f"affine-decided obligation(s) was not measured{hint}."
             )
         notes = v.notes
+    # WHAT THE MEASUREMENT IS NOT, WHEN THE PRECONDITION IS UNSETTLED (audit
+    # 0.2.0 S7's second half). "No obligation discharges with the bounds
+    # widened" is a real dependence on the envelope, and a reader takes it
+    # for SUBSTANTIVE — this VERIFIED says something. On a run whose assumed
+    # region was never shown non-empty it can be the exact opposite, and the
+    # audit measured that case: `dt ∈ [5,10]`, `dt_max ∈ [0,1]`,
+    # `assume(dt < dt_max)`. Widening makes `dt < dt_max` SATISFIABLE again,
+    # so the negated obligation becomes sat and the re-check "fails to
+    # re-derive" — the instrument measured a dependence on the envelope, just
+    # not the one the sentence is read as claiming.
+    #
+    # A DETECTED empty case no longer reaches here: `solvers._dispatch_
+    # obligation` raises `UnsatisfiableAssumptionError` when one obligation's
+    # script states the whole contradiction, so there is no VERIFIED to
+    # stamp. An UNDETECTED one still does, and the qualification is what it
+    # gets: a contradiction spread across obligation cones (audit B3) leaves
+    # every script with a satisfiable relaxation, so nothing proves the
+    # region empty, and it arrives here through the same uncertified line as
+    # the undecided case. What the qualification therefore covers: an
+    # undecided region check, a cone-split empty region, and an interval
+    # narrowing/drop whose satisfiability was never certified. Keyed on the
+    # shared prefix rather than on a list of mechanisms, so a mechanism added
+    # later qualifies the sentence without anyone remembering to come here.
+    from stelling.propagate import UNCERTIFIED_PRECONDITION_PREFIX
+
+    if any(
+        a.startswith(UNCERTIFIED_PRECONDITION_PREFIX)
+        for a in v.stamp.assumptions
+    ):
+        vac_line += (
+            ". WHAT THIS MEASUREMENT DOES NOT SAY: this run's assumed region "
+            "was never shown non-empty (see the 'precondition satisfiability "
+            "uncertified' line), so every obligation of it may be vacuously "
+            "true of an empty precondition. Widening a declared bound can "
+            "make an unsatisfiable precondition SATISFIABLE again, so neither "
+            "outcome of this re-check is evidence that the VERIFIED is "
+            "substantive"
+        )
     # The widen re-check runs at the same pipeline depth, so on the
     # escalated path it makes real solver invocations the vacuity line
     # then relies on — and a relied-on invocation must be stamped (audit

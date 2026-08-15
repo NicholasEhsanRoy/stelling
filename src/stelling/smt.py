@@ -537,6 +537,8 @@ def emit(
     sl: ObligationSlice,
     solver: str,
     timeout_ms: int,
+    *,
+    states_obligation: bool = True,
 ) -> Script:
     """Emit the escalation script for one obligation slice.
 
@@ -544,6 +546,53 @@ def emit(
     block (option names are solver-specific); the logical content —
     declarations, bounds, definitions, the negated predicate — is
     identical, so both portfolio members see the same query.
+
+    ``states_obligation=False`` emits **the admitted-region script**: the
+    identical text with the one ``(assert (not <root>))`` line removed, so
+    what remains is exactly the declared boxes conjoined with the relational
+    axioms this slice states — the region the obligation was judged over,
+    and nothing about the obligation itself. ``unsat`` on it means that
+    region is EMPTY, which is the only reading under which an ``unsat`` on
+    the full script says nothing about the obligation (audit 0.2.0 S7).
+
+    **THE AXIOMS THIS SLICE STATES ARE NOT NECESSARILY THE QUERY'S**, and
+    the sentence above says "this slice" for that reason.
+    ``_Slicer._carry_assumes`` skips every assume whose operands fall outside
+    the obligation's backward cone, so this script can describe a strict
+    RELAXATION of the user's precondition. That is why its two answers are
+    read ASYMMETRICALLY upstream (:func:`stelling.solvers._region_answer`,
+    audit B3): an empty relaxation proves the tighter set empty, a MODEL of a
+    relaxation proves nothing about the tighter set. Nothing here changes
+    with that accounting — this function's job is to make the two texts
+    comparable, not to decide what the comparison means.
+
+    THAT IT IS THE SAME FUNCTION IS THE POINT, not an economy. The question
+    the admitted-region script answers is "did *this* discharge's ``unsat``
+    come from the obligation or from the precondition", and it is only that
+    question if the two texts agree about every declaration, every bound,
+    every definition, every axiom, the logic, and the option block. A second
+    emitter — or this one with a second set of rules under a flag — could
+    drift on any of them and the comparison would silently become a
+    comparison of two different queries. **Exactly one SEMANTIC line differs,
+    plus an inert header comment**: the removed ``(assert (not <root>))``,
+    whose presence is the whole difference between the two questions, and an
+    added ``; admitted-region check: …`` comment saying WHICH question this
+    text asks — a dumped script and the ``smt2_sha256`` a stamp carries must
+    be self-identifying, and the sha alone cannot do it. The comment is not a
+    divergence in the query; the project's own
+    ``test_the_admitted_region_script_is_the_obligation_script_minus_one_line``
+    measures both directions of the diff and pins that there is exactly one
+    of each. (The prose said "exactly one line" until audit B3 pointed out
+    that code, test and prose then disagreed with each other.) Both texts
+    still end ``(check-sat) (get-model)``: a ``sat`` here is a POINT of the
+    region THIS SCRIPT describes, and a model that can be read is what makes
+    the answer constructive rather than merely negative.
+
+    The returned :class:`Script`'s ``relational_assumes_emitted`` and
+    ``emitted_origins`` are unchanged by the flag — the axiom loop is the
+    same loop — but no rule may be built on them from an admitted-region
+    script: the withholding join is about the script the OBLIGATION was
+    decided on.
 
     THE RELATIONAL AXIOMS COME FROM THE SLICE AND FROM NOWHERE ELSE.
     ``sl.assumes`` are :class:`stelling.obligation.SliceAssume` values, whose
@@ -615,6 +664,14 @@ def emit(
     lines: list[str] = [
         f"; stelling escalation: obligation #{sl.index} ({sl.fragment})"
     ]
+    if not states_obligation:
+        # a dumped script, and the `smt2_sha256` a stamp carries, must say
+        # WHICH of the two questions it asked; the sha alone cannot
+        lines.append(
+            "; admitted-region check: the declared boxes and the forwarded "
+            "relational axiom(s) ALONE, with the negated obligation removed "
+            "— unsat here means the assumed region is empty"
+        )
     for key, value in options:
         lines.append(f"(set-option {key} {value})")
     lines.append(f"(set-logic {sl.fragment})")
@@ -995,7 +1052,14 @@ def emit(
         # the array assert is the universal elementwise claim: its negation
         # is satisfied where AT LEAST ONE element predicate fails
         negated = f"(not (and {' '.join(root_terms)}))"
-    lines.append(f"(assert {negated})")
+    if states_obligation:
+        lines.append(f"(assert {negated})")
+    # `term(sl.root)` runs either way, and deliberately: it is a lookup, not
+    # an emission — every `define-fun` the root needs was already written by
+    # the equation loop — and running it on both paths keeps the root's own
+    # validation (the unbound-variable raise) on the admitted-region path
+    # too. A script that declined to look at its root would be a script whose
+    # emission ran under different rules from the one it is compared against.
     lines.append("(check-sat)")
     lines.append("(get-model)")
     text = "\n".join(lines) + "\n"

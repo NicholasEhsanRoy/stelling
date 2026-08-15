@@ -5752,4 +5752,620 @@ verdicts:
   invariant, and `tests/test_assume_disclosure_claims.py` for the sentences
   this entry corrects.
 
+- **2026-08-14 (0.2.0 development, unreleased): VACUOUS VERIFIED — an
+  unsatisfiable forwarded `assume` discharged every obligation, and the
+  empty-precondition refusal could not see it.** An `assume` whose two
+  sides both vary cannot be applied in the interval domain, so the
+  empty-declared-set oracle never sees it either: `_unsatisfiable` meets a
+  variable's propagated BOX with the assumed half-space, and `x < y` is not
+  a half-space on either box. Since 0.2.0 the same assume is emitted to the
+  solver as a POSITIVE AXIOM. If the emitted axiom set is unsatisfiable —
+  on its own, or against the declared boxes — then
+  `boxes ∧ axioms ∧ ¬P` is unsat **for every `P`**, the obligation is
+  `discharged`, and the verdict is VERIFIED. Nothing checked whether the
+  `unsat` came from the obligation or from the precondition. (Audit 0.2.0
+  S7, S7′, and M5/M4 in the same batch.)
+
+  **THE ASYMMETRY IS WHY THIS IS A DEFECT AND NOT A TECHNICALITY.** The
+  non-relational form of the identical mistake is refused, loudly, by
+  design: `dt ∈ [5, 10]` with `assume(dt < 1.0)` raises
+  `UnsatisfiableAssumptionError` — *"the declared set as assumed is empty
+  and every downstream obligation would be vacuous (harness defect; nothing
+  was verified)"*. 0.2.0's forwarding built a route around that refusal, and
+  the route is reached by an ordinary typo rather than an exotic
+  construction.
+
+  **Measured, three shapes, on this tree at `0874dd1` (the parent
+  commit).**
+
+  * A MIS-DECLARED BOUND, one assume: `dt = any_array((), "float64",
+    (5.0, 10.0))`, `dt_max = any_array((), "float64", (0.0, 1.0))`,
+    `assume(dt < dt_max)`, `assert_(dt + dt_max <= 1.0)`. No point of the
+    declared box satisfies `dt < dt_max` (`dt ≥ 5`, `dt_max ≤ 1`), and
+    `dt + dt_max ≥ 5` everywhere in the box, so the assert is false at every
+    declared point. **VERIFIED.** Deleting the assume: REFUTED, before and
+    after.
+  * An AXIOM CYCLE, no help from the boxes: `assume(x < y)`,
+    `assume(y < z)`, `assume(z < x)` over `[-10, 10]³`, asserting
+    `x + y + z >= 100.0` where the box maximum is 30. **VERIFIED.**
+  * The INDUCTIVE form (S7′), which is the user-facing one:
+    `check_inductive_step` on the body `x, y -> ((x + y) * 10, (x + y) * 10)`
+    with the invariant `[-1, 1]²` and a contradictory `assume(x < y)` /
+    `assume(y < x)` in the body. **VERIFIED**, with the note *"the invariant
+    is preserved by one step"* — and from `x = y = 0.5`, inside the
+    invariant, one step gives `10.0`. Deleting the assumes: REFUTED, before
+    and after.
+
+  **AND THE STAMP MADE A POSITIVE CLAIM THAT WAS FALSE.** At
+  `vacuity_mode="all"` the first harness stamped *"vacuity checked
+  (mode=all): no obligation discharges with the declared bounds widened —
+  under the mechanism(s) that ran, this VERIFIED was not re-derivable
+  without the declared envelope"*, which a reader takes for SUBSTANTIVE. It
+  was the exact opposite: the VERIFIED rested entirely on a precondition no
+  declared point satisfies. The instrument measured a real dependence —
+  widening the boxes makes `dt < dt_max` satisfiable again, so the negated
+  obligation becomes `sat` — just not the one the sentence is read as
+  claiming. No may-be-vacuous line was present either, although this file's
+  own constraining-assume entry (2026-07-18) states the policy: *"definite
+  REFUTEDs under an uncertified precondition are withheld to UNKNOWN with
+  the reason disclosed, uncertified VERIFIEDs carry a stamped
+  may-be-vacuous line"*.
+
+  **WHICH VERSIONS ARE AFFECTED: 0.2.0 development builds only, verified
+  rather than assumed.** At `v0.1.0`, `git grep -c relational_assumes
+  v0.1.0 -- src/` is empty, `smt.emit`'s signature is
+  `(sl, solver, timeout_ms)`, the string `sl.assumes` occurs 0 times in
+  `smt.py` and `assumes` 0 times in `obligation.py` — no assume reaches a
+  solver at all, so the route does not exist. Re-run on a `v0.1.0` tree:
+  the mis-declared-bound harness and the axiom cycle both return
+  **UNKNOWN**. S7′ is doubly out of scope there — `stelling.inductive` does
+  not exist at `v0.1.0`. The exposure widened inside 0.2.0 rather than at
+  one commit: the S5 identity repair (previous entry) made forwarding work
+  from behind a transparent call, which is the documented
+  `preconditions.*` idiom, and the 288-harness sweep's vacuous-VERIFIED
+  count went 24 → 72 across it.
+
+  **THE FIX: THE DISCHARGE IS AUDITED BY THE BACKEND THAT PRODUCED IT.**
+  Before an `unsat` is credited, and only on an obligation whose script
+  carries at least one forwarded relational axiom, the SAME backend is asked
+  the same script with the one `(assert (not <root>))` line removed
+  (`stelling.smt.emit(..., states_obligation=False)`): are the declared
+  boxes and those axioms satisfiable at all? One semantic line differs,
+  plus an inert `; admitted-region check: …` header comment so that a
+  dumped script and the `smt2_sha256` a stamp carries say WHICH of the two
+  questions they asked. *(This entry said "exactly one line" until audit
+  B3; the emission had prepended the comment since the first commit and
+  `test_the_admitted_region_script_is_the_obligation_script_minus_one_line`
+  had always measured both directions of the diff, so code, test and prose
+  disagreed. Semantically inert, and the comment is right to be there.)*
+
+  * `unsat` — the admitted region is EMPTY. A backend has reported that its
+    own first answer was about the precondition. This raises
+    `UnsatisfiableAssumptionError`, the same class and the same closing
+    sentence as the non-relational refusal, from
+    `solvers._dispatch_obligation`. The scope is right: an assume is a
+    precondition on the whole query, and a slice's axioms are a SUBSET of
+    the query's assumes, so a slice whose region is empty proves the
+    query's is.
+  * `sat` **and the script accounts for every assume of the query** — a
+    model, hence a point of the region. The discharge stands, clean.
+  * `sat` **with any assume unaccounted for** — nothing established; falls
+    to undecided. **This bullet is the audit B3 amendment below**, and the
+    two are not the same argument: `unsat` on a relaxation proves the
+    tighter set empty, a MODEL of a relaxation proves nothing about the
+    tighter set. The condition is `propagate.unaccounted_assumes` — the
+    predicate that already gates the release of a withheld violation, used
+    here in its other direction.
+  * undecided — the discharge stands (it is sound: every admitted point
+    satisfies the obligation, and there may be none) and stops being clean.
+    The obligation detail gains `[MAY BE VACUOUS: …]` and the stamp gains
+    `precondition satisfiability uncertified: …` — the line the policy
+    above already required on this path.
+  * `sat` and `unsat` from two backends on one script raises
+    `SolverDisagreement`, the posture the obligation script's own
+    disagreement already takes. Picking either way would be a tiebreak: on
+    `unsat` a solver bug is reported to the user as a defect in their
+    harness; on `sat` a discharge is stamped clean while a backend says the
+    region it rests on is empty.
+
+  **WHY NOT THE CERTIFICATE ALONE, AND WHERE THE CERTIFICATE IS USED.** The
+  audit's other direction was to refuse a discharge whenever
+  `Propagation.region_inhabited` is absent. That certificate is ONE-SIDED by
+  construction — its own docstring says so — and False means "no witness
+  was found" on a probe grid of at most 16 points, which is the normal
+  answer on a perfectly satisfiable precondition. Refusing on it would turn
+  every relational-assume query the probe happened to miss into UNKNOWN:
+  not a repair of a vacuity defect but a withdrawal of the feature. So it is
+  used in the direction it is sound in — True settles the question and the
+  extra solver call is SKIPPED entirely — and False falls through to the
+  question actually being asked.
+
+  **WHICH VERDICTS MOVE, MEASURED, ON THE 288-HARNESS SWEEP**
+  (`stelling-sweeps/fix-0.2.0-scratch/sweep_assume_scope.py`, copied to
+  scratch and run unmodified against three trees):
+
+  | tree | REFUTED | UNKNOWN | VERIFIED | RAISED | vacuous VERIFIED |
+  |---|---|---|---|---|---|
+  | `main` `095bfd4` | 18 | 222 | 48 | 0 | **24** |
+  | `0874dd1` (parent) | 54 | 90 | 144 | 0 | **72** |
+  | this build | 54 | 90 | 72 | **72** | **0** |
+
+  FALSE VERIFIED and FALSE REFUTED are 0 on all three. Row by row against
+  the parent: **72 VERIFIED → RAISED, 72 VERIFIED → VERIFIED, 54 REFUTED →
+  REFUTED, 90 UNKNOWN → UNKNOWN — nothing else moves.** Every one of the 72
+  that moved is from the `unsat` assume set (`assume(x0 < x1)` beside
+  `assume(x1 < x0)`), and every row with a SATISFIABLE assume set is
+  verdict-identical. **The coverage cost is zero: no substantive discharge
+  was lost.** The remaining 24 `unsat`-set rows are the `cond`-carried ones,
+  which stay UNKNOWN and correctly so — a branch-scoped assume is not
+  forwarded, so it never claims the query's region is empty.
+
+  **WHAT IT COSTS.** One extra solver call per relational-assume-bearing
+  DISCHARGE, and nothing anywhere else — not on a `sat`, not on a timeout,
+  not on a query without a relational assume, not when the certificate
+  already answered. Measured on the same sweep, where every harness carries
+  a relational assume by construction (the worst case): **324
+  admitted-region invocations out of 1044 total solver invocations (31%)**,
+  of which 144 are on the 72 harnesses that now refuse and 180 on the 72
+  that still verify; 0 on every REFUTED and every UNKNOWN row. Wall clock
+  for the whole sweep: **35.1 s at `0874dd1`, 39.1 s here (+11%)**.
+
+  **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID, AND HOW TO RECOGNISE
+  ONE.** Any VERIFIED from a 0.2.0 development build whose notes contain
+  *"relational assume(s) forwarded to solver as axiom(s)"* — that phrase is
+  the necessary condition, and it is in the notes of every affected verdict.
+  It is not sufficient: most such VERIFIEDs are substantive. **Re-run the
+  harness on this build and read the DISCLOSURE, not only the status.** An
+  empty precondition that one obligation's script states whole raises
+  `UnsatisfiableAssumptionError` naming the assume's source line; an
+  inhabited one that a script or the probe certifies returns the same
+  VERIFIED, clean; **everything else returns VERIFIED with `[MAY BE
+  VACUOUS: …]` on the obligation and `precondition satisfiability
+  uncertified` on the stamp — including the case where the precondition is
+  EMPTY but no single obligation's cone contains the whole contradiction**
+  (audit B3; the amendment below). A VERIFIED carrying that pair has not
+  been shown to be about anything, and re-running does not answer the
+  question for you. For `check_inductive_step`, additionally re-read the
+  appended note: a body whose `assume` reaches one of the state-bound
+  obligations says `inductive step CONDITIONAL — NOT the inductive step`
+  where it used to claim preservation.
+
+  **TWO DISCLOSURE DEFECTS FIXED IN THE SAME BATCH, both about a claim
+  nothing established.**
+
+  * A forwarded relational axiom is a PREMISE the answer rests on, exactly
+    as an interval narrowing is, and only the narrowing half stamped it. The
+    stamp now carries `forwarded relational assume(s) on obligation(s) …`
+    with the same `the verdict holds where the precondition holds` phrase —
+    which is now a named constant
+    (`stelling.propagate.CONDITIONAL_ON_PRECONDITION`) read by
+    `Verdict.render` and by `check_inductive_step` rather than a literal
+    duplicated in two files.
+  * The `vacuity checked …` line appends `WHAT THIS MEASUREMENT DOES NOT
+    SAY: …` whenever the stamp carries any `precondition satisfiability
+    uncertified` line, keyed on the shared prefix
+    (`UNCERTIFIED_PRECONDITION_PREFIX`) rather than on a list of mechanisms
+    a later mechanism would have to be added to. **The empty-region route to
+    that sentence is closed where one obligation's script states the whole
+    contradiction** — that run raises, so there is no VERIFIED left to stamp
+    — and it is NOT closed for a cone-split one (audit B3, below), which
+    reaches the sentence through the undecided route and is qualified there.
+    So the qualification covers the undecided case, the cone-split empty
+    case, and the two pre-existing interval ones.
+
+  **AND TWO INDUCTIVE-STEP OVER-CLAIMS (audit 0.2.0 M5, M4).**
+
+  * M5: an `assume` in the body is a precondition on the whole query, so a
+    VERIFIED means "every state IN THE ASSUMED SUB-REGION stays within
+    bounds after one step" — which is not the inductive step, because the
+    successor state need not re-enter that sub-region and there is nothing
+    to apply the second step to. The note claimed preservation with only an
+    initial-state caveat. Measured: `x -> 1.5x` on `[-1, 1]` under
+    `assume(x <= 0.5)` / `assume(x >= -0.5)` is VERIFIED, and iterating from
+    the ADMITTED `x = 0.4` gives `0.4, 0.6, 0.9, 1.35` — outside the
+    invariant at step 3. The note now begins `inductive step CONDITIONAL —
+    NOT the inductive step`, names the fix (state the restriction in
+    `state_bounds`, where the successor is checked against the same set the
+    predecessor was drawn from), and fires on the conditionality stamp
+    rather than on a count — so it catches the narrowing half and the
+    forwarded half, and correctly does NOT fire on a dropped assume (a drop
+    widens the judged set, which proves more than the inductive step needs)
+    or on a no-op one (which excludes nothing). `docs/inductive-step.md`'s
+    "What VERIFIED does NOT mean" list and the module docstring say the
+    same.
+  * M4: the REFUTED note mapped obligations to state variables
+    POSITIONALLY, while the harness appends its `2 × len(state_bounds)`
+    bound checks AFTER tracing `body` — so any `assert_` the body declares
+    shifts every index. Measured, body `{"a": a + 10.0, "b": b * 0.5}` on
+    `[-1, 1]²` with one assert in the body: the note said *"Escaped: b
+    (below lower bound)"* while `b * 0.5 ∈ [-0.5, 0.5]` never escapes and
+    `a + 10 ∈ [9, 11]` escapes above. The offset is now derived from the
+    obligation count; a REFUTED whose violated obligations are ALL the
+    body's own says so instead of blaming the invariant. Status and
+    per-obligation statuses were correct throughout — only the note was
+    wrong.
+
+  **WHAT THIS DOES NOT FIX, disclosed rather than left to be found.**
+
+  * **An empty precondition is not detected when NOTHING ESCALATES.** The
+    check audits a SOLVER discharge, so a query whose obligations are all
+    decided by the interval (or affine) leg never emits an admitted-region
+    script. Measured on this build: the mis-declared-bound declarations with
+    `assert_(dt + dt_max <= 20.0)` — true over the whole box, so the
+    interval leg discharges it — returns **VERIFIED at both
+    `solver_timeout_ms=None` and `=5000`**, with the empty precondition
+    unreported. That VERIFIED is not vacuous (an interval discharge is an
+    unconditional claim over the un-narrowed declared box, which is
+    STRONGER than the conditional one), but the harness defect goes
+    unmentioned, and a reader may take the precondition for meaningful.
+
+    **The gap is narrower than that sentence, and the difference is
+    `solver_timeout_ms`** (audit B3). A BOX-INDEPENDENT contradiction —
+    `x, y ∈ [-10,10]` under `assume(x < y)` and `assume(y < x)`, with the
+    interval-decided `assert_(x + y <= 100.0)` — **RAISES when
+    `solver_timeout_ms` is passed and returns VERIFIED without it.** The
+    vacuity widen re-check runs at the same pipeline depth as the original
+    call, and widening the boxes to `(-inf, inf)` un-decides the assert, so
+    the widened query escalates, emits the admitted-region script and finds
+    the 2-cycle unsat. Measured on this build, all four combinations:
+    box-independent → `VERIFIED / VERIFIED / RAISED / RAISED` at
+    `(None, 'inputs-only')`, `(None, 'all')`, `(5000, 'inputs-only')`,
+    `(5000, 'all')`; box-dependent (the mis-declared bound above, where
+    widening makes `dt < dt_max` satisfiable again) → `VERIFIED` in all
+    four. So the undetected case is precisely: an interval-decided
+    obligation whose contradiction *needs the declared boxes*, or a run with
+    no solver budget at all.
+  * **A cone-split empty precondition is disclosed, not refused** (audit
+    B3). The refusal is one script's `unsat`, and a script states only the
+    assumes whose operands lie in that obligation's backward cone. Spread
+    the contradiction so no cone holds it whole — `x, y, z ∈ [-10,10]` under
+    `assume(x < y)`, `assume(y < z)`, `assume(z < x)`, asserting
+    `x - y <= 0.0` — and every script sees one satisfiable link. Measured on
+    this build: **VERIFIED**, with `[MAY BE VACUOUS: …]` on the obligation
+    and `precondition satisfiability uncertified` on the stamp, over a
+    region that admits no point (an exact-`Fraction` 21³ grid over
+    `[-10,10]³` finds 0, and `x<y ∧ y<z ∧ z<x` gives `x<x`). Closing it
+    needs a WHOLE-QUERY admitted-region script — one emission naming every
+    assume's operands, which no obligation slice can — and that would also
+    buy back the disclosure cost measured below. Not attempted here.
+  * **A branch-scoped contradictory assume still returns UNKNOWN rather
+    than refusing.** It is not forwarded at all (previous entry), so no
+    axiom set is available to test, and refusing would be wrong anyway: the
+    other branch is real.
+  * **It does not make the check cheaper than one call.** No caching of the
+    admitted-region answer across obligations of one query is attempted;
+    slices differ, so their scripts differ.
+  * `verdict._bar_scope`'s mechanism (audit M10) is untouched; so are the
+    rational-`pow` rows and the IEEE legs.
+
+  ---
+
+  **AMENDED 2026-08-15 — AUDIT B3, TWO FINDINGS ON THE REPAIR ABOVE.** One
+  is the hazard this entry exists to close, left open in a shape the repair
+  actively certified as clean; the other is a disclosure regression the
+  repair introduced. Amended rather than filed separately because both are
+  about the mechanisms described above and a reader must not have to join
+  two entries to learn what the first one does.
+
+  **(1) `UNSOUND` — the check asked about the SLICE and the answer was read
+  as being about the QUERY.** `obligation._Slicer._carry_assumes` skips
+  every relational assume whose operands fall outside an obligation's
+  backward cone, with a quoted reason, so the admitted-region script states
+  a SUBSET of the query's axioms. The `unsat` direction is argued correctly
+  above and is sound. The converse is not, and the code used it: `sat`
+  became `REGION_INHABITED` ("a model, hence a point of the region") and the
+  verdict was stamped clean.
+
+  Measured at `1dc1b52`: `x, y, z ∈ [-10,10]`, `assume(x < y)`,
+  `assume(y < z)`, `assume(z < x)`, `assert_(x - y <= 0.0)`. The assert's
+  cone is `{x, y}`, so the slice carries `x < y` and quotes two skip
+  reasons; both backends answered `sat` on `boxes ∧ (x < y)`; **STATUS:
+  VERIFIED**, no `[MAY BE VACUOUS]`, no `precondition satisfiability
+  uncertified`. The assumed region is EMPTY — `x<y ∧ y<z ∧ z<x` gives
+  `x<x`, and an exact-`Fraction` 21³ grid over `[-10,10]³` finds 0 admitted
+  points. It reaches `check_inductive_step` too: body
+  `{x,y,z} -> {0.6(x-y)+0.6, 0.5y, 0.5z}` on `[-1,1]³` under the same
+  3-cycle returned VERIFIED with "the invariant is preserved by one step".
+  Not a regression — `0874dd1` does the same — but it is the shape this
+  entry's own mechanism certified.
+
+  **THE FIX IS ONE CONDITION, AND IT IS THE PROJECT'S EXISTING PREDICATE.**
+  `REGION_INHABITED` may be concluded only when the region the solver ran
+  over is inside the region EVERY assume of the query describes, which is
+  exactly what `propagate.unaccounted_assumes(assume_ledger,
+  emitted_origins)` decides for the withholding-release rule. One predicate,
+  one argument, both directions: a witness of the query is only a witness if
+  it lies in the assumed region, and a model of the region script is only a
+  point of that region for the same reason. `solvers._region_answer` now
+  takes a required keyword-only `accounts_for_every_assume` and returns
+  `REGION_UNCERTIFIED` on `sat` without it; `REGION_EMPTY` on `unsat` is
+  unchanged, because that is the direction the subset argument licenses.
+
+  *The auditor stated the condition as `sl.assumes_skipped` being non-empty.
+  That is necessary and NOT sufficient: it counts only assumes the slicer
+  dropped, while an assume the PROPAGATOR dropped — a `jnp.all(...)`
+  reduction, a non-finite bound, an unclassified predicate — is equally
+  absent from the script and equally free to be violated by the model. The
+  ledger read covers both by construction, and its whitelist refuses a
+  disposition nobody has taught it. `Propagation.region_inhabited` needs no
+  change and keeps its short-circuit: it is a WHOLE-QUERY point certificate,
+  and it is the one mechanism that still clears a cone-split run.*
+
+  **(2) `FRAGILE` — a per-obligation fact read as a whole-query one.** The
+  entry above added `forwarded relational assume(s) on obligation(s) #k:
+  <phrase>`, scoped per obligation. Both consumers tested
+  `any(CONDITIONAL_ON_PRECONDITION in a for a in stamp.assumptions)`, which
+  is the whole-query question, and an interval NARROWING line (whole-query,
+  names no obligation) and a FORWARDED line (scoped) are not the same fact.
+
+  * `verdict.Verdict.render`. Measured: one interval-refuted obligation plus
+    one that escalates with a forwarded axiom made the REFUTED render
+    *"conditional … judged over the propagated superset of the
+    precondition-narrowed set, not over the full declared box"*. Both
+    clauses false — a relational assume is inert in the interval domain so
+    nothing narrowed, and assert #0's own detail line four rows below says
+    "over the declared box". A true unconditional refutation was
+    under-reported.
+  * `inductive.check_inductive_step`. Measured: body
+    `{x,y} -> {0.5x, 0.5y}` on `[-1,1]²` with `assume(x < y)` carried only
+    into a body-assert's slice printed `inductive step CONDITIONAL — NOT the
+    inductive step … the invariant does NOT follow for all iterations`,
+    while the four bound obligations have single-variable cones, were judged
+    over the full declared box, and close the induction outright
+    (`|0.5·t| ≤ 0.5 ≤ 1`).
+
+  Both reads are now SCOPED, through one shared
+  `propagate.conditional_on_precondition(assumptions, indices)`: a line that
+  names obligations bears on those, a line that names none is whole-query
+  and bears on all. `render` passes the `violated-over-set` indices — a
+  forwarded axiom lives in a script and a script exists only where the
+  interval domain gave up, so it can never name one of them — and the
+  inductive note passes the state-bound obligations (`index >= offset`,
+  both quantities already computed there). An unparseable scope falls back
+  to whole-query: the failure direction is over-disclosure.
+
+  **(3) AUDIT B3-2 — A FILTER'S EMPTY RESULT READ AS A POSITIVE CLAIM.**
+  The condition (1) added is `not propagate.unaccounted_assumes(ledger,
+  emitted_origins)`. That function is a FILTER OVER THE LEDGER, so it
+  returns `()` in two situations a caller reading one value cannot tell
+  apart: every recorded assume is accounted for, and **nothing is recorded
+  for an assume that exists**. `solvers._dispatch_obligation` read it as
+  `accounts_for_every_assume` — the positive claim that the region the
+  solver ran over is inside the region EVERY assume of the query describes.
+
+  * **An assume that produces no ledger entry.** The propagator's walk does
+    not descend `scan` or `while_loop` bodies, so a `stelling_assume` inside
+    one is never classified: no narrowing, no drop record, no ledger entry.
+    Measured on this tree, jax 0.11.0, `JAX_ENABLE_X64=1`: `x, y ∈
+    [-10, 10]`, `assume(x < y)` at top level and `assume(y < x)` inside a
+    `lax.scan` body. The query states TWO assumes;
+    `Propagation.assume_ledger` has ONE; `unaccounted_assumes(ledger, (0,))`
+    is empty; the run returned **VERIFIED with no may-be-vacuous line** over
+    `x < y ∧ y < x`, which no strict order admits (an exact-`Fraction` 41²
+    grid over `[-10, 10]²` admits **0** points —
+    `_scan_body_cycle_admits_no_point`, computed in the test rather than by
+    the tool). It reaches the public `check_inductive_step` by the same
+    route.
+  * **The default failed OPEN, and the docstring said the opposite.**
+    `_dispatch_obligation`'s `assume_ledger` defaulted to `()` on the stated
+    ground that "an empty ledger accounts for nothing that was forwarded, so
+    a caller that forgets it gets `REGION_UNCERTIFIED` … never a clean
+    stamp". An empty ledger filters to an empty result, which read as the
+    positive claim. Measured on the cone-split cycle above, whose region is
+    provably empty: with `assume_ledger=()` the run's `region_uncertified`
+    was `()` and **no may-be-vacuous line was stamped**; with the real
+    ledger, `(0,)` and the line present.
+
+  **THE REPAIR, ON MACHINERY THAT IS ALREADY TOTAL.** The claim
+  `_region_answer` reads is now the CONJUNCTION of the filter and a
+  COMPLETENESS check: `not unaccounted_assumes(...) and
+  every_assume_recorded`, where `every_assume_recorded` is
+  `propagate.ledger_covers(propagation.assume_ledger, closed.jaxpr)` —
+  whether the ledger has a record for every `stelling_assume` equation the
+  query CONTAINS. The requirement is the STATIC set,
+  `propagate._assume_equation_ids`, which collects every assume equation
+  sub-jaxprs included *"whether or not any walk reaches it"*; the
+  non-emptiness certificate's own requirement already rests on it, which is
+  exactly why THAT path never had this hole. The join is on a new
+  `AssumeDisposition.eqn_id` (`id()` of the assume equation, the identity
+  `_Propagator.assume_witness` is already keyed on), stamped at the four
+  ledger write sites, and held OUT of the dataclass's equality
+  (`compare=False`) because a process-local key must not be what a
+  cross-run comparison fails on. `assume_ledger` and `every_assume_recorded`
+  are both REQUIRED keywords now — the discipline `_region_answer`'s own
+  accounting keyword already carries, one level down.
+
+  **`_assume_equation_ids` IS GENUINELY TOTAL OVER SUB-JAXPRS, CHECKED
+  RATHER THAN TRUSTED.** Against an INDEPENDENT walk of the raw jax jaxpr
+  (not stelling's IR, not stelling's traversal), on `scan`, `while_loop`,
+  `jit`-inside-`cond`, and `cond`-inside-`jit`-inside-`scan`: **2 of 2 on
+  every shape, all four agreeing**
+  (`test_the_static_assume_set_is_total_over_sub_jaxprs`). It rests on
+  `coverage.sub_jaxprs`, which yields every `Jaxpr`/`ClosedJaxpr` held in an
+  equation's params through tuples and named-tuple params, and on
+  `_jax_compat`'s param transcription, which converts every jaxpr-valued
+  param and RAISES `UnsupportedParamError` rather than dropping one. The one
+  boundary: `custom_jvp_call.jvp_jaxpr_fun` and `custom_vjp_call`'s thunks
+  are transcribed as opaque, but those are DERIVATIVE jaxprs — the primal
+  `call_jaxpr` transcribes normally, so a user `assume` on the primal path
+  is not behind them.
+
+  **SCOPE, STATED SO IT IS NOT OVERCLAIMED.** This closes the
+  un-recorded-assume route **for the admitted-region rule only**. The same
+  root cause — a `stelling_assume` the walk never reaches — also reaches the
+  withholding rule at the end of `escalate`, where `unaccounted_assumes` is
+  read the same way and can produce a false REFUTED. That face is
+  PRE-EXISTING, reaches released 0.1.0, and is **not** fixed here.
+
+  **RED/GREEN.** Deleting the `every_assume_recorded` conjunct from
+  `_region_answer`'s argument reddens **3** tests, all in
+  `tests/test_vacuous_precondition.py` §8
+  (`…_is_not_stamped_clean`, `…_names_the_unrecorded_assume_…`,
+  `…_fails_CLOSED`); no pre-existing test detects it. Full suite green in
+  both precision environments after the repair (counts below).
+
+  **WHAT MOVES, MEASURED ON THIS BUILD.** The 288-harness sweep re-run
+  unmodified against `d2fcff2` and against this build (jax 0.11.0,
+  `JAX_ENABLE_X64=1`, `JAX_PLATFORMS=cpu`, z3 + cvc5 wheels), comparing the
+  two `--json=` row maps entry by entry: **54 REFUTED / 90 UNKNOWN / 72
+  VERIFIED / 72 RAISED, 0 FALSE VERIFIED, 0 FALSE REFUTED, 0 vacuous
+  VERIFIED — identical to the table above, 0 of 288 rows moved, and 1044
+  solver invocations on each tree** (720 obligation-script + 324
+  admitted-region, counted at the transport-entry boundary
+  `solvers._Backend.run`, the act `_Ledger.spawns` counts — an earlier
+  revision of this paragraph recorded 756 on a basis it did not state and
+  that does not reproduce). The may-be-vacuous rate among the 72 VERIFIEDs
+  is **18 on each tree**, so the B3-2 repair adds no caveat here either: the
+  sweep carries no `scan`- or `while_loop`-bodied assume, which is the only
+  shape it fires on. No verdict moves and no solver call is added; what
+  moves is disclosure. On a purpose-built
+  48-harness cone-split family (relation `<`/`<=` × 3-cycle/3-chain ×
+  carrier pair × threshold × unused tail variable; the region is empty iff
+  strict-and-cycle, 12 of 48):
+
+  | | before | after |
+  |---|---|---|
+  | VERIFIED / UNKNOWN | 40 / 8 | 40 / 8 |
+  | empty-region VERIFIEDs stamped may-be-vacuous | **0 of 12** | **12 of 12** |
+  | inhabited-region VERIFIEDs (controls) | 28 | 28 |
+  | … of which newly qualified | — | **8** |
+  | solver invocations | 256 | 256 |
+
+  **THE COST IS A CAVEAT ON TRUE VERIFIEDS, AND IT IS REAL: 8 of the 28
+  inhabited controls here, 18 of the 72 VERIFIEDs on the sweep (0 before,
+  both cases).** They are the runs where a satisfiable precondition is split
+  across cones AND the probe grid found no point — a STRICT chain, where no
+  corner satisfies `x < y < z`. Nothing on such a run establishes
+  non-emptiness, so the caveat is truthful; the same harness with `<=` is
+  certified by the probe and stays clean, which is what keeps the
+  qualification from being printed on everything. A whole-query
+  admitted-region script would buy all of it back and close the cone-split
+  gap at once. Not attempted here.
+
+  **AND THE COST IS NOT INTRINSIC TO THE RULE — IT IS THE PROBE GRID'S
+  SHAPE, ISOLATED (audit B3-2, non-blocking; recorded here so the next
+  person does not re-derive it).** Measured on this tree:
+  `Propagation.region_inhabited` is **`False`** for `assume(x < y);
+  assume(y < z)` over `[-10, 10]³` and **`True`** for the same chain written
+  with `<=`, two harnesses one character apart. **THE GRID CANNOT CERTIFY A
+  STRICT CHAIN**, and the mechanism is in `propagate._probe_fraction`: the
+  first three probes are ANCHORS that put every declaration at the SAME
+  fraction of its box (`0.0`, `1.0`, `0.5`), where no strict inequality
+  between two declarations can hold; the other 13 offset the fraction by
+  `element * 0.7548776662466927` mod 1 per declaration, which for three
+  declarations steps DOWNWARD both times. Enumerated over all 16 probes:
+  **0 produce `f₀ < f₁ < f₂`** — so no probe point of a 3-variable strict
+  chain is ever ordered, and the certificate declines for a reason that is
+  about the grid, not about the region. (It is not a blanket rule against
+  strict relations: a 2-variable `assume(x < y)` IS certified, at probe 4 —
+  3 of the 16 probes give `f₀ < f₁`.)
+
+  So the 18-of-72 rate measures which points the grid happens to visit. One
+  interior ORDERED probe point, or the whole-query admitted-region script
+  named above, removes most of it. The probe is deliberately NOT changed
+  here: it is one-sided and every `False` path leaves the run byte-identical
+  (`test_a_failed_certificate_search_changes_nothing_at_all`), so widening
+  it is a separate change owing its own cost argument.
+
+  **MUTANTS, since a rule that flips verdicts has to be shown tested and
+  not merely present.** Disabling the admitted-region check (leaving the
+  certificate path) reddens **6** tests, all in
+  `tests/test_vacuous_precondition.py`. Reverting both inductive repairs —
+  `offset = 0` and `conditional = False` — reddens **2**, in the same file.
+  **No pre-existing test detects either**, on the full suite, which is why
+  that file exists. Same method as the entries above: full suite, no
+  environmental baseline to subtract.
+
+  For the amendment, three mutants run on the full suite at this commit,
+  each reverting exactly the changed expression:
+
+  | mutant | tests reddened |
+  |---|---|
+  | `_region_answer`: `sat` → `REGION_INHABITED` unconditionally | **4** |
+  | `render`: scoped read → `any(... in assumptions)` | **1** |
+  | inductive note: scoped read → `any(... in assumptions)` | **1** |
+  | **B3-2**: drop the `every_assume_recorded` conjunct from the accounting | **3** |
+
+  All nine are in `tests/test_vacuous_precondition.py`; no pre-existing test
+  detects any of the four. The B3-2 mutant was run at this commit on the
+  full suite with `JAX_ENABLE_X64=1`, restoring the file byte-for-byte
+  afterwards; the three it reddens are §8's
+  `…_is_not_stamped_clean`, `…_names_the_unrecorded_assume_…` and
+  `…_fails_CLOSED`.
+
+  **SUITE COUNTS, EACH WITH THE ENVIRONMENT THAT PRODUCED IT.** Every
+  figure below was re-run for this amendment; where a previously recorded
+  one did not reproduce it is corrected and the discrepancy named, because
+  a count without its environment is not a measurement. All runs: jax
+  0.11.0, python 3.12, z3 + cvc5 wheels, `python -m pytest tests/ -q`.
+
+  | tree | environment | result |
+  |---|---|---|
+  | this build | `JAX_ENABLE_X64=1` | **2993 passed, 10 skipped** |
+  | this build | no `JAX_ENABLE_X64` (what CI runs) | **2994 passed, 9 skipped** |
+  | `1dc1b52` (git checkout) | `JAX_ENABLE_X64=1` | 2969 passed, 10 skipped |
+  | `1dc1b52` (git checkout) | no `JAX_ENABLE_X64` | **67 failed**, 2903 passed, 9 skipped |
+  | `1dc1b52` (`git archive` export) | no `JAX_ENABLE_X64` | 68 failed, 2900 passed, 11 skipped |
+  | this build | jax absent, `[solvers]`-only venv | **1475 passed, 108 skipped, 0 failed** |
+  | this build | jax MASKED in the jax venv (`-p` plugin) | 1476 passed, 107 skipped, 0 failed |
+
+  The two precision rows' skip SETS differ by exactly one entry —
+  `tests/test_tripwire_arm.py:643`, the threefry case whose skip condition
+  IS x64-on — and by nothing else; the ninth run of the test it stops
+  skipping is the extra pass.
+
+  **The `1dc1b52` without-x64 figure was recorded as 75 and does not
+  reproduce at any measurement.** In a real git checkout of that commit it
+  is **67 failed / 2903 passed / 9 skipped**; in a `git archive` export of
+  the same commit, 68 / 2900 / 11 — the export forces the two git-gated
+  skips (`test_reuse_pins.py`, `test_sdist_contents.py`) and one extra
+  failure, `test_no_session_skip_is_undisclosed`, which is reacting to
+  those skips. `pytest-randomly` is not installed in any of these venvs, so
+  ordering cannot account for the difference; 75 has no environment on
+  record and is withdrawn. **The checkout figure is the one a reader can
+  regenerate** — `git clone`, `git checkout 1dc1b52`, run pytest — and it
+  is what the test-side half below is the reason for. The 67 are 36 in
+  `test_assume_scope_identity.py`, 18 in `test_vacuous_precondition.py`, 11
+  in `test_assume_ledger.py` and 2 in `test_assume_disclosure_claims.py`.
+
+  **The jax-free figure was recorded as 1476 / 107 without naming its
+  environment, and BOTH numbers are right in the environment that produced
+  them.** With `jax` MASKED inside the jax venv (`sys.modules["jax"] =
+  None` from a `-p` plugin, so the gates see an absent package during
+  collection) it is 1476 / 107, reproduced exactly. In a venv that has only
+  `[solvers]` + pytest — no jax and, consequently, **no numpy** — it is
+  1475 / 108, and that venv is the shape of CI's jax-free lane. The single
+  differing test is `tests/test_reproduce.py:644`, which skips for want of
+  numpy in the second and runs in the first. Zero failures either way, and
+  no undisclosed skip in either. The `[solvers]`-only figure is quoted
+  first above because it is the one CI reproduces.
+
+  The audit's own re-checker (`audit-0.2.0-lead/verify_findings.py`), re-run
+  on this build, prints `fixed` for S7 and S7′, with S5, S6 and S8 unchanged
+  at `fixed`. It also prints **`STILL PRESENT` for S13** — *"an assume the
+  walk never descends leaves no trace to withhold on"* — which is the SAME
+  root cause as (3) above reaching the WITHHOLDING rule instead of the
+  admitted-region one, and is deliberately not touched here. Reproduced
+  independently while measuring (3): with `assume(x < y)` and
+  `assume(y < x)` BOTH inside a `lax.scan` body, the ledger is empty,
+  `assume_dropped` is False, nothing is withheld, and `assert_(x - y <=
+  0.0)` comes back **REFUTED** with a witness that violates the
+  precondition — over a region no strict order admits. Separate batch.
+
+  **THE TEST-SIDE HALF, and it is the same lesson `main` learned twice at
+  `942df81` / `b53a537`.** `tests/test_vacuous_precondition.py` (added by
+  this entry) declares `float64` and asked for x64 from nothing, and gated
+  jax with `importorskip("jax", reason="needs jax")` — a custom reason
+  replaces pytest's standard `could not import 'jax'`, which is the message
+  `test_skip_inventory.py`'s `_IMPORT_GATE` matches to disclose the gate.
+  Both are invisible with `JAX_ENABLE_X64=1` and jax installed, which is
+  every local run. Fixed here with the house autouse module-scoped `_x64`
+  fixture that saves AND restores, and the bare `importorskip` idiom. The
+  three modules the previous entry's parent added
+  (`test_assume_ledger`, `test_assume_scope_identity`,
+  `test_assume_disclosure_claims`) carry the identical fixture, byte-for-byte
+  what `942df81` put on `main` after this branch forked — brought onto the
+  branch so the two-environment claim above is a measurement rather than a
+  prediction about a merge.
+
 *(no releases yet)*
