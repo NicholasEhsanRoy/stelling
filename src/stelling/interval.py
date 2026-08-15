@@ -174,6 +174,92 @@ SUBNORMAL_INDETERMINACY_ASSUMPTION = (
     "outcomes are treated as indeterminate, never definite"
 )
 
+
+# -- the two stamps above, said truthfully about a NARROW-format run ----------
+#
+# BOTH constants above are binary64 SENTENCES, and both were stamped
+# verbatim on float16/bfloat16/float32 verdicts once ieee mode became
+# format-parametric (audit 0.2.0 M14). Both are FALSE of such a run:
+#
+#   * the endpoints of a narrow-format run ARE outward-rounded — that is
+#     the whole of `propagate._ieee_round_box` — so they are not "the same
+#     float results the traced program computes";
+#   * the band applied was the FORMAT's (2**-14 / 2**-126), not 2**-1022.
+#
+# The `semantics:` stamp line discloses the parametric mode correctly, so
+# the two `assumes:` lines contradicted the line above them. These two
+# builders say the same things about the formats a run actually contains.
+# The binary64-only run keeps its exact original text — it is the case
+# those sentences were written for, it is by far the common one, and a
+# reworded stamp on an unchanged run would be its own disclosure noise.
+
+_FORMAT_MIN_NORMAL_TEXT = {
+    "float16": "2**-14",
+    "bfloat16": "2**-126",
+    "float32": "2**-126",
+    "float64": "2**-1022",
+}
+
+
+def _format_list(formats) -> str:
+    fs = tuple(formats)
+    return ", ".join(fs) if fs else "float64"
+
+
+def ieee_endpoint_assumption(formats=()) -> str:
+    """The endpoint-arithmetic stamp for a run over ``formats``.
+
+    ``formats`` is the set of float format NAMES the query contains. Empty
+    or ``("float64",)`` returns :data:`IEEE_ENDPOINT_ASSUMPTION` unchanged.
+    """
+    fs = tuple(sorted(set(formats) or {"float64"}))
+    if fs == ("float64",):
+        return IEEE_ENDPOINT_ASSUMPTION
+    bands = ", ".join(
+        f"{f}: {_FORMAT_MIN_NORMAL_TEXT.get(f, '?')}" for f in fs
+    )
+    return (
+        f"ieee endpoint arithmetic over {_format_list(fs)}: endpoints are "
+        f"computed in native binary64 round-to-nearest and then rounded "
+        f"OUTWARD onto the target format's own ulp grid (lo down, hi up), "
+        f"so an endpoint is a value of that format BRACKETING what the "
+        f"traced program computes rather than the float result itself — "
+        f"the no-outward-rounding claim holds for binary64 alone, where "
+        f"that rounding is the identity; relied on: monotonicity of the "
+        f"fl-rounded basic ops (add, sub, mul, div, max, min are monotone "
+        f"in each argument after rounding), so box images are bracketed by "
+        f"endpoint/corner evaluation — qualified inside each format's OWN "
+        f"open subnormal band ({bands}), where results are additionally "
+        f"hulled with 0 (see the subnormal-indeterminacy assumption)"
+    )
+
+
+def subnormal_indeterminacy_assumption(formats=()) -> str:
+    """The subnormal-band stamp for a run over ``formats``.
+
+    Empty or ``("float64",)`` returns
+    :data:`SUBNORMAL_INDETERMINACY_ASSUMPTION` unchanged.
+    """
+    fs = tuple(sorted(set(formats) or {"float64"}))
+    if fs == ("float64",):
+        return SUBNORMAL_INDETERMINACY_ASSUMPTION
+    bands = ", ".join(
+        f"{f}: 0 < |x| < {_FORMAT_MIN_NORMAL_TEXT.get(f, '?')}" for f in fs
+    )
+    return (
+        f"subnormal indeterminacy: whether the target flushes subnormals "
+        f"(FTZ/DAZ) is device/compiler-dependent — measured jax 0.11.0 CPU, "
+        f"bfloat16/float32/float64 flush subnormals in arithmetic, "
+        f"comparisons and libm while float16 keeps gradual underflow, and "
+        f"strict IEEE-754 keeps it for all four. ieee-mode intervals "
+        f"touching the open subnormal band OF THEIR OWN FORMAT ({bands}) "
+        f"are hulled with 0, making verdicts sound for both semantics; "
+        f"subnormal-band outcomes are treated as indeterminate, never "
+        f"definite. float16's band is wider than this target needs, which "
+        f"costs precision and never soundness (the haze HULLS, it does not "
+        f"replace)"
+    )
+
 # A precision boundary of the mode, disclosed because it is real and
 # because a non-green under ieee must be readable against it (the same
 # graceful-degradation property the dependency-wall notes carry).

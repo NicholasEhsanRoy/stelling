@@ -330,11 +330,34 @@ class Propagation:
 # whole analysis died on a legal trace (h_hard), the exact failure the
 # guard rule forbids. Unsigned ints decode to python ints, which
 # `_int_bracket` already brackets soundly above 2**53.
+#
+# `<f2` (float16) joined with audit 0.2.0 M12: without it EVERY float16
+# harness that mentions a scalar constant — the ubiquitous
+# `assert_(y > 0.0)` above all — bound ⊤ and topped out, so one of the
+# four catalogued formats did not work on the ordinary shape of a
+# harness. `struct`'s `e` code IS IEEE binary16, so the decode is exact
+# and costs no dependency. (`obligation._SCALAR_STRUCT_FMT` has carried
+# `<f2` all along; only the interval leg was short, and the two legs
+# therefore disagreed about the same constant.)
 _STRUCT_FMT = {
-    "<f8": "d", "<f4": "f", "<i8": "q", "<i4": "i", "|b1": "?",
+    "<f8": "d", "<f4": "f", "<f2": "e", "<i8": "q", "<i4": "i", "|b1": "?",
     "|u1": "B", "<u2": "H", "<u4": "I", "<u8": "Q",
     "|i1": "b", "<i2": "h",
 }
+
+# bfloat16 is the one catalogued format with no numpy scalar type and no
+# `struct` code, and its dtype `.str` is **`<V2`: an anonymous 2-byte
+# VOID**, which every other 2-byte structured dtype also spells. The byte
+# string therefore does NOT identify the format, and a decoder keyed on
+# `<V2` alone would read an arbitrary record type as a float — a wrong
+# VALUE, which is worse than the ⊤ it replaces. The `ir.Aval` beside the
+# value carries the dtype's NAME (`str(np.dtype(...))` -> `"bfloat16"`),
+# and that does identify it, so :func:`_decode_array` takes the name as a
+# disambiguator and decodes `<V2` **only** under it. A `<V2` payload with
+# no name, or with a different one, stays undecodable — ⊤ with a note and
+# `read_flag` True, exactly as before (audit 0.2.0 M12).
+_BFLOAT16_DTYPE_STR = "<V2"
+_BFLOAT16_DTYPE_NAME = "bfloat16"
 
 
 def _int_bracket(v: int) -> tuple[float, float]:
@@ -352,20 +375,67 @@ def _int_bracket(v: int) -> tuple[float, float]:
     return iv._down(x), iv._up(x)
 
 
-def _decode_array(a: ir.Array) -> iv.IntervalArray:
+def _elements(shape: tuple[int, ...]) -> int:
+    n = 1
+    for d in shape:
+        n *= d
+    return n
+
+
+def _decode_bfloat16(a: ir.Array) -> iv.IntervalArray:
+    """The `<V2` payload of a bfloat16 array, decoded EXACTLY.
+
+    bfloat16 is binary32 with the low 16 significand bits removed — same
+    exponent field, same bias — so a bfloat16 value is exactly the binary32
+    whose top half it is, and exactly the binary64 that binary32 is. The
+    decode is therefore a bit shift and a `struct` reinterpret, with no
+    rounding anywhere: `lo == hi`, like every other float row here.
+
+    Called only under the aval's dtype NAME (see
+    :data:`_BFLOAT16_DTYPE_STR`) — the `.str` alone cannot say a 2-byte
+    void is this format.
+    """
+    iv.check_shape(a.shape)
+    n = _elements(a.shape)
+    if len(a.data) != 2 * n:
+        raise iv.IntervalError(
+            f"array constant of shape {a.shape} dtype "
+            f"{_BFLOAT16_DTYPE_NAME!r} carries {len(a.data)} byte(s), "
+            f"expected {2 * n} — truncated or oversized payload "
+            f"(malformed IR)"
+        )
+    los = []
+    for u16 in struct.unpack(f"<{n}H", a.data):
+        (v,) = struct.unpack("<f", struct.pack("<I", u16 << 16))
+        los.append(float(v))
+    # NaN payloads reach IntervalArray's own NaN refusal, which the
+    # read site already turns into ⊤-with-maybe-NaN — the float64 NaN
+    # sentinel's route, unchanged.
+    return iv.IntervalArray(shape=a.shape, los=tuple(los), his=tuple(los))
+
+
+def _decode_array(a: ir.Array, dtype_name: str | None = None) -> iv.IntervalArray:
     fmt = _STRUCT_FMT.get(a.dtype)
     if fmt is None:
+        if (a.dtype == _BFLOAT16_DTYPE_STR
+                and dtype_name == _BFLOAT16_DTYPE_NAME):
+            return _decode_bfloat16(a)
+        extra = ""
+        if a.dtype == _BFLOAT16_DTYPE_STR:
+            extra = (
+                f" ({_BFLOAT16_DTYPE_STR!r} is an anonymous 2-byte void; "
+                f"stelling decodes it as bfloat16 only when the aval names "
+                f"that dtype, and this one names {dtype_name!r})"
+            )
         raise ir.TranscriptionError(
-            f"no zero-dep decoder for array dtype {a.dtype!r}; add one before "
-            f"propagating this query"
+            f"no zero-dep decoder for array dtype {a.dtype!r}{extra}; add one "
+            f"before propagating this query"
         )
     # shape predicates first (fix re-attacks R1/N2): integral nonnegative
     # extents (a negative or string extent would reach struct.unpack as a
     # malformed format and raise raw), through the decline channel
     iv.check_shape(a.shape)
-    n = 1
-    for d in a.shape:
-        n *= d
+    n = _elements(a.shape)
     # ... and the PAYLOAD LENGTH against the shape (N2): a truncated,
     # oversized, or empty buffer under a positive shape raised raw
     # struct.error out of the walk — the exact sibling of the negative
@@ -388,9 +458,20 @@ def _decode_array(a: ir.Array) -> iv.IntervalArray:
     return iv.IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
 
 
-def _value_to_interval(v, shape: tuple[int, ...]) -> iv.IntervalArray:
+def _value_to_interval(
+    v, shape: tuple[int, ...], dtype_name: str | None = None
+) -> iv.IntervalArray:
+    """The interval a literal/const value denotes.
+
+    ``dtype_name`` is the *aval's* dtype name beside the value. It is a
+    disambiguator, never an override: exactly one dtype (`bfloat16`) has a
+    `.str` that does not identify it, and only that one row reads this
+    argument (see :data:`_BFLOAT16_DTYPE_STR`). Omitting it can only lose
+    precision — the value stays undecodable and binds ⊤ — never change a
+    decoded value.
+    """
     if isinstance(v, ir.Array):
-        return _decode_array(v)
+        return _decode_array(v, dtype_name)
     if isinstance(v, bool):
         return iv.point(1.0 if v else 0.0, shape)
     if isinstance(v, int):
@@ -492,6 +573,21 @@ _FLOAT_FORMATS: dict[str, tuple[int, int, int]] = {
     "float32": (24, -126, 127),
     "float64": (53, -1022, 1023),
 }
+
+# The reverse view, for messages that hold a format tuple and owe the
+# reader a NAME. bfloat16 and float32 share (emin, emax) and differ only
+# in `p`, so the whole tuple is the key and the map is injective.
+_FLOAT_FORMATS_BY_TUPLE: dict[tuple[int, int, int], str] = {
+    v: k for k, v in _FLOAT_FORMATS.items()
+}
+if len(_FLOAT_FORMATS_BY_TUPLE) != len(_FLOAT_FORMATS):  # pragma: no cover
+    # `raise`, not `assert`: a module-level assert is stripped under -O,
+    # and a census that stops being enforced in an optimised deployment
+    # is not a census (tests/test_optimize_mode_guards.py).
+    raise RuntimeError(
+        "two float formats share a (p, emin, emax) tuple — the reverse "
+        "view would name the wrong one"
+    )
 
 
 def _conversion_exactness(src: str, dst: str) -> tuple[str, str]:
@@ -3081,7 +3177,7 @@ def _literal_strict_sign(atom: ir.Literal) -> int:
     :meth:`_quiet_box`.
     """
     try:
-        box = _value_to_interval(atom.val, atom.aval.shape)
+        box = _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
     except (iv.IntervalError, ir.TranscriptionError):
         return 0
     return _box_strict_sign(box)
@@ -3953,6 +4049,59 @@ _LIBM_ASSUMPTIONS = {
 # anything a float can be, including NaN).
 
 
+def _the_float_format(dtypes, what: str) -> tuple[str, tuple[int, int, int]]:
+    """**The one place a set of dtypes becomes an ieee float format.**
+
+    Returns ``(dtype_name, (p, emin, emax))``. Raises
+    :class:`~stelling.interval.IntervalError` when there is no float dtype
+    at all, when one is not a supported format (integer dtypes, the float8
+    variants), or when two supported ones DISAGREE.
+
+    The agreement check is not decoration and it is not optional. Sorting
+    the float dtypes and taking ``[0]`` picks a format ALPHABETICALLY, and
+    ``bfloat16 < float16 < float32 < float64``, so a `{bfloat16, float16}`
+    pair silently resolves to bfloat16 — whose subnormal band is
+    ``2**-126`` where float16 needs ``2**-14``, 112 decades too narrow, and
+    the band is what keeps a verdict sound for a flushing target. Two
+    call sites did the sort-and-take and only one did the check, so the
+    comparison side judged mixtures with the wrong band while the
+    arithmetic side declined them (audit 0.2.0 M13). One implementation
+    now, so the two cannot drift again: jax promotes before computing, so
+    a disagreement means hand-built or deserialized IR — which this
+    module's own rules treat as in scope — and a mixed equation is
+    DECLINED, in both faces, rather than judged with either operand's
+    band.
+
+    ``what`` names the caller in the refusal ("ieee arithmetic", "ieee
+    comparison"), which is the only thing the two faces do differently.
+    """
+    float_dtypes = sorted(d for d in dtypes if "float" in (d or ""))
+    if not float_dtypes:
+        raise iv.IntervalError(
+            f"{what} requires float operands; dtypes {sorted(dtypes)} "
+            f"contain no supported float format — declined"
+        )
+    fmt = _FLOAT_FORMATS.get(float_dtypes[0])
+    if fmt is None:
+        raise iv.IntervalError(
+            f"{what}: dtype {float_dtypes[0]!r} is not a supported "
+            f"format (supported: {sorted(_FLOAT_FORMATS)}) — declined"
+        )
+    for d in float_dtypes[1:]:
+        other = _FLOAT_FORMATS.get(d)
+        if other is None:
+            raise iv.IntervalError(
+                f"{what}: dtype {d!r} is not a supported format "
+                f"(supported: {sorted(_FLOAT_FORMATS)}) — declined"
+            )
+        if other != fmt:
+            raise iv.IntervalError(
+                f"{what}: mixed float formats "
+                f"{float_dtypes} — declined"
+            )
+    return float_dtypes[0], fmt
+
+
 def _ieee_get_format(eqn) -> tuple[int, int, int]:
     """Look up the float format for an equation's operand/result dtypes.
 
@@ -3963,36 +4112,20 @@ def _ieee_get_format(eqn) -> tuple[int, int, int]:
     supported float format (e.g., integer dtypes, float8 variants), or if
     the dtypes disagree (a mixed-dtype equation that bypassed promotion).
     """
+    return _ieee_get_dtype_format(eqn)[1]
+
+
+def _ieee_get_dtype_format(eqn) -> tuple[str, tuple[int, int, int]]:
+    """:func:`_ieee_get_format` plus the dtype NAME it resolved.
+
+    The name is what the libm accuracy budget is keyed on — a budget is
+    per ``(op, format)`` and the format tuple is not what a user writes.
+    """
     dtypes = {v.aval.dtype for v in (*eqn.invars, *eqn.outvars)}
-    # Remove non-float dtypes that are acceptable in some contexts (bool
-    # selectors in select_n, int indices) — the caller must validate those
-    # separately. Here we extract THE float format.
-    float_dtypes = sorted(d for d in dtypes if "float" in (d or ""))
-    if not float_dtypes:
-        raise iv.IntervalError(
-            f"ieee arithmetic requires float operands; dtypes {sorted(dtypes)} "
-            f"contain no supported float format — declined"
-        )
-    # All float operands/results must share a single format
-    fmt = _FLOAT_FORMATS.get(float_dtypes[0])
-    if fmt is None:
-        raise iv.IntervalError(
-            f"ieee arithmetic: dtype {float_dtypes[0]!r} is not a supported "
-            f"format (supported: {sorted(_FLOAT_FORMATS)}) — declined"
-        )
-    for d in float_dtypes[1:]:
-        other = _FLOAT_FORMATS.get(d)
-        if other is None:
-            raise iv.IntervalError(
-                f"ieee arithmetic: dtype {d!r} is not a supported format "
-                f"(supported: {sorted(_FLOAT_FORMATS)}) — declined"
-            )
-        if other != fmt:
-            raise iv.IntervalError(
-                f"ieee arithmetic: mixed float formats "
-                f"{float_dtypes} — declined"
-            )
-    return fmt
+    # Non-float dtypes that are acceptable in some contexts (bool selectors
+    # in select_n, int indices) are the caller's business to validate; here
+    # we extract THE float format.
+    return _the_float_format(dtypes, "ieee arithmetic")
 
 
 def _ieee_f64_only(eqn) -> None:
@@ -4081,7 +4214,22 @@ def _ieee_arith(op):
 
     Format-parametric: for non-float64 formats, uses the format's own
     subnormal band for the DAZ/FTZ haze, and rounds the result endpoints
-    outward to the format's ULP grid."""
+    outward to the format's ULP grid.
+
+    **A kernel with no :data:`_FMT_BINARY_OPS` row DECLINES on a narrow
+    format** — it does not fall back to the binary64 kernel. The fallback
+    that used to stand here hazed with ``iv.MIN_NORMAL`` (``2**-1022``)
+    and `_ieee_round_box` afterwards CANNOT recover the missing haze:
+    outward rounding onto the format grid does not hull with 0. Measured
+    on float32 ``x + x`` at ``x = 2**-140`` the fallback box was
+    ``[1.4349e-42, 1.4349e-42]`` where jax computes ``0.0`` — a box
+    excluding the executed value, i.e. a false VERIFIED in waiting (audit
+    0.2.0 M15). It was unreachable when it was written and the hazard was
+    that the NEXT binary kernel would make it reachable silently. Two
+    guards, because one of them fails before anything runs:
+    :func:`_assert_ieee_binary_kernels_are_format_parametric` refuses at
+    IMPORT if a registered ieee binary transfer has no row, and this arm
+    declines at RUN if one somehow gets past it."""
 
     def t(eqn, params, ins, flags):
         fmt = _ieee_get_format(eqn)
@@ -4091,14 +4239,23 @@ def _ieee_arith(op):
         else:
             # Use the format-parametric binary kernel with format's band
             op_fmt = _FMT_BINARY_OPS.get(op)
-            if op_fmt is not None:
-                box, made_nan = op_fmt(ins[0], ins[1], min_normal)
-            else:
-                # Fallback: use native binary64 kernel then round outward
-                box, made_nan = op(ins[0], ins[1])
+            if op_fmt is None:
+                raise iv.IntervalError(
+                    f"ieee {eqn.primitive!r} has no format-parametric kernel "
+                    f"for {_FLOAT_FORMATS_BY_TUPLE.get(fmt, fmt)}: the "
+                    f"binary64 kernel hazes with the binary64 subnormal band "
+                    f"(2**-1022) and outward rounding onto the format grid "
+                    f"cannot add the hull-with-0 this format's own band "
+                    f"(2**{fmt[1]}) requires — declined rather than judged "
+                    f"with the wrong band"
+                )
+            box, made_nan = op_fmt(ins[0], ins[1], min_normal)
             box = _ieee_round_box(box, fmt)
         return [box], [made_nan or any(flags)]
 
+    # The census hook: the closure hides `op`, so the import-time check
+    # below could not otherwise see WHICH kernel this transfer runs.
+    t._ieee_binary_kernel = op
     return t
 
 
@@ -4158,6 +4315,11 @@ _FMT_BINARY_OPS: dict = {
 # gate has passed (built here, after _FMT_BINARY_OPS, so the format
 # dispatch inside it is populated)
 _IEEE_DIV_ARITH = _ieee_arith(iv.ieee_div)
+# `div` reaches the binary core through a wrapper, so the wrapper has to
+# carry the census hook too — otherwise the import-time check below reads
+# `div` as "not a binary transfer" and stops covering the one row whose
+# kernel is hardest to see (audit 0.2.0 M15).
+_ieee_div._ieee_binary_kernel = _IEEE_DIV_ARITH._ieee_binary_kernel
 
 
 def _ieee_unary_exact(fn):
@@ -4262,22 +4424,48 @@ def _ieee_cmp_get_min_normal(eqn) -> float:
     produce booleans but consume floats — the subnormal haze applies to the
     INPUT dtypes, not the output. Integer/bool comparisons have no subnormal
     band. Returns the min_normal for the input float format, or the binary64
-    min_normal if inputs are non-float (integers/bools are unaffected)."""
-    float_dtypes = sorted(
-        d for v in eqn.invars
-        for d in [v.aval.dtype or ""]
-        if "float" in d
-    )
-    if not float_dtypes:
+    min_normal if inputs are non-float (integers/bools are unaffected).
+
+    **THE WIDEST operand band, never the alphabetically-first one.** This
+    used to sort the operands' float dtypes and take ``[0]``, and
+    ``bfloat16 < float16 < float32 < float64``, so a `{bfloat16, float16}`
+    comparison was hazed with bfloat16's ``2**-126`` where the float16
+    operand needs ``2**-14`` — 112 decades too narrow, and the band is
+    exactly what keeps the verdict sound for a flushing target (audit
+    0.2.0 M13).
+
+    **Why the widest band and NOT the agreement check the finding
+    proposed.** The arithmetic face declines a mixed equation because a
+    mixed arithmetic equation has no result format — there is no grid to
+    round the sum onto. A comparison has no result format to pick: it
+    consumes two values and produces a bool, and the only per-format
+    quantity it uses is the DAZ band. Taking the MAXIMUM band over the
+    operands is sound for every one of them, because the haze HULLS with
+    0 rather than replacing (`_elt_haze_fmt`) — a band wider than an
+    operand needs costs precision and can never cost soundness. So the
+    general rule is available here and it is strictly more capable than
+    declining, which would additionally have withdrawn the
+    `{float32, float64}` mixture that hand-built and deserialized IR
+    routinely carries (a float32 value compared against a binary64
+    literal) and that the old code happened to get right. Agreement stays
+    REQUIRED on the arithmetic face, where it is load-bearing for a
+    different reason.
+    """
+    dtypes = {v.aval.dtype or "" for v in eqn.invars}
+    floats = sorted(d for d in dtypes if "float" in d)
+    if not floats:
         # pure integer/bool comparison — no subnormal hazard
         return iv.MIN_NORMAL
-    fmt = _FLOAT_FORMATS.get(float_dtypes[0])
-    if fmt is None:
-        raise iv.IntervalError(
-            f"ieee comparison: dtype {float_dtypes[0]!r} is not a supported "
-            f"format (supported: {sorted(_FLOAT_FORMATS)}) — declined"
-        )
-    return _ieee_format_min_normal(fmt)
+    bands = []
+    for d in floats:
+        fmt = _FLOAT_FORMATS.get(d)
+        if fmt is None:
+            raise iv.IntervalError(
+                f"ieee comparison: dtype {d!r} is not a supported "
+                f"format (supported: {sorted(_FLOAT_FORMATS)}) — declined"
+            )
+        bands.append(_ieee_format_min_normal(fmt))
+    return max(bands)
 
 
 def _ieee_cmp_f64_only(eqn) -> None:
@@ -5004,6 +5192,59 @@ if set(IEEE_TRANSFERS) != set(TRANSFERS):
 )
 
 
+def _assert_ieee_binary_kernels_are_format_parametric() -> None:
+    """Every registered ieee binary transfer has a `_FMT_BINARY_OPS` row.
+
+    :data:`_FMT_BINARY_OPS` and :data:`IEEE_TRANSFERS` are two hand-written
+    lists that must agree, the same coupling ``affine.py``'s
+    ``AFFINE_SUPPORTED`` already names as load-bearing. They agreed by
+    luck: the fallback for a missing row hazed a NARROW format with the
+    BINARY64 subnormal band, and `_ieee_round_box` cannot put the missing
+    hull-with-0 back, so the fifth binary kernel registered without a row
+    would have shipped a box that excludes the value jax computes — with
+    nothing in the suite to notice, because the four that exist all have
+    rows (audit 0.2.0 M15).
+
+    Checked at import, where a mismatch costs a failed import instead of a
+    wrong verdict. The runtime arm in :func:`_ieee_arith` is the second
+    guard, not the first.
+    """
+    missing = []
+    for prim, (transfer, _tier) in sorted(IEEE_TRANSFERS.items()):
+        kernel = getattr(transfer, "_ieee_binary_kernel", None)
+        if kernel is not None and kernel not in _FMT_BINARY_OPS:
+            missing.append(prim)
+    if missing:
+        raise RuntimeError(
+            f"ieee binary transfer(s) {missing} have no _FMT_BINARY_OPS "
+            f"row: on a narrow format they would haze with the binary64 "
+            f"subnormal band (2**-1022) and no later outward rounding can "
+            f"add the hull-with-0 the format's own band requires. Add the "
+            f"format-parametric kernel before registering the transfer."
+        )
+    # ... and the census must BITE, in both directions. If the hook
+    # stopped being attached the loop above would pass by inspecting
+    # nothing; a row for a kernel no transfer runs is a dead entry that
+    # makes the table look more complete than it is. `add` and `add_any`
+    # share one kernel, so this compares SETS, not counts.
+    seen = {
+        k for t, _ in IEEE_TRANSFERS.values()
+        for k in [getattr(t, "_ieee_binary_kernel", None)]
+        if k is not None
+    }
+    if seen != set(_FMT_BINARY_OPS):
+        raise RuntimeError(
+            f"the ieee binary census and _FMT_BINARY_OPS disagree: "
+            f"{len(seen)} kernel(s) reached from IEEE_TRANSFERS against "
+            f"{len(_FMT_BINARY_OPS)} rows — either the census hook is not "
+            f"being attached (so the check above inspects nothing) or a row "
+            f"exists for a kernel no registered transfer runs"
+        )
+
+
+_assert_ieee_binary_kernels_are_format_parametric()
+
+
 # -- constraining assume ------------------------------------------------------
 
 _ASSUME_MODES = ("constrain", "inert")
@@ -5073,7 +5314,7 @@ def _subnormal_const_literal(atom: ir.Atom) -> bool:
     if not isinstance(atom, ir.Literal):
         return False
     try:
-        raw = _value_to_interval(atom.val, atom.aval.shape)
+        raw = _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
     except (iv.IntervalError, ir.TranscriptionError):
         return False
     lit_dtype = atom.aval.dtype or ""
@@ -5686,7 +5927,7 @@ class _Propagator:
             # is untouched — that one is a transcription defect, not a
             # value.
             try:
-                box = _value_to_interval(atom.val, atom.aval.shape)
+                box = _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
             except (iv.IntervalError, ir.TranscriptionError) as e:
                 self.notes.append(f"literal outside the domain ({e}); ⊤")
                 return _safe_top(atom.aval.shape)
@@ -5722,7 +5963,7 @@ class _Propagator:
         is written explicitly."""
         if isinstance(atom, ir.Literal):
             try:
-                _value_to_interval(atom.val, atom.aval.shape)
+                _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
             except (iv.IntervalError, ir.TranscriptionError):
                 return True
             return False
@@ -5850,7 +6091,7 @@ class _Propagator:
         and a message-builder must not double it)."""
         if isinstance(atom, ir.Literal):
             try:
-                return _value_to_interval(atom.val, atom.aval.shape)
+                return _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
             except (iv.IntervalError, ir.TranscriptionError):
                 return None
         return self.env.get(atom.id)
@@ -6493,7 +6734,7 @@ class _Propagator:
         failures make the assume inert, which is always sound."""
         if isinstance(atom, ir.Literal):
             try:
-                box = _value_to_interval(atom.val, atom.aval.shape)
+                box = _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
             except (iv.IntervalError, ir.TranscriptionError):
                 return None
             if self.semantics == "ieee":
@@ -7403,7 +7644,7 @@ class _Propagator:
                 self._bind_refused(var)
                 continue
             try:
-                box = _value_to_interval(c, var.aval.shape)
+                box = _value_to_interval(c, var.aval.shape, var.aval.dtype)
             except (iv.IntervalError, ir.TranscriptionError) as e:
                 # same posture as literals: an unrepresentable const binds ⊤
                 # (audit-gate finding 1 — a NaN closure const killed the run)
@@ -9049,6 +9290,36 @@ def _withhold_uncertified_branch_refutations(closed, p, *, assume_mode, semantic
         )
 
 
+def _query_float_formats(closed: ir.ClosedJaxpr) -> tuple[str, ...]:
+    """The float format names this query CONTAINS, sub-jaxprs included.
+
+    A stamp is a disclosure, so this reads the PROGRAM rather than the
+    walk: a format that appears only inside an untaken branch is still a
+    format the verdict's assumption lines have to be true of, and
+    over-naming is the safe direction for a sentence that says "these are
+    the formats these claims are about".
+    """
+    found: set[str] = set()
+    stack = [closed.jaxpr]
+    seen: set[int] = set()
+    while stack:
+        j = stack.pop()
+        if id(j) in seen:
+            continue
+        seen.add(id(j))
+        for v in (*j.invars, *j.constvars, *j.outvars):
+            d = getattr(getattr(v, "aval", None), "dtype", None)
+            if d in _FLOAT_FORMATS:
+                found.add(d)
+        for e in j.eqns:
+            for v in (*e.invars, *e.outvars):
+                d = getattr(getattr(v, "aval", None), "dtype", None)
+                if d in _FLOAT_FORMATS:
+                    found.add(d)
+            stack.extend(sub_jaxprs(e))
+    return tuple(sorted(found))
+
+
 def propagate(
     closed: ir.ClosedJaxpr,
     *,
@@ -9121,9 +9392,15 @@ def propagate(
         # the mode-wide stamped assumptions: how ieee endpoints are
         # computed and what their soundness relies on, and the
         # subnormal-band indeterminacy (flush-vs-gradual is
-        # target-dependent; band outcomes are never definite)
-        assumptions.add(iv.IEEE_ENDPOINT_ASSUMPTION)
-        assumptions.add(iv.SUBNORMAL_INDETERMINACY_ASSUMPTION)
+        # target-dependent; band outcomes are never definite).
+        # BOTH are format-parametric now. Their binary64 texts were
+        # stamped verbatim on narrow-format verdicts, where both are
+        # false — the endpoints WERE outward-rounded and the band applied
+        # was the format's, not 2**-1022 (audit 0.2.0 M14). A binary64-only
+        # run stamps the identical sentences it always did.
+        fmts = _query_float_formats(closed)
+        assumptions.add(iv.ieee_endpoint_assumption(fmts))
+        assumptions.add(iv.subnormal_indeterminacy_assumption(fmts))
         # the equation-order reliance, disclosed once the three-row round's
         # reduce_sum decline made the contrast load-bearing (audit
         # COSMETIC 4): modelling an `add` chain while refusing a reduction

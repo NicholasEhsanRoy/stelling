@@ -6201,4 +6201,135 @@ verdicts:
   commit's hunks rather than by predicting the merge. Its fifth and sixth
   files belong to branches this one does not contain.
 
+- **2026-08-15 (pre-release, B4 part 1): the format-parametric ieee mode
+  was still speaking binary64 in four places.** Audit 0.2.0 M12, M13, M14,
+  M15. Two of the four move verdicts; both move them in the
+  more-informative direction, and neither can mint a definite answer that
+  the old code contradicted.
+
+  **M12 — two of the four catalogued formats could not see a constant.**
+  `propagate._STRUCT_FMT` had no `<f2` (float16) and no route for
+  bfloat16's `<V2`, so `_decode_array` raised and `_Propagator.read` bound
+  ⊤ with a note. `read_flag` correctly returned maybe-NaN, so nothing
+  definite could leak — the failure was UNKNOWN, never a wrong verdict —
+  but `CHANGELOG.md` advertised "all four catalogued formats" while any
+  harness in two of them that mentioned a scalar, including the
+  ubiquitous `assert_(y > 0.0)`, topped out. Measured on this branch,
+  harness `y = x * 2.0 + 1.0; assert_(y > 0.0)`, four formats × two
+  semantics:
+
+  ```
+                real          ieee
+    float16     UNKNOWN  ->   VERIFIED (both)
+    bfloat16    UNKNOWN  ->   VERIFIED (both)
+    float32     VERIFIED      VERIFIED   (unchanged)
+    float64     VERIFIED      VERIFIED   (unchanged)
+  ```
+
+  float16 decodes through `struct`'s `e` code, which IS IEEE binary16, so
+  the value is exact and the interval is a point.
+  **bfloat16 needed a decision, and the obvious decoder would have been
+  worse than the ⊤ it replaced.** Its dtype `.str` is `<V2` — an anonymous
+  2-byte VOID, which every 2-byte structured dtype also spells — so the
+  byte string does not identify the format, and a decoder keyed on `<V2`
+  alone would read an arbitrary record type as a float: a wrong VALUE
+  where the old behaviour was only imprecise. The `ir.Aval` beside the
+  value carries the dtype's NAME, which does identify it, so
+  `_decode_array` takes the name as a disambiguator and decodes `<V2`
+  **only** under `"bfloat16"`. Anything else — a missing name, a different
+  name — stays ⊤-with-a-note, unchanged.
+
+  **Which verdicts are retroactively invalid: none.** The change only
+  moves UNKNOWN to a definite status, and an UNKNOWN claims nothing. A
+  recorded UNKNOWN whose notes contain *"literal outside the domain (no
+  zero-dep decoder for array dtype '<f2'…)"* is one this fix may now
+  decide; re-`check()` it to find out. No released verdict is affected —
+  float16/bfloat16 support is a 0.2.0 feature and 0.2.0 has not shipped.
+
+  **M13 — the comparison band was picked alphabetically.**
+  `_ieee_cmp_get_min_normal` sorted the equation's float dtypes and took
+  `[0]` where `_ieee_get_format` also *checks the operands agree*, and
+  `bfloat16 < float16 < float32 < float64`. So a `{bfloat16, float16}`
+  comparison was hazed with bfloat16's `2**-126` where the float16 operand
+  needs `2**-14` — 112 decades too narrow, and the band is exactly what
+  makes a verdict sound for a flushing target. Not reachable through jax
+  tracing (jax promotes before it computes); reachable through hand-built
+  or deserialized IR, which this module's own comments treat as in scope.
+
+  **The fix is NOT the agreement check the finding proposed, and the
+  reason matters.** Declining a mixed comparison would have been
+  consistent with the arithmetic face, and it would also have withdrawn
+  the `{float32, float64}` mixture that hand-built IR routinely carries
+  (a float32 value compared against a binary64 literal) and that the old
+  code happened to get right. The general rule is available instead: take
+  the **maximum** band over the operands' formats. That is sound for every
+  operand, because the haze HULLS with 0 rather than replacing
+  (`_elt_haze_fmt`), so a band wider than an operand needs costs precision
+  and can never cost soundness. Measured over the whole 4×4 grid in both
+  orders, 16 pairs, every one now gets a band no operand outgrows.
+  Agreement stays REQUIRED on the arithmetic face, where a mixed equation
+  has no result format to round onto; that asymmetry is deliberate and is
+  written down at both sites.
+
+  **Which verdicts are retroactively invalid**: any ieee-mode verdict from
+  a hand-built or deserialized query containing a float comparison whose
+  operand dtypes DISAGREE and whose alphabetically-first member has the
+  narrower band — in practice, anything paired with `bfloat16`. A
+  jax-traced harness cannot be affected. What to re-run: such a query, if
+  one exists; the pre-filter is "does any comparison equation in the
+  query have two different float dtypes".
+
+  **M14 — two binary64 sentences stamped on narrow-format verdicts.**
+  `IEEE_ENDPOINT_ASSUMPTION` says the endpoints are *"the same float
+  results the traced program computes, with NO outward rounding"*, and
+  `SUBNORMAL_INDETERMINACY_ASSUMPTION` names the band `2**-1022`. Both are
+  false of a float16/bfloat16/float32 run: the endpoints **were**
+  outward-rounded onto the target grid — that is the whole of
+  `_ieee_round_box` — and the band applied was the format's. The
+  `semantics:` line of the same stamp disclosed the parametric mode
+  correctly, so the verdict contradicted itself. Both are now built from
+  the float formats the query contains, at all three assembly sites
+  (`propagate`, `verdict.make_verdict`, `solvers.make_solver_verdict` —
+  the last two added the endpoint sentence a second time, independently
+  of the propagation's own set). **A binary64-only run stamps the
+  identical text it always did**: it is the case those sentences were
+  written for, it is by far the common one, and rewording an unchanged
+  run's stamp is its own disclosure noise. Disclosure only — no verdict
+  moves.
+
+  **M15 — the fallback that would have used the wrong band.**
+  `_ieee_arith` dispatched to a format-parametric kernel through
+  `_FMT_BINARY_OPS` and, with no row, fell back to the binary64 kernel —
+  which hazes with `iv.MIN_NORMAL` (`2**-1022`) — and then called
+  `_ieee_round_box`, which **cannot** recover the missing haze: rounding
+  outward onto the format grid does not hull with 0. Re-measured here,
+  float32 `x + x` at `x = 2**-140`:
+
+  ```
+    mapped   (format band 2**-126):  (0.0, 1.4349296274686127e-42)
+    fallback (binary64 band):        (1.4349296274686127e-42, 1.4349296274686127e-42)
+    what jax float32 computes:       0.0        -> the fallback box EXCLUDES it
+  ```
+
+  Dead today — all four registered ieee binary kernels have a row — and
+  the hazard was that the fifth would be a silent regression with no
+  failing test, because `_FMT_BINARY_OPS` and `IEEE_TRANSFERS` are two
+  hand-written lists that must agree. **The fix is the census, not the
+  arm.** `_ieee_arith` now tags each transfer with the kernel it closes
+  over, and `_assert_ieee_binary_kernels_are_format_parametric()` refuses
+  the IMPORT when the two lists disagree in either direction — a missing
+  row, or a row for a kernel no registered transfer runs. The runtime
+  decline is the second guard, and it names the format rather than
+  guessing at a band. No verdict moves: the path was unreachable.
+
+  **Suite, both environments, same machine** (CPython 3.12.3, jax 0.11.0,
+  jaxlib 0.11.0, numpy 2.5.1, Linux x86_64, glibc 2.39). Baseline for this
+  part is the branch point, `0fc6c13`.
+
+  ```
+                          passed   skipped
+    baseline, x64=1         3176       10
+    baseline, no x64 (CI)   3177        9
+  ```
+
 *(no releases yet)*

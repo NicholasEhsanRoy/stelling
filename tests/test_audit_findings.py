@@ -351,8 +351,14 @@ def test_nan_literal_degrades_to_top_not_crash():
 
 
 def test_undecodable_dtype_const_degrades_to_top_not_crash():
-    f16 = ir.Aval(kind="ShapedArray", shape=(), dtype="float16")
-    arr = ir.Array(dtype="<f2", shape=(), data=b"\x00\x3c")  # f16 1.0
+    # `<f2` (float16) used to be the example here, and is decodable since
+    # audit 0.2.0 M12 — so the property needs a dtype that is still
+    # genuinely outside the domain. `<V2` under an aval that does NOT name
+    # bfloat16 is exactly that, and it is also M12's own guard: a 2-byte
+    # VOID is not self-identifying, so it decodes only under the aval's
+    # dtype name and everything else stays ⊤-with-a-note.
+    f16 = ir.Aval(kind="ShapedArray", shape=(), dtype="void16")
+    arr = ir.Array(dtype="<V2", shape=(), data=b"\x00\x3c")
     x, s, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
     q = close(
         [

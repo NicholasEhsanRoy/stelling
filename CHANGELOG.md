@@ -74,6 +74,61 @@ SPDX-License-Identifier: Apache-2.0
   format's subnormal band (`assume(b > 1e-30)` in float32, say) keeps its
   quotient.
 
+- **float16 and bfloat16 constants are readable** (audit 0.2.0 M12).
+  `propagate._STRUCT_FMT` had no entry for float16's `<f2` or bfloat16's
+  `<V2`, so every constant in those formats bound ⊤-maybe-NaN and *any*
+  harness mentioning a scalar — including the ubiquitous
+  `assert_(y > 0.0)` — answered UNKNOWN. Sound, and it made two of the
+  four catalogued formats unusable for the ordinary shape of a harness.
+  float16 decodes through `struct`'s `e` code (IEEE binary16, exact);
+  **bfloat16 needs the aval**, because its dtype `.str` is `<V2` — an
+  anonymous 2-byte VOID that every 2-byte structured dtype spells, so the
+  byte string alone does not identify the format. The decoder therefore
+  takes the aval's dtype NAME and reads `<V2` only under `"bfloat16"`;
+  anything else stays ⊤-with-a-note rather than being read as a float.
+  Verdicts move **UNKNOWN → VERIFIED/REFUTED** on float16 and bfloat16
+  harnesses with constants, in both `real` and `ieee` semantics.
+
+- **A mixed-format comparison gets the WIDEST operand band, never the
+  alphabetically-first** (audit 0.2.0 M13). `_ieee_cmp_get_min_normal`
+  sorted the operands' float dtypes and took `[0]`, and
+  `bfloat16 < float16 < float32 < float64`, so a `{bfloat16, float16}`
+  comparison was hazed with bfloat16's `2**-126` where the float16
+  operand needs `2**-14` — 112 decades too narrow, and the band is what
+  keeps a verdict sound for a flushing target. The rule is now a maximum
+  over the operands' formats, which is sound for every one of them
+  because the haze HULLS with 0 rather than replacing. Reachable only
+  through hand-built or deserialized IR (jax promotes before it
+  computes). The *arithmetic* face still declines a mixed equation, and
+  the asymmetry is deliberate: an arithmetic result needs a grid to round
+  onto, a comparison produces a bool and uses only the band.
+
+- **The two mode-wide IEEE assumption stamps are format-parametric**
+  (audit 0.2.0 M14). `IEEE_ENDPOINT_ASSUMPTION` and
+  `SUBNORMAL_INDETERMINACY_ASSUMPTION` are binary64 sentences and were
+  stamped verbatim on narrow-format verdicts, where both are false: the
+  endpoints **were** outward-rounded to the target grid (that is the whole
+  of `_ieee_round_box`), and the band applied was the format's, not
+  `2**-1022`. The `semantics:` line disclosed the parametric mode
+  correctly, so the two `assumes:` lines contradicted the line above them.
+  Both sentences now name the formats the query contains and their own
+  bands; a binary64-only run stamps the identical text it always did.
+  Disclosure only — no verdict moves.
+
+- **A binary IEEE kernel with no format-parametric row declines** (audit
+  0.2.0 M15). `_ieee_arith`'s fallback used the binary64 kernel — whose
+  haze band is `2**-1022` — for a narrow format, and `_ieee_round_box`
+  afterwards **cannot** recover the missing haze: outward rounding onto
+  the format grid does not hull with 0. Measured, float32 `x + x` at
+  `x = 2**-140` came back `[1.4349e-42, 1.4349e-42]` where jax computes
+  `0.0`. Dead today, and the hazard was that the fifth binary kernel
+  registered without a `_FMT_BINARY_OPS` row would be a silent
+  regression: `_FMT_BINARY_OPS` and `IEEE_TRANSFERS` are two hand-written
+  lists that must agree, the coupling `affine.py`'s `AFFINE_SUPPORTED`
+  already names as load-bearing. An import-time census now refuses the
+  import when they disagree in either direction, and the runtime arm
+  declines as a second guard.
+
 ### Verification pipeline
 
 - **Reachability conjunct**: a backward walk from the jaxpr's outputs
