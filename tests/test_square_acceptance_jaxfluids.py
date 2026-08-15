@@ -25,10 +25,22 @@ SMALLEST of the three weights and the reconstruction leans on the
 one-sided stencils — the opposite of what the linear weights suggest.
 
 **Negative control**, in the same file and against the same function:
-``beta_0 >= 0`` over the same box. Interval propagation does not discharge
-it either, so it too runs the whole pipeline — and comes back VERIFIED by
-``unsat`` from both backends. If the row minted witnesses for true
-properties, this is where it would show.
+``beta_1 <= 18.0`` over the same box. Interval propagation does not
+discharge it either, so it too runs the whole pipeline — and comes back
+VERIFIED by ``unsat`` from both backends. If the row minted witnesses for
+true properties, this is where it would show.
+
+The control was ``beta_0 >= 0`` until audit 0.2.0 M16 gave ``mul`` an
+exact-rational path. The indicators are sums of squares with positive
+rational coefficients, and with those coefficient multiplications exact
+their box now floors at exactly 0, so interval propagation discharges that
+one before any solver sees it — which makes it useless as a control on
+this row and worth keeping as a control on the cheap layer instead. The
+escalating control moved to a bound the interval leg cannot reach:
+``beta_1``'s propagated box tops out at 18.333…, its true maximum over the
+declared box is 17.333… (beta is a convex quadratic form in the five cell
+values, so its maximum over a box is attained at a vertex; enumerated over
+all 32 vertices), and 18.0 sits between the two.
 
 Skipped without jax, jaxfluids, or a solver. The target's source is
 checked for the ``jnp.square`` call before anything is measured: if
@@ -103,6 +115,18 @@ def _beta0_is_nonnegative(b0, b1, b2):
     return b0 >= 0.0
 
 
+# The true maximum of beta_1 over the declared box, measured by vertex
+# enumeration in :func:`test_the_escalating_controls_bound_is_between_the
+# _true_maximum_and_the_box`; 18.0 sits strictly above it and strictly
+# below the propagated box's upper endpoint, which is what makes the
+# property true AND interval-undecidable.
+_BETA1_BOUND = 18.0
+
+
+def _beta1_is_bounded(b0, b1, b2):
+    return b1 <= _BETA1_BOUND
+
+
 def _witness_point(verdict):
     """The witness as five floats in declaration order (u_imm .. u_ipp) —
     x0..x4 are the declarations in the order the harness made them."""
@@ -141,11 +165,51 @@ def test_the_traced_query_really_contains_the_square_primitive():
 def test_the_cheap_layers_do_not_decide_it_so_the_row_is_what_decides():
     """Both obligations must survive interval propagation, or the verdicts
     below are about the interval leg rather than about this row."""
-    for predicate in (_central_is_smoothest, _beta0_is_nonnegative):
+    for predicate in (_central_is_smoothest, _beta1_is_bounded):
         p = propagate(trace(_stencil_harness(predicate)))
         assert p.obligations[0].status == "unknown", predicate.__name__
         # and it is NOT a coverage gap: every equation ran a real transfer
         assert p.coverage.unknown == 0
+
+
+def test_the_cheap_layer_now_decides_beta0_and_that_is_why_it_is_not_the_control():
+    """`beta_0 >= 0` was the escalating control until audit 0.2.0 M16.
+
+    The indicator is `13/12*(a)^2 + 1/4*(b)^2` in jaxfluids' own code — six
+    `jnp.square` calls and the coefficient `mul`s. With `mul` bumping every
+    endpoint outward, the sum's lower endpoint went slightly NEGATIVE and
+    `beta_0 >= 0` straddled; with `mul` exact on representable corners the
+    floor is exactly 0 and the interval leg says so. Pinned, because a
+    reader finding the old control in the history should find the reason it
+    moved here rather than infer that the row got weaker."""
+    p = propagate(trace(_stencil_harness(_beta0_is_nonnegative)))
+    assert p.obligations[0].status == "discharged"
+    assert p.coverage.unknown == 0
+
+
+def test_the_escalating_controls_bound_is_between_the_true_maximum_and_the_box():
+    """The control's bound must be TRUE over the box and UNREACHABLE by the
+    interval leg, and both halves are measured here rather than asserted.
+
+    beta_1 is a positive-semidefinite quadratic form in the five cell
+    values, so it is convex and its maximum over the box `[-1, 1]^5` is
+    attained at a vertex — all 32 are enumerated through jaxfluids' own
+    function. The propagated box's upper endpoint is read from the live
+    interval environment."""
+    import itertools
+
+    true_max = max(
+        float(np.asarray(smoothness(*[jnp.asarray(v, jnp.float64) for v in pt])[1]))
+        for pt in itertools.product(BOX, repeat=5)
+    )
+    closed = trace(_stencil_harness(_beta1_is_bounded))
+    p = propagate(closed)
+    detail = p.obligations[0].detail
+    assert true_max < _BETA1_BOUND, true_max
+    # the interval leg cannot decide it: its box for beta_1 reaches past the
+    # bound, which is exactly what the undecided detail quotes
+    assert p.obligations[0].status == "unknown"
+    assert str(_BETA1_BOUND) in detail
 
 
 # --- the acceptance ----------------------------------------------------------
@@ -212,10 +276,11 @@ def test_the_witness_executes_through_jaxfluids_and_reproduces_the_violation():
 
 
 def test_negative_control_the_same_function_verifies_a_true_property():
-    """The indicators are sums of squares, so `beta_0 >= 0` HOLDS over the
-    same box — and the pipeline says so by `unsat`, not by declining."""
+    """`beta_1 <= 18.0` HOLDS over the same box (its true maximum there is
+    17.333…) and the interval leg cannot see it — the pipeline says so by
+    `unsat`, not by declining and not by minting a witness."""
     v = check(
-        _stencil_harness(_beta0_is_nonnegative),
+        _stencil_harness(_beta1_is_bounded),
         vacuity_mode="inputs-only",
         solver_timeout_ms=TIMEOUT_MS,
     )

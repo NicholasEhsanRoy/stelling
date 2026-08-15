@@ -5362,6 +5362,7 @@ verdicts:
   test can separate it; and `.is_integer()` versus `== int(...)` differs
   only at inf/nan, which the literal decoder refuses earlier.
 
+<<<<<<< HEAD
 - **2026-08-14 (0.2.0 development, unreleased): FALSE VERIFIED — a
   forwarded relational `assume` was resolved by a bare integer, and a
   bare integer does not say which scope it is an id in.** An `assume`
@@ -6367,5 +6368,845 @@ verdicts:
   what `942df81` put on `main` after this branch forked — brought onto the
   branch so the two-environment claim above is a measurement rather than a
   prediction about a merge.
+=======
+- **2026-08-15 (pre-release): an IEEE divisor box that reaches zero was
+  divided as if the zero had a sign, and it flipped verdicts in ALL FOUR
+  FORMATS.** Audit 0.2.0 S10 (found by that audit's IEEE-formats lens as
+  § F2), fixed in `interval.ieee_div` and `interval.ieee_div_fmt`.
+
+  **The defect.** Both kernels special-cased a divisor interval touching
+  zero at exactly one boundary. `b = [lo, 0]` with `lo < 0` was read —
+  the comment said so — as *"divisor approaches 0 from below"*, so for a
+  non-positive dividend the quotient was `[ahi/blo, +inf]`, excluding
+  `-inf`. **Under IEEE the divisor does not approach zero; it IS zero at
+  that endpoint, and the sign of `x/0` is `sign(x)` XOR the SIGN BIT OF
+  THE ZERO.** `+0.0 == 0.0`, so `+0.0` is a value of `[lo, 0]`; there the
+  quotient is `-inf`, which the box did not contain. An interval endpoint
+  has no sign bit, so *which boundary is zero* is not enough information
+  to make the tightening at all — no test on the endpoints' positions
+  could have repaired it.
+
+  **Measured, all four formats** (`audit-0.2.0-ieee/F2b_div_all_formats.py`,
+  re-run here on this branch before and after; harness `a = [-2,-2]`,
+  `x = [-1, 0]`, `assert(a/x > 0)`, and its mirror `a = [2,2]`,
+  `x = [0, 1]` at `-0.0`):
+
+  ```
+                      before        after      jax at the zero
+    float16          VERIFIED      UNKNOWN     y = -inf,  y > 0 -> False
+    bfloat16         VERIFIED      UNKNOWN     y = -inf,  y > 0 -> False
+    float32          VERIFIED      UNKNOWN     y = -inf,  y > 0 -> False
+    float64          VERIFIED      UNKNOWN     y = -inf,  y > 0 -> False
+  ```
+
+  Eight false VERIFIEDs (four formats × two mirror shapes), every one of
+  them refuted by executing the same harness in jax at a point of its own
+  declared box.
+
+  **IT IS A 0.2.0 REGRESSION, and the lens that found it got that
+  wrong.** § F2 concluded it "predates 0.2.0" from the fact that binary64
+  is affected — which conflates the *format* with the *feature*. Measured
+  at the kernel on both trees, `v0.1.0` extracted with `git archive` and
+  run by `PYTHONPATH` (no worktree, repo untouched), this branch's base at
+  `f0b34cd`:
+
+  ```
+  --- v0.1.0 ---
+  ieee_div([-2,-2], [-1,0]) -> (-inf, inf)   contains -inf? True
+  ieee_div([2,2],   [0,1])  -> (-inf, inf)   contains -inf? True
+  hasattr(iv, "ieee_div_fmt") False   hasattr(iv, "boundary_div") False
+  --- pre-fix tree (f0b34cd) ---
+  ieee_div([-2,-2], [-1,0]) -> (2.0, inf)    contains -inf? False
+  ieee_div([2,2],   [0,1])  -> (2.0, inf)    contains -inf? False
+  hasattr(iv, "ieee_div_fmt") True    hasattr(iv, "boundary_div") True
+  ```
+
+  0.1.0 returned the sound hull for any zero-containing divisor. The
+  boundary-aware branch arrived at `3328c9b` (2026-08-13, *"IEEE
+  assume-bump + boundary-aware division"*), one day after the `v0.1.0`
+  tag and in no tag since — `git describe --tags --contains 3328c9b`
+  names none. **So the released 0.1.0 is NOT affected**, including
+  through `propagate(closed, semantics="ieee")`, which was 0.1.0's only
+  door to ieee mode.
+
+  **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID, and how to
+  recognise one.** Any verdict produced by a tree containing `3328c9b`
+  and not this fix, whose stamp names **ieee** semantics (arithmetic mode
+  `interval/ieee` or `interval/ieee-fmt`, any of the four formats), on a
+  query containing a float `div` **whose divisor's propagated box reaches
+  zero at exactly one boundary** — `[0, hi]` or `[lo, 0]`. Only the
+  DEFINITE directions are at risk: a VERIFIED or a set-level REFUTED that
+  the interval leg decided downstream of such a division. An UNKNOWN was
+  never wrong, and no released verdict is affected because 0.2.0 has not
+  shipped.
+
+  Three shapes reach it, and the third needs no signed-zero reasoning in
+  the harness at all:
+
+  * a declared box with an endpoint at zero (`any_array(..., (-1.0, 0.0))`);
+  * `assume(b > 0)` in ieee mode — the bump lands on the format's smallest
+    SUBNORMAL, which the DAZ haze then hulls back to `[0, hi]`;
+  * **any subnormal-reaching divisor**, because `_elt_haze_fmt` hulls a
+    band-touching interval with the positive literal `0.0` and thereby
+    manufactures a zero endpoint whose sign the model has already
+    discarded. The 0.2.0 audit's fuzzer found six further instances of
+    this class through this route alone.
+
+  **What to re-run.** Any recorded ieee-mode verdict matching the shape
+  above: re-run it on a tree with this fix and take the new verdict. A
+  cheap pre-filter that needs no re-run: if the query has no `div`, or if
+  every divisor's propagated box is bounded away from zero *and* clear of
+  the format's subnormal band, the verdict is unaffected.
+
+  **The fix, and the shape NOT chosen.** A zero-containing divisor now
+  divides to ⊤ under ieee, with no case split on where the zero sits —
+  which is what `v0.1.0` did, and which is not merely the conservative
+  answer but the EXACT hull: whenever the dividend can be nonzero both
+  `±inf` are attainable and no narrower closed interval holds both, and
+  in the only remaining case (dividend exactly `[0,0]`) every quotient is
+  `0/0 = NaN` or `±0`, where the NaN flag is already set. The alternative
+  was to carry the zero's sign in the IEEE domain so a box could
+  distinguish "reaches `-0.0`" from "reaches `+0.0`". That is strictly
+  more capable and was rejected on cost and on hazard: it is a new
+  lattice element that must be threaded through every kernel that can
+  produce or consume a signed zero (the haze, `neg`/`abs`, `select_n`,
+  the comparisons, `reduce_sum`'s seed, every conversion), and a
+  half-done version is worse than none — it would put a trustworthy sign
+  bit on values that only some producers set, which is what this defect
+  already was. It would also buy little today: the declaration surface
+  has no way to say "this input reaches `+0.0` but not `-0.0`", and the
+  haze's manufactured zeros have no determinate sign to record (the same
+  audit measured `x + x` flushing to `-0.0` while `jnp.sum` seeds `+0.0`
+  on the same backend). Recorded here as a decision, with its reasons, so
+  that re-adding a tightening requires arguing against them.
+
+  **THE REAL-MODE `boundary_div` KERNEL IS NOT WRONG FOR THIS REASON AND
+  WAS NOT CHANGED** — the two kernels disagree deliberately, and the
+  claim was verified rather than assumed. ℝ has one zero and `a/0` is
+  undefined there, so the box must cover only `b ≠ 0`. Checked in exact
+  rational arithmetic over 12 dividend boxes × 10 one-sided-boundary
+  divisor boxes, at values crowding the zero endpoint (relative offsets
+  down to `1e-300` of the span): **7,560 quotients, 0 containment
+  failures.** So `[2, ∞)` is right for `[-2,-2] / [-1,0]` in ℝ and ⊤ is
+  right for the same operands under ieee.
+  `tests/test_ieee_zero_divisor_and_mul_exact.py` pins that DIFFERENCE
+  with its reasoning, because the next reader to see the two kernels side
+  by side will assume they should agree.
+
+  **THE FIGURE ABOVE WAS 31,350 OVER TEN CASES AND NO RUN IN THE TREE
+  PRODUCED IT** (audit 0.2.0 B5-4). The shipped test had five cases,
+  executed 195 quotients, and asserted only `checked > 100`; the claim it
+  was standing in for is amply true — an independent exact-rational sweep
+  by the auditor did 3,291,024 quotients with 0 failures — but a reader
+  chasing 31,350 found 195. The sweep is now the larger one described
+  above and the count is `assert`ed exactly, against a module constant
+  the sentence quotes: `BOUNDARY_DIV_SWEEP_QUOTIENTS = 7560`. A drift in
+  either direction reddens the suite with "update both or neither"
+  instead of leaving prose to be believed. **This was the third
+  fabricated figure in this campaign**, and the mechanism is why the fix
+  is an assertion rather than a corrected number.
+
+  **AND A SOUND KERNEL IS NOT A SOUND ROW — see the B5-1 entry below.**
+  Every sentence above is about `boundary_div`'s behaviour *given* `b ≠
+  0`. Whether `b ≠ 0` holds is a separate question that a sweep of the
+  kernel cannot see, and the transfer answered it wrong: it inferred
+  "the zero can be dropped" from the SHAPE of the box. That is how a
+  kernel this well measured came to sit underneath a false VERIFIED.
+
+  **The coverage this costs, measured and named.** In ieee mode the
+  advertised pair *"IEEE assume-bump + boundary-aware division"* no longer
+  decides `assume(b > 0); a / b`: the bump lands on the format's smallest
+  subnormal, the DAZ haze hulls that back to `[0, hi]` (measured on
+  float32: `_elt_haze_fmt(2**-149, 10.0, 2**-126) == (0.0, 10.0)`), and a
+  zero-containing divisor is now ⊤. That pin was a passing test asserting
+  `discharged`; it now asserts `unknown` and says why. **The row is not
+  dead** — an assume whose bound clears the format's subnormal band keeps
+  its quotient, measured on the same query at `assume(b > 1e-30)` in
+  float32, which still discharges — and real mode is untouched. That is
+  the whole price: one shape, in one mode, and both sides of the boundary
+  are pinned.
+
+  **Also removed by the fix, and found only by driving the kernel:** the
+  boundary branch could RAISE. `ieee_div([-inf,-inf], [-inf, 0])` took
+  the `bhi == 0` arm and computed `ahi/blo = -inf/-inf = NaN`, which
+  `IntervalArray.__post_init__` rejects — an `IntervalError` out of a
+  kernel whose contract is to degrade, not to crash. 20 such box pairs in
+  the binary64 sweep below, 16/20/16 in the three narrow formats.
+
+  **The sweep, and what the previous one missed.** An exact containment
+  sweep drives `mul`, `ieee_mul`, `ieee_div`, `ieee_mul_fmt` and
+  `ieee_div_fmt` over every ordered endpoint pair from a 28-value
+  adversarial pool (`±0.0`, `±5e-324`, `±2.225e-308`, `±1e300`, `±FMAX`,
+  `±inf`, `nextafter(1.0, ±inf)`, and magnitudes subnormal in a *narrower*
+  format), 406 boxes and 164,836 box pairs per row, checking that every
+  returned box contains every value the arithmetic can produce at points
+  of the operand boxes — with **`+0.0` and `-0.0` kept apart on the input
+  side**, which is exactly what the sweep before it did not do (it drove
+  real-mode `div` and `boundary_div`, never `ieee_div`, and deduplicated
+  its sample points with `==`, under which the two zeros are one point).
+  Boxes are built from POOL INDICES rather than value comparisons, which
+  is what keeps the two zeros apart. Real-mode `mul` is judged against
+  exact rational products; `ieee_mul`/`ieee_div` against the binary64
+  value the program actually computes (their corner hull is the native
+  product with no outward rounding, so the REAL product is the wrong
+  yardstick); the narrow formats against the exact real value, which is
+  sufficient once `_ieee_round_box` has rounded the box outward onto the
+  target grid, and which assumes nothing about how that format rounds.
+
+  **THE TABLE BELOW WAS AN OUT-OF-TREE MEASUREMENT AND IS NOW A RUN**
+  (B5 follow-up audit). Its predecessor read `0 / 1,366,561`,
+  `40,032 / 6,707,920`, `+ 20 RAISED`, `116,548` NaN samples and
+  `301 boxes / 90,601 box pairs`; those counts came from a sweep that was
+  never committed, so `grep` for them found nothing in `tests/` or
+  `src/`. Nothing about them was wrong — the arithmetic was internally
+  consistent and an independent sweep agreed with the conclusions — but
+  they sat three paragraphs above the paragraph explaining why exactly
+  that shape is a problem, and immediately after the sibling figure that
+  had just been converted to an exact assert. **Every number below is
+  from a run of `tests/ieee_containment_sweep.py` on this branch**, and
+  `tests/test_ieee_zero_divisor_and_mul_exact.py` asserts all four
+  columns of all nine rows exactly, against the module constants
+  `POST_FIX_ROWS`, `PRE_FIX_IEEE_DIV_F64`, `POOL_SIZE`, `BOX_COUNT` and
+  `BOX_PAIRS` — so drift in either direction reddens the suite with
+  "update both or neither". Reproduce with:
+
+      PYTHONPATH=src python tests/ieee_containment_sweep.py
+
+  Measured 2026-08-15 at `0dff2a9` + this commit, CPython 3.12.3, jax
+  0.11.0, numpy 2.5.1, Linux x86_64, `JAX_ENABLE_X64=1` (the sweep drives
+  the kernels directly and does not read the flag).
+
+  ```
+  kernel        format      failures / samples      NaN samples   RAISED
+  real mul      R                  0 /   851,929             0        0
+  ieee_mul      float64            0 /   962,361        29,348        0
+  ieee_div      float64            0 /   962,361        67,373        0
+  ieee_mul_fmt  float32            0 /   962,361       104,632        0
+  ieee_div_fmt  float32            0 /   962,361       128,657        0
+  ieee_mul_fmt  float16            0 /   962,361       115,784        0
+  ieee_div_fmt  float16            0 /   962,361       151,505        0
+  ieee_mul_fmt  bfloat16           0 /   962,361       104,632        0
+  ieee_div_fmt  bfloat16           0 /   962,361       128,657        0
+
+  positive control — the PRE-FIX ieee_div, same grid:
+  ieee_div      float64       15,048 /   962,361        67,373        0
+  ```
+
+  **A battery that has never failed is not evidence**, so the pre-fix
+  kernel is kept in the sweep module as `prefix_ieee_div` and driven over
+  the same grid: it fails 15,048 of 962,361 samples, and a run that ever
+  reports 0 there fails the suite. `RAISED` is 0 in that column and that
+  is not a hole — the raise this entry records above
+  (`ieee_div([-inf,-inf], [-inf, 0])` computing `-inf/-inf`) was closed
+  inside `boundary_div` itself by a different fix, so the pre-fix
+  *transfer* driven through today's kernel degrades instead of crashing.
+  The `20` / `16/20/16` raise counts in the paragraph above it remain an
+  **out-of-tree measurement at `f0b34cd`**, named as such because no test
+  in this tree can reproduce a crash in code the tree no longer contains.
+
+  A NaN result is checked against the `made_nan` flag rather than
+  containment, and every NaN sample counted above is flagged.
+  **What the generator could not produce**, said plainly: it samples a
+  finite subset of each box (the endpoints, and zero when the box
+  straddles it) rather than every float, so it is a containment
+  *battery*, not a proof; it drives the kernels and the `_ieee_round_box`
+  composition directly, not the traced pipeline; and it says nothing
+  about the transfers this batch did not touch.
+
+- **2026-08-15 (pre-release, same batch): `mul` was the only arithmetic
+  transfer with no exact-rational path, and the missing ulp decided
+  verdicts.** Audit 0.2.0 M16. **Sound in both directions — no verdict
+  was ever wrong — and it is in this log because it MOVED verdicts**, in
+  the UNKNOWN → definite direction, on a shape the release advertises.
+
+  `add` routes through `_exactable` → `Fraction` and returns the exact
+  endpoint when it is representable; `div` has the same branch; `mul`
+  bumped unconditionally. Measured on this branch, before and after:
+
+  ```
+                              before                              after
+  mul([2,3],[2,3])   (3.9999999999999996, 9.000000000000002)   (4.0, 9.0)
+  mul([0,4],[0,4])   (-5e-324, 16.000000000000004)             (0.0, 16.0)
+  reduce_sum(x*x)    (-1e-323, 32.00000000000001)              (0.0, 32.0)
+  ```
+
+  The exactly-zero corner bumped **below zero**, which defeats
+  `reduce_sum`'s nonnegative clamp: `Σ xᵢ²` became a true straddle, so
+  `boundary_div` was never reached and the division declined — with a
+  message recommending `assume(divisor > 0)`, which the caller had
+  effectively already done. The same real property, three spellings, on
+  this branch:
+
+  ```
+                     before      after
+    via_mul         UNKNOWN    VERIFIED
+    via_ipow       VERIFIED    VERIFIED
+    via_square     VERIFIED    VERIFIED
+  ```
+
+  **The verdict depended on how the user spelled "squared"**, and the
+  spelling that lost is the `safe_mask` sum-of-squares residual that the
+  0.2.0 boundary-division row was built for. Clamping `mul`'s sign as a
+  special case would have been a bandaid: it leaves `[2,3]×[2,3]` inexact,
+  and the inexactness is the defect.
+
+  **THE FINDING'S OWN HEADLINE IS NOT QUITE TRUE, and the remainder is
+  left standing deliberately.** M16 says `mul` is "the only arithmetic
+  transfer with no exact-rational path". It was not: `dot_general` carries
+  an INLINED COPY of the same corner rule (`_prod` + `_down`/`_up`), and
+  its docstring cited *"`mul`'s rule"* as its authority — so converting
+  `mul` alone silently split one rule into two. Measured after this fix,
+  on the same operands:
+
+  ```
+  reduce_sum(mul(x, x))  over x in [0,4]^2  ->  (0.0, 32.0)
+  dot_general(x, x)      same contraction   ->  (-1e-323, 32.00000000000001)
+  ```
+
+  So the M16 shape survived one level up: a sum of squares written
+  `jnp.dot(x, x)` lost its zero floor where `jnp.sum(x*x)` no longer did.
+  Sound — a wider box only loses precision — and the docstring stated the
+  divergence rather than claiming the rule it no longer followed.
+
+  **CONVERTED, and the reason first given for not converting it was the
+  wrong one** (audit 0.2.0 B5-2). That reason was *"changing a
+  contraction's numerics needs its own measurement of the
+  association-order argument"*. The accumulation in `dot_general` ALREADY
+  used `_add_lo`/`_add_hi` — the exact-when-representable route — and only
+  the four product corners bumped; a product's corners have nothing to do
+  with association order, and the `nonneg = nonneg and plo >= 0.0` clamp
+  the bump defeated is not "the M16 shape one level up", it is M16, in a
+  second copy. The two are now ONE function, `interval._mul_corners`,
+  called by `mul` and by `dot_general`'s per-term product, so the next
+  conversion cannot convert one of them. Measured on this branch:
+
+  ```
+                                        before                    after
+  reduce_sum(mul(x,x)), x in [0,4]^2    (0.0, 32.0)               (0.0, 32.0)
+  dot_general(x, x), same contraction   (-1e-323, 32.00000000000001)  (0.0, 32.0)
+  matmul of [2,3]-valued 2x2            (7.999999999999999,       (8.0, 18.0)
+                                         18.000000000000004)
+  ```
+
+  Containment evidence, the same shape `mul`'s: over every ordered
+  endpoint pair from an 8-value dyadic pool (1,296 box pairs), a two-term
+  1-D contraction's box is checked against the exact rational image
+  `2·[min corner, max corner]` — and, because every value in the pool is a
+  small dyadic, is asserted EQUAL to it, not merely containing.
+  0 failures. The infinite-endpoint confinement is shared with `mul` by
+  construction and pinned by one test that compares the two on the same
+  operands.
+
+  **The interaction with B5-1, said plainly**: a `dot_general`-floored sum
+  of squares now reaches the `div` transfer with a `[0, S]` box exactly as
+  a `reduce_sum`-floored one does, so it meets the same certificate gate.
+  `jnp.dot(x, x)` is the FOURTH spelling in the three-spellings control
+  for that reason, and `dot_general` carries the strict-sign certificate
+  for the same reason.
+
+  **The ieee `mul` kernels deliberately do NOT take this route**, and the
+  reason is not symmetry-of-effort: under ieee the value the program has
+  IS `fl(x*y)`, and the native binary64 corner products already ARE that
+  value — exactly for binary64 operands, and exactly for the narrower
+  formats too (a product of two float32/bfloat16/float16 values needs at
+  most 48 significand bits and stays well inside binary64's exponent
+  range, after which `_ieee_round_box` rounds outward onto the target
+  grid). Routing through `Fraction` there would bracket the REAL product
+  and widen by up to an ulp on each side — slack where there is none.
+
+  That is the whole reason, and the overflow argument that used to
+  accompany it is WITHDRAWN (audit 0.2.0 B5-6). It ran: two binary64
+  operands near `FMAX` multiply to `inf`, so the exact route's
+  `[FMAX, inf]` would "name a value the program cannot compute". True of
+  binary64, and it proves too much — the row's own narrow-format path
+  already returns exactly that box, because the corners are computed in
+  binary64 and only then rounded outward onto the narrow grid. Measured,
+  float32: `ieee_mul_fmt` on `FMAX × FMAX` returns
+  `(3.4028234663852886e+38, inf)` while `np.float32` computes `inf`.
+  Sound in both places — the box holds the value — but an argument that
+  condemns the sibling row cannot be this row's reason, and
+  `test_the_overflow_argument_for_ieee_mul_proves_too_much` keeps the
+  measurement beside the docstring that no longer makes the claim.
+
+  **Measured coverage effects, counted rather than characterised.**
+  Fifteen pre-existing tests changed status across the two fixes — **13
+  from this one, 2 from S10** — and each is re-posed with its reason in
+  place. (A sixteenth, `test_no_untracked_file_anywhere_would_ship`,
+  reddened only because the new test file was untracked; not a behaviour
+  change.)
+
+  From `mul`, the interval leg now decides what a solver used to, or what
+  nothing used to: the JAX-Fluids `beta_0 >= 0` acceptance control (a sum
+  of squares — now discharged by intervals, which is why the escalating
+  control moved to `beta_1 <= 18.0`, true over the box with a measured
+  vertex maximum of 17.333… against a propagated box reaching 18.333…);
+  the T2 coefficient-contrast obligation at the equality-attaining
+  boundary (`C*min` starts at exactly 200 now, so the closed contrast
+  decides where it used to escalate — and the escalation pin moved to the
+  n = 1 field, where max and min are the same element and the dependency
+  problem keeps it undecidable for good); the T3 symmetry pair at an
+  all-point envelope (`0.0 * t` is the exact `[0,0]`, so the seam between
+  the triple and array paths closed); the all-point contract envelope,
+  which no longer invokes a solver at all; and four unit pins that
+  asserted the bump directly.
+
+  Three audit-pinned constructions had to be re-posed onto transfers that
+  still bracket, because their subject was the pad and never `mul`: the
+  uncertified-precondition channel B (audit F7) moved to `sqrt`, whose
+  endpoints are irrational in general so that no exactness discipline can
+  ever remove its bracket — it is the THIRD transfer to carry that
+  channel, after `add` and `mul` were each converted out from under it,
+  and the note predicting this move was already in the file; the
+  undecided-detail exhibit moved to `exp`; and the emission-infidelity
+  alarm's `true_over_box_query` moved from `x*x <= 1.0` to `x*x >= 0.0`,
+  which straddles for a reason no exactness work can remove (the interval
+  domain cannot see that the two operands are the same variable).
+
+  **THE "OTHER DIRECTION" SENTENCE THIS ENTRY ORIGINALLY CARRIED WAS
+  FALSE, and its falsity is the B5-1 entry below.** It read: *"In the
+  other direction the loss is the S10 entry's, not this one's: nothing
+  here made any verdict less decidable."* Nothing here made a verdict less
+  decidable — but M16 opened a composition that made one WRONG, by moving
+  a sum-of-squares residual off the true-straddle decline and onto the one
+  zero-containing shape that did not decline. An entry that verifies its
+  own ℝ-containment claim and then stops has not finished: the question is
+  not only "is this transfer's box sound" but "what does this transfer now
+  reach". Corrected in place rather than deleted, because the sentence's
+  shape — a true local claim standing in for an unexamined global one — is
+  the recurring failure this log exists to record.
+
+- **2026-08-15 (pre-release, B5 follow-up): a real-mode divisor box that
+  REACHES zero dropped the zero and minted a definite verdict.** Audit
+  0.2.0 B5-1. **FALSE VERIFIED, real mode**, made reachable by the M16 fix
+  above.
+
+  **The defect.** `div`'s zero-containing divisor had four shapes and
+  three of them declined, every one citing the same fact — ℝ has no value
+  at `a/0`:
+
+  | divisor box | before |
+  |---|---|
+  | `[0, 0]` | decline — *"division by zero is undefined"* |
+  | `lo < 0 < hi` | decline — `DIV_STRADDLE_DECLINE` |
+  | (`sqrt` of a negative box, the ℝ-undefined precedent) | decline |
+  | `[lo, 0]` / `[0, hi]` | **`boundary_div`, which EXCLUDES the zero, and a definite verdict from the rest** |
+
+  Before M16, `Σxᵢ²` bumped its zero corner below zero, so a residual
+  `Σxᵢ² − c` was a TRUE STRADDLE and took row 2. With `mul` exact it
+  floors at exactly `0.0`, lands on row 4, and the drop happens silently.
+  Measured on this branch, `x` declared `float64 [0, 2]²`:
+
+  ```
+  1.0 / (jnp.sum(x*x) - 8.0)  <=  -0.125
+
+    stelling                  VERIFIED
+    divisor box               (-8.0, 0.0)
+    boundary_div([1,1], .)    (-inf, -0.125]
+    jax at x = [2.0, 2.0]     inf              <= -0.125 ?  False   <- a DECLARED point
+    jax at x = [1.0, 1.0]     -0.1666...       <= -0.125 ?  True
+  ```
+
+  At `f0b34cd` the same tree returns UNKNOWN with *"the divisor interval
+  [-8.000000000000002, 1.7763568394002505e-15] straddles zero"*.
+  The falsifying direction is specific: `[lo, 0]` with a non-negative
+  dividend gives a strictly negative upper bound while the runtime zero is
+  `+0.0` (`Σx² − c` and `0.0 − x*x` both produce `+0.0`; `-(x*x)`
+  produces `-0.0` and does not falsify).
+
+  **THE KERNEL IS NOT THE DEFECT.** `boundary_div` is sound over `b ≠ 0`
+  — 7,560 exact-rational quotients here, 0 failures, and 3,291,024 in the
+  auditor's independent sweep, also 0. The defect is the PREMISE: the
+  transfer inferred "the zero can be dropped" from the SHAPE of the box,
+  and the shape does not carry that. This is why a well-measured kernel
+  can sit under a false verdict, and why the sweep above now says so in
+  its own docstring.
+
+  **The design question, and how it was answered.** Reverting to "decline
+  every zero-touching divisor" is sound and withdraws the 0.2.0 row
+  entirely — including the case it was built for, `assume(x > 0); 1/Σxᵢ²`,
+  where the assume genuinely does exclude the zero and the box cannot say
+  so (an interval has no open bound, so the narrowing is the closed
+  `[0, hi]`). So the honest condition is not *which endpoint is zero* but
+  *whether zero is a value the divisor can take*.
+
+  **What the propagator knew, measured rather than assumed.** Nothing.
+  `_classify_cmp` meets the CLOSED half-space and writes it straight into
+  `env`; strictness is destroyed at that line and no table, flag or note
+  survives it. Transfers receive `(eqn, params, ins)` — boxes only — so
+  even a `div` whose divisor IS the assumed variable could not recover it.
+  It is *recoverable*, though, because the assume equation is still in the
+  jaxpr and the propagator still sees it, which is what the fix does.
+
+  **The fix: a strict-sign certificate, one source, one rule set, one
+  consumer.** `_Propagator.strict_sign` maps a var id to `+1`/`-1`, read
+  as "every element of this value is certainly > 0 (resp. < 0) at every
+  point of the assumed region" — a claim about true reals, never about the
+  box.
+
+  * **Source** (`_classify_cmp`): a strict `gt` with every per-element
+    bound `>= 0` records `+1`; a strict `lt` with every bound `<= 0`
+    records `-1`. `assume(x > -5)` records nothing, which is right: it
+    excludes no zero. Later assumes cannot invalidate a record, because
+    narrowing is a meet and the assumed region is the conjunction — a fact
+    true of the region stays true of every sub-region.
+  * **Propagation** (`_strict_sign_out`, a closed by-NAME set):
+    `mul`/`div` multiply the signs; `add`/`add_any` keep a shared sign;
+    `neg` flips; `abs`/`square` give `+1`; `integer_pow` gives `+1` for
+    even `y` (including `y = 0`) and `sign(x)` for odd; `reduce_sum` and
+    `dot_general` keep the sign when the operand size is nonzero, which is
+    exactly the guarantee that every output cell sums at least one term.
+    **`sub` is absent on purpose** — two positives can differ by zero, and
+    that is the `Σx² − c` shape above. Every other primitive drops the
+    fact.
+  * **Consumer**: `_t_div` takes the per-operand signs as a fourth
+    argument (the real-mode counterpart of the `in_flags` every ieee
+    transfer already receives, registered in
+    `_REAL_TRANSFERS_READING_STRICT_SIGN`) and reaches `boundary_div` only
+    when the divisor's is nonzero. Otherwise `DIV_BOUNDARY_ZERO_DECLINE`,
+    which names the box, says ℝ has no quotient at that point, and lists
+    the primitives that carry a certificate.
+  * **Not gated on `exactness.certifies_nonemptiness`**, deliberately: the
+    claim a certified sign licenses is "the quotient is bounded WHERE THE
+    PRECONDITION HOLDS", which is what a VERIFIED under a constraining
+    assume already says in its stamp. Whether that region is inhabited is
+    the vacuity question, decided and disclosed by separate machinery.
+  * **Real mode only.** Under ieee the strict narrowing bumps to the
+    format's smallest subnormal and the DAZ haze hulls it straight back to
+    a box containing 0 — the runtime value IS zero there — so `x > 0` does
+    not imply "certainly nonzero" on a flush-to-zero target. That is S10's
+    own lesson; nothing writes or reads the table under ieee.
+  * **Scope-swapped like `env`.** Var ids are unique per jaxpr, not per
+    transcription, so a transparent call and a `cond` branch each run with
+    a fresh table, and nothing is carried in or out. An assume inside a
+    possibly-untaken branch therefore licenses nothing outside it.
+
+  **The coverage this costs, measured.** Two shapes lose a decision, and
+  both were resting on the dropped point:
+
+  ```
+                                                     before      after
+  declared b = [0, 1], no assume,   1/b > 0          VERIFIED    UNKNOWN
+  declared x = [-1, 0], no assume,  -2/x > 0         VERIFIED    UNKNOWN
+  ```
+
+  Both are correct losses: `b = 0` and `x = 0` are DECLARED values, ℝ has
+  no quotient there, and jax returns `+inf` / `-inf` — the second is not
+  `> 0` at all. Two pre-existing tests asserted those discharges and are
+  re-posed with an assume, each keeping its un-assumed form as the
+  decline control.
+
+  **What is kept**, which is the point of not simply declining:
+
+  ```
+  assume(b > 0); a / b                                       discharged
+  assume(x > 0); 1 / jnp.sum(x * x)         > 0              VERIFIED
+  assume(x > 0); 1 / jnp.sum(x ** 2)        > 0              VERIFIED
+  assume(x > 0); 1 / jnp.sum(jnp.square(x)) > 0              VERIFIED
+  assume(x > 0); 1 / jnp.dot(x, x)          > 0              VERIFIED
+  ```
+
+  **What is lost beyond the two rows above**, said plainly rather than
+  left to be discovered: any divisor built through a primitive with no
+  rule, and any built through a subtraction. Measured:
+  `assume(x > 0); 1/(Σxᵢ² − 1.0)` is UNKNOWN even though the true divisor
+  is nonzero over `x ∈ (0, 4]²` for a large part of the box, and
+  `assume(x > 0); y = jnp.sqrt(x); 1/Σyᵢ²` is UNKNOWN because `sqrt` has
+  no rule. Extending the set is a rule-per-primitive job and each rule is
+  a soundness claim; the granularity is whole-array, not per-element, so
+  a mixed-sign array carries nothing.
+
+  **A note on the amendments below, before their content.** They come
+  from a later, blinded pass over this branch whose verdict was MERGE,
+  and it handed over findings without numeric IDs. They are recorded
+  WITHOUT invented ones: the obvious next labels (`B5-2`, `B5-3`) are
+  already spent in this same log on different findings — `dot_general`'s
+  inlined corners and `boundary_div`'s `inf/inf` raise — so minting them
+  here would have put two different things under one name in one file,
+  which is the failure mode this log exists to prevent. "B5 follow-up
+  audit" is a true label; a number would not have been.
+
+  **AMENDED (2026-08-15, B5 follow-up audit): a CONSTANT operand used to
+  drop the certificate too, and the prose said it could not.** Not a
+  soundness defect — a COVERAGE defect with two pieces of prose denying
+  it, one of them user-facing. `read_strict_sign` answered `0` for every
+  literal, on a docstring rationale that reasoned only about a literal
+  DIVISOR: *"the single consumer is the `div` boundary gate, which is
+  only consulted when the operand's box REACHES zero."* **The single
+  consumer was not the only reader.** `_strict_sign_out` calls
+  `read_strict_sign` on *every operand of every rule*, so a literal
+  COEFFICIENT zeroed the whole chain through it — nothing to do with any
+  divisor. Measured before the fix, all four sound and all four declining:
+
+  ```
+  assume(x > 0); 1 / (0.5 * jnp.sum(x*x))  > 0               UNKNOWN
+  assume(x > 0); 1 / (2.0 * x)             > 0               UNKNOWN
+  assume(x > 0); 1 / (x / 2.0)             > 0               UNKNOWN
+  assume(x > 0); 1 / jnp.mean(x*x)         > 0               UNKNOWN
+  ```
+
+  The last is the mean-squared-residual idiom — the `/n` inside
+  `jnp.mean` is the literal — and it is the shape most likely to appear
+  wherever this row's headline shape does. Worse, the decline the user
+  read was `DIV_BOUNDARY_ZERO_DECLINE`, which told them the chain is
+  carried *"on a value the divisor is built from by `* / neg abs square
+  x**n sum dot`"*. All four queries are built by exactly `*` and `/`.
+  **The message named a rule the code did not implement**, so the remedy
+  it recommended did not work — the `docs/norms.md` "claim divergence"
+  class, pointed at a user.
+
+  **The fix: a constant answers from its own decoded value**
+  (`_box_strict_sign`, beside the rule set it feeds). Five conditions,
+  each load-bearing, and each with a test that reddens when that one
+  alone is removed:
+
+  * **decodable** — the tree carries dtypes with no zero-dep decoder and
+    an undecodable-literal sentinel; both keep answering `0`, via the
+    same guarded-decode idiom as `read_flag` and `_quiet_box`. Measured:
+    a NaN literal does not even reach the finiteness test, because
+    `_value_to_interval` raises `IntervalError("NaN endpoint")` first.
+  * **a value, not a range** — the premise `_box_strict_sign` needs is
+    that the box IS the value, which is true of a decoded literal and a
+    decoded constvar and of NOTHING else here. A var's box is an
+    over-approximation, and `assume(x > 0)` narrows to `[0, hi]`, which
+    this function correctly calls unsigned; the whole strict-sign table
+    exists because a box in general cannot carry this. The pre-boxed
+    `IntervalArray` const branch — provenance unknown, which is why it is
+    marked maybe-NaN under ieee — is skipped for the same reason, and
+    that skip has its own test.
+  * **finite, both endpoints** — `±inf` is nonzero but breaks the rules
+    that consume the fact: `a / inf = 0`, so a certificate minted off an
+    infinite operand would claim NONZERO of a value that is zero. Not
+    hypothetical plumbing: `_int_bracket` saturates an int beyond the
+    double range to `(maxf, inf)`, and that is a literal.
+  * **non-empty** — a size-0 value certifies nothing about "every
+    element": both quantifiers are vacuously true over an empty box,
+    which would mint a sign for a value that has none.
+  * **strictly nonzero, EVERY element** — the fact is quantified over all
+    elements, so an array constant must be one-signed throughout. Reading
+    only `los[0]` is not merely loose, it is unsound in the divisor
+    direction, and the enumeration below is what shows that.
+
+  **The divisor case is not weakened, and this was enumerated rather than
+  asserted.** `_t_div`'s gate is consulted only when
+  `iv.straddles_zero(divisor)` — some element with `lo <= 0 <= hi`. A
+  constant answering `+1` has `lo > 0` for every element (`-1`: `hi < 0`,
+  so `lo <= hi < 0`), so it cannot straddle, so no constant divisor whose
+  sign is newly nonzero can reach the gate at all. Enumerated over 13
+  scalars and all 4³ arrays drawn from `{0, 1, -1, inf}`: 76 decodable
+  cases, 1 undecodable, 0 signed-and-straddling. Under the
+  first-element-only mutation that enumeration REDS, which is what shows
+  the all-elements condition is carrying the soundness and not just tidiness.
+
+  **The certificate was re-checked semantically, not just re-run.** For
+  every var the propagator records a sign for, the query is evaluated in
+  exact `Fraction` arithmetic at points of the ASSUMED region — the
+  half-open `(0, 2]`, sampled including a point `1e-12` from the excluded
+  zero and the closed upper endpoint — and every element is confirmed to
+  really have that sign. Five shapes, **850 points, 8,438 var-point
+  checks, 0 failures**, with a live positive control that adds `sub` to
+  the rules and finds **25 violations in 25 cells**. `sub` stays out.
+  Those per-shape counts are printed, not just asserted:
+
+      STELLING_FUZZ_REPORT=1 pytest -s tests/test_assume_bump_boundary_div.py \
+        -k "TRUE_at_every or catches_a_certificate"
+
+  ```
+                                                    before      after
+  assume(x > 0); 1 / (0.5 * Σx²)      > 0           UNKNOWN     VERIFIED
+  assume(x > 0); 1 / (2.0 * x)        > 0           UNKNOWN     VERIFIED
+  assume(x > 0); 1 / (x / 2.0)        > 0           UNKNOWN     VERIFIED
+  assume(x > 0); 1 / jnp.mean(x*x)    > 0           UNKNOWN     VERIFIED
+  assume(x > 0); 1 / (-2.0 * x)       < 0           UNKNOWN     VERIFIED
+  ```
+
+  **And the losses stay lost**, re-measured on the fixed tree — every one
+  of them still UNKNOWN:
+
+  ```
+  declared b = [0, 1], NO assume,     1/b > 0                  UNKNOWN
+  declared x = [-1, 0], NO assume,    1/x < 0                  UNKNOWN
+  assume(x > 0); 1 / (Σx² − 8.0)  < 0      (the `sub` break)   UNKNOWN
+  assume(x > 0); 1 / jnp.sqrt(x)  > 0      (rule-less)         UNKNOWN
+  x / 0.0 > 0                     (a literal ZERO divisor)     UNKNOWN
+  assume(x > 0); 1 / (0.0 * x)    > 0      (a zero coeff)      UNKNOWN
+  ```
+
+  The four spellings of `assume(x>0); 1/Σx²` above are unchanged and
+  still VERIFIED. `DIV_BOUNDARY_ZERO_DECLINE` now says "with nonzero
+  finite constants allowed anywhere in that chain", which is the rule the
+  code implements.
+
+  **The rule had to cover CONSTVARS, not just literals, or that new
+  sentence would have been the next claim divergence.** A scalar constant
+  traces to a `Literal`; an ARRAY constant traces to a CONSTVAR, which is
+  a `Var` and so reads the assume-written table, where it is absent.
+  Measured on the literal-only version of this fix:
+  `assume(x > 0); 1/jnp.sum(jnp.array([1.,2.,3.,4.]) * x*x) > 0` was still
+  UNKNOWN while the scalar `2.0 * x` had started verifying — a message
+  true of scalars and false of arrays, which is the same defect class the
+  fix is about. A constvar's decoded box IS its value, exactly as a
+  literal's is, so `run()` writes the certificate for it from the same
+  `_box_strict_sign`. Measured after:
+
+  ```
+  W = [ 1,  2, 3, 4]   assume(x>0); 1/Σ wᵢxᵢ² > 0            VERIFIED
+  W = [-1, -2,-3,-4]   assume(x>0); 1/Σ wᵢxᵢ² < 0            VERIFIED
+  W = [ 1,  0, 3, 4]   assume(x>0); 1/Σ wᵢxᵢ² > 0            UNKNOWN
+  W = [ 1, -2, 3, 4]   assume(x>0); 1/Σ wᵢxᵢ² > 0            UNKNOWN
+  W = [ 1, inf,3, 4]   assume(x>0); 1/Σ wᵢxᵢ² > 0            UNKNOWN
+  ```
+
+  The mixed-sign row is not conservatism: with `W = [1,-2,3,4]` the sum
+  really can be zero over the assumed region, so a certificate there
+  would be FALSE. Whole-array quantification is what refuses it.
+
+  **AMENDED (2026-08-15, B5 follow-up audit): the sub-jaxpr disclosure
+  named the two rare wrappers and omitted `jit`.** `CHANGELOG.md` said
+  *"A transparent wrapper (`remat`, `custom_jvp`) or a `cond` branch runs
+  with a fresh table."* `DEFAULT_TRANSPARENT` is
+  `{'jit', 'remat2', 'custom_vjp_call', 'custom_jvp_call'}` — **`jit` is
+  a member, and it is the one every jax user writes.** The behaviour is
+  correct and conservative; the disclosure understated its own cost by
+  naming only the members almost nobody hits. Measured, the certificate
+  does not cross it in either direction:
+
+  ```
+  assume(x>0); 1 / jax.jit(lambda v: jnp.sum(v*v))(x) > 0      UNKNOWN
+  assume moved INSIDE the jit, same query                      UNKNOWN
+  ```
+
+  Both decline with `div … REACHES zero at a boundary`. The list is now
+  pinned to `stelling.coverage.DEFAULT_TRANSPARENT` by a test that reads
+  `CHANGELOG.md` and requires every member to be named, so the next
+  member added to the frozenset cannot quietly fall out of the prose.
+
+- **2026-08-15 (pre-release, B5 follow-up): the crash class removed from
+  `ieee_div` was still live in `boundary_div`, and surfaced as a decline
+  reason.** Audit 0.2.0 B5-3. Not a false verdict — a false SENTENCE, out
+  of a public entry point.
+
+  The S10 entry above records: *"the boundary-aware branch also raised
+  `IntervalError("NaN endpoint")` on `[-inf,-inf] / [-inf, 0]`; returning
+  ⊤ before any endpoint arithmetic removes that too."* True of `ieee_div`,
+  false of the real-mode sibling, which the same batch left untouched:
+
+  ```
+  pre-fix : ieee_div([-inf,-inf], [-inf,0])   RAISED IntervalError: NaN endpoint
+            boundary_div([inf,inf], [0,inf])  RAISED IntervalError: NaN endpoint
+  B5 HEAD : ieee_div(...)                     -> (-inf, inf)
+            boundary_div([inf,inf], [0,inf])  RAISED IntervalError: NaN endpoint
+  after   : both                              -> (-inf, inf)
+  ```
+
+  `_boundary_div_lo`/`_hi` fall to `_down(num/den)` when either operand is
+  infinite, and `inf/inf` is NaN, which `IntervalArray.__post_init__`
+  rejects. The dispatcher catches it, so nothing crashed; what a user saw
+  was the domain's internal invariant string presented as the reason
+  division declined:
+
+  ```
+  'div' declined this form at <string>:11 (h): NaN endpoint in interval arithmetic
+  ```
+
+  `div`'s own four-corner `inf/inf` guard now runs first in BOTH of
+  `boundary_div`'s arms — verbatim, so the two kernels answer the
+  indeterminate form identically, and deliberately not refined to
+  which-arm-uses-which-corner, because ⊤ is always sound and a narrower
+  test is a second thing to keep right. Measured over every legal
+  one-sided-boundary call from a 10-value endpoint pool (2,016 box pairs):
+  **8 raised before, 0 after.**
+
+  **Suite, both environments, and the skip set.** CI runs plain
+  `pytest -q -ra` with no `JAX_ENABLE_X64`, and this branch is measured
+  under both:
+
+  ```
+                          passed   skipped
+  JAX_ENABLE_X64=1          3141       10
+  no JAX_ENABLE_X64 (CI)    3142        9
+  ```
+
+  The skip SET differs by exactly one member and by design:
+  `test_tripwire_arm.py::…threefry…` skips *"the threefry mask fires only
+  at x64=0"* when x64 is on. The other nine are identical in both
+  (hypothesis ×6, pytest-xdist ×1, blackjax ×2). Baseline on this branch
+  before these fixes: 3127/10. `tests/test_ieee_zero_divisor_and_mul_exact.py`
+  now carries 204 cases, of which **130 fail against the merge base** —
+  measured by copying the file into a `git archive` of `f0b34cd` and
+  running it there.
+
+  **Re-measured after the three follow-up amendments above**, same two
+  environments, same machine (CPython 3.12.3, jax 0.11.0, numpy 2.5.1,
+  Linux x86_64):
+
+  ```
+                          passed   skipped
+  JAX_ENABLE_X64=1          3176       10
+  no JAX_ENABLE_X64 (CI)    3177        9
+  ```
+
+  `+35` on both, and they reconcile exactly: `+33` in
+  `tests/test_assume_bump_boundary_div.py` (18 → 51 collected) and `+2` in
+  `tests/test_ieee_zero_divisor_and_mul_exact.py` (204 → 206). The skip
+  SET is unchanged in both environments — nothing added here can skip —
+  and the one-member difference between them is still the same `threefry`
+  case.
+
+  **Each fix was reverted ALONE and the whole suite re-run**, so the
+  coverage is attributed rather than assumed — a test that reddens for two
+  fixes tells you less than the count suggests. All six mutations are
+  live:
+
+  | reverted alone | tests red | where |
+  |---|---|---|
+  | B5-1 (the certificate gate removed from `_t_div`) | **4** | the composition test against jax, the two `boundary_div`-reachability controls, and the `assume`-removed sum-of-squares control |
+  | B5-2 (`dot_general`'s inlined bumped corners restored) | **4** | three `dot_general` pins in the new file, plus the four-spellings control |
+  | B5-3 (`boundary_div`'s `inf/inf` guard removed) | **2** | the kernel sweep and the public-entry-point decline-reason pin |
+  | B5-6 (the ieee `div` decline replaced by a silent ⊤) | **4** | one per format |
+  | M16 (`_mul_corners`' exact route removed — one function now, so it reverts for `mul` AND `dot_general`) | **19** | 12 in the new file, 3 in `test_contracts.py`, one each in `test_interval.py`, `test_ieee_semantics.py`, `test_square_acceptance_jaxfluids.py`, `test_undecided_detail.py` |
+  | S10 (the ieee boundary branch restored in both kernels, with B5-6's gate removed so the branch is reachable) | **117** | 115 in the new file, plus the ieee-f32 assume-bump price pin and the subnormal-haze pin |
+
+  The M16 revert additionally reds
+  `test_every_registered_mutation_still_applies_exactly_once`, because the
+  mutation deletes text that two registered positive controls target; that
+  is an artifact of the mutation, not a control, and is excluded from the
+  19. The B5-1 revert additionally reds
+  `test_committed_page_matches_live_registries`, because the generated
+  primitives page quotes source LINE NUMBERS and the revert shifts them;
+  same treatment.
+
+  **Two of those registered controls had stopped applying, and the static
+  check could not see it.** `oracle-masked` and `widen` both mutate
+  interval multiplication to keep only the two same-corner products. They
+  named the `products = (...)` line — the BUMPED route — which after M16
+  the int8 `[-1, 1]` query they run never reaches, so the mutants had
+  stopped masking anything while `test_suite_disclosure`'s occurrence
+  count kept passing. Both now replace the whole body of `_mul_corners`,
+  masking both routes; measured under the new mutation,
+  `mul([-1,1],[-1,1])` returns `[1, 1]` (so `x*x >= 1` discharges over a
+  set containing 0) and `mul([-1,0.5]²)` / `mul([-4,3.5]²)` return
+  `[0.25, 1.0]` / `[12.25, 16.0]` against the clean `[-0.5, 1.0]` /
+  `[-14.0, 16.0]` (so widening turns UNKNOWN into VERIFIED). The controls
+  themselves could not be EXECUTED here — both properties are
+  hypothesis-gated and hypothesis is not installed in this environment —
+  so what is measured is the mutant's effect on the domain, which is the
+  mechanism each control's `why` describes.
+
+  **Also in this batch, and it is the defect that took `main` red twice:**
+  `tests/test_ieee_zero_divisor_and_mul_exact.py` called
+  `jax.config.update("jax_enable_x64", True)` INLINE in two tests, with no
+  restore. x64 is process-global in jax, so an unrestored set leaks into
+  every test that runs after it in the session, and it is invisible to
+  anyone running with `JAX_ENABLE_X64=1` in the environment — which CI
+  does not set. Both now go through a save/restore `_x64` fixture
+  (function-scoped and not autouse, because the rest of that module runs
+  hand-built IR with no jax at all, so requesting the fixture is also its
+  jax gate). The four analogous instances `main` fixed at `942df81` and
+  which exist on this branch — `test_pow_audit_findings.py`'s
+  module-scope set, and the `importorskip("jax", reason=…)` gates in the
+  three property modules — are brought over by cherry-picking that
+  commit's hunks rather than by predicting the merge. Its fifth and sixth
+  files belong to branches this one does not contain.
+>>>>>>> fix/B5-ieee-div-mul
 
 *(no releases yet)*

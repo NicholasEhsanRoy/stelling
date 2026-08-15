@@ -35,23 +35,29 @@ is a false VERIFIED**, which is the project's own thesis defect. The rules:
 **TWO ENDPOINT DISCIPLINES LIVE HERE. They are not interchangeable and the
 call site does not say which one applies, so the rule is:**
 
-* **exact-when-representable** — ``add``, ``sub``, ``reduce_sum``,
+* **exact-when-representable** — ``add``, ``sub``, ``mul``, ``reduce_sum``,
   ``integer_pow``. The endpoint is computed exactly (``Fraction``; a double
   is a dyadic rational) and then rounded outward ONLY if the exact result
   is not representable. Sound because these are correctly-rounded ops whose
-  slack was pure *endpoint-representation* conservatism.
-* **unconditional one-ulp bump** — ``mul``, ``exp``, ``pow``, ``sqrt``.
-  (``div`` joined the first group for its finite, non-zero-straddling case;
-  its two ⊤ escapes — a divisor interval containing 0, and ``inf/inf`` — are
-  untouched, which is what keeps ``integer_pow``'s negative-exponent use of
-  the zero discipline exactly as it was.) **Do not "optimise" these to the rule above without reading
-  why each one is here**, because in three of them the ulp is doing a
-  second job: ``exp``/``pow`` carry the faithfully-rounded-libm assumption
-  (error ≤ 1 ulp, stamped into every verdict that uses them), and ``sqrt``'s
-  ulp is what keeps it sound on a platform whose ``sqrt`` is merely
-  faithfully rounded rather than correctly rounded. ``mul``/``div`` are
-  representational like the first group and are simply not converted yet —
-  that is a scope boundary, not a soundness statement.
+  slack was pure *endpoint-representation* conservatism. (``div`` belongs
+  here for its finite, non-zero-straddling case; its two ⊤ escapes — a
+  divisor interval containing 0, and ``inf/inf`` — are untouched, which is
+  what keeps ``integer_pow``'s negative-exponent use of the zero discipline
+  exactly as it was. ``mul`` keeps the bump on the same confinement: an
+  infinite endpoint, where ``Fraction`` cannot represent the operand and the
+  ``0·±inf = 0`` convention is an endpoint rule rather than real
+  arithmetic.)
+* **unconditional one-ulp bump** — ``exp``, ``pow``, ``sqrt``. **Do not
+  "optimise" these to the rule above**: in every one of them the ulp is
+  doing a second job. ``exp``/``pow`` carry the faithfully-rounded-libm
+  assumption (error ≤ 1 ulp, stamped into every verdict that uses them),
+  and ``sqrt``'s ulp is what keeps it sound on a platform whose ``sqrt`` is
+  merely faithfully rounded rather than correctly rounded. Nothing
+  merely-representational is left in this group — ``mul`` was the last, and
+  its bump was not free: it put the exactly-zero corner of a squared
+  quantity BELOW zero, which defeated ``reduce_sum``'s nonnegative clamp and
+  made ``x*x`` and ``x**2`` reach different verdicts on the same property
+  (audit 0.2.0 M16).
 
 * Endpoints may be ``±inf`` (overflow saturates outward; half-infinite
   sets are representable). Interval multiplication uses the ``0·±inf = 0``
@@ -267,6 +273,30 @@ SCATTER_ADD_IEEE_DECLINE = (
     "declines under ieee semantics — including the duplicate-free and "
     "empty-update forms, deliberately: the refusal is the censused floor, "
     "not a per-case judgement"
+)
+
+
+IEEE_ZERO_DIVISOR_TOP = (
+    "Under ieee semantics a divisor box that CONTAINS zero divides to ⊤, "
+    "including the one-sided-boundary shapes [0, hi] and [lo, 0]. The "
+    "0.2.0 boundary-aware tightening is WITHDRAWN here and must not be "
+    "re-added: it read [lo, 0] as 'the divisor approaches 0 from below' and "
+    "returned a one-signed infinity, but under IEEE the divisor does not "
+    "approach zero, it IS zero at that endpoint, and the sign of x/0 comes "
+    "from sign(x) XOR signbit(0) — the SIGN BIT OF THE ZERO, which an "
+    "interval endpoint cannot carry. +0.0 == 0.0, so +0.0 is a value of "
+    "[lo, 0] and -0.0 is a value of [0, hi]; both infinities are attainable "
+    "and the box excluded one of them (audit 0.2.0 S10, FALSE VERIFIED in "
+    "all four formats). WHICH BOUNDARY IS ZERO IS NOT ENOUGH INFORMATION "
+    "TO DECIDE THIS, so no test on the endpoints' positions can repair it — "
+    "only a domain that carries the zero's sign could, and this one does "
+    "not. ⊤ is not merely the conservative answer here, it is the EXACT "
+    "hull: whenever the dividend can be nonzero both ±inf are attained, and "
+    "in the only remaining case (dividend exactly [0, 0]) every quotient is "
+    "0/0 = NaN or ±0, which already raises the NaN flag. The real-mode "
+    ":func:`boundary_div` keeps the tightening and is NOT wrong for this "
+    "reason: ℝ has ONE zero and a/0 is undefined there, so the box need "
+    "only cover b ≠ 0. The two kernels disagree deliberately."
 )
 
 
@@ -591,12 +621,76 @@ def abs_(a: IntervalArray) -> IntervalArray:
     return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
 
 
-def mul(a: IntervalArray, b: IntervalArray) -> IntervalArray:
-    def f(alo, ahi, blo, bhi):
-        products = (_prod(alo, blo), _prod(alo, bhi), _prod(ahi, blo), _prod(ahi, bhi))
-        return _down(min(products)), _up(max(products))
+def _mul_corners(
+    alo: float, ahi: float, blo: float, bhi: float
+) -> tuple[float, float]:
+    """THE interval product of two elements — one implementation, two
+    callers (:func:`mul` and :func:`dot_general`'s per-term product).
 
-    return _binary(a, b, f)
+    They were two copies of the same four-corner rule, and M16 converted
+    only one of them: `dot_general` kept the unconditional bump, so
+    `jnp.sum(x*x)` floored at exactly 0 while `jnp.dot(x, x)` floored at
+    `-1e-323` and lost the same nonnegative clamp M16 was about. The
+    divergence was disclosed and attributed to "a contraction's numerics
+    need their own measurement of the association order" — which was the
+    wrong reason: the ACCUMULATION already used `_add_lo`/`_add_hi`, the
+    exact-when-representable route, and association order has nothing to
+    do with a product's corners. Only the corners bumped. Sharing the code
+    is what stops the next reader from having to notice that again.
+
+    Finite endpoints: the four corner products are exact rationals, so the
+    extremum is exact and the single directed rounding leaves it UNCHANGED
+    whenever it is representable. An infinite endpoint keeps the
+    unconditional bump — ``Fraction(inf)`` raises, and :func:`_prod`'s
+    closed-interval ``0 * ±inf = 0`` is an endpoint convention rather than
+    real arithmetic.
+    """
+    if _exactable(alo, ahi, blo, bhi):
+        ex = [Fraction(x) * Fraction(y)
+              for x in (alo, ahi) for y in (blo, bhi)]
+        return _exact_down(min(ex)), _exact_up(max(ex))
+    products = (
+        _prod(alo, blo), _prod(alo, bhi), _prod(ahi, blo), _prod(ahi, bhi)
+    )
+    return _down(min(products)), _up(max(products))
+
+
+def mul(a: IntervalArray, b: IntervalArray) -> IntervalArray:
+    """Real multiplication, exact on finite endpoints.
+
+    The four corner products of FINITE endpoints are exact rationals and
+    ``min``/``max`` over them is exact, so there is one rounding in the
+    whole transfer and ``_exact_down``/``_exact_up`` do it *directed* —
+    returning the endpoint UNCHANGED when the extremum is representable.
+    This is the same route `add` (`_add_lo`/`_add_hi`) and `div` have
+    always taken; `mul` was the only arithmetic transfer that bumped
+    unconditionally (audit 0.2.0 M16).
+
+    The bump it used to apply was not free precision. `mul([2,3],[2,3])`
+    returned `[3.9999999999999996, 9.000000000000002]` for an image that
+    is exactly `[4, 9]`, and — the consequence that mattered — the
+    exactly-zero corner of `mul([0,4],[0,4])` bumped to `-5e-324`, BELOW
+    ZERO. That defeats `reduce_sum`'s nonnegative clamp, so a
+    sum-of-squares written `x*x` became a true straddle and the divisor it
+    fed declined, while the same sum written `x**2` verified: one real
+    property, two verdicts, decided by the spelling. Sound in both
+    directions — a wider box only loses precision — but the loss landed
+    exactly on the `assume(x > 0)` sum-of-squares shape boundary-aware
+    division was added for.
+
+    Clamping the sign of a zero corner would have been a bandaid: it
+    leaves `[2,3]×[2,3]` inexact, and the inexactness is the defect.
+
+    An infinite endpoint keeps the unconditional bump: ``Fraction(inf)``
+    raises, and the closed-interval ``0 * ±inf = 0`` convention in
+    :func:`_prod` is an endpoint rule rather than real arithmetic, so it
+    stays where it already lived. Same confinement as `add` and `div`.
+
+    The rule itself lives in :func:`_mul_corners`, which
+    :func:`dot_general` also calls — the sharing is the fix, not tidiness
+    (a second copy is what let M16 survive its own fix one level up).
+    """
+    return _binary(a, b, _mul_corners)
 
 
 def div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
@@ -659,6 +753,19 @@ def boundary_div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     For elements where the divisor does NOT contain zero, normal division
     is used. For one-sided boundary elements, the result is computed with
     the appropriate infinite endpoint.
+
+    ``inf/inf`` IS ⊤ HERE TOO, and it is checked once for both arms. It
+    used to be checked only on the non-zero-containing arm, so
+    ``boundary_div([inf, inf], [0, inf])`` fell into
+    :func:`_boundary_div_lo`, computed ``inf/inf = NaN`` and raised
+    ``IntervalError("NaN endpoint")`` — an internal invariant string
+    surfacing as a user-facing decline reason out of a kernel whose
+    contract is to degrade rather than crash (audit 0.2.0 B5-3; 8 such box
+    pairs in the sweep). The guard is :func:`div`'s, verbatim, so the two
+    kernels answer the indeterminate form the same way; it is deliberately
+    the same conservative four-corner test rather than a
+    which-arm-uses-which-corner refinement, because ⊤ is always sound and
+    a narrower test here is a second thing to keep right.
     """
     def f(alo, ahi, blo, bhi):
         # Precondition validation: reject divisors that are not valid
@@ -675,13 +782,15 @@ def boundary_div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
                 f"boundary_div requires a one-sided-boundary divisor, but got "
                 f"point-at-zero [0, 0]; division by zero has no finite result"
             )
+        for x in (alo, ahi):
+            for y in (blo, bhi):
+                if (x == _INF or x == -_INF) and (y == _INF or y == -_INF):
+                    # inf/inf is indeterminate; widen fully outward, before
+                    # any endpoint arithmetic can manufacture a NaN
+                    return -_INF, _INF
         b_contains_zero = blo <= 0.0 <= bhi
         if not b_contains_zero:
             # Normal division (no zero in divisor)
-            for x in (alo, ahi):
-                for y in (blo, bhi):
-                    if (x == _INF or x == -_INF) and (y == _INF or y == -_INF):
-                        return -_INF, _INF
             if _exactable(alo, ahi, blo, bhi):
                 ex = [Fraction(x) / Fraction(y)
                       for x in (alo, ahi) for y in (blo, bhi)]
@@ -1206,11 +1315,24 @@ def dot_general(
     BETWEEN output elements are still lost, which is the ordinary image gap
     and not this function's concern.
 
-    Each term is a four-corner interval product (:func:`mul`'s rule, which
-    is exact for the corners and rounds outward once), and the terms are
-    accumulated with the same exact-when-representable steps
-    :func:`reduce_sum` uses — seeded with the first contributor, so a
-    one-term contraction spends no bumps at all.
+    Each term is a four-corner interval product — :func:`_mul_corners`,
+    literally the function :func:`mul` calls, so the two cannot drift — and
+    the terms are accumulated with the same exact-when-representable steps
+    :func:`reduce_sum` uses, seeded with the first contributor, so a
+    one-term contraction of representable operands spends no rounding at
+    all.
+
+    **The two used to be separate copies of one rule, and that is how M16
+    survived its own fix.** Audit 0.2.0 M16 gave `mul` the
+    exact-when-representable route and left the copy inlined here bumping
+    unconditionally, so `jnp.sum(x*x)` floored at exactly 0 while
+    `jnp.dot(x, x)` floored at `-1e-323` — a sum-of-squares residual losing
+    its nonnegative clamp by being spelled as a contraction. The
+    divergence was recorded but its stated reason was wrong: the
+    ACCUMULATION here already used `_add_lo`/`_add_hi`, only the product
+    corners bumped, and a product's corners have nothing to do with
+    association order. The association-order argument below is untouched by
+    this and always was.
 
     Under **R** semantics addition is associative, so the bracket bounds
     every association order XLA might pick at once. This reasoning is not
@@ -1294,11 +1416,7 @@ def dot_general(
             ib = _flat_index(tuple(bc), b.shape)
             alo, ahi = a.los[ia], a.his[ia]
             blo, bhi = b.los[ib], b.his[ib]
-            corners = (
-                _prod(alo, blo), _prod(alo, bhi),
-                _prod(ahi, blo), _prod(ahi, bhi),
-            )
-            plo, phi = _down(min(corners)), _up(max(corners))
+            plo, phi = _mul_corners(alo, ahi, blo, bhi)
             if not seen:
                 acc_lo, acc_hi, seen = plo, phi, True
             else:
@@ -1455,6 +1573,14 @@ def pow_(a: IntervalArray, b: IntervalArray) -> IntervalArray:
 # 0/0 into the flag) and result endpoints are hazed after it (FTZ: a
 # subnormal result may flush to 0). See :func:`subnormal_haze` and
 # :data:`SUBNORMAL_INDETERMINACY_ASSUMPTION`.
+#
+# ZERO IS WHERE THIS DOMAIN IS WEAKER THAN THE REAL ONE, not stronger. An
+# IEEE format has TWO zeros and an interval endpoint has no sign bit, so a
+# box that reaches zero cannot say which zero the program will meet — and
+# the haze above MANUFACTURES such boxes, hulling with the positive literal
+# 0.0 whatever the sign of the value it flushed. Division is where that
+# bites: see :data:`IEEE_ZERO_DIVISOR_TOP`, which is also why the real-mode
+# :func:`boundary_div` and :func:`ieee_div` deliberately disagree.
 
 MIN_NORMAL = 2.0**-1022  # smallest positive normal binary64
 
@@ -1620,6 +1746,34 @@ def ieee_sub(a: IntervalArray, b: IntervalArray):
 
 
 def ieee_mul(a: IntervalArray, b: IntervalArray):
+    """IEEE multiplication.
+
+    **This kernel deliberately does NOT take the exact-rational route the
+    real-mode :func:`mul` takes** (audit 0.2.0 M16 asked the question).
+    Under ieee semantics the value the program has IS ``fl(x*y)``, the
+    correctly-rounded float product, and the native binary64 corner
+    products already ARE that value — exactly, for binary64 operands, and
+    exactly for every narrower format too, since a product of two float32
+    (or bfloat16, or float16) values needs at most 48 significand bits and
+    lands well inside binary64's exponent range, after which
+    ``_ieee_round_box`` rounds outward onto the target's grid.
+
+    Routing through ``Fraction`` would compute the REAL product and then
+    round it outward, which is up to an ulp wider on each side than the
+    set of values the target can produce — slack where there is none, and
+    a claim about ℝ under a dial that speaks floats. That is the whole
+    argument, and it is deliberately no longer accompanied by an overflow
+    one. The overflow sentence this docstring used to add — "two operands
+    near ``FMAX`` multiply to ``inf``, so the exact route's ``[FMAX, inf]``
+    names a value the program cannot compute" — is true of binary64 and
+    PROVES TOO MUCH: the format-parametric path already returns exactly
+    that box, since the corner products are computed in binary64 and
+    ``_ieee_round_box`` rounds them outward onto the narrow grid. Measured,
+    float32: ``FMAX×FMAX`` boxes to ``(3.4028234663852886e+38, inf)`` while
+    ``np.float32`` computes ``inf``. Sound — the box holds the value — but
+    an argument that condemns the sibling row cannot be this row's reason.
+    """
+
     def f(alo, ahi, blo, bhi):
         # NaN class 0·±inf: 0 may sit in the interior, inf only at
         # endpoints — detected from containment, not only from corners.
@@ -1634,6 +1788,10 @@ def ieee_mul(a: IntervalArray, b: IntervalArray):
 
 
 def ieee_div(a: IntervalArray, b: IntervalArray):
+    """IEEE division. A divisor box containing zero divides to ⊤ —
+    :data:`IEEE_ZERO_DIVISOR_TOP` states why, and why the real-mode
+    :func:`boundary_div` deliberately does not agree."""
+
     def f(alo, ahi, blo, bhi):
         a0, b0 = alo <= 0.0 <= ahi, blo <= 0.0 <= bhi
         ainf = alo == -_INF or ahi == _INF
@@ -1642,30 +1800,11 @@ def ieee_div(a: IntervalArray, b: IntervalArray):
         # VALUE under ieee, not NaN.
         made_nan = (a0 and b0) or (ainf and binf)
         if b0:
-            # Boundary-aware: if zero sits at exactly one boundary,
-            # compute a tighter result than full [-inf, +inf].
-            if blo == 0.0 and bhi == 0.0:
-                # [0, 0]: division by literal zero — ⊤
-                return -_INF, _INF, made_nan
-            elif blo == 0.0:
-                # [0, hi], hi > 0: divisor approaches 0 from above
-                if alo >= 0.0:
-                    return alo / bhi if alo != 0.0 else 0.0, _INF, made_nan
-                elif ahi <= 0.0:
-                    return -_INF, ahi / bhi if ahi != 0.0 else 0.0, made_nan
-                else:
-                    return -_INF, _INF, made_nan
-            elif bhi == 0.0:
-                # [lo, 0], lo < 0: divisor approaches 0 from below
-                if alo >= 0.0:
-                    return -_INF, alo / blo if alo != 0.0 else 0.0, made_nan
-                elif ahi <= 0.0:
-                    return ahi / blo if ahi != 0.0 else 0.0, _INF, made_nan
-                else:
-                    return -_INF, _INF, made_nan
-            else:
-                # True straddle (lo < 0 < hi): ⊤
-                return -_INF, _INF, made_nan
+            # A zero-containing divisor divides to ⊤ under ieee, with no
+            # case split on WHERE the zero sits — see IEEE_ZERO_DIVISOR_TOP
+            # for why the boundary-aware branch that used to be here was
+            # unsound and why no endpoint test can replace it.
+            return -_INF, _INF, made_nan
         corners = (alo / blo, alo / bhi, ahi / blo, ahi / bhi)
         return _corner_hull(corners, made_nan)
 
@@ -1711,27 +1850,9 @@ def ieee_div_fmt(a: IntervalArray, b: IntervalArray, min_normal: float):
         binf = blo == -_INF or bhi == _INF
         made_nan = (a0 and b0) or (ainf and binf)
         if b0:
-            # Boundary-aware: tighter result for one-sided boundaries
-            if blo == 0.0 and bhi == 0.0:
-                return -_INF, _INF, made_nan
-            elif blo == 0.0:
-                # [0, hi], hi > 0
-                if alo >= 0.0:
-                    return alo / bhi if alo != 0.0 else 0.0, _INF, made_nan
-                elif ahi <= 0.0:
-                    return -_INF, ahi / bhi if ahi != 0.0 else 0.0, made_nan
-                else:
-                    return -_INF, _INF, made_nan
-            elif bhi == 0.0:
-                # [lo, 0], lo < 0
-                if alo >= 0.0:
-                    return -_INF, alo / blo if alo != 0.0 else 0.0, made_nan
-                elif ahi <= 0.0:
-                    return ahi / blo if ahi != 0.0 else 0.0, _INF, made_nan
-                else:
-                    return -_INF, _INF, made_nan
-            else:
-                return -_INF, _INF, made_nan
+            # Same rule as :func:`ieee_div`, and it is format-independent:
+            # every IEEE format has two zeros. See IEEE_ZERO_DIVISOR_TOP.
+            return -_INF, _INF, made_nan
         corners = (alo / blo, alo / bhi, ahi / blo, ahi / bhi)
         return _corner_hull(corners, made_nan)
 

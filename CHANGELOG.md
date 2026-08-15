@@ -20,10 +20,35 @@ SPDX-License-Identifier: Apache-2.0
   2^53]), the interval passes through instead of declining to top.
   Unblocks 41 jax-md `safe_mask` sites.
 
-- **Boundary-aware division**: when the divisor has zero at exactly one
-  boundary (`[0, hi]` or `[lo, 0]`) — the case `assume(x > 0)` produces
-  — compute a meaningful result instead of declining. True straddles and
-  point-at-zero still decline with an actionable message.
+- **Boundary-aware division, REAL MODE ONLY, and only where a strict
+  `assume` excludes the zero**: when the divisor has zero at exactly one
+  boundary (`[0, hi]` or `[lo, 0]`) **and** a strict `assume` certifies
+  the divisor is nonzero, compute a meaningful result instead of
+  declining. True straddles and point-at-zero still decline with an
+  actionable message — and so, since the B5-1 fix below, does a
+  zero-touching divisor with no certificate.
+
+  **The certificate, and what carries it.** `assume(d > 0)` narrows `d`
+  to the CLOSED `[0, hi]` — an interval cannot hold an open bound — so
+  the box alone can never say whether its zero endpoint is a value the
+  program reaches. The propagator records the exclusion separately and
+  carries it through `mul`, `div`, `add`/`add_any`, `neg`, `abs`,
+  `square`, `integer_pow`, `reduce_sum` and `dot_general`, which is what
+  keeps the row's headline shape — `assume(x > 0); 1 / jnp.sum(x*x)` —
+  decidable in all four of its spellings. **A subtraction breaks the
+  chain** (two positives can differ by zero), as does every primitive not
+  in that list: those decline, naming the remedy.
+
+  **Under `semantics="ieee"` the tightening is WITHDRAWN entirely**: an
+  IEEE format has two zeros and an interval endpoint has no sign bit, so
+  a divisor box reaching zero divides to `[-inf, inf]` there — and the
+  transfer now says so, quoting `interval.IEEE_ZERO_DIVISOR_TOP` as its
+  decline reason instead of returning ⊤ as an ordinary result. That ⊤ was
+  counted "known", so a reader was told "none fell to ⊤ … compatible with
+  a precision near-miss" about a `[-inf, +inf]` box while the same
+  verdict's `top_despite_coverage` line named `div ×1`. See the S10 and
+  B5-1 entries under Soundness fixes; the two kernels disagree
+  deliberately.
 
 - **Div-straddle decline**: when float division has a divisor spanning
   zero (true straddle), the transfer now declines with a message naming
@@ -41,8 +66,13 @@ SPDX-License-Identifier: Apache-2.0
 - **IEEE assume-bump** (`_format_nextafter`): `assume(x > k)` in IEEE
   mode narrows to `[nextafter_fmt(k, +inf), hi]` — the smallest
   representable value strictly above k in the target format. Works for
-  all k, all formats. In combination with boundary-aware division, the
-  `assume(b > 0); a / b` pattern produces decidable quotients.
+  all k, all formats. **The `assume(b > 0); a / b` pattern does NOT
+  produce a decidable quotient in ieee mode** (it does in real mode):
+  `nextafter_fmt(0, +inf)` is the format's smallest subnormal, which the
+  DAZ haze immediately hulls back to 0, and a zero-containing divisor is
+  ⊤ under ieee since the S10 fix. An assume whose bound is above the
+  format's subnormal band (`assume(b > 1e-30)` in float32, say) keeps its
+  quotient.
 
 ### Verification pipeline
 
@@ -105,6 +135,89 @@ SPDX-License-Identifier: Apache-2.0
   non-integer `pow` over a declaration-independent base was stamped
   `QF_LRA` while the emission wrote `(* aux aux)`, and both backends
   refused the script.
+
+- **An IEEE divisor box that reaches zero divides to ⊤** (audit 0.2.0
+  S10; see [SOUNDNESS.md](SOUNDNESS.md)): `ieee_div`/`ieee_div_fmt` read
+  `[lo, 0]` as *"the divisor approaches 0 from below"* and returned a
+  one-signed infinity. Under IEEE the divisor does not approach zero, it
+  IS zero at that endpoint, and the sign of `x/0` comes from the ZERO's
+  sign bit — which an interval endpoint cannot carry. `+0.0 == 0.0`, so
+  `+0.0` is a value of `[lo, 0]` and the excluded `-inf` is a value of
+  the program. **FALSE VERIFIED in all four formats**, a 0.2.0
+  regression against `v0.1.0` (measured: `v0.1.0` returns `(-inf, inf)`
+  where the pre-fix tree returned `(2.0, inf)`). Verdicts move
+  **VERIFIED → UNKNOWN** wherever an ieee-mode division has a divisor box
+  reaching zero. The boundary-aware branch also raised
+  `IntervalError("NaN endpoint")` on `[-inf,-inf] / [-inf, 0]`; returning
+  ⊤ before any endpoint arithmetic removes that too. Real-mode
+  `boundary_div` is a sound kernel over `b ≠ 0` and is not wrong for this
+  reason — ℝ has one zero and `a/0` is undefined there — but *reaching*
+  it needs a premise the box does not carry, which is the next entry.
+
+- **A real-mode divisor box that reaches zero declines unless a strict
+  `assume` excludes the zero** (audit 0.2.0 B5-1; see
+  [SOUNDNESS.md](SOUNDNESS.md)). **FALSE VERIFIED, real mode, made
+  reachable by the M16 fix below.** With `mul` exact, `Σxᵢ²` floors at
+  exactly `0`, so `Σxᵢ² − c` turned from a TRUE STRADDLE (which declines)
+  into a ONE-SIDED BOUNDARY — and the one-sided arm was the only one of
+  `div`'s four zero-containing shapes that did not decline. It called
+  `boundary_div`, which drops `b = 0` from the image, and nothing in the
+  verdict disclosed the drop. Measured: `x` declared `[0, 2]²`,
+  `1/(jnp.sum(x*x) − 8.0)` boxed to `(-inf, -0.125]` and DISCHARGED
+  `q <= -0.125`, while jax at `x = [2, 2]` — a point of the declared box
+  — returns `+inf`. The three sibling shapes (`[0,0]`, a true straddle,
+  a negative `sqrt` domain) all decline citing the same fact, that ℝ has
+  no value there; this one minted a definite verdict from the rest of the
+  box. Verdicts move **VERIFIED/REFUTED → UNKNOWN** wherever a real-mode
+  division's divisor box reaches zero with no strict assume excluding it.
+  See "Boundary-aware division" above for what now licenses the
+  tightening and what carries the licence.
+
+- **`boundary_div` answers `inf/inf` instead of raising** (audit 0.2.0
+  B5-3). The claim recorded for the S10 fix — "returning ⊤ before any
+  endpoint arithmetic removes the `NaN endpoint` raise too" — was true of
+  `ieee_div` and false of the real-mode sibling, which was never touched:
+  `_boundary_div_lo`/`_hi` fall to `_down(num/den)` on an infinite
+  operand, and `inf/inf` is NaN. `boundary_div([inf,inf], [0,inf])`
+  raised `IntervalError("NaN endpoint in interval arithmetic")` — caught
+  by the dispatcher, so nothing crashed, but the domain's internal
+  invariant string was printed as the user-facing reason `div` declined.
+  `div`'s own `inf/inf` guard now runs first in both of `boundary_div`'s
+  arms; 8 box pairs in the endpoint sweep raised before, 0 after.
+
+- **`mul` is exact when its corner products are representable** (audit
+  0.2.0 M16): it was the only arithmetic transfer with no exact-rational
+  path, bumping every endpoint outward unconditionally. `[2,3]×[2,3]`
+  boxed to `[3.9999999999999996, 9.000000000000002]` for an image that is
+  exactly `[4, 9]`, and the exactly-zero corner of `[0,4]×[0,4]` bumped to
+  `-5e-324` — below zero, which defeats `reduce_sum`'s nonnegative clamp.
+  A sum of squares written `x*x` therefore became a true straddle and the
+  division consuming it declined, while `x**2` and `jnp.square(x)`
+  verified: one real property, three spellings, two verdicts — on exactly
+  the `assume(x > 0)` sum-of-squares shape boundary-aware division was
+  added for. Sound in both directions (the weak spelling only lost
+  precision), so no verdict was wrong; verdicts move **UNKNOWN →
+  VERIFIED/REFUTED** where the lost ulp was what prevented a decision.
+  `mul` now takes the same `_exactable`/`Fraction` route `add` and `div`
+  already had, confined the same way (an infinite endpoint keeps the bump,
+  because `Fraction(inf)` raises and `0·±inf = 0` is an endpoint
+  convention). The ieee `mul` kernels deliberately do NOT change: under
+  ieee the value IS `fl(x*y)`, which the native corner products already
+  compute exactly.
+
+  **`dot_general` follows the same rule, because it now IS the same rule**
+  (audit 0.2.0 B5-2). It carried an inlined COPY of `mul`'s four corners
+  and M16 converted only the original, so `jnp.sum(x*x)` floored at
+  exactly 0 while `jnp.dot(x, x)` floored at `-1e-323` — the M16 defect,
+  one level up, in the second copy. Both call `interval._mul_corners` now.
+  Measured over `x in [0,4]²`: the contraction returns `(0.0, 32.0)`,
+  identical to the reduction, where it returned
+  `(-1e-323, 32.00000000000001)`; a `[2,3]`-valued 2×2 matmul returns the
+  exact `[8, 18]` where it returned `[7.999999999999999,
+  18.000000000000004]`. Verdicts move **UNKNOWN → VERIFIED/REFUTED**,
+  never the other way. Only the product corners changed: the accumulation
+  already used `_add_lo`/`_add_hi`, and the association-order argument the
+  contraction rests on is untouched by this and always was.
 
 - **Relational assumes forwarded to solver**: when `assume(e1 < e2)`
   involves two variable operands (a constraint the interval domain cannot
@@ -319,8 +432,51 @@ SPDX-License-Identifier: Apache-2.0
 
 - `assume(x > 0)` in real mode still narrows to `[0, hi]` (closed
   intervals cannot represent open bounds in exact reals). The IEEE bump
-  is exact; the real-mode overapproximation is sound. In real mode,
-  boundary-aware division handles the resulting `[0, hi]` gracefully.
+  is exact; the real-mode overapproximation is sound. In real mode, the
+  strict-sign certificate — not the box — is what lets boundary-aware
+  division use the resulting `[0, hi]`.
+- **The strict-sign certificate is dropped by every primitive without an
+  explicit rule**, and by every `sub`. So `assume(x > 0); 1/(Σxᵢ² − c)`
+  declines even where `c` makes the divisor genuinely nonzero, and
+  `assume(x > 0); y = jnp.sqrt(x); 1/jnp.sum(y*y)` declines because
+  `sqrt` has no rule (both measured). Sound in that direction (a dropped
+  fact can only turn a
+  VERIFIED into an UNKNOWN) and extending it is a rule-per-primitive job,
+  each rule a soundness claim of its own. It is also whole-array
+  granularity — "every element of this value is certainly positive" —
+  rather than per-element, so a mixed-sign array carries nothing even
+  where some elements are certified.
+  A nonzero finite CONSTANT does **not** drop it, whether it reaches the
+  rules as a literal (a scalar) or as a constvar (an array): `0.5*Σxᵢ²`,
+  `2.0*x`, `x/2.0`, the `/n` inside `jnp.mean`, and
+  `jnp.sum(jnp.array([1.,2.,3.,4.]) * x*x)` all keep the chain (measured
+  VERIFIED). A constant array must be strictly one-signed THROUGHOUT — a
+  mixed-sign weight vector really can sum a positive quadratic to zero —
+  and a zero element, a non-finite element, or a dtype with no decoder
+  still drops it.
+- **The certificate does not cross a sub-jaxpr boundary — `jit`
+  included.** Any transparent call wrapper, or a `cond` branch, runs with
+  a fresh table, so a division inside one of them sees no certificate
+  from its caller and the cond's outputs carry none back. The wrappers
+  are `stelling.coverage.DEFAULT_TRANSPARENT` = `jit`, `remat2`,
+  `custom_jvp_call`, `custom_vjp_call` — and **`jit` is the one that
+  matters in practice**: `assume(x > 0); 1/jax.jit(lambda v: jnp.sum(v*v))(x)`
+  is UNKNOWN, and so is the same query with the `assume` moved inside the
+  `jit` (both measured, 0.2.0). Earlier text here named only `remat` and
+  `custom_jvp`, which understated the cost: almost no jax user writes
+  those, and almost every jax user writes `jit`. Conservative in the
+  sound direction, and it is what keeps a branch-local assume from
+  licensing anything outside its branch.
+- **The interval domain cannot represent the sign of an IEEE zero**, so
+  under `semantics="ieee"` every divisor box that reaches zero divides to
+  ⊤ — including the one-sided shapes real mode tightens, and including
+  the ones the subnormal haze creates by hulling a strictly-signed
+  interval with `0.0`. Closing this needs a signed-zero lattice threaded
+  through every kernel that can produce or consume one, which is a larger
+  feature and was deliberately not built here: a half-done version would
+  put a trustworthy sign bit on values only some producers set, which is
+  the defect S10 already was. Declining to tighten is the sound posture in
+  the meantime.
 - The dependency problem (A ∧ ¬A = unknown in intervals) is inherent to
   the non-relational domain. Solver escalation is the designed remedy.
 - Rational pow requires non-negative base (JAX returns NaN for

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import struct
+from fractions import Fraction
 
 import pytest
 
@@ -291,9 +292,19 @@ def test_ieee_mul_finite_endpoints_are_native_no_outward_bump():
     box, made_nan = iv.ieee_mul(s(0.1, 0.1), s(0.1, 0.1))
     assert made_nan is False
     assert box.los[0] == box.his[0] == 0.1 * 0.1  # exactly fl(0.01)
-    # the real transfer pads outward — the pair witnesses the difference
+    # The pair still witnesses the difference, and the difference is now the
+    # SHARP one: since audit 0.2.0 M16 the real transfer brackets the REAL
+    # product `Fraction(0.1)**2` — an irrational-in-binary value strictly
+    # between two doubles — so its box is that one-ulp bracket, while ieee's
+    # point IS `fl(0.1*0.1)`, the value the target computes. The real box's
+    # upper endpoint therefore COINCIDES with ieee's point (fl rounds up
+    # here) and its lower endpoint is one step below; before M16 the real
+    # transfer bumped both ends past the bracket unconditionally.
     real = iv.mul(s(0.1, 0.1), s(0.1, 0.1))
-    assert real.los[0] < box.los[0] and real.his[0] > box.his[0]
+    assert real.los[0] < box.los[0]
+    assert real.his[0] == box.his[0]
+    assert math.nextafter(real.los[0], INF) == real.his[0]  # one ulp wide
+    assert Fraction(real.los[0]) <= Fraction(0.1) ** 2 <= Fraction(real.his[0])
 
 
 def test_ieee_div_zero_denominator_is_top_and_nan_only_when_possible():

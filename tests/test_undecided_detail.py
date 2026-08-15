@@ -92,17 +92,33 @@ def close(eqns, outvars):
     )
 
 
-def _half_x_query(cmp, point_side):
-    """0.5 * x over x in [0, 4] against the bound 0.0 — the proposal's own
-    exhibit: outward rounding turns the exact 0 endpoint into -5e-324."""
+_PAD_BOUND = 1.0
+
+
+def _padded_query(cmp, point_side):
+    """exp(x) over x in [0, 4] against the bound 1.0 — a bracket-padded
+    endpoint one ulp on the wrong side of the bound.
+
+    **This exhibit was `0.5 * x` over `[0, 4]` against `0.0`** (the proposal's
+    own), where outward rounding turned the exact 0 endpoint into `-5e-324`.
+    Audit 0.2.0 M16 gave `mul` the exact-rational route `add` and `div`
+    already had, so that box is now exactly `[0.0, 2.0]`, the obligation
+    `>= 0.0` DISCHARGES, and the sentence under test was no longer reachable
+    through it. Nothing about the sentence changed — the subject moved to a
+    transfer that still brackets, and must: `exp` is irrational at every
+    nonzero rational argument, so its endpoints can only ever be bracketed
+    (`exp([0, 4])` -> `[0.9999999999999999, 54.59815003314424]`, whose true
+    infimum is exactly 1). The shape is identical: the failing endpoint
+    misses the bound by exactly one ulp at its magnitude.
+    """
     x, m, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
     sides = (
-        [lit(0.0), m] if point_side == "left" else [m, lit(0.0)]
+        [lit(_PAD_BOUND), m] if point_side == "left" else [m, lit(_PAD_BOUND)]
     )
     q = close(
         [
             any_eqn(x, 0.0, 4.0),
-            eqn("mul", [x, lit(0.5)], m),
+            eqn("exp", [x], m),
             eqn(cmp, sides, pred),
             eqn("stelling_assert", [pred], out),
         ],
@@ -111,26 +127,48 @@ def _half_x_query(cmp, point_side):
     return q, propagate(q)
 
 
+def test_the_old_mul_exhibit_now_decides_and_that_is_why_the_subject_moved():
+    """The exhibit that moved, kept as the record of why: `0.5 * x` over
+    `[0, 4]` is now the exact `[0.0, 2.0]` and `>= 0.0` is definitely true.
+    Before audit 0.2.0 M16 the box was `[-5e-324, 2.0000000000000004]` and
+    this obligation was undecided by one denormal ulp."""
+    x, m, pred, out = var(0), var(1), var(2, BOOL), var(3, BOOL)
+    q = close(
+        [
+            any_eqn(x, 0.0, 4.0),
+            eqn("mul", [x, lit(0.5)], m),
+            eqn("ge", [m, lit(0.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(q)
+    box = interval_env(q)[1]
+    assert (box.los[0], box.his[0]) == (0.0, 2.0)
+    assert p.obligations[0].status == "discharged"
+
+
 # -- the point-bound scalar form ----------------------------------------------
 
 
 def test_scalar_span_bound_and_one_ulp_miss_all_measured():
-    q, p = _half_x_query("ge", "right")
+    q, p = _padded_query("ge", "right")
     detail = p.obligations[0].detail
     # the pre-change sentence survives as the prefix — same count, same n
     assert detail.startswith("undecided for 1/1 element(s)")
     # the quoted span IS the judged box, read back from the live env
     box = interval_env(q)[1]
-    assert box.los[0] == -5e-324 < 0.0 and box.his[0] > 2.0
+    assert box.los[0] < _PAD_BOUND < box.his[0]
     assert f"the operand spans [{box.los[0]}, {box.his[0]}]" in detail
-    assert "the asserted bound is operand >= 0.0" in detail
+    assert "the asserted bound is operand >= 1.0" in detail
     # the miss is the exact distance from the FAILING (lower) endpoint to
-    # the bound: one denormal ulp, and both the number and the ulp count
-    # are measured, not narrated
-    assert 0.0 - box.los[0] == 5e-324
-    assert math.nextafter(box.los[0], 0.0) == 0.0  # exactly one step
+    # the bound: one ulp, and both the number and the ulp count are
+    # measured, not narrated
+    miss = _PAD_BOUND - box.los[0]
+    assert miss == 1.1102230246251565e-16
+    assert math.nextafter(box.los[0], _PAD_BOUND) == _PAD_BOUND  # one step
     assert (
-        "the operand's lower endpoint misses the bound by 5e-324 "
+        f"the operand's lower endpoint misses the bound by {miss} "
         "(1 ulp step at this magnitude)" in detail
     )
     # message content only
@@ -139,14 +177,15 @@ def test_scalar_span_bound_and_one_ulp_miss_all_measured():
 
 
 def test_point_on_the_left_normalizes_to_operand_cmp_bound():
-    # assert 0.0 < 0.5*x  ===  operand > 0.0: the quote reads in operand
+    # assert 1.0 < exp(x)  ===  operand > 1.0: the quote reads in operand
     # terms, with the direction preserved by the flip
-    _, p = _half_x_query("lt", "left")
+    _, p = _padded_query("lt", "left")
     detail = p.obligations[0].detail
     assert p.obligations[0].status == "unknown"
-    assert "the asserted bound is operand > 0.0" in detail
+    assert "the asserted bound is operand > 1.0" in detail
     assert (
-        "the operand's lower endpoint misses the bound by 5e-324" in detail
+        "the operand's lower endpoint misses the bound by "
+        "1.1102230246251565e-16" in detail
     )
 
 
@@ -383,7 +422,7 @@ def test_declined_declaration_side_points_at_the_declaration():
 
 
 def test_cause_note_complete_coverage_counts_are_the_instruments_own():
-    q, p = _half_x_query("ge", "right")
+    q, p = _padded_query("ge", "right")
     v = make_verdict(q, p, **_VERSIONS)
     assert v.status == "UNKNOWN"
     notes = [n for n in v.notes if "transfer coverage is not the cause" in n]

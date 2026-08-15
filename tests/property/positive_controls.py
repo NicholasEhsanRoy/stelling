@@ -94,6 +94,36 @@ _CVC5 = f"{PROPERTY_DIR}/test_cvc5_protocol.py"
 _CROSS = f"{PROPERTY_DIR}/test_cross_series.py"
 
 
+# The mutation two controls below share: interval multiplication that keeps
+# only the two SAME-CORNER products, so `[-1, 1] x [-1, 1]` boxes to `[1, 1]`
+# and `x*x >= 1` discharges over a set containing 0.
+#
+# IT REPLACES THE WHOLE BODY OF `_mul_corners`, both routes, and that is
+# forced rather than thorough. `mul` has TWO corner rules — the exact
+# rational one for finite endpoints (audit 0.2.0 M16) and the bumped one for
+# infinite endpoints — and the int8 `[-1, 1]` query the controls run takes
+# the exact one. The earlier registration named only the bumped route's
+# `products = (...)` line, which after M16 that query never reaches: the
+# static registry check kept passing (the text existed) while the mutant
+# had stopped masking anything. A mutation that must stay live has to name
+# the code the control's own query executes.
+_MUL_CORNERS_OLD = """    if _exactable(alo, ahi, blo, bhi):
+        ex = [Fraction(x) * Fraction(y)
+              for x in (alo, ahi) for y in (blo, bhi)]
+        return _exact_down(min(ex)), _exact_up(max(ex))
+    products = (
+        _prod(alo, blo), _prod(alo, bhi), _prod(ahi, blo), _prod(ahi, bhi)
+    )
+    return _down(min(products)), _up(max(products))"""
+
+_MUL_CORNERS_NEW = """    if _exactable(alo, ahi, blo, bhi):
+        ex = [Fraction(x) * Fraction(y)
+              for x, y in ((alo, blo), (ahi, bhi))]
+        return _exact_down(min(ex)), _exact_up(max(ex))
+    products = (_prod(alo, blo), _prod(ahi, bhi))
+    return _down(min(products)), _up(max(products))"""
+
+
 CONTROLS = (
     # ── the open defect, live on main today ─────────────────────────────────
     Control(
@@ -130,11 +160,8 @@ CONTROLS = (
         ),
     mutation=Mutation(
             path="src/stelling/interval.py",
-            old=(
-                "        products = (_prod(alo, blo), _prod(alo, bhi), "
-                "_prod(ahi, blo), _prod(ahi, bhi))"
-            ),
-            new="        products = (_prod(alo, blo), _prod(ahi, bhi))",
+            old=_MUL_CORNERS_OLD,
+            new=_MUL_CORNERS_NEW,
         ),
         expect_message="WRONG VERIFIED",
     ),
@@ -268,16 +295,15 @@ CONTROLS = (
             "interval multiplication over two corners instead of four is "
             "non-monotone in the input box: x*x >= 0.5 over x in [-1.0, 0.5] "
             "gives [0.25, 1.0] and stays UNKNOWN, while WIDENING to "
-            "[-4.0, 3.5] gives [4.0, 12.25] and DISCHARGES it. A mutant, for "
-            "the same reason as `oracle-masked`, and labelled as one."
+            "[-4.0, 3.5] gives [12.25, 16.0] and DISCHARGES it (the clean "
+            "domain returns [-0.5, 1.0] and [-14.0, 16.0] and stays UNKNOWN "
+            "on both). A mutant, for the same reason as `oracle-masked`, and "
+            "labelled as one."
         ),
     mutation=Mutation(
             path="src/stelling/interval.py",
-            old=(
-                "        products = (_prod(alo, blo), _prod(alo, bhi), "
-                "_prod(ahi, blo), _prod(ahi, bhi))"
-            ),
-            new="        products = (_prod(alo, blo), _prod(ahi, bhi))",
+            old=_MUL_CORNERS_OLD,
+            new=_MUL_CORNERS_NEW,
         ),
         expect_message="toward-VERIFIED under widening",
     ),
