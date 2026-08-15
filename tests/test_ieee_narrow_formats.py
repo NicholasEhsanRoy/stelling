@@ -381,6 +381,43 @@ def test_the_live_registry_passes_its_own_census():
     assert len(_FMT_BINARY_OPS) == 4
 
 
+@pytest.mark.parametrize(
+    "guard",
+    ("_assert_ieee_binary_kernels_are_format_parametric",
+     "_assert_libm_transfers_take_a_budget"),
+)
+def test_the_census_guards_actually_run_at_import(guard):
+    """A census function having tests is not the same as the census
+    RUNNING (audit 0.2.0 B4). Deleting either module-level call left the
+    whole suite green — and the guards' entire value is that they fail
+    before anything runs, so "it is invoked at all" is the property.
+
+    Checked by parsing the module rather than by importing it: the call
+    has already happened by the time a test can observe anything, so the
+    only evidence available at runtime is the source. The walk is over
+    MODULE-LEVEL statements only, so demoting the call into a function or
+    behind a conditional reddens here too."""
+    import ast
+    import pathlib
+
+    import stelling.propagate as P
+
+    tree = ast.parse(pathlib.Path(P.__file__).read_text(encoding="utf-8"))
+    called = {
+        node.value.func.id
+        for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+    }
+    assert guard in called, (
+        f"{guard} is defined but never called at module scope in "
+        f"{P.__file__}: a census that never runs, with nothing in the "
+        f"suite able to notice"
+    )
+    assert callable(getattr(P, guard))
+
+
 def test_a_narrow_format_add_still_hulls_with_its_own_band_end_to_end():
     """The property the fallback would have broken, through the public
     entry point: a float32 subnormal sum is INDETERMINATE, not definite."""

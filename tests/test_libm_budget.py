@@ -285,10 +285,12 @@ def _decline_note(dtype="float64", op="exp"):
 @pytest.mark.parametrize("dtype", ("float16", "bfloat16", "float32", "float64"))
 @pytest.mark.parametrize("op", ("exp", "pow"))
 def test_every_libm_op_and_format_declines_without_a_declaration(dtype, op):
-    """Fail closed, uniformly. float16 and bfloat16 are exhaustively
-    CORRECTLY ROUNDED on the measured backend and still decline: "measured
-    well once, on one jaxlib, on one device" is not something a verdict may
-    rest on silently."""
+    """Fail closed, uniformly. bfloat16 exp is exhaustively CORRECTLY
+    ROUNDED on the measured backend over every normal finite result, and
+    it still declines: "measured well once, on one jaxlib, on one device"
+    is not something a verdict may rest on silently — and float16, which
+    the same measurement first read as correctly rounded and is not, is
+    why."""
     v, note = _decline_note(dtype, op)
     assert v.status == "UNKNOWN"
     assert op in note and dtype in note
@@ -302,13 +304,49 @@ def test_the_decline_carries_the_evidence_that_justifies_it():
     assert "12,542" in note
 
 
+def test_the_float32_population_is_derived_rather_than_transcribed():
+    """The row said 2,237,668,968 — one too many, an inclusive/exclusive
+    fencepost at the low edge (audit 0.2.0 B4). The figure is the count of
+    float32 values whose `exp` is normal and finite, which the bit
+    ordering computes in closed form, so it is COMPUTED here instead of
+    believed. The band's two edges are pinned the same way: one step out
+    on either side leaves it."""
+    import numpy as np
+
+    def ordinal(x):
+        u = np.array([x], dtype=np.float32).view(np.int32)[0].item()
+        return u if u >= 0 else -(u & 0x7FFFFFFF)
+
+    min_normal = 2.0 ** -126
+    lo, hi = np.float32(-87.33654022216797), np.float32(88.72283172607422)
+    with np.errstate(over="ignore"):
+        assert math.exp(float(lo)) >= min_normal
+        assert math.exp(float(np.nextafter(lo, np.float32(-np.inf)))) \
+            < min_normal
+        assert math.isfinite(float(np.float32(math.exp(float(hi)))))
+        assert math.isinf(float(np.float32(
+            math.exp(float(np.nextafter(hi, np.float32(np.inf)))))))
+
+    n = ordinal(hi) - ordinal(lo) + 1
+    assert n == 2_237_668_967, n
+    assert f"{n:,} of them" in LIBM_MEASURED[("exp", "float32")]
+    # ... and the wider interval the row also names, which is 2,185,053
+    # arguments larger — precisely the subnormal-result region
+    wide = (ordinal(np.float32(88.73)) - ordinal(np.float32(-104.0)) + 1)
+    assert wide == 2_239_854_020 and wide - n == 2_185_053, (wide, n)
+
+
 def test_the_decline_carries_the_exact_incantation():
     _v, note = _decline_note("float32", "exp")
     assert f"libm_budget='{PROFILE}'" in note
     assert "from stelling.propagate import LibmBudget" in note
-    assert "name='my-backend-YYYY-MM'" in note
-    assert "('exp', 'float32'): <ulps>" in note
+    assert "name='my-backend-2026-08'" in note
+    assert "('exp', 'float32'): 6" in note
     assert "6 ulps" in note  # the shipped number for this pair
+    # BOTH doors, not just check(): the S11 exposure this gate closes runs
+    # through `propagate`, which takes the same keyword (audit 0.2.0 B4)
+    assert f"propagate(closed, semantics='ieee', libm_budget='{PROFILE}')" \
+        in note
 
 
 def test_the_decline_says_a_fixed_wider_bracket_is_not_the_fix():
@@ -329,6 +367,41 @@ def test_the_incantation_in_the_decline_actually_works():
 
     assert _ieee(h).status == "UNKNOWN"
     assert _ieee(h, libm_budget=PROFILE).status == "VERIFIED"
+
+
+def test_every_line_the_decline_prints_RUNS_AS_WRITTEN():
+    """A template is not an incantation (audit 0.2.0 B4).
+
+    The first draft printed ``check(harness, vacuity_mode=..., ...)`` —
+    ``...`` is ``Ellipsis`` and raises *"widen mode must be one of ('all',
+    'inputs-only')"* — and ``ulps={('exp','float32'): <ulps>}``, which is a
+    ``SyntaxError``. Both were templates wearing an incantation's clothes,
+    and the test that was supposed to cover them checked a DIFFERENT line
+    that happened to work. So every backticked call the decline prints is
+    pulled out of a LIVE decline here and executed verbatim."""
+    import re
+
+    from stelling.harness import trace
+    from stelling.propagate import LibmBudget, propagate
+
+    _v, note = _decline_note("float32", "exp")
+    printed = [m for m in re.findall(r"`([^`]+)`", note)
+               if m.startswith(("check(", "propagate("))]
+    assert len(printed) == 3, printed
+
+    def harness():
+        x = any_array((), "float32", (1.0, 2.0))
+        return assert_(jnp.exp(x) > 0.0)
+
+    closed = trace(harness)
+    env = {"harness": harness, "closed": closed, "check": check,
+           "propagate": propagate, "LibmBudget": LibmBudget}
+    for src in printed:
+        out = eval(compile(src, "<the decline>", "eval"), env)  # noqa: S307
+        # each one has to actually OPEN the gate, not merely parse
+        status = getattr(out, "status", None)
+        assert status == "VERIFIED" if status is not None \
+            else out.all_discharged, (src, out)
 
 
 # -- per (op, format), never extrapolated -------------------------------------
@@ -389,12 +462,107 @@ def test_a_correctly_rounded_budget_costs_exactly_nothing(arg, fmt_name):
     assert (at_half.los, at_half.his) == (pre_fix.los, pre_fix.his)
 
 
-def test_the_shipped_profile_declares_the_narrow_formats_correctly_rounded():
+def test_the_shipped_profile_declares_only_bfloat16_correctly_rounded():
+    """float16 `exp` is NOT correctly rounded on this backend and the
+    profile used to say it was (audit 0.2.0 B4). 2 of the 63,487 arguments
+    measure 0.500028 ulps, so a 0.5 declaration — which
+    `_libm_widen_box` honours by widening NOTHING — states a bound the
+    backend it was measured on violates. The re-measurement is in
+    `test_the_float16_exp_escapes_are_re_measured_against_the_backend`;
+    this pins what the profile concluded from it."""
     b = LIBM_PROFILES[PROFILE]
-    assert b.get("exp", "float16") == 0.5
+    assert b.get("exp", "float16") == 1.0
     assert b.get("exp", "bfloat16") == 0.5
-    assert "CORRECTLY ROUNDED" in LIBM_MEASURED[("exp", "float16")]
+    assert "NOT correctly rounded" in LIBM_MEASURED[("exp", "float16")]
     assert "CORRECTLY ROUNDED" in LIBM_MEASURED[("exp", "bfloat16")]
+    # and every exhaustive exp row carries the qualifier that makes it true
+    for d in ("float16", "bfloat16", "float32"):
+        prose = LIBM_MEASURED[("exp", d)]
+        assert "EXHAUSTIVE" in prose, d
+        assert "result is normal and finite" in prose, d
+
+
+@pytest.mark.parametrize("x", (0.0226898193359375, 0.007297515869140625))
+def test_the_float16_exp_escapes_are_re_measured_against_the_backend(x):
+    """Re-measured live against a 60-decimal-digit reference, like every
+    other escaping argument in this file: a row cannot pass by agreeing
+    with a stale number. These two arguments are why `("exp","float16")`
+    cannot declare 0.5 — and `_libm_widen_box` honours a 0.5 declaration
+    by widening NOTHING, so the shortfall would have had no cover at all
+    beyond the ±1-binary64-ulp bump."""
+    import numpy as np
+    from decimal import Decimal, localcontext
+
+    with localcontext() as ctx:
+        ctx.prec = 60
+        t = Decimal(x).exp()
+    fmt = _FLOAT_FORMATS["float16"]
+    b = float(np.asarray(jnp.exp(jnp.asarray(np.float16(x)))))
+    err = abs(Decimal(b) - t) / Decimal(_libm_ulp_at(float(t), fmt))
+    assert err > Decimal("0.5"), (x, err)
+    assert err < Decimal("0.5001"), (x, err)      # it misses by a hair
+    assert LIBM_PROFILES[PROFILE].get("exp", "float16") >= float(err)
+
+
+def test_the_bfloat16_row_needs_its_normal_and_finite_qualifier():
+    """The row claims correct rounding, and it is true only over results
+    that are NORMAL and finite. At x=-87.5 the true value is a bfloat16
+    SUBNORMAL and this backend flushes it to 0.0 — 108.7 ulps out, 217
+    times the declared 0.5. What covers that is `subnormal_haze_fmt`,
+    which hulls the box with 0 whenever it reaches the format's subnormal
+    band, and not the accuracy budget (audit 0.2.0 B4)."""
+    import numpy as np
+    import ml_dtypes
+    from decimal import Decimal, localcontext
+
+    fmt = _FLOAT_FORMATS["bfloat16"]
+    x = -87.5
+    with localcontext() as ctx:
+        ctx.prec = 60
+        t = Decimal(x).exp()
+    b = float(np.asarray(jnp.exp(jnp.asarray(np.asarray(x, ml_dtypes.bfloat16)))))
+    assert b == 0.0 and float(t) > 0.0            # flushed
+    assert float(t) < _ieee_format_min_normal(fmt)  # ... because subnormal
+    err = abs(Decimal(b) - t) / Decimal(_libm_ulp_at(float(t), fmt))
+    assert err > Decimal("100"), err
+    # the budget does not cover it; the haze does
+    box = _exp_box(x, "bfloat16", LIBM_PROFILES[PROFILE].get("exp", "bfloat16"))
+    assert box.los[0] == 0.0 <= b <= box.his[0], (box.los[0], box.his[0])
+
+
+def test_a_half_ulp_budget_is_read_as_CORRECT_ROUNDING_not_as_the_inequality():
+    """`ulps <= 0.5` widens by nothing, and the justification is CORRECT
+    ROUNDING — not "<= 0.5 ulps" read through this module's binade
+    convention, which is strictly weaker (audit 0.2.0 B4).
+
+    `_libm_ulp_at(2**k)` is the spacing ABOVE `2**k`, while the float
+    BELOW it is only `2**(k-p)` away — half such an ulp. So the LITERAL
+    inequality at u=0.5 also admits a backend returning `nextdown(2**k)`
+    where the true value is `2**k`, which correct rounding does not.
+    `exp(0) = 1.0` reaches it. The residual is covered for THIS module's
+    callers, and only by them: `iv.exp` hands over a box already bumped a
+    binary64 ulp outward, so the format-rounded lower endpoint sits one
+    format step below."""
+    import numpy as np
+    import ml_dtypes
+
+    npdt = {"float16": np.float16, "bfloat16": ml_dtypes.bfloat16,
+            "float32": np.float32, "float64": np.float64}
+    for fmt_name in ("float16", "bfloat16", "float32", "float64"):
+        fmt = _FLOAT_FORMATS[fmt_name]
+        dt = npdt[fmt_name]
+        one = dt(1.0)
+        below = float(np.nextafter(one, dt(-np.inf)))
+        # the literal reading admits it: it is exactly half an ulp away
+        assert abs(below - 1.0) == 0.5 * _libm_ulp_at(1.0, fmt), fmt_name
+        # the widening itself does NOT reach it — the branch is a no-op
+        w = _libm_widen_box(
+            iv.IntervalArray(shape=(), los=(1.0,), his=(1.0,)), fmt, 0.5,
+            floor=0.0)
+        assert w.los[0] == 1.0 > below, fmt_name
+        # what covers it is the caller's outward bump plus the format round
+        box = _exp_box(0.0, fmt_name, 0.5)
+        assert box.los[0] <= below, (fmt_name, box.los[0], below)
 
 
 def test_a_faithful_budget_does_cost_and_a_measured_one_costs_more():
@@ -537,13 +705,83 @@ def test_every_shipped_budget_is_at_least_its_measured_maximum():
     b = LIBM_PROFILES[PROFILE]
     checked = 0
     for key, prose in LIBM_MEASURED.items():
-        m = re.search(r"max error ([0-9.]+) ulps", prose)
-        assert m, (key, prose)
-        measured = float(m.group(1))
+        found = re.findall(r"max error ([0-9.]+) ulps", prose)
+        # exactly one, so a row cannot state a second, larger maximum for
+        # a wider population and have the parse silently take the first —
+        # the bfloat16 row quotes 108.698176 for the flushed-subnormal
+        # population and 0.499988 for the one the budget covers
+        assert len(found) == 1, (key, found)
+        measured = float(found[0])
         declared = b.get(*key)
         assert declared >= measured, (key, declared, measured)
         checked += 1
     assert checked == 8
+
+
+# -- the signature census that decides who gets handed a budget ---------------
+#
+# `_assert_libm_transfers_take_a_budget` had ZERO test references (audit
+# 0.2.0 B4): functional, load-bearing at import, and unpinned. The
+# dispatcher picks the calling convention from the TIER, so both directions
+# of disagreement are real bugs and both are import-time errors here.
+
+
+def test_the_signature_census_passes_on_the_live_registry():
+    from stelling.propagate import _assert_libm_transfers_take_a_budget
+
+    _assert_libm_transfers_take_a_budget()
+
+
+def test_the_signature_census_bites_on_a_libm_transfer_with_no_budget_param(
+    monkeypatch
+):
+    """A `sound-libm` transfer with the four-argument signature would raise
+    `TypeError` out of the walk on first contact."""
+    import stelling.propagate as P
+
+    def four(eqn, params, ins, flags):  # pragma: no cover - never called
+        raise AssertionError
+
+    monkeypatch.setattr(
+        "stelling.propagate.IEEE_TRANSFERS",
+        {**P.IEEE_TRANSFERS, "exp": (four, P.TIER_SOUND_LIBM)},
+    )
+    with pytest.raises(RuntimeError) as e:
+        P._assert_libm_transfers_take_a_budget()
+    assert "exp" in str(e.value) and "4 params" in str(e.value)
+
+
+def test_the_signature_census_bites_on_a_non_libm_transfer_taking_a_budget(
+    monkeypatch
+):
+    """...and the other direction: registered at another tier while taking
+    a budget, it would never be handed one and would ride whatever default
+    it wrote."""
+    import stelling.propagate as P
+
+    def five(eqn, params, ins, flags, budget):  # pragma: no cover
+        raise AssertionError
+
+    monkeypatch.setattr(
+        "stelling.propagate.IEEE_TRANSFERS",
+        {**P.IEEE_TRANSFERS, "add": (five, P.TIER_EXACT)},
+    )
+    with pytest.raises(RuntimeError) as e:
+        P._assert_libm_transfers_take_a_budget()
+    assert "add" in str(e.value) and "5 params" in str(e.value)
+
+
+def test_the_signature_census_bites_when_no_transfer_rides_the_tier(
+    monkeypatch
+):
+    """The gate guarding nothing is the failure mode a rename produces:
+    `LIBM_BUDGET_OPS` stays a description of the registry, not a wish."""
+    import stelling.propagate as P
+
+    monkeypatch.setattr("stelling.propagate.LIBM_BUDGET_OPS", frozenset())
+    with pytest.raises(RuntimeError) as e:
+        P._assert_libm_transfers_take_a_budget()
+    assert "guards nothing" in str(e.value)
 
 
 def test_an_unknown_profile_name_raises_where_it_was_written():
@@ -644,10 +882,63 @@ def test_widening_never_narrows_and_never_crosses_zero_downward():
 
 
 def test_widening_leaves_infinite_endpoints_alone():
-    fmt = _FLOAT_FORMATS["float64"]
-    a = iv.IntervalArray(shape=(), los=(0.0,), his=(math.inf,))
-    w = _libm_widen_box(a, fmt, 6.0, floor=0.0)
-    assert w.his[0] == math.inf
+    """An infinite endpoint stays infinite — AND the FINITE one still owes
+    the contract, which is the half this test never checked (audit 0.2.0
+    B4). A half-infinite box holds every ``t`` beyond its finite end, so
+    that endpoint has to clear ``t -+ u*ulp(t)`` for ALL of them; asserting
+    only ``his[0] == inf`` is a scope that does not cover the claim.
+
+    **And the box has to be one where the defect can appear.** ``[0, inf]``
+    — the box this test used — is not: at ``lo = 0`` the infimum of
+    ``t - u*ulp(t)`` really is at ``t = 0``, so the rule with the bug in it
+    passes. The box that bites is anchored just BELOW a power of two,
+    where the first binade boundary above ``lo`` carries twice ``lo``'s
+    spacing."""
+    for fmt_name in ("float16", "bfloat16", "float32", "float64"):
+        fmt = _FLOAT_FORMATS[fmt_name]
+        for k in (-8, 0, 1, 8, 64, 512):
+            lo = math.nextafter(2.0 ** k, 0.0)
+            a = iv.IntervalArray(shape=(), los=(lo,), his=(math.inf,))
+            w = _libm_widen_box(a, fmt, 6.0, floor=None)
+            assert w.his[0] == math.inf
+            for j in range(k, 1024, 137):
+                t = 2.0 ** j
+                assert w.los[0] <= t - 6.0 * _libm_ulp_at(t, fmt), (
+                    fmt_name, k, j)
+            # the mirror arm, latent today because exp/pow pass floor=0.0
+            hi = -lo
+            b = iv.IntervalArray(shape=(), los=(-math.inf,), his=(hi,))
+            w2 = _libm_widen_box(b, fmt, 6.0, floor=None)
+            assert w2.los[0] == -math.inf
+            for j in range(k, 1024, 137):
+                t = -(2.0 ** j)
+                assert w2.his[0] >= t + 6.0 * _libm_ulp_at(t, fmt), (
+                    fmt_name, k, j)
+
+
+def test_a_budget_past_two_to_the_p_minus_one_unbounds_a_half_infinite_box():
+    """The side condition on the doubling. ``g(2**k) = 2**k*(1 -
+    u*2**(1-p))`` rises with ``k`` only while ``u <= 2**(p-1)``; past that
+    it falls without bound and NO finite lower endpoint is sound. bfloat16
+    reaches the threshold at 128 ulps — under the 108.7 this very backend's
+    bfloat16 ``exp`` measures on flushed subnormal results, so a caller
+    declaring a budget that covers its own backend is in the
+    neighbourhood."""
+    for fmt_name in ("float16", "bfloat16", "float32", "float64"):
+        fmt = _FLOAT_FORMATS[fmt_name]
+        thr = 2.0 ** (fmt[0] - 1)
+        a = iv.IntervalArray(shape=(), los=(1.0,), his=(math.inf,))
+        at = _libm_widen_box(a, fmt, thr, floor=None)
+        assert math.isfinite(at.los[0]), (fmt_name, "finite at the threshold")
+        over = _libm_widen_box(a, fmt, math.nextafter(thr, math.inf),
+                               floor=None)
+        assert over.los[0] == -math.inf, (fmt_name, over.los[0])
+        # ... and `floor` still states the RANGE rather than being lost
+        floored = _libm_widen_box(a, fmt, thr * 4.0, floor=0.0)
+        assert floored.los[0] == 0.0, (fmt_name, floored.los[0])
+        # the mirror arm saturates upward
+        b = iv.IntervalArray(shape=(), los=(-math.inf,), his=(-1.0,))
+        assert _libm_widen_box(b, fmt, thr * 4.0, floor=None).his[0] == math.inf
 
 
 def test_widening_saturates_rather_than_producing_a_nan_endpoint():
@@ -725,3 +1016,250 @@ def test_the_binade_sweep_bites_against_a_per_endpoint_widening():
         if not wlo <= b - 6.0 * _libm_ulp_at(b, fmt):
             misses += 1
     assert misses == len(boundaries) == 31, (misses, len(boundaries))
+
+
+# -- the same step function, on the arm the row above does not reach ----------
+#
+# `test_the_widening_covers_every_binade_boundary_a_box_straddles` uses only
+# FINITE boxes, and `test_widening_leaves_infinite_endpoints_alone` used the
+# one half-infinite box where the defect cannot appear. So the rule shipped
+# with a hole in it and nothing went red (audit 0.2.0 B4). What closes that
+# is not another example: it is enumerating the whole extremiser set.
+#
+# `t -> t -+ u*ulp(t)` is affine with slope 1 inside a binade, so an extremum
+# over a box sits at an endpoint or at a jump of `ulp`. `_extremisers` below
+# holds EVERY jump the binary64 grid can express — +-2**k for every k the
+# format's ulp formula distinguishes, up to 2**1023, with the float on each
+# side of it — so a box's true infimum and supremum are exactly a min/max
+# over (its endpoints + the candidates it contains). For a half-infinite box
+# that is a SUFFIX min / PREFIX max, which is what makes the +-inf arm
+# checkable at all instead of samplable.
+
+# Pinned, like LIBM_BINADE_SWEEP_CHECKS: the extremiser points the sweep
+# reduces over, per arm. Asserted rather than bounded.
+LIBM_EXTREMISER_POINTS = {"finite": 1551584, "half": 34844544,
+                          "both-inf": 525888}
+
+
+def _extremisers(fmt):
+    """Every ulp jump the binary64 grid can express, both sides, sorted,
+    with its ulp — computed once per format."""
+    p, emin, _emax = fmt
+    big = math.nextafter(math.inf, 0.0)
+    pts = {0.0, big, -big}
+    for k in range(emin - p + 1, 1024):
+        b = math.ldexp(1.0, k)
+        for s in (b, -b):
+            pts.add(s)
+            pts.add(math.nextafter(s, -math.inf))
+            pts.add(math.nextafter(s, math.inf))
+    ts = sorted(pts)
+    return ts, [_libm_ulp_at(t, fmt) for t in ts]
+
+
+def _sweep_anchors(fmt):
+    p, emin, emax = fmt
+    out = {0.0}
+    for k in (emin - p + 1, emin - p + 4, emin, emin + 4, -8, -1, 0, 1, 8,
+              emax - 4, emax):
+        b = math.ldexp(1.0, k)
+        for v in (b, math.nextafter(b, 0.0), math.nextafter(b, math.inf)):
+            out.add(v)
+            out.add(-v)
+    return sorted(out)
+
+
+def _sweep_boxes(fmt):
+    a = _sweep_anchors(fmt)
+    out = []
+    for i, lo in enumerate(a):
+        out.append((lo, lo))
+        out.append((lo, a[min(i + 1, len(a) - 1)]))
+        out.append((lo, a[min(i + 5, len(a) - 1)]))
+    out += [(lo, math.inf) for lo in a]
+    out += [(-math.inf, hi) for hi in a]
+    out.append((-math.inf, math.inf))
+    return [(lo, hi) for lo, hi in out if lo <= hi]
+
+
+def _sweep_budgets(fmt):
+    """Ordinary budgets, then the ``2**(p-1)`` threshold the doubling's
+    side condition turns on, then past it."""
+    thr = math.ldexp(1.0, fmt[0] - 1)
+    return (0.75, 1.0, 2.0, 6.0, thr, math.nextafter(thr, math.inf),
+            thr * 1.5, thr * 4096.0)
+
+
+def _run_widen_sweep(rule):
+    """(points driven, violations) per arm, over every format, budget and
+    box. `rule(lo, hi, fmt, u) -> (widened_lo, widened_hi)`."""
+    import bisect
+
+    driven = {"finite": 0, "half": 0, "both-inf": 0}
+    bad = {"finite": 0, "half": 0, "both-inf": 0}
+    first = None
+    for fmt in _FLOAT_FORMATS.values():
+        ts, us = _extremisers(fmt)
+        n = len(ts)
+        for u in _sweep_budgets(fmt):
+            g = [t - u * uu for t, uu in zip(ts, us)]
+            h = [t + u * uu for t, uu in zip(ts, us)]
+            suf_g = [math.inf] * (n + 1)
+            for i in range(n - 1, -1, -1):
+                suf_g[i] = min(g[i], suf_g[i + 1])
+            pre_h = [-math.inf] * (n + 1)
+            for i in range(n):
+                pre_h[i + 1] = max(h[i], pre_h[i])
+            for lo, hi in _sweep_boxes(fmt):
+                lo_inf, hi_inf = math.isinf(lo), math.isinf(hi)
+                kind = ("both-inf" if lo_inf and hi_inf
+                        else "finite" if not (lo_inf or hi_inf) else "half")
+                i = bisect.bisect_left(ts, lo)
+                j = bisect.bisect_right(ts, hi)
+                need_lo, need_hi = math.inf, -math.inf
+                for v in (lo, hi):
+                    if math.isfinite(v):
+                        uu = _libm_ulp_at(v, fmt)
+                        need_lo = min(need_lo, v - u * uu)
+                        need_hi = max(need_hi, v + u * uu)
+                if hi_inf:
+                    need_lo, need_hi = min(need_lo, suf_g[i]), math.inf
+                elif lo_inf:
+                    need_lo, need_hi = -math.inf, max(need_hi, pre_h[j])
+                else:
+                    for k in range(i, j):
+                        need_lo = min(need_lo, g[k])
+                        need_hi = max(need_hi, h[k])
+                driven[kind] += 2 * max(
+                    (j - i) if kind == "finite"
+                    else ((n - i) if hi_inf else j) + 2, 1)
+                wlo, whi = rule(lo, hi, fmt, u)
+                if not (wlo <= need_lo and whi >= need_hi):
+                    bad[kind] += 1
+                    if first is None:
+                        first = (fmt, u, (lo, hi), (wlo, whi),
+                                 (need_lo, need_hi))
+    return driven, bad, first
+
+
+def test_the_widening_covers_the_whole_extremiser_set_on_every_arm():
+    """The obligation, enumerated rather than sampled, over finite,
+    half-infinite and doubly-infinite boxes, all four formats, budgets from
+    0.75 up past ``2**(p-1)``."""
+    driven, bad, first = _run_widen_sweep(
+        lambda lo, hi, fmt, u: (
+            lambda b: (b.los[0], b.his[0])
+        )(_libm_widen_box(
+            iv.IntervalArray(shape=(), los=(lo,), his=(hi,)),
+            fmt, u, floor=None))
+    )
+    assert bad == {"finite": 0, "half": 0, "both-inf": 0}, first
+    assert driven == LIBM_EXTREMISER_POINTS, driven
+
+
+def test_the_extremiser_sweep_bites_against_all_three_wrong_rules():
+    """The positive control, and it is the load-bearing half of this
+    finding: the shipped rule going green proves nothing unless the rules
+    it replaced go RED on the same obligations. All three did ship or were
+    drafted.
+
+    A: ``max`` over the FINITE endpoints only — correct on a finite box and
+       silently wrong the moment one endpoint is ``inf``. This is what
+       B4 found.
+    B: each endpoint widened by its OWN ulp — the first draft; wrong on
+       BOTH arms.
+    C: the doubling WITHOUT the ``u <= 2**(p-1)`` side condition — the
+       shape proposed with this finding; sound up to the threshold and
+       unbounded-wrong past it.
+    """
+    nxt = math.nextafter
+
+    def finite_max_only(lo, hi, fmt, u):
+        fin = [v for v in (lo, hi) if math.isfinite(v)]
+        if not fin:
+            return lo, hi
+        w = u * max(_libm_ulp_at(v, fmt) for v in fin)
+        return (nxt(lo - w, -math.inf) if math.isfinite(lo) else lo,
+                nxt(hi + w, math.inf) if math.isfinite(hi) else hi)
+
+    def per_endpoint(lo, hi, fmt, u):
+        return (nxt(lo - u * _libm_ulp_at(lo, fmt), -math.inf)
+                if math.isfinite(lo) else lo,
+                nxt(hi + u * _libm_ulp_at(hi, fmt), math.inf)
+                if math.isfinite(hi) else hi)
+
+    def doubled_without_side_condition(lo, hi, fmt, u):
+        fin = [v for v in (lo, hi) if math.isfinite(v)]
+        if not fin:
+            return lo, hi
+        s = max(_libm_ulp_at(v, fmt) for v in fin)
+        if not (math.isfinite(lo) and math.isfinite(hi)):
+            s *= 2.0
+        w = u * s
+        return (nxt(lo - w, -math.inf) if math.isfinite(lo) else lo,
+                nxt(hi + w, math.inf) if math.isfinite(hi) else hi)
+
+    _d, bad_a, _f = _run_widen_sweep(finite_max_only)
+    assert bad_a["half"] == 1886, bad_a
+    assert bad_a["finite"] == 0, bad_a      # correct on the arm it covered
+
+    _d, bad_b, _f = _run_widen_sweep(per_endpoint)
+    assert bad_b["finite"] == 1552 and bad_b["half"] == 1886, bad_b
+
+    _d, bad_c, first_c = _run_widen_sweep(doubled_without_side_condition)
+    assert bad_c["finite"] == 0 and bad_c["half"] == 1538, bad_c
+    # and it first goes wrong at the very first budget past the threshold
+    assert first_c[1] == math.nextafter(2.0 ** (first_c[0][0] - 1), math.inf)
+
+
+def test_a_backend_inside_the_declared_budget_is_not_excluded_over_inf():
+    """End to end, on the shipped profile: an ordinary float32 envelope
+    whose `iv.exp` overflows to ``+inf`` (any envelope reaching past
+    709.78 does). Before B4 the propagated lower endpoint sat ABOVE values
+    the declared 6-ulp budget permits, and the obligation below came back
+    VERIFIED. The escaping value is re-measured here against the live
+    reference rather than quoted."""
+    import numpy as np
+
+    lo_arg = 0.6931471805599453
+    xp = float(np.nextafter(np.float32(lo_arg), np.float32(np.inf)))
+    true = float(jnp.exp(jnp.asarray(xp, "float64")))
+    fmt = _FLOAT_FORMATS["float32"]
+    u = LIBM_PROFILES[PROFILE].get("exp", "float32")
+
+    def _finish(b):
+        return _ieee_round_box(
+            iv.subnormal_haze_fmt(b, _ieee_format_min_normal(fmt))[0], fmt)
+
+    raw = iv.exp(iv.IntervalArray(shape=(), los=(lo_arg,), his=(1e6,)))
+    assert raw.his[0] == math.inf          # the half-infinite arm
+    box = _finish(_libm_widen_box(raw, fmt, u, floor=0.0))
+
+    # the rule B4 replaced: max over the FINITE endpoints only, so the
+    # +inf endpoint drops out and the spacing falls back to ulp(lo)
+    w_pre = u * _libm_ulp_at(raw.los[0], fmt)
+    pre = _finish(iv.IntervalArray(
+        shape=(), los=(math.nextafter(raw.los[0] - w_pre, -math.inf),),
+        his=(math.inf,)))
+
+    # the LEAST-WRONG float32 the pre-fix box excluded
+    esc = np.float32(pre.los[0])
+    while float(esc) >= pre.los[0]:
+        esc = np.nextafter(esc, np.float32(-np.inf))
+    err = abs(float(esc) - true) / _libm_ulp_at(true, fmt)
+
+    assert err < u, err                    # inside the DECLARED budget
+    assert err < 5.5112, err               # and inside the MEASURED maximum
+    assert box.los[0] <= float(esc) < pre.los[0], (
+        f"a backend only {err:.4f} ulps out — inside both the declared {u} "
+        f"and the 5.5112 this profile measured exhaustively — returns "
+        f"{float(esc)!r}, which the pre-B4 lower endpoint {pre.los[0]!r} "
+        f"excluded and the fixed one {box.los[0]!r} must admit"
+    )
+
+    def h():
+        x = any_array((), "float32", (lo_arg, 1e6))
+        return assert_(jnp.exp(x) >= np.float32(1.9999991655349731))
+
+    # the PRE-FIX lower endpoint, which this used to mint as VERIFIED
+    assert _ieee(h, libm_budget=PROFILE).status != "VERIFIED"

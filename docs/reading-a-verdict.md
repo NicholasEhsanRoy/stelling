@@ -252,8 +252,20 @@ executes, which stelling cannot see, execute or measure. If the backend is
 worse than the budget says, the propagated box may exclude the value the
 program computes and the VERIFIED above it is false, with nothing in the
 pipeline able to notice. The profile name is dated for exactly this
-reason: it tells a later reader *what was measured and when*. See
-[preconditions.md](preconditions.md#the-libm-accuracy-budget-exp-and-pow-under-ieee).
+reason: it tells a later reader *what was measured and when*.
+
+And **not "how much"** — that is in the `basis`, and it is worth opening.
+The shipped profile's rows are not all of one kind: `exp` in `float16`,
+`bfloat16` and `float32` was measured **exhaustively**, while `exp` in
+`float64` and **all four `pow` budgets are SAMPLED**. A sampled row bounds
+what was sampled and nothing more — `exp@float64` measured 1.6470 ulps on
+one 3,000,000-argument draw and 1.6660 on an independent one of the same
+size. So a stamp reading `pow@float32 <= 1 ulp` is resting on 16,000,000
+pairs, not on the format; if your query lives somewhere those pairs did
+not, the budget is an extrapolation you are making. See
+[preconditions.md](preconditions.md#the-libm-accuracy-budget-exp-and-pow-under-ieee)
+and `stelling.propagate.LIBM_MEASURED`, which carries every figure beside
+the population it came from.
 
 ## `coverage-not-established:` — what the `coverage:` line did not settle
 

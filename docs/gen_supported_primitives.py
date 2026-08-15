@@ -412,9 +412,11 @@ def generate() -> str:
     w("")
     w("The module docstring's recorded rationale for the ieee endpoint")
     w("arithmetic is: " + _q(_PROPAGATE,
-      "endpoint arithmetic for the monotone core is native binary64 with NO "
-      "outward rounding (the float value itself is computable — "
-      ":data:`stelling.interval.IEEE_ENDPOINT_ASSUMPTION`)") + ".")
+      "endpoint arithmetic for the monotone core is native binary64 with no "
+      "outward rounding IN BINARY64 (the float value itself is computable — "
+      ":data:`stelling.interval.IEEE_ENDPOINT_ASSUMPTION`); in the three "
+      "narrow formats the endpoints are rounded OUTWARD onto that format's "
+      "grid and hazed with that format's own subnormal band") + ".")
     w("")
     w("Per-primitive recorded reasons at the registry entries. Each")
     w("attached reason is checked at generation time for consistency with")
@@ -505,6 +507,73 @@ def generate() -> str:
               "recorded text, not as the reason for the live tier.")
         else:
             w(head + _q(rel, quote))
+    w("")
+
+    # -- the gate the sound-libm tier carries under ieee ----------------------
+    # Derived from LIBM_BUDGET_OPS / LIBM_PROFILES / LIBM_MEASURED, which
+    # are themselves derived from the registry's own tiers — so a sixth
+    # transfer registered at TIER_SOUND_LIBM appears here by being
+    # registered. The page used to say `sound-libm | sound-libm` and
+    # nothing else, which recorded the tier but not the gate (audit 0.2.0
+    # B4).
+    w(f"### The `{_pr.TIER_SOUND_LIBM}` tier under ieee: a DECLARED budget")
+    w("")
+    w(f"{len(_pr.LIBM_BUDGET_OPS)} primitives sit at tier "
+      f"`{_pr.TIER_SOUND_LIBM}` in `IEEE_TRANSFERS`: "
+      f"{_prims(_pr.LIBM_BUDGET_OPS)}. Under `semantics=\"ieee\"` each of "
+      f"them **DECLINES outright** unless the caller declares an accuracy "
+      f"budget for the execution backend — `libm_budget=`, accepted by "
+      f"both `stelling.preconditions.check` and "
+      f"`stelling.propagate.propagate`. The recorded reason is: "
+      + _q(_PROPAGATE,
+           "the bracket of one function is not a bracket of another") + ".")
+    w("")
+    w("The budget is **DECLARED, NEVER VERIFIED**: " + _q(_PROPAGATE,
+      "one smaller than your backend's real error mints a VERIFIED nothing "
+      "here can catch, and the verdict's stamp says exactly that") + ".")
+    w("")
+    _shipped = _pr.LIBM_PROFILES[_pr._DEFAULT_LIBM_PROFILE]
+    _maxre = re.compile(r"max error ([0-9.]+) ulps")
+    w(f"Shipped profile `{_shipped.name}` "
+      f"({_PROPAGATE}:{_def_line(_PROPAGATE, 'XLA_CPU_2026_08')}), and "
+      f"the measurement each budget is rounded up from "
+      f"(`stelling.propagate.LIBM_MEASURED`, "
+      f"{_PROPAGATE}:{_def_line(_PROPAGATE, 'LIBM_MEASURED')}):")
+    w("")
+    _rows = []
+    for (_op, _dt), _u in _shipped.ulps:
+        _prose = _pr.LIBM_MEASURED[(_op, _dt)]
+        _m = _maxre.search(_prose)
+        if _m is None:
+            raise LookupError(
+                f"LIBM_MEASURED[{(_op, _dt)!r}] states no 'max error N "
+                f"ulps' — the page cannot derive the figure the budget is "
+                f"rounded up from"
+            )
+        # the rows open with their population word; substring-matching
+        # "EXHAUSTIVE" anywhere would label the float64 row exhaustive off
+        # its own "SAMPLED, NOT EXHAUSTIVE" disclaimer
+        if _prose.startswith("EXHAUSTIVE"):
+            _pop = "EXHAUSTIVE"
+        elif "sampled" in _prose:
+            _pop = "sampled"
+        else:
+            raise LookupError(
+                f"LIBM_MEASURED[{(_op, _dt)!r}] states neither an "
+                f"EXHAUSTIVE population (leading word) nor a sampled one — "
+                f"the page cannot derive which it is"
+            )
+        _rows.append([f"`{_op}`", f"`{_dt}`", f"{_u:g}", _m.group(1), _pop])
+    for line in _table(
+        ["op", "format", "declared ulps", "measured max", "population"],
+        _rows,
+    ):
+        w(line)
+    w("")
+    w("A **sampled** row bounds what was sampled and nothing more. Every")
+    w("`exp` row is over the arguments whose result is normal and finite;")
+    w("a result that underflows is flushed to zero by the measured backend")
+    w("and is covered by the subnormal haze, not by an accuracy budget.")
     w("")
 
     # emission vs transfer

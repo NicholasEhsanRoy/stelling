@@ -174,12 +174,14 @@ SPDX-License-Identifier: Apache-2.0
   the machine running the analysis. The program runs whatever XLA
   compiled. Measured on jax 0.11.0 / jaxlib 0.11.0, CPU, x86_64,
   exhaustively over every `float32` argument whose result is normal and
-  finite (2,237,668,968 of them), XLA's `exp` is out by up to **5.51
+  finite (2,237,668,967 of them), XLA's `exp` is out by up to **5.51
   float32 ulps** — not faithfully rounded at all, so no fixed widening is
-  sound; in binary64 by up to **1.65 ulps** over 3,000,000 samples, which
-  is what leaks past a ±1-ulp bracket. On the *same* backend `float16`
-  and `bfloat16` `exp` are exhaustively **correctly rounded**, so one
-  number cannot be right for all four formats.
+  sound; in binary64 by up to **1.67 ulps** over 3,000,000 samples, which
+  is what leaks past a ±1-ulp bracket. On the *same* backend `bfloat16`
+  `exp` is exhaustively **correctly rounded** over every normal finite
+  result, while `float16` misses correct rounding on 2 of its 63,487
+  arguments (0.500028 ulps) — a factor of eleven between two formats of
+  one op, so one number cannot be right for all four.
 
   Both transfers therefore **fail closed** and are re-enabled by a
   declaration:
@@ -189,8 +191,9 @@ SPDX-License-Identifier: Apache-2.0
 
   `"xla-cpu-2026-08"` is a shipped, **named and dated** profile of
   per-`(op, format)` budgets; `stelling.propagate.LibmBudget` states your
-  own. The decline carries the measurement that justifies it and the exact
-  line to write. The budget widens the bracket by the declared ulps before
+  own. Both `check()` and `propagate()` take the keyword. The decline
+  carries the measurement that justifies it and a line that **runs as
+  written**. The budget widens the bracket by the declared ulps before
   the format rounding, and is stamped as **declared, not verified** —
   because a budget smaller than the backend's real error mints a VERIFIED
   stelling cannot catch. A budget of `0.5` ulps (correctly rounded) widens
@@ -198,9 +201,10 @@ SPDX-License-Identifier: Apache-2.0
   `sqrt` is a correctly-rounded basic operation, carries no libm demotion,
   and needs no budget. `semantics="real"` is untouched and refuses the
   argument. Verdicts move **VERIFIED → UNKNOWN** and **REFUTED → UNKNOWN**
-  on ieee-mode queries containing `exp` or `pow`; the coverage cost is one
-  extra 12 float32 / 6 binary64 grid steps of bracket width, and zero for
-  `float16`/`bfloat16`.
+  on ieee-mode queries containing `exp` or `pow`; the coverage cost,
+  measured at a point argument, is **12 float32 / 6 binary64 / 2 float16
+  extra grid steps** of bracket width, and zero for `bfloat16`, the one
+  format this backend's `exp` is exhaustively correctly rounded in.
 
 - **Rational-`pow` exponent identity** (audit 0.2.0 S1; see
   [SOUNDNESS.md](SOUNDNESS.md)): the exponent was rationalised with

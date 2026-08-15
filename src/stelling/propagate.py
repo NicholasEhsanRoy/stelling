@@ -124,17 +124,28 @@ byte-identically — the comparability control for the vacuity instrument.
 ``semantics`` is the dial SOUNDNESS.md's stamp contract names: ``"real"``
 (the default, byte-identical to everything above) judges obligations in
 exact real arithmetic; ``semantics="ieee"`` judges them about the traced
-program's **IEEE binary64 round-to-nearest float execution**. The ieee
+program's **IEEE round-to-nearest float execution in the format the
+jaxpr actually carries** — float16, bfloat16, float32 or binary64, each
+judged in its OWN format rather than all four as binary64. The ieee
 domain is the same :class:`stelling.interval.IntervalArray` plus a
 per-array ``maybe_nan`` flag (a parallel ``var id -> bool`` table beside
 the interval env): endpoint arithmetic for the monotone core is native
-binary64 with NO outward rounding (the float value itself is computable
-— :data:`stelling.interval.IEEE_ENDPOINT_ASSUMPTION`), overflow
-saturates to the VALUE ±inf, NaN-producing corner classes (``inf−inf``,
-``0·±inf``, ``0/0``, ``inf/inf``) set ``maybe_nan``, ⊤ is
+binary64 with no outward rounding IN BINARY64 (the float value itself is
+computable — :data:`stelling.interval.IEEE_ENDPOINT_ASSUMPTION`); in the
+three narrow formats the endpoints are rounded OUTWARD onto that
+format's grid and hazed with that format's own subnormal band, because
+binary64 endpoint arithmetic does not land on a narrow format's values.
+Overflow saturates to the VALUE ±inf, NaN-producing corner classes
+(``inf−inf``, ``0·±inf``, ``0/0``, ``inf/inf``) set ``maybe_nan``, ⊤ is
 maybe-NaN, and a predicate over a maybe-NaN operand is never definitely
 true (NaN falsifies every comparison except ``ne``, which it satisfies).
-Every registered transfer is censused for ieee in
+``exp`` and ``pow`` are the second exception to the no-outward-rounding
+line and a larger one: they bracket the TRUE REAL value and DECLINE
+outright unless the caller declares a :class:`LibmBudget` for the
+backend that will execute them (``libm_budget=``, accepted by both
+:func:`propagate` and :func:`stelling.preconditions.check`), because the
+bracket of the analysis host's ``math.exp`` is not a bracket of the one
+the compiler emits. Every registered transfer is censused for ieee in
 :data:`IEEE_TRANSFERS` — sound as-is, given an ieee variant, or declined
 to ⊤-maybe-NaN with the gap quoted; the real mode's extended-real
 conventions (the ``0·∞ = 0`` endpoint rule) are never reused. The
@@ -4237,17 +4248,23 @@ def _ieee_round_box(box: iv.IntervalArray, fmt: tuple[int, int, int]) -> iv.Inte
 # as |backend(x) − true(x)| in ulps of the target format (:data:`LIBM_MEASURED`
 # carries each figure with the population it came from): exp in float32 is
 # out by up to **5.51 ulps**, exhaustively over every argument whose result
-# is normal and finite; exp in binary64 by up to **1.65 ulps**; exp in
-# float16 and bfloat16 is **correctly rounded**, exhaustively, because the
-# backend evaluates those in float32 and rounds.
+# is normal and finite; exp in binary64 by up to **1.67 ulps** over three
+# million samples; exp in bfloat16 is **correctly rounded** over every
+# normal finite result, and exp in float16 misses correct rounding on 2 of
+# 63,487 arguments by 3e-5 of an ulp — both narrow formats are evaluated in
+# float32 and rounded, which is what makes them so close and what makes
+# float16, with only 11 significand bits, occasionally round twice the
+# wrong way.
 #
 # **WHY NOT A WIDER FIXED BRACKET.** The audit that found this proposed
 # ±2 ulps, "enough to cover any faithfully-rounded implementation". At 5.51
 # measured ulps this backend's float32 ``exp`` is not faithfully rounded AT
-# ALL, so no fixed number is sound — the quantity is a property of a compiled
-# function stelling cannot see. Nor is one number right across formats: the
-# SAME backend is correctly rounded in float16 and eleven times worse than
-# faithful in float32.
+# ALL — it is five and a half times worse than faithful — so no fixed
+# number is sound: the quantity is a property of a compiled function
+# stelling cannot see. Nor is one number right across formats. The SAME
+# backend, on the SAME op, is 0.500028 ulps out in float16 and 5.5112 out
+# in float32: a factor of ELEVEN between two formats, which is why the
+# budget is per ``(op, format)`` and never extrapolated.
 #
 # **SO: FAIL CLOSED, AND OPEN IT WITH A DECLARATION.** A transfer whose
 # backend accuracy stelling cannot establish declines, carrying the evidence
@@ -4316,19 +4333,78 @@ def _libm_widen_box(
     the property for every ``t``: ``t ≥ lo`` and ``ulp(t) ≤ U`` give
     ``t − u·ulp(t) ≥ lo − u·U``, and symmetrically above. Each endpoint
     then takes an outward binary64 bump, paying for the arithmetic's own
-    rounding.
+    rounding. A FINITE box needs nothing beyond that maximum, for any
+    ``u``: ``ulp`` is monotone in ``|t|``, so ``max(ulp(lo), ulp(hi))``
+    dominates ``ulp(t)`` everywhere between — including across zero.
 
-    **``ulps ≤ 0.5`` widens by NOTHING, and that is a theorem rather than a
-    kindness.** At half an ulp the backend's result IS the correctly
-    rounded true value; round-to-nearest is monotone; and the caller rounds
-    the box outward onto the format's grid immediately after — so
-    ``RN_fmt(t)`` is already inside ``[floor_fmt(lo), ceil_fmt(hi)]`` for
-    every ``t`` in the box. This is :func:`stelling.interval.sqrt`'s own
-    argument, generalised: sqrt carries no libm demotion precisely because
-    it is correctly rounded, and the mechanism here must not punish a
-    platform that has that property for ``exp`` too. A budget of 1 ulp —
-    merely FAITHFUL — does cost, and pays for the case where the true value
-    sits exactly on a grid point and the backend lands one step beyond it.
+    **AN INFINITE ENDPOINT DOUBLES THAT SPACING; DROPPING IT FROM THE
+    MAXIMUM IS HOW THIS WAS WRONG THE FIRST TIME.** ``iv.exp`` returns
+    ``hi = +inf`` whenever ``math.exp`` overflows binary64, so an ordinary
+    float32 envelope reaching past 709.78 arrives here half-infinite.
+    Taking ``U`` over the FINITE endpoints alone then falls back to
+    ``ulp(lo)`` while the box still holds every ``t ≥ lo``, in binades
+    whose spacing is 2×, 4×, … larger: exactly the class the paragraph
+    above is about, surviving on the arm it did not cover (audit 0.2.0
+    B4). ``U = 2·ulp(lo)`` is enough, and is exactly enough. Enough:
+    write ``g(t) = t − u·ulp(t)``; for ``t ≥ lo`` either
+    ``ulp(t) ≤ 2·ulp(lo)``, giving ``g(t) ≥ lo − 2u·ulp(lo)`` directly, or
+    ``ulp(t) > 2·ulp(lo)``, and then ``ulp(t)`` — a power of two — is at
+    least ``4·ulp(lo)`` and is not the subnormal floor, so
+    ``t ≥ 2**(p-1)·ulp(t)`` and
+    ``g(t) ≥ ulp(t)·(2**(p-1) − u) ≥ 4·ulp(lo)·(2**(p-1) − u)``, while
+    ``lo < 2**p·ulp(lo)`` gives ``lo − 2u·ulp(lo) < 2·ulp(lo)·(2**(p-1) −
+    u)``. Exactly enough: ``g(2**k) = 2**k·(1 − u·2**(1-p))``, the first
+    binade boundary above ``lo`` has ``ulp = 2·ulp(lo)`` and is where
+    ``g`` dips lowest, and for ``u < 2**(p-1)`` every boundary after it
+    dips less.
+
+    **AND THAT SIDE CONDITION IS REACHABLE.** Past ``u = 2**(p-1)`` ulps —
+    1024 for float16, **128 for bfloat16**, which is BELOW the 108.7 ulps
+    this backend's bfloat16 ``exp`` really reaches on flushed subnormal
+    results, so a caller declaring a budget that covers its own backend is
+    in the neighbourhood — ``1 − u·2**(1-p)`` turns non-positive,
+    ``g(2**k) → −∞``, and the infimum over a half-infinite box is
+    UNBOUNDED: no finite lower endpoint is sound, and the doubled ``U``
+    would mint one. That arm returns ``-inf`` (then ``floor``), which is
+    the true bound rather than a giving-up.
+
+    The upper side is the mirror image under ``t ↦ −t``, ``ulp`` being
+    even: ``lo = -inf`` needs ``U = 2·ulp(hi)`` and saturates to ``+inf``
+    past the same threshold. Nothing in this module produces ``lo = -inf``
+    today — ``exp`` and ``pow`` have range in ``[0, ∞)`` and pass
+    ``floor=0.0`` — so that arm is latent, and it is closed here rather
+    than left for whichever transfer makes it reachable. ``[-inf, +inf]``
+    is returned unchanged: it already admits every value.
+
+    **``ulps ≤ 0.5`` widens by NOTHING, and what makes that sound is
+    CORRECT ROUNDING — not "≤ 0.5 ulps" read through the binade convention
+    above.** Those are not the same statement and they come apart at
+    exactly one place: powers of two. ``ulp(2**k)`` here is the spacing
+    ABOVE ``2**k``, while the float BELOW it is only ``2**(k-p)`` away —
+    half an ulp by this convention — so the LITERAL reading of a ``u =
+    0.5`` declaration also admits a backend returning ``nextdown(2**k)``
+    where the true value is ``2**k``, which correct rounding does not.
+    ``exp(0) = 1.0`` reaches it. So the branch is read as the declaration
+    it is meant to be: :class:`LibmBudget` defines ``0.5`` as "correctly
+    rounded", and for a correctly-rounded backend the no-op IS a theorem —
+    the result is ``RN_fmt(t)``, round-to-nearest is monotone, and the
+    caller rounds the box outward onto the format's grid immediately
+    after, so ``RN_fmt(t)`` is already inside ``[floor_fmt(lo),
+    ceil_fmt(hi)]`` for every ``t`` in the box. This is
+    :func:`stelling.interval.sqrt`'s own argument, generalised: sqrt
+    carries no libm demotion precisely because it is correctly rounded,
+    and the mechanism here must not punish a platform that has that
+    property for ``exp`` too.
+
+    The residual — the literal reading's ``nextdown(2**k)`` — is covered
+    for THIS module's callers, and only by them: ``iv.exp`` and
+    ``iv.pow_`` hand over a box already bumped a binary64 ulp OUTWARD, so
+    ``floor_fmt(lo)`` sits at least one format step below any grid-point
+    true value, which is exactly where ``nextdown(2**k)`` is. A future
+    caller passing a box that TOUCHES the true value may not read ``u =
+    0.5`` as free. A budget of 1 ulp — merely FAITHFUL — does cost, and
+    pays for the case where the true value sits exactly on a grid point
+    and the backend lands one step beyond it.
 
     ``floor`` clamps the widened lower endpoint. ``exp``, and ``pow`` over a
     strictly positive base, have range in ``[0, ∞)``, so no backend value
@@ -4338,20 +4414,37 @@ def _libm_widen_box(
     """
     if ulps <= 0.5:
         return box
+    p = fmt[0]
+    # past 2**(p-1) declared ulps the infimum of t - u*ulp(t) over a
+    # half-infinite box is unbounded — see the docstring's side condition
+    unbounded = ulps > math.ldexp(1.0, p - 1)
     los, his = [], []
     for lo, hi in zip(box.los, box.his):
-        finite = [v for v in (lo, hi) if math.isfinite(v)]
-        if not finite:  # [-inf, inf] and the like: nothing to widen
+        lo_finite, hi_finite = math.isfinite(lo), math.isfinite(hi)
+        if not (lo_finite or hi_finite):  # [-inf, inf]: nothing to widen
             los.append(lo)
             his.append(hi)
             continue
-        w = ulps * max(_libm_ulp_at(v, fmt) for v in finite)
-        if math.isfinite(lo):
-            lo = math.nextafter(lo - w, -math.inf)
+        spacing = max(
+            _libm_ulp_at(v, fmt) for v in (lo, hi) if math.isfinite(v)
+        )
+        if not (lo_finite and hi_finite):
+            # the first binade boundary past the finite end doubles the
+            # spacing, and for u <= 2**(p-1) that boundary is the infimum
+            spacing *= 2.0
+        w = ulps * spacing
+        if lo_finite:
+            lo = (
+                -math.inf if (unbounded and not hi_finite)
+                else math.nextafter(lo - w, -math.inf)
+            )
             if floor is not None and lo < floor:
                 lo = floor
-        if math.isfinite(hi):
-            hi = math.nextafter(hi + w, math.inf)
+        if hi_finite:
+            hi = (
+                math.inf if (unbounded and not lo_finite)
+                else math.nextafter(hi + w, math.inf)
+            )
         los.append(lo)
         his.append(hi)
     return iv.IntervalArray(shape=box.shape, los=tuple(los), his=tuple(his))
@@ -4364,33 +4457,53 @@ def _libm_widen_box(
 # measured maxima and :data:`XLA_CPU_2026_08` rounds each UP to its budget.
 LIBM_MEASURED: dict[tuple[str, str], str] = {
     ("exp", "float16"): (
-        "EXHAUSTIVE over all 63,487 distinct finite float16 arguments: max "
-        "error 0.5000 ulps and none above it — CORRECTLY ROUNDED on this "
-        "backend, which evaluates float16 exp in float32 and rounds, "
-        "leaving thousands of backend ulps of slack"
+        "EXHAUSTIVE over all 63,487 distinct finite float16 arguments, "
+        "over the 37,479 of them whose result is normal and finite: max "
+        "error 0.500028 ulps, and 2 arguments exceed 0.5 — NOT correctly "
+        "rounded, though it misses by 3e-5 of an ulp. The backend "
+        "evaluates float16 exp in float32 and rounds twice; at "
+        "x=0.0226898193359375 and x=0.007297515869140625 the true value "
+        "sits a hair BELOW the float16 midpoint and the float32 "
+        "intermediate lands above it, so the second rounding goes to the "
+        "far neighbour. Over the 6,392 arguments with a subnormal result: "
+        "0.499849, none above 0.5"
     ),
     ("exp", "bfloat16"): (
-        "EXHAUSTIVE over all 65,279 distinct finite bfloat16 arguments: max "
-        "error 0.5000 ulps and none above it — CORRECTLY ROUNDED, for the "
-        "same reason as float16"
+        "EXHAUSTIVE over all 65,279 distinct finite bfloat16 arguments, "
+        "over the 34,145 of them whose result is normal and finite: max "
+        "error 0.499988 ulps and none above it — CORRECTLY ROUNDED there, "
+        "the backend evaluating bfloat16 exp in float32 and rounding, and "
+        "8 significand bits leaving room the 11 of float16 do not. THE "
+        "QUALIFIER IS LOAD-BEARING: over ALL finite arguments the maximum "
+        "is 108.698176 ulps and 11 exceed 0.5, every one of them a "
+        "subnormal result FLUSHED to zero (worst x=-87.5, true "
+        "9.982350930569248e-39, backend 0.0). That flush is covered by "
+        "interval.subnormal_haze_fmt, which hulls the box with 0 whenever "
+        "it reaches the format's subnormal band — not by this budget"
     ),
     ("exp", "float32"): (
         "EXHAUSTIVE over every float32 argument in [-104, 88.73] whose "
-        "result is normal and finite (2,237,668,968 of them): max error "
-        "5.5112 ulps, and 12,542 arguments exceed 1 ulp. They concentrate "
-        "in [88.54634857177734, 88.72283172607422] — 12,520 of the 12,542, "
-        "and that band holds exactly 23,133 float32 values, so 54.12% of "
-        "the arguments there escape. XLA's exp is not faithfully rounded "
-        "at all in that band, and every escape is on the low side"
+        "result is normal and finite (2,237,668,967 of them, which is "
+        "exactly the arguments in [-87.33654022216797, "
+        "88.72283172607422]): max error 5.5112 ulps, and 12,542 arguments "
+        "exceed 1 ulp. They concentrate in [88.54634857177734, "
+        "88.72283172607422] — 12,520 of the 12,542, and that band holds "
+        "exactly 23,133 float32 values, so 54.12% of the arguments there "
+        "escape. XLA's exp is not faithfully rounded at all in that band, "
+        "and every escape is on the low side (12,542 low, 0 high)"
     ),
     ("exp", "float64"): (
-        "3,000,000 sampled arguments over [-708,709], [-40,40] and [-1,1] "
-        "against a 50-digit decimal reference: max error 1.6470 ulps, with "
-        "10,561 (0.35%) above 1 ulp — so XLA's binary64 exp is not "
-        "faithfully rounded either, and a 1-ulp bracket around glibc's "
-        "leaks in both directions. A further 1,093,019 arguments in the far "
-        "tails reach 1.6319. SAMPLED, NOT EXHAUSTIVE: it bounds what was "
-        "sampled and nothing more"
+        "3,000,000 sampled arguments — a million uniform on each of "
+        "[-708,709], [-40,40] and [-1,1], numpy default_rng(20260815) — "
+        "against a 60-digit decimal reference: max error 1.6660 ulps, with "
+        "10,559 (0.35%) above 1 ulp, so XLA's binary64 exp is not "
+        "faithfully rounded either and a 1-ulp bracket around glibc's "
+        "leaks in both directions. SAMPLED, NOT EXHAUSTIVE, and this row "
+        "is the demonstration of what that costs: an earlier draw of the "
+        "same size recorded 1.6470 as its maximum and this one beat it. A "
+        "sampled row bounds what was sampled and nothing more, which is "
+        "why the declared budget rounds up to the next integer rather than "
+        "to the figure above"
     ),
     ("pow", "float16"): (
         "16,000,000 sampled (base, exponent) pairs over four regions — "
@@ -4415,7 +4528,7 @@ LIBM_MEASURED: dict[tuple[str, str], str] = {
 # THE DECLINE. It is the feature, not the error: a halt a reader cannot act
 # on is an obstacle to be worked around by trial and error, and what makes
 # this one a deliberate choice instead is that it carries the evidence that
-# justifies it and the exact line to write.
+# justifies it and a line that RUNS AS WRITTEN.
 LIBM_BUDGET_DECLINE = (
     "{op} under semantics='ieee' has no DECLARED accuracy budget for "
     "{dtype} — declined rather than judged against an assumption stelling "
@@ -4428,20 +4541,63 @@ LIBM_BUDGET_DECLINE = (
     "MEASURED for ({op}, {dtype}) on jax 0.11.0 / jaxlib 0.11.0, CPU, "
     "x86_64: {evidence}. "
     "A FIXED WIDER BRACKET IS NOT THE FIX: the error is a property of a "
-    "compiled function, and on this very backend the same op is correctly "
-    "rounded in float16 and eleven times worse than faithful in float32. "
-    "TO PROCEED, declare what you are willing to assume about your backend: "
-    "`check(harness, vacuity_mode=..., semantics='ieee', "
-    "libm_budget='{profile}')`, which declares {op}@{dtype} <= "
-    "{profile_ulps} ulps on the measurement above; or state your own: "
-    "`from stelling.propagate import LibmBudget` then "
-    "`check(..., libm_budget=LibmBudget(name='my-backend-YYYY-MM', "
-    "basis='what you measured, on what, and when', "
-    "ulps={{('{op}', '{dtype}'): <ulps>}}))`. "
+    "compiled function, and on this very backend the same op measures "
+    "0.500028 ulps in float16 and 5.5112 in float32 — a factor of eleven "
+    "between two formats, which no single number spans. "
+    "{incantation}. "
     "The budget is DECLARED, NEVER VERIFIED: one smaller than your "
     "backend's real error mints a VERIFIED nothing here can catch, and the "
     "verdict's stamp says exactly that."
 )
+
+
+def _libm_decline_incantation(
+    op: str, dtype: str, profile: str, ship_u: float | None
+) -> str:
+    """The decline's TO PROCEED sentence, built so that what it prints
+    RUNS AS WRITTEN.
+
+    **A template is not an incantation.** The first draft printed
+    ``check(harness, vacuity_mode=..., semantics='ieee', ...)`` — where
+    ``...`` is ``Ellipsis`` and raises *"widen mode must be one of ('all',
+    'inputs-only')"* — and ``ulps={('exp','float32'): <ulps>}``, which is a
+    ``SyntaxError``. A reader who pastes what a halt told them to paste and
+    gets a SECOND error learns that the halt was decoration. So the shipped
+    number goes in literally, ``vacuity_mode`` gets a real value, and the
+    only thing left for the reader to supply is their own harness.
+
+    It also names BOTH doors. The decline used to mention only ``check``,
+    while the exposure this whole gate exists to close (audit 0.2.0 S11)
+    runs through :func:`propagate` — which takes the same keyword and is
+    the entry point the released 0.1.0 reached ieee mode through.
+    """
+    number = ("%g" % ship_u) if ship_u is not None else "<the ulps you measured>"
+    own = (
+        "`from stelling.propagate import LibmBudget` then "
+        "`check(harness, vacuity_mode='inputs-only', semantics='ieee', "
+        "libm_budget=LibmBudget(name='my-backend-2026-08', "
+        "basis='what you measured, on what, and when', "
+        "ulps={%r: %s}))`" % ((op, dtype), number)
+    )
+    if ship_u is None:
+        return (
+            "TO PROCEED, declare what you are willing to assume about your "
+            "backend. The shipped profile %r does NOT cover (%s, %s), so "
+            "there is no number here to borrow: measure yours and write it "
+            "where the placeholder is — %s" % (profile, op, dtype, own)
+        )
+    return (
+        "TO PROCEED, declare what you are willing to assume about your "
+        "backend. EITHER OF THESE LINES RUNS AS WRITTEN once the first "
+        "argument is yours: `check(harness, vacuity_mode='inputs-only', "
+        "semantics='ieee', libm_budget=%r)` or `propagate(closed, "
+        "semantics='ieee', libm_budget=%r)`. Both declare %s@%s <= %s ulps "
+        "on the measurement above; both entry points take the keyword, and "
+        "`propagate` is the one the released 0.1.0 reached ieee mode "
+        "through. To declare your OWN number instead of borrowing that "
+        "one, %s, with your measurement in place of the %s"
+        % (profile, profile, op, dtype, number, own, number)
+    )
 
 LIBM_BUDGET_REAL_MODE_REFUSAL = (
     "a libm accuracy budget has no meaning under semantics='real' and is "
@@ -4481,8 +4637,9 @@ def _libm_budget_ulps(op: str, dtype: str, budget) -> float:
             op=op,
             dtype=dtype,
             evidence=evidence,
-            profile=_DEFAULT_LIBM_PROFILE,
-            profile_ulps=("%g" % ship_u) if ship_u is not None else "<ulps>",
+            incantation=_libm_decline_incantation(
+                op, dtype, _DEFAULT_LIBM_PROFILE, ship_u
+            ),
         )
     )
 
@@ -5736,26 +5893,39 @@ XLA_CPU_2026_08 = LibmBudget(
         "x86_64 Linux (glibc 2.39), CPython 3.12.3, eager and under jit "
         "(identical), as |jnp.op(x) - true(x)| in ulps of the target "
         "format, against a binary64 reference for the three narrow formats "
-        "and a 50-digit decimal reference for binary64. exp in "
-        "float16/bfloat16 is EXHAUSTIVE over every finite argument and exp "
-        "in float32 is EXHAUSTIVE over every argument whose result is "
-        "normal and finite; exp in float64 and pow everywhere are SAMPLED "
-        "and bound only what was sampled. Each budget is the measured "
-        "maximum rounded up; the maxima are in "
+        "and a 60-digit decimal reference for binary64. exp is EXHAUSTIVE "
+        "in all three narrow formats and, in float32, over every argument "
+        "whose result is normal and finite; exp in float64 and pow "
+        "everywhere are SAMPLED and bound only what was sampled. EVERY exp "
+        "row is over the arguments whose RESULT IS NORMAL AND FINITE: a "
+        "result that underflows to a subnormal is flushed to zero by this "
+        "backend and is covered by the subnormal haze, not by an accuracy "
+        "budget — in bfloat16 that flush reaches 108.7 ulps and would "
+        "otherwise dominate the row. Each budget is the measured maximum "
+        "rounded UP TO THE NEXT INTEGER, except where the measurement is "
+        "correct rounding and 0.5 is exact; the maxima are in "
         "stelling.propagate.LIBM_MEASURED. This profile describes ONE "
         "jaxlib on ONE device class on ONE day, and is named so that it "
         "cannot quietly outlive that"
     ),
     ulps={
-        # Correctly rounded, exhaustively — the backend evaluates these in
-        # float32 and rounds, so the target grid has thousands of backend
-        # ulps of slack. 0.5 costs NOTHING: a correctly-rounded libm needs
-        # no widening at all, because round-to-nearest is monotone.
-        ("exp", "float16"): 0.5,
+        # NOT correctly rounded, by 3e-5 of an ulp: 2 of the 63,487 float16
+        # arguments measure 0.500028, so 0.5 would declare a bound this
+        # backend violates and `_libm_widen_box` would widen by nothing to
+        # cover it. 1 is that rounded up, and it is what every other row
+        # short of correct rounding already declares. This costs the
+        # "float16 exp is free" property, and the property was not true.
+        ("exp", "float16"): 1.0,
+        # Correctly rounded over every normal finite result (0.499988,
+        # exhaustively) — the backend evaluates this in float32 and rounds,
+        # leaving the bfloat16 grid thousands of backend ulps of slack. 0.5
+        # costs NOTHING: round-to-nearest is monotone and the box is
+        # rounded outward onto the format grid anyway.
         ("exp", "bfloat16"): 0.5,
         # measured 5.5112 exhaustively; 6 is that rounded up
         ("exp", "float32"): 6.0,
-        # measured 1.6470 over 3M samples; 2 is that rounded up
+        # measured 1.6660 over 3M samples (and 1.6470 over an earlier,
+        # independent 3M); 2 is that rounded up
         ("exp", "float64"): 2.0,
         # measured 0.5001 / 0.5000 / 0.5380 / 0.5059 — every one a hair
         # above correctly rounded and nowhere near faithful. 1.0 is the

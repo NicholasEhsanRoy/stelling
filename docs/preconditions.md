@@ -225,9 +225,25 @@ Measured on jax 0.11.0 / jaxlib 0.11.0, CPU, x86_64, the gap is real and
 it is not small: exhaustively over every `float32` argument whose `exp` is
 normal and finite, XLA's result is up to **5.51 float32 ulps** from the
 true value — so it is not faithfully rounded at all, and no fixed widening
-of the bracket can be sound. On the *same* backend, `float16` and
-`bfloat16` `exp` are exhaustively **correctly rounded**, because they are
-evaluated in `float32` and rounded. One number cannot be right for both.
+of the bracket can be sound. On the *same* backend, `bfloat16` `exp` is
+exhaustively **correctly rounded** over every normal finite result, and
+`float16` misses correct rounding on 2 of its 63,487 arguments by 3e-5 of
+an ulp — both are evaluated in `float32` and rounded. A factor of eleven
+between two formats of one op: no single number is right for all four.
+
+**Not every row is exhaustive, and the difference matters.** `exp` is
+measured exhaustively in `float16`, `bfloat16` and `float32`. `exp` in
+`float64` and **all four `pow` budgets are SAMPLED** — they bound what was
+sampled and nothing more, and an independent draw of the same size has
+already beaten one of them (`exp@float64` measured 1.6470 on one 3,000,000
+draw and 1.6660 on the next). This is why the shipped budgets round up to
+the next integer rather than to the measured figure, and it is why the
+per-row population is written out in `stelling.propagate.LIBM_MEASURED`
+rather than summarised as a single number: read the row, not the maximum.
+Every `exp` row is also restricted to arguments **whose result is normal
+and finite** — a result that underflows is flushed to zero by this backend
+(108.7 ulps in `bfloat16`) and is covered by the subnormal haze, not by an
+accuracy budget.
 
 So the two transfers that ride the claim **fail closed**:
 
@@ -267,7 +283,9 @@ stamped     : True
 ```
 
 The decline is not a wall — it carries the measurement that justifies it
-and the exact line to write. `"xla-cpu-2026-08"` is a shipped profile: a
+and a line that **runs as written** (both `check()` and `propagate()`
+accept `libm_budget=`, and the decline names both).
+`"xla-cpu-2026-08"` is a shipped profile: a
 **named, dated** set of per-`(op, format)` budgets measured on one jaxlib,
 on one device class, on one day. The name is what a stamp carries, so when
 jaxlib moves the name stays honest about what it measured and when, which
@@ -292,13 +310,24 @@ A budget is **per `(op, format)` and never extrapolated**: one naming
 `("exp", "float64")` does nothing for `float32` `exp`, and a pair it does
 not name declines exactly as if no budget had been passed.
 
-`0.5` ulps means *correctly rounded*, and it costs nothing at all — the
-bracket is not widened by a single step, because round-to-nearest is
-monotone and the endpoints are rounded onto the format's grid anyway. `1`
-ulp means *faithfully rounded* and does cost. This is the same line
-`interval.sqrt` already draws for itself: sqrt is a correctly-rounded
-IEEE-754 basic operation, so it carries no libm demotion, needs no budget,
-and is unaffected by any of this.
+`0.5` ulps **is read as the declaration "correctly rounded"**, and it
+costs nothing at all — the bracket is not widened by a single step,
+because round-to-nearest is monotone and the endpoints are rounded onto
+the format's grid anyway. `1` ulp means *faithfully rounded* and does
+cost. This is the same line `interval.sqrt` already draws for itself:
+sqrt is a correctly-rounded IEEE-754 basic operation, so it carries no
+libm demotion, needs no budget, and is unaffected by any of this.
+
+One pedantry, because the whole design rests on the declaration meaning
+what the verdict assumes: an ulp here is the spacing of the binade
+*containing* the value, so `ulp(2**k)` is the spacing **above** `2**k`
+while the float **below** it is only half such an ulp away. Read as a
+raw inequality, `0.5` would therefore also admit a backend returning
+`nextdown(2**k)` where the true value is exactly `2**k` — which correct
+rounding does not, and `exp(0) = 1.0` reaches. `0.5` is read as the
+stronger claim, correct rounding, which is what the no-widening branch
+needs; if your backend is only *nearly* correctly rounded, declare `1`,
+which is what the shipped profile now does for `float16` `exp`.
 
 **What the stamp then says, and it is the whole point:**
 
