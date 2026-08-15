@@ -5527,41 +5527,84 @@ verdicts:
   the binary64 sweep below, 16/20/16 in the three narrow formats.
 
   **The sweep, and what the previous one missed.** An exact containment
-  sweep drives `ieee_div`, `ieee_div_fmt`, `mul` and `ieee_mul` over every
-  ordered endpoint pair from a 24-value adversarial pool (`±0.0`,
-  `±5e-324`, `±2.225e-308`, `±1e300`, `±FMAX`, `±inf`, `nextafter`
-  neighbours, and magnitudes subnormal in a *narrower* format), 301 boxes
-  and 90,601 box pairs, checking that every returned box contains every
-  value the arithmetic can produce at points of the operand boxes — with
-  **`+0.0` and `-0.0` kept apart on the input side**, which is exactly
-  what the earlier sweep did not do (it drove real-mode `div` and
-  `boundary_div`, never `ieee_div`, and deduplicated its sample points
-  with `==`, under which the two zeros are one point). Real-mode `mul` is
-  judged against exact rational products; the ieee kernels against the
-  target format's own arithmetic, composed with `_ieee_round_box` exactly
-  as `_ieee_arith` composes them.
+  sweep drives `mul`, `ieee_mul`, `ieee_div`, `ieee_mul_fmt` and
+  `ieee_div_fmt` over every ordered endpoint pair from a 28-value
+  adversarial pool (`±0.0`, `±5e-324`, `±2.225e-308`, `±1e300`, `±FMAX`,
+  `±inf`, `nextafter(1.0, ±inf)`, and magnitudes subnormal in a *narrower*
+  format), 406 boxes and 164,836 box pairs per row, checking that every
+  returned box contains every value the arithmetic can produce at points
+  of the operand boxes — with **`+0.0` and `-0.0` kept apart on the input
+  side**, which is exactly what the sweep before it did not do (it drove
+  real-mode `div` and `boundary_div`, never `ieee_div`, and deduplicated
+  its sample points with `==`, under which the two zeros are one point).
+  Boxes are built from POOL INDICES rather than value comparisons, which
+  is what keeps the two zeros apart. Real-mode `mul` is judged against
+  exact rational products; `ieee_mul`/`ieee_div` against the binary64
+  value the program actually computes (their corner hull is the native
+  product with no outward rounding, so the REAL product is the wrong
+  yardstick); the narrow formats against the exact real value, which is
+  sufficient once `_ieee_round_box` has rounded the box outward onto the
+  target grid, and which assumes nothing about how that format rounds.
+
+  **THE TABLE BELOW WAS AN OUT-OF-TREE MEASUREMENT AND IS NOW A RUN**
+  (B5 follow-up audit). Its predecessor read `0 / 1,366,561`,
+  `40,032 / 6,707,920`, `+ 20 RAISED`, `116,548` NaN samples and
+  `301 boxes / 90,601 box pairs`; those counts came from a sweep that was
+  never committed, so `grep` for them found nothing in `tests/` or
+  `src/`. Nothing about them was wrong — the arithmetic was internally
+  consistent and an independent sweep agreed with the conclusions — but
+  they sat three paragraphs above the paragraph explaining why exactly
+  that shape is a problem, and immediately after the sibling figure that
+  had just been converted to an exact assert. **Every number below is
+  from a run of `tests/ieee_containment_sweep.py` on this branch**, and
+  `tests/test_ieee_zero_divisor_and_mul_exact.py` asserts all four
+  columns of all nine rows exactly, against the module constants
+  `POST_FIX_ROWS`, `PRE_FIX_IEEE_DIV_F64`, `POOL_SIZE`, `BOX_COUNT` and
+  `BOX_PAIRS` — so drift in either direction reddens the suite with
+  "update both or neither". Reproduce with:
+
+      PYTHONPATH=src python tests/ieee_containment_sweep.py
+
+  Measured 2026-08-15 at `0dff2a9` + this commit, CPython 3.12.3, jax
+  0.11.0, numpy 2.5.1, Linux x86_64, `JAX_ENABLE_X64=1` (the sweep drives
+  the kernels directly and does not read the flag).
 
   ```
-                          pre-fix (f0b34cd)          post-fix
-  real mul   / R          0 / 1,366,561              0 / 1,366,561
-  ieee_div   / f64        40,032 / 6,707,920         0 / 6,708,100
-                          + 20 RAISED                + 0 RAISED
-  ieee_mul   / f64        0 / 6,708,100              0 / 6,708,100
-  ieee_div_fmt/float32     8,760 / 792,008           0 / 792,100
-  ieee_div_fmt/float16     6,904 / 495,524           0 / 495,616
-  ieee_div_fmt/bfloat16    7,800 / 659,252           0 / 659,344
-  ieee_mul_fmt/*           0                         0
+  kernel        format      failures / samples      NaN samples   RAISED
+  real mul      R                  0 /   851,929             0        0
+  ieee_mul      float64            0 /   962,361        29,348        0
+  ieee_div      float64            0 /   962,361        67,373        0
+  ieee_mul_fmt  float32            0 /   962,361       104,632        0
+  ieee_div_fmt  float32            0 /   962,361       128,657        0
+  ieee_mul_fmt  float16            0 /   962,361       115,784        0
+  ieee_div_fmt  float16            0 /   962,361       151,505        0
+  ieee_mul_fmt  bfloat16           0 /   962,361       104,632        0
+  ieee_div_fmt  bfloat16           0 /   962,361       128,657        0
+
+  positive control — the PRE-FIX ieee_div, same grid:
+  ieee_div      float64       15,048 /   962,361        67,373        0
   ```
+
+  **A battery that has never failed is not evidence**, so the pre-fix
+  kernel is kept in the sweep module as `prefix_ieee_div` and driven over
+  the same grid: it fails 15,048 of 962,361 samples, and a run that ever
+  reports 0 there fails the suite. `RAISED` is 0 in that column and that
+  is not a hole — the raise this entry records above
+  (`ieee_div([-inf,-inf], [-inf, 0])` computing `-inf/-inf`) was closed
+  inside `boundary_div` itself by a different fix, so the pre-fix
+  *transfer* driven through today's kernel degrades instead of crashing.
+  The `20` / `16/20/16` raise counts in the paragraph above it remain an
+  **out-of-tree measurement at `f0b34cd`**, named as such because no test
+  in this tree can reproduce a crash in code the tree no longer contains.
 
   A NaN result is checked against the `made_nan` flag rather than
-  containment; 116,548 of the binary64 division samples are NaN and every
-  one of them is flagged. **What the generator could not produce**, said
-  plainly: it samples a finite subset of each box (endpoints, both zeros,
-  `nextafter` neighbours, a fixed constant pool) rather than every float,
-  so it is a containment *battery*, not a proof; it drives the kernels
-  directly and the `_ieee_arith`/`_ieee_round_box` composition, not the
-  traced pipeline; and it says nothing about the transfers this batch did
-  not touch.
+  containment, and every NaN sample counted above is flagged.
+  **What the generator could not produce**, said plainly: it samples a
+  finite subset of each box (the endpoints, and zero when the box
+  straddles it) rather than every float, so it is a containment
+  *battery*, not a proof; it drives the kernels and the `_ieee_round_box`
+  composition directly, not the traced pipeline; and it says nothing
+  about the transfers this batch did not touch.
 
 - **2026-08-15 (pre-release, same batch): `mul` was the only arithmetic
   transfer with no exact-rational path, and the missing ulp decided
@@ -5865,6 +5908,171 @@ verdicts:
   a soundness claim; the granularity is whole-array, not per-element, so
   a mixed-sign array carries nothing.
 
+  **A note on the amendments below, before their content.** They come
+  from a later, blinded pass over this branch whose verdict was MERGE,
+  and it handed over findings without numeric IDs. They are recorded
+  WITHOUT invented ones: the obvious next labels (`B5-2`, `B5-3`) are
+  already spent in this same log on different findings — `dot_general`'s
+  inlined corners and `boundary_div`'s `inf/inf` raise — so minting them
+  here would have put two different things under one name in one file,
+  which is the failure mode this log exists to prevent. "B5 follow-up
+  audit" is a true label; a number would not have been.
+
+  **AMENDED (2026-08-15, B5 follow-up audit): a CONSTANT operand used to
+  drop the certificate too, and the prose said it could not.** Not a
+  soundness defect — a COVERAGE defect with two pieces of prose denying
+  it, one of them user-facing. `read_strict_sign` answered `0` for every
+  literal, on a docstring rationale that reasoned only about a literal
+  DIVISOR: *"the single consumer is the `div` boundary gate, which is
+  only consulted when the operand's box REACHES zero."* **The single
+  consumer was not the only reader.** `_strict_sign_out` calls
+  `read_strict_sign` on *every operand of every rule*, so a literal
+  COEFFICIENT zeroed the whole chain through it — nothing to do with any
+  divisor. Measured before the fix, all four sound and all four declining:
+
+  ```
+  assume(x > 0); 1 / (0.5 * jnp.sum(x*x))  > 0               UNKNOWN
+  assume(x > 0); 1 / (2.0 * x)             > 0               UNKNOWN
+  assume(x > 0); 1 / (x / 2.0)             > 0               UNKNOWN
+  assume(x > 0); 1 / jnp.mean(x*x)         > 0               UNKNOWN
+  ```
+
+  The last is the mean-squared-residual idiom — the `/n` inside
+  `jnp.mean` is the literal — and it is the shape most likely to appear
+  wherever this row's headline shape does. Worse, the decline the user
+  read was `DIV_BOUNDARY_ZERO_DECLINE`, which told them the chain is
+  carried *"on a value the divisor is built from by `* / neg abs square
+  x**n sum dot`"*. All four queries are built by exactly `*` and `/`.
+  **The message named a rule the code did not implement**, so the remedy
+  it recommended did not work — the `docs/norms.md` "claim divergence"
+  class, pointed at a user.
+
+  **The fix: a constant answers from its own decoded value**
+  (`_box_strict_sign`, beside the rule set it feeds). Five conditions,
+  each load-bearing, and each with a test that reddens when that one
+  alone is removed:
+
+  * **decodable** — the tree carries dtypes with no zero-dep decoder and
+    an undecodable-literal sentinel; both keep answering `0`, via the
+    same guarded-decode idiom as `read_flag` and `_quiet_box`. Measured:
+    a NaN literal does not even reach the finiteness test, because
+    `_value_to_interval` raises `IntervalError("NaN endpoint")` first.
+  * **a value, not a range** — the premise `_box_strict_sign` needs is
+    that the box IS the value, which is true of a decoded literal and a
+    decoded constvar and of NOTHING else here. A var's box is an
+    over-approximation, and `assume(x > 0)` narrows to `[0, hi]`, which
+    this function correctly calls unsigned; the whole strict-sign table
+    exists because a box in general cannot carry this. The pre-boxed
+    `IntervalArray` const branch — provenance unknown, which is why it is
+    marked maybe-NaN under ieee — is skipped for the same reason, and
+    that skip has its own test.
+  * **finite, both endpoints** — `±inf` is nonzero but breaks the rules
+    that consume the fact: `a / inf = 0`, so a certificate minted off an
+    infinite operand would claim NONZERO of a value that is zero. Not
+    hypothetical plumbing: `_int_bracket` saturates an int beyond the
+    double range to `(maxf, inf)`, and that is a literal.
+  * **non-empty** — a size-0 value certifies nothing about "every
+    element": both quantifiers are vacuously true over an empty box,
+    which would mint a sign for a value that has none.
+  * **strictly nonzero, EVERY element** — the fact is quantified over all
+    elements, so an array constant must be one-signed throughout. Reading
+    only `los[0]` is not merely loose, it is unsound in the divisor
+    direction, and the enumeration below is what shows that.
+
+  **The divisor case is not weakened, and this was enumerated rather than
+  asserted.** `_t_div`'s gate is consulted only when
+  `iv.straddles_zero(divisor)` — some element with `lo <= 0 <= hi`. A
+  constant answering `+1` has `lo > 0` for every element (`-1`: `hi < 0`,
+  so `lo <= hi < 0`), so it cannot straddle, so no constant divisor whose
+  sign is newly nonzero can reach the gate at all. Enumerated over 13
+  scalars and all 4³ arrays drawn from `{0, 1, -1, inf}`: 76 decodable
+  cases, 1 undecodable, 0 signed-and-straddling. Under the
+  first-element-only mutation that enumeration REDS, which is what shows
+  the all-elements condition is carrying the soundness and not just tidiness.
+
+  **The certificate was re-checked semantically, not just re-run.** For
+  every var the propagator records a sign for, the query is evaluated in
+  exact `Fraction` arithmetic at points of the ASSUMED region — the
+  half-open `(0, 2]`, sampled including a point `1e-12` from the excluded
+  zero and the closed upper endpoint — and every element is confirmed to
+  really have that sign. Five shapes, **850 points, 8,438 var-point
+  checks, 0 failures**, with a live positive control that adds `sub` to
+  the rules and finds **25 violations in 25 cells**. `sub` stays out.
+  Those per-shape counts are printed, not just asserted:
+
+      STELLING_FUZZ_REPORT=1 pytest -s tests/test_assume_bump_boundary_div.py \
+        -k "TRUE_at_every or catches_a_certificate"
+
+  ```
+                                                    before      after
+  assume(x > 0); 1 / (0.5 * Σx²)      > 0           UNKNOWN     VERIFIED
+  assume(x > 0); 1 / (2.0 * x)        > 0           UNKNOWN     VERIFIED
+  assume(x > 0); 1 / (x / 2.0)        > 0           UNKNOWN     VERIFIED
+  assume(x > 0); 1 / jnp.mean(x*x)    > 0           UNKNOWN     VERIFIED
+  assume(x > 0); 1 / (-2.0 * x)       < 0           UNKNOWN     VERIFIED
+  ```
+
+  **And the losses stay lost**, re-measured on the fixed tree — every one
+  of them still UNKNOWN:
+
+  ```
+  declared b = [0, 1], NO assume,     1/b > 0                  UNKNOWN
+  declared x = [-1, 0], NO assume,    1/x < 0                  UNKNOWN
+  assume(x > 0); 1 / (Σx² − 8.0)  < 0      (the `sub` break)   UNKNOWN
+  assume(x > 0); 1 / jnp.sqrt(x)  > 0      (rule-less)         UNKNOWN
+  x / 0.0 > 0                     (a literal ZERO divisor)     UNKNOWN
+  assume(x > 0); 1 / (0.0 * x)    > 0      (a zero coeff)      UNKNOWN
+  ```
+
+  The four spellings of `assume(x>0); 1/Σx²` above are unchanged and
+  still VERIFIED. `DIV_BOUNDARY_ZERO_DECLINE` now says "with nonzero
+  finite constants allowed anywhere in that chain", which is the rule the
+  code implements.
+
+  **The rule had to cover CONSTVARS, not just literals, or that new
+  sentence would have been the next claim divergence.** A scalar constant
+  traces to a `Literal`; an ARRAY constant traces to a CONSTVAR, which is
+  a `Var` and so reads the assume-written table, where it is absent.
+  Measured on the literal-only version of this fix:
+  `assume(x > 0); 1/jnp.sum(jnp.array([1.,2.,3.,4.]) * x*x) > 0` was still
+  UNKNOWN while the scalar `2.0 * x` had started verifying — a message
+  true of scalars and false of arrays, which is the same defect class the
+  fix is about. A constvar's decoded box IS its value, exactly as a
+  literal's is, so `run()` writes the certificate for it from the same
+  `_box_strict_sign`. Measured after:
+
+  ```
+  W = [ 1,  2, 3, 4]   assume(x>0); 1/Σ wᵢxᵢ² > 0            VERIFIED
+  W = [-1, -2,-3,-4]   assume(x>0); 1/Σ wᵢxᵢ² < 0            VERIFIED
+  W = [ 1,  0, 3, 4]   assume(x>0); 1/Σ wᵢxᵢ² > 0            UNKNOWN
+  W = [ 1, -2, 3, 4]   assume(x>0); 1/Σ wᵢxᵢ² > 0            UNKNOWN
+  W = [ 1, inf,3, 4]   assume(x>0); 1/Σ wᵢxᵢ² > 0            UNKNOWN
+  ```
+
+  The mixed-sign row is not conservatism: with `W = [1,-2,3,4]` the sum
+  really can be zero over the assumed region, so a certificate there
+  would be FALSE. Whole-array quantification is what refuses it.
+
+  **AMENDED (2026-08-15, B5 follow-up audit): the sub-jaxpr disclosure
+  named the two rare wrappers and omitted `jit`.** `CHANGELOG.md` said
+  *"A transparent wrapper (`remat`, `custom_jvp`) or a `cond` branch runs
+  with a fresh table."* `DEFAULT_TRANSPARENT` is
+  `{'jit', 'remat2', 'custom_vjp_call', 'custom_jvp_call'}` — **`jit` is
+  a member, and it is the one every jax user writes.** The behaviour is
+  correct and conservative; the disclosure understated its own cost by
+  naming only the members almost nobody hits. Measured, the certificate
+  does not cross it in either direction:
+
+  ```
+  assume(x>0); 1 / jax.jit(lambda v: jnp.sum(v*v))(x) > 0      UNKNOWN
+  assume moved INSIDE the jit, same query                      UNKNOWN
+  ```
+
+  Both decline with `div … REACHES zero at a boundary`. The list is now
+  pinned to `stelling.coverage.DEFAULT_TRANSPARENT` by a test that reads
+  `CHANGELOG.md` and requires every member to be named, so the next
+  member added to the frozenset cannot quietly fall out of the prose.
+
 - **2026-08-15 (pre-release, B5 follow-up): the crash class removed from
   `ieee_div` was still live in `boundary_div`, and surfaced as a decline
   reason.** Audit 0.2.0 B5-3. Not a false verdict — a false SENTENCE, out
@@ -5919,6 +6127,23 @@ verdicts:
   now carries 204 cases, of which **130 fail against the merge base** —
   measured by copying the file into a `git archive` of `f0b34cd` and
   running it there.
+
+  **Re-measured after the three follow-up amendments above**, same two
+  environments, same machine (CPython 3.12.3, jax 0.11.0, numpy 2.5.1,
+  Linux x86_64):
+
+  ```
+                          passed   skipped
+  JAX_ENABLE_X64=1          3176       10
+  no JAX_ENABLE_X64 (CI)    3177        9
+  ```
+
+  `+35` on both, and they reconcile exactly: `+33` in
+  `tests/test_assume_bump_boundary_div.py` (18 → 51 collected) and `+2` in
+  `tests/test_ieee_zero_divisor_and_mul_exact.py` (204 → 206). The skip
+  SET is unchanged in both environments — nothing added here can skip —
+  and the one-member difference between them is still the same `threefry`
+  case.
 
   **Each fix was reverted ALONE and the whole suite re-run**, so the
   coverage is attributed rather than assumed — a test that reddens for two

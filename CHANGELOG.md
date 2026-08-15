@@ -271,12 +271,27 @@ SPDX-License-Identifier: Apache-2.0
   granularity — "every element of this value is certainly positive" —
   rather than per-element, so a mixed-sign array carries nothing even
   where some elements are certified.
-- **The certificate does not cross a sub-jaxpr boundary.** A transparent
-  wrapper (`remat`, `custom_jvp`) or a `cond` branch runs with a fresh
-  table, so a division inside one of them sees no certificate from its
-  caller and the cond's outputs carry none back. Conservative, and it is
-  what keeps a branch-local assume from licensing anything outside its
-  branch.
+  A nonzero finite CONSTANT does **not** drop it, whether it reaches the
+  rules as a literal (a scalar) or as a constvar (an array): `0.5*Σxᵢ²`,
+  `2.0*x`, `x/2.0`, the `/n` inside `jnp.mean`, and
+  `jnp.sum(jnp.array([1.,2.,3.,4.]) * x*x)` all keep the chain (measured
+  VERIFIED). A constant array must be strictly one-signed THROUGHOUT — a
+  mixed-sign weight vector really can sum a positive quadratic to zero —
+  and a zero element, a non-finite element, or a dtype with no decoder
+  still drops it.
+- **The certificate does not cross a sub-jaxpr boundary — `jit`
+  included.** Any transparent call wrapper, or a `cond` branch, runs with
+  a fresh table, so a division inside one of them sees no certificate
+  from its caller and the cond's outputs carry none back. The wrappers
+  are `stelling.coverage.DEFAULT_TRANSPARENT` = `jit`, `remat2`,
+  `custom_jvp_call`, `custom_vjp_call` — and **`jit` is the one that
+  matters in practice**: `assume(x > 0); 1/jax.jit(lambda v: jnp.sum(v*v))(x)`
+  is UNKNOWN, and so is the same query with the `assume` moved inside the
+  `jit` (both measured, 0.2.0). Earlier text here named only `remat` and
+  `custom_jvp`, which understated the cost: almost no jax user writes
+  those, and almost every jax user writes `jit`. Conservative in the
+  sound direction, and it is what keeps a branch-local assume from
+  licensing anything outside its branch.
 - **The interval domain cannot represent the sign of an IEEE zero**, so
   under `semantics="ieee"` every divisor box that reaches zero divides to
   ⊤ — including the one-sided shapes real mode tightens, and including

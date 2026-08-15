@@ -57,6 +57,7 @@ three spellings, two verdicts. `mul` now takes the same `_exactable`/
 from __future__ import annotations
 
 import itertools
+import importlib
 import math
 from fractions import Fraction
 
@@ -1091,3 +1092,57 @@ def test_a_sum_of_squares_residual_declines_without_an_assume(_x64):
     # UNKNOWN is about the dropped point and not about the whole obligation
     inside = 1.0 / (jnp.sum(jnp.array([1.0, 1.0]) ** 2) - 8.0)
     assert bool(inside <= -0.125)
+
+
+# --- the S10 sweep table is now a run, not a paragraph ---------------------
+
+
+def test_the_S10_sweep_table_reproduces_exactly():
+    """The counts `SOUNDNESS.md` prints, produced by a shipped sweep.
+
+    The S10 entry's table was an out-of-tree measurement: `grep` for its
+    counts found nothing in `tests/` or `src/`, which left it the largest
+    unverifiable numeric block in the file — three paragraphs above the
+    one explaining why such blocks are a problem, and immediately after
+    the sibling figure that had just been converted to an exact assert
+    (audit 0.2.0 B5-4, then the follow-up finding that the larger table
+    beside it needed the same treatment). `tests/ieee_containment_sweep.py` is
+    that sweep, and this is the assertion behind the table.
+
+    Exact equality, not a bound, and on all four columns: a sweep that
+    quietly stops sampling half its grid still reports "0 failures".
+    """
+    sweep = importlib.import_module("ieee_containment_sweep")
+    assert (sweep.POOL_SIZE, sweep.BOX_COUNT, sweep.BOX_PAIRS) == (
+        len(sweep.POOL), len(sweep.BOXES), len(sweep.BOXES) ** 2
+    ), "the grid moved; SOUNDNESS.md quotes its size"
+    for name, fmt, fn in sweep.ROWS:
+        s, f, n, r, misses = fn()
+        got = (f, s, n, r)
+        want = sweep.POST_FIX_ROWS[(name, fmt)]
+        assert got == want, (
+            f"{name}/{fmt}: sweep produced (failures, samples, nan, raised)"
+            f"={got}, SOUNDNESS.md quotes {want}. Update both or neither."
+            + ("\n  " + "\n  ".join(misses) if misses else "")
+        )
+
+
+def test_the_S10_sweep_CATCHES_the_defect_it_certifies_gone():
+    """POSITIVE CONTROL. A battery that has never failed is not evidence.
+
+    `prefix_ieee_div` is the kernel S10 replaced — the one that case-split
+    on WHERE the zero sat and kept a boundary-aware tightening for the
+    one-sided shapes. Sound over ℝ, wrong under IEEE, because `[0, hi]`
+    holds both zeros and `x / -0.0` is the opposite infinity from
+    `x / +0.0`. If this ever stops finding violations, the table above is
+    certifying nothing.
+    """
+    sweep = importlib.import_module("ieee_containment_sweep")
+    s, f, n, r, _misses = sweep.sweep_ieee(
+        "div", "float64", kern=sweep.prefix_ieee_div
+    )
+    assert (f, s, n, r) == sweep.PRE_FIX_IEEE_DIV_F64, (
+        f"pre-fix control produced {(f, s, n, r)}, SOUNDNESS.md quotes "
+        f"{sweep.PRE_FIX_IEEE_DIV_F64}. Update both or neither."
+    )
+    assert f > 0, "the control found no violation at all"

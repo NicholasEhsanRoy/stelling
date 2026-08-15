@@ -2990,9 +2990,11 @@ DIV_BOUNDARY_ZERO_DECLINE = (
     "boundary-aware tightening applies only when a strict assume certifies "
     "the divisor is nonzero: `assume(d > 0)` / `assume(d < 0)` on the "
     "divisor itself, or on a value the divisor is built from by * / neg abs "
-    "square x**n sum dot (a subtraction breaks the chain — two positives can "
-    "differ by zero). Remedies: narrow the divisor's declared envelope to "
-    "exclude zero, or add that assume"
+    "square x**n sum dot, with nonzero finite constants allowed anywhere in "
+    "that chain (a subtraction breaks it — two positives can differ by "
+    "zero — and so does any other operation, sqrt and exp included). "
+    "Remedies: narrow the divisor's declared envelope to exclude zero, or "
+    "add that assume"
 )
 
 # The primitives :meth:`_Propagator._strict_sign_out` has a rule for. A
@@ -3011,6 +3013,78 @@ _STRICT_SIGN_PRIMITIVES = frozenset({
 # argument every ieee transfer already receives. One member today; a
 # registry rather than an `if` so the coupling is greppable from both ends.
 _REAL_TRANSFERS_READING_STRICT_SIGN = frozenset({"div"})
+
+
+def _box_strict_sign(box: iv.IntervalArray) -> int:
+    """The strict sign of a box that IS a value: ``+1`` when every element
+    is certainly positive, ``-1`` when every element is certainly negative,
+    ``0`` otherwise.
+
+    **The premise is that the box is the value**, which is true of a
+    decoded LITERAL and of a decoded CONSTVAR and of nothing else in this
+    module — a var's box is an over-approximation, and `assume(x > 0)`
+    narrows to `[0, hi]`, which is exactly the box this function would call
+    unsigned. Callers must establish that premise; the strict-sign table
+    exists because a box in general cannot.
+
+    Three conditions, each load-bearing:
+
+    * **NON-EMPTY.** A size-0 value certifies nothing about "every
+      element" — both quantifiers below are vacuously true over an empty
+      box, which would mint a sign for a value that has none.
+    * **FINITE, both endpoints.** ``±inf`` is nonzero but breaks the chain
+      rules that consume this: ``a / inf = 0``, so a certificate minted off
+      an infinite operand would claim NONZERO of a value that is zero. Not
+      hypothetical plumbing — :func:`_int_bracket` saturates an int beyond
+      the double range to ``(maxf, inf)``, and that is a literal.
+    * **STRICTLY NONZERO, every element.** An ARRAY value must be all-one
+      sign, not merely first-element signed, because the fact this mints is
+      quantified over every element (see :meth:`_strict_sign_out`). A
+      ``0`` fails both halves, which is what keeps the divisor case exactly
+      as strong as it was: `div`'s boundary gate is consulted only when
+      :func:`stelling.interval.straddles_zero` holds of the divisor, i.e.
+      some element has ``lo <= 0 <= hi``, and a value answering ``+1`` here
+      has ``lo > 0`` for EVERY element (``-1``: ``hi < 0``, so
+      ``lo <= hi < 0``). Nothing that answers nonzero can straddle, so no
+      constant divisor can reach the gate this widens. Enumerated in
+      ``tests/test_assume_bump_boundary_div.py`` rather than asserted.
+    """
+    if box.size == 0:
+        return 0
+    if not all(
+        math.isfinite(lo) and math.isfinite(hi)
+        for lo, hi in zip(box.los, box.his)
+    ):
+        return 0
+    if all(lo > 0.0 for lo in box.los):
+        return 1
+    if all(hi < 0.0 for hi in box.his):
+        return -1
+    return 0
+
+
+def _literal_strict_sign(atom: ir.Literal) -> int:
+    """The strict sign of a LITERAL, from its own decoded value.
+
+    REAL MODE ONLY by construction — both call paths
+    (:meth:`_Propagator._strict_sign_out` and the `div` transfer's
+    `in_signs`) are gated on `semantics != "ieee"`, and that gating is what
+    makes reading the RAW decoded box correct here. Under ieee a literal is
+    subnormal-hazed by :meth:`_Propagator.read` (DAZ flushes a literal like
+    every other value), so a tiny positive literal's runtime value IS zero
+    and this box would be lying; in real mode the literal's value simply is
+    its box.
+
+    A literal that does not DECODE keeps answering 0: the tree carries
+    dtypes with no zero-dep decoder and an undecodable-literal NaN
+    sentinel, guarded with the same idiom as :meth:`read_flag` and
+    :meth:`_quiet_box`.
+    """
+    try:
+        box = _value_to_interval(atom.val, atom.aval.shape)
+    except (iv.IntervalError, ir.TranscriptionError):
+        return 0
+    return _box_strict_sign(box)
 
 
 def _t_div(eqn, params, ins, in_signs=None):
@@ -5443,12 +5517,27 @@ class _Propagator:
         # narrows to the CLOSED `[0, hi]` and the exclusion of zero
         # survives only here (audit 0.2.0 B5-1).
         #
-        # Absent id = 0 = "unknown", the conservative reading. Written at
-        # exactly one SOURCE (a strict `gt`/`lt` assume in
-        # :meth:`_classify_cmp`), propagated by exactly one rule set
-        # (:meth:`_strict_sign_out`), read by exactly one consumer (the
-        # `div` transfer's boundary gate). Every other primitive drops the
-        # fact, which is sound in the only direction that matters.
+        # Absent id = 0 = "unknown", the conservative reading. This TABLE
+        # is keyed by var id, propagated by exactly one rule set
+        # (:meth:`_strict_sign_out`), and reaches exactly one consumer
+        # (the `div` transfer's boundary gate). Every other primitive
+        # drops the fact, which is sound in the only direction that
+        # matters.
+        #
+        # TWO WRITERS, both real-mode only, and each writes a fact it can
+        # actually establish:
+        #
+        #   1. a strict `gt`/`lt` assume in :meth:`_classify_cmp` — the
+        #      half-space the closed meet could not represent;
+        #   2. a CONSTVAR bound in :meth:`run` — whose decoded box IS its
+        #      value, so its sign needs no assume at all.
+        #
+        # A LITERAL is in neither: it has no var id, and its sign is
+        # recomputed from its value on each read
+        # (:func:`_literal_strict_sign`). So the CERTIFICATE has three
+        # sources and the TABLE has two, and an ARRAY constant needs
+        # writer 2 specifically — it is traced as a constvar and never
+        # reaches a rule as a Literal.
         #
         # REAL MODE ONLY, and that is not tidiness. Under ieee the strict
         # narrowing bumps to the format's smallest subnormal and the DAZ
@@ -5652,15 +5741,17 @@ class _Propagator:
         certainly positive / certainly negative over the assumed region;
         ``0`` when nothing certifies either (see ``self.strict_sign``).
 
-        A LITERAL answers 0 even when its value is obviously nonzero. That
-        is deliberate and costs nothing: the single consumer is the `div`
-        boundary gate, which is only consulted when the operand's box
-        REACHES zero, and a literal whose box reaches zero is a literal
-        zero (or a ⊤ stand-in for an undecodable one) — neither of which a
-        sign fact should rescue.
+        A LITERAL answers from its own decoded value
+        (:func:`_literal_strict_sign`), because it is not only the `div`
+        boundary gate that reads this: :meth:`_strict_sign_out` reads
+        EVERY operand of every rule, so a literal answering 0 zeroed the
+        whole chain through it. `0.5 * Σx²`, `2.0 * x`, `x / 2.0` and the
+        `/n` inside `jnp.mean` are all literal-COEFFICIENT shapes whose
+        certificate died on the coefficient, not on anything about the
+        divisor (B5 follow-up audit).
         """
         if isinstance(atom, ir.Literal):
-            return 0
+            return _literal_strict_sign(atom)
         return self.strict_sign.get(atom.id, 0)
 
     def _strict_sign_out(self, eqn: ir.JaxprEqn, params, ins) -> int:
@@ -5671,6 +5762,15 @@ class _Propagator:
         sign; none of them reads a box endpoint, so none of them can be
         defeated by outward rounding. Any primitive not listed answers 0
         — the fact is dropped, never guessed.
+
+        An operand's premise comes from :meth:`read_strict_sign`, and
+        has exactly two shapes: a VAR reads ``self.strict_sign``, a
+        LITERAL reads its own decoded value
+        (:func:`_literal_strict_sign`). The table itself has two writers
+        — a strict assume in :meth:`_classify_cmp`, and a CONSTVAR bound
+        in :meth:`run` — and both are real-mode only. The constant
+        sources, literal and constvar, are why a coefficient no longer
+        zeroes the chain it sits in.
 
         * ``mul``/``div``: ``sign(a·b) = sign(a)·sign(b)`` and a product or
           quotient of nonzeros is nonzero. Broadcasting is irrelevant
@@ -7331,6 +7431,21 @@ class _Propagator:
             # exact iff the decoded box is a point per element — a >2**53
             # int decodes to a genuine bracket, which is NOT its value set
             self.exact.mark_if_point(var.id, box.los, box.his)
+            if not ieee:
+                # THE SECOND SOURCE of the strict-sign certificate, and it
+                # is the same source as the literal one: a CONSTVAR's box
+                # IS its value, so its sign is as certifiable as a
+                # literal's. It has to be written here because a constant
+                # only reaches the rules as a Var — an ARRAY constant is
+                # traced as a constvar, never as a Literal, so
+                # `jnp.array([1.,2.]) * x` would otherwise drop the chain
+                # while the scalar `2.0 * x` kept it. Skipped for the
+                # pre-boxed IntervalArray branch above, which `continue`s
+                # before this: that box is of unknown provenance and is
+                # NOT a value.
+                sgn = _box_strict_sign(box)
+                if sgn:
+                    self.strict_sign[var.id] = sgn
         for i, (var, a) in enumerate(zip(jaxpr.invars, args)):
             self.env[var.id] = a
             if ieee and arg_flags is not None and arg_flags[i]:

@@ -18,9 +18,13 @@ Hand-built IR throughout -- no jax needed.
 from __future__ import annotations
 
 import math
+import os
+import pathlib
+import struct
 
 import pytest
 
+from stelling.coverage import DEFAULT_TRANSPARENT
 from stelling import interval as iv
 from stelling import ir
 from stelling.propagate import propagate, interval_env
@@ -497,3 +501,787 @@ def test_boundary_div_valid_negative_boundary():
     # a >= 0 and b = [-5, 0]: result is [-inf, 1/(-5)]
     assert result.los[0] == -INF
     assert result.his[0] <= -0.2 + 1e-15  # approximately -1/5
+
+
+# --- a CONSTANT operand carries its own strict sign -------------------------
+#
+# `read_strict_sign` used to answer 0 for every literal, on a docstring
+# rationale that reasoned only about a literal DIVISOR. But `_strict_sign_out`
+# reads EVERY operand of every rule, so a literal COEFFICIENT zeroed the whole
+# chain through it: `0.5 * sum(x*x)`, `2.0 * x`, `x / 2.0` and the `/n` inside
+# `jnp.mean` all lost the certificate on the coefficient. `_literal_strict_sign`
+# answers from the literal's own decoded value instead.
+
+from fractions import Fraction  # noqa: E402
+from itertools import product  # noqa: E402
+
+from stelling.propagate import _literal_strict_sign  # noqa: E402
+
+
+def any_eqn_shaped(out, lo, hi, shape, dtype="float64"):
+    """`any_eqn`, but for a non-scalar declaration."""
+    return ir.JaxprEqn(
+        primitive="stelling_any",
+        invars=(),
+        outvars=(out,),
+        params=(("shape", shape), ("dtype", dtype), ("lo", lo), ("hi", hi)),
+    )
+
+
+def _sign_of(val, aval=F64):
+    return _literal_strict_sign(lit(val, aval))
+
+
+def test_literal_strict_sign_reads_a_plain_nonzero_scalar():
+    """The point of the fix: a nonzero finite literal answers its sign."""
+    assert _sign_of(0.5) == 1
+    assert _sign_of(2.0) == 1
+    assert _sign_of(-2.0) == -1
+    assert _sign_of(1e-300) == 1
+    assert _sign_of(-1e-300) == -1
+
+
+def test_literal_strict_sign_drops_zero_and_nonfinite():
+    """Zero is not signed, and neither is anything non-finite.
+
+    ``inf`` is nonzero but breaks the very rules that consume this fact:
+    ``a / inf = 0``, so a certificate minted off an infinite operand would
+    claim NONZERO of a value that is zero.
+    """
+    assert _sign_of(0.0) == 0
+    assert _sign_of(-0.0) == 0
+    assert _sign_of(INF) == 0
+    assert _sign_of(-INF) == 0
+    assert _sign_of(math.nan) == 0
+
+
+def test_literal_strict_sign_saturating_int_is_not_finite_and_drops():
+    """`_int_bracket` saturates an int past the double range to (maxf, inf).
+
+    That is a real literal reaching a real endpoint of ``inf``, which is
+    exactly what the finiteness guard is for — not a hypothetical.
+    """
+    huge = 10 ** 400
+    assert _sign_of(huge, ir.Aval(kind="ShapedArray", shape=(), dtype="int64")) == 0
+    assert _sign_of(-huge, ir.Aval(kind="ShapedArray", shape=(), dtype="int64")) == 0
+    # ...while an int that brackets finitely still answers
+    assert _sign_of(3, ir.Aval(kind="ShapedArray", shape=(), dtype="int64")) == 1
+    assert _sign_of(-3, ir.Aval(kind="ShapedArray", shape=(), dtype="int64")) == -1
+
+
+def _f64_array(values):
+    return ir.Array(
+        dtype="<f8",
+        shape=(len(values),),
+        data=struct.pack(f"<{len(values)}d", *values),
+    )
+
+
+def test_literal_strict_sign_needs_EVERY_element_same_sign():
+    """An ARRAY literal is signed only when all of it is — not the first cell.
+
+    The fact this mints is quantified over every element (see
+    `_strict_sign_out`), so a mixed-sign array must drop it. Reading only
+    ``los[0]`` would pass the first two of these and mint a false NONZERO
+    for the rest.
+    """
+    aval3 = ir.Aval(kind="ShapedArray", shape=(3,), dtype="float64")
+    assert _sign_of(_f64_array([1.0, 2.0, 3.0]), aval3) == 1
+    assert _sign_of(_f64_array([-1.0, -2.0, -3.0]), aval3) == -1
+    # first element positive, a later one is not
+    assert _sign_of(_f64_array([1.0, 2.0, -3.0]), aval3) == 0
+    assert _sign_of(_f64_array([1.0, 0.0, 3.0]), aval3) == 0
+    # first element negative, a later one is not
+    assert _sign_of(_f64_array([-1.0, -2.0, 3.0]), aval3) == 0
+    assert _sign_of(_f64_array([-1.0, 0.0, -3.0]), aval3) == 0
+    # a single non-finite cell disqualifies the whole array
+    assert _sign_of(_f64_array([1.0, INF, 3.0]), aval3) == 0
+
+
+def test_literal_strict_sign_drops_an_undecodable_literal():
+    """A dtype with no zero-dep decoder keeps answering 0, and does not raise."""
+    bad = ir.Array(dtype="<c16", shape=(1,), data=b"\x00" * 16)
+    aval = ir.Aval(kind="ShapedArray", shape=(1,), dtype="complex128")
+    assert _literal_strict_sign(lit(bad, aval)) == 0
+    # the NaN-sentinel spelling: a literal of a type with no interval meaning
+    assert _literal_strict_sign(
+        lit("not-a-number", ir.Aval(kind="ShapedArray", shape=(), dtype="float64"))
+    ) == 0
+
+
+def test_literal_strict_sign_drops_a_size_zero_literal():
+    """A size-0 literal certifies nothing about "every element".
+
+    Both all() quantifiers are vacuously true over an empty box, which
+    would mint a sign for a value that has none.
+    """
+    aval0 = ir.Aval(kind="ShapedArray", shape=(0,), dtype="float64")
+    assert _sign_of(_f64_array([]), aval0) == 0
+
+
+def test_a_signed_literal_can_never_reach_the_div_boundary_gate():
+    """The divisor case is not weakened, ENUMERATED rather than asserted.
+
+    `_t_div` consults the strict-sign gate only when
+    `iv.straddles_zero(divisor)` — some element with ``lo <= 0 <= hi``. A
+    literal that answers +-1 has ``lo > 0`` (resp. ``hi < 0``) for EVERY
+    element, so it cannot straddle. Hence no literal divisor's newly-minted
+    sign can change any `div` outcome: the only literal divisors that reach
+    the gate are the ones that still answer 0.
+    """
+    aval3 = ir.Aval(kind="ShapedArray", shape=(3,), dtype="float64")
+    scalars = [0.0, -0.0, 1.0, -1.0, 0.5, -0.5, 1e-300, -1e-300,
+               1e300, -1e300, INF, -INF, math.nan]
+    cases = [(lit(v), F64) for v in scalars]
+    cases += [
+        (lit(_f64_array(list(t)), aval3), aval3)
+        for t in product([0.0, 1.0, -1.0, INF], repeat=3)
+    ]
+    from stelling.propagate import _value_to_interval
+
+    checked = undecodable = 0
+    for atom, aval in cases:
+        atom = lit(atom.val, aval)
+        sign = _literal_strict_sign(atom)
+        try:
+            box = _value_to_interval(atom.val, aval.shape)
+        except (iv.IntervalError, ir.TranscriptionError):
+            # an undecodable literal answers 0 and never reaches the gate
+            assert sign == 0
+            undecodable += 1
+            continue
+        if sign != 0:
+            assert not iv.straddles_zero(box), (
+                f"literal {atom.val!r} answered sign={sign} AND straddles "
+                f"zero — it would reach the div boundary gate"
+            )
+        checked += 1
+    # 13 scalars, of which NaN raises at decode ("NaN endpoint in interval
+    # arithmetic") before the finiteness guard is even consulted, plus every
+    # 4**3 array over {0, 1, -1, inf}
+    assert undecodable == 1, undecodable
+    assert checked == len(scalars) - 1 + 4 ** 3 == 76, checked
+
+
+# --- the four queries the literal sign newly admits, as hand-built IR --------
+
+
+def _coeff_query(build, *, lo=0.0, hi=2.0, n=4):
+    """`assume(x > 0)`; `assert_(1 / f(x) > 0)` with f built by `build`.
+
+    `build(nxt, eqns, x)` returns the var holding the divisor.
+    """
+    counter = [0]
+
+    def nxt(aval=F64):
+        counter[0] += 1
+        return var(counter[0], aval)
+
+    xa = ir.Aval(kind="ShapedArray", shape=(n,), dtype="float64") if n else F64
+    x = var(0, xa)
+    eqns = [any_eqn_shaped(x, lo, hi, (n,) if n else ())]
+    pred_assume = nxt(ir.Aval(kind="ShapedArray", shape=(n,), dtype="bool")
+                      if n else BOOL)
+    assume_out = nxt(ir.Aval(kind="ShapedArray", shape=(n,), dtype="bool")
+                     if n else BOOL)
+    eqns.append(eqn("gt", [x, lit(0.0)], pred_assume))
+    eqns.append(eqn("stelling_assume", [pred_assume], assume_out))
+    d = build(nxt, eqns, x)
+    q = nxt()
+    eqns.append(eqn("div", [lit(1.0), d], q))
+    pred = nxt(BOOL)
+    out = nxt(BOOL)
+    eqns.append(eqn("gt", [q, lit(0.0)], pred))
+    eqns.append(eqn("stelling_assert", [pred], out))
+    return close(eqns, [out]), eqns
+
+
+def _build_sumsq(nxt, eqns, x):
+    sq = nxt(x.aval)
+    eqns.append(eqn("mul", [x, x], sq))
+    s = nxt()
+    eqns.append(eqn("reduce_sum", [sq], s, [("axes", (0,))]))
+    return s
+
+
+def _build_half_sumsq(nxt, eqns, x):
+    s = _build_sumsq(nxt, eqns, x)
+    h = nxt()
+    eqns.append(eqn("mul", [lit(0.5), s], h))
+    return h
+
+
+def _build_mean_sq(nxt, eqns, x):
+    """`jnp.mean(x*x)` = reduce_sum(x*x) / 4.0 -- the /n is the literal."""
+    s = _build_sumsq(nxt, eqns, x)
+    m = nxt()
+    eqns.append(eqn("div", [s, lit(4.0)], m))
+    return m
+
+
+def _build_two_x(nxt, eqns, x):
+    t = nxt()
+    eqns.append(eqn("mul", [lit(2.0), x], t))
+    return t
+
+
+def _build_x_half(nxt, eqns, x):
+    t = nxt()
+    eqns.append(eqn("div", [x, lit(2.0)], t))
+    return t
+
+
+COEFF_QUERIES = {
+    "0.5*sum(x*x)": (_build_half_sumsq, 4),
+    "mean(x*x)": (_build_mean_sq, 4),
+    "2.0*x": (_build_two_x, 0),
+    "x/2.0": (_build_x_half, 0),
+}
+
+
+@pytest.mark.parametrize("name", sorted(COEFF_QUERIES))
+def test_literal_coefficient_no_longer_kills_the_certificate(name):
+    """REDDENS ON REVERT of `_literal_strict_sign`.
+
+    With `read_strict_sign` answering 0 for literals these four are UNKNOWN
+    with `div` declining "REACHES zero at a boundary" — while the same
+    query without the coefficient is VERIFIED. Nothing about the divisor
+    changed; only the coefficient did.
+    """
+    build, n = COEFF_QUERIES[name]
+    query, _ = _coeff_query(build, n=n)
+    p = propagate(query, semantics="real")
+    assert p.obligations[0].status == "discharged", (
+        f"{name}: {p.obligations[0].status} — {p.obligations[0].detail}"
+    )
+
+
+def test_the_uncoefficiented_control_was_already_green():
+    """The comparison the test above rests on: no coefficient, VERIFIED."""
+    query, _ = _coeff_query(_build_sumsq, n=4)
+    p = propagate(query, semantics="real")
+    assert p.obligations[0].status == "discharged"
+
+
+def test_a_negative_literal_coefficient_flips_the_sign():
+    """`assume(x>0)`; `1/(-2.0*x) < 0` — the -1 arm of the literal rule."""
+    counter = [0]
+
+    def nxt(aval=F64):
+        counter[0] += 1
+        return var(counter[0], aval)
+
+    x = var(0, F64)
+    eqns = [any_eqn(x, 0.0, 2.0, "float64")]
+    pa, ao = nxt(BOOL), nxt(BOOL)
+    eqns.append(eqn("gt", [x, lit(0.0)], pa))
+    eqns.append(eqn("stelling_assume", [pa], ao))
+    t = nxt()
+    eqns.append(eqn("mul", [lit(-2.0), x], t))
+    q = nxt()
+    eqns.append(eqn("div", [lit(1.0), t], q))
+    pred, out = nxt(BOOL), nxt(BOOL)
+    eqns.append(eqn("lt", [q, lit(0.0)], pred))
+    eqns.append(eqn("stelling_assert", [pred], out))
+    p = propagate(close(eqns, [out]), semantics="real")
+    assert p.obligations[0].status == "discharged"
+
+
+# --- the losses that must STAY lost -----------------------------------------
+
+
+def test_a_literal_ZERO_coefficient_still_drops_the_certificate():
+    """`0.0 * x` is zero everywhere; `1/(0.0*x)` must not verify."""
+    counter = [0]
+
+    def nxt(aval=F64):
+        counter[0] += 1
+        return var(counter[0], aval)
+
+    x = var(0, F64)
+    eqns = [any_eqn(x, 0.0, 2.0, "float64")]
+    pa, ao = nxt(BOOL), nxt(BOOL)
+    eqns.append(eqn("gt", [x, lit(0.0)], pa))
+    eqns.append(eqn("stelling_assume", [pa], ao))
+    t = nxt()
+    eqns.append(eqn("mul", [lit(0.0), x], t))
+    q = nxt()
+    eqns.append(eqn("div", [lit(1.0), t], q))
+    pred, out = nxt(BOOL), nxt(BOOL)
+    eqns.append(eqn("gt", [q, lit(0.0)], pred))
+    eqns.append(eqn("stelling_assert", [pred], out))
+    p = propagate(close(eqns, [out]), semantics="real")
+    assert p.obligations[0].status != "discharged"
+
+
+def test_sub_still_breaks_the_chain_with_a_literal_present():
+    """`1/(sum(x*x) - 8.0)`: the false-VERIFIED shape. `sub` stays out.
+
+    The literal `8.0` is now signed, which is exactly the ingredient that
+    could have re-opened this had the fix been applied to `sub` too.
+    """
+    counter = [0]
+
+    def nxt(aval=F64):
+        counter[0] += 1
+        return var(counter[0], aval)
+
+    xa = ir.Aval(kind="ShapedArray", shape=(2,), dtype="float64")
+    ba = ir.Aval(kind="ShapedArray", shape=(2,), dtype="bool")
+    x = var(0, xa)
+    eqns = [any_eqn_shaped(x, 0.0, 2.0, (2,))]
+    pa, ao = nxt(ba), nxt(ba)
+    eqns.append(eqn("gt", [x, lit(0.0)], pa))
+    eqns.append(eqn("stelling_assume", [pa], ao))
+    sq = nxt(xa)
+    eqns.append(eqn("mul", [x, x], sq))
+    s = nxt()
+    eqns.append(eqn("reduce_sum", [sq], s, [("axes", (0,))]))
+    d = nxt()
+    eqns.append(eqn("sub", [s, lit(8.0)], d))
+    q = nxt()
+    eqns.append(eqn("div", [lit(1.0), d], q))
+    pred, out = nxt(BOOL), nxt(BOOL)
+    eqns.append(eqn("lt", [q, lit(0.0)], pred))
+    eqns.append(eqn("stelling_assert", [pred], out))
+    p = propagate(close(eqns, [out]), semantics="real")
+    assert p.obligations[0].status != "discharged"
+
+
+def test_no_assume_still_declines_even_with_a_literal_coefficient():
+    """A declared [0,1] divisor with NO assume: the literal cannot rescue it."""
+    counter = [0]
+
+    def nxt(aval=F64):
+        counter[0] += 1
+        return var(counter[0], aval)
+
+    x = var(0, F64)
+    eqns = [any_eqn(x, 0.0, 1.0, "float64")]
+    t = nxt()
+    eqns.append(eqn("mul", [lit(2.0), x], t))
+    q = nxt()
+    eqns.append(eqn("div", [lit(1.0), t], q))
+    pred, out = nxt(BOOL), nxt(BOOL)
+    eqns.append(eqn("gt", [q, lit(0.0)], pred))
+    eqns.append(eqn("stelling_assert", [pred], out))
+    p = propagate(close(eqns, [out]), semantics="real")
+    assert p.obligations[0].status != "discharged"
+
+
+# --- the exact-Fraction semantic check over the ASSUMED region --------------
+
+
+_EXACT_RULES = {
+    "mul": lambda a, b: [x * y for x, y in zip(a, b)],
+    "div": lambda a, b: [x / y for x, y in zip(a, b)],
+    "add": lambda a, b: [x + y for x, y in zip(a, b)],
+    "sub": lambda a, b: [x - y for x, y in zip(a, b)],
+}
+
+
+def _exact_eval(eqns, point):
+    """Evaluate the arithmetic spine of a built query in exact Fractions.
+
+    `point` is the list of Fractions bound to var 0. Returns
+    `var id -> list[Fraction]`. Only the primitives these queries use are
+    implemented; anything else raises, so a query that grows a new
+    primitive cannot silently skip its own check.
+    """
+    env = {0: list(point)}
+    for e in eqns:
+        prim = e.primitive
+        if prim in ("stelling_any", "stelling_assume", "stelling_assert",
+                    "gt", "lt", "ge", "le"):
+            continue
+        out = e.outvars[0].id
+
+        def val(atom):
+            if isinstance(atom, ir.Literal):
+                return [Fraction(atom.val)]
+            return env[atom.id]
+
+        if prim == "reduce_sum":
+            env[out] = [sum(val(e.invars[0]), Fraction(0))]
+            continue
+        if prim in _EXACT_RULES:
+            a, b = val(e.invars[0]), val(e.invars[1])
+            if len(a) == 1:
+                a = a * len(b)
+            if len(b) == 1:
+                b = b * len(a)
+            env[out] = _EXACT_RULES[prim](a, b)
+            continue
+        raise AssertionError(f"no exact rule for {prim!r}")
+    return env
+
+
+def _assumed_points(n, lo, hi, steps):
+    """Points of the ASSUMED region: every coordinate in (lo, hi], x > 0.
+
+    `lo` is 0 for these queries, so the assume `x > 0` makes the region the
+    HALF-OPEN (0, hi]; the sampled grid deliberately includes both a value
+    adjacent to the excluded 0 and the closed upper endpoint.
+    """
+    base = [Fraction(hi) * Fraction(k, steps) for k in range(1, steps + 1)]
+    base = [b for b in base if b > 0]
+    base.append(Fraction(1, 10 ** 12))  # right up against the excluded zero
+    if n == 0:
+        return [[b] for b in base]
+    return [list(t) for t in product(base, repeat=n)]
+
+
+SEMANTIC_CASES = {
+    "0.5*sum(x*x)": (_build_half_sumsq, 4, 3),
+    "mean(x*x)": (_build_mean_sq, 4, 3),
+    "2.0*x": (_build_two_x, 0, 40),
+    "x/2.0": (_build_x_half, 0, 40),
+    "sum(x*x)": (_build_sumsq, 4, 3),
+}
+
+
+@pytest.mark.parametrize("name", sorted(SEMANTIC_CASES))
+def test_strict_sign_certificate_is_TRUE_at_every_assumed_point(name):
+    """The certificate is a semantic claim; check it semantically.
+
+    For every var the propagator recorded a strict sign for, evaluate the
+    query in EXACT `Fraction` arithmetic at points of the assumed region
+    and confirm every element really has that sign. Exact rationals, so no
+    rounding can mask a violation, and no interval reasoning is reused —
+    this is an independent witness, not a restatement of the propagator.
+    """
+    from stelling.propagate import _Propagator
+
+    build, n, steps = SEMANTIC_CASES[name]
+    query, eqns = _coeff_query(build, n=n)
+    p = _Propagator("constrain")
+    p.run(query.jaxpr, list(query.consts), [])
+    signs = dict(p.strict_sign)
+    assert signs, f"{name}: nothing was certified, the check would be vacuous"
+
+    points = _assumed_points(n, 0.0, 2.0, steps)
+    assert points, "no sample points"
+    checks = 0
+    for point in points:
+        env = _exact_eval(eqns, point)
+        for vid, sgn in signs.items():
+            if vid not in env:  # a bool/predicate var carries no arithmetic
+                continue
+            for cell in env[vid]:
+                assert (cell > 0) if sgn > 0 else (cell < 0), (
+                    f"{name}: var {vid} was certified sign={sgn} but is "
+                    f"{cell} at assumed point {point}"
+                )
+                checks += 1
+    assert checks > 0, f"{name}: no var-point check ran"
+    if os.environ.get("STELLING_FUZZ_REPORT"):
+        print(f"FUZZREPORT {name} points={len(points)} checks={checks} "
+              f"signed_vars={len(signs)}")
+
+
+def test_the_semantic_check_catches_a_certificate_that_is_false():
+    """POSITIVE CONTROL: the check above fails when the certificate lies.
+
+    Adding `sub` to the rules is the known break — `a - b` with both
+    positive can be anything — so a certificate minted through `sub` is
+    false at points of the assumed region. If this control ever stops
+    finding violations, the check above is no longer checking anything.
+    """
+    from stelling import propagate as pm
+    from stelling.propagate import _Propagator
+
+    counter = [0]
+
+    def nxt(aval=F64):
+        counter[0] += 1
+        return var(counter[0], aval)
+
+    xa = ir.Aval(kind="ShapedArray", shape=(2,), dtype="float64")
+    ba = ir.Aval(kind="ShapedArray", shape=(2,), dtype="bool")
+    x = var(0, xa)
+    eqns = [any_eqn_shaped(x, 0.0, 2.0, (2,))]
+    pa, ao = nxt(ba), nxt(ba)
+    eqns.append(eqn("gt", [x, lit(0.0)], pa))
+    eqns.append(eqn("stelling_assume", [pa], ao))
+    sq = nxt(xa)
+    eqns.append(eqn("mul", [x, x], sq))
+    s = nxt()
+    eqns.append(eqn("reduce_sum", [sq], s, [("axes", (0,))]))
+    d = nxt()
+    eqns.append(eqn("sub", [s, lit(8.0)], d))
+    out = nxt(BOOL)
+    eqns.append(eqn("stelling_assert", [ao], out))
+    query = close(eqns, [out])
+
+    real_out = pm._Propagator._strict_sign_out
+
+    def with_sub(self, e, params, ins):
+        if e.primitive == "sub":
+            sgn = [self.read_strict_sign(a) for a in e.invars]
+            return sgn[0] if len(sgn) == 2 and sgn[0] == sgn[1] else 0
+        return real_out(self, e, params, ins)
+
+    monkey = pm._STRICT_SIGN_PRIMITIVES | {"sub"}
+    old_set = pm._STRICT_SIGN_PRIMITIVES
+    pm._STRICT_SIGN_PRIMITIVES = monkey
+    pm._Propagator._strict_sign_out = with_sub
+    try:
+        p = _Propagator("constrain")
+        p.run(query.jaxpr, list(query.consts), [])
+        signs = dict(p.strict_sign)
+        assert signs.get(d.id) == 1, (
+            "the control did not even mint the false certificate"
+        )
+        failures = cells = 0
+        for point in _assumed_points(2, 0.0, 2.0, 4):
+            env = _exact_eval(eqns, point)
+            for cell in env[d.id]:
+                cells += 1
+                if not cell > 0:
+                    failures += 1
+        assert failures > 0, (
+            "the positive control found NO violation — the semantic check "
+            "is not actually checking the certificate"
+        )
+        if os.environ.get("STELLING_FUZZ_REPORT"):
+            print(f"FUZZREPORT control failures={failures} of {cells} cells")
+    finally:
+        pm._Propagator._strict_sign_out = real_out
+        pm._STRICT_SIGN_PRIMITIVES = old_set
+
+
+# --- the disclosure must name the wrapper people actually write -------------
+
+
+def _changelog_text():
+    """CHANGELOG.md with runs of whitespace collapsed.
+
+    The file is hard-wrapped, so a claim to be matched must be matched
+    against the unwrapped text or the test is really testing line breaks.
+    """
+    root = pathlib.Path(__file__).resolve().parents[1]
+    raw = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    return " ".join(raw.split())
+
+
+def test_the_disclosure_names_EVERY_transparent_wrapper():
+    """REDDENS ON REVERT of the CHANGELOG list, and on drift in either file.
+
+    The published disclosure said "a transparent wrapper (`remat`,
+    `custom_jvp`)" while `DEFAULT_TRANSPARENT` also contains `jit` — the
+    one member essentially every jax user writes, and the only one most
+    will ever hit. Naming the two rare members and omitting the universal
+    one understates the limitation's cost to the reader who is paying it.
+    Pinned to the code so the next member added to the frozenset cannot
+    quietly fall out of the prose (B5 follow-up audit).
+    """
+    text = _changelog_text()
+    for member in sorted(DEFAULT_TRANSPARENT):
+        assert f"`{member}`" in text, (
+            f"DEFAULT_TRANSPARENT member {member!r} is not named anywhere in "
+            f"CHANGELOG.md; the sub-jaxpr disclosure lists "
+            f"{sorted(DEFAULT_TRANSPARENT)}"
+        )
+    assert "`jit` is the one that matters in practice" in text, (
+        "the disclosure no longer says which member the reader will hit"
+    )
+
+
+def _jit_wrapped_sumsq_query(*, assume_inside):
+    """`assume(x>0)`; `1 / jit(lambda v: sum(v*v))(x) > 0`, hand-built.
+
+    `assume_inside` moves the assume into the wrapper body, which is the
+    other direction the certificate could have crossed.
+    """
+    xa = ir.Aval(kind="ShapedArray", shape=(4,), dtype="float64")
+    ba = ir.Aval(kind="ShapedArray", shape=(4,), dtype="bool")
+    inner_x = var(100, xa)
+    inner_eqns = []
+    if assume_inside:
+        ip, io = var(101, ba), var(102, ba)
+        inner_eqns += [
+            eqn("gt", [inner_x, lit(0.0)], ip),
+            eqn("stelling_assume", [ip], io),
+        ]
+    inner_sq, inner_s = var(103, xa), var(104, F64)
+    inner_eqns += [
+        eqn("mul", [inner_x, inner_x], inner_sq),
+        eqn("reduce_sum", [inner_sq], inner_s, [("axes", (0,))]),
+    ]
+    body = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(), invars=(inner_x,), outvars=(inner_s,),
+            eqns=tuple(inner_eqns),
+        )
+    )
+
+    x = var(0, xa)
+    eqns = [any_eqn_shaped(x, 0.0, 2.0, (4,))]
+    if not assume_inside:
+        pa, ao = var(1, ba), var(2, ba)
+        eqns += [
+            eqn("gt", [x, lit(0.0)], pa),
+            eqn("stelling_assume", [pa], ao),
+        ]
+    s, q, pred, out = var(3, F64), var(4, F64), var(5, BOOL), var(6, BOOL)
+    eqns += [
+        eqn("jit", [x], s, [("jaxpr", body)]),
+        eqn("div", [lit(1.0), s], q),
+        eqn("gt", [q, lit(0.0)], pred),
+        eqn("stelling_assert", [pred], out),
+    ]
+    return close(eqns, [out])
+
+
+@pytest.mark.parametrize("assume_inside", [False, True])
+def test_the_certificate_does_not_cross_jit_in_either_direction(assume_inside):
+    """The measurement the disclosure now reports, pinned.
+
+    Not a bug — a fresh table per sub-jaxpr is what stops a branch-local
+    assume licensing anything outside its branch. It is a COST, and the
+    point of the finding is that the cost was disclosed under the names of
+    two wrappers nobody writes.
+    """
+    query = _jit_wrapped_sumsq_query(assume_inside=assume_inside)
+    p = propagate(query, semantics="real")
+    assert p.obligations[0].status != "discharged", (
+        "the certificate crossed a jit boundary — if this is now intended, "
+        "the CHANGELOG disclosure and this test must both be rewritten"
+    )
+    assert any("REACHES zero at a boundary" in str(n) for n in p.notes) or (
+        "REACHES zero at a boundary" in str(p.obligations[0].detail)
+    ), (p.notes, p.obligations[0].detail)
+
+
+def test_the_uncrossed_jit_query_is_green_without_the_wrapper():
+    """The control: identical arithmetic, no `jit`, VERIFIED.
+
+    Without this the test above would pass for any reason at all.
+    """
+    query, _ = _coeff_query(_build_sumsq, n=4)
+    p = propagate(query, semantics="real")
+    assert p.obligations[0].status == "discharged"
+
+
+def test_the_literal_sign_is_REAL_MODE_ONLY():
+    """The invariant that makes reading the raw decoded box correct.
+
+    `_literal_strict_sign` reads the literal's UN-HAZED value. Under ieee
+    that box would be lying: DAZ flushes a literal like every other value
+    (`_Propagator.read` hazes it), so a tiny positive literal's runtime
+    value IS zero on a flush-to-zero target — S10's own lesson. Reading
+    the raw box is only correct because neither call path can run under
+    ieee: `_strict_sign_out` is short-circuited by `0 if ieee else`, and
+    `div`'s `in_signs` argument is passed from the `elif` arm that the
+    `if ieee` arm precedes. Asserted here rather than left to the reader
+    to re-derive from two distant call sites.
+    """
+    query, _ = _coeff_query(_build_half_sumsq, n=4)
+    from stelling.propagate import _Propagator
+
+    real = _Propagator("constrain")
+    real.run(query.jaxpr, list(query.consts), [])
+    assert real.strict_sign, "real mode should certify something here"
+
+    ieee = _Propagator("constrain")
+    ieee.semantics = "ieee"
+    ieee.run(query.jaxpr, list(query.consts), [])
+    assert not ieee.strict_sign, (
+        f"ieee mode wrote the strict-sign table: {ieee.strict_sign}. "
+        f"Nothing may write or read it under a flush-to-zero semantics."
+    )
+
+
+# --- the same fact for a CONSTVAR, which is how array constants arrive ------
+#
+# A scalar constant traces to a Literal; an ARRAY constant traces to a
+# CONSTVAR, which is a Var and so reads the assume-written table, where it
+# is absent. Measured: `jnp.array([1.,2.,3.,4.]) * x` dropped the chain
+# while the scalar `2.0 * x` kept it. The decline message promises the
+# chain survives "nonzero finite constants", and a message that is true of
+# scalars and false of arrays is the same claim-divergence class this
+# finding is about — so the certificate is written for a constvar too, from the same
+# `_box_strict_sign`, because a constvar's box IS its value.
+
+
+def _const_coeff_query(values, *, assert_gt=True):
+    """`assume(x > 0)`; `assert_(1 / sum(W * x * x) <cmp> 0)`, W a constvar."""
+    n = len(values)
+    xa = ir.Aval(kind="ShapedArray", shape=(n,), dtype="float64")
+    ba = ir.Aval(kind="ShapedArray", shape=(n,), dtype="bool")
+    w = var(90, xa)
+    x = var(0, xa)
+    pa, ao = var(1, ba), var(2, ba)
+    sq, wsq, s = var(3, xa), var(4, xa), var(5, F64)
+    q, pred, out = var(6, F64), var(7, BOOL), var(8, BOOL)
+    eqns = [
+        any_eqn_shaped(x, 0.0, 2.0, (n,)),
+        eqn("gt", [x, lit(0.0)], pa),
+        eqn("stelling_assume", [pa], ao),
+        eqn("mul", [x, x], sq),
+        eqn("mul", [w, sq], wsq),
+        eqn("reduce_sum", [wsq], s, [("axes", (0,))]),
+        eqn("div", [lit(1.0), s], q),
+        eqn("gt" if assert_gt else "lt", [q, lit(0.0)], pred),
+        eqn("stelling_assert", [pred], out),
+    ]
+    closed = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(w,), invars=(), outvars=(out,), eqns=tuple(eqns)
+        ),
+        consts=(_f64_array(list(values)),),
+    )
+    return closed
+
+
+@pytest.mark.parametrize(
+    "values,assert_gt,want",
+    [
+        ([1.0, 2.0, 3.0, 4.0], True, "discharged"),
+        ([-1.0, -2.0, -3.0, -4.0], False, "discharged"),
+        ([1.0, 0.0, 3.0, 4.0], True, None),   # a zero element
+        ([1.0, -2.0, 3.0, 4.0], True, None),  # mixed sign
+        ([1.0, INF, 3.0, 4.0], True, None),   # non-finite
+    ],
+)
+def test_an_array_CONSTVAR_carries_the_same_certificate(values, assert_gt, want):
+    """REDDENS ON REVERT of the constvar half of the fix.
+
+    The mixed-sign row is not a conservatism artifact: with
+    `W = [1, -2, 3, 4]` the sum `Σ wᵢxᵢ²` really can be zero over the
+    assumed region, so a certificate there would be FALSE. Whole-array
+    quantification is what refuses it.
+    """
+    p = propagate(_const_coeff_query(values, assert_gt=assert_gt),
+                  semantics="real")
+    if want == "discharged":
+        assert p.obligations[0].status == "discharged", (
+            f"{values}: {p.obligations[0].status}"
+        )
+    else:
+        assert p.obligations[0].status != "discharged", values
+
+
+def test_a_PRE_BOXED_constvar_gets_no_certificate():
+    """A const already handed over as an IntervalArray is a BOX, not a value.
+
+    Its provenance is unknown — that branch is why `nan` is set True for it
+    under ieee — so `[2, 3]` there means "somewhere in [2,3]", which is a
+    range and not a constant, and it must not mint a sign.
+    """
+    xa = ir.Aval(kind="ShapedArray", shape=(), dtype="float64")
+    w = var(90, xa)
+    closed = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(w,), invars=(), outvars=(w,), eqns=()
+        ),
+        consts=(iv.IntervalArray(shape=(), los=(2.0,), his=(3.0,)),),
+    )
+    from stelling.propagate import _Propagator
+
+    p = _Propagator("constrain")
+    p.run(closed.jaxpr, list(closed.consts), [])
+    assert p.strict_sign == {}, (
+        f"a pre-boxed const minted {p.strict_sign}; that box is a RANGE of "
+        f"unknown provenance, not a value"
+    )
