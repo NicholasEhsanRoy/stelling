@@ -7494,7 +7494,7 @@ verdicts:
   a loop-body assume is one member.
 
   **THE `nonvacuity` FAILED FACE MOVES TOO, and nothing above measured
-  it.** `_withhold_uncertified_violations` runs over two sinks, and the
+  it.** `_withhold_uncertified_refutations` runs over two sinks, and the
   second is `p.nonvacuity_checks`: a membership condition judged
   definitely false over the judged set goes from `violated-over-set` to
   `unknown`, with `nonvacuity FAILED face WITHHELD` in the notes. Measured

@@ -4,12 +4,18 @@
 
 `sweep_loop_assume.py` measured 96 rows moving REFUTED -> UNKNOWN and scored
 EVERY one of them a false REFUTED. That is true of THAT corpus and it is a
-property of the corpus, not of the change: its comparison set is `lt`/`le`
-only and its asserts all point one way (`expr <= threshold`), so a model that
-violates the assert has the operands in the order the assume FORBIDS, and the
-solver's first witness therefore always lands outside the precondition. Flip
-the assume to `ge`/`gt` — or the assert to `>=` — and the same witness lands
-INSIDE it, and the withheld refutation was CORRECT, with a CORRECT witness.
+property of the corpus, not of the change — but NOT for the reason first
+recorded here, and the correction is the useful part.
+
+The first attribution said the cause was the comparison set (`lt`/`le` only).
+THIS FILE'S OWN OUTPUT DISPROVES THAT: the row `le x add_le5` is CORRECT, a
+`<=` assert under a `le` assume. The operative property is STRICTNESS, not
+direction. With no axiom forwarded the solver returns the degenerate model
+`(0, 0)`; a STRICT conjunct excludes it, so the witness lands outside the
+precondition and the refutation was false, while a NON-STRICT one admits it,
+so the refutation was correct and is now withheld. Every assume set in the
+144-row corpus contains a strict `lt`, which is why it observed zero of the
+category — not because `ge`/`gt` were absent.
 
 So this corpus adds `gt` and `ge` to the comparison set and a `>=` direction
 to the asserts, and it partitions the moved rows FOUR ways instead of three,
@@ -50,9 +56,11 @@ from fractions import Fraction as F
 LO, HI = -10.0, 10.0
 FLO, FHI = F(LO), F(HI)
 
-# THE COMPARISON SET, AND WHY IT IS THE FINDING. `lt`/`le` alone cannot
-# produce a witness inside the precondition for a `<=` assert, so a corpus
-# built from them cannot observe the category this file exists to count.
+# THE COMPARISON SET. Widened to both directions, but note the operative
+# property is STRICTNESS rather than direction: `le` alone produces a
+# CORRECT_WITHHELD row under a `<=` assert (see `le x add_le5` in the output).
+# A strict conjunct excludes the solver's degenerate `(0, 0)` model; a
+# non-strict one admits it.
 CMP = {
     "lt": (lambda a, b: a < b, lambda a, b: a < b),
     "le": (lambda a, b: a <= b, lambda a, b: a <= b),
