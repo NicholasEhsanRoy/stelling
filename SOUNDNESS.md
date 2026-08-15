@@ -5839,11 +5839,101 @@ verdicts:
   both quantities already computed there). An unparseable scope falls back
   to whole-query: the failure direction is over-disclosure.
 
+  **(3) AUDIT B3-2 — A FILTER'S EMPTY RESULT READ AS A POSITIVE CLAIM.**
+  The condition (1) added is `not propagate.unaccounted_assumes(ledger,
+  emitted_origins)`. That function is a FILTER OVER THE LEDGER, so it
+  returns `()` in two situations a caller reading one value cannot tell
+  apart: every recorded assume is accounted for, and **nothing is recorded
+  for an assume that exists**. `solvers._dispatch_obligation` read it as
+  `accounts_for_every_assume` — the positive claim that the region the
+  solver ran over is inside the region EVERY assume of the query describes.
+
+  * **An assume that produces no ledger entry.** The propagator's walk does
+    not descend `scan` or `while_loop` bodies, so a `stelling_assume` inside
+    one is never classified: no narrowing, no drop record, no ledger entry.
+    Measured on this tree, jax 0.11.0, `JAX_ENABLE_X64=1`: `x, y ∈
+    [-10, 10]`, `assume(x < y)` at top level and `assume(y < x)` inside a
+    `lax.scan` body. The query states TWO assumes;
+    `Propagation.assume_ledger` has ONE; `unaccounted_assumes(ledger, (0,))`
+    is empty; the run returned **VERIFIED with no may-be-vacuous line** over
+    `x < y ∧ y < x`, which no strict order admits (an exact-`Fraction` 41²
+    grid over `[-10, 10]²` admits **0** points —
+    `_scan_body_cycle_admits_no_point`, computed in the test rather than by
+    the tool). It reaches the public `check_inductive_step` by the same
+    route.
+  * **The default failed OPEN, and the docstring said the opposite.**
+    `_dispatch_obligation`'s `assume_ledger` defaulted to `()` on the stated
+    ground that "an empty ledger accounts for nothing that was forwarded, so
+    a caller that forgets it gets `REGION_UNCERTIFIED` … never a clean
+    stamp". An empty ledger filters to an empty result, which read as the
+    positive claim. Measured on the cone-split cycle above, whose region is
+    provably empty: with `assume_ledger=()` the run's `region_uncertified`
+    was `()` and **no may-be-vacuous line was stamped**; with the real
+    ledger, `(0,)` and the line present.
+
+  **THE REPAIR, ON MACHINERY THAT IS ALREADY TOTAL.** The claim
+  `_region_answer` reads is now the CONJUNCTION of the filter and a
+  COMPLETENESS check: `not unaccounted_assumes(...) and
+  every_assume_recorded`, where `every_assume_recorded` is
+  `propagate.ledger_covers(propagation.assume_ledger, closed.jaxpr)` —
+  whether the ledger has a record for every `stelling_assume` equation the
+  query CONTAINS. The requirement is the STATIC set,
+  `propagate._assume_equation_ids`, which collects every assume equation
+  sub-jaxprs included *"whether or not any walk reaches it"*; the
+  non-emptiness certificate's own requirement already rests on it, which is
+  exactly why THAT path never had this hole. The join is on a new
+  `AssumeDisposition.eqn_id` (`id()` of the assume equation, the identity
+  `_Propagator.assume_witness` is already keyed on), stamped at the four
+  ledger write sites, and held OUT of the dataclass's equality
+  (`compare=False`) because a process-local key must not be what a
+  cross-run comparison fails on. `assume_ledger` and `every_assume_recorded`
+  are both REQUIRED keywords now — the discipline `_region_answer`'s own
+  accounting keyword already carries, one level down.
+
+  **`_assume_equation_ids` IS GENUINELY TOTAL OVER SUB-JAXPRS, CHECKED
+  RATHER THAN TRUSTED.** Against an INDEPENDENT walk of the raw jax jaxpr
+  (not stelling's IR, not stelling's traversal), on `scan`, `while_loop`,
+  `jit`-inside-`cond`, and `cond`-inside-`jit`-inside-`scan`: **2 of 2 on
+  every shape, all four agreeing**
+  (`test_the_static_assume_set_is_total_over_sub_jaxprs`). It rests on
+  `coverage.sub_jaxprs`, which yields every `Jaxpr`/`ClosedJaxpr` held in an
+  equation's params through tuples and named-tuple params, and on
+  `_jax_compat`'s param transcription, which converts every jaxpr-valued
+  param and RAISES `UnsupportedParamError` rather than dropping one. The one
+  boundary: `custom_jvp_call.jvp_jaxpr_fun` and `custom_vjp_call`'s thunks
+  are transcribed as opaque, but those are DERIVATIVE jaxprs — the primal
+  `call_jaxpr` transcribes normally, so a user `assume` on the primal path
+  is not behind them.
+
+  **SCOPE, STATED SO IT IS NOT OVERCLAIMED.** This closes the
+  un-recorded-assume route **for the admitted-region rule only**. The same
+  root cause — a `stelling_assume` the walk never reaches — also reaches the
+  withholding rule at the end of `escalate`, where `unaccounted_assumes` is
+  read the same way and can produce a false REFUTED. That face is
+  PRE-EXISTING, reaches released 0.1.0, and is **not** fixed here.
+
+  **RED/GREEN.** Deleting the `every_assume_recorded` conjunct from
+  `_region_answer`'s argument reddens **3** tests, all in
+  `tests/test_vacuous_precondition.py` §8
+  (`…_is_not_stamped_clean`, `…_names_the_unrecorded_assume_…`,
+  `…_fails_CLOSED`); no pre-existing test detects it. Full suite green in
+  both precision environments after the repair (counts below).
+
   **WHAT MOVES, MEASURED ON THIS BUILD.** The 288-harness sweep re-run
-  unmodified: **54 REFUTED / 90 UNKNOWN / 72 VERIFIED / 72 RAISED, 0 FALSE
-  VERIFIED, 0 FALSE REFUTED, 0 vacuous VERIFIED — identical to the table
-  above, and 756 solver invocations before and after.** No verdict moves and
-  no solver call is added; what moves is disclosure. On a purpose-built
+  unmodified against `d2fcff2` and against this build (jax 0.11.0,
+  `JAX_ENABLE_X64=1`, `JAX_PLATFORMS=cpu`, z3 + cvc5 wheels), comparing the
+  two `--json=` row maps entry by entry: **54 REFUTED / 90 UNKNOWN / 72
+  VERIFIED / 72 RAISED, 0 FALSE VERIFIED, 0 FALSE REFUTED, 0 vacuous
+  VERIFIED — identical to the table above, 0 of 288 rows moved, and 1044
+  solver invocations on each tree** (720 obligation-script + 324
+  admitted-region, counted at the transport-entry boundary
+  `solvers._Backend.run`, the act `_Ledger.spawns` counts — an earlier
+  revision of this paragraph recorded 756 on a basis it did not state and
+  that does not reproduce). The may-be-vacuous rate among the 72 VERIFIEDs
+  is **18 on each tree**, so the B3-2 repair adds no caveat here either: the
+  sweep carries no `scan`- or `while_loop`-bodied assume, which is the only
+  shape it fires on. No verdict moves and no solver call is added; what
+  moves is disclosure. On a purpose-built
   48-harness cone-split family (relation `<`/`<=` × 3-cycle/3-chain ×
   carrier pair × threshold × unused tail variable; the region is empty iff
   strict-and-cycle, 12 of 48):
@@ -5867,6 +5957,31 @@ verdicts:
   admitted-region script would buy all of it back and close the cone-split
   gap at once. Not attempted here.
 
+  **AND THE COST IS NOT INTRINSIC TO THE RULE — IT IS THE PROBE GRID'S
+  SHAPE, ISOLATED (audit B3-2, non-blocking; recorded here so the next
+  person does not re-derive it).** Measured on this tree:
+  `Propagation.region_inhabited` is **`False`** for `assume(x < y);
+  assume(y < z)` over `[-10, 10]³` and **`True`** for the same chain written
+  with `<=`, two harnesses one character apart. **THE GRID CANNOT CERTIFY A
+  STRICT CHAIN**, and the mechanism is in `propagate._probe_fraction`: the
+  first three probes are ANCHORS that put every declaration at the SAME
+  fraction of its box (`0.0`, `1.0`, `0.5`), where no strict inequality
+  between two declarations can hold; the other 13 offset the fraction by
+  `element * 0.7548776662466927` mod 1 per declaration, which for three
+  declarations steps DOWNWARD both times. Enumerated over all 16 probes:
+  **0 produce `f₀ < f₁ < f₂`** — so no probe point of a 3-variable strict
+  chain is ever ordered, and the certificate declines for a reason that is
+  about the grid, not about the region. (It is not a blanket rule against
+  strict relations: a 2-variable `assume(x < y)` IS certified, at probe 4 —
+  3 of the 16 probes give `f₀ < f₁`.)
+
+  So the 18-of-72 rate measures which points the grid happens to visit. One
+  interior ORDERED probe point, or the whole-query admitted-region script
+  named above, removes most of it. The probe is deliberately NOT changed
+  here: it is one-sided and every `False` path leaves the run byte-identical
+  (`test_a_failed_certificate_search_changes_nothing_at_all`), so widening
+  it is a separate change owing its own cost argument.
+
   **MUTANTS, since a rule that flips verdicts has to be shown tested and
   not merely present.** Disabling the admitted-region check (leaving the
   certificate path) reddens **6** tests, all in
@@ -5884,22 +5999,73 @@ verdicts:
   | `_region_answer`: `sat` → `REGION_INHABITED` unconditionally | **4** |
   | `render`: scoped read → `any(... in assumptions)` | **1** |
   | inductive note: scoped read → `any(... in assumptions)` | **1** |
+  | **B3-2**: drop the `every_assume_recorded` conjunct from the accounting | **3** |
 
-  All six are in `tests/test_vacuous_precondition.py`; no pre-existing test
-  detects any of the three.
+  All nine are in `tests/test_vacuous_precondition.py`; no pre-existing test
+  detects any of the four. The B3-2 mutant was run at this commit on the
+  full suite with `JAX_ENABLE_X64=1`, restoring the file byte-for-byte
+  afterwards; the three it reddens are §8's
+  `…_is_not_stamped_clean`, `…_names_the_unrecorded_assume_…` and
+  `…_fails_CLOSED`.
 
-  Full suite green in **both** precision environments: **2985 passed, 10
-  skipped** with `JAX_ENABLE_X64=1`, and **2986 passed, 9 skipped** without
-  it (the configuration CI runs). The skip sets differ by exactly one
-  entry — `test_tripwire_arm.py`'s threefry case, whose skip condition IS
-  x64-on — and by nothing else; the ninth run of the test it stops skipping
-  is the extra pass. At `1dc1b52` before the amendment: 2969 / 10 with x64,
-  and **75 FAILED without it**, which is the reason for the test-side half
-  below. With `jax` genuinely unimportable (`sys.modules["jax"] = None` from
-  a `-p` plugin, so the gates see an absent package during collection):
-  **1476 passed, 107 skipped, 0 failed** — no undisclosed skip. The audit's
-  own re-checker (`audit-0.2.0-lead/verify_findings.py`) prints `fixed` for
-  S7 and S7′ here, with S5, S6 and S8 unchanged at `fixed`.
+  **SUITE COUNTS, EACH WITH THE ENVIRONMENT THAT PRODUCED IT.** Every
+  figure below was re-run for this amendment; where a previously recorded
+  one did not reproduce it is corrected and the discrepancy named, because
+  a count without its environment is not a measurement. All runs: jax
+  0.11.0, python 3.12, z3 + cvc5 wheels, `python -m pytest tests/ -q`.
+
+  | tree | environment | result |
+  |---|---|---|
+  | this build | `JAX_ENABLE_X64=1` | **2993 passed, 10 skipped** |
+  | this build | no `JAX_ENABLE_X64` (what CI runs) | **2994 passed, 9 skipped** |
+  | `1dc1b52` (git checkout) | `JAX_ENABLE_X64=1` | 2969 passed, 10 skipped |
+  | `1dc1b52` (git checkout) | no `JAX_ENABLE_X64` | **67 failed**, 2903 passed, 9 skipped |
+  | `1dc1b52` (`git archive` export) | no `JAX_ENABLE_X64` | 68 failed, 2900 passed, 11 skipped |
+  | this build | jax absent, `[solvers]`-only venv | **1475 passed, 108 skipped, 0 failed** |
+  | this build | jax MASKED in the jax venv (`-p` plugin) | 1476 passed, 107 skipped, 0 failed |
+
+  The two precision rows' skip SETS differ by exactly one entry —
+  `tests/test_tripwire_arm.py:643`, the threefry case whose skip condition
+  IS x64-on — and by nothing else; the ninth run of the test it stops
+  skipping is the extra pass.
+
+  **The `1dc1b52` without-x64 figure was recorded as 75 and does not
+  reproduce at any measurement.** In a real git checkout of that commit it
+  is **67 failed / 2903 passed / 9 skipped**; in a `git archive` export of
+  the same commit, 68 / 2900 / 11 — the export forces the two git-gated
+  skips (`test_reuse_pins.py`, `test_sdist_contents.py`) and one extra
+  failure, `test_no_session_skip_is_undisclosed`, which is reacting to
+  those skips. `pytest-randomly` is not installed in any of these venvs, so
+  ordering cannot account for the difference; 75 has no environment on
+  record and is withdrawn. **The checkout figure is the one a reader can
+  regenerate** — `git clone`, `git checkout 1dc1b52`, run pytest — and it
+  is what the test-side half below is the reason for. The 67 are 36 in
+  `test_assume_scope_identity.py`, 18 in `test_vacuous_precondition.py`, 11
+  in `test_assume_ledger.py` and 2 in `test_assume_disclosure_claims.py`.
+
+  **The jax-free figure was recorded as 1476 / 107 without naming its
+  environment, and BOTH numbers are right in the environment that produced
+  them.** With `jax` MASKED inside the jax venv (`sys.modules["jax"] =
+  None` from a `-p` plugin, so the gates see an absent package during
+  collection) it is 1476 / 107, reproduced exactly. In a venv that has only
+  `[solvers]` + pytest — no jax and, consequently, **no numpy** — it is
+  1475 / 108, and that venv is the shape of CI's jax-free lane. The single
+  differing test is `tests/test_reproduce.py:644`, which skips for want of
+  numpy in the second and runs in the first. Zero failures either way, and
+  no undisclosed skip in either. The `[solvers]`-only figure is quoted
+  first above because it is the one CI reproduces.
+
+  The audit's own re-checker (`audit-0.2.0-lead/verify_findings.py`), re-run
+  on this build, prints `fixed` for S7 and S7′, with S5, S6 and S8 unchanged
+  at `fixed`. It also prints **`STILL PRESENT` for S13** — *"an assume the
+  walk never descends leaves no trace to withhold on"* — which is the SAME
+  root cause as (3) above reaching the WITHHOLDING rule instead of the
+  admitted-region one, and is deliberately not touched here. Reproduced
+  independently while measuring (3): with `assume(x < y)` and
+  `assume(y < x)` BOTH inside a `lax.scan` body, the ledger is empty,
+  `assume_dropped` is False, nothing is withheld, and `assert_(x - y <=
+  0.0)` comes back **REFUTED** with a witness that violates the
+  precondition — over a region no strict order admits. Separate batch.
 
   **THE TEST-SIDE HALF, and it is the same lesson `main` learned twice at
   `942df81` / `b53a537`.** `tests/test_vacuous_precondition.py` (added by

@@ -36,7 +36,9 @@ WHAT THESE TESTS PIN, in the order the repair reads:
    vacuity sentence stops claiming substantiveness on such a run;
 6. the two inductive-step over-claims (M5's conditional step, M4's
    positionally-mapped REFUTED note);
-7. the SCOPE of both readings, which is audit B3 (below).
+7. the SCOPE of both readings, which is audit B3 (below);
+8. that an EMPTY ``unaccounted_assumes`` result is not the positive claim
+   the rule reads it as, which is audit B3-2 (below).
 
 AUDIT B3, TWO FINDINGS ON THE REPAIR ABOVE.
 
@@ -61,10 +63,27 @@ is the whole-query question. Measured, an interval refutation called
 precondition-narrowed set" on a run where nothing narrowed, and an inductive
 step called "CONDITIONAL — NOT the inductive step" on a body whose bound
 obligations were judged over the full declared box.
+
+AUDIT B3-2, ONE FINDING ON THE REPAIR ABOVE.
+
+**A FILTER'S EMPTY RESULT READ AS A POSITIVE CLAIM.**
+``unaccounted_assumes`` filters the LEDGER, so it returns ``()`` both when
+every recorded assume is accounted for and when NOTHING IS RECORDED for an
+assume that exists — and the rule above read that one value as
+``accounts_for_every_assume``. The propagator does not descend ``scan`` or
+``while_loop`` bodies, so an assume inside one is never classified and leaves
+no entry to filter. Measured: ``x, y ∈ [-10,10]``, ``assume(x < y)`` at top
+level and ``assume(y < x)`` inside a ``lax.scan`` body — a precondition no
+strict order admits — gave VERIFIED, stamped CLEAN. The repair is the
+CONJUNCTION with a completeness check of the ledger against the STATIC set of
+assume equations the query contains (``propagate.ledger_covers`` over
+``_assume_equation_ids``, the same total machinery the non-emptiness
+certificate's own requirement rests on), and section 8 pins it.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 from fractions import Fraction
 
@@ -78,6 +97,8 @@ import pytest
 pytest.importorskip("jax")
 
 import jax  # noqa: E402
+import jax.numpy as jnp  # noqa: E402
+from jax import lax  # noqa: E402
 
 from stelling import smt, solvers  # noqa: E402
 from stelling.harness import any_array, assert_, assume, trace  # noqa: E402
@@ -88,17 +109,23 @@ from stelling.propagate import (  # noqa: E402
     CONDITIONAL_ON_PRECONDITION,
     UNCERTIFIED_PRECONDITION_PREFIX,
     UnsatisfiableAssumptionError,
+    _assume_equation_ids,
     conditional_on_precondition,
     interval_env,
+    ledger_covers,
     propagate,
+    unaccounted_assumes,
 )
 from stelling.solvers import (  # noqa: E402
     REGION_EMPTY,
     REGION_INHABITED,
     REGION_NOT_ASKED,
     REGION_UNCERTIFIED,
+    REGION_UNRECORDED_MECHANISM,
     UNCERTIFIED_REGION_ASSUMPTION,
+    _dispatch_obligation,
     _region_answer,
+    _region_uncertified_note,
     relational_assume_assumption,
 )
 
@@ -264,6 +291,37 @@ def satisfiable_assume():
     return assert_(x - y <= 0.0)
 
 
+def scan_body_cycle():
+    """AUDIT B3-2's shape: a 2-cycle whose second link the propagator's walk
+    NEVER SEES.
+
+    ``assume(x < y)`` at top level and ``assume(y < x)`` inside a
+    ``lax.scan`` body. The two together are ``x < y ∧ y < x``, which no
+    strict order admits (:func:`_scan_body_cycle_admits_no_point` is the
+    independent ground truth), so every obligation is vacuously true and
+    nothing may be stamped clean.
+
+    Distinct from :func:`cone_split_cycle`, where every assume IS in the
+    ledger and only THIS obligation's script leaves one out — a difference
+    the filter over the ledger can see. Here the propagator does not descend
+    the scan body at all, so the second assume is never classified and leaves
+    NO ledger entry: ``unaccounted_assumes`` has nothing to return, its empty
+    result was read as "accounts for every assume", and the discharge was
+    stamped CLEAN. The record has to be checked for COMPLETENESS against what
+    the query CONTAINS, which is what :func:`ledger_covers` does.
+    """
+    x = any_array((), "float64", (-10.0, 10.0))
+    y = any_array((), "float64", (-10.0, 10.0))
+    assume(x < y)
+
+    def body(carry, _):
+        assume(y < x)
+        return carry, carry
+
+    carry, _ = lax.scan(body, x, jnp.zeros((2,)))
+    return assert_(x - y <= 0.0)
+
+
 def _first_slice(harness):
     q = trace(harness)
     p = propagate(q)
@@ -290,6 +348,22 @@ def _cone_split_admits_no_point(n=21):
         for x in pts for y in pts for z in pts
         if x < y and y < z and z < x
     )
+
+
+def _scan_body_cycle_admits_no_point(n=41):
+    """GROUND TRUTH for :func:`scan_body_cycle`, computed here, exactly.
+
+    An ``n²`` grid of exact :class:`~fractions.Fraction` points spanning
+    ``[-10, 10]²``, counting those satisfying ``x < y ∧ y < x``. No float, no
+    solver, no stelling — the emptiness the headline test rests on is a fact
+    about the harness, and a fact about the harness must not be established
+    by the tool under test. (It is also immediate — the two give ``x < x`` —
+    and the grid is the measurement that catches a harness edited into a
+    different shape.)
+    """
+    lo, hi = Fraction(-10), Fraction(10)
+    pts = [lo + (hi - lo) * Fraction(i, n - 1) for i in range(n)]
+    return sum(1 for x in pts for y in pts if x < y and y < x)
 
 
 # ---------------------------------------------------------------------------
@@ -1046,3 +1120,216 @@ def test_the_inductive_note_is_unconditional_when_the_BOUND_obligations_are():
     note = v.notes[-1]
     assert note.startswith("inductive step: all state variables stay within")
     assert "CONDITIONAL" not in note
+
+
+# ---------------------------------------------------------------------------
+# 8. AUDIT B3-2: an EMPTY `unaccounted_assumes` is not the positive claim
+#
+# `unaccounted_assumes` is a FILTER over the ledger, so it returns `()` in two
+# very different situations — every recorded assume is accounted for, and
+# NOTHING IS RECORDED for an assume that exists. `_dispatch_obligation` read
+# that single value as `accounts_for_every_assume=True`, which is the positive
+# claim that the region the solver ran over is inside the region EVERY assume
+# of the query describes. The second situation is reachable: the propagator
+# does not descend `scan` or `while_loop` bodies, so an assume inside one is
+# never classified and leaves no entry at all.
+#
+# The repair is the CONJUNCTION with a completeness check against the STATIC
+# set of assume equations (`propagate.ledger_covers` over
+# `_assume_equation_ids`) — the same total machinery the non-emptiness
+# certificate's own requirement already rests on, which is why THAT path never
+# had this hole.
+#
+# SCOPE. This closes the un-recorded-assume route for the admitted-region
+# rule. It does NOT close the same root cause's other face, where an
+# unrecorded assume reaches the withholding rule; that is a separate item and
+# nothing here should be read as covering it.
+# ---------------------------------------------------------------------------
+
+
+def test_the_scan_body_harness_really_does_admit_no_point():
+    """The premise of every test below it, measured rather than asserted."""
+    assert _scan_body_cycle_admits_no_point() == 0
+
+
+def test_the_ledger_does_not_record_an_assume_inside_a_scan_body():
+    """THE MECHANISM, with no solver in it. The query CONTAINS two assumes
+    and the propagation classified one, so a filter over the ledger is
+    reading a record that is missing a row — and cannot say so."""
+    q = trace(scan_body_cycle)
+    p = propagate(q)
+    # the query contains two; the walk classified one
+    assert len(_assume_equation_ids(q.jaxpr)) == 2
+    assert len(p.assume_ledger) == 1
+    # ... and the filter cannot see the difference: with the one recorded
+    # assume emitted, its answer is the same "nothing unaccounted for" it
+    # gives on a query whose every assume IS recorded
+    assert unaccounted_assumes(p.assume_ledger, (0,)) == ()
+    # which is exactly why the completeness question has to be asked
+    # separately, and answers no
+    assert ledger_covers(p.assume_ledger, q.jaxpr) is False
+
+
+@need_solver
+def test_a_discharge_over_an_assume_nobody_recorded_is_not_stamped_clean():
+    """THE HEADLINE. Before the repair: VERIFIED, no may-be-vacuous line,
+    over ``x < y ∧ y < x``.
+
+    Deleting the `ledger_covers` conjunct in `_dispatch_obligation` restores
+    that, which is what makes this test load-bearing rather than descriptive.
+    """
+    q = trace(scan_body_cycle)
+    p = propagate(q)
+    # the certificate cannot rescue this one either: its requirement is the
+    # same static set, and the probe does not walk into the scan body
+    assert p.region_inhabited is False
+    esc = solvers.escalate(q, p, solvers.SolverConfig(timeout_ms=TIMEOUT))
+    assert [r.outcome for r in esc.records] == [solvers.OB_DISCHARGED]
+    assert esc.region_uncertified == (0,)
+
+    v = check(scan_body_cycle, vacuity_mode="all", solver_timeout_ms=TIMEOUT)
+    assert v.status == "VERIFIED"  # sound: true of an empty region
+    assert UNCERTIFIED_REGION_ASSUMPTION in v.stamp.assumptions
+
+
+@need_solver
+def test_the_note_names_the_unrecorded_assume_and_not_the_other_mechanisms():
+    """The per-obligation sentence has to be TRUE on this run, and the two
+    it used to have to choose between are both false here: the solver DID
+    decide (it answered sat), and no conjunct can be listed as unaccounted
+    for, because the missing one was never written down."""
+    q = trace(scan_body_cycle)
+    p = propagate(q)
+    esc = solvers.escalate(q, p, solvers.SolverConfig(timeout_ms=TIMEOUT))
+    notes = esc.records[0].notes
+    assert any(REGION_UNRECORDED_MECHANISM in n for n in notes), notes
+    assert any("answered sat" in n for n in notes), notes
+    assert not any("could not decide" in n for n in notes), notes
+
+
+def test_the_unrecorded_mechanism_is_reported_ahead_of_the_other_two():
+    """The rule as a pure function. With the record incomplete, neither of
+    the other two sentences can be true, so the completeness answer is read
+    first — including when `missing` is non-empty as well."""
+    unrecorded = _region_uncertified_note(
+        0, (), every_assume_recorded=False,
+    )
+    assert REGION_UNRECORDED_MECHANISM in unrecorded
+    both = _region_uncertified_note(
+        0,
+        (dataclasses.replace(
+            propagate(trace(cone_split_cycle)).assume_ledger[1],
+        ),),
+        every_assume_recorded=False,
+    )
+    assert REGION_UNRECORDED_MECHANISM in both
+    # and it stays out of the way when the record IS complete
+    decided = _region_uncertified_note(0, (), every_assume_recorded=True)
+    assert REGION_UNRECORDED_MECHANISM not in decided
+
+
+@need_solver
+def test_an_empty_ledger_now_really_does_fail_CLOSED():
+    """THE SECOND FACE, which the docstring claimed and the code did not do.
+
+    ``_dispatch_obligation``'s ``assume_ledger`` used to default to ``()``
+    on the stated ground that "a caller that forgets it gets
+    REGION_UNCERTIFIED and a disclosed caveat, never a clean stamp". Measured
+    on the cone-split cycle, whose region is provably empty
+    (:func:`_cone_split_admits_no_point`), the opposite happened: an empty
+    ledger filtered to an empty result, which read as the positive claim, and
+    the caveat DISAPPEARED. It is now a required argument AND an empty one
+    fails the completeness test, so both halves of the sentence hold.
+    """
+    q = trace(cone_split_cycle)
+    p = propagate(q)
+    config = solvers.SolverConfig(timeout_ms=TIMEOUT)
+    assert solvers.escalate(q, p, config).region_uncertified == (0,)
+    starved = dataclasses.replace(p, assume_ledger=())
+    assert solvers.escalate(q, starved, config).region_uncertified == (0,)
+
+
+def test_the_ledger_and_its_completeness_are_required_keywords():
+    """The same discipline `_region_answer`'s own accounting keyword carries,
+    one level up, and for the same reason: a default would have to guess an
+    answer the caller did not supply — and the guess this one used to make
+    was the unsound direction."""
+    params = inspect.signature(_dispatch_obligation).parameters
+    for name in ("assume_ledger", "every_assume_recorded"):
+        p = params[name]
+        assert p.kind is inspect.Parameter.KEYWORD_ONLY, name
+        assert p.default is inspect.Parameter.empty, name
+
+
+def test_the_static_assume_set_is_total_over_sub_jaxprs():
+    """THE PREMISE THE REPAIR RESTS ON, checked rather than trusted.
+
+    `_assume_equation_ids` collects every `stelling_assume` equation the
+    query contains "whether or not any walk reaches it", and the gate is
+    only as strong as that is true. Ground truth is an INDEPENDENT walk of
+    the RAW JAX jaxpr — not stelling's IR, not stelling's traversal — over a
+    `scan`, a `while_loop`, a `jit` inside a `cond`, and a `cond` inside a
+    `jit` inside a `scan`.
+    """
+    def raw_count(fn):
+        stack = [jax.make_jaxpr(fn)().jaxpr]
+        n = 0
+        while stack:
+            j = stack.pop()
+            for e in j.eqns:
+                if e.primitive.name == "stelling_assume":
+                    n += 1
+                for v in e.params.values():
+                    for item in (v if isinstance(v, (tuple, list)) else (v,)):
+                        inner = getattr(item, "jaxpr", item)
+                        if hasattr(inner, "eqns"):
+                            stack.append(inner)
+        return n
+
+    def in_while():
+        x = any_array((), "float64", (1.0, 2.0))
+        y = any_array((), "float64", (3.0, 4.0))
+        assume(x < y)
+
+        def body(s):
+            i, v = s
+            assume(y < x)
+            return i + 1, v + 1.0
+
+        lax.while_loop(lambda s: s[0] < 3, body, (0, x))
+        return assert_(x - y <= 0.0)
+
+    def in_jit_in_cond():
+        x = any_array((), "float64", (-10.0, 10.0))
+        y = any_array((), "float64", (-10.0, 10.0))
+        assume(x < y)
+
+        @jax.jit
+        def inner(a, b):
+            assume(b < a)
+            return a + b
+
+        lax.cond(x > 0.0, inner, lambda a, b: a - b, x, y)
+        return assert_(x - y <= 0.0)
+
+    def in_cond_in_jit_in_scan():
+        x = any_array((), "float64", (-10.0, 10.0))
+        y = any_array((), "float64", (-10.0, 10.0))
+        assume(x < y)
+
+        @jax.jit
+        def inner(a, b):
+            return lax.cond(
+                a > 0.0,
+                lambda p, q: (assume(q < p), p + q)[1],
+                lambda p, q: p - q,
+                a, b,
+            )
+
+        lax.scan(lambda c, _: (inner(c, y), c), x, jnp.zeros((2,)))
+        return assert_(x - y <= 0.0)
+
+    for fn in (scan_body_cycle, in_while, in_jit_in_cond,
+               in_cond_in_jit_in_scan):
+        static = _assume_equation_ids(trace(fn).jaxpr)
+        assert len(static) == raw_count(fn) == 2, fn.__name__

@@ -84,6 +84,7 @@ from stelling.propagate import (
     Propagation,
     UnsatisfiableAssumptionError,
     interval_env,
+    ledger_covers,
     unaccounted_assumes,
 )
 from stelling.smt import Script, emit
@@ -263,11 +264,11 @@ UNCERTIFIED_REGION_ASSUMPTION = (
     f"declared boxes admit a point satisfying EVERY assume of this query — so "
     f"the discharge may be vacuous (true of an empty region). The claim is "
     f"still sound: every admitted point satisfies the obligation, and there "
-    f"may be none. The per-obligation note names which of the two mechanisms "
-    f"left it unestablished"
+    f"may be none. The per-obligation note names which of the three "
+    f"mechanisms left it unestablished"
 )
 
-# The two mechanisms, named where naming them is true: on the obligation.
+# The three mechanisms, named where naming them is true: on the obligation.
 REGION_UNDECIDED_MECHANISM = (
     "the solver could not decide whether the declared boxes and those axioms "
     "admit any point at all"
@@ -276,6 +277,26 @@ REGION_PARTIAL_MECHANISM = (
     "the admitted-region check answered sat, but over the axioms THIS "
     "obligation's script states — which are not every assume of this query, "
     "so the model it found need not lie in the assumed region at all"
+)
+# The THIRD mechanism, and the one an empty `unaccounted_assumes` used to be
+# read as excluding. The ledger is a record of what the propagator's walk
+# CLASSIFIED, and the walk does not enter `scan` or `while_loop` bodies: an
+# assume in one is never classified, leaves no entry, and so cannot appear in
+# a filter over that ledger. Naming it separately is not decoration — the
+# undecided mechanism says "the solver could not decide", which is FALSE on
+# this run (the solver decided `sat`), and the partial one names conjuncts
+# this run cannot list, because the missing ones were never written down.
+#
+# THE SENTENCE STATES THE FACT AND ATTRIBUTES THE CAUSE SEPARATELY. What is
+# known on the run is that the record is incomplete; the scan/while_loop walk
+# is the only way that happens TODAY, and a cause named as if it were the
+# fact would be a claim the gate does not check.
+REGION_UNRECORDED_MECHANISM = (
+    "the admitted-region check answered sat, but this query CONTAINS a "
+    "stelling_assume the propagation never classified, so no record of that "
+    "assume exists to check the model against and the model need not satisfy "
+    "it (today this arises from an assume inside a scan or while_loop body, "
+    "which the propagator's walk does not enter)"
 )
 
 # The conditionality line a forwarded relational axiom earns, in the same
@@ -344,7 +365,9 @@ def _region_answer(answers: frozenset, *, accounts_for_every_assume: bool) -> st
     return REGION_UNCERTIFIED
 
 
-def _region_uncertified_note(index: int, missing: tuple) -> str:
+def _region_uncertified_note(
+    index: int, missing: tuple, *, every_assume_recorded: bool
+) -> str:
     """The per-obligation note, naming the mechanism that actually fired.
 
     ``missing`` is this obligation's ``unaccounted_assumes`` result: empty
@@ -353,7 +376,20 @@ def _region_uncertified_note(index: int, missing: tuple) -> str:
     which conjuncts were left out of it — the same naming the withholding
     refusal does, for the same reason (a reader cannot otherwise tell which
     of their assumes the check never saw).
+
+    ``every_assume_recorded`` is ``propagate.ledger_covers`` for this query.
+    It is checked FIRST because it is the one mechanism the other two cannot
+    describe: with an assume the propagation never classified, ``missing`` is
+    empty (there is nothing to filter) and the solver DID decide, so both
+    other sentences would be false. It is a REQUIRED keyword for the reason
+    the rule it reports is: a default here would be a guess about which
+    mechanism fired.
     """
+    if not every_assume_recorded:
+        return (
+            f"assert #{index}: {REGION_UNRECORDED_MECHANISM} — the discharge "
+            f"may be vacuous"
+        )
     if not missing:
         return (
             f"assert #{index}: {REGION_UNDECIDED_MECHANISM} — the discharge "
@@ -1556,20 +1592,45 @@ def _dispatch_obligation(
     ledger: _Ledger,
     *,
     region_certified: bool = False,
-    assume_ledger: tuple = (),
+    assume_ledger: tuple,
+    every_assume_recorded: bool,
 ) -> tuple[ObligationEscalation, tuple[int, ...], str]:
     """Escalate one obligation slice. Returns ``(record, emitted origins,
     admitted-region status)``.
 
     ``assume_ledger`` is ``Propagation.assume_ledger`` — the disposition of
-    every assumed conjunct the propagator classified. It is what lets a `sat`
-    on the admitted-region script be read as a point of the USER'S region
-    rather than of a relaxation of it: see :func:`_region_answer`. Defaulting
-    it to empty is the conservative direction, not a convenience — an empty
-    ledger accounts for nothing that was forwarded, so a caller that forgets
-    it gets :data:`REGION_UNCERTIFIED` and a disclosed caveat, never a clean
-    stamp. (A slice with no assumes never asks the question at all, so the
-    hand-built-slice callers in the tests are unaffected.)
+    every assumed conjunct the propagator CLASSIFIED — and
+    ``every_assume_recorded`` is ``propagate.ledger_covers`` for this query:
+    whether that ledger has a record for every ``stelling_assume`` equation
+    the query CONTAINS. Together they are what lets a `sat` on the
+    admitted-region script be read as a point of the USER'S region rather
+    than of a relaxation of it: see :func:`_region_answer`.
+
+    **BOTH ARE REQUIRED KEYWORDS, and the second exists because the first is
+    not enough.** ``assume_ledger`` used to default to ``()``, on the stated
+    ground that an empty ledger "accounts for nothing that was forwarded, so
+    a caller that forgets it gets :data:`REGION_UNCERTIFIED`". That was
+    false, and measured false: ``unaccounted_assumes`` is a FILTER over the
+    ledger, so an empty ledger yields an empty result, and an empty result
+    was read as the positive claim "accounts for every assume" — the default
+    failed OPEN. On the cone-split cycle, whose region is provably empty,
+    ``assume_ledger=()`` gave no may-be-vacuous line at all while the real
+    ledger gave one. A required argument is the same discipline
+    :func:`_region_answer` already applies one level down, and for the same
+    reason: a default here would have to guess an answer the caller did not
+    supply.
+
+    ``every_assume_recorded`` closes the other face of that: an assume inside
+    a ``scan`` or ``while_loop`` body is never classified, so it leaves NO
+    ledger entry, and no filter over the ledger can see it. Measured,
+    ``assume(x < y)`` at top level plus ``assume(y < x)`` in a ``lax.scan``
+    body — a precondition no strict order admits — returned VERIFIED, clean.
+    The requirement is the static assume set
+    (:func:`propagate._assume_equation_ids`), the same total machinery the
+    non-emptiness certificate's own requirement rests on, which is why THAT
+    path never had this hole. (A slice with no assumes never asks the
+    question at all, so the hand-built-slice callers in the tests are
+    unaffected.)
 
     ``region_certified`` is ``Propagation.region_inhabited``, THE HYBRID
     HALF of the S7 repair: the propagation's own probe already searched the
@@ -1866,10 +1927,22 @@ def _dispatch_obligation(
             # only a witness if it lies in the assumed region, and a model of
             # the region script is only a point of that region for the same
             # reason.
+            #
+            # AND THE FILTER'S EMPTY RESULT IS NOT THE POSITIVE CLAIM. It
+            # says every RECORDED assume is accounted for; it cannot say the
+            # record is complete, because an assume nobody classified leaves
+            # nothing to filter. `ledger_covers` is the other half — the
+            # ledger against the STATIC set of assume equations the query
+            # contains — and the claim `_region_answer` reads is the
+            # conjunction. Without it, `assume(x < y)` plus `assume(y < x)`
+            # inside a `lax.scan` body verified CLEAN over a precondition no
+            # strict order admits.
             unaccounted = unaccounted_assumes(assume_ledger, emitted_origins)
             region = _region_answer(
                 frozenset(region_answers),
-                accounts_for_every_assume=not unaccounted,
+                accounts_for_every_assume=(
+                    not unaccounted and every_assume_recorded
+                ),
             )
             if region == REGION_EMPTY:
                 who = " and ".join(
@@ -1904,7 +1977,10 @@ def _dispatch_obligation(
                     f"assert #{sl.index}: {UNCERTIFIED_REGION_ASSUMPTION}"
                 )
                 notes.append(
-                    _region_uncertified_note(sl.index, unaccounted)
+                    _region_uncertified_note(
+                        sl.index, unaccounted,
+                        every_assume_recorded=every_assume_recorded,
+                    )
                 )
         return (ObligationEscalation(
             index=sl.index,
@@ -2182,6 +2258,12 @@ def escalate(
             query_sha256=query_sha256,
         )
     env = interval_env(closed)
+    # DOES THE PROPAGATION'S LEDGER HAVE A RECORD FOR EVERY ASSUME THIS QUERY
+    # CONTAINS — computed ONCE, from the query, not per obligation: it is a
+    # whole-query fact, exactly like `region_inhabited` beside it. It is the
+    # half of "accounts for every assume" that a filter over the ledger cannot
+    # supply (see `propagate.ledger_covers`).
+    every_assume_recorded = ledger_covers(propagation.assume_ledger, closed.jaxpr)
     ledger = _Ledger()
     records: list[tuple[ObligationEscalation, int]] = []
     # WHICH DISCHARGES REST ON A PRECONDITION NOBODY SETTLED, and which rest
@@ -2213,6 +2295,7 @@ def escalate(
                 item, config, backends, missing, ledger,
                 region_certified=propagation.region_inhabited,
                 assume_ledger=propagation.assume_ledger,
+                every_assume_recorded=every_assume_recorded,
             )
             if region == REGION_UNCERTIFIED:
                 region_uncertified.append(item.index)

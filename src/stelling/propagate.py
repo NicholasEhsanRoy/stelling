@@ -348,12 +348,34 @@ class AssumeDisposition:
     this conjunct's index in :attr:`Propagation.relational_assumes`, and it is
     the identity a downstream join is keyed on. It is ``-1`` on every other
     kind, and ``-1`` matches no emitted origin.
+
+    ``eqn_id`` is ``id()`` of the ``stelling_assume`` EQUATION this conjunct
+    came out of — the same identity :func:`_assume_equation_ids` collects
+    statically and :attr:`_Propagator.assume_witness` is keyed on. It is what
+    :func:`ledger_covers` joins on, and it is why an empty
+    :func:`unaccounted_assumes` result can be told apart from an assume the
+    walk never reached: a filter over the ledger cannot see an assume that
+    left no entry, and the static set can. ``-1`` on a hand-built entry that
+    names no equation, which matches no static id.
+
+    **``eqn_id`` IS OUT OF THE EQUALITY, and that is not a convenience.** It
+    is a process-local join key — ``id()`` of an object in this run's memory —
+    and not part of what became of the conjunct: two dispositions with the
+    same kind, reason, location and forwarded index record the same
+    classification whichever trace of the same harness produced them. Leaving
+    it in ``__eq__`` would make every :class:`Propagation` unequal to a
+    propagation of a SECOND trace of the same harness, which is precisely the
+    comparison the certificate's one-sidedness is pinned by
+    (``test_a_failed_certificate_search_changes_nothing_at_all`` compares two
+    whole runs byte-for-byte). A field that cannot be compared across runs
+    must not be what a cross-run comparison fails on.
     """
 
     kind: str
     reason: str = ""
     where: str = ""
     forwarded_index: int = -1
+    eqn_id: int = dataclasses.field(default=-1, compare=False)
 
 
 def unaccounted_assumes(
@@ -405,6 +427,51 @@ def unaccounted_assumes(
             e.kind in (ASSUME_APPLIED, ASSUME_NOOP)
             or (e.kind == ASSUME_FORWARDED and e.forwarded_index in emitted)
         )
+    )
+
+
+def ledger_covers(
+    ledger: tuple["AssumeDisposition", ...],
+    jaxpr,
+) -> bool:
+    """Whether the ledger has a record for EVERY ``stelling_assume`` equation
+    ``jaxpr`` contains — sub-jaxprs included.
+
+    **THE QUESTION :func:`unaccounted_assumes` CANNOT ANSWER, AND MUST NOT BE
+    READ AS ANSWERING.** That function is a FILTER over the ledger, so its
+    empty result has two causes that a caller reading a single value cannot
+    tell apart: every recorded assume is accounted for, or *nothing is
+    recorded* for an assume that exists. The second is reachable — the
+    propagator does not descend ``scan`` or ``while_loop`` bodies, so a
+    ``stelling_assume`` inside one is never classified and leaves no ledger
+    entry at all. Measured: ``assume(x < y)`` at top level plus
+    ``assume(y < x)`` inside a ``lax.scan`` body gives a one-entry ledger, an
+    empty ``unaccounted_assumes``, and a CLEAN VERIFIED over a precondition
+    that admits no point of any strict order.
+
+    So the positive claim "the region the solver ran over is inside the region
+    EVERY assume of the query describes" is the CONJUNCTION of the two: the
+    filter says the recorded ones are accounted for, and this says the record
+    is complete. Neither alone is that claim.
+
+    The requirement is the STATIC set (:func:`_assume_equation_ids`) — every
+    assume equation the query contains, whether or not any walk reached it —
+    which is the same total machinery the non-emptiness certificate's
+    requirement already rests on, and the reason that path never had this
+    hole. Over-collecting is the safe direction: an equation nothing evaluates
+    simply fails the subset test, and the caller falls back to
+    :data:`stelling.solvers.REGION_UNCERTIFIED` and a disclosed caveat.
+
+    The join is on ``AssumeDisposition.eqn_id``, so ``ledger`` must be the
+    ledger of a propagation of THIS ``jaxpr`` object — the same discipline
+    :func:`unaccounted_assumes` states for its two arguments, and the same
+    object identity :func:`stelling.propagate._region_witness` already joins
+    its static requirement to its witness map on. A ledger from a different
+    (or re-decoded) jaxpr matches nothing and answers False, which is the
+    conservative direction.
+    """
+    return _assume_equation_ids(jaxpr) <= frozenset(
+        e.eqn_id for e in ledger if e.eqn_id != -1
     )
 
 
@@ -6736,11 +6803,19 @@ class _Propagator:
         # A `vacuous` conjunct is `dropped`, never `no-op`: it is the assumed
         # region being EMPTY on the branch it was written on, which is the
         # opposite of excluding nothing.
+        #
+        # `eqn_id` is stamped from the SAME three sources and for the same
+        # reason `where` is: it is a property of the ASSUME, not of a conjunct
+        # of it. It is what lets :func:`ledger_covers` ask whether the ledger
+        # has a record for every assume equation the query CONTAINS — the
+        # question a filter over the ledger cannot answer, because an assume
+        # nobody classified leaves nothing to filter.
         self.assume_ledger.extend(
             AssumeDisposition(
                 kind=ASSUME_APPLIED,
                 reason=f"narrowed var {var_id} to {_render_box(box)}",
                 where=where,
+                eqn_id=id(eqn),
             )
             for var_id, box, _changed, _certified in narrowed
         )
@@ -6748,13 +6823,14 @@ class _Propagator:
         # is stamped once here rather than threaded through every
         # classification site
         self.assume_ledger.extend(
-            dataclasses.replace(d, where=where) for d in dropped
+            dataclasses.replace(d, where=where, eqn_id=id(eqn)) for d in dropped
         )
         self.assume_ledger.extend(
             AssumeDisposition(
                 kind=ASSUME_DROPPED,
                 reason=f"unsatisfiable within this cond branch ({desc})",
                 where=where,
+                eqn_id=id(eqn),
             )
             for desc in vacuous
         )
@@ -7916,6 +7992,7 @@ class _Propagator:
                         "classified at all"
                     ),
                     where=where,
+                    eqn_id=id(eqn),
                 ))
             in_taints = (
                 [self.read_taint(a) for a in eqn.invars]
