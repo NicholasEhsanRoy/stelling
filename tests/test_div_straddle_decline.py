@@ -167,11 +167,19 @@ def test_div_assume_narrows_past_straddle():
 # --- edge cases ---------------------------------------------------------------
 
 
-def test_div_boundary_at_zero_lower():
-    """b declared as [0, 1]: zero at the lower boundary only. With
-    boundary-aware division, this computes [a_lo/hi, +inf] rather than
-    declining — the obligation can decide (a/b > 0 with a > 0, b > 0
-    gives a positive quotient)."""
+def test_div_boundary_at_zero_lower_declines_without_a_certificate():
+    """b DECLARED as [0, 1]: zero at the lower boundary, and zero is a
+    declared value of b.
+
+    This used to discharge — `boundary_div` returned `[1/1, +inf]` and
+    `a/b > 0` followed. It was a false VERIFIED of exactly the class the
+    other three zero-containing shapes decline for (audit 0.2.0 B5-1):
+    `b = 0` is a point of the declared set, real division has no value
+    there, and nothing in the verdict said the point had been dropped.
+    `boundary_div` is reached only under a strict-assume certificate now,
+    and a DECLARATION whose endpoint is zero is not one — the endpoint is
+    a value the caller asked for.
+    """
     a, b = var(0), var(1)
     q_out, pred, out = var(2), var(3, BOOL), var(4, BOOL)
     query = close(
@@ -185,9 +193,33 @@ def test_div_boundary_at_zero_lower():
         [out],
     )
     p = propagate(query)
-    # Boundary-aware division: a=[1,5], b=[0,1] gives [1/1, +inf] = [1, inf]
-    # gt(result, 0) is definitely true
-    assert p.obligations[0].status == "discharged"
+    assert p.obligations[0].status == "unknown"
+    assert any("REACHES zero at a boundary" in n for n in p.notes), p.notes
+
+
+def test_div_boundary_at_zero_lower_decides_under_a_strict_assume():
+    """The same shape with the zero EXCLUDED: `assume(b > 0)` narrows to
+    the closed `[0, 1]` — an interval cannot hold an open bound — but the
+    strictness is recorded, `boundary_div` is reached, and `a/b > 0`
+    discharges. This is the capability the 0.2.0 row exists for, and it is
+    also the remedy the decline above recommends."""
+    a, b = var(0), var(1)
+    pred_assume, assume_out = var(5, BOOL), var(6, BOOL)
+    q_out, pred, out = var(2), var(3, BOOL), var(4, BOOL)
+    query = close(
+        [
+            any_eqn(a, 1.0, 5.0),
+            any_eqn(b, 0.0, 1.0),
+            eqn("gt", [b, lit(0.0)], pred_assume),
+            eqn("stelling_assume", [pred_assume], assume_out),
+            eqn("div", [a, b], q_out),
+            eqn("gt", [q_out, lit(0.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(query)
+    assert p.obligations[0].status == "discharged", p.obligations[0].detail
     assert not any("straddles zero" in n for n in p.notes)
 
 

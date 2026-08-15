@@ -2983,15 +2983,70 @@ DIV_STRADDLE_DECLINE = (
     "add assume(divisor > 0) / assume(divisor < 0) before the division"
 )
 
+DIV_BOUNDARY_ZERO_DECLINE = (
+    "div: the divisor interval {divisor} REACHES zero at a boundary, and "
+    "nothing in this query excludes that point — real division is undefined "
+    "at 0, so no bound on the quotient holds over the whole box. The "
+    "boundary-aware tightening applies only when a strict assume certifies "
+    "the divisor is nonzero: `assume(d > 0)` / `assume(d < 0)` on the "
+    "divisor itself, or on a value the divisor is built from by * / neg abs "
+    "square x**n sum dot (a subtraction breaks the chain — two positives can "
+    "differ by zero). Remedies: narrow the divisor's declared envelope to "
+    "exclude zero, or add that assume"
+)
 
-def _t_div(eqn, params, ins):
+# The primitives :meth:`_Propagator._strict_sign_out` has a rule for. A
+# by-NAME census, kept beside the rules it guards so a reader sees the
+# closed set: anything absent DROPS the certificate, which is the
+# conservative direction (a dropped fact can only turn a VERIFIED into an
+# UNKNOWN).
+_STRICT_SIGN_PRIMITIVES = frozenset({
+    "mul", "div", "add", "add_any", "neg", "abs", "square", "integer_pow",
+    "reduce_sum", "dot_general",
+})
+
+# Real-mode transfers that READ the strict-sign certificate, and therefore
+# take it as a fourth positional argument. The dispatcher passes
+# `tuple(sign per invar)` to exactly these, mirroring the `in_flags`
+# argument every ieee transfer already receives. One member today; a
+# registry rather than an `if` so the coupling is greppable from both ends.
+_REAL_TRANSFERS_READING_STRICT_SIGN = frozenset({"div"})
+
+
+def _t_div(eqn, params, ins, in_signs=None):
     """``div``. On floats this is real division, unchanged. On INTEGERS it
     is not: jax integer division TRUNCATES toward zero (measured:
     ``lax.div(-7, 2) = -3``, not −3.5) and ``INT_MIN / -1`` WRAPS (measured:
     ``lax.div(-2**31, -1) = -2147483648``, not +2³¹). Modelling either as
     real division mints false definite verdicts in both directions — audit
     UNSOUND 3, and the second of those is literally the wraparound class
-    the overflow guard exists for, so it routes through the same guard."""
+    the overflow guard exists for, so it routes through the same guard.
+
+    **A divisor box that CONTAINS zero declines in all four of its shapes
+    unless the zero is certified excluded** (audit 0.2.0 B5-1). The four
+    shapes used to be judged by WHERE the zero sat — ``[0,0]``, a true
+    straddle and a negative ``sqrt``-style domain all declined citing "ℝ
+    has no value there", while ``[lo,0]``/``[0,hi]`` silently dropped the
+    endpoint and minted a definite quotient from the rest. That fourth arm
+    was a false VERIFIED: with `x` declared ``[0,2]``, ``1/(Σxᵢ² − 8)``
+    boxed to ``(-inf, -0.125]`` and discharged ``q <= -0.125``, while jax
+    at ``x = [2,2]`` — a point of the DECLARED box — returns ``+inf``.
+    Nothing in the verdict disclosed that a point had been dropped.
+
+    The honest condition is not which endpoint is zero but **whether zero
+    is a value the divisor can take**, and the propagator answers that from
+    ``in_signs``: a ``+1``/``-1`` there means a strict ``assume`` certifies
+    the divisor is nonzero over the assumed region, so the closed box's
+    zero endpoint is the unrepresentable-open-bound artifact
+    :func:`stelling.interval.boundary_div` was written for and dropping it
+    drops nothing. Without that certificate the endpoint is a real value of
+    a real point and the transfer declines, exactly as the other three
+    shapes do.
+
+    ``in_signs is None`` — the shape every direct caller and every test
+    that builds this transfer by hand takes — means "no certificate",
+    the conservative reading.
+    """
     dtype = (eqn.outvars[0].aval.dtype or "") if eqn.outvars else ""
     if not _is_integer_dtype(dtype):
         divisor = ins[1]
@@ -3025,8 +3080,20 @@ def _t_div(eqn, params, ins):
                 raise iv.IntervalError(
                     DIV_STRADDLE_DECLINE.format(divisor=span)
                 )
-            # All straddling elements are one-sided boundaries:
-            # boundary-aware division
+            # Every straddling element is a one-sided boundary. The zero is
+            # dropped by `boundary_div` ONLY where a strict assume put it
+            # there; otherwise it is a point of the box the program reaches
+            # and ℝ has no quotient at it.
+            if not (in_signs and len(in_signs) > 1 and in_signs[1]):
+                for i, (lo, hi) in enumerate(zip(divisor.los, divisor.his)):
+                    if lo <= 0.0 <= hi:
+                        span = f"[{lo}, {hi}]"
+                        if divisor.size > 1:
+                            span = f"element {i} spans {span}"
+                        break
+                raise iv.IntervalError(
+                    DIV_BOUNDARY_ZERO_DECLINE.format(divisor=span)
+                )
             return [iv.boundary_div(ins[0], divisor)]
         return [iv.div(*ins)]
     return _int_overflow_guard(eqn, "div", [iv.int_div(*ins)])
@@ -3961,6 +4028,48 @@ def _ieee_arith(op):
     return t
 
 
+def _ieee_div(eqn, params, ins, flags):
+    """``div`` under ieee: a zero-containing divisor DECLINES, with the
+    reason quoted, rather than returning ⊤ silently.
+
+    The kernel's answer is unchanged and correct — ⊤ is the exact hull, for
+    the reasons :data:`stelling.interval.IEEE_ZERO_DIVISOR_TOP` gives — but
+    a ⊤ returned as an ordinary result is counted KNOWN, and the undecided
+    note then told the reader "none fell to ⊤ … compatible with a precision
+    near-miss" about a `[-inf, +inf]` box, while the stamp's
+    ``top_despite_coverage`` line correctly named `div ×1` in the same
+    verdict. One of those two sentences had to go, and the honest one to
+    keep is the stamp's: the transfer has no informative answer here, which
+    is what a decline says.
+
+    It also puts the constant in front of the person the CHANGELOG sends
+    to it. `IEEE_ZERO_DIVISOR_TOP` was reachable only from docstrings while
+    the release note said "``interval.IEEE_ZERO_DIVISOR_TOP`` says why".
+
+    **The divisor is hazed FIRST.** DAZ flushes a subnormal operand to
+    zero, so a box that clears zero on paper can contain it as executed —
+    which is the third and least obvious of the three shapes that reach
+    this rule (audit 0.2.0 S10). `_ieee_binary`/`_ieee_binary_fmt` apply
+    exactly this haze to the operands before the corner rule, so testing
+    the hazed box is testing what the kernel would have seen.
+    """
+    fmt = _ieee_get_format(eqn)
+    hazed, _ = iv.subnormal_haze_fmt(ins[1], _ieee_format_min_normal(fmt))
+    if iv.straddles_zero(hazed):
+        span = None
+        for i, (lo, hi) in enumerate(zip(hazed.los, hazed.his)):
+            if lo <= 0.0 <= hi:
+                span = f"[{lo}, {hi}]"
+                if hazed.size > 1:
+                    span = f"element {i} spans {span}"
+                break
+        raise iv.IntervalError(
+            f"div: the divisor interval {span} contains zero (after the "
+            f"subnormal haze). {iv.IEEE_ZERO_DIVISOR_TOP}"
+        )
+    return _IEEE_DIV_ARITH(eqn, params, ins, flags)
+
+
 # Mapping from the binary64-native ieee kernel to its format-parametric
 # counterpart. Used by _ieee_arith to dispatch the correct kernel when
 # the equation's format is not float64.
@@ -3970,6 +4079,11 @@ _FMT_BINARY_OPS: dict = {
     iv.ieee_mul: iv.ieee_mul_fmt,
     iv.ieee_div: iv.ieee_div_fmt,
 }
+
+# the plain arithmetic face `_ieee_div` delegates to once its zero-divisor
+# gate has passed (built here, after _FMT_BINARY_OPS, so the format
+# dispatch inside it is populated)
+_IEEE_DIV_ARITH = _ieee_arith(iv.ieee_div)
 
 
 def _ieee_unary_exact(fn):
@@ -4672,7 +4786,9 @@ IEEE_TRANSFERS = {
     "add_any": (_ieee_arith(iv.ieee_add), TIER_EXACT),
     "square": (_ieee_square, TIER_EXACT),
     "mul": (_ieee_arith(iv.ieee_mul), TIER_EXACT),
-    "div": (_ieee_arith(iv.ieee_div), TIER_EXACT),
+    # a zero-containing divisor DECLINES here rather than returning ⊤ as an
+    # ordinary result — same box, but counted and narrated (IEEE_ZERO_DIVISOR_TOP)
+    "div": (_ieee_div, TIER_EXACT),
     # (i)/(ii) exact sign arithmetic; flag propagates (NaN stays NaN)
     "neg": (_ieee_unary_exact(iv.neg), TIER_EXACT),
     "abs": (_ieee_unary_exact(iv.abs_), TIER_EXACT),
@@ -5317,6 +5433,32 @@ class _Propagator:
         # depend on recognising the intervening shape, which is exactly
         # what a simplification set makes unrecognisable.
         self.taint: dict[int, bool] = {}
+        # REAL mode's parallel table: var id -> +1 / -1, read as "every
+        # element of this value is certainly > 0 (resp. < 0) at every point
+        # of the ASSUMED region". A fact about the true real values, never
+        # about the box — the box is a closed over-approximation whose
+        # endpoint may sit exactly at 0 while no point of the assumed
+        # region does. That gap is the whole reason the table exists: an
+        # interval cannot represent an OPEN bound, so `assume(x > 0)`
+        # narrows to the CLOSED `[0, hi]` and the exclusion of zero
+        # survives only here (audit 0.2.0 B5-1).
+        #
+        # Absent id = 0 = "unknown", the conservative reading. Written at
+        # exactly one SOURCE (a strict `gt`/`lt` assume in
+        # :meth:`_classify_cmp`), propagated by exactly one rule set
+        # (:meth:`_strict_sign_out`), read by exactly one consumer (the
+        # `div` transfer's boundary gate). Every other primitive drops the
+        # fact, which is sound in the only direction that matters.
+        #
+        # REAL MODE ONLY, and that is not tidiness. Under ieee the strict
+        # narrowing bumps to the format's smallest subnormal and the DAZ
+        # haze hulls that straight back to a box containing 0 — the runtime
+        # value IS zero there — so `x > 0` does NOT imply "certainly
+        # nonzero" on a flush-to-zero target (audit 0.2.0 S10). The ieee
+        # `div` kernel divides every zero-containing divisor to ⊤ with no
+        # case split and never reads this table; nothing writes it under
+        # ieee either.
+        self.strict_sign: dict[int, int] = {}
         # var ids whose value comes from a REFUSED negative/malformed
         # shape (fix re-attack N1): membership, not aval classification,
         # is what gates every env reference — ids are globally unique per
@@ -5504,6 +5646,81 @@ class _Propagator:
         if isinstance(atom, ir.Literal):
             return False
         return self.taint.get(atom.id, False)
+
+    def read_strict_sign(self, atom: ir.Atom) -> int:
+        """``+1``/``-1`` when every element of this atom's value is
+        certainly positive / certainly negative over the assumed region;
+        ``0`` when nothing certifies either (see ``self.strict_sign``).
+
+        A LITERAL answers 0 even when its value is obviously nonzero. That
+        is deliberate and costs nothing: the single consumer is the `div`
+        boundary gate, which is only consulted when the operand's box
+        REACHES zero, and a literal whose box reaches zero is a literal
+        zero (or a ⊤ stand-in for an undecodable one) — neither of which a
+        sign fact should rescue.
+        """
+        if isinstance(atom, ir.Literal):
+            return 0
+        return self.strict_sign.get(atom.id, 0)
+
+    def _strict_sign_out(self, eqn: ir.JaxprEqn, params, ins) -> int:
+        """The strict sign of this equation's output, from its operands'.
+
+        Every rule below is a statement about REAL values under the
+        premise that each named operand is certainly nonzero of the given
+        sign; none of them reads a box endpoint, so none of them can be
+        defeated by outward rounding. Any primitive not listed answers 0
+        — the fact is dropped, never guessed.
+
+        * ``mul``/``div``: ``sign(a·b) = sign(a)·sign(b)`` and a product or
+          quotient of nonzeros is nonzero. Broadcasting is irrelevant
+          because the fact is quantified over ALL elements of each operand.
+        * ``add``/``add_any``: two same-signed nonzeros sum to that sign.
+          (``sub`` is absent on purpose — ``a − b`` with both positive can
+          be anything, and that is exactly the `Σx² − c` shape whose
+          missing decline was the false VERIFIED.)
+        * ``neg`` flips it; ``abs`` and ``square`` make it ``+1``.
+        * ``integer_pow``: ``x ≠ 0`` gives ``x**y ≠ 0`` for every integer
+          ``y`` including negative ones, with sign ``+1`` for even ``y``
+          (``y = 0`` included: ``x**0 = 1``) and ``sign(x)`` for odd.
+        * ``reduce_sum``: a sum of same-signed nonzeros keeps the sign,
+          PROVIDED each output cell sums at least one term. ``size > 0`` on
+          the operand is exactly that guarantee — every extent is nonzero,
+          so every reduced extent is too. A size-0 operand sums to the
+          IDENTITY 0 and must drop the fact, which the guard does.
+        * ``dot_general``: each output element is a sum of products of one
+          lhs and one rhs element, so it is the two rules above composed;
+          the same size guard covers an empty contraction.
+        """
+        prim = eqn.primitive
+        if prim not in _STRICT_SIGN_PRIMITIVES or len(eqn.outvars) != 1:
+            # every member is single-output; a multi-output member would
+            # have to say WHICH output its rule speaks about before the
+            # caller could write the fact anywhere
+            return 0
+        sgn = [self.read_strict_sign(a) for a in eqn.invars]
+        if prim in ("mul", "div"):
+            return sgn[0] * sgn[1] if len(sgn) == 2 else 0
+        if prim in ("add", "add_any"):
+            return sgn[0] if len(sgn) == 2 and sgn[0] == sgn[1] else 0
+        if prim == "neg":
+            return -sgn[0]
+        if prim in ("abs", "square"):
+            return 1 if sgn[0] else 0
+        if prim == "integer_pow":
+            y = _integer_exponent(params)
+            if y is None or not sgn[0]:
+                return 0
+            return sgn[0] if y % 2 else 1
+        if prim == "reduce_sum":
+            return sgn[0] if ins and ins[0].size > 0 else 0
+        if prim == "dot_general":
+            if len(sgn) != 2 or not (sgn[0] and sgn[1]):
+                return 0
+            if len(ins) != 2 or not (ins[0].size and ins[1].size):
+                return 0
+            return sgn[0] * sgn[1]
+        return 0  # pragma: no cover - the membership test above precedes it
 
     def top_out(
         self, eqn: ir.JaxprEqn, cause: str = "its result was not modeled"
@@ -6987,6 +7204,36 @@ class _Propagator:
             # channel stays closed for flagged targets
             def_true = False
         self.env[target_atom.id] = new
+        if self.semantics == "real" and cmp in ("gt", "lt"):
+            # THE ONE SOURCE of the strict-sign certificate. The closed
+            # meet just written cannot represent `x > k`; this records the
+            # part of it the box lost, and only the part that is a
+            # NONZERO-ness claim: `x > k` with `k >= 0` gives `x > 0`
+            # (transitively, and for every element, since `ks` is the
+            # per-element bound), `x < k` with `k <= 0` gives `x < 0`.
+            # A bound of the wrong sign — `assume(x > -5)` — records
+            # nothing, which is right: it excludes no zero.
+            #
+            # LATER ASSUMES CANNOT INVALIDATE IT. Narrowing is a meet, so
+            # every subsequent constraint on this var only shrinks its box,
+            # and the assumed region is the CONJUNCTION of all of them — a
+            # fact true of the region at this point is true of every
+            # sub-region after it. That is why the record needs no
+            # re-validation downstream, and why it is keyed by var id
+            # rather than by box.
+            #
+            # It is NOT gated on `exactness.certifies_nonemptiness`, and
+            # that is deliberate: the claim a certified sign licenses is
+            # "the quotient is bounded WHERE THE PRECONDITION HOLDS", which
+            # is what a VERIFIED under a constraining assume already says
+            # in its stamp. Whether that region is inhabited is the vacuity
+            # question, decided by the machinery above and disclosed
+            # separately; it is not this fact's job and folding it in here
+            # would answer it twice, inconsistently.
+            if cmp == "gt" and all(k >= 0.0 for k in ks):
+                self.strict_sign[target_atom.id] = 1
+            elif cmp == "lt" and all(k <= 0.0 for k in ks):
+                self.strict_sign[target_atom.id] = -1
         if self.semantics == "ieee" and self.nan.get(target_atom.id):
             # an assumed-true comparison excludes NaN (NaN would falsify
             # it), so the narrowed target's maybe-NaN flag is soundly
@@ -7210,10 +7457,18 @@ class _Propagator:
                 outer_exact = self.exact
                 outer_nan = self.nan
                 outer_taint = self.taint
+                # var ids are unique per JAXPR, not per transcription, so
+                # the strict-sign table is scope-swapped exactly like the
+                # env it annotates. Nothing is carried IN or OUT across the
+                # boundary: an inner value inherits no certificate from its
+                # caller and hands none back, which loses precision on a
+                # `remat`-wrapped division and cannot lose soundness.
+                outer_sign = self.strict_sign
                 self.env = {}
                 self.exact = exactness.ExactSet()
                 self.nan = {}
                 self.taint = {}
+                self.strict_sign = {}
                 out_flags = None
                 out_taints = None
                 try:
@@ -7232,6 +7487,7 @@ class _Propagator:
                     self.exact = outer_exact
                     self.nan = outer_nan
                     self.taint = outer_taint
+                    self.strict_sign = outer_sign
                 for out, val, iout in zip(
                     eqn.outvars, outs, inner.jaxpr.outvars
                 ):
@@ -7329,6 +7585,12 @@ class _Propagator:
             outer_exact = self.exact
             outer_nan = self.nan
             outer_taint = self.taint
+            # branch-scoped like the env, and for a second reason on top of
+            # id uniqueness: an assume inside a possibly-untaken branch
+            # constrains that branch's precondition only, so a certificate
+            # it mints must not outlive the branch. The join below hands
+            # the cond's outputs no certificate at all.
+            outer_sign = self.strict_sign
             results = []
             branch_flags = []  # ieee: per-branch outvar flags
             branch_taints = []  # ieee: per-branch outvar product-taints
@@ -7361,6 +7623,7 @@ class _Propagator:
                     self.exact = exactness.ExactSet()
                     self.nan = {}
                     self.taint = {}
+                    self.strict_sign = {}
                     self._branch_path.append((id(eqn), i))
                     try:
                         results.append(
@@ -7386,6 +7649,7 @@ class _Propagator:
                 self.exact = outer_exact
                 self.nan = outer_nan
                 self.taint = outer_taint
+                self.strict_sign = outer_sign
             branch_refused = [
                 any(
                     isinstance(branches[i].jaxpr.outvars[j], ir.Var)
@@ -7517,11 +7781,20 @@ class _Propagator:
         ins = [self.read(a) for a in eqn.invars]
         in_flags = [self.read_flag(a) for a in eqn.invars] if ieee else None
         try:
-            result = (
-                transfer(eqn, params, ins, in_flags)
-                if ieee
-                else transfer(eqn, params, ins)
-            )
+            if ieee:
+                result = transfer(eqn, params, ins, in_flags)
+            elif eqn.primitive in _REAL_TRANSFERS_READING_STRICT_SIGN:
+                # the fourth argument is the real-mode counterpart of
+                # `in_flags`: a per-operand certificate the transfer cannot
+                # recover from its boxes (see `self.strict_sign`)
+                result = transfer(
+                    eqn,
+                    params,
+                    ins,
+                    tuple(self.read_strict_sign(a) for a in eqn.invars),
+                )
+            else:
+                result = transfer(eqn, params, ins)
         except iv.IndexOutOfBoundsError as e:
             # A FINDING, not a decline. Every other exception arriving here
             # means stelling has no rule for a legal form; this one means
@@ -7861,8 +8134,15 @@ class _Propagator:
                     source_info=eqn.source_info,
                 )
             )
+        out_sign = 0 if ieee else self._strict_sign_out(eqn, params, ins)
         for i, (out, val) in enumerate(zip(eqn.outvars, outs)):
             self.env[out.id] = val
+            if out_sign:
+                # single-output primitives only, in practice: every member
+                # of _STRICT_SIGN_PRIMITIVES has one outvar, and a rule for
+                # a multi-output primitive would have to say which output
+                # it speaks about before it could be added here
+                self.strict_sign[out.id] = out_sign
             if ieee:
                 self.nan[out.id] = out_flags[i]
                 # IEEE_PRODUCT_SOURCES are the taint SOURCES; everything

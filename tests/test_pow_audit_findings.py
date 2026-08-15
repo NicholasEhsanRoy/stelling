@@ -744,7 +744,15 @@ def test_m9_a_dependent_base_is_still_nonlinear_at_an_integer_exponent():
 jax = pytest.importorskip("jax")
 import jax.numpy as jnp  # noqa: E402
 
-jax.config.update("jax_enable_x64", True)
+# x64 is enabled by the module-scoped `_x64` fixture below, NOT here. A
+# bare `jax.config.update` at module scope has no restore, so it leaks
+# into every test that runs after this module in the session — and it did:
+# `test_transcribe.py::test_content_hash_stable_across_processes` compares
+# an in-process hash against one from a clean subprocess, so a leaked x64
+# makes the parent transcribe f64 while the child transcribes f32 and the
+# hashes differ. Invisible to anyone running with `JAX_ENABLE_X64=1` in
+# the environment, because then the child inherits it too; CI sets no such
+# variable, which is why CI is where it surfaced.
 
 from stelling import _optional  # noqa: E402
 from stelling.harness import any_array, assert_  # noqa: E402

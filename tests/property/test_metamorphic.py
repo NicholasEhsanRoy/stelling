@@ -138,7 +138,7 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("hypothesis", reason="needs hypothesis")
-jax = pytest.importorskip("jax", reason="needs jax")
+jax = pytest.importorskip("jax")
 
 from hypothesis import example, given  # noqa: E402
 from hypothesis import strategies as st  # noqa: E402

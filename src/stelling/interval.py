@@ -621,6 +621,40 @@ def abs_(a: IntervalArray) -> IntervalArray:
     return IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
 
 
+def _mul_corners(
+    alo: float, ahi: float, blo: float, bhi: float
+) -> tuple[float, float]:
+    """THE interval product of two elements — one implementation, two
+    callers (:func:`mul` and :func:`dot_general`'s per-term product).
+
+    They were two copies of the same four-corner rule, and M16 converted
+    only one of them: `dot_general` kept the unconditional bump, so
+    `jnp.sum(x*x)` floored at exactly 0 while `jnp.dot(x, x)` floored at
+    `-1e-323` and lost the same nonnegative clamp M16 was about. The
+    divergence was disclosed and attributed to "a contraction's numerics
+    need their own measurement of the association order" — which was the
+    wrong reason: the ACCUMULATION already used `_add_lo`/`_add_hi`, the
+    exact-when-representable route, and association order has nothing to
+    do with a product's corners. Only the corners bumped. Sharing the code
+    is what stops the next reader from having to notice that again.
+
+    Finite endpoints: the four corner products are exact rationals, so the
+    extremum is exact and the single directed rounding leaves it UNCHANGED
+    whenever it is representable. An infinite endpoint keeps the
+    unconditional bump — ``Fraction(inf)`` raises, and :func:`_prod`'s
+    closed-interval ``0 * ±inf = 0`` is an endpoint convention rather than
+    real arithmetic.
+    """
+    if _exactable(alo, ahi, blo, bhi):
+        ex = [Fraction(x) * Fraction(y)
+              for x in (alo, ahi) for y in (blo, bhi)]
+        return _exact_down(min(ex)), _exact_up(max(ex))
+    products = (
+        _prod(alo, blo), _prod(alo, bhi), _prod(ahi, blo), _prod(ahi, bhi)
+    )
+    return _down(min(products)), _up(max(products))
+
+
 def mul(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     """Real multiplication, exact on finite endpoints.
 
@@ -651,17 +685,12 @@ def mul(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     raises, and the closed-interval ``0 * ±inf = 0`` convention in
     :func:`_prod` is an endpoint rule rather than real arithmetic, so it
     stays where it already lived. Same confinement as `add` and `div`.
+
+    The rule itself lives in :func:`_mul_corners`, which
+    :func:`dot_general` also calls — the sharing is the fix, not tidiness
+    (a second copy is what let M16 survive its own fix one level up).
     """
-
-    def f(alo, ahi, blo, bhi):
-        if _exactable(alo, ahi, blo, bhi):
-            ex = [Fraction(x) * Fraction(y)
-                  for x in (alo, ahi) for y in (blo, bhi)]
-            return _exact_down(min(ex)), _exact_up(max(ex))
-        products = (_prod(alo, blo), _prod(alo, bhi), _prod(ahi, blo), _prod(ahi, bhi))
-        return _down(min(products)), _up(max(products))
-
-    return _binary(a, b, f)
+    return _binary(a, b, _mul_corners)
 
 
 def div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
@@ -724,6 +753,19 @@ def boundary_div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
     For elements where the divisor does NOT contain zero, normal division
     is used. For one-sided boundary elements, the result is computed with
     the appropriate infinite endpoint.
+
+    ``inf/inf`` IS ⊤ HERE TOO, and it is checked once for both arms. It
+    used to be checked only on the non-zero-containing arm, so
+    ``boundary_div([inf, inf], [0, inf])`` fell into
+    :func:`_boundary_div_lo`, computed ``inf/inf = NaN`` and raised
+    ``IntervalError("NaN endpoint")`` — an internal invariant string
+    surfacing as a user-facing decline reason out of a kernel whose
+    contract is to degrade rather than crash (audit 0.2.0 B5-3; 8 such box
+    pairs in the sweep). The guard is :func:`div`'s, verbatim, so the two
+    kernels answer the indeterminate form the same way; it is deliberately
+    the same conservative four-corner test rather than a
+    which-arm-uses-which-corner refinement, because ⊤ is always sound and
+    a narrower test here is a second thing to keep right.
     """
     def f(alo, ahi, blo, bhi):
         # Precondition validation: reject divisors that are not valid
@@ -740,13 +782,15 @@ def boundary_div(a: IntervalArray, b: IntervalArray) -> IntervalArray:
                 f"boundary_div requires a one-sided-boundary divisor, but got "
                 f"point-at-zero [0, 0]; division by zero has no finite result"
             )
+        for x in (alo, ahi):
+            for y in (blo, bhi):
+                if (x == _INF or x == -_INF) and (y == _INF or y == -_INF):
+                    # inf/inf is indeterminate; widen fully outward, before
+                    # any endpoint arithmetic can manufacture a NaN
+                    return -_INF, _INF
         b_contains_zero = blo <= 0.0 <= bhi
         if not b_contains_zero:
             # Normal division (no zero in divisor)
-            for x in (alo, ahi):
-                for y in (blo, bhi):
-                    if (x == _INF or x == -_INF) and (y == _INF or y == -_INF):
-                        return -_INF, _INF
             if _exactable(alo, ahi, blo, bhi):
                 ex = [Fraction(x) / Fraction(y)
                       for x in (alo, ahi) for y in (blo, bhi)]
@@ -1271,25 +1315,24 @@ def dot_general(
     BETWEEN output elements are still lost, which is the ordinary image gap
     and not this function's concern.
 
-    Each term is a four-corner interval product — the corners computed in
-    float (so each is correctly rounded, not exact) and the extremum bumped
-    one ulp outward, which covers that rounding. The terms are then
-    accumulated with the same exact-when-representable steps
-    :func:`reduce_sum` uses — seeded with the first contributor, so a
-    one-term contraction spends only the product's bump.
+    Each term is a four-corner interval product — :func:`_mul_corners`,
+    literally the function :func:`mul` calls, so the two cannot drift — and
+    the terms are accumulated with the same exact-when-representable steps
+    :func:`reduce_sum` uses, seeded with the first contributor, so a
+    one-term contraction of representable operands spends no rounding at
+    all.
 
-    **This is NO LONGER :func:`mul`'s rule, and the divergence is recorded
-    rather than hidden.** It was mul's rule, verbatim and inlined, until
-    audit 0.2.0 M16 gave `mul` the exact-when-representable route; this
-    function still carries the unconditional bump. The consequence is the
-    M16 shape one level up: `jnp.sum(x*x)` now floors at exactly 0 while
-    the same quantity written as a contraction does not, so a
-    sum-of-squares residual can still lose its floor by being spelled as a
-    dot product. Sound (a wider box only loses precision), and NOT fixed
-    here because changing a contraction's numerics needs its own
-    measurement of the association-order argument above — but the two
-    should be one implementation, and a reader must not take this
-    paragraph's silence for agreement.
+    **The two used to be separate copies of one rule, and that is how M16
+    survived its own fix.** Audit 0.2.0 M16 gave `mul` the
+    exact-when-representable route and left the copy inlined here bumping
+    unconditionally, so `jnp.sum(x*x)` floored at exactly 0 while
+    `jnp.dot(x, x)` floored at `-1e-323` — a sum-of-squares residual losing
+    its nonnegative clamp by being spelled as a contraction. The
+    divergence was recorded but its stated reason was wrong: the
+    ACCUMULATION here already used `_add_lo`/`_add_hi`, only the product
+    corners bumped, and a product's corners have nothing to do with
+    association order. The association-order argument below is untouched by
+    this and always was.
 
     Under **R** semantics addition is associative, so the bracket bounds
     every association order XLA might pick at once. This reasoning is not
@@ -1373,11 +1416,7 @@ def dot_general(
             ib = _flat_index(tuple(bc), b.shape)
             alo, ahi = a.los[ia], a.his[ia]
             blo, bhi = b.los[ib], b.his[ib]
-            corners = (
-                _prod(alo, blo), _prod(alo, bhi),
-                _prod(ahi, blo), _prod(ahi, bhi),
-            )
-            plo, phi = _down(min(corners)), _up(max(corners))
+            plo, phi = _mul_corners(alo, ahi, blo, bhi)
             if not seen:
                 acc_lo, acc_hi, seen = plo, phi, True
             else:
@@ -1722,11 +1761,17 @@ def ieee_mul(a: IntervalArray, b: IntervalArray):
     Routing through ``Fraction`` would compute the REAL product and then
     round it outward, which is up to an ulp wider on each side than the
     set of values the target can produce — slack where there is none, and
-    a claim about ℝ under a dial that speaks floats. It is also wrong at
-    overflow: two binary64 operands near ``FMAX`` multiply to ``inf`` on
-    the target, so the true image is the point ``[inf, inf]``, while the
-    exact route would report ``[FMAX, inf]`` and name a value the program
-    cannot compute.
+    a claim about ℝ under a dial that speaks floats. That is the whole
+    argument, and it is deliberately no longer accompanied by an overflow
+    one. The overflow sentence this docstring used to add — "two operands
+    near ``FMAX`` multiply to ``inf``, so the exact route's ``[FMAX, inf]``
+    names a value the program cannot compute" — is true of binary64 and
+    PROVES TOO MUCH: the format-parametric path already returns exactly
+    that box, since the corner products are computed in binary64 and
+    ``_ieee_round_box`` rounds them outward onto the narrow grid. Measured,
+    float32: ``FMAX×FMAX`` boxes to ``(3.4028234663852886e+38, inf)`` while
+    ``np.float32`` computes ``inf``. Sound — the box holds the value — but
+    an argument that condemns the sibling row cannot be this row's reason.
     """
 
     def f(alo, ahi, blo, bhi):

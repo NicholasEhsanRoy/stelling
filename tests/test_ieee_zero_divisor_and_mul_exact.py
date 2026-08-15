@@ -1,7 +1,28 @@
 # SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
 # SPDX-License-Identifier: Apache-2.0
 
-"""Audit 0.2.0 S10 and M16: the sign of an IEEE zero, and `mul`'s bump.
+"""Audit 0.2.0 S10, M16 and the B5 follow-ups: the sign of an IEEE zero,
+`mul`'s bump, and what licenses dropping a divisor's zero.
+
+**B5-1 (FALSE VERIFIED, real mode), and it is what M16 made reachable.**
+With `mul` exact, `sum(x*x)` floors at exactly 0, so `sum(x*x) - c` became a
+ONE-SIDED BOUNDARY divisor where it used to be a true straddle — and the
+one-sided arm was the only one of `div`'s four zero-containing shapes that
+did not decline. It called `boundary_div`, which silently drops `b = 0`.
+The program does not: `1/(sum(x*x) - 8)` over `x in [0,2]^2` DISCHARGED
+`q <= -0.125` while jax at `x = [2,2]` returns `+inf`.
+
+The kernel is sound over `b != 0` (the sweep below re-measures that). What
+was missing is the premise: `boundary_div` is reachable only when a strict
+`assume` certifies the divisor is nonzero, carried to the division through
+`mul`/`square`/`integer_pow`/`reduce_sum`/`dot_general`. Everything else
+declines with the other three shapes.
+
+**B5-2.** `dot_general` kept an inlined copy of `mul`'s corner rule that M16
+did not convert; the two are one function now.
+
+**B5-3.** The `NaN endpoint` raise removed from `ieee_div` was still live in
+`boundary_div`, where it surfaced as a user-facing decline reason.
 
 **S10 (FALSE VERIFIED, all four formats).** `ieee_div`/`ieee_div_fmt` used to
 tighten a divisor box touching zero at exactly one boundary: `[lo, 0]` with
@@ -46,6 +67,7 @@ from stelling import ir
 from stelling.propagate import (
     _FLOAT_FORMATS,
     _ieee_format_min_normal,
+    _ieee_format_min_positive,
     _ieee_round_box,
     propagate,
 )
@@ -92,6 +114,31 @@ def close(eqns, outvars):
         jaxpr=ir.Jaxpr(invars=(), constvars=(), eqns=tuple(eqns), outvars=tuple(outvars)),
         consts=(),
     )
+
+
+@pytest.fixture
+def _x64():
+    """float64 for one test, RESTORED afterwards — the house pattern.
+
+    Two tests below used to call `jax.config.update("jax_enable_x64", True)`
+    inline with no restore. x64 is process-global in jax, so an unrestored
+    set leaks into every test that runs after it in the session; the one
+    that caught it on `main` was
+    `test_transcribe.py::test_content_hash_stable_across_processes`, which
+    hashes an in-process trace against a clean subprocess — parent f64,
+    child f32, hashes differ. Invisible to anyone running with
+    `JAX_ENABLE_X64=1` in the environment, because then the child inherits
+    it too, and CI sets no such variable.
+
+    Function-scoped and NOT autouse, unlike most modules': the rest of this
+    file is hand-built IR that runs with no jax at all, so requesting the
+    fixture is also this module's jax gate.
+    """
+    jax = pytest.importorskip("jax")
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    yield
+    jax.config.update("jax_enable_x64", old)
 
 
 def ieee_div_any_format(a, b, name):
@@ -181,6 +228,40 @@ def test_s10_harness_no_longer_discharges_in_any_format(dtype):
     )
 
 
+@pytest.mark.parametrize("dtype", FORMAT_NAMES)
+def test_the_ieee_zero_divisor_rule_is_emitted_not_only_documented(dtype):
+    """`IEEE_ZERO_DIVISOR_TOP` reaches the reader the CHANGELOG sends to it.
+
+    The constant is named and placed like `SCATTER_ADD_IEEE_DECLINE`, which
+    is raised as user-facing text, but it was referenced only from
+    docstrings — while `CHANGELOG.md` told a user "`interval.
+    IEEE_ZERO_DIVISOR_TOP` says why". What they actually saw contradicted
+    itself: the transfer returned ⊤ as an ORDINARY result, so it counted
+    KNOWN and the undecided note said "none fell to ⊤ … compatible with a
+    precision near-miss" about a `[-inf, +inf]` box, while the stamp's
+    `top_despite_coverage` line named `div ×1` in the same verdict.
+
+    Both halves are asserted: the prose is emitted, and the coverage counts
+    the ⊤ so the two sentences agree (audit 0.2.0 B5-6).
+    """
+    A = av(dtype)
+    a, x, q, pred, out = var(0, A), var(1, A), var(2, A), var(3, BOOL), var(4, BOOL)
+    query = close(
+        [
+            any_eqn(a, -2.0, -2.0, dtype=dtype),
+            any_eqn(x, -1.0, 0.0, dtype=dtype),
+            eqn("div", [a, x], q),
+            eqn("gt", [q, lit(0.0, A)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(query, semantics="ieee")
+    assert any(iv.IEEE_ZERO_DIVISOR_TOP in n for n in p.notes), p.notes
+    assert any("contains zero (after the subnormal haze)" in n for n in p.notes)
+    assert p.coverage.unknown_primitives == (("div", 1),), p.coverage
+
+
 def test_ieee_div_does_not_raise_on_an_infinite_dividend_over_a_zero_edge():
     """The withdrawn branch could also CRASH the analysis, not only mislead it.
 
@@ -195,6 +276,73 @@ def test_ieee_div_does_not_raise_on_an_infinite_dividend_over_a_zero_edge():
         box, made_nan = ieee_div_any_format(s(-INF, -INF), s(-INF, 0.0), name)
         assert (box.los[0], box.his[0]) == (-INF, INF)
         assert made_nan is True  # inf/inf is a real NaN class here
+
+
+def test_boundary_div_answers_inf_over_inf_instead_of_raising():
+    """**The same crash class in the SIBLING kernel** (audit 0.2.0 B5-3).
+
+    The claim recorded for `ieee_div` — "returning ⊤ before any endpoint
+    arithmetic removes the `NaN endpoint` raise too" — was true of that
+    kernel and false of the real-mode one, which was never changed.
+    `_boundary_div_lo`/`_hi` fall to `_down(num/den)` when either operand is
+    infinite, and `inf/inf` is NaN, so `boundary_div([inf, inf], [0, inf])`
+    raised `IntervalError("NaN endpoint in interval arithmetic")`. The
+    dispatcher catches it, so it never crashed `check` — it surfaced an
+    INTERNAL INVARIANT STRING as the user-facing decline reason, out of a
+    public entry point. `div`'s own `inf/inf` guard now runs first in both
+    of `boundary_div`'s arms.
+    """
+    r = iv.boundary_div(s(INF, INF), s(0.0, INF))
+    assert (r.los[0], r.his[0]) == (-INF, INF)
+    r2 = iv.boundary_div(s(-INF, -INF), s(-INF, 0.0))
+    assert (r2.los[0], r2.his[0]) == (-INF, INF)
+
+    # exhaustive over the pool: no legal one-sided-boundary call raises
+    raised = []
+    for alo, ahi in _SWEEP_BOXES:
+        for blo, bhi in _SWEEP_BOXES:
+            if blo < 0.0 < bhi or (blo == 0.0 and bhi == 0.0):
+                continue  # outside boundary_div's documented precondition
+            try:
+                iv.boundary_div(s(alo, ahi), s(blo, bhi))
+            except iv.IntervalError as e:  # pragma: no cover - the finding
+                raised.append(((alo, ahi), (blo, bhi), str(e)))
+    assert raised == [], f"{len(raised)} box pairs still raise: {raised[:3]}"
+
+
+def test_the_nan_endpoint_string_is_not_a_decline_reason_the_user_can_see():
+    """The same defect through the PUBLIC entry point, which is what made it
+    worth fixing: the dispatcher catches the `IntervalError`, so nothing
+    crashed — it printed the domain's internal invariant text as the reason
+    `div` declined.
+
+    `a = [inf, inf]`, `assume(b > 0)` on `b = [0, inf]`: the certificate
+    admits `boundary_div`, whose `[0, hi]` arm divides `alo / bhi` —
+    `inf / inf`. Measured on the pre-fix tree, verbatim:
+
+        'div' declined this form at ...: NaN endpoint in interval arithmetic
+
+    Both halves are asserted: the string is gone, and the obligation is
+    still undecided for the RIGHT reason (`inf/inf` really is ⊤).
+    """
+    a, b, q, pred, out = var(0), var(1), var(2), var(3, BOOL), var(4, BOOL)
+    pa, ao = var(5, BOOL), var(6, BOOL)
+    query = close(
+        [
+            any_eqn(a, INF, INF),
+            any_eqn(b, 0.0, INF),
+            eqn("gt", [b, lit(0.0)], pa),
+            eqn("stelling_assume", [pa], ao),
+            eqn("div", [a, b], q),
+            eqn("gt", [q, lit(0.0)], pred),
+            eqn("stelling_assert", [pred], out),
+        ],
+        [out],
+    )
+    p = propagate(query)
+    assert not any("NaN endpoint" in n for n in p.notes), p.notes
+    assert not any("declined this form" in n for n in p.notes), p.notes
+    assert p.obligations[0].status == "unknown"
 
 
 @pytest.mark.parametrize("name", FORMAT_NAMES)
@@ -214,47 +362,76 @@ def test_ieee_div_still_tightens_when_the_divisor_excludes_zero(name):
 # =========================================================================
 
 
+_BOUNDARY_DIV_DIVIDENDS = [
+    (-2.0, -2.0), (-5.0, -1.0), (-1.0, -1e-9), (-1e300, -1e-300),
+    (0.0, 0.0), (0.0, 4.0), (1.0, 1.0), (2.0, 4.0), (1e-300, 1e300),
+    (-3.0, 7.5), (-1.0, 0.0), (0.0, 1e-320),
+]
+_BOUNDARY_DIV_DIVISORS = [
+    (0.0, 1.0), (0.0, 2.0), (0.0, 32.0), (0.0, 1e300), (0.0, 5e-324),
+    (-1.0, 0.0), (-3.0, 0.0), (-1e300, 0.0), (-5e-324, 0.0), (-0.125, 0.0),
+]
+_BOUNDARY_DIV_CROWDING = (
+    2, 3, 10, 100, 10**3, 10**6, 10**9, 10**30, 10**120, 10**300,
+)
+
+# The exact number of quotients the sweep below checks. Asserted rather than
+# bounded, and quoted in SOUNDNESS.md: a figure in the log that no run in the
+# tree reproduces is worth less than no figure (audit 0.2.0 B5-4 — the entry
+# claimed 31,350 quotients over ten cases while the shipped test executed 195
+# over five and asserted only `> 100`).
+BOUNDARY_DIV_SWEEP_QUOTIENTS = 7560
+
+
 def test_real_boundary_div_covers_every_nonzero_real_in_the_divisor_box():
     """The claim that licenses the difference, verified rather than asserted.
 
     Over R there is ONE zero and `a/0` is undefined, so `boundary_div`'s
     obligation is to cover `a/b` for every real `b != 0` in the box. Checked
-    in exact rational arithmetic at values crowding the zero endpoint, where
-    the quotient diverges.
+    in exact rational arithmetic over 12 dividend boxes x 10
+    one-sided-boundary divisor boxes, at values crowding the zero endpoint
+    down to a relative offset of `1e-300` of the span, where the quotient
+    diverges.
+
+    **This does not license `boundary_div`'s REACHABILITY**, which is a
+    separate question the transfer answers (audit 0.2.0 B5-1): the kernel is
+    sound over `b != 0`, and whether `b != 0` holds is what the strict-assume
+    certificate decides. A sweep of the kernel can never see that, which is
+    exactly how a sound kernel came to sit under a false VERIFIED.
     """
-    cases = [
-        (-2.0, -2.0, -1.0, 0.0),
-        (2.0, 2.0, 0.0, 1.0),
-        (-5.0, -1.0, 0.0, 2.0),
-        (2.0, 4.0, -3.0, 0.0),
-        (1.0, 1.0, 0.0, 32.0),
-    ]
     checked = 0
-    for alo, ahi, blo, bhi in cases:
-        r = iv.boundary_div(s(alo, ahi), s(blo, bhi))
-        lo, hi = r.los[0], r.his[0]
-        flo = Fraction(lo) if math.isfinite(lo) else None
-        fhi = Fraction(hi) if math.isfinite(hi) else None
-        xs = [Fraction(alo), Fraction(ahi), (Fraction(alo) + Fraction(ahi)) / 2]
-        span = Fraction(bhi) - Fraction(blo)
-        ys = [Fraction(blo), Fraction(bhi)]
-        for k in (2, 10, 10**3, 10**9, 10**30, 10**300):
-            ys += [Fraction(blo) + span / k, Fraction(bhi) - span / k]
-        for x in xs:
-            for y in ys:
-                if y == 0 or not (Fraction(blo) <= y <= Fraction(bhi)):
-                    continue
-                q = x / y
-                checked += 1
-                assert flo is None or q >= flo, (
-                    f"boundary_div([{alo},{ahi}],[{blo},{bhi}]) -> [{lo},{hi}] "
-                    f"misses {float(x)}/{float(y)}"
-                )
-                assert fhi is None or q <= fhi, (
-                    f"boundary_div([{alo},{ahi}],[{blo},{bhi}]) -> [{lo},{hi}] "
-                    f"misses {float(x)}/{float(y)}"
-                )
-    assert checked > 100
+    for alo, ahi in _BOUNDARY_DIV_DIVIDENDS:
+        for blo, bhi in _BOUNDARY_DIV_DIVISORS:
+            r = iv.boundary_div(s(alo, ahi), s(blo, bhi))
+            lo, hi = r.los[0], r.his[0]
+            flo = Fraction(lo) if math.isfinite(lo) else None
+            fhi = Fraction(hi) if math.isfinite(hi) else None
+            xs = [
+                Fraction(alo), Fraction(ahi),
+                (Fraction(alo) + Fraction(ahi)) / 2,
+            ]
+            span = Fraction(bhi) - Fraction(blo)
+            ys = [Fraction(blo), Fraction(bhi)]
+            for k in _BOUNDARY_DIV_CROWDING:
+                ys += [Fraction(blo) + span / k, Fraction(bhi) - span / k]
+            for x in xs:
+                for y in ys:
+                    if y == 0 or not (Fraction(blo) <= y <= Fraction(bhi)):
+                        continue
+                    q = x / y
+                    checked += 1
+                    assert flo is None or q >= flo, (
+                        f"boundary_div([{alo},{ahi}],[{blo},{bhi}]) -> "
+                        f"[{lo},{hi}] misses {x}/{y}"
+                    )
+                    assert fhi is None or q <= fhi, (
+                        f"boundary_div([{alo},{ahi}],[{blo},{bhi}]) -> "
+                        f"[{lo},{hi}] misses {x}/{y}"
+                    )
+    assert checked == BOUNDARY_DIV_SWEEP_QUOTIENTS, (
+        f"the sweep executed {checked} quotients; SOUNDNESS.md quotes "
+        f"{BOUNDARY_DIV_SWEEP_QUOTIENTS}. Update both or neither."
+    )
 
 
 def test_real_and_ieee_division_disagree_at_a_zero_boundary_on_purpose():
@@ -286,46 +463,129 @@ def test_real_and_ieee_division_disagree_at_a_zero_boundary_on_purpose():
     assert real.los[0] != -INF
 
 
-def test_real_mode_div_transfer_still_uses_boundary_div():
-    """The real-mode dispatch is untouched: the same harness that must not
-    discharge under ieee still discharges under R, and that is correct
-    there."""
+def test_real_mode_div_transfer_reaches_boundary_div_under_a_certificate():
+    """The real-mode dispatch reaches `boundary_div`, and what gets it
+    there is the strict assume, not the position of the zero.
+
+    This construction used to omit the assume and still discharge, which
+    was the B5-1 false VERIFIED in its smallest form: `x = 0` is a DECLARED
+    value, ℝ has no `-2/0`, and the running program returns `-inf` — which
+    is not `> 0`. With `assume(x < 0)` the zero is excluded by the
+    precondition, the closed box is still `[-1, 0]` because an interval
+    cannot hold an open bound, and dropping the endpoint drops nothing.
+    """
     a, x, q, pred, out = var(0), var(1), var(2), var(3, BOOL), var(4, BOOL)
-    query = close(
-        [
-            any_eqn(a, -2.0, -2.0),
-            any_eqn(x, -1.0, 0.0),
-            eqn("div", [a, x], q),
-            eqn("gt", [q, lit(0.0)], pred),
-            eqn("stelling_assert", [pred], out),
-        ],
-        [out],
-    )
-    p = propagate(query)
+    pa, ao = var(5, BOOL), var(6, BOOL)
+    eqns = [
+        any_eqn(a, -2.0, -2.0),
+        any_eqn(x, -1.0, 0.0),
+        eqn("lt", [x, lit(0.0)], pa),
+        eqn("stelling_assume", [pa], ao),
+        eqn("div", [a, x], q),
+        eqn("gt", [q, lit(0.0)], pred),
+        eqn("stelling_assert", [pred], out),
+    ]
+    p = propagate(close(eqns, [out]))
     assert p.obligations[0].status == "discharged", (
         f"real-mode boundary division regressed: {p.obligations[0].detail}"
     )
+
+    # …and without the assume it declines, naming the reason.
+    bare = propagate(close([eqns[0], eqns[1], *eqns[4:]], [out]))
+    assert bare.obligations[0].status == "unknown"
+    assert any("REACHES zero at a boundary" in n for n in bare.notes), bare.notes
 
 
 # =========================================================================
 # S10 — a standing containment sweep, signed zeros distinguished
 # =========================================================================
 
-_SWEEP_POOL = [
-    -INF, -1e300, -1.0, -5e-324, -0.0, 0.0, 5e-324, 1.0, 1e300, INF,
-]
+def _fmt_max(name):
+    """The largest finite value of a format: `(2 - 2**(1-p)) * 2**emax`."""
+    p, _emin, emax = _FLOAT_FORMATS[name]
+    return math.ldexp(2.0 - math.ldexp(1.0, 1 - p), emax)
+
+
+def _pow2(e: int) -> Fraction:
+    """``2**e`` as an exact rational, for either sign of ``e``."""
+    return Fraction(2**e, 1) if e >= 0 else Fraction(1, 2**-e)
+
+
+def _round_to_format(q: Fraction, name: str) -> float:
+    """``q`` rounded to nearest-even in ``name``'s grid, overflowing to ±inf.
+
+    The narrow-format oracle, in pure Python. The alternative was to divide
+    in `numpy`/`ml_dtypes`, which would put an import gate — and a skip the
+    inventory has to disclose — on the only test that drives narrow-format
+    division. Validated against `numpy.float16/float32/float64` and
+    `ml_dtypes.bfloat16` over 379,440 operand pairs (each format's pool plus
+    300 pseudo-random in-format values, all four formats), 0 mismatches; the
+    check is not shipped because those packages are the dependency this
+    function exists to avoid.
+
+    Not a general float printer: it takes an EXACT rational and returns the
+    binary64 double that holds the format's answer (every value of all four
+    formats is a binary64 value), which is what the boxes are compared
+    against.
+    """
+    p, emin, emax = _FLOAT_FORMATS[name]
+    if q == 0:
+        return 0.0
+    sign = -1 if q < 0 else 1
+    a = -q if q < 0 else q
+    # e = floor(log2(a)), from the bit lengths plus at most one correction
+    e = a.numerator.bit_length() - a.denominator.bit_length()
+    while _pow2(e) > a:
+        e -= 1
+    while _pow2(e + 1) <= a:
+        e += 1
+    if e > emax:  # past the top binade: overflow, whatever the significand
+        return sign * INF
+    e = max(e, emin)  # subnormals share the minimum exponent's ulp
+    shift = p - 1 - e  # ulp of the target binade is 2**-shift
+    n = round(a * _pow2(shift))  # Fraction rounds half to EVEN — IEEE's rule
+    try:
+        val = sign * math.ldexp(float(n), -shift)
+    except OverflowError:  # rounded up out of the top binade
+        return sign * INF
+    fmax = _fmt_max(name)
+    if val > fmax:
+        return INF
+    if val < -fmax:
+        return -INF
+    return val
+
+
+def _fmt_pool(name):
+    """The adversarial value pool **for this format**.
+
+    It used to be one binary64 pool for all four parametrizations, so the
+    three narrow instances drove `ieee_div_fmt` with operands no float16 or
+    bfloat16 program can hold (`5e-324`, `1e300`) — they exercised the
+    binary64 arithmetic and the outward rounding, not the format. Each
+    format now brings its OWN smallest subnormal, largest finite, and a
+    mid-range magnitude, so a narrow instance is a narrow-format sweep.
+    """
+    fmax = _fmt_max(name)
+    tiny = _ieee_format_min_positive(_FLOAT_FORMATS[name])
+    mid = math.ldexp(1.0, _FLOAT_FORMATS[name][2] // 2)  # 2**(emax//2)
+    return [
+        -INF, -fmax, -mid, -1.0, -tiny, -0.0, 0.0, tiny, 1.0, mid, fmax, INF,
+    ]
+
+
+_SWEEP_POOL = _fmt_pool("float64")
 _SWEEP_BOXES = [
     (lo, hi) for lo, hi in itertools.product(_SWEEP_POOL, repeat=2) if lo <= hi
 ]
 
 
-def _float_points(lo, hi):
+def _float_points(lo, hi, pool):
     """Values of the box, with `+0.0` and `-0.0` kept APART. They compare
     equal, so a generator that dedups on `==` sees one zero and never
     produces the input that made S10 visible."""
-    cands = [lo, hi, -0.0, 0.0, -1.0, 1.0, -1e300, 1e300]
     out, seen = [], set()
-    for c in cands:
+    for c in [lo, hi, *pool]:
         if not (lo <= c <= hi):
             continue
         key = (c, math.copysign(1.0, c)) if c == 0.0 else (c, 0.0)
@@ -338,15 +598,30 @@ def _float_points(lo, hi):
 @pytest.mark.parametrize("name", FORMAT_NAMES)
 def test_ieee_div_containment_sweep_over_adversarial_boxes(name):
     """Every returned box must contain every quotient the format can compute
-    at points of the operand boxes — infinities and signed zeros included."""
+    at points of the operand boxes — infinities and signed zeros included.
+
+    **The pool and the oracle are both the format's now.** They used to be
+    binary64's for all four parametrizations, so the three narrow instances
+    fed `ieee_div_fmt` operands no float16 or bfloat16 program can hold
+    (`5e-324`, `1e300`) and compared its box against a binary64 division —
+    exercising the outward rounding and nothing of the format. The pool is
+    each format's own extremes (`_fmt_pool`) and the finite/finite quotient
+    is `_round_to_format(Fraction(x)/Fraction(y))`, the value the target
+    ACTUALLY computes, arrived at without dividing in binary64 first
+    (a double rounding is not the format's answer).
+    """
+    pool = _fmt_pool(name)
+    boxes = [
+        (lo, hi) for lo, hi in itertools.product(pool, repeat=2) if lo <= hi
+    ]
     checked = 0
-    for (alo, ahi) in _SWEEP_BOXES:
-        for (blo, bhi) in _SWEEP_BOXES:
+    for (alo, ahi) in boxes:
+        for (blo, bhi) in boxes:
             box, made_nan = ieee_div_any_format(s(alo, ahi), s(blo, bhi), name)
-            for x in _float_points(alo, ahi):
-                for y in _float_points(blo, bhi):
-                    v = _ieee_quotient(x, y)
+            for x in _float_points(alo, ahi, pool):
+                for y in _float_points(blo, bhi, pool):
                     checked += 1
+                    v = _ieee_quotient(x, y, name)
                     if v is None:  # NaN
                         assert made_nan, (
                             f"{name}: NaN at {x!r}/{y!r} but made_nan=False"
@@ -360,12 +635,17 @@ def test_ieee_div_containment_sweep_over_adversarial_boxes(name):
     assert checked > 5000
 
 
-def _ieee_quotient(x, y):
-    """`x / y` with IEEE's answers, in pure Python: returns None for NaN.
+def _ieee_quotient(x, y, name="float64"):
+    """`x / y` in format `name`, with IEEE's answers, in pure Python:
+    returns None for NaN.
 
     Python raises on division by zero instead of returning an infinity, so
     the zero cases — the whole subject — are supplied from the standard:
     `+-finite/+-0 = +-inf` by XOR of the sign bits, `0/0` and `inf/inf` NaN.
+    The finite/finite case is the exact rational quotient rounded once into
+    the target format, which for `float64` is the same value `x / y`
+    produces and for the narrow formats is the value binary64 division
+    cannot give.
     """
     xz, yz = x == 0.0, y == 0.0
     xinf, yinf = math.isinf(x), math.isinf(y)
@@ -378,7 +658,9 @@ def _ieee_quotient(x, y):
         return math.copysign(INF, sign)
     if yinf:
         return math.copysign(0.0, sign)
-    return x / y
+    if xz:
+        return math.copysign(0.0, sign)
+    return _round_to_format(Fraction(x) / Fraction(y), name)
 
 
 # =========================================================================
@@ -464,16 +746,105 @@ def test_mul_containment_and_exactness_on_a_battery():
             assert Fraction(r.his[0]) == hi_exact
 
 
+# =========================================================================
+# B5-2 — `dot_general` follows `mul`'s rule again, because it IS `mul`'s rule
+# =========================================================================
+
+
+def _contract_1d(a_box, b_box):
+    """`dot_general`'s 1-D contraction: the interval meaning of
+    `jnp.dot(x, y)` for vectors."""
+    return iv.dot_general(a_box, b_box, (((0,), (0,)), ((), ())))
+
+
+def test_dot_general_no_longer_loses_the_floor_reduce_sum_keeps():
+    """The M16 shape one level up (audit 0.2.0 B5-2).
+
+    `dot_general` carried an INLINED COPY of `mul`'s four-corner rule and
+    M16 converted only the original, so `jnp.sum(x*x)` floored at exactly 0
+    while `jnp.dot(x, x)` floored at `-1e-323` — the same nonnegative clamp,
+    defeated the same way, one level up. Measured before the fix:
+    `(-1e-323, 32.00000000000001)` against `reduce_sum`'s `(0.0, 32.0)`.
+
+    The two are the same call now (`interval._mul_corners`), so this asserts
+    the boxes are IDENTICAL rather than merely both nonnegative — an
+    equality a future divergence cannot satisfy by accident.
+    """
+    X = iv.from_bounds((2,), 0.0, 4.0)
+    via_sum = iv.reduce_sum(iv.mul(X, X), (0,))
+    via_dot = _contract_1d(X, X)
+    assert (via_dot.los[0], via_dot.his[0]) == (0.0, 32.0)
+    assert (via_dot.los, via_dot.his) == (via_sum.los, via_sum.his)
+
+
+def test_dot_general_is_exact_when_the_contraction_is_representable():
+    """A matmul of `[2,3]`-valued matrices: each output element is
+    `2 x [4, 9]`, exactly `[8, 18]`. The bumped copy returned
+    `[7.999999999999999, 18.000000000000004]`."""
+    A = iv.from_bounds((2, 2), 2.0, 3.0)
+    r = iv.dot_general(A, A, (((1,), (0,)), ((), ())))
+    assert r.los == (8.0,) * 4 and r.his == (18.0,) * 4
+
+
+def test_dot_general_containment_on_a_battery():
+    """The containment evidence `mul` got, for the converted rule.
+
+    A 1-D contraction's image is `sum_i x_i*y_i`, and with the operand
+    elements independent (no index appears twice in one output element —
+    the property the row rests on) the exact image endpoints are the sums of
+    the per-term corner extrema. Checked in exact rational arithmetic over
+    every ordered endpoint pair from an 8-value dyadic pool, and — because
+    every value here is a small dyadic — the box must be EXACTLY the image,
+    not merely contain it.
+    """
+    pool = [-4.0, -1.5, -0.5, 0.0, 0.5, 1.5, 4.0, 8.0]
+    boxes = [(lo, hi) for lo, hi in itertools.product(pool, repeat=2) if lo <= hi]
+    checked = 0
+    for (alo, ahi) in boxes:
+        for (blo, bhi) in boxes:
+            # two identical terms, so the image is 2x the single-term image
+            a_box = iv.IntervalArray(shape=(2,), los=(alo, alo), his=(ahi, ahi))
+            b_box = iv.IntervalArray(shape=(2,), los=(blo, blo), his=(bhi, bhi))
+            r = _contract_1d(a_box, b_box)
+            corners = [
+                Fraction(x) * Fraction(y)
+                for x in (alo, ahi)
+                for y in (blo, bhi)
+            ]
+            lo_exact, hi_exact = 2 * min(corners), 2 * max(corners)
+            checked += 1
+            assert Fraction(r.los[0]) <= lo_exact
+            assert Fraction(r.his[0]) >= hi_exact
+            assert Fraction(r.los[0]) == lo_exact, (
+                f"dot_general([{alo},{ahi}],[{blo},{bhi}]) lo "
+                f"{r.los[0]} != {float(lo_exact)}"
+            )
+            assert Fraction(r.his[0]) == hi_exact, (
+                f"dot_general([{alo},{ahi}],[{blo},{bhi}]) hi "
+                f"{r.his[0]} != {float(hi_exact)}"
+            )
+    assert checked == 1296
+
+
+def test_dot_general_keeps_the_bump_where_mul_does():
+    """The confinement is shared too: an infinite endpoint takes the
+    unconditional-bump route in both, because `Fraction(inf)` raises and the
+    `0 * ±inf = 0` convention is an endpoint rule. One implementation, one
+    boundary."""
+    a_box = iv.IntervalArray(shape=(1,), los=(2.0,), his=(INF,))
+    b_box = iv.IntervalArray(shape=(1,), los=(3.0,), his=(4.0,))
+    r = _contract_1d(a_box, b_box)
+    assert r.his[0] == INF
+    assert r.los[0] < 6.0  # bumped, exactly as `mul` is on the same operands
+    assert r.los[0] == iv.mul(a_box, b_box).los[0]
+
+
 def test_ieee_mul_deliberately_keeps_the_native_float_product():
     """`ieee_mul` does NOT take the exact route, and this pins why.
 
     Under ieee the value the program has IS `fl(x*y)`; the native corner
     product already IS that value, so routing through `Fraction` would round
-    a REAL product outward and manufacture slack where there is none. At
-    overflow it would also be wrong in kind: two `1e300`s multiply to `inf`
-    on the target, so the true image is the point `[inf, inf]`, while the
-    exact route reports `[FMAX, inf]` and names a value the program cannot
-    produce — which is exactly what real-mode `mul` correctly returns above.
+    a REAL product outward and manufacture slack where there is none.
     """
     box, made_nan = iv.ieee_mul(s(1e300, 1e300), s(1e300, 1e300))
     assert (box.los[0], box.his[0]) == (INF, INF)
@@ -485,29 +856,65 @@ def test_ieee_mul_deliberately_keeps_the_native_float_product():
     assert point.los[0] == point.his[0] == 0.1 * 0.1
 
 
-def test_mul_transfer_end_to_end_reaches_boundary_division():
-    """The shape the 0.2.0 boundary-division row was added for: a
-    sum-of-squares residual in the denominator. `sum(x*x)` for `x in [0,4]`
-    must floor at 0, so the divisor has zero at ONE boundary and
-    `boundary_div` decides `1/sum > 0`."""
-    x, sq, tot, q, pred, out = (
-        var(0, av("float64")),
-        var(1),
-        var(2),
-        var(3),
-        var(4, BOOL),
-        var(5, BOOL),
+def test_the_overflow_argument_for_ieee_mul_proves_too_much():
+    """**Why the reason above stops where it does** (audit 0.2.0 B5-6).
+
+    The docstring used to add an overflow argument: two binary64 operands
+    near `FMAX` multiply to `inf`, so the exact route's `[FMAX, inf]` would
+    "name a value the program cannot compute". True of binary64 — and the
+    row's own NARROW-format path already returns exactly that box, because
+    the corners are computed in binary64 and only then rounded outward onto
+    the narrow grid. Measured here on float32, so nobody re-derives the
+    argument from the docstring and applies it to the sibling.
+
+    Sound in both places: the box holds the value the target computes. It
+    is the ARGUMENT that does not survive, and an argument that condemns
+    the row next door cannot be this row's reason.
+    """
+    fmt = _FLOAT_FORMATS["float32"]
+    f32max = _fmt_max("float32")
+    box, made_nan = iv.ieee_mul_fmt(
+        s(f32max, f32max), s(f32max, f32max), _ieee_format_min_normal(fmt)
     )
-    x = ir.Var(id=0, aval=ir.Aval(kind="ShapedArray", shape=(2,), dtype="float64"))
-    sq = ir.Var(id=1, aval=ir.Aval(kind="ShapedArray", shape=(2,), dtype="float64"))
-    query = close(
+    box = _ieee_round_box(box, fmt)
+    assert (box.los[0], box.his[0]) == (f32max, INF), (
+        "the narrow path stopped naming FMAX; re-read the docstring's reason"
+    )
+    assert made_nan is False
+    # the value float32 actually computes is `inf`, and the box holds it —
+    # while ALSO holding `FMAX`, which is the half the old argument forbade
+    assert box.his[0] == INF and box.los[0] < INF
+
+
+def _sum_of_squares_query(with_assume: bool):
+    """`1 / sum(x*x) > 0` over `x in [0, 4]^2`, with or without
+    `assume(x > 0)`. Hand-built so the two differ in exactly one pair of
+    equations."""
+    VEC = ir.Aval(kind="ShapedArray", shape=(2,), dtype="float64")
+    VBOOL = ir.Aval(kind="ShapedArray", shape=(2,), dtype="bool")
+    x = ir.Var(id=0, aval=VEC)
+    sq = ir.Var(id=1, aval=VEC)
+    tot, q, pred, out = var(2), var(3), var(4, BOOL), var(5, BOOL)
+    pa, ao = ir.Var(id=6, aval=VBOOL), ir.Var(id=7, aval=VBOOL)
+    decl = ir.JaxprEqn(
+        primitive="stelling_any",
+        invars=(),
+        outvars=(x,),
+        params=(("shape", (2,)), ("dtype", "float64"), ("lo", 0.0), ("hi", 4.0)),
+    )
+    gate = (
         [
-            ir.JaxprEqn(
-                primitive="stelling_any",
-                invars=(),
-                outvars=(x,),
-                params=(("shape", (2,)), ("dtype", "float64"), ("lo", 0.0), ("hi", 4.0)),
-            ),
+            eqn("gt", [x, ir.Literal(val=0.0, aval=ir.Aval(
+                kind="ShapedArray", shape=(), dtype="float64"))], pa),
+            eqn("stelling_assume", [pa], ao),
+        ]
+        if with_assume
+        else []
+    )
+    return close(
+        [
+            decl,
+            *gate,
             eqn("mul", [x, x], sq),
             eqn("reduce_sum", [sq], tot, params=(("axes", (0,)),)),
             eqn("div", [lit(1.0), tot], q),
@@ -516,11 +923,41 @@ def test_mul_transfer_end_to_end_reaches_boundary_division():
         ],
         [out],
     )
-    p = propagate(query)
+
+
+def test_mul_transfer_end_to_end_reaches_boundary_division():
+    """The shape the 0.2.0 boundary-division row was added for: a
+    sum-of-squares residual in the denominator, with the `assume(x > 0)`
+    the row's own description gives it.
+
+    Two things have to hold at once. `sum(x*x)` must floor at exactly 0
+    (M16 — with the bump the divisor was a true straddle and the division
+    declined before `boundary_div` was reached), and the strict assume's
+    exclusion of zero must SURVIVE `mul` and `reduce_sum` to the division
+    (B5-1 — the closed box is `[0, 32]` either way, so the box alone
+    cannot license dropping the endpoint).
+    """
+    p = propagate(_sum_of_squares_query(with_assume=True))
     assert p.obligations[0].status == "discharged", (
         f"the `x*x` spelling still cannot reach boundary division: "
         f"{p.obligations[0].detail}; notes {p.notes}"
     )
+
+
+def test_the_same_sum_of_squares_declines_with_the_assume_removed():
+    """**The attribution control for the test above**, and the B5-1 defect
+    at the propagate layer: remove the one assume and the identical divisor
+    box `[0, 32]` must now DECLINE. `x = [0, 0]` is a declared point, the
+    divisor is exactly 0 there, and ℝ has no quotient at it.
+
+    So `boundary_div`'s reachability tracks the CERTIFICATE, not the shape
+    of the box — which is the whole content of the fix, since the two
+    queries produce the same box.
+    """
+    p = propagate(_sum_of_squares_query(with_assume=False))
+    assert p.obligations[0].status == "unknown"
+    assert any("REACHES zero at a boundary" in n for n in p.notes), p.notes
+    assert any("[0.0, 32.0]" in n for n in p.notes), p.notes
 
 
 # =========================================================================
@@ -528,14 +965,11 @@ def test_mul_transfer_end_to_end_reaches_boundary_division():
 # =========================================================================
 
 
-def test_s10_jax_computes_the_infinity_the_old_box_excluded():
+def test_s10_jax_computes_the_infinity_the_old_box_excluded(_x64):
     """The measurement the finding rests on, kept as a test: in every format
     jax evaluates `-2.0 / x` at `x = +0.0` to `-inf`, so a VERIFIED for
     `a/x > 0` over `x in [-1, 0]` is false about the running program."""
-    pytest.importorskip("jax")
-    import jax
-
-    jax.config.update("jax_enable_x64", True)
+    import jax  # noqa: F401  (the `_x64` fixture is the import gate)
     import jax.numpy as jnp
 
     from stelling.harness import any_array, assert_
@@ -565,15 +999,26 @@ def test_s10_jax_computes_the_infinity_the_old_box_excluded():
         )
 
 
-def test_three_spellings_of_squared_reach_the_same_verdict():
-    """`x*x`, `x**2` and `jnp.square(x)` are the same real property. The
-    `mul` bump used to decide between them: `via_mul` came back UNKNOWN with
-    a decline recommending `assume(divisor > 0)` — which the caller had
-    already effectively done on the inputs."""
-    pytest.importorskip("jax")
-    import jax
+def test_three_spellings_of_squared_reach_the_same_verdict(_x64):
+    """`x*x`, `x**2`, `jnp.square(x)` and `jnp.dot(x, x)` are the same real
+    property. The `mul` bump used to decide between them: `via_mul` came
+    back UNKNOWN with a decline recommending `assume(divisor > 0)` — which
+    the caller had already effectively done on the inputs.
 
-    jax.config.update("jax_enable_x64", True)
+    `via_dot` is the FOURTH spelling and it is here for audit 0.2.0 B5-2:
+    `dot_general` carried an inlined copy of `mul`'s corner rule that M16
+    did not convert, so the contraction kept the bump and lost the same
+    zero floor. It shares `_mul_corners` now, and the row is that all four
+    spellings agree.
+
+    Every one of them needs `assume(x > 0)` to reach `boundary_div` at all
+    (audit 0.2.0 B5-1): the divisor's box is `[0, S]` either way, and what
+    licenses dropping the zero is the strict assume, not the shape of the
+    box. The propagator carries the strictness across `mul`/`square`/
+    `integer_pow`/`reduce_sum`/`dot_general` to the division — which is
+    precisely what this test measures four ways.
+    """
+    import jax  # noqa: F401  (the `_x64` fixture is the import gate)
     import jax.numpy as jnp
 
     from stelling.harness import any_array, assert_, assume
@@ -594,8 +1039,55 @@ def test_three_spellings_of_squared_reach_the_same_verdict():
         assume(x > 0.0)
         return assert_(1.0 / jnp.sum(jnp.square(x)) > 0.0)
 
+    def via_dot():
+        x = any_array((2,), jnp.float64, (0.0, 4.0))
+        assume(x > 0.0)
+        return assert_(1.0 / jnp.dot(x, x) > 0.0)
+
     got = {
         h.__name__: check(h, vacuity_mode="inputs-only").status
-        for h in (via_mul, via_ipow, via_square)
+        for h in (via_mul, via_ipow, via_square, via_dot)
     }
     assert set(got.values()) == {"VERIFIED"}, got
+
+
+def test_a_sum_of_squares_residual_declines_without_an_assume(_x64):
+    """**The false VERIFIED audit 0.2.0 B5-1 names, refuted against jax.**
+
+    `mul`'s exactness fix (M16) makes `sum(x*x)` floor at exactly 0, so
+    `sum(x*x) - 8` over `x in [0, 2]^2` boxes to `[-8, 0]` — a ONE-SIDED
+    BOUNDARY where it used to be a true straddle. `boundary_div` then
+    returned `(-inf, -0.125]` and `q <= -0.125` DISCHARGED, because the
+    kernel drops `b = 0` from the image. The program does not: at
+    `x = [2, 2]`, a point of the DECLARED box, jax computes `+inf`.
+
+    Both halves are asserted here — the verdict is not definite, AND jax
+    at the declared point falsifies what the definite verdict would have
+    claimed — so the test cannot be satisfied by an UNKNOWN that arrives
+    for some unrelated reason.
+    """
+    import jax  # noqa: F401  (the `_x64` fixture is the import gate)
+    import jax.numpy as jnp
+
+    from stelling.harness import any_array, assert_
+    from stelling.preconditions import check
+
+    def residual():
+        x = any_array((2,), jnp.float64, (0.0, 2.0))
+        return assert_(1.0 / (jnp.sum(x * x) - 8.0) <= -0.125)
+
+    v = check(residual, vacuity_mode="inputs-only")
+    assert v.status == "UNKNOWN", (
+        f"FALSE VERIFIED: {v.status}; jax returns +inf at x = [2, 2]"
+    )
+    assert any("REACHES zero at a boundary" in n for n in v.notes), v.notes
+
+    at_zero = 1.0 / (jnp.sum(jnp.array([2.0, 2.0]) ** 2) - 8.0)
+    assert float(at_zero) == INF
+    assert not bool(at_zero <= -0.125), (
+        "the point that refutes the old verdict no longer refutes it"
+    )
+    # and the shape is genuinely decidable elsewhere in the box, so the
+    # UNKNOWN is about the dropped point and not about the whole obligation
+    inside = 1.0 / (jnp.sum(jnp.array([1.0, 1.0]) ** 2) - 8.0)
+    assert bool(inside <= -0.125)

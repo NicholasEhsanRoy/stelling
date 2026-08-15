@@ -87,7 +87,7 @@ import sys
 import pytest
 
 pytest.importorskip("hypothesis", reason="needs hypothesis")
-jax = pytest.importorskip("jax", reason="needs jax")
+jax = pytest.importorskip("jax")
 
 import _corpus  # noqa: E402
 
