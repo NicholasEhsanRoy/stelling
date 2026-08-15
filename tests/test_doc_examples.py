@@ -19,18 +19,18 @@ prints what the doc says it prints", which was wider than the mechanism.
 Measured over ``README.md`` + ``docs/*.md``, and pinned by
 :func:`test_inventory_is_what_the_docstring_says`::
 
-    ```python blocks                                45
+    ```python blocks                                47
       marked illustrative — not run                 16
-      EXECUTED (exit 0 required)                    29
+      EXECUTED (exit 0 required)                    30
         marked run-only — output not compared        3
-        OUTPUT COMPARED against a fence             26
-    plain ``` fences                                62
-      consumed as an example's claimed output       26
-      HAND-WRITTEN, compared to nothing             36
+        OUTPUT COMPARED against a fence             27
+    plain ``` fences                                64
+      consumed as an example's claimed output       27
+      HAND-WRITTEN, compared to nothing             37
 
-So the claim this file earns is: *every runnable example runs, and 26 of
-the 29 have their stdout compared byte for byte after a narrow
-normalisation.* The 36 unattached fences — a render pasted into prose, a
+So the claim this file earns is: *every runnable example runs, and 27 of
+the 30 have their stdout compared byte for byte after a narrow
+normalisation.* The 37 unattached fences — a render pasted into prose, a
 quoted stamp line, an excerpt from another page's table — are **not**
 verified here. Writing one of those is a hand-check and stays one.
 
@@ -139,13 +139,13 @@ SRC = REPO / "src"
 # The inventory the docstring states. A change here is a change to what
 # this file promises, so it must be made deliberately and in both places.
 EXPECTED_INVENTORY = {
-    "python_blocks": 45,
+    "python_blocks": 47,
     "illustrative": 16,
-    "executed": 29,
+    "executed": 30,
     "run_only": 3,
-    "compared": 26,
-    "plain_fences": 62,
-    "plain_unattached": 36,
+    "compared": 27,
+    "plain_fences": 64,
+    "plain_unattached": 37,
 }
 
 _MARKER = re.compile(r"<!--\s*doc-example:\s*(illustrative|run-only)\s*-->")

@@ -7617,4 +7617,683 @@ verdicts:
   because it embeds source line numbers; this batch's edits do not move
   any it cites, so it is byte-identical.
 
-*(no releases yet)*
+- **2026-08-15 (pre-release, B4 part 1): the format-parametric ieee mode
+  was still speaking binary64 in four places.** Audit 0.2.0 M12, M13, M14,
+  M15. Two of the four move verdicts; both move them in the
+  more-informative direction, and neither can mint a definite answer that
+  the old code contradicted.
+
+  **M12 — two of the four catalogued formats could not see a constant.**
+  `propagate._STRUCT_FMT` had no `<f2` (float16) and no route for
+  bfloat16's `<V2`, so `_decode_array` raised and `_Propagator.read` bound
+  ⊤ with a note. `read_flag` correctly returned maybe-NaN, so nothing
+  definite could leak — the failure was UNKNOWN, never a wrong verdict —
+  but `CHANGELOG.md` advertised "all four catalogued formats" while any
+  harness in two of them that mentioned a scalar, including the
+  ubiquitous `assert_(y > 0.0)`, topped out. Measured on this branch,
+  harness `y = x * 2.0 + 1.0; assert_(y > 0.0)`, four formats × two
+  semantics:
+
+  ```
+                real          ieee
+    float16     UNKNOWN  ->   VERIFIED (both)
+    bfloat16    UNKNOWN  ->   VERIFIED (both)
+    float32     VERIFIED      VERIFIED   (unchanged)
+    float64     VERIFIED      VERIFIED   (unchanged)
+  ```
+
+  float16 decodes through `struct`'s `e` code, which IS IEEE binary16, so
+  the value is exact and the interval is a point.
+  **bfloat16 needed a decision, and the obvious decoder would have been
+  worse than the ⊤ it replaced.** Its dtype `.str` is `<V2` — an anonymous
+  2-byte VOID, which every 2-byte structured dtype also spells — so the
+  byte string does not identify the format, and a decoder keyed on `<V2`
+  alone would read an arbitrary record type as a float: a wrong VALUE
+  where the old behaviour was only imprecise. The `ir.Aval` beside the
+  value carries the dtype's NAME, which does identify it, so
+  `_decode_array` takes the name as a disambiguator and decodes `<V2`
+  **only** under `"bfloat16"`. Anything else — a missing name, a different
+  name — stays ⊤-with-a-note, unchanged.
+
+  **Which verdicts are retroactively invalid: none.** The change only
+  moves UNKNOWN to a definite status, and an UNKNOWN claims nothing. A
+  recorded UNKNOWN whose notes contain *"literal outside the domain (no
+  zero-dep decoder for array dtype '<f2'…)"* is one this fix may now
+  decide; re-`check()` it to find out. No released verdict is affected —
+  float16/bfloat16 support is a 0.2.0 feature and 0.2.0 has not shipped.
+
+  **M13 — the comparison band was picked alphabetically.**
+  `_ieee_cmp_get_min_normal` sorted the equation's float dtypes and took
+  `[0]` where `_ieee_get_format` also *checks the operands agree*, and
+  `bfloat16 < float16 < float32 < float64`. So a `{bfloat16, float16}`
+  comparison was hazed with bfloat16's `2**-126` where the float16 operand
+  needs `2**-14` — 112 decades too narrow, and the band is exactly what
+  makes a verdict sound for a flushing target. Not reachable through jax
+  tracing (jax promotes before it computes); reachable through hand-built
+  or deserialized IR, which this module's own comments treat as in scope.
+
+  **The fix is NOT the agreement check the finding proposed, and the
+  reason matters.** Declining a mixed comparison would have been
+  consistent with the arithmetic face, and it would also have withdrawn
+  the `{float32, float64}` mixture that hand-built IR routinely carries
+  (a float32 value compared against a binary64 literal) and that the old
+  code happened to get right. The general rule is available instead: take
+  the **maximum** band over the operands' formats. That is sound for every
+  operand, because the haze HULLS with 0 rather than replacing
+  (`_elt_haze_fmt`), so a band wider than an operand needs costs precision
+  and can never cost soundness. Measured over the whole 4×4 grid in both
+  orders, 16 pairs, every one now gets a band no operand outgrows.
+  Agreement stays REQUIRED on the arithmetic face, where a mixed equation
+  has no result format to round onto; that asymmetry is deliberate and is
+  written down at both sites.
+
+  **Which verdicts are retroactively invalid**: any ieee-mode verdict from
+  a hand-built or deserialized query containing a float comparison whose
+  operand dtypes DISAGREE and whose alphabetically-first member has the
+  narrower band — in practice, anything paired with `bfloat16`. A
+  jax-traced harness cannot be affected. What to re-run: such a query, if
+  one exists; the pre-filter is "does any comparison equation in the
+  query have two different float dtypes".
+
+  **M14 — two binary64 sentences stamped on narrow-format verdicts.**
+  `IEEE_ENDPOINT_ASSUMPTION` says the endpoints are *"the same float
+  results the traced program computes, with NO outward rounding"*, and
+  `SUBNORMAL_INDETERMINACY_ASSUMPTION` names the band `2**-1022`. Both are
+  false of a float16/bfloat16/float32 run: the endpoints **were**
+  outward-rounded onto the target grid — that is the whole of
+  `_ieee_round_box` — and the band applied was the format's. The
+  `semantics:` line of the same stamp disclosed the parametric mode
+  correctly, so the verdict contradicted itself. Both are now built from
+  the float formats the query contains, at all three assembly sites
+  (`propagate`, `verdict.make_verdict`, `solvers.make_solver_verdict` —
+  the last two added the endpoint sentence a second time, independently
+  of the propagation's own set). **A binary64-only run stamps the
+  identical text it always did**: it is the case those sentences were
+  written for, it is by far the common one, and rewording an unchanged
+  run's stamp is its own disclosure noise. Disclosure only — no verdict
+  moves.
+
+  **M15 — the fallback that would have used the wrong band.**
+  `_ieee_arith` dispatched to a format-parametric kernel through
+  `_FMT_BINARY_OPS` and, with no row, fell back to the binary64 kernel —
+  which hazes with `iv.MIN_NORMAL` (`2**-1022`) — and then called
+  `_ieee_round_box`, which **cannot** recover the missing haze: rounding
+  outward onto the format grid does not hull with 0. Re-measured here,
+  float32 `x + x` at `x = 2**-140`:
+
+  ```
+    mapped   (format band 2**-126):  (0.0, 1.4349296274686127e-42)
+    fallback (binary64 band):        (1.4349296274686127e-42, 1.4349296274686127e-42)
+    what jax float32 computes:       0.0        -> the fallback box EXCLUDES it
+  ```
+
+  Dead today — all four registered ieee binary kernels have a row — and
+  the hazard was that the fifth would be a silent regression with no
+  failing test, because `_FMT_BINARY_OPS` and `IEEE_TRANSFERS` are two
+  hand-written lists that must agree. **The fix is the census, not the
+  arm.** `_ieee_arith` now tags each transfer with the kernel it closes
+  over, and `_assert_ieee_binary_kernels_are_format_parametric()` refuses
+  the IMPORT when the two lists disagree in either direction — a missing
+  row, or a row for a kernel no registered transfer runs. The runtime
+  decline is the second guard, and it names the format rather than
+  guessing at a band. No verdict moves: the path was unreachable.
+
+  **Suite, both environments, same machine** (CPython 3.12.3, jax 0.11.0,
+  jaxlib 0.11.0, numpy 2.5.1, Linux x86_64, glibc 2.39). Baseline for this
+  part is the branch point, `0fc6c13`.
+
+  ```
+                          passed   skipped
+    baseline, x64=1         3176       10
+    baseline, no x64 (CI)   3177        9
+  ```
+
+- **2026-08-15 (B4): under `semantics="ieee"`, `exp` and `pow` were
+  bracketing the WRONG FUNCTION, and one half of it REACHES THE RELEASED
+  0.1.0.** Audit 0.2.0 S9 (float32) and S11 (binary64). FALSE VERIFIED and
+  FALSE REFUTED.
+
+  **The defect.** Under `ieee` semantics a verdict is a claim about the
+  float value **the program computes**. `iv.exp` brackets CPython's
+  `math.exp` — the libm of the machine running the analysis, glibc here —
+  with a ±1-binary64-ulp bump, under `EXP_LIBM_ASSUMPTION`; `iv.pow_` does
+  the same around `math.pow`. **The program does not run that function.**
+  It runs whatever XLA compiled for the device. A bracket of one function
+  is not a bracket of another, and the assumption stamped under the
+  verdict — *"exp endpoints assume a faithfully-rounded libm exp"* —
+  asserts a property of the analysis host's libm while being read as one
+  of the target's.
+
+  **Measured here**, on jax 0.11.0 / jaxlib 0.11.0, CPU backend, x86_64
+  Linux (glibc 2.39), CPython 3.12.3, numpy 2.5.1, ml_dtypes 0.5.4,
+  `JAX_ENABLE_X64=1`, eager and under `jit` (identical results), as
+  `|jnp.op(x) − true(x)|` in ulps of the target format under
+  `_libm_ulp_at`'s binade convention — binary64 reference for the narrow
+  formats, 60-digit `decimal` for binary64. **Every row below was re-run
+  from scratch on 2026-08-15 for the B4 amendment.** An EXHAUSTIVE row has
+  one right answer and the re-run is what stands. A SAMPLED row does not:
+  it is a property of its draw, so the row keeps the LARGER of the two
+  draws' maxima — the budget must clear anything either saw — and names
+  both. `>` marks the four rows the amendment changed (three in the
+  figure, one in the population):
+
+  ```
+    op   format     population                                       max ulps
+  > exp  float16    EXHAUSTIVE, 37,479 normal-finite results           0.500028
+  > exp  bfloat16   EXHAUSTIVE, 34,145 normal-finite results           0.499988
+  > exp  float32    EXHAUSTIVE, 2,237,668,967 normal-finite results    5.5112
+  > exp  float64    3,000,000 sampled args, seed 20260815              1.6660
+    pow  float16    16,000,000 sampled pairs, seed 20260815            0.5001
+    pow  bfloat16   16,000,000 sampled pairs, seed 20260815            0.5000
+    pow  float32    16,000,000 sampled pairs, draw A (seed unrecorded) 0.5380
+    pow  float64     1,045,976 sampled pairs, draw A (seed unrecorded) 0.5059
+  ```
+
+  **Four of those rows corrected what this entry previously claimed**, and
+  three of the corrections are the B4 finding:
+
+  * `exp float16` is **not** correctly rounded. Exhaustively, 2 of the
+    63,487 distinct finite arguments exceed half an ulp —
+    `x=0.0226898193359375` at 0.500028136794678751 and
+    `x=0.007297515869140625` at 0.500011390558184612. The backend
+    evaluates float16 `exp` in float32 and rounds twice; at both the true
+    value sits a hair BELOW the float16 midpoint and the float32
+    intermediate lands above it. The row said 0.5000 and the profile
+    declared 0.5, which `_libm_widen_box` honours by widening **nothing**
+    — a declared bound the backend it was measured on violates.
+  * `exp bfloat16` is correctly rounded **only over normal finite
+    results**, and the qualifier was missing. Over ALL finite arguments
+    the maximum is **108.698176 ulps** and 11 exceed 0.5 — every one a
+    subnormal result flushed to zero, worst `x=-87.5` (true
+    9.982350930569248e-39, backend 0.0). That flush is covered by
+    `subnormal_haze_fmt`, not by an accuracy budget, which is exactly
+    what the qualifier says.
+  * `exp float32`'s population is **2,237,668,967**, not the
+    2,237,668,968 recorded before: an inclusive/exclusive fencepost at
+    the low edge. The band is exactly the float32 values in
+    `[-87.33654022216797, 88.72283172607422]` — the first argument whose
+    `exp` is normal, and the last whose `exp` rounds finite. The
+    2,239,854,020 figure for the raw interval `[-104, 88.73]` DOES
+    reproduce; it is 2,185,053 arguments larger, and those are precisely
+    the subnormal-result region the sweep never measured.
+  * `exp float64`'s sampled maximum is **1.6660**, above the 1.6470 first
+    recorded. Nothing is wrong with either: a sampled row is not a bound,
+    and an independent draw of the same size beat it. That is the row's
+    own lesson and it is now written into the row. The declared budget
+    (2.0) covers both. The earlier row also claimed "a further 1,093,019
+    arguments in the far tails reach 1.6319" — not reproduced, not
+    re-derivable from the design recorded, and dropped rather than
+    repeated.
+
+  **The four `pow` rows were re-run too, and their provenance is now
+  recorded rather than assumed.** `pow` never exceeds 1 ulp in any format,
+  on 49,000,000 pairs across the two campaigns, so the declared 1.0 is not
+  in question — but a SAMPLED maximum is a property of the sample, and
+  until this amendment the rows named neither draw:
+
+  ```
+    format     draw A (c322cec)        draw B (B4, seed 20260815)   row
+    float16    16,000,000    0.5001    16,000,000  ->  0.5001       0.5001
+    bfloat16   16,000,000    0.5000    16,000,000  ->  0.5000       0.5000
+    float32    16,000,000    0.5380    16,000,000  ->  0.5290       0.5380
+    float64     1,045,976    0.5059     1,000,000  ->  0.5056       0.5059
+  ```
+
+  Draw B is `numpy.random.default_rng(20260815)` over four regions whose
+  distributions are written out in full above `LIBM_MEASURED`, and it was
+  **run twice: identical maxima and identical kept counts**
+  (12,642,619 / 15,907,789 / 15,907,360 / 999,989 pairs with a normal
+  finite result), so the seed reproduces it.
+
+  **Draw A's seed was never recorded and draw A cannot be re-run.** On the
+  two rows where the draws disagree it is the LARGER, so it is what the
+  row keeps — a budget must clear anything either draw saw — and each of
+  those rows now says in its own text that the figure it carries is the
+  unreproducible one. That is the honest position, not a comfortable one:
+  it is the same failure mode the auditor hit in round 1 when it flagged
+  `exp@float64` as stale because its own draw gave a different number, and
+  it is why `exp@float64` was rewritten to name its seed and both draws.
+  The four `pow` rows now do the same.
+
+  12,542 float32 arguments exceed 1 ulp, and 12,520 of them are inside
+  `[88.54634857177734, 88.72283172607422]` — a band holding exactly 23,133
+  float32 values, so **54.12% of the arguments there escape**, every one on
+  the low side (12,542 low, 0 high). Two rates, and they must not be
+  compared across populations: over the WHOLE float32 population the
+  escape rate is 12,542 in 2,237,668,967, one in 178,414, and the danger
+  is that it is not spread — 99.8% of it sits in a band 0.001% of the
+  population wide. In binary64, 10,559 of 3,000,000 sampled arguments
+  (0.35%, one in 284) exceed 1 ulp, which is exactly what a ±1-ulp
+  bracket cannot hold.
+
+  **THE AUDIT'S OWN SUGGESTED REMEDY IS REFUTED BY ITS OWN
+  MEASUREMENT.** It proposed widening to ±2 ulps, "enough to cover any
+  faithfully-rounded implementation". At 5.51 measured float32 ulps this
+  backend's float32 `exp` is not faithfully rounded at all — it is **five
+  and a half times worse than faithful** (5.5112 / 1.0; the 11.02 this
+  entry used to quote is the ratio against CORRECTLY ROUNDED, 5.5112 /
+  0.5, which contradicts `LibmBudget`'s own definitions) — so no fixed
+  widening is sound: the quantity is a property of a compiled function
+  stelling cannot see. Nor is one number right across formats. The same
+  backend, on the same op, measures 0.500028 ulps in float16 and 5.5112
+  in float32: a factor of **eleven between two formats**, both of them
+  evaluated in float32 and rounded.
+
+  **The fix: fail closed, open it with a DECLARATION.** Under `ieee`, a
+  transfer whose backend accuracy stelling cannot establish declines —
+  carrying the measurement that justifies it and a line that **runs as
+  written** — and the caller re-enables it by declaring a per-`(op,
+  format)` budget through EITHER entry point:
+
+  ```
+    check(harness, vacuity_mode="inputs-only", semantics="ieee",
+          libm_budget="xla-cpu-2026-08")
+    propagate(closed, semantics="ieee", libm_budget="xla-cpu-2026-08")
+  ```
+
+  Both of those are pulled out of a live decline and executed by
+  `test_every_line_the_decline_prints_RUNS_AS_WRITTEN`. They were not
+  runnable when this entry was first written: the decline printed
+  `vacuity_mode=...` (`Ellipsis`, which raises) and
+  `ulps={('exp','float32'): <ulps>}` (a `SyntaxError`), and it named only
+  `check` — while the S11 exposure this whole gate exists to close runs
+  through `propagate`. Both halves are fixed, and the test now executes
+  what the message prints rather than a line that resembles it.
+
+  `"xla-cpu-2026-08"` is a shipped **named, dated** profile whose numbers
+  are the maxima above rounded up (1 / 0.5 / 6 / 2 for `exp`, 1.0
+  throughout for `pow`); `stelling.propagate.LibmBudget` declares your own
+  and requires a `name` and a `basis`. The budget widens the bracket by
+  that many format ulps before the outward round onto the format's grid,
+  and the verdict stamps it as **DECLARED, NOT VERIFIED**, saying in those
+  words that a budget smaller than the backend's real error mints a
+  VERIFIED nothing here can catch. A budget of `0.5` — read as **the
+  declaration "correctly rounded"** — widens by **nothing at all**:
+  round-to-nearest is monotone and the endpoints are rounded onto the grid
+  anyway, so the mechanism cannot punish a good platform. That is
+  `interval.sqrt`'s own argument generalised; `sqrt` is a correctly-rounded
+  IEEE-754 basic operation, carries no libm demotion, and is untouched.
+
+  **"0.5 ulps" and "correctly rounded" are not the same statement in this
+  convention, and the branch is justified by the second.** `_libm_ulp_at`
+  reports the spacing of the binade CONTAINING a value, so `ulp(2^k)` is
+  the spacing *above* `2^k` while the float *below* it is only `2^(k−p)`
+  away — half such an ulp. Read as a raw inequality, `u = 0.5` therefore
+  also admits a backend returning `nextdown(2^k)` where the true value is
+  exactly `2^k`, which correct rounding does not; `exp(0) = 1.0` reaches
+  it, and a sweep at `u = 0.5` flags 26 boxes per narrow format, every one
+  at equality and every one anchored on a power of two. The docstring used
+  to call the no-op "a theorem rather than a kindness" on the weaker
+  reading, which is where it was wrong. The residual is covered for this
+  module's callers and ONLY by them: `iv.exp` and `iv.pow_` hand over a
+  box already bumped a binary64 ulp outward, so the format-rounded lower
+  endpoint sits at least one format step below any grid-point true value —
+  exactly where `nextdown(2^k)` is. Pinned by
+  `test_a_half_ulp_budget_is_read_as_CORRECT_ROUNDING_not_as_the_inequality`
+  in all four formats, which asserts the residual exists AND that the
+  transfer covers it. After B4 only `exp@bfloat16` still sits at 0.5;
+  `exp@float16` moved to 1.0, because it is not correctly rounded.
+
+  **ONE SPACING SERVES BOTH ENDPOINTS, AND IT IS THE LARGER — the first
+  draft of the widening was unsound and this is where it was.** `ulp` is a
+  STEP function of the magnitude: it doubles at every binade boundary, so
+  `t − u·ulp(t)` is **not** monotone in `t` — it drops by half an ulp each
+  time `t` crosses a power of two upward. Widening the lower endpoint by
+  *its own* ulp is therefore not enough for a box straddling `2**k` from
+  below, where the declaration admits values as low as
+  `2**k − u·2**(k−p+1)` while `ulp(lo)` is only `2**(k−p)`, half of what
+  is needed. The rule is `U = max(ulp(lo), ulp(hi))` applied to both
+  endpoints, which restores `lo_out ≤ t − u·ulp(t)` and
+  `hi_out ≥ t + u·ulp(t)` for every `t` in the box. Caught by re-deriving
+  the monotonicity claim rather than by a test, and now held by one:
+  `test_the_widening_covers_every_binade_boundary_a_box_straddles`
+  discharges 372 endpoint obligations across the four formats, and its
+  positive control shows the per-endpoint rule fails **31 of 31**
+  boundaries. It costs nothing at a point argument — the containment
+  sweep's widths are unchanged — and it is invisible to any sweep built
+  from point declarations, which is exactly why it needed the derivation.
+
+  **AND IT SURVIVED ON THE HALF-INFINITE ARM — the same class, on the arm
+  the fix did not cover.** `U` was taken over the FINITE endpoints only,
+  so when `hi = +inf` the infinite endpoint dropped out of the maximum and
+  `U` fell back to `ulp(lo)` — while the box still holds every `t ≥ lo`,
+  in binades whose spacing is 2×, 4×, … larger. Reachable by anything
+  ordinary: `iv.exp` returns `hi = +inf` whenever `math.exp` overflows
+  binary64, i.e. any envelope reaching past 709.78. Measured on the
+  shipped profile at `x ∈ [0.6931471805599453, 10^6]`, float32:
+
+  ```
+    iv.exp box                 : (1.9999999999999998, inf)
+    widened + hazed + rounded  : (1.9999991655349731, inf)     <- pre-B4
+    the same, after B4         : (1.9999984502792358, inf)
+    check(exp(x) >= 1.9999991655349731) -> VERIFIED   pre-B4
+                                        -> UNKNOWN    after B4
+
+    X'  = 0.6931472420692444        (next f32 above the low endpoint)
+    true exp(X') = 2.000000123018602
+    the LEAST-WRONG f32 the pre-B4 box excluded: 1.9999990463256836
+       = 4.5160 ulps out — inside the DECLARED 6.0 and inside the 5.5112
+         this profile measured exhaustively as XLA's own worst float32 exp
+  ```
+
+  So a backend **better than the one the profile was measured on** could
+  return a value the box excluded, and stelling said VERIFIED while
+  `LibmBudget.render` stamped *"the bracket is widened by exactly that
+  much"*. (The finding as filed quoted 5.5160 ulps and called it "less
+  wrong than the 5.5112 measured" — 5.5160 is *more* than 5.5112. The
+  4.5160 above is the sharp figure and is the one that makes the point.)
+
+  **The rule is `U = 2·max(ulp(finite endpoints))` when either endpoint is
+  infinite, and it is exactly enough — under a side condition that is
+  reachable.** Write `g(t) = t − u·ulp(t)`. For `t ≥ lo`, either
+  `ulp(t) ≤ 2·ulp(lo)` and `g(t) ≥ lo − 2u·ulp(lo)` directly; or
+  `ulp(t) > 2·ulp(lo)`, in which case `ulp(t)` — a power of two, and not
+  the subnormal floor — is at least `4·ulp(lo)` and `t ≥ 2^(p−1)·ulp(t)`,
+  so `g(t) ≥ ulp(t)·(2^(p−1) − u) ≥ 4·ulp(lo)·(2^(p−1) − u)`, while
+  `lo < 2^p·ulp(lo)` gives `lo − 2u·ulp(lo) < 2·ulp(lo)·(2^(p−1) − u)`.
+  Exactly enough because `g(2^k) = 2^k·(1 − u·2^(1−p))`: the first binade
+  boundary above `lo` has `ulp = 2·ulp(lo)` and is where `g` dips lowest,
+  and for `u < 2^(p−1)` every later boundary dips less. **The second case
+  needs `u ≤ 2^(p−1)`, and past it there is no sound finite endpoint at
+  all**: `1 − u·2^(1−p)` turns non-positive and `g(2^k) → −∞`. Past the
+  threshold the widened endpoint is `-inf`, clamped by `floor`; the
+  `lo = -inf` arm is the mirror image under `t ↦ −t` and saturates to
+  `+inf`, latent today only because `exp`/`pow` have range in `[0, ∞)`,
+  and closed anyway.
+
+  **THE THRESHOLD IS CROSSED BY ROUNDING UP, NOT BY MEASURING — and the
+  first two versions of this paragraph had that inequality backwards.**
+  They read *"1024 for float16 and 128 for bfloat16 — **under** the 108.7
+  ulps this backend's bfloat16 `exp` reaches on flushed subnormal
+  results"*. 128 > 108.7; the threshold is above the measurement, not
+  below it. The true statement is sharper, and it is a cap rather than an
+  anecdote: a subnormal result flushed to zero has error `t/tiny`, since
+  `_libm_ulp_at` floors a subnormal's ulp at `tiny`, and the largest
+  representable subnormal is `tiny·(2^(p−1) − 1)` — so **a flush measures
+  at most `2^(p−1) − 1` ulps, exactly one ulp BELOW the threshold, in
+  every format.** Re-derived here in exact `Fraction` arithmetic:
+
+  ```
+    format     p    largest subnormal / tiny        threshold 2**(p-1)
+    float16    11                       1023                      1024
+    bfloat16    8                        127                       128
+    float32    24                    8388607                   8388608
+    float64    53           4503599627370495          4503599627370496
+  ```
+
+  Over the open subnormal band the bound is `< 2^(p−1)`, a supremum that
+  is not attained. So the threshold sits just **above** anything that can
+  be observed, and this backend's bfloat16 `exp` flush at 108.698176 is
+  under 127 and therefore under 128. What crosses it is a caller ROUNDING
+  a measurement up — 108.7 rounds to 128 as readily as to 109, and
+  rounding up is this profile's own stated convention — a real and likely
+  route, but a declaration rather than an observation. The side condition
+  is necessary either way: control C below fails 1,538 obligations without
+  it. Now held by
+  `test_a_flush_to_zero_can_never_measure_up_to_the_threshold`, which
+  computes the table above rather than quoting it, so the direction cannot
+  drift back.
+
+  Verifying the doubling on a copy is not enough to adopt it: the side
+  condition was NOT part of the rule as proposed, and the sweep below
+  shows the proposed rule failing 1,538 obligations without it.
+
+  **THE INSTRUMENT WAS THE OTHER HALF OF THE FINDING.** The two tests that
+  should have caught this could not:
+  `test_the_widening_covers_every_binade_boundary_a_box_straddles` used
+  only FINITE boxes, and `test_widening_leaves_infinite_endpoints_alone`
+  used the one half-infinite box where the defect cannot appear and
+  asserted only `w.his[0] == math.inf` — never the lower endpoint against
+  the contract. `docs/norms.md` § *"an acceptance criterion must check that
+  the scope covers the claim"*, failing on this change's own instrument.
+  **Nothing existing went red when B4 was fixed, and that is the evidence
+  the arm was never pinned.**
+
+  What replaces them enumerates rather than samples. `t ↦ t ∓ u·ulp(t)` is
+  affine with slope 1 inside a binade, so an extremum over a box sits at
+  an endpoint or at a jump of `ulp`; the sweep's candidate set holds EVERY
+  jump the binary64 grid can express (`±2^k` for every `k` the format's
+  ulp formula distinguishes, up to `2^1023`, with the float on each side),
+  so a box's true infimum and supremum are a min/max over its endpoints
+  plus the candidates it contains — a SUFFIX min / PREFIX max for a
+  half-infinite box, which is what makes the `±inf` arm checkable at all.
+  `test_the_widening_covers_the_whole_extremiser_set_on_every_arm` reduces
+  over **1,551,584 finite / 34,844,544 half-infinite / 525,888
+  doubly-infinite** extremiser points, over all four formats and eight
+  budgets from 0.75 up past `2^(p−1)`. Three positive controls, all of
+  them rules that shipped or were drafted:
+
+  ```
+    rule                                    finite   half-infinite
+    SHIPPED (after B4)                            0             0
+    A: max over FINITE endpoints only (pre-B4)    0          1886
+    B: per-endpoint (the first draft)          1552          1886
+    C: doubled, no u <= 2**(p-1) condition        0          1538
+  ```
+
+  A is correct on exactly the arm it was written for and wrong on the
+  other; C first fails at `nextafter(2**(p-1))`, the very first budget
+  past the threshold.
+
+  **BOTH DIRECTIONS.** A wider bracket makes VERIFIED and REFUTED harder
+  alike, so this closes S9's false-REFUTED half in the same change:
+  with the threshold moved between the executed value and the box, ieee
+  mode used to call the obligation *definitely false* where the float32
+  execution makes it true. Verified as its own row
+  (`test_s9_the_false_refuted_half_closes_too`).
+
+  **REAL MODE IS UNTOUCHED, and that is checked rather than assumed.**
+  There the bracket is about the true real value, CPython's own `math`
+  module does satisfy the ±1-ulp assumption it rides on, and the
+  divergence from the compiled program is the ℝ-versus-float gap the stamp
+  already names. `iv.exp` is byte-identical; a budget passed under
+  `semantics="real"` is REFUSED rather than ignored; and the real-mode
+  `exp` stamp still carries the unchanged `EXP_LIBM_ASSUMPTION`
+  (`test_real_mode_still_judges_exp_with_no_budget_at_all`, four formats).
+
+  **WHICH STELLING VERSIONS ARE AFFECTED.** S11 (binary64) is **0.1.0 code,
+  unchanged** and present in the released tag. S9 (float32) is the
+  format-parametric mode, 0.2.0 development only. Reproduced here on
+  `v0.1.0` itself, extracted with `git archive` and run by `PYTHONPATH`
+  (no worktree, repo untouched):
+
+  ```
+    v0.1.0 __version__ = 0.1.0
+    v0.1.0 iv.exp([X,X]) = (4.244390682998849e-95, 4.2443906829988504e-95)
+    jnp.exp(X)           =  4.244390682998851e-95     (one ulp ABOVE the box)
+    inside bracket?       False
+    v0.1.0 propagate(cj, semantics="ieee") -> ['discharged']
+  ```
+
+  at `X = -217.29998556254742`, an entirely ordinary argument. The
+  obligation was `assert_(jnp.exp(x) <= 4.2443906829988504e-95)`, the
+  verdict discharged it, and executing the same program in jax falsifies
+  it.
+
+  **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID, AND HOW A READER
+  RECOGNISES ONE.** A verdict is at risk when **all** of:
+
+  * its stamp's `semantics:` line says **ieee** (`ieee (IEEE-754 binary64)`
+    or the format-parametric wording) — a `real (ℝ)` verdict is not
+    affected in any version; and
+  * its `assumes:` lines contain **`exp endpoints assume a
+    faithfully-rounded libm exp`** or the `pow` counterpart, which is
+    stamped exactly when the query used that transfer; and
+  * the status is **definite** — VERIFIED, or a set-level REFUTED that the
+    interval leg decided downstream of the `exp`/`pow`. An UNKNOWN never
+    claimed anything.
+
+  In **0.1.0** that means: a verdict produced through
+  `propagate(closed, semantics="ieee")` on a query containing `exp` or
+  `pow`, in binary64 (the only format 0.1.0's ieee mode accepted).
+  **`check()` in 0.1.0 had no `semantics` keyword** — verified at the tag,
+  `def check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None,
+  strict=False)` — so no verdict from the documented front door can be
+  affected; the exposure is exactly the `propagate` entry point.
+
+  **And the released CHANGELOG never named that entry point.** This entry
+  used to say it "advertised" `propagate`; re-checked at the tag, the word
+  `propagate` appears **zero** times in `v0.1.0:CHANGELOG.md`. Its only
+  related line is
+
+  ```
+    - IEEE-semantics mode (opt-in): judges censused binary64 behaviours and
+      stamps itself separately from real-mode verdicts.
+  ```
+
+  — a feature announced with **no route named**. That is a more
+  uncomfortable fact than the one this entry asserted, not a lesser one:
+  a reader who wanted the advertised mode had to find the route in the API
+  surface, so the population of affected verdicts is bounded by who did
+  that and not by who read the release notes. It is also why the B4
+  decline now names `propagate` explicitly.
+
+  In **0.2.0 development** the same applies in all four formats, and
+  float32 is the dangerous one — not because its overall escape rate is
+  high but because it is **concentrated**. Both rates, over their own
+  populations: 12,542 of 2,237,668,967 float32 arguments exceed 1 ulp
+  (one in 178,414, exhaustive), and 12,520 of those sit in a band of
+  23,133 values where the rate is **54.12%**. In binary64, 10,559 of
+  3,000,000 sampled arguments exceed 1 ulp (0.35%, one in 284, sampled).
+  A previous version of this line compared float32's in-band 54% against
+  an underived "one-in-130,000" over a different population; that figure
+  reproduced from nothing in this campaign and has been replaced by the
+  two rates above, each with the population it was measured over.
+
+  **WHAT TO RE-RUN.** Any recorded ieee-mode verdict whose query contains
+  `exp` or `pow`. Re-run it on a tree with this fix. With no
+  `libm_budget` it will now be UNKNOWN with the decline quoted; with a
+  budget declared it is judged against a bracket widened by that
+  declaration. A verdict that stays VERIFIED under the shipped profile was
+  never resting on the missing ulps. The cheap pre-filter that needs no
+  re-run: **if the query contains no `exp` and no `pow`, or if the stamp
+  says `real`, it is unaffected.**
+
+  **The cost, measured.** Bracket width at a point argument, in
+  representable steps of the target format, before and after:
+
+  ```
+    format     arg      declared ulps   before   after
+    float16    3.0            0.5            1       1
+    bfloat16   3.0            0.5            1       1
+    float32    3.0            6              1      13
+    float32   88.7            6              1      13
+    float64    3.0            2              2       8
+    float64 -217.3            2              2       8
+  ```
+
+  float16 and bfloat16 cost **nothing**, which is the 0.5-ulp branch doing
+  its job. End to end, ordinary obligations survive — `exp(x) > 0` over
+  `[-2, 2]` is VERIFIED in every format, and `exp(x) <= e·(1+1e-7)` over
+  `[0, 1]` in binary64 — while obligations tight to the last ulp
+  (`exp(1) <= fl(e)`) move VERIFIED → UNKNOWN, which is the class the
+  finding was about.
+
+  **The sweep behind the profile is in the tree**, not only in this file:
+  `tests/test_libm_budget.py::test_the_declared_budget_brackets_what_the_backend_computes`
+  drives 4,003 containment checks across the four formats — including 300
+  arguments inside the measured float32 escape band and S11's own
+  argument — and asserts that exact count against
+  `LIBM_EXP_SWEEP_CHECKS`, the way `BOUNDARY_DIV_SWEEP_QUOTIENTS` is
+  asserted. A sibling row shows the sweep BITES: with the widening removed
+  the same arguments escape.
+
+  **Suite, both environments, same machine** (CPython 3.12.3, jax 0.11.0,
+  jaxlib 0.11.0, numpy 2.5.1, Linux x86_64, glibc 2.39):
+
+  ```
+                          passed   skipped
+    branch point 0fc6c13    3176       10      (x64=1)
+    branch point 0fc6c13    3177        9      (no x64, as CI runs)
+    after M12-M15           3206       10      (x64=1)
+    after the budget        3277       10      (x64=1)
+    after the budget        3278        9      (no x64, as CI runs)
+    after the B4 amendment  3293       10      (x64=1)
+    after the B4 amendment  3294        9      (no x64, as CI runs)
+    after the B4 re-audit   3295       10      (x64=1)
+    after the B4 re-audit   3296        9      (no x64, as CI runs)
+  ```
+
+  They reconcile exactly: `+30` in `tests/test_ieee_narrow_formats.py` for
+  M12–M15, then `+70` in `tests/test_libm_budget.py` and `+1` in
+  `tests/test_doc_examples.py` (whose executed-block inventory went 29 to
+  30 with the new documented example), then `+14` in
+  `tests/test_libm_budget.py` and `+2` in
+  `tests/test_ieee_narrow_formats.py` for B4, then `+2` in
+  `tests/test_libm_budget.py` for the re-audit's two cosmetic items — the
+  flush-cap table and the sampled-row provenance, one test each. The skip
+  SET is unchanged in
+  both environments and the one-member difference between them is still
+  `test_tripwire_arm.py`'s `threefry` case, which skips *"the threefry
+  mask fires only at x64=0"* when x64 is on; the other nine (hypothesis
+  ×6, pytest-xdist ×1, blackjax ×2) are identical in both.
+
+  **Each part was reverted ALONE and the whole suite re-run**, so the
+  coverage is attributed rather than assumed:
+
+  | reverted alone | tests red |
+  |---|---|
+  | the budget gate removed from `exp` AND `pow` (the pre-fix bracket) | **23** |
+  | the gate kept but the WIDENING made a no-op | **9** |
+  | the stamp's *declared, not verified* line dropped | **4** |
+  | the widening using each endpoint's OWN ulp (the binade bug) | **1** |
+
+  and for the B4 amendment, each reverted alone against
+  `test_libm_budget.py` + `test_ieee_narrow_formats.py` +
+  `test_ieee_semantics.py`:
+
+  | reverted alone | tests red |
+  |---|---|
+  | the whole half-infinite rule (back to max over finite endpoints) | **3** |
+  | ...just the `spacing *= 2` doubling | **2** |
+  | ...just the `u <= 2**(p-1)` side condition | **2** |
+  | `exp@float16` back to a declared 0.5 with the correctly-rounded row | **3** |
+  | the bfloat16 row losing its *normal and finite* qualifier | **1** |
+  | the decline back to a template (`vacuity_mode=...`, `<ulps>`, `check` only) | **2** |
+  | the `ulps <= 0.5` branch narrowed to `< 0.5` (the Fix-3 restatement's subject) | **7** |
+  | the module-level `_assert_ieee_binary_kernels_are_format_parametric()` call deleted | **1** |
+  | the module-level `_assert_libm_transfers_take_a_budget()` call deleted | **1** |
+
+  and, for the two cosmetic items the re-audit returned:
+
+  | reverted alone | tests red |
+  |---|---|
+  | `_libm_ulp_at` stops flooring a subnormal's ulp at `tiny` (the flush cap's premise) | **4** |
+  | a `pow` row drops the seed of the draw that CAN be re-run | **1** |
+  | a `pow` row stops disclosing that its carried figure's seed was NEVER recorded | **1** |
+
+  The two deleted-census-call rows were **0** before this amendment — that
+  is the whole of finding 6. The half-infinite rows are the whole of
+  finding 1, and the measure of how badly the instrument was aimed:
+  reverting the *entire* B4 widening fix reds nothing that existed before
+  it.
+  `test_supported_primitives_doc.py::test_committed_page_matches_live_registries`
+  reds on every mutation that shifts a source line and is excluded from
+  every count above, the same treatment the B5 entry gives it.
+
+  Every mutation additionally reds
+  `test_supported_primitives_doc.py::test_committed_page_matches_live_registries`,
+  because the generated primitives page quotes source LINE NUMBERS and
+  every mutation shifts them; that is an artifact of mutating, not a
+  control, and is excluded from each count — the same treatment the B5
+  entry above gives it. The attribution runs were driven with a reduced
+  environment, whose own clean baseline is 3,269 passed / 18 skipped
+  rather than 3,277 / 10; the FAILED lists are what is read here, and the
+  totals reconcile against that baseline in every row.
+
+  Three pre-existing tests changed status and each was repaired rather
+  than relaxed: `test_ieee_semantics.py::test_pow_and_exp_keep_libm_brackets_when_nan_free`
+  and `::test_pow_declines_flagged_operands_with_the_gap`, and
+  `test_three_rows.py::test_exp_stops_the_taint_and_a_later_add_stays_definite`
+  all drove ieee `exp`/`pow` with no budget. Each now declares one — so the
+  property each was written for (the bracket, the maybe-NaN gap, the
+  contraction taint) is still exercised — and the first additionally pins
+  that the undeclared call declines.
+
+**Releases reached by an entry in this log.** `v0.1.0`, the only release,
+is reached by the 2026-08-15 `exp`/`pow` libm-bracket entry (audit 0.2.0
+S11) through `propagate(closed, semantics="ieee")` — reproduced at the tag
+in that entry, with the false VERIFIED printed. Every other entry is
+0.2.0 development only, and **no release has yet shipped any fix in this
+log**. This line read *"(no releases yet)"* until 2026-08-15, a few lines
+below the reproduction that contradicts it.

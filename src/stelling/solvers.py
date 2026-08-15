@@ -80,13 +80,14 @@ from stelling.obligation import (
     violating_elements,
     witness_is_valid,
 )
-from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
+from stelling.interval import IEEE_ENDPOINT_ASSUMPTION, ieee_endpoint_assumption
 from stelling.propagate import (
     CONDITIONAL_ON_PRECONDITION,
     UNCERTIFIED_PRECONDITION_PREFIX,
     ObligationReport,
     Propagation,
     UnsatisfiableAssumptionError,
+    _query_float_formats,
     interval_env,
     ledger_covers,
     unaccounted_assumes,
@@ -3476,7 +3477,9 @@ def make_solver_verdict(
     if propagation.semantics == "ieee":
         semantics = SEMANTICS_IEEE
         arithmetic_mode = ARITHMETIC_MODE_INTERVAL_IEEE
-        convention = IEEE_ENDPOINT_ASSUMPTION
+        # format-parametric, for the reason `verdict.make_verdict` gives
+        # at the same line (audit 0.2.0 M14)
+        convention = ieee_endpoint_assumption(_query_float_formats(closed))
     else:
         semantics = SEMANTICS_REAL
         arithmetic_mode = ARITHMETIC_MODE_INTERVAL

@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Norms
 
-**Twenty-three rules, each earned by a specific failure and each naming the
+**Twenty-six rules, each earned by a specific failure and each naming the
 instances that earned it.** They are here rather than in `CONTRIBUTING.md`
 because a contributor needs the gate on their first read and the reasoning on
 their third, and 900 lines of reasoning in front of the gate meant neither got
@@ -887,6 +887,49 @@ populations will often be numerically compatible, and compatibility is not
 agreement. Naming the unit is not enough when two units produce the same
 number — the **population** has to be named too, per figure, even when it
 feels obvious to the person who just measured it.
+
+## An inequality used as an ARGUMENT is evaluated, not read
+
+**When a comparison carries the point of a sentence, compute it before writing
+the sentence.** A number in code is evaluated every time it runs; a number in
+prose is evaluated never, and a *comparison* in prose is evaluated by the
+reader — who is reading for the conclusion, not for the arithmetic.
+
+The norm above is about *what* a figure counts. This one is about *which way
+the comparison runs*, and they are independent: a figure can carry its unit and
+its population and still be compared backwards.
+
+**Three instances in one campaign** — the B4 libm-budget change — all in
+soundness-adjacent prose, none caught by a test, each caught by the next
+context to read it:
+
+| the sentence | the arithmetic |
+|---|---|
+| an audit report, on a backend value the declaration permits: *"5.5160 ulps … and LESS wrong than the 5.5112 this very profile measured"* | 5.5160 **>** 5.5112 |
+| the fix's own docstring, its test, and `SOUNDNESS.md`: the `2**(p-1)` side condition is *"128 for bfloat16, which is BELOW the 108.7 ulps this backend really reaches"* | 128 **>** 108.7 |
+| a third, in the coordinating context's own report, found by the auditor | counted here; its content was not relayed, and is not invented |
+
+The first two were **fluent, and pointed at a true conclusion by a false
+route** — which is exactly why review passes them. The escaping value really
+was inside the declared budget; the side condition really is reachable. The
+comparison was doing rhetorical work (*"so this matters"*), and a reader checks
+whether it matters, not whether the digits order that way.
+
+**The fix is not "be careful".** It is:
+
+1. **Compute it.** If the load-bearing word is *below / under / above / worse
+   than / within*, put both sides in front of an evaluator before the sentence
+   is written. Both instances above take one line.
+2. **Prefer a derivation to an anecdote.** *"128 is under 108.7"* is a
+   coincidence about one measurement. The true statement was a **cap** — a
+   flush-to-zero error is at most `2**(p-1) - 1` ulps, exactly one ulp under
+   the threshold, in every format — which is stronger, shorter, and checkable
+   without the measurement it was quoting.
+3. **If both sides are computable, it belongs in a test.** The replacement for
+   the second row computes that table in `Fraction` arithmetic and asserts it,
+   so the direction cannot drift back. A rhetorical inequality over two
+   computable quantities is an invariant wearing prose, and the first norm in
+   this file already governs it.
 
 ## A blinded audit is a GATE, not a step
 

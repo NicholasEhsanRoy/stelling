@@ -606,8 +606,9 @@ measured reasons the preference is not cosmetic:
   Both fall to ⊤ at `reduce_sum` — the slack form for three or more
   contributors (float addition is not associative and the jaxpr fixes no
   order), the counting form at *every* size (its accumulator is an
-  integer, and ieee endpoint arithmetic is binary64-only). The
-  elementwise form decides in both modes at every size.
+  integer, and ieee endpoint arithmetic models the four catalogued FLOAT
+  formats only — integer wraparound is a real-mode row). The elementwise
+  form decides in both modes at every size.
 * **As an `assume` they are not interchangeable.** All three CONSTRAIN
   rather than DROP, but the arithmetic pair narrows the reduction's own
   intermediate — an over-approximated value — so the precondition is

@@ -11,12 +11,12 @@ and derives every membership, tier, count, and citation below from
 them. The registries consumed, with their definition sites at
 generation time:
 
-- `stelling.propagate.TRANSFERS` (`src/stelling/propagate.py:3643`, 50 entries) — real-mode interval transfer registry (`semantics="real"`); each entry carries an assumption tier
-- `stelling.propagate.IEEE_TRANSFERS` (`src/stelling/propagate.py:5248`, 50 entries) — ieee-mode interval transfer registry (`semantics="ieee"`); each entry carries an assumption tier
-- `stelling.propagate._INT_COMPUTING` (`src/stelling/propagate.py:3826`, 17 entries) — transfer-side integer-semantics census: transfers that can compute a new numeric value (they carry the overflow-reachability guard)
-- `stelling.propagate._INT_NON_COMPUTING` (`src/stelling/propagate.py:3877`, 33 entries) — transfer-side integer-semantics census: transfers recorded as computing no new value
-- `stelling.propagate._INT_NON_COMPUTING_EXEMPT` (`src/stelling/propagate.py:3919`, 33 entries) — per-primitive written soundness reasons for the non-computing classification (reproduced in the appendix below)
-- `stelling.propagate._ASSUME_CMPS` (`src/stelling/propagate.py:5409`, 5 entries) — the comparisons a point-bounded `stelling_assume` can narrow through
+- `stelling.propagate.TRANSFERS` (`src/stelling/propagate.py:3754`, 50 entries) — real-mode interval transfer registry (`semantics="real"`); each entry carries an assumption tier
+- `stelling.propagate.IEEE_TRANSFERS` (`src/stelling/propagate.py:5962`, 50 entries) — ieee-mode interval transfer registry (`semantics="ieee"`); each entry carries an assumption tier
+- `stelling.propagate._INT_COMPUTING` (`src/stelling/propagate.py:3937`, 17 entries) — transfer-side integer-semantics census: transfers that can compute a new numeric value (they carry the overflow-reachability guard)
+- `stelling.propagate._INT_NON_COMPUTING` (`src/stelling/propagate.py:3988`, 33 entries) — transfer-side integer-semantics census: transfers recorded as computing no new value
+- `stelling.propagate._INT_NON_COMPUTING_EXEMPT` (`src/stelling/propagate.py:4030`, 33 entries) — per-primitive written soundness reasons for the non-computing classification (reproduced in the appendix below)
+- `stelling.propagate._ASSUME_CMPS` (`src/stelling/propagate.py:6499`, 5 entries) — the comparisons a point-bounded `stelling_assume` can narrow through
 - `stelling.obligation._SUPPORTED` (`src/stelling/obligation.py:266`, 36 entries) — the SMT emission set: primitives an obligation slice may contain and emit
 - `stelling.obligation._INT_OVERFLOW_EMITTED` (`src/stelling/obligation.py:286`, 11 entries) — emission-side integer-semantics census: emitted primitives that compute a new numeric value (integer dtypes decline)
 - `stelling.obligation._INT_SAFE_EMITTED` (`src/stelling/obligation.py:310`, 25 entries) — emission-side integer-semantics census: emitted primitives recorded int-safe
@@ -125,7 +125,7 @@ where the code records no reason for a difference, the entry says
 ### Real vs ieee transfer registry membership
 
 The two transfer registries register exactly the same 50 primitives. This is enforced by an import-time
-check whose recorded reason is: "the census must stay total: a registered transfer with no ieee census entry would be silent reuse, the exact thing rule 6 forbids" (src/stelling/propagate.py:5393).
+check whose recorded reason is: "the census must stay total: a registered transfer with no ieee census entry would be silent reuse, the exact thing rule 6 forbids" (src/stelling/propagate.py:6112).
 
 ### Real vs ieee assumption tiers
 
@@ -133,7 +133,7 @@ check whose recorded reason is: "the census must stay total: a registered transf
 39 carry the same tier in both.
 
 The module docstring's recorded rationale for the ieee endpoint
-arithmetic is: "endpoint arithmetic for the monotone core is native binary64 with NO outward rounding (the float value itself is computable — :data:`stelling.interval.IEEE_ENDPOINT_ASSUMPTION`)" (src/stelling/propagate.py:146).
+arithmetic is: "endpoint arithmetic for the monotone core is native binary64 with no outward rounding IN BINARY64 (the float value itself is computable — :data:`stelling.interval.IEEE_ENDPOINT_ASSUMPTION`); in the three narrow formats the endpoints are rounded OUTWARD onto that format's grid and hazed with that format's own subnormal band" (src/stelling/propagate.py:148).
 
 Per-primitive recorded reasons at the registry entries. Each
 attached reason is checked at generation time for consistency with
@@ -142,23 +142,47 @@ a contradicting tier fails generation unless the row is presented
 as a recorded discrepancy, and a discrepancy row whose recorded
 text no longer contradicts the live tier fails generation too.
 
-- `add` — real `sound`, ieee `exact`: "(ii) ieee variants: the monotone arithmetic core — native binary64 endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0 convention (iv._prod inside iv.mul) is NOT reused." (src/stelling/propagate.py:5249)
-- `add_any` — real `sound`, ieee `exact`: "(ii) ieee variants: the monotone arithmetic core — native binary64 endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0 convention (iv._prod inside iv.mul) is NOT reused." (src/stelling/propagate.py:5249)
-- `div` — real `sound`, ieee `exact`: "(ii) ieee variants: the monotone arithmetic core — native binary64 endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0 convention (iv._prod inside iv.mul) is NOT reused." (src/stelling/propagate.py:5249)
-- `dot_general` — real `sound`, ieee `exact`: "dot_general under ieee: a whole-primitive censused REFUSAL." (src/stelling/propagate.py:5144)
-- `integer_pow` — real `sound`, ieee `exact`: "(ii) censused down the same way: y in {0, 1} perform NO arithmetic and are exact (y=0 is measured 1.0 even at NaN, so it CLEARS the flag); every other exponent declines — no fixed multiply schedule" (src/stelling/propagate.py:5299)
-- `mul` — real `sound`, ieee `exact`: "(ii) ieee variants: the monotone arithmetic core — native binary64 endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0 convention (iv._prod inside iv.mul) is NOT reused." (src/stelling/propagate.py:5249)
-- `reduce_sum` — real `sound`, ieee `exact`: "(ii) censused DOWN to the association-free cases: <=2 contributors are exact (0 or 1 addition; IEEE add is commutative), >=3 declines — float addition is not associative and the jaxpr fixes no order" (src/stelling/propagate.py:5295)
-- `scatter-add` — real `sound`, ieee `exact`: "Category (iii), whole-primitive: the censused ieee REFUSAL for scatter-add — the honest floor, chosen over an order-independent enclosure." (src/stelling/propagate.py:5130)
-- `sqrt` — real `sound`, ieee `exact`: RECORDED DISCREPANCY — the registry comment reads "(ii) native binary64, CORRECTLY rounded — the float root bracketed exactly (no outward bump, tier sound not sound-libm); a negative arg is NaN routed to the flag, a maybe-NaN operand poisons the result" (src/stelling/propagate.py:5271), which asserts tier `sound`, contradicting the live tier `exact` carried by the `IEEE_TRANSFERS` entry it annotates. The comment is stale on main, flagged for correction; it is quoted here as recorded text, not as the reason for the live tier.
-- `square` — real `sound`, ieee `exact`: "`square` under ieee — DECLINES, and the reason is not schedule ambiguity." (src/stelling/propagate.py:4809)
-- `sub` — real `sound`, ieee `exact`: "(ii) ieee variants: the monotone arithmetic core — native binary64 endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0 convention (iv._prod inside iv.mul) is NOT reused." (src/stelling/propagate.py:5249)
+- `add` — real `sound`, ieee `exact`: "(ii) ieee variants: the monotone arithmetic core — native binary64 endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0 convention (iv._prod inside iv.mul) is NOT reused." (src/stelling/propagate.py:5963)
+- `add_any` — real `sound`, ieee `exact`: "(ii) ieee variants: the monotone arithmetic core — native binary64 endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0 convention (iv._prod inside iv.mul) is NOT reused." (src/stelling/propagate.py:5963)
+- `div` — real `sound`, ieee `exact`: "(ii) ieee variants: the monotone arithmetic core — native binary64 endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0 convention (iv._prod inside iv.mul) is NOT reused." (src/stelling/propagate.py:5963)
+- `dot_general` — real `sound`, ieee `exact`: "dot_general under ieee: a whole-primitive censused REFUSAL." (src/stelling/propagate.py:5858)
+- `integer_pow` — real `sound`, ieee `exact`: "(ii) censused down the same way: y in {0, 1} perform NO arithmetic and are exact (y=0 is measured 1.0 even at NaN, so it CLEARS the flag); every other exponent declines — no fixed multiply schedule" (src/stelling/propagate.py:6018)
+- `mul` — real `sound`, ieee `exact`: "(ii) ieee variants: the monotone arithmetic core — native binary64 endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0 convention (iv._prod inside iv.mul) is NOT reused." (src/stelling/propagate.py:5963)
+- `reduce_sum` — real `sound`, ieee `exact`: "(ii) censused DOWN to the association-free cases: <=2 contributors are exact (0 or 1 addition; IEEE add is commutative), >=3 declines — float addition is not associative and the jaxpr fixes no order" (src/stelling/propagate.py:6014)
+- `scatter-add` — real `sound`, ieee `exact`: "Category (iii), whole-primitive: the censused ieee REFUSAL for scatter-add — the honest floor, chosen over an order-independent enclosure." (src/stelling/propagate.py:5844)
+- `sqrt` — real `sound`, ieee `exact`: RECORDED DISCREPANCY — the registry comment reads "(ii) native binary64, CORRECTLY rounded — the float root bracketed exactly (no outward bump, tier sound not sound-libm); a negative arg is NaN routed to the flag, a maybe-NaN operand poisons the result" (src/stelling/propagate.py:5990), which asserts tier `sound`, contradicting the live tier `exact` carried by the `IEEE_TRANSFERS` entry it annotates. The comment is stale on main, flagged for correction; it is quoted here as recorded text, not as the reason for the live tier.
+- `square` — real `sound`, ieee `exact`: "`square` under ieee — DECLINES, and the reason is not schedule ambiguity." (src/stelling/propagate.py:5523)
+- `sub` — real `sound`, ieee `exact`: "(ii) ieee variants: the monotone arithmetic core — native binary64 endpoints, NaN corners routed to the flag; the real-mode 0·∞ = 0 convention (iv._prod inside iv.mul) is NOT reused." (src/stelling/propagate.py:5963)
+
+### The `sound-libm` tier under ieee: a DECLARED budget
+
+2 primitives sit at tier `sound-libm` in `IEEE_TRANSFERS`: `exp`, `pow`. Under `semantics="ieee"` each of them **DECLINES outright** unless the caller declares an accuracy budget for the execution backend — `libm_budget=`, accepted by both `stelling.preconditions.check` and `stelling.propagate.propagate`. The recorded reason is: "the bracket of one function is not a bracket of another" (src/stelling/propagate.py:4637).
+
+The budget is **DECLARED, NEVER VERIFIED**: "one smaller than your backend's real error mints a VERIFIED nothing here can catch, and the verdict's stamp says exactly that" (src/stelling/propagate.py:5011).
+
+Shipped profile `xla-cpu-2026-08` (src/stelling/propagate.py:6352), and the measurement each budget is rounded up from (`stelling.propagate.LIBM_MEASURED`, src/stelling/propagate.py:4901):
+
+| op | format | declared ulps | measured max | population |
+|---|---|---|---|---|
+| `exp` | `bfloat16` | 0.5 | 0.499988 | EXHAUSTIVE |
+| `exp` | `float16` | 1 | 0.500028 | EXHAUSTIVE |
+| `exp` | `float32` | 6 | 5.5112 | EXHAUSTIVE |
+| `exp` | `float64` | 2 | 1.6660 | sampled |
+| `pow` | `bfloat16` | 1 | 0.5000 | sampled |
+| `pow` | `float16` | 1 | 0.5001 | sampled |
+| `pow` | `float32` | 1 | 0.5380 | sampled |
+| `pow` | `float64` | 1 | 0.5059 | sampled |
+
+A **sampled** row bounds what was sampled and nothing more. Every
+`exp` row is over the arguments whose result is normal and finite;
+a result that underflows is flushed to zero by the measured backend
+and is covered by the subnormal haze, not by an accuracy budget.
 
 ### Emission set vs transfer registries
 
 In the emission set but in neither transfer registry (2): `stelling_assume`, `xor`.
 
-- `stelling_assume` — "stelling_assume's *constraint* is inert (dropped, disclosed by the propagation notes) and is deliberately NOT emitted — only its data flow passes through, exactly as in propagation." (src/stelling/obligation.py:261); on the propagation side it is handled by the walk itself rather than through the transfer registry: "value semantics: the identity on the predicate — the assume's output passes its input through unchanged in BOTH modes" (src/stelling/propagate.py:8389)
+- `stelling_assume` — "stelling_assume's *constraint* is inert (dropped, disclosed by the propagation notes) and is deliberately NOT emitted — only its data flow passes through, exactly as in propagation." (src/stelling/obligation.py:261); on the propagation side it is handled by the walk itself rather than through the transfer registry: "value semantics: the identity on the predicate — the assume's output passes its input through unchanged in BOTH modes" (src/stelling/propagate.py:9494)
 - `xor` — no recorded reason for the absence of a transfer
 
 In the transfer registries but not in the emission set (16): `abs`, `add_any`, `copy`, `dynamic_slice`, `dynamic_update_slice`, `exp`, `gather`, `reduce_or`, `rem`, `sign`, `split`, `sqrt`, `stelling_any`, `stelling_assert`, `stop_gradient`, `unstack`.
@@ -198,7 +222,7 @@ overflow-guarded, 23 non-computing AND int-safe, and
 none is classified differently by the two censuses.
 
 Where both apply, the recorded relationship between the two guards
-is: "SMT-LIB2 Reals are unbounded; jax integers wrap. Emitting a computed integer as a Real would let the solver prove a claim the program falsifies, so integer dtypes decline here — the emission is stricter than the transfer on purpose." (src/stelling/obligation.py:2120) The transfer-side census's recorded charter is: "So the classification is mechanised instead of remembered. Every registered transfer is either COMPUTING — it can produce a numeric value its operands did not contain, so it carries the overflow-reachability guard — or NON-COMPUTING, with the reason recorded here." (src/stelling/propagate.py:3820) The emission-side census's totality rule is: "Every emittable primitive is classified, and the union must be total over `_SUPPORTED`." (src/stelling/obligation.py:307).
+is: "SMT-LIB2 Reals are unbounded; jax integers wrap. Emitting a computed integer as a Real would let the solver prove a claim the program falsifies, so integer dtypes decline here — the emission is stricter than the transfer on purpose." (src/stelling/obligation.py:2120) The transfer-side census's recorded charter is: "So the classification is mechanised instead of remembered. Every registered transfer is either COMPUTING — it can produce a numeric value its operands did not contain, so it carries the overflow-reachability guard — or NON-COMPUTING, with the reason recorded here." (src/stelling/propagate.py:3931) The emission-side census's totality rule is: "Every emittable primitive is classified, and the union must be total over `_SUPPORTED`." (src/stelling/obligation.py:307).
 
 Censused on the transfer side only (not emitted, 16): `abs`, `add_any`, `copy`, `dynamic_slice`, `dynamic_update_slice`, `exp`, `gather`, `reduce_or`, `rem`, `sign`, `split`, `sqrt`, `stelling_any`, `stelling_assert`, `stop_gradient`, `unstack`. Censused on the emission side only (no transfer, 2): `stelling_assume`, `xor`.
 
@@ -206,7 +230,7 @@ Censused on the transfer side only (not emitted, 16): `abs`, `add_any`, `copy`, 
 
 Of the 6 emitted comparisons, 5 can narrow through a constraining assume; not narrowing: `ne`.
 
-For `ne` the recorded reason is: "`ne` is a comparison but NOT here: excluding a single point from an interval does not narrow it (the hull of [lo, hi] \ {k} is [lo, hi]) — it stays inert with the reason quoted." (src/stelling/propagate.py:5405).
+For `ne` the recorded reason is: "`ne` is a comparison but NOT here: excluding a single point from an interval does not narrow it (the hull of [lo, hi] \ {k} is [lo, hi]) — it stays inert with the reason quoted." (src/stelling/propagate.py:6495).
 
 ## Recorded classification reasons
 
@@ -242,7 +266,7 @@ The two reason registries, reproduced verbatim from the live dicts.
 | `transpose` | emits NO terms: output elements alias source terms (index routing only) |
 | `xor` | boolean connective on Bool terms (non-bool operands decline in _validate) |
 
-### Transfer non-computing exemptions (`stelling.propagate._INT_NON_COMPUTING_EXEMPT`, `src/stelling/propagate.py:3919`)
+### Transfer non-computing exemptions (`stelling.propagate._INT_NON_COMPUTING_EXEMPT`, `src/stelling/propagate.py:4030`)
 
 | primitive | recorded reason |
 |---|---|

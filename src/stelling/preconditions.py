@@ -105,7 +105,7 @@ def scalar_nonzero(dtype, envelope):
 
 
 def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
-          refine=None, solver=None, strict=False):
+          refine=None, solver=None, strict=False, libm_budget=None):
     """Run a precondition harness end-to-end and return the stamped
     :class:`stelling.verdict.Verdict` — with the vacuity check built in:
     **this entry point cannot return an unchecked VERIFIED.**
@@ -155,6 +155,22 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     (``"z3"`` or ``"cvc5"``). ``None`` (default) uses the full installed
     portfolio. Only meaningful when ``solver_timeout_ms`` is also passed.
 
+    ``libm_budget``: **required to use ``exp`` or ``pow`` under**
+    ``semantics="ieee"``. ``None`` (the default) makes those transfers
+    DECLINE, with the measured evidence and the exact line to write in
+    the decline. Pass a shipped profile name — ``"xla-cpu-2026-08"`` — or
+    a :class:`stelling.propagate.LibmBudget` of your own, to declare how
+    far the function your backend executes may be from the true value.
+    Under ieee semantics a verdict is a claim about the float the program
+    computes, and stelling's bracket is built around the ``math`` module
+    of the host running the analysis; the two differ by up to 5.5 float32
+    ulps on the measured backend, so the assumption is made an explicit,
+    named, dated declaration instead of a silent default (audit 0.2.0 S9,
+    S11). It is stamped on the verdict as **declared, not verified**, and
+    a budget smaller than your backend's real error mints a VERIFIED
+    stelling cannot catch. Passing it under ``semantics="real"`` raises —
+    it has no meaning there.
+
     Version, precision, and solver stamps are filled from the live
     environment; the precision entry records the *actual*
     ``jax_enable_x64`` state at trace time, not an assumption.
@@ -181,6 +197,7 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
             solver_timeout_ms=solver_timeout_ms,
             refine=refine,
             solver=solver,
+            libm_budget=libm_budget,
         )
     except ir.TranscriptionError as e:
         # stelling could not READ the query. That is a capability gap, not a
@@ -201,7 +218,7 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
 
 
 def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
-              refine=None, solver=None):
+              refine=None, solver=None, libm_budget=None):
     """The one pipeline behind :func:`check` — trace, propagate, optional
     affine refinement (``refine="affine"``, never on by default), optional
     solver escalation, stamped verdict assembly, and the VERIFIED widen
@@ -260,6 +277,16 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
         raise ValueError(
             f"solver must be None, 'z3', or 'cvc5', got {solver!r}"
         )
+    # the libm budget is validated eagerly like every other dial — a
+    # typo'd profile name must raise where it was written, not arrive as a
+    # decline three layers down that reads like a stelling limitation
+    from stelling.propagate import (
+        LIBM_BUDGET_REAL_MODE_REFUSAL, resolve_libm_budget,
+    )
+
+    libm_budget = resolve_libm_budget(libm_budget)
+    if libm_budget is not None and semantics != "ieee":
+        raise ValueError(LIBM_BUDGET_REAL_MODE_REFUSAL)
 
     from stelling._tripwire import (
         _pop_gate, _push_gate, fires_count as _fires_count,
@@ -327,7 +354,7 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
         )
         return v, cj
 
-    p = propagate(cj, semantics=semantics)
+    p = propagate(cj, semantics=semantics, libm_budget=libm_budget)
     versions = dict(
         stelling_version=_stelling.__version__,
         jax_version=jax_version(),
@@ -401,7 +428,9 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
         )
         return dataclasses.replace(v, stamp=stamp), cj
 
-    wide, wide_ref = _finish(wcj, propagate(wcj, semantics=semantics))
+    wide, wide_ref = _finish(
+        wcj, propagate(wcj, semantics=semantics, libm_budget=libm_budget)
+    )
     still = [
         o.index for o in wide.obligations if o.status == "discharged"
     ]

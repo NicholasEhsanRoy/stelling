@@ -74,6 +74,61 @@ SPDX-License-Identifier: Apache-2.0
   format's subnormal band (`assume(b > 1e-30)` in float32, say) keeps its
   quotient.
 
+- **float16 and bfloat16 constants are readable** (audit 0.2.0 M12).
+  `propagate._STRUCT_FMT` had no entry for float16's `<f2` or bfloat16's
+  `<V2`, so every constant in those formats bound ⊤-maybe-NaN and *any*
+  harness mentioning a scalar — including the ubiquitous
+  `assert_(y > 0.0)` — answered UNKNOWN. Sound, and it made two of the
+  four catalogued formats unusable for the ordinary shape of a harness.
+  float16 decodes through `struct`'s `e` code (IEEE binary16, exact);
+  **bfloat16 needs the aval**, because its dtype `.str` is `<V2` — an
+  anonymous 2-byte VOID that every 2-byte structured dtype spells, so the
+  byte string alone does not identify the format. The decoder therefore
+  takes the aval's dtype NAME and reads `<V2` only under `"bfloat16"`;
+  anything else stays ⊤-with-a-note rather than being read as a float.
+  Verdicts move **UNKNOWN → VERIFIED/REFUTED** on float16 and bfloat16
+  harnesses with constants, in both `real` and `ieee` semantics.
+
+- **A mixed-format comparison gets the WIDEST operand band, never the
+  alphabetically-first** (audit 0.2.0 M13). `_ieee_cmp_get_min_normal`
+  sorted the operands' float dtypes and took `[0]`, and
+  `bfloat16 < float16 < float32 < float64`, so a `{bfloat16, float16}`
+  comparison was hazed with bfloat16's `2**-126` where the float16
+  operand needs `2**-14` — 112 decades too narrow, and the band is what
+  keeps a verdict sound for a flushing target. The rule is now a maximum
+  over the operands' formats, which is sound for every one of them
+  because the haze HULLS with 0 rather than replacing. Reachable only
+  through hand-built or deserialized IR (jax promotes before it
+  computes). The *arithmetic* face still declines a mixed equation, and
+  the asymmetry is deliberate: an arithmetic result needs a grid to round
+  onto, a comparison produces a bool and uses only the band.
+
+- **The two mode-wide IEEE assumption stamps are format-parametric**
+  (audit 0.2.0 M14). `IEEE_ENDPOINT_ASSUMPTION` and
+  `SUBNORMAL_INDETERMINACY_ASSUMPTION` are binary64 sentences and were
+  stamped verbatim on narrow-format verdicts, where both are false: the
+  endpoints **were** outward-rounded to the target grid (that is the whole
+  of `_ieee_round_box`), and the band applied was the format's, not
+  `2**-1022`. The `semantics:` line disclosed the parametric mode
+  correctly, so the two `assumes:` lines contradicted the line above them.
+  Both sentences now name the formats the query contains and their own
+  bands; a binary64-only run stamps the identical text it always did.
+  Disclosure only — no verdict moves.
+
+- **A binary IEEE kernel with no format-parametric row declines** (audit
+  0.2.0 M15). `_ieee_arith`'s fallback used the binary64 kernel — whose
+  haze band is `2**-1022` — for a narrow format, and `_ieee_round_box`
+  afterwards **cannot** recover the missing haze: outward rounding onto
+  the format grid does not hull with 0. Measured, float32 `x + x` at
+  `x = 2**-140` came back `[1.4349e-42, 1.4349e-42]` where jax computes
+  `0.0`. Dead today, and the hazard was that the fifth binary kernel
+  registered without a `_FMT_BINARY_OPS` row would be a silent
+  regression: `_FMT_BINARY_OPS` and `IEEE_TRANSFERS` are two hand-written
+  lists that must agree, the coupling `affine.py`'s `AFFINE_SUPPORTED`
+  already names as load-bearing. An import-time census now refuses the
+  import when they disagree in either direction, and the runtime arm
+  declines as a second guard.
+
 ### Verification pipeline
 
 - **Reachability conjunct**: a backward walk from the jaxpr's outputs
@@ -110,6 +165,46 @@ SPDX-License-Identifier: Apache-2.0
   returns NaN for `pow(negative, fractional)`).
 
 ### Soundness fixes
+
+- **`exp` and `pow` under `semantics="ieee"` now require a DECLARED libm
+  accuracy budget** (audit 0.2.0 **S9** and **S11**; S11 reaches the
+  released **0.1.0** — see [SOUNDNESS.md](SOUNDNESS.md)). Under `ieee` a
+  verdict is a claim about the float value the program computes, and
+  stelling's bracket was built around CPython's `math.exp` — the libm of
+  the machine running the analysis. The program runs whatever XLA
+  compiled. Measured on jax 0.11.0 / jaxlib 0.11.0, CPU, x86_64,
+  exhaustively over every `float32` argument whose result is normal and
+  finite (2,237,668,967 of them), XLA's `exp` is out by up to **5.51
+  float32 ulps** — not faithfully rounded at all, so no fixed widening is
+  sound; in binary64 by up to **1.67 ulps** over 3,000,000 samples, which
+  is what leaks past a ±1-ulp bracket. On the *same* backend `bfloat16`
+  `exp` is exhaustively **correctly rounded** over every normal finite
+  result, while `float16` misses correct rounding on 2 of its 63,487
+  arguments (0.500028 ulps) — a factor of eleven between two formats of
+  one op, so one number cannot be right for all four.
+
+  Both transfers therefore **fail closed** and are re-enabled by a
+  declaration:
+
+      check(harness, vacuity_mode="inputs-only", semantics="ieee",
+            libm_budget="xla-cpu-2026-08")
+
+  `"xla-cpu-2026-08"` is a shipped, **named and dated** profile of
+  per-`(op, format)` budgets; `stelling.propagate.LibmBudget` states your
+  own. Both `check()` and `propagate()` take the keyword. The decline
+  carries the measurement that justifies it and a line that **runs as
+  written**. The budget widens the bracket by the declared ulps before
+  the format rounding, and is stamped as **declared, not verified** —
+  because a budget smaller than the backend's real error mints a VERIFIED
+  stelling cannot catch. A budget of `0.5` ulps (correctly rounded) widens
+  by nothing at all, which is `interval.sqrt`'s own argument generalised;
+  `sqrt` is a correctly-rounded basic operation, carries no libm demotion,
+  and needs no budget. `semantics="real"` is untouched and refuses the
+  argument. Verdicts move **VERIFIED → UNKNOWN** and **REFUTED → UNKNOWN**
+  on ieee-mode queries containing `exp` or `pow`; the coverage cost,
+  measured at a point argument, is **12 float32 / 6 binary64 / 2 float16
+  extra grid steps** of bracket width, and zero for `bfloat16`, the one
+  format this backend's `exp` is exhaustively correctly rounded in.
 
 - **Rational-`pow` exponent identity** (audit 0.2.0 S1; see
   [SOUNDNESS.md](SOUNDNESS.md)): the exponent was rationalised with
@@ -487,6 +582,25 @@ SPDX-License-Identifier: Apache-2.0
   top level of the harness. Descending the loop is a separate feature: a
   loop body's assume is a per-iteration statement about a carry that
   changes, and this release models neither.
+- **The libm accuracy budget is DECLARED, never verified.** stelling
+  widens the `exp`/`pow` bracket by the ulps you declare and stamps the
+  declaration; it has no way to measure the function your backend
+  executes, so a budget smaller than that function's real error mints a
+  VERIFIED nothing here can catch. The shipped profile
+  `"xla-cpu-2026-08"` is a measurement of **one** jaxlib on **one** device
+  class on **one** day, and its name says so; on any other target it is a
+  guess with a date on it. There is also no *residual* budget: an
+  `(op, format)` pair a budget does not name declines, and stelling never
+  extrapolates from one format to another (measured, the same backend
+  ranges over 0.50 to 5.51 ulps across the four formats for the same op).
+- **`sqrt` under `ieee` still brackets binary64 with a POINT** — no
+  outward bump at all — which is sound only because IEEE-754 *requires*
+  `sqrt` to be correctly rounded, so `math.sqrt` and the compiled `sqrt`
+  must agree bit for bit. That is a standard's guarantee rather than a
+  measurement, and it is a genuinely different footing from `exp`/`pow`,
+  which IEEE-754 does not constrain at all. A backend that violates it
+  (a fast-math build, an approximate reciprocal-sqrt path) is outside
+  what this mode can catch, and `sqrt` carries no budget dial to say so.
 - `assume(x > 0)` in real mode still narrows to `[0, hi]` (closed
   intervals cannot represent open bounds in exact reals). The IEEE bump
   is exact; the real-mode overapproximation is sound. In real mode, the

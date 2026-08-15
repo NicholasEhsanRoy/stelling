@@ -78,6 +78,8 @@ file and that one cannot drift apart:
 - [To claim a capability would unblock work, STUB IT AND COUNT](docs/norms.md#to-claim-a-capability-would-unblock-work-stub-it-and-count)
 - [Don't hand-roll a traversal when a canonical accessor exists](docs/norms.md#dont-hand-roll-a-traversal-when-a-canonical-accessor-exists)
 - [A measurement whose result is an ABSENCE needs a positive control](docs/norms.md#a-measurement-whose-result-is-an-absence-needs-a-positive-control)
+- [Evidence of non-occurrence licenses "unreached", never "unreachable"](docs/norms.md#evidence-of-non-occurrence-licenses-unreached-never-unreachable)
+- [Conditional coverage reports as full coverage](docs/norms.md#conditional-coverage-reports-as-full-coverage)
 - [Before measuring a constant, read its definition site — and before deciding a question, read its ADJUDICATION site](docs/norms.md#before-measuring-a-constant-read-its-definition-site--and-before-deciding-a-question-read-its-adjudication-site)
 - [State which query a measurement actually ran](docs/norms.md#state-which-query-a-measurement-actually-ran)
 - [An instrument must declare its SCOPE, and an acceptance criterion must check that the scope covers the claim](docs/norms.md#an-instrument-must-declare-its-scope-and-an-acceptance-criterion-must-check-that-the-scope-covers-the-claim)
@@ -95,6 +97,7 @@ file and that one cannot drift apart:
 - [Stop before soundness-critical work when mechanical slips accumulate](docs/norms.md#stop-before-soundness-critical-work-when-mechanical-slips-accumulate)
 - [A gauge's oracle is the TARGET, not a reference implementation](docs/norms.md#a-gauges-oracle-is-the-target-not-a-reference-implementation)
 - [A figure in a norm states the UNIT it counts](docs/norms.md#a-figure-in-a-norm-states-the-unit-it-counts)
+- [An inequality used as an ARGUMENT is evaluated, not read](docs/norms.md#an-inequality-used-as-an-argument-is-evaluated-not-read)
 - [A blinded audit is a GATE, not a step](docs/norms.md#a-blinded-audit-is-a-gate-not-a-step)
 
 If you are changing one line in a docstring, read the first two. If you are

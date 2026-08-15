@@ -140,17 +140,28 @@ byte-identically — the comparability control for the vacuity instrument.
 ``semantics`` is the dial SOUNDNESS.md's stamp contract names: ``"real"``
 (the default, byte-identical to everything above) judges obligations in
 exact real arithmetic; ``semantics="ieee"`` judges them about the traced
-program's **IEEE binary64 round-to-nearest float execution**. The ieee
+program's **IEEE round-to-nearest float execution in the format the
+jaxpr actually carries** — float16, bfloat16, float32 or binary64, each
+judged in its OWN format rather than all four as binary64. The ieee
 domain is the same :class:`stelling.interval.IntervalArray` plus a
 per-array ``maybe_nan`` flag (a parallel ``var id -> bool`` table beside
 the interval env): endpoint arithmetic for the monotone core is native
-binary64 with NO outward rounding (the float value itself is computable
-— :data:`stelling.interval.IEEE_ENDPOINT_ASSUMPTION`), overflow
-saturates to the VALUE ±inf, NaN-producing corner classes (``inf−inf``,
-``0·±inf``, ``0/0``, ``inf/inf``) set ``maybe_nan``, ⊤ is
+binary64 with no outward rounding IN BINARY64 (the float value itself is
+computable — :data:`stelling.interval.IEEE_ENDPOINT_ASSUMPTION`); in the
+three narrow formats the endpoints are rounded OUTWARD onto that
+format's grid and hazed with that format's own subnormal band, because
+binary64 endpoint arithmetic does not land on a narrow format's values.
+Overflow saturates to the VALUE ±inf, NaN-producing corner classes
+(``inf−inf``, ``0·±inf``, ``0/0``, ``inf/inf``) set ``maybe_nan``, ⊤ is
 maybe-NaN, and a predicate over a maybe-NaN operand is never definitely
 true (NaN falsifies every comparison except ``ne``, which it satisfies).
-Every registered transfer is censused for ieee in
+``exp`` and ``pow`` are the second exception to the no-outward-rounding
+line and a larger one: they bracket the TRUE REAL value and DECLINE
+outright unless the caller declares a :class:`LibmBudget` for the
+backend that will execute them (``libm_budget=``, accepted by both
+:func:`propagate` and :func:`stelling.preconditions.check`), because the
+bracket of the analysis host's ``math.exp`` is not a bracket of the one
+the compiler emits. Every registered transfer is censused for ieee in
 :data:`IEEE_TRANSFERS` — sound as-is, given an ieee variant, or declined
 to ⊤-maybe-NaN with the gap quoted; the real mode's extended-real
 conventions (the ``0·∞ = 0`` endpoint rule) are never reused. The
@@ -188,6 +199,9 @@ from stelling.coverage import (
 
 __all__ = [
     "IEEE_TRANSFERS",
+    "LIBM_MEASURED",
+    "LIBM_PROFILES",
+    "LibmBudget",
     "ObligationReport",
     "Propagation",
     "RelationalAssume",
@@ -196,6 +210,7 @@ __all__ = [
     "UnsatisfiableAssumptionError",
     "interval_env",
     "propagate",
+    "resolve_libm_budget",
 ]
 
 TIER_EXACT = "exact"
@@ -724,11 +739,34 @@ class Propagation:
 # whole analysis died on a legal trace (h_hard), the exact failure the
 # guard rule forbids. Unsigned ints decode to python ints, which
 # `_int_bracket` already brackets soundly above 2**53.
+#
+# `<f2` (float16) joined with audit 0.2.0 M12: without it EVERY float16
+# harness that mentions a scalar constant — the ubiquitous
+# `assert_(y > 0.0)` above all — bound ⊤ and topped out, so one of the
+# four catalogued formats did not work on the ordinary shape of a
+# harness. `struct`'s `e` code IS IEEE binary16, so the decode is exact
+# and costs no dependency. (`obligation._SCALAR_STRUCT_FMT` has carried
+# `<f2` all along; only the interval leg was short, and the two legs
+# therefore disagreed about the same constant.)
 _STRUCT_FMT = {
-    "<f8": "d", "<f4": "f", "<i8": "q", "<i4": "i", "|b1": "?",
+    "<f8": "d", "<f4": "f", "<f2": "e", "<i8": "q", "<i4": "i", "|b1": "?",
     "|u1": "B", "<u2": "H", "<u4": "I", "<u8": "Q",
     "|i1": "b", "<i2": "h",
 }
+
+# bfloat16 is the one catalogued format with no numpy scalar type and no
+# `struct` code, and its dtype `.str` is **`<V2`: an anonymous 2-byte
+# VOID**, which every other 2-byte structured dtype also spells. The byte
+# string therefore does NOT identify the format, and a decoder keyed on
+# `<V2` alone would read an arbitrary record type as a float — a wrong
+# VALUE, which is worse than the ⊤ it replaces. The `ir.Aval` beside the
+# value carries the dtype's NAME (`str(np.dtype(...))` -> `"bfloat16"`),
+# and that does identify it, so :func:`_decode_array` takes the name as a
+# disambiguator and decodes `<V2` **only** under it. A `<V2` payload with
+# no name, or with a different one, stays undecodable — ⊤ with a note and
+# `read_flag` True, exactly as before (audit 0.2.0 M12).
+_BFLOAT16_DTYPE_STR = "<V2"
+_BFLOAT16_DTYPE_NAME = "bfloat16"
 
 
 def _int_bracket(v: int) -> tuple[float, float]:
@@ -746,20 +784,67 @@ def _int_bracket(v: int) -> tuple[float, float]:
     return iv._down(x), iv._up(x)
 
 
-def _decode_array(a: ir.Array) -> iv.IntervalArray:
+def _elements(shape: tuple[int, ...]) -> int:
+    n = 1
+    for d in shape:
+        n *= d
+    return n
+
+
+def _decode_bfloat16(a: ir.Array) -> iv.IntervalArray:
+    """The `<V2` payload of a bfloat16 array, decoded EXACTLY.
+
+    bfloat16 is binary32 with the low 16 significand bits removed — same
+    exponent field, same bias — so a bfloat16 value is exactly the binary32
+    whose top half it is, and exactly the binary64 that binary32 is. The
+    decode is therefore a bit shift and a `struct` reinterpret, with no
+    rounding anywhere: `lo == hi`, like every other float row here.
+
+    Called only under the aval's dtype NAME (see
+    :data:`_BFLOAT16_DTYPE_STR`) — the `.str` alone cannot say a 2-byte
+    void is this format.
+    """
+    iv.check_shape(a.shape)
+    n = _elements(a.shape)
+    if len(a.data) != 2 * n:
+        raise iv.IntervalError(
+            f"array constant of shape {a.shape} dtype "
+            f"{_BFLOAT16_DTYPE_NAME!r} carries {len(a.data)} byte(s), "
+            f"expected {2 * n} — truncated or oversized payload "
+            f"(malformed IR)"
+        )
+    los = []
+    for u16 in struct.unpack(f"<{n}H", a.data):
+        (v,) = struct.unpack("<f", struct.pack("<I", u16 << 16))
+        los.append(float(v))
+    # NaN payloads reach IntervalArray's own NaN refusal, which the
+    # read site already turns into ⊤-with-maybe-NaN — the float64 NaN
+    # sentinel's route, unchanged.
+    return iv.IntervalArray(shape=a.shape, los=tuple(los), his=tuple(los))
+
+
+def _decode_array(a: ir.Array, dtype_name: str | None = None) -> iv.IntervalArray:
     fmt = _STRUCT_FMT.get(a.dtype)
     if fmt is None:
+        if (a.dtype == _BFLOAT16_DTYPE_STR
+                and dtype_name == _BFLOAT16_DTYPE_NAME):
+            return _decode_bfloat16(a)
+        extra = ""
+        if a.dtype == _BFLOAT16_DTYPE_STR:
+            extra = (
+                f" ({_BFLOAT16_DTYPE_STR!r} is an anonymous 2-byte void; "
+                f"stelling decodes it as bfloat16 only when the aval names "
+                f"that dtype, and this one names {dtype_name!r})"
+            )
         raise ir.TranscriptionError(
-            f"no zero-dep decoder for array dtype {a.dtype!r}; add one before "
-            f"propagating this query"
+            f"no zero-dep decoder for array dtype {a.dtype!r}{extra}; add one "
+            f"before propagating this query"
         )
     # shape predicates first (fix re-attacks R1/N2): integral nonnegative
     # extents (a negative or string extent would reach struct.unpack as a
     # malformed format and raise raw), through the decline channel
     iv.check_shape(a.shape)
-    n = 1
-    for d in a.shape:
-        n *= d
+    n = _elements(a.shape)
     # ... and the PAYLOAD LENGTH against the shape (N2): a truncated,
     # oversized, or empty buffer under a positive shape raised raw
     # struct.error out of the walk — the exact sibling of the negative
@@ -782,9 +867,20 @@ def _decode_array(a: ir.Array) -> iv.IntervalArray:
     return iv.IntervalArray(shape=a.shape, los=tuple(los), his=tuple(his))
 
 
-def _value_to_interval(v, shape: tuple[int, ...]) -> iv.IntervalArray:
+def _value_to_interval(
+    v, shape: tuple[int, ...], dtype_name: str | None = None
+) -> iv.IntervalArray:
+    """The interval a literal/const value denotes.
+
+    ``dtype_name`` is the *aval's* dtype name beside the value. It is a
+    disambiguator, never an override: exactly one dtype (`bfloat16`) has a
+    `.str` that does not identify it, and only that one row reads this
+    argument (see :data:`_BFLOAT16_DTYPE_STR`). Omitting it can only lose
+    precision — the value stays undecodable and binds ⊤ — never change a
+    decoded value.
+    """
     if isinstance(v, ir.Array):
-        return _decode_array(v)
+        return _decode_array(v, dtype_name)
     if isinstance(v, bool):
         return iv.point(1.0 if v else 0.0, shape)
     if isinstance(v, int):
@@ -886,6 +982,21 @@ _FLOAT_FORMATS: dict[str, tuple[int, int, int]] = {
     "float32": (24, -126, 127),
     "float64": (53, -1022, 1023),
 }
+
+# The reverse view, for messages that hold a format tuple and owe the
+# reader a NAME. bfloat16 and float32 share (emin, emax) and differ only
+# in `p`, so the whole tuple is the key and the map is injective.
+_FLOAT_FORMATS_BY_TUPLE: dict[tuple[int, int, int], str] = {
+    v: k for k, v in _FLOAT_FORMATS.items()
+}
+if len(_FLOAT_FORMATS_BY_TUPLE) != len(_FLOAT_FORMATS):  # pragma: no cover
+    # `raise`, not `assert`: a module-level assert is stripped under -O,
+    # and a census that stops being enforced in an optimised deployment
+    # is not a census (tests/test_optimize_mode_guards.py).
+    raise RuntimeError(
+        "two float formats share a (p, emin, emax) tuple — the reverse "
+        "view would name the wrong one"
+    )
 
 
 def _conversion_exactness(src: str, dst: str) -> tuple[str, str]:
@@ -3475,7 +3586,7 @@ def _literal_strict_sign(atom: ir.Literal) -> int:
     :meth:`_quiet_box`.
     """
     try:
-        box = _value_to_interval(atom.val, atom.aval.shape)
+        box = _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
     except (iv.IntervalError, ir.TranscriptionError):
         return 0
     return _box_strict_sign(box)
@@ -4347,6 +4458,59 @@ _LIBM_ASSUMPTIONS = {
 # anything a float can be, including NaN).
 
 
+def _the_float_format(dtypes, what: str) -> tuple[str, tuple[int, int, int]]:
+    """**The one place a set of dtypes becomes an ieee float format.**
+
+    Returns ``(dtype_name, (p, emin, emax))``. Raises
+    :class:`~stelling.interval.IntervalError` when there is no float dtype
+    at all, when one is not a supported format (integer dtypes, the float8
+    variants), or when two supported ones DISAGREE.
+
+    The agreement check is not decoration and it is not optional. Sorting
+    the float dtypes and taking ``[0]`` picks a format ALPHABETICALLY, and
+    ``bfloat16 < float16 < float32 < float64``, so a `{bfloat16, float16}`
+    pair silently resolves to bfloat16 — whose subnormal band is
+    ``2**-126`` where float16 needs ``2**-14``, 112 decades too narrow, and
+    the band is what keeps a verdict sound for a flushing target. Two
+    call sites did the sort-and-take and only one did the check, so the
+    comparison side judged mixtures with the wrong band while the
+    arithmetic side declined them (audit 0.2.0 M13). One implementation
+    now, so the two cannot drift again: jax promotes before computing, so
+    a disagreement means hand-built or deserialized IR — which this
+    module's own rules treat as in scope — and a mixed equation is
+    DECLINED, in both faces, rather than judged with either operand's
+    band.
+
+    ``what`` names the caller in the refusal ("ieee arithmetic", "ieee
+    comparison"), which is the only thing the two faces do differently.
+    """
+    float_dtypes = sorted(d for d in dtypes if "float" in (d or ""))
+    if not float_dtypes:
+        raise iv.IntervalError(
+            f"{what} requires float operands; dtypes {sorted(dtypes)} "
+            f"contain no supported float format — declined"
+        )
+    fmt = _FLOAT_FORMATS.get(float_dtypes[0])
+    if fmt is None:
+        raise iv.IntervalError(
+            f"{what}: dtype {float_dtypes[0]!r} is not a supported "
+            f"format (supported: {sorted(_FLOAT_FORMATS)}) — declined"
+        )
+    for d in float_dtypes[1:]:
+        other = _FLOAT_FORMATS.get(d)
+        if other is None:
+            raise iv.IntervalError(
+                f"{what}: dtype {d!r} is not a supported format "
+                f"(supported: {sorted(_FLOAT_FORMATS)}) — declined"
+            )
+        if other != fmt:
+            raise iv.IntervalError(
+                f"{what}: mixed float formats "
+                f"{float_dtypes} — declined"
+            )
+    return float_dtypes[0], fmt
+
+
 def _ieee_get_format(eqn) -> tuple[int, int, int]:
     """Look up the float format for an equation's operand/result dtypes.
 
@@ -4357,36 +4521,32 @@ def _ieee_get_format(eqn) -> tuple[int, int, int]:
     supported float format (e.g., integer dtypes, float8 variants), or if
     the dtypes disagree (a mixed-dtype equation that bypassed promotion).
     """
+    return _ieee_get_dtype_format(eqn)[1]
+
+
+def _ieee_get_dtype_format(eqn) -> tuple[str, tuple[int, int, int]]:
+    """:func:`_ieee_get_format` plus the dtype NAME it resolved.
+
+    The name is what the libm accuracy budget is keyed on — a budget is
+    per ``(op, format)`` and the format tuple is not what a user writes.
+    """
     dtypes = {v.aval.dtype for v in (*eqn.invars, *eqn.outvars)}
-    # Remove non-float dtypes that are acceptable in some contexts (bool
-    # selectors in select_n, int indices) — the caller must validate those
-    # separately. Here we extract THE float format.
-    float_dtypes = sorted(d for d in dtypes if "float" in (d or ""))
-    if not float_dtypes:
-        raise iv.IntervalError(
-            f"ieee arithmetic requires float operands; dtypes {sorted(dtypes)} "
-            f"contain no supported float format — declined"
-        )
-    # All float operands/results must share a single format
-    fmt = _FLOAT_FORMATS.get(float_dtypes[0])
-    if fmt is None:
-        raise iv.IntervalError(
-            f"ieee arithmetic: dtype {float_dtypes[0]!r} is not a supported "
-            f"format (supported: {sorted(_FLOAT_FORMATS)}) — declined"
-        )
-    for d in float_dtypes[1:]:
-        other = _FLOAT_FORMATS.get(d)
-        if other is None:
-            raise iv.IntervalError(
-                f"ieee arithmetic: dtype {d!r} is not a supported format "
-                f"(supported: {sorted(_FLOAT_FORMATS)}) — declined"
-            )
-        if other != fmt:
-            raise iv.IntervalError(
-                f"ieee arithmetic: mixed float formats "
-                f"{float_dtypes} — declined"
-            )
-    return fmt
+    # Non-float dtypes that are acceptable in some contexts (bool selectors
+    # in select_n, int indices) are the caller's business to validate; here
+    # we extract THE float format.
+    return _the_float_format(dtypes, "ieee arithmetic")
+
+
+def _ieee_float_dtype_or_none(eqn) -> str | None:
+    """The equation's float dtype NAME, or None when there is not exactly
+    one. Never raises: it feeds the propagator's record of which
+    ``(op, format)`` budgets a run consumed, and a record is not worth a
+    second failure path — a pair it cannot name simply is not recorded,
+    and the transfer that just ran had already resolved the same dtype."""
+    try:
+        return _ieee_get_dtype_format(eqn)[0]
+    except iv.IntervalError:
+        return None
 
 
 def _ieee_f64_only(eqn) -> None:
@@ -4467,6 +4627,486 @@ def _ieee_round_box(box: iv.IntervalArray, fmt: tuple[int, int, int]) -> iv.Inte
     return iv.IntervalArray(shape=box.shape, los=tuple(los), his=tuple(his))
 
 
+# -- the declared libm accuracy budget: the widening math ---------------------
+#
+# **WHAT THIS EXISTS FOR.** Under ``semantics="ieee"`` a verdict is a claim
+# about the float value THE PROGRAM COMPUTES. :func:`stelling.interval.exp`
+# brackets CPython's ``math.exp`` — glibc on the host running the analysis —
+# with a ±1-binary64-ulp bump, and :func:`stelling.interval.pow_` does the
+# same around ``math.pow``. The program does not run glibc's ``exp``. It runs
+# whatever XLA compiled for the device, and the bracket of one function is
+# not a bracket of another (audit 0.2.0 S9 and S11; S11 reaches the released
+# 0.1.0, where ``propagate(closed, semantics="ieee")`` was the door).
+#
+# **MEASURED** on jax 0.11.0 / jaxlib 0.11.0, CPU, x86_64 Linux, glibc 2.39,
+# as |backend(x) − true(x)| in ulps of the target format (:data:`LIBM_MEASURED`
+# carries each figure with the population it came from): exp in float32 is
+# out by up to **5.51 ulps**, exhaustively over every argument whose result
+# is normal and finite; exp in binary64 by up to **1.67 ulps** over three
+# million samples; exp in bfloat16 is **correctly rounded** over every
+# normal finite result, and exp in float16 misses correct rounding on 2 of
+# 63,487 arguments by 3e-5 of an ulp — both narrow formats are evaluated in
+# float32 and rounded, which is what makes them so close and what makes
+# float16, with only 11 significand bits, occasionally round twice the
+# wrong way.
+#
+# **WHY NOT A WIDER FIXED BRACKET.** The audit that found this proposed
+# ±2 ulps, "enough to cover any faithfully-rounded implementation". At 5.51
+# measured ulps this backend's float32 ``exp`` is not faithfully rounded AT
+# ALL — it is five and a half times worse than faithful — so no fixed
+# number is sound: the quantity is a property of a compiled function
+# stelling cannot see. Nor is one number right across formats. The SAME
+# backend, on the SAME op, is 0.500028 ulps out in float16 and 5.5112 out
+# in float32: a factor of ELEVEN between two formats, which is why the
+# budget is per ``(op, format)`` and never extrapolated.
+#
+# **SO: FAIL CLOSED, AND OPEN IT WITH A DECLARATION.** A transfer whose
+# backend accuracy stelling cannot establish declines, carrying the evidence
+# and the exact incantation. The caller re-enables it by DECLARING a budget,
+# which makes the assumption a deliberate engineering choice with a name and
+# a date on it rather than a silent default — and the stamp then says, in
+# those words, that the accuracy was declared and not verified.
+#
+# **REAL MODE IS UNTOUCHED.** There the bracket is about the true real value,
+# CPython's own ``math`` module does satisfy the ±1-ulp assumption it is
+# built on, and the divergence from XLA is the ℝ-versus-float gap the stamp
+# already names. A budget passed under ``semantics="real"`` is REFUSED at
+# entry rather than silently ignored.
+#
+# The class, the shipped profiles and the resolver live further down, after
+# `IEEE_TRANSFERS`, because the set of ops a budget may name is derived from
+# the registry's own tiers rather than hand-written beside it.
+
+_DEFAULT_LIBM_PROFILE = "xla-cpu-2026-08"
+
+
+def _libm_ulp_at(x: float, fmt: tuple[int, int, int]) -> float:
+    """The format's ulp at ``|x|``: the spacing of the binade containing it,
+    floored at the format's smallest subnormal.
+
+    The binade convention — ``ulp(2**e) = 2**(e-p+1)``, the spacing ABOVE a
+    power of two — is the one the sweeps behind :data:`LIBM_MEASURED` used,
+    so a declared budget means the same thing on both sides of the
+    comparison. Getting those two conventions out of step would make every
+    number in the profile mean something slightly different from what it
+    measured.
+    """
+    p, emin, _emax = fmt
+    tiny = math.ldexp(1.0, emin - p + 1)
+    if x == 0.0 or not math.isfinite(x):
+        return tiny
+    _m, e = math.frexp(abs(x))  # |x| = m * 2**e with 0.5 <= m < 1
+    return max(math.ldexp(1.0, e - p), tiny)
+
+
+def _libm_widen_box(
+    box: iv.IntervalArray,
+    fmt: tuple[int, int, int],
+    ulps: float,
+    *,
+    floor: float | None,
+) -> iv.IntervalArray:
+    """Widen a libm bracket to admit a backend within ``ulps`` format ulps
+    of the true real value.
+
+    ``box`` must already bracket the TRUE REAL image of the argument box —
+    which is what ``iv.exp`` and ``iv.pow_`` produce, under their own
+    assumption that the host's ``math`` module is faithfully rounded. The
+    declared claim is ``|backend(x) − true(x)| ≤ ulps · ulp_fmt(true(x))``,
+    so what the widened box owes is ``lo_out ≤ t − u·ulp(t)`` and
+    ``hi_out ≥ t + u·ulp(t)`` for EVERY ``t`` in the box.
+
+    **ONE spacing serves both endpoints, and it is the LARGEST the box
+    reaches — widening each endpoint by its own ulp is NOT enough.** ``ulp``
+    is a step function of the magnitude: it doubles at every binade
+    boundary, so ``t ↦ t − u·ulp(t)`` is *not* monotone — it drops by
+    ``u·ulp/2`` each time ``t`` crosses a power of two upward. A box
+    straddling ``2**k`` from below therefore admits values as low as
+    ``2**k − u·2**(k-p+1)`` while ``ulp(lo)`` is only ``2**(k-p)``, half of
+    what the widening needs. Taking ``U = max(ulp(lo), ulp(hi))`` restores
+    the property for every ``t``: ``t ≥ lo`` and ``ulp(t) ≤ U`` give
+    ``t − u·ulp(t) ≥ lo − u·U``, and symmetrically above. Each endpoint
+    then takes an outward binary64 bump, paying for the arithmetic's own
+    rounding. A FINITE box needs nothing beyond that maximum, for any
+    ``u``: ``ulp`` is monotone in ``|t|``, so ``max(ulp(lo), ulp(hi))``
+    dominates ``ulp(t)`` everywhere between — including across zero.
+
+    **AN INFINITE ENDPOINT DOUBLES THAT SPACING; DROPPING IT FROM THE
+    MAXIMUM IS HOW THIS WAS WRONG THE FIRST TIME.** ``iv.exp`` returns
+    ``hi = +inf`` whenever ``math.exp`` overflows binary64, so an ordinary
+    float32 envelope reaching past 709.78 arrives here half-infinite.
+    Taking ``U`` over the FINITE endpoints alone then falls back to
+    ``ulp(lo)`` while the box still holds every ``t ≥ lo``, in binades
+    whose spacing is 2×, 4×, … larger: exactly the class the paragraph
+    above is about, surviving on the arm it did not cover (audit 0.2.0
+    B4). ``U = 2·ulp(lo)`` is enough, and is exactly enough. Enough:
+    write ``g(t) = t − u·ulp(t)``; for ``t ≥ lo`` either
+    ``ulp(t) ≤ 2·ulp(lo)``, giving ``g(t) ≥ lo − 2u·ulp(lo)`` directly, or
+    ``ulp(t) > 2·ulp(lo)``, and then ``ulp(t)`` — a power of two — is at
+    least ``4·ulp(lo)`` and is not the subnormal floor, so
+    ``t ≥ 2**(p-1)·ulp(t)`` and
+    ``g(t) ≥ ulp(t)·(2**(p-1) − u) ≥ 4·ulp(lo)·(2**(p-1) − u)``, while
+    ``lo < 2**p·ulp(lo)`` gives ``lo − 2u·ulp(lo) < 2·ulp(lo)·(2**(p-1) −
+    u)``. Exactly enough: ``g(2**k) = 2**k·(1 − u·2**(1-p))``, the first
+    binade boundary above ``lo`` has ``ulp = 2·ulp(lo)`` and is where
+    ``g`` dips lowest, and for ``u < 2**(p-1)`` every boundary after it
+    dips less.
+
+    **AND THAT SIDE CONDITION IS REACHABLE — BY ROUNDING UP, NOT BY
+    MEASURING.** Past ``u = 2**(p-1)`` ulps — 1024 for float16, **128 for
+    bfloat16**, 8388608 for float32 — ``1 − u·2**(1-p)`` turns
+    non-positive, ``g(2**k) → −∞``, and the infimum over a half-infinite
+    box is UNBOUNDED: no finite lower endpoint is sound, and the doubled
+    ``U`` would mint one. That arm returns ``-inf`` (then ``floor``),
+    which is the true bound rather than a giving-up.
+
+    **A MEASUREMENT CANNOT REACH THAT THRESHOLD**, and which way round
+    that goes is worth stating rather than waving at. The worst error this
+    module has a name for — a subnormal result FLUSHED to zero — is
+    ``t/tiny`` for a true value ``t`` under ``2**emin``, because
+    :func:`_libm_ulp_at` floors at ``tiny``. The largest representable
+    subnormal is ``tiny·(2**(p-1) − 1)``, so a flush measures at most
+    ``2**(p-1) − 1`` ulps: exactly ONE ulp under the threshold, in every
+    format — 1023 vs 1024, 127 vs 128, 8388607 vs 8388608,
+    4503599627370495 vs 4503599627370496. For a true value anywhere in the
+    open subnormal band the bound is ``< 2**(p-1)``, a supremum that is
+    not attained. **The threshold therefore sits just ABOVE anything that
+    can be observed**, and this backend's bfloat16 ``exp`` flush reaches
+    108.7 — under 127 and so under 128. What crosses the threshold is a
+    caller ROUNDING a measurement up, which is real and likely: 108.7
+    rounds to 128 as readily as to 109, and rounding up is this profile's
+    own stated convention. The side condition is necessary either way —
+    the extremiser sweep's control C fails 1,538 obligations without it —
+    but the route to it is a DECLARATION, not an observation.
+
+    The upper side is the mirror image under ``t ↦ −t``, ``ulp`` being
+    even: ``lo = -inf`` needs ``U = 2·ulp(hi)`` and saturates to ``+inf``
+    past the same threshold. Nothing in this module produces ``lo = -inf``
+    today — ``exp`` and ``pow`` have range in ``[0, ∞)`` and pass
+    ``floor=0.0`` — so that arm is latent, and it is closed here rather
+    than left for whichever transfer makes it reachable. ``[-inf, +inf]``
+    is returned unchanged: it already admits every value.
+
+    **``ulps ≤ 0.5`` widens by NOTHING, and what makes that sound is
+    CORRECT ROUNDING — not "≤ 0.5 ulps" read through the binade convention
+    above.** Those are not the same statement and they come apart at
+    exactly one place: powers of two. ``ulp(2**k)`` here is the spacing
+    ABOVE ``2**k``, while the float BELOW it is only ``2**(k-p)`` away —
+    half an ulp by this convention — so the LITERAL reading of a ``u =
+    0.5`` declaration also admits a backend returning ``nextdown(2**k)``
+    where the true value is ``2**k``, which correct rounding does not.
+    ``exp(0) = 1.0`` reaches it. So the branch is read as the declaration
+    it is meant to be: :class:`LibmBudget` defines ``0.5`` as "correctly
+    rounded", and for a correctly-rounded backend the no-op IS a theorem —
+    the result is ``RN_fmt(t)``, round-to-nearest is monotone, and the
+    caller rounds the box outward onto the format's grid immediately
+    after, so ``RN_fmt(t)`` is already inside ``[floor_fmt(lo),
+    ceil_fmt(hi)]`` for every ``t`` in the box. This is
+    :func:`stelling.interval.sqrt`'s own argument, generalised: sqrt
+    carries no libm demotion precisely because it is correctly rounded,
+    and the mechanism here must not punish a platform that has that
+    property for ``exp`` too.
+
+    The residual — the literal reading's ``nextdown(2**k)`` — is covered
+    for THIS module's callers, and only by them: ``iv.exp`` and
+    ``iv.pow_`` hand over a box already bumped a binary64 ulp OUTWARD, so
+    ``floor_fmt(lo)`` sits at least one format step below any grid-point
+    true value, which is exactly where ``nextdown(2**k)`` is. A future
+    caller passing a box that TOUCHES the true value may not read ``u =
+    0.5`` as free. A budget of 1 ulp — merely FAITHFUL — does cost, and
+    pays for the case where the true value sits exactly on a grid point
+    and the backend lands one step beyond it.
+
+    ``floor`` clamps the widened lower endpoint. ``exp``, and ``pow`` over a
+    strictly positive base, have range in ``[0, ∞)``, so no backend value
+    can be negative and ``floor=0.0`` states the RANGE rather than
+    narrowing anything (``iv.exp`` already floors there). It has no default:
+    a future transfer whose range is not half-open must say so out loud.
+    """
+    if ulps <= 0.5:
+        return box
+    p = fmt[0]
+    # past 2**(p-1) declared ulps the infimum of t - u*ulp(t) over a
+    # half-infinite box is unbounded — see the docstring's side condition
+    unbounded = ulps > math.ldexp(1.0, p - 1)
+    los, his = [], []
+    for lo, hi in zip(box.los, box.his):
+        lo_finite, hi_finite = math.isfinite(lo), math.isfinite(hi)
+        if not (lo_finite or hi_finite):  # [-inf, inf]: nothing to widen
+            los.append(lo)
+            his.append(hi)
+            continue
+        spacing = max(
+            _libm_ulp_at(v, fmt) for v in (lo, hi) if math.isfinite(v)
+        )
+        if not (lo_finite and hi_finite):
+            # the first binade boundary past the finite end doubles the
+            # spacing, and for u <= 2**(p-1) that boundary is the infimum
+            spacing *= 2.0
+        w = ulps * spacing
+        if lo_finite:
+            lo = (
+                -math.inf if (unbounded and not hi_finite)
+                else math.nextafter(lo - w, -math.inf)
+            )
+            if floor is not None and lo < floor:
+                lo = floor
+        if hi_finite:
+            hi = (
+                math.inf if (unbounded and not lo_finite)
+                else math.nextafter(hi + w, math.inf)
+            )
+        los.append(lo)
+        his.append(hi)
+    return iv.IntervalArray(shape=box.shape, los=tuple(los), his=tuple(his))
+
+
+# Every figure here is from a run recorded in this campaign's scratch and is
+# regenerable: enumerate the format's bit patterns, evaluate the op through
+# jax, compare against a higher-precision reference. A figure a reader can
+# regenerate is worth more than a larger one they cannot, so these are the
+# measured maxima and :data:`XLA_CPU_2026_08` rounds each UP to its budget.
+#
+# **THE SAMPLED ROWS NAME THEIR DRAW, because a sampled maximum is not a
+# property of the backend — it is a property of the sample, and a reader who
+# re-runs and gets a different number must be able to tell "the row is stale"
+# from "your draw differs".** Two campaigns measured these:
+#
+#   DRAW A (c322cec) — the first campaign. Its regions are described below,
+#     but ITS SEED WAS NOT RECORDED, so draw A cannot be re-run. Where it is
+#     the larger of the two it is still what the row carries, because the
+#     budget must clear anything either draw saw; it is flagged as
+#     unreproducible each time.
+#   DRAW B (B4, 2026-08-15) — ``numpy.random.default_rng(20260815)``,
+#     re-measured from scratch for the amendment and re-run to confirm the
+#     seed reproduces it.
+#
+# Draw B's sampled designs, in full, because "four regions" is not a design:
+#
+#   exp@float64 — 3,000,000 arguments: 1,000,000 uniform on each of
+#     [-708, 709], [-40, 40], [-1, 1], drawn in that order.
+#   pow@* — n pairs, n/4 per region, drawn in this order, each cast to the
+#     target format, keeping the pairs whose true result is normal and
+#     finite:
+#       1. broad            base = 2**U(-20, 20),   exponent = U(-8, 8)
+#       2. under overflow   base = 2**U(0.5, 12),
+#                           exponent = U(0.80, 0.999)*emax / log2(base)
+#       3. bases near 1     base = 1 + U(-0.05, 0.05),
+#                           exponent = U(-400, 400)
+#       4. powers of two    base = 2**k, k ~ randint(-12, 13) (0 mapped to 1),
+#                           exponent = U(-emax/12, emax/12)
+#
+# References: binary64 for the three narrow formats; a 60-decimal-digit
+# ``decimal`` context (``prec=70``) for binary64 targets.
+LIBM_MEASURED: dict[tuple[str, str], str] = {
+    ("exp", "float16"): (
+        "EXHAUSTIVE over all 63,487 distinct finite float16 arguments, "
+        "over the 37,479 of them whose result is normal and finite: max "
+        "error 0.500028 ulps, and 2 arguments exceed 0.5 — NOT correctly "
+        "rounded, though it misses by 3e-5 of an ulp. The backend "
+        "evaluates float16 exp in float32 and rounds twice; at "
+        "x=0.0226898193359375 and x=0.007297515869140625 the true value "
+        "sits a hair BELOW the float16 midpoint and the float32 "
+        "intermediate lands above it, so the second rounding goes to the "
+        "far neighbour. Over the 6,392 arguments with a subnormal result: "
+        "0.499849, none above 0.5"
+    ),
+    ("exp", "bfloat16"): (
+        "EXHAUSTIVE over all 65,279 distinct finite bfloat16 arguments, "
+        "over the 34,145 of them whose result is normal and finite: max "
+        "error 0.499988 ulps and none above it — CORRECTLY ROUNDED there, "
+        "the backend evaluating bfloat16 exp in float32 and rounding, and "
+        "8 significand bits leaving room the 11 of float16 do not. THE "
+        "QUALIFIER IS LOAD-BEARING: over ALL finite arguments the maximum "
+        "is 108.698176 ulps and 11 exceed 0.5, every one of them a "
+        "subnormal result FLUSHED to zero (worst x=-87.5, true "
+        "9.982350930569248e-39, backend 0.0). That flush is covered by "
+        "interval.subnormal_haze_fmt, which hulls the box with 0 whenever "
+        "it reaches the format's subnormal band — not by this budget"
+    ),
+    ("exp", "float32"): (
+        "EXHAUSTIVE over every float32 argument in [-104, 88.73] whose "
+        "result is normal and finite (2,237,668,967 of them, which is "
+        "exactly the arguments in [-87.33654022216797, "
+        "88.72283172607422]): max error 5.5112 ulps, and 12,542 arguments "
+        "exceed 1 ulp. They concentrate in [88.54634857177734, "
+        "88.72283172607422] — 12,520 of the 12,542, and that band holds "
+        "exactly 23,133 float32 values, so 54.12% of the arguments there "
+        "escape. XLA's exp is not faithfully rounded at all in that band, "
+        "and every escape is on the low side (12,542 low, 0 high)"
+    ),
+    ("exp", "float64"): (
+        "3,000,000 sampled arguments — a million uniform on each of "
+        "[-708,709], [-40,40] and [-1,1], numpy default_rng(20260815) — "
+        "against a 60-digit decimal reference: max error 1.6660 ulps, with "
+        "10,559 (0.35%) above 1 ulp, so XLA's binary64 exp is not "
+        "faithfully rounded either and a 1-ulp bracket around glibc's "
+        "leaks in both directions. SAMPLED, NOT EXHAUSTIVE, and this row "
+        "is the demonstration of what that costs: draw A, an earlier draw "
+        "of the same size whose SEED WAS NOT RECORDED, reached 1.6470 and "
+        "this one beat it. Here the reproducible draw is also the larger, "
+        "so the row carries it. A sampled row bounds what was sampled and "
+        "nothing more, which is why the declared budget rounds up to the "
+        "next integer rather than to the figure above"
+    ),
+    ("pow", "float16"): (
+        "TWO INDEPENDENT DRAWS and the row carries the larger. Draw B "
+        "(seed 20260815, re-run to confirm the seed reproduces it exactly): "
+        "16,000,000 sampled (base, exponent) pairs over the four regions "
+        "above, 12,642,619 of them with a normal finite result, reaching "
+        "0.5001 with 509 above half an ulp. Draw A (the first campaign, "
+        "16,000,000 pairs, SEED NOT RECORDED so it cannot be re-run): also "
+        "0.5001. The two agree. max error 0.5001 ulps, none above 1 ulp"
+    ),
+    ("pow", "bfloat16"): (
+        "Draw B (seed 20260815, reproduced): 16,000,000 sampled pairs over "
+        "the same four regions, 15,907,789 with a normal finite result, "
+        "reaching 0.5000 with 74 above half an ulp. Draw A (first "
+        "campaign, 16,000,000 pairs, SEED NOT RECORDED): also 0.5000. The "
+        "two agree. max error 0.5000 ulps, none above 1 ulp"
+    ),
+    ("pow", "float32"): (
+        "THE TWO DRAWS DISAGREE AND THE ROW CARRIES THE LARGER, WHICH IS "
+        "THE ONE THAT CANNOT BE RE-RUN. Draw A (first campaign, "
+        "16,000,000 sampled pairs over the same four regions, SEED NOT "
+        "RECORDED) reached 0.5380. Draw B (seed 20260815, reproduced): "
+        "16,000,000 pairs, 15,907,360 with a normal finite result, only "
+        "0.5290, with 24,511 above half an ulp. A budget must clear "
+        "anything either draw saw, so the row states A's figure and the "
+        "declared 1.0 covers both with room. max error 0.5380 ulps, none "
+        "above 1 ulp in either draw — pow does not share exp's "
+        "overflow-band path"
+    ),
+    ("pow", "float64"): (
+        "The two draws disagree in the fourth decimal and the row carries "
+        "the larger, which again is the one that cannot be re-run. Draw A "
+        "(first campaign, 1,045,976 sampled pairs, 60-digit decimal "
+        "reference, SEED NOT RECORDED) reached 0.5059. Draw B (seed 20260815, "
+        "reproduced): 1,000,000 pairs against a 60-digit reference, 999,989 "
+        "with a normal finite result, reached 0.5056 with 853 above half "
+        "an ulp. max error 0.5059 ulps, none above 1 ulp in either draw"
+    ),
+}
+
+# THE DECLINE. It is the feature, not the error: a halt a reader cannot act
+# on is an obstacle to be worked around by trial and error, and what makes
+# this one a deliberate choice instead is that it carries the evidence that
+# justifies it and a line that RUNS AS WRITTEN.
+LIBM_BUDGET_DECLINE = (
+    "{op} under semantics='ieee' has no DECLARED accuracy budget for "
+    "{dtype} — declined rather than judged against an assumption stelling "
+    "cannot check. "
+    "WHY: the bracket here is built from CPython's math.{op} (glibc on the "
+    "host running the analysis) bumped 1 ulp outward. Under ieee semantics "
+    "the verdict is a claim about the float value YOUR PROGRAM computes, "
+    "and your program runs the {op} the compiler emitted for your device — "
+    "a different function, which stelling cannot see, execute or measure. "
+    "MEASURED for ({op}, {dtype}) on jax 0.11.0 / jaxlib 0.11.0, CPU, "
+    "x86_64: {evidence}. "
+    "A FIXED WIDER BRACKET IS NOT THE FIX: the error is a property of a "
+    "compiled function, and on this very backend the same op measures "
+    "0.500028 ulps in float16 and 5.5112 in float32 — a factor of eleven "
+    "between two formats, which no single number spans. "
+    "{incantation}. "
+    "The budget is DECLARED, NEVER VERIFIED: one smaller than your "
+    "backend's real error mints a VERIFIED nothing here can catch, and the "
+    "verdict's stamp says exactly that."
+)
+
+
+def _libm_decline_incantation(
+    op: str, dtype: str, profile: str, ship_u: float | None
+) -> str:
+    """The decline's TO PROCEED sentence, built so that what it prints
+    RUNS AS WRITTEN.
+
+    **A template is not an incantation.** The first draft printed
+    ``check(harness, vacuity_mode=..., semantics='ieee', ...)`` — where
+    ``...`` is ``Ellipsis`` and raises *"widen mode must be one of ('all',
+    'inputs-only')"* — and ``ulps={('exp','float32'): <ulps>}``, which is a
+    ``SyntaxError``. A reader who pastes what a halt told them to paste and
+    gets a SECOND error learns that the halt was decoration. So the shipped
+    number goes in literally, ``vacuity_mode`` gets a real value, and the
+    only thing left for the reader to supply is their own harness.
+
+    It also names BOTH doors. The decline used to mention only ``check``,
+    while the exposure this whole gate exists to close (audit 0.2.0 S11)
+    runs through :func:`propagate` — which takes the same keyword and is
+    the entry point the released 0.1.0 reached ieee mode through.
+    """
+    number = ("%g" % ship_u) if ship_u is not None else "<the ulps you measured>"
+    own = (
+        "`from stelling.propagate import LibmBudget` then "
+        "`check(harness, vacuity_mode='inputs-only', semantics='ieee', "
+        "libm_budget=LibmBudget(name='my-backend-2026-08', "
+        "basis='what you measured, on what, and when', "
+        "ulps={%r: %s}))`" % ((op, dtype), number)
+    )
+    if ship_u is None:
+        return (
+            "TO PROCEED, declare what you are willing to assume about your "
+            "backend. The shipped profile %r does NOT cover (%s, %s), so "
+            "there is no number here to borrow: measure yours and write it "
+            "where the placeholder is — %s" % (profile, op, dtype, own)
+        )
+    return (
+        "TO PROCEED, declare what you are willing to assume about your "
+        "backend. EITHER OF THESE LINES RUNS AS WRITTEN once the first "
+        "argument is yours: `check(harness, vacuity_mode='inputs-only', "
+        "semantics='ieee', libm_budget=%r)` or `propagate(closed, "
+        "semantics='ieee', libm_budget=%r)`. Both declare %s@%s <= %s ulps "
+        "on the measurement above; both entry points take the keyword, and "
+        "`propagate` is the one the released 0.1.0 reached ieee mode "
+        "through. To declare your OWN number instead of borrowing that "
+        "one, %s, with your measurement in place of the %s"
+        % (profile, profile, op, dtype, number, own, number)
+    )
+
+LIBM_BUDGET_REAL_MODE_REFUSAL = (
+    "a libm accuracy budget has no meaning under semantics='real' and is "
+    "refused rather than silently ignored: there the bracket is about the "
+    "TRUE REAL value, the ±1-ulp assumption it rides on is about CPython's "
+    "own math module — which satisfies it — and the divergence from what "
+    "your program computes is the ℝ-versus-float gap the stamp already "
+    "names. No accuracy budget closes that gap. Drop libm_budget, or pass "
+    "semantics='ieee'."
+)
+
+
+def _libm_budget_ulps(op: str, dtype: str, budget) -> float:
+    """The declared budget for ``(op, dtype)``, or the decline.
+
+    **THE CHOKE POINT.** Every ieee transfer that rides a libm accuracy
+    claim comes through here, and there is no path past it that does not
+    carry a number the caller wrote down.
+    """
+    if budget is not None:
+        got = budget.get(op, dtype)
+        if got is not None:
+            return got
+    shipped = LIBM_PROFILES.get(_DEFAULT_LIBM_PROFILE)
+    ship_u = shipped.get(op, dtype) if shipped is not None else None
+    covered = (
+        ", ".join(f"{o}@{d}" for (o, d), _u in shipped.ulps)
+        if shipped is not None else "nothing"
+    )
+    evidence = LIBM_MEASURED.get(
+        (op, dtype),
+        f"stelling ships no measurement for this pair — the shipped "
+        f"profile covers {covered}",
+    )
+    raise iv.IntervalError(
+        LIBM_BUDGET_DECLINE.format(
+            op=op,
+            dtype=dtype,
+            evidence=evidence,
+            incantation=_libm_decline_incantation(
+                op, dtype, _DEFAULT_LIBM_PROFILE, ship_u
+            ),
+        )
+    )
+
+
 def _ieee_arith(op):
     """The monotone core (add/sub/mul/div): native binary64 corner
     endpoints, NaN corners routed to the flag (never into an interval).
@@ -4475,7 +5115,22 @@ def _ieee_arith(op):
 
     Format-parametric: for non-float64 formats, uses the format's own
     subnormal band for the DAZ/FTZ haze, and rounds the result endpoints
-    outward to the format's ULP grid."""
+    outward to the format's ULP grid.
+
+    **A kernel with no :data:`_FMT_BINARY_OPS` row DECLINES on a narrow
+    format** — it does not fall back to the binary64 kernel. The fallback
+    that used to stand here hazed with ``iv.MIN_NORMAL`` (``2**-1022``)
+    and `_ieee_round_box` afterwards CANNOT recover the missing haze:
+    outward rounding onto the format grid does not hull with 0. Measured
+    on float32 ``x + x`` at ``x = 2**-140`` the fallback box was
+    ``[1.4349e-42, 1.4349e-42]`` where jax computes ``0.0`` — a box
+    excluding the executed value, i.e. a false VERIFIED in waiting (audit
+    0.2.0 M15). It was unreachable when it was written and the hazard was
+    that the NEXT binary kernel would make it reachable silently. Two
+    guards, because one of them fails before anything runs:
+    :func:`_assert_ieee_binary_kernels_are_format_parametric` refuses at
+    IMPORT if a registered ieee binary transfer has no row, and this arm
+    declines at RUN if one somehow gets past it."""
 
     def t(eqn, params, ins, flags):
         fmt = _ieee_get_format(eqn)
@@ -4485,14 +5140,23 @@ def _ieee_arith(op):
         else:
             # Use the format-parametric binary kernel with format's band
             op_fmt = _FMT_BINARY_OPS.get(op)
-            if op_fmt is not None:
-                box, made_nan = op_fmt(ins[0], ins[1], min_normal)
-            else:
-                # Fallback: use native binary64 kernel then round outward
-                box, made_nan = op(ins[0], ins[1])
+            if op_fmt is None:
+                raise iv.IntervalError(
+                    f"ieee {eqn.primitive!r} has no format-parametric kernel "
+                    f"for {_FLOAT_FORMATS_BY_TUPLE.get(fmt, fmt)}: the "
+                    f"binary64 kernel hazes with the binary64 subnormal band "
+                    f"(2**-1022) and outward rounding onto the format grid "
+                    f"cannot add the hull-with-0 this format's own band "
+                    f"(2**{fmt[1]}) requires — declined rather than judged "
+                    f"with the wrong band"
+                )
+            box, made_nan = op_fmt(ins[0], ins[1], min_normal)
             box = _ieee_round_box(box, fmt)
         return [box], [made_nan or any(flags)]
 
+    # The census hook: the closure hides `op`, so the import-time check
+    # below could not otherwise see WHICH kernel this transfer runs.
+    t._ieee_binary_kernel = op
     return t
 
 
@@ -4552,6 +5216,11 @@ _FMT_BINARY_OPS: dict = {
 # gate has passed (built here, after _FMT_BINARY_OPS, so the format
 # dispatch inside it is populated)
 _IEEE_DIV_ARITH = _ieee_arith(iv.ieee_div)
+# `div` reaches the binary core through a wrapper, so the wrapper has to
+# carry the census hook too — otherwise the import-time check below reads
+# `div` as "not a binary transfer" and stops covering the one row whose
+# kernel is hardest to see (audit 0.2.0 M15).
+_ieee_div._ieee_binary_kernel = _IEEE_DIV_ARITH._ieee_binary_kernel
 
 
 def _ieee_unary_exact(fn):
@@ -4592,32 +5261,54 @@ def _ieee_minmax(fn):
     return t
 
 
-def _ieee_exp(eqn, params, ins, flags):
-    """exp keeps its 1-ulp outward libm bracket — a faithfully-rounded
-    libm result lands within 1 ulp of the true value, so the outward
-    bracket contains the float the program computes (the same
-    EXP_LIBM_ASSUMPTION stamps, via the sound-libm tier). exp(NaN) is
-    NaN and nothing else: flag propagation is exact. The subnormal haze
-    covers flushing libm targets (measured jax 0.11.0 CPU:
-    exp(-720) = 0.0 while IEEE exp is subnormal — the 1-ulp bracket alone
-    cannot absorb a flush to 0). Format-parametric: applies the format's
-    own subnormal band and rounds the result outward to the format grid."""
-    fmt = _ieee_get_format(eqn)
+def _ieee_exp(eqn, params, ins, flags, budget):
+    """exp under ieee — a bracket of the TRUE REAL value, widened by the
+    caller's DECLARED budget for the backend that will execute it.
+
+    Three steps, and the middle one is what audit 0.2.0 S9 and S11 bought:
+
+    1. ``iv.exp`` brackets the true real image of the argument box, riding
+       the assumption that the host's ``math.exp`` is faithfully rounded
+       (the ±1-binary64-ulp bump). That assumption is about *this*
+       process's libm and it is the right one for step 1.
+    2. :func:`_libm_widen_box` widens by the declared budget for
+       ``(exp, this format)``. **With no budget this DECLINES** — the
+       bracket of glibc's exp is not a bracket of XLA's, and the gap is up
+       to 5.5 float32 ulps on the measured backend.
+    3. the subnormal haze (a flushing libm returns 0 where the bracket is
+       subnormal — measured, ``exp(-720) = 0.0``) and the outward round
+       onto the format's grid, which is the identity for binary64.
+
+    ``exp(NaN)`` is NaN and nothing else, so flag propagation is exact.
+    """
+    dtype, fmt = _ieee_get_dtype_format(eqn)
+    ulps = _libm_budget_ulps("exp", dtype, budget)
     min_normal = _ieee_format_min_normal(fmt)
-    box = iv.subnormal_haze_fmt(iv.exp(ins[0]), min_normal)[0]
-    if fmt != _FLOAT_FORMATS["float64"]:
-        box = _ieee_round_box(box, fmt)
-    return [box], [flags[0]]
+    box = _libm_widen_box(iv.exp(ins[0]), fmt, ulps, floor=0.0)
+    box = iv.subnormal_haze_fmt(box, min_normal)[0]
+    return [_ieee_round_box(box, fmt)], [flags[0]]
 
 
-def _ieee_pow(eqn, params, ins, flags):
-    """pow keeps its libm corner brackets (strictly positive base — the
-    same decline otherwise), but a maybe-NaN operand DECLINES rather than
-    flag-propagating: IEEE pow has non-NaN results at NaN inputs
-    (pow(NaN, 0) = 1 and pow(1, NaN) = 1 — measured on jax 0.11.0), and 1
-    may lie outside the corner bracket, so flag propagation alone would
-    be unsound. Format-parametric."""
-    fmt = _ieee_get_format(eqn)
+def _ieee_pow(eqn, params, ins, flags, budget):
+    """pow under ieee — :func:`_ieee_exp`'s three steps over the four
+    monotone corners, and the same DECLARED budget gate.
+
+    A maybe-NaN operand DECLINES rather than flag-propagating: IEEE pow has
+    non-NaN results at NaN inputs (``pow(NaN, 0) = 1`` and
+    ``pow(1, NaN) = 1`` — measured on jax 0.11.0), and 1 may lie outside
+    the corner bracket, so flag propagation alone would be unsound.
+
+    The budget gate runs FIRST, before that check: a harness with no
+    declared budget needs one whatever its operands look like, and the
+    decline that says so is the more actionable of the two.
+
+    ``pow`` measures far better than ``exp`` on this backend (0.5–0.54 ulps
+    against 5.5) and it still declines by default, because "measured well
+    once" is not something a verdict can rest on silently. The profile
+    carries the number and the stamp carries the profile.
+    """
+    dtype, fmt = _ieee_get_dtype_format(eqn)
+    ulps = _libm_budget_ulps("pow", dtype, budget)
     min_normal = _ieee_format_min_normal(fmt)
     if any(flags):
         raise iv.IntervalError(
@@ -4625,12 +5316,9 @@ def _ieee_pow(eqn, params, ins, flags):
             "pow(1, NaN) = 1 escape both the corner bracket and the NaN "
             "flag — no sound rule here, declined"
         )
-    # subnormal haze on the result: a flushing libm pow may return 0
-    # where the bracket is subnormal
-    box = iv.subnormal_haze_fmt(iv.pow_(*ins), min_normal)[0]
-    if fmt != _FLOAT_FORMATS["float64"]:
-        box = _ieee_round_box(box, fmt)
-    return [box], [False]
+    box = _libm_widen_box(iv.pow_(*ins), fmt, ulps, floor=0.0)
+    box = iv.subnormal_haze_fmt(box, min_normal)[0]
+    return [_ieee_round_box(box, fmt)], [False]
 
 
 def _ieee_sqrt(eqn, params, ins, flags):
@@ -4656,22 +5344,48 @@ def _ieee_cmp_get_min_normal(eqn) -> float:
     produce booleans but consume floats — the subnormal haze applies to the
     INPUT dtypes, not the output. Integer/bool comparisons have no subnormal
     band. Returns the min_normal for the input float format, or the binary64
-    min_normal if inputs are non-float (integers/bools are unaffected)."""
-    float_dtypes = sorted(
-        d for v in eqn.invars
-        for d in [v.aval.dtype or ""]
-        if "float" in d
-    )
-    if not float_dtypes:
+    min_normal if inputs are non-float (integers/bools are unaffected).
+
+    **THE WIDEST operand band, never the alphabetically-first one.** This
+    used to sort the operands' float dtypes and take ``[0]``, and
+    ``bfloat16 < float16 < float32 < float64``, so a `{bfloat16, float16}`
+    comparison was hazed with bfloat16's ``2**-126`` where the float16
+    operand needs ``2**-14`` — 112 decades too narrow, and the band is
+    exactly what keeps the verdict sound for a flushing target (audit
+    0.2.0 M13).
+
+    **Why the widest band and NOT the agreement check the finding
+    proposed.** The arithmetic face declines a mixed equation because a
+    mixed arithmetic equation has no result format — there is no grid to
+    round the sum onto. A comparison has no result format to pick: it
+    consumes two values and produces a bool, and the only per-format
+    quantity it uses is the DAZ band. Taking the MAXIMUM band over the
+    operands is sound for every one of them, because the haze HULLS with
+    0 rather than replacing (`_elt_haze_fmt`) — a band wider than an
+    operand needs costs precision and can never cost soundness. So the
+    general rule is available here and it is strictly more capable than
+    declining, which would additionally have withdrawn the
+    `{float32, float64}` mixture that hand-built and deserialized IR
+    routinely carries (a float32 value compared against a binary64
+    literal) and that the old code happened to get right. Agreement stays
+    REQUIRED on the arithmetic face, where it is load-bearing for a
+    different reason.
+    """
+    dtypes = {v.aval.dtype or "" for v in eqn.invars}
+    floats = sorted(d for d in dtypes if "float" in d)
+    if not floats:
         # pure integer/bool comparison — no subnormal hazard
         return iv.MIN_NORMAL
-    fmt = _FLOAT_FORMATS.get(float_dtypes[0])
-    if fmt is None:
-        raise iv.IntervalError(
-            f"ieee comparison: dtype {float_dtypes[0]!r} is not a supported "
-            f"format (supported: {sorted(_FLOAT_FORMATS)}) — declined"
-        )
-    return _ieee_format_min_normal(fmt)
+    bands = []
+    for d in floats:
+        fmt = _FLOAT_FORMATS.get(d)
+        if fmt is None:
+            raise iv.IntervalError(
+                f"ieee comparison: dtype {d!r} is not a supported "
+                f"format (supported: {sorted(_FLOAT_FORMATS)}) — declined"
+            )
+        bands.append(_ieee_format_min_normal(fmt))
+    return max(bands)
 
 
 def _ieee_cmp_f64_only(eqn) -> None:
@@ -5264,8 +5978,13 @@ IEEE_TRANSFERS = {
     # the operand hull + flag
     "max": (_ieee_minmax(iv.maximum), TIER_EXACT),
     "min": (_ieee_minmax(iv.minimum), TIER_EXACT),
-    # (ii) libm brackets kept (faithful rounding lands within 1 ulp);
-    # pow declines maybe-NaN operands (pow(NaN,0)=1 escapes the flag)
+    # (ii) libm brackets kept, but under ieee they bracket the WRONG
+    # FUNCTION on their own — the host's math module, not the one the
+    # compiler emits — so both require a DECLARED per-(op, format)
+    # accuracy budget and DECLINE without one, widening the bracket by
+    # the declared ulps when they have it (audit 0.2.0 S9/S11;
+    # LibmBudget). pow additionally declines maybe-NaN operands
+    # (pow(NaN,0)=1 escapes the flag).
     "pow": (_ieee_pow, TIER_SOUND_LIBM),
     "exp": (_ieee_exp, TIER_SOUND_LIBM),
     # (ii) native binary64, CORRECTLY rounded — the float root bracketed
@@ -5398,6 +6117,377 @@ if set(IEEE_TRANSFERS) != set(TRANSFERS):
 )
 
 
+def _assert_ieee_binary_kernels_are_format_parametric() -> None:
+    """Every registered ieee binary transfer has a `_FMT_BINARY_OPS` row.
+
+    :data:`_FMT_BINARY_OPS` and :data:`IEEE_TRANSFERS` are two hand-written
+    lists that must agree, the same coupling ``affine.py``'s
+    ``AFFINE_SUPPORTED`` already names as load-bearing. They agreed by
+    luck: the fallback for a missing row hazed a NARROW format with the
+    BINARY64 subnormal band, and `_ieee_round_box` cannot put the missing
+    hull-with-0 back, so the fifth binary kernel registered without a row
+    would have shipped a box that excludes the value jax computes — with
+    nothing in the suite to notice, because the four that exist all have
+    rows (audit 0.2.0 M15).
+
+    Checked at import, where a mismatch costs a failed import instead of a
+    wrong verdict. The runtime arm in :func:`_ieee_arith` is the second
+    guard, not the first.
+    """
+    missing = []
+    for prim, (transfer, _tier) in sorted(IEEE_TRANSFERS.items()):
+        kernel = getattr(transfer, "_ieee_binary_kernel", None)
+        if kernel is not None and kernel not in _FMT_BINARY_OPS:
+            missing.append(prim)
+    if missing:
+        raise RuntimeError(
+            f"ieee binary transfer(s) {missing} have no _FMT_BINARY_OPS "
+            f"row: on a narrow format they would haze with the binary64 "
+            f"subnormal band (2**-1022) and no later outward rounding can "
+            f"add the hull-with-0 the format's own band requires. Add the "
+            f"format-parametric kernel before registering the transfer."
+        )
+    # ... and the census must BITE, in both directions. If the hook
+    # stopped being attached the loop above would pass by inspecting
+    # nothing; a row for a kernel no transfer runs is a dead entry that
+    # makes the table look more complete than it is. `add` and `add_any`
+    # share one kernel, so this compares SETS, not counts.
+    seen = {
+        k for t, _ in IEEE_TRANSFERS.values()
+        for k in [getattr(t, "_ieee_binary_kernel", None)]
+        if k is not None
+    }
+    if seen != set(_FMT_BINARY_OPS):
+        raise RuntimeError(
+            f"the ieee binary census and _FMT_BINARY_OPS disagree: "
+            f"{len(seen)} kernel(s) reached from IEEE_TRANSFERS against "
+            f"{len(_FMT_BINARY_OPS)} rows — either the census hook is not "
+            f"being attached (so the check above inspects nothing) or a row "
+            f"exists for a kernel no registered transfer runs"
+        )
+
+
+_assert_ieee_binary_kernels_are_format_parametric()
+
+
+# -- the declared libm accuracy budget: the object a caller writes ------------
+#
+# Placed after the registry because the set of ops a budget may name is
+# DERIVED from the registry's own tiers rather than hand-written beside it:
+# the sixth transfer registered at `TIER_SOUND_LIBM` becomes budget-gated by
+# being registered, with no second list to keep in step. That is the same
+# coupling `_assert_ieee_binary_kernels_are_format_parametric` closes one
+# table over, and it is closed here by construction instead of by a check.
+LIBM_BUDGET_OPS = frozenset(
+    prim for prim, (_t, tier) in IEEE_TRANSFERS.items()
+    if tier == TIER_SOUND_LIBM
+)
+
+
+@dataclass(frozen=True)
+class LibmBudget:
+    """A DECLARED bound on the execution backend's libm error, per
+    ``(op, format)`` — the thing that re-enables ``exp`` and ``pow`` under
+    ``semantics="ieee"``.
+
+    ``ulps[(op, dtype)] = u`` declares: **for every argument, the value the
+    execution target produces for** ``op`` **in** ``dtype`` **is within**
+    ``u`` **ulps of the true real value**, where an ulp is the spacing of
+    the binade containing that value in ``dtype``. ``u = 0.5`` is exactly
+    "correctly rounded" and costs nothing; ``u = 1`` is "faithfully
+    rounded"; anything larger is a measurement of one compiled function.
+
+    **stelling does not verify this and cannot.** The declaration is about
+    a function the compiler emits for a device, and nothing in this process
+    can see it. What stelling does with the number is widen the bracket by
+    exactly that much before rounding it onto the format's grid, and stamp
+    the declaration on the verdict in the words *declared, not verified*. A
+    budget smaller than the backend's real error mints a VERIFIED stelling
+    has no way to catch — which is why the number has to be written down by
+    someone rather than defaulted to by the tool.
+
+    **PER (op, format), and never extrapolated.** A budget naming
+    ``("exp", "float64")`` does nothing for float32 exp: on the measured
+    backend those two differ by more than a factor of three, and float16
+    differs from float32 by a factor of eleven in the other direction. A
+    pair this budget does not name DECLINES, exactly as if no budget had
+    been passed.
+
+    ``name`` and ``basis`` are REQUIRED, and not as decoration. A budget is
+    a citable claim: the name is what the stamp carries and what a reader
+    looks up; the basis is what they read to decide whether to believe it.
+    A bare number in a stamp is a number nobody can audit — the same reason
+    a solver invocation may not be made on defaults.
+
+    Named profiles live in :data:`LIBM_PROFILES` and are passed by name, so
+    the common case needs no import::
+
+        check(harness, vacuity_mode="inputs-only", semantics="ieee",
+              libm_budget="xla-cpu-2026-08")
+
+    **A profile name is DATED on purpose.** The number it carries is a
+    property of one jaxlib, on one device class, on one day. When jaxlib
+    moves, the name stays honest about what it measured and when — which is
+    the one thing a bare number can never be, and it is what makes the
+    durability problem survivable rather than solved.
+    """
+
+    name: str
+    basis: str
+    ulps: object = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError(
+                "LibmBudget.name must be a non-empty string: it is what the "
+                "verdict's stamp carries, and an unnamed accuracy claim is "
+                "one no reader can look up"
+            )
+        if not isinstance(self.basis, str) or len(self.basis.strip()) < 8:
+            raise ValueError(
+                f"LibmBudget.basis must say what was measured, on what, and "
+                f"when — a budget is a claim about a backend, and the basis "
+                f"is the only thing a reader of the stamp has to judge it "
+                f"by; got {self.basis!r}"
+            )
+        raw = self.ulps
+        items: list[tuple[tuple[str, str], float]] = []
+        pairs = raw.items() if hasattr(raw, "items") else raw
+        for entry in pairs:
+            try:
+                key, value = entry
+                op, dtype = key
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"LibmBudget.ulps entries are ((op, dtype), ulps) pairs; "
+                    f"got {entry!r}"
+                ) from None
+            if op not in LIBM_BUDGET_OPS:
+                raise ValueError(
+                    f"LibmBudget: {op!r} does not ride a libm accuracy "
+                    f"assumption under ieee semantics, so a budget for it "
+                    f"would never be read. The ops that do: "
+                    f"{sorted(LIBM_BUDGET_OPS)}"
+                )
+            if dtype not in _FLOAT_FORMATS:
+                raise ValueError(
+                    f"LibmBudget: {dtype!r} is not a catalogued float format "
+                    f"(known: {sorted(_FLOAT_FORMATS)})"
+                )
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(
+                    f"LibmBudget: the budget for ({op!r}, {dtype!r}) must be "
+                    f"a number of ulps, got {type(value).__name__} "
+                    f"({value!r})"
+                )
+            value = float(value)
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(
+                    f"LibmBudget: the budget for ({op!r}, {dtype!r}) must be "
+                    f"a finite non-negative number of ulps, got {value!r}"
+                )
+            items.append(((op, dtype), value))
+        if not items:
+            raise ValueError(
+                "LibmBudget.ulps is empty: a budget that declares nothing "
+                "re-enables nothing, and every (op, format) it does not "
+                "name still declines. Name the pairs your harness uses."
+            )
+        seen: dict[tuple[str, str], float] = {}
+        for key, value in items:
+            if key in seen and seen[key] != value:
+                raise ValueError(
+                    f"LibmBudget: two different budgets declared for {key}: "
+                    f"{seen[key]} and {value}"
+                )
+            seen[key] = value
+        object.__setattr__(self, "ulps", tuple(sorted(seen.items())))
+
+    def get(self, op: str, dtype: str) -> float | None:
+        """The declared budget for ``(op, dtype)``, or ``None`` when this
+        budget does not name that pair. **None means decline.**"""
+        for (o, d), u in self.ulps:
+            if o == op and d == dtype:
+                return u
+        return None
+
+    def render(self, used) -> str:
+        """The stamped assumption line, over the pairs this run actually
+        consumed.
+
+        **The most important sentence a budgeted ieee verdict carries.** A
+        budget that is too small mints a false VERIFIED and stelling cannot
+        check it, so the line has to say that the accuracy was DECLARED and
+        not verified, and what a wrong declaration costs — otherwise the
+        stamp reads as though something had been established.
+        """
+        want = set(used)
+        declared = "; ".join(
+            f"{op}@{dtype} <= {u:g} ulp{'' if u == 1 else 's'}"
+            for (op, dtype), u in self.ulps
+            if (op, dtype) in want
+        )
+        return (
+            f"ieee libm accuracy DECLARED, NOT VERIFIED — profile "
+            f"{self.name!r}: {declared}. TWO claims compose to make this "
+            f"verdict and stelling checks NEITHER. (1) the math module of "
+            f"the host that ran this analysis (CPython -> the platform "
+            f"libm) is faithfully rounded, which is what makes the "
+            f"1-binary64-ulp bracket contain the TRUE REAL value. (2) the "
+            f"function the compiler emits FOR YOUR TARGET is within the "
+            f"declared ulps of that true value; the bracket is widened by "
+            f"exactly that much before being rounded onto the format's "
+            f"grid. Claim (2) is a DECLARATION about a compiled function "
+            f"stelling cannot see, execute or measure: if the target is "
+            f"worse than declared, the bracket may EXCLUDE the value the "
+            f"program computes, and a VERIFIED resting on it is FALSE with "
+            f"nothing here able to notice. It also makes exp/pow endpoints "
+            f"the exception to the ieee endpoint-arithmetic line's "
+            f"'no outward rounding' clause: these are an outward-rounded "
+            f"bracket, widened. Basis given for the declaration: "
+            f"{self.basis}"
+        )
+
+
+XLA_CPU_2026_08 = LibmBudget(
+    name="xla-cpu-2026-08",
+    basis=(
+        "measured 2026-08-15 on jax 0.11.0 / jaxlib 0.11.0, CPU backend, "
+        "x86_64 Linux (glibc 2.39), CPython 3.12.3, eager and under jit "
+        "(identical), as |jnp.op(x) - true(x)| in ulps of the target "
+        "format, against a binary64 reference for the three narrow formats "
+        "and a 60-digit decimal reference for binary64. exp is EXHAUSTIVE "
+        "in all three narrow formats and, in float32, over every argument "
+        "whose result is normal and finite; exp in float64 and pow "
+        "everywhere are SAMPLED and bound only what was sampled — those "
+        "five rows were drawn twice, the row keeps the larger maximum of "
+        "the two draws, and LIBM_MEASURED names each draw's seed or says "
+        "outright that it was not recorded. EVERY exp "
+        "row is over the arguments whose RESULT IS NORMAL AND FINITE: a "
+        "result that underflows to a subnormal is flushed to zero by this "
+        "backend and is covered by the subnormal haze, not by an accuracy "
+        "budget — in bfloat16 that flush reaches 108.7 ulps and would "
+        "otherwise dominate the row. Each budget is the measured maximum "
+        "rounded UP TO THE NEXT INTEGER, except where the measurement is "
+        "correct rounding and 0.5 is exact; the maxima are in "
+        "stelling.propagate.LIBM_MEASURED. This profile describes ONE "
+        "jaxlib on ONE device class on ONE day, and is named so that it "
+        "cannot quietly outlive that"
+    ),
+    ulps={
+        # NOT correctly rounded, by 3e-5 of an ulp: 2 of the 63,487 float16
+        # arguments measure 0.500028, so 0.5 would declare a bound this
+        # backend violates and `_libm_widen_box` would widen by nothing to
+        # cover it. 1 is that rounded up, and it is what every other row
+        # short of correct rounding already declares. This costs the
+        # "float16 exp is free" property, and the property was not true.
+        ("exp", "float16"): 1.0,
+        # Correctly rounded over every normal finite result (0.499988,
+        # exhaustively) — the backend evaluates this in float32 and rounds,
+        # leaving the bfloat16 grid thousands of backend ulps of slack. 0.5
+        # costs NOTHING: round-to-nearest is monotone and the box is
+        # rounded outward onto the format grid anyway.
+        ("exp", "bfloat16"): 0.5,
+        # measured 5.5112 exhaustively; 6 is that rounded up
+        ("exp", "float32"): 6.0,
+        # measured 1.6660 over 3M samples (and 1.6470 over an earlier,
+        # independent 3M); 2 is that rounded up
+        ("exp", "float64"): 2.0,
+        # measured 0.5001 / 0.5000 / 0.5380 / 0.5059, each the larger of
+        # two independent draws (the other gave 0.5001 / 0.5000 / 0.5290 /
+        # 0.5056) — every one a hair above correctly rounded and nowhere
+        # near faithful. 1.0 is the classic faithful-rounding claim and
+        # covers every figure in both draws with room, which is what makes
+        # the unrecorded seed on the larger draw survivable here.
+        ("pow", "float16"): 1.0,
+        ("pow", "bfloat16"): 1.0,
+        ("pow", "float32"): 1.0,
+        ("pow", "float64"): 1.0,
+    },
+)
+
+# The shipped profiles, by name. **A released profile may never be edited
+# in place** — the name is what a stamp carries, so changing what it means
+# would retroactively change what old verdicts claimed. Add a new dated one.
+LIBM_PROFILES: dict[str, LibmBudget] = {
+    XLA_CPU_2026_08.name: XLA_CPU_2026_08,
+}
+
+if _DEFAULT_LIBM_PROFILE not in LIBM_PROFILES:  # pragma: no cover
+    raise RuntimeError(
+        f"the decline message points at profile {_DEFAULT_LIBM_PROFILE!r}, "
+        f"which is not shipped: the incantation it tells a reader to write "
+        f"would raise"
+    )
+
+
+def resolve_libm_budget(value) -> "LibmBudget | None":
+    """``None`` | a profile NAME | a :class:`LibmBudget` -> the budget.
+
+    Resolved EAGERLY at the entry point, so a typo'd profile name raises
+    where it was written rather than arriving three layers down as a
+    decline that reads like a stelling limitation.
+    """
+    if value is None or isinstance(value, LibmBudget):
+        return value
+    if isinstance(value, str):
+        try:
+            return LIBM_PROFILES[value]
+        except KeyError:
+            raise ValueError(
+                f"unknown libm profile {value!r}; shipped profiles: "
+                f"{sorted(LIBM_PROFILES)}. Pass a "
+                f"stelling.propagate.LibmBudget to declare your own."
+            ) from None
+    raise TypeError(
+        f"libm_budget must be None, a profile name from "
+        f"{sorted(LIBM_PROFILES)}, or a stelling.propagate.LibmBudget; got "
+        f"{type(value).__name__}"
+    )
+
+
+def _assert_libm_transfers_take_a_budget() -> None:
+    """Every ieee transfer at `TIER_SOUND_LIBM` accepts the budget, and no
+    other one does.
+
+    The dispatcher decides which calling convention to use from the TIER,
+    so a transfer registered at that tier with a four-argument signature
+    would raise a `TypeError` out of the walk on first contact — and one
+    registered at another tier while taking a budget would never be handed
+    one and would ride whatever default it wrote. Both are import-time
+    errors here rather than runtime surprises, which is what keeps
+    `LIBM_BUDGET_OPS` a description of the registry instead of a wish.
+    """
+    import inspect
+
+    wrong = []
+    for prim, (transfer, tier) in sorted(IEEE_TRANSFERS.items()):
+        try:
+            n = len(inspect.signature(transfer).parameters)
+        except (TypeError, ValueError):  # pragma: no cover - builtins only
+            continue
+        want = 5 if tier == TIER_SOUND_LIBM else 4
+        if n != want:
+            wrong.append(f"{prim} (tier {tier}, {n} params, wants {want})")
+    if wrong:
+        raise RuntimeError(
+            f"ieee transfer signature census failed for {wrong}: a "
+            f"{TIER_SOUND_LIBM!r} transfer takes "
+            f"(eqn, params, ins, flags, budget) and every other takes "
+            f"(eqn, params, ins, flags)"
+        )
+    if not LIBM_BUDGET_OPS:
+        raise RuntimeError(
+            "no ieee transfer is registered at tier "
+            f"{TIER_SOUND_LIBM!r}, so the budget gate guards nothing — "
+            "either the tier was renamed or the census is inspecting the "
+            "wrong registry"
+        )
+
+
+_assert_libm_transfers_take_a_budget()
+
+
 # -- constraining assume ------------------------------------------------------
 
 _ASSUME_MODES = ("constrain", "inert")
@@ -5480,7 +6570,7 @@ def _subnormal_const_literal(atom: ir.Atom) -> bool:
     if not isinstance(atom, ir.Literal):
         return False
     try:
-        raw = _value_to_interval(atom.val, atom.aval.shape)
+        raw = _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
     except (iv.IntervalError, ir.TranscriptionError):
         return False
     lit_dtype = atom.aval.dtype or ""
@@ -5893,9 +6983,24 @@ def _probe_point(k: int, shape, lo: float, hi: float, dtype: str, base: int):
 
 
 class _Propagator:
-    def __init__(self, assume_mode: str, semantics: str = "real") -> None:
+    def __init__(
+        self,
+        assume_mode: str,
+        semantics: str = "real",
+        libm_budget=None,
+    ) -> None:
         self.assume_mode = assume_mode
         self.semantics = semantics
+        # The caller's DECLARED libm accuracy budget (ieee only; None is
+        # the default and makes every libm-riding transfer decline). It is
+        # already resolved to a `LibmBudget` or None by `propagate` —
+        # nothing below this line accepts a profile NAME, so there is one
+        # place a bad name can raise and it is the entry point.
+        self.libm_budget = libm_budget
+        # the (op, dtype) pairs whose budget this run actually CONSUMED —
+        # the stamp names those and not the whole profile, because a
+        # verdict rests on what it used
+        self.libm_declared: set[tuple[str, str]] = set()
         self.env: dict[int, iv.IntervalArray] = {}
         # ieee mode's parallel table: var id -> maybe_nan. Real mode never
         # writes it (the flag machinery is fenced behind semantics checks),
@@ -6113,7 +7218,7 @@ class _Propagator:
             # is untouched — that one is a transcription defect, not a
             # value.
             try:
-                box = _value_to_interval(atom.val, atom.aval.shape)
+                box = _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
             except (iv.IntervalError, ir.TranscriptionError) as e:
                 self.notes.append(f"literal outside the domain ({e}); ⊤")
                 return _safe_top(atom.aval.shape)
@@ -6149,7 +7254,7 @@ class _Propagator:
         is written explicitly."""
         if isinstance(atom, ir.Literal):
             try:
-                _value_to_interval(atom.val, atom.aval.shape)
+                _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
             except (iv.IntervalError, ir.TranscriptionError):
                 return True
             return False
@@ -6277,7 +7382,7 @@ class _Propagator:
         and a message-builder must not double it)."""
         if isinstance(atom, ir.Literal):
             try:
-                return _value_to_interval(atom.val, atom.aval.shape)
+                return _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
             except (iv.IntervalError, ir.TranscriptionError):
                 return None
         return self.env.get(atom.id)
@@ -6920,7 +8025,7 @@ class _Propagator:
         failures make the assume inert, which is always sound."""
         if isinstance(atom, ir.Literal):
             try:
-                box = _value_to_interval(atom.val, atom.aval.shape)
+                box = _value_to_interval(atom.val, atom.aval.shape, atom.aval.dtype)
             except (iv.IntervalError, ir.TranscriptionError):
                 return None
             if self.semantics == "ieee":
@@ -7938,7 +9043,7 @@ class _Propagator:
                 self._bind_refused(var)
                 continue
             try:
-                box = _value_to_interval(c, var.aval.shape)
+                box = _value_to_interval(c, var.aval.shape, var.aval.dtype)
             except (iv.IntervalError, ir.TranscriptionError) as e:
                 # same posture as literals: an unrepresentable const binds ⊤
                 # (audit-gate finding 1 — a NaN closure const killed the run)
@@ -8483,7 +9588,16 @@ class _Propagator:
         ins = [self.read(a) for a in eqn.invars]
         in_flags = [self.read_flag(a) for a in eqn.invars] if ieee else None
         try:
-            if ieee:
+            if ieee and tier == TIER_SOUND_LIBM:
+                # THE FIFTH ARGUMENT, and which transfers get it is read
+                # off the TIER rather than off a list of primitive names:
+                # a transfer that rides a libm accuracy claim is exactly
+                # one registered at `TIER_SOUND_LIBM`, and the next one
+                # registered there becomes budget-gated by being
+                # registered. `_assert_libm_transfers_take_a_budget`
+                # refuses the import if the two conventions ever disagree.
+                result = transfer(eqn, params, ins, in_flags, self.libm_budget)
+            elif ieee:
                 result = transfer(eqn, params, ins, in_flags)
             elif eqn.primitive in _REAL_TRANSFERS_READING_STRICT_SIGN:
                 # the fourth argument is the real-mode counterpart of
@@ -8658,13 +9772,26 @@ class _Propagator:
                     self.counter.record_known(e.primitive)
         self.used[eqn.primitive] = tier
         if tier == TIER_SOUND_LIBM:
-            self.assumptions.add(
-                _LIBM_ASSUMPTIONS.get(
-                    eqn.primitive,
-                    f"{eqn.primitive} endpoints assume a faithfully-rounded "
-                    f"libm (error <= 1 ulp), bumped 1 ulp outward",
+            if self.semantics == "ieee":
+                # UNDER IEEE THE BINARY64 SENTENCE IS NOT THE CLAIM, and
+                # stamping it alone is audit 0.2.0 S9/S11: it asserts a
+                # property of the analysis host's libm and was read as one
+                # of the target's. The run records which (op, format)
+                # budgets it consumed and `propagate` renders ONE line
+                # naming both halves — the host-libm bracket AND the
+                # declared, unverified backend claim.
+                d = _ieee_float_dtype_or_none(eqn)
+                if d is not None:
+                    self.libm_declared.add((eqn.primitive, d))
+            else:
+                self.assumptions.add(
+                    _LIBM_ASSUMPTIONS.get(
+                        eqn.primitive,
+                        f"{eqn.primitive} endpoints assume a "
+                        f"faithfully-rounded libm (error <= 1 ulp), bumped "
+                        f"1 ulp outward",
+                    )
                 )
-            )
         if eqn.primitive == "stelling_assert":
             if self.unforced_depth == 0:
                 # every cond between this assert and the top of the query
@@ -9645,7 +10772,10 @@ def _region_witness(closed, p, *, assume_mode, semantics) -> bool:
         # withholding sentence is unchanged and still complete.
         return False
     for k in range(_certificate_probe_count(elements)):
-        probe = _Propagator(assume_mode, semantics)
+        # the probe judges the SAME query in the SAME arithmetic, so it
+        # must carry the same declaration — a probe that declined where
+        # the run did not would certify less than the run earned
+        probe = _Propagator(assume_mode, semantics, p.libm_budget)
         probe.pin = k
         try:
             probe.run(closed.jaxpr, list(closed.consts), [])
@@ -9706,7 +10836,7 @@ def _reachability_witnesses(closed, p, *, assume_mode, semantics):
         return frozenset()
     found: set[int] = set()
     for k in range(_PROBE_COUNT):
-        probe = _Propagator(assume_mode, semantics)
+        probe = _Propagator(assume_mode, semantics, p.libm_budget)
         probe.pin = k
         try:
             probe.run(closed.jaxpr, list(closed.consts), [])
@@ -9904,12 +11034,43 @@ def _record_undescended_assumes(closed, p) -> None:
         p.assumptions.add(UNDESCENDED_ASSUME_ASSUMPTION)
 
 
+def _query_float_formats(closed: ir.ClosedJaxpr) -> tuple[str, ...]:
+    """The float format names this query CONTAINS, sub-jaxprs included.
+
+    A stamp is a disclosure, so this reads the PROGRAM rather than the
+    walk: a format that appears only inside an untaken branch is still a
+    format the verdict's assumption lines have to be true of, and
+    over-naming is the safe direction for a sentence that says "these are
+    the formats these claims are about".
+    """
+    found: set[str] = set()
+    stack = [closed.jaxpr]
+    seen: set[int] = set()
+    while stack:
+        j = stack.pop()
+        if id(j) in seen:
+            continue
+        seen.add(id(j))
+        for v in (*j.invars, *j.constvars, *j.outvars):
+            d = getattr(getattr(v, "aval", None), "dtype", None)
+            if d in _FLOAT_FORMATS:
+                found.add(d)
+        for e in j.eqns:
+            for v in (*e.invars, *e.outvars):
+                d = getattr(getattr(v, "aval", None), "dtype", None)
+                if d in _FLOAT_FORMATS:
+                    found.add(d)
+            stack.extend(sub_jaxprs(e))
+    return tuple(sorted(found))
+
+
 def propagate(
     closed: ir.ClosedJaxpr,
     *,
     semantics: str = "real",
     assume_mode: str = "constrain",
     domain: str = "interval",
+    libm_budget=None,
 ) -> Propagation:
     """Forward-propagate the declared boxes through a transcribed query and
     judge every ``stelling_assert`` obligation.
@@ -9932,11 +11093,24 @@ def propagate(
     other value raises :class:`ValueError`; under ``semantics="real"``
     the refusal quotes why a tightened domain may never run there
     (:data:`TIGHTENED_DOMAIN_REAL_REFUSAL`).
+
+    ``libm_budget`` — ``None`` (the default), a shipped profile NAME from
+    :data:`LIBM_PROFILES`, or a :class:`LibmBudget`. Under
+    ``semantics="ieee"`` the transfers that ride a libm accuracy claim
+    (``exp``, ``pow``) **decline unless a budget names their exact
+    (op, format) pair**: the bracket is built around this host's ``math``
+    module and the program runs whatever the compiler emitted, and the
+    measured gap reaches 5.5 float32 ulps (audit 0.2.0 S9, S11). Passing
+    one under ``semantics="real"`` raises: it has no meaning there.
     """
     _check_semantics(semantics)
     _check_assume_mode(assume_mode)
     _check_domain(domain, semantics)
-    p = _Propagator(assume_mode, semantics)
+    # eagerly, so a typo'd profile name raises where it was written
+    budget = resolve_libm_budget(libm_budget)
+    if budget is not None and semantics != "ieee":
+        raise ValueError(LIBM_BUDGET_REAL_MODE_REFUSAL)
+    p = _Propagator(assume_mode, semantics, budget)
     if closed.jaxpr.invars:
         raise ir.TranscriptionError(
             "propagate expects a self-contained harness query (inputs declared "
@@ -9983,9 +11157,15 @@ def propagate(
         # the mode-wide stamped assumptions: how ieee endpoints are
         # computed and what their soundness relies on, and the
         # subnormal-band indeterminacy (flush-vs-gradual is
-        # target-dependent; band outcomes are never definite)
-        assumptions.add(iv.IEEE_ENDPOINT_ASSUMPTION)
-        assumptions.add(iv.SUBNORMAL_INDETERMINACY_ASSUMPTION)
+        # target-dependent; band outcomes are never definite).
+        # BOTH are format-parametric now. Their binary64 texts were
+        # stamped verbatim on narrow-format verdicts, where both are
+        # false — the endpoints WERE outward-rounded and the band applied
+        # was the format's, not 2**-1022 (audit 0.2.0 M14). A binary64-only
+        # run stamps the identical sentences it always did.
+        fmts = _query_float_formats(closed)
+        assumptions.add(iv.ieee_endpoint_assumption(fmts))
+        assumptions.add(iv.subnormal_indeterminacy_assumption(fmts))
         # the equation-order reliance, disclosed once the three-row round's
         # reduce_sum decline made the contrast load-bearing (audit
         # COSMETIC 4): modelling an `add` chain while refusing a reduction
@@ -9998,6 +11178,21 @@ def propagate(
         # the mode's measured precision boundary, disclosed so a non-green
         # under ieee is read against it rather than as a float finding
         assumptions.add(iv.IEEE_NAN_HYGIENE_SCOPE)
+        if p.libm_declared:
+            # A libm-riding transfer RAN, which means a budget covered it —
+            # the transfer declines otherwise, so there is no path to a
+            # populated set with no budget. Checked rather than assumed:
+            # this line is the one that tells a reader the accuracy was
+            # declared and not verified, and a verdict that quietly lost it
+            # would be the S9/S11 defect again with better manners.
+            if budget is None:  # pragma: no cover - unreachable by design
+                raise RuntimeError(
+                    f"libm-riding transfers {sorted(p.libm_declared)} ran "
+                    f"with no declared budget: the decline gate has been "
+                    f"bypassed and this verdict would carry no disclosure "
+                    f"of the assumption it rests on"
+                )
+            assumptions.add(budget.render(sorted(p.libm_declared)))
     return Propagation(
         obligations=tuple(p.obligations),
         nonvacuity_checks=tuple(p.nonvacuity_checks),

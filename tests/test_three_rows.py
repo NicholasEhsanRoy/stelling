@@ -2118,7 +2118,12 @@ def test_exp_stops_the_taint_and_a_later_add_stays_definite():
         ],
         [out],
     )
-    assert sole(q, semantics="ieee").obligations[0].status == "discharged"
+    # the taint is what this row measures, so the libm budget the exp
+    # transfer now requires is declared rather than left to decline for a
+    # reason that has nothing to do with contraction (audit 0.2.0 S9/S11)
+    assert sole(
+        q, semantics="ieee", libm_budget="xla-cpu-2026-08"
+    ).obligations[0].status == "discharged"
 
 
 def test_real_mode_is_untouched_by_the_taint_machinery():

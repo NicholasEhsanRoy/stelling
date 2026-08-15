@@ -37,10 +37,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 
-from stelling.interval import IEEE_ENDPOINT_ASSUMPTION
+from stelling.interval import IEEE_ENDPOINT_ASSUMPTION, ieee_endpoint_assumption
 from stelling.propagate import (
     ObligationReport,
     Propagation,
+    _query_float_formats,
     conditional_on_precondition,
 )
 from stelling.reachability import defined_vars, reaches_output
@@ -1697,7 +1698,14 @@ def make_verdict(
         else:
             semantics = SEMANTICS_IEEE
             arithmetic_mode = ARITHMETIC_MODE_INTERVAL_IEEE
-        convention = IEEE_ENDPOINT_ASSUMPTION
+        # Format-parametric (audit 0.2.0 M14). The binary64 sentence says
+        # the endpoints are "the same float results the traced program
+        # computes, with NO outward rounding" — FALSE of a narrow-format
+        # run, where `_ieee_round_box` rounds them onto the target grid,
+        # which is the whole of the parametric mode. The `semantics:` line
+        # directly above disclosed the mode correctly, so the two lines
+        # contradicted each other in the same stamp.
+        convention = ieee_endpoint_assumption(_query_float_formats(closed))
         solver_reason = (
             "no solver invoked: every obligation was judged by native-"
             "binary64 interval arithmetic alone (ieee semantics refuses "
