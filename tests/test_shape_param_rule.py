@@ -281,6 +281,50 @@ def _lying_iter_candidates() -> list[tuple[str, object]]:
     return out
 
 
+def _claiming_candidates() -> list[tuple[str, object]]:
+    """For every ACCEPTED container type, an object that merely CLAIMS to
+    be it — audit 0.2.0 B6 audit 7, and the arm the two above did not
+    have.
+
+    :func:`_refusing_iter_candidates` and :func:`_lying_iter_candidates`
+    are real SUBCLASSES: they satisfy the rule and then misbehave past it.
+    These satisfy nothing and were admitted anyway, because both faces
+    asked ``isinstance``, which falls back to reading the OBJECT's
+    ``__class__`` — two lines of property, and a declaration's extents
+    were read out of an object holding none. The metaclass form is here
+    too, because a `frozenset` membership on a type is the other half of
+    the same finding and neither face may be settled by either.
+
+    Both faces must refuse these FOR THEIR TYPE, which is what the
+    computed partition below asserts without a row of its own:
+    ``issubclass(type(param), ir._SHAPE_PARAM_CONTAINERS)`` is False for
+    every one of them.
+    """
+    out: list[tuple[str, object]] = []
+    for base in ir._SHAPE_PARAM_CONTAINERS:
+        body = {"__iter__": lambda self: iter((2, 2)),
+                "__len__": lambda self: 2,
+                "__getitem__": lambda self, k: 2}
+
+        class _M(type):
+            def __hash__(cls, _b=base):
+                return hash(_b)
+
+            def __eq__(cls, other, _b=base):
+                return other is _b
+
+        out.append((
+            f"claims to be {base.__name__} by a __class__ property",
+            type(f"Claims_{base.__name__}", (),
+                 dict(body, __class__=property(lambda self, _b=base: _b)))(),
+        ))
+        out.append((
+            f"claims to be {base.__name__} by a metaclass ==/hash",
+            _M(f"Meta_{base.__name__}", (), dict(body))(),
+        ))
+    return out
+
+
 def _numpy_candidates() -> list[tuple[str, object]]:
     """numpy is not in a scanned namespace and its own namespace is far
     too large to sweep, so its containers are ADDED. This is the part of
@@ -305,6 +349,7 @@ def _population() -> list[tuple[str, object]]:
         + _subclass_candidates(scanned)
         + _refusing_iter_candidates()
         + _lying_iter_candidates()
+        + _claiming_candidates()
         + _numpy_candidates()
     )
 
@@ -445,19 +490,31 @@ def test_the_rule_is_stated_once_and_the_prose_points_at_it():
 
 def test_the_measured_partition_IS_the_documented_rule():
     """THE PIN. Over a computed population of container types, each face's
-    real accept/refuse partition must equal ``isinstance(param,
+    real accept/refuse partition must equal ``issubclass(type(param),
     ir._SHAPE_PARAM_CONTAINERS)`` — and the two faces must partition
     identically.
 
     "Applied the rule" is the container gate alone: a `list` subclass
-    whose `__iter__` raises passes `isinstance` and is then refused as
+    whose `__iter__` raises passes the gate and is then refused as
     UNREADABLE, which is a second and separate fact about the document and
     is checked as such.
+
+    **THE ORACLE WAS `isinstance`, WHICH IS THE PRIMITIVE BOTH FACES USED**
+    — audit 0.2.0 B6 audit 7, the sibling of the finding in
+    `tests/test_ir_canonicalization.py`. An object that merely CLAIMS to
+    be a `tuple` through a two-line ``__class__`` property satisfied the
+    oracle, satisfied both faces, and was measured as agreeing with the
+    rule — so the population could not contain one, and did not. It does
+    now (:func:`_claiming_candidates`), and the oracle is written out here
+    as ``issubclass(type(param), ...)`` rather than delegated to
+    `ir._held_in_a_shape_param_container`: an independent spelling of the
+    same meaning, so a face and its oracle cannot be repaired into
+    agreement by one edit.
     """
     population = _population()
     rows = []
     for label, param in population:
-        predicted = isinstance(param, ir._SHAPE_PARAM_CONTAINERS)
+        predicted = issubclass(type(param), ir._SHAPE_PARAM_CONTAINERS)
         door = _door(param)
         emission = _emission(param)
         rows.append((label, predicted, door, emission))
@@ -646,7 +703,7 @@ def test_the_TRANSFER_face_is_NOT_held_to_the_container_rule():
     # is the measurement.
     read_by_the_transfer = []
     for label, param in _population():
-        if isinstance(param, ir._SHAPE_PARAM_CONTAINERS):
+        if issubclass(type(param), ir._SHAPE_PARAM_CONTAINERS):
             continue
         params = {"shape": param, "lo": 0.0, "hi": 1.0, "dtype": "float64"}
         try:

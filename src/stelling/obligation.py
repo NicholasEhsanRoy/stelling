@@ -718,7 +718,22 @@ def _shape_problem(shape) -> str | None:
     an `ir` dataclass rather than of the three fields someone remembered.
     This paragraph keeps naming the three because they are the ones this
     function reads; it no longer implies they are the ones that are
-    covered."""
+    covered.
+
+    **AND THAT SENTENCE RESTS ON THE DOOR'S DISPATCH, WHICH WAS ITSELF
+    OVERRIDABLE WHEN IT WAS WRITTEN** — audit 0.2.0 B6 audit 7. "Anything
+    read off an `ir` dataclass" was true of everything the door had
+    CANONICALIZED and said nothing about what it had merely waved
+    through, and it waved through anything with three lines of metaclass
+    or two lines of `__class__` property, including an `ir.Var` subclass
+    whose `id` is a fresh call on every read. The door decides by
+    identity and by
+    ``issubclass`` against the base now, and refuses what it cannot read;
+    the sentence above is what that buys, and it is worth restating that
+    it is a claim about the DOOR and not about this function — a value
+    installed past a frozen dataclass with ``object.__setattr__`` is
+    outside it, which is the technique this suite's own tests use to
+    measure this function with the door out of the way."""
     return _extents(shape)[0]
 
 
@@ -2272,17 +2287,32 @@ class _Slicer:
         document-supplied value with an exact instance of a type that
         module stores — before anything compares, hashes or iterates it —
         so a param this method can be lied to by is one that is not what
-        :meth:`ir.JaxprEqn.__post_init__` stored: either no
-        :class:`ir.JaxprEqn` was built at all, or something wrote over
-        what it stored afterwards. ``object.__setattr__`` past
-        the frozen dataclass is still such a route; it is the technique
-        this batch's own tests use to measure the emission face with the
-        door out of the way, and the boundary `SOUNDNESS.md` records for
-        this method's sibling disclosures. It is named here as AN example
-        and no longer as the enumeration. Naming the containment where it
-        actually is matters, because "cannot drift apart" invites the next
-        reader to stop looking, and naming it in the wrong place invites
-        the same thing with a citation attached.
+        :meth:`ir.JaxprEqn.__post_init__` stored. ``object.__setattr__``
+        past the frozen dataclass is one route to that; it is the
+        technique this batch's own tests use to measure the emission face
+        with the door out of the way, and the boundary `SOUNDNESS.md`
+        records for this method's sibling disclosures. It is named here
+        as AN example and no longer as the enumeration. Naming the
+        containment where it actually is matters, because "cannot drift
+        apart" invites the next reader to stop looking, and naming it in
+        the wrong place invites the same thing with a citation attached.
+
+        **AND THE ENUMERATION CAME BACK IN THE SENTENCE THAT RETIRED IT**
+        — audit 0.2.0 B6 audit 7, which is the second time this paragraph
+        has made this mistake in the same shape. It read *"either no
+        `ir.JaxprEqn` was built at all, or something wrote over what it
+        stored afterwards"*: two routes, offered as the complete list, one
+        paragraph after the paragraph above says a list of routes is a
+        claim about every route not on it. There was a third and it was
+        the door's own dispatch — ``type(obj) in <a frozenset>`` runs the
+        METACLASS and ``isinstance(obj, base)`` reads the object's
+        ``__class__``, so a document could be built ENTIRELY through
+        public `ir` constructors, with nothing written over afterwards,
+        and still carry a value the door had never canonicalized. That
+        document reached ``discharged`` on a claim exact arithmetic
+        falsifies. The dispatch is identity and ``issubclass`` against the
+        base now, and what is stated here is again a property of the
+        stored value and not a survey of routes.
 
         **AND IT IS NOT THE LIBRARY'S ONLY READER of a declaration's
         element count.** :func:`stelling.propagate._declared_element_count`
@@ -2341,7 +2371,15 @@ class _Slicer:
         # emission face cannot come to hold different rules by one of them
         # being edited, and `tests/test_shape_param_rule.py` measures both
         # partitions against that object over a population it computes.
-        if not isinstance(raw, ir._SHAPE_PARAM_CONTAINERS):
+        #
+        # AND THE SAME READING OF IT — audit 0.2.0 B6 audit 7. Sharing the
+        # LIST left each face to spell the test, and both spelled it
+        # `isinstance`, which reads the OBJECT's own `__class__` and so
+        # takes a two-line property's word for what it is. Hardening one
+        # face alone would have re-opened by the reading the gap the
+        # paragraph above closed by the list, so the reading is a function
+        # in `ir` and both faces call it.
+        if not ir._held_in_a_shape_param_container(raw):
             # quoted through `_safely` for the reason the branch below
             # already was: a `str` SUBCLASS can carry a `__repr__` that
             # raises, and an unguarded `{raw!r}` here turned this clean

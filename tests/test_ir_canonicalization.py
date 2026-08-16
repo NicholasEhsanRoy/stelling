@@ -282,6 +282,85 @@ def _sub(base):
     return type(f"Sub{base.__name__}", (base,), {})
 
 
+# ---------------------------------------------------------------------------
+# the oracle, which may not be the door's own test
+# ---------------------------------------------------------------------------
+
+def _allowed_stored_types() -> tuple[type, ...]:
+    """Every type a stored value is permitted to be, from `ir`'s own
+    DECLARATIONS — not from `ir._STORED_AS_IS`, which is the door's own
+    index of them and would make this test agree with the door by
+    construction."""
+    return (tuple(ir._CANONICAL_EXACT_TYPES) + tuple(ir._CANONICAL_IR_TYPES)
+            + tuple(ir._LIBRARY_STORED_TYPES) + (tuple,))
+
+
+def _is_an_allowed_stored_type(v) -> bool:
+    """Is ``type(v)`` one of the permitted types — BY IDENTITY?
+
+    **THE ORACLE MAY NOT SHARE THE DOOR'S OWN PRIMITIVE** — audit 0.2.0 B6
+    audit 7, and this file is where that was found. The two assertions
+    below used to read ``type(v) not in allowed`` over a `set` of types,
+    which is the same `frozenset` membership `ir._canonical` used to
+    decide whether to canonicalize at all — so the METACLASS of a
+    document-supplied object answered both, and this test reported NO
+    DEFECT for exactly the object the door had waved through:
+
+        the TEST oracle: type(v) not in allowed  -> False   (no defect)
+        the DOOR:        type(v) in _CANONICAL_EXACT -> True (store as is)
+
+    An instrument that shares a primitive with the thing it measures
+    cannot measure that primitive. Identity is not a protocol and nothing
+    can answer it, so this loop reports on the object rather than asking
+    it — and the door's own membership test is spelled differently again
+    (``id(t)`` into a dict), so the two are independent implementations of
+    the same meaning rather than one calling the other."""
+    t = type(v)
+    for k in _allowed_stored_types():
+        if t is k:
+            return True
+    return False
+
+
+def _meta_lie(face):
+    """A metaclass answering ``==``/``hash`` as ``face`` — which is all a
+    `frozenset` membership test on a type ever asks."""
+
+    class M(type):
+        def __hash__(cls):
+            return hash(face)
+
+        def __eq__(cls, other):
+            return other is face
+
+    return M
+
+
+def _liar(face, *, metaclass: bool, class_property: bool):
+    """An object that CLAIMS to be ``face`` and carries none of its payload.
+
+    The two bypasses audit 7 drove, separately and together: a metaclass
+    that answers the door's `frozenset` membership, and a ``__class__``
+    property that answers its ``isinstance``. The protocols this module's
+    readers ask of a stored value are all implemented, so the object is
+    refused for what it IS and not for failing to behave."""
+    ns = {
+        "__float__": lambda self: 3.9,
+        "__index__": lambda self: 3,
+        "__str__": lambda self: "float64",
+        "__repr__": lambda self: "<liar>",
+        "__len__": lambda self: 1,
+        "__iter__": lambda self: iter((1,)),
+        "__getitem__": lambda self, k: 1,
+        "__eq__": lambda self, other: True,
+        "__hash__": lambda self: 0,
+    }
+    if class_property:
+        ns["__class__"] = property(lambda self: face)
+    mcls = _meta_lie(face) if metaclass else type
+    return mcls(f"Liar_{face.__name__}", (), ns)()
+
+
 _S, _I, _F, _B, _T = (_sub(str), _sub(int), _sub(float), _sub(bytes),
                       _sub(tuple))
 
@@ -347,22 +426,101 @@ def _subclass_document() -> ir.ClosedJaxpr:
         consts=_T((arr,)))
 
 
-@pytest.mark.parametrize("build", [_canonical_document, _subclass_document],
-                         ids=["exact spellings", "subclass spellings"])
-def test_every_value_a_document_stores_is_of_an_EXACT_type(build):
+_LIAR_SPELLINGS = [
+    ("metaclass only", dict(metaclass=True, class_property=False)),
+    ("__class__ only", dict(metaclass=False, class_property=True)),
+    ("both", dict(metaclass=True, class_property=True)),
+]
+
+
+def _liar_document(face, **how):
+    """A document of the false-VERIFIED reproducer's shape, holding ONE
+    object that lies about its type in the position
+    `a1_false_verified_metaclass.py` attacked — the ceiling of the
+    asserted predicate."""
+    def build():
+        a0 = av()
+        x, s = ir.Var(id=2, aval=av((4,))), ir.Var(id=3, aval=a0)
+        pred, out = ir.Var(id=4, aval=av((), "bool")), ir.Var(id=5, aval=av((), "bool"))
+        return ir.ClosedJaxpr(jaxpr=ir.Jaxpr(
+            constvars=(), invars=(), outvars=(out,), eqns=(
+                ir.JaxprEqn(primitive="stelling_any", invars=(), outvars=(x,),
+                            params=(("dtype", "float64"), ("hi", 2.0),
+                                    ("lo", 1.0), ("shape", (4,)))),
+                ir.JaxprEqn(primitive="reduce_sum", invars=(x,), outvars=(s,),
+                            params=(("axes", (0,)), ("out_sharding", None))),
+                ir.JaxprEqn(primitive="le",
+                            invars=(s, ir.Literal(val=_liar(face, **how),
+                                                  aval=a0)),
+                            outvars=(pred,)),
+                ir.JaxprEqn(primitive="stelling_assert", invars=(pred,),
+                            outvars=(out,)),
+            )))
+    return build
+
+
+# COMPUTED from the door's own declaration of what it stores, plus the
+# containers it names separately, so a type added to `ir` later is lied
+# about here without anyone having to remember this list.
+_LIAR_FACES = (tuple(ir._CANONICAL_EXACT_TYPES)
+               + tuple(ir._SHAPE_PARAM_CONTAINERS))
+
+_POPULATION = (
+    [(_canonical_document, False, "exact spellings"),
+     (_subclass_document, False, "subclass spellings")]
+    + [(_liar_document(face, **how), True, f"LIAR {face.__name__} ({name})")
+       for face in _LIAR_FACES
+       for name, how in _LIAR_SPELLINGS]
+)
+
+
+@pytest.mark.parametrize(
+    "build,must_refuse",
+    [(b, r) for b, r, _id in _POPULATION],
+    ids=[i for _b, _r, i in _POPULATION],
+)
+def test_every_value_a_document_stores_is_of_an_EXACT_type(build, must_refuse):
     """THE PROPERTY, over the whole document and computed from the
     dataclasses' own fields rather than from a list of the ones anyone
     remembered.
 
-    Driven over TWO spellings of the same document. The exact one says the
-    door does not damage a well-formed query; the subclass one is what
-    measures the door at all, and it holds a subclass in every field of
-    every dataclass that can carry one."""
-    doc = build()
-    allowed = (ir._CANONICAL_EXACT | ir._CANONICAL_IR_TYPES
-               | set(ir._LIBRARY_STORED_TYPES) | {tuple})
+    Driven over three populations: one document in EXACT spellings, which
+    says the door does not damage a well-formed query; the same document
+    in SUBCLASS spellings, which holds a subclass in every field of every
+    dataclass that can carry one; and a family of LIAR documents — added
+    at audit 0.2.0 B6 audit 7 — each holding one object that merely
+    CLAIMS to be a stored type, which is what this test was blind to for
+    the whole of its existence.
+
+    **WHY IT WAS BLIND, because it is the batch's signature pattern
+    arriving inside the fix for the batch's signature pattern.** The
+    assertion read ``type(v) not in allowed`` over a set of types — the
+    same `frozenset` membership `ir._canonical` used to decide whether to
+    canonicalize at all. The metaclass answered both, so the door stored
+    the liar and this test agreed that it had not. The oracle is
+    :func:`_is_an_allowed_stored_type` now, which asks identity and asks
+    nothing of the object; the door asks ``id()``; neither is a call into
+    the other.
+
+    A liar document is REFUSED rather than stored, so the property holds
+    over it vacuously — which is why ``must_refuse`` is checked rather
+    than left to the walk. A row that stopped being refused would
+    otherwise pass this test by having nothing to walk."""
+    try:
+        doc = build()
+    except ir.TranscriptionError as exc:
+        assert must_refuse, f"a well-formed document was refused: {exc}"
+        assert "has no exact form to store" in str(exc), str(exc)
+        return
     wrong = [(p, type(v).__name__) for p, v in _stored_values(doc)
-             if type(v) not in allowed]
+             if not _is_an_allowed_stored_type(v)]
+    assert not must_refuse, (
+        "a document holding a value that LIES about its type was BUILT "
+        "rather than refused; what it now carries, as the oracle sees it: "
+        + (repr(wrong) if wrong else
+           "nothing the oracle objects to — which means the oracle shares "
+           "the hole with the door, and that is the defect twice")
+    )
     assert not wrong, (
         f"{len(wrong)} stored value(s) are not of an exact stored type — a "
         f"later reader can be handed a different answer at each of them:\n  "
@@ -459,6 +617,196 @@ def test_a_subclass_of_an_ir_DATACLASS_is_refused_rather_than_rebuilt():
         ir.Var(id=1, aval=bad)
 
 
+@pytest.mark.parametrize("base", sorted(ir._CANONICAL_IR_TYPES,
+                                        key=lambda c: c.__name__),
+                         ids=lambda c: c.__name__)
+def test_an_ir_DATACLASS_subclass_is_refused_even_with_a_LYING_METACLASS(base):
+    """AUDIT 0.2.0 B6 AUDIT 7. The refusal above rests on
+    ``type(obj) in _CANONICAL_IR_TYPES`` being FALSE for a subclass, and
+    that is a `frozenset` membership: three lines of metaclass answering as
+    the base made it True, and the subclass was CARRIED by the arm whose
+    whole justification is that the object canonicalized its own fields.
+
+    Measured on `dff95fc`: an `ir.Var` subclass whose ``__getattribute__``
+    counts reads of ``id`` was accepted by ``ir.JaxprEqn`` and handed every
+    reader ``[1, 99, 99, 99]`` — which is precisely the hazard
+    `Var.__post_init__`'s own comment names. Driven over EVERY frozen
+    dataclass in `ir`, computed from the module, because the arm is
+    computed from the module.
+    """
+    class M(type):
+        def __hash__(cls):
+            return hash(base)
+
+        def __eq__(cls, other):
+            return other is base
+
+    liar = M(f"Evil{base.__name__}", (base,), {})
+    assert liar in ir._CANONICAL_IR_TYPES, (
+        "the metaclass no longer answers the frozenset membership, so this "
+        "test is not driving the bypass it is named for"
+    )
+    assert liar is not base, "the bypass must be a DIFFERENT class"
+    # the door decides by IDENTITY, so the lie buys nothing
+    with pytest.raises(ir._NotCanonical):
+        ir._canonical(object.__new__(liar))
+
+
+@pytest.mark.parametrize("name,how", _LIAR_SPELLINGS,
+                         ids=[n for n, _ in _LIAR_SPELLINGS])
+def test_the_ORACLE_this_file_uses_is_NOT_the_doors_own_primitive(name, how):
+    """THE INSTRUMENT, MEASURED — audit 0.2.0 B6 audit 7, and the reason
+    it has a test of its own.
+
+    Every other assertion in this file is about the door. This one is
+    about the ORACLE those assertions use, because an instrument that
+    shares a primitive with what it measures reports no defect for
+    exactly the defect it exists to find.
+
+    THE OLD ORACLE WAS BLIND TO ONE OF THE TWO BYPASSES AND NOT THE
+    OTHER, and the rows say which. ``type(v) in <a set of types>`` reads
+    ``type()`` honestly and then asks the METACLASS, so the metaclass
+    liar walked past it; a ``__class__`` property lies to ``isinstance``
+    and has nothing to say to a `set` membership on ``type(v)``, so that
+    form was always visible to the oracle even while the door was storing
+    it. Two bypasses, two repairs, and an instrument that catches one of
+    them is not an instrument that catches the class.
+
+    Without this row the repair is unattributable, because a liar
+    document is refused before any oracle is consulted. That is a fine
+    state of the world and a poor experiment."""
+    liar = _liar(float, **how)
+    if how["metaclass"]:
+        assert type(liar) in {float}, (
+            "the metaclass no longer satisfies a `set` membership on the "
+            "type, so this row is not driving the primitive it names"
+        )
+    assert not _is_an_allowed_stored_type(liar), (
+        "the oracle this file measures the door with accepts an object "
+        "that merely CLAIMS to be a stored type — it is the door's own "
+        "membership test again, and it cannot report on it"
+    )
+
+
+def test_the_ir_dataclass_arm_is_reached_by_IDENTITY_not_by_membership():
+    """The same fact stated about the door's index rather than about one
+    class: `ir._STORED_AS_IS` is keyed on ``id()``, which nothing can
+    answer, and it holds each type as its VALUE so the address cannot be
+    reused under it."""
+    assert all(isinstance(k, int) for k in ir._STORED_AS_IS)
+    assert all(id(t) == k for k, t in ir._STORED_AS_IS.items())
+
+
+def test_the_doors_index_is_the_three_sets_it_MERGES():
+    """The index is a cache, and a cache is a second copy — so it is
+    re-derived here rather than trusted to have been rebuilt. It is also
+    what makes merging the three arms into one lookup safe: the sets must
+    be DISJOINT, or merging them would move which arm decides a type."""
+    groups = (tuple(ir._CANONICAL_EXACT_TYPES), tuple(ir._CANONICAL_IR_TYPES),
+              tuple(ir._LIBRARY_STORED_TYPES))
+    declared = [t for g in groups for t in g]
+    assert {id(t) for t in declared} == set(ir._STORED_AS_IS), (
+        "`ir._STORED_AS_IS` is stale: something changed one of the three "
+        "sets without calling `ir._rebuild_stored_index()`"
+    )
+    assert len({id(t) for t in declared}) == len(declared), (
+        "the three sets the door merges overlap, so one lookup can no "
+        "longer stand for three arms in a fixed order"
+    )
+    # and neither container arm is in it — those are decided AFTER it
+    for c in ir._SHAPE_PARAM_CONTAINERS:
+        assert id(c) not in ir._STORED_AS_IS
+
+
+def test_the_types_with_NO_read_are_the_ones_that_cannot_be_subclassed():
+    """AUDIT 0.2.0 B6 AUDIT 7. ``_CANONICAL_UNSUBCLASSABLE`` is the reason
+    `bool` needs no read, and it is a claim about CPython — so it is
+    measured rather than asserted. A type listed there that CAN be
+    subclassed would silently make every subclass of it REFUSED rather
+    than read, which is the narrowing `np.float64` and `np.str_` show the
+    door cannot afford; and a type in both tables would be settled by
+    identity before its read ever ran."""
+    for t in ir._CANONICAL_UNSUBCLASSABLE:
+        with pytest.raises(TypeError, match="not an acceptable base type"):
+            type(f"Sub{t.__name__}", (t,), {})
+    assert set(ir._CANONICAL_UNSUBCLASSABLE) <= set(ir._CANONICAL_EXACT)
+    assert not (set(ir._CANONICAL_UNSUBCLASSABLE)
+                & {b for b, _ in ir._CANONICAL_READS})
+
+
+def test_NO_read_in_the_table_is_the_IDENTITY():
+    """AUDIT 0.2.0 B6 AUDIT 7, and the whole of what the `bool` row was.
+
+    An identity read is the one read that cannot detect having been
+    applied to the wrong object, so a table entry that is the identity
+    turns whatever reaches its arm into a stored value. Driven rather than
+    read: each read is applied to a fresh instance of its base and must
+    return something that is not that instance."""
+    args = {int: (3,), float: (1.5,), complex: (1, 2), str: ("x",),
+            bytes: (b"x",)}
+    for base, _read in ir._CANONICAL_READS:
+        assert not any(base is u for u in ir._CANONICAL_UNSUBCLASSABLE), (
+            f"{base.__name__} cannot be subclassed, so its only possible "
+            f"read is the identity and it may not be in this table at all; "
+            f"it belongs in `_CANONICAL_UNSUBCLASSABLE`, which reads nothing"
+        )
+        assert base in args, f"no probe for a new read base {base.__name__}"
+    for base, read in ir._CANONICAL_READS:
+        probe = type(f"P{base.__name__}", (base,), {})(*args[base])
+        out = read(probe)
+        assert out is not probe, (
+            f"the read for {base.__name__} returned the object it was "
+            f"handed; an identity read stores whatever reaches its arm"
+        )
+        assert type(out) is base, (base, type(out))
+
+
+def test_the_base_types_the_door_asks_have_no_ABCMeta_in_play():
+    """``issubclass(type(obj), base)`` dispatches
+    ``type(base).__subclasscheck__``, so the door's safety is a fact about
+    the BASES' metaclasses. `ABCMeta` would consult ``__subclasshook__``
+    and hand the derived class a say again."""
+    for base in (tuple(ir._CANONICAL_EXACT_TYPES)
+                 + tuple(b for b, _ in ir._CANONICAL_READS)
+                 + tuple(ir._SHAPE_PARAM_CONTAINERS)):
+        assert type(base) is type, (base, type(base))
+
+
+def test_a_metaclass_that_FORGES_the_mro_cannot_forge_a_payload():
+    """The one thing a derived class can still do to ``issubclass``, and
+    why the accessor is what settles it — audit 0.2.0 B6 audit 7.
+
+    A metaclass may override ``mro()``. CPython's own layout check refuses
+    the result for every base whose instances have their own layout, which
+    is every base this door asks ``issubclass`` against; the single
+    exception among the types it stores is ``bool``, which shares
+    ``int``'s layout, so a REAL ``int`` subclass can forge
+    ``issubclass(cls, bool)``. Under the identity read this file removed,
+    that object was STORED; under ``int.__index__`` it is stored as the
+    exact ``int`` it actually carries, which is the truth about it."""
+    for base in (tuple(b for b, _ in ir._CANONICAL_READS)
+                 + tuple(ir._SHAPE_PARAM_CONTAINERS)):
+        class M(type):
+            def mro(cls, _b=base):
+                return [cls, _b, object]
+
+        with pytest.raises(TypeError, match="unsuitable layout"):
+            M("Forged", (), {})
+
+    class MBool(type):
+        def mro(cls):
+            return [cls, bool, int, object]
+
+    forged = MBool("ForgedBool", (int,), {})
+    assert issubclass(forged, bool), (
+        "CPython no longer permits this forgery, so the identity read this "
+        "test justifies removing has one fewer reason to be gone — the "
+        "other reason (`isinstance` reads `__class__`) still stands"
+    )
+    stored = ir._canonical(forged(7))
+    assert type(stored) is int and stored == 7, stored
+
+
 def test_a_param_key_must_be_an_exact_str_and_an_entry_must_be_a_pair():
     """Two structural facts about `params` that every reader assumes and
     nothing checked. The pair one is not hypothetical: a 2-character `str`
@@ -493,6 +841,157 @@ def test_the_reads_are_the_base_types_OWN_and_cannot_be_redirected():
 
     assert ir._canonical(Hostile("payload")) == "payload"
     assert ir._canonical(HostileTuple((1, 2))) == (1, 2)
+
+
+@pytest.mark.parametrize("face", list(_LIAR_FACES),
+                         ids=lambda t: t.__name__)
+@pytest.mark.parametrize("name,how", _LIAR_SPELLINGS, ids=[n for n, _ in _LIAR_SPELLINGS])
+def test_a_liar_is_refused_as_a_TranscriptionError_and_never_a_raw_TypeError(
+        face, name, how):
+    """AUDIT 0.2.0 B6 AUDIT 7, the FRAGILE half of the same finding.
+
+    The door's reads were applied to objects that only CLAIMED the base
+    type, so ``descriptor '__getitem__' requires a 'tuple' object but
+    received a 'Liar'`` came out of `ir.JaxprEqn(...)` raw. That is not a
+    tidiness point: `ir.TranscriptionError` SUBCLASSES `TypeError`, so
+    ``except ir.TranscriptionError`` does not catch a raw `TypeError`, and
+    the contract `tests/test_ir_message_totality.py` enforces — a public
+    constructor raises this module's error or nothing — was broken at
+    three sites that sweep cannot reach, because it injects SUBCLASSES and
+    these objects are not subclasses of anything.
+
+    Driven through the public constructor and caught only as
+    `TranscriptionError`, which is the assertion: anything else propagates
+    out of `pytest.raises` and reds."""
+    liar = _liar(face, **how)
+    with pytest.raises(ir.TranscriptionError):
+        ir.JaxprEqn(primitive="add", invars=(), outvars=(),
+                    params=(("thing", liar),))
+    # the two positions `_validate_decl_eqn` owns, which are read BEFORE
+    # the generic pass and had their own `isinstance` each
+    with pytest.raises(ir.TranscriptionError):
+        ir.JaxprEqn(primitive="stelling_any", invars=(),
+                    outvars=(ir.Var(id=1, aval=av((2,))),),
+                    params=(("dtype", "float64"), ("hi", 2.0), ("lo", 1.0),
+                            ("shape", liar)))
+    with pytest.raises(ir.TranscriptionError):
+        ir.JaxprEqn(primitive="stelling_any", invars=(),
+                    outvars=(ir.Var(id=1, aval=av((2,))),),
+                    params=(("dtype", liar), ("hi", 2.0), ("lo", 1.0),
+                            ("shape", (2,))))
+    # and as a leaf under a container, where the recursion must keep its
+    # own path back to the field rather than be swallowed by the read
+    with pytest.raises(ir.TranscriptionError, match=r"\[0\]"):
+        ir.JaxprEqn(primitive="add", invars=(), outvars=(),
+                    params=(("thing", (liar,)),))
+
+
+def test_the_dtype_param_must_BE_a_str_and_not_merely_pass_an_isinstance():
+    """AUDIT 0.2.0 B6 AUDIT 7, a seventh member of the read-pair class in
+    the guard that closed the fourth.
+
+    `_validate_decl_eqn` gated the agreement check with
+    ``isinstance(raw_dtype, str)``, so a `dtype` param that is any OTHER
+    exact built-in did not fail the comparison — it SKIPPED it. Measured
+    on `dff95fc`: ``b'float64'``, ``0``, ``64.0`` and ``('float64',)``
+    were all ACCEPTED under a `float64` aval, while a `str` ``'int64'``
+    that contradicts the aval was correctly refused. So *"a declaration's
+    two self-descriptions of one declared set must agree"* held only when
+    the param happened to be a `str`.
+
+    The verdict does not move on any of the three spellings the audit
+    drove, because `propagate._ieee_any` re-derives most of the haze from
+    the AVAL — and that is a fact about how much of the model the param
+    reaches, not a reason to leave a self-description unchecked. What it
+    does reach is the subnormal band: `_ieee_any` selects it from
+    ``str()`` of this param, and ``str(b'float64')`` is ``"b'float64'"``,
+    which names no ieee format at all."""
+    def decl(dtype_param):
+        return ir.JaxprEqn(
+            primitive="stelling_any", invars=(),
+            outvars=(ir.Var(id=1, aval=av((2,), "float64")),),
+            params=(("dtype", dtype_param), ("hi", 2.0), ("lo", 1.0),
+                    ("shape", (2,))))
+
+    # the honest spelling, and the honest subclass the trace path produces
+    assert decl("float64").params_dict()["dtype"] == "float64"
+    assert type(decl(_S("float64")).params_dict()["dtype"]) is str
+    # the disagreement that was always caught
+    with pytest.raises(ir.TranscriptionError, match="contradicts"):
+        decl("int64")
+    # and every non-`str` exact built-in the door happily STORES, which
+    # used to skip the comparison entirely
+    for bad in (b"float64", 0, 64.0, ("float64",), None, True, 1 + 2j):
+        with pytest.raises(ir.TranscriptionError, match="a dtype is a NAME"):
+            decl(bad)
+    # the claim's own boundary, stated so it is not read as wider: a
+    # declaration whose AVAL has no dtype has only one self-description,
+    # and this function makes no claim about the param then
+    ok = ir.JaxprEqn(
+        primitive="stelling_any", invars=(),
+        outvars=(ir.Var(id=1, aval=ir.Aval(kind="ShapedArray", shape=(2,),
+                                           dtype=None)),),
+        params=(("dtype", b"float64"), ("hi", 2.0), ("lo", 1.0),
+                ("shape", (2,))))
+    assert ok.params_dict()["dtype"] == b"float64"
+
+
+def test_registering_a_stored_type_is_gated_on_the_property_it_delegates():
+    """AUDIT 0.2.0 B6 AUDIT 7. `ir._register_stored_type` accepted any
+    object and checked nothing about it, so ``_canonical(Wild()) is it``
+    was two lines away for anything that can `import stelling.ir`.
+
+    What registration delegates is single-valuedness, and the property
+    that gives `interval.IntervalArray` it is that the class is a FROZEN
+    dataclass — its fields are settled in its own ``__post_init__`` and
+    cannot be reassigned. That is checkable, it is the same property
+    `ir._CANONICAL_IR_TYPES` is computed with, and it is checked now.
+
+    IT IS STILL NOT A SECURITY BOUNDARY and `ir.py` says so where the
+    function is: code that can call this can equally rebind
+    `ir._canonical`. The boundary the door defends is a DOCUMENT, and no
+    document reaches this arm — `_decode` has no tag for a registered type
+    and `_encode` refuses to encode one."""
+    saved = ir._LIBRARY_STORED_TYPES
+    try:
+        class Wild:
+            pass
+
+        with pytest.raises(TypeError, match="not a frozen dataclass"):
+            ir._register_stored_type(Wild)
+
+        @dataclasses.dataclass
+        class Mutable:
+            a: int = 0
+
+        with pytest.raises(TypeError, match="not a frozen dataclass"):
+            ir._register_stored_type(Mutable)
+
+        with pytest.raises(TypeError, match="takes a class"):
+            ir._register_stored_type(Wild())
+
+        for known in (str, ir.Var):
+            with pytest.raises(TypeError, match="already a type this module"):
+                ir._register_stored_type(known)
+
+        # and the one shape it does accept, with the index rebuilt for it
+        @dataclasses.dataclass(frozen=True)
+        class Boxed:
+            a: int = 0
+
+        ir._register_stored_type(Boxed)
+        assert id(Boxed) in ir._STORED_AS_IS
+        b = Boxed()
+        assert ir._canonical(b) is b
+    finally:
+        ir._LIBRARY_STORED_TYPES = saved
+        ir._rebuild_stored_index()
+    assert ir._LIBRARY_STORED_TYPES is saved
+    assert set(ir._STORED_AS_IS) == {
+        id(t) for t in (tuple(ir._CANONICAL_EXACT_TYPES)
+                        + tuple(ir._CANONICAL_IR_TYPES)
+                        + tuple(saved))
+    }
 
 
 def test_a_list_is_stored_as_a_tuple_and_the_document_now_hashes():
@@ -558,10 +1057,8 @@ def test_the_traced_route_pays_nothing_and_needs_the_subclass_arm():
     finally:
         jax.config.update("jax_enable_x64", old)
 
-    allowed = (ir._CANONICAL_EXACT | ir._CANONICAL_IR_TYPES
-               | set(ir._LIBRARY_STORED_TYPES) | {tuple})
     wrong = [(p, type(v).__name__) for p, v in _stored_values(q)
-             if type(v) not in allowed]
+             if not _is_an_allowed_stored_type(v)]
     assert not wrong, wrong
     assert ir.ClosedJaxpr.from_dict(q.to_dict()) == q
     assert ir.ClosedJaxpr.from_dict(q.to_dict()).to_dict() == q.to_dict()

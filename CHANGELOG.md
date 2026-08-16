@@ -1005,8 +1005,8 @@ SPDX-License-Identifier: Apache-2.0
            of type bytes: a declaration records its extents in a tuple or
            a list, ...
   _declared_shape call sites reached, in order:
-      obligation.py:3255 in slice     <- the element budget
-                                      <- obligation.py:3392, the
+      obligation.py:3293 in slice     <- the element budget
+                                      <- obligation.py:3459, the
                                          slice-input reader, is never
                                          reached
   ```
@@ -1106,6 +1106,279 @@ SPDX-License-Identifier: Apache-2.0
   reader at. This is the same label-versus-substance slip the fixup two
   paragraphs above corrected for `obligation.h2` → `h1`.*
 
+- **UNSOUND — THE DOOR'S OWN DISPATCH WAS BUILT FROM THE TWO MOST
+  OVERRIDABLE TESTS IN PYTHON, SO IT COULD BE WALKED PAST; IT DECIDES BY
+  IDENTITY NOW** (audit 0.2.0 B6 audit 7, **S14**; reaches `main` and the
+  **released `v0.1.0`**). The entry below replaces every document-supplied
+  value with an exact built-in "or refuses it". Its MECHANISM is sound —
+  each read is the base type's own accessor, called exactly once, and the
+  result is bound — and every sentence about it is about what happens
+  once the door has decided to read. The decision itself was:
+
+  ```
+  if type(obj) in _CANONICAL_EXACT:      # a frozenset -> the METACLASS's
+      return obj                         #   __hash__ / __eq__
+  ...
+  for base, read in _CANONICAL_READS:    # first entry: (bool, lambda v: v)
+      if isinstance(obj, base):          # falls back to obj.__class__
+          return read(obj)
+  ```
+
+  Three lines of metaclass answering as `float`, or a two-line
+  `__class__` property returning `bool` into an arm whose read is the
+  IDENTITY, and an arbitrary two-faced object is stored in an `ir` field
+  untouched. **Each bypass sufficed alone**, and they are recorded
+  separately because a repair that closed only their conjunction would
+  leave both open: the metaclass alone stores the liar for every one of
+  the nine faces the door names; the `__class__` property alone stores it
+  for `bool`, the single face whose arm is an identity read, and for the
+  other eight reaches a real accessor and raw-crashes. Driven together:
+
+  ```
+  query   x = any(shape=(2,), lo=1, hi=2)
+          assert sum(x) <= C   and   assert C <= 79/20
+  truth   max over [1,2] x [1,2] of (x0 + x1) = 4 > 79/20
+  dff95fc obligation 0 = 'discharged'   obligation 1 = 'discharged'
+  dee8bc2 obligation 0 = 'discharged'   obligation 1 = 'discharged'
+  v0.1.0  obligation 0 = 'discharged'   obligation 1 = 'discharged'
+  ```
+
+  The document is SELF-CONTRADICTING — the two obligations together say
+  the maximum is at most 3.95, and it is 4 — so refuting it needs no
+  reference to the liar's identity, and `jnp.sum` at `x=[2,2]` returns
+  `4.0`. Every object in it is built through a public `stelling.ir`
+  dataclass; there is no `object.__setattr__` anywhere. The `main` and
+  `v0.1.0` rows were re-measured here, on `git clone --shared` trees at
+  `dee8bc2` and at the tag. The class extends past leaf values: an
+  `ir.Var` or `ir.Aval` SUBCLASS with the same metaclass was CARRIED by
+  the arm whose whole justification is that the object canonicalized its
+  own fields, so a stored `Var`'s `id` answered `1, 99, 99, 99` across
+  four reads — the exact hazard `Var.__post_init__`'s own comment names.
+
+  **THE REPAIR IS THAT THE DOOR ASKS THE OBJECT NOTHING.** It reads
+  `type(obj)` (the object header; no `__class__` property can move it),
+  tests membership by IDENTITY through an `id()`-keyed index of the types
+  it stores — `id()` has no override hook and its result is an exact
+  `int` — and asks `issubclass(type(obj), base)`, which dispatches
+  `type.__subclasscheck__` on the **BASE**, whose metaclass is exactly
+  `type` (no `ABCMeta`, checked), so the derived class gets no say. And
+  **no arm's read is the identity**: `bool` needs none, because CPython
+  refuses it as a base class — a premise now measured rather than
+  asserted. A metaclass can still forge the C-level MRO; CPython's own
+  layout check refuses that for every base with its own layout, and the
+  single case it permits is `bool` from a real `int` subclass, which
+  shares `int`'s layout and is therefore not a lie about the payload —
+  measured, and stored as the exact `int` it carries. Where a read is
+  nonetheless handed an object without its type's payload it RAISES, and
+  the door turns that into a `TranscriptionError` instead of letting a raw
+  `TypeError` — which `TranscriptionError` SUBCLASSES, so `except
+  TranscriptionError` does **not** catch it — out of a public constructor.
+  Driving a liar of each of the nine faces, under each of the two
+  bypasses, into a plain param value and into both declaration params (81
+  combinations) gave **19 raw `TypeError`s at six distinct statements** on
+  `dff95fc` and **none** on `main`, which has no door to raise them: that
+  half is a regression of this batch and not a defect of the release. The
+  message-totality sweep reaches none of the six, because every leaf it
+  injects is a real SUBCLASS and none of these objects is a subclass of
+  anything. All 81 are `TranscriptionError` now.
+
+  **THE SAME MEMBERSHIP WAS THE HEADLINE TEST'S ORACLE**, which is the
+  campaign's signature pattern arriving inside the test written to prove
+  it closed. `test_every_value_a_document_stores_is_of_an_EXACT_type`
+  asserted `type(v) not in allowed` — the door's own primitive — so:
+
+  ```
+  the TEST oracle: type(v) not in allowed      -> False  (reports NO defect)
+  the DOOR:        type(v) in _CANONICAL_EXACT -> True   (store as is)
+  ```
+
+  The oracle asks identity now, the door asks `id()`, and the test's
+  population gained a liar per face per bypass — 27 rows, computed from
+  the door's own declaration of what it stores.
+
+  **THE `dtype` PARAM'S TYPE WAS UNCHECKED, a seventh member of the
+  read-pair class inside the guard that closed the fourth.**
+  `_validate_decl_eqn` gated the agreement check with
+  `isinstance(raw_dtype, str)`, so a `dtype` param that is any other exact
+  built-in did not fail the comparison, it SKIPPED it: measured,
+  `b'float64'`, `0`, `64.0` and `('float64',)` were all ACCEPTED under a
+  `float64` aval while a `str` `'int64'` was correctly refused. So *"two
+  self-descriptions of one declared set"* held only when the param
+  happened to be a `str`. The param is canonicalized and required to BE a
+  `str` now, in its own sentence. No verdict moved on the three spellings
+  driven — `propagate._ieee_any` re-derives most of the haze from the aval
+  — which is a fact about how much of the model the param reaches, not a
+  reason to leave a self-description unchecked; what it does reach is the
+  subnormal band, and `str(b'float64')` is `"b'float64'"`, naming no ieee
+  format at all.
+
+  **`ir._register_stored_type` is gated.** It was module-level and checked
+  nothing, so any code that can `import stelling.ir` could opt a type out
+  of the door entirely. What registration delegates is single-valuedness,
+  and the property that gives `interval.IntervalArray` it is that the
+  class is a FROZEN dataclass — the same property `_CANONICAL_IR_TYPES` is
+  computed with — so that is checked, along with "is a class" and "is not
+  already a type this door stores". It is **still not a security
+  boundary** and `ir.py` says so where the function is: code that can call
+  it can equally rebind `_canonical`. The boundary the door defends is a
+  DOCUMENT, and no document reaches this arm — `_decode` has no tag for a
+  registered type and `_encode` refuses to encode one.
+
+  **ONE RULE, ONE READING.** `ir._SHAPE_PARAM_CONTAINERS` was shared by
+  the load door and `obligation._Slicer._declared_shape` so the two faces
+  could not hold different LISTS — and each face still spelled the test
+  itself, both as `isinstance`. Hardening one alone would have re-opened
+  by the reading the gap that was closed by the list, so the reading is
+  `ir._held_in_a_shape_param_container` and both faces call it.
+
+  **Compatibility, re-measured over all three routes.** A traced query's
+  `content_hash()` is **byte-identical** on `dee8bc2`, `dff95fc` and this
+  commit, over four documents (traced simple, traced rich, and each
+  reloaded through `from_dict`); `to_dict()` round-trips stably on all
+  three. The accept/refuse partition over the hand-built population is
+  **unchanged from `dff95fc`** — every row that was accepted is accepted
+  and every row refused is refused — with two narrowings of hand-built IR
+  added here: a `stelling_any` `dtype` param that is not a `str` (when the
+  outvar aval has a dtype), and a value that lies about its type, which
+  was previously stored and is now refused.
+
+  **Cost, measured on this tree** (jax 0.11.0, python 3.12.3,
+  `/home/nick/venvs/stelling-jax`, best of 9, three `git clone --shared`
+  trees). The entry below was reported with microbenchmark figures that
+  appear nowhere in the diff or its commit message; they are re-derived
+  here rather than transcribed, so the absolute numbers are this run's:
+
+  ```
+                              dee8bc2   dff95fc   this commit
+  250k ir.Var                  0.153 s   0.227 s   0.178 s
+  250k ir.JaxprEqn             0.430 s   1.249 s   1.014 s
+  868-object traced query:
+    from_dict(to_dict())       1.300 ms  2.043 ms  2.344 ms
+    propagate()                2.196 ms  2.120 ms  2.291 ms
+  ```
+
+  250,000 `ir` objects is not a query; the traced query above builds 868,
+  and `propagate()` on it is within noise of `main`. The membership
+  spelling was chosen on that measurement rather than on taste: an
+  exact-leaf hit costs 13.5 ns as the `frozenset` lookup that was there,
+  180 ns as `any(t is k for k in ...)`, and 32.4 ns as one `id()` and one
+  `dict` lookup; an `ir`-dataclass hit costs 33.1 ns, 487 ns and 31.9 ns
+  the same three ways — because the `id()` index merges the three arms
+  into one lookup, and a linear scan is linear in a set this module
+  COMPUTES.
+
+  The reproducer is `tests/test_aval_lie_both_faces.py::test_a_value_that_
+  LIES_about_its_TYPE_can_no_longer_mint_a_FALSE_VERIFIED`, held beside
+  the two documents below because all three are the same lie at three
+  depths — a shape param's contents, a param key, and a value's type — and
+  each of the last three rounds has closed one and been followed by the
+  next.
+
+  **ATTRIBUTION.** Same method as the table above — `git clone --shared`
+  per row, the revert applied ALONE by exact-string replacement (a miss is
+  a hard error, so a row that no longer applies fails loudly rather than
+  measuring an unreverted tree), the whole suite run once per row,
+  `JAX_ENABLE_X64=1`, jax 0.11.0, python 3.12.3,
+  `pytest -q -p no:randomly`. No confound to subtract on any row:
+  `docs/supported-primitives.md` cites line numbers in `obligation.py`,
+  `propagate.py` and `coverage.py`, and the only row that touches one of
+  those (`R7`) is line-count neutral. NET = raw.
+
+  ```
+  revert (this commit, applied alone)       raw  conf  NET  the tests that red
+  R1  the door's membership test, back       42     0   42  every_value_a_document_
+      to `type(obj) in <a frozenset>`                          stores_is_of_an_EXACT_type
+                                                              (14 LIAR rows);
+                                                              a_liar_is_refused_as_a_
+                                                              TranscriptionError_and_never_
+                                                              a_raw_TypeError (14);
+                                                              an_ir_DATACLASS_subclass_is_
+                                                              refused_even_with_a_LYING_
+                                                              METACLASS (13);
+                                                              a_value_that_LIES_about_its_
+                                                              TYPE_can_no_longer_mint_a_
+                                                              FALSE_VERIFIED
+  R2  the door's arm test, back to            0     0    0  NOTHING alone — see R2+R4
+      `isinstance(obj, base)`
+  R3  the `(bool, identity)` read,             5     0    5  a_value_that_LIES_about_its_
+      restored to the table                                   TYPE_can_no_longer_mint_a_
+                                                              FALSE_VERIFIED;
+                                                              the_doors_index_is_the_three_
+                                                              sets_it_MERGES;
+                                                              the_types_with_NO_read_are_
+                                                              the_ones_that_cannot_be_
+                                                              subclassed;
+                                                              NO_read_in_the_table_is_the_
+                                                              IDENTITY;
+                                                              a_metaclass_that_FORGES_the_
+                                                              mro_cannot_forge_a_payload
+  R4  `_read_or_refuse`, back to the           0     0    0  NOTHING alone — see R2+R4
+      bare `read(obj)`
+  R2+R4  both of the above together           33     0   33  every_value_a_document_
+                                                              stores_is_of_an_EXACT_type
+                                                              (16);
+                                                              a_liar_is_refused_as_a_
+                                                              TranscriptionError_and_never_
+                                                              a_raw_TypeError (16);
+                                                              a_value_that_LIES_about_its_
+                                                              TYPE_can_no_longer_mint_a_
+                                                              FALSE_VERIFIED
+  R5  the `dtype` param's TYPE                 6     0    6  a_value_that_LIES_about_its_
+      constraint                                              TYPE_can_no_longer_mint_a_
+                                                              FALSE_VERIFIED;
+                                                              a_liar_is_refused_as_a_
+                                                              TranscriptionError_and_never_
+                                                              a_raw_TypeError (2 str rows);
+                                                              the_dtype_param_must_BE_a_
+                                                              str_and_not_merely_pass_an_
+                                                              isinstance;
+                                                              the_recorded_FIGURES_are_the_
+                                                              ones_the_sweep_MEASURES;
+                                                              the_QUOTE_SITE_COUNT_the_
+                                                              record_quotes_is_the_union_
+                                                              it_measures
+  R6  the `_register_stored_type` gate         1     0    1  registering_a_stored_type_is_
+                                                              gated_on_the_property_it_
+                                                              delegates
+  R7  the slicer's READING of the              1     0    1  the_measured_partition_IS_the_
+      shape-param container rule                              documented_rule
+  R8  the canonicalization test's              2     0    2  the_ORACLE_this_file_uses_is_
+      ORACLE                                                  NOT_the_doors_own_primitive
+
+  PROSE control (the anti-vacuity half: a prose revert must red nothing)
+  P1  `ir._safe_repr`'s residue                0     0    0
+      paragraph
+
+  the unreverted base (a clone at this commit): 3733 passed, 10 skipped, 0 failed
+  ```
+
+  **R2 AND R4 EACH RED NOTHING ALONE, AND THE ROW SAYS SO RATHER THAN
+  BANKING THE PAIR'S REDS TWICE.** They are two defences against the same
+  object and each masks the other: with `issubclass` in place a liar never
+  reaches a read, so removing `_read_or_refuse` changes nothing; with
+  `_read_or_refuse` in place a liar that reaches a read is refused by the
+  accessor raising, so restoring `isinstance` changes nothing either.
+  Reverted together they red 33. Keeping both is deliberate — the
+  `issubclass` half is what makes the refusal a TYPE decision rather than
+  an accident of what the accessor happens to do, and the
+  `_read_or_refuse` half is what makes the door TOTAL by construction
+  instead of by an argument about CPython's layout check.
+
+  **R8's ROW EXISTS BECAUSE THE ORACLE IS OTHERWISE UNATTRIBUTABLE.** With
+  the door fixed, a liar document is refused before any oracle is
+  consulted, so reverting the oracle alone would red nothing and the
+  repair would rest on the author. It is measured directly instead —
+  `test_the_ORACLE_this_file_uses_is_NOT_the_doors_own_primitive` hands
+  the oracle a liar and requires it to say no — and the two spellings were
+  driven against each other on the `R1` tree, where the liar document
+  BUILDS:
+
+  ```
+  door reverted (R1); the stored ceiling is of type Liar_float
+    OLD oracle  (type(v) in allowed)   -> reports NO DEFECT
+    NEW oracle  (identity)             -> query.jaxpr.eqns[2].invars[1].val
+  ```
+
 - **UNSOUND — THE DOOR NOW STORES EVERY DOCUMENT-SUPPLIED VALUE AS AN
   EXACT BUILT-IN, OR REFUSES IT; CLOSING THE PAIRS ONE AT A TIME IS WHAT
   KEPT THIS OPEN** (audit 0.2.0 B6 audit 6). The entry below made the
@@ -1176,7 +1449,10 @@ SPDX-License-Identifier: Apache-2.0
   that no later read *can* differ, because there is nothing left to
   override — and that is a property of the STORED OBJECT rather than of
   any reader, so it holds for readers nobody has written yet, which is
-  what the per-member repairs could not do.
+  what the per-member repairs could not do. **That last sentence was
+  false as shipped, because the door's own DISPATCH was overridable and
+  the value never reached the mechanism it describes; see the audit-7
+  entry above, which is where it becomes true.**
 
   **A SUBCLASS IS READ AND NOT REFUSED, AND THE TRACE PATH IS WHY**:
   `np.float64` IS a `float` subclass and `_jax_compat.Transcriber.param`
@@ -1476,7 +1752,7 @@ SPDX-License-Identifier: Apache-2.0
   x64 on:
 
   ```
-  this tree, as shipped              95 swept / 0 escapes / 20 skipped
+  at dff95fc, as shipped             95 swept / 0 escapes / 20 skipped
   guards neutered                     1 escape  /  1 line  / 1 message
   guards neutered, and the door's
     LEAF READS neutered too          26 escapes /  8 lines / 8 messages
@@ -1489,13 +1765,30 @@ SPDX-License-Identifier: Apache-2.0
   same quantity; it is stated so a reader can recompute it, not so the two
   can be treated as one.
 
+  **THOSE ARE `dff95fc`'S FIGURES AND THE TREE HAS MOVED** — audit 0.2.0
+  B6 audit 7 gave `_validate_decl_eqn`'s `dtype` param a refusal for its
+  TYPE, which is a message expression the sweep reaches, so the
+  door-removed row is `27 escapes / 9 lines / 9 messages` and the union is
+  `11 = those 9 + the 2`. The shipped row and the guards-neutered row are
+  unchanged at `95/0/20` and `1/1/1`. Both are COMPUTED by the two tests
+  named below, which now also read the table in their own docstring back
+  out and compare it — a table beside a dict was an honour-system copy of
+  it, and at `dff95fc` the two had already parted (that docstring stated
+  `27/9/8`, which is no control this file runs).
+
   **THE POSITIVE CONTROL NOW REMOVES TWO DEFENCES, NOT ONE** (audit 0.2.0
   B6 audit 6). Every hostile leaf this sweep injects is a SUBCLASS of a
   stored type, and the canonicalization door added in audit 6 replaces one
   with an exact twin before any message quotes it — so 25 of the 26
   ESCAPES do not happen, across 7 of the 8 message expressions, and they
-  are not GUARDED but unreachable (two units, both stated, for the reason
-  this entry gives above). A control that only neutered
+  are not GUARDED but unreachable *for the leaf this sweep injects*.
+  **That qualifier was missing and its absence was read as a claim about
+  `_safe_repr` being load-bearing at ONE site** (audit 0.2.0 B6 audit 7).
+  It is not: a leaf that BYPASSES the door is stored unchanged — which is
+  exactly what neutering the leaf reads simulates — so it reaches every
+  one of those sites, and there the guards are the only thing between it
+  and a raw crash out of a public constructor. `_safe_repr` is
+  load-bearing at all of them. A control that only neutered
   `_safe_repr` measured 1 escape and would have gone on passing with every
   guarded read in the module deleted. The guard figures are therefore
   measured with the door's LEAF READS neutered as well — not the whole

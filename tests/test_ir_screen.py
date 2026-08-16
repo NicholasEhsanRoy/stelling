@@ -565,11 +565,30 @@ def test_the_batch_ships_an_attribution_table_that_adds_up():
 # an attribution row names TESTS, and a test name is checkable
 # ---------------------------------------------------------------------------
 
-# The fence pattern accepts an optional LANGUAGE TAG — audit 0.2.0 B6
-# audit 6. It was `\`\`\`\n` exactly, so one ```` ```python ```` block added
-# anywhere earlier in `CHANGELOG.md` re-paired every fence after it and
-# this scan found two attribution tables instead of three, reporting a
-# defect in the tables that was really a defect in the reader.
+# The fence pattern accepts an optional LANGUAGE TAG.
+#
+# THE STORY THIS COMMENT USED TO TELL DOES NOT REPRODUCE, AND IS
+# RETRACTED — audit 0.2.0 B6 audit 7. It read: *"It was `\`\`\`\n`
+# exactly, so one ```` ```python ```` block added anywhere earlier in
+# `CHANGELOG.md` re-paired every fence after it and this scan found two
+# attribution tables instead of three, reporting a defect in the tables
+# that was really a defect in the reader."* Measured at `dee8bc2` and at
+# `dff95fc`: at `dff95fc` `CHANGELOG.md` carries 26 fence markers, ZERO
+# of them with any info string, and BOTH patterns — the bare one and this
+# one — report 3 attribution tables. At `dee8bc2` it carries no fences at
+# all, because the tables are what this batch added, so both patterns
+# report 0. There is no commit at which the scan found two: the defect
+# was never exhibited by this tree, and what the hardening records is a
+# hazard someone would introduce by writing a tagged block, not one
+# anyone had.
+#
+# The hardening is kept on its own merits — a tagged block IS the natural
+# thing to write next and would silently re-pair every fence after it —
+# and its own limit is stated rather than left to be discovered: `\w*`
+# matches a bare word, so a hyphenated or braced info string
+# (```` ```c-like ````, ```` ```{note} ````) still re-pairs everything
+# after it exactly as the bare pattern did. That is a narrower hazard
+# than the one retracted above, and it is a real one.
 _FENCE = r"```\w*\n(.*?)```"
 
 

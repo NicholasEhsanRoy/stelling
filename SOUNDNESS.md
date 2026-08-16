@@ -8827,8 +8827,63 @@ verdicts:
   subclass left to answer it. That is a property of the stored object
   rather than of any reader, so it covers the params that have no rule at
   all (`axes`, `new_sizes`, `slice_sizes`, `dimension_numbers`) and
-  readers nobody has written yet. **It does not make those params
-  CORRECT** — per-primitive shape inference is still scoped out in
+  readers nobody has written yet.
+
+  **AND THAT SENTENCE WAS FALSE WHEN IT WAS WRITTEN, BECAUSE THE DOOR'S
+  OWN DISPATCH WAS OVERRIDABLE — audit 0.2.0 B6 audit 7, S14.** Every
+  clause above is about what happens once the door has decided to read.
+  The decision itself was `type(obj) in <a frozenset of types>`, which
+  runs the object's METACLASS, and `isinstance(obj, base)`, which falls
+  back to reading the object's own `__class__` — and the first entry of
+  the read table was `(bool, lambda v: v)`, an IDENTITY read. Three lines
+  of metaclass, or two lines of `__class__` property, put an arbitrary
+  two-faced object into an `ir` field untouched. **Each bypass sufficed
+  alone**, and they are recorded separately because a repair that closed
+  only their conjunction would leave both open: the metaclass alone
+  stored the liar for every one of the nine faces the door names, and the
+  `__class__` property alone stored it for `bool` — the single face whose
+  arm was an IDENTITY read — while for the other eight it reached a real
+  accessor and raw-crashed. The same document shape as the two above,
+  with both bypasses on the ceiling of the asserted predicate and every
+  object built through a public `stelling.ir` dataclass, reached
+  **`discharged`** on two obligations that cannot both hold —
+  `sum(x) <= C` and `C <= 79/20` over `[1,2]^2`, whose true maximum is 4.
+  Re-measured on `git clone --shared` trees, it reached `discharged`
+  identically on `main` (`dee8bc2`) and on the **released `v0.1.0`** tag,
+  so this was a live false VERIFIED and not a regression of this batch. The class also
+  extended past leaf values: an `ir.Var` or `ir.Aval` SUBCLASS with the
+  same metaclass was CARRIED by the arm whose whole justification is that
+  the object canonicalized its own fields, so a stored `Var`'s `id`
+  answered `1, 99, 99, 99` across four reads — the exact hazard
+  `Var.__post_init__`'s own comment names.
+
+  What makes the sentence true is that the door now decides by things no
+  object takes part in: `type(obj)` (the object header, which no
+  `__class__` property can move), IDENTITY against an `id()`-keyed index
+  of the types it stores, and `issubclass(type(obj), base)`, which
+  dispatches `type.__subclasscheck__` on the BASE — every base here has
+  metaclass exactly `type`, so there is no `ABCMeta` hook and no say for
+  the derived class. No arm's read is the identity: `bool` needs none,
+  because CPython refuses it as a base class, and that premise is
+  measured rather than asserted. A metaclass may still forge the C-level
+  MRO, and CPython's own layout check refuses that for every base with
+  its own instance layout; the single case it permits — `bool` from a
+  real `int` subclass, which shares `int`'s layout — is not a lie about
+  the payload at all, and `int.__index__` stores the exact `int` the
+  object really carries. Where a read is nonetheless handed an object
+  without its type's payload it RAISES, and the door turns that into a
+  `TranscriptionError` rather than letting a raw `TypeError` — which
+  `TranscriptionError` SUBCLASSES, so `except TranscriptionError` does
+  not catch it — out of a public constructor. That half is a regression
+  of `dff95fc` rather than a defect of the release: driving a liar of
+  each of the nine faces, under each of the two bypasses, into a plain
+  param value and into both declaration params — 81 combinations — gave
+  **19 raw `TypeError`s at six distinct statements** on `dff95fc` and
+  **none** on `main`, which has no door to raise them. All 81 are
+  `TranscriptionError` now.
+
+  **It does not make those params CORRECT** — per-primitive shape
+  inference is still scoped out in
   writing — only single-valued, so the transfer and the emission read the
   same extents. The fields the module already had a stronger rule for are
   left to it: aval and array extents go through `_load_extents`, which

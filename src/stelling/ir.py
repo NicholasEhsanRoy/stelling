@@ -603,6 +603,34 @@ class ClosedJaxpr:
 # Tagged, recursive, and closed over exactly the types above. ``to_dict`` /
 # ``from_dict`` must round-trip losslessly: that is tested, and the content
 # hash is defined over this encoding.
+#
+# WHY THE `isinstance` CHAINS BELOW ARE NOT THE ONES THE DOOR REPLACED,
+# and the sweep's verdict on them, so the next reader does not have to
+# re-derive it — audit 0.2.0 B6 audit 7.
+#
+# `_encode` walks an object graph that has ALREADY been through the
+# canonicalization door: every value reachable from a constructed
+# `ClosedJaxpr` is an exact built-in, an exact `ir` dataclass, or a
+# registered type, so every `isinstance` here is answered by the object's
+# REAL type — an exact object's ``__class__`` is its type. It also decides
+# an ENCODING rather than gating a check, and it is the hot path of
+# `content_hash`.
+#
+# `_decode` is the other direction and its input is whatever a caller
+# hands `from_dict`. A leaf that lies about its type is returned unchanged
+# from `_decode`'s scalar arm and then REFUSED by the door when a
+# dataclass constructor receives it — measured. What is NOT covered, and is recorded
+# rather than repaired because it is a different surface with a different
+# contract (this reader raises `ValueError`, not `TranscriptionError`, and
+# its input is JSON): the READS OF THE MAPPING ITSELF. ``isinstance(obj,
+# dict)`` takes a `__class__` property's word for it, and ``obj.get`` /
+# ``obj[...]`` are the mapping's own — so `ClosedJaxpr.from_dict` raises a
+# raw `AttributeError` on an object that merely claims to be a `dict`, and
+# a raw `KeyError` on a real `dict` SUBCLASS whose ``get`` answers
+# differently on two calls. Neither reaches a verdict: they are crashes in
+# the reader, before any IR exists. The general repair is to route every
+# read of the serialization through `dict`'s own accessors, which is a
+# change to this reader's error surface and belongs in its own commit.
 
 
 def _encode(obj: object, meta: bool) -> object:
@@ -825,6 +853,28 @@ _SHAPE_PARAM_CONTAINERS: tuple[type, ...] = (tuple, list)
 _SHAPE_PARAM_RULE = " or ".join(f"a {t.__name__}" for t in _SHAPE_PARAM_CONTAINERS)
 
 
+def _held_in_a_shape_param_container(obj: object) -> bool:
+    """Is ``obj`` held in one of :data:`_SHAPE_PARAM_CONTAINERS`?
+
+    ONE OBJECT WAS NOT ENOUGH: THE TWO FACES MUST ALSO ASK IT THE SAME WAY
+    — audit 0.2.0 B6 audit 7. :func:`_validate_decl_eqn` and
+    :meth:`stelling.obligation._Slicer._declared_shape` both asked
+    ``isinstance`` against :data:`_SHAPE_PARAM_CONTAINERS`, which shares
+    the list but not the READING, and a reading is a thing two faces can
+    drift apart in exactly as a list is. They call this now, so neither
+    can be hardened without the other.
+
+    AND THE READING IS ``issubclass(type(obj), ...)``. ``isinstance``
+    falls back to the OBJECT's ``__class__``, so a two-line property
+    returning ``tuple`` satisfied it from any object at all — and the
+    sentence that is supposed to refuse such a param then never fired, on
+    either face. ``issubclass`` dispatches ``type.__subclasscheck__`` on
+    the BASE — both bases here have metaclass exactly ``type``, no
+    ``ABCMeta`` in play — so the derived class does not get a say.
+    """
+    return issubclass(type(obj), _SHAPE_PARAM_CONTAINERS)
+
+
 def _safe_repr(obj) -> str:
     """``repr(obj)``, or a visible placeholder when the object refuses.
 
@@ -858,33 +908,44 @@ def _safe_repr(obj) -> str:
     rather than trusted from this paragraph:
 
         this tree, as shipped              95 swept / 0 escapes / 20 skipped
-        guards neutered                     1 escape  /  1 line  / 1 message
+        guards neutered, door shipped       1 escape  /  1 line  / 1 message
         guards neutered, and the door's
-          LEAF READS neutered too          26 escapes /  8 lines / 8 messages
+          LEAF READS neutered too          27 escapes /  9 lines / 9 messages
         `30d4b04`, guards absent           28 escapes / 10 lines / 8 messages
 
-    The sweep's 8 message expressions plus the 2 the canonical document
-    masks also comes to 10; that is a different quantity from the ten
-    quotes above and agrees with it by arithmetic, not by derivation. A
-    guarded quote is cheap; deciding per site which objects can misbehave
-    is how those six were missed.
+    The sweep's 9 message expressions plus the 2 the canonical document
+    masks comes to 11, which is the union that test computes. The ten
+    QUOTES above is a different unit and a fixed statement about the tree
+    audit 4 measured; the two agreed at ten on that tree and no longer do,
+    and re-typing the second number to keep the coincidence alive would be
+    this file's own defect one step subtler. A guarded quote is cheap;
+    deciding per site which objects can misbehave is how those six were
+    missed.
 
     **THE GUARD-NEUTERED FIGURES ARE MEASURED WITH THE CANONICALIZATION
     DOOR REMOVED TOO** — audit 0.2.0 B6 audit 6. Every hostile leaf that
-    sweep injects is a SUBCLASS of a stored type, and the door now
-    replaces one with an exact twin before any message quotes it: 25 of
-    the 26 ESCAPES therefore do not happen, across 7 of the 8 message
-    expressions, and they are not guarded — they are unreachable. (Two
-    units, both stated, for the reason the rest of this docstring gives.)
-    A control that
-    neutered only the guards measured 1 escape and would have gone on
-    passing with every call to this function deleted, so it neuters the
-    door's leaf reads as well and reports each measurement with the other
-    out of the way. This function is still
-    load-bearing at the one site canonicalization does not own — the
-    hostile extent inside a declaration's `shape` param, which
-    `_validate_decl_eqn` reads as handed in because it has its own rule
-    for that param."""
+    sweep injects is a SUBCLASS of a stored type, and the door replaces
+    one with an exact twin before any message quotes it, so with the door
+    shipped 26 of the 27 escapes do not happen. A control that neutered
+    only the guards measured 1 escape and would have gone on passing with
+    every call to this function deleted, so it neuters the door's leaf
+    reads as well and reports each measurement with the other out of the
+    way.
+
+    **AND "1" IS NOT A COUNT OF THE SITES THIS FUNCTION IS LOAD-BEARING
+    AT** — audit 0.2.0 B6 audit 7, which is how the paragraph above was
+    read, and how it was written: *"they are not guarded — they are
+    unreachable"*. Unreachable TO THE LEAF THAT SWEEP INJECTS, which is a
+    subclass, and only that. A leaf that BYPASSES the door — the metaclass
+    and `__class__` liars audit 7 built, before the door was fixed to
+    refuse them — reaches every one of those 27 sites carrying whatever
+    `__repr__` it likes, and the guards are then the only thing between it
+    and a raw crash out of a public constructor. So this function is
+    load-bearing at all 27, not at 1. What "1" measures is the residue of
+    ONE sweep against ONE defence, and the site it names is real and
+    worth naming: the hostile extent inside a declaration's `shape` param,
+    which `_validate_decl_eqn` reads as handed in because it has its own
+    rule for that param."""
     try:
         return repr(obj)
     except Exception:  # noqa: BLE001 — the message's own totality
@@ -994,11 +1055,53 @@ def _load_check(cond: bool, where: str, what: str) -> None:
 # reads, and a guard that checked one answer has not checked the other.
 # The repair that does not need the members enumerated is to leave nothing
 # overridable in what is stored: every value is replaced, at construction,
-# by an EXACT instance of a type this module is closed over. A later read
-# then cannot differ, because there is no subclass left to answer it — and
-# that is a property of the STORED OBJECT rather than of any reader, so it
-# holds for readers nobody has written yet, which is what the per-member
-# repairs could not do.
+# by an EXACT instance of a type this module is closed over — or, for the
+# two kinds of object that are carried rather than rewritten, by an object
+# whose single-valuedness some other invariant owns and states (an `ir`
+# frozen dataclass, which canonicalized its own fields; a
+# :data:`_LIBRARY_STORED_TYPES` registration, which delegates in writing).
+# For a value in the first class a later read cannot differ, because there
+# is no subclass left to answer it; for the other two the claim is the one
+# the invariant makes and no wider. That is a property of the STORED
+# OBJECT rather than of any reader, so it holds for readers nobody has
+# written yet, which is what the per-member repairs could not do.
+#
+# AND THE DOOR'S OWN DISPATCH IS PART OF WHAT IS STORED — audit 0.2.0 B6
+# audit 7, and the reason the paragraph above was false when it was
+# written. Every sentence here is about what happens AFTER the door
+# decides to read; the decision itself was made with the two most
+# overridable tests in Python. ``type(obj) in <a frozenset of types>``
+# runs the METACLASS's ``__hash__``/``__eq__``, so three lines of
+# metaclass answering as ``float`` walked an arbitrary object out of the
+# door untouched before any accessor ran; ``isinstance(obj, base)`` falls
+# back to reading ``obj.__class__``, so a two-line property returning
+# ``bool`` reached an arm whose read was the IDENTITY and stored the
+# object unchanged.
+#
+# EACH BYPASS ALONE LEFT A TWO-FACED OBJECT STORED, and they are measured
+# separately because a repair that closed only their conjunction would
+# leave both open: the metaclass alone stores for ANY face, and the
+# ``__class__`` property alone stores for ``bool``, the one face whose arm
+# was the identity (for every other face it reached a real accessor and
+# raw-crashed instead — see :func:`_read_or_refuse`). Driven together they
+# minted a `discharged` on two obligations that cannot both hold —
+# ``sum(x) <= C`` and ``C <= 79/20`` over ``[1,2]^2``, whose true maximum
+# is 4 — with every object in the document built through a public
+# `stelling.ir` dataclass and no ``object.__setattr__`` anywhere, and they
+# mint it identically on `main` and on the released `v0.1.0`. So the door
+# asks, and may only ask:
+#
+#   * ``type(obj)`` — the object's header, which no `__class__` property
+#     can move (``isinstance`` reads the property; ``type()`` does not);
+#   * IDENTITY against the types it stores, never ``==``/``hash``, which
+#     is :data:`_STORED_AS_IS` below — one ``id()`` and one ``dict``
+#     lookup on the exact ``int`` it returns, protocols no document-
+#     supplied object takes part in;
+#   * ``issubclass(type(obj), base)``, which dispatches
+#     ``type.__subclasscheck__`` ON THE BASE — a built-in whose metaclass
+#     is exactly ``type`` — and so cannot be redirected by the derived
+#     class at all. See :func:`_read_or_refuse` for the one thing a
+#     derived class CAN still do to it, and why the accessor detects it.
 #
 # WHERE THE BOUNDARY IS BETWEEN A VALUE THAT DECIDES AND ONE THAT IS
 # MERELY CARRIED: there is not one, and looking for it is how this class
@@ -1029,8 +1132,29 @@ def _load_check(cond: bool, where: str, what: str) -> None:
 # module transcribes what an object IS. An EXACT value never reaches one
 # of these readers at all — the dispatch below is on ``type(v)`` and
 # returns it unchanged — so the traced and deserialized routes, whose
-# values are exact already, pay one set lookup per value and allocate
-# nothing.
+# values are exact already, pay one ``id()`` and one ``dict`` lookup per
+# value and allocate nothing.
+#
+# AND NO ARM'S READ MAY BE THE IDENTITY — audit 0.2.0 B6 audit 7. The
+# table below carried ``(bool, lambda v: v)``, justified by "``bool``
+# cannot itself be subclassed, so its read is the identity". The premise
+# is true and the conclusion does not follow, for two measured reasons.
+# The arm was entered by ``isinstance``, which asks the OBJECT what its
+# class is, so a `__class__` property returning ``bool`` reached it from
+# any object at all. And even with the entry test fixed, ``bool`` shares
+# ``int``'s instance layout, so a REAL ``int`` subclass whose metaclass
+# overrides ``mro()`` to return ``[cls, bool, int, object]`` is created
+# without complaint and satisfies ``issubclass(cls, bool)`` — measured,
+# and ``bool`` is the only type this module stores for which it is
+# possible, because it is the only one that shares another's instance
+# layout (CPython's own check refuses the forgery for every other).
+# Under the identity read that object was STORED; under ``int.__index__``
+# it is stored as the exact ``int`` it actually carries. An identity read
+# is the one read that cannot detect having been applied to the wrong
+# object, so the fix is not a better guard in front of it: it is that
+# there is no identity read. ``bool`` keeps its place in what may be
+# stored through :data:`_CANONICAL_UNSUBCLASSABLE`, which is a statement
+# about EXACT types and reads nothing.
 
 import dataclasses as _dataclasses  # noqa: E402  (stdlib; kept local to the pass)
 
@@ -1049,13 +1173,26 @@ class _NotCanonical(Exception):
         self.path: list[str] = []
 
 
-# THE READS, ONE PER BASE TYPE, IN THIS ORDER. ``bool`` is an ``int``
-# subclass and must claim the `isinstance` before ``int`` does, or
+# THE TYPES WITH NO READ, BECAUSE THEY HAVE NO INEXACT FORM. CPython
+# refuses both as a base class (``type 'NoneType' is not an acceptable
+# base type``, and the same for ``bool``), so an object whose ``type()``
+# is one of these is EXACT by construction and an object that merely
+# CLAIMS to be one is a liar no read of it could settle. That is why
+# neither appears in the read table below and why neither needs to:
+# `_canonical` settles both by identity, before any read. The premise is
+# TESTED rather than asserted — `tests/test_ir_canonicalization.py`
+# subclasses each of them and requires the refusal — so a type added here
+# whose subclassing CPython permits does not silently acquire an
+# identity read (audit 0.2.0 B6 audit 7).
+_CANONICAL_UNSUBCLASSABLE: tuple[type, ...] = (type(None), bool)
+
+# THE READS, ONE PER BASE TYPE, IN THIS ORDER, AND NOT ONE OF THEM IS THE
+# IDENTITY (see the door's narrative above). ``bool`` is an ``int``
+# subclass and must be settled before ``int`` is asked, or
 # ``int.__index__`` would store ``True`` as ``1`` and change what a param
-# says; ``bool`` cannot itself be subclassed, so its read is the identity
-# and its entry exists only to take that place in the order.
+# says — and it IS settled before, by ``_CANONICAL_UNSUBCLASSABLE``, which
+# `_canonical` consults before it reaches this table at all.
 _CANONICAL_READS: tuple[tuple[type, object], ...] = (
-    (bool, lambda v: v),
     (int, int.__index__),
     (float, float.__float__),
     (complex, lambda v: complex(complex.real.__get__(v),
@@ -1065,18 +1202,25 @@ _CANONICAL_READS: tuple[tuple[type, object], ...] = (
 )
 
 # The leaf types that are already what they will be stored as when their
-# type is EXACT. Derived from the reads above so the two cannot name
-# different sets.
-_CANONICAL_EXACT: frozenset[type] = frozenset(
-    (type(None),) + tuple(t for t, _ in _CANONICAL_READS)
+# type is EXACT. Derived from the two tables above so the three cannot
+# name different sets. ORDERED, because :data:`_CANONICAL_RULE` is the
+# same list read as a sentence and a refusal that reorders itself between
+# runs is a refusal no test can hold.
+_CANONICAL_EXACT_TYPES: tuple[type, ...] = (
+    _CANONICAL_UNSUBCLASSABLE + tuple(t for t, _ in _CANONICAL_READS)
 )
+_CANONICAL_EXACT: frozenset[type] = frozenset(_CANONICAL_EXACT_TYPES)
 
 # The rule as a sentence, DERIVED from the table, so a refusal can never
 # name a different set from the one it applied — the same discipline
 # :data:`_SHAPE_PARAM_RULE` carries. ``_CANONICAL_IR_TYPES`` is computed
 # at the foot of this module from the module's own dataclasses.
 _CANONICAL_RULE = (
-    ", ".join(["None"] + [t.__name__ for t, _ in _CANONICAL_READS] + ["tuple"])
+    ", ".join(
+        ["None" if t is type(None) else t.__name__
+         for t in _CANONICAL_EXACT_TYPES]
+        + ["tuple"]
+    )
     + " (a list is stored as a tuple), or one of stelling.ir's own frozen "
     "dataclasses"
 )
@@ -1103,30 +1247,210 @@ _CANONICAL_RULE = (
 # `_decode` has no tag for such a type and `_encode` refuses to encode
 # one, so a registered value can only come from a caller who built it,
 # and it is outside `content_hash` and `to_dict` entirely.
+#
+# AND WHAT REGISTRATION IS *NOT* A DEFENCE AGAINST — audit 0.2.0 B6 audit
+# 7. :func:`_register_stored_type` is module-level and importable, so any
+# code running in this process can opt a type out of the door. That is
+# checked below for the one property the delegation actually rests on,
+# and it is still not a security boundary, because nothing at this level
+# could be: code that can call it can equally rebind :func:`_canonical`.
+# The boundary this door defends is a DOCUMENT — the values that arrive
+# through `from_dict`, through a trace, or through a public dataclass
+# constructor — and no document reaches this arm at all, for the reason
+# the paragraph above gives. The check is here so that a future in-tree
+# registrant cannot delegate single-valuedness to a class that does not
+# have it; the disclosure is here so the check is not mistaken for more.
 _LIBRARY_STORED_TYPES: tuple[type, ...] = ()
 
 
 def _register_stored_type(cls: type) -> type:
     """Declare ``cls`` a library-supplied type :func:`_canonical` carries.
 
-    Package-internal (see the comment above for what it delegates).
-    Returns ``cls`` so it can be used as a decorator.
+    Package-internal (see the comment above for what it delegates and for
+    what this check is and is not). Returns ``cls`` so it can be used as a
+    decorator.
+
+    THE ONE PROPERTY THE DELEGATION RESTS ON IS CHECKED, not assumed —
+    the same discipline :data:`_CANONICAL_IR_TYPES` applies to this
+    module's own dataclasses, and for the same reason. "The registering
+    module owns its single-valuedness" is a claim that a later read of a
+    field cannot differ from an earlier one, and for `IntervalArray` that
+    is true because it is a FROZEN dataclass: its fields are settled in
+    its own ``__post_init__`` and cannot be reassigned afterwards. A
+    mutable class, or a plain class with a property for a field, has no
+    such invariant, and carrying one would be exactly the hole the door
+    exists to close — reached by an import rather than by a document.
+
+    Raises a plain `TypeError` and not a `TranscriptionError`: nothing
+    here is a malformed document, and a caller catching document errors
+    should not swallow a package-internal contract violation.
     """
     global _LIBRARY_STORED_TYPES
-    if cls not in _LIBRARY_STORED_TYPES:
+    if not issubclass(type(cls), type):
+        raise TypeError(
+            f"_register_stored_type takes a class; got {_safe_type_name(cls)}"
+        )
+    # the quotes go through `_safe_repr` like every other object-valued
+    # quote in this pass: `cls.__name__` is an attribute lookup on a
+    # caller-supplied class and a metaclass can make it refuse
+    if id(cls) in _STORED_AS_IS:
+        raise TypeError(
+            f"{_safe_repr(cls)} is already a type this module stores, so "
+            f"registering it would move which arm of the door decides it"
+        )
+    if not (_dataclasses.is_dataclass(cls)
+            and getattr(cls, "__dataclass_params__", None) is not None
+            and cls.__dataclass_params__.frozen):
+        raise TypeError(
+            f"{_safe_repr(cls)} is not a frozen dataclass: a registered type "
+            f"is CARRIED rather than canonicalized, and the registering "
+            f"module's claim to own its single-valuedness rests on its fields "
+            f"being settled at construction and unassignable afterwards"
+        )
+    if not any(cls is k for k in _LIBRARY_STORED_TYPES):
         _LIBRARY_STORED_TYPES = _LIBRARY_STORED_TYPES + (cls,)
+        _rebuild_stored_index()
     return cls
 
 
+# THE DOOR'S MEMBERSHIP TEST, AND THE WHOLE OF WHY IT IS SPELLED THIS WAY
+# — audit 0.2.0 B6 audit 7. Every type in it is stored AS IS: an exact
+# leaf built-in, one of this module's own frozen dataclasses (canonical by
+# its own ``__post_init__``), or a registered library type (carried, by
+# the declaration above). Three arms, one answer, so one lookup.
+#
+# KEYED BY ``id()``, NOT BY THE TYPE. ``t in <set of types>`` and
+# ``t == k`` both run the METACLASS, which a document-supplied object
+# chooses; ``id()`` has no override hook at all, and the key it returns is
+# an exact ``int`` whose ``hash`` and ``eq`` are ``int``'s own. The dict
+# holds each type as its VALUE as well, which is not decoration: an
+# address may only be reused after the object at it is freed, and holding
+# the reference is what makes that impossible.
+#
+# WHY NOT ``any(t is k for k in ...)``, which is equally unforgeable:
+# measured on this tree (python 3.12.3), an exact-leaf hit costs 13.5 ns
+# as the `frozenset` lookup that was here, 180 ns as ``any()`` and 32.4 ns
+# as one ``id()`` and one lookup; an `ir`-dataclass hit costs 33.1 ns,
+# 487 ns and 31.9 ns the same three ways. ``_canonical`` is the hottest
+# line in this module — a 141-equation traced query builds 868 `ir`
+# objects, and every field of every one of them comes through here — and a
+# scan is linear in a set this module COMPUTES, so a dataclass added later
+# lengthens every call. The dict is O(1) in that set, merges what were
+# three lookups into one, and is the only spelling of the three that
+# leaves the traced and deserialized routes where they were.
+_STORED_AS_IS: dict[int, type] = {}
+
+
+def _rebuild_stored_index() -> None:
+    """Recompute :data:`_STORED_AS_IS` from the three sets it merges.
+
+    Called once at the foot of this module, where ``_CANONICAL_IR_TYPES``
+    is computed, and again on every registration. It is the ONLY cache in
+    this pass keyed on something other than a class object, so
+    `tests/test_ir_canonicalization.py` re-derives it from the three sets
+    rather than trusting that every mutator remembered to call this.
+    """
+    global _STORED_AS_IS
+    _STORED_AS_IS = {
+        id(t): t
+        for t in (_CANONICAL_EXACT_TYPES
+                  + tuple(_CANONICAL_IR_TYPES)
+                  + _LIBRARY_STORED_TYPES)
+    }
+
+
+def _tuple_payload(v):
+    """An exact `tuple` of what a `tuple` SUBCLASS actually carries."""
+    return tuple.__getitem__(v, slice(None))
+
+
+def _list_payload(v):
+    """An exact `tuple` of what a `list` SUBCLASS actually carries.
+
+    ``list.__getitem__`` builds an exact `list`, whose own ``__iter__``
+    the ``tuple()`` then walks — so neither read is the subclass's.
+    """
+    return tuple(list.__getitem__(v, slice(None)))
+
+
+def _read_or_refuse(read, obj: object) -> object:
+    """A base type's own accessor applied to ``obj``, or ``obj`` refused.
+
+    THE ONE THING A DERIVED CLASS CAN STILL DO TO ``issubclass``, and why
+    the accessor is what settles it — audit 0.2.0 B6 audit 7.
+    ``issubclass(type(obj), base)`` dispatches ``type.__subclasscheck__``
+    on the BASE, so an override on the derived class cannot answer it; a
+    metaclass CAN, however, override ``mro()`` and hand the interpreter a
+    C-level MRO the class did not earn. Measured on this tree: CPython's
+    own layout check refuses that for every base in
+    :data:`_CANONICAL_READS` and for both of
+    :data:`_SHAPE_PARAM_CONTAINERS` (*mro() returned base with unsuitable
+    layout*), and permits it in exactly one direction — ``bool`` from a
+    real ``int`` subclass, which shares ``int``'s layout and is therefore
+    not a lie about the payload at all.
+
+    That argument is about today's CPython, so it is not what this pass
+    rests on. What it rests on is that an accessor handed an object
+    without its type's payload RAISES, and this function turns that into
+    the module's own refusal. The alternative is not a wrong value — it is
+    ``descriptor '__getitem__' requires a 'tuple' object but received a
+    'Liar'`` escaping a public constructor as a raw `TypeError`, which
+    `TranscriptionError` SUBCLASSES, so ``except TranscriptionError`` does
+    not catch it. Measured on `dff95fc` by driving a liar of each of the
+    nine faces this door names, under each of the two bypasses, into a
+    plain param value and into both declaration params — 81 combinations —
+    **19 raw `TypeError`s at SIX distinct statements**: the ``complex``
+    and ``bytes`` reads, the shared ``read(obj)`` call, the ``tuple`` and
+    ``list`` container arms, and :func:`_validate_decl_eqn`'s
+    ``str.__str__`` on the ``dtype`` param. The message-totality sweep
+    cannot reach any of them, because every leaf it injects is a real
+    SUBCLASS and none of these objects is a subclass of anything. On
+    `main` the same 81 combinations produce none — that door does not
+    exist there — so this half is a regression of `dff95fc` and not a
+    defect of the release.
+    """
+    try:
+        return read(obj)
+    except Exception:  # noqa: BLE001 — an unreadable payload IS the finding
+        raise _NotCanonical(obj) from None
+
+
 def _canonical(obj: object) -> object:
-    """``obj`` as an EXACT instance of a type this module stores.
+    """``obj`` as an EXACT instance of a type this module stores, or as
+    one of the two kinds of object it CARRIES with the delegation stated
+    (one of this module's own frozen dataclasses; a registered library
+    type).
 
     Raises :class:`_NotCanonical` — never a `TranscriptionError` — because
     the path back to the field is composed as the signal unwinds and only
     the caller that owns a `where` can turn it into a refusal.
+
+    **EVERY DECISION HERE IS MADE ON ``type(obj)``, BY IDENTITY OR BY
+    ``issubclass`` AGAINST THE BASE, AND NOTHING ELSE WILL DO** — audit
+    0.2.0 B6 audit 7. The contract line above was true of what this
+    function DID with a value and false about which values it did it to:
+    the dispatch was ``type(obj) in <a frozenset>``, which runs the
+    METACLASS, and ``isinstance(obj, base)``, which reads the object's
+    own ``__class__``, so an object could be stored having reached none
+    of the mechanism described here. See the door's narrative above.
     """
     t = type(obj)
-    if t in _CANONICAL_EXACT:
+    if id(t) in _STORED_AS_IS:
+        # STORED AS IS, and the three reasons are one lookup because they
+        # are one answer: an exact leaf built-in is already what it will
+        # be stored as; one of this module's own frozen dataclasses is
+        # canonical by its OWN `__post_init__`, which ran before this
+        # object could be handed to anything, so there is nothing to
+        # recurse into and a document costs one pass over its own size
+        # rather than one per level of nesting; and a registered library
+        # type is carried by the declaration another `stelling` module
+        # made. The registered arm is settled HERE, before the subclass
+        # reads below, because registration says "carry this" and a
+        # registered type that happened to subclass a stored one would
+        # otherwise be rewritten into something its own module did not
+        # build — and `_register_stored_type` refuses a type this index
+        # already holds, so merging the three cannot move which arm
+        # decides anything.
         return obj
     if t is tuple:
         return _canonical_items(obj)
@@ -1141,26 +1465,16 @@ def _canonical(obj: object) -> object:
         # (`_jax_compat.Transcriber.param`) and `_decode` never builds
         # one, so the conversion costs no route anything.
         return _canonical_items(tuple(obj))
-    if t in _CANONICAL_IR_TYPES:
-        # canonical by its OWN `__post_init__`, which ran before this
-        # object could be handed to anything — so there is nothing to
-        # recurse into, and a document costs one pass over its own size
-        # rather than one per level of nesting
-        return obj
-    if t in _LIBRARY_STORED_TYPES:
-        # carried, by the declaration another `stelling` module made — and
-        # checked HERE, before the subclass reads below, because
-        # registration says "carry this" and a registered type that
-        # happened to subclass a stored one would otherwise be rewritten
-        # into something its own module did not build
-        return obj
     for base, read in _CANONICAL_READS:
-        if isinstance(obj, base):
-            return read(obj)
-    if isinstance(obj, tuple):
-        return _canonical_items(tuple.__getitem__(obj, slice(None)))
-    if isinstance(obj, list):
-        return _canonical_items(tuple(list.__getitem__(obj, slice(None))))
+        if issubclass(t, base):
+            return _read_or_refuse(read, obj)
+    # the recursion is OUTSIDE the guarded read on purpose: a
+    # `_NotCanonical` raised by an ELEMENT is a different finding about a
+    # different object, and must keep its own path back to the field
+    if issubclass(t, tuple):
+        return _canonical_items(_read_or_refuse(_tuple_payload, obj))
+    if issubclass(t, list):
+        return _canonical_items(_read_or_refuse(_list_payload, obj))
     raise _NotCanonical(obj)
 
 
@@ -1193,10 +1507,13 @@ def _canonical_shell(v: object) -> tuple:
         return v
     if t is list:
         return tuple(v)
-    if isinstance(v, tuple):
-        return tuple.__getitem__(v, slice(None))
-    if isinstance(v, list):
-        return tuple(list.__getitem__(v, slice(None)))
+    # `issubclass` against the BASE, never `isinstance` against the
+    # object, for the reason :func:`_canonical` gives — this function has
+    # the same two arms and had the same two holes (audit 0.2.0 B6 audit 7)
+    if issubclass(t, tuple):
+        return _read_or_refuse(_tuple_payload, v)
+    if issubclass(t, list):
+        return _read_or_refuse(_list_payload, v)
     raise _NotCanonical(v)
 
 
@@ -1398,7 +1715,18 @@ def _validate_value_against_aval(val, aval: Aval, where: str) -> None:
     # re-reads.
     aval_problem, aval_dims = _load_extents(aval.shape)
     _load_check(aval_problem is None, where, f"aval has {aval_problem}")
-    if isinstance(val, Array):
+    # `issubclass(type(v), C)` AND NOT `isinstance(v, C)` — audit 0.2.0 B6
+    # audit 7, and the reason is the same at every site in this pass that
+    # spells it this way. `isinstance` falls back to reading the OBJECT's
+    # `__class__`, which a two-line property answers, and each of the two
+    # branches below GATES a check: a value that claims to be neither an
+    # `Array` nor a scalar has its shape claim cross-checked against
+    # nothing at all. `issubclass` dispatches on the BASE, whose metaclass
+    # is `type`, so the derived class does not get a say. The door in
+    # front of this function refuses such an object already — and this
+    # function is annotated above as not resting on another guard having
+    # run, so it may not rest on that one either.
+    if issubclass(type(val), Array):
         val_dims = _validate_array_value(val, where)
         _load_check(
             val_dims == aval_dims,
@@ -1406,12 +1734,12 @@ def _validate_value_against_aval(val, aval: Aval, where: str) -> None:
             f"array value shape {val_dims} contradicts the "
             f"recorded aval shape {aval_dims}",
         )
-    elif isinstance(val, (bool, int, float, complex)):
+    elif issubclass(type(val), (bool, int, float, complex)):
         _load_check(
             aval_dims == (),
             where,
-            # a document-supplied scalar, and `isinstance` is a claim
-            # about the TYPE: an `int` subclass whose `__repr__` raises
+            # a document-supplied scalar, and a TYPE test is a claim about
+            # the type: an `int` subclass whose `__repr__` raises
             # satisfies it (audit 0.2.0 B6 audit 4, F2)
             f"scalar value {_safe_repr(val)} under a non-scalar aval "
             f"shape {aval_dims}",
@@ -1435,21 +1763,28 @@ def _validate_aval(aval: Aval, where: str) -> tuple[int, ...]:
 
 
 def _validate_atom(atom, where: str) -> None:
-    if isinstance(atom, Var):
+    # a TYPE test and not an `isinstance` — see
+    # :func:`_validate_value_against_aval`; an atom that claims to be
+    # neither has its aval validated by nothing
+    if issubclass(type(atom), Var):
         _validate_aval(atom.aval, where)
-    elif isinstance(atom, Literal):
+    elif issubclass(type(atom), Literal):
         _validate_aval(atom.aval, where)
         _validate_value_against_aval(atom.val, atom.aval, where)
 
 
 def _validate_param_value(v, where: str) -> None:
-    if isinstance(v, ClosedJaxpr):
+    # a TYPE test and not an `isinstance` — see
+    # :func:`_validate_value_against_aval`. Here the branch decides
+    # whether to RECURSE, so a param that claims to be none of these
+    # carries a whole nested jaxpr past the walk
+    if issubclass(type(v), ClosedJaxpr):
         _validate_closed(v, where)
-    elif isinstance(v, Jaxpr):
+    elif issubclass(type(v), Jaxpr):
         _validate_jaxpr(v, where)
-    elif isinstance(v, Array):
+    elif issubclass(type(v), Array):
         _validate_array_value(v, where)
-    elif isinstance(v, (tuple, list)):
+    elif issubclass(type(v), (tuple, list)):
         # LIST AS WELL AS TUPLE — audit 0.2.0 B6 re-audit, UNSOUND-1. This
         # walk recursed into tuples and not lists, so anything a list param
         # held (a nested ClosedJaxpr, an Array, a shape) reached the rest of
@@ -1460,7 +1795,7 @@ def _validate_param_value(v, where: str) -> None:
         # list `shape` param past `_validate_decl_eqn` above.
         for i, item in enumerate(v):
             _validate_param_value(item, f"{where}[{i}]")
-    elif isinstance(v, NamedTupleParam):
+    elif issubclass(type(v), NamedTupleParam):
         for name, item in v.fields:
             _validate_param_value(item, f"{where}.{_safe_str(name)}")
 
@@ -1679,10 +2014,13 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
     # self-descriptions disagreed
     if "shape" in params:
         shape = params["shape"]
-        # THE RULE, ASKED OF THE ONE OBJECT THAT HOLDS IT. The slicer's
-        # `_declared_shape` asks `ir._SHAPE_PARAM_CONTAINERS` too, so the
-        # two faces cannot part company by one of them being edited.
-        held_in_a_container = isinstance(shape, _SHAPE_PARAM_CONTAINERS)
+        # THE RULE, ASKED OF THE ONE OBJECT THAT HOLDS IT, THROUGH THE ONE
+        # FUNCTION THAT READS IT. The slicer's `_declared_shape` calls
+        # `ir._held_in_a_shape_param_container` too, so the two faces
+        # cannot part company by one of them being edited — nor by one of
+        # them being hardened, which is how they parted last time (audit
+        # 0.2.0 B6 audit 7; see that function).
+        held_in_a_container = _held_in_a_shape_param_container(shape)
         dims: tuple | None = None
         if held_in_a_container:
             try:
@@ -1762,25 +2100,83 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
         # what the caller installs: the extents this function READ, not the
         # object it read them from (audit 0.2.0 B6 audit 5, F1)
         normalised["shape"] = param_dims
-    raw_dtype = params.get("dtype")
-    if isinstance(raw_dtype, str) and eqn.outvars[0].aval.dtype is not None:
-        # THE COMPARISON IS BETWEEN EXACT STRINGS, and the exact string is
-        # what the caller installs — audit 0.2.0 B6 audit 6, the `dtype`
-        # sibling of the extents above. `isinstance` is a claim about the
-        # TYPE: a `str` subclass satisfies it, satisfies `str.__eq__`
-        # against the aval, and still hands `str()` a different answer to
-        # `propagate._ieee_any`, which picks the subnormal band from it.
-        # `str.__str__` reads the character data the instance carries and
-        # cannot be redirected (see the canonicalization door).
-        dtype = str.__str__(raw_dtype)
+    if "dtype" in params and eqn.outvars[0].aval.dtype is not None:
+        raw_dtype = params["dtype"]
+        # THE PARAM'S TYPE IS PART OF THE AGREEMENT, AND IT WAS THE GATE ON
+        # IT — audit 0.2.0 B6 audit 7. This read
+        # ``if isinstance(raw_dtype, str)``, so a `dtype` param that is any
+        # other exact built-in — the door stores `bytes`, `int`, `float`
+        # and `tuple` perfectly happily — did not merely fail the
+        # comparison, it SKIPPED it: measured, ``b'float64'``, ``0`` and
+        # ``('float64',)`` were all ACCEPTED under a ``float64`` aval while
+        # a ``str`` ``'int64'`` was correctly refused. So *"a declaration's
+        # two self-descriptions must agree"* held only when the param
+        # happened to be a `str`, which is a condition no document has to
+        # meet.
+        #
+        # THE FIX IS TO CONSTRAIN THE TYPE, not to widen the comparison. A
+        # `dtype` param is a NAME — the same fact `_canonical_param_keys`
+        # states about a param key — and `propagate._ieee_any` consumes it
+        # with ``str()``, which turns ``b'float64'`` into ``"b'float64'"``:
+        # a string naming no ieee format, so the declaration silently gets
+        # the no-float-format arm and no subnormal band. That the auditor
+        # could not drive the three spellings to different VERDICTS is a
+        # fact about how much of the haze is re-derived downstream from the
+        # aval, not a reason to leave a self-description unchecked.
+        #
+        # CANONICALIZED FIRST, because this runs BEFORE
+        # `_canonical_param_values` — the door's generic pass over the
+        # params cannot run until this function has installed the two it
+        # owns — so `raw_dtype` here is still exactly as the document
+        # handed it over. One read through the door, then a TYPE test on
+        # what the door produced; the previous spelling's `isinstance`
+        # took the object's word for it and then applied `str.__str__` to
+        # whatever answered, which is a raw `TypeError` out of a public
+        # constructor for anything that lied.
+        try:
+            dtype = _canonical(raw_dtype)
+        except _NotCanonical as exc:
+            exc.path.append(".params['dtype']")
+            _refuse_uncanonical(exc, where)
+        if type(dtype) is not str:
+            # COMPOSED ONLY ON THE FAILING PATH, for the reason
+            # `_canonical_param_keys` gives and one more that is this
+            # batch's own subject: this message quotes the RAW param, and
+            # `repr()` of a document-supplied object is a READ of it. The
+            # door's passing path is exactly ONE read per value, which is
+            # the whole of what makes a second read impossible to
+            # disagree with; a quote composed as an ARGUMENT would make it
+            # two on every declaration that has nothing wrong with it.
+            _load_check(
+                False,
+                where,
+                f"stelling_any dtype param {_safe_repr(raw_dtype)} is of "
+                f"type {_safe_type_name(raw_dtype)}, and a dtype is a "
+                f"NAME: it is the second of a declaration's two "
+                f"self-descriptions of one declared set, it is compared "
+                f"below against the outvar aval dtype "
+                f"{_safe_repr(eqn.outvars[0].aval.dtype)}, and "
+                f"`propagate._ieee_any` selects the subnormal band by "
+                f"reading `str()` of it — so a param of any other type is "
+                f"not a disagreement this function can report, it is a "
+                f"comparison that never happened",
+            )
         _load_check(
             dtype == eqn.outvars[0].aval.dtype,
             where,
-            # both quotes guarded: `dtype` passes `isinstance(dtype, str)`
-            # as a str SUBCLASS whose `__repr__` raises, and the aval's own
-            # dtype is document-supplied too — this arm sat 44 lines under
-            # a comment claiming every quote in this function was guarded
-            # (audit 0.2.0 B6 audit 4, F2)
+            # BOTH QUOTES GUARDED, AND NEITHER CAN RAISE ON THIS TREE —
+            # which is a fact about two other guards and not about this
+            # message, so it is not the reason they are guarded. `dtype`
+            # is an exact `str` by the type test three lines up, and the
+            # aval's dtype is an exact `str` or `None` by
+            # `Aval.__post_init__`'s own canonicalization. This function
+            # does not rest on either having run (see the paragraph on the
+            # defensive extent read above), and
+            # `tests/test_ir_message_totality.py` measures this very
+            # statement escaping raw with the door's leaf reads neutered.
+            # It sat 44 lines under a comment claiming every quote in this
+            # function was guarded, and was not (audit 0.2.0 B6 audit 4,
+            # F2)
             f"stelling_any dtype param {_safe_repr(dtype)} contradicts the "
             f"outvar aval dtype {_safe_repr(eqn.outvars[0].aval.dtype)}",
         )
@@ -1819,3 +2215,9 @@ _CANONICAL_IR_TYPES: frozenset[type] = frozenset(
     and obj.__module__ == __name__
     and obj.__dataclass_params__.frozen
 )
+
+# and the door's index, which merges this set with the two above it. It is
+# built HERE and nowhere else but `_register_stored_type`; see
+# :func:`_rebuild_stored_index` for why that is stated rather than left to
+# be noticed.
+_rebuild_stored_index()

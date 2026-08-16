@@ -133,6 +133,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import re
 import struct
 from pathlib import Path
 from typing import NamedTuple
@@ -483,10 +484,52 @@ def test_the_sweep_catches_an_injected_defect_of_exactly_this_class():
 # it was needed. They are computed here and the prose cites this test.
 _SHIPPED = {"swept": 95, "escapes": 0, "skipped": 20}
 # guards neutered, canonicalization SHIPPED: what the guards still catch
+# ON THE LEAF THIS SWEEP INJECTS, and that qualifier is the whole of the
+# figure's meaning — audit 0.2.0 B6 audit 7. "1" was read as *"the door
+# makes 25 of the 26 escapes unreachable rather than guarded"*, i.e. as a
+# statement that `_safe_repr` is load-bearing at one site. It is not one.
+# Every leaf this sweep injects is a SUBCLASS of a stored type, so the
+# door replaces it with an exact twin and it never reaches the quote. A
+# leaf that BYPASSES the door is stored UNCHANGED — which is precisely
+# what neutering the leaf reads to the identity simulates — so it reaches
+# every site the row below counts, and there the guards are the only
+# thing between it and a raw escape. What this row measures is therefore
+# the reach of one sweep against one defence, not the reach of the
+# guards; the row below is the one that measures the guards.
 _NEUTERED = {"escapes": 1, "lines": 1, "messages": 1}
 # guards neutered AND canonicalization removed: the tree the guards alone
-# stood on, and the measurement the record's 8/10 figures belong to
-_NEUTERED_NO_CANON = {"escapes": 26, "lines": 8, "messages": 8}
+# stood on, and the measurement the record's per-site figures belong to
+_NEUTERED_NO_CANON = {"escapes": 27, "lines": 9, "messages": 9}
+# the union of the two drivers, in MESSAGE EXPRESSIONS — the record's
+# headline quote-site figure, decomposed and asserted by
+# `test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures`
+_QUOTE_SITE_UNION = 11
+
+
+_FIGURE_ROW = re.compile(
+    r"^\s{4,}(?P<label>this tree[^0-9]*?)\s{2,}"
+    r"(?P<escapes>\d+)\s*/\s*(?P<lines>\d+)\s*/\s*(?P<messages>\d+)\s*$"
+)
+
+
+def _docstring_figures() -> dict[str, dict[str, int]]:
+    """The rows of the table in the docstring below, parsed out of it.
+
+    Only the rows about THIS tree: the historical row is a measurement of
+    a commit this suite does not carry and there is nothing here that
+    could hold it, which is why it is labelled as historical rather than
+    quietly listed beside two rows that are checked.
+    """
+    doc = test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES.__doc__ or ""
+    out: dict[str, dict[str, int]] = {}
+    for line in doc.split("\n"):
+        m = _FIGURE_ROW.match(line)
+        if m:
+            out[m.group("label").strip()] = {
+                k: int(m.group(k)) for k in ("escapes", "lines", "messages")
+            }
+    assert len(out) == 3, f"the figure table has {len(out)} rows about this tree"
+    return out
 
 
 def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():
@@ -500,14 +543,32 @@ def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():
     one the record quotes, and it is the one that is stable across the two
     measurements the record was conflating:
 
-        `30d4b04`, guards ABSENT   28 escapes / 10 lines / 8 messages
-        this tree, guards NEUTERED 27 escapes /  9 lines / 8 messages
-        this tree, as shipped       0 escapes
+        historical: 30d4b04, guards absent, no door  28 / 10 / 8
+        this tree, guards neutered, door removed     27 /  9 / 9
+        this tree, guards neutered, door shipped      1 /  1 / 1
+        this tree, as shipped                         0 /  0 / 0
 
-    Those are two different documents' worth of arithmetic and the record
+    Those are different documents' worth of arithmetic and the record
     quoted them as one. The `30d4b04` row is a historical measurement of a
-    tree this suite does not carry; it is stated in the prose and is not
-    asserted here, and the two figures that ARE about this tree are.
+    tree this suite does not carry, and is not asserted; every row whose
+    label begins "this tree" is READ BACK OUT of this docstring below and
+    compared to the measurement, which is the only thing that makes a
+    table in prose worth writing.
+
+    **AND THIS TABLE DID NOT MATCH THE DICTS ABOVE IT** — audit 0.2.0 B6
+    audit 7. It read *"this tree, guards NEUTERED 27 escapes / 9 lines /
+    8 messages"* over `_NEUTERED_NO_CANON = 26/8/8` and
+    `_NEUTERED = 1/1/1`: three numbers no configuration in this file
+    produces, in the docstring of the test that exists to stop exactly
+    that, two commits after it was written to stop it. Nothing connected
+    the row to a control, because the row did not say which control it
+    was — so the repair is not to retype the digits. It is the labels,
+    and the parser below that now holds them.
+
+    The door-removed row gained one escape, one line and one message at
+    audit 0.2.0 B6 audit 7: `_validate_decl_eqn` refuses a `dtype` param
+    whose TYPE is not `str` in its own sentence rather than skipping the
+    agreement check, and that sentence quotes the raw param.
     """
     escapes, swept, skipped = _sweep()
     assert (len(swept), len(escapes), skipped) == (
@@ -551,6 +612,22 @@ def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():
     # so the two counts have met. Equality is a fact about this tree, not
     # an invariant, which is why it is stated as the bound it really is.
     assert _NEUTERED_NO_CANON["lines"] >= _NEUTERED_NO_CANON["messages"]
+
+    # AND THE TABLE IN THE DOCSTRING ABOVE IS READ BACK OUT AND COMPARED —
+    # audit 0.2.0 B6 audit 7, where it stated three numbers no control in
+    # this file produces. A table beside a dict is an honour-system copy
+    # of it, which is the finding `tests/test_doc_examples.py` closes for
+    # its own inventory and the same repair applies here.
+    stated = _docstring_figures()
+    assert stated == {
+        "this tree, guards neutered, door removed": _NEUTERED_NO_CANON,
+        "this tree, guards neutered, door shipped": _NEUTERED,
+        "this tree, as shipped": {"escapes": 0, "lines": 0, "messages": 0},
+    }, (
+        f"the table in this test's docstring states {stated} and the dicts "
+        f"above measure something else; the row labels are the dicts' own "
+        f"names and both must move together"
+    )
 
 
 # The sites the RECORD names, one row each, tagged with the group the
@@ -686,7 +763,7 @@ def test_the_named_sites_one_line_each(label, build):
 
 
 def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
-    """TEN, AND IT IS COMPUTED — audit 0.2.0 B6 audit 5, F2.
+    """ELEVEN, AND IT IS COMPUTED — audit 0.2.0 B6 audit 5, F2.
 
     The record's headline figure is the number of DISTINCT MESSAGE
     EXPRESSIONS in `ir.py` at which a hostile leaf produces a RAW escape
@@ -695,31 +772,40 @@ def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
     written as "9 ... of which the audit had named three" three lines
     under a heading that said the audit had named FOUR:
 
-        the canonical sweep         8 message expressions
+        the canonical sweep         9 message expressions
         the driven rows above     + 2 the sweep cannot reach
-                                  = 10
+                                  = 11
+
+    The figure is `_QUOTE_SITE_UNION` and the two addends are computed
+    here; it was 10 until audit 0.2.0 B6 audit 7 gave
+    `_validate_decl_eqn`'s `dtype` param a refusal for its TYPE, which is
+    a ninth message expression the sweep reaches.
 
     Both halves are driven with `ir`'s canonicalization door removed, for
     the reason the module docstring gives: this is a count of the sites
     the GUARDS cover, and with the door in place a hostile leaf does not
-    reach most of them (audit 0.2.0 B6 audit 6). The union is still ten.
+    reach most of them (audit 0.2.0 B6 audit 6).
 
     A `TranscriptionError` is NOT an escape and is not counted: its
     traceback always ends at `_load_check`'s own `raise`, which is not a
     quote site, and two of the audit-4 rows now refuse cleanly because the
     message they compose quotes extents the guard normalised.
 
-    **AND THE RECORD'S OTHER TEN IS NOT THIS ONE.** `CHANGELOG.md` also
-    decomposes the finding as *four sites the audit named, six it had
-    not* — two on the passing path, three the canonical document masks,
-    and the `NamedTupleParam` field name the sweep found. That is a count
-    of QUOTES: individual interpolations of an object into a message. It
-    is a different unit, and it reaches ten by a different route (the
-    duplicate-key refusal is two quotes in ONE message expression, and
-    two of the audit-4 quotes no longer escape at all). The two agree at
-    ten and neither is derived from the other, so only the computed one is
-    asserted here — writing an identity across two units is the defect
-    this file exists for, one step subtler.
+    **AND THE RECORD'S OTHER TEN WAS NEVER THIS ONE, AND NO LONGER AGREES
+    WITH IT.** `CHANGELOG.md` also decomposes the finding as *four sites
+    the audit named, six it had not* — two on the passing path, three the
+    canonical document masks, and the `NamedTupleParam` field name the
+    sweep found. That is a count of QUOTES: individual interpolations of
+    an object into a message, a different unit reaching ten by a different
+    route (the duplicate-key refusal is two quotes in ONE message
+    expression, and two of the audit-4 quotes no longer escape at all).
+    The two agreeing at ten was a coincidence of one tree and it has now
+    ended: this union is eleven and the quote decomposition is a fixed
+    historical statement about what audit 4 named. Only the computed one
+    is asserted here, and the other is left labelled as the history it
+    is — writing an identity across two units is the defect this file
+    exists for, one step subtler, and keeping the identity alive by
+    retyping the second number would be the same defect again.
     """
     stmts = _ir_statement_starts()
 
@@ -758,12 +844,17 @@ def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
     assert (ir._safe_repr, ir._safe_type_name, ir._safe_str) == saved
     assert ir._CANONICAL_READS is saved_reads
 
-    assert len(sweep_sites | row_sites) == 10, (
-        f"the record says 10 distinct quote sites and the union measures "
-        f"{len(sweep_sites | row_sites)}: sweep={sorted(sweep_sites)} "
-        f"rows={sorted(row_sites)}. `CHANGELOG.md`, this module's "
-        f"docstring and `ir._safe_repr`'s docstring all state it."
+    assert len(sweep_sites | row_sites) == _QUOTE_SITE_UNION, (
+        f"the record says {_QUOTE_SITE_UNION} distinct quote sites and the "
+        f"union measures {len(sweep_sites | row_sites)}: "
+        f"sweep={sorted(sweep_sites)} rows={sorted(row_sites)}. "
+        f"`CHANGELOG.md`, this module's docstring and `ir._safe_repr`'s "
+        f"docstring all state it."
     )
+    # and the addends the docstring decomposes it into, so the arithmetic
+    # is the tree's and not an author's
+    assert len(sweep_sites) == _NEUTERED_NO_CANON["messages"]
+    assert len(row_sites - sweep_sites) == 2, sorted(row_sites - sweep_sites)
 
     # the grouping the record uses, counted from the rows themselves
     groups = {g: sum(1 for x, _l, _b in _NAMED_SITES if x == g)

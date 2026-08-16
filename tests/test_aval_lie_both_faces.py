@@ -1831,6 +1831,167 @@ def test_two_keys_with_equal_text_and_different_hashes_are_ONE_key():
         build(K1("update_jaxpr"), K2("update_jaxpr"))
 
 
+def _typed_liar(face, *, metaclass: bool, class_property: bool):
+    """An object CLAIMING to be ``face`` and carrying none of its payload.
+
+    Both of `dff95fc`'s bypasses of the canonicalization door, each in the
+    three lines it really takes:
+
+      * the metaclass answers ``__hash__``/``__eq__`` as ``face``, which
+        is the whole of what ``type(v) in _CANONICAL_EXACT`` asks;
+      * ``__class__`` is a property returning ``face``, which is the whole
+        of what ``isinstance(v, base)`` falls back to — and the `bool` arm
+        of the read table was the IDENTITY.
+
+    The protocols `ir`'s readers ask of a stored value are all
+    implemented, so the object is refused for what it IS rather than for
+    failing to behave.
+    """
+    ns = {"__float__": lambda self: 3.9, "__index__": lambda self: 3,
+          "__str__": lambda self: "float64", "__repr__": lambda self: "<liar>",
+          "__len__": lambda self: 1, "__iter__": lambda self: iter((1,)),
+          "__getitem__": lambda self, k: 1}
+    if class_property:
+        ns["__class__"] = property(lambda self: face)
+    if metaclass:
+        class M(type):
+            def __hash__(cls):
+                return hash(face)
+
+            def __eq__(cls, other):
+                return other is face
+
+        mcls = M
+    else:
+        mcls = type
+    return mcls(f"Liar_{face.__name__}", (), ns)()
+
+
+def test_a_value_that_LIES_about_its_TYPE_can_no_longer_mint_a_FALSE_VERIFIED():
+    """AUDIT 0.2.0 B6 AUDIT 7 — S14, and the third false VERIFIED in this
+    file that is the SAME lie one layer further out.
+
+    Its two siblings above lie about a shape param's CONTENTS and about a
+    param KEY. This one lies about a value's TYPE, and so walks past the
+    door that was built to close both of them — because the door's own
+    dispatch was ``type(obj) in <a frozenset>`` and ``isinstance(obj,
+    base)``, the two most overridable tests in Python. Three lines of
+    metaclass — for ANY face — or two lines of `__class__` property for
+    the one face whose arm was the identity read, and an arbitrary object
+    is stored in an `ir` field untouched. Each is driven separately in
+    step 4, which also records what each did on `dff95fc`, because a
+    repair that closed only their conjunction would leave each of them
+    open.
+
+        query   x = any(shape=(2,), lo=1, hi=2)
+                assert sum(x) <= C   and   assert C <= 79/20
+        truth   max over [1,2]x[1,2] of (x0 + x1) = 4 > 79/20
+                so the two obligations cannot both hold
+
+    The document is SELF-CONTRADICTING and needs no reference to the
+    ceiling's identity to refute: obligation (i) says the sum is under C
+    and (ii) says C is under 3.95, and stelling returned ``discharged``
+    for BOTH — on `dff95fc`, on `main` (`dee8bc2`) and on the RELEASED
+    `v0.1.0`, which is what makes this a live defect rather than a
+    regression this batch introduced. Every object in it is built through
+    a public `stelling.ir` dataclass; there is no `object.__setattr__`
+    anywhere.
+
+    The repair is that the door decides by IDENTITY (``id(type(obj))``
+    into a dict) and by ``issubclass(type(obj), base)``, which dispatches
+    on the BASE — neither of which the object gets a say in — and that no
+    arm's read is the identity. So the value is REFUSED at construction,
+    and the assertion below is on the constructor rather than on a
+    verdict, because there is no longer a document to propagate.
+    """
+    reads: list[int] = []
+
+    class M(type):
+        def __hash__(cls):
+            return hash(float)
+
+        def __eq__(cls, other):
+            return other is float
+
+    class Ceiling(metaclass=M):
+        """1e9 for the ONE reader that decides; 3.9 for everyone else."""
+
+        @property
+        def __class__(self):
+            return float
+
+        def __float__(self):
+            reads.append(1)
+            return 1e9 if len(reads) == 1 else 3.9
+
+        def __repr__(self):
+            return "3.9"
+
+    def av(shape=(), dtype="float64"):
+        return ir.Aval(kind="ShapedArray", shape=shape, dtype=dtype)
+
+    # 1. the exact oracle, in rationals and with no stelling code in it
+    assert Fraction(2) + Fraction(2) > Fraction(79, 20)
+
+    # 2. THE SOUNDNESS ASSERTION, DELIBERATELY FIRST. At `dff95fc`,
+    #    `dee8bc2` and `v0.1.0` this constructor RETURNS, and the query it
+    #    goes on to build reports 'discharged' for BOTH obligations.
+    with pytest.raises(ir.TranscriptionError) as exc:
+        ir.Literal(val=Ceiling(), aval=av())
+    assert "has no exact form to store" in str(exc.value), str(exc.value)
+    assert "Ceiling" in str(exc.value), str(exc.value)
+
+    # 3. THE MECHANISM. Not "the value is read correctly" — it is not read
+    #    at all. A type with no exact form to store has none to check
+    #    either, so the door never asks it anything.
+    assert reads == [], (
+        f"the liar's `__float__` was consulted {len(reads)} time(s); the "
+        f"door is supposed to refuse it on its TYPE"
+    )
+
+    # 4. EACH BYPASS ALONE, over every face the door names. Measured on
+    #    `dff95fc`: the metaclass alone stored the liar for every face,
+    #    and the `__class__` property alone stored it for `bool` — the one
+    #    face whose read was the identity — while for the other eight it
+    #    reached a real accessor and raw-crashed. So a repair that closed
+    #    only the pair would leave both halves open, and one that closed
+    #    only the entry test would leave the identity read open.
+    #    The refusal must also be CATCHABLE as what this module raises:
+    #    `TranscriptionError` SUBCLASSES `TypeError`, so a raw `TypeError`
+    #    out of a public constructor is not merely untidy — `except
+    #    ir.TranscriptionError` does not catch it, which is what
+    #    `descriptor '__getitem__' requires a 'tuple' object` did at six
+    #    distinct statements over these 81 combinations.
+    def _param_value(o):
+        return ir.JaxprEqn(primitive="add", invars=(), outvars=(),
+                           params=(("thing", o),))
+
+    def _shape_param(o):
+        return ir.JaxprEqn(
+            primitive="stelling_any", invars=(),
+            outvars=(ir.Var(1, av((2,))),),
+            params=(("dtype", "float64"), ("hi", 2.0), ("lo", 1.0),
+                    ("shape", o)))
+
+    def _dtype_param(o):
+        return ir.JaxprEqn(
+            primitive="stelling_any", invars=(),
+            outvars=(ir.Var(1, av((2,))),),
+            params=(("dtype", o), ("hi", 2.0), ("lo", 1.0), ("shape", (2,))))
+
+    driven = 0
+    for face in (tuple(ir._CANONICAL_EXACT_TYPES)
+                 + tuple(ir._SHAPE_PARAM_CONTAINERS)):
+        for how in (dict(metaclass=True, class_property=False),
+                    dict(metaclass=False, class_property=True),
+                    dict(metaclass=True, class_property=True)):
+            for build in (_param_value, _shape_param, _dtype_param):
+                with pytest.raises(ir.TranscriptionError):
+                    build(_typed_liar(face, **how))
+                driven += 1
+    assert driven == 81, driven
+
+
 @needs_solvers
 def test_the_lying_shape_param_document_is_REFUTED_with_a_witness():
     """What the blocking document produces INSTEAD of the false VERIFIED.
