@@ -284,8 +284,10 @@ SPDX-License-Identifier: Apache-2.0
   `_measured_seam_reach()` now instruments all three seams and the
   `(element, n_out)` pairs are compared against a `DRIVEN_AUX_ELEMENTS` read
   off the fixture table, exactly as the exponents are. **What closes the axis
-  rather than sampling it is a new gate,
-  `emission-is-invariant-to-the-array-shape`**: `pow` is elementwise, so an
+  rather than sampling it is a new gate**, added here as
+  `emission-is-invariant-to-the-array-shape` and renamed further down this
+  section to `emission-is-invariant-to-the-shape-and-the-base-term` when it
+  took on the base-term axis too: `pow` is elementwise, so an
   element's emitted lines cannot legitimately depend on which element it is
   or on how many there are, and the gate asserts that every element's seam
   output at every count in `[1, 2, 3, 4, 5, 6]`, on BOTH branches, is the
@@ -307,6 +309,96 @@ SPDX-License-Identifier: Apache-2.0
   floor is typed at the radius of a mutation someone already wrote. The shape
   invariance is the one argument in this row's gauge that is not
   radius-shaped.
+
+- **And then the radius moved onto the seam's OTHER ARGUMENT: the BASE TERM.**
+  `smt._pow_integer_body(term, exp_val)` takes two arguments and the gauge
+  measured the joint reach of one of them. Every fixture in the battery raised
+  a DECLARED PROGRAM INPUT to a power — measured across all 22 gates, the
+  base-term prefix reaching either exponent seam was `x` and nothing else — so
+  a wrongness conditioned on "the base is not an input" was correct on every
+  fixture the instrument had. A blinded audit conditioned two mutations that
+  way, at a DRIVEN exponent, element 0 and `n_out` 1, and both survived all 22
+  gates and minted verdict-level false VERIFIEDs on ordinary jax:
+  `(x+1)**3 - (x+1) <= 23` over `[1, 2]` (truth 24) and `(x+1)**0.5 <= 8.9`
+  over `[0, 80]` (truth 9), REFUTED becoming VERIFIED on both branches.
+  Enumerating the axis properly found three more: the base can also be a
+  rational `pow`'s own AUXILIARY (`(x**0.5)**3 <= 7.9` over `[1, 4]`, truth
+  `4^(3/2) = 8`, likewise REFUTED → VERIFIED) or an inlined NUMERAL. Five
+  survivors in total, none of them the disclosed exponent radius. **Real
+  programs almost always `pow` a computed quantity.**
+
+  The base's SPELLING is a coordinate of the joint reach now —
+  `(element, n_out, base_kind, exp)` and `(element, n_out, base_kind, p, q)` —
+  and the invariance gate sweeps the three spellings `smt.emit` writes for a
+  symbol (`input`, `intermediate`, `auxiliary`) against a reference shared
+  with the shape sweep, so what is closed is the PRODUCT and not a fourth
+  marginal. The gate is renamed
+  `emission-is-invariant-to-the-shape-and-the-base-term` to say so. The joint
+  reach went from 84 and 63 tuples to **252 and 189, still the full product**;
+  four battery mutations conditioned on the base kind at a driven exponent pin
+  it, each caught by that gate ALONE. `_element_index_of` no longer guesses
+  the element index off a trailing `_<digits>` — it parses the emitter's
+  naming grammar, which the old regex got wrong for the auxiliary branch's
+  single-element spelling (`aux_2` is element 0 of output 2, not element 2).
+  A base spelling the grammar does not know is reported as an INCONSISTENCY
+  rather than counted, so the NUMERAL case is disclosed in both not-reached
+  lists instead of being absorbed into a driven set. No source behaviour
+  changes: the seams were already correct, and the whole repair is in the
+  instrument.
+
+  **What is meant to end the pattern is not the fourth axis but that the axis
+  LIST is no longer written from memory.** A seam is a pure function of its
+  arguments, so its arguments are the complete set of things a wrongness in it
+  can be conditioned on.
+  `test_every_SEAM_ARGUMENT_is_a_gauged_COORDINATE_or_a_named_exemption` reads
+  all three seams' signatures with `inspect` and requires every parameter to
+  be classified COORDINATE (recorded in the joint reach and swept as a
+  product), DRIVEN (reaches the seam at more than one value and is pinned by a
+  battery mutation rather than swept, because its values are jax's variable
+  numbering and a product over them would claim nothing), DERIVED (a pure
+  function of parameters already classified) or DISCLOSED (named in `SCOPE`,
+  which the test checks rather than trusts). A future round that adds
+  an argument to a seam fails that test instead of shipping an axis nobody
+  enumerated. It says nothing about whether a coordinate is swept WIDELY
+  enough — the exponent radius is still a finite set of points and the NUMERAL
+  base spelling is outside the driven range of `base_kind`.
+
+  **Running the enumeration corrected its own first draft, which is the
+  strongest thing that can be said for it.** `_pow_aux_name`'s `out_id` — the
+  auxiliary's freshness across two `pow` OUTPUTS rather than across two
+  elements — was written down as an undriven residual, on the reasoning that
+  no fixture holds two rational `pow`s. Measured, that was already false: this
+  round's `auxiliary` probe arm is `(x**0.5)**e`, two rational `pow`s and so
+  two `out_id`s. Two distinct values reach the seam across the battery and a
+  mutation dropping `out_id` from the name — colliding two outputs'
+  auxiliaries while keeping them fresh per element — is CAUGHT. The
+  disclosure would have shipped false on the day it was written; `out_id` is
+  classified DRIVEN and pinned by
+  `emit-rational-aux-collides-across-two-pow-OUTPUTS`, and every seam argument
+  now sits in a positive class with the DISCLOSED class empty.
+
+- **Two documented claims about this gauge were out of date in its own file.**
+  `test_the_documented_coverage_figures_are_the_MEASURED_ones` read
+  `reach.shapes`, `.integer` and `.rational` and asserted "the FULL PRODUCT"
+  without the `assert not reach.inconsistent` guard its sibling has —
+  measured: perturbing `smt.emit` so the recorder's LIFO mis-pairs left this
+  test green, printing 63 of 63 off 54 inconsistent entries. The guard is
+  there now. And the bar-independence paragraph counted only the nine
+  pre-existing tests elsewhere in the suite: measured with `pow` injected into
+  `verdict.VERIFIED_BARRED_PRIMITIVES`, the BATTERY does read identically (27
+  mutations, 0 survivors either way, every catch set unchanged, baseline
+  passes all 22 gates) but **7 demonstration assertions in the gauge file
+  itself go red**, because their per-item verdict lines read `check().status`
+  — which is the point of them. 18 red in total: 9 pre-existing elsewhere, 2
+  detectors in `tests/test_bar_membership_policy.py`, 7 here. Separately, the
+  shape probe's docstring said `pow` is monotone on a strictly positive box
+  "so" the difference of two elements is symmetric about zero; the `so` does
+  not carry. Every element of a declared array carries the SAME interval, so
+  `r[n-1] - r[0]` is a SELF-subtraction and symmetric whether or not the row
+  is monotone (demonstrated with a non-monotone `x*x` on a straddling box,
+  equally undecidable). Strict positivity is load-bearing for DOMAIN
+  ADMISSIBILITY instead — a negative integer exponent needs a base excluding
+  0, a fractional exponent declines on a negative base.
 
 - **The document test accepted wrong documents and rejected a right one.**
   `test_the_documented_coverage_figures_are_the_MEASURED_ones` required only

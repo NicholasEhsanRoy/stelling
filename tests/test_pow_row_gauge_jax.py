@@ -14,16 +14,69 @@ row (S1, S2, S3) without any of them being expressible as a mutation, because
 the row had no named seam at all. This file is the instrument that would have
 expressed them.
 
-**IT IS DELIBERATELY BAR-INDEPENDENT.** Every discharge gate reads the
-per-obligation OUTCOME off `stelling.solvers.escalate` rather than the
-`check()` STATUS, for the reason `tests/test_scatter_gauge_jax.py`'s
-`_set_row_records` gives: if `pow` were ever added to
-`verdict.VERIFIED_BARRED_PRIMITIVES`, `check` would report UNKNOWN for a
-correctly discharged obligation and every such gate would silently start
-measuring the bar instead of the row. Measured: with `pow` in that set the
-whole battery below reads identically, and nine PRE-EXISTING tests elsewhere
-in the suite go red (eleven counting the two detectors in
-`tests/test_bar_membership_policy.py`, which owns that measurement). A bar is not a gauge, and this gauge does not depend on one.
+**THE BATTERY IS DELIBERATELY BAR-INDEPENDENT. THE DEMONSTRATION ASSERTIONS
+IN THIS FILE ARE NOT, AND THE SENTENCE THAT STOOD HERE SAID ONLY THE FIRST
+HALF.** Every discharge GATE reads the per-obligation OUTCOME off
+`stelling.solvers.escalate` rather than the `check()` STATUS, for the reason
+`tests/test_scatter_gauge_jax.py`'s `_set_row_records` gives: if `pow` were
+ever added to `verdict.VERIFIED_BARRED_PRIMITIVES`, `check` would report
+UNKNOWN for a correctly discharged obligation and every such gate would
+silently start measuring the bar instead of the row.
+
+**THE ONE GATE THAT DOES TOUCH `check` IS SAFE BY THE DIRECTION OF ITS
+COMPARISON, WHICH IS WORTH SAYING RATHER THAN LEAVING TO "EVERY DISCHARGE
+GATE".** `gate_non_dyadic_exponent_declines` asserts
+`check(...).status != "VERIFIED"` — audit S1's claim that a nearby rational is
+a DIFFERENT function, so `x ** 0.1` must never verify. The bar can only turn a
+VERIFIED into an UNKNOWN, so it makes that condition MORE true and cannot flip
+the gate from pass to fail; a gate REQUIRING `== "VERIFIED"` would be the
+unsafe direction and there is none. That split is scanned out of this module's
+own source by
+`test_the_bar_DEPENDENT_demonstrations_are_the_ones_this_DOCSTRING_names`,
+which is how the exception was found in the first place.
+
+Measured with `pow` injected into that set, on this tree (jax 0.11.0, python
+3.12.3, `/home/nick/venvs/stelling-jax`, z3 + cvc5 wheels, x64, 2026-08-16):
+
+* **the battery reads identically** — 27 mutations, 0 survivors either way,
+  every catch SET unchanged, and the baseline still passes all 22 gates. That
+  is the claim this file's design buys, and it is the one that holds;
+* **18 tests go red in the suite**, of which **9 are PRE-EXISTING tests
+  elsewhere** (8 in `tests/test_0_2_0_regression.py`, 1 in
+  `tests/test_pow_audit_findings.py`) and **2 are the detectors in
+  `tests/test_bar_membership_policy.py`**, which owns that measurement and
+  prices the decision;
+* **and 7 are in THIS FILE** — one per item in `_SHAPE_CONDITIONED_CATCHES`
+  and `_BASE_KIND_CATCHES`, which are parametrisations of the only two tests
+  here that assert a `check()` STATUS of VERIFIED:
+  `test_the_shape_conditioned_mutations_are_CAUGHT_by_the_INVARIANCE_gate` and
+  `test_the_base_kind_conditioned_mutations_are_CAUGHT_by_the_INVARIANCE_gate`.
+  They read it because what they demonstrate IS the end-to-end false VERIFIED,
+  so they are bar-DEPENDENT by construction: a missed violation that comes
+  back UNKNOWN instead of VERIFIED is still a missed violation, but it is not
+  the sentence those tests assert.
+
+  **THE COUNT IS A DATED MEASUREMENT; THE NAMES ARE THE CLAIM.** 7 is what one
+  run produced, and it went stale twice by being a bare digit — the round
+  before this added two conditional items and this one added four, neither
+  touching the paragraph. What is pinned instead is the STRUCTURAL half, by
+  `test_the_bar_DEPENDENT_demonstrations_are_the_ones_this_DOCSTRING_names`:
+  it scans this module's own source and fails if any function other than those
+  two REQUIRES a `check()` status of `"VERIFIED"` — and separately pins the one
+  gate that REFUSES one, since the direction is what decides whether the bar
+  breaks it. A future round that adds a third such test must name it here.
+  Pinning the DIGIT was considered
+  and rejected: `7 == 3 + 4` holds today, but that two of the three
+  shape-conditioned items assert VERIFIED while the third asserts
+  `EmissionInfidelityError` and goes red for its own reason is a coincidence
+  of this tree, not an identity, and an instrument asserting it would be
+  asserting something nobody derived.
+
+The previous version of this paragraph counted only the nine and read as
+though nothing in this file moved — the "digit in prose that nothing
+recomputes" defect the rest of this file exists to refuse, committed about
+itself. A bar is not a gauge; the BATTERY does not depend on one, and the
+demonstrations do.
 
 SCOPE — what these gates REACH (CONTRIBUTING.md, "an instrument must declare
 its SCOPE"):
@@ -73,7 +126,8 @@ its SCOPE"):
   the element count, so the `(element, n_out)` pairs reaching it are measured
   across every gate the same way the exponents are, declared at
   `DRIVEN_AUX_ELEMENTS`, and asserted by the same test. What CLOSES that axis
-  rather than sampling it is `gate_emission_is_invariant_to_the_array_shape`:
+  rather than sampling it is
+  `gate_emission_is_invariant_to_the_shape_and_the_base_term`:
   emission is text, so a shape-conditioned emission wrongness is exactly a
   per-element difference in the emitted text, and that gate asserts every
   element's seam output at every count in `_INVARIANCE_ELEMENT_COUNTS` is the
@@ -94,6 +148,40 @@ its SCOPE"):
   the FULL PRODUCT: `DRIVEN_INTEGER_JOINT` and `DRIVEN_RATIONAL_JOINT`. The
   marginals this file prints are projections of that product, not a second
   measurement.
+* **THE BASE TERM, WHICH IS THE EXPONENT SEAMS' OTHER ARGUMENT.** Both are
+  handed the base, and for three rounds every fixture handed them a DECLARED
+  PROGRAM INPUT — measured across all 22 gates, the base-term prefix was `x`
+  and nothing else — while the joint reach above was being widened on every
+  other axis. Five wrongnesses conditioned on the base's KIND at a DRIVEN
+  exponent survived all 22 gates, and FOUR of them mint verdict-level false
+  VERIFIEDs on ordinary jax (`(x+1)**3 <= 23` over [1, 2];
+  `(x**0.5)**3 <= 7.9` over [1, 4]; and the two rational twins). The fifth —
+  a NUMERAL base — survives too, but its verdict effect was never measured.
+  The base's spelling is a COORDINATE of
+  the joint reach now, the invariance gate sweeps the three spellings
+  `smt.emit` produces for a symbol — `input`, `intermediate`, `auxiliary` —
+  against a reference shared with the shape sweep, and four battery mutations
+  pin it. A base that is NOT a symbol (a numeral, from a constant fold
+  `smt._renderable` declined) is reachable, is measured surviving the whole
+  battery, and is disclosed below rather than driven.
+* **AND THE AXIS LIST ITSELF, DERIVED FROM THE SEAMS' SIGNATURES.** Three
+  rounds, three axes nobody had enumerated. A seam is a pure function of its
+  arguments, so its arguments ARE the complete set of things a wrongness in it
+  can be conditioned on;
+  `test_every_SEAM_ARGUMENT_is_a_gauged_COORDINATE_or_a_named_exemption` reads
+  all three signatures with `inspect` and requires every parameter to be a
+  gauged COORDINATE, a DRIVEN one (pinned by a battery mutation rather than
+  swept as a product), a DERIVED one, or a DISCLOSED gap named in `SCOPE`. The
+  next axis is therefore a signature change, and a signature change fails a
+  test. Running it corrected its own first draft: `_pow_aux_name`'s `out_id`
+  was written down as an undriven gap and MEASURED as driven — the new
+  `auxiliary` probe arm is two rational `pow`s, so it had closed that gap in
+  the same round — and it is now pinned by
+  `emit-rational-aux-collides-across-two-pow-OUTPUTS`. Every seam argument is
+  in a positive class today; nothing is DISCLOSED. It still says nothing about
+  whether a coordinate is swept WIDELY enough — the exponent radius is a
+  finite set of points and the NUMERAL base spelling is outside the driven
+  range of `base_kind`.
 
 **WHAT THIS MECHANISM CAN AND CANNOT DO, said here because "MEASURED" reads as
 "sufficient".** The equality assertions in
@@ -108,26 +196,51 @@ index `>= 2`. Mutations conditioned OUTSIDE the floors still survive, are still
 disclosed below, and are still not gauged. The one part of this file that is
 not radius-shaped ON THE SHAPE AXIS is the INVARIANCE gate, which holds for
 every conditioning function on `(element, n_out)` up to a printed element count
-rather than at a sampled point — and holds it at every DRIVEN exponent, because
-the gate sweeps that set. **That is a claim about the product and it was
-previously overstated as a claim about the exponent axis too.** It is not: the
-emitted text is legitimately different at a different exponent, so no
-invariance is available there, and the exponent axis remains a finite set of
-driven points. A gate that closes one axis at one point of another has moved
-the radius rather than removed it, which is exactly what the predecessor of
-this gate did — see the block at `SHAPE_PROBE_BOX`.
+rather than at a sampled point — and holds it at every DRIVEN exponent and in
+every DRIVEN base spelling, because the gate sweeps both sets. **That is a
+claim about the product and it was previously overstated as a claim about the
+exponent axis too.** It is not: the emitted text is legitimately different at a
+different exponent, so no invariance is available there, and the exponent axis
+remains a finite set of driven points. A gate that closes one axis at one point
+of another has moved the radius rather than removed it, which is exactly what
+the predecessor of this gate did — see the block at `SHAPE_PROBE_BOX`.
 
-**AND THE THREE AXES ARE MEASURED JOINTLY, because three marginals are
-consistent with almost any joint.** `_measured_seam_reach` records
-`(element, n_out, exp)` and `(element, n_out, p, q)` as TUPLES and the arity
-test asserts each is the FULL PRODUCT of the driven shapes with the driven
-exponents. The predecessor asserted the three axes separately, every equality
-passed, and every element index `>= 2` was nevertheless driven at `(1, 4)`
-alone — so `element >= 2 AND q == 2`, with both coordinates inside the printed
-sets, was ungauged and undisclosed.
+**AND THE BASE-SPELLING HALF IS A SAMPLE, NOT AN INVARIANCE, SAID PLAINLY
+BECAUSE THE TWO ARE SWEPT BY ONE GATE.** The shape sweep quantifies over a
+contiguous RANGE and the argument is that no per-element difference exists
+inside it. The base sweep drives THREE spellings, which is every spelling
+`smt.emit` writes for a symbol but is still three points and not a
+quantification over what a base could be. What keeps that from being the old
+defect wearing a new name is that the spelling is RECORDED: a fourth one
+reaching a seam lands in the measured reach, or in its `inconsistent` list if
+its element index cannot be recovered, and fails the arity test — it cannot sit
+in a gap the way `element >= 2 AND q == 2` did.
+
+**AND THE AXES ARE MEASURED JOINTLY, because marginals are consistent with
+almost any joint.** `_measured_seam_reach` records
+`(element, n_out, base_kind, exp)` and `(element, n_out, base_kind, p, q)` as
+TUPLES and the arity test asserts each is the FULL PRODUCT of the driven
+shapes and spellings with the driven exponents. The predecessor asserted the
+three axes separately, every equality passed, and every element index `>= 2`
+was nevertheless driven at `(1, 4)` alone — so `element >= 2 AND q == 2`, with
+both coordinates inside the printed sets, was ungauged and undisclosed. The
+base spelling is in the tuples for exactly that reason and not as a fourth
+marginal: `base is computed AND q == 2` is the same sentence one axis over.
 
 SCOPE — what these gates DO NOT reach, and are therefore no evidence about:
 
+* **A base term that is NOT a SYMBOL — the NUMERAL spelling.** `smt.emit`
+  folds a `pow` whose base and exponent are both constant, but when
+  `smt._renderable` declines the fold (the exact value's denominator crosses
+  CPython's `int`->`str` cap) the literal's TEXT is handed to the seam in
+  place of a symbol. Measured: `jnp.power(1e-100, 64.0)` reaches
+  `_pow_integer_body` with a compound `(/ ... ...)` term, and a mutation
+  conditioned on "the base is not an identifier" survives all 22 gates. Not
+  driven, because the canonicalisation the invariance argument rests on
+  presupposes a symbol and because the element index is not recoverable from
+  such a term — so `_measured_seam_reach` reports one as an INCONSISTENCY
+  rather than counting it, which is what stops the gap being absorbed into a
+  driven set.
 * **`integer_pow`'s row.** It is a different primitive with its own
   equation, and this battery's seams are `pow`'s own
   (`smt._pow_integer_body`, `smt._pow_rational_lines`,
@@ -176,9 +289,11 @@ SCOPE — what these gates DO NOT reach, and are therefore no evidence about:
   the top of `_INVARIANCE_ELEMENT_COUNTS`**; and, for every stage that is NOT
   the emission — the transfer, the slice, the solver dispatch, the replay and
   the verdict — **any element count past the top of
-  `_VERDICT_ELEMENT_COUNTS`**. The emission's shape dependence is closed by
-  invariance over the first range; the other stages are driven at two element
-  counts and that is a sample, stated as one.
+  `_VERDICT_ELEMENT_COUNTS`, and any base spelling but `input`**. The
+  emission's shape and base-spelling dependence is closed over the first range
+  and the three symbol spellings; the other stages are driven at two element
+  counts with a declared input as the base, and that is a sample, stated as
+  one.
 
 Positive control: a property genuinely FALSE inside the declared box must come
 back REFUTED with a witness that replays exactly and that violates the
@@ -191,7 +306,9 @@ the same page.
 
 from __future__ import annotations
 
+import ast
 import contextlib
+import inspect
 import pathlib
 import re
 from dataclasses import dataclass
@@ -289,10 +406,10 @@ DRIVEN_RATIONAL_PQ = tuple(
 #   They are the scalar fixtures (1) and the vector fixture (2).
 #
 #   `_INVARIANCE_ELEMENT_COUNTS` are the counts driven through the EMISSION
-#   alone, by `gate_emission_is_invariant_to_the_array_shape`. That gate does
-#   not sample the shape axis, it CLOSES it: emission is text, so a
-#   shape-conditioned emission wrongness IS a per-element difference in the
-#   text, and the gate asserts there is none — every element's seam output at
+#   alone, by `gate_emission_is_invariant_to_the_shape_and_the_base_term`.
+#   That gate does not sample the shape axis, it CLOSES it: emission is text,
+#   so a shape-conditioned emission wrongness IS a per-element difference in
+#   the text, and the gate asserts there is none — every element's seam output at
 #   every count in the range is the SCALAR output with the symbol names
 #   substituted. One more sampled point would have been a floor typed at the
 #   radius of the mutation the last audit happened to write; an invariance
@@ -324,6 +441,26 @@ DRIVEN_AUX_ELEMENTS = tuple(
     sorted((i, n) for n in DRIVEN_ELEMENT_COUNTS for i in range(n))
 )
 
+# --- THE DRIVEN BASE KIND, THE SEAM'S OTHER ARGUMENT -------------------------
+#
+# THE EXPONENT AND THE SHAPE WERE MEASURED AND THE BASE WAS NOT, WHICH IS THE
+# SAME DEFECT A THIRD TIME. Both exponent seams are handed the base term, and
+# every fixture in the battery handed them a DECLARED PROGRAM INPUT — measured
+# across all 22 gates, the base-term prefix was `x` and nothing else. So five
+# wrongnesses conditioned on the base's KIND at a DRIVEN exponent survived
+# every gate, and FOUR of them are demonstrated minting a verdict-level false
+# VERIFIED on ordinary jax. The block above `_base_spelling` has the numbers.
+#
+# These are the kinds DRIVEN, and they are the key set of `_BASE_KIND_BASES`
+# below — asserted equal to it by
+# `test_the_shape_probe_reaches_the_EMISSION_at_every_DRIVEN_exponent_and_KIND`
+# so this tuple cannot drift from the probes that realise it. `other` (a
+# numeral, from a constant fold `smt._renderable` declined) is REACHABLE and
+# is NOT here: it is disclosed in the SCOPE and in both "does NOT reach"
+# lists, and the reach recorder reports it as an inconsistency rather than
+# counting it, so it can never be quietly absorbed into a driven set.
+DRIVEN_BASE_KINDS = ("auxiliary", "input", "intermediate")
+
 # --- THE JOINT REACH: THE PLANE, NOT TWO MARGINALS ---------------------------
 #
 # THREE MEASURED AXES AND A CLAIM ABOUT THEIR PRODUCT IS THE SAME DEFECT AGAIN,
@@ -339,20 +476,32 @@ DRIVEN_AUX_ELEMENTS = tuple(
 # recording `(element, n_out, p, q)` jointly shows the hole on its own.
 #
 # So the reach is recorded as tuples and compared against the FULL PRODUCT
-# below. That the product is achievable at all is what the exponent sweep in
-# `gate_emission_is_invariant_to_the_array_shape` buys: one probe shape that
-# reaches the emission at every driven exponent means every driven exponent can
-# be driven at every element count, and the claim is then an equality rather
-# than a disclosure. Where it were not achievable the honest form would be to
-# print the joint reach and claim exactly it — but it IS achievable here, so
-# the assertion is equality with the product and the SCOPE says the product.
+# below. That the product is achievable at all is what the sweep in
+# `gate_emission_is_invariant_to_the_shape_and_the_base_term` buys: one probe
+# SHAPE that reaches the emission at every driven exponent and in every driven
+# base spelling means every driven exponent can be driven at every element
+# count in every spelling, and the claim is then an equality rather than a
+# disclosure. Where it were not achievable the honest form would be to print
+# the joint reach and claim exactly it — but it IS achievable here (measured:
+# 0 unreached out of the whole product, under BOTH transfers), so the
+# assertion is equality with the product and the SCOPE says the product.
+#
+# THE BASE KIND IS A COORDINATE OF THAT PRODUCT AND NOT A SECOND MARGINAL, for
+# the reason this section already had to learn once: `element >= 2 AND q == 2`
+# named two coordinates that were each inside a printed driven set and whose
+# COMBINATION was not driven. `base is computed AND q == 2` is the same
+# sentence one axis over, and recording the kind alongside the shape and the
+# exponent is what makes it an equality rather than three claims a reader has
+# to multiply themselves.
 
 
 def _driven_product(exponent_keys):
-    """The full ``(element, n_out) x exponent`` product, as flat tuples."""
+    """The full ``(element, n_out) x base kind x exponent`` product, as flat
+    tuples."""
     return frozenset(
-        (element, n_out) + key
+        (element, n_out, kind) + key
         for element, n_out in DRIVEN_AUX_ELEMENTS
+        for kind in DRIVEN_BASE_KINDS
         for key in exponent_keys
     )
 
@@ -366,6 +515,7 @@ _DRIVEN_INT_TEXT = ", ".join(str(e) for e in DRIVEN_INTEGER_EXPONENTS)
 _DRIVEN_PQ_TEXT = ", ".join(f"{p}/{q}" for p, q in DRIVEN_RATIONAL_PQ)
 _DRIVEN_N_TEXT = ", ".join(str(n) for n in DRIVEN_ELEMENT_COUNTS)
 _VERDICT_N_TEXT = ", ".join(str(n) for n in sorted(_VERDICT_ELEMENT_COUNTS))
+_DRIVEN_KIND_TEXT = ", ".join(DRIVEN_BASE_KINDS)
 
 SCOPE = (
     "BOTH exponent branches of the `pow` row under real semantics, at a "
@@ -385,19 +535,29 @@ SCOPE = (
     "per-element output is asserted INVARIANT to the shape — so an emission "
     "wrongness conditioned on the element index or the element count is "
     "caught for every conditioning function inside that range and not only at "
-    "a sampled point. THE TWO AXES ARE MEASURED JOINTLY AND CLAIMED AS THEIR "
-    f"PRODUCT: all {len(DRIVEN_AUX_ELEMENTS)} (element, n_out) shapes are "
-    f"driven at every one of the {len(DRIVEN_INTEGER_EXPONENTS)} integer "
-    f"exponents ({len(DRIVEN_INTEGER_JOINT)} tuples) and at every one of the "
+    "a sampled point. AND SO IS THE BASE TERM, which is the exponent seams' "
+    "OTHER argument: the emission is driven with the base written in each of "
+    f"the [{_DRIVEN_KIND_TEXT}] spellings `smt.emit` produces for a SYMBOL, "
+    "and the row's per-element output is asserted invariant to that too. THE "
+    "THREE AXES ARE MEASURED JOINTLY AND CLAIMED AS THEIR PRODUCT: all "
+    f"{len(DRIVEN_AUX_ELEMENTS)} (element, n_out) shapes in all "
+    f"{len(DRIVEN_BASE_KINDS)} base spellings are driven at every one of the "
+    f"{len(DRIVEN_INTEGER_EXPONENTS)} integer exponents "
+    f"({len(DRIVEN_INTEGER_JOINT)} tuples) and at every one of the "
     f"{len(DRIVEN_RATIONAL_PQ)} (p, q) pairs ({len(DRIVEN_RATIONAL_JOINT)} "
     "tuples), so an emission wrongness conditioned on ANY COMBINATION of an "
-    "element index, an element count and a DRIVEN exponent is caught — and "
-    "the invariance argument is about the shape axis only, never about the "
-    "exponent axis, which stays a finite set of points. Does NOT drive: any "
+    "element index, an element count, a driven base spelling and a DRIVEN "
+    "exponent is caught — and the invariance argument is about the shape and "
+    "the base spelling only, never about the exponent axis, which stays a "
+    "finite set of points. Does NOT drive: any "
     "exponent outside the two sets "
     f"above, any element count past {max(DRIVEN_ELEMENT_COUNTS)} or any rank "
     f"past 1, any NON-emission stage past {max(_VERDICT_ELEMENT_COUNTS)} "
-    "elements (and the interval-containment probe is SCALAR-shaped, so the "
+    "elements or in any base spelling but `input` (the base-kind sweep is "
+    "EMISSION-only), a base that is not a symbol at all — a NUMERAL, which "
+    "`smt.emit` hands the seam when `_renderable` declines a constant fold, "
+    "and which is reachable and measured surviving the whole battery — "
+    "(and the interval-containment probe is SCALAR-shaped, so the "
     "transfer face is driven at one element by that gate and at two only "
     "through the vector fixture's verdict), `integer_pow`'s row, the shared "
     "`_repeated_product` renderer, ieee semantics past a decline probe, "
@@ -643,7 +803,7 @@ def _rat_vector_harness():
     return h
 
 
-# --- the shape probe, ONE shape for EVERY driven exponent --------------------
+# --- the probe: ONE shape for every driven exponent AND BASE SPELLING --------
 #
 # THE RADIUS MOVED FROM THE ELEMENT AXIS TO THE EXPONENT AXIS, WHERE IT WAS
 # INVISIBLE. The predecessor of this probe was two functions, one per branch,
@@ -668,44 +828,123 @@ def _rat_vector_harness():
 #
 # The repair is a probe SHAPE that does not need a bound per exponent, so the
 # gate can quantify over the whole driven set instead of one point in it.
-SHAPE_PROBE_BOX = (1.0, 81.0)  # STRICTLY POSITIVE: a negative exponent needs it
+#
+# AND THEN THE RADIUS MOVED ONTO THE SEAM'S OTHER ARGUMENT. Every probe here,
+# and every fixture in the battery, raised a DECLARED PROGRAM INPUT to a
+# power, so the whole product above was driven at ONE point of the base-term
+# axis and five wrongnesses conditioned on the base's kind survived all 22
+# gates. The same predicate serves every spelling for free — the probe only
+# has to be EMITTED, and what the base is spelled as does not change that — so
+# the fix is a probe per kind rather than a bound per kind, and the gate
+# quantifies over the base spelling on the same footing as the shape.
+SHAPE_PROBE_BOX = (1.0, 81.0)  # STRICTLY POSITIVE: see `_shape_probe_harness`
 SHAPE_PROBE_BOUND = 0.0
+# the inner exponent that makes a `pow` output be a `pow` INPUT, so the outer
+# call's base is spelled `aux_...`. Rational, because only the rational branch
+# names an auxiliary — the integer branch defines a `t...` like any other row.
+# `1/2` keeps the intermediate box strictly positive at [1, 9].
+AUX_BASE_INNER_EXP = 0.5
 
 
-def _shape_probe_harness(exponent, n):
-    """ONE driven exponent at ONE element count, for the shape INVARIANCE gate.
+def _shape_probe_harness(exponent, n, base_kind="input"):
+    """ONE driven exponent at ONE element count in ONE base SPELLING, for the
+    emission INVARIANCE gate.
 
     Not a control: it is never asked for a verdict, only for emitted text, so
     what it has to be is EMITTED — the obligation must survive interval
     propagation or there is no slice and nothing to compare.
 
+    `base_kind` selects how the base reaching the seam is SPELLED, which is
+    the seam's other argument and was driven at `input` alone for three
+    rounds. The predicate is the same in all three, because what the base is
+    spelled as cannot affect whether the obligation survives the interval
+    domain — only the box the base ranges over can, and each arm below keeps
+    that box strictly positive for the reason two paragraphs down.
+
     THE PREDICATE IS A DIFFERENCE OF TWO ELEMENTS AGAINST ZERO, WHICH IS WHAT
-    LETS ONE PROBE SERVE EVERY EXPONENT. `pow` is monotone on a strictly
-    positive box, so whatever interval the transfer gives the row's output —
-    `[lo^e, hi^e]` (or its reverse, at a negative exponent) under the REAL
-    transfer, `[lo, hi]` under `transfer-is-the-base` — the difference
-    `r[n-1] - r[0]` lands in an interval SYMMETRIC about zero, and zero is the
-    bound. Zero is therefore strictly interior under both transfers, at every
-    exponent, at every element count, so the probe reaches the emission either
-    way and the invariance gate cannot end up reporting a TRANSFER wrongness as
-    a shape one. Nothing here is tuned per exponent, which is the whole point:
-    a hand-tuned bound is what limited the predecessor to one exponent per
-    branch, and one exponent per branch is where `element >= 2 AND q == 2`
+    LETS ONE PROBE SERVE EVERY EXPONENT — AND THE REASON IS SELF-SUBTRACTION,
+    NOT MONOTONICITY. This paragraph used to say `pow` is monotone on a
+    strictly positive box, "so" the difference lands in an interval symmetric
+    about zero. The `so` does not carry, and getting the reason right is what
+    says which of the probe's properties may be changed. Every element of an
+    `any_array` is declared over the SAME box, and the transfer is
+    elementwise, so every element of `r` carries the IDENTICAL interval
+    `[a, b]` — whatever the transfer makes it (`[lo^e, hi^e]` or its reverse
+    under the REAL transfer, `[lo, hi]` under `transfer-is-the-base`).
+    `r[n-1] - r[0]` is then `[a, b] - [a, b] = [a-b, b-a]`, which is symmetric
+    about zero because it is a SELF-subtraction, whether or not the row is
+    monotone and whether or not the box is positive. Measured, with a
+    NON-monotone `x*x` on a box straddling zero: the same symmetry, the same
+    `unknown`. So zero is interior under both transfers at every exponent and
+    every element count, the probe reaches the emission either way, and the
+    invariance gate cannot end up reporting a TRANSFER wrongness as a shape
+    one.
+
+    STRICT POSITIVITY IS STILL LOAD-BEARING, FOR A DIFFERENT REASON: DOMAIN
+    ADMISSIBILITY. A negative integer exponent is a reciprocal and needs a
+    base box excluding 0; a fractional exponent on a box reaching below zero
+    is DECLINED at admission (jax returns NaN there and the Real encoding does
+    not model it — `gate_negative_base_declines` is that refusal's own gate).
+    A box straddling zero would therefore lose the negative and the fractional
+    exponents from the sweep, which is most of it — but it would lose them by
+    DECLINING, not by deciding.
+
+    Nothing here is tuned per exponent OR per base kind, which is the whole
+    point: a hand-tuned bound is what limited the predecessor to one exponent
+    per branch, and one exponent per branch is where `element >= 2 AND q == 2`
     lived. That undecidability is asserted, not argued, by
-    `test_the_shape_probe_reaches_the_EMISSION_at_every_DRIVEN_exponent`.
+    `test_the_shape_probe_reaches_the_EMISSION_at_every_DRIVEN_exponent_and_KIND`,
+    which drives the whole product under both transfers.
 
     The difference is also the correlation the interval domain cannot see, so
     the `+ (x[0] - x[0])` the predecessor carried is gone: the difference IS
     the correlation. At `n == 1` it is `r[0] - r[0]`, which interval arithmetic
     still cannot collapse, so the scalar arm is driven on the same footing.
+
+    THE THREE ARMS, and why each produces the spelling it claims:
+
+    * `input` — the base IS the declared array, so `smt.emit` hands the seam
+      the `SliceInput` name, `x{k}_{i}`;
+    * `intermediate` — an `add` in between, so the base is a `define-fun` the
+      emission made, `t{id}` or `t{id}_{i}`. This is the ordinary case in real
+      code and it was the one no fixture had;
+    * `auxiliary` — a RATIONAL `pow` in between, whose output term IS its
+      auxiliary constant, so the outer call's base is `aux_{id}[_{i}]`. This
+      arm also drives the inner call at `(1, 2)` with an `input` base, which
+      is already inside the declared product and so adds nothing to it — and
+      it introduces a SECOND `out_id`, which is how `_pow_aux_name`'s third
+      parameter stopped being undriven. See
+      `emit-rational-aux-collides-across-two-pow-OUTPUTS`.
+
+    Every arm's base box stays strictly positive: `[1, 81]` becomes `[2, 82]`
+    under `+ 1.0` and `[1, 9]` under `x^(1/2)`.
     """
+    if base_kind not in _BASE_KIND_BASES:
+        raise AssertionError(
+            f"no probe drives a {base_kind!r} base — the driven kinds are "
+            f"{sorted(_BASE_KIND_BASES)}"
+        )
+    build_base = _BASE_KIND_BASES[base_kind]
 
     def h():
         x = any_array((n,), "float64", SHAPE_PROBE_BOX)
-        r = jnp.power(x, exponent)
+        r = jnp.power(build_base(x), exponent)
         return (assert_(r[n - 1] - r[0] <= SHAPE_PROBE_BOUND),)
 
     return h
+
+
+# The base each arm hands `jnp.power`, keyed by the spelling `smt.emit` then
+# gives it. This dict IS the fixture table for the base-kind axis:
+# `DRIVEN_BASE_KINDS` is asserted equal to its keys, and the reach recorder
+# measures the spellings that actually arrive, so an arm that stopped
+# producing the kind it is filed under fails the arity test rather than
+# quietly narrowing the sweep.
+_BASE_KIND_BASES = {
+    "input": lambda x: x,
+    "intermediate": lambda x: x + 1.0,
+    "auxiliary": lambda x: jnp.power(x, AUX_BASE_INNER_EXP),
+}
 
 
 def _non_dyadic_harness():
@@ -901,17 +1140,108 @@ def _rat_wrong_only_at_a_numerator_past_one():
     return mutated
 
 
-_ELEMENT_SUFFIX = re.compile(r"_(\d+)$")
+# --- THE BASE TERM, DECOMPOSED THE WAY `smt.emit` COMPOSES IT ----------------
+#
+# THE SEAM'S OTHER ARGUMENT. `_pow_integer_body(term, exp_val)` takes two and
+# this file gauged the joint reach of ONE of them; `_pow_rational_lines`
+# takes four and it gauged `p` and `q`. The base TERM was read only for the
+# element index it carries, so what KIND of expression the base is — which is
+# a thing every emitted line is conditioned on, because the term is pasted
+# straight into the text — was not a coordinate of anything. Measured across
+# all 22 gates, every fixture raised a DECLARED PROGRAM INPUT to a power: the
+# base-term prefix reaching either exponent seam was `x` and nothing else. So
+# a wrongness conditioned on "the base is not an input" was correct on every
+# fixture in the battery. Five of them were measured surviving all 22 gates,
+# and `pow` applied to a computed quantity is what real programs do:
+#
+#   INT exp==3 (DRIVEN) AND base is an intermediate      0 of 22
+#   INT exp==3 (DRIVEN) AND base is an auxiliary         0 of 22
+#   INT exp==3 (DRIVEN) AND base is a numeral            0 of 22
+#   RAT (p,q)==(1,2) (DRIVEN) AND base is an intermediate 0 of 22
+#   RAT (p,q)==(1,2) (DRIVEN) AND base is an auxiliary    0 of 22
+#
+# FOUR OF THE FIVE are demonstrated minting a verdict-level false VERIFIED on
+# an ordinary jax program — `(x+1)**3 - (x+1) <= 23` over [1, 2],
+# `(x+1)**0.5 <= 8.9` over [0, 80], `(x**0.5)**3 <= 7.9` over [1, 4] and
+# `(x**0.5)**0.5 <= 8.9` over [1, 6561] all go REFUTED -> VERIFIED, and the
+# four battery items below recompute that end to end. The FIFTH — the NUMERAL
+# base — is measured surviving all 22 gates and its VERDICT effect was never
+# measured; it is disclosed rather than driven, and saying "each" of the five
+# mints one would be a claim about a run nobody made.
+#
+# Neither disclosure list named the axis, and the page claimed a wrongness
+# conditioned on "the element index, the element count, a driven exponent, or
+# ANY COMBINATION of the three" is caught.
+#
+# THE ENUMERATION IS THE SEAMS' ARGUMENTS, AND IT IS ASSERTED FROM THE
+# SIGNATURES rather than listed here — see `SEAM_ARGUMENTS` and
+# `test_every_SEAM_ARGUMENT_is_a_gauged_COORDINATE_or_a_named_exemption`. The
+# pattern this file has now repeated three times is: close the product of the
+# axes you enumerated, then discover the radius moved onto one you did not.
+# What ends that is enumerating the seam's arguments, because the arguments
+# are exactly what a wrongness in the seam can be conditioned on — the seam is
+# a pure function of them. So the next axis is a signature change, and a
+# signature change fails a test.
+#
+# The grammar below is `smt.emit`'s own, and the decomposition is total: a
+# spelling outside it is `other`, which is NOT a driven kind, so it reaches
+# the reach recorder as an unrecoverable element index and is reported as an
+# INCONSISTENCY rather than silently counted as element 0. That is how the
+# NUMERAL kind — reachable when `smt._renderable` declines a constant fold and
+# the literal's text is handed to the seam in place of a symbol — stays
+# visible without being claimed as driven.
+#
+#   input        `x{k}`   / `x{k}_{i}`     a declared program input
+#   intermediate `t{id}`  / `t{id}_{i}`    an emitted define-fun
+#   auxiliary    `aux{_id}`/`aux_{id}_{i}` a rational pow's own aux constant,
+#                                          when a `pow` feeds a `pow`
+#   other        anything else             a numeral, or a spelling nobody
+#                                          has enumerated yet
+_TERM_SPELLING = re.compile(r"^(?P<kind>x|t|aux_)(?P<id>\d+)(?:_(?P<element>\d+))?$")
+
+_SPELLING_KINDS = {"x": "input", "t": "intermediate", "aux_": "auxiliary"}
+
+BASE_KIND_OTHER = "other"
+
+
+def _base_spelling(base):
+    """``(kind, element)`` for a base term, or ``(BASE_KIND_OTHER, None)``.
+
+    ONE decomposition, so the element index and the kind cannot disagree about
+    what a term is. The predecessor read the index with a bare ``_(\\d+)$``
+    search, which is right for `x0_1` and `t7_2` and WRONG for the auxiliary
+    branch's single-element spelling: `aux_2` is element 0 of output 2 and that
+    regex reads it as element 2. It was latent only because no gate drove a
+    `pow` whose base is another `pow`'s auxiliary; this round drives exactly
+    that, so the recovery has to parse the spelling instead of guessing at its
+    tail. ``element`` is ``None`` when the term is not one of the emitter's
+    three symbol forms — the caller decides whether that is a mutation
+    declining to fire or a measurement declining to invent a number."""
+    m = _TERM_SPELLING.match(base)
+    if m is None:
+        return (BASE_KIND_OTHER, None)
+    return (_SPELLING_KINDS[m.group("kind")], int(m.group("element") or 0))
+
+
+def _base_kind_of(base):
+    """Which of `smt.emit`'s naming forms a base term is written in."""
+    return _base_spelling(base)[0]
 
 
 def _element_index_of(base):
-    """The element index a base term's name carries, or 0 for the unsuffixed
-    single-element spelling. `_pow_rational_lines` is not handed the index —
-    that is the seam gap `docs/gauge-coverage.md` names — so an
-    element-conditioned mutation has to read it off the term, exactly as
-    `_emit_rat_one_declaration_for_two_elements` does."""
-    m = _ELEMENT_SUFFIX.search(base)
-    return int(m.group(1)) if m else 0
+    """The element index a base term's name carries, or 0 when the spelling
+    carries none. `_pow_rational_lines` is not handed the index — that is the
+    seam gap `docs/gauge-coverage.md` names — so an element-conditioned
+    mutation has to read it off the term, exactly as
+    `_emit_rat_one_declaration_for_two_elements` does.
+
+    0 is the answer for BOTH the unsuffixed single-element spelling (`t7`,
+    `aux_7`, `x0`) and for a term this grammar does not recognise. Those are
+    different situations and only the MEASUREMENT needs to tell them apart, so
+    it calls :func:`_base_spelling` directly and reports the second as an
+    inconsistency; a mutation reading an index off an unrecognised term is
+    simply not conditioned on anything real, and 0 keeps it from firing."""
+    return _base_spelling(base)[1] or 0
 
 
 def _rat_wrong_only_past_the_second_element():
@@ -927,7 +1257,7 @@ def _rat_wrong_only_past_the_second_element():
 
     It is in the battery to PIN the shape measurement, the way the three
     exponent-conditioned mutations pin the exponent one. What catches it is
-    `emission-is-invariant-to-the-array-shape`, and that gate catches it for
+    `emission-is-invariant-to-the-shape-and-the-base-term`, and that gate catches it for
     every index inside its range rather than at the one index this mutation
     happens to name."""
     real = SM._pow_rational_lines
@@ -998,6 +1328,64 @@ def _int_wrong_only_past_the_second_element_at_degree_five():
     return mutated
 
 
+# --- the BASE-KIND-conditioned mutations -------------------------------------
+#
+# THE AXIS THE FIRST THREE ROUNDS DID NOT ENUMERATE, PINNED. Every one of the
+# four items below is conditioned on a DRIVEN exponent AND on the base term's
+# KIND, and each was measured surviving all 22 gates on `e8621a9` — the tree
+# that had just closed the (element, n_out) x exponent product. That
+# measurement used PREFIX predicates (`term.startswith("t")`,
+# `.startswith("aux")`) because `_base_spelling` did not exist yet; the items
+# below say the same thing through the classifier. They are here
+# for the reason the `...-past-the-second-element...` items are: the base-kind
+# sweep in `gate_emission_is_invariant_to_the_shape_and_the_base_term` is what
+# CLOSES the axis, and a closure with nothing driving it is one edit from
+# being deleted silently. The measured joint reach pins the probes; these pin
+# that the gate CATCHES.
+#
+# One per (branch x non-`input` spelling), because the two branches are two
+# seams and the two spellings are two probe arms — a single item conditioned
+# on "not an input" would be caught by whichever arm ran first and would stop
+# pinning the other.
+#
+# Each emits a smaller EFFECTIVE exponent — a lower degree on the integer
+# branch (3 -> 2), a LARGER denominator on the rational one (q 2 -> 4, i.e. a
+# higher root) — so the value the mutated script can reach is capped BELOW the
+# fixture's bound and a genuinely REFUTED query comes back VERIFIED. That
+# direction is checked, not assumed, by
+# `test_the_base_kind_conditioned_mutations_are_CAUGHT_by_the_INVARIANCE_gate`.
+
+
+def _wrong_only_at_a_base_kind_integer(kind, exp, replacement):
+    """`real(term, replacement)` when the base is spelled `kind` and the
+    exponent is `exp`; correct everywhere else."""
+    real = SM._pow_integer_body
+
+    def mutated(term, exp_val):
+        if exp_val == exp and _base_kind_of(term) == kind:
+            return real(term, replacement)
+        return real(term, exp_val)
+
+    return mutated
+
+
+def _wrong_only_at_a_base_kind_rational(kind, pq, replacement_q):
+    """`aux^replacement_q = x^p` when the base is spelled `kind` and the
+    exponent is `pq`; correct everywhere else. A LARGER `q` is a SMALLER
+    root, so the reachable value is capped — and it is `q + 2` rather than
+    `q + 1` for the reason `_rat_wrong_only_at_a_larger_denominator` gives:
+    an odd `q` is refused outright and would be caught by malformedness
+    instead of by the axis this item is for."""
+    real = SM._pow_rational_lines
+
+    def mutated(aux_name, base, p, q):
+        if (p, q) == pq and _base_kind_of(base) == kind:
+            return real(aux_name, base, p, replacement_q)
+        return real(aux_name, base, p, q)
+
+    return mutated
+
+
 def _emit_rat_aux_is_the_base(aux_name, base, p, q):
     return [
         f"(declare-const {aux_name} Real)",
@@ -1007,6 +1395,27 @@ def _emit_rat_aux_is_the_base(aux_name, base, p, q):
 
 def _emit_shared_aux(out_id, element, n_out):
     return f"aux_{out_id}"
+
+
+def _emit_aux_collides_across_outputs(out_id, element, n_out):
+    """`out_id` DROPPED from the auxiliary's name: still fresh per element of
+    one output, colliding between two DIFFERENT rational `pow`s.
+
+    THE SEAM ARGUMENT THE ENUMERATION FOUND, and the one that shows the
+    enumeration is worth having. `_pow_aux_name(out_id, element, n_out)` takes
+    three parameters and this file gauged two of them; `out_id`'s only job is
+    to keep two outputs' auxiliaries apart, and `_emit_shared_aux` mutates
+    freshness across ELEMENTS while nothing touched freshness across OUTPUTS.
+    That is not a shape and not an exponent, which is why three rounds of
+    widening those never came near it.
+
+    It became reachable in the same round it was found: the `auxiliary` arm of
+    the base-spelling sweep is `(x**0.5)**e`, which is two rational `pow`s and
+    therefore two `out_id`s. Measured across every gate, `_pow_aux_name` is
+    handed exactly two distinct `out_id` values, and this mutation is CAUGHT —
+    so the honest classification of `out_id` is DRIVEN, not disclosed, and
+    this item is what keeps that true if the auxiliary arm is ever removed."""
+    return f"aux_{element}" if n_out > 1 else "aux"
 
 
 def _emit_rat_one_declaration_for_two_elements(aux_name, base, p, q):
@@ -1136,6 +1545,30 @@ def _mutations():
                  _rat_wrong_only_past_the_second_element_at_q_two()),
             ),
         },
+        "emit-integer-wrong-only-on-a-COMPUTED-base-at-degree-three": {
+            "__patches__": (
+                (SM, "_pow_integer_body",
+                 _wrong_only_at_a_base_kind_integer("intermediate", 3, 2)),
+            ),
+        },
+        "emit-integer-wrong-only-on-an-AUXILIARY-base-at-degree-three": {
+            "__patches__": (
+                (SM, "_pow_integer_body",
+                 _wrong_only_at_a_base_kind_integer("auxiliary", 3, 2)),
+            ),
+        },
+        "emit-rational-wrong-only-on-a-COMPUTED-base-at-q-two": {
+            "__patches__": (
+                (SM, "_pow_rational_lines",
+                 _wrong_only_at_a_base_kind_rational("intermediate", (1, 2), 4)),
+            ),
+        },
+        "emit-rational-wrong-only-on-an-AUXILIARY-base-at-q-two": {
+            "__patches__": (
+                (SM, "_pow_rational_lines",
+                 _wrong_only_at_a_base_kind_rational("auxiliary", (1, 2), 4)),
+            ),
+        },
         "emit-rational-sides-swapped": {
             "__patches__": ((SM, "_pow_rational_lines", _emit_rat_sides_swapped),),
         },
@@ -1155,6 +1588,11 @@ def _mutations():
         },
         "emit-rational-aux-shared-across-elements": {
             "__patches__": ((SM, "_pow_aux_name", _emit_shared_aux),),
+        },
+        "emit-rational-aux-collides-across-two-pow-OUTPUTS": {
+            "__patches__": (
+                (SM, "_pow_aux_name", _emit_aux_collides_across_outputs),
+            ),
         },
         "emit-rational-one-aux-for-two-elements": {
             "__patches__": (
@@ -1530,13 +1968,25 @@ def _canonicalise(lines, names):
     return tuple(pattern.sub(lambda m: names[m.group(0)], ln) for ln in lines)
 
 
-def _seam_blocks(harness, attr, record):
+def _seam_blocks(harness, attr, record, base_of=None, base_kind=None):
     """Emit `harness` with `smt.<attr>` spied, and return the per-element
     CANONICAL seam output — or None if there was no slice to emit.
 
     The spy wraps whatever is installed at call time, which is the MUTATED
     function: `_patched` has already entered by the time a gate calls this, so
-    what gets recorded is the subject's emission and not the row's."""
+    what gets recorded is the subject's emission and not the row's.
+
+    `base_kind` keeps only the calls whose BASE is written in that spelling,
+    and it is not a convenience: the `auxiliary` probe is a `pow` feeding a
+    `pow`, so at a rational outer exponent the rational seam sees TWO calls
+    per element — the inner one with an `input` base at `(1, 2)` and the outer
+    one with the `aux_...` base at the exponent under test. Comparing all of
+    them against one reference would compare two different exponents' text and
+    report a difference that is not a wrongness. Filtering by the spelling
+    under test is what makes one probe per kind legible; the inner call is not
+    discarded from the MEASUREMENT, which sees it through
+    :func:`_measured_seam_reach` and counts it in the `input` half of the
+    product where it belongs."""
     sl = _slice_of(harness)
     if sl is None:
         return None
@@ -1550,6 +2000,11 @@ def _seam_blocks(harness, attr, record):
 
     with mock.patch.object(SM, attr, spy):
         SM.emit(sl, "z3", TIMEOUT_MS)
+    if base_kind is not None:
+        calls = [
+            (args, out) for args, out in calls
+            if _base_kind_of(base_of(args)) == base_kind
+        ]
     return [record(args, out) for args, out in calls]
 
 
@@ -1563,14 +2018,22 @@ def _integer_block(args, out):
     return _canonicalise((out,), {term: "BASE"})
 
 
+# (seam, the exponents it is swept at, how one call canonicalises, WHICH
+# ARGUMENT IS THE BASE). The last entry is the one this round adds and it is
+# read off the signature rather than assumed: `_pow_integer_body(term,
+# exp_val)` carries the base first, `_pow_rational_lines(aux_name, base, p,
+# q)` second, and `test_every_SEAM_ARGUMENT_is_a_gauged_COORDINATE_or_a_named
+# _exemption` checks both against `inspect.signature`.
 _INVARIANCE_SWEEP = (
-    ("_pow_rational_lines", _RATIONAL_FIXTURE_EXPONENTS, _rational_block),
-    ("_pow_integer_body", _INTEGER_FIXTURE_EXPONENTS, _integer_block),
+    ("_pow_rational_lines", _RATIONAL_FIXTURE_EXPONENTS, _rational_block,
+     lambda args: args[1]),
+    ("_pow_integer_body", _INTEGER_FIXTURE_EXPONENTS, _integer_block,
+     lambda args: args[0]),
 )
 
 
-def gate_emission_is_invariant_to_the_array_shape(subject):
-    """THE SHAPE AXIS, CLOSED RATHER THAN SAMPLED — AT EVERY DRIVEN EXPONENT.
+def gate_emission_is_invariant_to_the_shape_and_the_base_term(subject):
+    """EVERY SEAM ARGUMENT BUT THE EXPONENT, CLOSED RATHER THAN SAMPLED.
 
     Every other gate in this battery drives one or two element counts and is
     therefore evidence about those counts only — which is how a mutation
@@ -1588,7 +2051,7 @@ def gate_emission_is_invariant_to_the_array_shape(subject):
     in that text — which makes this gate evidence about every conditioning
     function on the SHAPE and not about a sampled point.
 
-    AND IT SWEEPS THE EXPONENT, WHICH IS THE HALF THE PREDECESSOR LEFT OUT.
+    AND IT SWEEPS THE EXPONENT, WHICH IS THE HALF ITS PREDECESSOR LEFT OUT.
     A shape invariance driven at ONE exponent per branch is an invariance in
     the shape and a SAMPLE in the exponent, and the product of the two is where
     the wrongness lives: `element >= 2 AND q == 2` names an element index and a
@@ -1600,35 +2063,56 @@ def gate_emission_is_invariant_to_the_array_shape(subject):
     per exponent, because the emitted text legitimately differs BETWEEN
     exponents and must not differ WITHIN one.
 
-    What this closes is therefore the full (element, n_out) x (driven exponent)
-    product for the EMISSION, and `_measured_seam_reach` records that product
-    jointly rather than as three marginals. What it is NOT: evidence about the
-    transfer, the slice, the replay or the verdict at those counts, nor about
-    any exponent outside the driven set. Those stages are driven at
-    `_VERDICT_ELEMENT_COUNTS` and the SCOPE string says so.
+    AND IT SWEEPS THE BASE TERM, WHICH IS THE SEAM'S OTHER ARGUMENT AND WAS
+    DRIVEN AT ONE POINT FOR THREE ROUNDS. `_pow_integer_body(term, exp_val)`
+    takes two arguments; the gate above quantified over the shape and the
+    second argument and pasted the FIRST in from a declared program input,
+    every time, in every fixture. Five wrongnesses conditioned on the base's
+    spelling at a DRIVEN exponent survived all 22 gates and four of them mint
+    a verdict-level false VERIFIED. The reference is now SHARED across the
+    driven base spellings as well as across the element counts, so what is
+    asserted is that the block depends on the exponent and on NOTHING ELSE the
+    seam is handed — which is the invariance the row's own elementwise
+    contract licenses, and the strongest statement available without a proof.
+
+    What this closes is therefore the full
+    (element, n_out) x (base spelling) x (driven exponent) product for the
+    EMISSION, and `_measured_seam_reach` records that product jointly rather
+    than as marginals. What it is NOT: evidence about the transfer, the slice,
+    the replay or the verdict at those counts or spellings, nor about any
+    exponent outside the driven set, nor about a base that is not a SYMBOL —
+    `smt.emit` inlines a numeral when `_renderable` declines a constant fold,
+    and that spelling is disclosed rather than driven. Those stages are driven
+    at `_VERDICT_ELEMENT_COUNTS` with an `input` base and the SCOPE says so.
 
     No slice means nothing was emitted and the invariance is vacuous, so that
     is a CATCH — the same conservative direction every other gate takes with an
     exception. The probe is built to survive `transfer-is-the-base` at every
-    exponent for that reason, or this gate would report a transfer wrongness as
-    a shape one."""
+    exponent and in every spelling for that reason, or this gate would report a
+    transfer wrongness as a shape one."""
     try:
         with _patched(subject), _maybe_linear_fragment(subject):
-            for attr, exponents, record in _INVARIANCE_SWEEP:
+            for attr, exponents, record, base_of in _INVARIANCE_SWEEP:
                 for exponent in exponents:
+                    # ONE reference per exponent, shared by every element
+                    # count AND every base spelling — that sharing is the
+                    # whole claim, and splitting it per kind would make this
+                    # three invariances in three marginals again
                     reference = None
-                    for n in _INVARIANCE_ELEMENT_COUNTS:
-                        blocks = _seam_blocks(
-                            _shape_probe_harness(exponent, n), attr, record
-                        )
-                        # one seam call per element, or the probe is not
-                        # measuring the shape it names
-                        if blocks is None or len(blocks) != n:
-                            return False
-                        if reference is None:
-                            reference = blocks[0]
-                        if any(b != reference for b in blocks):
-                            return False
+                    for base_kind in DRIVEN_BASE_KINDS:
+                        for n in _INVARIANCE_ELEMENT_COUNTS:
+                            blocks = _seam_blocks(
+                                _shape_probe_harness(exponent, n, base_kind),
+                                attr, record, base_of, base_kind,
+                            )
+                            # one seam call per element in the spelling under
+                            # test, or the probe is not driving what it names
+                            if blocks is None or len(blocks) != n:
+                                return False
+                            if reference is None:
+                                reference = blocks[0]
+                            if any(b != reference for b in blocks):
+                                return False
         return True
     except Exception:
         return False
@@ -1693,8 +2177,8 @@ GATES = {
     "witness-executes-through-jax": gate_witness_executes_through_jax,
     "interval-containment-eager-and-jit": gate_interval_containment_eager_and_jit,
     "fragment-is-nonlinear": gate_fragment_is_nonlinear,
-    "emission-is-invariant-to-the-array-shape":
-        gate_emission_is_invariant_to_the_array_shape,
+    "emission-is-invariant-to-the-shape-and-the-base-term":
+        gate_emission_is_invariant_to_the_shape_and_the_base_term,
     "non-dyadic-exponent-declines": gate_non_dyadic_exponent_declines,
     "negative-base-declines": gate_negative_base_declines,
     "replay-agrees-with-jax": gate_replay_agrees_with_jax,
@@ -1756,13 +2240,22 @@ class _SeamReach:
     """What the gates drive through the `pow` row's three seams, recorded as
     the JOINT tuples rather than as one set per axis.
 
-    ``integer`` is ``(element, n_out, exp)`` at :func:`smt._pow_integer_body`
-    and ``rational`` is ``(element, n_out, p, q)`` at
-    :func:`smt._pow_rational_lines`; ``aux`` is the ``(element, n_out)`` pairs
-    :func:`smt._pow_aux_name` was handed, kept separately because it is its own
-    seam and the two must AGREE. ``inconsistent`` carries anything the
-    recorder could not reconcile, so a broken measurement fails loudly rather
-    than reporting a narrow reach as a clean one.
+    ``integer`` is ``(element, n_out, base_kind, exp)`` at
+    :func:`smt._pow_integer_body` and ``rational`` is
+    ``(element, n_out, base_kind, p, q)`` at :func:`smt._pow_rational_lines`;
+    ``aux`` is the ``(element, n_out)`` pairs :func:`smt._pow_aux_name` was
+    handed, kept separately because it is its own seam and the two must AGREE.
+    ``inconsistent`` carries anything the recorder could not reconcile, so a
+    broken measurement fails loudly rather than reporting a narrow reach as a
+    clean one.
+
+    ``base_kind`` IS A COORDINATE AND NOT A FOURTH MARGINAL. It is the seams'
+    other argument — the one whose reach was `input` and only `input` for
+    three rounds while the tuples above were being widened on every other
+    axis. Recording it here is what makes the next wrongness conditioned on
+    the base a MEASUREMENT rather than a discovery: it appears in the printed
+    reach, and a spelling the grammar does not know appears in
+    ``inconsistent``.
 
     The marginals below are PROJECTIONS of the joint sets and not a second
     measurement, which is the property the predecessor lacked."""
@@ -1774,19 +2267,30 @@ class _SeamReach:
 
     @property
     def integer_exponents(self):
-        return tuple(sorted({e for _, _, e in self.integer}))
+        return tuple(sorted({e for _, _, _, e in self.integer}))
 
     @property
     def rational_pq(self):
-        return tuple(sorted({(p, q) for _, _, p, q in self.rational}))
+        return tuple(sorted({(p, q) for _, _, _, p, q in self.rational}))
 
     @property
     def shapes(self):
         """Every ``(element, n_out)`` either exponent seam was driven at."""
         return tuple(sorted(
-            {(i, n) for i, n, _ in self.integer}
-            | {(i, n) for i, n, _, _ in self.rational}
+            {(i, n) for i, n, _, _ in self.integer}
+            | {(i, n) for i, n, _, _, _ in self.rational}
         ))
+
+    @property
+    def base_kinds(self):
+        """Every base SPELLING either exponent seam was handed."""
+        return tuple(sorted(
+            {k for _, _, k, _ in self.integer}
+            | {k for _, _, k, _, _ in self.rational}
+        ))
+
+
+_REACH_CACHE: list = []
 
 
 def _measured_seam_reach() -> _SeamReach:
@@ -1814,6 +2318,18 @@ def _measured_seam_reach() -> _SeamReach:
     printed as driven — was ungauged and undisclosed. This function therefore
     records TUPLES.
 
+    AND THEN IT RECORDED EVERY ARGUMENT THE SEAMS TAKE EXCEPT THE BASE. Both
+    exponent seams are handed the base TERM, and this recorder read it only
+    for the element index it carries — so the reach it printed was silent
+    about the one coordinate whose measured value was a single point (`input`,
+    on every fixture, at every gate). Five wrongnesses lived there. The kind
+    is a coordinate of the tuples now, and it is recovered by the SAME
+    decomposition the element index is (:func:`_base_spelling`), so the two
+    cannot disagree about what a term is. A spelling the grammar does not
+    recognise — the NUMERAL `smt.emit` inlines when `_renderable` declines a
+    constant fold — is reported as an inconsistency rather than counted as
+    element 0 of an unknown kind.
+
     HOW THE SHAPE IS RECOVERED AT SEAMS THAT ARE NOT HANDED IT, because that is
     the one thing here that is not a plain spy:
 
@@ -1834,41 +2350,67 @@ def _measured_seam_reach() -> _SeamReach:
     That the integer seam cannot see its own shape is the seam gap
     `docs/gauge-coverage.md` names; recovering it here measures the gap rather
     than closing it.
+
+    CACHED for the reason :func:`_report` is: this runs every gate against the
+    baseline, four assertions read the identical measurement, and the base-kind
+    sweep tripled what one run costs. It is a pure function of (BASELINE,
+    GATES) and it restores every patch it makes, so one run is one run's worth
+    of evidence however many assertions quote it.
     """
-    integer: set[tuple[int, int, int]] = set()
-    rational: set[tuple[int, int, int, int]] = set()
+    if _REACH_CACHE:
+        return _REACH_CACHE[0]
+    integer: set[tuple[int, int, str, int]] = set()
+    rational: set[tuple[int, int, str, int, int]] = set()
     aux: set[tuple[int, int]] = set()
     inconsistent: list[str] = []
     real_int, real_rat = SM._pow_integer_body, SM._pow_rational_lines
     real_aux = SM._pow_aux_name
     # the shape `_pow_aux_name` was handed for the element being emitted now
     pending: list[tuple[int, int]] = []
-    # the integer branch's current eqn run, as (element, exp) in emission order
-    run: list[tuple[int, int]] = []
+    # the integer branch's current eqn run, as (element, kind, exp) in
+    # emission order
+    run: list[tuple[int, str, int]] = []
+
+    def unrecognised(seam, term):
+        """A base term outside `smt.emit`'s three symbol forms. It is not a
+        driven kind, its element index cannot be recovered, and inventing 0 is
+        how a NUMERAL base would be silently counted as element 0 of a
+        one-element output — so it is reported instead."""
+        inconsistent.append(
+            f"`{seam}` was handed the base term `{term}`, which is not one of "
+            f"`smt.emit`'s symbol spellings (x/t/aux_), so neither its element "
+            f"index nor its base KIND can be recovered — see `_base_spelling`"
+        )
 
     def close_run():
         if not run:
             return
         n_out = len(run)
-        if [e for e, _ in run] != list(range(n_out)):
+        if [e for e, _, _ in run] != list(range(n_out)):
             inconsistent.append(
                 f"`_pow_integer_body` was driven at elements "
-                f"{[e for e, _ in run]}, which is not one eqn's 0..n-1 run, so "
-                f"the element COUNT cannot be recovered from the call order"
+                f"{[e for e, _, _ in run]}, which is not one eqn's 0..n-1 run, "
+                f"so the element COUNT cannot be recovered from the call order"
             )
         else:
-            for element, exp_val in run:
-                integer.add((element, n_out, exp_val))
+            for element, kind, exp_val in run:
+                integer.add((element, n_out, kind, exp_val))
         run.clear()
 
     def spy_int(term, exp_val):
-        element = _element_index_of(term)
+        kind, element = _base_spelling(term)
+        if element is None:
+            unrecognised("_pow_integer_body", term)
+            element = 0
         if element == 0:
             close_run()
-        run.append((element, exp_val))
+        run.append((element, kind, exp_val))
         return real_int(term, exp_val)
 
     def spy_rat(aux_name, base, p, q):
+        kind, base_element = _base_spelling(base)
+        if base_element is None:
+            unrecognised("_pow_rational_lines", base)
         if not pending:
             inconsistent.append(
                 f"`_pow_rational_lines` emitted `{aux_name}` with no preceding "
@@ -1876,12 +2418,12 @@ def _measured_seam_reach() -> _SeamReach:
             )
         else:
             element, n_out = pending.pop()
-            if element != _element_index_of(base):
+            if base_element is not None and element != base_element:
                 inconsistent.append(
                     f"`_pow_aux_name` says element {element} while the base "
-                    f"term `{base}` says {_element_index_of(base)}"
+                    f"term `{base}` says {base_element}"
                 )
-            rational.add((element, n_out, p, q))
+            rational.add((element, n_out, kind, p, q))
         return real_rat(aux_name, base, p, q)
 
     def spy_aux(out_id, element, n_out):
@@ -1901,12 +2443,13 @@ def _measured_seam_reach() -> _SeamReach:
                     f"no `_pow_rational_lines` call then emitted"
                 )
                 pending.clear()
-    return _SeamReach(
+    _REACH_CACHE.append(_SeamReach(
         integer=frozenset(integer),
         rational=frozenset(rational),
         aux=tuple(sorted(aux)),
         inconsistent=tuple(inconsistent),
-    )
+    ))
+    return _REACH_CACHE[0]
 
 
 def _render_joint(label, measured, declared, n_exponents):
@@ -1921,8 +2464,8 @@ def _render_joint(label, measured, declared, n_exponents):
     if not missing and not extra:
         return (
             f"{label}: the FULL product of {len(DRIVEN_AUX_ELEMENTS)} "
-            f"(element, n_out) shapes x {n_exponents} exponent(s) = "
-            f"{len(measured)} tuples"
+            f"(element, n_out) shapes x {len(DRIVEN_BASE_KINDS)} base "
+            f"spelling(s) x {n_exponents} exponent(s) = {len(measured)} tuples"
         )
     return (
         f"{label}: {len(measured)} tuples, NOT the declared product — "
@@ -2017,16 +2560,17 @@ def _stage_driven_arity():
     detail = (
         f"integer exponents {list(reach.integer_exponents)} ; (p,q) pairs "
         f"{[list(pq) for pq in reach.rational_pq]} ; (element, n_out) pairs "
-        f"{[list(a) for a in reach.aux]} — measured at all three seams across "
+        f"{[list(a) for a in reach.aux]} ; base spellings "
+        f"{list(reach.base_kinds)} — measured at all three seams across "
         f"every gate, and NOT the admitted set. JOINTLY: "
         + _render_joint(
-            "(element, n_out, exp)", reach.integer, DRIVEN_INTEGER_JOINT,
-            len(DRIVEN_INTEGER_EXPONENTS),
+            "(element, n_out, base_kind, exp)", reach.integer,
+            DRIVEN_INTEGER_JOINT, len(DRIVEN_INTEGER_EXPONENTS),
         )
         + " ; "
         + _render_joint(
-            "(element, n_out, p, q)", reach.rational, DRIVEN_RATIONAL_JOINT,
-            len(DRIVEN_RATIONAL_PQ),
+            "(element, n_out, base_kind, p, q)", reach.rational,
+            DRIVEN_RATIONAL_JOINT, len(DRIVEN_RATIONAL_PQ),
         )
     )
     if reach.inconsistent:
@@ -2288,6 +2832,13 @@ def test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose():
         f"one this file left as prose for a round, and a mutation "
         f"conditioned on the element index lived in that gap"
     )
+    assert reach.base_kinds == DRIVEN_BASE_KINDS, (
+        f"the gates hand the exponent seams base terms spelled "
+        f"{list(reach.base_kinds)}, but the probe table declares "
+        f"{list(DRIVEN_BASE_KINDS)} — the BASE TERM is the seams' other "
+        f"argument, it was driven at `input` and nothing else for three "
+        f"rounds, and five wrongnesses conditioned on it survived all 22 gates"
+    )
     # ...and the two seams that see the shape must AGREE about it: the aux
     # names handed out and the shapes the two exponent seams were driven at are
     # the same set, or one of the two recordings is measuring something else
@@ -2304,21 +2855,24 @@ def test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose():
     # marginals are a projection of what follows and are kept because they are
     # what the SCOPE string prints; what makes the SCOPE string TRUE is this:
     assert reach.integer == DRIVEN_INTEGER_JOINT, _render_joint(
-        "the integer branch's (element, n_out, exp) reach",
+        "the integer branch's (element, n_out, base_kind, exp) reach",
         reach.integer, DRIVEN_INTEGER_JOINT, len(DRIVEN_INTEGER_EXPONENTS),
     )
     assert reach.rational == DRIVEN_RATIONAL_JOINT, _render_joint(
-        "the rational branch's (element, n_out, p, q) reach",
+        "the rational branch's (element, n_out, base_kind, p, q) reach",
         reach.rational, DRIVEN_RATIONAL_JOINT, len(DRIVEN_RATIONAL_PQ),
     )
-    # ANTI-VACUITY on the product itself: an empty exponent set or an empty
-    # shape set would make both equalities hold over nothing
-    assert len(reach.integer) == len(DRIVEN_AUX_ELEMENTS) * len(ints) > 0
-    assert len(reach.rational) == len(DRIVEN_AUX_ELEMENTS) * len(pqs) > 0
+    # ANTI-VACUITY on the product itself: an empty exponent set, an empty
+    # shape set or an empty base-kind set would make both equalities hold over
+    # nothing
+    n_shapes = len(DRIVEN_AUX_ELEMENTS) * len(DRIVEN_BASE_KINDS)
+    assert len(reach.integer) == n_shapes * len(ints) > 0
+    assert len(reach.rational) == n_shapes * len(pqs) > 0
     # the SCOPE the report and the reading both quote is BUILT from these,
     # so the printed claim cannot drift from the measured one
     assert f"[{_DRIVEN_INT_TEXT}]" in SCOPE and f"[{_DRIVEN_PQ_TEXT}]" in SCOPE
     assert f"[{_DRIVEN_N_TEXT}]" in SCOPE and f"[{_VERDICT_N_TEXT}]" in SCOPE
+    assert f"[{_DRIVEN_KIND_TEXT}]" in SCOPE
 
     # ANTI-VACUITY, and READ THE MODULE DOCSTRING ON WHAT THIS IS. The three
     # equalities above are DRIFT protection: they fail when the fixtures and
@@ -2364,12 +2918,264 @@ def test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose():
                for i in range(n))
     ), list(aux)
 
+    # the BASE-KIND floor, and it is the one this round's survivors lived
+    # under. `input` alone is not a set: it is the spelling every fixture in
+    # the battery happens to produce, and a wrongness conditioned on "the base
+    # is not a declared input" was correct on all 22 gates. At least one
+    # COMPUTED spelling has to reach each seam or the axis is a point again.
+    assert "input" in reach.base_kinds, (
+        "no fixture raises a DECLARED INPUT to a power, which is the spelling "
+        "the byte-level emission tests pin"
+    )
+    assert set(reach.base_kinds) - {"input"}, (
+        "every fixture raises a DECLARED PROGRAM INPUT to a power, so a "
+        "wrongness conditioned on the base being COMPUTED is invisible — "
+        "five such mutations survived all 22 gates and four minted a false "
+        "VERIFIED ((x+1)**3 - (x+1) <= 23 over [1,2]; (x**0.5)**3 <= 7.9 "
+        "over [1,4]). Real programs almost always `pow` a computed quantity"
+    )
+    assert BASE_KIND_OTHER not in reach.base_kinds, (
+        "a base spelling outside `smt.emit`'s three symbol forms reached a "
+        "seam; it cannot be a driven kind because its element index is not "
+        "recoverable, and `_measured_seam_reach` should have said so in "
+        "`inconsistent` before this line was reached"
+    )
+
     # and every driven pair is one the shipped guard actually ADMITS, or the
     # widening bought coverage of exponents no program can reach
     for p, q in pqs:
         assert OB.rational_pow_problem(p / q) is None, (p, q)
     for e in ints:
         assert abs(e) <= OB.INTEGER_POW_EXPANSION_CAP, e
+
+
+# --- THE ENUMERATION ITSELF, DERIVED FROM THE SIGNATURES ---------------------
+#
+# THREE ROUNDS, THREE AXES NOBODY ENUMERATED. Each round closed the product of
+# the axes it had thought of and the next audit found the radius sitting on one
+# it had not: the EXPONENT, then the SHAPE, then the joint of those two, then
+# the BASE TERM. Widening after each discovery is not converging on anything,
+# because the thing being widened is a list somebody wrote from memory.
+#
+# What ends it is that the seams are PURE FUNCTIONS OF THEIR ARGUMENTS. The
+# row's emitted text for one element is a function of `term` and `exp_val` and
+# of nothing else, so a wrongness IN THE ROW is a different function of those
+# two — which makes the arguments the complete axis list, not a good one but
+# the complete one, and the only way a new axis can appear is for a signature
+# to change. The table below classifies every parameter of all three seams,
+# and the test reads the real signatures with `inspect` and fails if any
+# parameter is missing from it. A future round that adds an argument to a seam
+# therefore fails HERE, before it can fail as a survivor an audit finds.
+#
+# THE LIMIT OF THAT ARGUMENT, because "complete" reads as more than it is. A
+# mutation is arbitrary Python and could condition on something the seam is
+# NOT handed — a call counter, a module global, the clock. Nothing like that
+# is conditioned on a COORDINATE at all, so no product of coordinates would
+# reach it; what it models is a nondeterministic emitter rather than a wrong
+# one, and this file does not gauge that. The claim here is about the space of
+# wrongnesses that are functions of the row's own inputs, which is what a
+# defect in an emission row is. It is also silent about whether a coordinate
+# is swept WIDELY enough — see the test's own docstring.
+#
+# Four statuses, and the difference between them is the whole content:
+#
+#   COORDINATE — recorded in the joint reach and swept. `_RECORDED_
+#                COORDINATES` says which tuple slot, and the arity test
+#                asserts the reach is the full product of them.
+#   DRIVEN     — reaches the seam at more than one value and a wrongness
+#                conditioned on it is CAUGHT, but it is not a joint-reach
+#                coordinate because its values are jax's own variable
+#                numbering rather than a semantic axis of the row, so a
+#                "full product" over it would mean nothing. Pinned by a
+#                battery mutation instead. Only `out_id` is one.
+#   DERIVED    — a pure function of parameters already classified, so it
+#                introduces no axis. Only `aux_name` is one.
+#   DISCLOSED  — reaches a seam, is NOT swept, and is named in the SCOPE
+#                string and in `docs/gauge-coverage.md`'s not-reached list.
+#                The test checks the SCOPE mention rather than trusting it.
+#                **CURRENTLY EMPTY**, so that check is vacuous today; the
+#                class is kept because the next argument added to a seam may
+#                need it, and a vocabulary with nowhere honest to put an
+#                undriven argument is how one gets mislabelled.
+#
+# THAT `out_id` IS `DRIVEN` AND NOT `DISCLOSED` WAS A MEASUREMENT, AND THE
+# FIRST DRAFT OF THIS TABLE GOT IT WRONG. It was written as DISCLOSED — "no
+# fixture holds two independent rational `pow`s" — and then measured, because
+# a classification nobody ran is the same prose defect one level up. The
+# `auxiliary` arm of the base-spelling sweep IS two rational `pow`s, so it had
+# already closed the gap in the same round: `_pow_aux_name` sees two distinct
+# `out_id` values across the battery, and `emit-rational-aux-collides-across-
+# two-pow-OUTPUTS` is caught. The disclosure would have been false the day it
+# shipped.
+_SEAM_ARGUMENTS = {
+    "_pow_integer_body": {
+        "term": ("COORDINATE", "base_kind, plus the element index it carries"),
+        "exp_val": ("COORDINATE", "exp"),
+    },
+    "_pow_rational_lines": {
+        "aux_name": (
+            "DERIVED",
+            "`smt.emit` builds it as `_pow_aux_name(out.id, i, n_out)`, whose "
+            "three parameters are classified below, and every block "
+            "comparison canonicalises it to `AUX` — so it carries no axis of "
+            "its own",
+        ),
+        "base": ("COORDINATE", "base_kind, plus the element index it carries"),
+        "p": ("COORDINATE", "p"),
+        "q": ("COORDINATE", "q"),
+    },
+    "_pow_aux_name": {
+        "out_id": (
+            "DRIVEN",
+            "the auxiliary's FRESHNESS across two different `pow` OUTPUTS. "
+            "Freshness across ELEMENTS is `emit-rational-aux-shared-across-"
+            "elements` and `emit-rational-one-aux-for-two-elements`; across "
+            "OUTPUTS is `emit-rational-aux-collides-across-two-pow-OUTPUTS`, "
+            "which the `auxiliary` arm of the base-spelling sweep made "
+            "reachable — `(x**0.5)**e` is two rational `pow`s and so two "
+            "`out_id`s. Measured: two distinct values reach this seam across "
+            "the battery and the collision is CAUGHT. Not a COORDINATE "
+            "because an `out_id` is jax's variable numbering, so a product "
+            "over it would claim nothing",
+        ),
+        "element": ("COORDINATE", "element"),
+        "n_out": ("COORDINATE", "n_out"),
+    },
+}
+
+# which joint-reach slot each COORDINATE occupies, so the tuple WIDTH and the
+# classification above cannot drift apart
+_RECORDED_COORDINATES = {
+    "integer": ("element", "n_out", "base_kind", "exp"),
+    "rational": ("element", "n_out", "base_kind", "p", "q"),
+    "aux": ("element", "n_out"),
+}
+
+
+def test_every_SEAM_ARGUMENT_is_a_gauged_COORDINATE_or_a_named_exemption():
+    """THE AXIS LIST, DERIVED FROM THE CODE RATHER THAN REMEMBERED.
+
+    This is the generalisation of the last three rounds and it is the only
+    part of this file that is not about `pow`'s exponent or `pow`'s shape.
+    Each round enumerated some axes, closed their product, and was then shown
+    a wrongness conditioned on an axis nobody had listed. The list was the
+    defect, not any of its entries.
+
+    A seam is a pure function of its parameters, so its parameters are the
+    complete set of things a wrongness inside it can be conditioned on. This
+    test reads them off `inspect.signature` and requires each to be classified
+    COORDINATE, DRIVEN, DERIVED or DISCLOSED. Adding a parameter to a seam now
+    fails a test instead of silently opening an axis; so does renaming one,
+    which is the cheaper of the two ways the table could rot.
+
+    RUNNING IT IS WHAT CORRECTED IT. `out_id` was written DISCLOSED — "no
+    fixture holds two independent rational `pow`s" — and the measurement said
+    otherwise: this round's `auxiliary` probe arm is `(x**0.5)**e`, two
+    rational `pow`s and two `out_id`s, so the gap it disclosed had been closed
+    by the same round that wrote the disclosure. It is DRIVEN, pinned by
+    `emit-rational-aux-collides-across-two-pow-OUTPUTS`, and every seam
+    argument now falls in one of the three POSITIVE classes.
+
+    WHAT IT DOES NOT DO, said because "complete" reads as "sufficient": it
+    cannot tell you a COORDINATE is swept WIDELY enough. `exp` is a coordinate
+    and the exponent radius is still a finite set of driven points; `base_kind`
+    is a coordinate and the NUMERAL spelling is outside its driven range. Both
+    are disclosed as ranges, and a range is not what this test closes. What it
+    closes is the enumeration.
+    """
+    for name, table in _SEAM_ARGUMENTS.items():
+        seam = getattr(SM, name)
+        actual = tuple(inspect.signature(seam).parameters)
+        assert actual == tuple(table), (
+            f"`smt.{name}{inspect.signature(seam)}` takes {list(actual)} but "
+            f"the classification table lists {list(table)}. A seam parameter "
+            f"nobody classified is an axis nobody enumerated, and this file "
+            f"has been shown three of those. Add the parameter to "
+            f"`_SEAM_ARGUMENTS` as a COORDINATE (record it in the joint "
+            f"reach and sweep it), as DRIVEN (and pin it with a battery "
+            f"mutation), as DERIVED (and say what it is derived from), or as "
+            f"DISCLOSED (and name it in SCOPE)"
+        )
+        for param, (status, why) in table.items():
+            assert status in ("COORDINATE", "DRIVEN", "DERIVED", "DISCLOSED"), (
+                name, param, status
+            )
+            assert why.strip(), f"{name}.{param}: no reason given"
+
+    # every COORDINATE is really in the joint reach, by TUPLE WIDTH: the
+    # recorder and this table are two descriptions of one thing, and a
+    # coordinate added to one and not the other is the marginal/joint defect
+    # in miniature
+    reach = _measured_seam_reach()
+    assert not reach.inconsistent, reach.inconsistent
+    for field, coords in _RECORDED_COORDINATES.items():
+        got = getattr(reach, field)
+        assert got, f"the {field} reach is empty, so its width says nothing"
+        widths = {len(t) for t in got}
+        assert widths == {len(coords)}, (
+            f"the {field} reach records {sorted(widths)}-wide tuples while "
+            f"`_RECORDED_COORDINATES` names {len(coords)} coordinates "
+            f"{list(coords)}"
+        )
+    # ...and the COORDINATE names the table hands out are exactly the ones the
+    # recorder claims to record (`base_kind` is named by two seams and
+    # recorded once, so this is a set comparison)
+    declared = {
+        c
+        for table in _SEAM_ARGUMENTS.values()
+        for status, why in table.values()
+        if status == "COORDINATE"
+        for c in re.findall(r"\b(element|n_out|base_kind|exp|p|q)\b", why)
+    }
+    recorded = {c for coords in _RECORDED_COORDINATES.values() for c in coords}
+    assert declared == recorded, (
+        f"the seam-argument table maps parameters to coordinates {declared} "
+        f"while the recorder records {recorded}"
+    )
+
+    # every DRIVEN argument names a battery mutation that is CAUGHT, because
+    # "driven" without a pin is the claim `out_id` carried for one draft and
+    # would have shipped as false. The mutation name is read out of the
+    # classification's own reason, so a table entry that names nothing, or
+    # names an item the battery does not have, fails here.
+    caught = dict(_report().caught_by)
+    driven = [
+        (name, param, why)
+        for name, table in _SEAM_ARGUMENTS.items()
+        for param, (status, why) in table.items()
+        if status == "DRIVEN"
+    ]
+    assert driven, (
+        "no seam argument is classified DRIVEN. That is not impossible, but "
+        "it emptied the one class whose members must name a pinning mutation "
+        "— check the table rather than deleting this assertion"
+    )
+    for name, param, why in driven:
+        pins = [m for m in _BACKTICKED.findall(why) if m in caught]
+        assert pins, (
+            f"`smt.{name}`'s `{param}` is classified DRIVEN but its reason "
+            f"names no battery mutation, so nothing keeps it driven. Name the "
+            f"item that would fail if the fixture reaching this argument were "
+            f"deleted"
+        )
+        for item in pins:
+            assert caught[item], (
+                f"`smt.{name}`'s `{param}` is pinned by `{item}`, which "
+                f"SURVIVES every gate — so the argument is not driven after "
+                f"all and the classification is wrong"
+            )
+
+    # every DISCLOSED argument is named in the SCOPE string, or "disclosed"
+    # means "written in a dict nobody reads". Currently VACUOUS: nothing is
+    # DISCLOSED, which is the point of the paragraph above the table.
+    for name, table in _SEAM_ARGUMENTS.items():
+        for param, (status, _why) in table.items():
+            if status == "DISCLOSED":
+                assert param in SCOPE, (
+                    f"`smt.{name}`'s `{param}` is classified DISCLOSED but "
+                    f"the SCOPE string never names it, so nothing a reader "
+                    f"sees says it is undriven"
+                )
 
 
 def test_the_three_conditional_mutations_are_CAUGHT_and_by_the_new_arity():
@@ -2408,15 +3214,16 @@ def test_the_three_conditional_mutations_are_CAUGHT_and_by_the_new_arity():
     )
 
 
-def test_the_shape_probe_reaches_the_EMISSION_at_every_DRIVEN_exponent():
+def test_the_shape_probe_reaches_the_EMISSION_at_every_DRIVEN_exponent_and_KIND():
     """THE SWEEP'S LOAD-BEARING PROPERTY, ASSERTED RATHER THAN ARGUED.
 
-    `gate_emission_is_invariant_to_the_array_shape` treats "no slice" as a
-    CATCH, which is the right conservative direction and also means a probe
-    that quietly stops being emitted at some exponent would turn the gate into
-    a detector for that instead of for the shape. So the probe must be
-    interval-UNDECIDABLE at every exponent it is driven at, and at every
-    element count — and under TWO transfers, not one:
+    `gate_emission_is_invariant_to_the_shape_and_the_base_term` treats "no
+    slice" as a CATCH, which is the right conservative direction and also
+    means a probe that quietly stops being emitted at some exponent would turn
+    the gate into a detector for that instead of for the shape. So the probe
+    must be interval-UNDECIDABLE at every exponent it is driven at, at every
+    element count, and IN EVERY BASE SPELLING — and under TWO transfers, not
+    one:
 
     * under the REAL transfer, or the gate never reaches the row and the
       baseline fails;
@@ -2430,12 +3237,21 @@ def test_the_shape_probe_reaches_the_EMISSION_at_every_DRIVEN_exponent():
     at every exponent (see `_shape_probe_harness`), and this test is what says
     so about the exponents actually driven rather than about the argument.
 
-    AN EXPONENT THAT CANNOT CARRY A PROBE WOULD BE NAMED HERE. The auditor's
+    THE BASE SPELLING IS SWEPT HERE ON THE SAME FOOTING, because it is the
+    argument that let five wrongnesses through. Each arm inserts one
+    computation between the declared array and the `pow` — an `add` for
+    `intermediate`, a rational `pow` for `auxiliary` — and that could in
+    principle change whether the obligation survives the interval domain. It
+    does not, for the reason `_shape_probe_harness` gives (the difference is a
+    SELF-subtraction and each arm's base box stays strictly positive), and
+    this test is what says so rather than the argument.
+
+    A COMBINATION THAT CANNOT CARRY A PROBE WOULD BE NAMED HERE. The auditor's
     own sweep stopped at the integer branch because a box straddling zero
     cannot carry a negative exponent; the failure below prints every
-    (transfer, branch, exponent, element count) that did not reach the
-    emission, so an undriven combination is disclosed by name and never left
-    inside a set the file prints as driven.
+    (transfer, branch, exponent, base kind, element count) that did not reach
+    the emission, so an undriven combination is disclosed by name and never
+    left inside a set the file prints as driven.
     """
     unreached = []
     for label, subject in (
@@ -2443,33 +3259,68 @@ def test_the_shape_probe_reaches_the_EMISSION_at_every_DRIVEN_exponent():
         ("transfer-is-the-base", _mutations()["transfer-is-the-base"]),
     ):
         with _patched(subject):
-            for attr, exponents, record in _INVARIANCE_SWEEP:
+            for attr, exponents, record, base_of in _INVARIANCE_SWEEP:
                 for exponent in exponents:
-                    for n in _INVARIANCE_ELEMENT_COUNTS:
-                        blocks = _seam_blocks(
-                            _shape_probe_harness(exponent, n), attr, record
-                        )
-                        got = None if blocks is None else len(blocks)
-                        if got != n:
-                            unreached.append(
-                                f"{label}: {attr} at exponent {exponent} with "
-                                f"{n} element(s) produced "
-                                f"{'no slice' if got is None else f'{got} seam call(s)'}"
+                    for base_kind in DRIVEN_BASE_KINDS:
+                        for n in _INVARIANCE_ELEMENT_COUNTS:
+                            blocks = _seam_blocks(
+                                _shape_probe_harness(exponent, n, base_kind),
+                                attr, record, base_of, base_kind,
                             )
+                            got = None if blocks is None else len(blocks)
+                            if got != n:
+                                unreached.append(
+                                    f"{label}: {attr} at exponent {exponent} "
+                                    f"on a {base_kind} base with {n} "
+                                    f"element(s) produced "
+                                    f"{'no slice' if got is None else f'{got} seam call(s)'}"
+                                )
     assert not unreached, (
-        "the shape probe does not reach the emission everywhere the invariance "
+        "the probe does not reach the emission everywhere the invariance "
         "gate drives it, so that gate is measuring emittability and not "
-        "shape-invariance at:\n  " + "\n  ".join(unreached)
+        "invariance at:\n  " + "\n  ".join(unreached)
     )
     # ANTI-VACUITY: the sweep must actually be the DRIVEN sets, or the loop
     # above is a small green nothing
-    swept = {attr: tuple(exps) for attr, exps, _ in _INVARIANCE_SWEEP}
+    swept = {attr: tuple(exps) for attr, exps, _, _ in _INVARIANCE_SWEEP}
     assert swept == {
         "_pow_rational_lines": _RATIONAL_FIXTURE_EXPONENTS,
         "_pow_integer_body": _INTEGER_FIXTURE_EXPONENTS,
     }, swept
     assert len(_INVARIANCE_ELEMENT_COUNTS) > 1 and min(
         _INVARIANCE_ELEMENT_COUNTS) == 1
+    # ...and the base-kind sweep is the PROBE TABLE, so `DRIVEN_BASE_KINDS`
+    # cannot name a spelling no arm produces, nor omit one that an arm does
+    assert DRIVEN_BASE_KINDS == tuple(sorted(_BASE_KIND_BASES)), (
+        f"DRIVEN_BASE_KINDS is {list(DRIVEN_BASE_KINDS)} but the probe table "
+        f"realises {sorted(_BASE_KIND_BASES)}"
+    )
+    # ...and each arm really does hand the seam the spelling it is filed
+    # under. The reach measurement asserts this across the whole battery;
+    # asserting it per ARM is what makes the arm itself the thing under test —
+    # an `intermediate` arm whose `+ 1.0` jax folded away would otherwise just
+    # narrow the measured set and be blamed on some other fixture.
+    for base_kind in DRIVEN_BASE_KINDS:
+        seen = set()
+        real = SM._pow_integer_body
+        sl = _slice_of(
+            _shape_probe_harness(_INTEGER_FIXTURE_EXPONENTS[0], 2, base_kind)
+        )
+        assert sl is not None, (
+            f"the {base_kind!r} probe arm is interval-decided at two "
+            f"elements, so there is no emission to read a spelling off"
+        )
+        with mock.patch.object(
+            SM, "_pow_integer_body",
+            lambda t, e: (seen.add(_base_kind_of(t)), real(t, e))[1],
+        ):
+            SM.emit(sl, "z3", TIMEOUT_MS)
+        assert base_kind in seen, (
+            f"the {base_kind!r} probe arm hands `_pow_integer_body` a base "
+            f"spelled {sorted(seen)} — the arm is not driving the kind it is "
+            f"filed under, so the sweep is narrower than DRIVEN_BASE_KINDS "
+            f"says"
+        )
 
 
 # --- the conditional mutations' arithmetic, in ONE place that computes it ----
@@ -2733,7 +3584,9 @@ def test_the_shape_conditioned_mutations_are_CAUGHT_by_the_INVARIANCE_gate(item)
     vacuity re-check intercepts it — which is disclosed in the table above and
     MEASURED here rather than left as a sentence."""
     caught = dict(_report().caught_by)
-    assert caught[item.mutation] == ("emission-is-invariant-to-the-array-shape",), (
+    assert caught[item.mutation] == (
+        "emission-is-invariant-to-the-shape-and-the-base-term",
+    ), (
         f"{item.mutation} must be caught by the invariance gate ALONE — every "
         f"other fixture in this battery drives one or two elements, and that "
         f"blindness is the finding. Measured: {list(caught[item.mutation])}"
@@ -2780,6 +3633,319 @@ def test_the_shape_conditioned_mutations_are_CAUGHT_by_the_INVARIANCE_gate(item)
         # re-derives is the defect class this whole file is about.
         with pytest.raises(EmissionInfidelityError):
             _run(h, _mutations()[item.mutation])
+
+
+@dataclass(frozen=True)
+class _BaseKindCatch:
+    """One base-kind-conditioned mutation, the program whose violation it
+    hides, and the arithmetic to recompute. Nothing here is a result: the
+    exponent, the box, the bound and the truth's exact rational value are
+    inputs; both outcomes and the comparison are derived.
+
+    There is no `build` field: the base is built by `_BASE_KIND_BASES[kind]`,
+    the SAME callable the invariance gate's probe arm uses. That is what makes
+    the program and the arm produce the same spelling by construction rather
+    than by two definitions agreeing — and the test measures the spelling that
+    actually arrives at the seam anyway, because "by construction" is an
+    argument and this file prefers a measurement."""
+
+    mutation: str
+    kind: str
+    exponent: float
+    box: tuple[float, float]
+    bound: float
+    truth: Fraction
+
+    @property
+    def build(self):
+        return _BASE_KIND_BASES[self.kind]
+
+
+# Each row's base comes from `_BASE_KIND_BASES[kind]`, so a row's program and
+# the probe arm its mutation is aimed at are the same construction. The
+# `auxiliary` rows therefore chain a RATIONAL `pow`, which is what names an
+# auxiliary at all — an integer inner `pow` would define a `t...` like any
+# other row and the row would be testing `intermediate` twice.
+#
+# The boxes differ per row because each has to be interval-UNDECIDABLE at its
+# own exponent, which is the one thing the shape probe's difference predicate
+# buys and a scalar bound does not.
+_BASE_KIND_CATCHES = (
+    _BaseKindCatch(
+        mutation="emit-integer-wrong-only-on-a-COMPUTED-base-at-degree-three",
+        kind="intermediate",
+        exponent=3.0, box=(1.0, 2.0), bound=23.0, truth=Fraction(27),
+    ),
+    _BaseKindCatch(
+        mutation="emit-integer-wrong-only-on-an-AUXILIARY-base-at-degree-three",
+        kind="auxiliary",
+        exponent=3.0, box=(1.0, 4.0), bound=7.9, truth=Fraction(8),
+    ),
+    _BaseKindCatch(
+        mutation="emit-rational-wrong-only-on-a-COMPUTED-base-at-q-two",
+        kind="intermediate",
+        exponent=0.5, box=(0.0, 80.0), bound=8.9, truth=Fraction(9),
+    ),
+    _BaseKindCatch(
+        mutation="emit-rational-wrong-only-on-an-AUXILIARY-base-at-q-two",
+        kind="auxiliary",
+        exponent=0.5, box=(1.0, 6561.0), bound=8.9, truth=Fraction(9),
+    ),
+)
+
+
+def _base_kind_harness(item):
+    """`build(x) ** exponent <= bound`, false at the box's upper extremum.
+
+    SCALAR and element 0, deliberately: every coordinate this program drives
+    is one the file prints as driven — element 0, `n_out` 1, a DRIVEN exponent
+    — so a survivor here could never have been blamed on the disclosed
+    exponent radius or on the element-count bound. The one coordinate outside
+    the set the predecessor drove is the base's SPELLING, which is the point.
+    """
+
+    def h():
+        x = any_array((), "float64", item.box)
+        return (assert_(jnp.power(item.build(x), item.exponent) <= item.bound),)
+
+    return h
+
+
+@pytest.mark.parametrize(
+    "item", _BASE_KIND_CATCHES, ids=lambda i: i.mutation
+)
+def test_the_base_kind_conditioned_mutations_are_CAUGHT_by_the_INVARIANCE_gate(
+    item,
+):
+    """THE AXIS NOBODY ENUMERATED, PINNED — each mutation to the gate that
+    kills it and to the missed violation it produces without one.
+
+    Every fixture in this battery raised a DECLARED PROGRAM INPUT to a power.
+    Measured across all 22 gates on `e8621a9`, the base-term prefix reaching
+    either exponent seam was `x` and nothing else — so a wrongness conditioned
+    on "the base is not an input" was correct on every fixture and survived
+    everything. `pow` applied to a COMPUTED quantity is what real programs do,
+    which is what makes this the sharpest of the four axes this file has had
+    to add.
+
+    THE ATTRIBUTION MATTERS MORE THAN THE CATCH, exactly as it does for the
+    shape-conditioned items. What kills these must be the gate that CLOSES the
+    base-term axis — not a second fixture that happens to `pow` an
+    intermediate, which would answer these four mutations and leave the next
+    spelling open. So the exclusivity is asserted: no other gate sees them,
+    which is the statement that every solver-driven fixture in this battery is
+    blind to what its base is spelled as.
+
+    The arithmetic is RECOMPUTED. The truth at the box extremum is an exact
+    `Fraction`, it is compared against the BINARY64 bound the traced program
+    carries rather than the decimal that resembles it, and jax's own execution
+    on this target is required to agree — the oracle is the target, never
+    stelling.
+
+    THE MISSED VIOLATION IS READ OFF `escalate`, NOT OFF `check().status`, for
+    the reason the module docstring gives: a `check` status carries the bar
+    and the vacuity machinery on top of the row. `violated-witness` becoming
+    `discharged` IS the missed violation at the row's own layer. The
+    end-to-end verdict is asserted too, because these four ride all the way
+    out as false VERIFIEDs with nothing intercepting them — which is the whole
+    reason the axis matters and is measured here rather than described."""
+    caught = dict(_report().caught_by)
+    assert caught[item.mutation] == (
+        "emission-is-invariant-to-the-shape-and-the-base-term",
+    ), (
+        f"{item.mutation} must be caught by the invariance gate ALONE — every "
+        f"other fixture in this battery raises a DECLARED INPUT to a power, "
+        f"and that blindness is the finding. Measured: "
+        f"{list(caught[item.mutation])}"
+    )
+
+    # the mutation really is conditioned on the KIND and not on the exponent:
+    # at the same exponent with an `input` base it emits the row's own text
+    ((_mod, attr, mutation),) = _mutations()[item.mutation]["__patches__"]
+    real = getattr(SM, attr)
+    if attr == "_pow_integer_body":
+        assert mutation("x0", 3) == real("x0", 3), (
+            f"{item.mutation} is wrong on an INPUT base too, so it is not "
+            f"conditioned on the base kind and this attribution measures "
+            f"nothing"
+        )
+        spelled = {"intermediate": "t9", "auxiliary": "aux_9"}[item.kind]
+        assert mutation(spelled, 3) != real(spelled, 3), (
+            f"{item.mutation} emits the row's own text on a {item.kind} base, "
+            f"so it is not wrong where its gate looks"
+        )
+    else:
+        assert mutation("aux_0", "x0", 1, 2) == real("aux_0", "x0", 1, 2), (
+            f"{item.mutation} is wrong on an INPUT base too"
+        )
+        spelled = {"intermediate": "t9", "auxiliary": "aux_9"}[item.kind]
+        assert mutation("aux_0", spelled, 1, 2) != real(
+            "aux_0", spelled, 1, 2
+        ), (
+            f"{item.mutation} emits the row's own text on a {item.kind} base"
+        )
+
+    # the violation is REAL at the box extremum, against the binary64 bound
+    assert item.truth > Fraction(item.bound), (
+        f"{item.mutation}'s fixture is not violated at the extremum: "
+        f"{item.truth} <= {Fraction(item.bound)}, so there is no missed "
+        f"violation to hide"
+    )
+    # ...and jax agrees on this target, which is the oracle that matters
+    hi = jnp.asarray(item.box[1], jnp.float64)
+    executed = float(np.asarray(jnp.power(item.build(hi), item.exponent)))
+    assert executed > item.bound, (item.mutation, executed, item.bound)
+
+    # the program drives ONLY coordinates the file prints as driven, so a
+    # survivor could never have been blamed on the exponent radius
+    h = _base_kind_harness(item)
+    assert _base_kind_of(_probe_base_term(h, attr)) == item.kind, (
+        f"{item.mutation}'s program does not hand `{attr}` a {item.kind} base"
+    )
+
+    # the MISSED VIOLATION itself, at the row's own layer...
+    assert _outcomes(h, BASELINE) == ("violated-witness",)
+    assert _outcomes(h, _mutations()[item.mutation]) == ("discharged",), (
+        f"{item.mutation} no longer turns a violated obligation into a "
+        f"discharged one; it is in the battery to pin the base-kind "
+        f"measurement and has stopped being the thing it pins"
+    )
+    # ...and all the way out to the VERDICT, with nothing intercepting it
+    assert _run(h, BASELINE).status == "REFUTED"
+    assert _run(h, _mutations()[item.mutation]).status == "VERIFIED", (
+        f"{item.mutation} no longer mints a false VERIFIED end to end — "
+        f"either the pipeline changed or this item has stopped being the "
+        f"demonstration it is here to be"
+    )
+
+
+def _probe_base_term(harness, attr):
+    """The base term `smt.<attr>` is actually handed when `harness` is
+    emitted. Measured, so a fixture that stopped producing the spelling it
+    claims fails rather than quietly narrowing the sweep."""
+    seen = []
+    real = getattr(SM, attr)
+    idx = 0 if attr == "_pow_integer_body" else 1
+    sl = _slice_of(harness)
+    assert sl is not None, "the fixture is interval-decided, so nothing emits"
+
+    def spy(*args):
+        seen.append(args[idx])
+        return real(*args)
+
+    with mock.patch.object(SM, attr, spy):
+        SM.emit(sl, "z3", TIMEOUT_MS)
+    assert seen, f"`{attr}` was never called"
+    return seen[-1]
+
+
+# Every function here that reads a `check()` STATUS against `"VERIFIED"`,
+# split by the DIRECTION of the comparison, because the direction is what
+# decides whether the `pow` bar breaks it.
+#
+#   `== "VERIFIED"` REQUIRES the verdict the bar withholds, so the bar turns
+#   it red. These are the demonstrations the module docstring's bar paragraph
+#   names, and they are bar-dependent by construction.
+#
+#   `!= "VERIFIED"` REFUSES that verdict, so the bar — which can only turn a
+#   VERIFIED into an UNKNOWN — makes it MORE true and cannot flip a pass into
+#   a failure. That is why the battery reads identically with `pow` barred
+#   even though this gate does touch `check`.
+_BAR_DEPENDENT_TESTS = frozenset({
+    "test_the_shape_conditioned_mutations_are_CAUGHT_by_the_INVARIANCE_gate",
+    "test_the_base_kind_conditioned_mutations_are_CAUGHT_by_the_INVARIANCE_gate",
+})
+_BAR_SAFE_STATUS_READERS = frozenset({"gate_non_dyadic_exponent_declines"})
+
+
+def test_the_bar_DEPENDENT_demonstrations_are_the_ones_this_DOCSTRING_names():
+    """THE BAR PARAGRAPH'S STRUCTURAL HALF, PINNED TO THE SOURCE.
+
+    The module docstring claims the battery is bar-independent and that the
+    exceptions are the per-item verdict lines of two named tests. The first
+    half is `tests/test_bar_membership_policy.py`'s to price and this file's
+    design to earn; the second half is a fact about THIS file's source, and it
+    is what went stale twice — the sentence said only "nine PRE-EXISTING tests
+    elsewhere" while conditional items with `check().status` assertions were
+    added under it in two consecutive rounds.
+
+    So this scans the module's own AST for every comparison of a `.status`
+    attribute against `"VERIFIED"` and requires the enclosing functions to be
+    exactly the declared ones. Add a third and it fails until the paragraph
+    names it.
+
+    THE DIRECTION OF THE COMPARISON IS THE WHOLE OF IT, and writing this test
+    is what showed that the file had one of each. A gate that requires
+    `status == "VERIFIED"` needs the verdict the bar withholds and goes red
+    under it. `gate_non_dyadic_exponent_declines` asserts
+    `status != "VERIFIED"` — audit S1's "a nearby rational is a different
+    function, so this must never verify" — and the bar can only turn a
+    VERIFIED into an UNKNOWN, so it makes that gate's condition MORE true and
+    cannot flip a pass into a failure. Measured: with `pow` barred the battery
+    reads identically, this gate included. The two sets below are therefore
+    kept apart rather than merged into "functions that touch `check`", because
+    merging them would lose exactly the distinction that makes the battery
+    bar-independent while the demonstrations are not.
+
+    IT PINS THE NAMES, NOT THE COUNT, and the difference is deliberate. `7 ==
+    len(_SHAPE_CONDITIONED_CATCHES) + len(_BASE_KIND_CATCHES)` is true on this
+    tree, but two of the three shape items assert VERIFIED while the third
+    asserts `EmissionInfidelityError` and reds for a reason of its own; that
+    the totals agree is a coincidence of this tree rather than an identity, and
+    an assertion of it would be an instrument nobody derived. The digit stays a
+    dated measurement with its environment printed beside it."""
+    tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"))
+    requires: set[str] = set()
+    refuses: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for sub in ast.walk(node):
+            if not (
+                isinstance(sub, ast.Compare)
+                and isinstance(sub.left, ast.Attribute)
+                and sub.left.attr == "status"
+            ):
+                continue
+            for op, comparator in zip(sub.ops, sub.comparators):
+                if not (
+                    isinstance(comparator, ast.Constant)
+                    and comparator.value == "VERIFIED"
+                ):
+                    continue
+                if isinstance(op, ast.Eq):
+                    requires.add(node.name)
+                elif isinstance(op, ast.NotEq):
+                    refuses.add(node.name)
+                else:  # pragma: no cover - no other operator is meaningful
+                    raise AssertionError(
+                        f"{node.name} compares a status against 'VERIFIED' "
+                        f"with {type(op).__name__}, which this test cannot "
+                        f"classify as bar-dependent or bar-safe"
+                    )
+    assert requires == set(_BAR_DEPENDENT_TESTS), (
+        f"the functions REQUIRING a check() status of VERIFIED are "
+        f"{sorted(requires)}, but the module docstring's bar paragraph names "
+        f"{sorted(_BAR_DEPENDENT_TESTS)}. Those assertions go red when `pow` "
+        f"is in `verdict.VERIFIED_BARRED_PRIMITIVES`, so a new one is a new "
+        f"exception to a paragraph that claims to list them"
+    )
+    assert refuses == set(_BAR_SAFE_STATUS_READERS), (
+        f"the functions REFUSING a check() status of VERIFIED are "
+        f"{sorted(refuses)}, not {sorted(_BAR_SAFE_STATUS_READERS)}. Such a "
+        f"reader is bar-SAFE — the bar only turns VERIFIED into UNKNOWN — but "
+        f"it is still a gate touching `check`, and the docstring's claim that "
+        f"the gates read `escalate` has to name it"
+    )
+    # ANTI-VACUITY: two empty sets compare equal, and a docstring naming
+    # nothing would pass a scan finding nothing
+    assert requires and refuses, (requires, refuses)
+    for name in _BAR_DEPENDENT_TESTS | _BAR_SAFE_STATUS_READERS:
+        assert name in __doc__, (
+            f"{name} reads a check() status of VERIFIED but the module "
+            f"docstring does not name it, so the paragraph a reader sees is "
+            f"not the list this test checks"
+        )
 
 
 def test_the_odd_denominator_branch_is_UNREACHABLE_and_FAILS_CLOSED():
@@ -3112,7 +4278,7 @@ def test_every_gate_passes_the_baseline_and_catches_its_battery():
     # what the exclusivity was standing in for and is stronger than it:
     assert set(caught["emit-rational-one-aux-for-two-elements"]) == {
         "refutes-the-false-vector-property",
-        "emission-is-invariant-to-the-array-shape",
+        "emission-is-invariant-to-the-shape-and-the-base-term",
     }, (
         f"the well-formed aux sharing is caught by "
         f"{list(caught['emit-rational-one-aux-for-two-elements'])}; it must be "
@@ -3138,12 +4304,14 @@ _MEASURED_RE = re.compile(
 # digits as prose for exactly as long as it took to write them, which is the
 # defect the MEASURED line above already exists to prevent — and the joint reach
 # is the figure this round is about, so it gets the same treatment rather than a
-# weaker one. The shape count is a BACKREFERENCE, so the two halves of the
-# sentence cannot disagree about it.
+# weaker one. The shape count and the BASE SPELLING count are BACKREFERENCES, so
+# the two halves of the sentence cannot disagree about either.
 _JOINT_RE = re.compile(
     r"JOINT\s+REACH:\s+\*\*(?P<shapes>\d+)\s+\(element,\s*n_out\)\s+shapes"
+    r"\s+x\s+(?P<kinds>\d+)\s+base\s+spellings"
     r"\s+x\s+(?P<ints>\d+)\s+integer\s+exponents\s+=\s+(?P<int_tuples>\d+)"
-    r"\s+tuples;\s+(?P=shapes)\s+x\s+(?P<pqs>\d+)\s+\(p,\s*q\)\s+pairs"
+    r"\s+tuples;\s+(?P=shapes)\s+x\s+(?P=kinds)\s+x\s+(?P<pqs>\d+)"
+    r"\s+\(p,\s*q\)\s+pairs"
     r"\s+=\s+(?P<rat_tuples>\d+)\s+tuples\s+.\s+the\s+FULL\s+PRODUCT\s+in"
     r"\s+both\s+cases\.\*\*"
 )
@@ -3316,7 +4484,26 @@ def test_the_documented_coverage_figures_are_the_MEASURED_ones():
     # It is the figure this round is about, so it is recomputed and not typed.
     # A page that prints "the FULL PRODUCT" while the measurement is 24 of 84
     # is the exact shape of the claim the three marginals used to license.
+    #
+    # AND THE VALIDITY FLAG IS READ BEFORE THE FIGURE IS, which is a defect
+    # this file names and then committed one consumer down. `_SeamReach`
+    # carries `inconsistent` exactly so a broken measurement fails loudly
+    # rather than reporting a narrow reach as a clean one, and
+    # `test_the_driven_arity_...` guards on it — this test read `.shapes`,
+    # `.integer` and `.rational` and asserted "the FULL PRODUCT" without ever
+    # looking. Measured: perturbing `smt.emit` so the recorder's LIFO
+    # mis-pairs the aux call with the lines call reds the arity test and left
+    # THIS one green, printing 63 of 63 off 54 inconsistent entries. The
+    # suite impact was nil because the two reds together, but a consumer that
+    # prints a figure from a measurement whose validity flag it never reads is
+    # the defect class whatever else is green in the same session.
     reach = _measured_seam_reach()
+    assert not reach.inconsistent, (
+        "the seam recorder could not reconcile what it saw, so the joint "
+        "figures below are not a measurement and the page's FULL PRODUCT "
+        "claim cannot be checked against them:\n  "
+        + "\n  ".join(reach.inconsistent)
+    )
     joint = _JOINT_RE.search(text)
     assert joint is not None, (
         f"{_DOC.name} no longer carries the machine-checked JOINT REACH line "
@@ -3325,6 +4512,7 @@ def test_the_documented_coverage_figures_are_the_MEASURED_ones():
     )
     for field, value in (
         ("shapes", len(reach.shapes)),
+        ("kinds", len(reach.base_kinds)),
         ("ints", len(reach.integer_exponents)),
         ("int_tuples", len(reach.integer)),
         ("pqs", len(reach.rational_pq)),
