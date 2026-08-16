@@ -506,6 +506,20 @@ Both failure modes here were hit in one sitting while writing this section:
 In both cases the passing test would have supported "guard UNCOVERED." Neither was
 true.
 
+**And separate a GUARD from a VALUE READ before applying any of this.** A guard
+exists to refuse; if nothing can be built that its mutation breaks, it is not
+earning its place and the record says so. A call whose job is to *produce the
+quantity some other reader already produced* is a different thing: its mutation
+may be unobservable precisely because the two readers agree, which is the property
+it exists to hold. Reverting it to an independent read is then the defect, not the
+control. Record such a site as **unreachable as a guard**, with the reason, rather
+than claiming a test reds on it or deleting it — and never let "reverted alone,
+and a test goes red" be said about a batch in which one such site sits. Audit
+0.2.0 B6 audit 3 found exactly that: `obligation._Slicer.slice`'s slice-input
+reader reverts with zero suite reds, because the element budget has already called
+the same reader over the same variables; it is kept because an independent read
+there is the UNSOUND finding the batch was about.
+
 ## A decline rule must trace to a measured discrepancy with a magnitude
 
 A parameter-space gauge earns a decline rule by showing that the operation's real

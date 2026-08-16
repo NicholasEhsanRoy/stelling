@@ -10629,7 +10629,22 @@ def _assume_equation_ids(jaxpr) -> frozenset:
 def _declared_element_count(jaxpr) -> int:
     """Total elements across every ``stelling_any`` declaration in the
     query — the size the user declared, which is what the certificate
-    search's cap is stated in."""
+    search's cap is stated in.
+
+    **THIS READS THE OUTVAR AVAL; THE EMISSION PATH READS THE ``shape``
+    PARAM.** The two disagree on a declaration that describes itself
+    twice — an absent ``shape`` param reads as ``()`` there and as the
+    aval's own count here — so this function is the library's SECOND
+    reader of a declaration's element count, and
+    ``obligation._Slicer._declared_shape``'s docstring used to claim it
+    was the only one (audit 0.2.0 B6 audit 3, F4). Reading the aval here
+    is sound, and it is not an exception to that rule: the count gates
+    only the CAP in :func:`_region_witness` — whether the non-emptiness
+    search RUNS — whose direction is toward REFUTED, and the search
+    re-derives its witness by re-running the honest propagator, so no
+    verdict is derived from this number. Should that ever stop being
+    true, this must move to the param.
+    """
     total = 0
     stack = [jaxpr]
     while stack:

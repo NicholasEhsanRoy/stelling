@@ -594,23 +594,67 @@ class _Decline(Exception):
         self.reason = reason
 
 
-def _shape_problem(shape) -> str | None:
-    """The uninhabited/malformed-shape problem of a static shape, or None.
+def _extents(shape) -> tuple[str | None, tuple[int, ...]]:
+    """A static shape's extents NORMALISED to plain ``int``, paired with
+    the uninhabited/malformed-shape problem that stopped the
+    normalisation — ``(None, extents)`` when there is none.
+
     Two measured predicates (fix re-attacks R1/N1/N2): every extent must
     be INTEGRAL (from_dict does not coerce shape entries — a string
     extent made `d < 0` raise raw, and `1 * "x"` is silent garbage in a
     size product) and NONNEGATIVE (jax rejects negative extents in every
-    concrete context: the type is uninhabited). Zero extents are legal."""
+    concrete context: the type is uninhabited). Zero extents are legal.
+
+    **IT RETURNS A VALUE AND NOT ONLY A VERDICT, AND THAT IS WHY IT
+    EXISTS** — audit 0.2.0 B6 audit 3, F1. Its first spelling was
+    :func:`_shape_problem` alone: it bound ``k = _op_index(d)``, tested
+    ``k``, and DISCARDED it, so :meth:`_Slicer._declared_shape` re-read
+    every extent with a second ``_op_index(d)`` and returned THAT — two
+    reads per extent, and the returned one was the unvalidated one. An
+    object whose ``__index__`` answers ``4`` and then ``-1`` was validated
+    at ``4`` and emitted as ``(-1,)``, where ``_size`` takes a NEGATIVE
+    contribution to the element budget and ``range(-1)`` mints no symbols
+    at all. A guard that tests a value nobody keeps has not guarded the
+    value the emission uses. This is the identical defect this same batch
+    fixed one module over in
+    :func:`stelling.interval.dot_general_geometry`'s ``_indices``, and the
+    repair is the identical one: read once, and hand the caller what was
+    read.
+
+    **NOT ONLY** ``TypeError`` — audit 0.2.0 B6 audit 3, F2.
+    ``operator.index`` raises whatever ``__index__`` raises, so a
+    ``ValueError`` or an ``OverflowError`` from a hostile extent escaped
+    this predicate raw and reached the caller as *"internal error"*
+    through :func:`slice_obligation`'s net. An extent that will not answer
+    ``__index__`` is a non-integer extent whatever it raises saying so,
+    and the extent is quoted through :func:`_safely` because an object
+    that refuses ``__index__`` may refuse ``__repr__`` too.
+    """
+    out: list[int] = []
     for d in shape:
         try:
             k = _op_index(d)
-        except TypeError:
-            return f"a non-integer extent {d!r} (malformed IR)"
+        except Exception:  # noqa: BLE001 — unreadable IS the finding
+            return (
+                f"a non-integer extent "
+                f"{_safely(lambda: repr(d), '<unreadable>')} (malformed IR)",
+                (),
+            )
         if k < 0:
             return (
-                "a negative extent (no jax program constructs such a value)"
+                "a negative extent (no jax program constructs such a value)",
+                (),
             )
-    return None
+        out.append(k)
+    return None, tuple(out)
+
+
+def _shape_problem(shape) -> str | None:
+    """:func:`_extents`' problem alone, for the readers that only need the
+    verdict — an aval's shape they are about to compare, not a param they
+    are about to mint terms from. Every reader that needs the COUNT calls
+    :func:`_extents` and binds what it returns."""
+    return _extents(shape)[0]
 
 
 def _size(shape: tuple[int, ...]) -> int:
@@ -1998,18 +2042,45 @@ class _Slicer:
         """THE SHAPE A ``stelling_any`` BINDS ITS VALUE AT: its ``shape``
         PARAM, normalised, or a decline when that param cannot be read.
 
-        THE ONE READER, and being the one reader is the whole point of it
-        (audit 0.2.0 B6 re-audit, UNSOUND-1). A declaration describes
-        itself TWICE — a ``shape`` param and an outvar aval — and
-        :meth:`slice` mints one SMT constant per element of the **param**
-        (``x{k}_{i}`` over ``_size(shape)``), never per element of the
-        aval. So the param is the quantity every other reader of "how many
-        elements does this value have" must also read; a reader that
-        reaches for the aval instead is comparing a quantity nothing
-        emits. All three sites that need the answer — the element budget,
-        the input-term construction and :meth:`_binding_shape` — call this
-        method, so the emission and the check that guards it cannot read
-        different quantities by drifting apart.
+        ONE RULE FOR THE EMISSION PATH, and that is the point of it (audit
+        0.2.0 B6 re-audit, UNSOUND-1). A declaration describes itself TWICE
+        — a ``shape`` param and an outvar aval — and :meth:`slice` mints
+        one SMT constant per element of the **param** (``x{k}_{i}`` over
+        ``_size(shape)``), never per element of the aval. So the param is
+        the quantity every reader on that path must also read; a reader
+        that reaches for the aval instead is comparing a quantity nothing
+        emits. The three sites in the emission path that need a
+        declaration's element count — the budget, :meth:`_binding_shape`
+        and the input-term construction — all call this method, so none
+        can implement a different rule from the others.
+
+        **THIS IS NOT A SINGLE READ, and the docstring said it was —
+        audit 0.2.0 B6 audit 3, F4.** Each call re-reads the param, and an
+        object that answers differently between calls does make the check
+        and the emission differ. A ``list`` SUBCLASS — which
+        ``isinstance(raw, (tuple, list))`` admits — whose ``__iter__``
+        yields ``(4,)`` for three reads and ``()`` after was checked at
+        ``(4,)`` and minted ONE input for a four-element reference;
+        :meth:`slice` alone reads it three times. What catches that is not
+        this method but :meth:`ir.ClosedJaxpr.content_hash`, which cannot
+        encode a param that answers differently between iterations: it
+        RAISES, ``solvers._query_sha256`` swallows that to ``""``, and the
+        pairing gate refuses an empty hash. Naming the containment where it
+        actually is matters, because "cannot drift apart" invites the next
+        reader to stop looking.
+
+        **AND IT IS NOT THE LIBRARY'S ONLY READER of a declaration's
+        element count.** :func:`stelling.propagate._declared_element_count`
+        reads the outvar AVAL — the other quantity — for the
+        certificate-search cap. That is sound, and it is not an exception
+        to the rule above: the cap only gates WHETHER the region search
+        runs, its direction is toward REFUTED, and the search re-derives
+        its witness by re-running the honest propagator, so no verdict is
+        derived from the miscount. It is named here because a global claim
+        of sole readership that a `grep` refutes is worse than no claim.
+        The narrower statement in ``SOUNDNESS.md`` — that the budget, the
+        input-term construction and :meth:`_binding_shape` all read this —
+        is the true one.
 
         FAILING CLOSED IS THE POINT OF THE VALIDATION HERE, AND IT DOES NOT
         REST ON ``ir.py``. That door was closed in the same commit, but
@@ -2022,34 +2093,75 @@ class _Slicer:
         cannot read is neither an internal error nor a pass: it is a value
         whose element count nothing can agree on, and the slice declines.
 
-        ``str`` and ``bytes`` are refused rather than iterated for the
-        reason :func:`_frames` gives about ``str``: ``tuple(b"34")`` is
-        ``(51, 52)``, a pair of perfectly plausible extents that the
-        declaration never said.
+        WHAT IS ACCEPTED IS STATED POSITIVELY: a ``tuple`` or a ``list``,
+        the only forms :func:`ir._decode` builds and the only forms jax's
+        own params carry. The reason is the one :func:`_frames` gives
+        about ``str`` — ``tuple(b"34")`` is ``(51, 52)``, a pair of
+        perfectly plausible extents the declaration never said — but the
+        rule may not be spelled as the list of containers that hazard was
+        first noticed in. It was, and ``memoryview`` and ``array.array``
+        walked past it with the identical reading (audit 0.2.0 B6 audit
+        3). Stated the other way round, the character sequences fall out
+        of the rule instead of being named by it, and so does whichever
+        sequence type is noticed next.
         """
         raw = decl.params_dict().get("shape", ())
-        if isinstance(raw, (str, bytes, bytearray)):
+        # A POSITIVE TEST, not a list of refused containers — audit 0.2.0
+        # B6 audit 3, the optional item. This branch used to read
+        # `isinstance(raw, (str, bytes, bytearray))`, and `memoryview` and
+        # `array.array` walked past it: `tuple(memoryview(b"34"))` is
+        # `(51, 52)`, the same pair of perfectly plausible extents the
+        # `bytes` arm exists to refuse, and the door accepted it. Adding
+        # two more names to that tuple is "the container type I happened
+        # to enumerate", which is the reasoning `ir._validate_param_value`
+        # is annotated as condemning. So the rule is stated the other way
+        # round: the extents of a declaration are recorded in a `tuple` or
+        # a `list` — the only forms `ir._decode` builds, the only forms
+        # jax's own params carry — and anything else declines. The
+        # character sequences fall out of that instead of being named by
+        # it, and so does the next exotic sequence type.
+        if not isinstance(raw, (tuple, list)):
+            # quoted through `_safely` for the reason the branch below
+            # already was: a `str` SUBCLASS can carry a `__repr__` that
+            # raises, and an unguarded `{raw!r}` here turned this clean
+            # decline into "internal error: RuntimeError: repr refuses"
+            # (audit 0.2.0 B6 audit 3, F3). A refusal message about an
+            # object already known to be malformed may not itself raise.
             raise _Decline(
                 f"input declaration of variable {vid} has a shape param "
-                f"{raw!r}: a string of characters or bytes is not a "
-                f"sequence of extents, and reading it as one would model "
-                f"an array the declaration never described (malformed IR)"
+                f"{_safely(lambda: repr(raw), '<unreadable>')} of type "
+                f"{_safely(lambda: type(raw).__name__, '<unreadable>')}: a "
+                f"declaration records its extents in a tuple or a list, and "
+                f"this is not a sequence of extents in that form — reading "
+                f"it as one would model an array the declaration never "
+                f"described (`tuple(b\"34\")` is `(51, 52)`) (malformed IR)"
             )
         try:
             shape = tuple(raw)
         except Exception:  # noqa: BLE001 — unreadable IS the finding
+            # `isinstance` is a claim about the TYPE and not the object:
+            # a `list` SUBCLASS whose `__iter__` raises satisfies the test
+            # above, which is the same R5 finding `_frames` carries.
             raise _Decline(
                 f"input declaration of variable {vid} has a shape param "
                 f"{_safely(lambda: repr(raw), '<unreadable>')} that is not "
                 f"a sequence of extents, so the number of elements the "
                 f"emission would mint for it cannot be read (malformed IR)"
             ) from None
-        problem = _shape_problem(shape)
+        # BOUND to what the guard read, not re-read after it — audit 0.2.0
+        # B6 audit 3, F1. The first spelling called `_shape_problem(shape)`,
+        # which validated each extent and threw the answer away, and then
+        # returned `tuple(_op_index(d) for d in shape)`: a SECOND read, and
+        # the one the emission got. `_extents` reads once and hands back
+        # what it tested.
+        problem, extents = _extents(shape)
         if problem is not None:
             raise _Decline(
-                f"input declaration of shape {shape!r} has {problem}"
+                f"input declaration of shape "
+                f"{_safely(lambda: repr(shape), '<unreadable>')} has "
+                f"{problem}"
             )
-        return tuple(_op_index(d) for d in shape)
+        return extents
 
     def _binding_shape(self, atom: ir.Var) -> tuple[int, ...] | None:
         """The shape the value ACTUALLY HAS, read at the site that binds
@@ -3051,9 +3163,27 @@ class _Slicer:
             # the shape this mints terms from is by construction the shape
             # the cross-check compared every reference against. An empty
             # declared set (a negative extent — fix-re-attack R1) declines
-            # inside it, through `_shape_problem`: no array of such a shape
+            # inside it, through `_extents`: no array of such a shape
             # exists, so there is nothing to declare and any universal
             # claim over it is vacuous.
+            #
+            # AND THIS CALL IS UNREACHABLE AS A GUARD, RECORDED RATHER THAN
+            # CLAIMED — audit 0.2.0 B6 audit 3, F5. Reverting it alone to
+            # its own independent read reds NOTHING in the suite, because
+            # the budget loop above has already called `_declared_shape`
+            # over the same vids and declined for the same reasons. The
+            # batch's "each change has a test that reds when reverted
+            # alone" was therefore false here, and `docs/norms.md` forbids
+            # exactly the move of asserting coverage by construction.
+            #
+            # It is KEPT, and not deleted, because it is not a guard: it is
+            # a VALUE read, and the value it must produce is the one the
+            # budget counted and the one `_binding_shape` compared every
+            # reference against. An independent read here — which is what
+            # the code did before — is UNSOUND-1 itself, a second reader of
+            # a declaration's element count implementing its own rule. That
+            # no test can tell the two apart today is a fact about today's
+            # readers agreeing, not a reason to let them diverge again.
             shape = self._declared_shape(self.producers[vid], vid)
             k = self.any_order[vid]
             if shape == ():
@@ -3289,13 +3419,16 @@ def slice_obligation(
 def _safely(read, fallback):
     """``read()``, or ``fallback`` when reading raises.
 
-    For the inside of an exception handler only, and for nothing else. A
-    handler composing a degraded answer must not itself be able to raise —
-    every read it makes is of an object already known to be misbehaving —
-    but the same swallow anywhere on a deciding path would hide a defect
-    instead of quoting one. The fallbacks are visible placeholders for
-    that reason: a reader sees that something could not be read, rather
-    than a plausible value.
+    For composing a message ABOUT AN OBJECT ALREADY KNOWN TO BE
+    MISBEHAVING, and for nothing else — the inside of an exception
+    handler, and the refusal a guard raises once it has decided to refuse.
+    Neither may itself be able to raise: a handler that re-raises costs
+    every sibling's verdict exactly as the original raise would have, and
+    a decline whose message raises is not a decline at all but the raw
+    escape the guard existed to prevent (audit 0.2.0 B6 audit 3, F3). The
+    same swallow anywhere on a DECIDING path would hide a defect instead
+    of quoting one, so the fallbacks are visible placeholders: a reader
+    sees that something could not be read, rather than a plausible value.
     """
     try:
         return read()

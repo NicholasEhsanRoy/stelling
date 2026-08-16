@@ -295,9 +295,17 @@ SPDX-License-Identifier: Apache-2.0
   aval. A declaration saying four elements in its param and two in its aval
   therefore minted four symbols, summed the two the reference asked for,
   and came back `discharged` on `8 <= 4.5` — inside a `jit` body, where the
-  box witness is blind by construction. `_Slicer._declared_shape` is now
-  the one reader of a declaration's element count and the budget, the
-  input-term construction and the check all go through it.
+  box witness is blind by construction. The three sites in the emission
+  path that need a declaration's element count — the budget, the
+  input-term construction and the check — all call
+  `_Slicer._declared_shape`, so none can implement a different rule from
+  the others. **That is not sole readership and it is not a single read**:
+  `propagate._declared_element_count` reads the outvar aval for the
+  certificate search's cap (sound — the cap only gates whether the search
+  runs, and the search re-derives its witness honestly), and each call
+  re-reads the param, an object that answers differently between calls
+  being caught by `ClosedJaxpr.content_hash()` rather than here. Both
+  claims were made in the first spelling and both are struck.
   `ir._validate_decl_eqn` was closed alongside it: it compared a
   declaration's two self-descriptions only `if isinstance(shape, tuple)`,
   so a `list` skipped it entirely, and it now compares the extents whatever
@@ -309,8 +317,8 @@ SPDX-License-Identifier: Apache-2.0
   **Cost, measured** over every obligation slice the test suite builds, by
   a stated method: wrap the check, mirror its short-circuits, attribute
   every count to the test file that produced it, run the whole suite, and
-  partition on `declines > 0`. The partition lands on exactly one file —
-  the one that hands the check malformed IR on purpose. Over the
+  partition on `declines > 0`. The partition lands on exactly two files,
+  and both hand the check malformed IR on purpose. Over the
   well-formed remainder (10,503 equations; 13,286 operand references, all
   13,286 with a binding found; 23,789 atoms, 23,112 of them with a
   propagated box): **zero** disagreements on either witness and **zero**
@@ -331,6 +339,62 @@ SPDX-License-Identifier: Apache-2.0
   `propagate()`, while the emission declined: the same two-faces split one
   type level up. The returned geometry now holds plain `int`s. The crash
   was pre-existing; the docstring asserting it could not happen was not.
+
+- **A guard that refuses a malformed extent can no longer be stopped by
+  the extent** (audit 0.2.0 B6 **audit 3**, F1/F2/F3 — three shapes of one
+  mistake, at the five `operator.index` sites the batch had touched). Each
+  is in the safe direction and none moves a verdict; they are listed
+  because "the guard is closed" was said about all five.
+
+  - **A guard must PRODUCE the value it validated, not merely test it.**
+    `_Slicer._declared_shape` called `_shape_problem(shape)` — which bound
+    `operator.index(d)`, tested it and discarded it — and then RETURNED a
+    second read, `tuple(_op_index(d) for d in shape)`. An extent answering
+    `4` and then `-1` was validated at 4 and emitted as `(-1,)`, where the
+    element budget takes a negative contribution and `range(-1)` mints no
+    symbols at all. This is verbatim the defect the entry above fixed in
+    `dot_general_geometry`, one module over, in the same batch.
+    `ir._load_extent_problem` carried it too, in both its callers: the
+    declaration door compared the RAW param objects with `==` after
+    validating them through `__index__`, and the array length check re-read
+    them with `int(d)`. All three now read once and hand back what they
+    read, so every comparison downstream is `int`-to-`int`.
+  - **`operator.index` raises whatever `__index__` raises.** Four guards
+    caught `TypeError` alone, so a `ValueError` or `OverflowError` from a
+    hostile extent left `ir.JaxprEqn(...)`, `ir.Aval(...)`,
+    `interval.check_shape`, `interval.dot_general` and the public
+    `propagate()` **raw**, while the emission face declined on the same
+    object — the S12″ two-faces split, from a guard written as an
+    enumeration of the exception types its author expected.
+  - **A refusal message may not itself raise.** Two composers interpolated
+    an unguarded `{!r}` of the object being refused, so a hostile
+    `__repr__` turned a decided decline into *"internal error:
+    RuntimeError: repr refuses"*. In `ir._validate_decl_eqn` it was worse
+    than that: `_load_check`'s message is an ARGUMENT and is composed on
+    the passing path too, so a **well-formed** declaration whose extent
+    merely had a refusing `__repr__` raw-crashed the public constructor.
+    Every such quote now goes through a placeholder-substituting read
+    (`obligation._safely`, `interval._safe_repr`, `ir._safe_repr`).
+
+  Re-measured over the malformed-`dimension_numbers` corpus that entry
+  publishes, extended by the family it did not contain and driven through
+  the public `interval.dot_general` on all three trees: **31 of 34 raised
+  raw on `dee8bc2`, 6 on `d6b6d0b`, 0 on this tree.**
+
+- **A declaration's `shape` param is accepted by a POSITIVE rule** (audit
+  0.2.0 B6 audit 3). Both faces refused `str`/`bytes`/`bytearray` by name,
+  because `tuple(b"34")` is `(51, 52)` — a pair of plausible extents the
+  declaration never said. `memoryview` and `array.array` read the same way
+  and were not on the list: the door ACCEPTED a `memoryview` shape param
+  and the slicer sliced a four-element declaration off it. Adding two more
+  names is "the container type I happened to enumerate", which
+  `ir._validate_param_value` is annotated in this same batch as
+  condemning, so the rule is stated the other way round: **a declaration
+  records its extents in a `tuple` or a `list`** — the only forms
+  `ir._decode` builds and the only forms jax's own params carry — and
+  anything else declines. The character sequences fall out of it instead
+  of being named by it, and so does whichever sequence type is noticed
+  next.
 
 - **`slice_unknown_obligations` can no longer raise** (audit 0.2.0
   **M17′**; a regression of the M17 fix above, caught and fixed before
@@ -771,6 +835,202 @@ SPDX-License-Identifier: Apache-2.0
   though the tightening is not gated on loops, and two non-loop shapes
   outside that corpus do gain a correct caveat (an assume inside a
   `lax.cond` branch, and `assume(jnp.all(...))` with no control flow).
+
+- **ATTRIBUTION FOR THIS BATCH, PUBLISHED — with the census method, so the
+  numbers can be re-derived rather than trusted** (audit 0.2.0 B6 audit 3,
+  F5). The batch's commit message said *"every code change was reverted
+  ALONE and the claiming tests go red"* and shipped **no table**, so the
+  claim rested on the author. Re-deriving it moved two of the numbers.
+
+  **CENSUS METHOD.** A raw hunk count is a property of the DIFF, not of the
+  change: adjacent edits merge at wider context. So the width is stated.
+
+  1. `git diff -U<W> 96ab47a d6b6d0b -- src/`, counting `@@` markers.
+  2. Split that diff into one patch per hunk, each applicable alone with
+     `git apply -R`.
+  3. Classify each hunk **SEMANTIC** or **PROSE**: revert it alone, parse
+     the file with `ast`, strip every docstring, compare `ast.dump`. A
+     hunk whose lone revert leaves the docstring-stripped AST identical
+     cannot change behaviour — nothing can red on it except a test that
+     reads source line numbers.
+  4. Run the whole suite once per SEMANTIC hunk, reverted alone.
+
+  ```
+  raw hunk census         -U0   -U3 (git's default)
+    obligation.py          18    10
+    interval.py             4     2
+    ir.py                   5     2
+    solvers.py              1     1
+    TOTAL                  28    15
+
+  at -U3:  SEMANTIC 12   PROSE 3
+    PROSE: interval.h1 (the R4 comment), obligation.h8 (the preamble
+    docstring), solvers.h1 (the Escalation docstring)
+  ```
+
+  So the batch is **15 hunks, 12 of them semantic** — not the 8 an earlier
+  summary gave, and not the 10 a later one did.
+
+  **TWO CONFOUNDS, AND BOTH ARE ELIMINABLE BY CONSTRUCTION rather than
+  subtractable.** A revert experiment needs a clean tree, and two obvious
+  ways to make one are not clean. `cp -a` preserves mtimes, so the copied
+  `__pycache__` validates and its `co_filename` still names the ORIGINAL
+  tree — `test_undescended_assume.py` compares a traced frame's filename
+  against the test module's `__file__`, and reds in the UNREVERTED base.
+  `git archive` carries no `.git`, so `test_reuse_pins.py`'s scratchpad
+  floor skips ("not a git repository") and
+  `test_skip_inventory.py::test_no_session_skip_is_undisclosed` reds on
+  the undisclosed skip — again in the unreverted base. `git clone` has
+  neither, and is the method.
+
+  One confound genuinely does have to be subtracted:
+  `test_supported_primitives_doc.py::test_committed_page_matches_live_registries`
+  reds on ANY line-count change in `src/stelling/obligation.py`, because
+  `docs/supported-primitives.md` embeds source line numbers, and
+  regenerating the page per revert would make the experiment circular.
+
+  **RESULT** — full suite per revert, `JAX_ENABLE_X64=1`, jax 0.11.0,
+  `pytest -q -p no:randomly`; NET = raw failures minus that row's base
+  confounds:
+
+  ```
+  revert (hunks, -U3)                      raw  conf  NET  the tests that red
+  R1  _declared_shape family h1+h2+h3+h4     8     1    7  the four below, plus
+                                                            ..._DECLINES[bytes]
+  R1a _binding_shape dispatch     h2         5     1    4  aval_lie: NO_shape_param
+                                                            _binds_at_the_scalar;
+                                                            slicer_closes_..._ON_ITS_OWN;
+                                                            lie_no_longer_reaches_a_discharge;
+                                                            BINDING_witness_alone_closes
+  R1b the element-budget reader   h3         3     1    2  ..._DECLINES[str],
+                                                            ..._DECLINES[not-iterable]
+  R1c the slice-input reader      h4         1     1    0  NOTHING  <-- see below
+  R2  TranscriptionError decline  h5         2     1    1  lie_is_refused_when_the_
+                                                            descent_re_transcribes_it
+  R3  the handler's _safely   h6+h10         3     1    2  net_around_the_association_
+                                                            cannot_itself_raise;
+                                                            ..._DECLINES[not-iterable] (*)
+  R4  _frames list arm            h7         2     1    1  frames_is_total_on_a_list_
+                                                            that_will_not_iterate
+  R5  claimants read once         h9         2     1    1  the_claimants_count_is_read_ONCE
+  R6  ir list recursion       ir.h1          1     0    1  load_walk_recurses_into_LIST_params
+  R7  ir _validate_decl_eqn   ir.h2          1     0    1  declaration_check_reads_the_
+                                                            EXTENTS_not_the_param_type
+  R8  interval _indices    interval.h2       4     0    4  oracle_NORMALISES_its_dims (+3
+                                                            0-d-array rows of ..._AND_NOTHING_ELSE)
+
+  PROSE controls (the anti-vacuity half: a prose revert must red nothing)
+  P1  interval R4 comment  interval.h1       0     0    0
+  P2  preamble docstring          h8         1     1    0
+  P3  Escalation docstring solvers.h1        0     0    0
+
+  the unreverted base (a clone at d6b6d0b):  3557 passed, 10 skipped, 0 failed
+  ```
+
+  **(*) R3's GROUP IS ONE HUNK SHORT, and the row says so rather than
+  banking the extra red.** `_safely` has a THIRD call site, installed by
+  `obligation.h2` inside `_binding_shape`, so reverting h6+h10 leaves it
+  live: `..._DECLINES[not-iterable]` reds with a bare `NameError: name
+  '_safely' is not defined` leaking into the decline reason, which
+  measures an inconsistent tree and not the handler's degraded
+  composition. R3's one genuine behavioural red is
+  `test_the_net_around_the_association_cannot_itself_raise`, where the
+  handler raises `RuntimeError` out of `getattr(o, "index", -1)`;
+  reverting h6 alone reds that test and
+  `test_slice_unknown_obligations_CANNOT_RAISE_from_its_OWN_body`. A
+  revert group defined by "which hunks mention this symbol" is not the
+  same as "which hunks the symbol needs", and this is what the difference
+  costs.
+
+  **And `obligation.h1`'s only OWN attributable red is
+  `..._DECLINES[bytes]`** — it appears in the family row and in none of
+  h2/h3/h4 individually. Since h1 cannot be reverted alone without
+  breaking the tree, that single test is the whole behavioural evidence
+  for the `_declared_shape` extraction, visible only through the group.
+  Recorded because "seven tests red on the family" reads as seven tests
+  red on the extraction, and it is one.
+
+  Two hunks cannot be reverted alone at all and are reported as such
+  rather than as measurements: `obligation.h1` removes `_declared_shape`
+  while h2/h3/h4 still call it (**607 failed, 2949 passed** — an
+  inconsistent tree, not a difference), and `obligation.h6` removes
+  `_safely` while h1 and h10 still call it. Both are grouped above for
+  that reason and neither is a row.
+
+  **`obligation.h4` — the slice-input reader — REDS NOTHING, and is
+  recorded as UNREACHABLE AS A GUARD rather than claimed.** The element
+  budget calls `_declared_shape` over the same vids first, so no document
+  can reach this call in a state the budget did not already decline: it is
+  unreachable *as a difference*. `docs/norms.md` forbids exactly the move
+  of asserting coverage by construction, and the batch's blanket "each
+  change has a test that reds when reverted alone" was false here. It is
+  KEPT and not deleted, because it is not a guard: it is a VALUE read, and
+  the value it must produce is the one the budget counted and the one
+  `_binding_shape` compared every reference against. An independent read
+  there is UNSOUND-1 itself. That no test can tell the two apart today is
+  a fact about today's readers agreeing, not a licence to let them
+  diverge.
+
+  Note also what P2 shows: a PROSE revert of `obligation.py` reds the
+  supported-primitives page and nothing else, which is what makes that
+  subtraction a line-count effect rather than a behavioural one.
+
+  **AND AUDIT 3'S OWN FIXES, ATTRIBUTED THE SAME WAY** — by MUTATION,
+  which is what `docs/norms.md` prescribes for a one-line guard and what a
+  hunk revert degenerates into at this size. Each mutation asserts its own
+  anchor before running, so a mutation that lands on nothing is an error
+  rather than a green run; each is driven over the whole suite in its own
+  clone. The base confound here is
+  `test_sdist_contents.py::test_no_untracked_file_anywhere_would_ship`,
+  which reds in every row including the control because `git apply` leaves
+  a new test file untracked in a clone; with the file `git add`ed it is
+  green.
+
+  ```
+  mutation                                  raw  conf  NET  the tests that red
+  (control: no mutation)                      1     1    0  --
+  F1 return the SECOND read in
+     _declared_shape                          2     1    1  declared_shape_RETURNS_
+                                                              the_extents_it_validated
+  F1 compare RAW objects in the ir door,
+     and re-read with int(d) for the
+     byte-length product                      4     1    3  door_compares_the_extents_
+                                                              it_VALIDATED_not_a_second_read;
+                                                              byte_length_product_uses_the_
+                                                              extents_the_guard_validated;
+                                                              a_hostile___repr___cannot_raise_
+                                                              out_of_the_public_constructor
+  F2 narrow all four handlers back to
+     `except TypeError`                      13     1   12  door_refuses_whatever___index__
+                                                              _raises x3;
+                                                              declaration_reader_... x3;
+                                                              check_shape_refuses_... x3;
+                                                              oracle_refuses_... x2;
+                                                              declaration_refusal_cannot_be_
+                                                              stopped_by_a_hostile___repr__
+  F3 unguard every quoted repr             4     1    3  the three ..._hostile___repr__
+                                                              tests, one per module
+  F4 restore "THE ONE READER" and drop
+     the named second reader                  2     1    1  declared_shape_is_NOT_the_
+                                                              librarys_only_reader_of_an_
+                                                              element_count
+  F6 remove clause 4's convention from
+     SOUNDNESS.md                             2     1    1  the_entrys_clause_4_states_
+                                                              the_convention
+  F7 remove the blindness paragraph           2     1    1  the_entry_names_the_screens_
+                                                              blind_classes
+  OPT restore the (str, bytes, bytearray)
+     enumeration on both faces                4     1    3  declaration_check_reads_the_
+                                                              EXTENTS_not_the_param_type;
+                                                              ..._DECLINES[memoryview];
+                                                              ..._DECLINES[array.array]
+  ```
+
+  F5 is the table above and is pinned by
+  `test_ir_screen.py::test_the_batch_ships_an_attribution_table_that_adds_up`,
+  driven three ways rather than by a whole-suite mutation: with no table at
+  all (the state the finding reports), with one row's arithmetic broken,
+  and with the `R1c` row claiming a red it does not have. All three red.
 
 ### Inductive step verification
 

@@ -29,6 +29,7 @@ Hand-built IR (no jax) covering the array-emission build's contracts:
 
 from __future__ import annotations
 
+import array as _arraymod
 import hashlib
 import struct
 from fractions import Fraction
@@ -1900,7 +1901,13 @@ def test_the_declaration_check_reads_the_EXTENTS_not_the_param_type():
     # cannot be read. `str`/`bytes` are sequences and are not shapes —
     # `tuple("34")` is a tuple of CHARACTERS, so coercing one would compare
     # something the declaration never said.
-    for bad in (3, None, "34", b"34"):
+    # `memoryview` and `array.array` join them not by being enumerated but
+    # by falling outside the POSITIVE rule (a tuple or a list) that
+    # replaced the enumeration — audit 0.2.0 B6 audit 3. Both read as
+    # `(52, 52)` through `tuple(...)`, the identical misread as `b"44"`,
+    # and the door ACCEPTED the memoryview form before this.
+    for bad in (3, None, "34", b"34", memoryview(b"\x03"),
+                _arraymod.array("b", b"\x03")):
         with pytest.raises(
             ir.TranscriptionError, match="not a sequence of extents"
         ):
@@ -1993,3 +2000,174 @@ def test_the_door_still_refuses_malformed_dicts():
         ir.ClosedJaxpr.from_dict(corrupted)
     # the uncorrupted dict still loads, hash byte-identical
     assert ir.ClosedJaxpr.from_dict(d).content_hash() == q.content_hash()
+
+
+# -- audit 0.2.0 B6 audit 3, F1 / F2 / F3: the door's own totality ----------
+
+
+class _IndexRaises:
+    def __init__(self, exc):
+        self._exc = exc
+
+    def __index__(self):
+        raise self._exc
+
+    def __repr__(self):
+        return f"_IndexRaises({type(self._exc).__name__})"
+
+
+class _IndexOK_ReprRaises:
+    """A PERFECTLY WELL-FORMED extent whose `__repr__` refuses."""
+
+    def __init__(self, k):
+        self._k = k
+
+    def __index__(self):
+        return self._k
+
+    def __repr__(self):
+        raise RuntimeError("repr refuses")
+
+
+class _TwoFacedExtent:
+    """`__index__` answers `first` once and `then` on every later call."""
+
+    def __init__(self, first, then):
+        self._answers = [first, then]
+        self.reads = 0
+
+    def __index__(self):
+        self.reads += 1
+        return self._answers[0] if self.reads == 1 else self._answers[1]
+
+    def __repr__(self):
+        return f"_TwoFacedExtent(reads={self.reads})"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [ValueError("index says no"), OverflowError("too big"),
+     RuntimeError("some other refusal")],
+    ids=["ValueError", "OverflowError", "RuntimeError"],
+)
+def test_the_door_refuses_whatever___index___raises(exc):
+    """AUDIT 0.2.0 B6 AUDIT 3, F2 — `_load_extent_problem` caught only
+    `TypeError`, and `operator.index` raises whatever `__index__` raises.
+
+    So a `ValueError` or an `OverflowError` from one extent came out of
+    `ir.Aval(...)` and `ir.JaxprEqn(...)` RAW — out of a public constructor,
+    which `_validate_decl_eqn`'s own docstring names as "the very class this
+    function is closing". The exception type an extent chooses is not a fact
+    about whether the document is malformed."""
+    with pytest.raises(ir.TranscriptionError, match="non-integer shape"):
+        ir.Aval(kind="ShapedArray", shape=(_IndexRaises(exc),), dtype="f8")
+    with pytest.raises(ir.TranscriptionError, match="non-integer shape"):
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((3,))),),
+            params=(("shape", (_IndexRaises(exc),)), ("dtype", "float64"),
+                    ("lo", 0.0), ("hi", 1.0)),
+        )
+
+
+def test_a_hostile___repr___cannot_raise_out_of_the_public_constructor():
+    """AUDIT 0.2.0 B6 AUDIT 3, F3 — and the sharpest form of it, because
+    THE DOCUMENT HERE IS WELL FORMED.
+
+    `_load_check`'s message is an ARGUMENT, so it is composed on the passing
+    path as well as the failing one. `_validate_decl_eqn` interpolated
+    `{shape!r}` into it unguarded, so a declaration whose extent answers
+    `__index__` with 4 — matching an outvar aval of `(4,)`, nothing at all
+    wrong with it — raised `RuntimeError: repr refuses` out of
+    `ir.JaxprEqn(...)`. A refusal that has not been decided on may not
+    crash, and one that has may not crash either: both quotes go through
+    `_safe_repr`."""
+    ok = ir.JaxprEqn(
+        primitive="stelling_any",
+        invars=(),
+        outvars=(var(0, aval((4,))),),
+        params=(("shape", (_IndexOK_ReprRaises(4),)), ("dtype", "float64"),
+                ("lo", 0.0), ("hi", 1.0)),
+    )
+    assert ok.primitive == "stelling_any"
+    # and a genuinely contradictory one still refuses, with the placeholder
+    # visible rather than a plausible value
+    with pytest.raises(ir.TranscriptionError) as ei:
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((4,))),),
+            params=(("shape", _ReprRaisesNotASequence()), ("dtype", "f8"),
+                    ("lo", 0.0), ("hi", 1.0)),
+        )
+    assert "not a sequence of extents" in str(ei.value)
+    assert "<unreadable>" in str(ei.value), str(ei.value)
+
+
+class _ReprRaisesNotASequence:
+    def __iter__(self):
+        raise RuntimeError("will not iterate")
+
+    def __repr__(self):
+        raise RuntimeError("repr refuses")
+
+
+def test_the_door_compares_the_extents_it_VALIDATED_not_a_second_read():
+    """AUDIT 0.2.0 B6 AUDIT 3, F1, in `ir.py` — the same defect the slicer
+    carried, in the function that is supposed to be the door in front of it.
+
+    `_load_extent_problem` bound `k = operator.index(d)`, tested `k` and
+    DISCARDED it. `_validate_decl_eqn` then compared the RAW param objects
+    against the aval with `==`, and `_validate_array_value` re-read them
+    with `int(d)` for its byte-length product — so what the door validated
+    and what the door used were two different reads of one self-describing
+    object. Two reads of an object that answers differently each time is
+    the whole of this finding's mechanism.
+
+    Bound, the comparison is `int`-to-`int` and no `__eq__`, `__int__` or
+    later `__index__` can move it: an extent that says 4 to the guard is
+    compared as 4, and a later -1 cannot be smuggled past."""
+    d = _TwoFacedExtent(4, -1)
+    with pytest.raises(ir.TranscriptionError) as ei:
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((2,))),),
+            params=(("shape", (d,)), ("dtype", "float64"),
+                    ("lo", 0.0), ("hi", 1.0)),
+        )
+    # the extents the door quotes are the ones it read, not a later answer
+    assert "shape param (4,) contradicts the outvar aval shape (2,)" in str(
+        ei.value
+    ), str(ei.value)
+    assert d.reads == 1, (
+        f"the door read the extent {d.reads} times; one read is the fix"
+    )
+    # the agreeing case is accepted on that same single read
+    d2 = _TwoFacedExtent(2, -1)
+    ir.JaxprEqn(
+        primitive="stelling_any",
+        invars=(),
+        outvars=(var(0, aval((2,))),),
+        params=(("shape", (d2,)), ("dtype", "float64"),
+                ("lo", 0.0), ("hi", 1.0)),
+    )
+    assert d2.reads == 1
+
+
+def test_the_byte_length_product_uses_the_extents_the_guard_validated():
+    """The other half of F1 in `ir.py`: `_validate_array_value` validated
+    `arr.shape` with `operator.index` and then computed its expected byte
+    length with a SECOND, different conversion (`int(d)`). A two-faced
+    extent was therefore length-checked against a number nobody validated."""
+    d = _TwoFacedExtent(2, 7)
+    a = ir.Array(dtype="<f8", shape=(d,), data=b"\x00" * 16)
+    assert a.shape == (d,)  # the dataclass still records what it was given
+    assert d.reads == 1, (
+        f"the length check read the extent {d.reads} times; one read is the "
+        f"fix — the second read was `int(d)` and could disagree"
+    )
+    # a genuine length lie is still refused, quoting the validated extents
+    with pytest.raises(ir.TranscriptionError, match=r"expected 16"):
+        ir.Array(dtype="<f8", shape=(_TwoFacedExtent(2, 7),), data=b"\x00" * 8)

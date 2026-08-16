@@ -39,6 +39,7 @@ propagated box at all.
 """
 from __future__ import annotations
 
+import array as _arraymod
 import copy
 from fractions import Fraction
 
@@ -812,8 +813,20 @@ def test_the_BINDING_witness_alone_closes_the_declaration_lie(monkeypatch):
         (("4",), "non-integer extent"),
         ((-4,), "negative extent"),
         (object(), "not a sequence of extents"),
+        # AND THE TWO THE ENUMERATION MISSED — audit 0.2.0 B6 audit 3.
+        # `tuple(memoryview(b"44"))` is `(52, 52)` and so is
+        # `tuple(array.array("b", b"44"))`: the identical misread the
+        # `bytes` row above exists to refuse, in a container the
+        # `(str, bytes, bytearray)` test did not name — and the slicer
+        # SLICED a four-element declaration off one, measured. The rule is
+        # now stated positively (a tuple or a list), so these fall out of
+        # it rather than needing to be named by it, and so does whichever
+        # sequence type is noticed next.
+        (memoryview(b"\x02\x02"), "not a sequence of extents"),
+        (_arraymod.array("b", b"\x02\x02"), "not a sequence of extents"),
     ],
-    ids=["bytes", "str", "string-extent", "negative", "not-iterable"],
+    ids=["bytes", "str", "string-extent", "negative", "not-iterable",
+         "memoryview", "array.array"],
 )
 def test_a_declaration_shape_param_that_cannot_be_read_DECLINES(
     bad_param, expect
@@ -875,6 +888,19 @@ def test_the_transfer_face_still_raises_raw_on_an_uniterable_shape_param():
     refuses a non-sequence `shape` param at construction, so only an
     `object.__setattr__` past the frozen dataclass reaches it.
 
+    **AND IT IS NOT CATCHABLE THROUGH THE DOCUMENTED HANDLERS** — audit
+    0.2.0 B6 audit 3, Q6, which is what makes this a residue worth
+    carrying rather than a wording nit. "The transfer raises where the
+    emission declines" reads like a difference in phrasing; it is a
+    difference in what a caller can catch. The library's two malformed-IR
+    exception classes are `interval.IntervalError` and
+    `ir.TranscriptionError`, and NEITHER covers this: what escapes is a
+    bare `TypeError`, and `TranscriptionError` *subclasses* `TypeError`,
+    so the relationship runs the wrong way. Only `except TypeError` — a
+    handler no caller should be asked to write, since it swallows their
+    own bugs too — sees it. A caller handling malformed IR exactly as this
+    library documents therefore gets a crash.
+
     IF THIS TEST FAILS because `propagate()` no longer raises, the finding
     has been fixed: delete this test and say so wherever it is recorded."""
     q = trace(_sum_ceiling)
@@ -901,6 +927,20 @@ def test_the_transfer_face_still_raises_raw_on_an_uniterable_shape_param():
         consts=q.consts)
     with pytest.raises(TypeError, match="not iterable"):
         propagate(bad)
+    # ... and the documented handlers do not see it
+    from stelling import interval as _iv
+
+    for cls in (_iv.IntervalError, ir.TranscriptionError):
+        try:
+            propagate(bad)
+        except cls:  # pragma: no cover — the finding is that this is dead
+            raise AssertionError(
+                f"{cls.__name__} now catches the transfer face's raise; the "
+                f"Q6 disclosure has been overtaken and must be rewritten"
+            )
+        except TypeError as ex:
+            assert not isinstance(ex, cls), (cls, type(ex))
+            assert type(ex) is TypeError, type(ex)
 
 
 # -- the SECOND witness, driven directly, and what its status honestly is -----
@@ -967,3 +1007,295 @@ def test_the_propagated_box_witness_declines_when_it_is_the_one_that_sees():
     assert not isinstance(
         slice_obligation(q, 0, interval_env(q)), DeclinedObligation
     )
+
+
+# -- audit 0.2.0 B6 audit 3: the reader's own totality, and its claims ------
+
+
+class _TwoFacedExtent:
+    """`__index__` answers `first` on the first call and `then` after."""
+
+    def __init__(self, first, then):
+        self._answers = (first, then)
+        self.reads = 0
+
+    def __index__(self):
+        self.reads += 1
+        return self._answers[0] if self.reads == 1 else self._answers[1]
+
+    def __repr__(self):
+        return f"_TwoFacedExtent(reads={self.reads})"
+
+
+def _decl_eqn(shape_param, aval_shape=(N,)):
+    """A `stelling_any` carrying `shape_param`, installed PAST
+    `ir.JaxprEqn.__post_init__` — the slicer may not rest on the door."""
+    e = ir.JaxprEqn(
+        primitive="stelling_any", invars=(),
+        outvars=(ir.Var(id=0, aval=ir.Aval(
+            kind="ShapedArray", shape=tuple(aval_shape), dtype="float64")),),
+        params=(("dtype", "float64"), ("hi", float(HI)), ("lo", float(LO)),
+                ("shape", tuple(aval_shape))),
+    )
+    object.__setattr__(e, "params", tuple(sorted(
+        (("dtype", "float64"), ("hi", float(HI)), ("lo", float(LO)),
+         ("shape", shape_param)), key=lambda kv: kv[0])))
+    return e
+
+
+def test_declared_shape_RETURNS_the_extents_it_validated():
+    """AUDIT 0.2.0 B6 AUDIT 3, F1 — `_declared_shape` returned a shape it
+    had just rejected.
+
+    It called `_shape_problem(shape)`, which bound `k = _op_index(d)`,
+    tested `k` and DISCARDED it, and then returned
+    `tuple(_op_index(d) for d in shape)` — a SECOND read per extent, and
+    the one the emission got. An extent answering 4 and then -1 was
+    therefore validated at 4 and EMITTED as `(-1,)`, where `_size` takes a
+    negative contribution to the element budget and `range(-1)` mints no
+    symbols at all. Measured on `d6b6d0b`:
+
+        _declared_shape returned (-1,)   <-- validated 4, EMITS (-1,)
+
+    This is the identical defect this same batch fixed one module over in
+    `interval.dot_general_geometry`, and described in its own CHANGELOG:
+    "the first spelling called it and discarded the result, so the dims
+    were validated and never normalised". A guard that tests a value nobody
+    keeps has not guarded the value the emission uses.
+    """
+    import stelling.obligation as OB
+
+    sl = object.__new__(OB._Slicer)
+    d = _TwoFacedExtent(4, -1)
+    got = OB._Slicer._declared_shape(sl, _decl_eqn((d,)), 0)
+    assert got == (4,), (
+        f"the guard validated 4 and the method returned {got}: the returned "
+        f"value is a second, unvalidated read"
+    )
+    assert d.reads == 1, f"{d.reads} reads per extent; one read is the fix"
+    # a negative extent on the FIRST read is still refused, and the refusal
+    # is the one thing the second read used to be able to smuggle past
+    with pytest.raises(OB._Decline, match="negative extent"):
+        OB._Slicer._declared_shape(sl, _decl_eqn((_TwoFacedExtent(-1, 4),)), 0)
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [ValueError("index says no"), OverflowError("too big"),
+     RuntimeError("some other refusal")],
+    ids=["ValueError", "OverflowError", "RuntimeError"],
+)
+def test_the_declaration_reader_refuses_whatever___index___raises(exc):
+    """AUDIT 0.2.0 B6 AUDIT 3, F2 — `_shape_problem` caught only
+    `TypeError`, and `operator.index` raises whatever `__index__` raises.
+
+    A `ValueError` or an `OverflowError` from one extent therefore escaped
+    the reader and reached the caller through `slice_obligation`'s generic
+    net as *"slice attempted; internal error: ValueError: index says no"* —
+    a malformed document reported as a stelling defect, which is the exact
+    sentence M17′ was already named for. The exception type an extent
+    chooses is not a fact about whether the document can be read."""
+    import stelling.obligation as OB
+
+    class _IndexRaises:
+        def __index__(self):
+            raise exc
+
+        def __repr__(self):
+            return "_IndexRaises"
+
+    sl = object.__new__(OB._Slicer)
+    with pytest.raises(OB._Decline, match="non-integer extent"):
+        OB._Slicer._declared_shape(sl, _decl_eqn((_IndexRaises(),)), 0)
+
+
+def test_a_declaration_refusal_cannot_be_stopped_by_a_hostile___repr__():
+    """AUDIT 0.2.0 B6 AUDIT 3, F3 — two composers in the refusal path
+    interpolated an unguarded `{!r}`.
+
+    `_declared_shape`'s str/bytes branch quoted `{raw!r}` and its
+    extent branch quoted `{shape!r}`, while the sibling branch between them
+    already used `_safely` for exactly this hazard — the same commit
+    introduced `_safely` and then did not reach for it twice. A `str`
+    subclass with a refusing `__repr__` turned a clean decline into
+    *"internal error: RuntimeError: repr refuses"*: the decline the guard
+    decided on never reached the caller, and what did reach them blamed the
+    tool for the document.
+
+    A message about an object already known to be malformed may not itself
+    be able to raise. The placeholder is visible, so a reader is told
+    something could not be read rather than shown a plausible value."""
+    import stelling.obligation as OB
+
+    class _HostileStr(str):
+        def __repr__(self):
+            raise RuntimeError("repr refuses")
+
+    class _HostileExtent:
+        def __index__(self):
+            raise ValueError("no")
+
+        def __repr__(self):
+            raise RuntimeError("repr refuses")
+
+    sl = object.__new__(OB._Slicer)
+    with pytest.raises(OB._Decline) as ei:
+        OB._Slicer._declared_shape(sl, _decl_eqn(_HostileStr("34")), 0)
+    assert "not a sequence of extents" in ei.value.reason
+    assert "<unreadable>" in ei.value.reason, ei.value.reason
+
+    with pytest.raises(OB._Decline) as ei:
+        OB._Slicer._declared_shape(sl, _decl_eqn((_HostileExtent(),)), 0)
+    assert "non-integer extent" in ei.value.reason
+    assert "<unreadable>" in ei.value.reason, ei.value.reason
+
+    # and through the public face: a decline, never an "internal error"
+    from stelling.obligation import slice_obligation
+
+    q = trace(_sum_ceiling)
+    eqns = tuple(
+        _decl_eqn(_HostileStr("34")) if e.primitive == "stelling_any" else e
+        for e in q.jaxpr.eqns
+    )
+    # keep the declaration's own var id, which _decl_eqn does not know
+    decl = next(e for e in q.jaxpr.eqns if e.primitive == "stelling_any")
+    fixed = []
+    for e in eqns:
+        if e.primitive == "stelling_any":
+            object.__setattr__(e, "outvars", decl.outvars)
+        fixed.append(e)
+    bad = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(constvars=q.jaxpr.constvars, invars=q.jaxpr.invars,
+                       outvars=q.jaxpr.outvars, eqns=tuple(fixed),
+                       effects=q.jaxpr.effects,
+                       debug_info=q.jaxpr.debug_info),
+        consts=q.consts)
+    item = slice_obligation(bad, 0, {})
+    assert isinstance(item, DeclinedObligation), item
+    assert "internal error" not in item.reason, item.reason
+    assert "not a sequence of extents" in item.reason, item.reason
+
+
+def test_declared_shape_is_NOT_the_librarys_only_reader_of_an_element_count():
+    """AUDIT 0.2.0 B6 AUDIT 3, F4 — the docstring said "THE ONE READER",
+    and a `grep` refutes it.
+
+    `stelling.propagate._declared_element_count` is a genuine second reader
+    of "how many elements does this declaration have", and it reads the
+    OTHER quantity: the outvar AVAL, where `_declared_shape` reads the
+    `shape` PARAM. One document makes them answer `()` and `4`.
+
+    IT IS NOT DRIVEABLE TO A WRONG VERDICT, and this test pins both halves
+    of that. The count gates only `_region_witness`'s cap — whether the
+    non-emptiness search RUNS — whose direction is toward REFUTED, and the
+    search re-derives its witness by re-running the honest propagator, so
+    nothing downstream is derived from the miscount. But a false claim of
+    sole readership is worse than no claim: it tells the next reader to
+    stop looking, and this batch has already been wrong twice about
+    enumerations nobody drove. `SOUNDNESS.md`'s narrower wording — the
+    budget, the input-term construction and `_binding_shape` — is true and
+    stays."""
+    import stelling.obligation as OB
+    import stelling.propagate as P
+
+    # door-legal: NO shape param at all. The aval says 4 elements; the
+    # param, absent, reads as ().
+    x = ir.Var(id=0, aval=ir.Aval(
+        kind="ShapedArray", shape=(N,), dtype="float64"))
+    d = ir.JaxprEqn(
+        primitive="stelling_any", invars=(), outvars=(x,),
+        params=(("dtype", "float64"), ("hi", float(HI)), ("lo", float(LO))),
+    )
+    j = ir.Jaxpr(constvars=(), invars=(), outvars=(x,), eqns=(d,))
+
+    sl = object.__new__(OB._Slicer)
+    assert OB._Slicer._declared_shape(sl, d, 0) == ()
+    assert P._declared_element_count(j) == N
+    # ... which is a real disagreement, on one document, between two live
+    # readers of the same quantity
+    assert OB._size(OB._Slicer._declared_shape(sl, d, 0)) != (
+        P._declared_element_count(j)
+    )
+
+    # the second reader has exactly one call site, and it is the cap
+    import inspect
+
+    src = inspect.getsource(P)
+    calls = [
+        ln.strip() for ln in src.splitlines()
+        if "_declared_element_count(" in ln and not ln.strip().startswith("def")
+    ]
+    assert calls == ["elements = _declared_element_count(closed.jaxpr)"], calls
+    assert "_region_witness" in inspect.getsource(P._region_witness)
+
+    # and the docstring no longer claims what the measurement refutes
+    doc = OB._Slicer._declared_shape.__doc__
+    assert "THE ONE READER" not in doc, doc
+    assert "cannot read different quantities by drifting apart" not in doc
+    assert "_declared_element_count" in doc, (
+        "the second reader must be NAMED where the false claim used to be"
+    )
+
+
+def test_the_declaration_reader_is_a_FUNCTION_and_not_a_single_READ():
+    """AUDIT 0.2.0 B6 AUDIT 3, F4, second half — *"cannot drift apart"* was
+    false, and what contains the drift is not this method.
+
+    `_declared_shape` is the one reader in the sense that the budget,
+    `_binding_shape` and the input-term construction all call it, so none
+    can implement a different rule. It is NOT one read: each call re-reads
+    the param, and `slice` alone reads it three times. A `list` SUBCLASS
+    whose `__iter__` answers differently between calls — `isinstance(raw,
+    (tuple, list))` is true of it, so both faces accept it — therefore does
+    make the check and the emission differ. Swept over the read at which it
+    flips, measured identically on `d6b6d0b` and on this tree:
+
+        flip=1,2   DECLINE, by the binding witness
+        flip=3     SLICED with 1 input term for a FOUR-element reference
+        flip>=4    SLICED with 4
+
+    What stops the flip=3 document reaching a verdict is
+    `ClosedJaxpr.content_hash()`: a param that can answer differently
+    between iterations cannot be an `ir._encode`-able value, so hashing
+    RAISES, `solvers._query_sha256` swallows that to `""`, and the pairing
+    gate refuses an empty hash. Naming the containment where it is matters
+    — "cannot drift apart" tells the next reader to stop looking."""
+    from stelling.obligation import slice_obligation
+
+    class Drifting(list):
+        n = 0
+
+        def __iter__(self):
+            type(self).n += 1
+            return iter((N,) if type(self).n <= 3 else ())
+
+    x = ir.Var(id=0, aval=ir.Aval(
+        kind="ShapedArray", shape=(N,), dtype="float64"))
+    s = ir.Var(id=1, aval=ir.Aval(kind="ShapedArray", shape=(), dtype="float64"))
+    pr = ir.Var(id=2, aval=ir.Aval(kind="ShapedArray", shape=(), dtype="bool"))
+    o = ir.Var(id=3, aval=ir.Aval(kind="ShapedArray", shape=(), dtype="bool"))
+    tail = (
+        ir.JaxprEqn(primitive="reduce_sum", invars=(x,), outvars=(s,),
+                    params=(("axes", (0,)), ("out_sharding", None))),
+        ir.JaxprEqn(
+            primitive="le",
+            invars=(s, ir.Literal(val=float(CEILING), aval=s.aval)),
+            outvars=(pr,)),
+        ir.JaxprEqn(primitive="stelling_assert", invars=(pr,), outvars=(o,)),
+    )
+    d = ir.JaxprEqn(
+        primitive="stelling_any", invars=(), outvars=(x,),
+        params=(("dtype", "float64"), ("hi", float(HI)), ("lo", float(LO)),
+                ("shape", Drifting())))
+    q = ir.ClosedJaxpr(jaxpr=ir.Jaxpr(constvars=(), invars=(), outvars=(o,),
+                                      eqns=(d,) + tail))
+    item = slice_obligation(q, 0, {})
+    assert not isinstance(item, DeclinedObligation), item
+    assert len(item.inputs) == 1, (
+        f"the drifting param minted {len(item.inputs)} term(s); the finding "
+        f"is that ONE is minted for a {N}-element reference"
+    )
+
+    # ... and the containment is the hash, not the reader
+    with pytest.raises(TypeError, match="cannot encode"):
+        q.content_hash()

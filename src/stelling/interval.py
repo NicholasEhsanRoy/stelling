@@ -534,6 +534,28 @@ class IntervalArray:
         return self.shape == ()
 
 
+def _safe_repr(obj) -> str:
+    """``repr(obj)``, or a visible placeholder when the object refuses.
+
+    For quoting an object a guard has ALREADY DECIDED TO REFUSE, and for
+    nothing else. A guard that turns a malformed value into a quotable
+    :class:`IntervalError` must not raise while quoting it: the object it
+    is describing is by construction misbehaving, and a ``__repr__`` that
+    refuses converts the refusal into exactly the raw escape the guard
+    exists to prevent (audit 0.2.0 B6 audit 3, F3 — measured, a
+    ``RuntimeError`` out of :func:`check_shape` and out of
+    :func:`dot_general_geometry`). The placeholder is visible so a reader
+    sees that something could not be read rather than a plausible value.
+    (``stelling.obligation._safely`` is the same helper for the same
+    reason; this module deliberately imports nothing from the rest of the
+    library, so it carries its own four lines rather than acquiring a
+    dependency for them.)"""
+    try:
+        return repr(obj)
+    except Exception:  # noqa: BLE001 — the message's own totality
+        return "<unreadable>"
+
+
 def check_shape(shape) -> None:
     """Refuse shapes no jax program can carry, through the decline channel.
 
@@ -548,18 +570,30 @@ def check_shape(shape) -> None:
     dropped-addends UNSOUND). Zero extents are LEGAL (jax constructs
     zero-size arrays; do not over-guard). Every box construction routes
     through here (:class:`IntervalArray.__post_init__`), plus the
-    pre-construction sites that compute element products first."""
+    pre-construction sites that compute element products first.
+
+    **THE REFUSAL IS TOTAL IN BOTH DIRECTIONS** — audit 0.2.0 B6 audit 3,
+    F2 and F3. ``operator.index`` raises whatever ``__index__`` raises,
+    and this handler caught only ``TypeError``, so a ``ValueError`` or an
+    ``OverflowError`` from an extent left this function raw and left
+    ``propagate()`` raw with it — the S12″ two-faces split again, since
+    the emission face declined on the same object. An extent that will not
+    answer ``__index__`` is a non-integer extent whatever it raises saying
+    so. And the message that says so quotes both the shape and the extent
+    through :func:`_safe_repr`, because an object that refuses one dunder
+    may refuse ``__repr__`` too."""
     for d in shape:
         try:
             k = operator.index(d)
-        except TypeError:
+        except Exception:  # noqa: BLE001 — unreadable IS the finding
             raise IntervalError(
-                f"shape {tuple(shape)!r} has a non-integer extent {d!r} "
-                f"(malformed IR: from_dict does not coerce shape entries)"
+                f"shape {_safe_repr(shape)} has a non-integer extent "
+                f"{_safe_repr(d)} (malformed IR: from_dict does not coerce "
+                f"shape entries)"
             ) from None
         if k < 0:
             raise IntervalError(
-                f"shape {tuple(shape)} has a negative extent: no jax "
+                f"shape {_safe_repr(shape)} has a negative extent: no jax "
                 f"program constructs such a value (measured: jax rejects "
                 f"negative dims in every concrete context)"
             )
@@ -1532,15 +1566,23 @@ def dot_general_geometry(
     # tests `k`. Binding here means every consumer below — and the
     # `DotGeneralGeometry` this returns, which the emission and the replay
     # both read — sees plain `int`s that no protocol can surprise.
+    #
+    # AND IT CATCHES WHATEVER `__index__` RAISES, quoting the dimension
+    # through `_safe_repr` — audit 0.2.0 B6 audit 3, F2 and F3. Catching
+    # only `TypeError` left a `ValueError` from a hostile `__index__`, and
+    # a `RuntimeError` from a hostile `__repr__` in the handler itself,
+    # raw out of the public `propagate()`: the same split one more level
+    # in, from the same cause, that a guard was written as an enumeration
+    # of the exception types the author happened to expect.
     def _indices(name: str, dims) -> tuple[int, ...]:
         out = []
         for d in dims:
             try:
                 out.append(operator.index(d))
-            except TypeError:
+            except Exception:  # noqa: BLE001 — unreadable IS the finding
                 raise IntervalError(
-                    f"dot_general {name} dimension {d!r} is not an integer "
-                    f"(malformed IR: from_dict does not coerce "
+                    f"dot_general {name} dimension {_safe_repr(d)} is not "
+                    f"an integer (malformed IR: from_dict does not coerce "
                     f"dimension_numbers entries)"
                 ) from None
         return tuple(out)

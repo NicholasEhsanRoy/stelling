@@ -497,15 +497,59 @@ def _decode(obj: object) -> object:
 import operator as _operator  # noqa: E402  (stdlib; kept local to the pass)
 
 
-def _load_extent_problem(shape) -> str | None:
+def _safe_repr(obj) -> str:
+    """``repr(obj)``, or a visible placeholder when the object refuses.
+
+    For quoting an object this pass is describing in a refusal, and for
+    nothing else. `__post_init__` is the public constructor's own body, so
+    a `repr` that raises inside a message composed here leaves
+    `ir.JaxprEqn(...)` as a raw `RuntimeError` — which is precisely the
+    class `_validate_decl_eqn` exists to close, arriving through the
+    sentence that was meant to close it (audit 0.2.0 B6 audit 3, F3).
+    Measured: a well-formed declaration whose extent has a working
+    `__index__` and a refusing `__repr__` raw-crashed the constructor,
+    because the message below is an ARGUMENT to `_load_check` and is
+    therefore composed whether or not the check fails."""
+    try:
+        return repr(obj)
+    except Exception:  # noqa: BLE001 — the message's own totality
+        return "<unreadable>"
+
+
+def _load_extents(shape) -> tuple[str | None, tuple[int, ...]]:
+    """A shape's extents NORMALISED to plain ``int``, paired with the
+    malformed-extent problem that stopped the normalisation.
+
+    BOUND, NOT DISCARDED — audit 0.2.0 B6 audit 3, F1, which is the same
+    finding `interval.dot_general_geometry` and
+    `obligation._Slicer._declared_shape` carry. The predicate spelling of
+    this function bound `k = _operator.index(d)`, tested `k` and threw it
+    away; its callers then re-read the RAW objects — `_validate_array_
+    value` with `int(d)` for the byte-length product, `_validate_decl_eqn`
+    with `==` against the aval's extents — so what was validated and what
+    was used were two different reads of the same self-describing object.
+    Returning the normalised extents makes the comparison an `int`-to-
+    `int` one that no `__eq__`, `__int__` or second `__index__` can move.
+
+    NOT ONLY `TypeError`: `operator.index` raises whatever `__index__`
+    raises, and a `ValueError` or `OverflowError` from an extent left
+    `Aval(...)` and `JaxprEqn(...)` raw (audit 0.2.0 B6 audit 3, F2)."""
+    out = []
     for d in shape:
         try:
             k = _operator.index(d)
-        except TypeError:
-            return f"non-integer shape extent {d!r}"
+        except Exception:  # noqa: BLE001 — unreadable IS the finding
+            return f"non-integer shape extent {_safe_repr(d)}", ()
         if k < 0:
-            return f"negative shape extent {d}"
-    return None
+            return f"negative shape extent {k}", ()
+        out.append(k)
+    return None, tuple(out)
+
+
+def _load_extent_problem(shape) -> str | None:
+    """:func:`_load_extents`' problem alone, for the readers that need the
+    verdict and not the count."""
+    return _load_extents(shape)[0]
 
 
 def _load_itemsize(dtype: str) -> int | None:
@@ -527,17 +571,20 @@ def _load_check(cond: bool, where: str, what: str) -> None:
 
 
 def _validate_array_value(arr: Array, where: str) -> None:
-    problem = _load_extent_problem(arr.shape)
+    # the byte-length product is computed from the extents the guard
+    # ACTUALLY VALIDATED, not from a second `int(d)` read of the same
+    # objects (audit 0.2.0 B6 audit 3, F1)
+    problem, extents = _load_extents(arr.shape)
     _load_check(problem is None, where, f"array value has {problem}")
     itemsize = _load_itemsize(arr.dtype)
     if itemsize is not None:
         n = 1
-        for d in arr.shape:
-            n *= int(d)
+        for d in extents:
+            n *= d
         _load_check(
             len(arr.data) == n * itemsize,
             where,
-            f"array value of shape {arr.shape} dtype {arr.dtype!r} carries "
+            f"array value of shape {extents} dtype {arr.dtype!r} carries "
             f"{len(arr.data)} byte(s), expected {n * itemsize}",
         )
 
@@ -758,32 +805,64 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
     if "shape" in params:
         shape = params["shape"]
         dims: tuple | None = None
-        if not isinstance(shape, (str, bytes, bytearray)):
+        # A POSITIVE TEST, and the same one the slicer's `_declared_shape`
+        # makes — audit 0.2.0 B6 audit 3, the optional item. This read
+        # `not isinstance(shape, (str, bytes, bytearray))`, and a
+        # `memoryview` walked past it carrying the identical hazard
+        # (`tuple(memoryview(b"34"))` is `(51, 52)`). A declaration records
+        # its extents in a `tuple` or a `list` — the only forms `_decode`
+        # builds and the only forms jax's own params carry — and anything
+        # else is refused as unreadable rather than enumerated as banned.
+        if isinstance(shape, (tuple, list)):
             try:
                 dims = tuple(shape)
             except Exception:  # noqa: BLE001 — unreadable IS the finding
-                # not only TypeError: a param whose iteration raises
-                # ANYTHING is a self-description that cannot be read, and
-                # letting that exception out of `JaxprEqn.__post_init__`
-                # raw is the very class this function is closing.
+                # not only TypeError, and `isinstance` is a claim about
+                # the TYPE and not the object: a `list` SUBCLASS whose
+                # `__iter__` raises satisfies the test above. A param
+                # whose iteration raises ANYTHING is a self-description
+                # that cannot be read, and letting that exception out of
+                # `JaxprEqn.__post_init__` raw is the very class this
+                # function is closing.
                 dims = None
+        # EVERY QUOTE HERE IS GUARDED, because a `_load_check` message is
+        # an ARGUMENT and is therefore composed on the passing path too: an
+        # unguarded `{shape!r}` raw-crashed `JaxprEqn(...)` on a document
+        # with nothing wrong with it, whose extent merely had a `__repr__`
+        # that refuses (audit 0.2.0 B6 audit 3, F3).
+        # the aval side goes through the SAME reader, so the comparison
+        # below is int-to-int. `Aval.__post_init__` validates its own
+        # extents, so an aval that exists has none of these problems — the
+        # read is here because this function may not rest on another
+        # guard having run, and it is recorded as a defensive read rather
+        # than claimed as a covered one.
+        aval_problem, aval_dims = _load_extents(eqn.outvars[0].aval.shape)
+        _load_check(
+            aval_problem is None,
+            where,
+            f"stelling_any outvar aval has {aval_problem}",
+        )
         _load_check(
             dims is not None,
             where,
-            f"stelling_any shape param {shape!r} is not a sequence of "
-            f"extents, so it cannot be checked against the outvar aval "
-            f"shape {tuple(eqn.outvars[0].aval.shape)} it is the second "
-            f"description of",
+            f"stelling_any shape param {_safe_repr(shape)} is not a "
+            f"sequence of extents, so it cannot be checked against the "
+            f"outvar aval shape {aval_dims} it is the second description "
+            f"of",
         )
-        problem = _load_extent_problem(dims)
+        problem, param_dims = _load_extents(dims)
         _load_check(
             problem is None, where, f"stelling_any shape param has {problem}"
         )
+        # COMPARED AS NORMALISED ints, not as the raw objects — audit 0.2.0
+        # B6 audit 3, F1. `dims == tuple(aval.shape)` asked the param's own
+        # `__eq__`, so the extents this function had just validated through
+        # `__index__` were not the extents it compared.
         _load_check(
-            dims == tuple(eqn.outvars[0].aval.shape),
+            param_dims == aval_dims,
             where,
-            f"stelling_any shape param {dims} contradicts "
-            f"the outvar aval shape {tuple(eqn.outvars[0].aval.shape)}",
+            f"stelling_any shape param {param_dims} contradicts "
+            f"the outvar aval shape {aval_dims}",
         )
     dtype = params.get("dtype")
     if isinstance(dtype, str) and eqn.outvars[0].aval.dtype is not None:

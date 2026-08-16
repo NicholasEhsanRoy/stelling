@@ -544,3 +544,92 @@ def test_the_two_new_check_shape_calls_are_unreachable_for_an_IntervalArray():
         iv.dot_general_geometry((-2,), (3,), dn)
     with pytest.raises(iv.IntervalError):
         iv.dot_general_geometry((3,), ("x",), dn)
+
+
+# -- audit 0.2.0 B6 audit 3, F2 / F3: the guard's own totality --------------
+#
+# The B6 re-audit's R4 repair bound `operator.index`'s result instead of
+# discarding it. It left two things un-repaired, and both are the same
+# shape: a guard whose refusal path can itself raise is not a refusal.
+
+
+class _IndexRaises:
+    """`__index__` refuses with something other than `TypeError`."""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    def __index__(self):
+        raise self._exc
+
+    def __repr__(self):
+        return f"_IndexRaises({type(self._exc).__name__})"
+
+
+class _ReprRaises:
+    """No `__index__` at all, and a `__repr__` that refuses."""
+
+    def __repr__(self):
+        raise RuntimeError("repr refuses")
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [ValueError("index says no"), OverflowError("too big"),
+     RuntimeError("some other refusal")],
+    ids=["ValueError", "OverflowError", "RuntimeError"],
+)
+def test_check_shape_refuses_whatever___index___raises(exc):
+    """`operator.index` raises WHATEVER `__index__` raises, and this guard
+    caught only `TypeError`.
+
+    So a `ValueError` or an `OverflowError` from one extent left
+    `check_shape` raw, and left the public `propagate()` raw with it —
+    `iv.check_shape(a.shape)` is on the transfer face's own path — while the
+    emission face declined on the identical object. That is the S12″
+    two-faces split for the third time in this batch, from the third
+    instance of one cause: a guard written as an enumeration of the
+    exception types its author happened to expect.
+
+    An extent that will not answer `__index__` is a non-integer extent
+    whatever it raises saying so."""
+    with pytest.raises(iv.IntervalError, match="non-integer extent"):
+        iv.check_shape((_IndexRaises(exc),))
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [ValueError("index says no"), OverflowError("too big")],
+    ids=["ValueError", "OverflowError"],
+)
+def test_the_oracle_refuses_whatever___index___raises(exc):
+    """The same widening in `dot_general_geometry`'s `_indices`, which is
+    the site R4 rewrote and left catching `TypeError` alone."""
+    dn = (((_IndexRaises(exc),), (0,)), ((), ()))
+    with pytest.raises(iv.IntervalError, match="is not an integer"):
+        iv.dot_general_geometry((2, 2), (2, 2), dn)
+
+
+def test_a_refusal_message_cannot_be_stopped_by_a_hostile___repr__():
+    """A GUARD THAT QUOTES A MALFORMED OBJECT MUST NOT BE ABLE TO RAISE
+    WHILE QUOTING IT — audit 0.2.0 B6 audit 3, F3.
+
+    Both refusal messages here interpolate the offending value with `{!r}`.
+    The value is by construction one this module has already decided is
+    malformed, so its `__repr__` is exactly as untrustworthy as the
+    `__index__` that got it refused; an unguarded quote turned the decline
+    into a raw `RuntimeError` out of the same public entry points the
+    decline exists to protect. `_safe_repr` substitutes a VISIBLE
+    placeholder, so a reader is told something could not be read rather
+    than shown a plausible value.
+    """
+    with pytest.raises(iv.IntervalError, match="non-integer extent"):
+        iv.check_shape((_ReprRaises(),))
+    dn = (((_ReprRaises(),), (0,)), ((), ()))
+    with pytest.raises(iv.IntervalError, match="is not an integer"):
+        iv.dot_general_geometry((2, 2), (2, 2), dn)
+    # and the placeholder is visible rather than plausible
+    try:
+        iv.check_shape((_ReprRaises(),))
+    except iv.IntervalError as e:
+        assert "<unreadable>" in str(e), str(e)
