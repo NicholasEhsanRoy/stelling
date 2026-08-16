@@ -105,8 +105,8 @@ true six times over while the prose said once. The defect is not the digit; it
 is a digit in prose that nothing recomputes.
 
 <!-- gauge-figures: pow -->
-MEASURED: **28 mutations, 0 survivors, 28 face asymmetries, 15 caught by more
-than one gate, 13 caught by exactly one.**
+MEASURED: **32 mutations, 0 survivors, 32 face asymmetries, 17 caught by more
+than one gate, 15 caught by exactly one.**
 
 <!-- gauge-joint-reach: pow -->
 JOINT REACH: **21 (element, n_out) shapes x 3 base spellings x 4 integer
@@ -124,46 +124,62 @@ battery, and five wrongnesses conditioned on it survived all 22 gates.
 
 **The single-covered set, NAMED rather than counted.** Each of these is caught
 by exactly one gate, so deleting that gate deletes the only measurement of
-that wrongness. All thirteen carry an `ALONE` marking in the mutation table
+that wrongness. All fifteen carry an `ALONE` marking in the mutation table
 below, the test derives that marking from the measurement rather than trusting
 it, and the rows are compared as a SET so an alphabetised table is not rejected
-for being alphabetised. For eleven of them the exclusivity is itself the
-FINDING rather than a gap: `emit-rational-aux-shared-across-elements` is seen
-only by the vector fixture, which is what says the scalar fixtures are blind to
-per-element freshness; `emit-rational-aux-collides-across-two-pow-OUTPUTS` is
-seen only by the invariance gate, which is what says no solver-driven fixture
-here holds two rational `pow`s at all; the two exponent-conditional mutations
+for being alphabetised. For thirteen of them the exclusivity is itself the
+FINDING rather than a gap: the two exponent-conditional mutations
 are seen only by the fixture at their own `(p, q)`, which is what says the rest
 of the battery is blind to a denominator past 2 and a numerator past 1; the
 three element-conditional mutations are seen only by the invariance gate, which
 is what says every solver-driven fixture here is blind past element 1 on BOTH
-branches and at every exponent; and the four BASE-KIND-conditional mutations
+branches and at every exponent; the four BASE-KIND-conditional mutations
 are seen only by that same gate, which is what says every solver-driven fixture
 here raises a DECLARED PROGRAM INPUT to a power and is blind to what its base
-is spelled as. The other two are admission-guard mutations, which only the
-admission gate can reach.
+is spelled as; and each of the four ID-conditional mutations is seen by exactly
+one of the two RANGE gates — three by the invariance gate and the name
+collision by the freshness one — which is what says every solver-driven fixture
+here drives the emitter's variable numbering at the handful of values its own
+equations produce, measured at `out_id` `{2, 3}` and base ids `{0, 2}`. The
+other two are admission-guard mutations, which only the admission gate can
+reach.
+
+**Two rows LEFT this list in the round that added the freshness gate**, and
+the reason is the finding rather than an accident.
+`emit-rational-aux-shared-across-elements` was seen only by the vector fixture
+and `emit-rational-aux-collides-across-two-pow-OUTPUTS` only by the invariance
+gate; both are now seen by
+`every-auxiliary-is-declared-ONCE-and-named-FRESHLY` as well, because both are
+name COLLISIONS and that gate asserts injectivity of the naming seam rather
+than sampling it. What the exclusivity used to stand in for — "no solver-driven
+fixture here holds two rational `pow`s at all" — is still true and is still
+asserted, by the anti-vacuity floor on the measured `out_id` reach in
+`test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose`. A claim
+that moved from an exclusivity to a direct assertion got stronger, not weaker.
 
 <!-- single-covered: BEGIN -->
 | single-covered mutation | its only gate |
 |---|---|
 | `rational-admission-always-yes` | `non-dyadic-exponent-declines` |
 | `exponent-rationalised-to-a-nearby-fraction` | `non-dyadic-exponent-declines` |
-| `emit-integer-wrong-only-past-the-second-element-at-degree-five` | `emission-is-invariant-to-the-shape-and-the-base-term` |
+| `emit-integer-wrong-only-past-the-second-element-at-degree-five` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` |
 | `emit-rational-wrong-only-at-a-larger-denominator` | `refutes-the-false-rational-property-at-denominator-four` |
 | `emit-rational-wrong-only-at-a-numerator-past-one` | `refutes-the-false-rational-property-at-numerator-three` |
-| `emit-rational-wrong-only-past-the-second-element` | `emission-is-invariant-to-the-shape-and-the-base-term` |
-| `emit-rational-wrong-only-past-the-second-element-at-q-two` | `emission-is-invariant-to-the-shape-and-the-base-term` |
-| `emit-integer-wrong-only-on-a-COMPUTED-base-at-degree-three` | `emission-is-invariant-to-the-shape-and-the-base-term` |
-| `emit-integer-wrong-only-on-an-AUXILIARY-base-at-degree-three` | `emission-is-invariant-to-the-shape-and-the-base-term` |
-| `emit-rational-wrong-only-on-a-COMPUTED-base-at-q-two` | `emission-is-invariant-to-the-shape-and-the-base-term` |
-| `emit-rational-wrong-only-on-an-AUXILIARY-base-at-q-two` | `emission-is-invariant-to-the-shape-and-the-base-term` |
-| `emit-rational-aux-shared-across-elements` | `refutes-the-false-vector-property` |
-| `emit-rational-aux-collides-across-two-pow-OUTPUTS` | `emission-is-invariant-to-the-shape-and-the-base-term` |
+| `emit-rational-wrong-only-past-the-second-element` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` |
+| `emit-rational-wrong-only-past-the-second-element-at-q-two` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` |
+| `emit-integer-wrong-only-on-a-COMPUTED-base-at-degree-three` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` |
+| `emit-integer-wrong-only-on-an-AUXILIARY-base-at-degree-three` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` |
+| `emit-rational-wrong-only-on-a-COMPUTED-base-at-q-two` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` |
+| `emit-rational-wrong-only-on-an-AUXILIARY-base-at-q-two` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` |
+| `emit-rational-wrong-only-at-a-LATER-OUT-ID` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` |
+| `emit-rational-aux-collides-only-at-a-LATER-OUT-ID` | `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` |
+| `emit-integer-wrong-only-at-a-LATER-BASE-ID` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` |
+| `emit-rational-wrong-only-at-a-LATER-BASE-ID` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` |
 <!-- single-covered: END -->
 
 **The count did not move; the membership did** — and then the count moved too,
 which is the reason the set is compared by NAME and not by size. It has now
-happened three times. The exponent widening took two entries off this list —
+happened four times. The exponent widening took two entries off this list —
 `emit-integer-loses-the-reciprocal`, also seen by the second-magnitude
 reciprocal gate, and `replay-as-the-identity`, also seen by the `p = 3`
 positive control — and the two conditional mutations it added replaced them.
@@ -171,9 +187,11 @@ The shape round took `emit-rational-one-aux-for-two-elements` off (the
 invariance gate sees it too, without a solver) and added
 `emit-rational-wrong-only-past-the-second-element`. Six, six and six; three
 different sets. A test comparing a count against a count would have passed
-through all three rounds unchanged. This round is the first to move the size,
-and it moves it because the two mutations it adds are conditioned on the
-PRODUCT of the element index and the exponent rather than on either alone.
+through all three rounds unchanged. The joint round was the first to move the
+size, because the two mutations it added are conditioned on the PRODUCT of the
+element index and the exponent rather than on either alone; the ID round moved
+it again in both directions at once — four new single-covered items in, two
+freshness items out to the new gate.
 
 **The mutation table.** The middle column is the COMPLETE catch set, checked
 for equality against the measurement: every catching gate is named, no gate is
@@ -205,7 +223,7 @@ a whole cell of it without the suite noticing.
 <!-- mutation-table: BEGIN -->
 | mutation | caught by | what the catch looks like |
 |---|---|---|
-| `row-absent-from-the-emission-set` | `refutes-the-false-integer-property`, `refutes-under-jit`, `discharges-the-true-integer-property`, `refutes-the-false-integer-property-at-degree-five`, `discharges-the-true-integer-property-at-degree-five`, `discharges-the-negative-exponent-identity`, `discharges-the-fourth-power-reciprocal-identity`, `discharges-the-true-rational-upper-bound`, `discharges-the-true-rational-lower-bound`, `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `discharges-the-true-rational-bound-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `discharges-the-true-rational-bound-at-denominator-four`, `refutes-the-false-vector-property`, `witness-executes-through-jax`, `fragment-is-nonlinear`, `emission-is-invariant-to-the-shape-and-the-base-term`, `replay-agrees-with-jax` | everything declines |
+| `row-absent-from-the-emission-set` | `refutes-the-false-integer-property`, `refutes-under-jit`, `discharges-the-true-integer-property`, `refutes-the-false-integer-property-at-degree-five`, `discharges-the-true-integer-property-at-degree-five`, `discharges-the-negative-exponent-identity`, `discharges-the-fourth-power-reciprocal-identity`, `discharges-the-true-rational-upper-bound`, `discharges-the-true-rational-lower-bound`, `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `discharges-the-true-rational-bound-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `discharges-the-true-rational-bound-at-denominator-four`, `refutes-the-false-vector-property`, `witness-executes-through-jax`, `fragment-is-nonlinear`, `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT`, `every-auxiliary-is-declared-ONCE-and-named-FRESHLY`, `replay-agrees-with-jax` | everything declines |
 | `fragment-claims-linear` | `refutes-the-false-integer-property`, `refutes-under-jit`, `discharges-the-true-integer-property`, `refutes-the-false-integer-property-at-degree-five`, `discharges-the-true-integer-property-at-degree-five`, `discharges-the-negative-exponent-identity`, `discharges-the-fourth-power-reciprocal-identity`, `discharges-the-true-rational-upper-bound`, `discharges-the-true-rational-lower-bound`, `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `discharges-the-true-rational-bound-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `discharges-the-true-rational-bound-at-denominator-four`, `refutes-the-false-vector-property`, `witness-executes-through-jax`, `fragment-is-nonlinear` | the script violates its own declared logic |
 | `rational-admission-always-yes` | `non-dyadic-exponent-declines` ALONE | `x ** 0.1` is admitted |
 | `exponent-rationalised-to-a-nearby-fraction` | `non-dyadic-exponent-declines` ALONE | audit S1's own defect: `0.1` becomes `1/10` |
@@ -214,23 +232,27 @@ a whole cell of it without the suite noticing.
 | `emit-integer-exponent-ignored` | `refutes-the-false-integer-property`, `refutes-under-jit`, `refutes-the-false-integer-property-at-degree-five`, `discharges-the-negative-exponent-identity`, `discharges-the-fourth-power-reciprocal-identity`, `witness-executes-through-jax` | the violation disappears — a MISSED violation |
 | `emit-integer-loses-the-reciprocal` | `discharges-the-negative-exponent-identity`, `discharges-the-fourth-power-reciprocal-identity` | `x^-2` is emitted as `x^2` |
 | `emit-integer-wrong-only-above-degree-three` | `refutes-the-false-integer-property-at-degree-five`, `discharges-the-fourth-power-reciprocal-identity` | **CONDITIONAL.** Correct at every exponent the shipped battery drove and wrong at `abs(exp) >= 4`; emits `x^5` for `x^6`, so `x**6 <= 40` over [1, 2] goes VERIFIED when `2^6 = 64` |
-| `emit-integer-wrong-only-past-the-second-element-at-degree-five` | `emission-is-invariant-to-the-shape-and-the-base-term` ALONE | **CONDITIONAL ON THE PRODUCT of the element index and the exponent, which is where the round that closed each axis separately left a hole.** Correct everywhere except at element 2 and beyond AND at exponent 5 — and BOTH of those coordinates are printed as driven above, so this is not covered by the exponent radius disclosed further down. It emits `x^2` for `x^5` past element 1, so on `x[2]**5 - x[1]**5 <= 10` over [1, 2] the reachable value at element 2 is capped at `2^2 = 4` while the truth is `2^5 = 32` against `1^5 = 1`, and a violated obligation comes back `discharged`. The predecessor's shape-invariance gate drove ONE hardwired exponent per branch — 3 on this one — so every other integer exponent was reached at element 0 only and this survived all 22 gates |
+| `emit-integer-wrong-only-past-the-second-element-at-degree-five` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` ALONE | **CONDITIONAL ON THE PRODUCT of the element index and the exponent, which is where the round that closed each axis separately left a hole.** Correct everywhere except at element 2 and beyond AND at exponent 5 — and BOTH of those coordinates are printed as driven above, so this is not covered by the exponent radius disclosed further down. It emits `x^2` for `x^5` past element 1, so on `x[2]**5 - x[1]**5 <= 10` over [1, 2] the reachable value at element 2 is capped at `2^2 = 4` while the truth is `2^5 = 32` against `1^5 = 1`, and a violated obligation comes back `discharged`. The predecessor's shape-invariance gate drove ONE hardwired exponent per branch — 3 on this one — so every other integer exponent was reached at element 0 only and this survived all 22 gates |
 | `emit-rational-wrong-only-at-a-larger-denominator` | `refutes-the-false-rational-property-at-denominator-four` ALONE | **CONDITIONAL.** Correct at `q = 2` and wrong at `q >= 4`; emits `aux^6 = x^1` for `x^(1/4)`, which caps the reachable value at `81^(1/6)` — below the bound — so a bound of 2.9 goes VERIFIED where the truth is `81^(1/4) = 3` |
 | `emit-rational-wrong-only-at-a-numerator-past-one` | `refutes-the-false-rational-property-at-numerator-three` ALONE | **CONDITIONAL.** Correct across the whole `p == 1` family and wrong outside it; emits `aux^2 = x^1` for `x^(3/2)`, which caps the reachable value at `4^(1/2)` — below the bound — so a bound of 7.9 goes VERIFIED where the truth is `4^(3/2) = 8` |
-| `emit-rational-wrong-only-past-the-second-element` | `emission-is-invariant-to-the-shape-and-the-base-term` ALONE | **CONDITIONAL, on the SHAPE axis, and the mutation that survived the round that widened the exponent one.** Correct at elements 0 and 1 — the whole of what the two-element vector fixture drives — and wrong from element 2 on, where it emits `aux^6 = x^1` for `x^(1/4)`. On `x[2]**0.25 - x[1]**0.25 <= 1.9` over [1, 81] it turns a REFUTED into a VERIFIED; the truth is `81^(1/4) = 3` minus `1^(1/4) = 1`, which is 2. Caught by the INVARIANCE gate, so the catch holds for every element index in that gate's range and not only for the index this mutation names |
-| `emit-rational-wrong-only-past-the-second-element-at-q-two` | `emission-is-invariant-to-the-shape-and-the-base-term` ALONE | **The same PRODUCT on the rational branch, and the sharper of the two because `q = 2` is the denominator the whole battery is built around.** Correct everywhere except at element 2 and beyond AND at `q == 2`; emits `aux^4 = x^1` for `x^(1/2)` there, so on `x[2]**0.5 - x[1]**0.5 <= 7.9` over [1, 81] the reachable value at element 2 is capped at `81^(1/4) = 3` while the truth is `81^(1/2) = 9` against `1^(1/2) = 1`, and a REFUTED query comes back VERIFIED. Every element index past 1 used to be driven at `(1, 4)` and nowhere else, so this combination of two DRIVEN coordinates was ungauged and — unlike the exponent radius below — undisclosed |
-| `emit-integer-wrong-only-on-a-COMPUTED-base-at-degree-three` | `emission-is-invariant-to-the-shape-and-the-base-term` ALONE | **CONDITIONAL ON THE SEAM'S OTHER ARGUMENT — the base TERM, which no round had enumerated.** Correct at every element, every count and every exponent when the base is a declared program input, and wrong when it is an emitted `t...` intermediate at exponent 3: it emits `x^2` for `x^3`. Every fixture in the battery raised a DECLARED INPUT to a power, so this passed all 22 gates and rode out as a false VERIFIED on ordinary jax — `(x+1)**3 <= 23` over [1, 2], where the truth at the extremum is `3^3 = 27` and the mutated script cannot exceed `3^2 = 9`. Real programs almost always `pow` a computed quantity |
-| `emit-integer-wrong-only-on-an-AUXILIARY-base-at-degree-three` | `emission-is-invariant-to-the-shape-and-the-base-term` ALONE | **The same axis at the THIRD spelling, which is the one the base-kind finding itself nearly missed.** A rational `pow` feeding an integer `pow` hands the seam an `aux_...` base, not a `t...` one, so a mutation conditioned on `aux` survives a battery that has just closed `t`. It emits `x^2` for `x^3` there, so `(x**0.5)**3 <= 7.9` over [1, 4] goes REFUTED → VERIFIED: the truth at the extremum is `4^(3/2) = 8` and the mutated script cannot exceed `4^(2/2) = 4` |
-| `emit-rational-wrong-only-on-a-COMPUTED-base-at-q-two` | `emission-is-invariant-to-the-shape-and-the-base-term` ALONE | **The base-term axis on the RATIONAL branch, at `q = 2` — the denominator the whole battery is built around, so nothing about this is a corner.** Emits `aux^4 = x^1` for `x^(1/2)` when the base is a `t...` intermediate, which caps the reachable value at the fourth root: on `(x+1)**0.5 <= 8.9` over [0, 80] the truth at the extremum is `81^(1/2) = 9` and the mutated script cannot exceed `81^(1/4) = 3` |
-| `emit-rational-wrong-only-on-an-AUXILIARY-base-at-q-two` | `emission-is-invariant-to-the-shape-and-the-base-term` ALONE | **The auxiliary spelling on the rational branch, which is a `pow` of a `pow` — `(x**0.5)**0.5`, ordinary code.** Emits `aux^4 = x^1` for `x^(1/2)` when the base is another element's `aux_...`, so over [1, 6561] the truth at the extremum is `6561^(1/4) = 9` while the mutated outer encoding cannot exceed `6561^(1/8) = 3`, and a bound of 8.9 turns REFUTED into VERIFIED. Note that the INNER `pow` of this program is untouched: the mutation fires on the base's spelling, not on the exponent, and both calls carry `(1, 2)` |
+| `emit-rational-wrong-only-past-the-second-element` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` ALONE | **CONDITIONAL, on the SHAPE axis, and the mutation that survived the round that widened the exponent one.** Correct at elements 0 and 1 — the whole of what the two-element vector fixture drives — and wrong from element 2 on, where it emits `aux^6 = x^1` for `x^(1/4)`. On `x[2]**0.25 - x[1]**0.25 <= 1.9` over [1, 81] it turns a REFUTED into a VERIFIED; the truth is `81^(1/4) = 3` minus `1^(1/4) = 1`, which is 2. Caught by the INVARIANCE gate, so the catch holds for every element index in that gate's range and not only for the index this mutation names |
+| `emit-rational-wrong-only-past-the-second-element-at-q-two` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` ALONE | **The same PRODUCT on the rational branch, and the sharper of the two because `q = 2` is the denominator the whole battery is built around.** Correct everywhere except at element 2 and beyond AND at `q == 2`; emits `aux^4 = x^1` for `x^(1/2)` there, so on `x[2]**0.5 - x[1]**0.5 <= 7.9` over [1, 81] the reachable value at element 2 is capped at `81^(1/4) = 3` while the truth is `81^(1/2) = 9` against `1^(1/2) = 1`, and a REFUTED query comes back VERIFIED. Every element index past 1 used to be driven at `(1, 4)` and nowhere else, so this combination of two DRIVEN coordinates was ungauged and — unlike the exponent radius below — undisclosed |
+| `emit-integer-wrong-only-on-a-COMPUTED-base-at-degree-three` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` ALONE | **CONDITIONAL ON THE SEAM'S OTHER ARGUMENT — the base TERM, which no round had enumerated.** Correct at every element, every count and every exponent when the base is a declared program input, and wrong when it is an emitted `t...` intermediate at exponent 3: it emits `x^2` for `x^3`. Every fixture in the battery raised a DECLARED INPUT to a power, so this passed all 22 gates and rode out as a false VERIFIED on ordinary jax — `(x+1)**3 <= 23` over [1, 2], where the truth at the extremum is `3^3 = 27` and the mutated script cannot exceed `3^2 = 9`. Real programs almost always `pow` a computed quantity |
+| `emit-integer-wrong-only-on-an-AUXILIARY-base-at-degree-three` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` ALONE | **The same axis at the THIRD spelling, which is the one the base-kind finding itself nearly missed.** A rational `pow` feeding an integer `pow` hands the seam an `aux_...` base, not a `t...` one, so a mutation conditioned on `aux` survives a battery that has just closed `t`. It emits `x^2` for `x^3` there, so `(x**0.5)**3 <= 7.9` over [1, 4] goes REFUTED → VERIFIED: the truth at the extremum is `4^(3/2) = 8` and the mutated script cannot exceed `4^(2/2) = 4` |
+| `emit-rational-wrong-only-on-a-COMPUTED-base-at-q-two` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` ALONE | **The base-term axis on the RATIONAL branch, at `q = 2` — the denominator the whole battery is built around, so nothing about this is a corner.** Emits `aux^4 = x^1` for `x^(1/2)` when the base is a `t...` intermediate, which caps the reachable value at the fourth root: on `(x+1)**0.5 <= 8.9` over [0, 80] the truth at the extremum is `81^(1/2) = 9` and the mutated script cannot exceed `81^(1/4) = 3` |
+| `emit-rational-wrong-only-on-an-AUXILIARY-base-at-q-two` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` ALONE | **The auxiliary spelling on the rational branch, which is a `pow` of a `pow` — `(x**0.5)**0.5`, ordinary code.** Emits `aux^4 = x^1` for `x^(1/2)` when the base is another element's `aux_...`, so over [1, 6561] the truth at the extremum is `6561^(1/4) = 9` while the mutated outer encoding cannot exceed `6561^(1/8) = 3`, and a bound of 8.9 turns REFUTED into VERIFIED. Note that the INNER `pow` of this program is untouched: the mutation fires on the base's spelling, not on the exponent, and both calls carry `(1, 2)` |
+| `emit-rational-wrong-only-at-a-LATER-OUT-ID` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` ALONE | **THE RANGE INSIDE AN ENUMERATED ARGUMENT.** Emits `aux^(q+2) = x^p` once the auxiliary's own NAME spells an `out_id` of 4 or more, and the row's own text below that. `out_id` was classified DRIVEN — "reaches the seam at more than one value AND a wrongness conditioned on it is CAUGHT" — on a measured reach of `{2, 3}`, of which only `2` reaches a verdict-producing gate; the universal was false, and this survived all 22 gates on `41329d7` while minting a verdict-level false VERIFIED on three ordinary jax operations. `y = (x+1)-1 ; r = y**0.5 ; r[0]-r[1] <= 7.9` over [1, 81]^2 drives `out_id` 4, the truth is `81^(1/2) = 9` against `1^(1/2) = 1`, and the mutated encoding caps element 0 at `81^(1/4) = 3` |
+| `emit-rational-aux-collides-only-at-a-LATER-OUT-ID` | `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` ALONE | **THE FRESHNESS CLAIM AT AN UNSWEPT `out_id`**, and the item that says why the freshness gate is a second gate rather than a branch of the invariance one. `emit-rational-aux-collides-across-two-pow-OUTPUTS` with the un-swept coordinate as its condition: `out_id` dropped from the name once it is 4 or more, so two `pow` OUTPUTS share an auxiliary. The invariance gate CANONICALISES that name to `AUX` and is blind to it by construction. Its failure is a LOST REFUTATION rather than a missed violation — one symbol declared twice is illegal SMT-LIB2, both backends decline, and a nested `pow` over [1, 6561] whose truth is `6561^(1/4) = 9` against `1^(1/4) = 1` returns `unknown` where the baseline refutes |
+| `emit-integer-wrong-only-at-a-LATER-BASE-ID` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` ALONE | **THE SAME RANGE ONE ARGUMENT OVER: the id inside the BASE TERM.** A base's KIND is what `_base_spelling` keeps and its ID is what it throws away, so three spellings were swept while the ids reaching the seams were `{0, 2}`. Emits `x^(exp-1)` once the base term's id is 4 or more. Survived all 22 gates on `41329d7`, and turns a `violated-witness` into a `discharged` on `((x+1)-1)**3` over [1, 3], where the truth is `3^3 = 27` and the mutated script cannot exceed `3^2 = 9`. The end-to-end verdict is intercepted by the vacuity widen re-check, which raises `EmissionInfidelityError`, so the demonstration stops at the escalation outcome exactly as its shape-conditioned twin does |
+| `emit-rational-wrong-only-at-a-LATER-BASE-ID` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` ALONE | **THE BASE-TERM ID ON THE RATIONAL BRANCH**, a separate item because the two branches are two seams. Emits `aux^(q+2) = x^p` once the base term's id is 4 or more. Survived all 22 gates on `41329d7` and mints a verdict-level false VERIFIED: two padding equations put the base at `t5`, the truth is `81^(1/2) = 9` against `1^(1/2) = 1` under a bound of 7.9, and the mutated encoding caps the reachable value at `81^(1/4) = 3` |
 | `emit-rational-sides-swapped` | `discharges-the-true-rational-upper-bound`, `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `discharges-the-true-rational-bound-at-denominator-four`, `refutes-the-false-vector-property` | `aux^p = x^q` is `x^(q/p)`, a different function |
 | `emit-rational-root-guard-dropped` | `discharges-the-true-rational-lower-bound`, `refutes-the-false-vector-property` | the NEGATIVE root satisfies the negated obligation |
 | `emit-rational-constraint-never-asserted` | `discharges-the-true-rational-upper-bound`, `discharges-the-true-rational-lower-bound`, `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `discharges-the-true-rational-bound-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `discharges-the-true-rational-bound-at-denominator-four`, `refutes-the-false-vector-property` | `aux` is free; every true property becomes sat |
 | `emit-rational-denominator-off-by-one` | `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `refutes-the-false-vector-property` | `aux^3 = x` caps the value below the bound — a MISSED violation |
 | `emit-rational-aux-is-the-base` | `discharges-the-true-rational-upper-bound`, `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `discharges-the-true-rational-bound-at-denominator-four`, `refutes-the-false-vector-property` | the encoding collapses to the identity |
-| `emit-rational-aux-shared-across-elements` | `refutes-the-false-vector-property` ALONE | **by MALFORMEDNESS**: two `declare-const` of one symbol, both backends refuse, the obligation returns `unknown`. NOT seen by the invariance gate, and that is correct — every element emits the same lines about the same shared symbol, so there is no per-element difference to see; only a verdict can catch this one |
-| `emit-rational-aux-collides-across-two-pow-OUTPUTS` | `emission-is-invariant-to-the-shape-and-the-base-term` ALONE | **THE THIRD `_pow_aux_name` PARAMETER, which the signature enumeration turned up and which the same round had already made reachable.** Drops `out_id` from the auxiliary's name: still fresh per ELEMENT of one output, colliding between two DIFFERENT rational `pow`s. Freshness across elements had two battery items and freshness across OUTPUTS had none, because no fixture held two rational `pow`s — until the `auxiliary` arm of the base-spelling sweep, which is `(x**0.5)**e`. Measured: two distinct `out_id` values reach the seam across the battery, and the collision shows up as a per-element block that canonicalises its own base and auxiliary to the same token. Exclusivity is the finding: no solver-driven fixture here chains two rational `pow`s at all |
-| `emit-rational-one-aux-for-two-elements` | `refutes-the-false-vector-property`, `emission-is-invariant-to-the-shape-and-the-base-term` | **the sharpest item.** Well-formed: one declaration, two constraints, so `x0_0 == x0_1` and the difference of the two roots collapses to 0. An obligation false at `x = [4, 1]` comes back `discharged`. A silent missed violation, and nothing in the tree caught it before. Caught twice now — by the vector fixture's verdict and, without a solver, by the invariance gate, because declaring the auxiliary for one element and not the other IS a per-element difference in the emitted text |
+| `emit-rational-aux-shared-across-elements` | `refutes-the-false-vector-property`, `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` | **by MALFORMEDNESS**: two `declare-const` of one symbol, both backends refuse, the obligation returns `unknown`. NOT seen by the invariance gate, and that is correct — every element emits the same lines about the same shared symbol, so there is no per-element difference to see; only a verdict can catch this one |
+| `emit-rational-aux-collides-across-two-pow-OUTPUTS` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT`, `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` | **THE THIRD `_pow_aux_name` PARAMETER, which the signature enumeration turned up and which the same round had already made reachable.** Drops `out_id` from the auxiliary's name: still fresh per ELEMENT of one output, colliding between two DIFFERENT rational `pow`s. Freshness across elements had two battery items and freshness across OUTPUTS had none, because no fixture held two rational `pow`s — until the `auxiliary` arm of the base-spelling sweep, which is `(x**0.5)**e`. Measured: two distinct `out_id` values reach the seam across the battery, and the collision shows up as a per-element block that canonicalises its own base and auxiliary to the same token. Exclusivity is the finding: no solver-driven fixture here chains two rational `pow`s at all |
+| `emit-rational-one-aux-for-two-elements` | `refutes-the-false-vector-property`, `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT`, `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` | **the sharpest item.** Well-formed: one declaration, two constraints, so `x0_0 == x0_1` and the difference of the two roots collapses to 0. An obligation false at `x = [4, 1]` comes back `discharged`. A silent missed violation, and nothing in the tree caught it before. Caught twice now — by the vector fixture's verdict and, without a solver, by the invariance gate, because declaring the auxiliary for one element and not the other IS a per-element difference in the emitted text |
 | `replay-exponent-inverted` | `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `refutes-the-false-vector-property`, `replay-agrees-with-jax` | the replay disagrees with jax at a grid point |
 | `replay-as-the-identity` | `refutes-the-false-rational-property-at-numerator-three`, `replay-agrees-with-jax` | as above |
 <!-- mutation-table: END -->
@@ -261,16 +283,27 @@ VERIFIED on an exponent the guard admits. The claim is now:
 > per-element output is asserted invariant to that too. Every NON-emission
 > stage is driven with an `input` base and only an `input` base.
 >
-> And the three axes are claimed JOINTLY, not one at a time: every one of those
+> On the ID axis — which is the RANGE half of the two arguments above and not
+> a fifth axis — the emitted block is asserted INVARIANT to every emitter id
+> in `[0, 15]`, at every symbol spelling, every driven shape and every driven
+> exponent; and the auxiliary's NAME is asserted FRESH over the same range,
+> between the elements of one output and between two outputs. An id past 15 is
+> NOT gauged, and an id is unbounded, so that residue is disclosed rather than
+> closed. The ids the gates DRIVE are measured and asserted to lie inside the
+> range: `out_id` at `{2, 3}`, base ids at `{0, 2}`.
+>
+> And the axes are claimed JOINTLY, not one at a time: every one of those
 > shapes, in every one of those spellings, is driven at every one of the
 > integer exponents and at every one of the `(p, q)` pairs — the FULL PRODUCT
 > in both cases, asserted as an equality against it, and counted in the
 > machine-checked JOINT REACH line above. So an emission wrongness conditioned
 > on the element index, on the element count, on a DRIVEN base spelling, on a
-> driven exponent, or on ANY COMBINATION of the four, is caught. A
+> driven exponent, on an id inside the range, or on ANY COMBINATION of the
+> five, is caught. A
 > non-emission wrongness past two elements or outside an `input` base, or
 > anything at all past six elements, or any rank above 1, or anything
-> conditioned on an exponent outside the two sets above, or on a base that is
+> conditioned on an exponent outside the two sets above, on an id past the top
+> of the range, or on a base that is
 > not a symbol at all, is NOT gauged.
 
 Four and three is better than two and one and is still finite, so the honest
@@ -366,32 +399,79 @@ arguments, so its arguments are the complete set of things a wrongness inside
 it can be conditioned on.
 `test_every_SEAM_ARGUMENT_is_a_gauged_COORDINATE_or_a_named_exemption` reads
 all three seams' signatures with `inspect` and requires every parameter to be
-classified: COORDINATE (recorded in the joint reach and swept as a product),
-DRIVEN (reaches the seam at more than one value and a wrongness conditioned on
-it is caught, but its values are jax's variable numbering rather than a
-semantic axis, so it is pinned by a battery mutation instead of swept),
-DERIVED (a pure function of parameters already classified — only `aux_name` is
-one) or DISCLOSED (reaches a seam, is not swept, and is named in the SCOPE
-string, which the test checks rather than trusts). A future round that adds an
-argument to a seam fails that test instead of shipping an axis nobody
-enumerated. It does NOT say a COORDINATE is swept widely enough: the exponent
-is a coordinate and its radius is still a finite set of points, and the NUMERAL
-base spelling is outside the driven range of `base_kind`. What it closes is the
-enumeration, not the ranges.
+classified. A future round that adds an argument to a seam fails that test
+instead of shipping an axis nobody enumerated.
 
-**Running the enumeration corrected its own first draft, which is the best
-evidence it is worth having.** `smt._pow_aux_name`'s `out_id` — the auxiliary's
+**Running the enumeration corrected its own first draft.**
+`smt._pow_aux_name`'s `out_id` — the auxiliary's
 freshness across two `pow` OUTPUTS rather than across two elements — was
 written down as an undriven gap, on the reasoning that no fixture holds two
-rational `pow`s. Measured, that was already false: the `auxiliary` arm of this
-round's base-spelling sweep is `(x**0.5)**e`, which is two rational `pow`s and
+rational `pow`s. Measured, that was already false: the `auxiliary` arm of the
+base-spelling sweep is `(x**0.5)**e`, which is two rational `pow`s and
 therefore two `out_id`s. Two distinct values reach the seam across the
 battery, and a mutation that drops `out_id` from the name — colliding two
-outputs' auxiliaries while keeping them fresh per element — is CAUGHT by the
-invariance gate. It is classified DRIVEN and pinned by
-`emit-rational-aux-collides-across-two-pow-OUTPUTS`, so removing the auxiliary
-probe arm would fail that item rather than silently reopen the gap. **Every
-seam argument is now in a positive class; the DISCLOSED class is empty.**
+outputs' auxiliaries while keeping them fresh per element — is CAUGHT.
+
+**AND THEN THE LIST WAS CLOSED AND EVERY RANGE WAS STILL OPEN, WHICH IS THE
+DEFECT THE ENUMERATION ROUND SHIPPED.** A wrongness is conditioned on an
+argument's VALUE, not on its name, so enumerating the parameters closed the
+LIST and left every parameter's RANGE exactly as open as before. Two entries in
+that table said otherwise and both were wrong in the same way:
+
+- `out_id` was classified DRIVEN, a class defined as *"reaches the seam at more
+  than one value AND a wrongness conditioned on it is CAUGHT"*. That universal
+  was false. The measured reach was `{2, 3}` — and `{2}` at every
+  verdict-producing gate, `3` arriving only through one emission-only gate — so
+  what held was the EXISTENTIAL: one particular mutation, conditioned at
+  `out_id >= 3`, was caught. Mutations conditioned at `>= 4`, `>= 5` and `>= 6`
+  survived all 22 gates, and one mints a verdict-level false VERIFIED on three
+  ordinary jax operations: `y = (x+1)-1 ; r = y**0.5 ; r[0]-r[1] <= 7.9` over
+  [1, 81]^2 hands the seam `out_id` 4, the truth is `81^(1/2) = 9` against
+  `1^(1/2) = 1`, and the mutated encoding cannot exceed `81^(1/4) = 3`.
+- `aux_name` was classified DERIVED because it is *"a pure function of
+  parameters already classified … SO it carries no axis of its own"*. That `so`
+  does not carry. Derived-ness closes the LIST; the RANGES compose. `aux_name`
+  is derived from `out_id`, which was classified but not closed, and a product
+  over `element` and `n_out` says nothing about `out_id`.
+
+The same defect ran one seam over, on an argument nobody had called an id at
+all: both exponent seams read a BASE TERM, and `x0`, `t2`, `aux_2` spell an id
+exactly as `aux_2_0` does. The base's KIND was swept and the ID inside it was
+`{0, 2}` — so `emit-integer-wrong-only-at-a-LATER-BASE-ID` and its rational
+twin survived every gate too, the second minting a false VERIFIED on the same
+three-operation shape.
+
+**The repair is an INVARIANCE over a printed range, plus a vocabulary that
+forces the choice.** The ids are closed the way the shape is: the emitted block
+must be the REFERENCE block with its symbol names substituted, at every id in
+`[0, 15]`, for every symbol spelling, at every driven shape and every driven
+exponent — evidence about every conditioning function on an id inside the
+range rather than about the values a fixture produced. Freshness needs its own
+gate, because the invariance comparison canonicalises the auxiliary's name to
+`AUX` and is blind to a wrongness that changes only the name;
+`every-auxiliary-is-declared-ONCE-and-named-FRESHLY` asserts INJECTIVITY of the
+naming seam over the same range and, end to end, that every `declare-const` in
+an emitted probe script is declared once.
+
+Each seam parameter now carries a CLOSURE as well as an axis — **SWEPT** (every
+value in its range is driven; only `element` is one), **INVARIANT** (a named
+gate asserts the text is independent of it over a declared range) or
+**DISCLOSED** (a finite set of driven points, with the rest named in the gauge's
+`SCOPE`) — and a RESIDUE naming the part of its range that is not closed, whose
+phrase must appear in that `SCOPE`. The DISCLOSED class was EMPTY for a round,
+and its emptiness was the tell: a vocabulary with nowhere to say *"listed, but
+not closed"* had nowhere to put the exponent, which is the most disclosed thing
+on this page. `exp_val`, `p` and `q` are in it now. A DERIVED argument is
+required to carry its sources' residues, which is the `so` above made
+mechanical.
+
+What none of this closes is whether a declared RANGE is wide enough. An id is
+unbounded and `[0, 15]` is finite, so a wrongness conditioned past the top
+survives — and it has to be wrong ABOVE the range and right inside it, which is
+a defect shaped to the instrument. That residue is disclosed in the not-reached
+list below, and the ids the gates DRIVE are asserted to lie inside the range
+and to be a PROPER subset of it, so a sweep that started recording itself would
+fail rather than print its own range as the reach.
 
 **And a note on what that instrument can and cannot do, because "MEASURED"
 reads as "sufficient".** The equality between what the fixtures declare and
@@ -401,8 +481,10 @@ declared set is the right one. The genuinely new coverage lives in the test's
 ANTI-VACUITY floors, and every floor is typed at the radius of a mutation
 someone already wrote — `|exp| >= 4`, `q >= 4`, `p != 1`, element index `>= 2`.
 Widen the battery again and the next mutation sits one step outside the new
-floor. **That is not a prediction; it is measured.** Three mutations
-conditioned one step outside the exponent floors survive all twenty-two gates
+floor. **That is not a prediction; it is measured — and it was measured again
+one round later, on the ID axis, which is why the repair there is an invariance
+and not a fifth floor.** Three mutations
+conditioned one step outside the exponent floors survive every gate
 on this tree today, each minting a false VERIFIED on an exponent the admission
 guard admits:
 
@@ -417,11 +499,13 @@ and writing three more mutations, which is this round again rather than the end
 of it; what the row honestly claims is the printed set above, and a wrongness
 conditioned outside it is disclosed here rather than covered.
 
-The one part of this row's gauge that is not radius-shaped **on the SHAPE and
-BASE-TERM axes** is the invariance gate: emission is text, an elementwise row's
-per-element text cannot legitimately depend on the shape or on what its base is
-spelled as, so asserting that it does not is evidence about every conditioning
-function on `(element, n_out)` and on the base's spelling rather than about a
+The one part of this row's gauge that is not radius-shaped **on the SHAPE,
+BASE-TERM and ID axes** is the invariance gate: emission is text, an
+elementwise row's per-element text cannot legitimately depend on the shape, on
+what its base is spelled as, or on the emitter's variable numbering, so
+asserting that it does not is evidence about every conditioning
+function on `(element, n_out)`, on the base's spelling and on an id inside the
+printed range rather than about a
 sampled point — and, since the gate sweeps the driven exponent set, that
 argument now holds at each of those exponents rather than at one per branch.
 **It is not an argument about the exponent axis and this page previously
@@ -444,6 +528,18 @@ a fourth spelling reaching a seam appears in the measured reach or in its
 
 **What this gauge does NOT reach, stated as flatly as the table above.**
 
+- **An emitter ID past the top of the printed range** — an `out_id` at
+  `smt._pow_aux_name`, or the id inside a base term at either exponent seam.
+  The invariance and freshness gates close every id inside `[0, 15]`, which is
+  every conditioning function on an id rather than the values a fixture
+  happens to produce, and an id is UNBOUNDED so no finite range closes it.
+  What is asserted instead is that the reach lies inside the range and nowhere
+  near its top — measured, `out_id` at `{2, 3}` and base ids at `{0, 2}` — so a
+  program with more equations ahead of its `pow` than the range has room for is
+  outside the closure. A wrongness living there has to be right at every id up
+  to the top and wrong above it, which is a defect shaped to the instrument
+  rather than to the row; widening the range is cheap and would move the line
+  rather than remove it, which is why the residue is disclosed instead.
 - **The rational branch at an ODD `q` — which no longer exists to reach.**
   This page and the gauge both used to describe the branch as covering `q`
   even *and odd*. The odd half was structurally unreachable:
@@ -465,7 +561,9 @@ a fourth spelling reaching a seam appears in the measured reach or in its
   literal's TEXT is pasted into the seam call in place of a symbol. Measured on
   this tree: `jnp.power(1e-100, 64.0)` hands `smt._pow_integer_body` the term
   `(/ 492525077454931 4925…)`, a compound s-expression, and a mutation
-  conditioned on "the base is not an identifier" survives all 22 gates. It is
+  conditioned on "the base is not an identifier" survives every gate — 22 of
+  them on `41329d7` and all 23 on this tree, re-measured because the two new
+  RANGE gates sweep symbol spellings and a numeral is not one. It is
   not DRIVEN because the invariance argument the other three spellings rest on
   presupposes a symbol to canonicalise, and because its element index is not
   recoverable from the text — so the reach recorder reports such a term as an
@@ -542,6 +640,21 @@ sees the index, because it compares emitted TEXT and does not need the seam to
 be parameterised. What is still open is the same gap on the non-emission
 stages, where there is no text to compare. That is the next refinement of this
 row's seams, not a claim that the space is closed.
+
+**And that RUN RECOVERY can silently OVERSTATE, which is a disclosed follow-up
+rather than a closed case.** The recovery's docstring states its guarantee as
+an invariant — an out-of-order or gappy run is reported as an inconsistency
+instead of being counted — and the guarantee is really a coincidence of today's
+gate set. Two SEPARATE scalar `pow` eqns on `x[0]` and `x[1]`, emitted
+consecutively, present as elements 0 and 1 of one two-element eqn: that run is
+neither out of order nor gappy, nothing fires, and the recorder books an
+`n_out` of 2 where the truth is two eqns of 1. Measured against jaxpr ground
+truth on this tree it overstates nothing and understates nothing — no gate here
+holds two consecutive scalar `pow`s — so the figures above are a reading today
+and would stop being one the moment a fixture did. The honest fix keys the run
+on the EQN rather than on the element index; it is recorded here rather than
+taken, because a guarantee that holds by coincidence and READS as an invariant
+is the class of claim this page exists to refuse.
 
 ## "Gauged" is a claim about a SPACE, not about a row
 

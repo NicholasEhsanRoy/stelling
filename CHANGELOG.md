@@ -286,7 +286,7 @@ SPDX-License-Identifier: Apache-2.0
   off the fixture table, exactly as the exponents are. **What closes the axis
   rather than sampling it is a new gate**, added here as
   `emission-is-invariant-to-the-array-shape` and renamed further down this
-  section to `emission-is-invariant-to-the-shape-and-the-base-term` when it
+  section to `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` when it
   took on the base-term axis too: `pow` is elementwise, so an
   element's emitted lines cannot legitimately depend on which element it is
   or on how many there are, and the gate asserts that every element's seam
@@ -333,7 +333,7 @@ SPDX-License-Identifier: Apache-2.0
   symbol (`input`, `intermediate`, `auxiliary`) against a reference shared
   with the shape sweep, so what is closed is the PRODUCT and not a fourth
   marginal. The gate is renamed
-  `emission-is-invariant-to-the-shape-and-the-base-term` to say so. The joint
+  `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT` to say so. The joint
   reach went from 84 and 63 tuples to **252 and 189, still the full product**;
   four battery mutations conditioned on the base kind at a driven exponent pin
   it, each caught by that gate ALONE. `_element_index_of` no longer guesses
@@ -352,16 +352,12 @@ SPDX-License-Identifier: Apache-2.0
   can be conditioned on.
   `test_every_SEAM_ARGUMENT_is_a_gauged_COORDINATE_or_a_named_exemption` reads
   all three seams' signatures with `inspect` and requires every parameter to
-  be classified COORDINATE (recorded in the joint reach and swept as a
-  product), DRIVEN (reaches the seam at more than one value and is pinned by a
-  battery mutation rather than swept, because its values are jax's variable
-  numbering and a product over them would claim nothing), DERIVED (a pure
-  function of parameters already classified) or DISCLOSED (named in `SCOPE`,
-  which the test checks rather than trusts). A future round that adds
+  be classified. A future round that adds
   an argument to a seam fails that test instead of shipping an axis nobody
   enumerated. It says nothing about whether a coordinate is swept WIDELY
   enough — the exponent radius is still a finite set of points and the NUMERAL
-  base spelling is outside the driven range of `base_kind`.
+  base spelling is outside the driven range of `base_kind` — which is the
+  half the entry below had to repair.
 
   **Running the enumeration corrected its own first draft, which is the
   strongest thing that can be said for it.** `_pow_aux_name`'s `out_id` — the
@@ -374,8 +370,82 @@ SPDX-License-Identifier: Apache-2.0
   auxiliaries while keeping them fresh per element — is CAUGHT. The
   disclosure would have shipped false on the day it was written; `out_id` is
   classified DRIVEN and pinned by
-  `emit-rational-aux-collides-across-two-pow-OUTPUTS`, and every seam argument
-  now sits in a positive class with the DISCLOSED class empty.
+  `emit-rational-aux-collides-across-two-pow-OUTPUTS`.
+
+- **And then the LIST was closed and every RANGE was still open, which is the
+  defect the enumeration itself shipped.** A wrongness is conditioned on an
+  argument's VALUE, not on its name, so enumerating the parameters closed the
+  list and left every parameter's range exactly as open as before. Two entries
+  said otherwise. `out_id` was classified DRIVEN under a definition written as
+  a UNIVERSAL — *"reaches the seam at more than one value AND a wrongness
+  conditioned on it is CAUGHT"* — on a measured reach of `{2, 3}`, of which
+  only `2` reaches any verdict-producing gate; what held was the EXISTENTIAL,
+  and mutations conditioned on `out_id >= 4`, `>= 5` and `>= 6` survived all 22
+  gates. One mints a verdict-level false VERIFIED on three ordinary jax
+  operations: `y = (x+1)-1 ; r = y**0.5 ; r[0]-r[1] <= 7.9` over `[1, 81]^2`,
+  where the exact truth is `9 - 1 = 8` and the mutated encoding cannot exceed
+  `81^(1/4) = 3`. And `aux_name` was classified DERIVED because it is *"a pure
+  function of parameters already classified, SO it carries no axis of its
+  own"* — the same `so` this batch had already corrected in the monotonicity
+  sentence. Derived-ness closes the LIST; the RANGES compose, and a product
+  over `element` and `n_out` says nothing about `out_id`.
+
+  The same defect ran one seam over on an argument nobody had called an id:
+  both exponent seams read a BASE TERM, and `x0`, `t2`, `aux_2` spell an id
+  exactly as `aux_2_0` does. `_base_spelling` keeps the KIND and throws the ID
+  away, so three spellings were swept while the ids reaching the seams were
+  `{0, 2}` — and `emit-integer-wrong-only-at-a-LATER-BASE-ID` and its rational
+  twin survived every gate too, the second minting the same false VERIFIED.
+
+  **The repair is an INVARIANCE over a printed range, because a range is what
+  a sample cannot close.** `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT`
+  now asserts that the block a seam returns is the REFERENCE block with its
+  symbol names substituted, at every id in `[0, 15]`, for every symbol
+  spelling, at every driven shape and every driven exponent — one reference
+  shared with the emitted half, so it is one claim and not two marginals. The
+  FRESHNESS claim needs its own gate, and that is the finding rather than an
+  economy: the invariance comparison canonicalises the auxiliary's name to
+  `AUX`, so a wrongness that changes only the NAME is invariant there by
+  construction. `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` asserts
+  INJECTIVITY of the naming seam over the same range — two elements of one
+  output never share a name, two outputs never share one — and, end to end,
+  that every `declare-const` in an emitted probe script is declared once.
+  Writing it corrected a sentence in the process: `_pow_aux_name` is NOT
+  injective over its own signature, since `aux_{out_id}_{element}` does not
+  spell `n_out` and `(0, 0, 2)` and `(0, 0, 3)` both mint `aux_0_0`. Those
+  cannot co-occur — one output has one element count — so the claim asserted
+  is the one the row actually makes.
+
+  **And the vocabulary now forces the choice, which is what stops this
+  happening a fifth time.** Every seam parameter carries a CLOSURE as well as
+  an axis — SWEPT (every value in its range is driven; only `element` is one),
+  INVARIANT (a named gate asserts the text is independent of it over a
+  declared range) or DISCLOSED (a finite set of driven points, with the rest
+  named in `SCOPE`) — plus a RESIDUE naming the part of its range that is not
+  closed, whose phrase has to appear in `SCOPE`. DISCLOSED was EMPTY for a
+  round and its emptiness was the tell: a vocabulary with nowhere to say
+  *"listed, but not closed"* had nowhere to put the exponent, which is the most
+  disclosed thing in the file. `exp_val`, `p` and `q` are in it now, and a
+  DERIVED argument is required to carry its sources' residues — the `so` above,
+  made mechanical. Four battery mutations pin the id range, a fifth test drives
+  the whole `>= 3/4/5/6` family through `fidelity.gauge`, and the measured id
+  reach is asserted to be a PROPER subset of the closed range so that a sweep
+  which began recording itself would fail rather than print its own range as
+  the reach. What is NOT closed is stated: an id is unbounded, `[0, 15]` is
+  finite, and a wrongness conditioned past the top is disclosed in both
+  not-reached lists. No source behaviour changes; the whole repair is in the
+  instrument.
+
+  **Carried as a disclosed follow-up, measured harmless today**: the integer
+  branch's `n_out` RECOVERY can silently OVERSTATE. Two separate scalar `pow`
+  eqns emitted consecutively present as elements 0 and 1 of one two-element
+  eqn — not out of order, not gappy — so nothing fires and the recorder books
+  an `n_out` of 2 where the truth is two eqns of 1. Checked against jaxpr
+  ground truth on this tree: nothing overstated, nothing understated, because
+  no gate holds two consecutive scalar `pow`s. The docstring stated that
+  guarantee as an INVARIANT and it is a coincidence of the gate set; the honest
+  fix keys the run on the eqn, and it is recorded in both the recorder's
+  docstring and `docs/gauge-coverage.md` rather than taken here.
 
 - **Two documented claims about this gauge were out of date in its own file.**
   `test_the_documented_coverage_figures_are_the_MEASURED_ones` read
@@ -383,14 +453,28 @@ SPDX-License-Identifier: Apache-2.0
   without the `assert not reach.inconsistent` guard its sibling has —
   measured: perturbing `smt.emit` so the recorder's LIFO mis-pairs left this
   test green, printing 63 of 63 off 54 inconsistent entries. The guard is
-  there now. And the bar-independence paragraph counted only the nine
+  there now — **and it is the WHOLE of the defence, which this entry first
+  described as one omission among several figures.** Under that same
+  perturbation the joint reach still counts its tuples and still equals the
+  declared FULL PRODUCT, so the equality the page argues from does not notice a
+  broken measurement at all; `assert not reach.inconsistent` is the only thing
+  in either test that does. A product equality is evidence about the reach only
+  once the reach is known to be a reading. And the bar-independence paragraph
+  counted only the nine
   pre-existing tests elsewhere in the suite: measured with `pow` injected into
-  `verdict.VERIFIED_BARRED_PRIMITIVES`, the BATTERY does read identically (27
+  `verdict.VERIFIED_BARRED_PRIMITIVES`, the BATTERY does read identically (32
   mutations, 0 survivors either way, every catch set unchanged, baseline
-  passes all 22 gates) but **7 demonstration assertions in the gauge file
+  passes every gate) but **10 demonstration assertions in the gauge file
   itself go red**, because their per-item verdict lines read `check().status`
-  — which is the point of them. 18 red in total: 9 pre-existing elsewhere, 2
-  detectors in `tests/test_bar_membership_policy.py`, 7 here. Separately, the
+  — which is the point of them. 21 red in total: 9 pre-existing elsewhere, 2
+  detectors in `tests/test_bar_membership_policy.py`, 10 here. **That battery
+  size was written `27` against a tree holding 28**: the run was taken one
+  mutation early, the substance re-measured true at 28 — 0 survivors and
+  identical catch sets both ways — and only the digit was stale, in the two
+  files whose whole argument is that a documented count should be written by
+  the tree and not by an author. Both copies are machine-checked now, by
+  `test_the_DOCSTRING_and_CHANGELOG_battery_SIZE_is_the_one_that_RAN`.
+  Separately, the
   shape probe's docstring said `pow` is monotone on a strictly positive box
   "so" the difference of two elements is symmetric about zero; the `so` does
   not carry. Every element of a declared array carries the SAME interval, so
