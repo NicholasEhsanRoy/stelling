@@ -929,7 +929,7 @@ SPDX-License-Identifier: Apache-2.0
 
   **(*) R3's GROUP IS ONE HUNK SHORT, and the row says so rather than
   banking the extra red.** `_safely` has a THIRD call site, installed by
-  `obligation.h2` inside `_binding_shape`, so reverting h6+h10 leaves it
+  `obligation.h1` inside `_declared_shape`, so reverting h6+h10 leaves it
   live: `..._DECLINES[not-iterable]` reds with a bare `NameError: name
   '_safely' is not defined` leaking into the decline reason, which
   measures an inconsistent tree and not the handler's degraded
@@ -941,6 +941,24 @@ SPDX-License-Identifier: Apache-2.0
   revert group defined by "which hunks mention this symbol" is not the
   same as "which hunks the symbol needs", and this is what the difference
   costs.
+
+  *This row said `obligation.h2` inside `_binding_shape` until audit 0.2.0
+  B6 audit 4, F4. The substance was right and the LABEL was not, in a
+  table whose whole purpose is re-derivability — so here is how to check
+  it in one command, which is what the row should have carried in the
+  first place:*
+
+  ```
+  git diff -U3 96ab47a d6b6d0b -- src/stelling/obligation.py \
+    | awk '/^@@/{n++} {print n": "$0}' | grep '^[0-9]*: +' | grep _safely
+  ```
+
+  *prints the hunk number beside every added `_safely` line: **h1** (one
+  call site, in `_declared_shape`'s "cannot be read" refusal — which is
+  exactly the `..._DECLINES[not-iterable]` red above), **h6** (the
+  definition), **h10** (four call sites, in the association net). `h2` is
+  the `_binding_shape` dispatch and adds two lines, neither of them a
+  `_safely`.*
 
   **And `obligation.h1`'s only OWN attributable red is
   `..._DECLINES[bytes]`** — it appears in the family row and in none of
@@ -1031,6 +1049,223 @@ SPDX-License-Identifier: Apache-2.0
   driven three ways rather than by a whole-suite mutation: with no table at
   all (the state the finding reports), with one row's arithmetic broken,
   and with the `R1c` row claiming a red it does not have. All three red.
+
+  *The `OPT` row's first test was renamed at audit 0.2.0 B6 audit 4 —
+  `..._reads_the_EXTENTS_not_the_param_type` is now
+  `test_the_declaration_check_compares_BOTH_holders_and_refuses_the_rest`,
+  because the old name stated the rule the code had stopped implementing.
+  The row measures `d6b6d0b`, where the old name is the one in the tree.*
+
+- **A CLAIM ABOUT CONTAINER TYPES IS COMPUTABLE, SO IT IS COMPUTED** (audit
+  0.2.0 B6 audit 4, F1). Four audits of this batch have found the same
+  defect — a principle stated in prose beside code that does something
+  else — and the last three found it in the fix meant to close the previous
+  one. The fifth instance was `ir._validate_decl_eqn`'s own docstring: it
+  described *"any sequence of extents is now compared, and a `shape` param
+  that is not a sequence of extents at all is REFUSED"* for two commits
+  after the code had become `isinstance(shape, (tuple, list))` — a check on
+  the param's PYTHON TYPE, under which `range`, `array.array`,
+  `memoryview`, a numpy array and every custom iterable ARE sequences of
+  extents and are all refused. And the stale sentence reached users:
+  `np.array([4])` was refused with *"shape param array([4]) is not a
+  sequence of extents"*, which is not why it was refused.
+
+  So the sentence is not the deliverable. **The rule now lives in one
+  object**, `ir._SHAPE_PARAM_CONTAINERS`; `ir._validate_decl_eqn` and
+  `obligation._Slicer._declared_shape` both ask THAT rather than each
+  keeping a copy of the answer, both refusal messages are composed from
+  `ir._SHAPE_PARAM_RULE` (derived from it), and both docstrings name it
+  instead of restating it. The refusal now names the type it refused and
+  splits the two failures the single sentence had merged: the wrong
+  CONTAINER TYPE, and the right type whose ITERATION RAISES.
+
+  **And the partition is measured, not asserted.**
+  `tests/test_shape_param_rule.py` builds a population of container types
+  by SCANNING `builtins`, `collections`, `collections.abc`, `array`,
+  `queue` and `types` with a battery of generic constructor arguments,
+  derives a subclass of every type that allows one, derives a
+  refusing-`__iter__` subclass of every ACCEPTED type, and adds numpy's
+  containers by hand. Measured on this tree: **51 objects, 8 accepted, 43
+  refused, and the two faces partition identically** — so the door and the
+  emission cannot come to hold different rules, in either direction, and
+  the soundness direction (emission ⊆ door) is the one that would be
+  UNSOUND-1 again.
+
+  **What that pin does not cover is stated in the test rather than
+  discovered later.** It does not prove the population complete — a
+  container type in a namespace the scan does not visit is measured only
+  because someone added it, which is the class narrowed and not
+  eliminated. It does not stop the rule being WIDENED: everything derives
+  from one tuple deliberately, so a change moves the rule, the messages
+  and the expected partition together, and what reds on that is one
+  deliberate line
+  (`test_the_rule_itself_is_pinned_to_tuple_and_list`). And it says
+  nothing about the THIRD reader — `propagate`'s `stelling_any` transfer
+  reads the same param with a bare `tuple(shape)` and is held to no
+  container rule at all. That asymmetry is now DRIVEN and recorded rather
+  than described (`test_the_TRANSFER_face_is_NOT_held_to_the_container_
+  rule`); it is the standing disclosure this transfer already carried.
+
+- **"EVERY QUOTE HERE IS GUARDED" WAS FALSE 44 LINES BELOW ITSELF, and
+  the four sites were six short** (audit 0.2.0 B6 audit 4, F2). A
+  `_load_check` message is an ARGUMENT, so it is composed on the passing
+  path too; `ir`'s validation runs inside the public dataclasses'
+  `__post_init__`, so a message that raises is a raw exception out of
+  `ir.Array(...)`, `ir.Literal(...)`, `ir.JaxprEqn(...)` or
+  `ir.ClosedJaxpr(...)` — the class the validation exists to close.
+  Driving the class rather than reading it, over one canonical
+  well-formed document: **28 raw escapes at `30d4b04`, 0 here, from 9
+  DISTINCT quote sites**, of which the audit had named three. Two of the
+  six it had not fire on the PASSING path, on documents with nothing
+  wrong with them:
+
+  ```
+  ir.Array(dtype=<str subclass whose __repr__ raises>, ...)      PASSING path
+  ir.Literal(val=<int subclass whose __repr__ raises>, aval=())  PASSING path
+  ```
+
+  Three further sites the canonical document MASKS rather than clears —
+  `_validate_jaxpr` composes its own `where` string before
+  `_validate_required_params` runs — are driven one row each:
+  `ir.JaxprEqn`'s duplicate-key refusal, its `{dups}` list, and
+  `_validate_required_params`' primitive quote. And the
+  `NamedTupleParam` field name in a `where` path is one the sweep found
+  and no reading had. All of them now go through `ir._safe_repr` /
+  `_safe_type_name` / `_safe_str`; four more quotes outside the
+  `_load_check` pass (`_encode`/`_decode`/`from_dict` type names and
+  `_decode`'s unknown-tag) are guarded for uniformity rather than because
+  a document was built for them. **All are pre-existing and none is a
+  regression** — `d6b6d0b` and `30d4b04` escape on these too.
+
+  The sweep is `tests/test_ir_message_totality.py`, and it is a property
+  rather than a list: one canonical well-formed `ClosedJaxpr`, its leaves
+  found by walking `dataclasses.fields()` (so a field added to any IR
+  dataclass joins the sweep with no edit), each leaf replaced in turn by a
+  SUBCLASS OF ITS OWN TYPE that refuses `__repr__`, `__str__` and
+  `__format__`, the document rebuilt from the root so every
+  `__post_init__` re-runs, and `ir._validate_loaded` driven over the
+  result. **95 sites swept, 0 raw escapes**; with the guarded reads
+  neutered, **26 escapes** — the positive control that makes the zero mean
+  something. What it does not reach is counted rather than silent: 20
+  leaves whose type cannot be subclassed (`bool`, `None`).
+
+- **AN ELEMENT COUNT COMES FROM `__index__`, NOT FROM `__mul__`** (audit
+  0.2.0 B6 audit 4, F3). `obligation._size` was `n = 1; for d in shape: n
+  *= d` over the RAW objects — a third protocol beside the `__index__`
+  every guard validates with and the `__eq__` the shape comparisons use.
+  Measured: an extent with `operator.index(d) == 2` and
+  `_shape_problem((d,)) is None` gave `_size((d,)) == 1`.
+
+  The audit named four count-readers that took the predicate face and then
+  counted with an unvalidated second read, and said plainly that it could
+  not drive any of them to a false verdict — the constvar route is closed
+  earlier by the `ir` door, the `_decode_elements` route by the
+  byte-length check. **The containment was accidental, and the four were
+  not the count either.** A census of `_size`'s call sites at `30d4b04`
+  finds **14 whose argument is a shape read straight off an `ir.Aval` or
+  an `ir.Array` at the call site** — the divisor probe, the term-count
+  pass, four in the element budget, two on the replay path, and more at
+  one remove through a local; some with no validation in front of them at
+  all. Enumerating them would have been the same defect one level up. So
+  the repair is `_size` itself, which now reads its extents
+  through `_extents` and declines a shape it cannot count rather than
+  returning a product of whatever `__mul__` said. No caller anywhere can
+  obtain a count from a third protocol, including one written tomorrow.
+  The four named readers additionally BIND what `_extents` returned, so
+  they read each shape once; every other `_size` caller still reads a
+  second time, which is safe against a third protocol and is not safe
+  against an object that answers `__index__` differently between calls —
+  contained by `ClosedJaxpr.content_hash()`, which cannot encode such a
+  param, and recorded in `_shape_problem`'s docstring rather than claimed
+  away.
+
+- **`docs/norms.md`: "unreachable as a guard" now has a QUALIFYING TEST.**
+  The paragraph distinguishing a guard from a value read supplied no test
+  for when a site qualifies, so it could become an all-purpose excuse for
+  a mutation nothing caught. Four clauses, every one required: the site
+  has no refusal of its own; the other reader is NAMED at a file and a
+  symbol; the divergence is EXHIBITED as a concrete object, not merely
+  conceivable; and the site appears as a row with a zero in the same table
+  as the reds.
+
+- **ATTRIBUTION FOR AUDIT 4, by MUTATION** — same census method as the
+  table above: each mutation asserts its own ANCHOR before it runs (a
+  mutation that lands on nothing is an error, not a green run), each is
+  driven over the WHOLE suite in its own `git clone`, and the base is the
+  same clone unmutated. `JAX_ENABLE_X64=1`, jax 0.11.0, python 3.12,
+  `pytest -q -p no:randomly`. **The control is clean at 0 failures** —
+  the previous table's `test_sdist_contents` confound is gone because
+  both new test files are committed rather than `git apply`ed.
+
+  ```
+  mutation                                  raw  conf  NET  the tests that red
+  (control: no mutation)                      0     0    0  --  3613 passed, 10 skipped (*)
+  F1a widen ir._SHAPE_PARAM_CONTAINERS
+      to (tuple, list, memoryview)            5     0    5  rule_itself_is_pinned_to_tuple_
+                                                              and_list;
+                                                              TRANSFER_face_is_NOT_held_to_
+                                                              the_container_rule;
+                                                              named_rows...[memoryview];
+                                                              ..._DECLINES[memoryview];
+                                                              declaration_check_compares_
+                                                              BOTH_holders_and_refuses_the_rest
+  F1b obligation keeps its OWN copy of
+      the rule, one type wider                3     0    3  measured_partition_IS_the_
+                                                              documented_rule;
+                                                              named_rows...[memoryview];
+                                                              ..._DECLINES[memoryview]
+  F1c the docstring restates the rule
+      instead of naming the object            1     0    1  rule_is_stated_once_and_the_
+                                                              prose_points_at_it
+  F1d one sentence for both refusals,
+      as before the split                    10     0   10  rule_is_stated_once...;
+                                                              measured_partition...;
+                                                              named_rows... x6;
+                                                              declaration_check_compares_
+                                                              BOTH_holders...;
+                                                              a_hostile___repr___cannot_
+                                                              raise_out_of_the_public_
+                                                              constructor
+  F2a unguard the ir.Array dtype quote        2     0    2  no_message_in_the_ir_validation_
+                                                              pass_can_raise;
+                                                              named_sites[Array dtype,
+                                                              PASSING path]
+  F2b unguard the scalar `val` quote          2     0    2  no_message...;
+                                                              named_sites[Literal scalar val,
+                                                              PASSING path]
+  F2c unguard the NamedTupleParam
+      where-segment                           1     0    1  no_message_in_the_ir_validation_
+                                                              pass_can_raise
+  F3a _size back to the raw product           2     1    1  an_element_COUNT_comes_from___
+                                                              index___and_not_from___mul__
+  F3b _decode_elements counts a SECOND
+      read                                    1     0    1  the_named_count_readers_bind_
+                                                              what_the_guard_VALIDATED
+  ```
+
+  **(*)** the mutation runs were driven at **3613/10**, two tests before
+  the tree's final **3615/10**: the two extra rows are
+  `test_ir_message_totality`'s `[the duplicate-key LIST itself]` and
+  `[_validate_required_params' own primitive quote]`, added afterwards to
+  make good on that file's claim to drive the three sites its canonical
+  document masks. Neither is a claiming test of any mutated hunk.
+
+  **F3a's one confound is the line-count one this table already names:**
+  `test_supported_primitives_doc.py::test_committed_page_matches_live_registries`
+  reds on ANY change to `src/stelling/obligation.py`'s line count, and
+  F3a is the only row that changes it. F1b, F1c and F3b edit the same
+  file at constant length and do not red it, which is what makes the
+  subtraction a line-count effect rather than a behavioural one.
+
+  **AND F1a IS THE ROW THAT SAYS WHAT THE PIN DOES NOT COVER.** Widening
+  the rule moves the door and the emission TOGETHER — they read one
+  object — so `test_the_measured_partition_IS_the_documented_rule` stays
+  **GREEN** on it, correctly: the behaviour still equals the rule. What
+  reds is the one deliberate line and the named rows. That is the
+  intended division and it is stated here rather than left to be
+  discovered: *the computed partition catches DRIFT between the faces
+  (F1b) and catches a rule the messages no longer state (F1d); it does
+  not and cannot catch a rule someone widened on purpose.*
 
 ### Inductive step verification
 

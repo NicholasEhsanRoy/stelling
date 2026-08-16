@@ -651,15 +651,76 @@ def _extents(shape) -> tuple[str | None, tuple[int, ...]]:
 
 def _shape_problem(shape) -> str | None:
     """:func:`_extents`' problem alone, for the readers that only need the
-    verdict — an aval's shape they are about to compare, not a param they
-    are about to mint terms from. Every reader that needs the COUNT calls
-    :func:`_extents` and binds what it returns."""
+    VERDICT — an aval's shape they are about to compare, not a param they
+    are about to mint terms from.
+
+    WHAT THIS DOES NOT SAY, because the sentence that used to stand here
+    said it and it was not true of the code below (audit 0.2.0 B6 audit 4,
+    F3): *"every reader that needs the COUNT calls `_extents` and binds
+    what it returns"*. The four readers this docstring was written for did
+    not, and neither did the others: a census of :func:`_size`'s call
+    sites at ``30d4b04`` finds **14 whose argument is a shape read
+    straight off an `ir.Aval` or an `ir.Array` at the call site** — the
+    divisor probe, the term-count pass, four in the element budget, two
+    on the replay path, and more at one remove through a local. Listing
+    them is the same defect one level up, so the repair is not a list of
+    call sites. It is :func:`_size`: an element count is now the product
+    of extents read through the SAME ``__index__`` a guard validates with,
+    so no caller anywhere can obtain a count from a third protocol.
+
+    What remains true only of the named readers, and is therefore said
+    here rather than globally: :func:`_decode_scalar`,
+    :func:`_decode_elements`, :meth:`_Slicer.slice`'s root and its
+    constvar pass BIND what :func:`_extents` returned and count that, so
+    they read each shape ONCE. Every other :func:`_size` caller reads a
+    second time. That second read is safe against a third protocol and is
+    NOT safe against an object that answers ``__index__`` differently
+    between reads; what contains that is ``ClosedJaxpr.content_hash()``,
+    which cannot encode such a param — see
+    :meth:`_Slicer._declared_shape`, where the same residue is recorded."""
     return _extents(shape)[0]
 
 
-def _size(shape: tuple[int, ...]) -> int:
+def _size(shape) -> int:
+    """The element count of ``shape``, read through ``__index__``.
+
+    **NOT ``for d in shape: n *= d`` OVER THE RAW OBJECTS — audit 0.2.0 B6
+    audit 4, F3.** That spelling reached ``__mul__``/``__rmul__``, a THIRD
+    protocol beside the ``__index__`` every guard in this module validates
+    with and the ``__eq__`` the shape comparisons use, so an extent could
+    be validated at 2, compared equal to 2, and counted as 1 — measured:
+    ``operator.index(d) == 2`` and ``_shape_problem((d,)) is None`` while
+    ``_size((d,)) == 1``. The audit named FOUR readers that took the
+    predicate face of :func:`_extents` and then counted with a raw second
+    read, and could not drive any of them to a false verdict: the constvar
+    route is closed earlier by the ``ir`` door and the
+    :func:`_decode_elements` route by the byte-length check. **That
+    containment was accidental**, and the four were not the count either —
+    at ``30d4b04`` fourteen call sites handed this function a shape read
+    straight off an ``ir.Aval`` or an ``ir.Array``, some with no
+    validation in front of them at all. Fixing the sites someone
+    enumerated is the defect one level up; fixing the function makes a
+    count and the guard that validated it come from one protocol whatever
+    the caller did first.
+
+    A malformed extent is a DECLINE and not a number: an element count
+    that cannot be read is not zero, not one, and not the caller's
+    problem to notice. Netted to a `DeclinedObligation` everywhere the
+    slicer drives it. On the replay path (:func:`_root_elements`,
+    :func:`violating_elements`) the shapes come from an
+    :class:`ObligationSlice` whose extents :meth:`_Slicer._validate` and
+    :meth:`_Slicer._declared_shape` already normalised, so this cannot
+    fire for a slice this module produced; a hand-built slice that made it
+    fire would surface it as an internal error rather than a
+    :exc:`ReplayError`, and that residue is recorded here rather than
+    claimed away."""
+    problem, extents = _extents(shape)
+    if problem is not None:
+        raise _Decline(
+            f"a shape with {problem} has no element count (malformed IR)"
+        )
     n = 1
-    for d in shape:
+    for d in extents:
         n *= d
     return n
 
@@ -669,9 +730,19 @@ def _decode_scalar(val):
     decline. (The emission's single-element decoder; array constants go
     through :func:`_decode_elements`.)"""
     if isinstance(val, ir.Array):
-        if _size(val.shape) != 1:
+        # ONE READ: `_extents` validates and hands back what it validated,
+        # and the count below is that (audit 0.2.0 B6 audit 4, F3 — this
+        # reader had no validation at all and counted the raw objects)
+        problem, extents = _extents(val.shape)
+        if problem is not None:
             raise _Decline(
-                f"array-shaped constant of shape {val.shape} where a single "
+                f"array-shaped constant of shape "
+                f"{_safely(lambda: repr(tuple(val.shape)), '<unreadable>')} "
+                f"has {problem}"
+            )
+        if _size(extents) != 1:
+            raise _Decline(
+                f"array-shaped constant of shape {extents} where a single "
                 f"value is required"
             )
         fmt = _SCALAR_STRUCT_FMT.get(val.dtype)
@@ -691,15 +762,22 @@ def _decode_elements(val) -> tuple:
     element in flat C-order, or decline. A scalar decodes to a 1-tuple; a
     static-shape :class:`stelling.ir.Array` decodes every element."""
     if isinstance(val, ir.Array):
-        problem = _shape_problem(val.shape)
+        # ONE READ, and the count below is bound from it — audit 0.2.0 B6
+        # audit 4, F3. This called `_shape_problem(val.shape)` and then
+        # `_size(val.shape)`: the extents it validated and the extents it
+        # counted were two different reads of the same self-describing
+        # objects.
+        problem, extents = _extents(val.shape)
         if problem is not None:
             # fix-re-attack R1/N2: a negative or non-integer element
             # count would reach struct.unpack as a malformed format and
             # raise struct.error raw — decline quoted instead
             raise _Decline(
-                f"array-shaped constant of shape {val.shape} has {problem}"
+                f"array-shaped constant of shape "
+                f"{_safely(lambda: repr(tuple(val.shape)), '<unreadable>')} "
+                f"has {problem}"
             )
-        n = _size(val.shape)
+        n = _size(extents)
         fmt = _SCALAR_STRUCT_FMT.get(val.dtype)
         if fmt is None:
             raise _Decline(f"constant with undecodable dtype {val.dtype!r}")
@@ -710,7 +788,7 @@ def _decode_elements(val) -> tuple:
             # assume") — truncated, oversized, and empty payloads under a
             # positive shape raised raw struct.error before this
             raise _Decline(
-                f"array-shaped constant of shape {val.shape} dtype "
+                f"array-shaped constant of shape {extents} dtype "
                 f"{val.dtype!r} carries {len(val.data)} byte(s), expected "
                 f"{expect} — truncated or oversized payload (malformed IR)"
             )
@@ -2093,16 +2171,20 @@ class _Slicer:
         cannot read is neither an internal error nor a pass: it is a value
         whose element count nothing can agree on, and the slice declines.
 
-        WHAT IS ACCEPTED IS STATED POSITIVELY: a ``tuple`` or a ``list``,
-        the only forms :func:`ir._decode` builds and the only forms jax's
-        own params carry. The reason is the one :func:`_frames` gives
-        about ``str`` — ``tuple(b"34")`` is ``(51, 52)``, a pair of
-        perfectly plausible extents the declaration never said — but the
-        rule may not be spelled as the list of containers that hazard was
-        first noticed in. It was, and ``memoryview`` and ``array.array``
-        walked past it with the identical reading (audit 0.2.0 B6 audit
-        3). Stated the other way round, the character sequences fall out
-        of the rule instead of being named by it, and so does whichever
+        WHAT IS ACCEPTED IS STATED POSITIVELY, AND IT IS STATED IN ONE
+        PLACE: :data:`ir._SHAPE_PARAM_CONTAINERS`, which is the object the
+        branch below asks and the object :func:`ir._validate_decl_eqn`
+        asks. This docstring deliberately does not restate the list —
+        audit 0.2.0 B6 audit 4, F1, where the door's docstring described a
+        rule the door had stopped implementing two commits earlier. The
+        reason for a positive rule is the one :func:`_frames` gives about
+        ``str`` — ``tuple(b"34")`` is ``(51, 52)``, a pair of perfectly
+        plausible extents the declaration never said — but the rule may
+        not be spelled as the list of containers that hazard was first
+        noticed in. It was, and ``memoryview`` and ``array.array`` walked
+        past it with the identical reading (audit 0.2.0 B6 audit 3).
+        Stated the other way round, the character sequences fall out of
+        the rule instead of being named by it, and so does whichever
         sequence type is noticed next.
         """
         raw = decl.params_dict().get("shape", ())
@@ -2114,13 +2196,15 @@ class _Slicer:
         # `bytes` arm exists to refuse, and the door accepted it. Adding
         # two more names to that tuple is "the container type I happened
         # to enumerate", which is the reasoning `ir._validate_param_value`
-        # is annotated as condemning. So the rule is stated the other way
-        # round: the extents of a declaration are recorded in a `tuple` or
-        # a `list` — the only forms `ir._decode` builds, the only forms
-        # jax's own params carry — and anything else declines. The
-        # character sequences fall out of that instead of being named by
-        # it, and so does the next exotic sequence type.
-        if not isinstance(raw, (tuple, list)):
+        # is annotated as condemning.
+        #
+        # THE RULE LIVES IN ONE PLACE AND THIS ASKS IT — audit 0.2.0 B6
+        # audit 4, F1. `ir._SHAPE_PARAM_CONTAINERS` is the same object
+        # `ir._validate_decl_eqn` refuses on, so the load door and this
+        # emission face cannot come to hold different rules by one of them
+        # being edited, and `tests/test_shape_param_rule.py` measures both
+        # partitions against that object over a population it computes.
+        if not isinstance(raw, ir._SHAPE_PARAM_CONTAINERS):
             # quoted through `_safely` for the reason the branch below
             # already was: a `str` SUBCLASS can carry a `__repr__` that
             # raises, and an unguarded `{raw!r}` here turned this clean
@@ -2131,10 +2215,10 @@ class _Slicer:
                 f"input declaration of variable {vid} has a shape param "
                 f"{_safely(lambda: repr(raw), '<unreadable>')} of type "
                 f"{_safely(lambda: type(raw).__name__, '<unreadable>')}: a "
-                f"declaration records its extents in a tuple or a list, and "
-                f"this is not a sequence of extents in that form — reading "
-                f"it as one would model an array the declaration never "
-                f"described (`tuple(b\"34\")` is `(51, 52)`) (malformed IR)"
+                f"declaration records its extents in {ir._SHAPE_PARAM_RULE}, "
+                f"and reading any other container as one would model an "
+                f"array the declaration never described "
+                f"(`tuple(b\"34\")` is `(51, 52)`) (malformed IR)"
             )
         try:
             shape = tuple(raw)
@@ -2144,9 +2228,11 @@ class _Slicer:
             # above, which is the same R5 finding `_frames` carries.
             raise _Decline(
                 f"input declaration of variable {vid} has a shape param "
-                f"{_safely(lambda: repr(raw), '<unreadable>')} that is not "
-                f"a sequence of extents, so the number of elements the "
-                f"emission would mint for it cannot be read (malformed IR)"
+                f"{_safely(lambda: repr(raw), '<unreadable>')} that is "
+                f"{ir._SHAPE_PARAM_RULE} whose iteration RAISES, so it is "
+                f"not a readable sequence of extents and the number of "
+                f"elements the emission would mint for it cannot be read "
+                f"(malformed IR)"
             ) from None
         # BOUND to what the guard read, not re-read after it — audit 0.2.0
         # B6 audit 3, F1. The first spelling called `_shape_problem(shape)`,
@@ -2936,17 +3022,21 @@ class _Slicer:
         if self.poisoned is not None:
             raise _Decline(self.poisoned)
         root = self._resolve(assert_eqn.invars[0])
-        root_size = _size(root.aval.shape)
+        # ONE READ, AND THE COUNT IS TAKEN AFTER THE VERDICT — audit 0.2.0
+        # B6 audit 4, F3. `root_size` was computed here from the raw
+        # objects, BEFORE `_shape_problem` had said anything about them.
+        root_problem, root_extents = _extents(root.aval.shape)
         if not _is_bool_dtype(root.aval):
             raise _Decline(
                 f"assert operand has dtype {root.aval.dtype!r}, expected bool"
             )
-        root_problem = _shape_problem(root.aval.shape)
         if root_problem is not None:
             raise _Decline(
-                f"assert operand has shape {tuple(root.aval.shape)} with "
-                f"{root_problem}"
+                f"assert operand has shape "
+                f"{_safely(lambda: repr(tuple(root.aval.shape)), '<unreadable>')} "
+                f"with {root_problem}"
             )
+        root_size = _size(root_extents)
         if root_size == 0:
             # zero elements: the universal claim is vacuously true, and
             # interval propagation already discharges it (matching measured
@@ -2954,7 +3044,7 @@ class _Slicer:
             # reaches escalation through the normal path — a direct ask
             # declines rather than mints a vacuous proof obligation.
             raise _Decline(
-                f"assert operand has shape {tuple(root.aval.shape)} with "
+                f"assert operand has shape {root_extents} with "
                 f"zero elements: the empty universal claim is vacuously "
                 f"true and is decided by interval propagation, not by "
                 f"emission"
@@ -3090,8 +3180,14 @@ class _Slicer:
         used_consts: dict[int, object] = {}
         for cid in const_ids:
             c_aval = self.const_avals.get(cid)
+            c_extents: tuple[int, ...] | None = None
             if c_aval is not None:
-                problem = _shape_problem(c_aval.shape)
+                # ONE READ — audit 0.2.0 B6 audit 4, F3. This screened the
+                # shape with `_shape_problem` and then counted it TWICE
+                # more with `_size(c_aval.shape)`, three reads of the same
+                # self-describing objects where the guard had validated
+                # only the first.
+                problem, c_extents = _extents(c_aval.shape)
                 if problem is not None:
                     # P1(b): the slicer rebuilds values independently of
                     # the propagation, so it must refuse the refused
@@ -3099,14 +3195,15 @@ class _Slicer:
                     # a lying consumer reference never shows it
                     raise _Decline(
                         f"constvar {cid} has aval shape "
-                        f"{tuple(c_aval.shape)} with {problem}"
+                        f"{_safely(lambda: repr(tuple(c_aval.shape)), '<unreadable>')} "
+                        f"with {problem}"
                     )
             vals = _decode_elements(self.consts[cid])
-            if c_aval is not None and len(vals) != _size(c_aval.shape):
+            if c_extents is not None and len(vals) != _size(c_extents):
                 raise _Decline(
                     f"constvar {cid} decodes to {len(vals)} element(s) "
-                    f"but its aval shape {tuple(c_aval.shape)} holds "
-                    f"{_size(c_aval.shape)} (aval/value mismatch, "
+                    f"but its aval shape {c_extents} holds "
+                    f"{_size(c_extents)} (aval/value mismatch, "
                     f"malformed IR)"
                 )
             for v in vals:

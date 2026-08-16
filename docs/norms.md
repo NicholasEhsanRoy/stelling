@@ -520,6 +520,33 @@ reader reverts with zero suite reds, because the element budget has already call
 the same reader over the same variables; it is kept because an independent read
 there is the UNSOUND finding the batch was about.
 
+**AND THE QUALIFYING TEST IS THIS, because otherwise "unreachable as a guard"
+becomes an all-purpose excuse for a mutation nothing caught** (audit 0.2.0 B6
+audit 4). *Every* clause, not a majority; a site failing any one of them is a
+guard that went uncovered, and its row is a failure rather than a disclosure.
+
+1. **It has no refusal of its own.** If the site can decline, raise, or return a
+   sentinel that changes a caller's path, it is a guard — mutate it and build the
+   document that reaches it. A site with a refusal branch NEVER qualifies, however
+   unreachable that branch looks.
+2. **The other reader is NAMED, at a file and a symbol.** *"Something upstream must
+   already check this"* does not qualify. If you cannot point at the line that
+   produced the same quantity from the same input, you are holding an unmeasured
+   guard, not a value read.
+3. **The divergence is EXHIBITED, not merely conceivable.** State an object for
+   which an independent read would differ from the named reader's — the `list`
+   subclass whose `__iter__` answers differently between calls, in the case above.
+   If no such object can be described, the two reads are the same computation, and
+   the site is dead code to delete rather than a disclosure to publish.
+4. **It appears as a row with a zero, in the same table as the reds.** A site left
+   out of the attribution table has not been recorded, it has been omitted — and
+   the batch's coverage claim is then false by exactly that site.
+
+Clauses 1 and 3 are the load-bearing pair and they pull in opposite directions on
+purpose: 1 refuses the excuse to anything that can refuse, 3 refuses it to anything
+that could not possibly differ. What survives both is the narrow real case — two
+readers that *could* disagree and must not.
+
 ## A decline rule must trace to a measured discrepancy with a magnitude
 
 A parameter-space gauge earns a decline rule by showing that the operation's real

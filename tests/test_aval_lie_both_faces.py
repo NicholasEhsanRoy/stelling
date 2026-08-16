@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import array as _arraymod
 import copy
+import operator
 from fractions import Fraction
 
 import pytest
@@ -805,28 +806,48 @@ def test_the_BINDING_witness_alone_closes_the_declaration_lie(monkeypatch):
     assert real is not binding_leg_only  # the mutation really replaced it
 
 
+class _WillNotIterate(list):
+    """A `list` SUBCLASS — `isinstance(x, ir._SHAPE_PARAM_CONTAINERS)` is
+    true of it — whose `__iter__` refuses. `isinstance` is a claim about
+    the TYPE and not about the object, so the container rule cannot be the
+    whole guard."""
+
+    def __iter__(self):
+        raise RuntimeError("will not iterate")
+
+
 @pytest.mark.parametrize(
     "bad_param,expect",
     [
-        (b"\x04", "not a sequence of extents"),
-        ("4", "not a sequence of extents"),
+        # THE CONTAINER ROWS quote the rule's own sentence. It used to read
+        # "not a sequence of extents", which is a claim about the object
+        # and was false of most of these — `np.array([4])` and
+        # `array.array("i", [4])` ARE sequences of extents, and were
+        # refused for their TYPE (audit 0.2.0 B6 audit 4, F1). The marker
+        # is the fixed part of the sentence `ir._SHAPE_PARAM_RULE` is
+        # interpolated into, so it cannot drift from the rule it applied.
+        (b"\x04", "records its extents in"),
+        ("4", "records its extents in"),
         (("4",), "non-integer extent"),
         ((-4,), "negative extent"),
-        (object(), "not a sequence of extents"),
+        (object(), "records its extents in"),
         # AND THE TWO THE ENUMERATION MISSED — audit 0.2.0 B6 audit 3.
         # `tuple(memoryview(b"44"))` is `(52, 52)` and so is
         # `tuple(array.array("b", b"44"))`: the identical misread the
         # `bytes` row above exists to refuse, in a container the
         # `(str, bytes, bytearray)` test did not name — and the slicer
         # SLICED a four-element declaration off one, measured. The rule is
-        # now stated positively (a tuple or a list), so these fall out of
-        # it rather than needing to be named by it, and so does whichever
-        # sequence type is noticed next.
-        (memoryview(b"\x02\x02"), "not a sequence of extents"),
-        (_arraymod.array("b", b"\x02\x02"), "not a sequence of extents"),
+        # now stated positively (`ir._SHAPE_PARAM_CONTAINERS`), so these
+        # fall out of it rather than needing to be named by it, and so
+        # does whichever sequence type is noticed next.
+        (memoryview(b"\x02\x02"), "records its extents in"),
+        (_arraymod.array("b", b"\x02\x02"), "records its extents in"),
+        # ... and the arm `isinstance` cannot see: the RIGHT container,
+        # whose iteration refuses. A separate fact and a separate sentence.
+        (_WillNotIterate(), "whose iteration RAISES"),
     ],
     ids=["bytes", "str", "string-extent", "negative", "not-iterable",
-         "memoryview", "array.array"],
+         "memoryview", "array.array", "list-subclass-that-will-not-iterate"],
 )
 def test_a_declaration_shape_param_that_cannot_be_read_DECLINES(
     bad_param, expect
@@ -1079,6 +1100,114 @@ def test_declared_shape_RETURNS_the_extents_it_validated():
         OB._Slicer._declared_shape(sl, _decl_eqn((_TwoFacedExtent(-1, 4),)), 0)
 
 
+class _IndexTwoMulOne:
+    """A THIRD PROTOCOL. `__index__` answers 2 — every guard in
+    `obligation` validates through that and is satisfied — and `__eq__`
+    agrees with 2, so every shape comparison passes as well. Only
+    `__mul__`/`__rmul__` disagree, and an element COUNT computed as
+    `n *= d` over the raw objects is the one reader that asks them."""
+
+    def __index__(self):
+        return 2
+
+    def __eq__(self, o):
+        return 2 == o
+
+    def __hash__(self):
+        return hash(2)
+
+    def __mul__(self, o):
+        return 1
+
+    __rmul__ = __mul__
+
+    def __repr__(self):
+        return "<index=2, mul=1>"
+
+
+def test_an_element_COUNT_comes_from___index___and_not_from___mul__():
+    """AUDIT 0.2.0 B6 AUDIT 4, F3 — `_size` multiplied the RAW objects.
+
+    `n = 1; for d in shape: n *= d` reaches `__mul__`/`__rmul__`, a third
+    protocol beside the `__index__` every guard validates with and the
+    `__eq__` the shape comparisons use. Measured on `30d4b04`:
+
+        operator.index(d)               = 2      <- what the guard validates
+        obligation._shape_problem((d,)) = None   <- 'no problem'
+        obligation._size((d,))          = 1      <- what every COUNT reader got
+
+    Six readers took the predicate face of `_extents` and then counted with
+    such a raw second read, and the previous audit could not drive any of
+    them to a false verdict: the constvar route is closed earlier by the
+    `ir` door and the `_decode_elements` route by the byte-length check.
+    **That containment was accidental**, which is why the repair is not a
+    list of call sites — `_size` itself now reads through `__index__`, so
+    no caller anywhere can obtain a count from a third protocol, including
+    one written tomorrow.
+    """
+    import stelling.obligation as OB
+
+    d = _IndexTwoMulOne()
+    # the premise: this object satisfies every OTHER reader
+    assert operator.index(d) == 2 and OB._shape_problem((d,)) is None
+    assert tuple((d,)) == (2,)  # __eq__ agrees too
+
+    assert OB._size((d,)) == 2, (
+        "the element count came from `__mul__` and not from the `__index__` "
+        "the guard validated with"
+    )
+    assert OB._size((d, d)) == 4, OB._size((d, d))
+
+    # ... and a count that CANNOT be read is a decline, not a number: an
+    # unreadable extent used to make the product silent garbage
+    class _NoIndex:
+        def __index__(self):
+            raise ValueError("no")
+
+    with pytest.raises(OB._Decline, match="no element count"):
+        OB._size((_NoIndex(),))
+
+
+def test_the_named_count_readers_bind_what_the_guard_VALIDATED():
+    """AUDIT 0.2.0 B6 AUDIT 4, F3, second half — one READ, not two.
+
+    `_size` reading through `__index__` closes the third protocol. It does
+    not make a reader that screens a shape and then counts it again into a
+    single read, and an object that answers `__index__` differently between
+    calls is checked at one value and counted at another. The four readers
+    the audit named now bind what `_extents` returned:
+    `_decode_scalar`, `_decode_elements`, `_Slicer.slice`'s assert root and
+    its constvar pass.
+
+    Driven on `_decode_elements`, with the drifting extent installed PAST
+    `ir.Array.__post_init__` so the decoder gets the object's FIRST read —
+    the door is a separate reader with its own lifetime, and the claim
+    here is about one function, not about the whole tree. The extent
+    answers 2 and then 8 against a two-element payload. Before this,
+    `_shape_problem` validated the first read (2) and `_size` took the
+    second (8), so the byte-length check compared the payload against a
+    count nothing had validated and the decoder declined a payload that
+    matched what it had just approved.
+    """
+    import struct
+
+    import stelling.obligation as OB
+
+    d = _TwoFacedExtent(2, 8)
+    arr = ir.Array(dtype="<f8", shape=(2,), data=struct.pack("<2d", 1.0, 2.0))
+    object.__setattr__(arr, "shape", (d,))
+
+    got = OB._decode_elements(arr)
+    assert got == (1.0, 2.0), (
+        f"the decoder screened the extent at 2 and then counted it again "
+        f"at 8: {got!r}"
+    )
+    assert d.reads == 1, (
+        f"the decoder read the extent {d.reads} time(s); one read is the "
+        f"fix, and the second read is the one nothing validated"
+    )
+
+
 @pytest.mark.parametrize(
     "exc",
     [ValueError("index says no"), OverflowError("too big"),
@@ -1141,7 +1270,7 @@ def test_a_declaration_refusal_cannot_be_stopped_by_a_hostile___repr__():
     sl = object.__new__(OB._Slicer)
     with pytest.raises(OB._Decline) as ei:
         OB._Slicer._declared_shape(sl, _decl_eqn(_HostileStr("34")), 0)
-    assert "not a sequence of extents" in ei.value.reason
+    assert "records its extents in" in ei.value.reason
     assert "<unreadable>" in ei.value.reason, ei.value.reason
 
     with pytest.raises(OB._Decline) as ei:
@@ -1173,7 +1302,7 @@ def test_a_declaration_refusal_cannot_be_stopped_by_a_hostile___repr__():
     item = slice_obligation(bad, 0, {})
     assert isinstance(item, DeclinedObligation), item
     assert "internal error" not in item.reason, item.reason
-    assert "not a sequence of extents" in item.reason, item.reason
+    assert "records its extents in" in item.reason, item.reason
 
 
 def test_declared_shape_is_NOT_the_librarys_only_reader_of_an_element_count():

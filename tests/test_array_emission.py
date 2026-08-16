@@ -1862,14 +1862,24 @@ def test_type_level_declaration_param_aval_disagreement_is_unconstructable():
         )
 
 
-def test_the_declaration_check_reads_the_EXTENTS_not_the_param_type():
+def test_the_declaration_check_compares_BOTH_holders_and_refuses_the_rest():
     """AUDIT 0.2.0 B6 RE-AUDIT, UNSOUND-1 — the check above used to run only
     `if isinstance(shape, tuple)`, so a `list` shape param SKIPPED it
     entirely and the exact disagreement the test above forbids was
     constructible one bracket away. `_validate_param_value` recursed into
     tuples and not lists either, so nothing else read it. A validator that
     silently passes a param class it cannot read is not a validator for that
-    class; the comparison is now on the extents, whatever holds them.
+    class; BOTH holders are now compared, and every other container type is
+    refused.
+
+    RENAMED at audit 0.2.0 B6 audit 4, F1. It read
+    `..._reads_the_EXTENTS_not_the_param_type`, which was true of
+    `d6b6d0b` — where the check really did read any sequence of extents —
+    and false from `30d4b04`, where it became a check on the param's
+    CONTAINER TYPE and nothing else. `CHANGELOG.md`'s R7 attribution row
+    quotes the old name because it measures `d6b6d0b`. The rule this holds
+    is `ir._SHAPE_PARAM_CONTAINERS`, swept over a computed population in
+    `tests/test_shape_param_rule.py`.
 
     Note what is NOT refused here, and deliberately: a declaration with no
     `shape` param at all. Hand-built IR legitimately omits params (see
@@ -1896,20 +1906,23 @@ def test_the_declaration_check_reads_the_EXTENTS_not_the_param_type():
             params=(("shape", holder([3])), ("dtype", "float64"),
                     ("lo", 0.0), ("hi", 1.0)),
         )
-    # a param that is not a sequence of extents at all is REFUSED, not
-    # skipped: two self-descriptions cannot be reconciled if one of them
-    # cannot be read. `str`/`bytes` are sequences and are not shapes —
-    # `tuple("34")` is a tuple of CHARACTERS, so coercing one would compare
-    # something the declaration never said.
-    # `memoryview` and `array.array` join them not by being enumerated but
-    # by falling outside the POSITIVE rule (a tuple or a list) that
-    # replaced the enumeration — audit 0.2.0 B6 audit 3. Both read as
-    # `(52, 52)` through `tuple(...)`, the identical misread as `b"44"`,
-    # and the door ACCEPTED the memoryview form before this.
+    # a param held in any OTHER container is REFUSED, not skipped: two
+    # self-descriptions cannot be reconciled if one of them is not the
+    # thing a declaration records its extents in. `str`/`bytes` are
+    # sequences and are not shapes — `tuple("34")` is a tuple of
+    # CHARACTERS, so coercing one would compare something the declaration
+    # never said. `memoryview` and `array.array` join them not by being
+    # enumerated but by falling outside the POSITIVE rule
+    # (`ir._SHAPE_PARAM_CONTAINERS`) that replaced the enumeration — audit
+    # 0.2.0 B6 audit 3. Both read as `(52, 52)` through `tuple(...)`, the
+    # identical misread as `b"44"`, and the door ACCEPTED the memoryview
+    # form before this. The refusal now names the TYPE it refused, because
+    # "is not a sequence of extents" over `np.array([4])` was a sentence
+    # about something else (audit 0.2.0 B6 audit 4, F1).
     for bad in (3, None, "34", b"34", memoryview(b"\x03"),
                 _arraymod.array("b", b"\x03")):
         with pytest.raises(
-            ir.TranscriptionError, match="not a sequence of extents"
+            ir.TranscriptionError, match="records its extents in"
         ):
             ir.JaxprEqn(
                 primitive="stelling_any",
@@ -2101,7 +2114,7 @@ def test_a_hostile___repr___cannot_raise_out_of_the_public_constructor():
             params=(("shape", _ReprRaisesNotASequence()), ("dtype", "f8"),
                     ("lo", 0.0), ("hi", 1.0)),
         )
-    assert "not a sequence of extents" in str(ei.value)
+    assert "records its extents in" in str(ei.value)
     assert "<unreadable>" in str(ei.value), str(ei.value)
 
 

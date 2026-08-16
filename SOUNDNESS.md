@@ -8751,12 +8751,23 @@ verdicts:
   measured below, it fired zero times.
 
   **THE DOOR WAS CLOSED TOO, AND IT IS NOT THE FIX.** `ir.
-  _validate_decl_eqn` now compares a declaration's two self-descriptions
-  whatever sequence holds the extents, and REFUSES a `shape` param that is
-  not a sequence of extents at all rather than skipping it;
+  _validate_decl_eqn` compares a declaration's two self-descriptions in
+  BOTH the containers a declaration is recorded in — a `tuple` and a
+  `list`, which is the whole of `ir._SHAPE_PARAM_CONTAINERS` — and REFUSES
+  a `shape` param of any other container type rather than skipping it;
   `ir._validate_param_value` recurses into lists as well as tuples. A
   validator that silently passes a param class it cannot read grants that
-  class a pass, which is the same defect shape one layer down. But the
+  class a pass, which is the same defect shape one layer down.
+  *(This paragraph read "REFUSES a `shape` param that is not a sequence of
+  extents at all" until audit 0.2.0 B6 audit 4, F1. That was true of
+  `d6b6d0b`; from `30d4b04` the check is on the param's CONTAINER TYPE,
+  under which `range`, `array.array`, `memoryview`, a numpy array and
+  every custom iterable are sequences of extents and are all refused. The
+  narrowing is confined to hand-built IR — every other route normalises to
+  a `tuple` before the primitive is bound — and the partition is now
+  measured against the rule over a computed population of container types
+  in `tests/test_shape_param_rule.py`, so this sentence cannot go stale
+  again without a test going red.)* But the
   door is **not** where this class is contained, and two things say so.
   `ir.py` scopes per-primitive shape inference out of the load validation
   in writing, and `ir.ClosedJaxpr` is a public dataclass. And the door
@@ -8977,9 +8988,46 @@ verdicts:
   3  resolve per scope, innermost first        0          0            1
   the SHIPPED (96ab47a) screen: 1, 2b1,
      2b4 and 3 all off at once                 5          6          194
+   ... the same four off, but clause 1
+       ablated to "any primitive, top-
+       level jaxpr params only"                5          6          409
+   ... 96ab47a's screen RE-IMPLEMENTED
+       from its own published text             5          6          194
   clause 4 EXTENDED to equation outvars        0          0            0
   clause 4 EXTENDED to a jaxpr's outvars       0          0            0
   ```
+
+  **THE 194 AND THE 409 ARE BOTH RIGHT, AND WHAT SEPARATES THEM IS WHAT
+  "CLAUSE 1 OFF" MEANS — audit 0.2.0 B6 audit 4, F5.** An audit's re-run
+  reported 409 where this table said 194, with STRICT and PUBLISHED and
+  every individual clause row agreeing exactly. Re-driven with both
+  readings in one run, on one population, the disagreement is not in the
+  measurement: switching clause 1 off can mean *descend the four
+  transparent primitives* (`jit`, `custom_jvp_call`, `custom_vjp_call`,
+  `remat2` — what `96ab47a` actually did) or *descend any param whose own
+  value is a jaxpr, for any primitive*. The second descends MORE scopes,
+  so more sub-jaxpr invar references exist to be unresolvable, and
+  fail-closed turns each into an AFFECTED: **583 unresolvable in 192
+  queries** against **1,063 in 407**. The row means the first, which is
+  what "the SHIPPED (96ab47a) screen" says — and the check on that is the
+  last row: a re-implementation of `96ab47a`'s screen straight from its own
+  published sentence, sharing no code with the ablation, lands on the same
+  **194** and the same **583 in 192**.
+
+  **METHOD, so both figures can be re-derived rather than believed.** One
+  `pytest -q -p no:randomly` over the whole suite with `propagate()`
+  wrapped, holding a hard reference to every query (`id()` alone drifts —
+  CPython recycles the address of a collected object). Each distinct query
+  is screened once per configuration in the same call, so every row above
+  is the same population: **3,650 `propagate()` calls, 3,534 distinct
+  queries, 0 screen errors**. The clause switches are `descend ∈ {all,
+  transparent4, toplevel}`, `stelling_any binds at its shape param ∈
+  {on, off}`, `a jaxpr's invars bind ∈ {on, off}`, `resolve per scope ∈
+  {on, off}`; the three conventions are applied to the same walk rather
+  than measured in separate runs. Re-measured on the tree this fix ships
+  in, every published figure in this section reproduced to the unit —
+  15/16/18, 526, 1,378 across 532, 583 across 192, and the four individual
+  clause rows.
 
   So on the suite's real work **only clause 2's `stelling_any`-param
   bullet ever changes a verdict** under the reading as first published;
@@ -8998,6 +9046,30 @@ verdicts:
   unanswerable and unanswerable now means AFFECTED. A reader running the
   screen as written is therefore running the reading in which that bullet
   is load-bearing on ordinary work.
+
+  **WHAT THE SCREEN AS SHIPPED ACTUALLY SAYS ON THAT POPULATION, printed
+  beside the 526 because the 526 invites the wrong reading — audit 0.2.0
+  B6 audit 4, F5.** *The screen does not flag 526 of anything.* With the
+  invars bullet ON, which is how it is published and how a reader will run
+  it, those 1,378 sub-jaxpr-invar references RESOLVE — unresolvable drops
+  to **2 across 2 queries** — and the screen's own output over the same
+  3,534 is:
+
+  ```
+  the SHIPPED screen, all four clauses ON, fail-closed convention
+      UNTOUCHED   3,516
+      AFFECTED       18   = 16 in tests/test_aval_lie_both_faces.py, the
+                            file that builds affected documents on purpose
+                          +  2 fixtures that deliberately hold an unbound
+                            variable (the screen saying "I cannot answer")
+      false positives 0
+      unresolvable references  2, in exactly those 2 fixtures
+  ```
+
+  The **526** is a CLAUSE-ABLATION COUNTERFACTUAL: it is how many verdicts
+  move if you delete the bullet from the screen, not how many documents the
+  screen accuses. Both numbers are about the same run, and quoting the
+  second without the first reads as an alarm about the suite.
 
   **WHAT THIS SCREEN IS BLIND TO — audit 0.2.0 B6 audit 3, F7.** The
   screen is **witness 1 and nothing else**. It reads shapes recorded in
@@ -9122,7 +9194,12 @@ verdicts:
   **The well-formed-remainder column is byte-identical to the one this
   entry first published** (10,503 / 13,286 / 23,789 / 23,112 / 97.15%);
   only the whole-suite column moves, by the malformed documents audit 3's
-  fixes added.
+  fixes added. *(Re-derived by the same method after audit 4's fixes:
+  BOTH columns reproduce to the unit — 10,610/10,503 equations,
+  13,419/13,286 references all bound, 24,006/23,789 atoms,
+  23,289/23,112 boxed, 97.01%/97.15%, 14/0 declines, and the same
+  two-file partition with the same 13/1 split. Audit 4 added no
+  document this check declines on.)*
 
   **AND THE INSTRUMENT PERTURBS EXACTLY ONE SUBJECT, WHICH IS WORTH MORE
   THAN THE ROW IT COSTS.** The plugin's replica calls
@@ -9141,9 +9218,10 @@ verdicts:
   ids — which is why the binding-site witness must be total in its own
   right, as UNSOUND-1 above measured the hard way.
 
-  Suite, re-derived on this tree: **3589 passed / 10 skipped** with
-  `JAX_ENABLE_X64=1`, **3590 / 9** without it as CI runs, skip sets
-  differing by exactly `test_tripwire_arm.py:643`. One pre-existing test
+  Suite, re-derived on this tree: **3615 passed / 10 skipped** with
+  `JAX_ENABLE_X64=1`, **3616 / 9** without it as CI runs, skip sets
+  differing by exactly `test_tripwire_arm.py:643`. *(This read 3589/3590
+  at `30d4b04`, re-derived there before audit 4's +24.)* One pre-existing test
   changed in the first pass and was REPAIRED rather than relaxed:
   `test_three_rows.py::test_slice_params_contradicting_the_aval_decline_with_the_form_quoted`
   built its own fixture by handing a shape-`(1,)` slicer an operand
@@ -9533,6 +9611,9 @@ verdicts:
   after audit 3's fixes
                     3589 passed, 10 skipped   (JAX_ENABLE_X64=1)
                     3590 passed,  9 skipped   (no x64, as CI runs)
+  after audit 4's fixes
+                    3615 passed, 10 skipped   (JAX_ENABLE_X64=1)
+                    3616 passed,  9 skipped   (no x64, as CI runs)
   ```
 
   The first two steps reconcile exactly: **+34** for `4d793cf`, all new
@@ -9560,6 +9641,24 @@ verdicts:
   `tests/test_array_emission.py` (70 -> 76) and 6 in
   `tests/test_dot_general_both_faces.py` (46 -> 52). They reconcile
   exactly: 11 + 9 + 6 + 6 = 32.
+
+  Audit 4's own step is **+26** in both columns, all new tests, nothing
+  deleted: 12 in `tests/test_shape_param_rule.py` (a new file — the
+  `shape`-param container rule measured against a COMPUTED population of
+  container types, on both faces), 11 in
+  `tests/test_ir_message_totality.py` (a new file — the message-totality
+  sweep over a canonical document's own leaves, its positive control, and
+  9 parametrised rows for the named quote sites), and 3 in
+  `tests/test_aval_lie_both_faces.py` (41 -> 44: the element-count
+  protocol, the one-read count readers, and one added parametrised row for
+  the right container whose iteration raises). They reconcile exactly:
+  12 + 11 + 3 = 26. **One test was RENAMED** and is the
+  only departure from "nothing deleted or renamed" in this arc:
+  `test_array_emission.py::test_the_declaration_check_reads_the_EXTENTS_
+  not_the_param_type` is now
+  `..._compares_BOTH_holders_and_refuses_the_rest`, because the old name
+  stated the rule the code stopped implementing at `30d4b04` — the same
+  defect as its docstring, one level up. The count is unchanged by it.
 
   The skip SET is unchanged in both environments at every step, and the
   one-member difference between them is still `test_tripwire_arm.py:643`,

@@ -255,8 +255,13 @@ class JaxprEqn:
             dups = sorted({n for n in names if names.count(n) > 1})
             _load_check(
                 False,
-                f"JaxprEqn ({self.primitive!r})",
-                f"params carry duplicate key(s) {dups}: params mirrors a jax "
+                # guarded like every other quote in this pass: `primitive`
+                # is document-supplied and a `str` SUBCLASS can refuse
+                # `__repr__` (audit 0.2.0 B6 audit 4, F2). A refusal whose
+                # own message raises is not a refusal.
+                f"JaxprEqn ({_safe_repr(self.primitive)})",
+                f"params carry duplicate key(s) {_safe_repr(dups)}: params "
+                f"mirrors a jax "
                 f"dict, whose keys are unique, and every reader resolves a "
                 f"repeat last-wins — so a duplicate silently picks one of two "
                 f"contradictory values by serialization order",
@@ -299,7 +304,9 @@ class ClosedJaxpr:
         # (component objects self-validated at their own construction)
         for i, (var, val) in enumerate(zip(self.jaxpr.constvars, self.consts)):
             _validate_value_against_aval(
-                val, var.aval, f"ClosedJaxpr.consts[{i}] (constvar {var.id})"
+                val,
+                var.aval,
+                f"ClosedJaxpr.consts[{i}] (constvar {_safe_repr(var.id)})",
             )
 
     def to_dict(self, *, include_metadata: bool = True) -> dict:
@@ -309,7 +316,9 @@ class ClosedJaxpr:
     def from_dict(d: dict) -> "ClosedJaxpr":
         obj = _decode(d)
         if not isinstance(obj, ClosedJaxpr):
-            raise ValueError(f"expected a serialized ClosedJaxpr, got {type(obj).__name__}")
+            raise ValueError(
+                f"expected a serialized ClosedJaxpr, got {_safe_type_name(obj)}"
+            )
         _validate_loaded(obj)
         return obj
 
@@ -410,14 +419,16 @@ def _encode(obj: object, meta: bool) -> object:
             "jaxpr": _encode(obj.jaxpr, meta),
             "consts": [_encode(c, meta) for c in obj.consts],
         }
-    raise TypeError(f"stelling.ir cannot encode {type(obj).__name__}")
+    raise TypeError(f"stelling.ir cannot encode {_safe_type_name(obj)}")
 
 
 def _decode(obj: object) -> object:
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
     if not isinstance(obj, dict):
-        raise ValueError(f"malformed IR serialization: unexpected {type(obj).__name__}")
+        raise ValueError(
+            f"malformed IR serialization: unexpected {_safe_type_name(obj)}"
+        )
     k = obj.get("k")
     if k == "complex":
         return complex(obj["re"], obj["im"])
@@ -483,7 +494,7 @@ def _decode(obj: object) -> object:
             jaxpr=_decode(obj["jaxpr"]),
             consts=tuple(_decode(c) for c in obj["consts"]),
         )
-    raise ValueError(f"malformed IR serialization: unknown tag {k!r}")
+    raise ValueError(f"malformed IR serialization: unknown tag {_safe_repr(k)}")
 
 
 # --- the bounded from_dict validation pass ----------------------------------
@@ -497,21 +508,100 @@ def _decode(obj: object) -> object:
 import operator as _operator  # noqa: E402  (stdlib; kept local to the pass)
 
 
+# THE SHAPE-PARAM CONTAINER RULE, WRITTEN ONCE — audit 0.2.0 B6 audit 4, F1.
+#
+# A declaration records its extents in one of these types. This tuple is the
+# WHOLE of the rule: :func:`_validate_decl_eqn` below refuses a ``shape``
+# param that is not one of them, and
+# :meth:`stelling.obligation._Slicer._declared_shape` declines it — both by
+# asking ``isinstance`` against THIS object, and neither by restating the
+# list. Two copies of a rule are two rules, and the whole of this batch is
+# about a claim that stopped matching the code beside it.
+#
+# WHY A POSITIVE TEST rather than a list of refused containers. The refusal
+# used to enumerate the types the hazard was first noticed in —
+# ``(str, bytes, bytearray)`` — and ``memoryview`` and ``array.array``
+# walked past it carrying the identical misread: ``tuple(memoryview(b"34"))``
+# is ``(51, 52)``, a pair of perfectly plausible extents the declaration
+# never said, and the door ACCEPTED that form. Adding two more names is
+# "the container type I happened to enumerate", which
+# :func:`_validate_param_value` is annotated in this same batch as
+# condemning. Naming the two forms a declaration is actually recorded in
+# makes every other one fall out of the rule instead of having to be named
+# by it — including the one nobody has thought of yet.
+#
+# WHY EXACTLY THESE TWO, and what the narrowing costs. They are the only
+# forms that reach here from a document anyone can produce without hand-
+# building IR: :func:`_decode` builds a ``tuple`` for every sequence param,
+# jax's own params carry tuples and lists, and ``harness.any_array``
+# normalises whatever the caller passes into a ``tuple`` before the
+# primitive is bound (measured: twelve exotic ``shape`` arguments — a
+# ``range``, an ``array.array``, a numpy array, a custom iterable — all
+# trace to a ``tuple`` param). So the narrowing is confined to HAND-BUILT
+# IR, and there it is loud: a `TranscriptionError` naming the type.
+#
+# `tests/test_shape_param_rule.py` measures the accept/refuse partition of
+# BOTH faces against this tuple, over a population of container types it
+# COMPUTES rather than lists, so the rule and the behaviour cannot drift
+# apart in silence. That test is the mechanism; this comment is not.
+_SHAPE_PARAM_CONTAINERS: tuple[type, ...] = (tuple, list)
+
+# The rule as a sentence, DERIVED from the tuple above so a refusal can
+# never name a different set from the one it applied.
+_SHAPE_PARAM_RULE = " or ".join(f"a {t.__name__}" for t in _SHAPE_PARAM_CONTAINERS)
+
+
 def _safe_repr(obj) -> str:
     """``repr(obj)``, or a visible placeholder when the object refuses.
 
-    For quoting an object this pass is describing in a refusal, and for
-    nothing else. `__post_init__` is the public constructor's own body, so
-    a `repr` that raises inside a message composed here leaves
-    `ir.JaxprEqn(...)` as a raw `RuntimeError` — which is precisely the
-    class `_validate_decl_eqn` exists to close, arriving through the
-    sentence that was meant to close it (audit 0.2.0 B6 audit 3, F3).
-    Measured: a well-formed declaration whose extent has a working
-    `__index__` and a refusing `__repr__` raw-crashed the constructor,
-    because the message below is an ARGUMENT to `_load_check` and is
-    therefore composed whether or not the check fails."""
+    For quoting an object this pass is describing, and for nothing else.
+    `__post_init__` is the public constructor's own body, so a `repr` that
+    raises inside a message composed here leaves `ir.JaxprEqn(...)` as a
+    raw `RuntimeError` — which is precisely the class `_validate_decl_eqn`
+    exists to close, arriving through the sentence that was meant to close
+    it (audit 0.2.0 B6 audit 3, F3). Measured: a well-formed declaration
+    whose extent has a working `__index__` and a refusing `__repr__`
+    raw-crashed the constructor, because a `_load_check` message is an
+    ARGUMENT and is therefore composed whether or not the check fails.
+
+    EVERY object-valued quote in this pass goes through this function or
+    one of its two siblings (:func:`_safe_type_name`, :func:`_safe_str`),
+    including the ones in a `where` string and the ones on a branch that
+    only composes when the check has already failed — audit 0.2.0 B6
+    audit 4, F2. Measured with the sweep, over one canonical well-formed
+    document: **28 raw escapes at `30d4b04` and 0 here, from 9 distinct
+    quote sites**, of which the previous audit had named three; two of
+    the six it had not fire on the PASSING path (`ir.Array(dtype=<a str
+    subclass whose repr raises>)` and `ir.Literal(val=<an int subclass
+    whose repr raises>)`, both well-formed documents). A guarded quote is
+    cheap; deciding per site which objects can misbehave is how those six
+    were missed. `tests/test_ir_message_totality.py` sweeps the pass for
+    the class rather than trusting this paragraph."""
     try:
         return repr(obj)
+    except Exception:  # noqa: BLE001 — the message's own totality
+        return "<unreadable>"
+
+
+def _safe_type_name(obj) -> str:
+    """``type(obj).__name__``, or a visible placeholder — the sibling of
+    :func:`_safe_repr` for the refusals that name the type they refused."""
+    try:
+        return type(obj).__name__
+    except Exception:  # noqa: BLE001 — the message's own totality
+        return "<unreadable>"
+
+
+def _safe_str(obj) -> str:
+    """``str(obj)``, or a visible placeholder — the sibling of
+    :func:`_safe_repr` for a `where` PATH SEGMENT, which reads as a name
+    rather than as a quotation. Found by the sweep in
+    `tests/test_ir_message_totality.py`, not by reading: a
+    `NamedTupleParam` field name is document-supplied, and interpolating
+    it bare took `str.__format__` — a third read again — straight out of
+    `ClosedJaxpr.from_dict`."""
+    try:
+        return str(obj)
     except Exception:  # noqa: BLE001 — the message's own totality
         return "<unreadable>"
 
@@ -570,10 +660,13 @@ def _load_check(cond: bool, where: str, what: str) -> None:
         )
 
 
-def _validate_array_value(arr: Array, where: str) -> None:
-    # the byte-length product is computed from the extents the guard
-    # ACTUALLY VALIDATED, not from a second `int(d)` read of the same
-    # objects (audit 0.2.0 B6 audit 3, F1)
+def _validate_array_value(arr: Array, where: str) -> tuple[int, ...]:
+    """Validate an :class:`Array`'s self-description, and RETURN the
+    normalised extents it validated — audit 0.2.0 B6 audit 3, F1, the
+    same shape of repair as :func:`_load_extents`. The byte-length product
+    below and :func:`_validate_value_against_aval`'s comparison above both
+    take what this read, never a second `int(d)` read of the same
+    self-describing objects."""
     problem, extents = _load_extents(arr.shape)
     _load_check(problem is None, where, f"array value has {problem}")
     itemsize = _load_itemsize(arr.dtype)
@@ -584,26 +677,49 @@ def _validate_array_value(arr: Array, where: str) -> None:
         _load_check(
             len(arr.data) == n * itemsize,
             where,
-            f"array value of shape {extents} dtype {arr.dtype!r} carries "
-            f"{len(arr.data)} byte(s), expected {n * itemsize}",
+            # `arr.dtype` is a document-supplied object, and a `str`
+            # SUBCLASS whose `__repr__` raises satisfies every check above
+            # it: this message is an ARGUMENT, so an unguarded `{!r}` here
+            # raw-crashed `ir.Array(...)` on a WELL-FORMED array (audit
+            # 0.2.0 B6 audit 4, F2 — a site the previous pass did not name)
+            f"array value of shape {extents} dtype {_safe_repr(arr.dtype)} "
+            f"carries {len(arr.data)} byte(s), expected {n * itemsize}",
         )
+    return extents
 
 
 def _validate_value_against_aval(val, aval: Aval, where: str) -> None:
+    # BOTH SIDES THROUGH THE SAME READER, so the comparison is int-to-int
+    # and every extent quoted below is a plain `int` — audit 0.2.0 B6
+    # audit 4, F2. This compared `tuple(val.shape) == tuple(aval.shape)`,
+    # which asks the raw objects' own `__eq__` after nothing validated
+    # them here, and quoted them unguarded into a message that is an
+    # ARGUMENT to `_load_check`: an extent with a working `__index__` and
+    # a refusing `__repr__` therefore raw-crashed `ir.Literal(...)` and
+    # `ir.ClosedJaxpr(...)` on the PASSING path. The aval's own
+    # `__post_init__` has validated its extents already; this read is
+    # defensive rather than covered, because this function may not rest on
+    # another guard having run — the same reason `_validate_decl_eqn`
+    # re-reads.
+    aval_problem, aval_dims = _load_extents(aval.shape)
+    _load_check(aval_problem is None, where, f"aval has {aval_problem}")
     if isinstance(val, Array):
-        _validate_array_value(val, where)
+        val_dims = _validate_array_value(val, where)
         _load_check(
-            tuple(val.shape) == tuple(aval.shape),
+            val_dims == aval_dims,
             where,
-            f"array value shape {tuple(val.shape)} contradicts the "
-            f"recorded aval shape {tuple(aval.shape)}",
+            f"array value shape {val_dims} contradicts the "
+            f"recorded aval shape {aval_dims}",
         )
     elif isinstance(val, (bool, int, float, complex)):
         _load_check(
-            tuple(aval.shape) == (),
+            aval_dims == (),
             where,
-            f"scalar value {val!r} under a non-scalar aval shape "
-            f"{tuple(aval.shape)}",
+            # a document-supplied scalar, and `isinstance` is a claim
+            # about the TYPE: an `int` subclass whose `__repr__` raises
+            # satisfies it (audit 0.2.0 B6 audit 4, F2)
+            f"scalar value {_safe_repr(val)} under a non-scalar aval "
+            f"shape {aval_dims}",
         )
     # str and None values carry no shape claim to cross-check
 
@@ -641,7 +757,7 @@ def _validate_param_value(v, where: str) -> None:
             _validate_param_value(item, f"{where}[{i}]")
     elif isinstance(v, NamedTupleParam):
         for name, item in v.fields:
-            _validate_param_value(item, f"{where}.{name}")
+            _validate_param_value(item, f"{where}.{_safe_str(name)}")
 
 
 def _validate_jaxpr(jaxpr: Jaxpr, where: str) -> None:
@@ -652,14 +768,16 @@ def _validate_jaxpr(jaxpr: Jaxpr, where: str) -> None:
     for i, a in enumerate(jaxpr.outvars):
         _validate_atom(a, f"{where}.outvars[{i}]")
     for k, eqn in enumerate(jaxpr.eqns):
-        w = f"{where}.eqns[{k}] ({eqn.primitive!r})"
+        # a `where` string is a message too: every object-valued quote in
+        # this pass goes through `_safe_repr` (audit 0.2.0 B6 audit 4, F2)
+        w = f"{where}.eqns[{k}] ({_safe_repr(eqn.primitive)})"
         for i, a in enumerate(eqn.invars):
             _validate_atom(a, f"{w}.invars[{i}]")
         for i, v in enumerate(eqn.outvars):
             _validate_aval(v.aval, f"{w}.outvars[{i}]")
         params = dict(eqn.params)
         for name, v in eqn.params:
-            _validate_param_value(v, f"{w}.params[{name!r}]")
+            _validate_param_value(v, f"{w}.params[{_safe_repr(name)}]")
         _validate_required_params(eqn, w)
         _validate_decl_eqn(eqn, w)
 
@@ -758,7 +876,8 @@ def _validate_required_params(eqn: "JaxprEqn", where: str) -> None:
     _load_check(
         not missing,
         where,
-        f"missing param(s) {missing} that jax supplies on every {eqn.primitive!r} "
+        f"missing param(s) {missing} that jax supplies on every "
+        f"{_safe_repr(eqn.primitive)} "
         f"equation; absence is not a traced form, and readers that test key "
         f"PRESENCE would take it for a hand-built equation and apply the "
         f"primitive's default meaning",
@@ -771,21 +890,44 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
     JaxprEqn.__post_init__ (every construction path) and from the
     from_dict walk (kept for its load-path error context).
 
-    THE CHECK IS ON THE EXTENTS, NOT ON THE PARAM'S PYTHON TYPE — audit
-    0.2.0 B6 re-audit, UNSOUND-1. It used to run only ``if isinstance(
-    shape, tuple)``, so a ``list`` shape param skipped it entirely and a
-    declaration saying four elements in its param and two in its aval was
-    constructible; `_validate_param_value` recurses into tuples and (until
-    the same commit) not into lists, so nothing else read it either. A
-    validator that SILENTLY SKIPS a param class it cannot read grants that
-    class a pass, which is the opposite of what a validator is for. Any
-    sequence of extents is now compared, and a ``shape`` param that is not
-    a sequence of extents at all is REFUSED rather than skipped — the two
-    self-descriptions cannot be reconciled if one of them cannot be read.
+    **THE RULE ON THE ``shape`` PARAM IS POSITIVE, AND IT IS THE PARAM'S
+    CONTAINER TYPE:** a declaration records its extents in one of
+    :data:`_SHAPE_PARAM_CONTAINERS`, and a ``shape`` param of any other
+    type is REFUSED — not skipped, and not coerced. The tuple is the whole
+    of the rule and this sentence restates none of it; the two branches
+    below ask ``isinstance`` against that object, and
+    :meth:`stelling.obligation._Slicer._declared_shape` asks the same
+    object rather than keeping a second copy of the answer.
 
-    Bytes and str are sequences and are not shapes: ``tuple("ab")`` is a
-    tuple of CHARACTERS, so coercing one would compare something the
-    declaration never said. They are refused with the same sentence.
+    That is a NARROWING, and the narrowing is the point. This check used
+    to run only ``if isinstance(shape, tuple)``, so a ``list`` param
+    skipped it entirely and a declaration saying four elements in its
+    param and two in its aval was constructible (audit 0.2.0 B6 re-audit,
+    UNSOUND-1); the enumeration that replaced it — refuse ``str``,
+    ``bytes``, ``bytearray``, read anything else — let ``memoryview`` and
+    ``array.array`` through with the misread the enumeration existed to
+    stop. What is refused now is everything the rule does not name, so
+    ``range``, ``array.array``, ``memoryview``, a numpy array and a custom
+    iterable are all refused, and so is whichever sequence type is noticed
+    next. **Being a sequence of extents is not the test and never was the
+    test after this commit** — audit 0.2.0 B6 audit 4, F1, where this
+    paragraph still described the enumeration two commits after the code
+    stopped implementing it.
+
+    What that costs is stated where the rule is (see
+    :data:`_SHAPE_PARAM_CONTAINERS`): every route that is not hand-built
+    IR normalises to a ``tuple`` before this is reached, so the refusal is
+    confined to hand-built IR, and there it names the type it refused.
+
+    Two distinct failures, and they are refused SEPARATELY because they
+    are different facts about the document — the same split
+    :meth:`_declared_shape` makes. A param of the wrong container type is
+    refused for its TYPE; a param of the right type whose iteration raises
+    (a ``list`` SUBCLASS whose ``__iter__`` refuses — ``isinstance`` is a
+    claim about the type and not about the object) is refused for being
+    UNREADABLE. One sentence for both said "is not a sequence of extents"
+    over ``np.array([4])``, which is a sequence of extents and was refused
+    for a different reason.
 
     **This door is not the soundness boundary and closing it does not make
     one.** `ir.py` scopes per-primitive shape inference out of the load
@@ -804,16 +946,12 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
     # self-descriptions disagreed
     if "shape" in params:
         shape = params["shape"]
+        # THE RULE, ASKED OF THE ONE OBJECT THAT HOLDS IT. The slicer's
+        # `_declared_shape` asks `ir._SHAPE_PARAM_CONTAINERS` too, so the
+        # two faces cannot part company by one of them being edited.
+        held_in_a_container = isinstance(shape, _SHAPE_PARAM_CONTAINERS)
         dims: tuple | None = None
-        # A POSITIVE TEST, and the same one the slicer's `_declared_shape`
-        # makes — audit 0.2.0 B6 audit 3, the optional item. This read
-        # `not isinstance(shape, (str, bytes, bytearray))`, and a
-        # `memoryview` walked past it carrying the identical hazard
-        # (`tuple(memoryview(b"34"))` is `(51, 52)`). A declaration records
-        # its extents in a `tuple` or a `list` — the only forms `_decode`
-        # builds and the only forms jax's own params carry — and anything
-        # else is refused as unreadable rather than enumerated as banned.
-        if isinstance(shape, (tuple, list)):
+        if held_in_a_container:
             try:
                 dims = tuple(shape)
             except Exception:  # noqa: BLE001 — unreadable IS the finding
@@ -825,11 +963,18 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
                 # `JaxprEqn.__post_init__` raw is the very class this
                 # function is closing.
                 dims = None
-        # EVERY QUOTE HERE IS GUARDED, because a `_load_check` message is
-        # an ARGUMENT and is therefore composed on the passing path too: an
-        # unguarded `{shape!r}` raw-crashed `JaxprEqn(...)` on a document
-        # with nothing wrong with it, whose extent merely had a `__repr__`
-        # that refuses (audit 0.2.0 B6 audit 3, F3).
+        # THE QUOTES ON THIS BRANCH ARE GUARDED, because a `_load_check`
+        # message is an ARGUMENT and is therefore composed on the passing
+        # path too: an unguarded `{shape!r}` raw-crashed `JaxprEqn(...)` on
+        # a document with nothing wrong with it, whose extent merely had a
+        # `__repr__` that refuses (audit 0.2.0 B6 audit 3, F3). That
+        # sentence was written as *"every quote here is guarded"* and was
+        # false 44 lines below itself — the `dtype` arm at the end of this
+        # function was not, and neither were three sites in the rest of the
+        # pass (audit 0.2.0 B6 audit 4, F2). The claim is narrowed to what
+        # it covers, the other sites are fixed, and the sweep for the class
+        # is `tests/test_ir_message_totality.py` rather than a sentence.
+        #
         # the aval side goes through the SAME reader, so the comparison
         # below is int-to-int. `Aval.__post_init__` validates its own
         # extents, so an aval that exists has none of these problems — the
@@ -842,13 +987,30 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
             where,
             f"stelling_any outvar aval has {aval_problem}",
         )
+        # THE TWO FAILURES ARE NAMED SEPARATELY (audit 0.2.0 B6 audit 4,
+        # F1): the wrong container type is a fact about the param's TYPE,
+        # and one sentence for both told a reader holding `np.array([4])`
+        # that it "is not a sequence of extents" — which it is, and which
+        # is not why it was refused.
+        _load_check(
+            held_in_a_container,
+            where,
+            f"stelling_any shape param {_safe_repr(shape)} is of type "
+            f"{_safe_type_name(shape)}: a declaration records its extents "
+            f"in {_SHAPE_PARAM_RULE}, and reading any other container as "
+            f"one would model an array the declaration never described "
+            f"(`tuple(b\"34\")` is `(51, 52)`), so it cannot be checked "
+            f"against the outvar aval shape {aval_dims} it is the second "
+            f"description of",
+        )
         _load_check(
             dims is not None,
             where,
-            f"stelling_any shape param {_safe_repr(shape)} is not a "
-            f"sequence of extents, so it cannot be checked against the "
-            f"outvar aval shape {aval_dims} it is the second description "
-            f"of",
+            f"stelling_any shape param {_safe_repr(shape)} is "
+            f"{_SHAPE_PARAM_RULE} whose iteration RAISES, so it is not a "
+            f"readable sequence of extents and cannot be checked against "
+            f"the outvar aval shape {aval_dims} it is the second "
+            f"description of",
         )
         problem, param_dims = _load_extents(dims)
         _load_check(
@@ -869,8 +1031,13 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
         _load_check(
             dtype == eqn.outvars[0].aval.dtype,
             where,
-            f"stelling_any dtype param {dtype!r} contradicts the "
-            f"outvar aval dtype {eqn.outvars[0].aval.dtype!r}",
+            # both quotes guarded: `dtype` passes `isinstance(dtype, str)`
+            # as a str SUBCLASS whose `__repr__` raises, and the aval's own
+            # dtype is document-supplied too — this arm sat 44 lines under
+            # a comment claiming every quote in this function was guarded
+            # (audit 0.2.0 B6 audit 4, F2)
+            f"stelling_any dtype param {_safe_repr(dtype)} contradicts the "
+            f"outvar aval dtype {_safe_repr(eqn.outvars[0].aval.dtype)}",
         )
 
 
@@ -878,7 +1045,7 @@ def _validate_closed(closed: ClosedJaxpr, where: str = "query") -> None:
     _validate_jaxpr(closed.jaxpr, where)
     for i, (var, val) in enumerate(zip(closed.jaxpr.constvars, closed.consts)):
         _validate_value_against_aval(
-            val, var.aval, f"{where}.consts[{i}] (constvar {var.id})"
+            val, var.aval, f"{where}.consts[{i}] (constvar {_safe_repr(var.id)})"
         )
 
 
