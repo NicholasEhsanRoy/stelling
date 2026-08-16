@@ -692,7 +692,21 @@ def test_frames_is_total_on_a_list_that_will_not_iterate():
     A value that will not iterate is not a frame list either, so it reads as
     `None` — "this association cannot be CHECKED" — by exactly the same
     reasoning an `int` does. Asserted through the helper AND end to end,
-    because the point is that the net is not what answers."""
+    because the point is that the net is not what answers.
+
+    **THE END-TO-END HALF NOW MEASURES A DIFFERENT THING, AND SAYS SO** —
+    audit 0.2.0 B6 audit 6. `ir`'s canonicalization door replaces
+    `source_info` with an exact `tuple` at construction, reading the list's
+    payload through `list.__getitem__` rather than asking it to iterate, so
+    an EQUATION can no longer carry a `Hostile` at all: the route that used
+    to reach `_frames` with one is shut one layer earlier. That is a
+    strictly better place for it and it is not a substitute for this
+    helper's totality, because `_frames` also reads
+    `ObligationReport.source_info`, which is not an `ir` dataclass field
+    and goes through no door. So the helper is still driven directly, and
+    the end-to-end half now asserts what is true: an equation's frames are
+    canonical, and a NON-frame element (which canonicalization does not
+    make a frame) still declines rather than raising."""
     import stelling.obligation as OB
 
     class Hostile(list):
@@ -701,31 +715,53 @@ def test_frames_is_total_on_a_list_that_will_not_iterate():
 
     assert isinstance(Hostile([1, 2]), list)
     assert OB._frames(Hostile(["a"])) is None
+    # the other half of the helper's totality, and the one the door cannot
+    # take away: an `ObligationReport`'s frames go through no `ir` door
+    assert OB._frames(3) is None
 
     q = square_query()
-    eqns = tuple(
-        ir.JaxprEqn(
-            primitive=e.primitive, invars=e.invars, outvars=e.outvars,
-            params=e.params, effects=e.effects,
-            source_info=Hostile(["somewhere.py:1"]),
+
+    def _rebuild(source_info):
+        eqns = tuple(
+            ir.JaxprEqn(
+                primitive=e.primitive, invars=e.invars, outvars=e.outvars,
+                params=e.params, effects=e.effects,
+                source_info=source_info,
+            )
+            if e.primitive == "stelling_assert" else e
+            for e in q.jaxpr.eqns
         )
-        if e.primitive == "stelling_assert" else e
-        for e in q.jaxpr.eqns
-    )
-    bad = ir.ClosedJaxpr(
-        jaxpr=ir.Jaxpr(
-            constvars=q.jaxpr.constvars, invars=q.jaxpr.invars,
-            outvars=q.jaxpr.outvars, eqns=eqns,
-        ),
-        consts=q.consts,
-    )
+        return ir.ClosedJaxpr(
+            jaxpr=ir.Jaxpr(
+                constvars=q.jaxpr.constvars, invars=q.jaxpr.invars,
+                outvars=q.jaxpr.outvars, eqns=eqns,
+            ),
+            consts=q.consts,
+        )
+
+    # 1. the door reads the hostile list's payload rather than iterating
+    #    it, so the equation carries an ordinary frame tuple
+    fine = _rebuild(Hostile(["somewhere.py:1"]))
+    (asserted,) = [e for e in fine.jaxpr.eqns
+                   if e.primitive == "stelling_assert"]
+    assert asserted.source_info == ("somewhere.py:1",), asserted.source_info
+    assert type(asserted.source_info) is tuple
+
+    # 2. and a `source_info` that is not a frame list at all is still a
+    #    DECLINE and not a raise. Canonicalization settles the TYPE of what
+    #    is stored, never whether it means anything: an `int` is an exact
+    #    `int` and is carried, and `_frames` reads it as `None` — the
+    #    original M17′ row, reached through the door rather than around it.
+    bad = _rebuild(3)
+    assert [e.source_info for e in bad.jaxpr.eqns
+            if e.primitive == "stelling_assert"] == [3]
     p = propagate(bad)
     (item,) = slice_unknown_obligations(bad, p, interval_env(bad))
     assert isinstance(item, DeclinedObligation), item
     assert "not a list of source frames" in item.reason, item.reason
     assert "internal error" not in item.reason, (
-        "the net answered, which means `_frames` raised — the totality claim "
-        "is still a docstring assertion rather than a property"
+        "the net answered, which means `_frames` or its caller raised — the "
+        "totality claim is still a docstring assertion rather than a property"
     )
 
 

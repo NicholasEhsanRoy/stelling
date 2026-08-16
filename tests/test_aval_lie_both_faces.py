@@ -1681,6 +1681,156 @@ def test_a_lying_shape_param_can_no_longer_mint_a_FALSE_VERIFIED():
     assert type(decl.params_dict()["shape"]) is tuple
 
 
+def test_a_lying_param_KEY_can_no_longer_mint_a_FALSE_VERIFIED():
+    """THE BLOCKING DOCUMENT, ONE LAYER OUT — audit 0.2.0 B6 audit 6.
+
+    Same query, same oracle, same four read sites, same ``discharged``.
+    The previous repair made the door INSTALL the extents it validated,
+    with
+
+        (k, dims) if k == "shape" else (k, v)
+
+    and ``k`` is document-supplied too. A `str` SUBCLASS answering True
+    for `_validate_decl_eqn`'s two reads and FALSE for the install's own
+    third read let the door validate the param and report ``dims`` while
+    that comprehension matched NOTHING — so the equation kept the raw
+    lying object, every later reader found the key again (True from the
+    fourth call on) and read the lie. A guard that installs through a
+    comparison has one more document-supplied value than it counted.
+
+        query   x = any(shape=<lies>, lo=1, hi=2);  assert sum(x) <= 3.9
+        aval    x : f64[2]  — the shape the door validated the param at
+        truth   max over [1,2]x[1,2] of (x0 + x1) = 4 > 39/10
+
+    Measured at `f729d70`: ``discharged``. The repair is not a fourth
+    comparison but `ir._canonical_param_keys`: the key is an exact `str`
+    before anything compares, hashes, sorts or counts it, so a document of
+    this class has nothing left to answer with. The mechanism assertion
+    below is that the key's ``__eq__`` is never called AT ALL.
+
+    Held beside `test_a_lying_shape_param_can_no_longer_mint_a_FALSE_
+    VERIFIED`, which must stay closed: these are the same lie at two
+    depths, and closing one has now reopened the other twice.
+    """
+    eq_calls = []
+
+    class Key(str):
+        """True, True, FALSE (the install), then True forever."""
+
+        def __eq__(self, other):
+            eq_calls.append(other)
+            if len(eq_calls) == 3:
+                return False
+            return str.__eq__(self, other)
+
+        def __ne__(self, other):
+            r = self.__eq__(other)
+            return NotImplemented if r is NotImplemented else not r
+
+        def __hash__(self):
+            return str.__hash__(self)
+
+    class Lying(tuple):
+        n = 0
+
+        def __iter__(self):
+            Lying.n += 1
+            return iter((2,) if Lying.n <= 1 else (1,))
+
+    def av(shape=(), dtype="float64"):
+        return ir.Aval(kind="ShapedArray", shape=shape, dtype=dtype)
+
+    x = ir.Var(id=1, aval=av((2,)))
+    s = ir.Var(id=2, aval=av())
+    pr = ir.Var(id=3, aval=av((), "bool"))
+    o = ir.Var(id=4, aval=av((), "bool"))
+    decl = ir.JaxprEqn(
+        primitive="stelling_any", invars=(), outvars=(x,),
+        params=(("dtype", "float64"), ("hi", 2.0), ("lo", 1.0),
+                (Key("shape"), Lying((2,)))))
+    q = ir.ClosedJaxpr(jaxpr=ir.Jaxpr(constvars=(), invars=(), outvars=(o,), eqns=(
+        decl,
+        ir.JaxprEqn(primitive="reduce_sum", invars=(x,), outvars=(s,),
+                    params=(("axes", (0,)), ("out_sharding", None))),
+        ir.JaxprEqn(primitive="le", invars=(s, ir.Literal(val=3.9, aval=s.aval)),
+                    outvars=(pr,)),
+        ir.JaxprEqn(primitive="stelling_assert", invars=(pr,), outvars=(o,)),
+    )))
+
+    # 1. the exact oracle, in rationals and with no stelling code in it
+    assert Fraction(2) + Fraction(2) > Fraction(39, 10)
+
+    # 2. THE SOUNDNESS ASSERTION, DELIBERATELY FIRST. At `f729d70` this is
+    #    the line that reds, and it reds saying 'discharged'.
+    p = propagate(q)
+    (ob,) = p.obligations
+    assert ob.status != OB_DISCHARGED, (
+        f"the lying KEY is discharged again: {ob.status!r}"
+    )
+    assert ob.status == "unknown", ob.status
+    assert interval_env(q)[x.id].size == 2, (
+        "the transfer built a box at the shape the lying param reports, "
+        "not at the shape the door validated"
+    )
+
+    # 3. THE MECHANISM. Not "the comparison now matches" — there is no
+    #    comparison against this object left to match. The key is replaced
+    #    by an exact `str` before the sort, so its `__eq__` is never
+    #    reached by the sort, the duplicate check, `dict()`,
+    #    `_validate_decl_eqn` or the install.
+    assert eq_calls == [], (
+        f"a document-supplied key's `__eq__` was consulted {len(eq_calls)} "
+        f"time(s) during construction: {eq_calls}"
+    )
+    (key,) = [k for k, _ in decl.params if k == "shape"]
+    assert type(key) is str, type(key)
+    assert decl.params_dict()["shape"] == (2,)
+    assert type(decl.params_dict()["shape"]) is tuple
+
+
+def test_two_keys_with_equal_text_and_different_hashes_are_ONE_key():
+    """The duplicate refusal asked `hash` of the keys and `eq` of the same
+    keys — audit 0.2.0 B6 audit 6.
+
+    ``set(names)`` is HASH-based and ``names.count(n)`` is EQ-based, so
+    two `str` subclasses with equal text and different ``__hash__`` were
+    two set elements AND two count hits: no duplicate seen. Measured at
+    `f729d70`: a document carrying both ``("update_jaxpr", None)`` and
+    ``("update_jaxpr", <a ClosedJaxpr>)`` was ACCEPTED, and
+    ``params_dict()`` picked one BY HASH PLACEMENT — which is exactly the
+    ``scatter-add`` replace-vs-accumulate hazard the refusal's own comment
+    says it exists to close.
+
+    Canonical keys close it without the refusal learning a second
+    protocol: equal text is one exact `str`, so `hash` and `eq` agree by
+    construction and the check that is already there sees the duplicate.
+    """
+    class K1(str):
+        def __hash__(self):
+            return str.__hash__(self)
+
+    class K2(str):
+        def __hash__(self):
+            return str.__hash__(self) ^ 0x5F5E
+
+    sub = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(constvars=(), invars=(), outvars=(), eqns=())
+    )
+    aval = ir.Aval(kind="ShapedArray", shape=(), dtype="float64")
+
+    def build(k1, k2):
+        return ir.JaxprEqn(
+            primitive="scatter-add", invars=(), outvars=(ir.Var(1, aval),),
+            params=((k1, None), (k2, sub)))
+
+    # the control: two plain-`str` duplicates were always refused
+    with pytest.raises(ir.TranscriptionError, match="duplicate key"):
+        build("update_jaxpr", "update_jaxpr")
+    # and the attack is now the same document
+    with pytest.raises(ir.TranscriptionError, match="duplicate key"):
+        build(K1("update_jaxpr"), K2("update_jaxpr"))
+
+
 @needs_solvers
 def test_the_lying_shape_param_document_is_REFUTED_with_a_witness():
     """What the blocking document produces INSTEAD of the false VERIFIED.

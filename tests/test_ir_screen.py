@@ -565,8 +565,16 @@ def test_the_batch_ships_an_attribution_table_that_adds_up():
 # an attribution row names TESTS, and a test name is checkable
 # ---------------------------------------------------------------------------
 
+# The fence pattern accepts an optional LANGUAGE TAG — audit 0.2.0 B6
+# audit 6. It was `\`\`\`\n` exactly, so one ```` ```python ```` block added
+# anywhere earlier in `CHANGELOG.md` re-paired every fence after it and
+# this scan found two attribution tables instead of three, reporting a
+# defect in the tables that was really a defect in the reader.
+_FENCE = r"```\w*\n(.*?)```"
+
+
 def _table_blocks(text: str) -> list[str]:
-    return [b for b in re.findall(r"```\n(.*?)```", text, re.S)
+    return [b for b in re.findall(_FENCE, text, re.S)
             if "the tests that red" in b]
 
 
@@ -644,7 +652,7 @@ def test_an_attribution_row_may_not_quote_a_test_that_does_not_exist():
     assert len(blocks) >= 3, f"{len(blocks)} attribution table(s) found"
 
     # the annotations, taken from OUTSIDE the fenced blocks
-    prose = re.sub(r"```\n.*?```", "", text, flags=re.S)
+    prose = re.sub(_FENCE, "", text, flags=re.S)
     annotations = [p for p in prose.split("\n\n") if "renam" in p.lower()]
 
     unexplained = []

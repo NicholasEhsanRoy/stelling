@@ -8792,6 +8792,57 @@ verdicts:
   same document now reaches **REFUTED** with a two-element witness the
   exact-rational replay confirms.
 
+  **AND INSTALLING THROUGH A COMPARISON IS NOT ENOUGH EITHER: THE DOOR
+  NOW STORES EVERY VALUE AS AN EXACT BUILT-IN, OR REFUSES IT** (audit
+  0.2.0 B6 audit 6). The install above was written
+  `(k, dims) if k == "shape" else (k, v)`, and `k` is document-supplied
+  too: a `str` SUBCLASS answering that comparison True for
+  `_validate_decl_eqn`'s two reads and **False** for the install's own
+  third read let the door validate the param, report `dims`, and rewrite
+  `params` with the lying object still in it — after which every later
+  reader found the key again and read the lie. Same query, same oracle,
+  same four read sites, same **`discharged`**, again with no
+  `object.__setattr__` anywhere. Two more members of the same class were
+  measured beside it: the duplicate-key refusal asked `hash` (through
+  `set`) and `eq` (through `list.count`) of the same keys, so two `str`
+  subclasses with equal text and different `__hash__` were **not** a
+  duplicate and a document carrying both `("update_jaxpr", None)` and
+  `("update_jaxpr", <the add jaxpr>)` was accepted with `params_dict()`
+  picking one by hash placement — the exact `scatter-add`
+  replace-vs-accumulate hazard that refusal exists to close; and the
+  `dtype` param was compared with `==` at the door and consumed with
+  `str()` by `propagate._ieee_any`, which selects the subnormal band from
+  it.
+
+  Five members in four rounds, each repair correct and none of them
+  closing anything, is the evidence that the class is not a list. The
+  repair is therefore **`ir`'s canonicalization door**: at construction,
+  every document-supplied value in every `stelling.ir` dataclass is
+  replaced by an EXACT instance of a type the module is closed over — a
+  subclass read ONCE through its base type's own accessor (`str.__str__`,
+  `int.__index__`, `float.__float__`, `bytes.__getitem__`,
+  `tuple.__getitem__`, none of which an override can redirect), a `list`
+  stored as a `tuple`, and a type with no exact form to store REFUSED
+  naming its type. A second read cannot then differ, because there is no
+  subclass left to answer it. That is a property of the stored object
+  rather than of any reader, so it covers the params that have no rule at
+  all (`axes`, `new_sizes`, `slice_sizes`, `dimension_numbers`) and
+  readers nobody has written yet. **It does not make those params
+  CORRECT** — per-primitive shape inference is still scoped out in
+  writing — only single-valued, so the transfer and the emission read the
+  same extents. The fields the module already had a stronger rule for are
+  left to it: aval and array extents go through `_load_extents`, which
+  reads any object with a working `__index__` once and installs a plain
+  `int`, and a declaration's `shape` param is judged by the container rule
+  above before the generic door sees it. One value is CARRIED rather than
+  canonicalized, by explicit declaration from the module that builds it:
+  the pre-boxed `interval.IntervalArray` a `ClosedJaxpr.consts` entry may
+  hold in place of a value (recorded above, with its own test). No
+  document route reaches it — `ir._decode` has no tag for it and
+  `ir._encode` refuses to encode one — so it is a caller's object, and
+  `interval.py` states in return that it is frozen and validated at
+  construction.
+
   But the
   door is **not** where this class is contained, and two things say so.
   `ir.py` scopes per-primitive shape inference out of the load validation

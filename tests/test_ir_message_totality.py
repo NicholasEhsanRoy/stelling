@@ -29,10 +29,43 @@ several source lines and can interpolate on more than one, so a per-LINE
 count is a different and larger number, and it is the one that got
 written down as if it were this one:
 
-    this tree, as shipped        95 swept /  0 escapes / 20 skipped
-    this tree, guards neutered   27 escapes /  9 lines /  8 messages
-    `30d4b04`, guards absent     28 escapes / 10 lines /  8 messages
-    message-expression union     10 = those 8 + the 2 the sweep masks
+    this tree, as shipped              95 swept / 0 escapes / 20 skipped
+    guards neutered                     1 escape  /  1 line  / 1 message
+    guards neutered, and the door's
+      LEAF READS neutered too          26 escapes /  8 lines / 8 messages
+    `30d4b04`, guards absent           28 escapes / 10 lines / 8 messages
+    message-expression union           10 = those 8 + the 2 the sweep masks
+
+**THERE ARE NOW TWO DEFENCES AND EACH IS MEASURED WITH THE OTHER
+REMOVED** — audit 0.2.0 B6 audit 6. `ir`'s canonicalization door replaces
+a leaf that is a SUBCLASS of a stored type with an exact twin, read
+through the base type's own accessor — which is exactly what the hostile
+leaves this sweep injects are, so their `__repr__` no longer survives into
+the document. 25 of the 26 ESCAPES therefore do not happen, and they are
+not GUARDED — they are not reached: 7 of the 8 message expressions are
+never composed with a hostile object at all. (Escapes and message
+expressions are different units and this sentence states both, which is
+the discipline the rest of this file is about.) A positive control that
+only neutered the guards would therefore be pushing on a door already
+shut, and would go on reporting green if every `_safe_repr` in the module
+were deleted. So
+`_neutered_sweep(canonicalization=False)` removes the second defence too,
+and that is the measurement the guard figures belong to.
+
+The one escape that survives canonicalization is the hostile `int` inside
+a declaration's `shape` PARAM tuple: the declaration door owns that param
+(it has a container rule and normalises the extents itself), so the
+generic door is held back from it and `_validate_decl_eqn`'s quotes see
+the object as handed in. That is one site, it is guarded, and it is why
+the guards are still load-bearing.
+
+The guards-neutered figures also moved by exactly one escape and one
+LINE against `f729d70` (27/9/8 -> 26/8/8), and the difference is
+attributable: `_validate_decl_eqn`'s `dtype` message interpolated the
+param on one line and the outvar aval's dtype on the next, and the param
+half is now canonicalized inside that function (audit 6's `dtype`
+finding), so one of that message expression's two lines no longer escapes.
+The MESSAGE count is unchanged at 8, which is the unit the record quotes.
 
 **AND "TEN" IS SAID TWICE IN TWO UNITS.** `CHANGELOG.md` also decomposes
 the finding as four sites the audit named and six it had not; that counts
@@ -334,18 +367,45 @@ def _sweep() -> tuple[list[_Escape], list[str], int]:
     return escapes, swept, skipped
 
 
-def _neutered_sweep():
+def _neutered_sweep(*, canonicalization: bool = True):
     """The same sweep with the three guarded reads replaced by the
     unguarded ones they stand in for. Restores the module on the way out
-    whatever happens."""
+    whatever happens.
+
+    ``canonicalization=False`` ALSO removes the second defence — audit
+    0.2.0 B6 audit 6. `ir`'s canonicalization door replaces a leaf that is
+    a SUBCLASS of a stored type with an exact twin, read through the base
+    type's own accessor, and a hostile `__repr__` does not survive that:
+    which means the hostile leaves this sweep injects no longer REACH most
+    of the quotes it exists to measure, and a positive control that only
+    neutered the guards would be measuring a door that is already shut.
+
+    Both defences are therefore measured with the OTHER out of the way.
+    Setting every entry of `ir._CANONICAL_READS` to the identity leaves a
+    subclass LEAF in the document exactly as it arrived, which is the tree
+    the guards alone stood on for the values this sweep injects.
+
+    IT DOES NOT REMOVE THE WHOLE DOOR, and saying so matters because the
+    figure is quoted: `_canonical`'s `list`-to-`tuple` arm,
+    `_canonical_shell`, and `_validate_decl_eqn`'s own `str.__str__` on
+    the `dtype` param all still run. The last of those is the whole of the
+    residue against `f729d70` — one escape and one line — and it is
+    attributed in this module's docstring rather than left as drift.
+    """
     saved = (ir._safe_repr, ir._safe_type_name, ir._safe_str)
+    saved_reads = ir._CANONICAL_READS
     try:
         ir._safe_repr = repr
         ir._safe_type_name = lambda o: type(o).__name__
         ir._safe_str = str
+        if not canonicalization:
+            ir._CANONICAL_READS = tuple(
+                (base, lambda v: v) for base, _ in saved_reads
+            )
         return _sweep()
     finally:
         ir._safe_repr, ir._safe_type_name, ir._safe_str = saved
+        ir._CANONICAL_READS = saved_reads
 
 
 def test_no_message_in_the_ir_validation_pass_can_raise():
@@ -380,8 +440,14 @@ def test_the_sweep_catches_an_injected_defect_of_exactly_this_class():
     something. With `_safe_repr`, `_safe_type_name` and `_safe_str`
     neutered to the unguarded reads they replaced, the same sweep must
     find escapes."""
-    before = (ir._safe_repr, ir._safe_type_name, ir._safe_str)
-    escapes, swept, _ = _neutered_sweep()
+    before = (ir._safe_repr, ir._safe_type_name, ir._safe_str, ir._CANONICAL_READS)
+
+    # 1. GUARDS ALONE. Canonicalization is removed as well, because it now
+    #    stands in front of almost every quote this sweep aims at: with it
+    #    in place a hostile leaf never reaches the message, so a control
+    #    that only neutered the guards would report green with every
+    #    `_safe_repr` in the module deleted (audit 0.2.0 B6 audit 6).
+    escapes, swept, _ = _neutered_sweep(canonicalization=False)
     assert escapes, (
         "neutering the guarded reads produced NO raw escape, so the sweep "
         "is not measuring the class it claims to: either the quotes moved "
@@ -393,8 +459,21 @@ def test_the_sweep_catches_an_injected_defect_of_exactly_this_class():
         f"counted in are pinned by "
         f"test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES"
     )
+
+    # 2. CANONICALIZATION ALONE, which is the same control from the other
+    #    side: with the guards neutered and the door in place, all but one
+    #    of those escapes is gone — not caught, NOT REACHED.
+    still, _swept, _ = _neutered_sweep()
+    assert len(still) < len(escapes), (
+        f"the canonicalization door stopped no escape at all "
+        f"({len(still)} with it, {len(escapes)} without); either the door "
+        f"no longer replaces subclass leaves or the sweep no longer "
+        f"injects them"
+    )
+
     # and the tree is genuinely restored
-    assert (ir._safe_repr, ir._safe_type_name, ir._safe_str) == before
+    assert (ir._safe_repr, ir._safe_type_name, ir._safe_str,
+            ir._CANONICAL_READS) == before
 
 
 # The figures the record quotes, in ONE place, in the unit they are counted
@@ -403,7 +482,11 @@ def test_the_sweep_catches_an_injected_defect_of_exactly_this_class():
 # ("26"/"27" escapes, "9"/"eight" quote sites) because each was typed where
 # it was needed. They are computed here and the prose cites this test.
 _SHIPPED = {"swept": 95, "escapes": 0, "skipped": 20}
-_NEUTERED = {"escapes": 27, "lines": 9, "messages": 8}
+# guards neutered, canonicalization SHIPPED: what the guards still catch
+_NEUTERED = {"escapes": 1, "lines": 1, "messages": 1}
+# guards neutered AND canonicalization removed: the tree the guards alone
+# stood on, and the measurement the record's 8/10 figures belong to
+_NEUTERED_NO_CANON = {"escapes": 26, "lines": 8, "messages": 8}
 
 
 def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():
@@ -436,25 +519,38 @@ def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():
         f"`ir.py` message-totality entry in `CHANGELOG.md` together."
     )
 
-    escapes, _swept, _skipped = _neutered_sweep()
-    measured = {
-        "escapes": len(escapes),
-        "lines": len({e.line for e in escapes}),
-        "messages": len({e.message for e in escapes}),
-    }
-    assert measured == _NEUTERED, (
-        f"the positive control now measures {measured} and the record says "
-        f"{_NEUTERED}. Three places state it and they must move together: "
-        f"this module's docstring, `ir._safe_repr`'s docstring, and the "
-        f"`ir.py` message-totality entry in `CHANGELOG.md`."
-    )
-    assert None not in {e.message for e in escapes}, (
-        "an escape could not be attributed to a statement in `ir.py`, so "
-        "the per-message count is not measuring what it says"
-    )
-    # per-line >= per-message by construction; equality would mean no
-    # message expression interpolates on two lines, which is not this file
-    assert measured["lines"] > measured["messages"]
+    def _measure(**kw):
+        escapes, _swept, _skipped = _neutered_sweep(**kw)
+        assert None not in {e.message for e in escapes}, (
+            "an escape could not be attributed to a statement in `ir.py`, "
+            "so the per-message count is not measuring what it says"
+        )
+        return {
+            "escapes": len(escapes),
+            "lines": len({e.line for e in escapes}),
+            "messages": len({e.message for e in escapes}),
+        }
+
+    for measured, record, which in (
+        (_measure(), _NEUTERED, "guards neutered"),
+        (_measure(canonicalization=False), _NEUTERED_NO_CANON,
+         "guards neutered AND canonicalization removed"),
+    ):
+        assert measured == record, (
+            f"the positive control ({which}) now measures {measured} and "
+            f"the record says {record}. Three places state it and they must "
+            f"move together: this module's docstring, `ir._safe_repr`'s "
+            f"docstring, and the `ir.py` message-totality entry in "
+            f"`CHANGELOG.md`."
+        )
+    # per-line >= per-message by construction. It used to be STRICTLY
+    # greater, and the message expression that made it so was
+    # `_validate_decl_eqn`'s `dtype` refusal, which interpolated the param
+    # on one line and the outvar aval's dtype on the next; the param half
+    # is canonicalized inside that function now (audit 0.2.0 B6 audit 6),
+    # so the two counts have met. Equality is a fact about this tree, not
+    # an invariant, which is why it is stated as the bound it really is.
+    assert _NEUTERED_NO_CANON["lines"] >= _NEUTERED_NO_CANON["messages"]
 
 
 # The sites the RECORD names, one row each, tagged with the group the
@@ -546,23 +642,47 @@ def test_the_named_sites_one_line_each(label, build):
     HOW MANY THERE ARE IS `len(_NAMED_SITES)` AND IS NOT TYPED HERE —
     audit 0.2.0 B6 audit 5, F2, where this docstring said "the seven
     sites" over nine rows and the comment above them said "the three
-    sites" over two."""
-    h = _hostiles()
+    sites" over two.
+
+    **TWO DRIVES PER ROW SINCE AUDIT 6.** As shipped, the required outcome
+    is a refusal or a success and never a raw escape — and the message a
+    reader gets is now usually the ORDINARY one, because `ir`'s
+    canonicalization door replaced the hostile leaf with an exact twin
+    before any quote reached it, so there is nothing left to print a
+    placeholder for. That is a better outcome and it is also one that
+    would hold with every guard deleted, so each row is driven a second
+    time with the door removed, where the GUARD is what must hold and the
+    message must show the placeholder or the normalised extents. Both
+    defences, each measured with the other out of the way.
+    """
+    def _drive(what):
+        try:
+            build(_hostiles())
+        except ir.TranscriptionError as exc:
+            return str(exc)
+        except Exception as exc:  # noqa: BLE001
+            raise AssertionError(
+                f"{label} ({what}): RAW {type(exc).__name__} out of a "
+                f"public constructor: {exc}"
+            ) from None
+        return None
+
+    # 1. as shipped: a refusal or a success, never a raw escape
+    _drive("as shipped")
+
+    # 2. with the canonicalization door removed, the guard alone. Where
+    #    the message quotes the hostile OBJECT it shows a placeholder;
+    #    where it quotes the extents the guard NORMALISED it shows plain
+    #    ints, and that is the better answer — the quote is then of what
+    #    was validated rather than of what was handed in.
+    saved = ir._CANONICAL_READS
     try:
-        build(h)
-    except ir.TranscriptionError as exc:
-        # a refusal is a fine outcome; what may not happen is a raw
-        # escape. Where the message quotes the hostile OBJECT it shows a
-        # placeholder; where it quotes the extents the guard NORMALISED
-        # it shows plain ints, and that is the better answer — the quote
-        # is then of what was validated rather than of what was handed in.
-        text = str(exc)
+        ir._CANONICAL_READS = tuple((b, lambda v: v) for b, _ in saved)
+        text = _drive("canonicalization removed")
+    finally:
+        ir._CANONICAL_READS = saved
+    if text is not None:
         assert "<unreadable>" in text or "shape (2,)" in text, text
-    except Exception as exc:  # noqa: BLE001
-        raise AssertionError(
-            f"{label}: RAW {type(exc).__name__} out of a public constructor: "
-            f"{exc}"
-        ) from None
 
 
 def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
@@ -578,6 +698,11 @@ def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
         the canonical sweep         8 message expressions
         the driven rows above     + 2 the sweep cannot reach
                                   = 10
+
+    Both halves are driven with `ir`'s canonicalization door removed, for
+    the reason the module docstring gives: this is a count of the sites
+    the GUARDS cover, and with the door in place a hostile leaf does not
+    reach most of them (audit 0.2.0 B6 audit 6). The union is still ten.
 
     A `TranscriptionError` is NOT an escape and is not counted: its
     traceback always ends at `_load_check`'s own `raise`, which is not a
@@ -598,16 +723,26 @@ def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
     """
     stmts = _ir_statement_starts()
 
-    sweep_sites = {e.message for e in _neutered_sweep()[0]}
-    assert len(sweep_sites) == _NEUTERED["messages"], sorted(sweep_sites)
+    # BOTH HALVES ARE DRIVEN WITH THE CANONICALIZATION DOOR REMOVED —
+    # audit 0.2.0 B6 audit 6. This figure counts the quote sites the
+    # GUARDS cover, and the door now stops a hostile leaf reaching most of
+    # them; measuring the union with the door in place would count the
+    # sites the guards happen to be in front of today, which is a
+    # different and much smaller thing, and would shrink silently the next
+    # time the door widened.
+    sweep_sites = {e.message
+                   for e in _neutered_sweep(canonicalization=False)[0]}
+    assert len(sweep_sites) == _NEUTERED_NO_CANON["messages"], sorted(sweep_sites)
 
     row_sites: set[int] = set()
     refused_cleanly = 0
     saved = (ir._safe_repr, ir._safe_type_name, ir._safe_str)
+    saved_reads = ir._CANONICAL_READS
     try:
         ir._safe_repr = repr
         ir._safe_type_name = lambda o: type(o).__name__
         ir._safe_str = str
+        ir._CANONICAL_READS = tuple((b, lambda v: v) for b, _ in saved_reads)
         for _group, label, build in _NAMED_SITES:
             try:
                 build(_hostiles())
@@ -619,7 +754,9 @@ def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
                 row_sites.add(site)
     finally:
         ir._safe_repr, ir._safe_type_name, ir._safe_str = saved
+        ir._CANONICAL_READS = saved_reads
     assert (ir._safe_repr, ir._safe_type_name, ir._safe_str) == saved
+    assert ir._CANONICAL_READS is saved_reads
 
     assert len(sweep_sites | row_sites) == 10, (
         f"the record says 10 distinct quote sites and the union measures "

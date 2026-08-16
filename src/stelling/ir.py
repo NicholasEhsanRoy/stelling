@@ -8,34 +8,45 @@ below, no normalization, no canonical form, no renaming, no derived fields.
 If a jaxpr has it, it is mirrored; if a jaxpr doesn't, it is not invented.
 Any redesign is Stage 1 work, after the analyses have said what they need.
 
-Two commitments, made deliberately and named as such, plus one hash-scope
-decision:
+**WHAT THIS MODULE DOES TO A DOCUMENT IT IS GIVEN IS WRITTEN ONCE, IN
+:data:`CANONICALIZATIONS`, AND IS NOT RESTATED HERE.** This paragraph used
+to be the list, introduced as *"two commitments … plus one hash-scope
+decision"* and closed with *"Nothing here licenses more: stability entails
+exactly this much canonicalization and nothing further"* — a counted,
+hand-maintained enumeration in prose. It said three where the code did
+four: `f729d70` had added the extents install and nothing added it to the
+sentence, and this commit adds a fifth (audit 0.2.0 B6 audit 6, F4; it is
+the eighth instance in this batch of a claim that stopped matching the
+code beside it, and the previous two were inside the fix meant to close
+the seventh).
 
-* **The IR is canonical up to alpha-renaming — entailed by hash stability,
-  not chosen alongside it.** The commitment is cross-process hash
-  stability. A jax ``Var`` carries no serializable identity (historically
-  there was ``Var.count``; on current jax the only handle is the object
-  itself), so any stable naming must be derived from structure — and
-  structure-derived names necessarily collapse alpha-equivalent jaxprs
-  (same structure, different tracer-generated identities) into equal IR
-  with equal hashes. The collapse is what stability entails, and it is
-  also exactly the identity relation verification wants on queries. The
-  only free choice left is *which* structure-derived naming —
-  first-encounter order over De Bruijn indices, picked for readability,
-  with no semantic consequence either way.
-* **Hashes are order-independent where jax is orderless — sorting is a
-  commitment, not a serialization convenience.** Eqn params (a dict in jax)
-  and effects (a set) are stored sorted, so the content hash cannot depend
-  on dict/set iteration order.
-* **The content hash covers semantics only.** ``source_info`` and
-  ``debug_info`` are excluded from :meth:`ClosedJaxpr.content_hash` (and
-  kept in :meth:`to_dict`): textually identical programs traced from
-  different files must hash alike, or proof caching and the z3-vs-cvc5
-  "did both solvers see the same query" check break for no semantic reason.
+:data:`CANONICALIZATIONS` is data rather than prose, and each entry is
+DEMONSTRATED by a witness in `tests/test_ir_canonicalization.py` that
+collapses two spellings of one document — so an entry that stops
+describing the code reds, an entry with no witness reds, a witness with
+no entry reds, and a docstring that restates an entry reds. **What no
+test here can catch is a canonicalization added with no entry at all**,
+which is why the list is a short structure a reader can diff against a
+commit rather than a paragraph they have to re-derive.
 
-Nothing here licenses more: stability entails exactly this much
-canonicalization and nothing further. The rule for everything else stands:
-transcribe.
+Stability is what licenses these and nothing else licenses more. The rule
+for everything the list does not name stands: transcribe.
+
+The one thing on that list that is a *consequence* rather than an act of
+this module, recorded here because it is what the others are for: **the IR
+is canonical up to alpha-renaming — entailed by hash stability, not chosen
+alongside it.** The commitment is cross-process hash stability. A jax
+``Var`` carries no serializable identity (historically there was
+``Var.count``; on current jax the only handle is the object itself), so any
+stable naming must be derived from structure — and structure-derived names
+necessarily collapse alpha-equivalent jaxprs (same structure, different
+tracer-generated identities) into equal IR with equal hashes. The collapse
+is what stability entails, and it is also exactly the identity relation
+verification wants on queries. The only free choice left is *which*
+structure-derived naming — first-encounter order over De Bruijn indices,
+picked for readability, with no semantic consequence either way. The ids
+themselves are minted by :mod:`stelling._jax_compat` at transcription;
+this module transcribes whatever ids it is handed.
 
 One dividend of that rule, recorded because it keeps recurring: the mirror
 recurses into every sub-jaxpr *regardless of whether anything can analyse
@@ -95,6 +106,60 @@ class UnsupportedParamError(TranscriptionError):
     """
 
 
+# EVERY CANONICALIZATION THIS MODULE MAKES, WRITTEN ONCE — audit 0.2.0 B6
+# audit 6, F4. A ``(name, what)`` pair per entry, deliberately plain
+# tuples rather than a dataclass, because :data:`_CANONICAL_IR_TYPES` is
+# computed from this module's dataclasses and a commitment is not a thing
+# a document may carry.
+#
+# The module docstring cites this object and does not restate it; the
+# witnesses live in `tests/test_ir_canonicalization.py`, one per entry,
+# each collapsing two spellings of one document — so an entry that stops
+# describing the code reds, an entry with no witness reds, and a witness
+# with no entry reds. The mechanism is that test; this comment is not.
+CANONICALIZATIONS: tuple[tuple[str, str], ...] = (
+    (
+        "alpha-renaming",
+        "A CONSEQUENCE, not an act of this module: `Var` identity is a "
+        "structure-derived id minted at transcription, so alpha-equivalent "
+        "jaxprs are equal IR with equal hashes. This module transcribes "
+        "whatever ids it is handed.",
+    ),
+    (
+        "param and effect order",
+        "`JaxprEqn.params` (a dict in jax) and `JaxprEqn.effects` / "
+        "`Jaxpr.effects` (a set in jax) are stored SORTED, so the content "
+        "hash cannot depend on dict or set iteration order.",
+    ),
+    (
+        "hash scope",
+        "`source_info` and `debug_info` are excluded from "
+        "`ClosedJaxpr.content_hash` and kept in `to_dict`: textually "
+        "identical programs traced from different files must hash alike, "
+        "or proof caching and the z3-vs-cvc5 'did both solvers see the "
+        "same query' check break for no semantic reason.",
+    ),
+    (
+        "shape extents",
+        "An `Aval`'s, an `Array`'s and a `stelling_any` declaration's "
+        "extents are stored as plain `int` in a plain `tuple` — the value "
+        "the guard read through `__index__` and compared, INSTALLED, so a "
+        "later reader cannot be handed a second answer. `True` therefore "
+        "stores as `1`; `operator.index(True)` is `1` exactly, and no jax "
+        "trace produces a boolean extent.",
+    ),
+    (
+        "stored value types",
+        "Every document-supplied value in this module's dataclasses is "
+        "stored as an EXACT instance of a type the module is closed over — "
+        "a subclass is read once through its base type's own accessor and "
+        "replaced by the exact twin, a `list` is stored as a `tuple`, and "
+        "a type with no exact form to store is refused. See the "
+        "canonicalization door.",
+    ),
+)
+
+
 @dataclass(frozen=True)
 class Aval:
     """Mirror of an abstract value (``ShapedArray`` and friends)."""
@@ -117,6 +182,24 @@ class Aval:
         # extents a LATER reader sees the extents this check passed on.
         # See :class:`JaxprEqn`'s `__post_init__` for the finding this is
         # the sibling of.
+        #
+        # CANONICALIZED FIRST, so what is validated is what is stored — a
+        # guard that decides about a value the object is free to replace on
+        # the next read has decided about something else (audit 0.2.0 B6
+        # audit 6; see the canonicalization door). `kind` and `dtype` are
+        # dispatch keys all over the library and are document-supplied
+        # exactly as `shape` is.
+        #
+        # `shape` IS SKIPPED BECAUSE IT HAS ITS OWN RULE, and that rule is
+        # the stronger one: `_load_extents` reads every extent ONCE through
+        # `operator.index` and the line below installs what it returned, so
+        # an aval extent may be any object with a working `__index__` — a
+        # `numpy` integer, or one of this suite's `_TwoFacedExtent`s — and
+        # is stored as a plain `int` either way. The generic door would
+        # refuse those for their TYPE, which is a narrowing nothing asked
+        # for, and would refuse them BEFORE the rule that already
+        # canonicalizes them.
+        _canonicalise(self, "Aval", skip=("shape",))
         object.__setattr__(self, "shape", _validate_aval(self, "Aval"))
 
 
@@ -135,6 +218,14 @@ class Array:
         # F1). Measured before this line: an `Array` whose `shape` was a
         # `tuple` subclass answering `(2,)` once and `(1,)` afterwards
         # passed the length check at two elements and encoded as one.
+        #
+        # And canonicalized first: `data` is document-supplied bytes whose
+        # `__len__` the byte-length check below reads, and a `bytes`
+        # SUBCLASS can answer that twice (audit 0.2.0 B6 audit 6).
+        # `shape` is skipped for the reason `Aval` gives — the extent rule
+        # is `_load_extents`, it is stronger than a type test, and it
+        # already installs what it read.
+        _canonicalise(self, "Array", skip=("shape",))
         object.__setattr__(self, "shape", _validate_array_value(self, "Array"))
 
     def to_numpy(self):
@@ -148,6 +239,14 @@ class Var:
     id: int  # assigned in first-encounter order at transcription
     aval: Aval
 
+    def __post_init__(self) -> None:
+        # `id` IS this value's identity: the slicer, the propagator's
+        # environment and the emission all key on it, by `==` and by
+        # `hash`, and an `int` SUBCLASS answers those two independently.
+        # `aval` must be an `Aval` and not a subclass, because a subclass
+        # may make any of its fields a property (audit 0.2.0 B6 audit 6).
+        _canonicalise(self, "Var")
+
 
 @dataclass(frozen=True)
 class Literal:
@@ -156,7 +255,10 @@ class Literal:
 
     def __post_init__(self) -> None:
         # the val and the aval are two self-descriptions of one value;
-        # their agreement is this type's local invariant (census)
+        # their agreement is this type's local invariant (census) — checked
+        # on the canonical value, so the emission reads the number this
+        # comparison was made about (audit 0.2.0 B6 audit 6)
+        _canonicalise(self, "Literal")
         _validate_value_against_aval(self.val, self.aval, "Literal")
 
 
@@ -170,6 +272,14 @@ class EnumParam:
     cls: str
     member: str
 
+    def __post_init__(self) -> None:
+        # `member` is READ AS A NAME and dispatched on —
+        # `propagate._recognised_precision` takes `prec.member.upper()`,
+        # and compares `cls` with `== "Precision"` on the same line — so a
+        # `str` subclass can make `upper()` and the text it carries
+        # disagree (audit 0.2.0 B6 audit 6)
+        _canonicalise(self, "EnumParam")
+
 
 @dataclass(frozen=True)
 class NamedTupleParam:
@@ -181,6 +291,11 @@ class NamedTupleParam:
 
     cls: str
     fields: tuple[tuple[str, object], ...]
+
+    def __post_init__(self) -> None:
+        # a namedtuple param's field VALUES are the dimension numbers a
+        # transfer and an emission both read (audit 0.2.0 B6 audit 6)
+        _canonicalise(self, "NamedTupleParam")
 
 
 @dataclass(frozen=True)
@@ -195,6 +310,11 @@ class SentinelParam:
 
     cls: str
 
+    def __post_init__(self) -> None:
+        # `cls` is the whole payload and is compared by name
+        # (audit 0.2.0 B6 audit 6)
+        _canonicalise(self, "SentinelParam")
+
 
 @dataclass(frozen=True)
 class TreeDefParam:
@@ -208,6 +328,12 @@ class TreeDefParam:
     """
 
     text: str
+
+    def __post_init__(self) -> None:
+        # "treedefs with equal text are treated as identical" is a claim
+        # about `text`, and a `str` subclass can make equal text compare
+        # unequal (audit 0.2.0 B6 audit 6)
+        _canonicalise(self, "TreeDefParam")
 
 
 @dataclass(frozen=True)
@@ -228,6 +354,10 @@ class OpaqueParam:
 
     cls: str
 
+    def __post_init__(self) -> None:
+        # audit 0.2.0 B6 audit 6
+        _canonicalise(self, "OpaqueParam")
+
 
 @dataclass(frozen=True)
 class JaxprEqn:
@@ -239,9 +369,35 @@ class JaxprEqn:
     source_info: tuple[str, ...] = ()  # "file:line (function)" frames, as jax recorded them
 
     def __post_init__(self) -> None:
+        # EVERYTHING BUT THE PARAM VALUES IS CANONICALIZED FIRST — audit
+        # 0.2.0 B6 audit 6, and the reason is the very next statement.
+        # `primitive` is the transfer registry's dispatch key, read by `==`
+        # and by `hash`; `invars`/`outvars` carry the `Var.id`s the
+        # environment is keyed on; `effects` is sorted below and
+        # `source_info` is quoted into every report. The param VALUES are
+        # held back for `_canonical_param_values` at the foot of this
+        # method, because `_validate_decl_eqn` owns two of them and its
+        # container rule is the sentence a `shape` param should be refused
+        # by.
+        _canonicalise(self, "JaxprEqn", skip=("params",))
+        object.__setattr__(
+            self, "params", _canonical_param_keys(self.params, "JaxprEqn")
+        )
         # a commitment, not a convenience (see module docstring): the content
         # hash must not depend on dict/set iteration order, so params (a dict
         # in jax) and effects (a set) are stored sorted.
+        #
+        # THE SORT IS A READ OF THE KEYS, which is why they are canonical
+        # before it. Measured on `f729d70`: three honest params
+        # `aaa`/`bbb`/`ccc` whose FIRST key is a `str` subclass returning
+        # True from `__gt__` stored as `bbb, ccc, aaa` — an order `sorted`
+        # never puts them in, decided by the key's opinion of itself rather
+        # than by the key. (`__lt__` alone is not enough and that is worth
+        # knowing: a subclass's REFLECTED operation is tried first, so
+        # `"aaa" < Sub("bbb")` reaches `Sub.__gt__`, and a subclass that
+        # overrides only `__lt__` is never asked.) The commitment this line
+        # states is exactly that the stored order depends on nothing but
+        # the keys.
         object.__setattr__(self, "params", tuple(sorted(self.params, key=lambda kv: kv[0])))
         object.__setattr__(self, "effects", tuple(sorted(self.effects)))
         # params MIRRORS A JAX DICT, so its keys are unique by construction on
@@ -263,6 +419,18 @@ class JaxprEqn:
         # accumulate when the add came last, and declined when it came first.
         # Deserialization could not distinguish the two facts because it
         # collapsed them; refusing the duplicate is what keeps them distinct.
+        #
+        # THIS CHECK ASKS TWO DIFFERENT PROTOCOLS OF THE SAME KEYS, and it
+        # is sound because `_canonical_param_keys` ran: `set(names)` is
+        # HASH-based and `names.count(n)` is EQ-based, so before the keys
+        # were exact `str`, two subclasses with equal text and different
+        # `__hash__` were two set elements AND two count hits — no
+        # duplicate seen, and a document carrying both
+        # ("update_jaxpr", None) and ("update_jaxpr", <the add jaxpr>) was
+        # ACCEPTED with `params_dict()` picking one by hash placement,
+        # which is exactly the replace-vs-accumulate hazard the paragraph
+        # above says this check exists to close (audit 0.2.0 B6 audit 6).
+        # Exact `str` keys make `hash` and `eq` agree by construction.
         names = [k for k, _ in self.params]
         if len(set(names)) != len(names):
             dups = sorted({n for n in names if names.count(n) > 1})
@@ -303,12 +471,55 @@ class JaxprEqn:
         # cannot know which one is a shape) and `coverage.sub_jaxprs`
         # (which walks params looking for sub-jaxprs and never asks what a
         # param means) could not be routed through it at all.
-        dims = _validate_decl_eqn(self, "JaxprEqn")
-        if dims is not None:
-            # exactly one `shape` key: the duplicate-key refusal above ran
-            object.__setattr__(self, "params", tuple(
-                (k, dims) if k == "shape" else (k, v) for k, v in self.params
-            ))
+        #
+        # AND THE INSTALL'S OWN COMPARISON IS A READ TOO — audit 0.2.0 B6
+        # audit 6, the finding that reopened the one above in the same
+        # line. This wrote `(k, dims) if k == "shape" else (k, v)`, a
+        # THIRD `==` against a document-supplied key after
+        # `_validate_decl_eqn` had made two; a `str` subclass answering
+        # True, True, FALSE, then True forever let the door validate the
+        # param and report `dims` while this comprehension matched NOTHING
+        # and rewrote `params` with the lying object still in it. The
+        # sentence that stood here — *"exactly one `shape` key: the
+        # duplicate-key refusal above ran"* — was the defect: that refusal
+        # guarantees no key appears TWICE, and says nothing about whether
+        # this comparison matches ONE. Here it matched zero.
+        #
+        # It is sound now for two independent reasons, and the second is
+        # the one that does not depend on reading the code above: the keys
+        # are exact `str` by `_canonical_param_keys`, so `==` is
+        # `str.__eq__`; and the count is CHECKED rather than asserted, so
+        # a comparison that stops matching what `_validate_decl_eqn`
+        # matched is a refusal and not a silent rewrite.
+        installed = _validate_decl_eqn(self, "JaxprEqn")
+        if installed:
+            rewritten = []
+            written = 0
+            for k, v in self.params:
+                if k in installed:
+                    written += 1
+                    rewritten.append((k, installed[k]))
+                else:
+                    rewritten.append((k, v))
+            if written != len(installed):  # composed only when it fires
+                _load_check(
+                    False,
+                    f"JaxprEqn ({_safe_repr(self.primitive)})",
+                    f"the declaration door validated {len(installed)} "
+                    f"param(s) {_safe_repr(sorted(installed))} and this "
+                    f"equation carries {written} key(s) matching them: the "
+                    f"guard's value could not be installed, so a later "
+                    f"reader would re-read the object the guard was handed "
+                    f"instead of the value it checked",
+                )
+            object.__setattr__(self, "params", tuple(rewritten))
+        # AND EVERY PARAM THE DOOR DOES NOT OWN, canonicalized last: the
+        # two it does own are exact already (`_validate_decl_eqn` returns
+        # normalised extents and a canonical dtype), so this pass is a
+        # no-op on them and is the only door the rest have.
+        object.__setattr__(
+            self, "params", _canonical_param_values(self.params, "JaxprEqn")
+        )
 
     def params_dict(self) -> dict[str, object]:
         return dict(self.params)
@@ -319,6 +530,12 @@ class DebugInfo:
     func: str = ""
     arg_names: tuple[str, ...] = ()
     result_paths: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        # excluded from `content_hash` but not from `to_dict`, so these
+        # strings are still serialized and still document-supplied
+        # (audit 0.2.0 B6 audit 6)
+        _canonicalise(self, "DebugInfo")
 
 
 @dataclass(frozen=True)
@@ -331,6 +548,9 @@ class Jaxpr:
     debug_info: DebugInfo | None = None
 
     def __post_init__(self) -> None:
+        # canonicalized before the sort, for the reason `JaxprEqn` gives
+        # (audit 0.2.0 B6 audit 6)
+        _canonicalise(self, "Jaxpr")
         object.__setattr__(self, "effects", tuple(sorted(self.effects)))
 
 
@@ -340,6 +560,9 @@ class ClosedJaxpr:
     consts: tuple[bool | int | float | complex | str | Array, ...] = field(default=())
 
     def __post_init__(self) -> None:
+        # canonicalized before the pairing below reads either side
+        # (audit 0.2.0 B6 audit 6)
+        _canonicalise(self, "ClosedJaxpr")
         # local pairing invariant: each const against its constvar's aval
         # (component objects self-validated at their own construction)
         for i, (var, val) in enumerate(zip(self.jaxpr.constvars, self.consts)):
@@ -541,9 +764,20 @@ def _decode(obj: object) -> object:
 #
 # See the module docstring: a fixed list of checks at the deserialization
 # door, loud (TranscriptionError), symmetric with trace-side
-# transcription; NOT a shape-inference engine. content_hash and the
-# encode/decode forms are untouched — validation reads the decoded
-# objects and never rewrites them.
+# transcription; NOT a shape-inference engine.
+#
+# VALIDATION DOES REWRITE, AND REWRITING IS THE POINT — audit 0.2.0 B6
+# audit 6, F4. This said *"validation reads the decoded objects and never
+# rewrites them"*, and by the time it was read the whole of the preceding
+# commit was rewriting them: `Aval`, `Array` and a declaration's `shape`
+# param each store the extents their guard validated, and the
+# canonicalization door below replaces every stored value with an exact
+# twin. What is true is the narrower claim the sentence was reaching for:
+# the ENCODE/DECODE FORMS are untouched, and every rewrite is one of the
+# canonicalizations named in `CANONICALIZATIONS` — a guard that checks one
+# value and stores a different one is precisely the defect this pass
+# exists to close, so a guard that could not store what it checked would
+# be the wrong shape of guard.
 
 import operator as _operator  # noqa: E402  (stdlib; kept local to the pass)
 
@@ -623,15 +857,34 @@ def _safe_repr(obj) -> str:
     measurements, each computed by `tests/test_ir_message_totality.py`
     rather than trusted from this paragraph:
 
-        this tree, as shipped        95 swept /  0 escapes / 20 skipped
-        this tree, guards neutered   27 escapes /  9 lines /  8 messages
-        `30d4b04`, guards absent     28 escapes / 10 lines /  8 messages
+        this tree, as shipped              95 swept / 0 escapes / 20 skipped
+        guards neutered                     1 escape  /  1 line  / 1 message
+        guards neutered, and the door's
+          LEAF READS neutered too          26 escapes /  8 lines / 8 messages
+        `30d4b04`, guards absent           28 escapes / 10 lines / 8 messages
 
     The sweep's 8 message expressions plus the 2 the canonical document
     masks also comes to 10; that is a different quantity from the ten
     quotes above and agrees with it by arithmetic, not by derivation. A
     guarded quote is cheap; deciding per site which objects can misbehave
-    is how those six were missed."""
+    is how those six were missed.
+
+    **THE GUARD-NEUTERED FIGURES ARE MEASURED WITH THE CANONICALIZATION
+    DOOR REMOVED TOO** — audit 0.2.0 B6 audit 6. Every hostile leaf that
+    sweep injects is a SUBCLASS of a stored type, and the door now
+    replaces one with an exact twin before any message quotes it: 25 of
+    the 26 ESCAPES therefore do not happen, across 7 of the 8 message
+    expressions, and they are not guarded — they are unreachable. (Two
+    units, both stated, for the reason the rest of this docstring gives.)
+    A control that
+    neutered only the guards measured 1 escape and would have gone on
+    passing with every call to this function deleted, so it neuters the
+    door's leaf reads as well and reports each measurement with the other
+    out of the way. This function is still
+    load-bearing at the one site canonicalization does not own — the
+    hostile extent inside a declaration's `shape` param, which
+    `_validate_decl_eqn` reads as handed in because it has its own rule
+    for that param."""
     try:
         return repr(obj)
     except Exception:  # noqa: BLE001 — the message's own totality
@@ -713,6 +966,393 @@ def _load_check(cond: bool, where: str, what: str) -> None:
             f"every path that builds IR — trace, from_dict, or direct "
             f"construction — passes through it; see the module docstring)"
         )
+
+
+# --- the canonicalization door ----------------------------------------------
+#
+# WHAT A DOCUMENT SUPPLIES, THIS MODULE STORES AS AN EXACT BUILT-IN — or
+# refuses it. Audit 0.2.0 B6 audit 6.
+#
+# THE CLASS, AND WHY IT WAS NOT CLOSED BY FIXING ITS MEMBERS. Five repairs
+# before this one each routed one PAIR of reads onto one value: the
+# ``shape`` param validated by ``tuple()`` and consumed by ``tuple()``
+# again (audit 5, F1); the param KEY compared by ``==`` twice in
+# :func:`_validate_decl_eqn` and a third time by the install that read it
+# back (audit 6); the same key counted by ``hash`` through ``set()`` and
+# by ``eq`` through ``list.count`` in the duplicate refusal, so that two
+# keys with equal text and different ``__hash__`` were not a duplicate;
+# the ``dtype`` param compared with ``==`` here and consumed with
+# ``str()`` in ``propagate._ieee_any``. A fifth family — ``axes``,
+# ``new_sizes``, ``slice_sizes``, ``dimension_numbers`` — had no door at
+# all. Each repair was correct and none of them closed anything: the
+# members are found by whoever last looked, and three consecutive rounds
+# of this batch ended with a new one.
+#
+# The fact underneath every member is that Python's protocols are
+# OVERRIDABLE, so a document-supplied object may answer ``==``, ``hash``,
+# ``iter``, ``str``, ``index``, ``len`` or ``getitem`` differently on two
+# reads, and a guard that checked one answer has not checked the other.
+# The repair that does not need the members enumerated is to leave nothing
+# overridable in what is stored: every value is replaced, at construction,
+# by an EXACT instance of a type this module is closed over. A later read
+# then cannot differ, because there is no subclass left to answer it — and
+# that is a property of the STORED OBJECT rather than of any reader, so it
+# holds for readers nobody has written yet, which is what the per-member
+# repairs could not do.
+#
+# WHERE THE BOUNDARY IS BETWEEN A VALUE THAT DECIDES AND ONE THAT IS
+# MERELY CARRIED: there is not one, and looking for it is how this class
+# stayed open. ``dtype`` was a carried param until ``propagate._ieee_any``
+# began selecting a subnormal band from it; ``update_jaxpr``'s mere
+# PRESENCE became semantic when the scatter-add row learned to read it.
+# The rule here is therefore uniform over every field of every dataclass
+# in this module — the fields are read from :func:`dataclasses.fields`,
+# not listed, so a field added later is covered without anyone having to
+# remember this comment.
+#
+# A SUBCLASS IS READ, NOT REFUSED, AND THE TRACE PATH IS WHY. Refusing
+# everything but an exact type would be simpler and would refuse traced
+# queries: ``np.float64`` IS a ``float`` subclass and
+# ``_jax_compat.Transcriber.param`` returns it unchanged from its
+# ``isinstance(v, (int, float, complex))`` arm, and ``np.str_`` IS a
+# ``str`` subclass leaving the ``isinstance(v, (bool, str))`` arm the same
+# way. Both are measured. So a subclass is CANONICALIZED, by one read, and
+# only a type with no exact form to store is refused.
+#
+# THE READ IS THE BASE TYPE'S OWN ACCESSOR, NOT THE PUBLIC PROTOCOL.
+# ``str.__str__``, ``int.__index__``, ``float.__float__``,
+# ``bytes.__getitem__`` and ``tuple.__getitem__`` reach the payload the
+# instance actually carries, return an exact instance of the base type,
+# and cannot be redirected by an override. ``str(v)``, ``int(v)`` and
+# ``tuple(v)`` are each one read too and would be sound for the same
+# reason, but they ask the object how it would like to be read; this
+# module transcribes what an object IS. An EXACT value never reaches one
+# of these readers at all — the dispatch below is on ``type(v)`` and
+# returns it unchanged — so the traced and deserialized routes, whose
+# values are exact already, pay one set lookup per value and allocate
+# nothing.
+
+import dataclasses as _dataclasses  # noqa: E402  (stdlib; kept local to the pass)
+
+
+class _NotCanonical(Exception):
+    """Internal signal: an object this module has no exact form to store.
+
+    Carries the object and the path back up to the field it was found
+    under, appended innermost-first as the signal propagates, so the
+    refusal :func:`_refuse_uncanonical` composes names both.
+    """
+
+    def __init__(self, obj: object) -> None:
+        super().__init__()
+        self.obj = obj
+        self.path: list[str] = []
+
+
+# THE READS, ONE PER BASE TYPE, IN THIS ORDER. ``bool`` is an ``int``
+# subclass and must claim the `isinstance` before ``int`` does, or
+# ``int.__index__`` would store ``True`` as ``1`` and change what a param
+# says; ``bool`` cannot itself be subclassed, so its read is the identity
+# and its entry exists only to take that place in the order.
+_CANONICAL_READS: tuple[tuple[type, object], ...] = (
+    (bool, lambda v: v),
+    (int, int.__index__),
+    (float, float.__float__),
+    (complex, lambda v: complex(complex.real.__get__(v),
+                                complex.imag.__get__(v))),
+    (str, str.__str__),
+    (bytes, lambda v: bytes.__getitem__(v, slice(None))),
+)
+
+# The leaf types that are already what they will be stored as when their
+# type is EXACT. Derived from the reads above so the two cannot name
+# different sets.
+_CANONICAL_EXACT: frozenset[type] = frozenset(
+    (type(None),) + tuple(t for t, _ in _CANONICAL_READS)
+)
+
+# The rule as a sentence, DERIVED from the table, so a refusal can never
+# name a different set from the one it applied — the same discipline
+# :data:`_SHAPE_PARAM_RULE` carries. ``_CANONICAL_IR_TYPES`` is computed
+# at the foot of this module from the module's own dataclasses.
+_CANONICAL_RULE = (
+    ", ".join(["None"] + [t.__name__ for t, _ in _CANONICAL_READS] + ["tuple"])
+    + " (a list is stored as a tuple), or one of stelling.ir's own frozen "
+    "dataclasses"
+)
+
+
+# TYPES ANOTHER `stelling` MODULE BUILDS AND THIS ONE CARRIES. Exactly
+# one today: `interval.IntervalArray`, which `ClosedJaxpr.consts` may hold
+# in place of a value — "a const already handed over as a box, provenance
+# unknown", the form `propagate._Propagator.run` binds directly and
+# `SOUNDNESS.md` records with its own test.
+#
+# WHY IT IS A SEAM AND NOT A NAME. `ir` may not import anything outside
+# the standard library, so it cannot name that class; and it must not
+# guess by duck-typing, because "an object that looks like a box" is the
+# enumeration this whole door replaces. Registration is safe against
+# import order for a reason particular to it: a caller holding an
+# `IntervalArray` has necessarily imported `stelling.interval`, so the
+# registration has necessarily run.
+#
+# WHAT REGISTRATION DELEGATES, stated so it is not mistaken for a hole: a
+# registered type is CARRIED, not canonicalized — the registering module
+# owns its single-valuedness (`IntervalArray` is a frozen dataclass whose
+# own `__post_init__` validates it). No DOCUMENT can reach this arm:
+# `_decode` has no tag for such a type and `_encode` refuses to encode
+# one, so a registered value can only come from a caller who built it,
+# and it is outside `content_hash` and `to_dict` entirely.
+_LIBRARY_STORED_TYPES: tuple[type, ...] = ()
+
+
+def _register_stored_type(cls: type) -> type:
+    """Declare ``cls`` a library-supplied type :func:`_canonical` carries.
+
+    Package-internal (see the comment above for what it delegates).
+    Returns ``cls`` so it can be used as a decorator.
+    """
+    global _LIBRARY_STORED_TYPES
+    if cls not in _LIBRARY_STORED_TYPES:
+        _LIBRARY_STORED_TYPES = _LIBRARY_STORED_TYPES + (cls,)
+    return cls
+
+
+def _canonical(obj: object) -> object:
+    """``obj`` as an EXACT instance of a type this module stores.
+
+    Raises :class:`_NotCanonical` — never a `TranscriptionError` — because
+    the path back to the field is composed as the signal unwinds and only
+    the caller that owns a `where` can turn it into a refusal.
+    """
+    t = type(obj)
+    if t in _CANONICAL_EXACT:
+        return obj
+    if t is tuple:
+        return _canonical_items(obj)
+    if t is list:
+        # A LIST IS STORED AS A TUPLE. An exact `list` is an exact
+        # built-in and is still two answers waiting to happen, because it
+        # is MUTABLE: nothing stops the document's own reference to it
+        # being appended to after `__post_init__` returned. `_encode` also
+        # has no `list` arm, so a `list` that survived this door produced
+        # IR that `content_hash()` and `to_dict()` could not serialize at
+        # all; the trace path already collapses list to tuple
+        # (`_jax_compat.Transcriber.param`) and `_decode` never builds
+        # one, so the conversion costs no route anything.
+        return _canonical_items(tuple(obj))
+    if t in _CANONICAL_IR_TYPES:
+        # canonical by its OWN `__post_init__`, which ran before this
+        # object could be handed to anything — so there is nothing to
+        # recurse into, and a document costs one pass over its own size
+        # rather than one per level of nesting
+        return obj
+    if t in _LIBRARY_STORED_TYPES:
+        # carried, by the declaration another `stelling` module made — and
+        # checked HERE, before the subclass reads below, because
+        # registration says "carry this" and a registered type that
+        # happened to subclass a stored one would otherwise be rewritten
+        # into something its own module did not build
+        return obj
+    for base, read in _CANONICAL_READS:
+        if isinstance(obj, base):
+            return read(obj)
+    if isinstance(obj, tuple):
+        return _canonical_items(tuple.__getitem__(obj, slice(None)))
+    if isinstance(obj, list):
+        return _canonical_items(tuple(list.__getitem__(obj, slice(None))))
+    raise _NotCanonical(obj)
+
+
+def _canonical_items(items: tuple) -> tuple:
+    """Every element of an EXACT tuple, canonicalized; ``items`` itself
+    when nothing moved, so an already-canonical document is not copied."""
+    out: list = []
+    changed = False
+    for i, x in enumerate(items):
+        try:
+            c = _canonical(x)
+        except _NotCanonical as exc:
+            exc.path.append(f"[{i}]")
+            raise
+        changed = changed or c is not x
+        out.append(c)
+    return items if not changed else tuple(out)
+
+
+def _canonical_shell(v: object) -> tuple:
+    """An EXACT tuple of ``v``'s items, with the items left alone.
+
+    For the two places that need the CONTAINER canonical before its
+    contents are: the ``params`` sequence and each ``(key, value)`` entry
+    in it, whose keys must be settled before the sort and whose values
+    must not be, because :func:`_validate_decl_eqn` owns two of them.
+    """
+    t = type(v)
+    if t is tuple:
+        return v
+    if t is list:
+        return tuple(v)
+    if isinstance(v, tuple):
+        return tuple.__getitem__(v, slice(None))
+    if isinstance(v, list):
+        return tuple(list.__getitem__(v, slice(None)))
+    raise _NotCanonical(v)
+
+
+def _refuse_uncanonical(exc: _NotCanonical, where: str) -> None:
+    """Turn a :class:`_NotCanonical` into the module's `TranscriptionError`.
+
+    Both quotes guarded: the object being refused is document-supplied by
+    definition, and a `str` subclass whose `__repr__` raises is exactly
+    the kind of object that reaches here (audit 0.2.0 B6 audit 4, F2).
+    """
+    _load_check(
+        False,
+        f"{where}{''.join(reversed(exc.path))}",
+        f"value {_safe_repr(exc.obj)} is of type "
+        f"{_safe_type_name(exc.obj)}, which this module has no exact form "
+        f"to store: a document-supplied value is kept as an EXACT "
+        f"{_CANONICAL_RULE}, so that no reader after a guard can be handed "
+        f"a different answer than the guard checked — and a type with no "
+        f"exact form to store has none to check either",
+    )
+
+
+_CANONICAL_FIELDS: dict[type, tuple[str, ...]] = {}
+
+
+def _canonicalise(obj, where: str, *, skip: tuple[str, ...] = ()) -> None:
+    """Replace every field of an IR dataclass with its exact-typed twin.
+
+    The field names come from :func:`dataclasses.fields`, cached per
+    class: a field added to one of these dataclasses later is canonicalized
+    without anyone having to add it here, which is the difference between
+    this and a repair per member.
+    """
+    cls = type(obj)
+    names = _CANONICAL_FIELDS.get(cls)
+    if names is None:
+        names = _CANONICAL_FIELDS[cls] = tuple(
+            f.name for f in _dataclasses.fields(cls)
+        )
+    for name in names:
+        if name in skip:
+            continue
+        v = getattr(obj, name)
+        try:
+            c = _canonical(v)
+        except _NotCanonical as exc:
+            exc.path.append(f".{name}")
+            _refuse_uncanonical(exc, where)
+        if c is not v:
+            object.__setattr__(obj, name, c)
+
+
+def _canonical_param_keys(params, where: str) -> tuple[tuple[str, object], ...]:
+    """The ``params`` sequence, its entries and its KEYS — canonicalized;
+    the values left for :func:`_canonical_param_values` to take after
+    :func:`_validate_decl_eqn` has had the two it owns.
+
+    THE KEYS MOVE FIRST BECAUSE THE SORT READS THEM. `JaxprEqn` stores
+    params sorted (a commitment — see the module docstring), and a `str`
+    SUBCLASS that overrides the ordering protocol decides that order
+    itself: measured on `f729d70`, three honest params `aaa`/`bbb`/`ccc`
+    whose first key returns True from `__gt__` stored as `bbb, ccc, aaa`.
+    Everything downstream of the sort reads a key too — the duplicate
+    refusal's `set()`/`count()`, `dict()`, `_validate_decl_eqn`'s
+    ``"shape" in params``, and the install's own comparison.
+
+    A KEY MUST BE AN EXACT `str` AFTER THAT READ, not merely canonical:
+    the field is declared ``tuple[tuple[str, object], ...]``, every
+    consumer indexes :meth:`JaxprEqn.params_dict` by name, and a mixed
+    ``int``/``str`` key set makes the sort itself raise
+    (``'<' not supported between instances of 'str' and 'int'``). Neither
+    non-hand-built route can produce one: `_decode` reads each key
+    straight out of a JSON string and the trace path reads a jax
+    ``dict``'s own keys.
+    """
+    try:
+        entries = _canonical_shell(params)
+    except _NotCanonical as exc:
+        exc.path.append(".params")
+        _refuse_uncanonical(exc, where)
+    out: list[tuple[str, object]] = []
+    for i, entry in enumerate(entries):
+        try:
+            pair = _canonical_shell(entry)
+        except _NotCanonical:
+            pair = None
+        # ONE REFUSAL FOR BOTH SHAPES OF THE SAME FACT — an entry that is
+        # not a `tuple`/`list` and an entry of the wrong length are both
+        # "not a (key, value) pair", and neither is refused for being an
+        # uncanonicalizable VALUE, which is a different sentence about a
+        # different object.
+        #
+        # COMPOSED ONLY ON THE FAILING PATH, and deliberately so: a
+        # `_load_check` message is an ARGUMENT, and this one quotes a param
+        # entry — which may hold a whole nested `ClosedJaxpr` — so composing
+        # it on every construction of every equation is a cost the guarded-
+        # quote rule does not speak to. This is the one place in the pass
+        # where the quoted object has no size bound.
+        if pair is None or len(pair) != 2:
+            _load_check(
+                False,
+                f"{where}.params[{i}]",
+                f"params entry {_safe_repr(entry)} is not a (key, value) "
+                f"pair: params mirrors a jax dict's ITEMS, and everything "
+                f"here unpacks one into a key and a value — `dict()` and "
+                f"`for k, v in ...` will both take a 2-character `str` and "
+                f"read a key and a value the document never stated, so "
+                f"'it unpacks' is not the test",
+            )
+        try:
+            key = _canonical(pair[0])
+        except _NotCanonical as exc:
+            exc.path.append(f".params[{i}] key")
+            _refuse_uncanonical(exc, where)
+        if type(key) is not str:
+            _load_check(
+                False,
+                f"{where}.params[{i}]",
+                f"params key {_safe_repr(pair[0])} is of type "
+                f"{_safe_type_name(pair[0])}, and a param key is a NAME: "
+                f"`params` is declared `tuple[tuple[str, object], ...]`, the "
+                f"stored order is a sort over these keys, and every consumer "
+                f"indexes `params_dict()` by name",
+            )
+        out.append((key, pair[1]))
+    return tuple(out)
+
+
+def _canonical_param_values(params, where: str) -> tuple[tuple[str, object], ...]:
+    """The param VALUES, canonicalized — every param that has no rule of
+    its own, which is every one but the two :func:`_validate_decl_eqn`
+    owns, and those two as well, where this is a no-op because what that
+    function installed is exact already.
+
+    THIS IS WHAT CLOSES THE PARAMS NO DOOR NAMES. ``axes``,
+    ``new_sizes``, ``slice_sizes`` and ``dimension_numbers`` are read by
+    the transfers and by the emission with no validation between them and
+    the document, and this function does not validate them either: giving
+    them a schema would be per-primitive shape inference, which `ir.py`
+    scopes out in writing. What it does is narrower and is the whole of
+    this class — it makes each of them SINGLE-VALUED, so the transfer and
+    the emission read the same extents whatever protocol either asks. That
+    they are the RIGHT extents is a different claim, and is still not made
+    here.
+    """
+    out: list[tuple[str, object]] = []
+    changed = False
+    for k, v in params:
+        try:
+            c = _canonical(v)
+        except _NotCanonical as exc:
+            exc.path.append(f".params[{_safe_repr(k)}]")
+            _refuse_uncanonical(exc, where)
+        changed = changed or c is not v
+        out.append((k, c))
+    return params if not changed else tuple(out)
 
 
 def _validate_array_value(arr: Array, where: str) -> tuple[int, ...]:
@@ -949,16 +1589,18 @@ def _validate_required_params(eqn: "JaxprEqn", where: str) -> None:
     )
 
 
-def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> tuple[int, ...] | None:
+def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
     """A stelling_any declaration's aval must agree with its OWN
     params — two self-descriptions of one declared set. Called from
     JaxprEqn.__post_init__ (every construction path) and from the
     from_dict walk (kept for its load-path error context).
 
-    **RETURNS THE ``shape`` PARAM'S EXTENTS, NORMALISED** — or ``None``
-    when the equation carries no ``shape`` param to validate (a form this
-    function deliberately still blesses; see the last paragraph).
-    :meth:`JaxprEqn.__post_init__` writes them back into ``params``, which
+    **RETURNS THE PARAMS IT VALIDATED, NORMALISED, KEYED BY NAME** — the
+    ``shape`` param's extents as plain ``int`` in a plain ``tuple`` and
+    the ``dtype`` param as an exact ``str`` — and an EMPTY dict when the
+    equation carries neither to validate (a form this function
+    deliberately still blesses; see the last paragraph).
+    :meth:`JaxprEqn.__post_init__` writes each back into ``params``, which
     is what makes the value every later reader sees the value this
     function compared. Audit 0.2.0 B6 audit 5, F1: reading once and
     binding LOCALLY was audit 3's F1 repair and it is correct as far as it
@@ -967,6 +1609,18 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> tuple[int, ...] | None:
     :meth:`stelling.obligation._Slicer._declared_shape` then each re-read
     the raw param. Two reads of a self-describing object are two answers
     it is free to make different.
+
+    **THE ``dtype`` PARAM IS THE SAME FINDING ONE PARAM OVER** — audit
+    0.2.0 B6 audit 6. This function compared ``dtype == aval.dtype``,
+    which a ``str`` SUBCLASS satisfies (it satisfies the ``isinstance``
+    above the comparison too), while ``propagate._ieee_any`` consumes
+    ``str(_req(params, "dtype", ...))`` and selects the subnormal band
+    from THAT — so overriding ``__str__`` alone showed the door one dtype
+    and the ieee declaration transfer another. Measured on this IR: a
+    param whose ``repr`` is ``'float64'`` and whose ``str()`` is
+    ``'int64'`` was accepted, and the transfer took the arm for a
+    declaration with no float format at all. It is canonicalized and
+    installed here for the same reason the extents are.
 
     **THE RULE ON THE ``shape`` PARAM IS POSITIVE, AND IT IS THE PARAM'S
     CONTAINER TYPE:** a declaration records its extents in one of
@@ -1017,9 +1671,9 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> tuple[int, ...] | None:
     this closes is the constructor's own claim to have compared the two
     self-descriptions when it had not."""
     if eqn.primitive != "stelling_any" or not eqn.outvars:
-        return None
+        return {}
     params = dict(eqn.params)
-    normalised: tuple[int, ...] | None = None
+    normalised: dict[str, object] = {}
     # the declaration's aval must agree with its OWN params —
     # the P1 arc's lies all started at a declaration whose two
     # self-descriptions disagreed
@@ -1107,9 +1761,18 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> tuple[int, ...] | None:
         )
         # what the caller installs: the extents this function READ, not the
         # object it read them from (audit 0.2.0 B6 audit 5, F1)
-        normalised = param_dims
-    dtype = params.get("dtype")
-    if isinstance(dtype, str) and eqn.outvars[0].aval.dtype is not None:
+        normalised["shape"] = param_dims
+    raw_dtype = params.get("dtype")
+    if isinstance(raw_dtype, str) and eqn.outvars[0].aval.dtype is not None:
+        # THE COMPARISON IS BETWEEN EXACT STRINGS, and the exact string is
+        # what the caller installs — audit 0.2.0 B6 audit 6, the `dtype`
+        # sibling of the extents above. `isinstance` is a claim about the
+        # TYPE: a `str` subclass satisfies it, satisfies `str.__eq__`
+        # against the aval, and still hands `str()` a different answer to
+        # `propagate._ieee_any`, which picks the subnormal band from it.
+        # `str.__str__` reads the character data the instance carries and
+        # cannot be redirected (see the canonicalization door).
+        dtype = str.__str__(raw_dtype)
         _load_check(
             dtype == eqn.outvars[0].aval.dtype,
             where,
@@ -1121,6 +1784,7 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> tuple[int, ...] | None:
             f"stelling_any dtype param {_safe_repr(dtype)} contradicts the "
             f"outvar aval dtype {_safe_repr(eqn.outvars[0].aval.dtype)}",
         )
+        normalised["dtype"] = dtype
     return normalised
 
 
@@ -1135,3 +1799,23 @@ def _validate_closed(closed: ClosedJaxpr, where: str = "query") -> None:
 def _validate_loaded(closed: ClosedJaxpr) -> None:
     """The bounded from_dict validation pass (module docstring)."""
     _validate_closed(closed)
+
+
+# THE MODULE'S OWN DATACLASSES, COMPUTED — the third arm of
+# :func:`_canonical`'s dispatch, and the one that must not be a list. A
+# class defined in this module as a FROZEN dataclass has canonicalized its
+# own fields in its own `__post_init__` and cannot be reassigned
+# afterwards, which is the whole of what that arm rests on; frozen-ness is
+# therefore tested rather than assumed, so a mutable dataclass added here
+# later does not silently join a set whose members are relied on to be
+# single-valued. Written at the foot because it is computed from the
+# module namespace; `_canonical` reads it at CALL time, and nothing in
+# this module constructs IR at import.
+_CANONICAL_IR_TYPES: frozenset[type] = frozenset(
+    obj
+    for obj in tuple(globals().values())
+    if isinstance(obj, type)
+    and _dataclasses.is_dataclass(obj)
+    and obj.__module__ == __name__
+    and obj.__dataclass_params__.frozen
+)

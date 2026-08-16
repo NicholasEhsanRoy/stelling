@@ -534,6 +534,28 @@ class IntervalArray:
         return self.shape == ()
 
 
+# `ir.ClosedJaxpr.consts` may hold one of these IN PLACE OF A VALUE — "a
+# const already handed over as a box, provenance unknown", the form
+# `propagate._Propagator.run` binds directly and `SOUNDNESS.md` records
+# with its own test. `ir`'s canonicalization door stores only types it is
+# closed over (audit 0.2.0 B6 audit 6) and cannot name this one, because
+# it may not import anything outside the standard library — so the
+# declaration is made from this side, by the module that owns the type.
+#
+# WHAT THIS CLASS OWES IN RETURN, since `ir` CARRIES it rather than
+# canonicalizing it: single-valuedness. It is frozen, and its
+# `__post_init__` above reads `shape`, `los` and `his` at construction, so
+# a later read of any of the three is the same read.
+#
+# The edge is one-way and adds no dependency: `stelling.ir` is the only
+# package module this file imports, and `ir` itself imports nothing
+# outside the standard library, so the zero-dependency posture is
+# unchanged and there is no cycle.
+from stelling import ir as _ir  # noqa: E402  (below the class it registers)
+
+_ir._register_stored_type(IntervalArray)
+
+
 def _safe_repr(obj) -> str:
     """``repr(obj)``, or a visible placeholder when the object refuses.
 

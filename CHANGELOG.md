@@ -1005,7 +1005,7 @@ SPDX-License-Identifier: Apache-2.0
            of type bytes: a declaration records its extents in a tuple or
            a list, ...
   _declared_shape call sites reached, in order:
-      obligation.py:3226 in slice     <- the element budget
+      obligation.py:3255 in slice     <- the element budget
                                       <- obligation.py:3392, the
                                          slice-input reader, is never
                                          reached
@@ -1106,6 +1106,128 @@ SPDX-License-Identifier: Apache-2.0
   reader at. This is the same label-versus-substance slip the fixup two
   paragraphs above corrected for `obligation.h2` → `h1`.*
 
+- **UNSOUND — THE DOOR NOW STORES EVERY DOCUMENT-SUPPLIED VALUE AS AN
+  EXACT BUILT-IN, OR REFUSES IT; CLOSING THE PAIRS ONE AT A TIME IS WHAT
+  KEPT THIS OPEN** (audit 0.2.0 B6 audit 6). The entry below made the
+  declaration door INSTALL the extents it validated, with
+
+  ```
+  (k, dims) if k == "shape" else (k, v)
+  ```
+
+  and `k` is document-supplied too. A `str` SUBCLASS answering that
+  comparison True for `_validate_decl_eqn`'s two reads and **False** for
+  the install's own third read let the door validate the param and report
+  `dims` while the comprehension matched **nothing** — so the equation
+  kept the raw lying object, and every later reader found the key again
+  (True from the fourth call on) and read the lie. Same query, same
+  oracle, same four read sites, same verdict:
+
+  ```
+  query    x = any(shape=<lies>, lo=1, hi=2);  assert sum(x) <= 3.9
+  aval     x : f64[2]   — the shape the door validated the param at
+  truth    max over [1,2] x [1,2] of (x0 + x1) = 4 > 39/10
+  f729d70  obligation status = 'discharged'      <- VERIFIED, and false
+  ```
+
+  No `object.__setattr__` anywhere: every object was built through a
+  public `stelling.ir` dataclass, exactly as the document below was. The
+  sentence that stood over that install — *"exactly one `shape` key: the
+  duplicate-key refusal above ran"* — was the defect: that refusal
+  guarantees no key appears twice and says nothing about whether the
+  comparison matches one. Here it matched zero.
+
+  **FIVE MEMBERS IN FOUR ROUNDS.** Two more were measured beside the key
+  and are closed by the same repair. The duplicate-key refusal asks
+  `hash` (through `set`) and `eq` (through `list.count`) of the same keys,
+  so two `str` subclasses with equal text and different `__hash__` were
+  two set elements **and** two count hits — no duplicate seen — and a
+  document carrying both `("update_jaxpr", None)` and
+  `("update_jaxpr", <the add jaxpr>)` was ACCEPTED with `params_dict()`
+  picking one **by hash placement**: precisely the `scatter-add`
+  replace-vs-accumulate hazard that refusal's own comment says it exists
+  to close. And the `dtype` param was compared with `==` at the door (a
+  `str` subclass satisfies both the `isinstance` and `str.__eq__`) and
+  consumed with `str()` by `propagate._ieee_any`, which picks the
+  subnormal band from it — measured accepting a param whose `repr` is
+  `'float64'` and whose `str()` is `'int64'`, the arm taken for a
+  declaration with no float format at all. That one was **not** driven to
+  a moved verdict: every direction tried was caught by the comparison
+  transfers, which haze their operands from the value's own aval as well.
+  A fifth family — `axes`, `new_sizes`, `slice_sizes`,
+  `dimension_numbers` — had no door at all; driven, a two-faced `axes` was
+  read twice with two different answers and `_one_shape_per_value` caught
+  the divergence and DECLINED, so that member cost liveness rather than
+  soundness, and only because an invariant elsewhere was standing there.
+
+  **THE REPAIR IS NOT A SIXTH PAIR.** Python's protocols are overridable,
+  so any document-supplied value participating in a decision can answer
+  `==`, `hash`, `iter`, `str`, `index`, `len` or `getitem` differently on
+  two reads. `ir` now carries a **canonicalization door**: at
+  construction, every field of every `stelling.ir` dataclass — read from
+  `dataclasses.fields`, not listed — is replaced by an EXACT instance of a
+  type the module is closed over. A subclass is read ONCE through its base
+  type's own accessor (`str.__str__`, `int.__index__`, `float.__float__`,
+  `bytes.__getitem__`, `tuple.__getitem__`), which reaches the payload the
+  instance carries and cannot be redirected by an override; a `list` is
+  stored as a `tuple` (an exact `list` is mutable, so it is still two
+  answers waiting to happen, and `_encode` has no `list` arm at all); and
+  a type with no exact form to store is REFUSED naming its type. After
+  that no later read *can* differ, because there is nothing left to
+  override — and that is a property of the STORED OBJECT rather than of
+  any reader, so it holds for readers nobody has written yet, which is
+  what the per-member repairs could not do.
+
+  **A SUBCLASS IS READ AND NOT REFUSED, AND THE TRACE PATH IS WHY**:
+  `np.float64` IS a `float` subclass and `_jax_compat.Transcriber.param`
+  returns it unchanged from its `isinstance(v, (int, float, complex))`
+  arm; `np.str_` IS a `str` subclass leaving the
+  `isinstance(v, (bool, str))` arm the same way. Both measured. A door
+  that refused every subclass — the auditor's stated minimum for the key —
+  would refuse traced queries.
+
+  **WHERE THE BOUNDARY IS between a value that decides and one that is
+  merely carried: there is not one, and looking for it is how this stayed
+  open.** `dtype` was a carried param until `_ieee_any` began selecting a
+  band from it; `update_jaxpr`'s mere PRESENCE became semantic when the
+  scatter-add row learned to read it. The rule is therefore uniform over
+  every field. Two keep their own, stronger rule, and the generic door is
+  held back from them: aval and array extents (`_load_extents` reads any
+  object with a working `__index__` once and installs a plain `int`,
+  which is *wider* than a type test and already single-valued), and a
+  declaration's `shape` param, so that it is still refused by the
+  container rule with the sentence that names it.
+
+  **WHAT IT DOES NOT DO.** It makes a param SINGLE-VALUED, not CORRECT.
+  `axes` still has no schema — that would be per-primitive shape
+  inference, which `ir.py` scopes out in writing — so the transfer and the
+  emission now read the same extents, and whether those are the right
+  extents is a claim nothing here makes. Carried as a disclosed follow-up.
+
+  **Compatibility, measured over all three routes.** `from_dict` keys come
+  from JSON object entries and its values from `_decode`; trace keys come
+  from a jax `dict` and its values from `Transcriber.param`. Both are
+  exact already, so both are unchanged: the canonical document round-trips
+  to the same `to_dict` and the same `content_hash`, and a traced query
+  carries no value of an inexact type. Three narrowings, all of hand-built
+  IR: a param key that is not a `str`, a `params` entry that is not a
+  `(key, value)` pair, and a param value of a type the module cannot store
+  (`memoryview`, `array.array`, `range`, `dict`, `set`, `bytearray`, a
+  bare `object`, or a SUBCLASS of an `ir` dataclass — a dataclass subclass
+  can make any field a property, so there is no single read of it to
+  take). One widening: a `list` param under any key now stores as a
+  `tuple` and therefore serializes, where before it produced IR
+  `content_hash()` could not encode. `interval.IntervalArray` is declared
+  to `ir` from `interval.py` rather than refused, because
+  `ClosedJaxpr.consts` may hold one in place of a value and `ir` may not
+  import it.
+
+  The reproducer is `tests/test_aval_lie_both_faces.py::test_a_lying_
+  param_KEY_can_no_longer_mint_a_FALSE_VERIFIED`, held beside the document
+  below because they are the same lie at two depths and closing one has
+  reopened the other twice. The class is
+  `tests/test_ir_canonicalization.py`.
+
 - **UNSOUND — A GUARD MUST INSTALL THE VALUE IT VALIDATED, NOT MERELY
   RETURN IT** (audit 0.2.0 B6 audit 5, F1). A `tuple` SUBCLASS whose
   `__iter__` yields `(2,)` on the first read and `(1,)` on every read
@@ -1168,7 +1290,27 @@ SPDX-License-Identifier: Apache-2.0
   suite in both environments, the 686-document exact-`Fraction` fuzz (686
   built, 0 false discharges, 0 raw escapes), and the doc-example corpus.
   The canonical `shape=(2,)` declaration's `content_hash()` is
-  byte-identical (`5e5610cbec0232ba` on both trees). Two documents are now
+  byte-identical on both trees.
+
+  *(That sentence used to pin a 16-character hash LITERAL, and the
+  literal matched neither of the two documents it could have named —
+  audit 0.2.0 B6 audit 6, F5. Both were built and hashed on both trees:
+  the full `sum(x) <= 3.9` query and the declaration-only document each
+  hash identically across the two trees, so the PROPERTY the sentence
+  claims verifies and only the number was wrong. The number is dropped
+  rather than corrected. A hash literal in prose is a figure no reader
+  can check and no test holds — it goes stale the first time the
+  serialization changes for an unrelated reason, and this one was already
+  wrong when it shipped. What replaces it is the property, computed:
+  `tests/test_ir_canonicalization.py::test_every_canonicalization_the_
+  record_names_is_DEMONSTRATED` builds both spellings of the canonical
+  declaration and asserts their hashes agree, and
+  `test_the_record_does_not_pin_a_hash_LITERAL_in_prose` reds if one is
+  written back into this file. A hash literal inside an EXECUTED doc
+  example is a different thing and is fine: `tests/test_doc_examples.py`
+  recomputes those.)*
+
+  Two documents are now
   ACCEPTED further than before, both toward canonicalisation: a `list`
   `shape` param — a form `ir._SHAPE_PARAM_CONTAINERS` explicitly blesses —
   used to raise `TypeError: stelling.ir cannot encode list` out of
@@ -1334,17 +1476,41 @@ SPDX-License-Identifier: Apache-2.0
   x64 on:
 
   ```
-  this tree, as shipped        95 swept /  0 escapes / 20 skipped
-  this tree, guards neutered   27 escapes /  9 lines /  8 messages
-  30d4b04, guards absent       28 escapes / 10 lines /  8 messages
-  message-expression union     10 = those 8 + the 2 the canonical doc masks
+  this tree, as shipped              95 swept / 0 escapes / 20 skipped
+  guards neutered                     1 escape  /  1 line  / 1 message
+  guards neutered, and the door's
+    LEAF READS neutered too          26 escapes /  8 lines / 8 messages
+  30d4b04, guards absent             28 escapes / 10 lines / 8 messages
+  message-expression union           10 = those 8 + the 2 the canonical
+                                          doc masks
   ```
 
   That last 10 is the same number as the ten quotes above and is not the
   same quantity; it is stated so a reader can recompute it, not so the two
   can be treated as one.
 
-  The zero is the claim; the 27 is the positive control that makes it mean
+  **THE POSITIVE CONTROL NOW REMOVES TWO DEFENCES, NOT ONE** (audit 0.2.0
+  B6 audit 6). Every hostile leaf this sweep injects is a SUBCLASS of a
+  stored type, and the canonicalization door added in audit 6 replaces one
+  with an exact twin before any message quotes it — so 25 of the 26
+  ESCAPES do not happen, across 7 of the 8 message expressions, and they
+  are not GUARDED but unreachable (two units, both stated, for the reason
+  this entry gives above). A control that only neutered
+  `_safe_repr` measured 1 escape and would have gone on passing with every
+  guarded read in the module deleted. The guard figures are therefore
+  measured with the door's LEAF READS neutered as well — not the whole
+  door, which also collapses `list` to `tuple` and canonicalizes the
+  declaration's own `dtype` — and the door's effect on this sweep is the
+  difference between the two rows. The one escape that survives it is the
+  hostile `int` inside a declaration's `shape` PARAM, which
+  `_validate_decl_eqn` owns and reads as handed in. The guards-neutered
+  figures also moved by one escape and one LINE against `f729d70` (27/9 ->
+  26/8): `_validate_decl_eqn`'s `dtype` message interpolated the param on
+  one line and the aval's dtype on the next, and the param half is
+  canonicalized inside that function now. The MESSAGE count, which is the
+  unit this entry quotes, is unchanged at 8.
+
+  The zero is the claim; the 26 is the positive control that makes it mean
   something. What the sweep does not reach is counted rather than silent:
   20 leaves whose type cannot be subclassed (`bool`, `None`). Every one of
   these numbers is now COMPUTED by

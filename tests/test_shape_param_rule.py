@@ -90,8 +90,27 @@ and requires the measured partition to be exactly the rule.
   thing `slice` is ever given — carries what the door installed. A
   hand-built equation that bypasses `__post_init__`, as this file's own
   helper does, is outside that containment and is not covered here.
+  *(Until audit 0.2.0 B6 audit 6 the sentence before last was false as a
+  claim about DOCUMENTS: the door installed through `k == "shape"`
+  against a document-supplied KEY, and a `str` subclass answering that
+  one comparison False left the raw drifting param on the equation with
+  no `object.__setattr__` anywhere and reached `discharged`.
+  `ir._canonical_param_keys` settles the keys before anything compares
+  them; the measurement is
+  `tests/test_aval_lie_both_faces.py::test_a_lying_param_KEY_can_no_
+  longer_mint_a_FALSE_VERIFIED`.)*
+* **The DOOR face is still judged by the container rule, and audit 6's
+  generic canonicalization door does not stand in front of it.**
+  `ir.JaxprEqn.__post_init__` runs `_validate_decl_eqn` BEFORE
+  `_canonical_param_values`, deliberately: a `shape` param is refused by
+  the rule that is about shapes, with the sentence that names it, rather
+  than by the generic "this module has no exact form to store a
+  `memoryview`" — which would refuse most of the population below for a
+  broader and less useful reason. So the partition measured here is the
+  same partition, and it is still `isinstance(param,
+  ir._SHAPE_PARAM_CONTAINERS)`.
 
-Audit 0.2.0 B6 audit 4, F1; audit 5, F1.
+Audit 0.2.0 B6 audit 4, F1; audit 5, F1; audit 6.
 """
 from __future__ import annotations
 

@@ -706,7 +706,19 @@ def _shape_problem(shape) -> str | None:
     single-valued before it arrives, whatever protocol is asked of it, and
     a shape read off anything else is not covered by that and is listed in
     :func:`_size`. See :meth:`_Slicer._declared_shape`, where the same
-    correction is recorded."""
+    correction is recorded.
+
+    **AND THE CONTAINMENT IS WIDER THAN THOSE THREE NOW** — audit 0.2.0 B6
+    audit 6. Naming three objects was a list, and the objects the list did
+    not name — the param KEY that said which param the shape was, the
+    ``dtype`` beside it, and every param with no rule at all — were the
+    next three findings. `ir`'s canonicalization door stores EVERY
+    document-supplied value as an exact instance of a type that module is
+    closed over, so single-valuedness is a property of anything read off
+    an `ir` dataclass rather than of the three fields someone remembered.
+    This paragraph keeps naming the three because they are the ones this
+    function reads; it no longer implies they are the ones that are
+    covered."""
     return _extents(shape)[0]
 
 
@@ -2243,17 +2255,34 @@ class _Slicer:
         What catches it is :meth:`ir.JaxprEqn.__post_init__`: the door
         validates one read of the param against the outvar aval and
         INSTALLS it, so the equation this method is handed carries a plain
-        ``tuple`` of plain ``int`` and there is no second answer to get. A
-        param this method can still be lied to by is one that never went
-        through that constructor: the constructible route is shut, and
-        only an `object.__setattr__` past the frozen dataclass reaches it
-        — the same boundary `SOUNDNESS.md` records for this method's
-        sibling disclosures, and the technique this batch's own tests use
-        to measure the emission face with the door out of the way.
-        Naming the containment where it actually is matters, because
-        "cannot drift apart" invites the next reader to stop looking, and
-        naming it in the wrong place invites the same thing with a
-        citation attached.
+        ``tuple`` of plain ``int`` and there is no second answer to get.
+
+        **AND "ONLY AN ``object.__setattr__`` REACHES IT" WAS FALSE WHEN
+        IT WAS WRITTEN** — audit 0.2.0 B6 audit 6. That install compared
+        ``k == "shape"`` against a document-supplied KEY, so a ``str``
+        subclass answering that one comparison False left the raw param in
+        place with no ``object.__setattr__`` anywhere: every object in the
+        document that did it was built through a public `stelling.ir`
+        dataclass, and the query reached ``discharged``. A sentence naming
+        ONE route past a guard is a claim about every other route, and
+        that one had not been driven.
+
+        What is true now is a property of the stored VALUE rather than a
+        survey of routes: `ir`'s canonicalization door replaces every
+        document-supplied value with an exact instance of a type that
+        module stores — before anything compares, hashes or iterates it —
+        so a param this method can be lied to by is one that is not what
+        :meth:`ir.JaxprEqn.__post_init__` stored: either no
+        :class:`ir.JaxprEqn` was built at all, or something wrote over
+        what it stored afterwards. ``object.__setattr__`` past
+        the frozen dataclass is still such a route; it is the technique
+        this batch's own tests use to measure the emission face with the
+        door out of the way, and the boundary `SOUNDNESS.md` records for
+        this method's sibling disclosures. It is named here as AN example
+        and no longer as the enumeration. Naming the containment where it
+        actually is matters, because "cannot drift apart" invites the next
+        reader to stop looking, and naming it in the wrong place invites
+        the same thing with a citation attached.
 
         **AND IT IS NOT THE LIBRARY'S ONLY READER of a declaration's
         element count.** :func:`stelling.propagate._declared_element_count`
