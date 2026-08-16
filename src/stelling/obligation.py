@@ -2934,10 +2934,12 @@ def slice_obligation(
     ``relational_assumes`` are the propagation's forwarded relational
     assumes. A slice built WITHOUT them states none: the axioms are part of
     what the slice claims, so a re-derivation that was not given them is not
-    the same slice and its emitted script is not the same script. That is why
-    :func:`stelling.verdict._bar_scope`'s re-derivation, which has no
-    propagation to draw them from, still fails to reproduce an
-    assume-carrying script — unchanged by this fix, and its own finding."""
+    the same slice and its emitted script is not the same script. That is
+    what :func:`stelling.verdict._bar_scope`'s re-derivation used to be short
+    of, and why it failed to recognise an HONEST record on every
+    assume-carrying query (audit 0.2.0 M10). It re-derives the tuple from its
+    own ``closed`` and passes it here now, so the two slices agree — this
+    paragraph is why the argument exists, not a live disclosure."""
     jaxpr = closed.jaxpr
     asserts = [e for e in jaxpr.eqns if e.primitive == "stelling_assert"]
     if index >= len(asserts):

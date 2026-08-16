@@ -178,22 +178,22 @@ SPDX-License-Identifier: Apache-2.0
   widening the bar to the whole query. The assumes are now re-derived from
   `closed` (never read off an argument: `make_solver_verdict`'s `propagation`
   is not bound to its query by the pairing gate). Conservative before and
-  after — the fix can only NARROW — and the residue it does not close, an
-  `assert_position` the re-derivation still cannot reproduce, is disclosed at
-  `_bar_scope` and in SOUNDNESS.md.
+  after — the fix can only NARROW — and the residue it does not close, a
+  propagation re-run in `propagate`'s default configuration rather than the
+  caller's, is disclosed at `_bar_scope` and in SOUNDNESS.md.
 
 - **The `pow` emission row has a fidelity gauge, and stays out of the
   VERIFIED bar** (audit 0.2.0 **S4**). The row's emission now goes through
   three named seams — `smt._pow_integer_body`, `smt._pow_rational_lines`,
   `smt._pow_aux_name` — extracted behaviour-identically so that a mutation
   battery can express an emitted-`pow` wrongness at all;
-  `tests/test_pow_row_gauge_jax.py` runs 21 such mutations across both
+  `tests/test_pow_row_gauge_jax.py` runs 32 such mutations across both
   exponent branches with zero survivors. One of them declares a single
   auxiliary constant for two elements of a vectorised `pow`, which is
   well-formed SMT-LIB2, collapses `sqrt(x0) - sqrt(x1)` to zero, and silently
   DISCHARGES an obligation that is false at `x = [4, 1]` — the
-  missed-violation direction, caught by one gate and by nothing in the tree
-  before. `tests/test_bar_membership_policy.py` carries the decision not to
+  missed-violation direction, caught by three of the battery's gates and by
+  nothing in the tree before this batch. `tests/test_bar_membership_policy.py` carries the decision not to
   bar `pow` or `is_finite`, the reading of the standing rule it rests on, and
   the cost of the alternative measured on two corpora rather than estimated.
   `docs/gauge-coverage.md` states what the gauge reaches and what it does

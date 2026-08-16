@@ -651,17 +651,26 @@ def _approx(exact: str) -> str:
 #
 # THE ARGUMENTS ARE NOT ALL THE SAME ONES, AND THIS SENTENCE USED TO SAY THEY
 # WERE. It read "verbatim what `slice_unknown_obligations` calls, whose only
-# other argument (`top_primitives`) is documented message-wording-only". That
-# was false about TWO arguments, and one of them moved verdicts. Audit 0.2.0
-# M10: `relational_assumes` is not wording, it is the script's AXIOM LINES,
-# and omitting it made the re-emission fail to match an honest record on every
-# assume-carrying query — fixed, in `_bar_scope`, with the argument now
-# re-derived from `closed`. `assert_position` is the second and is NOT fixed:
-# `slice_unknown_obligations` reads it off each obligation's
-# `top_level_eqn_pos` and this call cannot, so a query holding an obligation
-# from inside a sub-jaxpr (audit 0.2.0 M17) re-slices a sibling's assert and
-# widens. Conservative, disclosed on `_bar_scope`, and measured rather than
-# reasoned about.
+# other argument (`top_primitives`) is documented message-wording-only". The
+# `top_primitives` half of that was right; the sentence was silent about the
+# argument that moved verdicts. Audit 0.2.0 M10: `relational_assumes` is not
+# wording, it is the script's AXIOM LINES, and omitting it made the
+# re-emission fail to match an honest record on every assume-carrying query —
+# fixed, in `_bar_scope`, with the argument now re-derived from `closed`.
+# `top_primitives` is now the only argument this call still does not pass, and
+# it reaches a DECLINE's wording and never admission, so it cannot move either
+# hash: a slice that is produced is byte-identical without it, and a slice that
+# declines widens here regardless of how its reason is worded.
+#
+# WHAT THE OBLIGATION INDEX IS, ON THIS TREE. Both calls map obligation `k`
+# onto the k-th top-level `stelling_assert` — `slice_obligation` takes an
+# INDEX and derives the assert from `closed`, and `slice_unknown_obligations`
+# hands it `o.index` after refusing the whole query when the obligation count
+# and the top-level assert count disagree. So a query holding an obligation
+# recorded from inside a sub-jaxpr declines at ESCALATION, nothing is
+# solver-decided, the bar's domain is empty and there is no VERIFIED to
+# withhold — measured on this tree. There is no recorded assert POSITION for
+# this re-derivation to be short of.
 #
 # THE MEMBERSHIP IS EXACT-NAME, SO `scatter-add` IS NOT UNDER THIS BAR, AND
 # THAT IS DELIBERATE. `scatter-add` is a separate primitive with separate
@@ -1441,16 +1450,13 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
                 #
                 # WHAT REMAINS TRUE, and it is what this sentence says: a
                 # failure here is a statement about THIS re-derivation, not
-                # about the escalation. Two residues can still produce one on
-                # an honest record. `assert_position` is not re-derived —
-                # `slice_unknown_obligations` reads each obligation's
-                # `top_level_eqn_pos` and this call cannot, so a query with
-                # an obligation recorded from inside a sub-jaxpr (audit 0.2.0
-                # M17) can shift the mapping for its siblings — and the
-                # propagation re-run here is `propagate`'s default
-                # configuration, which is the escalating one but is not read
-                # off the caller. Both widen, which is the direction they must
-                # fail in.
+                # about the escalation. One residue can still produce one on
+                # an honest record: the propagation re-run just above is
+                # `propagate`'s default configuration, which is the escalating
+                # one but is not read off the caller, so a caller that
+                # propagated differently can hand this walk a different
+                # forwarded tuple than the escalation carried. It widens,
+                # which is the direction it must fail in.
                 return fallback(
                     f"no recorded solver invocation for the decided "
                     f"obligation #{index} reproduces both this query's slice "

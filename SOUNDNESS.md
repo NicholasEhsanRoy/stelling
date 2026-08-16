@@ -8347,19 +8347,30 @@ verdicts:
   says which.
 
   **What is NOT fixed, stated because the note's own sentence turns on it.**
-  The re-derivation still does not reproduce `assert_position`.
-  `slice_unknown_obligations` reads each obligation's `top_level_eqn_pos` off
-  the propagation; `_bar_scope` calls `slice_obligation` with the obligation
-  INDEX and no position, and the two coincide only when every obligation comes
-  from a top-level `stelling_assert`. Measured on the same tree: a query with
-  one `assert_` inside a `jax.jit` helper, one solver-decided top-level
-  obligation and a `scatter` elsewhere re-slices the WRONG assert and falls
-  back to the whole query — VERIFIED withheld on an honest record, exactly as
-  M10 did. That is conservative (it withholds, never mints), it is a distinct
-  defect from M10 rather than a residue of the fix, and closing it means
-  re-deriving through `slice_unknown_obligations` itself, which changes four
-  documented stray-index behaviours and is deliberately not done in this
-  batch.
+  The propagation this walk re-runs is `propagate`'s DEFAULT configuration,
+  not the caller's. It is the escalating one, and the configurations that
+  could make a caller's differ — `semantics="ieee"`, a constrained assume,
+  `libm_budget`, `refine="affine"` — are argued unreachable or
+  assume-preserving at `_bar_scope`; but that argument is about what
+  `escalate` refuses, not about what `propagate` accepts, so a caller that
+  propagated some other way can hand this walk a forwarded tuple the
+  escalation never carried. That is conservative: a tuple that differs
+  re-emits a script that does not match, `_evidence_is_about` returns False
+  and the bar widens to the whole query, withholding a VERIFIED rather than
+  minting one.
+
+  **The obligation INDEX is not a second residue on this tree, and that was
+  measured rather than assumed.** `_bar_scope` calls `slice_obligation` with
+  the obligation index, and `slice_unknown_obligations` calls the same
+  function with `o.index` after refusing the WHOLE query whenever the
+  obligation count and the top-level `stelling_assert` count disagree. So the
+  two derive the same slice from the same `closed`, and the case that could
+  separate them — an obligation recorded from inside a sub-jaxpr — never
+  reaches the bar at all: measured on this tree, a query with one `assert_`
+  inside a `jax.jit` helper beside two top-level asserts declines at
+  ESCALATION with *"3 obligation(s) but 2 top-level stelling_assert
+  equation(s)"*, nothing is solver-decided, the bar's domain is empty and
+  there is no VERIFIED to withhold.
 
   **Two changes in this batch flip nothing, and that was established rather
   than assumed.** (1) `smt.emit`'s `pow` branch now routes through three named
@@ -8367,17 +8378,20 @@ verdicts:
   extraction is behaviour-identical and `tests/test_smt_emission.py`,
   `tests/test_array_emission.py`, `tests/test_pow_audit_findings.py` and
   `tests/test_0_2_0_regression.py` are byte-level pins on that text — all 172
-  green before and after, and green with the seams REVERTED while four of the
-  new gauge's tests go red, which attributes the change to the gauge and not
+  green before and after, and still all 172 green with the seams REVERTED
+  (inlined at their call site, behaviour-identical) while **22** of the
+  gauge's own tests go red, which attributes the change to the gauge and not
   to the emission. (2) `VERIFIED_BARRED_PRIMITIVES` is unchanged at
   `{"scatter"}`; the batch's decision was to leave `pow` and `is_finite` out
   of it, and `tests/test_bar_membership_policy.py` now carries that decision
   with its cost measured both ways: adding `pow` turns 9 PRE-EXISTING tests
   red, every one of them a `pow`-bearing VERIFIED becoming UNKNOWN, and
   adding `is_finite` turns none red in this suite while still withholding a
-  purpose-built query that reaches the row. (Both flips also trip this
-  policy file's own detectors, which is what they are for: 11 and 2 red in
-  total.)
+  purpose-built query that reaches the row. (Both flips also trip this policy
+  file's own detectors, which is what they are for, and the `pow` flip
+  additionally reddens 10 demonstration assertions in the gauge file whose
+  per-item lines read `check().status`: **21 and 2 red in total**, 9 + 2 + 10
+  and 0 + 2 + 0.)
 
 **Releases reached by an entry in this log.** `v0.1.0`, the only release,
 is reached by the 2026-08-15 `exp`/`pow` libm-bracket entry (audit 0.2.0

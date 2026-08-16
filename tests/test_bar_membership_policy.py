@@ -93,16 +93,23 @@ is the one the stamp already discloses. Measured below, both directions.
 
 THE COST, MEASURED. Environment: jax 0.11.0, python 3.12.3,
 `/home/nick/venvs/stelling-jax`, z3 wheel + cvc5 wheel, x64 enabled,
-2026-08-15.
+2026-08-16, re-measured on the tree that ships this file.
 
 * **The repository's own suite** — the population of queries this project
-  actually verifies, 3513 passed / 10 skipped with x64 and 3514 / 9 without.
-  With `pow` added to the set: **11 RED, of which 9 are pre-existing tests**,
+  actually verifies, 3501 passed / 10 skipped with x64 and 3502 / 9 without.
+  With `pow` added to the set: **21 RED, of which 9 are pre-existing tests**,
   every one of those nine a `pow`-bearing VERIFIED becoming UNKNOWN (8 in
   `tests/test_0_2_0_regression.py`, 1 in `tests/test_pow_audit_findings.py`).
-  The other two are this file's own detectors below, which is what they are
-  for. With `is_finite` added instead: **2 RED, both of them this file's
-  detectors, and 0 pre-existing tests** — the suite is otherwise fully green.
+  Two of the remaining twelve are this file's own detectors below, which is
+  what they are for; the other **10 are demonstration assertions inside
+  `tests/test_pow_row_gauge_jax.py`** whose per-item lines read
+  `check().status`, so a withheld VERIFIED reddens them by construction — the
+  BATTERY itself reads identically barred and unbarred (32 mutations, 0
+  survivors either way, every catch set unchanged). **This paragraph counted
+  only the nine for two rounds**, which is why the breakdown is now given in
+  full: 9 + 2 + 10. With `is_finite` added instead: **2 RED, both of them this
+  file's detectors, and 0 pre-existing tests** — the suite is otherwise fully
+  green.
 * **Six purpose-built harnesses** that put the row on a solver-decided slice:
   `+pow` withholds 4 of 4 `pow`-bearing VERIFIEDs; `+is_finite` withholds 1 of
   the 2 `is_finite` harnesses (the second never escalates).
