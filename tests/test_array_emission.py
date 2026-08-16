@@ -1876,8 +1876,15 @@ def test_the_declaration_check_compares_BOTH_holders_and_refuses_the_rest():
     `..._reads_the_EXTENTS_not_the_param_type`, which was true of
     `d6b6d0b` — where the check really did read any sequence of extents —
     and false from `30d4b04`, where it became a check on the param's
-    CONTAINER TYPE and nothing else. `CHANGELOG.md`'s R7 attribution row
-    quotes the old name because it measures `d6b6d0b`. The rule this holds
+    CONTAINER TYPE and nothing else. TWO `CHANGELOG.md` attribution rows
+    quote the old name, and they quote it for two different reasons: `R7`
+    is driven against a clone at `d6b6d0b`, where the old name is the one
+    in the tree; `OPT` is driven on `30d4b04`, where it is also the one in
+    the tree. Both now carry a rename annotation, and
+    `test_an_attribution_row_may_not_quote_a_test_that_does_not_exist`
+    holds that they do (audit 0.2.0 B6 audit 5, F4 — the annotation was on
+    `OPT` alone and named `d6b6d0b`, which is the tree `OPT`'s mutation
+    reproduces rather than the one it runs on). The rule this test holds
     is `ir._SHAPE_PARAM_CONTAINERS`, swept over a computed population in
     `tests/test_shape_param_rule.py`.
 
@@ -2173,10 +2180,22 @@ def test_the_byte_length_product_uses_the_extents_the_guard_validated():
     """The other half of F1 in `ir.py`: `_validate_array_value` validated
     `arr.shape` with `operator.index` and then computed its expected byte
     length with a SECOND, different conversion (`int(d)`). A two-faced
-    extent was therefore length-checked against a number nobody validated."""
+    extent was therefore length-checked against a number nobody validated.
+
+    AND WHAT THE GUARD VALIDATED IS NOW WHAT THE DATACLASS CARRIES — audit
+    0.2.0 B6 audit 5, F1. The assertion below used to read
+    ``a.shape == (d,)`` under the comment *"the dataclass still records
+    what it was given"*, and that WAS the residue: `_encode`, `to_numpy`
+    and every downstream reader then re-read the two-faced object and got
+    7 where the length check had got 2. One read, and the value read is
+    the value stored."""
     d = _TwoFacedExtent(2, 7)
     a = ir.Array(dtype="<f8", shape=(d,), data=b"\x00" * 16)
-    assert a.shape == (d,)  # the dataclass still records what it was given
+    assert a.shape == (2,), a.shape
+    assert all(type(k) is int for k in a.shape), a.shape
+    # ... and the SERIALIZATION is that same value. This encoded `[7]` for a
+    # 16-byte array the door had length-checked at two elements.
+    assert ir._encode(a, False)["shape"] == [2]
     assert d.reads == 1, (
         f"the length check read the extent {d.reads} times; one read is the "
         f"fix — the second read was `int(d)` and could disagree"

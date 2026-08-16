@@ -525,10 +525,27 @@ becomes an all-purpose excuse for a mutation nothing caught** (audit 0.2.0 B6
 audit 4). *Every* clause, not a majority; a site failing any one of them is a
 guard that went uncovered, and its row is a failure rather than a disclosure.
 
-1. **It has no refusal of its own.** If the site can decline, raise, or return a
-   sentinel that changes a caller's path, it is a guard — mutate it and build the
-   document that reaches it. A site with a refusal branch NEVER qualifies, however
-   unreachable that branch looks.
+1. **Every refusal it can produce is PRE-EMPTED, and the pre-emption is
+   EXHIBITED.** A site that can decline, raise, or return a path-changing sentinel
+   is a guard by default. It qualifies only if, for each such refusal, the reader
+   named under clause 2 produces the *same* refusal, on the *same* input, *before*
+   this site runs — and you have run the document that reaches that earlier
+   refusal and quoted what it produced. An exhibited document, not an argument
+   that one must exist.
+
+   *This clause used to read "it has no refusal of its own … a site with a
+   refusal branch NEVER qualifies" (audit 0.2.0 B6 audit 5, F6). Read strictly
+   that disqualifies every guard in this codebase, because almost all of them are
+   bare calls to refusing helpers — `self._validate(sub)`, `_load_check(...)`,
+   `self._declared_shape(...)` — so nothing could ever be recorded as unreachable
+   as a guard, including the one site this document records. It discriminated
+   SYNTAX where it means to discriminate SEMANTICS: the question is not whether
+   the expression can raise, it is whether this site is the FIRST thing that
+   would.*
+
+   *Deciding it is mechanical: list the refusals; for each, name the earlier
+   reader and show the run. A refusal with no such document is the site's own,
+   and the site is a guard — mutate it and build the document that reaches it.*
 2. **The other reader is NAMED, at a file and a symbol.** *"Something upstream must
    already check this"* does not qualify. If you cannot point at the line that
    produced the same quantity from the same input, you are holding an unmeasured
@@ -543,9 +560,20 @@ guard that went uncovered, and its row is a failure rather than a disclosure.
    the batch's coverage claim is then false by exactly that site.
 
 Clauses 1 and 3 are the load-bearing pair and they pull in opposite directions on
-purpose: 1 refuses the excuse to anything that can refuse, 3 refuses it to anything
-that could not possibly differ. What survives both is the narrow real case — two
-readers that *could* disagree and must not.
+purpose: 1 refuses the excuse to any refusal you cannot show was already made,
+3 refuses it to anything that could not possibly differ. What survives both is the
+narrow real case — two readers that *could* disagree and must not.
+
+**And clause 3 has teeth, which audit 0.2.0 B6 audit 5 demonstrated the hard way.**
+The object clause 3 names as its own example — *"the `list` subclass whose
+`__iter__` answers differently between calls"* — is one CONTAINER TYPE away from
+the object that minted a false VERIFIED at `321209d`. The batch that wrote the
+clause did build the `list` form, found it contained, and recorded the containment
+as `ClosedJaxpr.content_hash()`; the containment was in fact `ir._encode` having no
+`list` arm at all, which an honest undrifting `shape=[4]` also trips. It never
+built the `tuple` form, where nothing contained it. So exhibiting *an* object is
+not the whole of clause 3: the exhibit has to range over the types the rule
+actually admits, or it measures the accident instead of the rule.
 
 ## A decline rule must trace to a measured discrepancy with a magnitude
 

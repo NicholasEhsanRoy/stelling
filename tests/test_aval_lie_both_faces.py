@@ -1366,65 +1366,472 @@ def test_declared_shape_is_NOT_the_librarys_only_reader_of_an_element_count():
     )
 
 
-def test_the_declaration_reader_is_a_FUNCTION_and_not_a_single_READ():
-    """AUDIT 0.2.0 B6 AUDIT 3, F4, second half — *"cannot drift apart"* was
-    false, and what contains the drift is not this method.
+def test_the_element_count_census_covers_propagate_TOO():
+    """AUDIT 0.2.0 B6 AUDIT 5, F3 — *"No caller anywhere can obtain a
+    count from a third protocol"* is false one module over.
 
-    `_declared_shape` is the one reader in the sense that the budget,
-    `_binding_shape` and the input-term construction all call it, so none
-    can implement a different rule. It is NOT one read: each call re-reads
-    the param, and `slice` alone reads it three times. A `list` SUBCLASS
-    whose `__iter__` answers differently between calls — `isinstance(raw,
-    (tuple, list))` is true of it, so both faces accept it — therefore does
-    make the check and the emission differ. Swept over the read at which it
-    flips, measured identically on `d6b6d0b` and on this tree:
+    That sentence belongs to `obligation._size` and is true of `_size`'s
+    callers. `propagate` does not call `_size`. It carries its own raw
+    ``n = 1; for d in shape: n *= d`` products, and the claim as written
+    covered them without having looked. Enumerating them in prose is the
+    defect one level up, so the enumeration is COMPUTED here from the
+    module's own AST and the prose cites this test.
 
-        flip=1,2   DECLINE, by the binding witness
-        flip=3     SLICED with 1 input term for a FOUR-element reference
-        flip>=4    SLICED with 4
+    Three of the six loop over a shape read straight off an `ir.Aval` or
+    an `ir.Array` AT THE SITE. What makes those safe is not `_size`: it is
+    that those two dataclasses now install the extents their own
+    `__post_init__` validated (audit 5, F1), so there is no second
+    protocol left to reach. The other three take a caller-supplied
+    ``shape``, and `_elements` is reached only from `ir.Array.shape`.
+    """
+    import ast
+    import inspect
 
-    What stops the flip=3 document reaching a verdict is
-    `ClosedJaxpr.content_hash()`: a param that can answer differently
-    between iterations cannot be an `ir._encode`-able value, so hashing
-    RAISES, `solvers._query_sha256` swallows that to `""`, and the pairing
-    gate refuses an empty hash. Naming the containment where it is matters
-    — "cannot drift apart" tells the next reader to stop looking."""
+    import stelling.propagate as P
+
+    src = inspect.getsource(P)
+    found: list[tuple[str, str]] = []
+
+    class _Census(ast.NodeVisitor):
+        def __init__(self):
+            self.fn: list[str] = []
+
+        def visit_FunctionDef(self, node):
+            self.fn.append(node.name)
+            self.generic_visit(node)
+            self.fn.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_For(self, node):
+            for child in ast.walk(node):
+                if (isinstance(child, ast.AugAssign)
+                        and isinstance(child.op, ast.Mult)
+                        and isinstance(child.target, ast.Name)
+                        and isinstance(child.value, ast.Name)
+                        and isinstance(node.target, ast.Name)
+                        and child.value.id == node.target.id):
+                    found.append((self.fn[-1] if self.fn else "<module>",
+                                  ast.unparse(node.iter)))
+                    break
+            self.generic_visit(node)
+
+    _Census().visit(ast.parse(src))
+
+    assert sorted(found) == sorted([
+        ("_elements", "shape"),
+        ("_value_to_interval", "shape"),
+        ("_refused_value_problem", "value.shape"),
+        ("_atom_element_count", "atom.aval.shape"),
+        ("_probe_point", "shape"),
+        ("_declared_element_count", "out.aval.shape"),
+    ]), (
+        f"`propagate`'s raw element-count census has moved: {sorted(found)}. "
+        f"The `ir.py` message-totality entry in `CHANGELOG.md` names the "
+        f"three that read an `ir.Aval`/`ir.Array` shape at the site, and "
+        f"they must move together."
+    )
+
+    off_ir = [f for f, it in found if it.endswith(".shape")]
+    assert sorted(off_ir) == [
+        "_atom_element_count", "_declared_element_count",
+        "_refused_value_problem",
+    ], off_ir
+
+    # THE RECORD MUST NAME THEM. A claim of totality a `grep` refutes is
+    # worse than no claim, and the CHANGELOG carried the UNSCOPED version
+    # — the sentence a reader quotes.
+    import pathlib
+
+    changelog = (pathlib.Path(__file__).resolve().parent.parent
+                 / "CHANGELOG.md").read_text(encoding="utf-8")
+    anchor = "AN ELEMENT COUNT COMES FROM `__index__`"
+    assert anchor in changelog, anchor
+    entry = changelog[changelog.index(anchor):]
+    entry = entry[:entry.index("\n- **")]
+    assert "no caller anywhere" not in entry.lower(), (
+        "the CHANGELOG still makes the UNSCOPED claim; `propagate` does "
+        "not call `_size` and carries six raw products of its own"
+    )
+    for name in off_ir:
+        assert name in entry, (
+            f"`{name}` loops over an `ir` shape at the site, and the entry "
+            f"claiming no third protocol anywhere does not name it"
+        )
+
+    # and the containment those three now rest on is real, not accidental:
+    # the shapes they loop over are plain ints because the constructor put
+    # them there
+    a = ir.Aval(kind="ShapedArray", shape=(2, 3), dtype="float64")
+    assert type(a.shape) is tuple and all(type(k) is int for k in a.shape)
+    arr = ir.Array(dtype="<f8", shape=(2,), data=b"\x00" * 16)
+    assert type(arr.shape) is tuple and all(type(k) is int for k in arr.shape)
+
+
+def test_the_DOOR_INSTALLS_the_shape_param_it_VALIDATED():
+    """AUDIT 0.2.0 B6 AUDIT 5, F1 — the finding that a LOCAL binding is not
+    enough, and the correction of the two claims that stood here.
+
+    Audit 3's F4 established that `_declared_shape` is a FUNCTION and not a
+    single READ: each call re-reads the param, `slice` alone reads it three
+    times, and a subclass of an accepted container whose `__iter__` answers
+    differently between calls therefore made the check and the emission
+    differ. That is still true OF THE FUNCTION. What was false is where the
+    containment was said to be. Two sentences stood here:
+
+      *"What stops the flip=3 document reaching a verdict is
+      `ClosedJaxpr.content_hash()`: a param that can answer differently
+      between iterations cannot be an `ir._encode`-able value, so hashing
+      RAISES."*
+
+    Measured at `321209d`, over the same sweep, for BOTH accepted
+    container types rather than only the `list` the sentence was written
+    from:
+
+        list  flip=1..5   content_hash() RAISES TypeError
+        tuple flip=1..5   content_hash() SUCCEEDS  (725f5b524e26 / b39d63fa)
+
+    The `list` rows raise because `ir._encode` has no `list` arm AT ALL —
+    an honest, undrifting ``shape=[4]`` raises the identical TypeError —
+    so the containment was never about drifting and never covered the
+    other half of `ir._SHAPE_PARAM_CONTAINERS`. A `tuple` SUBCLASS with
+    the same `__iter__` hashed cleanly, and at flip=3 minted ONE input
+    term for a FOUR-element reference while hashing to ``725f5b524e26`` —
+    NOT the honest four-element document's ``b39d63fa2c7e``, so the hash
+    described one declaration and the emission read another.
+    Driven one step further — the aval at ``(2,)``
+    and the param answering ``(2,)`` once and ``(1,)`` after — that is a
+    VERIFIED on a claim whose exact maximum falsifies it, which is what
+    `test_a_lying_shape_param_can_no_longer_mint_a_FALSE_VERIFIED` below
+    holds.
+
+    THE REPAIR IS ONE LEVEL UP FROM AUDIT 3's. `ir._validate_decl_eqn`
+    already read the param once and bound it; `JaxprEqn.__post_init__` now
+    INSTALLS what it returned, so the equation carries the extents the
+    door compared and no later reader is reading a self-describing object
+    at all. Measured on this tree, same sweep, both container types:
+
+        list/tuple  flip=1..5   stored=(4,) type=tuple  inputs=4
+                                hash=b39d63fa2c7e  reads of the liar = 1
+
+    — one hash, one term count, one read, and that hash is the hash of the
+    honest ``(4,)`` document."""
     from stelling.obligation import slice_obligation
 
-    class Drifting(list):
+    def _build(param):
+        x = ir.Var(id=0, aval=ir.Aval(
+            kind="ShapedArray", shape=(N,), dtype="float64"))
+        s = ir.Var(id=1, aval=ir.Aval(
+            kind="ShapedArray", shape=(), dtype="float64"))
+        pr = ir.Var(id=2, aval=ir.Aval(
+            kind="ShapedArray", shape=(), dtype="bool"))
+        o = ir.Var(id=3, aval=ir.Aval(
+            kind="ShapedArray", shape=(), dtype="bool"))
+        tail = (
+            ir.JaxprEqn(primitive="reduce_sum", invars=(x,), outvars=(s,),
+                        params=(("axes", (0,)), ("out_sharding", None))),
+            ir.JaxprEqn(
+                primitive="le",
+                invars=(s, ir.Literal(val=float(CEILING), aval=s.aval)),
+                outvars=(pr,)),
+            ir.JaxprEqn(primitive="stelling_assert", invars=(pr,),
+                        outvars=(o,)),
+        )
+        d = ir.JaxprEqn(
+            primitive="stelling_any", invars=(), outvars=(x,),
+            params=(("dtype", "float64"), ("hi", float(HI)),
+                    ("lo", float(LO)), ("shape", param)))
+        return d, ir.ClosedJaxpr(jaxpr=ir.Jaxpr(
+            constvars=(), invars=(), outvars=(o,), eqns=(d,) + tail))
+
+    # the honest spelling, whose hash everything else must equal
+    honest_hash = _build((N,))[1].content_hash()
+
+    # SWEPT over both accepted container types and over the read at which
+    # the param flips, because the claim this replaces was measured on one
+    # container type and was false of the other.
+    for base in ir._SHAPE_PARAM_CONTAINERS:
+        for flip in range(1, 6):
+            counter = {"n": 0}
+
+            def _iter(self, counter=counter, flip=flip):
+                counter["n"] += 1
+                return iter((N,) if counter["n"] <= flip else ())
+
+            Drift = type(f"Drift_{base.__name__}_{flip}", (base,),
+                         {"__iter__": _iter})
+            d, q = _build(Drift())
+
+            where = f"{base.__name__} flip={flip}"
+            stored = d.params_dict()["shape"]
+            assert type(stored) is tuple and stored == (N,), (
+                f"{where}: the door stored {stored!r} of type "
+                f"{type(stored).__name__}; it validated {(N,)!r}"
+            )
+            assert counter["n"] == 1, (
+                f"{where}: the param was read {counter['n']} time(s) after "
+                f"construction; the door reads once and every later reader "
+                f"takes what it installed"
+            )
+            item = slice_obligation(q, 0, {})
+            assert not isinstance(item, DeclinedObligation), item
+            assert len(item.inputs) == N, (
+                f"{where}: the emission minted {len(item.inputs)} term(s) "
+                f"for a {N}-element declaration"
+            )
+            assert q.content_hash() == honest_hash, (
+                f"{where}: the document hashes differently from the honest "
+                f"spelling of the same declaration"
+            )
+            # STILL only one read: hashing and slicing went to the stored
+            # tuple, which is the whole of the repair.
+            assert counter["n"] == 1, where
+
+
+def test_a_lying_shape_param_can_no_longer_mint_a_FALSE_VERIFIED():
+    """THE BLOCKING DOCUMENT — audit 0.2.0 B6 audit 5, F1.
+
+    A `tuple` SUBCLASS whose `__iter__` yields ``(2,)`` on the first read
+    and ``(1,)`` afterwards. No `object.__setattr__` and no smuggling:
+    every object is built through a public `stelling.ir` dataclass and
+    `JaxprEqn.__post_init__` ACCEPTS it, because the door reads once and
+    the read it gets agrees with the outvar aval.
+
+        query   x = any(shape=(2,), lo=1, hi=2);  assert sum(x) <= 3.9
+        truth   max over [1,2]x[1,2] of (x0 + x1) = 4 > 39/10
+
+    At `321209d` the door validated ``(2,)`` and `propagate`'s
+    `stelling_any` transfer then re-read the param, got ``(1,)``, built a
+    ONE-element box and returned ``discharged``. `main` (`dee8bc2`) and
+    `96ab47a` refuse this document, but BY ACCIDENT: there the door read
+    the param twice and the second read caught the lie. Audit 3's
+    read-once-and-bind repair was correct and removed that accident, and
+    nothing replaced it until the door began INSTALLING what it read.
+
+    The oracle is arithmetic, not this library: two elements each at most
+    2 sum to 4, and 4 > 39/10.
+    """
+    from stelling.smt import emit
+
+    reads = []
+
+    class Lying(tuple):
         n = 0
 
         def __iter__(self):
-            type(self).n += 1
-            return iter((N,) if type(self).n <= 3 else ())
+            Lying.n += 1
+            reads.append(Lying.n)
+            return iter((2,) if Lying.n <= 1 else (1,))
 
-    x = ir.Var(id=0, aval=ir.Aval(
-        kind="ShapedArray", shape=(N,), dtype="float64"))
-    s = ir.Var(id=1, aval=ir.Aval(kind="ShapedArray", shape=(), dtype="float64"))
-    pr = ir.Var(id=2, aval=ir.Aval(kind="ShapedArray", shape=(), dtype="bool"))
-    o = ir.Var(id=3, aval=ir.Aval(kind="ShapedArray", shape=(), dtype="bool"))
-    tail = (
+    def av(shape=(), dtype="float64"):
+        return ir.Aval(kind="ShapedArray", shape=shape, dtype=dtype)
+
+    x = ir.Var(id=1, aval=av((2,)))
+    s = ir.Var(id=2, aval=av())
+    pr = ir.Var(id=3, aval=av((), "bool"))
+    o = ir.Var(id=4, aval=av((), "bool"))
+    decl = ir.JaxprEqn(
+        primitive="stelling_any", invars=(), outvars=(x,),
+        params=(("dtype", "float64"), ("hi", 2.0), ("lo", 1.0),
+                ("shape", Lying((2,)))))
+    q = ir.ClosedJaxpr(jaxpr=ir.Jaxpr(constvars=(), invars=(), outvars=(o,), eqns=(
+        decl,
         ir.JaxprEqn(primitive="reduce_sum", invars=(x,), outvars=(s,),
                     params=(("axes", (0,)), ("out_sharding", None))),
-        ir.JaxprEqn(
-            primitive="le",
-            invars=(s, ir.Literal(val=float(CEILING), aval=s.aval)),
-            outvars=(pr,)),
+        ir.JaxprEqn(primitive="le", invars=(s, ir.Literal(val=3.9, aval=s.aval)),
+                    outvars=(pr,)),
         ir.JaxprEqn(primitive="stelling_assert", invars=(pr,), outvars=(o,)),
+    )))
+
+    # 1. the door accepted it. That is not the finding and never was — a
+    #    param that agrees with the aval on the read the door takes is a
+    #    well-formed declaration as far as the door can see.
+    assert isinstance(decl, ir.JaxprEqn)
+
+    # 2. the exact oracle, in rationals and with no stelling code in it
+    assert Fraction(2) + Fraction(2) > Fraction(39, 10)
+
+    # 3. THE SOUNDNESS ASSERTION, DELIBERATELY FIRST. At `321209d` this is
+    #    the line that reds, and it reds saying 'discharged'.
+    p = propagate(q)
+    (ob,) = p.obligations
+    assert ob.status != OB_DISCHARGED, (
+        f"the lying param is discharged again: {ob.status!r}"
     )
-    d = ir.JaxprEqn(
-        primitive="stelling_any", invars=(), outvars=(x,),
-        params=(("dtype", "float64"), ("hi", float(HI)), ("lo", float(LO)),
-                ("shape", Drifting())))
-    q = ir.ClosedJaxpr(jaxpr=ir.Jaxpr(constvars=(), invars=(), outvars=(o,),
-                                      eqns=(d,) + tail))
-    item = slice_obligation(q, 0, {})
-    assert not isinstance(item, DeclinedObligation), item
-    assert len(item.inputs) == 1, (
-        f"the drifting param minted {len(item.inputs)} term(s); the finding "
-        f"is that ONE is minted for a {N}-element reference"
+    assert ob.status == "unknown", ob.status
+    env = interval_env(q)
+    box = env[x.id]
+    assert box.size == 2, (
+        f"the transfer built a {box.size}-element box for a declaration "
+        f"the door validated at two elements"
     )
 
-    # ... and the containment is the hash, not the reader
-    with pytest.raises(TypeError, match="cannot encode"):
-        q.content_hash()
+    # 4. the emission mints one term per validated element ...
+    (item,) = slice_unknown_obligations(q, p, env)
+    assert not isinstance(item, DeclinedObligation), item
+    assert len(item.inputs) == 2, item.inputs
+    # the SECOND element exists as a term — it is the one the truncated
+    # reading dropped, and the one the witness below sets to 2
+    assert "x0_1" in emit(item, "z3", 20_000).text
+
+    # 5. ... and the MECHANISM: the param was read exactly once, by the
+    #    door, and what the door read is what the equation now carries.
+    assert len(reads) == 1, reads
+    assert decl.params_dict()["shape"] == (2,)
+    assert type(decl.params_dict()["shape"]) is tuple
+
+
+@needs_solvers
+def test_the_lying_shape_param_document_is_REFUTED_with_a_witness():
+    """What the blocking document produces INSTEAD of the false VERIFIED.
+
+    Not merely "not discharged": the claim is false, and the verdict layer
+    says so with a two-element witness the exact-rational replay confirms.
+    Held separately from the propagation pin above so an environment
+    without both solvers still measures the soundness half.
+    """
+    class Lying(tuple):
+        n = 0
+
+        def __iter__(self):
+            Lying.n += 1
+            return iter((2,) if Lying.n <= 1 else (1,))
+
+    def av(shape=(), dtype="float64"):
+        return ir.Aval(kind="ShapedArray", shape=shape, dtype=dtype)
+
+    x = ir.Var(id=1, aval=av((2,)))
+    s = ir.Var(id=2, aval=av())
+    pr = ir.Var(id=3, aval=av((), "bool"))
+    o = ir.Var(id=4, aval=av((), "bool"))
+    q = ir.ClosedJaxpr(jaxpr=ir.Jaxpr(constvars=(), invars=(), outvars=(o,), eqns=(
+        ir.JaxprEqn(primitive="stelling_any", invars=(), outvars=(x,),
+                    params=(("dtype", "float64"), ("hi", 2.0), ("lo", 1.0),
+                            ("shape", Lying((2,))))),
+        ir.JaxprEqn(primitive="reduce_sum", invars=(x,), outvars=(s,),
+                    params=(("axes", (0,)), ("out_sharding", None))),
+        ir.JaxprEqn(primitive="le", invars=(s, ir.Literal(val=3.9, aval=s.aval)),
+                    outvars=(pr,)),
+        ir.JaxprEqn(primitive="stelling_assert", invars=(pr,), outvars=(o,)),
+    )))
+    p = propagate(q)
+    records = escalate(q, p, SolverConfig(timeout_ms=20_000)).records
+    assert len(records) == 1, (
+        f"the escalation had {len(records)} obligation(s) to judge; zero "
+        f"means the interval leg discharged the false claim before the "
+        f"solver was ever asked"
+    )
+    (record,) = records
+    assert record.outcome == OB_VIOLATED_WITNESS, record.detail
+    assert record.witness is not None
+    # the witness names a term per element of the DECLARED shape
+    assert len(record.witness.values) == 2, record.witness.values
+    assert "exact-rational replay" in record.detail, record.detail
+
+
+def test_the_size_DECLINE_census_names_every_site_that_has_no_net():
+    """AUDIT 0.2.0 B6 AUDIT 5, F5 — `_size`'s residue paragraph named two
+    of three, and argued the wrong containment for the two it named.
+
+    Making a total function partial gives every caller a channel to answer
+    for. `_size` declines; this drives what each of the three unnetted
+    callers really does with that, so the paragraph has a measurement
+    under it instead of a recollection.
+
+    The THIRD site is `_index_box`, and it is reached from
+    `_pair_elementwise` / `_route_structural` — which `stelling.smt.emit`
+    drives AFTER `slice_obligation` has returned, with no `_Decline` net
+    in `smt.py` at all. `stelling.affine` drives the same two helpers and
+    nets them, which is what makes the asymmetry a fact rather than an
+    opinion.
+
+    And the containment: the paragraph said the replay shapes "come from
+    an `ObligationSlice` whose extents `_Slicer._validate` and
+    `_declared_shape` already normalised". True of `SliceInput.shape`,
+    false of `sl.root.aval.shape` and `_shape_of(eqn.outvars[0])`, which
+    are fresh reads of a raw `ir.Aval` field. What makes THOSE safe is
+    audit 5's F1: `ir.Aval.__post_init__` installs what it validated.
+    """
+    import inspect
+
+    import stelling.affine as AF
+    import stelling.obligation as OB
+    import stelling.smt as SMT
+
+    class Unreadable:
+        def __index__(self):
+            raise ValueError("this extent has no count")
+
+        def __repr__(self):
+            return "Unreadable"
+
+    # 1. the helper really can decline — the site the paragraph did not name
+    with pytest.raises(OB._Decline):
+        OB._index_box((Unreadable(),), 0)
+
+    # 2. and the decline travels out through the shared routing helpers
+    raw_var = type("RawVar", (), {})
+    raw_aval = type("RawAval", (), {})
+
+    def _var(i):
+        a = raw_aval()
+        a.shape, a.dtype, a.kind, a.weak_type = (Unreadable(),), "float64", "ShapedArray", False
+        v = raw_var()
+        v.id, v.aval = i, a
+        return v
+
+    eqn = object.__new__(ir.JaxprEqn)
+    for field, value in (("primitive", "mul"),
+                         ("invars", (_var(1), _var(2))),
+                         ("outvars", (_var(3),)),
+                         ("params", ()), ("effects", ()), ("source_info", ())):
+        object.__setattr__(eqn, field, value)
+    with pytest.raises(OB._Decline):
+        OB._pair_elementwise(eqn)
+
+    # 3. THE ASYMMETRY, read off the two consumers rather than described
+    smt_src = inspect.getsource(SMT)
+    assert not any("except" in ln and "_Decline" in ln
+                   for ln in smt_src.splitlines()), (
+        "`smt.py` has acquired a `_Decline` net; the residue paragraph in "
+        "`obligation._size` says it has none and must be updated with it"
+    )
+    affine_nets = sum(1 for ln in inspect.getsource(AF).splitlines()
+                      if "except _SliceDecline" in ln)
+    assert affine_nets == 3, affine_nets
+
+    # 4. the replay path's two, measured the same way
+    root_src = inspect.getsource(OB._root_elements)
+    assert root_src.count("except _Decline") == 2, root_src.count("except _Decline")
+    assert "raise ReplayError" in root_src
+    viol_src = inspect.getsource(OB.violating_elements)
+    assert "_size(sl.root.aval.shape)" in viol_src and "try" not in viol_src, (
+        "`violating_elements` has grown a net; the paragraph says it has "
+        "none"
+    )
+
+    # 5. AND THE CONTAINMENT THAT KEEPS ALL THREE OFF A DOCUMENT: an
+    #    `ir.Aval` carries the extents it validated, so `_shape_of` — the
+    #    argument every one of these sites is really given — is a plain
+    #    tuple of plain ints and `_size` on it is total.
+    class TwoFaced:
+        n = 0
+
+        def __index__(self):
+            TwoFaced.n += 1
+            return 2 if TwoFaced.n <= 1 else -1
+
+        def __repr__(self):
+            return "TwoFaced"
+
+    v = ir.Var(id=0, aval=ir.Aval(
+        kind="ShapedArray", shape=(TwoFaced(),), dtype="float64"))
+    assert OB._shape_of(v) == (2,), OB._shape_of(v)
+    assert all(type(k) is int for k in OB._shape_of(v))
+    assert OB._size(OB._shape_of(v)) == 2, (
+        "a fresh read of `aval.shape` answered differently from the read "
+        "the aval was validated at — the containment the paragraph now "
+        "claims is `ir.Aval.__post_init__`'s install"
+    )
+    # ... and the SliceInput half of the old argument, which was the true half
+    assert OB._extents((2, 3)) == (None, (2, 3))

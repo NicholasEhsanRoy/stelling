@@ -927,6 +927,17 @@ SPDX-License-Identifier: Apache-2.0
   the unreverted base (a clone at d6b6d0b):  3557 passed, 10 skipped, 0 failed
   ```
 
+  *`R7`'s test was RENAMED at audit 0.2.0 B6 audit 4 —
+  `..._reads_the_EXTENTS_not_the_param_type` is now
+  `test_the_declaration_check_compares_BOTH_holders_and_refuses_the_rest`,
+  because the old name stated a rule the code stopped implementing at
+  `30d4b04`. This row quotes the old name because it is driven against a
+  clone at `d6b6d0b`, where the old name IS the name in the tree and the
+  old rule IS the code (`ir.py:761`). That is the row
+  `tests/test_array_emission.py` points a reader at, and it had no
+  annotation until audit 0.2.0 B6 audit 5, F4 — the note had been attached
+  to `OPT` instead, which is driven on a different tree.*
+
   **(*) R3's GROUP IS ONE HUNK SHORT, and the row says so rather than
   banking the extra red.** `_safely` has a THIRD call site, installed by
   `obligation.h1` inside `_declared_shape`, so reverting h6+h10 leaves it
@@ -979,7 +990,32 @@ SPDX-License-Identifier: Apache-2.0
   recorded as UNREACHABLE AS A GUARD rather than claimed.** The element
   budget calls `_declared_shape` over the same vids first, so no document
   can reach this call in a state the budget did not already decline: it is
-  unreachable *as a difference*. `docs/norms.md` forbids exactly the move
+  unreachable *as a difference*.
+
+  **THE PRE-EMPTION IS NOW EXHIBITED, because `docs/norms.md` clause 1
+  requires a document and this row had an argument** (audit 0.2.0 B6
+  audit 5, F6). The document is a declaration whose `shape` param is
+  `b"\x02\x02"`, installed past `__post_init__` — the hand-built route
+  `SOUNDNESS.md` scopes in. Run through `slice_obligation`, with
+  `_Slicer._declared_shape` instrumented to record its caller:
+
+  ```
+  outcome: DeclinedObligation
+  reason : input declaration of variable 1 has a shape param b'\x02\x02'
+           of type bytes: a declaration records its extents in a tuple or
+           a list, ...
+  _declared_shape call sites reached, in order:
+      obligation.py:3226 in slice     <- the element budget
+                                      <- obligation.py:3392, the
+                                         slice-input reader, is never
+                                         reached
+  ```
+
+  One refusal, produced by the earlier reader, on the same input, before
+  `h4`'s site runs — which is the whole of what clause 1 asks. Driven by
+  `tests/test_ir_screen.py::test_the_R1c_disclosure_EXHIBITS_its_pre_emption`
+  so the exhibit is a run and not a transcript. `docs/norms.md` forbids
+  exactly the move
   of asserting coverage by construction, and the batch's blanket "each
   change has a test that reds when reverted alone" was false here. It is
   KEPT and not deleted, because it is not a guard: it is a VALUE read, and
@@ -1053,8 +1089,144 @@ SPDX-License-Identifier: Apache-2.0
   *The `OPT` row's first test was renamed at audit 0.2.0 B6 audit 4 —
   `..._reads_the_EXTENTS_not_the_param_type` is now
   `test_the_declaration_check_compares_BOTH_holders_and_refuses_the_rest`,
-  because the old name stated the rule the code had stopped implementing.
-  The row measures `d6b6d0b`, where the old name is the one in the tree.*
+  because the old name stated the rule the code had stopped implementing.*
+
+  *AND THE ANNOTATION ABOVE NAMED THE WRONG COMMIT (audit 0.2.0 B6 audit
+  5, F4). It said "the row measures `d6b6d0b`". It does not: `OPT` is
+  driven on the audit-3 fix tree, **`30d4b04`**, where the old name is the
+  one in the tree — and where the code is already the positive
+  `isinstance(shape, (tuple, list))` test, so there is an enumeration to
+  restore. `d6b6d0b` is what the mutation REPRODUCES, not what it runs on;
+  at `d6b6d0b` the enumeration IS the code
+  (`ir.py:761`, `obligation.py:2031`), so "restore the enumeration" would
+  land on nothing there and this table's own anchor rule makes that an
+  error rather than a green run. The row whose base really is a clone at
+  `d6b6d0b` is `R7` in the revert table above, and it now carries its own
+  annotation — which is the row `tests/test_array_emission.py` points a
+  reader at. This is the same label-versus-substance slip the fixup two
+  paragraphs above corrected for `obligation.h2` → `h1`.*
+
+- **UNSOUND — A GUARD MUST INSTALL THE VALUE IT VALIDATED, NOT MERELY
+  RETURN IT** (audit 0.2.0 B6 audit 5, F1). A `tuple` SUBCLASS whose
+  `__iter__` yields `(2,)` on the first read and `(1,)` on every read
+  after it. No `object.__setattr__` and no smuggling: every object is
+  built through a public `stelling.ir` dataclass, and
+  `JaxprEqn.__post_init__` **accepts** the document, because the door
+  reads the param once — audit 3's F1 repair, and correct — and the read
+  it gets agrees with the outvar aval.
+
+  ```
+  query    x = any(shape=(2,), lo=1, hi=2);  assert sum(x) <= 3.9
+  truth    max over [1,2] x [1,2] of (x0 + x1) = 4 > 39/10
+  321209d  obligation status = 'discharged'      <- VERIFIED, and false
+  ```
+
+  Four readers reached that param and the door was the only one that
+  validated it: `ir.py`'s door, `ir._encode`, `propagate`'s `stelling_any`
+  transfer (which built the ONE-element box the discharge rests on), and
+  `coverage.sub_jaxprs`. `content_hash()` succeeded and hashed `(1,)`
+  while the door had validated `(2,)`. **`main` (`dee8bc2`) and `96ab47a`
+  refuse this document by ACCIDENT** — there the door read the param
+  TWICE and the second read caught the lie; `d6b6d0b`, `30d4b04` and
+  `321209d` all discharge it. Read-once-and-bind removed the accidental
+  catch and nothing replaced it.
+
+  **The repair is this batch's own theme one level up.** A guard that
+  hands its value back to its own caller has fixed one read; a guard that
+  INSTALLS its value into the object has fixed every read there will ever
+  be. `JaxprEqn.__post_init__` now writes the extents
+  `ir._validate_decl_eqn` returned back into `params` — the same
+  `object.__setattr__` idiom that method already uses to sort them — and
+  `Aval.__post_init__` and `Array.__post_init__` do the same for their own
+  `shape`. Every later reader is handed a plain `tuple` of plain `int`.
+
+  **Why not a shared reader.** Routing every reader through one function —
+  the `_size`/`_extents` repair one module over — makes every read use one
+  PROTOCOL; it does not make two reads return one VALUE, which is exactly
+  what this document exploits. And two of the four readers could not be
+  routed at all: `ir._encode` is generic over tuples and cannot know which
+  one is a shape, and `coverage.sub_jaxprs` walks params looking for
+  sub-jaxprs without ever asking what a param means. Normalisation covers
+  both without touching either file, and it is why `propagate`'s transfer
+  — held to no container rule of its own — now needs none: for every
+  equation built through `ir.JaxprEqn`, which is every equation
+  `propagate` is given, there is only one value left for it to read. (The
+  transfer FUNCTION still has no rule, and
+  `test_the_TRANSFER_face_is_NOT_held_to_the_container_rule` still drives
+  it with a raw params dict to say so.)
+
+  **Compatibility, and what the argument for it is worth.** The fix adds
+  no refusal: every `_load_check` and every condition it tests is
+  unchanged, and the only new statements STORE values the guards had
+  already computed. For any document whose extents and containers answer
+  CONSISTENTLY — which is every document a trace, a `from_dict` or an
+  ordinary hand-build produces — the installed value equals every read and
+  behaviour is identical by construction. For a document that answers
+  inconsistently, later checks now see the FIRST read, the one the guard
+  passed, instead of a second one; that IS the fix, and it is a change in
+  what those checks judge, so it is measured rather than argued away — the
+  suite in both environments, the 686-document exact-`Fraction` fuzz (686
+  built, 0 false discharges, 0 raw escapes), and the doc-example corpus.
+  The canonical `shape=(2,)` declaration's `content_hash()` is
+  byte-identical (`5e5610cbec0232ba` on both trees). Two documents are now
+  ACCEPTED further than before, both toward canonicalisation: a `list`
+  `shape` param — a form `ir._SHAPE_PARAM_CONTAINERS` explicitly blesses —
+  used to raise `TypeError: stelling.ir cannot encode list` out of
+  `content_hash()`/`to_dict()` and now hashes identically to the `tuple`
+  spelling of the same declaration; and an `Aval` whose extents are numpy
+  integers now encodes (it used to raise *"Object of type int64 is not
+  JSON serializable"*). One value changes: an extent written as `True`
+  stores and encodes as `1`, so a document with a boolean extent hashes
+  differently. No jax trace produces one, and `operator.index(True)` is 1,
+  so the two documents denote the same shape.
+
+  **A THIRD LEAK SITE GOES WITH IT** (audit 0.2.0 B6 audit 5, F5).
+  `obligation._size`'s residue paragraph named two callers that can let a
+  `_Decline` out unnetted; there are three. `_index_box`
+  (`range(_size(shape))`, reached from `_pair_elementwise` /
+  `_route_structural`, which `smt.emit` drives AFTER `slice_obligation`
+  has returned, and `smt.py` nets no `_Decline` at all) is the third, and
+  it is new at `321209d` — at `30d4b04` `_size` was a raw product, so the
+  same shape left the helper as a bare `TypeError`. Swept over the read at
+  which a hostile extent starts refusing, on one declaration query:
+
+  ```
+  321209d   k=32, k=35  escalation attempted; internal error: _Decline
+            k=37, k=40  EmissionInfidelityError / ReplayError
+  with F1   no decline at any k
+  ```
+
+  because `Aval.__post_init__` now freezes the extent at the read it
+  validated. The paragraph's ARGUMENT is corrected too: *"the shapes come
+  from an `ObligationSlice` whose extents ... already normalised"* is true
+  of `SliceInput.shape` and was never true of `sl.root.aval.shape` or
+  `_shape_of(eqn.outvars[0])`, which were fresh reads of a raw `ir.Aval`
+  field. What makes those safe is the constructor, and it is named as
+  such.
+
+  The blocking document is `tests/test_aval_lie_both_faces.py::
+  test_a_lying_shape_param_can_no_longer_mint_a_FALSE_VERIFIED` (it now
+  reaches REFUTED with a two-element witness the exact-rational replay
+  confirms), and the mechanism is swept over both accepted container types
+  and five flip points in `..._test_the_DOOR_INSTALLS_the_shape_param_it_
+  VALIDATED` and over the computed container population in
+  `tests/test_shape_param_rule.py::test_the_door_INSTALLS_what_it_
+  VALIDATED_so_a_second_read_cannot_differ`.
+
+  **Two sentences this batch shipped are falsified by that document and
+  are corrected with it.** `tests/test_shape_param_rule.py` said *"a
+  document whose param and aval disagree is refused at the `ir` door on
+  every deserialized route"* — this one's param and aval disagree on every
+  read after the first and the door accepted it. And
+  `obligation._shape_problem` / `_Slicer._declared_shape` both said the
+  containment was `ClosedJaxpr.content_hash()`, *"which cannot encode such
+  a param"*. It can: `ir._encode` iterates a shape param ONCE and encodes
+  what that read returned. The `list` the claim was measured on raised for
+  an unrelated reason — `_encode` has no `list` arm at all, so an honest
+  `shape=[4]` raises the identical `TypeError` — and the `tuple` half of
+  the rule was never contained by anything. Measured at `321209d`, a
+  `tuple` subclass whose `__iter__` answered `(4,)` once and `()`
+  afterwards hashed cleanly at every flip point.
 
 - **A CLAIM ABOUT CONTAINER TYPES IS COMPUTABLE, SO IT IS COMPUTED** (audit
   0.2.0 B6 audit 4, F1). Four audits of this batch have found the same
@@ -1114,10 +1286,15 @@ SPDX-License-Identifier: Apache-2.0
   `ir.Array(...)`, `ir.Literal(...)`, `ir.JaxprEqn(...)` or
   `ir.ClosedJaxpr(...)` — the class the validation exists to close.
   Driving the class rather than reading it, over one canonical
-  well-formed document: **28 raw escapes at `30d4b04`, 0 here, from 9
-  DISTINCT quote sites**, of which the audit had named three. Two of the
-  six it had not fire on the PASSING path, on documents with nothing
-  wrong with them:
+  well-formed document: **10 DISTINCT quote sites**, of which the audit
+  had named four. (A quote site here is one INTERPOLATION of an object
+  into a message. The figures further down count MESSAGE EXPRESSIONS,
+  which is a different unit — the duplicate-key refusal is two quotes in
+  one message — and the two agree at ten by different routes rather than
+  one being derived from the other. Said, because writing an identity
+  across two units is this entry's own defect one step subtler.) Two of
+  the six the audit had not named fire on the PASSING path, on documents
+  with nothing wrong with them:
 
   ```
   ir.Array(dtype=<str subclass whose __repr__ raises>, ...)      PASSING path
@@ -1144,10 +1321,37 @@ SPDX-License-Identifier: Apache-2.0
   SUBCLASS OF ITS OWN TYPE that refuses `__repr__`, `__str__` and
   `__format__`, the document rebuilt from the root so every
   `__post_init__` re-runs, and `ir._validate_loaded` driven over the
-  result. **95 sites swept, 0 raw escapes**; with the guarded reads
-  neutered, **26 escapes** — the positive control that makes the zero mean
-  something. What it does not reach is counted rather than silent: 20
-  leaves whose type cannot be subclassed (`bool`, `None`).
+  result.
+
+  **THE FIGURES, AND WHICH MEASUREMENT EACH BELONGS TO** (audit 0.2.0 B6
+  audit 5, F2). Three sentences in this entry and its test carried four
+  numbers for two measurements — "26" and "27" escapes, "9" and "eight"
+  quote sites — because each was typed where it was needed. The sweep's
+  own unit is the MESSAGE EXPRESSION, which is neither of the other two: a
+  `_load_check` message spans several source lines and can interpolate on
+  more than one, so a per-LINE count is larger, and a per-QUOTE count (the
+  ten above) is larger again. Measured on `jax 0.11.0` / `python 3.12.3`,
+  x64 on:
+
+  ```
+  this tree, as shipped        95 swept /  0 escapes / 20 skipped
+  this tree, guards neutered   27 escapes /  9 lines /  8 messages
+  30d4b04, guards absent       28 escapes / 10 lines /  8 messages
+  message-expression union     10 = those 8 + the 2 the canonical doc masks
+  ```
+
+  That last 10 is the same number as the ten quotes above and is not the
+  same quantity; it is stated so a reader can recompute it, not so the two
+  can be treated as one.
+
+  The zero is the claim; the 27 is the positive control that makes it mean
+  something. What the sweep does not reach is counted rather than silent:
+  20 leaves whose type cannot be subclassed (`bool`, `None`). Every one of
+  these numbers is now COMPUTED by
+  `test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES` and
+  `test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures`,
+  which red naming this file when they move — that is what stopped the
+  same class recurring for the container rule one entry above.
 
 - **AN ELEMENT COUNT COMES FROM `__index__`, NOT FROM `__mul__`** (audit
   0.2.0 B6 audit 4, F3). `obligation._size` was `n = 1; for d in shape: n
@@ -1169,15 +1373,57 @@ SPDX-License-Identifier: Apache-2.0
   all. Enumerating them would have been the same defect one level up. So
   the repair is `_size` itself, which now reads its extents
   through `_extents` and declines a shape it cannot count rather than
-  returning a product of whatever `__mul__` said. No caller anywhere can
-  obtain a count from a third protocol, including one written tomorrow.
+  returning a product of whatever `__mul__` said. **No caller OF `_size`
+  can obtain a count from a third protocol, including one written
+  tomorrow.**
+
+  **THE SCOPE OF THAT SENTENCE IS `obligation`, AND IT WAS WRITTEN
+  WITHOUT ONE** (audit 0.2.0 B6 audit 5, F3). It stood here as *"no
+  caller anywhere"*, which is false one module over: `propagate` does not
+  call `_size` and carries **six** raw `n = 1; for d in shape: n *= d`
+  products of its own. Measured on this tree, three of them loop over a
+  shape read straight off an `ir.Aval` or an `ir.Array` at the site —
+
+  ```
+  _refused_value_problem    for d in value.shape       propagate.py:1180
+  _atom_element_count       for d in atom.aval.shape   propagate.py:6584
+  _declared_element_count   for d in out.aval.shape    propagate.py:10657
+  ```
+
+  (line numbers as measured at this commit; the census itself is computed
+  from `propagate`'s own AST by `tests/test_aval_lie_both_faces.py::
+  test_the_element_count_census_covers_propagate_TOO`, which reds naming
+  this entry if a seventh appears or one of these moves.)
+
+  — one more (`propagate._elements`, `propagate.py:814`) is reached at one
+  remove and only from `ir.Array.shape` at both its call sites, and the
+  remaining two take a caller-supplied `shape` argument. `_declared_
+  element_count` is the library's SECOND element-count reader and was
+  already named by an earlier audit in `_Slicer._declared_shape`'s
+  docstring; the other five appear in this entry for the first time. The
+  version of this sentence in `_shape_problem`'s docstring opens *"It is
+  `_size`:"* and is correctly scoped; this one is the one a reader quotes,
+  and it is now scoped too.
+
+  What makes those six safe is not `_size` and is stated where it is:
+  after audit 5's F1, `ir.Aval` and `ir.Array` CARRY the extents their own
+  `__post_init__` validated, as plain `int` in a plain `tuple`, so a
+  product taken over one of their shapes has no second protocol to reach.
+
   The four named readers additionally BIND what `_extents` returned, so
   they read each shape once; every other `_size` caller still reads a
   second time, which is safe against a third protocol and is not safe
-  against an object that answers `__index__` differently between calls —
-  contained by `ClosedJaxpr.content_hash()`, which cannot encode such a
-  param, and recorded in `_shape_problem`'s docstring rather than claimed
-  away.
+  against an object that answers `__index__` differently between calls.
+  **What contains THAT is the constructor and not the hash** (audit 0.2.0
+  B6 audit 5, F1): this entry said *"contained by
+  `ClosedJaxpr.content_hash()`, which cannot encode such a param"*, and
+  `ir._encode` passes an `int` SUBCLASS through untouched for `json.dumps`
+  to read its stored value — so a two-faced `__index__` on an `int`
+  subclass hashes perfectly well, and a `tuple` subclass with a drifting
+  `__iter__` hashed cleanly at `321209d` while minting a false VERIFIED.
+  The containment is that the shapes reaching these readers come off IR
+  objects that installed what they validated. Recorded in
+  `_shape_problem`'s docstring rather than claimed away.
 
 - **`docs/norms.md`: "unreachable as a guard" now has a QUALIFYING TEST.**
   The paragraph distinguishing a guard from a value read supplied no test

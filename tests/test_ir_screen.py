@@ -44,6 +44,7 @@ itself is outside both.
 from __future__ import annotations
 
 import pathlib
+import re
 
 import pytest
 
@@ -557,4 +558,210 @@ def test_the_batch_ships_an_attribution_table_that_adds_up():
     assert zero == ["R1c"], (
         f"exactly one semantic revert is expected to red nothing (the "
         f"slice-input reader, unreachable as a difference); got {zero}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# an attribution row names TESTS, and a test name is checkable
+# ---------------------------------------------------------------------------
+
+def _table_blocks(text: str) -> list[str]:
+    return [b for b in re.findall(r"```\n(.*?)```", text, re.S)
+            if "the tests that red" in b]
+
+
+def _table_rows(block: str):
+    """(row label, the wrapped lines of its "tests that red" column).
+
+    The column wraps MID-IDENTIFIER with no marker, so the caller resolves
+    a row under both joinings — see the test below.
+    """
+    label, tail, prev_first = None, [], None
+    for ln in block.split("\n"):
+        if "the tests that red" in ln:
+            continue
+        parts = ln.split()
+        nums = [i for i, p in enumerate(parts) if p.isdigit()]
+        start = None
+        for k in range(len(nums) - 2):
+            if nums[k + 1] == nums[k] + 1 and nums[k + 2] == nums[k] + 2:
+                start = nums[k]
+                break
+        indent = len(ln) - len(ln.lstrip(" "))
+        if start is not None:
+            if label:
+                yield label, list(tail)
+            first = parts[0]
+            # a row's label can sit on the line ABOVE its numbers when the
+            # mutation description wraps (`OPT` does)
+            label = first if re.match(r"^[A-Z(]", first) else (prev_first or first)
+            tail = [" ".join(parts[start + 3:])]
+        elif label is not None and indent >= 40:
+            tail.append(ln.strip())
+        if parts and start is None and indent < 40:
+            prev_first = parts[0]
+    if label:
+        yield label, tail
+
+
+def _live_test_names() -> set[str]:
+    names: set[str] = set()
+    for f in (REPO / "tests").rglob("test_*.py"):
+        names |= set(re.findall(r"^def (test_\w+)", f.read_text(encoding="utf-8"), re.M))
+    return names
+
+
+def _quoted_fragments(text: str) -> set[str]:
+    return {t.strip("_")
+            for t in re.findall(r"[A-Za-z][A-Za-z0-9_]{12,}", text)
+            if "_" in t}
+
+
+def test_an_attribution_row_may_not_quote_a_test_that_does_not_exist():
+    """AUDIT 0.2.0 B6 AUDIT 5, F4 — an attribution row's value is that a
+    reader can run the test it names.
+
+    The `tests that red` column is a claim of exactly that shape, so it is
+    checkable: every identifier in it must be a fragment of a test that
+    exists in this tree, or the entry must carry a RENAME ANNOTATION that
+    names the row and the replacement. Both are required — an annotation
+    on the wrong row leaves the right row unexplained, which is the
+    finding. `R7` and `OPT` both quote
+    `..._reads_the_EXTENTS_not_the_param_type` and for different reasons
+    (`R7` runs against a clone at `d6b6d0b`, `OPT` on `30d4b04`); the note
+    sat on `OPT` alone and named `d6b6d0b`, which is the tree `OPT`'s
+    mutation REPRODUCES rather than the one it runs on.
+
+    The column wraps mid-identifier with no marker, so a row is resolved
+    under either joining — glued or spaced — and only counts as unresolved
+    when BOTH fail. That is why `F3`'s `the three ..._hostile___repr__ /
+    tests, one per module` is not a false positive.
+    """
+    text = CHANGELOG.read_text(encoding="utf-8")
+    live = _live_test_names()
+    assert len(live) > 1000, len(live)
+    blocks = _table_blocks(text)
+    assert len(blocks) >= 3, f"{len(blocks)} attribution table(s) found"
+
+    # the annotations, taken from OUTSIDE the fenced blocks
+    prose = re.sub(r"```\n.*?```", "", text, flags=re.S)
+    annotations = [p for p in prose.split("\n\n") if "renam" in p.lower()]
+
+    unexplained = []
+    for block in blocks:
+        for label, tail in _table_rows(block):
+            best = None
+            for joiner in ("", " "):
+                got = _quoted_fragments(joiner.join(tail))
+                bad = {g for g in got if not any(g in n for n in live)}
+                if best is None or len(bad) < len(best):
+                    best = bad
+            if not best:
+                continue
+            covered = any(
+                label in ann and any(n in ann for n in live)
+                for ann in annotations
+            )
+            if not covered:
+                unexplained.append((label, sorted(best)))
+
+    assert not unexplained, (
+        "an attribution row names a test that is not in this tree and "
+        "carries no rename annotation naming the row and its replacement:\n"
+        + "\n".join(f"    row {lab}: {frags}" for lab, frags in unexplained)
+    )
+
+
+def test_the_R1c_disclosure_EXHIBITS_its_pre_emption():
+    """AUDIT 0.2.0 B6 AUDIT 5, F6 — `docs/norms.md` clause 1, restated so
+    it is decidable, and then applied to the one site this batch records
+    under it.
+
+    The clause used to read *"it has no refusal of its own … a site with a
+    refusal branch NEVER qualifies"*. Read strictly that disqualifies
+    every guard in this codebase — almost all of them are bare calls to
+    refusing helpers — so nothing could ever be recorded as unreachable as
+    a guard, `R1c` included. It discriminated syntax where it means to
+    discriminate semantics.
+
+    Restated, it asks whether the site is the FIRST thing that would
+    refuse, and it asks for the document. This is the document: a
+    declaration whose `shape` param is `bytes`, installed past
+    `__post_init__`. `_Slicer._declared_shape` is called ONCE, by the
+    element budget, and the slice-input reader `R1c` records is never
+    reached.
+    """
+    import traceback
+
+    import stelling.obligation as OB
+    from stelling import ir
+
+    calls: list[str] = []
+    original = OB._Slicer._declared_shape
+
+    def _spy(self, decl, vid):
+        frame = traceback.extract_stack()[-2]
+        calls.append(f"{frame.filename.rsplit('/', 1)[-1]}:{frame.lineno}")
+        return original(self, decl, vid)
+
+    def av(shape=(), dtype="float64"):
+        return ir.Aval(kind="ShapedArray", shape=shape, dtype=dtype)
+
+    x = ir.Var(id=1, aval=av((2,)))
+    s = ir.Var(id=2, aval=av())
+    pred = ir.Var(id=3, aval=av((), "bool"))
+    out = ir.Var(id=4, aval=av((), "bool"))
+    decl = ir.JaxprEqn(
+        primitive="stelling_any", invars=(), outvars=(x,),
+        params=(("dtype", "float64"), ("hi", 2.0), ("lo", 1.0),
+                ("shape", (2,))))
+    object.__setattr__(decl, "params", tuple(sorted(
+        (("dtype", "float64"), ("hi", 2.0), ("lo", 1.0),
+         ("shape", b"\x02\x02")), key=lambda kv: kv[0])))
+    q = ir.ClosedJaxpr(jaxpr=ir.Jaxpr(constvars=(), invars=(), outvars=(out,), eqns=(
+        decl,
+        ir.JaxprEqn(primitive="reduce_sum", invars=(x,), outvars=(s,),
+                    params=(("axes", (0,)), ("out_sharding", None))),
+        ir.JaxprEqn(primitive="le",
+                    invars=(s, ir.Literal(val=9.9, aval=s.aval)),
+                    outvars=(pred,)),
+        ir.JaxprEqn(primitive="stelling_assert", invars=(pred,), outvars=(out,)),
+    )))
+
+    OB._Slicer._declared_shape = _spy
+    try:
+        item = OB.slice_obligation(q, 0, {})
+    finally:
+        OB._Slicer._declared_shape = original
+
+    assert isinstance(item, OB.DeclinedObligation), item
+    assert "of type bytes" in item.reason, item.reason
+    assert len(calls) == 1, (
+        f"`_declared_shape` was called {len(calls)} time(s): {calls}. The "
+        f"pre-emption clause 1 requires is that the BUDGET's call refuses "
+        f"before the slice-input reader runs"
+    )
+
+    # the two call sites, read off the source so a moved line does not
+    # turn the exhibit into folklore
+    lines = [i + 1 for i, ln in enumerate(
+        pathlib.Path(OB.__file__).read_text(encoding="utf-8").splitlines())
+        if "self._declared_shape(self.producers[vid], vid)" in ln]
+    assert len(lines) == 2, lines
+    budget_line, slice_input_line = min(lines), max(lines)
+    assert calls == [f"obligation.py:{budget_line}"], (calls, lines)
+    assert slice_input_line not in {int(c.split(":")[1]) for c in calls}
+
+    # ... and the clause and the row both say so
+    norms = (REPO / "docs" / "norms.md").read_text(encoding="utf-8")
+    assert "A site with a refusal branch NEVER qualifies" not in norms, (
+        "clause 1 still disqualifies every bare call to a refusing helper, "
+        "which is every guard in this codebase"
+    )
+    assert "PRE-EMPTED, and the pre-emption is" in norms, norms[:0]
+    changelog = CHANGELOG.read_text(encoding="utf-8")
+    assert "THE PRE-EMPTION IS NOW EXHIBITED" in changelog
+    assert f"obligation.py:{budget_line} in slice" in changelog, (
+        f"the R1c exhibit quotes a call site that is no longer the "
+        f"budget's (now line {budget_line})"
     )

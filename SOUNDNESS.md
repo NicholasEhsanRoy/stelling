@@ -8767,7 +8767,32 @@ verdicts:
   a `tuple` before the primitive is bound — and the partition is now
   measured against the rule over a computed population of container types
   in `tests/test_shape_param_rule.py`, so this sentence cannot go stale
-  again without a test going red.)* But the
+  again without a test going red.)*
+
+  **AND COMPARING IS NOT ENOUGH: THE DOOR NOW INSTALLS WHAT IT COMPARED**
+  (audit 0.2.0 B6 audit 5, F1). Reading the param ONCE and binding it
+  locally made the door's own comparison honest and left every reader
+  after it re-reading the raw object — the interval transfer in
+  `propagate`, `_Slicer._declared_shape`, `ir._encode` and
+  `coverage.sub_jaxprs`. A `tuple` SUBCLASS whose `__iter__` yields `(2,)`
+  for the door and `(1,)` for everyone after it was therefore ACCEPTED at
+  two elements, propagated as one, and returned **`discharged`** for
+  `sum(x) <= 3.9` over `x` in `[1,2]²`, whose exact maximum is 4 — with no
+  `object.__setattr__` anywhere and with a stable `content_hash()`. `main`
+  refuses that document only by accident: the door there read the param
+  twice and the second read caught the lie. The read-once repair removed
+  the accident and nothing replaced it. `JaxprEqn.__post_init__` now
+  writes the validated extents back into `params`, and
+  `Aval.__post_init__` / `Array.__post_init__` do the same for their own
+  `shape`, so every later reader sees a plain `tuple` of plain `int`.
+  A SHARED READER would not have done this — it makes every read use one
+  PROTOCOL, not one VALUE, and neither `ir._encode` (generic over tuples,
+  it cannot know which one is a shape) nor `coverage.sub_jaxprs` (which
+  never asks what a param means) could have been routed through one. The
+  same document now reaches **REFUTED** with a two-element witness the
+  exact-rational replay confirms.
+
+  But the
   door is **not** where this class is contained, and two things say so.
   `ir.py` scopes per-primitive shape inference out of the load validation
   in writing, and `ir.ClosedJaxpr` is a public dataclass. And the door

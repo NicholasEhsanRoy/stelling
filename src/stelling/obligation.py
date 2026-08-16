@@ -675,9 +675,38 @@ def _shape_problem(shape) -> str | None:
     they read each shape ONCE. Every other :func:`_size` caller reads a
     second time. That second read is safe against a third protocol and is
     NOT safe against an object that answers ``__index__`` differently
-    between reads; what contains that is ``ClosedJaxpr.content_hash()``,
-    which cannot encode such a param — see
-    :meth:`_Slicer._declared_shape`, where the same residue is recorded."""
+    between reads.
+
+    **WHAT CONTAINS THAT IS THE CONSTRUCTOR, AND THIS USED TO SAY THE
+    HASH** — audit 0.2.0 B6 audit 5, F1. The sentence here was *"what
+    contains that is ``ClosedJaxpr.content_hash()``, which cannot encode
+    such a param"*, and it was true of ``__index__`` for a reason it did
+    not give and false one protocol over.
+
+    For ``__index__``: an ``int`` SUBCLASS cannot answer differently
+    between reads at all, because ``operator.index`` short-circuits on a
+    real ``int`` and never calls ``__index__`` (measured: zero calls, the
+    stored value returned) — so the guard, ``ir._encode`` and
+    ``json.dumps`` all read the same number. A two-faced ``__index__``
+    therefore needs a NON-``int`` class, and ``ir._encode`` refuses to
+    encode one at all. The containment was `_encode`'s TYPE closure, not
+    an inability to encode a drifting answer.
+
+    One protocol over, the claim is simply false. ``ir._encode`` iterates
+    a ``shape`` param ONCE and encodes what that read returned, so a
+    ``tuple`` SUBCLASS whose ``__iter__`` answered ``(4,)`` once and
+    ``()`` afterwards hashed cleanly at ``321209d`` — measured at every
+    flip point — and the same trick one element narrower minted a VERIFIED
+    on a claim exact arithmetic falsifies.
+
+    The containment is that ``ir.Aval``, ``ir.Array`` and a declaration's
+    ``shape`` param now CARRY the extents their own ``__post_init__``
+    validated, as plain ``int`` in a plain ``tuple``. A shape this
+    function or :func:`_size` reads off one of those objects is
+    single-valued before it arrives, whatever protocol is asked of it, and
+    a shape read off anything else is not covered by that and is listed in
+    :func:`_size`. See :meth:`_Slicer._declared_shape`, where the same
+    correction is recorded."""
     return _extents(shape)[0]
 
 
@@ -706,14 +735,68 @@ def _size(shape) -> int:
     A malformed extent is a DECLINE and not a number: an element count
     that cannot be read is not zero, not one, and not the caller's
     problem to notice. Netted to a `DeclinedObligation` everywhere the
-    slicer drives it. On the replay path (:func:`_root_elements`,
-    :func:`violating_elements`) the shapes come from an
-    :class:`ObligationSlice` whose extents :meth:`_Slicer._validate` and
-    :meth:`_Slicer._declared_shape` already normalised, so this cannot
-    fire for a slice this module produced; a hand-built slice that made it
-    fire would surface it as an internal error rather than a
-    :exc:`ReplayError`, and that residue is recorded here rather than
-    claimed away."""
+    slicer drives it.
+
+    **WHERE IT IS NOT NETTED — THREE SITES, and this paragraph named two**
+    (audit 0.2.0 B6 audit 5, F5). Making a total function partial gives
+    every caller a channel to answer for, so the census is here rather
+    than in whichever caller someone remembered:
+
+    * :func:`_root_elements` — CORRECT and unchanged. Its per-equation
+      ``_size`` and routing calls are inside a ``try`` that converts
+      :exc:`_Decline` to :exc:`ReplayError`, which is the replay path's
+      own channel. Its input-size loop runs BEFORE that ``try`` and is
+      the one place the old argument was right about: ``inp.shape`` is a
+      :attr:`SliceInput.shape`, which IS an :func:`_extents` result and
+      not a re-read of anything.
+    * :func:`violating_elements` — its ``_size(sl.root.aval.shape)`` runs
+      after :func:`_root_elements` returns, outside any net, and would
+      reach :mod:`stelling.solvers`' generic handler as *"escalation
+      attempted; internal error"*.
+    * :func:`_index_box` — ``range(_size(shape))``, reached from
+      :func:`_pair_elementwise` and :func:`_route_structural`. The
+      DECLINE is new at ``321209d``: at ``30d4b04`` ``_size`` was a raw
+      product, so the same shape came out of this helper as a bare
+      ``TypeError: unsupported operand type(s) for *=`` — measured, and
+      the reason the change is a narrowing of the escape and not the
+      creation of one. Both routing helpers are driven AGAIN by
+      :func:`stelling.smt.emit`, after :func:`slice_obligation` has
+      returned, and `smt.py` nets no :exc:`_Decline` at all — so a
+      decline there does not become a :class:`DeclinedObligation`; it
+      lands in :mod:`stelling.solvers`' generic handler as *"escalation
+      attempted; internal error"*. :mod:`stelling.affine` drives the same
+      two helpers and DOES net them (three sites), which is how the
+      asymmetry between the two consumers is visible at all.
+
+      DRIVEN, not deduced: sweeping the read at which a hostile extent
+      starts refusing, over one declaration query, ``321209d`` produced
+      *"escalation attempted; internal error: `_Decline`"* from this
+      helper at two points in the sweep and a `ReplayError` at a third.
+      After audit 5's F1 the SAME sweep produces no decline at any point,
+      because :meth:`ir.Aval.__post_init__` freezes the extent at the read
+      it validated and this helper's argument is a :func:`_shape_of` of
+      that. The site is recorded rather than deleted because that
+      containment is about where the shape COMES FROM, not about this
+      helper.
+
+    **AND THE ARGUMENT FOR WHY IT CANNOT FIRE WAS TWO ARGUMENTS.** This
+    paragraph said the replay shapes *"come from an `ObligationSlice`
+    whose extents `_Slicer._validate` and `_Slicer._declared_shape`
+    already normalised"*. That is true of :attr:`SliceInput.shape`, which
+    IS an :func:`_extents` result. It was never true of
+    ``sl.root.aval.shape`` or of ``_shape_of(eqn.outvars[0])``: those were
+    fresh reads of a raw ``ir.Aval`` field, and normalising a DIFFERENT
+    object earlier does not make a later read of this one safe. Since
+    audit 5's F1 the containment there is real rather than incidental, and
+    it is a different mechanism with a different name:
+    :meth:`ir.Aval.__post_init__` INSTALLS the extents it validated, so
+    ``aval.shape`` is a plain ``tuple`` of plain ``int`` and every re-read
+    of it — here, in :func:`_shape_of`, in :func:`_index_box` — returns
+    the same ints. What is NOT covered by that is a shape reaching these
+    callers from somewhere other than an ``ir.Aval``, an ``ir.Array`` or
+    an :func:`_extents` result; the three sites above are recorded so that
+    such a caller has somewhere to be checked against rather than being
+    discovered by an *"internal error"* in a verdict."""
     problem, extents = _extents(shape)
     if problem is not None:
         raise _Decline(
@@ -2139,13 +2222,38 @@ class _Slicer:
         ``isinstance(raw, (tuple, list))`` admits — whose ``__iter__``
         yields ``(4,)`` for three reads and ``()`` after was checked at
         ``(4,)`` and minted ONE input for a four-element reference;
-        :meth:`slice` alone reads it three times. What catches that is not
-        this method but :meth:`ir.ClosedJaxpr.content_hash`, which cannot
-        encode a param that answers differently between iterations: it
-        RAISES, ``solvers._query_sha256`` swallows that to ``""``, and the
-        pairing gate refuses an empty hash. Naming the containment where it
-        actually is matters, because "cannot drift apart" invites the next
-        reader to stop looking.
+        :meth:`slice` alone reads it three times. That is still true of
+        this METHOD, and it is why the containment is not here.
+
+        **AND THE CONTAINMENT NAMED HERE WAS THE WRONG ONE — audit 0.2.0
+        B6 audit 5, F1.** This paragraph said *"what catches that is
+        :meth:`ir.ClosedJaxpr.content_hash`, which cannot encode a param
+        that answers differently between iterations: it RAISES"*. It does
+        not. ``ir._encode`` iterates a ``shape`` param ONCE and encodes
+        whatever that read returned, so a drifting param hashes cleanly
+        and stably. The ``list`` the sentence was measured on raised for
+        an unrelated reason — ``_encode`` has no ``list`` arm at all, so
+        an honest, undrifting ``shape=[4]`` raises the identical
+        ``TypeError`` — and the ``tuple`` half of
+        :data:`ir._SHAPE_PARAM_CONTAINERS`, which the sentence also
+        covered, was never contained by anything. Driven with the aval at
+        ``(2,)`` and the param answering ``(2,)`` once and ``(1,)``
+        afterwards, that was a VERIFIED on a false claim.
+
+        What catches it is :meth:`ir.JaxprEqn.__post_init__`: the door
+        validates one read of the param against the outvar aval and
+        INSTALLS it, so the equation this method is handed carries a plain
+        ``tuple`` of plain ``int`` and there is no second answer to get. A
+        param this method can still be lied to by is one that never went
+        through that constructor: the constructible route is shut, and
+        only an `object.__setattr__` past the frozen dataclass reaches it
+        — the same boundary `SOUNDNESS.md` records for this method's
+        sibling disclosures, and the technique this batch's own tests use
+        to measure the emission face with the door out of the way.
+        Naming the containment where it actually is matters, because
+        "cannot drift apart" invites the next reader to stop looking, and
+        naming it in the wrong place invites the same thing with a
+        citation attached.
 
         **AND IT IS NOT THE LIBRARY'S ONLY READER of a declaration's
         element count.** :func:`stelling.propagate._declared_element_count`

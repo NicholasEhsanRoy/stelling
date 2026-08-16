@@ -39,6 +39,16 @@ and requires the measured partition to be exactly the rule.
 * An iteration that RAISES is derived the same way, for every accepted
   container type: `isinstance` is a claim about the type and not about the
   object, and that arm must decline rather than escape.
+* An iteration that ANSWERS INCONSISTENTLY is derived the same way, and
+  for the same reason — audit 0.2.0 B6 audit 5, F1. `isinstance` says
+  nothing about what a second read returns, and an `__iter__` yielding
+  `(2, 2)` once and `(1,)` afterwards is a well-formed param to the
+  door's single read. What that arm must do is not decline: it is that
+  the door INSTALLS the extents it validated, so the second answer is
+  never asked for. That is measured in
+  :func:`test_the_door_INSTALLS_what_it_VALIDATED_so_a_second_read_cannot_differ`,
+  and the false VERIFIED it closes is held in
+  `tests/test_aval_lie_both_faces.py`.
 * BOTH FACES, and their agreement. The door (`ir`, at construction) and
   the emission (`obligation._Slicer._declared_shape`) are measured
   separately and required to partition identically. The soundness
@@ -69,8 +79,19 @@ and requires the measured partition to be exactly the rule.
 * It says nothing about extent VALUES. Non-integer and negative extents
   are a different guard (`ir._load_extents` / `obligation._extents`) with
   its own tests.
+* The EMISSION face is measured PAST the door. :func:`_decl_eqn` installs
+  the candidate param with `object.__setattr__` precisely so
+  `_declared_shape` can be judged on its own, which means the
+  inconsistent-`__iter__` row above measures the door's install and NOT
+  the emission's behaviour on a drifting object. `_declared_shape` is
+  still a function and not a single read, and handed a drifting param
+  directly it will still answer differently between calls; what makes
+  that unreachable from a document is that every `ir.JaxprEqn` — the only
+  thing `slice` is ever given — carries what the door installed. A
+  hand-built equation that bypasses `__post_init__`, as this file's own
+  helper does, is outside that containment and is not covered here.
 
-Audit 0.2.0 B6 audit 4, F1.
+Audit 0.2.0 B6 audit 4, F1; audit 5, F1.
 """
 from __future__ import annotations
 
@@ -203,6 +224,44 @@ def _refusing_iter_candidates() -> list[tuple[str, object]]:
     return out
 
 
+def _lying_iter_candidates() -> list[tuple[str, object]]:
+    """For every ACCEPTED container type, a subclass whose ``__iter__``
+    answers ``(2, 2)`` once and ``(1,)`` afterwards — audit 0.2.0 B6
+    audit 5, F1.
+
+    The sibling of :func:`_refusing_iter_candidates`, and the arm it did
+    not have. An `__iter__` that RAISES is caught by the door's `try`; an
+    `__iter__` that merely answers DIFFERENTLY is a perfectly well-formed
+    param on the one read the door takes, and was the object that minted a
+    false VERIFIED. `(2, 2)` is `_AVAL`'s shape, so these rows agree with
+    the outvar aval on the door's read and are ACCEPTED — the measurement
+    is what the door then stores, not whether it refuses.
+
+    Skipped, not crashed, for a base that cannot be subclassed or built
+    empty, for the reason :func:`_refusing_iter_candidates` gives."""
+    out: list[tuple[str, object]] = []
+    for base in ir._SHAPE_PARAM_CONTAINERS:
+        state = {"n": 0}
+
+        def _drift(self, state=state):
+            state["n"] += 1
+            return iter((2, 2) if state["n"] <= 1 else (1,))
+
+        try:
+            sub = types.new_class(
+                "Drifting_" + base.__name__, (base,),
+                exec_body=lambda ns: ns.update({"__iter__": _drift}),
+            )
+            inst = sub()
+        except Exception:  # noqa: BLE001 — final or argument-taking bases
+            continue
+        out.append(
+            (f"{base.__name__} subclass whose __iter__ answers "
+             f"inconsistently", inst)
+        )
+    return out
+
+
 def _numpy_candidates() -> list[tuple[str, object]]:
     """numpy is not in a scanned namespace and its own namespace is far
     too large to sweep, so its containers are ADDED. This is the part of
@@ -226,6 +285,7 @@ def _population() -> list[tuple[str, object]]:
         scanned
         + _subclass_candidates(scanned)
         + _refusing_iter_candidates()
+        + _lying_iter_candidates()
         + _numpy_candidates()
     )
 
@@ -459,6 +519,74 @@ def test_the_measured_partition_IS_the_documented_rule():
         )
 
 
+def test_the_door_INSTALLS_what_it_VALIDATED_so_a_second_read_cannot_differ():
+    """AUDIT 0.2.0 B6 AUDIT 5, F1 — the arm `isinstance` cannot see and
+    the `try` cannot catch.
+
+    The container rule is a claim about a param's TYPE. Reading it once
+    and binding locally (audit 3's F1) makes the DOOR's own comparison
+    honest and does nothing for the readers after it: the transfer in
+    `propagate`, `_declared_shape`, `ir._encode` and
+    `coverage.sub_jaxprs` each re-read the raw param, and a container
+    that answers differently between reads gave them a different value
+    from the one the door compared against the outvar aval.
+
+    So the repair is not a fourth reader and not a stricter rule. It is
+    that `JaxprEqn.__post_init__` installs the extents
+    `ir._validate_decl_eqn` returned, and that is what this measures: over
+    the whole computed population, every param the door ACCEPTS is stored
+    as a plain `tuple` of plain `int`, equal to the outvar aval's extents.
+    A row that stores the object it was handed is a row a second reader
+    can be lied to about.
+    """
+    stored_rows = 0
+    for label, param in _population():
+        try:
+            eqn = ir.JaxprEqn(
+                primitive="stelling_any", invars=(),
+                outvars=(ir.Var(id=0, aval=_AVAL),),
+                params=(("dtype", "float64"), ("lo", 0.0), ("hi", 1.0),
+                        ("shape", param)),
+            )
+        except ir.TranscriptionError:
+            continue
+        stored = eqn.params_dict()["shape"]
+        assert type(stored) is tuple, (
+            f"{label}: the door stored a {type(stored).__name__}, so a "
+            f"later reader is reading the document's object and not the "
+            f"door's answer"
+        )
+        assert all(type(k) is int for k in stored), (
+            f"{label}: the door stored {stored!r}, whose extents are not "
+            f"plain ints — `__index__` can answer twice"
+        )
+        assert stored == _AVAL.shape, (
+            f"{label}: the door stored {stored!r} but validated the param "
+            f"against the outvar aval shape {_AVAL.shape!r}"
+        )
+        stored_rows += 1
+
+    assert stored_rows >= 4, (
+        f"only {stored_rows} accepted row(s) reached the store check; "
+        f"`tuple`, `list` and a derived subclass of each are the floor"
+    )
+
+    # ... and the drifting rows are IN that count, which is the finding.
+    for label, param in _lying_iter_candidates():
+        eqn = ir.JaxprEqn(
+            primitive="stelling_any", invars=(),
+            outvars=(ir.Var(id=0, aval=_AVAL),),
+            params=(("dtype", "float64"), ("lo", 0.0), ("hi", 1.0),
+                    ("shape", param)),
+        )
+        # the param would now answer (1,); the equation does not ask it
+        assert tuple(param) == (1,), label
+        assert eqn.params_dict()["shape"] == (2, 2), (
+            f"{label}: the equation's shape moved to "
+            f"{eqn.params_dict()['shape']!r} on a later read"
+        )
+
+
 def test_the_TRANSFER_face_is_NOT_held_to_the_container_rule():
     """RECORDED, NOT FIXED — the third reader, and it has no rule at all.
 
@@ -470,11 +598,24 @@ def test_the_TRANSFER_face_is_NOT_held_to_the_container_rule():
     raw crash on a param that will not iterate at all — is pinned in
     `tests/test_aval_lie_both_faces.py` as a live expectation.
 
-    Why it is not a verdict: a declaration whose param the emission
-    declines never reaches an SMT discharge, and a document whose param
-    and aval disagree is refused at the `ir` door on every deserialized
-    route. What is left is hand-built IR judged by interval propagation
-    alone, which is the standing disclosure that this transfer belongs to.
+    Why it is not a verdict, STATED AGAINST WHAT THE CODE DOES — audit
+    0.2.0 B6 audit 5, F1. The sentence that stood here was *"a document
+    whose param and aval disagree is refused at the `ir` door on every
+    deserialized route"*, and it was false of the document that mattered:
+    a `tuple` subclass answering `(2,)` once and `(1,)` afterwards has a
+    param that disagrees with its aval on every read after the first, and
+    the door ACCEPTED it — the door compares one read, and one read
+    agreed.
+
+    What is true is narrower and is now a mechanism rather than a claim.
+    The door compares ONE read of the param against the outvar aval and
+    INSTALLS that read, so no reader after it — this transfer included —
+    can be handed a different value than the one compared. A param the
+    door never saw is therefore the only way to reach this transfer with
+    a container the other two faces refuse, and that is what
+    :func:`_decl_eqn` builds by writing past `__post_init__`: hand-built
+    IR judged by interval propagation alone, which is the standing
+    disclosure this transfer belongs to.
     """
     from stelling import interval as iv
     from stelling.propagate import TRANSFERS

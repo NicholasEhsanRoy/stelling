@@ -110,7 +110,14 @@ class Aval:
         # construction) passes through here — the construction-path census
         # found the gates lived only at the two doors, leaving direct
         # construction ungated (design/ci-readiness.md, Part A)
-        _validate_aval(self, "Aval")
+        #
+        # AND THE GUARD'S OWN VALUE IS INSTALLED, not discarded — audit
+        # 0.2.0 B6 audit 5, F1. `_validate_aval` normalises every extent
+        # through `__index__`; storing what it returned is what makes the
+        # extents a LATER reader sees the extents this check passed on.
+        # See :class:`JaxprEqn`'s `__post_init__` for the finding this is
+        # the sibling of.
+        object.__setattr__(self, "shape", _validate_aval(self, "Aval"))
 
 
 @dataclass(frozen=True)
@@ -122,7 +129,13 @@ class Array:
     data: bytes
 
     def __post_init__(self) -> None:
-        _validate_array_value(self, "Array")  # local, type-level (census)
+        # local, type-level (census) — and the validated extents are
+        # INSTALLED, so `_encode`, `to_numpy` and the emission read what
+        # the byte-length check was computed from (audit 0.2.0 B6 audit 5,
+        # F1). Measured before this line: an `Array` whose `shape` was a
+        # `tuple` subclass answering `(2,)` once and `(1,)` afterwards
+        # passed the length check at two elements and encoded as one.
+        object.__setattr__(self, "shape", _validate_array_value(self, "Array"))
 
     def to_numpy(self):
         import numpy as np  # lazy: numpy is not a stelling dependency
@@ -268,7 +281,34 @@ class JaxprEqn:
             )
         # type-level: a declaration's two self-descriptions must agree
         # (the census's structuralization — see _validate_decl_eqn)
-        _validate_decl_eqn(self, "JaxprEqn")
+        #
+        # AND WHAT THE GUARD VALIDATED IS INSTALLED INTO THE EQUATION —
+        # audit 0.2.0 B6 audit 5, F1, and the reason a returned value is
+        # not enough. `_validate_decl_eqn` reads the `shape` param ONCE
+        # and hands back the extents it compared against the outvar aval;
+        # writing them back is what makes every LATER reader — the
+        # interval transfer (`propagate`), `_declared_shape`, `_encode`
+        # and `coverage.sub_jaxprs` — read the value that was checked,
+        # rather than re-reading a self-describing object that is free to
+        # answer differently the second time. A `tuple` SUBCLASS whose
+        # `__iter__` yielded `(2,)` for the door and `(1,)` for everyone
+        # after it passed this check at two elements, was propagated as
+        # one, and minted a VERIFIED for `sum(x) <= 3.9` over `x` in
+        # `[1,2]^2`, whose true maximum is 4.
+        #
+        # A SHARED READER CANNOT DO THIS. Routing every reader through one
+        # function — the repair `_size`/`_extents` carries one module over
+        # — makes every read use one PROTOCOL; it does not make two reads
+        # return one VALUE, and `_encode` (which is generic over tuples and
+        # cannot know which one is a shape) and `coverage.sub_jaxprs`
+        # (which walks params looking for sub-jaxprs and never asks what a
+        # param means) could not be routed through it at all.
+        dims = _validate_decl_eqn(self, "JaxprEqn")
+        if dims is not None:
+            # exactly one `shape` key: the duplicate-key refusal above ran
+            object.__setattr__(self, "params", tuple(
+                (k, dims) if k == "shape" else (k, v) for k, v in self.params
+            ))
 
     def params_dict(self) -> dict[str, object]:
         return dict(self.params)
@@ -568,15 +608,30 @@ def _safe_repr(obj) -> str:
     one of its two siblings (:func:`_safe_type_name`, :func:`_safe_str`),
     including the ones in a `where` string and the ones on a branch that
     only composes when the check has already failed — audit 0.2.0 B6
-    audit 4, F2. Measured with the sweep, over one canonical well-formed
-    document: **28 raw escapes at `30d4b04` and 0 here, from 9 distinct
-    quote sites**, of which the previous audit had named three; two of
-    the six it had not fire on the PASSING path (`ir.Array(dtype=<a str
-    subclass whose repr raises>)` and `ir.Literal(val=<an int subclass
-    whose repr raises>)`, both well-formed documents). A guarded quote is
-    cheap; deciding per site which objects can misbehave is how those six
-    were missed. `tests/test_ir_message_totality.py` sweeps the pass for
-    the class rather than trusting this paragraph."""
+    audit 4, F2. The record's figure is **10 distinct quote sites** — ten
+    INTERPOLATIONS of an object into a message — of which the previous
+    audit had named four; two of the six it had not fire on the PASSING
+    path (`ir.Array(dtype=<a str subclass whose repr raises>)` and
+    `ir.Literal(val=<an int subclass whose repr raises>)`, both
+    well-formed documents).
+
+    THE SWEEP'S OWN UNIT IS THE MESSAGE EXPRESSION, and this paragraph
+    recorded two units as one — audit 0.2.0 B6 audit 5, F2. A
+    `_load_check` message spans several lines and can interpolate on more
+    than one, so a per-LINE count is larger than a per-MESSAGE count, and
+    a per-QUOTE count (the ten above) is larger again. The three
+    measurements, each computed by `tests/test_ir_message_totality.py`
+    rather than trusted from this paragraph:
+
+        this tree, as shipped        95 swept /  0 escapes / 20 skipped
+        this tree, guards neutered   27 escapes /  9 lines /  8 messages
+        `30d4b04`, guards absent     28 escapes / 10 lines /  8 messages
+
+    The sweep's 8 message expressions plus the 2 the canonical document
+    masks also comes to 10; that is a different quantity from the ten
+    quotes above and agrees with it by arithmetic, not by derivation. A
+    guarded quote is cheap; deciding per site which objects can misbehave
+    is how those six were missed."""
     try:
         return repr(obj)
     except Exception:  # noqa: BLE001 — the message's own totality
@@ -724,9 +779,19 @@ def _validate_value_against_aval(val, aval: Aval, where: str) -> None:
     # str and None values carry no shape claim to cross-check
 
 
-def _validate_aval(aval: Aval, where: str) -> None:
-    problem = _load_extent_problem(aval.shape)
+def _validate_aval(aval: Aval, where: str) -> tuple[int, ...]:
+    """Validate an :class:`Aval`'s extents and RETURN them normalised.
+
+    :meth:`Aval.__post_init__` installs what this returns, so the shape an
+    aval carries after construction is the shape this function passed —
+    audit 0.2.0 B6 audit 5, F1. The predicate spelling
+    (:func:`_load_extent_problem`) tested each extent and discarded it,
+    leaving every later reader of ``aval.shape`` — `_encode` here,
+    `obligation._shape_of` and `_size`, `propagate._atom_element_count`
+    and `_declared_element_count` — to re-read the raw objects."""
+    problem, extents = _load_extents(aval.shape)
     _load_check(problem is None, where, f"aval has {problem}")
+    return extents
 
 
 def _validate_atom(atom, where: str) -> None:
@@ -884,11 +949,24 @@ def _validate_required_params(eqn: "JaxprEqn", where: str) -> None:
     )
 
 
-def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
+def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> tuple[int, ...] | None:
     """A stelling_any declaration's aval must agree with its OWN
     params — two self-descriptions of one declared set. Called from
     JaxprEqn.__post_init__ (every construction path) and from the
     from_dict walk (kept for its load-path error context).
+
+    **RETURNS THE ``shape`` PARAM'S EXTENTS, NORMALISED** — or ``None``
+    when the equation carries no ``shape`` param to validate (a form this
+    function deliberately still blesses; see the last paragraph).
+    :meth:`JaxprEqn.__post_init__` writes them back into ``params``, which
+    is what makes the value every later reader sees the value this
+    function compared. Audit 0.2.0 B6 audit 5, F1: reading once and
+    binding LOCALLY was audit 3's F1 repair and it is correct as far as it
+    goes, but the binding died with the call, and the transfer in
+    `propagate`, `_encode`, `coverage.sub_jaxprs` and
+    :meth:`stelling.obligation._Slicer._declared_shape` then each re-read
+    the raw param. Two reads of a self-describing object are two answers
+    it is free to make different.
 
     **THE RULE ON THE ``shape`` PARAM IS POSITIVE, AND IT IS THE PARAM'S
     CONTAINER TYPE:** a declaration records its extents in one of
@@ -939,8 +1017,9 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
     this closes is the constructor's own claim to have compared the two
     self-descriptions when it had not."""
     if eqn.primitive != "stelling_any" or not eqn.outvars:
-        return
+        return None
     params = dict(eqn.params)
+    normalised: tuple[int, ...] | None = None
     # the declaration's aval must agree with its OWN params —
     # the P1 arc's lies all started at a declaration whose two
     # self-descriptions disagreed
@@ -1026,6 +1105,9 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
             f"stelling_any shape param {param_dims} contradicts "
             f"the outvar aval shape {aval_dims}",
         )
+        # what the caller installs: the extents this function READ, not the
+        # object it read them from (audit 0.2.0 B6 audit 5, F1)
+        normalised = param_dims
     dtype = params.get("dtype")
     if isinstance(dtype, str) and eqn.outvars[0].aval.dtype is not None:
         _load_check(
@@ -1039,6 +1121,7 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
             f"stelling_any dtype param {_safe_repr(dtype)} contradicts the "
             f"outvar aval dtype {_safe_repr(eqn.outvars[0].aval.dtype)}",
         )
+    return normalised
 
 
 def _validate_closed(closed: ClosedJaxpr, where: str = "query") -> None:
