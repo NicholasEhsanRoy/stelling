@@ -404,12 +404,45 @@ def _pow_rational_lines(aux_name: str, base: str, p: int, q: int) -> list[str]:
     reaches here (the caller takes the integer branch otherwise), so the
     renderer's degenerate arms are unreachable from this site.
 
+    **``q`` IS EVEN, ALWAYS, AND THE ODD ARM IS A REFUSAL RATHER THAN A
+    BRANCH.** This function used to write the guard under ``if q % 2 == 0``
+    and silently omit it otherwise, which reads as two live cases and is
+    one: ``q`` comes from
+    :func:`stelling.obligation.pow_exponent_rational`, which is
+    ``Fraction`` of a binary64, so ``q`` is a power of two — and ``q == 1``
+    took the integer branch. Measured over the whole 448-pair admitted set
+    ``q`` is exactly ``{2, 4, 8, 16, 32, 64, 128}``, 0 odd in 500 000
+    random draws. An untested branch that READS as covered is worse than
+    no branch, so the arm is gone and its condition is a refusal: the
+    guard is now unconditional, and an odd ``q`` raises here rather than
+    emitting a script down a path nothing measures.
+
+    The refusal is the SECOND line of defence, not the first.
+    :func:`stelling.obligation.rational_pow_problem` DECLINES an odd
+    denominator at admission, which is where a decline belongs — emission
+    cannot return UNKNOWN, it can only write a script or refuse, so a
+    widening past dyadics must be caught upstream and this raise exists to
+    make it loud if it is not.
+
     Returns the lines in EMISSION ORDER; the caller extends its script
     with them and binds the output element's term to ``aux_name``.
     """
-    lines = [f"(declare-const {aux_name} Real)"]
-    if q % 2 == 0:
-        lines.append(f"(assert (>= {aux_name} 0.0))")
+    if q % 2:
+        raise ValueError(
+            f"'pow' rational emission reached an ODD denominator q={q} "
+            f"(p={p}). The non-negativity guard below selects the root jax "
+            f"computes out of the two an even q admits; an odd q has one "
+            f"real root and no guard, and no test in this tree drives that "
+            f"path. Every binary64 exponent is dyadic so this is "
+            f"unreachable, and admission "
+            f"(stelling.obligation.rational_pow_problem) declines an odd "
+            f"denominator before emission is reached — arriving here means "
+            f"that decline was bypassed"
+        )
+    lines = [
+        f"(declare-const {aux_name} Real)",
+        f"(assert (>= {aux_name} 0.0))",
+    ]
     lines.append(
         f"(assert (= {_repeated_product(aux_name, q)} "
         f"{_repeated_product(base, p)}))"

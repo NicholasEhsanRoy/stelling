@@ -33,7 +33,7 @@ how the two faces drifted apart once already.
 | `scatter-add` | **yes** | **yes** | as above |
 | `dot_general` | **no** | **yes** | `param_gauge_dot.py` drives `TRANSFERS`/`interval_env` only; `tests/test_dot_general_interval.py` is containment |
 | `convert_element_type` | **no** | **yes** | `param_gauge_convert.py` drives `interval_env` only |
-| `pow` | **yes** | **partly** | `tests/test_pow_row_gauge_jax.py` drives both from one battery of **17 mutations, 0 survivors, 17 face asymmetries**. Emission: both exponent branches through `check`/`escalate` to a replayed witness, eager AND with the `pow` fused inside a `jit`. Transfer: `interval-containment-eager-and-jit` drives `interval_env` against the values jax computes on this target — but only over STRICTLY POSITIVE base boxes, which is the whole domain of `interval.pow_`'s corner rule, so the transfer column is **partly** and not **yes**. See the two paragraphs below for what else it does not reach |
+| `pow` | **yes** | **partly** | `tests/test_pow_row_gauge_jax.py` drives both from one battery, whose size, survivor count and asymmetry count are MEASURED under *The `pow` row's gauge* below rather than restated here — a digit typed in this cell is the class of thing this page got wrong. Emission: both exponent branches through `check`/`escalate` to a replayed witness, eager AND with the `pow` fused inside a `jit`. Transfer: `interval-containment-eager-and-jit` drives `interval_env` against the values jax computes on this target — but only over STRICTLY POSITIVE base boxes, which is the whole domain of `interval.pow_`'s corner rule, so the transfer column is **partly** and not **yes**. See the paragraphs below for what else it does not reach |
 | `square` | **yes** | **yes** | `tests/test_square_row_gauge_jax.py` drives both from one battery — the emission gates run the pipeline through `check`/`escalate` to a replayed witness, eagerly AND with the `square` fused inside a `jit`; `interval-containment-eager-and-jit` drives `interval_env` against the values jax computes on this target. Its transfer-face mutation is CAUGHT by the containment gate and ADMITTED by every emission gate, so the two faces are visibly independent rather than assumed to be |
 | every other member of the emission set | **no** | mostly yes | containment sweep (Run 11), which is transfer-face by construction |
 | every transfer with no emission row | n/a | mostly yes | same |
@@ -93,33 +93,126 @@ mutation, because the row had no named seam at all. It has three now —
 and the battery below is what they are for. `tests/test_bar_membership_policy.py`
 carries the decision not to bar the row, and its cost measured both ways.
 
-**The mutation table**, each entry with the gate that catches it. Sixteen of
-the seventeen are caught by more than one gate; the exclusivity of the last
-one is asserted, because that is what says the scalar fixtures are blind to
-it.
+**Every figure in this section is RECOMPUTED from the live battery** by
+`tests/test_pow_row_gauge_jax.py::test_the_documented_coverage_figures_are_the_MEASURED_ones`,
+which parses the two blocks below and compares them against a real gauging
+run. It is written that way because the sentence it replaces — *"Sixteen of
+the seventeen are caught by more than one gate"* — was contradicted by the
+table printed directly beneath it, which already showed five single-covered
+entries where the measurement said six. The page argues from *"a gauge with
+one single-covered mutation is one edit from a hole"*, and that premise was
+true six times over while the prose said once. The defect is not the digit; it
+is a digit in prose that nothing recomputes.
 
+<!-- gauge-figures: pow -->
+MEASURED: **20 mutations, 0 survivors, 20 face asymmetries, 14 caught by more
+than one gate, 6 caught by exactly one.**
+
+**The single-covered set, NAMED rather than counted.** Each of these is caught
+by exactly one gate, so deleting that gate deletes the only measurement of
+that wrongness. All six carry an `ALONE` marking in the mutation table below
+and the test checks that marking against the measurement, so the two lists
+cannot disagree. For four of them the exclusivity is itself the FINDING rather
+than a gap: the two aux-sharing mutations are seen only by the vector fixture,
+which is what says the scalar fixtures are blind to per-element freshness, and
+the two conditional mutations are seen only by the fixture at their own
+`(p, q)`, which is what says the rest of the battery is blind to a denominator
+past 2 and a numerator past 1. The other two are admission-guard mutations,
+which only the admission gate can reach.
+
+<!-- single-covered: BEGIN -->
+| single-covered mutation | its only gate |
+|---|---|
+| `rational-admission-always-yes` | `non-dyadic-exponent-declines` |
+| `exponent-rationalised-to-a-nearby-fraction` | `non-dyadic-exponent-declines` |
+| `emit-rational-wrong-only-at-a-larger-denominator` | `refutes-the-false-rational-property-at-denominator-four` |
+| `emit-rational-wrong-only-at-a-numerator-past-one` | `refutes-the-false-rational-property-at-numerator-three` |
+| `emit-rational-aux-shared-across-elements` | `refutes-the-false-vector-property` |
+| `emit-rational-one-aux-for-two-elements` | `refutes-the-false-vector-property` |
+<!-- single-covered: END -->
+
+**The count did not move; the membership did**, which is the reason the set is
+compared by NAME and not by size. The widening took two entries off this list
+— `emit-integer-loses-the-reciprocal`, now also seen by the second-magnitude
+reciprocal gate, and `replay-as-the-identity`, now also seen by the `p = 3`
+positive control — and the two conditional mutations it added replaced them.
+A test comparing the six against a six would have passed through that
+unchanged.
+
+**The mutation table**, each entry with a gate that catches it. Every gate
+NAMED in the middle column is checked to be an actual catcher, every row
+marked ALONE is checked to be caught by that gate and no other, and the
+mutation set is checked to be the whole battery — by the same test. The bare
+gate COUNTS this column used to carry ("11 gates", "(+5)") are gone rather
+than corrected: five of them were stale, and a digit that no longer means
+anything is what this section is about. The full attribution, with every
+catcher for every mutation, is in the reading the file prints
+(`python tests/test_pow_row_gauge_jax.py`).
+
+<!-- mutation-table: BEGIN -->
 | mutation | caught by | what the catch looks like |
 |---|---|---|
-| `row-absent-from-the-emission-set` | 11 gates | everything declines |
-| `fragment-claims-linear` | 10 gates | the script violates its own declared logic |
-| `rational-admission-always-yes` | `non-dyadic-exponent-declines` | `x ** 0.1` is admitted |
-| `exponent-rationalised-to-a-nearby-fraction` | `non-dyadic-exponent-declines` | audit S1's own defect: `0.1` becomes `1/10` |
-| `transfer-is-the-base` | `interval-containment-eager-and-jit` (+5) | the box excludes a value jax computes |
-| `emit-integer-off-by-one` | `discharges-the-true-integer-property`, `discharges-the-negative-exponent-identity` | a TRUE property comes back refuted; the witness fails replay |
-| `emit-integer-exponent-ignored` | `refutes-the-false-integer-property` (+3) | the violation disappears — a MISSED violation |
-| `emit-integer-loses-the-reciprocal` | `discharges-the-negative-exponent-identity` | `x^-2` is emitted as `x^2` |
-| `emit-rational-sides-swapped` | `discharges-the-true-rational-upper-bound` (+2) | `aux^p = x^q` is `x^(q/p)`, a different function |
+| `row-absent-from-the-emission-set` | `refutes-the-false-integer-property`, and most others | everything declines |
+| `fragment-claims-linear` | `fragment-is-nonlinear`, and most others | the script violates its own declared logic |
+| `rational-admission-always-yes` | `non-dyadic-exponent-declines` ALONE | `x ** 0.1` is admitted |
+| `exponent-rationalised-to-a-nearby-fraction` | `non-dyadic-exponent-declines` ALONE | audit S1's own defect: `0.1` becomes `1/10` |
+| `transfer-is-the-base` | `interval-containment-eager-and-jit`, and others | the box excludes a value jax computes |
+| `emit-integer-off-by-one` | `discharges-the-true-integer-property`, `discharges-the-negative-exponent-identity`, and others | a TRUE property comes back refuted; the witness fails replay |
+| `emit-integer-exponent-ignored` | `refutes-the-false-integer-property`, and others | the violation disappears — a MISSED violation |
+| `emit-integer-loses-the-reciprocal` | `discharges-the-negative-exponent-identity`, `discharges-the-fourth-power-reciprocal-identity` | `x^-2` is emitted as `x^2` |
+| `emit-integer-wrong-only-above-degree-three` | `refutes-the-false-integer-property-at-degree-five`, `discharges-the-fourth-power-reciprocal-identity` | **CONDITIONAL.** Correct at every exponent the shipped battery drove and wrong at `abs(exp) >= 4`; emits `x^5` for `x^6`, so `x**6 <= 40` over [1, 2] goes VERIFIED when `2^6 = 64` |
+| `emit-rational-wrong-only-at-a-larger-denominator` | `refutes-the-false-rational-property-at-denominator-four` ALONE | **CONDITIONAL.** Correct at `q = 2` and wrong at `q >= 4`; emits `aux^6 = x` for `x^(1/4)`, so a bound of 2.9 goes VERIFIED when `81^(1/4) = 3` |
+| `emit-rational-wrong-only-at-a-numerator-past-one` | `refutes-the-false-rational-property-at-numerator-three` ALONE | **CONDITIONAL.** Correct across the whole `p == 1` family and wrong outside it; emits `aux^2 = x^1` for `x^(3/2)`, so a bound of 7.9 goes VERIFIED when `4^(3/2) = 8` |
+| `emit-rational-sides-swapped` | `discharges-the-true-rational-upper-bound`, and others | `aux^p = x^q` is `x^(q/p)`, a different function |
 | `emit-rational-root-guard-dropped` | `discharges-the-true-rational-lower-bound`, `refutes-the-false-vector-property` | the NEGATIVE root satisfies the negated obligation |
-| `emit-rational-constraint-never-asserted` | 4 gates | `aux` is free; every true property becomes sat |
-| `emit-rational-denominator-off-by-one` | `refutes-the-false-rational-property`, `refutes-the-false-vector-property` | `aux^3 = x` caps the value below the bound — a MISSED violation |
-| `emit-rational-aux-is-the-base` | 3 gates | the encoding collapses to the identity |
-| `emit-rational-aux-shared-across-elements` | `refutes-the-false-vector-property` | **by MALFORMEDNESS**: two `declare-const` of one symbol, both backends refuse, the obligation returns `unknown` |
+| `emit-rational-constraint-never-asserted` | `discharges-the-true-rational-upper-bound`, and others | `aux` is free; every true property becomes sat |
+| `emit-rational-denominator-off-by-one` | `refutes-the-false-rational-property`, `refutes-the-false-vector-property`, and others | `aux^3 = x` caps the value below the bound — a MISSED violation |
+| `emit-rational-aux-is-the-base` | `refutes-the-false-rational-property`, and others | the encoding collapses to the identity |
+| `emit-rational-aux-shared-across-elements` | `refutes-the-false-vector-property` ALONE | **by MALFORMEDNESS**: two `declare-const` of one symbol, both backends refuse, the obligation returns `unknown` |
 | `emit-rational-one-aux-for-two-elements` | `refutes-the-false-vector-property` ALONE | **the sharpest item.** Well-formed: one declaration, two constraints, so `x0_0 == x0_1` and the difference of the two roots collapses to 0. An obligation false at `x = [4, 1]` comes back `discharged`. A silent missed violation, and nothing in the tree caught it before |
-| `replay-exponent-inverted` | `replay-agrees-with-jax` (+2) | the replay disagrees with jax at a grid point |
-| `replay-as-the-identity` | `replay-agrees-with-jax` | as above |
+| `replay-exponent-inverted` | `replay-agrees-with-jax`, and others | the replay disagrees with jax at a grid point |
+| `replay-as-the-identity` | `replay-agrees-with-jax`, `refutes-the-false-rational-property-at-numerator-three` | as above |
+<!-- mutation-table: END -->
+
+**What the battery's coverage claim may honestly say, and the measurement it
+rests on.** "Both exponent branches" is a statement about branches and says
+nothing about exponents, and the difference is where three false VERIFIEDs
+lived: the shipped battery drove integer exponents `{-2, 3}` and the single
+pair `(1, 2)`, an unstated SCOPE, and three wrongnesses conditioned outside it
+passed all fourteen gates while each turned a genuinely REFUTED query into
+VERIFIED on an exponent the guard admits. The claim is now:
+
+> Both exponent branches of the `pow` row, at integer exponents
+> `[-4, -2, 3, 5]` — both signs at both magnitude classes — and at exactly
+> the three `(p, q)` pairs `1/2`, `1/4`, `3/2`, which is three of the 448
+> admitted pairs and not the admitted space. A wrongness conditioned outside
+> those two sets is NOT gauged.
+
+Four and three is better than two and one and is still finite, so the honest
+form of the claim is to print the sets rather than describe them. They are not
+typed into that paragraph either: they are derived from the gauge file's
+fixture table and MEASURED at the two seams by
+`test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose`, which
+instruments `smt._pow_integer_body` and `smt._pow_rational_lines`, runs every
+gate against the baseline and fails if the reach is not exactly that set. A
+fixture that drifts moves the measurement and fails there; it cannot leave
+this paragraph standing.
 
 **What this gauge does NOT reach, stated as flatly as the table above.**
 
+- **The rational branch at an ODD `q` — which no longer exists to reach.**
+  This page and the gauge both used to describe the branch as covering `q`
+  even *and odd*. The odd half was structurally unreachable:
+  `obligation.pow_exponent_rational` is `Fraction` of a binary64, every finite
+  binary64 is a dyadic rational, so in lowest terms `q` is a power of two and
+  `q == 1` takes the integer branch. Measured: `q` over the whole 448-pair
+  admitted set is exactly `{2, 4, 8, 16, 32, 64, 128}`, 0 odd in 500 000
+  random draws. An untested branch that READS as covered is worse than no
+  branch, so the fix is enforcement rather than a corrected sentence: the root
+  guard is unconditional now, the derivation refuses a non-dyadic rational,
+  admission DECLINES an odd denominator and the emission REFUSES one.
+  `test_the_odd_denominator_branch_is_UNREACHABLE_and_FAILS_CLOSED` pins all
+  three on the standard the integer-dtype guard already gets.
 - **`integer_pow`'s row.** The seams are `pow`'s own, and
   `test_the_pow_seams_do_not_move_the_integer_pow_row` asserts that every
   emission mutation in this battery leaves an `integer_pow` slice's text

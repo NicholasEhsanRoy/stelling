@@ -187,7 +187,7 @@ SPDX-License-Identifier: Apache-2.0
   three named seams — `smt._pow_integer_body`, `smt._pow_rational_lines`,
   `smt._pow_aux_name` — extracted behaviour-identically so that a mutation
   battery can express an emitted-`pow` wrongness at all;
-  `tests/test_pow_row_gauge_jax.py` runs 17 such mutations across both
+  `tests/test_pow_row_gauge_jax.py` runs 20 such mutations across both
   exponent branches with zero survivors. One of them declares a single
   auxiliary constant for two elements of a vectorised `pow`, which is
   well-formed SMT-LIB2, collapses `sqrt(x0) - sqrt(x1)` to zero, and silently
@@ -199,6 +199,67 @@ SPDX-License-Identifier: Apache-2.0
   `docs/gauge-coverage.md` states what the gauge reaches and what it does
   not, including `pow`'s integer-dtype guard, which is recorded UNCOVERED
   because no jax program can reach it.
+
+- **That gauge was overfit to the exponents it drove, and now states its
+  arity as a MEASUREMENT.** A blinded adversarial audit instrumented the two
+  seams and found the shipped battery reaching integer exponents `{-2, 3}`
+  and the single pair `(1, 2)` — an unstated SCOPE, since "both exponent
+  branches" is true of the branches and says nothing about the exponents. It
+  then wrote three wrongnesses conditioned OUTSIDE that set (wrong only above
+  degree 3, wrong only for `q >= 4`, wrong only for `p != 1`); all three
+  passed every one of the fourteen gates, and each turned a genuinely REFUTED
+  query into VERIFIED on an exponent the admission guard admits — `2^6 = 64`
+  under a bound of 40, `81^(1/4) = 3` under 2.9, `4^(3/2) = 8` under 7.9.
+  Conditional wrongness is the shape a REPAIRED row regresses in, which is
+  the shape a one-point-per-branch battery cannot see.
+
+  The battery now drives integer exponents `[-4, -2, 3, 5]` (both signs at
+  both magnitude classes, because `_pow_integer_body` reads sign and
+  magnitude separately) and the pairs `1/2`, `1/4`, `3/2` (three of the 448
+  admitted pairs, because `_pow_rational_lines` reads `p` and `q`
+  separately). All three mutations are in it, so the widening is pinned and
+  not merely applied once. **The arity is derived from the fixture table and
+  measured at the seams** —
+  `test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose`
+  instruments both seams, runs every gate against the baseline and fails if
+  the reach is not exactly the declared set — so the SCOPE the gauge prints
+  cannot go stale the way the prose version did.
+
+- **`docs/gauge-coverage.md`'s coverage figures are recomputed from the
+  battery instead of typed.** The page said *"Sixteen of the seventeen are
+  caught by more than one gate"* while the table printed directly beneath it
+  already showed five single-covered entries; the measurement was **six**.
+  Every other cell re-derived exactly — only the summary was wrong, and it
+  was wrong in the direction that made the gauge look stronger, since the
+  page's own premise is that *"a gauge with one single-covered mutation is
+  one edit from a hole"*. Correcting the digit would have left the class
+  alone, so the digits are now parsed out of the page and compared against a
+  live gauging run by
+  `test_the_documented_coverage_figures_are_the_MEASURED_ones`: the battery
+  size, survivor and asymmetry counts, the multi/single partition, the
+  single-covered set BY NAME, and every gate the mutation table names
+  including each `ALONE` exclusivity. The bare gate counts that column
+  carried are deleted rather than corrected — five of them were stale too.
+
+- **`pow`'s rational branch no longer has an unreachable arm that reads as
+  covered.** The gauge claimed the branch covered "`q` even **and** odd", and
+  odd `q` was structurally unreachable: `obligation.pow_exponent_rational` is
+  `Fraction` of a binary64, every finite binary64 is a dyadic rational, so in
+  lowest terms `q` is a power of two and `q == 1` takes the integer branch.
+  Measured: `q` over the whole 448-pair admitted set is exactly
+  `{2, 4, 8, 16, 32, 64, 128}`, 0 odd in 500 000 random draws — so
+  `smt._pow_rational_lines`' `if q % 2 == 0:` had a dead `else`, presented in
+  its docstring as one of two live cases. An untested branch that READS as
+  covered is worse than no branch, so the repair is enforcement rather than a
+  corrected sentence, at all three altitudes: the DERIVATION refuses to
+  return a non-dyadic rational (so a widening cannot happen quietly), the
+  ADMISSION guard `rational_pow_problem` DECLINES an odd denominator (a
+  decline belongs where an UNKNOWN can be returned), and the EMISSION refuses
+  one with the root guard now unconditional (emission can only write a script
+  or refuse). `test_the_odd_denominator_branch_is_UNREACHABLE_and_FAILS_CLOSED`
+  pins the unreachability and all three refusals on the standard
+  `pow`'s integer-dtype guard already gets. No behaviour changes for any
+  exponent jax can produce; the emitted text is byte-identical.
 
 - **`exp` and `pow` under `semantics="ieee"` now require a DECLARED libm
   accuracy budget** (audit 0.2.0 **S9** and **S11**; S11 reaches the

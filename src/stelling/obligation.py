@@ -701,8 +701,41 @@ def pow_exponent_rational(exp_float: float) -> Fraction:
     downstream to re-derive it, that minted false VERIFIEDs. No threshold
     on a binary64 distance can fix it; the comparison has to be between
     rationals, and taking the exact one removes the comparison entirely.
+
+    **THE DYADIC INVARIANT IS ESTABLISHED HERE, SO IT IS ENFORCED HERE.**
+    A finite binary64 is ``m * 2**e`` exactly, so in lowest terms this
+    Fraction's denominator is a POWER OF TWO — never odd past 1, and
+    ``q == 1`` takes the integer branch. Two things downstream rest on
+    that and would otherwise rest on an unwritten assumption:
+    :func:`rational_pow_problem` DECLINES an odd denominator and
+    :func:`stelling.smt._pow_rational_lines` REFUSES one, because the
+    even-``q`` non-negativity guard those lines emit is the whole reason
+    the encoding picks the root jax computes, and an odd ``q`` would walk
+    a path no test in this tree has ever driven (measured: ``q`` over the
+    whole 448-pair admitted set is exactly ``{2, 4, 8, 16, 32, 64, 128}``,
+    and 0 of 500 000 random binary64 draws had an odd denominator).
+    Asserting it at the derivation rather than only at the two readers is
+    what makes those two a defence and not a duplication: they can fire
+    only if something REPLACES this derivation, and this raise is what
+    stops the replacement being silent. Widening past dyadics is therefore
+    a deliberate act — relax this check and the decline takes over — and
+    not a quiet change of behaviour in a branch nothing measures.
     """
-    return Fraction(exp_float)
+    frac = Fraction(exp_float)
+    q = frac.denominator
+    if q & (q - 1):
+        raise ValueError(
+            f"'pow' exponent {exp_float!r} produced the rational {frac}, "
+            f"whose denominator {q} is not a power of two. Every finite "
+            f"binary64 is a dyadic rational, so this cannot happen for a "
+            f"binary64 argument — whatever reached here is not one. The "
+            f"even-denominator root guard in "
+            f"stelling.smt._pow_rational_lines and the odd-denominator "
+            f"decline in stelling.obligation.rational_pow_problem both "
+            f"rest on this invariant; widen it deliberately in all three "
+            f"places or not at all"
+        )
+    return frac
 
 
 def rational_pow_problem(exp_float: float) -> str | None:
@@ -717,6 +750,18 @@ def rational_pow_problem(exp_float: float) -> str | None:
     exponent that is not a dyadic rational of small degree DECLINES to
     UNKNOWN rather than being analysed as a nearby rational, because a
     nearby rational is a different function.
+
+    **THE ODD-DENOMINATOR ARM FAILS CLOSED.** ``q`` is a power of two for
+    every binary64 exponent (:func:`pow_exponent_rational`), so the arm
+    below is unreachable from anything jax can trace and is here for the
+    day admission widens past dyadics. The emission's root guard —
+    ``aux >= 0``, which is what makes ``aux`` the root jax computes rather
+    than the negative one — is written for an EVEN ``q``; an odd one has a
+    single real root and needs no guard, which is exactly why a wrong
+    encoding there would be silent. Nothing in this tree has ever driven
+    it, so it DECLINES to UNKNOWN instead of walking. Declining costs an
+    answer nobody gets today; walking would spend an ungauged path on a
+    discharge, and a discharge has nothing downstream to re-derive it.
     """
     if not math.isfinite(exp_float):
         return (
@@ -729,6 +774,18 @@ def rational_pow_problem(exp_float: float) -> str | None:
         return (
             f"'pow' with negative rational exponent {frac}: negative "
             f"rational exponents are not supported"
+        )
+    if q % 2:
+        return (
+            f"'pow' exponent {exp_float!r} denotes exactly {p}/{q}, whose "
+            f"denominator is ODD. The auxiliary encoding aux^q = x^p is "
+            f"emitted with a non-negativity guard on aux that is correct "
+            f"for an EVEN q — it selects the root jax computes out of the "
+            f"two real ones — and an odd q takes a path no test in this "
+            f"tree drives. Every binary64 exponent is a dyadic rational, "
+            f"so this is unreachable through jax; it declines rather than "
+            f"emit down an ungauged branch, because a discharge from one "
+            f"has nothing downstream to catch it"
         )
     degree = max(p, q)
     if degree <= RATIONAL_POW_DEGREE_CAP:

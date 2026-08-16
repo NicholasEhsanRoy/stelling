@@ -50,13 +50,38 @@ against what a gauge buys. The bar's own text says what it buys: *"Under this
 bar the worst case of a wrong row is a witness that fails replay. Without it
 the worst case is silent."* A bar makes a wrong row's discharges UNUSABLE; it
 does not make them VISIBLE. `tests/test_pow_row_gauge_jax.py` makes them
-visible: 17 deliberate wrongnesses of this row's encoding, zero survivors, and
-one of them — a single auxiliary constant shared between two elements of a
-vectorised `pow` — silently DISCHARGES an obligation that is false at
-`x = [4, 1]`, which is exactly the missed violation the bar exists to contain
-and which nothing in this tree caught before. For a row that has been attacked
-and repaired, the gauge is the stronger instrument, and it is the one that
-would have caught the repairs going wrong. A bar is not a gauge.
+visible: a battery of deliberate wrongnesses of this row's encoding whose floor
+is `assert len(muts) >= 20` — the gauge's own anti-vacuity assertion, and the
+exact string this file checks for below, so the figure written here cannot
+drift from the one that runs — with zero survivors, and one of them, a single
+auxiliary constant shared between two elements of a vectorised `pow`, silently
+DISCHARGES an obligation that is false at `x = [4, 1]`, which is exactly the
+missed violation the bar exists to contain and which nothing in this tree
+caught before. For a row that has been attacked and repaired, the gauge is the
+stronger instrument, and it is the one that would have caught the repairs going
+wrong. A bar is not a gauge.
+
+THAT LAST SENTENCE WAS OVER-CLAIMED, AND THE CORRECTION IS WHY IT CAN BE
+TRUSTED NOW. "Would have caught the repairs going wrong" is a claim about the
+repairs AT THE EXPONENTS THE BATTERY DRIVES, and a blinded audit measured
+those: the shipped battery reached integer exponents `{-2, 3}` and the single
+pair `(1, 2)`. It then wrote three wrongnesses conditioned outside that set —
+wrong only above degree 3, wrong only for `q >= 4`, wrong only for `p != 1` —
+and all three passed every gate, each turning a genuinely REFUTED query into
+VERIFIED on an exponent the admission guard admits. A CONDITIONAL repair is
+exactly the shape a repaired row regresses in, so the sentence was claiming the
+property it was least able to support: "both exponent branches" is true of the
+branches and says nothing about the exponents.
+
+The battery now drives integer exponents `[-4, -2, 3, 5]` and the pairs `1/2`,
+`1/4`, `3/2`; all three of those mutations are IN it, so the widening is
+pinned rather than done once; and the arity is measured at the seams rather
+than asserted in prose
+(`test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose`). The
+claim above therefore stands at four integer exponents of both signs and three
+of the 448 admitted `(p, q)` pairs. That bound is stated instead of "both
+branches" because "both branches" is what was true while three mutations were
+getting through.
 
 `is_finite` is a weaker case still, and for a reason that is about the row
 rather than about process: under the semantics the verdict CLAIMS, emitting
@@ -291,9 +316,10 @@ def test_pow_is_out_because_its_pass_completed_AND_the_row_is_now_GAUGED():
     # anti-vacuity assertion is what pins the battery SIZE; this pins that the
     # battery still contains the mutations the decision was argued from.
     battery = gauge_path.read_text(encoding="utf-8")
-    assert "assert len(muts) >= 17" in battery, (
+    assert "assert len(muts) >= 20" in battery, (
         "the gauge no longer asserts its own battery size, so this file "
-        "cannot delegate that pin to it"
+        "cannot delegate that pin to it — and the floor quoted in this "
+        "module's docstring is that literal string, so the two move together"
     )
     for named in ('"emit-rational-sides-swapped"',
                   '"emit-rational-root-guard-dropped"',
@@ -309,6 +335,21 @@ def test_pow_is_out_because_its_pass_completed_AND_the_row_is_now_GAUGED():
         "and it is the strongest single sentence in the argument for not "
         "barring this row"
     )
+    # The three CONDITIONAL mutations, which are the ones that answer the
+    # counter-argument above rather than restating it. A repaired row
+    # regresses by being fixed at the exponent someone tested and left wrong
+    # at the general one; all three of these were written by a blinded
+    # auditor, all three survived the battery this file used to argue from,
+    # and each minted a real false VERIFIED. Without them in the battery the
+    # docstring's claim is back to the one that was measured false.
+    for conditional in ('"emit-integer-wrong-only-above-degree-three"',
+                        '"emit-rational-wrong-only-at-a-larger-denominator"',
+                        '"emit-rational-wrong-only-at-a-numerator-past-one"'):
+        assert conditional in battery, (
+            f"{conditional} is gone from the battery — that is the "
+            f"conditional-wrongness shape the audit got past every gate, and "
+            f"this file's decision not to bar `pow` rests on it being gauged"
+        )
 
 
 def test_is_finite_is_out_because_the_row_cannot_be_wrong_in_that_DIRECTION():
