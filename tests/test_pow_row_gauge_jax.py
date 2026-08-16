@@ -109,9 +109,10 @@ its SCOPE"):
   and that set is neither the admitted set nor open-ended.** It is
   `DRIVEN_INTEGER_EXPONENTS` and `DRIVEN_RATIONAL_PQ` below — derived from
   the fixture table rather than typed into this paragraph, and MEASURED at
-  the two seams by
+  the two EXPONENT seams by
   `test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose`,
-  which instruments `smt._pow_integer_body` and `smt._pow_rational_lines`,
+  which instruments all three (`smt._pow_integer_body`,
+  `smt._pow_rational_lines`, `smt._pow_aux_name`),
   runs every gate against the baseline, and fails if the reach is not
   exactly that set. It is written that way because the prose version of it
   went stale immediately: the shipped battery drove **two** integer
@@ -1321,7 +1322,7 @@ def _rat_wrong_only_at_a_numerator_past_one():
 # ANY COMBINATION of the three" is caught.
 #
 # THE ENUMERATION IS THE SEAMS' ARGUMENTS, AND IT IS ASSERTED FROM THE
-# SIGNATURES rather than listed here — see `SEAM_ARGUMENTS` and
+# SIGNATURES rather than listed here — see `_SEAM_ARGUMENTS` and
 # `test_every_SEAM_ARGUMENT_is_a_gauged_COORDINATE_or_a_named_exemption`. The
 # pattern this file has now repeated three times is: close the product of the
 # axes you enumerated, then discover the radius moved onto one you did not.
@@ -3401,7 +3402,7 @@ def test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose():
     fourteen gates.
 
     So the arity is a MEASUREMENT here. ``DRIVEN_*`` are read off the fixture
-    table, this test instruments the two seams and runs every gate against the
+    table, this test instruments all three seams and runs every gate against the
     baseline, and the SCOPE string the gauge report prints is built from the
     same constants — so a fixture that drifts, an exponent literal that creeps
     back in, or a gate deleted all fail HERE rather than leaving a paragraph

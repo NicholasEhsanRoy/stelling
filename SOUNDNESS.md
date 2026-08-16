@@ -8329,14 +8329,22 @@ verdicts:
   BAR's own reach — the note said the whole query was in scope when the
   mechanism could not tell. Re-running such a query now returns VERIFIED, and
   that VERIFIED rests on the same solver `unsat` the withheld one already
-  carried. **The direction that would matter — a VERIFIED becoming UNKNOWN,
-  or either becoming REFUTED — does not occur here**: the fix can only make
-  `_evidence_is_about` return True where it returned False, and True is the
-  NARROWING branch, so no verdict can be withheld by this change that was not
-  withheld before.
+  carried. **The direction that would matter — either verdict
+  becoming REFUTED, or a VERIFIED resting on evidence it did not have — does
+  not occur here**: the fix makes `_evidence_is_about` return True where it
+  returned False, and True is the NARROWING branch, so the `UNKNOWN` →
+  `VERIFIED` flip above rests on the same solver `unsat` the withheld verdict
+  already carried. It also adds a `propagate(closed)` call inside
+  `_bar_scope`'s `try`; driven with that call made to fail, the verdict goes
+  VERIFIED → UNKNOWN with the bar's fallback note. The change therefore moves
+  verdicts in BOTH directions — it can un-withhold a VERIFIED, and it can
+  withhold one — and neither direction produces a verdict resting on less
+  solver evidence than the one it replaced.
 
   **Which versions are affected.** 0.2.0 development builds only, from the
-  landing of the per-obligation evidence check onward. On builds whose bar was
+  landing of assume FORWARDING onward — not from the per-obligation evidence
+  check, which ships in `v0.1.0`, where there were no forwarded axioms to be
+  short of. On builds whose bar was
   whole-query there was no re-derivation to be short of axioms.
 
   **What to re-run to re-establish trust.** Any 0.2.0-development UNKNOWN

@@ -647,7 +647,10 @@ def _approx(exact: str) -> str:
 # predicate, in one place. Re-slicing is not a second implementation of the
 # emitted slice: `slice_obligation` is the SAME function
 # `slice_unknown_obligations` calls, and `tests/test_bar_walk_parity.py` pins
-# the two against each other.
+# the two against each other ON THE EQUATION WALK. That test passes no
+# `relational_assumes` and drives no assume-carrying fixture, so it does not
+# pin that argument; what makes that safe is measured separately —
+# `relational_assumes` moves `sl.assumes`/`sl.assumes_skipped` and never `sl.eqns`.
 #
 # THE ARGUMENTS ARE NOT ALL THE SAME ONES, AND THIS SENTENCE USED TO SAY THEY
 # WERE. It read "verbatim what `slice_unknown_obligations` calls, whose only

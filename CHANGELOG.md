@@ -221,7 +221,7 @@ SPDX-License-Identifier: Apache-2.0
   not merely applied once. **The arity is derived from the fixture table and
   measured at the seams** —
   `test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose`
-  instruments both seams, runs every gate against the baseline and fails if
+  instruments all three seams, runs every gate against the baseline and fails if
   the reach is not exactly the declared set — so the SCOPE the gauge prints
   cannot go stale the way the prose version did.
 
@@ -307,8 +307,8 @@ SPDX-License-Identifier: Apache-2.0
   do: the equality between declared and measured reach is DRIFT protection,
   the anti-vacuity floors are the only part carrying new coverage, and every
   floor is typed at the radius of a mutation someone already wrote. The shape
-  invariance is the one argument in this row's gauge that is not
-  radius-shaped.
+  invariance closes a RANGE rather than sampling it; its anti-vacuity floors
+  are still typed at the radius of the mutations already written.
 
 - **And then the radius moved onto the seam's OTHER ARGUMENT: the BASE TERM.**
   `smt._pow_integer_body(term, exp_val)` takes two arguments and the gauge
@@ -499,7 +499,7 @@ SPDX-License-Identifier: Apache-2.0
   `ALONE` derived from the measurement rather than trusted — the
   single-covered rows are compared as a set, and every `A^B = C` anywhere in
   the section is decided exactly in `Fraction` arithmetic. Because a complete
-  list runs to nineteen gate names on one row, the column is GENERATED:
+  list runs to twenty gate names on one row, the column is GENERATED:
   `python tests/test_pow_row_gauge_jax.py --doc-blocks` prints both blocks
   from a live run.
 

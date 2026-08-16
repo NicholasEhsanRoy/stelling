@@ -206,7 +206,7 @@ a subset satisfied the test, so deleting one gate name from the
 `emit-integer-loses-the-reciprocal` row left the suite green while deleting
 exactly the fact the paragraph above argues from.
 
-A complete list of up to nineteen gate names per row is not something anyone
+A complete list of up to twenty gate names per row is not something anyone
 should retype, and that is why the hedge was there. So the column is
 GENERATED: `python tests/test_pow_row_gauge_jax.py --doc-blocks` prints both
 blocks from a live gauging run, and the third column's prose is merged back in
@@ -250,8 +250,8 @@ a whole cell of it without the suite noticing.
 | `emit-rational-constraint-never-asserted` | `discharges-the-true-rational-upper-bound`, `discharges-the-true-rational-lower-bound`, `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `discharges-the-true-rational-bound-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `discharges-the-true-rational-bound-at-denominator-four`, `refutes-the-false-vector-property` | `aux` is free; every true property becomes sat |
 | `emit-rational-denominator-off-by-one` | `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `refutes-the-false-vector-property` | `aux^3 = x` caps the value below the bound — a MISSED violation |
 | `emit-rational-aux-is-the-base` | `discharges-the-true-rational-upper-bound`, `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `discharges-the-true-rational-bound-at-denominator-four`, `refutes-the-false-vector-property` | the encoding collapses to the identity |
-| `emit-rational-aux-shared-across-elements` | `refutes-the-false-vector-property`, `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` | **by MALFORMEDNESS**: two `declare-const` of one symbol, both backends refuse, the obligation returns `unknown`. NOT seen by the invariance gate, and that is correct — every element emits the same lines about the same shared symbol, so there is no per-element difference to see; only a verdict can catch this one |
-| `emit-rational-aux-collides-across-two-pow-OUTPUTS` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT`, `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` | **THE THIRD `_pow_aux_name` PARAMETER, which the signature enumeration turned up and which the same round had already made reachable.** Drops `out_id` from the auxiliary's name: still fresh per ELEMENT of one output, colliding between two DIFFERENT rational `pow`s. Freshness across elements had two battery items and freshness across OUTPUTS had none, because no fixture held two rational `pow`s — until the `auxiliary` arm of the base-spelling sweep, which is `(x**0.5)**e`. Measured: two distinct `out_id` values reach the seam across the battery, and the collision shows up as a per-element block that canonicalises its own base and auxiliary to the same token. Exclusivity is the finding: no solver-driven fixture here chains two rational `pow`s at all |
+| `emit-rational-aux-shared-across-elements` | `refutes-the-false-vector-property`, `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` | **by MALFORMEDNESS**: two `declare-const` of one symbol, both backends refuse, the obligation returns `unknown`. NOT seen by the invariance gate, and that is correct — every element emits the same lines about the same shared symbol, so there is no per-element difference to see. The freshness gate catches it instead, at TEXT level and with no solver: two `declare-const` of one symbol is a per-SCRIPT defect, not a per-element one |
+| `emit-rational-aux-collides-across-two-pow-OUTPUTS` | `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT`, `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` | **THE THIRD `_pow_aux_name` PARAMETER, which the signature enumeration turned up and which the same round had already made reachable.** Drops `out_id` from the auxiliary's name: still fresh per ELEMENT of one output, colliding between two DIFFERENT rational `pow`s. Freshness across elements had two battery items and freshness across OUTPUTS had none, because no fixture held two rational `pow`s — until the `auxiliary` arm of the base-spelling sweep, which is `(x**0.5)**e`. Measured: two distinct `out_id` values reach the seam across the battery, and the collision shows up as a per-element block that canonicalises its own base and auxiliary to the same token. The GAP is the finding: no solver-driven fixture here chains two rational `pow`s at all. It is no longer exclusively caught — the freshness gate sees it too |
 | `emit-rational-one-aux-for-two-elements` | `refutes-the-false-vector-property`, `emission-is-invariant-to-every-seam-argument-but-the-EXPONENT`, `every-auxiliary-is-declared-ONCE-and-named-FRESHLY` | **the sharpest item.** Well-formed: one declaration, two constraints, so `x0_0 == x0_1` and the difference of the two roots collapses to 0. An obligation false at `x = [4, 1]` comes back `discharged`. A silent missed violation, and nothing in the tree caught it before. Caught three times now — by the vector fixture's verdict and, without a solver, by BOTH text-level gates: the invariance gate, because declaring the auxiliary for one element and not the other IS a per-element difference in the emitted text, and the freshness gate, because one `declare-const` for two elements is a name that is not fresh |
 | `replay-exponent-inverted` | `refutes-the-false-rational-property`, `refutes-the-false-rational-property-at-numerator-three`, `refutes-the-false-rational-property-at-denominator-four`, `refutes-the-false-vector-property`, `replay-agrees-with-jax` | the replay disagrees with jax at a grid point |
 | `replay-as-the-identity` | `refutes-the-false-rational-property-at-numerator-three`, `replay-agrees-with-jax` | as above |
@@ -557,7 +557,7 @@ a fourth spelling reaching a seam appears in the measured reach or in its
   measured surviving the whole battery.** `smt.emit` normally folds a `pow`
   whose base and exponent are both constant, but when `smt._renderable`
   declines the fold (the exact value's denominator crosses CPython's
-  `int`→`str` cap — `Fraction(1e-100) ** 64` has a 5000-digit one) the
+  `int`→`str` cap — `Fraction(1e-100) ** 64` has a 7341-digit one) the
   literal's TEXT is pasted into the seam call in place of a symbol. Measured on
   this tree: `jnp.power(1e-100, 64.0)` hands `smt._pow_integer_body` the term
   `(/ 492525077454931 4925…)`, a compound s-expression, and a mutation
@@ -585,13 +585,14 @@ a fourth spelling reaching a seam appears in the measured reach or in its
   them interval-undecidable and is why the emission is what decides them.
   Separately, `interval-containment-eager-and-jit` builds every one of its
   probes at shape `()`, so the containment claim is about one element; the
-  transfer is reached at two only through the vector fixture's end-to-end
-  verdict, and at no other count at all. The shape-invariance argument does
+  transfer is CHECKED at two only through the vector fixture's end-to-end
+  verdict, and at no other count. Measured, the probes REACH the transfer at
+  counts 1-6; nothing asserts containment past one. The shape-invariance argument does
   not transfer here — there is no emitted text to compare on that face.
 - **The libm assumption under the transfer.** `interval.pow_` evaluates its
   corners with the host's `math.pow` bumped one ulp outward, under
   `POW_LIBM_ASSUMPTION`. The containment gate is a spot check at four points
-  per box on five boxes; it is not evidence that the bracket holds for every
+  per box over seven (box, exponent) pairs; it is not evidence that the bracket holds for every
   operand, and audit 0.2.0 § S9/S11 is the record of that class of assumption
   failing for the compiled libm rather than the host one.
 - **`pow`'s integer-dtype guard, which is UNREACHABLE rather than ungauged.**

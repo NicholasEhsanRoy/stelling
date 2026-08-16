@@ -493,7 +493,7 @@ def _renderable(values: tuple | None) -> tuple | None:
     ``int``→``str`` at ``sys.get_int_max_str_digits()`` (4300 by default
     since 3.11), and an exact dyadic power crosses it fast — the
     DENOMINATOR is the one that goes, being a power of two.
-    ``Fraction(1e-100) ** 64`` has a 5000-digit denominator.
+    ``Fraction(1e-100) ** 64`` has a 7341-digit denominator.
 
     Measured, and the reason this gate exists rather than a comment: with
     no fallback, ``rational()`` raised out of :func:`emit`, the escalation

@@ -110,9 +110,12 @@ THE COST, MEASURED. Environment: jax 0.11.0, python 3.12.3,
   full: 9 + 2 + 10. With `is_finite` added instead: **2 RED, both of them this
   file's detectors, and 0 pre-existing tests** — the suite is otherwise fully
   green.
-* **Six purpose-built harnesses** that put the row on a solver-decided slice:
-  `+pow` withholds 4 of 4 `pow`-bearing VERIFIEDs; `+is_finite` withholds 1 of
-  the 2 `is_finite` harnesses (the second never escalates).
+* **Two purpose-built harnesses in this file** (`_pow_harness`,
+  `_is_finite_harness`) that put the row on a solver-decided slice. A wider
+  dated measurement, taken off-tree and NOT reproducible from this checkout —
+  recorded as such, the way the corpus bullet below carries its own caveat — had `+pow` withhold
+  4 of 4 `pow`-bearing VERIFIEDs and `+is_finite` withhold 1 of the 2
+  `is_finite` harnesses (the second never escalates).
 * **The fourteen MADDENING/MIME contracts**: 0 of 7 VERIFIEDs lost under every
   candidate set — AND THAT NUMBER MEANS NOTHING ABOUT THE BAR. Not one of the
   fourteen has a solver-decided obligation at all (the only invocations

@@ -603,8 +603,13 @@ def test_the_bar_re_derives_the_slice_that_was_actually_emitted(
     `closed` instead. That is only sound if the re-derivation is the SAME
     slice `escalate` emitted, and it is by construction:
     `slice_unknown_obligations` calls `slice_obligation(closed, index,
-    interval_env(closed))`, and its one further argument is documented
-    "message wording only, never admission".
+    interval_env(closed))`, and its two further arguments are
+    `top_primitives`, documented "message wording only, never admission", and
+    `relational_assumes`, which is NOT wording — it is the script's axiom
+    lines. This test pins the EQUATION walk only: it passes no
+    `relational_assumes` and holds no assume-carrying fixture, so that axis is
+    unpinned here. What makes the omission safe is measured, not assumed —
+    `relational_assumes` moves `sl.assumes`/`sl.assumes_skipped` and never `sl.eqns`.
 
     "By construction" is exactly the kind of claim that stops being true
     quietly, so it is measured here on every slice shape, under a synthetic
