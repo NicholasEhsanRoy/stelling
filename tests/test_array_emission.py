@@ -1861,6 +1861,108 @@ def test_type_level_declaration_param_aval_disagreement_is_unconstructable():
         )
 
 
+def test_the_declaration_check_reads_the_EXTENTS_not_the_param_type():
+    """AUDIT 0.2.0 B6 RE-AUDIT, UNSOUND-1 — the check above used to run only
+    `if isinstance(shape, tuple)`, so a `list` shape param SKIPPED it
+    entirely and the exact disagreement the test above forbids was
+    constructible one bracket away. `_validate_param_value` recursed into
+    tuples and not lists either, so nothing else read it. A validator that
+    silently passes a param class it cannot read is not a validator for that
+    class; the comparison is now on the extents, whatever holds them.
+
+    Note what is NOT refused here, and deliberately: a declaration with no
+    `shape` param at all. Hand-built IR legitimately omits params (see
+    `ir._validate_required_params`), so absence stays blessed — and the
+    slicer's own `_one_shape_per_value` is what stands behind it, which is
+    exactly why this door is not the defect's soundness boundary. See
+    `tests/test_aval_lie_both_faces.py` for the slicer half."""
+    for holder in (list, tuple):
+        with pytest.raises(
+            ir.TranscriptionError, match="contradicts the outvar aval"
+        ):
+            ir.JaxprEqn(
+                primitive="stelling_any",
+                invars=(),
+                outvars=(var(0, aval((3,))),),
+                params=(("shape", holder([2])), ("dtype", "float64"),
+                        ("lo", 0.0), ("hi", 1.0)),
+            )
+        # ... and AGREEING extents in the same holder are still accepted
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((3,))),),
+            params=(("shape", holder([3])), ("dtype", "float64"),
+                    ("lo", 0.0), ("hi", 1.0)),
+        )
+    # a param that is not a sequence of extents at all is REFUSED, not
+    # skipped: two self-descriptions cannot be reconciled if one of them
+    # cannot be read. `str`/`bytes` are sequences and are not shapes —
+    # `tuple("34")` is a tuple of CHARACTERS, so coercing one would compare
+    # something the declaration never said.
+    for bad in (3, None, "34", b"34"):
+        with pytest.raises(
+            ir.TranscriptionError, match="not a sequence of extents"
+        ):
+            ir.JaxprEqn(
+                primitive="stelling_any",
+                invars=(),
+                outvars=(var(0, aval((3,))),),
+                params=(("shape", bad), ("dtype", "float64"),
+                        ("lo", 0.0), ("hi", 1.0)),
+            )
+    # absence stays legal, and is the form the slicer must cover alone
+    ir.JaxprEqn(
+        primitive="stelling_any",
+        invars=(),
+        outvars=(var(0, aval((3,))),),
+        params=(("dtype", "float64"), ("lo", 0.0), ("hi", 1.0)),
+    )
+
+
+def test_the_load_walk_recurses_into_LIST_params_as_well_as_tuples():
+    """AUDIT 0.2.0 B6 RE-AUDIT, UNSOUND-1, the second half of the door.
+
+    `ir._validate_param_value` dispatched on `ClosedJaxpr`, `Jaxpr`,
+    `Array`, `tuple` and `NamedTupleParam`. A `list` matched none of them,
+    so anything a list param held reached the rest of the library
+    unvalidated — which is the same omission, in the same function family,
+    that let a `list` `shape` param past `_validate_decl_eqn`.
+
+    Driven directly rather than through `from_dict`, and that is the honest
+    scope: `_decode` never builds a bare list, so no serialized document
+    reaches this arm today. It is closed because "the container type I
+    happened to enumerate" is not a reason for a validator to stop looking,
+    and the payload below is one only this walk can catch — a missing
+    required param is a LOAD-path refusal that `JaxprEqn.__post_init__`
+    deliberately does not make."""
+    inner = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(var(0, aval((3,))),),
+            outvars=(var(1, aval(())),),
+            eqns=(
+                ir.JaxprEqn(
+                    primitive="reduce_sum",
+                    invars=(var(0, aval((3,))),),
+                    outvars=(var(1, aval(())),),
+                    params=(),  # `axes` is a param jax supplies on every one
+                ),
+            ),
+        ),
+        consts=(),
+    )
+    # constructible: hand-built IR may omit params
+    with pytest.raises(ir.TranscriptionError, match="missing param"):
+        ir._validate_param_value(inner, "eqn.params['direct']")
+    with pytest.raises(ir.TranscriptionError, match="missing param"):
+        ir._validate_param_value((inner,), "eqn.params['in a tuple']")
+    with pytest.raises(ir.TranscriptionError, match="missing param"):
+        ir._validate_param_value([inner], "eqn.params['in a list']")
+    with pytest.raises(ir.TranscriptionError, match="missing param"):
+        ir._validate_param_value([[inner]], "eqn.params['nested']")
+
+
 def test_type_level_const_pairing_disagreement_is_unconstructable():
     # the P1 constvar: a scalar const under a non-scalar constvar aval
     j = ir.Jaxpr(

@@ -581,7 +581,15 @@ def _validate_param_value(v, where: str) -> None:
         _validate_jaxpr(v, where)
     elif isinstance(v, Array):
         _validate_array_value(v, where)
-    elif isinstance(v, tuple):
+    elif isinstance(v, (tuple, list)):
+        # LIST AS WELL AS TUPLE — audit 0.2.0 B6 re-audit, UNSOUND-1. This
+        # walk recursed into tuples and not lists, so anything a list param
+        # held (a nested ClosedJaxpr, an Array, a shape) reached the rest of
+        # the library unvalidated. `_decode` never builds a bare list, so
+        # from_dict cannot reach this arm today; it is closed anyway because
+        # "the container type I happened to enumerate" is not a reason for a
+        # validator to stop looking, and that omission is exactly what let a
+        # list `shape` param past `_validate_decl_eqn` above.
         for i, item in enumerate(v):
             _validate_param_value(item, f"{where}[{i}]")
     elif isinstance(v, NamedTupleParam):
@@ -714,23 +722,67 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> None:
     """A stelling_any declaration's aval must agree with its OWN
     params — two self-descriptions of one declared set. Called from
     JaxprEqn.__post_init__ (every construction path) and from the
-    from_dict walk (kept for its load-path error context)."""
+    from_dict walk (kept for its load-path error context).
+
+    THE CHECK IS ON THE EXTENTS, NOT ON THE PARAM'S PYTHON TYPE — audit
+    0.2.0 B6 re-audit, UNSOUND-1. It used to run only ``if isinstance(
+    shape, tuple)``, so a ``list`` shape param skipped it entirely and a
+    declaration saying four elements in its param and two in its aval was
+    constructible; `_validate_param_value` recurses into tuples and (until
+    the same commit) not into lists, so nothing else read it either. A
+    validator that SILENTLY SKIPS a param class it cannot read grants that
+    class a pass, which is the opposite of what a validator is for. Any
+    sequence of extents is now compared, and a ``shape`` param that is not
+    a sequence of extents at all is REFUSED rather than skipped — the two
+    self-descriptions cannot be reconciled if one of them cannot be read.
+
+    Bytes and str are sequences and are not shapes: ``tuple("ab")`` is a
+    tuple of CHARACTERS, so coercing one would compare something the
+    declaration never said. They are refused with the same sentence.
+
+    **This door is not the soundness boundary and closing it does not make
+    one.** `ir.py` scopes per-primitive shape inference out of the load
+    validation in writing, and `stelling.obligation._Slicer.
+    _one_shape_per_value` is what actually stands between a lying document
+    and a verdict — including for the form this function deliberately
+    still blesses, a declaration with NO ``shape`` param at all (hand-built
+    IR legitimately omits params; see `_validate_required_params`). What
+    this closes is the constructor's own claim to have compared the two
+    self-descriptions when it had not."""
     if eqn.primitive != "stelling_any" or not eqn.outvars:
         return
     params = dict(eqn.params)
     # the declaration's aval must agree with its OWN params —
     # the P1 arc's lies all started at a declaration whose two
     # self-descriptions disagreed
-    shape = params.get("shape")
-    if isinstance(shape, tuple):
-        problem = _load_extent_problem(shape)
+    if "shape" in params:
+        shape = params["shape"]
+        dims: tuple | None = None
+        if not isinstance(shape, (str, bytes, bytearray)):
+            try:
+                dims = tuple(shape)
+            except Exception:  # noqa: BLE001 — unreadable IS the finding
+                # not only TypeError: a param whose iteration raises
+                # ANYTHING is a self-description that cannot be read, and
+                # letting that exception out of `JaxprEqn.__post_init__`
+                # raw is the very class this function is closing.
+                dims = None
+        _load_check(
+            dims is not None,
+            where,
+            f"stelling_any shape param {shape!r} is not a sequence of "
+            f"extents, so it cannot be checked against the outvar aval "
+            f"shape {tuple(eqn.outvars[0].aval.shape)} it is the second "
+            f"description of",
+        )
+        problem = _load_extent_problem(dims)
         _load_check(
             problem is None, where, f"stelling_any shape param has {problem}"
         )
         _load_check(
-            tuple(shape) == tuple(eqn.outvars[0].aval.shape),
+            dims == tuple(eqn.outvars[0].aval.shape),
             where,
-            f"stelling_any shape param {tuple(shape)} contradicts "
+            f"stelling_any shape param {dims} contradicts "
             f"the outvar aval shape {tuple(eqn.outvars[0].aval.shape)}",
         )
     dtype = params.get("dtype")

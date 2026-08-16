@@ -803,12 +803,43 @@ class Escalation:
     passed. Measured on `e35de13`: the refusal then came from
     :class:`stelling.verdict.Stamp`'s own emptiness check one layer
     later, which is loud but is not this gate. The gate now refuses an
-    empty hash on either leg. Note also that ``carries_work`` is a real
-    exemption and not a formality: an escalation with no records, no
-    notes, no spawns and no stamps bypasses this gate entirely, and that
-    is harmless because it contributes nothing an assembly could
-    misattribute — measured, such a pairing returns UNKNOWN off the
-    propagation alone."""
+    empty hash on either leg.
+
+    **WHICH LEG THIS GATE BINDS, AND WHICH IT DOES NOT.** It binds the
+    ESCALATION to the ``closed`` it is stamped against, and nothing else.
+    It does NOT bind the ``propagation``: :class:`stelling.propagate.
+    Propagation` carries no query identity to check against, so an
+    assembly of (query B, propagation of A, escalation of B) passes every
+    gate here — ``escalate`` hashes the ``closed`` it was handed, so the
+    pair really does match — while B's obligations are REPORTED WITH A's
+    STATUSES. Measured on this tree, on ``main`` and on the released
+    0.1.0, on two queries traced from one factory (identical
+    ``source_info``, so the per-obligation association check passes too):
+    the assembly returns **VERIFIED** where B's honest verdict is
+    **REFUTED**, with no exception anywhere.
+    :func:`stelling.affine.refine_propagation` is public, sits below this
+    gate, and writes its refined statuses into that same unbound
+    argument, so it reaches the identical outcome.
+
+    ``carries_work`` is a real exemption and not a formality: an
+    escalation with no records, no notes, no spawns and no stamps bypasses
+    this gate entirely. The sentence that used to stand here — that such a
+    pairing "returns UNKNOWN off the propagation alone" — is FALSE, and
+    was measured false in the same run: on an obligation the interval leg
+    decides outright, ``escalate`` returns an empty escalation, the gate
+    is exempted, and the mispaired propagation ALONE mints VERIFIED on a
+    query whose honest verdict is REFUTED. An exempt escalation
+    contributes nothing an assembly could misattribute; the PROPAGATION
+    contributes everything, and it is the leg no identity is checked on.
+
+    The repair is an identity on the ``Propagation``, checked wherever a
+    propagation is consumed against a query — cross-module work, scheduled
+    as its own change. Until it lands this is a **disclosed residue and
+    not a closed one**, and ``tests/test_verified_bar.py::
+    test_a_mispaired_PROPAGATION_mints_a_false_VERIFIED`` holds the live
+    measurement of both arms — with ``::test_the_pairing_gate_binds_the_
+    ESCALATION_and_not_the_propagation`` beside it for the covered
+    direction — so that closing it is a test going red."""
 
     records: tuple[ObligationEscalation, ...]
     notes: tuple[str, ...] = ()

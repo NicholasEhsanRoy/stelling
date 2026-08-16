@@ -408,35 +408,540 @@ def test_the_same_harnesses_UNEDITED_are_untouched(harness, expected):
         assert r.outcome == expected, r.detail
 
 
+# -- THE DECLARATION'S OWN TWO SELF-DESCRIPTIONS (B6 re-audit, UNSOUND-1) ----
+#
+# Everything above moves the lie onto a COMPUTED equation's invar avals. The
+# re-audit moved it one step earlier, onto the `stelling_any` itself, and the
+# binding-site witness could not see it: `_binding_shape` answered from the
+# declaration's OUTVAR AVAL, and `slice` mints one SMT constant per element
+# of the declaration's `shape` PARAM. For exactly that one binding class the
+# check compared a quantity nothing emits. Measured on `96ab47a`: a `jit`
+# body declaring four elements in its param and two in its aval minted four
+# symbols, summed two, and returned `discharged` on `8 <= 4.5`.
+
+
+def _jit_decl_body_eqns(harness):
+    """The (jit eqn, its ClosedJaxpr body) of a traced harness."""
+    from stelling.coverage import call_body
+
+    q = trace(harness)
+    jit_eqn = next(e for e in q.jaxpr.eqns if e.primitive == "jit")
+    return q, jit_eqn, call_body(jit_eqn)
+
+
+def _rebuild_with_body(q, jit_eqn, body_eqns, consts):
+    body = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=jit_eqn.params_dict()["jaxpr"].jaxpr.constvars,
+            invars=jit_eqn.params_dict()["jaxpr"].jaxpr.invars,
+            outvars=jit_eqn.params_dict()["jaxpr"].jaxpr.outvars,
+            eqns=tuple(body_eqns),
+            effects=jit_eqn.params_dict()["jaxpr"].jaxpr.effects,
+            debug_info=jit_eqn.params_dict()["jaxpr"].jaxpr.debug_info,
+        ),
+        consts=consts,
+    )
+    new_jit = ir.JaxprEqn(
+        primitive=jit_eqn.primitive,
+        invars=jit_eqn.invars,
+        outvars=jit_eqn.outvars,
+        params=tuple((k, (body if k == "jaxpr" else v))
+                     for k, v in jit_eqn.params),
+        effects=jit_eqn.effects,
+        source_info=jit_eqn.source_info,
+    )
+    return ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=q.jaxpr.constvars,
+            invars=q.jaxpr.invars,
+            outvars=q.jaxpr.outvars,
+            eqns=tuple(new_jit if e is jit_eqn else e for e in q.jaxpr.eqns),
+            effects=q.jaxpr.effects,
+            debug_info=q.jaxpr.debug_info,
+        ),
+        consts=q.consts,
+    )
+
+
+@jax.jit
+def _jitted_declared_sum():
+    # the DECLARATION is inside the body, so no environment ever holds a box
+    # for it: `interval_env` returns the top level and the propagator runs
+    # each transparent body in an isolated env it discards
+    a = any_array((N,), jnp.float64, (float(LO), float(HI)))
+    return jnp.sum(a)
+
+
+def _jit_declared_ceiling():
+    return assert_(_jitted_declared_sum() <= float(CEILING))
+
+
+def test_a_declaration_with_NO_shape_param_binds_at_the_scalar_it_emits():
+    """THE FORM THE DOOR BLESSES, AND THE SLICER MUST COVER ALONE.
+
+    `ir._validate_decl_eqn` cross-checks a declaration's `shape` param
+    against its outvar aval, and deliberately does not fire when the param
+    is ABSENT — hand-built IR legitimately omits params, which is the form
+    `ir._validate_required_params`' docstring blesses in writing. `slice`
+    reads `params.get("shape", ())`, so an absent param means ONE scalar
+    symbol; here every aval in the document says four elements and agrees
+    with every other, so no reference disagrees with any other reference and
+    the value is inside a `jit` body where no box exists.
+
+    On `96ab47a` this sliced, and `smt.emit` then raised `IndexError: tuple
+    index out of range` — reaching the verdict as "escalation attempted;
+    internal error", an obligation quoting a stelling defect where the
+    honest answer is a named refusal. It is the same wrong-quantity read as
+    the list-param reproducer, in the direction that crashes rather than the
+    direction that discharges, and no door check can reach it."""
+    q, jit_eqn, inner = _jit_decl_body_eqns(_jit_declared_ceiling)
+    stripped = tuple(
+        ir.JaxprEqn(
+            primitive=e.primitive, invars=e.invars, outvars=e.outvars,
+            params=tuple((k, v) for k, v in e.params if k != "shape"),
+            effects=e.effects, source_info=e.source_info,
+        )
+        if e.primitive == "stelling_any" else e
+        for e in inner.jaxpr.eqns
+    )
+    assert any(
+        e.primitive == "stelling_any" and "shape" not in e.params_dict()
+        for e in stripped
+    ), "the fixture did not strip the shape param"
+    bad = _rebuild_with_body(q, jit_eqn, stripped, inner.consts)
+
+    p = propagate(bad)
+    assert [o.status for o in p.obligations] == ["unknown"]
+    env = interval_env(bad)
+    (item,) = slice_unknown_obligations(bad, p, env)
+    assert isinstance(item, DeclinedObligation), item
+    assert "BOUND at shape ()" in item.reason, item.reason
+    assert "one shape" in item.reason, item.reason
+    # the lying value is in NO environment: the box witness cannot see it
+    named = int(item.reason.split("variable ")[1].split(" ")[0])
+    assert named not in env, (
+        f"variable {named} IS in the environment, so this fixture does not "
+        f"exercise the blind spot it was written for"
+    )
+    # and the truth, in exact rationals: the claim is false
+    assert not (N * HI <= CEILING)
+
+
+def test_the_slicer_closes_the_declaration_lie_ON_ITS_OWN():
+    """THE SLICER IS CORRECT WITHOUT THE DOOR, and this test is what says so.
+
+    `ir._validate_decl_eqn` now compares a declaration's two
+    self-descriptions whatever holds the extents, so the re-audit's own
+    reproducer (`shape=[4]`, outvar aval `(2,)`) is refused at construction
+    and cannot reach a slicer at all —
+    `tests/test_array_emission.py::test_the_declaration_check_reads_the_
+    EXTENTS_not_the_param_type` pins that. That refusal must not be the only
+    thing standing here: `SOUNDNESS.md` puts hand-built `ir.ClosedJaxpr` in
+    scope, `ir.py` scopes per-primitive shape inference out of the load
+    validation in writing, and a slicer that relies on a door check is one
+    door change away from the false VERIFIED again.
+
+    So the disagreement is installed with `object.__setattr__`, PAST the
+    frozen dataclass's `__post_init__` — "suppose the door were bypassed" —
+    and the slicer is asked directly. It declines, naming the shape the
+    EMISSION would mint terms from as the binding: the `shape` param, four
+    elements, against a document every one of whose avals says two.
+
+    The document is the re-audit's `p1_decl_listshape.py` in every other
+    respect. The `jit`-nested form of the same lie is
+    `test_a_declaration_with_NO_shape_param_binds_at_the_scalar_it_emits`
+    above and `..._is_refused_when_the_descent_re_transcribes_it` below —
+    the descent rebuilds each equation, so the constructor's check runs a
+    second time there and answers first."""
+    q = trace(_sum_ceiling)
+    decl_id = next(e.outvars[0].id for e in q.jaxpr.eqns
+                   if e.primitive == "stelling_any")
+
+    def relabel(a, shape):
+        return ir.Aval(kind=a.kind, shape=tuple(shape), dtype=a.dtype,
+                       weak_type=a.weak_type)
+
+    lied = []
+    for e in q.jaxpr.eqns:
+        invars = tuple(
+            ir.Var(id=a.id, aval=relabel(a.aval, (2,)))
+            if isinstance(a, ir.Var) and a.id == decl_id else a
+            for a in e.invars
+        )
+        outvars = tuple(
+            ir.Var(id=v.id, aval=relabel(v.aval, (2,)))
+            if v.id == decl_id else v for v in e.outvars
+        )
+        params = e.params
+        if e.primitive == "stelling_any":
+            # constructed CONSISTENT (both self-descriptions say (2,)) so
+            # that the door lets it through at all
+            params = tuple((k, ((2,) if k == "shape" else v))
+                           for k, v in e.params)
+        new = ir.JaxprEqn(
+            primitive=e.primitive, invars=invars, outvars=outvars,
+            params=params, effects=e.effects, source_info=e.source_info,
+        )
+        if e.primitive == "stelling_any":
+            # ... and then moved PAST the constructor's check, on purpose:
+            # `shape` says four elements, every aval in the document says
+            # two, and every reference agrees with every other reference.
+            object.__setattr__(
+                new, "params",
+                tuple((k, ((N,) if k == "shape" else v)) for k, v in e.params),
+            )
+            assert tuple(new.params_dict()["shape"]) == (N,)
+            assert tuple(new.outvars[0].aval.shape) == (2,)
+        lied.append(new)
+    bad = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(constvars=q.jaxpr.constvars, invars=q.jaxpr.invars,
+                       outvars=q.jaxpr.outvars, eqns=tuple(lied),
+                       effects=q.jaxpr.effects,
+                       debug_info=q.jaxpr.debug_info),
+        consts=q.consts)
+
+    p = propagate(bad)
+    assert [o.status for o in p.obligations] == ["unknown"], (
+        "the interval leg no longer leaves this undecided, so nothing "
+        "escalates and the fixture measures nothing"
+    )
+    env = interval_env(bad)
+    (item,) = slice_unknown_obligations(bad, p, env)
+    assert isinstance(item, DeclinedObligation), item
+    assert f"BOUND at shape ({N},)" in item.reason, item.reason
+    # the BINDING leg is what answered, and that is the point: it is checked
+    # before the box leg and it read the `shape` param rather than the aval
+    assert "interval propagation computed a box" not in item.reason, item.reason
+    # the truth: four elements of [1, 2] sum to at most 8, and 8 > 4.5
+    assert not (N * HI <= CEILING)
+
+
+def test_the_declaration_lie_is_refused_when_the_descent_re_transcribes_it():
+    """AND THE SAME LIE INSIDE A `jit`, where the slicer's own inlining
+    rebuilds every equation through `ir.JaxprEqn` and the constructor check
+    therefore runs a SECOND time, over the descended scope.
+
+    Pinned because it is the reason the top-level fixture above is at the
+    top level: not because the binding witness cannot see the nested form —
+    `test_a_declaration_with_NO_shape_param_binds_at_the_scalar_it_emits`
+    shows it seeing exactly that, in the same place, on the form the door
+    blesses — but because here something answers first.
+
+    What is asserted is the WORDING as much as the outcome. A
+    `TranscriptionError` out of `_renumber_eqn` means the DOCUMENT is
+    malformed; quoting it as "internal error" would tell a reader the tool
+    broke, which is the M17′ misreading this repository has already paid
+    for once."""
+    q, jit_eqn, inner = _jit_decl_body_eqns(_jit_declared_ceiling)
+    decl_id = next(e.outvars[0].id for e in inner.jaxpr.eqns
+                   if e.primitive == "stelling_any")
+
+    def relabel(a, shape):
+        return ir.Aval(kind=a.kind, shape=tuple(shape), dtype=a.dtype,
+                       weak_type=a.weak_type)
+
+    lied = []
+    for e in inner.jaxpr.eqns:
+        invars = tuple(
+            ir.Var(id=a.id, aval=relabel(a.aval, (2,)))
+            if isinstance(a, ir.Var) and a.id == decl_id else a
+            for a in e.invars
+        )
+        outvars = tuple(
+            ir.Var(id=v.id, aval=relabel(v.aval, (2,)))
+            if v.id == decl_id else v for v in e.outvars
+        )
+        params = e.params
+        if e.primitive == "stelling_any":
+            params = tuple((k, ((2,) if k == "shape" else v))
+                           for k, v in e.params)
+        new = ir.JaxprEqn(
+            primitive=e.primitive, invars=invars, outvars=outvars,
+            params=params, effects=e.effects, source_info=e.source_info,
+        )
+        if e.primitive == "stelling_any":
+            object.__setattr__(
+                new, "params",
+                tuple((k, ((N,) if k == "shape" else v)) for k, v in e.params),
+            )
+        lied.append(new)
+    bad = _rebuild_with_body(q, jit_eqn, lied, inner.consts)
+
+    p = propagate(bad)
+    assert [o.status for o in p.obligations] == ["unknown"]
+    (item,) = slice_unknown_obligations(bad, p, interval_env(bad))
+    assert isinstance(item, DeclinedObligation), item
+    assert "could not be re-transcribed" in item.reason, item.reason
+    assert "contradicts the outvar aval shape" in item.reason, item.reason
+    assert "internal error" not in item.reason, item.reason
+
+
+@needs_solvers
+def test_the_declaration_lie_no_longer_reaches_a_discharge():
+    """The verdict-bearing leg for the two documents above. On `96ab47a`
+    the `object.__setattr__` document returned `discharged` — "the box with
+    the negated predicate is unsat per z3 (wheel) and cvc5 (wheel)" — for a
+    script whose sum had TWO of the four declared addends."""
+    from stelling.smt import emit
+
+    q, jit_eqn, inner = _jit_decl_body_eqns(_jit_declared_ceiling)
+    stripped = tuple(
+        ir.JaxprEqn(
+            primitive=e.primitive, invars=e.invars, outvars=e.outvars,
+            params=tuple((k, v) for k, v in e.params if k != "shape"),
+            effects=e.effects, source_info=e.source_info,
+        )
+        if e.primitive == "stelling_any" else e
+        for e in inner.jaxpr.eqns
+    )
+    bad = _rebuild_with_body(q, jit_eqn, stripped, inner.consts)
+    p = propagate(bad)
+    esc = escalate(bad, p, SolverConfig(timeout_ms=20_000))
+    (record,) = esc.records
+    assert record.outcome == OB_UNKNOWN, record.detail
+    assert record.witness is None
+    assert "one shape" in record.detail, record.detail
+    # and the sentence is a REFUSAL, not a quoted stelling defect
+    assert "internal error" not in record.detail, record.detail
+
+    # the UNEDITED harness is untouched: a check that declines legitimate
+    # work is a coverage defect, not a repair
+    good = trace(_jit_declared_ceiling)
+    gp = propagate(good)
+    for item in slice_unknown_obligations(good, gp, interval_env(good)):
+        assert not isinstance(item, DeclinedObligation), item.reason
+        assert len(item.inputs) == N, (
+            f"the emission minted {len(item.inputs)} symbols for a "
+            f"{N}-element declaration"
+        )
+        assert "x0_3" in emit(item, "z3", 20_000).text
+    for r in escalate(good, gp, SolverConfig(timeout_ms=20_000)).records:
+        assert r.outcome == OB_VIOLATED_WITNESS, r.detail
+
+
+def test_the_BINDING_witness_alone_closes_the_declaration_lie(monkeypatch):
+    """THE MUTATION CONTROL FOR THE STRUCK CLAIM (audit 0.2.0 B6 re-audit,
+    UNSOUND-2). On `96ab47a` the box leg was the SOLE detector of the
+    top-level declaration lie: delete it and the same query came back
+    `discharged`. The entry beside it said no such document existed.
+
+    So the replacement claim — *the binding witness must be total in its
+    own right* — is checked here the way the old one was not: the box leg
+    is deleted and the binding leg is required to answer alone, on the
+    document that defeated it before.
+    """
+    import stelling.obligation as OB
+
+    real = OB._Slicer._one_shape_per_value
+
+    def binding_leg_only(self, eqn):
+        for atom in eqn.invars:
+            if not isinstance(atom, ir.Var):
+                continue
+            here = tuple(atom.aval.shape)
+            bound = self._binding_shape(atom)
+            if bound is None:
+                raise OB._Decline("unbindable")
+            if bound != here:
+                raise OB._Decline(
+                    f"{eqn.primitive!r} refers to variable {atom.id} at "
+                    f"shape {here} but it is BOUND at shape {bound}"
+                )
+        # THE BOX LEG IS DELETED
+
+    q = trace(_sum_ceiling)
+    decl_id = next(e.outvars[0].id for e in q.jaxpr.eqns
+                   if e.primitive == "stelling_any")
+
+    def relabel(a, shape):
+        return ir.Aval(kind=a.kind, shape=tuple(shape), dtype=a.dtype,
+                       weak_type=a.weak_type)
+
+    lied = []
+    for e in q.jaxpr.eqns:
+        invars = tuple(
+            ir.Var(id=a.id, aval=relabel(a.aval, (2,)))
+            if isinstance(a, ir.Var) and a.id == decl_id else a
+            for a in e.invars
+        )
+        outvars = tuple(
+            ir.Var(id=v.id, aval=relabel(v.aval, (2,)))
+            if v.id == decl_id else v for v in e.outvars
+        )
+        params = e.params
+        if e.primitive == "stelling_any":
+            params = tuple((k, ((2,) if k == "shape" else v))
+                           for k, v in e.params)
+        new = ir.JaxprEqn(
+            primitive=e.primitive, invars=invars, outvars=outvars,
+            params=params, effects=e.effects, source_info=e.source_info,
+        )
+        if e.primitive == "stelling_any":
+            object.__setattr__(
+                new, "params",
+                tuple((k, ((N,) if k == "shape" else v)) for k, v in e.params),
+            )
+        lied.append(new)
+    bad = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(constvars=q.jaxpr.constvars, invars=q.jaxpr.invars,
+                       outvars=q.jaxpr.outvars, eqns=tuple(lied),
+                       effects=q.jaxpr.effects,
+                       debug_info=q.jaxpr.debug_info),
+        consts=q.consts)
+    p = propagate(bad)
+    env = interval_env(bad)
+    # the box leg COULD see this one — that is what made it load-bearing
+    lying = [k for k, v in env.items() if tuple(v.shape) == (N,)]
+    assert lying, "no box for the lying value; this is the wrong fixture"
+
+    monkeypatch.setattr(OB._Slicer, "_one_shape_per_value", binding_leg_only)
+    (item,) = slice_unknown_obligations(bad, p, env)
+    assert isinstance(item, DeclinedObligation), (
+        "with the box leg deleted nothing sees the lie, so the box leg is "
+        "still the sole detector and the binding witness is not total"
+    )
+    assert f"BOUND at shape ({N},)" in item.reason, item.reason
+    assert real is not binding_leg_only  # the mutation really replaced it
+
+
+@pytest.mark.parametrize(
+    "bad_param,expect",
+    [
+        (b"\x04", "not a sequence of extents"),
+        ("4", "not a sequence of extents"),
+        (("4",), "non-integer extent"),
+        ((-4,), "negative extent"),
+        (object(), "not a sequence of extents"),
+    ],
+    ids=["bytes", "str", "string-extent", "negative", "not-iterable"],
+)
+def test_a_declaration_shape_param_that_cannot_be_read_DECLINES(
+    bad_param, expect
+):
+    """`_declared_shape` fails closed, and the two string cases are the ones
+    worth spelling out: `tuple(b"\x04")` is `(4,)` and `tuple("4")` is
+    `("4",)` — a bytes param would be read as a perfectly plausible extent
+    list the declaration never stated, which is a silent misread rather than
+    a refusal. Both are refused, and so is a param that will not iterate at
+    all.
+
+    Installed past `ir.JaxprEqn.__post_init__`, which refuses all five at
+    construction: the point is that the SLICER refuses them too, since it
+    may not rest on a door `SOUNDNESS.md` scopes hand-built IR around. Driven
+    through `slice_obligation` with a caller-supplied environment, because
+    the TRANSFER face reaches `tuple(shape)` on the not-iterable one first —
+    see `test_the_transfer_face_still_raises_raw_on_an_uniterable_shape_param`
+    below, which records that as a finding rather than fixing it here."""
+    q = trace(_sum_ceiling)
+    eqns = []
+    for e in q.jaxpr.eqns:
+        if e.primitive != "stelling_any":
+            eqns.append(e)
+            continue
+        new = ir.JaxprEqn(
+            primitive=e.primitive, invars=e.invars, outvars=e.outvars,
+            params=e.params, effects=e.effects, source_info=e.source_info,
+        )
+        object.__setattr__(
+            new, "params",
+            tuple((k, (bad_param if k == "shape" else v))
+                  for k, v in e.params),
+        )
+        eqns.append(new)
+    bad = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(constvars=q.jaxpr.constvars, invars=q.jaxpr.invars,
+                       outvars=q.jaxpr.outvars, eqns=tuple(eqns),
+                       effects=q.jaxpr.effects,
+                       debug_info=q.jaxpr.debug_info),
+        consts=q.consts)
+    from stelling.obligation import slice_obligation
+
+    item = slice_obligation(bad, 0, {})
+    assert isinstance(item, DeclinedObligation), item
+    assert expect in item.reason, item.reason
+    assert "internal error" not in item.reason, item.reason
+
+
+def test_the_transfer_face_still_raises_raw_on_an_uniterable_shape_param():
+    """REPORTED, NOT FIXED, and pinned so that the report cannot rot.
+
+    `propagate._t_stelling_any` calls `tuple(params["shape"])` with no
+    guard, so a `shape` param that will not iterate raises
+    `TypeError: 'object' object is not iterable` out of the public
+    `propagate()` — the S12" family again, on the transfer face, while the
+    emission face (above) declines. It is out of this batch's scope
+    (`stelling.propagate`, and a different face from the one under repair),
+    and the constructible route to it is now shut: `ir._validate_decl_eqn`
+    refuses a non-sequence `shape` param at construction, so only an
+    `object.__setattr__` past the frozen dataclass reaches it.
+
+    IF THIS TEST FAILS because `propagate()` no longer raises, the finding
+    has been fixed: delete this test and say so wherever it is recorded."""
+    q = trace(_sum_ceiling)
+    eqns = []
+    for e in q.jaxpr.eqns:
+        if e.primitive != "stelling_any":
+            eqns.append(e)
+            continue
+        new = ir.JaxprEqn(
+            primitive=e.primitive, invars=e.invars, outvars=e.outvars,
+            params=e.params, effects=e.effects, source_info=e.source_info,
+        )
+        object.__setattr__(
+            new, "params",
+            tuple((k, (object() if k == "shape" else v))
+                  for k, v in e.params),
+        )
+        eqns.append(new)
+    bad = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(constvars=q.jaxpr.constvars, invars=q.jaxpr.invars,
+                       outvars=q.jaxpr.outvars, eqns=tuple(eqns),
+                       effects=q.jaxpr.effects,
+                       debug_info=q.jaxpr.debug_info),
+        consts=q.consts)
+    with pytest.raises(TypeError, match="not iterable"):
+        propagate(bad)
+
+
 # -- the SECOND witness, driven directly, and what its status honestly is -----
 
 
 def test_the_propagated_box_witness_declines_when_it_is_the_one_that_sees():
-    """THE BOX WITNESS, exercised — and this test exists because nothing
-    else exercises it.
+    """THE BOX WITNESS, exercised — and it is LOAD-BEARING, not a second
+    opinion.
 
-    In all six reproducers above the BINDING-SITE witness answers first, so
-    the box leg never fires; over the whole test suite, instrumented, it saw
-    23,072 atoms and disagreed with none of them. That is a fact worth
-    stating rather than papering over: **no IR document has been
-    constructed on which the box witness is the only thing that sees the
-    lie.** The lie it is there for is one applied CONSISTENTLY at a value's
-    binding and at every reference to it, and every route to such a lie
-    found so far is refused earlier by something else — a `stelling_any`
-    whose `shape` param contradicts its outvar aval is refused by
-    `ir.JaxprEqn.__post_init__` at construction, a constvar whose aval
-    contradicts its value is refused in `slice`'s pass 2, and a computed
-    outvar whose aval contradicts its operands is refused by the row's own
-    shape rule (`_route_structural`, `_pair_elementwise`, `_group_reduce_
-    sum`, `_dot_general_plan`).
+    **WHAT THIS TEST USED TO SAY, AND WHY IT WAS STRUCK** (audit 0.2.0 B6
+    re-audit, UNSOUND-2). It used to call the box leg "defence in depth" and
+    support that with an enumeration: every route to a consistently-applied
+    lie "found so far is refused earlier by something else", and "no IR
+    document has been constructed on which the box witness is the only thing
+    that sees the lie". The re-audit constructed one in an afternoon — a
+    `stelling_any` whose `shape` param and outvar aval disagreed, which the
+    enumeration listed as refused at construction and which was NOT, because
+    `ir._validate_decl_eqn` ran only `if isinstance(shape, tuple)`. On
+    `96ab47a` the box leg was the SOLE detector of that document at top
+    level, proved by deleting the box leg and watching the same query come
+    back `discharged`.
 
-    So it is DEFENCE IN DEPTH, and it is kept for two reasons that do not
-    depend on a live route. It is the inter-leg agreement the S12 commit
-    claimed and did not have — the property, stated where it can be
-    checked. And `env` is a caller-supplied argument of the public
-    `slice_obligation`, which is exactly how it is driven here: an
-    environment whose box disagrees with the query is a caller-visible
-    input, not an invented one.
+    That is the same failure mode twice in one batch, and it is what S12
+    itself did: **asserting completeness for an enumeration nobody drove.**
+    So no enumeration stands here. What stands is three checkable facts:
+
+    1. The box leg is the only witness a CONSISTENTLY-APPLIED lie cannot
+       forge — it is computed from the values flowing in, not from what the
+       IR says about them.
+    2. It is load-bearing wherever a box exists, and blind inside
+       transparent call bodies by construction (`interval_env` returns the
+       top-level environment; the propagator discards each body's isolated
+       env on the way out).
+    3. Which is why the BINDING witness must be total in its own right —
+       and is what `test_the_slicer_closes_the_declaration_lie_ON_ITS_OWN`
+       above measures, on a document with no box for the lying value at all.
+
+    Neither leg is here as insurance for the other. `env` is a
+    caller-supplied argument of the public `slice_obligation`, which is
+    exactly how this test drives it: an environment whose box disagrees with
+    the query is a caller-visible input, not an invented one.
     """
     from stelling import interval as _iv
     from stelling.obligation import slice_obligation

@@ -8450,8 +8450,37 @@ verdicts:
 
   Five malformation shapes moved from a raw `TypeError`/`ValueError` to
   the decline channel, because the extraction wrapped the
-  `dimension_numbers` unpack in a `try`. Every one is in the **safe**
-  direction and none is reachable through `_t_dot_general`, whose
+  `dimension_numbers` unpack in a `try`.
+
+  **AND THAT CENSUS IS INCOMPLETE, NOT INFLATED — audit 0.2.0 B6
+  RE-AUDIT.** Every row above is real; the census stopped at one source
+  line when the `try` it describes spans two. Re-derived over a 40-case
+  malformed-`dimension_numbers` corpus, same call, four trees, attributing
+  each raw raise to the `interval.py` line it came from on `dee8bc2`:
+
+  ```
+  dee8bc2 line 1454  `(lc, rc), (lb, rb) = dimension_numbers`
+      11 cases, ALL moved at 4d793cf     <- the family counted above (5 of these)
+  dee8bc2 line 1455  `lc, rc, lb, rb = tuple(lc), tuple(rc), ...`
+       7 cases, ALL moved at 4d793cf     <- A SIXTH FAMILY, in no test and
+                                            in no doc until now: the outer
+                                            form unpacks 2x2 and an INNER
+                                            element is not iterable
+  dee8bc2 line 1462  `0 <= d < len(arr.shape)`
+       4 cases, moved at 96ab47a (S12'''s operator.index guard)
+  dee8bc2 line 1473  `a.shape[i]`
+       2 cases, moved at 96ab47a
+  dee8bc2 line 1457  `len(set(dims))`
+       3 cases, moved in THIS commit (re-audit R4: the dims are now BOUND
+       to what operator.index returns, not merely checked)
+
+  27 of 40 corpus cases raised raw on dee8bc2; 0 do on this tree.
+  ```
+
+  So the batch's true figure across the whole arc is **27 malformation
+  shapes moved across five source lines**, of which 18 moved in the
+  extraction commit the paragraph above is about. Every one is in the
+  **safe** direction and none is reachable through `_t_dot_general`, whose
   `dimension_numbers` has been through `_dot_general_row_form` and is a
   well-formed 2×2 by then — but the function is public, and "no predicate
   changed" is a claim about the function. The extraction also added
@@ -8601,12 +8630,30 @@ verdicts:
   where the other sees**, and both are needed:
 
   1. **The binding site.** A variable is bound once and referred to many
-     times; every reference must agree with the binding (the producing
-     equation's outvar aval, or the constvar's aval). Needs no propagation,
-     so it reaches EVERY scope the descent flattened — including the
-     `jit`-nested pair above, whose operand ids this slicer minted and no
-     environment has ever seen. Blind to a lie applied CONSISTENTLY at the
-     binding and at every reference.
+     times; every reference must agree with the binding. Needs no
+     propagation, so it reaches EVERY scope the descent flattened —
+     including the `jit`-nested pair above, whose operand ids this slicer
+     minted and no environment has ever seen. Blind to a lie applied
+     CONSISTENTLY at the binding and at every reference.
+
+     **WHAT "THE BINDING" IS, and it took a second pass to get right —
+     audit 0.2.0 B6 RE-AUDIT, UNSOUND-1.** It read the producing equation's
+     outvar aval, or the constvar's aval. That is the record of the binding
+     for every producer BUT ONE. A `stelling_any` describes itself twice,
+     and `slice` mints one SMT constant per element of its `shape`
+     **param** — never per element of that outvar's aval. So for exactly
+     that binding class the check compared a quantity nothing emits: a
+     declaration saying four elements in its param and two in its aval
+     minted four symbols, summed the two the reference asked for, and came
+     back `discharged` on a claim whose truth is `8 <= 4.5`. Measured on
+     `96ab47a`, inside a `jit` body where witness 2 is blind by
+     construction and where no reference disagreed with any other.
+     `stelling.obligation._Slicer._declared_shape` is now **the one
+     reader** of a declaration's element count, and the element budget, the
+     input-term construction and `_binding_shape` all go through it — so
+     the check and the emission cannot read different quantities by
+     drifting apart. A declaration whose `shape` param cannot be read
+     **declines**.
   2. **The propagated box.** The interval leg computed a shape for this
      value from the values flowing in rather than from what the IR says
      about them, so it is the one witness a consistent lie cannot forge.
@@ -8615,25 +8662,83 @@ verdicts:
      top-level environment and the propagator runs each transparent call
      body in an isolated env it discards on the way out.
 
-     **This one is DEFENCE IN DEPTH and the entry says so rather than
-     letting it read as load-bearing.** Witness 1 answered first in all
-     six reproducers, and over the whole suite this leg examined 23,072
-     boxed atoms and disagreed with none: **no IR document has been
-     constructed on which it is the only thing that sees the lie.** Every
-     route to the consistently-applied lie it exists for is refused
-     earlier by something else — a `stelling_any` whose `shape` param
-     contradicts its outvar aval at `JaxprEqn` construction, a constvar
-     whose aval contradicts its value in the slicer's decode pass, a
-     computed outvar whose aval contradicts its operands by that row's own
-     shape rule. It is kept because it IS the inter-leg property, stated
-     where it can be checked rather than asserted in a docstring — which
-     is precisely the mistake S12 made — and it is exercised through
-     `env`, a caller-supplied argument of the public `slice_obligation`.
+     **THIS ONE IS LOAD-BEARING, AND THE PARAGRAPH THAT SAID OTHERWISE IS
+     STRUCK** — audit 0.2.0 B6 RE-AUDIT, UNSOUND-2. It used to read
+     "defence in depth", supported by an enumeration of every route to a
+     consistently-applied lie and by the claim that **"no IR document has
+     been constructed on which it is the only thing that sees the lie"**.
+     The re-audit constructed one: the declaration lie of item 1 at TOP
+     level, where witness 1 read the aval and therefore agreed with every
+     reference, and the propagated box — which the interval leg builds from
+     the `shape` param — was the only thing that disagreed. Proved by
+     deleting the box leg on `96ab47a` and watching the same query come
+     back `discharged`. The enumeration was wrong in its first clause: a
+     `stelling_any` whose `shape` param contradicts its outvar aval was NOT
+     refused at `JaxprEqn` construction, because that check ran only
+     `if isinstance(shape, tuple)`.
+
+     That is **the same failure mode twice in one batch — asserting
+     completeness for an enumeration nobody drove — and it is what S12
+     itself did.** So no enumeration replaces it. What replaces it is three
+     facts a reader can check: *the box leg is the only witness a
+     consistently-applied lie cannot forge; it is load-bearing wherever a
+     box exists; and it is blind inside transparent call bodies — which is
+     why the binding witness must be total in its own right.* Both legs are
+     load-bearing, in disjoint places, and neither is insurance for the
+     other. It is exercised through `env`, a caller-supplied argument of
+     the public `slice_obligation`.
 
   A `Var` the slicer cannot bind at all **declines** rather than passing. A
   check that goes quiet where it cannot see is the shape of the defect it
   is here to close, and that arm is a backstop rather than a live path —
   measured below, it fired zero times.
+
+  **THE DOOR WAS CLOSED TOO, AND IT IS NOT THE FIX.** `ir.
+  _validate_decl_eqn` now compares a declaration's two self-descriptions
+  whatever sequence holds the extents, and REFUSES a `shape` param that is
+  not a sequence of extents at all rather than skipping it;
+  `ir._validate_param_value` recurses into lists as well as tuples. A
+  validator that silently passes a param class it cannot read grants that
+  class a pass, which is the same defect shape one layer down. But the
+  door is **not** where this class is contained, and two things say so.
+  `ir.py` scopes per-primitive shape inference out of the load validation
+  in writing, and `ir.ClosedJaxpr` is a public dataclass. And the door
+  still BLESSES, deliberately, a declaration with **no `shape` param at
+  all** — hand-built IR legitimately omits params — which on `96ab47a`
+  sliced a four-element declaration into ONE scalar symbol and then raised
+  `IndexError: tuple index out of range` out of `smt.emit`, reaching the
+  verdict as *"escalation attempted; internal error"*. The slicer closes
+  that form on its own, and `tests/test_aval_lie_both_faces.py::
+  test_the_slicer_closes_the_declaration_lie_ON_ITS_OWN` installs the
+  param/aval disagreement past `__post_init__` with `object.__setattr__`
+  so that the slicer is measured with the door not standing in front of
+  it.
+
+  Driving that door found one more thing, **reported and not fixed here**:
+  `propagate._t_stelling_any` calls `tuple(params["shape"])` with no guard,
+  so a `shape` param that will not iterate raises `TypeError: 'object'
+  object is not iterable` out of the public `propagate()` while the
+  emission face declines — the S12″ two-faces shape once more, on the
+  transfer side. It is left because it is `stelling.propagate` and the
+  other face, and because the constructible route to it is now shut: only
+  an `object.__setattr__` past the frozen dataclass reaches it. Pinned as
+  a live expectation in
+  `test_aval_lie_both_faces.py::test_the_transfer_face_still_raises_raw_on_
+  an_uniterable_shape_param`, so the report cannot rot into folklore.
+
+  **DOES THE DECLARATION SHAPE REACH `v0.1.0`? YES.** Driven against the
+  tag (`3e9bb9d`, `stelling 0.1.0`; jax 0.11.0, x64, z3 and cvc5 wheels):
+  both the `jit`-nested and the top-level forms return `escalate(...) ->
+  discharged` — *"the box with the negated predicate is unsat per z3
+  (wheel) and cvc5 (wheel)"* — on `sum(a) <= 4.5` over `a ∈ [1,2]^4`,
+  whose true supremum is 8. On `96ab47a` the `jit`-nested form still
+  discharged and the top-level one was caught by the box leg alone. The
+  RENDERED verdict is blocked on both trees, and **only accidentally**: a
+  `list` shape param makes the query un-encodable, `ClosedJaxpr.
+  content_hash()` raises, `solvers._query_sha256` swallows that to `""`,
+  and the pairing gate refuses an empty hash. Nothing that saw the lie was
+  involved, and the raw `TypeError` that containment rests on is itself
+  disclosed below.
 
   **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID, and the ONE screen.** A
   verdict is in scope only if its query was **not produced by `trace()`** —
@@ -8643,14 +8748,80 @@ verdicts:
 
   For such a query, screen the **IR**, not the verdict:
 
-  > For every equation, for every operand that is an `ir.Var`, compare the
-  > shape on **that reference** with the shape recorded where the variable
-  > is **bound** — the outvar aval of the equation that produces it, or the
-  > constvar's own aval. **If every reference agrees with its binding, the
-  > verdict is untouched by this defect.** Do the comparison inside
-  > transparent call bodies too (`jit`, `custom_jvp_call`,
-  > `custom_vjp_call`, `remat2`), where the propagated box is unavailable
-  > and this is the only check there is.
+  > **1. Walk every scope.** The top-level jaxpr, and **every sub-jaxpr
+  > carried in any equation's params** — including ones nested inside a
+  > tuple or list param, such as a `cond`'s `branches`. Not only the four
+  > transparent primitives.
+  >
+  > **2. Collect the bindings of each scope.** A variable is bound at:
+  > - a `stelling_any` equation's **`shape` param** when that equation
+  >   produces it — **the param, not that equation's outvar aval**, and an
+  >   ABSENT `shape` param binds at `()`. This is the quantity the emission
+  >   mints terms from;
+  > - any other producing equation's outvar aval;
+  > - a constvar's own aval;
+  > - a jaxpr **invar's** own aval.
+  >
+  > **3. Resolve a reference in its own scope first, then outward through
+  > the enclosing scopes** — innermost enclosing first. Var ids are not
+  > globally unique and `from_dict` accepts a document that reuses one
+  > across scopes.
+  >
+  > **4. Then**: for every equation, for every operand that is an `ir.Var`,
+  > compare the shape on **that reference** with the shape it is bound at.
+  > **If every reference agrees with its binding, the verdict is untouched
+  > by this defect.**
+
+  **EVERY ONE OF THOSE FOUR CLAUSES WAS ADDED BECAUSE THE SCREEN WITHOUT
+  IT CLEARED AN AFFECTED DOCUMENT**, and the first one cleared a document
+  this very entry was written about. A remediation instruction that says
+  ALL CLEAR on an actually-false VERIFIED is worse than no instruction, so
+  each is recorded with what it lets through:
+
+  - **The `stelling_any` param (clause 2).** The screen used to name the
+    producing outvar's aval for every producer. On the declaration lie of
+    witness 1 above — the document this entry's own reproducers are built
+    from — every reference agrees with that aval and the screen returned
+    ALL CLEAR on a query that returned `discharged` on `8 <= 4.5`.
+  - **Scope (clause 3).** The screen was silent about scope. With a var id
+    reused across scopes — `from_dict` accepts it — a global first-wins
+    lookup lands on an unrelated TOP-LEVEL binding whose shape agrees with
+    the lie, and returns UNTOUCHED on a document that was `STATUS:
+    VERIFIED` on `4d793cf`. The code was right; the screen was the
+    failure, which is the same failure the screens it replaced were struck
+    for.
+  - **Invars (clause 2, fourth bullet).** The screen named two binding
+    sources and a jaxpr's invars is neither, so a reference to a function
+    parameter had nothing to compare against. Both readings driven over the
+    same population in one run (3,531 queries): the shipped one leaves
+    **583 references unresolvable across 192 queries**, the repaired one
+    leaves **2, in 2**. Not exploitable — the slicer's `_rewrite`
+    substitutes the caller's atom before anything reads an invar aval — but
+    a screen that quietly cannot answer for 583 references is not a screen
+    whose ALL CLEAR a reader can act on.
+  - **Descent (clause 1).** It descended only `jit`, `custom_jvp_call`,
+    `custom_vjp_call` and `remat2`, so a lie inside a `lax.cond` branch
+    read UNTOUCHED. Not exploitable either — `cond` declines — but
+    descending everything adds no false positives (measured below) and
+    costs nothing, and "the primitives I happened to enumerate" is the
+    same reasoning that produced the other three defects on this list.
+
+  **MEASURED, on the tree this fix ships in** (jax 0.11.0, x64, one full
+  pytest run with the screen driven on every query handed to
+  `propagate()`): **3,533 queries, 3,517 UNTOUCHED, 16 AFFECTED, 0 screen
+  errors, 2 unresolvable references.** All 16 AFFECTED are in
+  `tests/test_aval_lie_both_faces.py`, which is the file that builds
+  affected documents on purpose — **zero false positives.** The 2
+  unresolvable references are both in fixtures that deliberately hold an
+  unbound variable (`test_propagate.py::test_unbound_var_raises_instead_of_
+  widening` and `test_audit_findings.py::test_cross_branch_read_raises_
+  instead_of_reading_stale_scope`), so the screen cannot answer for exactly
+  the references no document is supposed to contain. Driven against the
+  affected documents directly, it flags all six known forms (the list-param
+  declaration nested and at top level, the absent-param declaration, this
+  entry's original `reduce_sum`/`dot_general` invar-aval reproducer, the
+  scope-reuse document and the `cond`-branch document) and clears all four
+  of their unedited controls.
 
   **There is no screen on the VERDICT for this one, and that is a finding
   rather than an omission.** S12's verdict-side signature worked because
@@ -8673,41 +8844,82 @@ verdicts:
   query computes (malformed IR)
   ```
 
-  naming the variable and both shapes. Unaffected queries return exactly
-  what they returned before — see the cost measurement below.
-
-  **THE COST, MEASURED, because a check that declines legitimate work is a
-  coverage defect and not a repair.** Instrumented over the whole test
-  suite (every obligation slice it builds), same environment as above:
+  naming the variable and both shapes. The declaration form reads the same
+  way and names the same two shapes, the bound one now being the `shape`
+  param's:
 
   ```
-  equations validated                    10488
-  Var invars examined (binding witness)  13261
-     with a binding this slicer found    13261   (100.00%)
-     disagreeing with their binding          0
-     with NO binding (the fail-closed arm)   0
-  Var atoms examined (box witness)       23749
-     with a propagated box                23072   (97.15%)
-     disagreeing with their box               0
-  declines raised by this check              0
+  escalation declined: 'reduce_sum' refers to variable 5 at shape (2,)
+  but it is BOUND at shape (4,): a value has one shape, and an emission
+  that read the reference would model a different array than the one the
+  query computes (malformed IR)
   ```
 
-  Zero declines on well-formed work, and the 2.85% of atoms the box
-  witness cannot see are exactly the inner-scope ids — which is why the
-  binding-site witness is the load-bearing one and not the second opinion.
-  Suite: 3487 passed / 10 skipped with `JAX_ENABLE_X64=1`, 3488 / 9
-  without it as CI runs, skip sets differing by exactly
-  `test_tripwire_arm.py:643`. One pre-existing test changed and was
-  REPAIRED rather than relaxed:
+  Unaffected queries return exactly what they returned before — see the
+  cost measurement below.
+
+  **THE COST, MEASURED — AND THE METHOD, BECAUSE THE FIRST TABLE HERE
+  COULD NOT BE RE-DERIVED FROM ITS OWN SENTENCE** (audit 0.2.0 B6
+  re-audit). It said *"over the whole test suite (every obligation slice it
+  builds)"* and printed zeros. Over the whole suite the check raises
+  declines, necessarily: the suite contains this class's own reproducers,
+  which are malformed IR on purpose. The zeros were the suite MINUS that
+  file, unstated. **A figure that cannot be re-derived from a stated method
+  is the defect this repository treats as first-order**, so the method is
+  now the table's first line.
+
+  **METHOD.** Wrap `_Slicer._one_shape_per_value` in a pytest plugin that
+  mirrors its short-circuits exactly (a decline stops the equation, so
+  counting past one is counting work the check never did), attribute every
+  count to the test FILE that produced it, and run the whole suite once.
+  Then partition on `declines > 0`. The partition is derived, not chosen:
+  no file is named in advance.
+
+  **RESULT** (this tree; jax 0.11.0, `JAX_ENABLE_X64=1`, one
+  `pytest -q -p no:randomly` over `tests/`):
+
+  ```
+                                          WHOLE SUITE   WELL-FORMED REMAINDER
+  equations validated                          10601                   10503
+  Var invars examined (binding witness)        13406                   13286
+     with a binding this slicer found          13406                   13286
+                                            (100.00%)               (100.00%)
+     disagreeing with their binding               11                       0
+     with NO binding (the fail-closed arm)         0                       0
+     with an unreadable declaration shape          0                       0
+  Var atoms examined (box witness)             23984                   23789
+     with a propagated box                     23279                   23112
+                                              (97.06%)                (97.15%)
+     disagreeing with their box                    1                       0
+  declines raised by this check                   12                       0
+
+  files that produced a decline: tests/test_aval_lie_both_faces.py  (all 12)
+  ```
+
+  The partition lands on **exactly one file**, and it is the file whose
+  whole purpose is to hand this check malformed documents. So the claim the
+  numbers support is: **zero declines, and zero disagreements on either
+  witness, over every obligation slice the suite builds from a well-formed
+  query.** The 11 binding disagreements and the 1 box disagreement are the
+  reproducers being caught, which is the check working rather than costing.
+
+  The 2.85% of atoms the box witness cannot see are exactly the inner-scope
+  ids — which is why the binding-site witness must be total in its own
+  right, as UNSOUND-1 above measured the hard way.
+
+  Suite, re-derived on this tree: **3557 passed / 10 skipped** with
+  `JAX_ENABLE_X64=1`, **3558 / 9** without it as CI runs, skip sets
+  differing by exactly `test_tripwire_arm.py:643`. One pre-existing test
+  changed in the first pass and was REPAIRED rather than relaxed:
   `test_three_rows.py::test_slice_params_contradicting_the_aval_decline_with_the_form_quoted`
   built its own fixture by handing a shape-`(1,)` slicer an operand
   `var(1, aval((3,)))` — an instance of this very class — so the new check
   answered before the slice-routing rule the test is named for. The
   operand is now given a slicer that really does bind it at `(3,)`.
 
-  `tests/test_aval_lie_both_faces.py` carries all six reproducers, the
-  unedited controls for each, and the truth in exact `Fraction` and in
-  concrete jax.
+  `tests/test_aval_lie_both_faces.py` carries all six original reproducers,
+  the declaration-shape reproducers the re-audit added, the unedited
+  controls for each, and the truth in exact `Fraction` and in concrete jax.
 
 - **2026-08-15 (B6): a `TypeError` out of the public `propagate()`, and a
   docstring asserting it could not happen.** Audit 0.2.0 **S12″**. A
@@ -8745,6 +8957,37 @@ verdicts:
   **No verdict is retroactively invalid**: the old behaviour was a crash,
   and a crash produces no verdict.
 
+  **AND THAT FIX WAS HALF A FIX — audit 0.2.0 B6 RE-AUDIT, R4.** It CALLED
+  `operator.index(d)` and **discarded the result**, so the dims were
+  validated and never NORMALISED. Everything below the guard still ran on
+  the raw objects: `set(dims)` hashes them, `0 <= d < len(shape)` orders
+  them, `shape[i]` indexes with them — three protocols, one unvalidated
+  object. A 0-d `numpy` array satisfies `__index__` and is UNHASHABLE, so
+  it passed the guard and raised a raw `TypeError: unhashable type:
+  'numpy.ndarray'` out of the public `propagate()` while the emission face
+  declined: **the same two-faces split, one type level up**, because the
+  repair had tested a predicate where it should have produced a value.
+  `check_shape` was the model all along and does it right — it binds
+  `k = operator.index(d)` and tests `k`. Measured on `96ab47a` and on this
+  tree over a five-object attack set through both faces:
+
+  ```
+                     96ab47a propagate()          this tree
+  0-d np.array(0)    RAW TypeError: unhashable    returns; emission declines
+  np.int64(0)        ok; emission declines        ok; emission declines
+  float 0.0          ok; emission declines        ok; emission declines
+  str "0"            ok; emission declines        ok; emission declines
+  bool True          ok (leaked a bool into       ok (geometry holds int 1)
+                     the returned geometry)
+  ```
+
+  The dims are now bound to what `operator.index` returns, so the
+  `DotGeneralGeometry` the emission and the replay both read holds plain
+  `int`s that no protocol can surprise — pinned as that property in
+  `test_dot_general_both_faces.py::test_the_oracle_NORMALISES_its_dims_
+  and_does_not_merely_check_them`, rather than as a list of refused
+  inputs, because a list of inputs is what the next exotic type gets past.
+
 - **2026-08-15 (B6): a REGRESSION introduced by `4d793cf` and fixed before
   release — `escalate()` raised where `dee8bc2` returned a verdict.** Audit
   0.2.0 **M17′**. The M17 fix added an unguarded
@@ -8780,6 +9023,66 @@ verdicts:
   its own answer. The `affine` leg was fixed by the same change, at the one
   place both callers share.
 
+  **FOUR TOTALITY CLAIMS IN THAT REPAIR WERE NOT TOTAL — audit 0.2.0 B6
+  RE-AUDIT, R5 / R6 / R7 and the claimants read.** None moves a verdict:
+  every one of them is a raise where a decline belongs, and three of the
+  four are caught by the net the same repair installed. They are listed
+  because a totality claim nobody drove is what this batch has already
+  been wrong about twice.
+
+  - **R5, `_frames` (fixed in the code).** `isinstance(v, list)` is a claim
+    about the TYPE, not the object: a `list` SUBCLASS whose `__iter__`
+    raises satisfies it and then raises inside `tuple(v)`, so the docstring
+    saying not raising is "the structural guarantee" was an assertion the
+    function did not keep. A value that will not iterate is not a frame
+    list either, and now reads as `None` by the same reasoning an `int`
+    does.
+  - **R6, the preamble (fixed in the claim).** *"It reads `e.primitive` and
+    `o.top_level_eqn_pos` and compares them, which cannot raise on any
+    object"* is false — there are eight reads out there, and four of them
+    are the caller's first raise. The TRUE argument is **shadowing**, and
+    it is the one the docstring now makes: both callers derive
+    `interval_env(closed)` and their own `unknown` list comprehension over
+    `propagation.obligations` BEFORE calling, so an object that will not
+    iterate has already raised in the caller, where it is the caller's own
+    crash and not a lost batch of verdicts. The residual is named rather
+    than denied: an object that survives those reads and raises only on
+    `.primitive`, on `.top_level_eqn_pos`, or on `hash()` of what the
+    latter returns.
+  - **R7, the net's own handler (fixed in the code).** A net that re-raises
+    while composing its own message is not a net — the escape costs every
+    sibling's verdict exactly as the original raise would have. `str(e)`
+    runs the exception's own `__str__`, and `getattr(o, name, default)`
+    returns the default only for `AttributeError`. All three reads now go
+    through `_safely`, which substitutes a visible placeholder.
+  - **The claimants count (fixed in the code).** `claimants.get(pos, 0)`
+    guarded a sentence that then printed `claimants[pos]` — two reads, and
+    the second raised `KeyError` whenever the key was absent, turning *"N
+    obligations claim top-level assert position P"* into *"internal error:
+    KeyError: 3"*. The absent case is reachable because `pos` is itself a
+    SECOND read of `o.top_level_eqn_pos` and `claimants` was built from a
+    first. One read now serves both.
+
+  All four are driven in `tests/test_obligation_slice.py`, by hostile
+  objects rather than by injection where the route allows it.
+
+  **AND ONE THAT IS DISCLOSED RATHER THAN FIXED: a raw `TypeError` out of
+  the public `make_verdict`.** A query carrying a param `ir._encode` cannot
+  serialize — a `list`, before the declaration door above refused the one
+  that mattered — makes `ClosedJaxpr.content_hash()` raise, and
+  `verdict.make_verdict` calls it unguarded while building the stamp. The
+  caller gets `TypeError: stelling.ir cannot encode list` from three frames
+  down instead of a refusal that names the reason, which is not the posture
+  this library takes anywhere else. It is left for two reasons and both are
+  about not making it worse. It is a **door that is shut**, not one that is
+  open — the re-audit brute-forced every `ir._encode`-able alternative and
+  only `str` qualifies, which both faces refuse — so the obvious "fix" of
+  teaching `_encode` to emit lists would OPEN the serialized route to the
+  declaration lie above; and choosing `make_verdict`'s public error
+  contract is cross-module work. Note that it was never containment for
+  UNSOUND-1 anyway, and is not now: the slicer declines the lie whether or
+  not the query can be hashed.
+
 - **2026-08-15 (B6): "strictly stronger than the count check" was an
   overclaim; narrowed, with the boundary measured.** Audit 0.2.0 **M17″**,
   and a CLAIM defect rather than a code one — no verdict is affected. M17's
@@ -8802,10 +9105,50 @@ verdicts:
   obligation what the count answered per query — and that on the
   wrong-query attack it catches strictly more than the count did (a
   differing `source_info`, a differing position, a contested position) but
-  not all of it. **Containment is one layer up and is the same defence the
-  count check had**: `make_solver_verdict` raises `MispairedEscalationError`
-  when the escalation's recorded query hash is not the hash of the query
-  being stamped — and also when that hash cannot be established at all.
+  not all of it. **The containment is one layer up and is the same defence
+  the count check had**: `make_solver_verdict` raises
+  `MispairedEscalationError` when the escalation's recorded query hash is
+  not the hash of the query being stamped — and also when that hash cannot
+  be established at all.
+
+  **AND THAT GATE BINDS ONE OF THE THREE ARGUMENTS, SO IT IS NOT
+  CONTAINMENT FOR THIS — audit 0.2.0 B6 RE-AUDIT, UNSOUND-3, DISCLOSED AND
+  NOT CLOSED.** The gate is real and unconditional on the leg it covers
+  (13 drives refused, including one with an unhashable query, with an
+  injected-defect control proving the harness reads the live gate). The
+  leg it covers is the ESCALATION. It does not cover the PROPAGATION,
+  because `Propagation` carries no query identity to check against — and
+  the discharges do not have to come from an escalation. Measured on this
+  tree, on `main` (`dee8bc2`) and on the released **`v0.1.0`**, on two
+  queries traced from one factory:
+
+  ```
+  make_solver_verdict(B, propagation_of_A, escalate(B, p_A))  -> VERIFIED
+  B's honest verdict                                          -> REFUTED
+  ```
+
+  with **no exception anywhere**: `escalate` hashes the `closed` IT was
+  handed, so the pair the gate checks genuinely matches while B's
+  obligations are reported with A's statuses. On an obligation the
+  interval leg decides outright the escalation carries no records, no
+  notes, no spawns and no stamps — `carries_work=False` — and the gate is
+  not consulted at all, reaching the same false VERIFIED with no solver
+  record in it. `stelling.affine.refine_propagation` is public, sits below
+  the gate, and writes its refined statuses into the same unbound
+  argument, so it reaches the identical outcome.
+
+  So the sentence in `Escalation.query_sha256`'s docstring that an exempt
+  pairing "returns UNKNOWN off the propagation alone" was **false, and is
+  struck**. The repair is an identity on the `Propagation` itself, checked
+  wherever a propagation is consumed against a query — cross-module work,
+  scheduled as its own change and deliberately not attempted here. What
+  this batch did is stop the tree claiming a containment it does not have:
+  `CHANGELOG.md`, `solvers.Escalation`'s docstring and
+  `tests/test_verified_bar.py` now say which leg is bound, which is not,
+  and that `carries_work=False` exempts the gate entirely.
+  `test_verified_bar.py::test_a_mispaired_PROPAGATION_mints_a_false_VERIFIED`
+  holds the live measurement in both forms, so closing it later is a test
+  going red rather than an archaeology exercise.
 
   **Deliberately not closed inside `slice_unknown_obligations`.** The
   hazard is a caller-PAIRING error and it reaches all three arguments
@@ -8944,19 +9287,34 @@ verdicts:
   Same environment, `pytest -q -p no:randomly`, full suite:
 
   ```
-  base dee8bc2   3453 passed, 10 skipped   (JAX_ENABLE_X64=1)
-  base dee8bc2   3454 passed,  9 skipped   (no x64, as CI runs)
-  after B6       3487 passed, 10 skipped   (JAX_ENABLE_X64=1)
-  after B6       3488 passed,  9 skipped   (no x64, as CI runs)
+  base dee8bc2      3453 passed, 10 skipped   (JAX_ENABLE_X64=1)
+  base dee8bc2      3454 passed,  9 skipped   (no x64, as CI runs)
+  after B6/4d793cf  3487 passed, 10 skipped   (JAX_ENABLE_X64=1)
+  after B6/4d793cf  3488 passed,  9 skipped   (no x64, as CI runs)
+  after B6/96ab47a  3535 passed, 10 skipped   (JAX_ENABLE_X64=1)
+  after B6/96ab47a  3536 passed,  9 skipped   (no x64, as CI runs)
+  after the re-audit fixes
+                    3557 passed, 10 skipped   (JAX_ENABLE_X64=1)
+                    3558 passed,  9 skipped   (no x64, as CI runs)
   ```
 
-  They reconcile exactly: **+34** in both columns, all of them new tests —
-  19 in `tests/test_dot_general_both_faces.py` (15 of those one
+  The first two steps reconcile exactly: **+34** for `4d793cf`, all new
+  tests — 19 in `tests/test_dot_general_both_faces.py` (15 of those one
   parametrised agreement case per form, 6 well-formed and 9 malformed), 4
   in `tests/test_dot_general_from_dict_door.py`, 9 in
   `tests/test_nested_assert_escalation.py`, and 2 added to
-  `tests/test_obligation_slice.py`. Nothing existing was deleted or
-  renamed. The skip SET is unchanged in both environments and the
+  `tests/test_obligation_slice.py`; then **+48** for `96ab47a`, which is
+  `tests/test_aval_lie_both_faces.py` arriving. *(The `+48` line is a
+  repin: this table read `3487/3488` at `96ab47a` — 48 low, in the very
+  entry that supplied the 48.)* The re-audit's own step is **+22** in both
+  columns, all new tests and nothing deleted or renamed: 11 in
+  `tests/test_aval_lie_both_faces.py` (21 → 32), 2 in
+  `tests/test_array_emission.py` (68 → 70), 4 in
+  `tests/test_dot_general_both_faces.py` (42 → 46, one test and three
+  parametrised rows), 3 in `tests/test_obligation_slice.py` (27 → 30) and
+  2 in `tests/test_verified_bar.py` (57 → 59).
+
+  The skip SET is unchanged in both environments at every step, and the
   one-member difference between them is still `test_tripwire_arm.py:643`,
   *"the threefry mask fires only at x64=0"* — re-measured here, one skip
   with x64 and none without, on that file alone.

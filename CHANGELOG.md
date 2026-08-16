@@ -287,10 +287,34 @@ SPDX-License-Identifier: Apache-2.0
   level). An operand the slicer cannot bind at all declines rather than
   passing.
 
-  **Cost, measured** over every obligation slice the test suite builds
-  (10,488 equations; 13,261 operand references, all 13,261 with a binding
-  found; 23,749 atoms, 23,072 of them with a propagated box): **zero**
-  disagreements and **zero** declines on well-formed work.
+  **And "the shape the value actually has" means the shape the EMISSION
+  MINTS TERMS FROM.** The first spelling of the binding witness read the
+  producing equation's outvar aval, which is the record of the binding for
+  every producer but one: `slice` mints one SMT constant per element of a
+  `stelling_any`'s **`shape` param**, never per element of that outvar's
+  aval. A declaration saying four elements in its param and two in its aval
+  therefore minted four symbols, summed the two the reference asked for,
+  and came back `discharged` on `8 <= 4.5` — inside a `jit` body, where the
+  box witness is blind by construction. `_Slicer._declared_shape` is now
+  the one reader of a declaration's element count and the budget, the
+  input-term construction and the check all go through it.
+  `ir._validate_decl_eqn` was closed alongside it: it compared a
+  declaration's two self-descriptions only `if isinstance(shape, tuple)`,
+  so a `list` skipped it entirely, and it now compares the extents whatever
+  holds them and refuses a `shape` param it cannot read at all rather than
+  passing it. **The door is not the containment** — a declaration with no
+  `shape` param at all stays legal, as hand-built IR requires, and the
+  slicer closes that form on its own.
+
+  **Cost, measured** over every obligation slice the test suite builds, by
+  a stated method: wrap the check, mirror its short-circuits, attribute
+  every count to the test file that produced it, run the whole suite, and
+  partition on `declines > 0`. The partition lands on exactly one file —
+  the one that hands the check malformed IR on purpose. Over the
+  well-formed remainder (10,503 equations; 13,286 operand references, all
+  13,286 with a binding found; 23,789 atoms, 23,112 of them with a
+  propagated box): **zero** disagreements on either witness and **zero**
+  declines.
 
 - **`interval.dot_general_geometry` keeps its documented contract on
   non-integer `dimension_numbers`** (audit 0.2.0 **S12″**). A float or
@@ -299,8 +323,14 @@ SPDX-License-Identifier: Apache-2.0
   `propagate()`, since both consumers catch `IntervalError` and nothing
   else, and, on the emission side, as an *"internal error"* decline. The
   dims now go through `operator.index` first, exactly as `check_shape`
-  already does for extents, and raise `IntervalError`. The crash was
-  pre-existing; the docstring asserting it could not happen was not.
+  already does for extents, **and are BOUND to what it returns** — the
+  first spelling called it and discarded the result, so the dims were
+  validated and never normalised, and an object that is indexable but
+  UNHASHABLE (a 0-d `numpy` array) passed the guard and then raised a raw
+  `TypeError: unhashable type` inside `len(set(dims))`, out of the public
+  `propagate()`, while the emission declined: the same two-faces split one
+  type level up. The returned geometry now holds plain `int`s. The crash
+  was pre-existing; the docstring asserting it could not happen was not.
 
 - **`slice_unknown_obligations` can no longer raise** (audit 0.2.0
   **M17′**; a regression of the M17 fix above, caught and fixed before
@@ -315,12 +345,37 @@ SPDX-License-Identifier: Apache-2.0
   but records 7"*) and the per-obligation body is netted **per obligation**,
   so a sibling still gets its own answer.
 
+  Four totality claims in that repair were **not total**, and none of them
+  moves a verdict — each is a raise where a decline belongs. `_frames`
+  tested `isinstance(v, list)`, which a `list` SUBCLASS whose `__iter__`
+  raises satisfies; the association net's own handler could raise while
+  composing its message (`str(e)` runs the exception's `__str__`; `getattr`
+  with a default swallows only `AttributeError`); a decline sentence read
+  its claimant count a second time and raised `KeyError` printing it; and
+  the docstring's *"the preamble cannot raise on any object"* is replaced
+  with the true argument, which is that both callers read the same objects
+  first and the residual is named.
   Also narrowed: the per-obligation association is **finer** than the count
   check it replaced, not *strictly stronger*. Two queries traced from the
   same factory carry identical `source_info` at the same position, so all
   three guards pass and the wrong-query slice comes out — as it did under
-  the count. Containment is `make_solver_verdict`'s query-hash pairing,
-  which is the same defence the count check had.
+  the count. The containment is `make_solver_verdict`'s query-hash
+  pairing, which is the same defence the count check had — **and that
+  pairing binds the ESCALATION to the query and does not bind the
+  PROPAGATION**, so it is not containment for a mispaired propagation.
+  Measured on this tree, on `main`, and on the released **0.1.0**:
+  `make_solver_verdict(query_B, propagation_of_A, escalate(B, p_A))`
+  returns **VERIFIED** where `B`'s honest verdict is **REFUTED**, with no
+  exception anywhere — `escalate` hashes the `closed` it was handed, so
+  the gate sees a matching pair while `B`'s obligations are reported with
+  `A`'s statuses. `carries_work=False` — an escalation with no records,
+  no notes, no spawns and no stamps — exempts the gate entirely and
+  reaches the same false VERIFIED with no solver record at all. The
+  identity belongs on the `Propagation`, checked wherever a propagation is
+  consumed against a query; that is cross-module work and is scheduled as
+  its own change. Until then this is a **disclosed residue, not a closed
+  one** — see [SOUNDNESS.md](SOUNDNESS.md) and
+  `tests/test_verified_bar.py::test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`.
 
 - **`exp` and `pow` under `semantics="ieee"` now require a DECLARED libm
   accuracy budget** (audit 0.2.0 **S9** and **S11**; S11 reaches the

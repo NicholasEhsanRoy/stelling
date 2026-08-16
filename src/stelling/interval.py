@@ -1476,10 +1476,15 @@ def dot_general_geometry(
     Raises :class:`IntervalError` on any malformation — and that promise
     was false in exactly one line until audit 0.2.0 B6 (a non-integer dim
     passed the range test and then indexed a tuple with a float, raising a
-    raw ``TypeError`` past both consumers' ``except IntervalError``). The
-    dims are now put through ``operator.index`` first, the same way
-    :func:`check_shape` already handles extents. The emission face quotes
-    the ``IntervalError`` as a decline.
+    raw ``TypeError`` past both consumers' ``except IntervalError``), then
+    false again in the same line for a different reason until B6's
+    re-audit (the guard CALLED ``operator.index`` and discarded the
+    result, so an object that is indexable but unhashable still reached
+    ``set(dims)`` raw). The dims are now put through ``operator.index``
+    and **bound to what it returns**, the same way :func:`check_shape`
+    handles extents, so everything downstream — including the returned
+    geometry — holds plain ``int``s. The emission face quotes the
+    ``IntervalError`` as a decline.
     """
     check_shape(lhs_shape)
     check_shape(rhs_shape)
@@ -1511,16 +1516,39 @@ def dot_general_geometry(
     # accepts, and, on the emission side, a decline quoted as an "internal
     # error" while the transfer face crashed instead. Two faces, two
     # behaviours, from one malformation — which is the S12 shape again.
-    for name, dims in (("lhs", lc + lb), ("rhs", rc + rb)):
+    #
+    # AND THE RESULT IS BOUND, not discarded — audit 0.2.0 B6 re-audit R4.
+    # The first spelling of this guard CALLED `operator.index(d)` and threw
+    # the answer away, so the dims were validated and never NORMALISED and
+    # everything below still ran on the raw objects: `set(dims)` hashes
+    # them, `0 <= d < len(shape)` orders them, `shape[i]` indexes with them.
+    # Three protocols, one unvalidated object — and a 0-d `np.array(0)`
+    # satisfies `__index__` while being UNHASHABLE, so it passed the guard
+    # and then raised a raw `TypeError: unhashable type` out of the public
+    # `propagate()` while the emission face declined: the same two-faces
+    # split S12″ was, recurring one type level up because the fix had
+    # checked a predicate instead of producing a value. `check_shape` above
+    # is the model and always was: it binds `k = operator.index(d)` and
+    # tests `k`. Binding here means every consumer below — and the
+    # `DotGeneralGeometry` this returns, which the emission and the replay
+    # both read — sees plain `int`s that no protocol can surprise.
+    def _indices(name: str, dims) -> tuple[int, ...]:
+        out = []
         for d in dims:
             try:
-                operator.index(d)
+                out.append(operator.index(d))
             except TypeError:
                 raise IntervalError(
                     f"dot_general {name} dimension {d!r} is not an integer "
                     f"(malformed IR: from_dict does not coerce "
                     f"dimension_numbers entries)"
                 ) from None
+        return tuple(out)
+
+    lc = _indices("lhs", lc)
+    lb = _indices("lhs", lb)
+    rc = _indices("rhs", rc)
+    rb = _indices("rhs", rb)
     for name, dims, shape in (
         ("lhs", lc + lb, lhs_shape), ("rhs", rc + rb, rhs_shape)
     ):

@@ -678,3 +678,173 @@ def test_a_non_tuple_source_info_declines_instead_of_raising():
     assert "internal error" not in item.reason, (
         "the total comparison is the repair; the net is only its backstop"
     )
+
+
+# ── the totality claims, DRIVEN (audit 0.2.0 B6 re-audit, R5 / R7) ────────
+
+
+def test_frames_is_total_on_a_list_that_will_not_iterate():
+    """R5. `_frames`' docstring says TOTAL and says that not raising is "the
+    structural guarantee". It was not: `isinstance(v, list)` is a claim
+    about the TYPE, and a `list` subclass whose `__iter__` raises satisfies
+    it and then raises inside `tuple(v)`.
+
+    A value that will not iterate is not a frame list either, so it reads as
+    `None` — "this association cannot be CHECKED" — by exactly the same
+    reasoning an `int` does. Asserted through the helper AND end to end,
+    because the point is that the net is not what answers."""
+    import stelling.obligation as OB
+
+    class Hostile(list):
+        def __iter__(self):
+            raise RuntimeError("this list refuses to iterate")
+
+    assert isinstance(Hostile([1, 2]), list)
+    assert OB._frames(Hostile(["a"])) is None
+
+    q = square_query()
+    eqns = tuple(
+        ir.JaxprEqn(
+            primitive=e.primitive, invars=e.invars, outvars=e.outvars,
+            params=e.params, effects=e.effects,
+            source_info=Hostile(["somewhere.py:1"]),
+        )
+        if e.primitive == "stelling_assert" else e
+        for e in q.jaxpr.eqns
+    )
+    bad = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=q.jaxpr.constvars, invars=q.jaxpr.invars,
+            outvars=q.jaxpr.outvars, eqns=eqns,
+        ),
+        consts=q.consts,
+    )
+    p = propagate(bad)
+    (item,) = slice_unknown_obligations(bad, p, interval_env(bad))
+    assert isinstance(item, DeclinedObligation), item
+    assert "not a list of source frames" in item.reason, item.reason
+    assert "internal error" not in item.reason, (
+        "the net answered, which means `_frames` raised — the totality claim "
+        "is still a docstring assertion rather than a property"
+    )
+
+
+def test_the_net_around_the_association_cannot_itself_raise(monkeypatch):
+    """R7. A net that re-raises while composing its own message is not a
+    net: the escape costs every sibling obligation's verdict exactly as the
+    original raise would have.
+
+    Three of its four reads can raise on a hostile object — `str(e)` runs
+    the exception's own `__str__`, and `getattr(o, name, default)` returns
+    the default only for `AttributeError`. All three are driven here at
+    once, and the sibling obligation is asserted to survive."""
+    import stelling.obligation as OB
+
+    class Nasty(Exception):
+        def __str__(self):
+            raise RuntimeError("even my message refuses to be read")
+
+    q = two_unknown_obligations_query()
+    p = propagate(q)
+    unknown = [o for o in p.obligations if o.status == "unknown"]
+    assert len(unknown) == 2
+
+    class HostileObligation:
+        """The first obligation, with every field the handler reads made
+        hostile — but still answering `top_level_eqn_pos`, so it reaches
+        `_decide` and the raise happens inside the netted body."""
+
+        def __init__(self, real):
+            self._real = real
+
+        status = "unknown"
+
+        @property
+        def top_level_eqn_pos(self):
+            return self._real.top_level_eqn_pos
+
+        @property
+        def index(self):
+            raise RuntimeError("index refuses to be read")
+
+        @property
+        def source_info(self):
+            raise RuntimeError("source_info refuses to be read")
+
+    real = OB._frames
+    calls = {"n": 0}
+
+    def boom(v):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise Nasty()
+        return real(v)
+
+    monkeypatch.setattr(OB, "_frames", boom)
+    hostile = HostileObligation(unknown[0])
+    import dataclasses
+
+    mixed = dataclasses.replace(
+        p, obligations=(hostile,) + tuple(p.obligations[1:])
+    )
+    items = OB.slice_unknown_obligations(q, mixed, interval_env(q))
+
+    assert len(items) == 2, items
+    first, second = items
+    assert isinstance(first, DeclinedObligation), (
+        "the handler re-raised and took the whole call with it"
+    )
+    assert "internal error" in first.reason, first.reason
+    assert "Nasty" in first.reason, first.reason
+    assert "<unreadable message>" in first.reason, first.reason
+    assert first.index == -1 and first.source_info == ()
+    assert not isinstance(second, DeclinedObligation), (
+        "the sibling declined with it, so the net is not per obligation"
+    )
+
+
+def test_the_claimants_count_is_read_ONCE(monkeypatch):
+    """The count in the guard and the count in the sentence it prints must
+    be the same read. `claimants.get(pos, 0)` followed by `claimants[pos]`
+    were two, and the second raised `KeyError` whenever the key was absent —
+    turning the intended "N obligations claim top-level assert position P"
+    into "internal error: KeyError: 3".
+
+    The absent case is reachable because `pos` here is a SECOND read of
+    `o.top_level_eqn_pos`; `claimants` was built from a first one. An
+    obligation that does not answer the same way twice is what this drives.
+    """
+    import stelling.obligation as OB
+
+    q = square_query()
+    p = propagate(q)
+    (real,) = [o for o in p.obligations if o.status == "unknown"]
+    pos = real.top_level_eqn_pos
+    assert pos is not None
+
+    class Drifting:
+        status = "unknown"
+        index = real.index
+        source_info = real.source_info
+
+        def __init__(self):
+            self._n = 0
+
+        @property
+        def top_level_eqn_pos(self):
+            # first read (building `claimants`) answers None; the second
+            # (inside `_decide`) answers the real position, so `claimants`
+            # has no entry for it
+            self._n += 1
+            return None if self._n == 1 else pos
+
+    import dataclasses
+
+    mixed = dataclasses.replace(p, obligations=(Drifting(),))
+    (item,) = OB.slice_unknown_obligations(q, mixed, interval_env(q))
+    assert isinstance(item, DeclinedObligation), item
+    assert "0 obligations claim top-level assert position" in item.reason, (
+        item.reason
+    )
+    assert "internal error" not in item.reason, item.reason
+    assert "KeyError" not in item.reason, item.reason

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from fractions import Fraction
 
+import numpy
 import pytest
 
 from stelling import interval as iv
@@ -332,7 +333,50 @@ MALFORMED_DIMENSION_NUMBERS = [
     ((((5,), (0,)), ((), ())), "a dim out of range"),
     ((((0, 0), (0, 0)), ((), ())), "a duplicated dim"),
     ((((0,), ()), ((), ())), "unpaired lists"),
+    # audit 0.2.0 B6 RE-AUDIT R4: the guard for the four rows above CALLED
+    # `operator.index(d)` and DISCARDED the result, so the dims were
+    # validated and never NORMALISED — `set(dims)` still hashed the raw
+    # object, `0 <= d < n` still ordered it, `shape[i]` still indexed with
+    # it. A 0-d `numpy` array satisfies `__index__` and is UNHASHABLE, so it
+    # passed the guard and raised a raw `TypeError: unhashable type` inside
+    # `len(set(dims))` — out of the public `propagate()` on the transfer
+    # side while the emission declined: the S12″ split recurring one type
+    # level up, because a predicate was tested where a value should have
+    # been produced. These rows are OUT OF RANGE so that they are still
+    # malformed once the dims are normalised.
+    ((((numpy.array(5),), (0,)), ((), ())), "a 0-d array dim out of range"),
+    ((((0,), (numpy.array(5),)), ((), ())), "a 0-d array rhs dim out of range"),
+    ((((1,), (1,)), ((numpy.array(9),), (0,))), "a 0-d array batch dim"),
 ]
+
+
+def test_the_oracle_NORMALISES_its_dims_and_does_not_merely_check_them():
+    """AUDIT 0.2.0 B6 RE-AUDIT R4 — the fix is a BINDING, and this is what
+    says so rather than leaving it to the rows above.
+
+    `check_shape` is the model and always was: it binds
+    `k = operator.index(d)` and tests `k`. The dim guard checked the
+    predicate and threw the value away, so three protocols downstream —
+    hashing, ordering, indexing — each met an object nothing had normalised.
+    Asserting that the returned geometry holds plain `int`s is the property;
+    asserting a list of refused inputs is only the symptom, and the symptom
+    is what a future exotic type gets past.
+    """
+    g = iv.dot_general_geometry(
+        (3, 3), (3, 3),
+        (
+            ((numpy.array(1),), (numpy.int64(1),)),
+            ((False,), (numpy.array(0),)),
+        ),
+    )
+    for name, dims in (("lc", g.lc), ("rc", g.rc), ("lb", g.lb), ("rb", g.rb)):
+        for d in dims:
+            assert type(d) is int, (
+                f"geometry.{name} carries a {type(d).__name__}, so the "
+                f"consumers below it are still meeting an unnormalised "
+                f"object"
+            )
+    assert (g.lc, g.rc, g.lb, g.rb) == ((1,), (1,), (0,), (0,))
 
 
 @pytest.mark.parametrize(
