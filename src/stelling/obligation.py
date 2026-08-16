@@ -2152,10 +2152,18 @@ class _Slicer:
                     raise _Decline(problem)
                 frac = pow_exponent_rational(exp_float)
                 # Base must be non-negative: JAX returns NaN for
-                # pow(negative, fractional), so the Real encoding (which
-                # always has a solution for odd q, or no solution for even q)
-                # does not model JAX's execution. Same guard pattern as the
-                # div-straddle and is_finite guards.
+                # pow(negative, fractional), and the Real encoding does not
+                # model that. `q` is EVEN on every path that reaches here —
+                # `rational_pow_problem`, three lines up, DECLINES an odd
+                # denominator — so `aux^q = x^p` at a negative `x^p` has no
+                # real solution at all, the negated obligation is trivially
+                # unsat, and a false VERIFIED is what would come back. This
+                # comment used to offer the odd-`q` case as the live other
+                # half of an alternative; it is not one, and an untested
+                # branch that READS as covered is worse than no branch —
+                # which is the argument `pow_exponent_rational`'s dyadic
+                # refusal rests on. Same guard pattern as the div-straddle
+                # and is_finite guards.
                 base = self._resolve_for_guard(eqn.invars[0])
                 base_iv = self.env.get(
                     base.id if hasattr(base, "id") else None

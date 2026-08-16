@@ -335,16 +335,22 @@ def test_pow_is_out_because_its_pass_completed_AND_the_row_is_now_GAUGED():
         "and it is the strongest single sentence in the argument for not "
         "barring this row"
     )
-    # The three CONDITIONAL mutations, which are the ones that answer the
+    # The four CONDITIONAL mutations, which are the ones that answer the
     # counter-argument above rather than restating it. A repaired row
     # regresses by being fixed at the exponent someone tested and left wrong
-    # at the general one; all three of these were written by a blinded
-    # auditor, all three survived the battery this file used to argue from,
-    # and each minted a real false VERIFIED. Without them in the battery the
-    # docstring's claim is back to the one that was measured false.
+    # at the general one; all four were written by a blinded auditor, all four
+    # survived the battery this file used to argue from at the time they were
+    # written, and each minted a real false VERIFIED. Without them in the
+    # battery the docstring's claim is back to the one that was measured
+    # false. THE FOURTH IS ON THE SHAPE AXIS, not the exponent one — correct
+    # at elements 0 and 1 and wrong from element 2 on — and it is here because
+    # the first three being caught is what made the shape gap the next thing
+    # to survive: this list is a record of where the reach has been shown to
+    # end, not a claim that it now ends nowhere.
     for conditional in ('"emit-integer-wrong-only-above-degree-three"',
                         '"emit-rational-wrong-only-at-a-larger-denominator"',
-                        '"emit-rational-wrong-only-at-a-numerator-past-one"'):
+                        '"emit-rational-wrong-only-at-a-numerator-past-one"',
+                        '"emit-rational-wrong-only-past-the-second-element"'):
         assert conditional in battery, (
             f"{conditional} is gone from the battery — that is the "
             f"conditional-wrongness shape the audit got past every gate, and "

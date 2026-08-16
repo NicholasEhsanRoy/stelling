@@ -67,8 +67,37 @@ its SCOPE"):
   nearby rational is a DIFFERENT function) and the negative-base refusal
   under a fractional exponent (jax returns NaN there and the Real encoding
   does not model it).
-* **An ARRAY-shaped rational `pow`**, one item, for the per-element freshness
-  of the auxiliary constant.
+* **An ARRAY-shaped rational `pow`**, two elements, for the per-element
+  freshness of the auxiliary constant — and, separately, **the SHAPE axis as a
+  MEASUREMENT rather than a sentence.** `_pow_aux_name` is the one seam handed
+  the element count, so the `(element, n_out)` pairs reaching it are measured
+  across every gate the same way the exponents are, declared at
+  `DRIVEN_AUX_ELEMENTS`, and asserted by the same test. What CLOSES that axis
+  rather than sampling it is `gate_emission_is_invariant_to_the_array_shape`:
+  emission is text, so a shape-conditioned emission wrongness is exactly a
+  per-element difference in the emitted text, and that gate asserts every
+  element's seam output at every count in `_INVARIANCE_ELEMENT_COUNTS` is the
+  SCALAR output with the symbol names substituted. The predecessor drove one
+  two-element fixture and said "any array shape past the one item named above"
+  is out of scope; a mutation correct at elements 0 and 1 and wrong from
+  element 2 on passed all twenty-one gates and minted a false VERIFIED
+  (`81^(1/4) - 1 = 2` under a bound of 1.9).
+
+**WHAT THIS MECHANISM CAN AND CANNOT DO, said here because "MEASURED" reads as
+"sufficient".** The equality assertions in
+`test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose` are
+DRIFT protection — real, and exactly what failed last round, when a paragraph
+outlived the fixtures it described. They are not discovery: an equality between
+what the fixtures declare and what the seams see cannot tell you that the
+declared set is the right one. The genuinely new coverage in that test lives in
+its ANTI-VACUITY floors, and a floor is typed at the radius of the mutations
+the last audit happened to write — `|exp| >= 4`, `q >= 4`, `p != 1`, element
+index `>= 2`. Mutations conditioned OUTSIDE the floors still survive, are still
+disclosed below, and are still not gauged. The one part of this file that is
+not radius-shaped is the shape INVARIANCE gate, which holds for every
+conditioning function up to a printed element count rather than at a sampled
+point; the exponent axis has no such argument available and remains a finite
+set of driven points.
 
 SCOPE — what these gates DO NOT reach, and are therefore no evidence about:
 
@@ -116,8 +145,13 @@ SCOPE — what these gates DO NOT reach, and are therefore no evidence about:
   `test_the_odd_denominator_branch_is_UNREACHABLE_and_FAILS_CLOSED` pins
   all three on the same standard the integer-dtype guard gets.
 * **The affine refinement domain**, which does not admit `pow`.
-* **Any other primitive's row**, and any array shape past the one item named
-  above.
+* **Any other primitive's row**; **any rank past 1**; **any element count past
+  the top of `_INVARIANCE_ELEMENT_COUNTS`**; and, for every stage that is NOT
+  the emission — the transfer, the slice, the solver dispatch, the replay and
+  the verdict — **any element count past the top of
+  `_VERDICT_ELEMENT_COUNTS`**. The emission's shape dependence is closed by
+  invariance over the first range; the other stages are driven at two element
+  counts and that is a sample, stated as one.
 
 Positive control: a property genuinely FALSE inside the declared box must come
 back REFUTED with a witness that replays exactly and that violates the
@@ -206,8 +240,54 @@ DRIVEN_RATIONAL_PQ = tuple(
     )
 )
 
+# --- THE DRIVEN SHAPE, ALSO READ OFF THE FIXTURES ----------------------------
+#
+# THE EXPONENT AXIS WAS MEASURED AND THE SHAPE AXIS WAS NOT, WHICH IS THE SAME
+# DEFECT ONE ROUND LATER. The round that wrote the block above instrumented
+# `_pow_integer_body` and `_pow_rational_lines` and left `_pow_aux_name` — the
+# ONLY one of the three seams handed the array shape — out of both `DRIVEN_*`
+# and `_measured_seam_reach()`. The SCOPE paragraph then said "any other array
+# shape" is not driven, which is prose of exactly the kind the rest of this
+# file argues must be a measurement; and a mutation conditioned on the ELEMENT
+# INDEX (correct at elements 0 and 1, wrong from element 2 on) passed all 21
+# gates and minted a false VERIFIED — `81^(1/4) - 1 = 2` under a bound of 1.9.
+# The measured/asserted line ran through the middle of the instrument.
+#
+# TWO COUNTS, BECAUSE THE TWO ARE DIFFERENT EVIDENCE.
+#
+#   `_VERDICT_ELEMENT_COUNTS` are the element counts driven END TO END —
+#   through the transfer, the slice, the solver, the replay and the verdict.
+#   They are the scalar fixtures (1) and the vector fixture (2).
+#
+#   `_INVARIANCE_ELEMENT_COUNTS` are the counts driven through the EMISSION
+#   alone, by `gate_emission_is_invariant_to_the_array_shape`. That gate does
+#   not sample the shape axis, it CLOSES it: emission is text, so a
+#   shape-conditioned emission wrongness IS a per-element difference in the
+#   text, and the gate asserts there is none — every element's seam output at
+#   every count in the range is the SCALAR output with the symbol names
+#   substituted. One more sampled point would have been a floor typed at the
+#   radius of the mutation the last audit happened to write; an invariance
+#   holds for every conditioning function inside the printed range, which is
+#   the difference between widening and closing.
+#
+# The shape reach is MEASURED at `_pow_aux_name` by `_measured_seam_reach()`
+# and compared against `DRIVEN_AUX_ELEMENTS`, so deleting the invariance gate
+# collapses the measurement and fails the arity test rather than leaving this
+# paragraph standing.
+_VERDICT_ELEMENT_COUNTS = (1, 2)
+_INVARIANCE_ELEMENT_COUNTS = tuple(range(1, 7))
+
+DRIVEN_ELEMENT_COUNTS = tuple(
+    sorted(set(_VERDICT_ELEMENT_COUNTS) | set(_INVARIANCE_ELEMENT_COUNTS))
+)
+DRIVEN_AUX_ELEMENTS = tuple(
+    sorted((i, n) for n in DRIVEN_ELEMENT_COUNTS for i in range(n))
+)
+
 _DRIVEN_INT_TEXT = ", ".join(str(e) for e in DRIVEN_INTEGER_EXPONENTS)
 _DRIVEN_PQ_TEXT = ", ".join(f"{p}/{q}" for p, q in DRIVEN_RATIONAL_PQ)
+_DRIVEN_N_TEXT = ", ".join(str(n) for n in DRIVEN_ELEMENT_COUNTS)
+_VERDICT_N_TEXT = ", ".join(str(n) for n in sorted(_VERDICT_ELEMENT_COUNTS))
 
 SCOPE = (
     "BOTH exponent branches of the `pow` row under real semantics, at a "
@@ -219,13 +299,23 @@ SCOPE = (
     "slice, the fragment stamp, the SMT text, the portfolio dispatch, the "
     "exact-rational replay and the end-to-end verdict, eager AND under jit; "
     "the interval transfer's corner rule by containment against jax on this "
-    "target; the witness executed back through jax; the non-dyadic-exponent "
-    "and negative-base admission guards; and one array-shaped rational pow "
-    "for per-element aux freshness. Does NOT drive: any exponent outside the "
-    "two sets above, `integer_pow`'s row, the shared `_repeated_product` "
-    "renderer, ieee semantics past a decline probe, either emission CAP, the "
-    "INTEGER-DTYPE guard or the ODD-q rational arm (both unreachable — see "
-    "the module docstring), the affine domain, or any other array shape."
+    "target; the witness executed back through jax; and the non-dyadic-"
+    "exponent and negative-base admission guards. THE SHAPE AXIS IS MEASURED "
+    f"TOO, at `_pow_aux_name`: element counts [{_DRIVEN_N_TEXT}] reach that "
+    f"seam, of which [{_VERDICT_N_TEXT}] are driven end to end to a VERDICT "
+    "while the whole range is driven through the EMISSION, where the row's "
+    "per-element output is asserted INVARIANT to the shape — so an emission "
+    "wrongness conditioned on the element index or the element count is "
+    "caught for every conditioning function inside that range and not only at "
+    "a sampled point. Does NOT drive: any exponent outside the two sets "
+    f"above, any element count past {max(DRIVEN_ELEMENT_COUNTS)} or any rank "
+    f"past 1, any NON-emission stage past {max(_VERDICT_ELEMENT_COUNTS)} "
+    "elements (and the interval-containment probe is SCALAR-shaped, so the "
+    "transfer face is driven at one element by that gate and at two only "
+    "through the vector fixture's verdict), `integer_pow`'s row, the shared "
+    "`_repeated_product` renderer, ieee semantics past a decline probe, "
+    "either emission CAP, the INTEGER-DTYPE guard or the ODD-q rational arm "
+    "(both unreachable — see the module docstring), or the affine domain."
 )
 
 
@@ -377,11 +467,17 @@ def _rat_false_harness():
 
 def _rat_numerator_false_harness():
     """p = 3. `x^(3/2) <= 7.9` over [1, 4] is violated at x = 4, where the
-    exact value is 8. A mutation that emits `aux^2 = x^1` — the p == 1 the
-    shipped fixtures were the whole of — caps the reachable value at 2, so
-    the violation disappears and a genuinely REFUTED query comes back
-    VERIFIED. Interval-undecidable because `pow_`'s corner rule gives
-    [1, 8+ulp], which straddles the bound."""
+    exact value is `4^(3/2) = 8`. A mutation that emits `aux^2 = x^1` — the
+    p == 1 the shipped fixtures were the whole of — caps the reachable value
+    at `4^(1/2)`, so the violation disappears and a genuinely REFUTED query
+    comes back VERIFIED. Interval-undecidable because `pow_`'s corner rule
+    gives [1, 8+ulp], which straddles the bound.
+
+    The emitted form and the cap are read off the LIVE mutation and the
+    inequality decided in exact `Fraction` arithmetic by
+    `test_the_conditional_mutations_CAP_the_value_below_the_bound_RECOMPUTED`
+    — see `_rat_denominator_false_harness` for why this paragraph is not
+    allowed to carry a typed number."""
 
     def h():
         x = any_array((), "float64", RAT_BOX)
@@ -407,10 +503,25 @@ def _rat_numerator_harness(bound):
 
 def _rat_denominator_false_harness():
     """q = 4. `x^(1/4) <= 2.9` over [1, 81] is violated at x = 81, where the
-    exact value is 3. A mutation that emits `aux^5 = x` — correct-looking,
-    and wrong only for a denominator the shipped fixtures never reached —
-    caps the reachable value at 81^(1/5) < 2.41, so the violation
-    disappears."""
+    exact value is `81^(1/4) = 3`. The mutation this gate exists for emits
+    `aux^6 = x^1` — correct-looking, and wrong only for a denominator the
+    shipped fixtures never reached — which caps the reachable value at
+    `81^(1/6)`, below the bound, so the violation disappears.
+
+    THE EMITTED FORM AND THE CAP ARE NOT TYPED HERE, THEY ARE CHECKED. This
+    docstring said `aux^5` and an `81^(1/5)` cap for a round: the battery's
+    mutation adds TWO to the denominator (`q + 1` would be an ODD `q`, which
+    the same round made `_pow_rational_lines` refuse, so the item would have
+    been caught by malformedness instead of by the denominator), and `q = 5`
+    is no longer emittable at all. The doc page had it right and this
+    docstring did not, because the page is machine-checked and a docstring is
+    not. It is now:
+    `test_the_conditional_mutations_CAP_the_value_below_the_bound_RECOMPUTED`
+    reads the emitted `(p, q)` off the LIVE mutation, decides `cap <= bound
+    < truth` in exact `Fraction` arithmetic, and fails unless this paragraph
+    and the doc row both quote what it computed. No decimal appears here for
+    the same reason — `81^(1/6)` is irrational, and an approximation of it is
+    one more digit nothing recomputes."""
 
     def h():
         x = any_array((), "float64", RAT_DENOMINATOR_BOX)
@@ -445,6 +556,44 @@ def _rat_vector_harness():
     return h
 
 
+def _shape_probe_rational_harness(n):
+    """The RATIONAL branch at an arbitrary element count, for the shape
+    INVARIANCE gate. Not a control: it is never asked for a verdict, only for
+    emitted text, so what it has to be is EMITTED — the obligation must survive
+    interval propagation or there is no slice and nothing to compare.
+
+    `x^(1/4) <= 2.9` over [1, 81] straddles the bound whatever the transfer
+    says, which is deliberate: under `transfer-is-the-base` the propagated box
+    is [1, 81] and still straddles, so this probe reaches the emission under
+    that mutation too and the invariance gate cannot end up reporting a
+    TRANSFER wrongness as a shape one. The `+ (x[0] - x[0])` is the same
+    correlation `_rat_upper_harness` uses."""
+
+    def h():
+        x = any_array((n,), "float64", RAT_DENOMINATOR_BOX)
+        r = jnp.power(x, RAT_DENOMINATOR_EXP)
+        return (assert_(r[n - 1] + (x[0] - x[0]) <= 2.9),)
+
+    return h
+
+
+def _shape_probe_integer_harness(n):
+    """The INTEGER branch at an arbitrary element count, same purpose.
+
+    The bound is 0.0 rather than `INT_FALSE_BOUND` for the reason the rational
+    probe gives: the real transfer declines the straddling box to ⊤, and under
+    `transfer-is-the-base` the box is [-2, 3] so `x^3 - x` lands in [-5, 5] —
+    0.0 is interior to both, so the probe is emitted either way and a transfer
+    mutation cannot be mistaken for a shape one."""
+
+    def h():
+        x = any_array((n,), "float64", INT_BOX)
+        r = jnp.power(x, INT_EXP)
+        return (assert_(r[n - 1] - x[n - 1] <= 0.0),)
+
+    return h
+
+
 def _non_dyadic_harness():
     """AUDIT S1's headline. `0.1` is not `1/10`: the binary64 literal denotes
     `3602879701896397/36028797018963968` exactly, whose auxiliary encoding is
@@ -460,9 +609,13 @@ def _non_dyadic_harness():
 
 
 def _negative_base_harness():
-    """A fractional exponent over a box reaching below zero: jax returns NaN,
-    and the Real encoding (which has a root for odd `q` and none for even)
-    does not model that. Must decline."""
+    """A fractional exponent over a box reaching below zero: jax returns NaN
+    and the Real encoding does not model that. `q` is EVEN on every path that
+    reaches the encoding — the odd arm is refused at admission, see
+    `test_the_odd_denominator_branch_is_UNREACHABLE_and_FAILS_CLOSED` — so
+    `aux^q = x^p` at a negative base has no real solution, the negated
+    obligation is trivially unsat, and a false VERIFIED is what would come
+    back. Must decline."""
 
     def h():
         x = any_array((), "float64", (-1.0, 4.0))
@@ -634,6 +787,45 @@ def _rat_wrong_only_at_a_numerator_past_one():
     return mutated
 
 
+_ELEMENT_SUFFIX = re.compile(r"_(\d+)$")
+
+
+def _element_index_of(base):
+    """The element index a base term's name carries, or 0 for the unsuffixed
+    single-element spelling. `_pow_rational_lines` is not handed the index —
+    that is the seam gap `docs/gauge-coverage.md` names — so an
+    element-conditioned mutation has to read it off the term, exactly as
+    `_emit_rat_one_declaration_for_two_elements` does."""
+    m = _ELEMENT_SUFFIX.search(base)
+    return int(m.group(1)) if m else 0
+
+
+def _rat_wrong_only_past_the_second_element():
+    """THE SHAPE AXIS'S CONDITIONAL WRONGNESS, and the fourth mutation to
+    survive a battery that had just been widened on the exponent axis.
+
+    Correct at elements 0 and 1 — the whole of what the two-element vector
+    fixture drives — and wrong from element 2 on, where it emits `aux^6 = x`
+    for `x^(1/4)`. It passed all twenty-one gates of the predecessor and minted
+    a real false VERIFIED: on `x[2]**0.25 - x[1]**0.25 <= 1.9` over [1, 81]^3
+    the truth is `81^(1/4) - 1^(1/4) = 3 - 1 = 2`, and the mutated encoding
+    caps element 2 at `81^(1/6) < 2.09`, so the violation disappears.
+
+    It is in the battery to PIN the shape measurement, the way the three
+    exponent-conditioned mutations pin the exponent one. What catches it is
+    `emission-is-invariant-to-the-array-shape`, and that gate catches it for
+    every index inside its range rather than at the one index this mutation
+    happens to name."""
+    real = SM._pow_rational_lines
+
+    def mutated(aux_name, base, p, q):
+        if _element_index_of(base) >= 2:
+            return real(aux_name, base, 1, q + 2)
+        return real(aux_name, base, p, q)
+
+    return mutated
+
+
 def _emit_rat_aux_is_the_base(aux_name, base, p, q):
     return [
         f"(declare-const {aux_name} Real)",
@@ -752,6 +944,12 @@ def _mutations():
             "__patches__": (
                 (SM, "_pow_rational_lines",
                  _rat_wrong_only_at_a_numerator_past_one()),
+            ),
+        },
+        "emit-rational-wrong-only-past-the-second-element": {
+            "__patches__": (
+                (SM, "_pow_rational_lines",
+                 _rat_wrong_only_past_the_second_element()),
             ),
         },
         "emit-rational-sides-swapped": {
@@ -1130,6 +1328,109 @@ def gate_negative_base_declines(subject):
         return False
 
 
+def _canonicalise(lines, names):
+    """`lines` with each symbol in `names` replaced by its canonical token.
+
+    One simultaneous alternation rather than chained `str.replace`, so a
+    substitution cannot rewrite the output of an earlier one, and `\\b`-anchored
+    so `aux_2_1` is never matched inside `aux_2_12`. Longest name first, because
+    Python's alternation takes the first branch that matches."""
+    if not names:
+        return tuple(lines)
+    pattern = re.compile(
+        "|".join(
+            rf"\b{re.escape(n)}\b"
+            for n in sorted(names, key=len, reverse=True)
+        )
+    )
+    return tuple(pattern.sub(lambda m: names[m.group(0)], ln) for ln in lines)
+
+
+def _seam_blocks(harness, attr, record):
+    """Emit `harness` with `smt.<attr>` spied, and return the per-element
+    CANONICAL seam output — or None if there was no slice to emit.
+
+    The spy wraps whatever is installed at call time, which is the MUTATED
+    function: `_patched` has already entered by the time a gate calls this, so
+    what gets recorded is the subject's emission and not the row's."""
+    sl = _slice_of(harness)
+    if sl is None:
+        return None
+    calls = []
+    real = getattr(SM, attr)
+
+    def spy(*args):
+        out = real(*args)
+        calls.append((args, out))
+        return out
+
+    with mock.patch.object(SM, attr, spy):
+        SM.emit(sl, "z3", TIMEOUT_MS)
+    return [record(args, out) for args, out in calls]
+
+
+def _rational_block(args, out):
+    aux_name, base, _p, _q = args
+    return _canonicalise(out, {aux_name: "AUX", base: "BASE"})
+
+
+def _integer_block(args, out):
+    term, _exp = args
+    return _canonicalise((out,), {term: "BASE"})
+
+
+def gate_emission_is_invariant_to_the_array_shape(subject):
+    """THE SHAPE AXIS, CLOSED RATHER THAN SAMPLED.
+
+    Every other gate in this battery drives one or two element counts and is
+    therefore evidence about those counts only — which is how a mutation
+    correct at elements 0 and 1 and wrong from element 2 on passed all
+    twenty-one of them and minted a false VERIFIED. Adding a three-element
+    fixture would have answered that mutation and nothing else; the next index
+    would sit in the next gap.
+
+    So this gate asserts an INVARIANT instead. `pow` is elementwise, so the
+    lines one element emits cannot legitimately depend on which element it is
+    or on how many there are: for every element count in
+    `_INVARIANCE_ELEMENT_COUNTS`, on BOTH branches, every element's seam output
+    must equal the SCALAR output with the auxiliary and base symbols
+    substituted. Emission is text, so a shape-conditioned emission wrongness IS
+    a per-element difference in that text — which makes this gate evidence
+    about every conditioning function inside the range and not about a sampled
+    point.
+
+    What it is NOT: evidence about the transfer, the slice, the replay or the
+    verdict at those counts. Those stages are driven at
+    `_VERDICT_ELEMENT_COUNTS` and the SCOPE string says so.
+
+    No slice means nothing was emitted and the invariance is vacuous, so that
+    is a CATCH — the same conservative direction every other gate takes with an
+    exception. Both probes are built to survive `transfer-is-the-base` for that
+    reason, or this gate would report a transfer wrongness as a shape one."""
+    try:
+        with _patched(subject), _maybe_linear_fragment(subject):
+            for attr, harness_of, record in (
+                ("_pow_rational_lines", _shape_probe_rational_harness,
+                 _rational_block),
+                ("_pow_integer_body", _shape_probe_integer_harness,
+                 _integer_block),
+            ):
+                reference = None
+                for n in _INVARIANCE_ELEMENT_COUNTS:
+                    blocks = _seam_blocks(harness_of(n), attr, record)
+                    # one seam call per element, or the probe is not measuring
+                    # the shape it names
+                    if blocks is None or len(blocks) != n:
+                        return False
+                    if reference is None:
+                        reference = blocks[0]
+                    if any(b != reference for b in blocks):
+                        return False
+        return True
+    except Exception:
+        return False
+
+
 def gate_replay_agrees_with_jax(subject):
     """EMISSION == REPLAY, measured rather than declared: at a grid of
     rational points inside the declared box, the exact-rational replay's
@@ -1189,6 +1490,8 @@ GATES = {
     "witness-executes-through-jax": gate_witness_executes_through_jax,
     "interval-containment-eager-and-jit": gate_interval_containment_eager_and_jit,
     "fragment-is-nonlinear": gate_fragment_is_nonlinear,
+    "emission-is-invariant-to-the-array-shape":
+        gate_emission_is_invariant_to_the_array_shape,
     "non-dyadic-exponent-declines": gate_non_dyadic_exponent_declines,
     "negative-base-declines": gate_negative_base_declines,
     "replay-agrees-with-jax": gate_replay_agrees_with_jax,
@@ -1207,7 +1510,7 @@ def _report():
     measurement.
 
     :func:`stelling.fidelity.gauge` is a pure function of (baseline, gates,
-    battery) and this battery is now 21 gates x 21 subjects. Running it once
+    battery) and this battery is now 22 gates x 22 subjects. Running it once
     per assertion measured the identical thing four times and spent four times
     the solver budget on it; the widening below would have made that five.
 
@@ -1244,9 +1547,10 @@ def single_covered(report):
 
 
 def _measured_seam_reach():
-    """What the gates ACTUALLY drive through the two `pow` seams: the integer
-    exponents reaching :func:`smt._pow_integer_body` and the ``(p, q)`` pairs
-    reaching :func:`smt._pow_rational_lines`, measured by instrumenting both
+    """What the gates ACTUALLY drive through all THREE `pow` seams: the integer
+    exponents reaching :func:`smt._pow_integer_body`, the ``(p, q)`` pairs
+    reaching :func:`smt._pow_rational_lines`, and the ``(element, n_out)``
+    pairs reaching :func:`smt._pow_aux_name` — measured by instrumenting each
     and running every gate against the BASELINE.
 
     This is the instrument that turns the SCOPE paragraph's arity claim from
@@ -1255,10 +1559,18 @@ def _measured_seam_reach():
     `{(1, 2)}`, which is true of the branches and says nothing about the
     exponents — and the difference is exactly where three surviving mutations
     lived.
+
+    THE THIRD SEAM WAS MISSING FROM HERE FOR A ROUND, which is the same defect
+    at one remove: `_pow_aux_name` is the only seam handed the array shape, the
+    predecessor instrumented the other two, and a mutation conditioned on the
+    ELEMENT INDEX survived the widened battery. An instrument that measures two
+    of the three parameters its row reads is measuring the ones it thought of.
     """
     ints: set[int] = set()
     pqs: set[tuple[int, int]] = set()
+    aux: set[tuple[int, int]] = set()
     real_int, real_rat = SM._pow_integer_body, SM._pow_rational_lines
+    real_aux = SM._pow_aux_name
 
     def spy_int(term, exp_val):
         ints.add(exp_val)
@@ -1268,11 +1580,16 @@ def _measured_seam_reach():
         pqs.add((p, q))
         return real_rat(aux_name, base, p, q)
 
+    def spy_aux(out_id, element, n_out):
+        aux.add((element, n_out))
+        return real_aux(out_id, element, n_out)
+
     with mock.patch.object(SM, "_pow_integer_body", spy_int), \
-            mock.patch.object(SM, "_pow_rational_lines", spy_rat):
+            mock.patch.object(SM, "_pow_rational_lines", spy_rat), \
+            mock.patch.object(SM, "_pow_aux_name", spy_aux):
         for gate in GATES.values():
             gate(BASELINE)
-    return tuple(sorted(ints)), tuple(sorted(pqs))
+    return tuple(sorted(ints)), tuple(sorted(pqs)), tuple(sorted(aux))
 
 
 # --- the stage table ---------------------------------------------------------
@@ -1356,11 +1673,12 @@ def _stage_escalation(harness, label):
 def _stage_driven_arity():
     """The arity, INTO the rendered reading. A reader who quotes this page
     gets the measurement and not only the SCOPE sentence the page quotes."""
-    ints, pqs = _measured_seam_reach()
+    ints, pqs, aux = _measured_seam_reach()
     return (
         "REACH",
         f"integer exponents {list(ints)} ; (p,q) pairs "
-        f"{[list(pq) for pq in pqs]} — measured at the seams across every "
+        f"{[list(pq) for pq in pqs]} ; (element, n_out) pairs "
+        f"{[list(a) for a in aux]} — measured at all three seams across every "
         f"gate, and NOT the admitted set",
     )
 
@@ -1597,7 +1915,7 @@ def test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose():
     back in, or a gate deleted all fail HERE rather than leaving a paragraph
     standing that nothing measures.
     """
-    ints, pqs = _measured_seam_reach()
+    ints, pqs, aux = _measured_seam_reach()
     assert ints == DRIVEN_INTEGER_EXPONENTS, (
         f"the gates drive integer exponents {list(ints)}, but the fixture "
         f"table declares {list(DRIVEN_INTEGER_EXPONENTS)} — the SCOPE this "
@@ -1607,13 +1925,23 @@ def test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose():
         f"the gates drive (p, q) pairs {list(pqs)}, but the fixture table "
         f"declares {list(DRIVEN_RATIONAL_PQ)}"
     )
+    assert aux == DRIVEN_AUX_ELEMENTS, (
+        f"the gates drive (element, n_out) pairs {list(aux)}, but the fixture "
+        f"table declares {list(DRIVEN_AUX_ELEMENTS)} — the SHAPE axis is the "
+        f"one this file left as prose for a round, and a mutation "
+        f"conditioned on the element index lived in that gap"
+    )
     # the SCOPE the report and the reading both quote is BUILT from these,
     # so the printed claim cannot drift from the measured one
     assert f"[{_DRIVEN_INT_TEXT}]" in SCOPE and f"[{_DRIVEN_PQ_TEXT}]" in SCOPE
+    assert f"[{_DRIVEN_N_TEXT}]" in SCOPE and f"[{_VERDICT_N_TEXT}]" in SCOPE
 
-    # ANTI-VACUITY: this would pass just as well at the arity that let three
-    # mutations through, so the properties the widening was FOR are asserted
-    # rather than left to the equality above.
+    # ANTI-VACUITY, and READ THE MODULE DOCSTRING ON WHAT THIS IS. The three
+    # equalities above are DRIFT protection: they fail when the fixtures and
+    # the printed SCOPE part company, which is exactly what happened last
+    # round, and they would pass just as well at the arity that let four
+    # mutations through. Everything genuinely new is below, and every floor
+    # below is typed at the radius of a mutation someone already wrote.
     assert max(abs(e) for e in ints) >= 4, (
         "no fixture drives |exponent| >= 4, so a wrongness conditioned above "
         "degree 3 is invisible again — that mutation minted a false VERIFIED"
@@ -1626,6 +1954,31 @@ def test_the_driven_arity_is_MEASURED_at_the_seams_not_asserted_in_prose():
     assert len({q for _, q in pqs}) >= 2, "one denominator is one q, not a branch"
     assert len({p for p, _ in pqs}) >= 2, "p == 1 is a family, not the space"
     assert max(q for _, q in pqs) >= 4 and max(p for p, _ in pqs) >= 3
+
+    # the SHAPE floors. The element-index one is the mutation that survived;
+    # the scalar one is the OTHER arm of `_pow_aux_name`'s naming rule, which
+    # the byte-level emission tests pin and which a shape-only battery could
+    # lose without noticing.
+    assert (0, 1) in aux, (
+        "the single-element arm of `_pow_aux_name` is never driven, so the "
+        "unsuffixed spelling is emitted by nothing this gauge measures"
+    )
+    assert max(i for i, _ in aux) >= 2, (
+        "no fixture reaches an element past index 1, so a wrongness "
+        "conditioned there is invisible — that mutation minted a false "
+        "VERIFIED (81^(1/4) - 1 = 2 under a bound of 1.9)"
+    )
+    assert max(n for _, n in aux) >= 3, (
+        "no fixture drives an array past two elements, so a wrongness "
+        "conditioned on the element COUNT is invisible"
+    )
+    # ...and the shape reach is not merely wide, it is CONTIGUOUS from the
+    # scalar up, because the invariance gate's claim is about a range and a
+    # gap in the range is a gap in the claim
+    assert aux == tuple(
+        sorted((i, n) for n in range(1, max(n for _, n in aux) + 1)
+               for i in range(n))
+    ), list(aux)
 
     # and every driven pair is one the shipped guard actually ADMITS, or the
     # widening bought coverage of exponents no program can reach
@@ -1668,6 +2021,192 @@ def test_the_three_conditional_mutations_are_CAUGHT_and_by_the_new_arity():
     ), (
         "the p != 1 mutation must be caught by the p = 3 gate ALONE — every "
         "other fixture is inside the p == 1 family"
+    )
+
+
+# --- the conditional mutations' arithmetic, in ONE place that computes it ----
+#
+# Every one of these mutations is a MISSED violation: it caps the value the
+# emitted script can reach BELOW the fixture's bound, so a genuinely REFUTED
+# query comes back VERIFIED and nothing downstream sees it. That is three
+# numbers per item — the truth at the box extremum, the bound, and the cap —
+# and they were typed into three places each (the fixture docstring, the
+# mutation docstring, `docs/gauge-coverage.md`). One of them had been wrong
+# since the round that wrote it: `_rat_denominator_false_harness` described an
+# `aux^5` emission with a cap of `81^(1/5)`, when the battery adds TWO to the
+# denominator and `q = 5` is not emittable at all. The page said `aux^6` and
+# was right, because the page is machine-checked and a docstring is not.
+#
+# So the emitted exponents are READ OFF THE LIVE MUTATION rather than declared,
+# the inequalities are decided in exact `Fraction` arithmetic, and the rendered
+# forms are required to appear in both the fixture docstring and the doc row.
+
+
+@dataclass(frozen=True)
+class _ConditionalCatch:
+    """One conditional mutation's arithmetic. Nothing here is a result: the
+    fixture's own driven exponent, box extremum and bound, and the mutation to
+    interrogate. Everything derived is derived."""
+
+    mutation: str
+    harness: object
+    driven: tuple[int, int]
+    worst: Fraction
+    bound: Fraction
+
+
+_CONDITIONAL_CATCHES = (
+    _ConditionalCatch(
+        mutation="emit-rational-wrong-only-at-a-larger-denominator",
+        harness=_rat_denominator_false_harness,
+        driven=(1, 4),
+        worst=Fraction(int(RAT_DENOMINATOR_BOX[1])),
+        bound=Fraction("2.9"),
+    ),
+    _ConditionalCatch(
+        mutation="emit-rational-wrong-only-at-a-numerator-past-one",
+        harness=_rat_numerator_false_harness,
+        driven=(3, 2),
+        worst=Fraction(int(RAT_BOX[1])),
+        bound=Fraction("7.9"),
+    ),
+)
+
+
+def _emitted_pq(aux_name, base, lines):
+    """The ``(p, q)`` a rational emission ACTUALLY wrote, counted off the
+    defining equation rather than taken from the arguments — which is the whole
+    point, since the mutation's job is to write something other than what it
+    was passed."""
+    eq = [ln for ln in lines if ln.startswith("(assert (= ")]
+    if len(eq) != 1:
+        raise AssertionError(f"expected one defining equation, got {lines}")
+    q = len(re.findall(rf"\b{re.escape(aux_name)}\b", eq[0]))
+    p = len(re.findall(rf"\b{re.escape(base)}\b", eq[0]))
+    return p, q
+
+
+def _emitted_form(p, q):
+    """How an emitted ``aux^q = x^p`` is written in prose on this page and in
+    `docs/gauge-coverage.md`. Always both exponents, so a forced ``p = 1`` is
+    visible rather than spelled as a bare `x`."""
+    return f"aux^{q} = x^{p}"
+
+
+def _power_form(base, p, q):
+    return f"{base}^({p}/{q})"
+
+
+def _exceeds(worst: Fraction, p: int, q: int, bound: Fraction) -> bool:
+    """``worst ** (p/q) > bound``, decided EXACTLY. Both sides are positive, so
+    raising to ``q`` is order-preserving and no root is ever taken — which
+    matters because `81^(1/6)` is irrational and a float comparison of it
+    against a bound is the kind of evidence this file exists to refuse."""
+    return worst**p > bound**q
+
+
+def test_the_conditional_mutations_CAP_the_value_below_the_bound_RECOMPUTED():
+    """WHY EACH CONDITIONAL MUTATION IS A MISSED VIOLATION, recomputed.
+
+    For each: the truth at the box extremum must EXCEED the fixture's bound
+    (so the query is genuinely REFUTED and the gate is a real positive
+    control), and the value the MUTATED script can reach must not (so the
+    violation disappears silently). Both decided in exact `Fraction`
+    arithmetic, with the mutated exponents read off the live mutation.
+
+    Then the rendered forms are required to appear in the fixture's docstring
+    and in the doc row, which is what stops either from rotting the way
+    `_rat_denominator_false_harness`'s did.
+    """
+    muts = _mutations()
+    doc = _DOC.read_text(encoding="utf-8")
+    for item in _CONDITIONAL_CATCHES:
+        p, q = item.driven
+        ((_mod, _attr, mutation),) = muts[item.mutation]["__patches__"]
+        emitted_p, emitted_q = _emitted_pq(
+            "aux_0", "x0", mutation("aux_0", "x0", p, q)
+        )
+        assert (emitted_p, emitted_q) != (p, q), (
+            f"{item.mutation} emitted the CORRECT exponent at the fixture's "
+            f"own (p, q) = {(p, q)} — it is not wrong where its gate looks, "
+            f"so that gate is not measuring it"
+        )
+        # the baseline emission at the same call must be the driven pair, or
+        # the comparison above is against a moving reference
+        assert _emitted_pq(
+            "aux_0", "x0", SM._pow_rational_lines("aux_0", "x0", p, q)
+        ) == (p, q)
+
+        assert _exceeds(item.worst, p, q, item.bound), (
+            f"{item.mutation}'s fixture is not violated at the extremum: "
+            f"{_power_form(item.worst, p, q)} <= {item.bound}, so the gate is "
+            f"not a positive control and catches nothing"
+        )
+        assert not _exceeds(item.worst, emitted_p, emitted_q, item.bound), (
+            f"{item.mutation} does NOT hide the violation: "
+            f"{_power_form(item.worst, emitted_p, emitted_q)} still exceeds "
+            f"{item.bound}, so it would be refuted anyway and this item is "
+            f"measuring nothing"
+        )
+
+        form = _emitted_form(emitted_p, emitted_q)
+        cap = _power_form(item.worst, emitted_p, emitted_q)
+        truth = _power_form(item.worst, p, q)
+        for where, text in (
+            (f"{item.harness.__name__}'s docstring", item.harness.__doc__),
+            (f"{_DOC.name}'s `{item.mutation}` row", _doc_row(doc, item.mutation)),
+        ):
+            for phrase in (form, cap, truth):
+                assert phrase in text, (
+                    f"{where} does not quote `{phrase}`, which is what this "
+                    f"test just recomputed — the number and the prose have "
+                    f"parted company again"
+                )
+
+
+def test_the_shape_conditioned_mutation_is_CAUGHT_by_the_INVARIANCE_gate():
+    """The fourth surviving mutation, pinned to the gate that kills it and to
+    the false VERIFIED it mints without one.
+
+    The attribution matters more than the catch. What catches it must be the
+    gate that closes the shape axis — not a three-element fixture that would
+    answer this index and leave the next one open — so the exclusivity is
+    asserted: no other gate in the battery sees it, which is exactly the
+    statement that every solver-driven fixture here is blind past element 1.
+    """
+    caught = dict(_report().caught_by)
+    assert caught["emit-rational-wrong-only-past-the-second-element"] == (
+        "emission-is-invariant-to-the-array-shape",
+    ), (
+        "the element-conditioned mutation must be caught by the invariance "
+        "gate ALONE — every other fixture in this battery drives one or two "
+        "elements, and that blindness is the finding"
+    )
+
+    # ...and what it does when nothing catches it: a real false VERIFIED on a
+    # query the row is asked to decide. `x[2]^(1/4) - x[1]^(1/4) <= 1.9` over
+    # [1, 81]^3 is violated at x = [_, 1, 81], where the exact truth is
+    # `81^(1/4) - 1^(1/4)` = 3 - 1 = 2.
+    def h():
+        x = any_array((3,), "float64", RAT_DENOMINATOR_BOX)
+        r = jnp.power(x, RAT_DENOMINATOR_EXP)
+        return (assert_(r[2] - r[1] <= 1.9),)
+
+    assert Fraction(3) - Fraction(1) > Fraction("1.9")  # the exact truth
+    executed = float(
+        np.asarray(
+            jnp.power(jnp.asarray([1.0, 1.0, 81.0], jnp.float64), 0.25)[2]
+            - jnp.power(jnp.asarray([1.0, 1.0, 81.0], jnp.float64), 0.25)[1]
+        )
+    )
+    assert executed > 1.9, executed  # ...and jax agrees on this target
+
+    assert _run(h, BASELINE).status == "REFUTED"
+    mutated = _run(h, _mutations()["emit-rational-wrong-only-past-the-second-element"])
+    assert mutated.status == "VERIFIED", (
+        f"the shape-conditioned mutation no longer mints a false VERIFIED "
+        f"({mutated.status}); it is in the battery to pin the shape "
+        f"measurement and has stopped being the thing it pins"
     )
 
 
@@ -1748,6 +2287,74 @@ def test_the_odd_denominator_branch_is_UNREACHABLE_and_FAILS_CLOSED():
     for q in sorted(reachable):
         lines = SM._pow_rational_lines("aux_0", "x0", 1, q)
         assert lines[1] == "(assert (>= aux_0 0.0))", (q, lines)
+
+
+# The odd-`q` arm was removed from the CODE last round and left standing in
+# three PROSE sites, each of which describes it as a live case the encoding
+# handles: an admission comment in `obligation.py` on a path where odd `q`
+# declines several lines earlier, `_negative_base_harness`'s docstring, and a
+# 0.2.0 regression docstring. This file's own standard is that an untested
+# branch which READS as covered is worse than no branch, and a reader who
+# trusts any of the three concludes the negative-base guard exists to stop a
+# root the row can compute — when in fact `q` is always even there, the
+# encoding has no solution at all, and what the guard stops is a trivially
+# UNSAT negation coming back as a false VERIFIED.
+#
+# The two shapes are described rather than quoted, and that is not squeamish:
+# the rule applies to THIS file too, so a verbatim example here would be a
+# self-inflicted hit. The originals are at `2d0339d`.
+_ODD_Q_AS_A_LIVE_CASE = (
+    # a real root or solution attributed to an odd denominator
+    re.compile(r"(?i)\b(?:root|solution)s?\b[^.\n]{0,100}?\bfor\s+odd\b"),
+    # an odd denominator parenthesised as the case the encoding models
+    re.compile(r"(?i)\bmodels?\b[^.\n]{0,80}?\(\s*odd\s+`?q`?\s*\)"),
+)
+
+
+def test_no_source_text_presents_the_ODD_q_ARM_as_a_live_case():
+    """The odd-`q` arm is refused at three altitudes and described as live in
+    none, checked across the whole tree rather than at the three sites that
+    were wrong.
+
+    WHAT THIS CAN AND CANNOT DO. It is a text check, so it catches the CLAIM
+    SHAPE — a real root attributed to an odd denominator, or an odd
+    denominator named as what the encoding models — and not every possible way
+    of saying the same thing; a reader determined to describe the arm as live
+    can evade it. What it does do is generalise past the three sentences the
+    audit found: the class is "odd `q` presented as something this row
+    computes", the patterns are written against that class rather than against
+    the sentences, and a fourth site written in the same shape fails here. The
+    rule covers this file too, which is why the patterns above carry
+    descriptions instead of examples. HISTORICAL QUOTATION IS ALLOWED — this
+    module and `smt._pow_rational_lines` both quote the old "`q` even and odd"
+    claim to say it was wrong, and a rule that forbade that would delete the
+    record of the defect along with the defect.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    scanned, hits = 0, []
+    for path in sorted(
+        list(root.glob("src/stelling/*.py"))
+        + list(root.glob("tests/*.py"))
+        + list(root.glob("docs/*.md"))
+        + list(root.glob("*.md"))
+    ):
+        text = path.read_text(encoding="utf-8")
+        scanned += 1
+        for pattern in _ODD_Q_AS_A_LIVE_CASE:
+            for m in pattern.finditer(text):
+                line = text[: m.start()].count("\n") + 1
+                hits.append(f"{path.relative_to(root)}:{line}: {m.group(0)}")
+    # ANTI-VACUITY: a glob that matched nothing would report a clean tree
+    assert scanned > 20, f"only {scanned} files scanned — the globs are wrong"
+    assert any(
+        "pow_exponent_rational" in p.read_text(encoding="utf-8")
+        for p in root.glob("src/stelling/*.py")
+    ), "the scan did not reach the module that owns the arm"
+    assert not hits, (
+        "the odd-`q` arm is described as a live case, on a path where it "
+        "DECLINES at admission, RAISES at derivation and RAISES at emission:\n  "
+        + "\n  ".join(hits)
+    )
 
 
 def test_the_integer_dtype_guard_is_UNREACHABLE_through_jax():
@@ -1844,10 +2451,23 @@ def test_every_gate_passes_the_baseline_and_catches_its_battery():
     assert "refutes-the-false-vector-property" in caught[
         "emit-rational-aux-shared-across-elements"]
     # the well-formed sharing, whose catch is a MISSED VIOLATION rather than a
-    # refused script — asserted to be caught by the vector gate ALONE, because
-    # that exclusivity is what says the scalar gates are blind to it
-    assert caught["emit-rational-one-aux-for-two-elements"] == (
-        "refutes-the-false-vector-property",)
+    # refused script. It used to be caught by the vector gate ALONE and the
+    # exclusivity carried the claim "the scalar fixtures are blind to it"; the
+    # shape-INVARIANCE gate now sees it too, because declaring the auxiliary
+    # for element 0 and not for element 1 is a per-element difference in the
+    # emitted text and that is exactly what the invariance gate is. So the
+    # claim is asserted DIRECTLY instead of through the exclusivity, which is
+    # what the exclusivity was standing in for and is stronger than it:
+    assert set(caught["emit-rational-one-aux-for-two-elements"]) == {
+        "refutes-the-false-vector-property",
+        "emission-is-invariant-to-the-array-shape",
+    }, (
+        f"the well-formed aux sharing is caught by "
+        f"{list(caught['emit-rational-one-aux-for-two-elements'])}; it must be "
+        f"caught by the two ARRAY-driving gates and by nothing else, because "
+        f"those two are the only gates in this battery that emit more than "
+        f"one element and 'the scalar fixtures are blind to it' is the claim"
+    )
     assert "discharges-the-negative-exponent-identity" in caught[
         "emit-integer-loses-the-reciprocal"]
 
@@ -1865,10 +2485,75 @@ _MEASURED_RE = re.compile(
 _SINGLE_ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|\s*$")
 _BACKTICKED = re.compile(r"`([^`]+)`")
 
+# THE CATCH COLUMN IS A PARSED SET, NOT PROSE, and this regex is the whole of
+# what it may contain: backticked gate names, comma-separated, optionally
+# followed by the word ALONE. No connective, no hedge, no count.
+#
+# The predecessor accepted any cell that NAMED a real catcher, which made
+# `and most others`, `and others` and `and nearly every other gate` all
+# unchecked — measured totals behind those ranged from 4 of 21 to 18 of 21 —
+# and, worse, made the naming optional. Deleting one gate name from the
+# `emit-integer-loses-the-reciprocal` row left the test green while deleting
+# exactly the fact the page's own narrative argues from (that the widening
+# took it off the single-covered list BECAUSE the second-magnitude reciprocal
+# gate now sees it). The bare counts that column used to carry were removed
+# last round for going stale; what replaced them was a hedge, which is the
+# same claim with the digit taken out. The rule now has no policy parameter in
+# it: name every catcher.
+_CATCH_CELL_RE = re.compile(
+    r"^\s*(?P<names>`[^`]+`(?:\s*,\s*`[^`]+`)*)\s*(?P<alone>ALONE)?\s*$"
+)
+
 
 def _doc_block(text, marker):
     return text.split(f"<!-- {marker}: BEGIN -->")[1].split(
         f"<!-- {marker}: END -->")[0]
+
+
+def _doc_rows(text):
+    """The mutation table's rows, as ``name -> (catch cell, prose cell)``."""
+    rows = {}
+    for ln in _doc_block(text, "mutation-table").splitlines():
+        if not ln.startswith("| `"):
+            continue
+        cells = ln.split("|")
+        rows[cells[1].strip().strip("`")] = (cells[2], cells[3])
+    return rows
+
+
+def _doc_row(text, mutation):
+    """One mutation's whole row, for a test that needs to read its prose."""
+    catch, prose = _doc_rows(text)[mutation]
+    return catch + "|" + prose
+
+
+# Any `A^B = C` written in backticks anywhere in the section is an arithmetic
+# CLAIM and is checkable, so it is checked. This is the general form of the
+# defect `_rat_denominator_false_harness`'s docstring had: a number in prose
+# that nothing recomputes. It is deliberately not tied to the mutation table —
+# the same rule covers the narrative paragraphs, which is where `2^6 = 64` and
+# `4^(3/2) = 8` live.
+_ARITH_CLAIM_RE = re.compile(
+    r"(?<![\w.])(?P<base>\d+)\s*(?:\^|\*\*)\s*\(?"
+    r"(?P<p>-?\d+)(?:\s*/\s*(?P<q>\d+))?\)?"
+    r"\s*=\s*(?P<val>-?\d+(?:\.\d+)?)(?![\w.])"
+)
+
+
+def _arithmetic_claims(text):
+    """Every ``A^B = C`` in `text`, with a verdict decided EXACTLY.
+
+    ``C == A**(p/q)`` is decided as ``C**q == A**p`` so no root is taken: the
+    claims on this page include irrational neighbours and a float comparison
+    is not the standard the rest of the file holds itself to."""
+    out = []
+    for m in _ARITH_CLAIM_RE.finditer(text):
+        base = Fraction(m.group("base"))
+        p = int(m.group("p"))
+        q = int(m.group("q") or 1)
+        val = Fraction(m.group("val"))
+        out.append((m.group(0), val**q == base**p))
+    return out
 
 
 def test_the_documented_coverage_figures_are_the_MEASURED_ones():
@@ -1887,6 +2572,21 @@ def test_the_documented_coverage_figures_are_the_MEASURED_ones():
     out of it and compared against a live gauging run, and the single-covered
     SET is compared by name — a count can be right about a set that has
     drifted, and the names are what a reader acts on.
+
+    WHAT THE PREDECESSOR OF THIS TEST STILL ACCEPTED, replayed offline by the
+    audit and now each a case below:
+
+    * a `caught by` cell that named ONE of a row's two catchers, deleting
+      exactly the fact the page's narrative argues from — the cell must now
+      name the COMPLETE catch set;
+    * `and most others` / `and others` / `and nearly every other gate`, with
+      measured totals behind them from 4 of 21 to 18 of 21 — no cell may
+      contain prose at all;
+    * a `what the catch looks like` cell made factually false — every `A^B =
+      C` in the section is now decided exactly;
+    * and it REJECTED a correct document whose single-covered rows had been
+      alphabetised, because it compared an ordered tuple against an ordered
+      tuple. Order is not a claim; the pairs are compared as a set.
     """
     report = _report()
     text = _DOC.read_text(encoding="utf-8")
@@ -1925,7 +2625,15 @@ def test_the_documented_coverage_figures_are_the_MEASURED_ones():
         )
         if m
     )
-    assert documented == single, (
+    # ORDER IS NOT A CLAIM. The predecessor compared two ordered tuples, so a
+    # document listing the SAME six pairs alphabetised was rejected — a test
+    # that fails on a correct document is a test people stop believing. The
+    # pairs are the claim, and duplicates are excluded separately so that
+    # comparing as a set cannot hide a repeated row.
+    assert len(set(documented)) == len(documented), (
+        f"{_DOC.name}'s single-covered table repeats a row: {documented}"
+    )
+    assert set(documented) == set(single), (
         f"{_DOC.name}'s single-covered table is\n  "
         + "\n  ".join(f"{n} -> {g}" for n, g in documented)
         + "\nbut the battery measures\n  "
@@ -1942,43 +2650,60 @@ def test_the_documented_coverage_figures_are_the_MEASURED_ones():
     #
     # The summary sentence was the cell that was wrong, but every "11 gates"
     # and "(+5)" beside it was the same kind of claim and five of them had
-    # gone stale too. Counts are gone from that column; what remains is gate
-    # NAMES and the word ALONE, and both are measurable — so they are
-    # measured, and the class cannot come back through the table either.
+    # gone stale too. Deleting the counts left a HEDGE in their place, which
+    # is the same claim with the digit taken out and nothing recomputing it.
+    # So the catch column is now a parsed SET compared for equality: complete,
+    # prose-free, order-insensitive, with ALONE derived rather than trusted.
     caught = dict(report.caught_by)
-    rows = [
-        ln for ln in _doc_block(text, "mutation-table").splitlines()
-        if ln.startswith("| `")
-    ]
-    assert [r.split("|")[1].strip().strip("`") for r in rows] == [
-        name for name, _ in report.caught_by
-    ], (
+    rows = _doc_rows(text)
+    assert list(rows) == [name for name, _ in report.caught_by], (
         f"{_DOC.name}'s mutation table lists a different battery, or lists it "
         f"in a different order, than the one that ran"
     )
-    for row in rows:
-        cells = row.split("|")
-        name = cells[1].strip().strip("`")
-        cell = cells[2]
-        named = _BACKTICKED.findall(cell)
-        assert named, f"{name}: the table names no catching gate"
-        for gate_name in named:
-            assert gate_name in caught[name], (
-                f"{_DOC.name} says {name} is caught by {gate_name!r}; the "
-                f"battery measures {list(caught[name])}"
-            )
-        if "ALONE" in cell:
-            assert caught[name] == tuple(named), (
-                f"{_DOC.name} marks {name} ALONE, but it is caught by "
-                f"{list(caught[name])} — the exclusivity is the claim, and "
-                f"it is what says the other fixtures are blind to it"
-            )
-        else:
-            assert len(caught[name]) > 1, (
-                f"{name} is caught by exactly one gate but the table does "
-                f"not mark it ALONE, so the single-covered set above and "
-                f"this row disagree"
-            )
+    for name, (cell, prose) in rows.items():
+        shape = _CATCH_CELL_RE.match(cell)
+        assert shape is not None, (
+            f"{_DOC.name}'s `caught by` cell for {name} is\n    {cell.strip()}\n"
+            f"which is not a catch SET. That column may contain backticked "
+            f"gate names, commas and the word ALONE, and nothing else — no "
+            f"'and others', no count, no connective. Every hedge that column "
+            f"has ever carried was unchecked, and the totals behind them ran "
+            f"from 4 of 21 to 18 of 21"
+        )
+        named = _BACKTICKED.findall(shape.group("names"))
+        assert len(set(named)) == len(named), f"{name}: a gate named twice"
+        assert set(named) == set(caught[name]), (
+            f"{_DOC.name} says {name} is caught by {named}; the battery "
+            f"measures {list(caught[name])}. The cell must name the COMPLETE "
+            f"catch set — naming a subset is how a row lost the second gate "
+            f"the page's own narrative argues from, with this test green"
+        )
+        assert bool(shape.group("alone")) == (len(caught[name]) == 1), (
+            f"{_DOC.name}'s ALONE marking on {name} disagrees with the "
+            f"measurement ({len(caught[name])} catchers) — the exclusivity is "
+            f"the claim, and it is what says the other fixtures are blind"
+        )
+        assert prose.strip(), f"{name}: no 'what the catch looks like' cell"
+
+    # -- the THIRD column, which nothing checked at all ----------------------
+    #
+    # It cannot be checked as prose, but the arithmetic in it can be, and the
+    # arithmetic is what a reader acts on: the audit falsified a whole cell
+    # (`2^2 = 5`, `x^(7/9)`, `aux^999`) and this test passed. Every `A^B = C`
+    # in the section is now decided exactly, wherever it appears — the same
+    # rule covers the narrative paragraphs, and the CONDITIONAL rows get their
+    # emitted form and cap recomputed from the live mutation by
+    # `test_the_conditional_mutations_CAP_the_value_below_the_bound_RECOMPUTED`.
+    section = text.split("## The `pow` row's gauge")[1].split("\n## ")[0]
+    claims = _arithmetic_claims(section)
+    assert claims, (
+        f"{_DOC.name}'s pow section states no arithmetic at all, so this "
+        f"check is comparing nothing — it is the third column's only pin"
+    )
+    bad = [c for c, ok in claims if not ok]
+    assert not bad, (
+        f"{_DOC.name}'s pow section states arithmetic that is FALSE: {bad}"
+    )
 
 
 def test_the_two_faces_are_gauged_and_their_asymmetry_is_visible():
@@ -2063,8 +2788,58 @@ def test_the_reading_renders_and_names_its_scope():
     (arity,) = [d for s, _, d in reading.stages if s == "driven-arity"]
     assert str(list(DRIVEN_INTEGER_EXPONENTS)) in arity, arity
     assert str([list(pq) for pq in DRIVEN_RATIONAL_PQ]) in arity, arity
+    assert str([list(a) for a in DRIVEN_AUX_ELEMENTS]) in arity, arity
+
+
+def doc_blocks() -> str:
+    """The two machine-checked blocks of `docs/gauge-coverage.md`, RENDERED.
+
+    The catch column has to name every catching gate, and a complete list of
+    up to twenty names per row is not something anyone should be retyping —
+    the hedge that stood there existed because the alternative was manual. So
+    the column is generated: run this file, paste the blocks. The third column
+    is prose and stays in the page, which is why only the first two cells of
+    each row are emitted here and the paste is a MERGE rather than an
+    overwrite; the test is what confirms the merge.
+    """
+    report = _report()
+    caught = dict(report.caught_by)
+    single = single_covered(report)
+    survivors = [n for n, gates in report.caught_by if not gates]
+    multi = [n for n, gates in report.caught_by if len(gates) > 1]
+    out = [
+        "<!-- gauge-figures: pow -->",
+        f"MEASURED: **{len(report.caught_by)} mutations, {len(survivors)} "
+        f"survivors, {len(report.asymmetries)} face asymmetries, "
+        f"{len(multi)} caught by more",
+        f"than one gate, {len(single)} caught by exactly one.**",
+        "",
+        "<!-- single-covered: BEGIN -->",
+        "| single-covered mutation | its only gate |",
+        "|---|---|",
+    ]
+    out += [f"| `{n}` | `{g}` |" for n, g in single]
+    out += [
+        "<!-- single-covered: END -->",
+        "",
+        "<!-- mutation-table: BEGIN -->",
+        "| mutation | caught by | what the catch looks like |",
+        "|---|---|---|",
+    ]
+    for name, gates in report.caught_by:
+        cell = ", ".join(f"`{g}`" for g in gates)
+        if len(gates) == 1:
+            cell += " ALONE"
+        out.append(f"| `{name}` | {cell} | <<< KEEP THE PAGE'S PROSE >>> |")
+    out.append("<!-- mutation-table: END -->")
+    return "\n".join(out)
 
 
 if __name__ == "__main__":  # the runnable-reading entry point
+    import sys
+
     jax.config.update("jax_enable_x64", True)
-    print(measure().render())
+    if "--doc-blocks" in sys.argv:
+        print(doc_blocks())
+    else:
+        print(measure().render())

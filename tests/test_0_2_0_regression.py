@@ -407,10 +407,13 @@ def test_pow_large_denominator_exponent_declines():
 def test_pow_rational_negative_base_declines():
     """SOUNDNESS: x in [-4, -1], x**0.5 must NOT verify.
 
-    JAX returns NaN for pow(negative, fractional). The Real encoding
-    would either have no solution (even q -> UNSAT -> false VERIFIED)
-    or model something JAX doesn't compute (odd q). The base-interval
-    guard declines this to UNKNOWN."""
+    JAX returns NaN for pow(negative, fractional). `q` is EVEN on every
+    path that reaches the encoding — the odd arm is refused at admission,
+    at derivation and at emission — so the Real encoding has NO solution
+    here, the negated obligation is trivially UNSAT and a false VERIFIED
+    is what would come back. The base-interval guard declines this to
+    UNKNOWN. (This docstring used to name odd q as the other live case;
+    it is not one.)"""
     def h():
         x = any_array((), "float64", (-4.0, -1.0))
         return (assert_(x ** 0.5 >= 99999.0),)

@@ -187,7 +187,7 @@ SPDX-License-Identifier: Apache-2.0
   three named seams — `smt._pow_integer_body`, `smt._pow_rational_lines`,
   `smt._pow_aux_name` — extracted behaviour-identically so that a mutation
   battery can express an emitted-`pow` wrongness at all;
-  `tests/test_pow_row_gauge_jax.py` runs 20 such mutations across both
+  `tests/test_pow_row_gauge_jax.py` runs 21 such mutations across both
   exponent branches with zero survivors. One of them declares a single
   auxiliary constant for two elements of a vectorised `pow`, which is
   well-formed SMT-LIB2, collapses `sqrt(x0) - sqrt(x1)` to zero, and silently
@@ -259,7 +259,87 @@ SPDX-License-Identifier: Apache-2.0
   or refuse). `test_the_odd_denominator_branch_is_UNREACHABLE_and_FAILS_CLOSED`
   pins the unreachability and all three refusals on the standard
   `pow`'s integer-dtype guard already gets. No behaviour changes for any
-  exponent jax can produce; the emitted text is byte-identical.
+  exponent jax can produce; the emitted text is byte-identical. Three PROSE
+  sites went on describing the odd arm as a live case the encoding handles —
+  an admission comment in `obligation.py` on a path where odd `q` declines
+  several lines earlier, `_negative_base_harness`'s docstring, and a 0.2.0
+  regression docstring. All three now say what is actually true there (`q` is
+  even, so the encoding has NO solution at a negative base, and the guard
+  stops a trivially-unsat negation coming back VERIFIED), and
+  `test_no_source_text_presents_the_ODD_q_ARM_as_a_live_case` scans the tree
+  for the claim SHAPE rather than for those three sentences.
+
+- **That gauge measured two of its row's three seams, and the SHAPE axis was
+  the one left as prose.** The round above instrumented `_pow_integer_body`
+  and `_pow_rational_lines` and left out `smt._pow_aux_name` — the only seam
+  handed the array shape — then wrote "any other array shape" into the
+  not-reached list. A blinded audit conditioned a mutation on the ELEMENT
+  INDEX (correct at elements 0 and 1, the whole of what the two-element
+  vector fixture drives; wrong from element 2 on, where it emits
+  `aux^6 = x^1` for `x^(1/4)`). It passed all twenty-one gates and minted a
+  false VERIFIED: on `x[2]**0.25 - x[1]**0.25 <= 1.9` over `[1, 81]` the truth
+  is `81^(1/4) = 3` less `1^(1/4) = 1`, which is 2. The measured/asserted line
+  ran through the middle of the instrument.
+
+  `_measured_seam_reach()` now instruments all three seams and the
+  `(element, n_out)` pairs are compared against a `DRIVEN_AUX_ELEMENTS` read
+  off the fixture table, exactly as the exponents are. **What closes the axis
+  rather than sampling it is a new gate,
+  `emission-is-invariant-to-the-array-shape`**: `pow` is elementwise, so an
+  element's emitted lines cannot legitimately depend on which element it is
+  or on how many there are, and the gate asserts that every element's seam
+  output at every count in `[1, 2, 3, 4, 5, 6]`, on BOTH branches, is the
+  SCALAR output with the symbol names substituted. Emission is text, so a
+  shape-conditioned emission wrongness IS a per-element difference in that
+  text — which makes the gate evidence about every conditioning function
+  inside the range instead of about one more sampled point. It needs no
+  solver. The audit's mutation is in the battery and is caught by that gate
+  ALONE; delete the gate and `fidelity.gauge` refuses the run with an
+  unexplained survivor. The claim is now split honestly in `SCOPE` and on the
+  page: element counts `[1, 2, 3, 4, 5, 6]` reach the seam, `[1, 2]` are
+  driven end to end to a VERDICT, and every NON-emission stage past two
+  elements — transfer, slice, dispatch, replay, verdict — is a sample, said
+  to be one.
+
+  The same page and the gauge file now also record what the mechanism cannot
+  do: the equality between declared and measured reach is DRIFT protection,
+  the anti-vacuity floors are the only part carrying new coverage, and every
+  floor is typed at the radius of a mutation someone already wrote. The shape
+  invariance is the one argument in this row's gauge that is not
+  radius-shaped.
+
+- **The document test accepted wrong documents and rejected a right one.**
+  `test_the_documented_coverage_figures_are_the_MEASURED_ones` required only
+  that each gate the table NAMED be a real catcher, so it never required the
+  naming to be complete: deleting one gate name from the
+  `emit-integer-loses-the-reciprocal` row left the suite green while deleting
+  exactly the fact the page's narrative argues from. The bare gate counts
+  removed last round had been replaced by hedges (`and most others`, `and
+  others`) with measured totals behind them from 4 of 21 to 18 of 21, all
+  unchecked; the third column was checked in no respect at all and a
+  falsified cell passed; and the single-covered comparison was ordered, so a
+  correct alphabetised table was REJECTED. The catch column is now a parsed
+  SET compared for equality — complete, prose-free, order-insensitive, with
+  `ALONE` derived from the measurement rather than trusted — the
+  single-covered rows are compared as a set, and every `A^B = C` anywhere in
+  the section is decided exactly in `Fraction` arithmetic. Because a complete
+  list runs to nineteen gate names on one row, the column is GENERATED:
+  `python tests/test_pow_row_gauge_jax.py --doc-blocks` prints both blocks
+  from a live run.
+
+- **A fixture docstring described an emission this tree had just outlawed.**
+  `_rat_denominator_false_harness` said the battery's mutation emits
+  `aux^5 = x` with a cap of `81^(1/5)`; the mutation adds TWO to the
+  denominator (`q + 1` would be an odd `q`, which the same round made
+  `_pow_rational_lines` REFUSE, so the item would have been caught by
+  malformedness instead of by the denominator it exists to measure), and
+  `q = 5` is not emittable at all. `docs/gauge-coverage.md` had it right,
+  because the page is machine-checked and a docstring is not. Both are now:
+  `test_the_conditional_mutations_CAP_the_value_below_the_bound_RECOMPUTED`
+  reads the emitted `(p, q)` off the LIVE mutation, decides
+  `cap <= bound < truth` exactly (raising both sides to `q` so no irrational
+  root is ever taken as a float), and fails unless the fixture docstring and
+  the doc row both quote what it computed.
 
 - **`exp` and `pow` under `semantics="ieee"` now require a DECLARED libm
   accuracy budget** (audit 0.2.0 **S9** and **S11**; S11 reaches the
