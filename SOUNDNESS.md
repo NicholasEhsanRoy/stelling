@@ -25,7 +25,16 @@ is itself a soundness event.
 
 Every verdict object stamps, at minimum:
 
-- stelling version,
+- stelling version. **A development build stamps a PEP 440 `.dev`
+  version** (`0.2.0.dev0`), never the release it precedes and never the
+  release it follows. This matters because the per-finding *"which versions
+  are affected"* rows in the Log below distinguish the released `v0.1.0`
+  from a 0.2.0 development build, and a reader answers those rows from this
+  stamp. A development build that stamped `0.1.0` misdirected in **both**
+  directions — claiming defects the tree had fixed, and disclaiming the
+  ones scoped to *"0.2.0 development builds only"*. Nothing in the library
+  compares this field, so it is provenance rather than a gate; that is
+  exactly why it has to be readable by a person.
 - jax version used to trace the harness,
 - solver name and version, **and transport** — Python wheel vs. external
   binary path; for an external cvc5, its `--show-config` feature set,

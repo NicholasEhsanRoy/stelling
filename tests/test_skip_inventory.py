@@ -301,6 +301,25 @@ PINNED = (
         "same bar, on the hard case: blackjax's MCLMC state, `wrap_key_data`, "
         "and PRNG key dtypes — the leaf kinds any_pytree refuses and redirects.",
     ),
+    Pinned(
+        "tests/test_dot_general_both_faces.py::"
+        "test_the_oracle_NORMALISES_its_dims_and_does_not_merely_check_them",
+        ("numpy",),
+        "audit 0.2.0 B6 RE-AUDIT R4's property: `dot_general_geometry` must "
+        "return plain `int` dims, because a guard that tests a predicate and "
+        "discards the value leaves three protocols downstream — hashing, "
+        "ordering, indexing — meeting an object nothing normalised. The "
+        "exhibit has to be a 0-d `numpy` array: it satisfies `__index__` AND "
+        "is unhashable, which is the pair that made `len(set(dims))` raise a "
+        "raw TypeError out of the public `propagate()` while the emission "
+        "declined. A hand-rolled unhashable `__index__` object would assert "
+        "the same property against a synthetic instance rather than the real "
+        "one the defect was found on. numpy is NOT a core dependency — the "
+        "core is zero-dep — so it is absent in the solvers-only lane, and "
+        "this module stays collectable there (48 of 52 rows still run) rather "
+        "than taking `importorskip` at module scope for one transitive "
+        "dependency of jax.",
+    ),
 )
 
 

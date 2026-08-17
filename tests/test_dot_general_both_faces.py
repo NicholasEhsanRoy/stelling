@@ -36,8 +36,31 @@ from __future__ import annotations
 
 from fractions import Fraction
 
-import numpy
 import pytest
+
+# THE CORE IS ZERO-DEP AND SO IS THIS MODULE'S SUBJECT. `dot_general`'s two
+# faces are jax-free, so this file must stay collectable in the
+# "solvers only, jax uninstalled" lane, which installs neither jax nor
+# numpy. Only the 0-d-array rows below need numpy, so numpy is optional
+# here and those rows carry the marker: skipping three rows keeps the lane's
+# coverage of the other 40-odd, where `pytest.importorskip` at module scope
+# would have thrown all of it away for one transitive dependency.
+try:
+    import numpy
+except ModuleNotFoundError:  # pragma: no cover - exercised by the no-jax lane
+    numpy = None
+
+
+def _numpy_or_skip():
+    """The canonical gate, so the skip reason is the one the skip inventory
+    knows how to read. `numpy` is already in that file's
+    `DECLARED_OPTIONAL_DEPENDENCIES` — "arrives with jax, absent in a bare
+    solvers-only install" — so a gate on it is disclosed. A bespoke
+    `skipif` reason is NOT: the inventory recognises an import gate, a RULES
+    entry or a MEASURED entry, and a fourth spelling would have been a skip
+    nothing asserts.
+    """
+    return pytest.importorskip("numpy")
 
 from stelling import interval as iv
 from stelling import ir
@@ -344,10 +367,14 @@ MALFORMED_DIMENSION_NUMBERS = [
     # level up, because a predicate was tested where a value should have
     # been produced. These rows are OUT OF RANGE so that they are still
     # malformed once the dims are normalised.
-    ((((numpy.array(5),), (0,)), ((), ())), "a 0-d array dim out of range"),
-    ((((0,), (numpy.array(5),)), ((), ())), "a 0-d array rhs dim out of range"),
-    ((((1,), (1,)), ((numpy.array(9),), (0,))), "a 0-d array batch dim"),
 ]
+
+if numpy is not None:
+    MALFORMED_DIMENSION_NUMBERS += [
+        ((((numpy.array(5),), (0,)), ((), ())), "a 0-d array dim out of range"),
+        ((((0,), (numpy.array(5),)), ((), ())), "a 0-d array rhs dim out of range"),
+        ((((1,), (1,)), ((numpy.array(9),), (0,))), "a 0-d array batch dim"),
+    ]
 
 
 def test_the_oracle_NORMALISES_its_dims_and_does_not_merely_check_them():
@@ -362,6 +389,7 @@ def test_the_oracle_NORMALISES_its_dims_and_does_not_merely_check_them():
     asserting a list of refused inputs is only the symptom, and the symptom
     is what a future exotic type gets past.
     """
+    numpy = _numpy_or_skip()
     g = iv.dot_general_geometry(
         (3, 3), (3, 3),
         (

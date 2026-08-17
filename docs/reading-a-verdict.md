@@ -11,7 +11,7 @@ prints all of it. This page walks the render top to bottom, then takes
 the two lines people reliably read as a contradiction.
 
 Every code block on this page was executed verbatim against this tree
-(stelling 0.1.0, jax 0.11.0, CPU, `jax_enable_x64=True`) and the outputs
+(stelling 0.2.0.dev0, jax 0.11.0, CPU, `jax_enable_x64=True`) and the outputs
 are what it printed.
 
 ## The status

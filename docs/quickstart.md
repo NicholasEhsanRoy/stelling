@@ -9,7 +9,7 @@ Ten minutes, four runnable files. At the end you will have a stamped
 verdict and know which parts of it you have earned.
 
 Every code block on this page was executed verbatim against this tree
-(stelling 0.1.0, jax 0.11.0, CPU, `jax_enable_x64=True`) and the outputs
+(stelling 0.2.0.dev0, jax 0.11.0, CPU, `jax_enable_x64=True`) and the outputs
 are what it printed — `tests/test_doc_examples.py` re-runs them and
 compares. The `at …` source line is the one part that differs on your
 machine: the **directory** shown below is a placeholder, and the file
@@ -62,7 +62,7 @@ print(check(harness, vacuity_mode="inputs-only").render())
   9 equations verified
   assert #0: discharged — definitely true for all 8 element(s)
     at <your-dir>/quickstart.py:15 (harness)
-stelling 0.1.0 | jax 0.11.0
+stelling 0.2.0.dev0 | jax 0.11.0
 query 628a25efd4417f44966443e7275a31b7c437cc45ddb6b42efcadb59308171765
 arithmetic: interval/f64/outward-1ulp (stelling.interval)
 semantics: real (ℝ): obligations judged in exact real arithmetic over the declared sets; the traced program's IEEE float behaviour is NOT modeled — a predicate can hold in ℝ and fail in floats

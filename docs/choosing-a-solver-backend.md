@@ -17,7 +17,7 @@ is not a recommendation derived from the backends' reputations; every
 figure below came out of this tree.
 
 **How this page was measured, and what that does not cover.** All figures
-are from `stelling 0.1.0`, `jax 0.11.0`, CPU, `jax_enable_x64=True`, z3
+are from `stelling 0.2.0.dev0`, `jax 0.11.0`, CPU, `jax_enable_x64=True`, z3
 `5.0.0` (wheel) and cvc5 `1.3.4-modified` (wheel), Linux x86-64, Python
 3.12, `solver_timeout_ms=10000`, three repeats per cell. Single-backend
 configurations were produced with `SolverConfig(only=…)` and by hiding a

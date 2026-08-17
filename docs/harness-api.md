@@ -53,7 +53,7 @@ JAX to import (its harness imports happen inside the functions), but
 calling `check` in a JAX-less environment raises the same error.
 
 Every code block on this page was executed verbatim against this tree
-(stelling 0.1.0, jax 0.11.0, CPU, `jax_enable_x64=True`) and the outputs
+(stelling 0.2.0.dev0, jax 0.11.0, CPU, `jax_enable_x64=True`) and the outputs
 are what it printed.
 
 | primitive | states | returns |

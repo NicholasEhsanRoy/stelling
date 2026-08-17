@@ -26,7 +26,18 @@ from __future__ import annotations
 
 from stelling._optional import OptionalDependencyError, available, require
 
-__version__ = "0.1.0"
+# PEP 440 development version, and the reason it is not "0.1.0" or "0.2.0".
+# Every verdict stamps this as provenance (`Stamp.stelling_version`), and
+# SOUNDNESS.md's per-finding "which versions are affected" rows key on the
+# distinction between the released `v0.1.0` and a 0.2.0 development build —
+# 29 references at the time of writing. A development build that stamped
+# "0.1.0" pointed a reader at the wrong rows in BOTH directions: it claimed
+# defects this tree fixed, and it disclaimed the ones scoped to "0.2.0
+# development builds only". Stamping "0.2.0" would be the mirror error, a
+# development build indistinguishable from the release. `.dev0` claims
+# neither, sorts before "0.2.0", and makes those rows answerable from the
+# stamp. It becomes "0.2.0" at release.
+__version__ = "0.2.0.dev0"
 
 __all__ = [
     "OptionalDependencyError",
