@@ -3834,6 +3834,85 @@ def _frames(v) -> tuple | None:
     return None
 
 
+def _unknown_reports_safely(propagation) -> list | None:
+    """The propagation's obligation reports that are still ``unknown``, read
+    TOTALLY — or ``None`` when the object will not yield its obligations at
+    all.
+
+    **FOR REFUSAL PATHS, and for nothing else** (audit 0.2.0 B11 audit, fixes
+    1 and 2). It exists because two of them need the same list off an object
+    a gate has just declined to recognise — this module's
+    :func:`slice_unknown_obligations`, which must name every obligation it is
+    refusing, and :func:`stelling.affine.refine_propagation`, which must
+    decline every one of them — and one derivation cannot drift from itself
+    the way two copies can. On the DECIDING path the plain comprehension
+    stays: swallowing there would answer "nothing to do" for an object that
+    could not be asked, which is the ambiguity this function's ``None``
+    exists to avoid.
+
+    ``None`` AND ``[]`` ARE DIFFERENT ANSWERS: ``[]`` means the propagation
+    was asked and had no unknown obligation, ``None`` means it could not be
+    asked. Only one caller needs the difference and it is the one that would
+    otherwise conflate them — :func:`_decline_all_unknown`, whose whole
+    return channel is the declines, so `()` from an unaskable object would
+    read as "nothing to decline". :func:`stelling.affine.refine_propagation`
+    treats the two alike, and may: it records its refusal on the
+    :class:`stelling.affine.RefinementReport` it builds either way.
+
+    An obligation whose ``status`` cannot be read is INCLUDED. Only the
+    ``unknown`` ones are sliced, so a status that reads back as something
+    else is provably not one of them and is dropped; a status that cannot be
+    read is not proof of anything, and on a refusal path an extra decline
+    costs a caller nothing while a missing one hides that something was
+    refused.
+    """
+    try:
+        reports = list(propagation.obligations)
+    except Exception:  # noqa: BLE001 — a refusal may not itself raise
+        return None
+    return [
+        o
+        for o in reports
+        if _safely(lambda o=o: o.status, None) in (None, "unknown")
+    ]
+
+
+def _decline_all_unknown(
+    propagation, reason: str
+) -> tuple[DeclinedObligation, ...]:
+    """One :class:`DeclinedObligation` carrying ``reason`` per obligation the
+    propagation left ``unknown`` — the shape
+    :func:`slice_unknown_obligations` returns when it refuses the whole
+    propagation rather than any one obligation.
+
+    **TOTAL, and that is the whole reason it is a function** (audit 0.2.0
+    B11 audit, fix 1). It is reached only after
+    :func:`stelling.propagate.unpaired_propagation` has declined to
+    recognise the object, so every read here is a read of something already
+    known to be misbehaving, and it sits in the one function that may not
+    raise: an :class:`stelling.propagate.ObligationReport` may refuse
+    ``index`` or ``source_info`` exactly as the propagation may refuse
+    ``obligations``.
+
+    An object that will not yield its obligations at all gets exactly ONE
+    decline, with the ``index=-1`` sentinel the reads below already use, and
+    **not** an empty tuple: `()` is what this function returns for a
+    propagation with nothing left ``unknown``, so returning it here would
+    spell "there was nothing to slice" for a propagation nobody could ask.
+    """
+    unknown = _unknown_reports_safely(propagation)
+    if unknown is None:
+        return (DeclinedObligation(index=-1, reason=reason, source_info=()),)
+    return tuple(
+        DeclinedObligation(
+            index=_safely(lambda o=o: o.index, -1),
+            reason=reason,
+            source_info=_safely(lambda o=o: o.source_info, ()),
+        )
+        for o in unknown
+    )
+
+
 def slice_unknown_obligations(
     closed: ir.ClosedJaxpr,
     propagation: Propagation,
@@ -3917,7 +3996,6 @@ def slice_unknown_obligations(
     today, and if one is ever built the fix is to move the preamble into a
     per-obligation net, not to restore the sentence.
     """
-    unknown = [o for o in propagation.obligations if o.status == "unknown"]
     # -- THE PROPAGATION PAIRING GATE (audit 0.2.0 B6 re-audit UNSOUND-3).
     # The association check below is STRUCTURAL — a recorded top-level
     # position that names a `stelling_assert`, carrying the same
@@ -3937,16 +4015,24 @@ def slice_unknown_obligations(
     # get here — and it is not redundant: this function is public, is in
     # `__all__`, and a caller who drives it directly gets slices whose
     # obligation indices are another query's.
+    #
+    # AND IT IS THE FIRST STATEMENT, ABOVE THE `unknown` COMPREHENSION —
+    # audit 0.2.0 B11 audit, fix 1. The comprehension stood ABOVE it, so the
+    # very read this gate exists to guard (`propagation.obligations`) happened
+    # first, in the function the paragraph above says may not raise. Measured
+    # on `4bc502b`: a `Propagation` built by `__new__` with no fields raised
+    # `AttributeError: 'Propagation' object has no attribute 'obligations'`
+    # here. Of the other four consumption sites, TWO degraded on that same
+    # object (`verdict.make_verdict` and `solvers.escalate`) and two raised
+    # for reasons of their own — `solvers.make_solver_verdict` on
+    # `propagation.coverage`, which is above ITS gate, and
+    # `affine.refine_propagation` inside its own decline — both since closed.
+    # Moving this gate costs nothing: its answer is a function of
+    # `query_sha256` and `closed` alone and never looks at an obligation.
     unpaired = unpaired_propagation(propagation, query_identity(closed))
     if unpaired is not None:
-        return tuple(
-            DeclinedObligation(
-                index=_safely(lambda: o.index, -1),
-                reason=unpaired,
-                source_info=_safely(lambda: o.source_info, ()),
-            )
-            for o in unknown
-        )
+        return _decline_all_unknown(propagation, unpaired)
+    unknown = [o for o in propagation.obligations if o.status == "unknown"]
     eqns = closed.jaxpr.eqns
     # position in the top-level eqns -> ordinal among top-level asserts,
     # which is the index `slice_obligation` selects by

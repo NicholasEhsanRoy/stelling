@@ -2975,6 +2975,77 @@ def _unaccounted_solver_runs(escalation, ledger_stamps) -> int:
         return 0
 
 
+class _Unreadable:
+    """What a propagation field reads back as when reading it RAISED.
+
+    A SENTINEL OBJECT AND NOT THE STRING ``"<unreadable>"``, so that no
+    value any caller can supply is equal to it. A string sentinel is a value
+    a hand-built `Escalation` or `Propagation` can also carry, and the gates
+    below decide by comparing the two — `escalation.semantics !=
+    prop_semantics` would then read "they match" for a pair that agreed on
+    the placeholder. Identity cannot be spelled from outside, and every
+    comparison here falls through to identity because this class defines no
+    ``__eq__``.
+
+    It renders as ``<unreadable>`` so a refusal that quotes it reads as a
+    sentence rather than as an object address, which would also make the
+    message non-deterministic.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<unreadable>"
+
+    __str__ = __repr__
+
+
+_UNREADABLE_PROPAGATION_FIELD = _Unreadable()
+
+
+def _propagation_read(read, fallback=_UNREADABLE_PROPAGATION_FIELD):
+    """``read()``, or ``fallback`` when reading raises — for the reads
+    :func:`make_solver_verdict` makes of its ``propagation`` argument ABOVE
+    the propagation pairing gate, and for nothing else.
+
+    **A GATE CANNOT GUARD A READ THAT HAPPENS ABOVE IT** — audit 0.2.0 B11
+    audit. Three of this assembler's escalation-mispairing conditions ask the
+    propagation about itself (``semantics``, twice, and
+    ``coverage.constrained``) before the pairing gate has established that the
+    object is this query's propagation at all, and each was a plain attribute
+    read. Measured on `4bc502b`: a ``Propagation`` built by ``__new__`` with
+    no fields raised ``AttributeError: 'Propagation' object has no attribute
+    'coverage'`` here. Two of the four other propagation-consuming sites
+    degraded on that same object (:func:`stelling.verdict.make_verdict` and
+    :func:`escalate`) and two raised for reasons of their own, both since
+    closed. ``propagation.semantics`` survived only because it carries a
+    dataclass DEFAULT, which makes it a class attribute, so ``__new__``
+    inherits ``"real"`` — luck, not a rule, and a ``semantics`` property that
+    raises has the same shape as the ``query_sha256`` one this repair's own
+    refusal already nets.
+
+    THE READS STAY WHERE THEY ARE. Their order relative to the pairing gate
+    is measured rather than preferred — lifting the pairing gate above them
+    turns seven of `r2_containment`'s nine refusals into UNKNOWNs (see that
+    gate's own comment) — so the fix is that they fail CLOSED, not that they
+    move: a quantity that cannot be read cannot be shown to be the harmless
+    value, and every condition that consults one below treats an unreadable
+    answer as the refusing one.
+
+    ONE READ PER VALUE. Each of these quantities used to be read afresh
+    wherever it was consulted — ``semantics`` at three places (two conditions
+    and the message that quotes it), ``coverage.constrained`` at two (a
+    condition and its message) — so a two-faced object could be refused for a
+    number other than the one the condition actually tested (audit 0.2.0 B6,
+    "one shape per value"). The caller reads once into a local and every use
+    reads the local.
+    """
+    try:
+        return read()
+    except Exception:  # noqa: BLE001 — a gate may not raise on its own read
+        return fallback
+
+
 def make_solver_verdict(
     closed: ir.ClosedJaxpr,
     propagation: Propagation,
@@ -3278,15 +3349,22 @@ def make_solver_verdict(
     # nothing-to-escalate shape) is exempt: it contributes nothing a
     # semantics mismatch could misattribute, and the absence reason is
     # derived from the propagation's own semantics below.
+    #
+    # `prop_semantics` and `prop_constrained` are the propagation's own two
+    # quantities these three gates consult, read ONCE EACH and through
+    # `_propagation_read` — see that function for why a plain attribute read
+    # here is a read the pairing gate below cannot guard.
+    prop_semantics = _propagation_read(lambda: propagation.semantics)
+    prop_constrained = _propagation_read(lambda: propagation.coverage.constrained)
     if (
         escalation.records
         or escalation.notes
         or escalation.ledger.spawns
         or ledger_stamps
-    ) and escalation.semantics != propagation.semantics:
+    ) and escalation.semantics != prop_semantics:
         raise MispairedEscalationError(
             f"mispaired escalation: the propagation being stamped ran "
-            f"under semantics='{propagation.semantics}', but the supplied "
+            f"under semantics='{prop_semantics}', but the supplied "
             f"escalation was produced from a "
             f"semantics='{escalation.semantics}' propagation — obligation "
             f"details and refusal reasons would be misattributed across "
@@ -3303,7 +3381,13 @@ def make_solver_verdict(
     # the escalation's own semantics record; this one is derived from the
     # WORK the escalation carries, so a forged/buggy semantics field
     # cannot smuggle ℝ solver outcomes under an ieee stamp).
-    if propagation.semantics == "ieee" and (
+    #
+    # An UNREADABLE `semantics` does not need a third arm here: the gate above
+    # is exempt only on a completely empty escalation, and every escalation
+    # this gate's own second clause admits is one that gate saw work in — so
+    # an unreadable `semantics` that reaches this line has already been
+    # refused above.
+    if prop_semantics == "ieee" and (
         escalation.ledger.spawns
         or ledger_stamps
         or any(
@@ -3332,7 +3416,17 @@ def make_solver_verdict(
     # propagation being STAMPED. A constrained propagation may only pair
     # with a refusal-shaped escalation — zero spawns, zero stamps, zero
     # witnesses, every record UNKNOWN with no invocations.
-    if propagation.coverage.constrained and (
+    #
+    # AN UNREADABLE COUNT REFUSES, and here that arm is load-bearing rather
+    # than tidy. `_UNREADABLE_PROPAGATION_FIELD` is truthy, so it takes this
+    # branch: a propagation that cannot be asked how many
+    # assumes it constrained cannot be shown to have constrained NONE,
+    # and stamping solver work over the un-assumed box against a possibly
+    # conditional claim is the exact unsoundness this gate exists for. Falling
+    # through to the pairing gate instead would not do — that gate passes any
+    # object carrying the right hash, and `coverage` would then be read again
+    # further down, where a second read may answer differently.
+    if prop_constrained and (
         escalation.ledger.spawns
         or ledger_stamps
         or any(
@@ -3341,9 +3435,15 @@ def make_solver_verdict(
         )
     ):
         n_wit = sum(1 for r in escalation.records if r.witness is not None)
+        how_many = (
+            "cannot be asked how many assume(s) it constrained (reading its "
+            "`coverage.constrained` raised)"
+            if prop_constrained is _UNREADABLE_PROPAGATION_FIELD
+            else f"constrained {prop_constrained} assume(s)"
+        )
         raise MispairedEscalationError(
             f"mispaired escalation: the propagation being stamped "
-            f"constrained {propagation.coverage.constrained} assume(s), but "
+            f"{how_many}, but "
             f"the supplied escalation carries solver work "
             f"({escalation.ledger.spawns} spawn(s), {len(ledger_stamps)} "
             f"ledger stamp(s), {n_wit} witness(es)) — it cannot have been "

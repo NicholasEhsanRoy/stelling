@@ -365,9 +365,17 @@ def test_two_queries_from_ONE_FACTORY_are_separated_by_the_query_IDENTITY():
     second half is now answered by saying which channels are closed rather
     than by leaving all three open: `propagation` is bound here and at the
     four other sites that consume one against a query
-    (`tests/test_propagation_identity.py`), and `env` is NOT bound — with
-    what that costs measured, by name, in
-    `test_propagation_identity.py::test_the_env_channel_is_NOT_bound_and_here_is_what_that_costs`.
+    (`tests/test_propagation_identity.py`), and `env` is NOT bound.
+
+    NOR IS IT ONE CHANNEL. "All three arguments" was itself short:
+    `slice_obligation` takes FOUR caller-supplied arguments carrying facts
+    about the query — `env`, `assert_position`, `top_primitives` and
+    `relational_assumes` — and the last of those is worse than `env`, because
+    it puts an axiom into the emitted script rather than relaxing a guard.
+    What each costs, and the derivation showing no library path forwards any
+    of them, are in
+    `test_propagation_identity.py::test_the_slicer_takes_FOUR_unbound_arguments_and_TWO_of_them_are_measured`
+    and `::test_NO_library_path_FORWARDS_a_slicer_argument_it_did_not_derive`.
     """
     from stelling.ir import ClosedJaxpr  # noqa: F401  (documented door)
     from stelling.obligation import ObligationSlice

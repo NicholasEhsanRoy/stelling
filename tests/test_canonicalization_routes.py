@@ -18,6 +18,12 @@ and each of them is DRIVEN below rather than described:
   hands `propagate`, `escalate` or `make_solver_verdict`, so a
   `ClosedJaxpr` SUBCLASS whose `jaxpr` is a `property` is read once by its
   own `__post_init__` and is free to answer differently every time after.
+  **This one is OUT OF SCOPE BY DECISION as of 2026-08-18, not an open
+  item** — see `test_the_ROOT_of_a_query_is_never_canonicalized` for the
+  principal's words and what the decision does and does not cover. The test
+  below stays exactly as it is: the route is still true of the tree, and a
+  decision to leave something open is worth nothing if the thing left open
+  stops being measured.
 * **the install is not guaranteed to install.** `_canonicalise` installs
   the canonical twin with `object.__setattr__`, which resolves the field
   NAME — and a name that resolves to a class-level DATA DESCRIPTOR goes to
@@ -106,6 +112,26 @@ def test_the_ROOT_of_a_query_is_never_canonicalized():
     no solver and no jax. What that mechanism costs is the test below,
     where `propagate` and `content_hash` are shown reading two different
     documents out of one object.
+
+    **STATUS: OUT OF SCOPE BY DECISION, 2026-08-18 — not an open item.**
+    Ruled out of scope by the principal, in these words: *"It can be
+    addressed with proper CI security on projects that need it. It requires
+    actively malicious python to actually happen."* B6's door covers an
+    object's FIELDS and was never scoped to its root, so this is a boundary
+    of that repair rather than a gap in it.
+
+    NOTHING ABOUT THIS TEST CHANGES, and that is the point of recording the
+    decision here rather than deleting the row. The route is still true of
+    the tree; the reproducer still reaches VERIFIED on a claim a concrete
+    `jnp.sum` falsifies; this test still drives the mechanism. What changes
+    is only its STATUS, so that a reader meeting it later records a decision
+    that was taken instead of reopening an oversight that was missed.
+
+    WHAT THE DECISION DOES NOT COVER: reachability from a DOCUMENT.
+    `ClosedJaxpr.from_dict` returns an exact `ClosedJaxpr`, pinned by
+    `test_NONE_of_the_routes_is_reachable_from_a_DOCUMENT`, and the decision
+    rests on that. A route to this behaviour that needs no attacker Python
+    would be a NEW finding, not an instance of a closed decision.
     """
     one = ir.Jaxpr(constvars=(), invars=(ir.Var(1, av((1,))),), outvars=(),
                    eqns=(), effects=())
@@ -590,6 +616,48 @@ def test_the_DISCLOSURES_name_exactly_these_routes():
         f"SOUNDNESS.md does not name these driven routes: {missing}. "
         f"Every route in `ROUTES` is exhibited by a test in this file and "
         f"must be named where the residue is disclosed."
+    )
+
+
+# the marker that says a route's status is a DECISION rather than an
+# oversight. Same string in both places, so neither can drift.
+_DECIDED = "OUT OF SCOPE BY DECISION, 2026-08-18"
+
+
+def test_the_ROOT_route_is_recorded_as_a_DECISION_not_as_an_OPEN_item():
+    """A ROUTE'S STATUS IS PROSE, AND PROSE ROTS UNLESS SOMETHING READS IT.
+
+    The root route is out of scope by an explicit decision of the principal
+    (2026-08-18): *"It can be addressed with proper CI security on projects
+    that need it. It requires actively malicious python to actually happen."*
+    B6's door covers an object's FIELDS and was never scoped to its root.
+
+    That is a decision, not a discovery, and the failure mode it invites is
+    the opposite of the usual one: not a residue that stops being measured,
+    but a decision that stops being recorded — after which a later reader
+    meets the row below, reads it as an oversight, and reopens work that was
+    deliberately declined. So both places that carry the status are read here
+    against the same string, and the route's own driven test is required to
+    still exist. **Removing the test is not how this route gets closed**; it
+    is still true of the tree, and only its status changed.
+    """
+    soundness = (_REPO / "SOUNDNESS.md").read_text(encoding="utf-8")
+    here = Path(__file__).read_text(encoding="utf-8")
+    for label, text in (("SOUNDNESS.md", soundness), ("this file", here)):
+        assert _DECIDED in text, (
+            f"{label} no longer records the root route's status as a "
+            f"decision taken on a date. If the decision has been REVERSED, "
+            f"say so here and reopen it; if it has merely been edited away, "
+            f"put it back — an undated 'we are not doing this' is what a "
+            f"later reader reopens as an oversight."
+        )
+    assert (
+        "actively malicious python" in soundness
+        and "actively malicious python" in here
+    ), "the reasoning the decision rests on is no longer recorded beside it"
+    assert "def test_the_ROOT_of_a_query_is_never_canonicalized" in here, (
+        "the root route's driven test is gone. Out of scope is a statement "
+        "about what will be FIXED, never about what will be MEASURED"
     )
 
 

@@ -856,6 +856,22 @@ def unpaired_propagation(propagation, query_sha256: str) -> str | None:
     needs to know whether the propagation named another query or named
     none.
 
+    **AND "TWO DIFFERENT STRINGS" MEANS "TWO STRINGS THAT SAY THEY DIFFER"**
+    — audit 0.2.0 B11 audit, fix 6. That last test is ``!=``, which
+    dispatches to the recorded value's own ``__ne__``, so a ``str`` SUBCLASS
+    whose comparison always answers equal satisfies the ``isinstance`` test
+    and the emptiness test honestly and then decides the third itself: it
+    PAIRS, with any query. Its two neighbours do not — an always-equal object
+    of any OTHER type fails ``isinstance``, and an EMPTY always-equal
+    subclass fails ``not recorded``, because a plain subclass inherits
+    ``str.__len__`` — so the exposure is exactly non-empty ``str``
+    subclasses, and it is driven AS A PAIRING in
+    ``tests/test_propagation_identity.py::test_an_ALWAYS_EQUAL_str_SUBCLASS*``.
+    It is disclosed rather than closed because it buys nothing: defining such
+    a class is attacker Python in the caller's own process, and a caller who
+    can do that can equally pass the query's true hash, which pairs by the
+    honest rule.
+
     IT DOES NOT DECIDE WHAT HAPPENS NEXT. Each site fails closed in its own
     vocabulary — a verdict assembler returns UNKNOWN carrying this
     sentence, :func:`stelling.affine.refine_propagation` declines every

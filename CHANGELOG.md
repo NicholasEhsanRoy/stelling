@@ -522,14 +522,64 @@ measured on a B7-free tree unless it says otherwise.
   already took for the stamp, so the gates themselves add none — see
   [SOUNDNESS.md](SOUNDNESS.md) for the table and the attribution.
 
-  **What is NOT closed, by name**: the `env` argument of
-  `obligation.slice_obligation` / `slice_unknown_obligations` is a plain
-  mapping with no identity. A foreign `env` defeats the div-by-zero straddle
-  guard and produces a slice where the honest pairing declines — measured in
-  `tests/test_propagation_identity.py::test_the_env_channel_is_NOT_bound_and_here_is_what_that_costs`,
-  which also reads off the live source that neither library consumer takes
-  an `env` from its caller, so the exposure stops at the slice and reaches
-  no verdict.
+  **What is NOT closed, by name — FOUR arguments, not one.**
+  `obligation.slice_obligation` takes `env`, `assert_position`,
+  `top_primitives` and `relational_assumes` from its caller. None is bound
+  to the query, and none is visible to the site derivation, because they
+  arrive unpacked into scalars rather than as a `Propagation` — there is no
+  object left whose identity anything could compare. A foreign `env`
+  defeats the div-by-zero straddle guard and produces a slice where the
+  honest pairing declines; a foreign `relational_assumes` is worse — it puts
+  an axiom that is FALSE of the query being sliced into the emitted script,
+  turning `sat` (REFUTED, with a witness) into `unsat` (DISCHARGED). Both
+  are measured in
+  `tests/test_propagation_identity.py::test_the_slicer_takes_FOUR_unbound_arguments_and_TWO_of_them_are_measured`,
+  and the boundary — that each of the four library calls into a slicer
+  supplies every channel it supplies from the query it is judging, the one
+  exception being `slice_unknown_obligations` passing its own `env` parameter
+  through, which is the declared channel — is DERIVED off the live source in
+  `::test_NO_library_path_FORWARDS_a_slicer_argument_it_did_not_derive`. So
+  the exposure stops at the slice, reaches no verdict, and a new library
+  path that forwards any of the four goes red. See
+  [SOUNDNESS.md](SOUNDNESS.md).
+
+  **The gates fail closed on the objects they exist to refuse, and that is
+  now driven.** Seven hostile identity shapes × the five sites = 35 cells;
+  four of them raised a raw exception instead of refusing — a
+  `Propagation.__new__` with no fields took `slice_unknown_obligations` and
+  `refine_propagation` down on `obligations` and `make_solver_verdict` down
+  on `coverage`, and a non-dataclass took `refine_propagation`'s
+  `dataclasses.replace` down with a `TypeError`. The pairing gate in
+  `slice_unknown_obligations` is now that function's FIRST statement rather
+  than the line after the read it guards; `affine` builds its declines
+  without a bare `replace` and records a whole-run refusal on the new
+  `RefinementReport.declined_wholly`; and `make_solver_verdict` reads the two
+  propagation fields its escalation gates consult ONCE EACH through a net, an
+  unreadable one refusing rather than raising. All 35 fail closed
+  (`::test_EVERY_site_fails_CLOSED_on_EVERY_hostile_propagation_shape`). No
+  verdict changes: nothing here is reachable without hand-building a
+  propagation.
+
+  **The site derivation is driven backwards.** The AST rule that enumerates
+  the five sites recognised a query as "annotated `ClosedJaxpr` or NAMED
+  `closed`" and checked for the gate by substring over `ast.unparse(node)`,
+  which keeps docstrings — so three of the five gates could be deleted
+  outright with the test still green, and a new assembler with an unannotated
+  query parameter was invisible. The rule is structural now (both halves
+  seeded from the classes and closed under calls in both directions), the
+  check is an `ast.Call` node, and the claim is narrowed to what it verifies:
+  a function that holds a query and READS the propagation. Each of the five
+  deletions and both injections are re-run as tests.
+
+  **Also recorded, as a decision rather than an oversight** (2026-08-18):
+  root-object canonicalization — a `ClosedJaxpr` subclass answering `jaxpr`
+  from a property, one of the three routes past `ir`'s door that B6
+  disclosed — is OUT OF SCOPE by explicit ruling, *"It can be addressed with
+  proper CI security on projects that need it. It requires actively
+  malicious python to actually happen."* The route is still true of the tree
+  and its driven test is untouched; only its status changed. See
+  [SOUNDNESS.md](SOUNDNESS.md) and
+  `tests/test_canonicalization_routes.py::test_the_ROOT_route_is_recorded_as_a_DECISION_not_as_an_OPEN_item`.
 
 **Batch B7 — the `pow`-row bar and gauge batch** (`fix/B7-bar-gauge`, landed on
 `main` at `198a2b5`; audit 0.2.0 M10, S4). Every figure in these eleven entries

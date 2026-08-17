@@ -1441,13 +1441,32 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
         # DERIVED FROM `closed`, NEVER READ OFF AN ARGUMENT, and that is the
         # whole reason this is a second walk rather than a field. The axioms
         # are an input to the re-emitted TEXT, hence to the narrowing
-        # decision; `make_solver_verdict`'s `propagation` argument is
-        # explicitly NOT bound to `closed` by the query pairing gate (its
-        # docstring measures that residue), so reading them off it would put a
-        # mispairable quantity into exactly the decision `barred_on_slice` was
-        # deleted for. `propagate` is handed `closed` and nothing else, so —
-        # by the same mirror argument :func:`_reproduced_evidence` carries —
-        # it cannot aim: it never sees a record.
+        # decision, so what supplies them decides how wide the bar is.
+        # `propagate` is handed `closed` and nothing else, so — by the same
+        # mirror argument :func:`_reproduced_evidence` carries — it cannot
+        # aim: it never sees a record.
+        #
+        # THE JUSTIFICATION THAT STOOD HERE HAS BEEN FALSIFIED BY THE DIFF IT
+        # WAS WRITTEN IN, and it is replaced rather than patched (audit 0.2.0
+        # B11 audit, fix 5). It said `make_solver_verdict`'s `propagation`
+        # argument is "explicitly NOT bound to `closed` by the query pairing
+        # gate (its docstring measures that residue)". Both halves are now
+        # false: B11 added exactly that gate, and rewrote that docstring so
+        # that it no longer measures any such residue.
+        #
+        # WHAT IS STILL TRUE IS FINER, AND IS WHY THE SECOND WALK STAYS. The
+        # gate binds the propagation's IDENTITY to `closed` — it establishes
+        # that the object says it is about this query — and says nothing about
+        # its CONTENT. A hand-built `Propagation` carrying this query's true
+        # `query_sha256` passes every gate in the library and may carry any
+        # `relational_assumes` at all; `stelling.solvers.Escalation`'s
+        # docstring states that trust model for its own sibling ("a hand-built
+        # record can hold any value"). So reading the axioms off the argument
+        # would still put a CALLER-CONTROLLED quantity into exactly the
+        # decision `barred_on_slice` was deleted for, which is what this walk
+        # exists to avoid. Any residue still fails CLOSED, as the paragraph
+        # below records: a tuple that differs from the escalation's re-emits a
+        # script that does not match, which WIDENS the bar.
         #
         # THE DEFAULT ARGUMENTS ARE THE RIGHT ONES FOR EVERY QUERY THAT CAN
         # REACH HERE, which is a claim about `escalate` rather than about

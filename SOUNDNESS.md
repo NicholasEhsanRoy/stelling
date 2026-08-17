@@ -9156,6 +9156,18 @@ in place and marked.*
     in-suite pin holds the MECHANISM rather than the verdict, so that it
     needs no solver: `propagate` and `content_hash` are shown reading two
     different documents from one object.
+
+    **STATUS: OUT OF SCOPE BY DECISION, 2026-08-18 — not an open item.**
+    Root-object canonicalization (a `ClosedJaxpr` subclass answering `jaxpr`
+    from a property) is ruled out of scope by the principal, in these words:
+    *"It can be addressed with proper CI security on projects that need it.
+    It requires actively malicious python to actually happen."* B6's door
+    covers an object's FIELDS and was never scoped to its root. The route is
+    still true of this tree and the reproducer and the driven test stay
+    exactly where they are — what changes is the status, so that a later
+    reader records it as a decision that was taken rather than reopening it
+    as an oversight that was missed. Anything that makes it reachable from a
+    DOCUMENT would be a new finding and is not covered by this decision.
   * **the install is not guaranteed to install.** `_canonicalise` installs
     the canonical twin with `object.__setattr__`, which resolves the field
     NAME — and a name that resolves to a class-level DATA DESCRIPTOR goes
@@ -10324,6 +10336,59 @@ in place and marked.*
   each inside a refusal condition, so a foreign propagation can cause a
   wrong refusal or a missed one and cannot mint through any of them.
 
+  **A GATE CANNOT GUARD A READ ABOVE IT, AND THOSE READS WERE PLAIN**
+  (audit 0.2.0 B11 audit). The paragraph above is a soundness argument and
+  it stands; what it did not say is that the reads it enumerates could
+  RAISE. `Propagation.__new__(Propagation)` — no fields at all — reached
+  `propagation.coverage.constrained` and left `AttributeError: 'Propagation'
+  object has no attribute 'coverage'` out of `make_solver_verdict`. Two of
+  the four other consumption sites degraded on that same object
+  (`verdict.make_verdict` and `solvers.escalate`) and two raised for reasons
+  of their own, recorded in the next paragraph. (`propagation.semantics`
+  survived only because it carries a dataclass DEFAULT, hence a class
+  attribute; that is luck, not a rule — a `semantics` property that raises
+  has the same shape as the `query_sha256` one this repair's own refusal
+  already nets.) Both
+  quantities are now read ONCE EACH through `solvers._propagation_read`, and
+  an unreadable one REFUSES: an unreadable `semantics` cannot be shown to
+  match the escalation's, and a propagation that cannot be asked how many
+  assumes it constrained cannot be shown to have constrained none. The
+  refusal is the gate's own `MispairedEscalationError`, so the ordering is
+  untouched and the readable-case messages are byte-identical.
+
+  The same class was live at two of the three sites that MAY NOT raise, and
+  is closed the same way. `obligation.slice_unknown_obligations` read
+  `propagation.obligations` on the line ABOVE its own gate, in the one
+  function whose own comment says it may not raise; the gate is now that
+  function's first statement, and the decline it returns enumerates the
+  obligations through a net (`obligation._decline_all_unknown`, which yields
+  ONE decline carrying `index=-1` when the object will not be enumerated at
+  all, because `()` is what a propagation with nothing unknown returns).
+  `affine.refine_propagation`'s decline went through `dataclasses.replace`,
+  which is a `TypeError` on anything that is not a dataclass instance — so
+  the refusal raised on exactly the objects it exists to refuse; it goes
+  through `affine._with_notes` now, which hands an unrebuildable object back
+  UNCHANGED (still un-laundered, which is the property that matters) and
+  records the refusal on `RefinementReport.declined_wholly`, whose value is
+  the refusing function's own reason string and nothing read off the
+  argument, so no shape the argument takes can empty it. **Driven: the
+  audit's 7 hostile identity shapes × 5 sites = 35 raised at 4 on `4bc502b`
+  and fails closed at 35 of 35 here**, re-run as
+  `test_propagation_identity.py::test_EVERY_site_fails_CLOSED_on_EVERY_hostile_propagation_shape`.
+  Reverting each of the four fixes alone reddens that row and names exactly
+  the cell it owns.
+
+  **WHAT THAT CHANGES IN THE 13-DRIVE CONTAINMENT REPRODUCER, exactly.**
+  `b6reaudit/r2_containment.py` on `207faca` and on this branch differ on
+  **three** lines, and none of them is a refusal that moved: the E1 preamble
+  (`records: [(0,'violated-witness')] spawns: 2` → `records: [] spawns: 0`,
+  because `escalate` now refuses the stranger propagation before it spawns)
+  and two rows that still read `PROCEEDED`, with the status they proceed to
+  going `REFUTED` → `UNKNOWN`. The refusal set is untouched at 9 refusals /
+  4 proceeds — 8 `MispairedEscalationError` plus the one hand-built
+  `Escalation` with no `query_sha256` field at all, which raises
+  `AttributeError` and is counted as a refusal because it does not proceed.
+
   An absent identity is refused exactly as a wrong one is: `""` on either
   leg is an absence, not a match — the same rule the escalation leg
   learned at `e35de13`. That is what makes the field's lack of a default
@@ -10348,13 +10413,77 @@ in place and marked.*
   (`test_propagation_identity.py::test_every_consumption_site_checks_the_pairing`),
   so a new site that skips the check fails at the moment it is written.
 
-  **WHICH CHANNEL IS NOT CLOSED, said plainly.** The `env` argument of
-  `obligation.slice_obligation` / `slice_unknown_obligations` is a plain
-  mapping with no identity, and B11 did not give it one. Measured cost, on
-  this build: the div-by-zero straddle guard reads the divisor's box out of
-  `env` rather than out of the query's declarations, so an `env` taken from
-  a query whose divisor excludes zero lets a slice be EMITTED for a query
-  whose divisor straddles it, where the honest pairing declines —
+  **AND THAT AST DERIVATION WAS DEFEATABLE TWICE OVER — audit 0.2.0 B11
+  audit, and the count of five was never in doubt; the ORACLE was.** It
+  recognised a query as "annotated `ClosedJaxpr` **or named `closed`**",
+  which is a naming convention rather than a fact about the argument, and it
+  checked for the gate by looking for the substring `unpaired_propagation`
+  in `ast.unparse(node)`, which keeps docstrings — and three of the five
+  sites name the function in their own docstring. Both defeats were driven
+  on this build:
+
+  ```
+  mutation                                             old oracle  new oracle
+  delete the gate in affine.refine_propagation         RED         RED
+  delete the gate in obligation.slice_unknown_oblig..  RED         RED
+  delete the gate in solvers.escalate                  GREEN       RED
+  delete the gate in solvers.make_solver_verdict       GREEN       RED
+  delete the gate in verdict.make_verdict              GREEN       RED
+  inject a public assembler whose query parameter is
+    unannotated and is not named `closed`              GREEN       RED
+  inject a public function that reads a propagation
+    with no annotation at all                          GREEN       RED
+  ```
+
+  The three GREEN rows in the first block are exactly the three sites whose
+  DOCSTRINGS name `unpaired_propagation`, which is what a substring test over
+  `ast.unparse(node)` was reading; deleting 884 characters of `escalate`'s
+  gate left this file passing.
+
+  The recognition rule is structural now and the check is an `ast.Call`
+  node, so a docstring, a comment and a string literal are all out of the
+  channel rather than filtered from it. A parameter carries a query if it is
+  annotated `ClosedJaxpr`, or a member only `ir.ClosedJaxpr` has is read off
+  it, or a call relates it — IN EITHER DIRECTION — to a parameter that does;
+  that is what sees `make_verdict`'s `closed`, which is unannotated and
+  never has an attribute read off it at all, through `query_identity`. A
+  parameter carries a propagation if it is annotated `Propagation` or a call
+  relates it to one that is; and a function is a SITE when it holds a query
+  and READS the propagation it holds — a member off it, or the whole object
+  handed to `dataclasses.replace`, which reads every field. **The claim is
+  narrowed to that, and
+  the narrowing is checked rather than asserted**: `preconditions._finish`
+  holds both and reads neither, and every call it makes with the propagation
+  is shown to land on a parameter the derivation also carries as a
+  propagation, so the object cannot reach a read nobody looked at. The one
+  residue a static rule cannot see — a propagation supplied by a caller
+  OUTSIDE the library, with no annotation to say what it is — is forbidden
+  rather than disclosed: a public library function that reads a name
+  `Propagation` answers to, off an unannotated parameter, fails
+  `test_a_PUBLIC_function_that_reads_a_propagation_must_ANNOTATE_it`.
+
+  Every one of those mutations is re-run as a test, because an oracle nobody
+  has driven backwards is an oracle nobody has tested — which is the defect
+  class this whole log keeps recording.
+
+  **WHICH CHANNELS ARE NOT CLOSED, said plainly — there are FOUR of them,
+  and this section named one** (audit 0.2.0 B11 audit).
+  `obligation.slice_obligation` is public, is in `__all__`, and takes FOUR
+  caller-supplied arguments carrying facts about the query that the
+  propagation would otherwise have derived: **`env`, `assert_position`,
+  `top_primitives` and `relational_assumes`.** None of them is bound to the
+  query, and none of them is visible to the site derivation above, because
+  they arrive UNPACKED INTO SCALARS rather than as a `Propagation` — there
+  is no object left whose identity anything could compare. The four are read
+  off the signature by
+  `test_propagation_identity.py::test_the_slicer_takes_FOUR_unbound_arguments_and_TWO_of_them_are_measured`,
+  so a fifth cannot be added silently.
+
+  **`env` RELAXES A GUARD.** The div-by-zero straddle guard reads the
+  divisor's box out of `env` rather than out of the query's declarations, so
+  an `env` taken from a query whose divisor excludes zero lets a slice be
+  EMITTED for a query whose divisor straddles it, where the honest pairing
+  declines —
 
   ```
   slice_unknown_obligations(hazard, p_hazard, interval_env(hazard))
@@ -10363,18 +10492,45 @@ in place and marked.*
       -> ObligationSlice        (the guard's premise is a lie)
   ```
 
-  **It is a disclosure and not a live false verdict, and the boundary is
-  exact**: the exposure stops at the SLICE. Both library consumers derive
-  the environment from their own `closed` (`solvers.escalate` and
-  `affine.refine_propagation` each call `interval_env(closed)`), so no
-  library path can supply a foreign one; reaching a VERDICT from a slice
-  means hand-emitting, hand-solving and hand-building an `Escalation`, and
-  a hand-built record is outside the trust model this library states.
-  `test_propagation_identity.py::test_the_env_channel_is_NOT_bound_and_here_is_what_that_costs`
-  holds that measurement AND reads the two `interval_env(closed)` call
-  sites off the live source, so the day a library path starts taking an
-  `env` from its caller, that test goes red and the answer is an identity
-  on the environment rather than a wider disclosure.
+  **`relational_assumes` INJECTS A FALSE PREMISE, and is the worse of the
+  two.** `smt.emit` reads its axioms off `sl.assumes` and from nowhere else,
+  and `_Slicer` fills `sl.assumes` from the `relational_assumes` it was
+  constructed with — so a tuple borrowed from another query's propagation
+  becomes an `(assert ...)` line in the emitted script and the solver is
+  asked a different question, which it answers correctly. Measured on this
+  build (z3, `jax_enable_x64=1`) on `x - y <= 0` over `[-5,5]²`, borrowing
+  the axiom `x <= y` from a query that declares it:
+
+  ```
+  honest ():   assumes=0  ->  (assert (not (and t4_0 t4_1)))       z3: sat    -> REFUTED/witnessed
+  FOREIGN:     assumes=1  ->  (assert (<= x0_0 x1_0))   <- an axiom FALSE of the query being sliced
+                              (assert (<= x0_1 x1_1))
+                              (assert (not (and t4_0 t4_1)))       z3: unsat  -> DISCHARGED
+  ground truth (exact Fraction): x=1, y=0 in [-5,5]^2 -> x - y = 1, NOT <= 0  => REFUTED
+  concrete jax: 1.0 > 0
+  ```
+
+  **They are disclosures and not live false verdicts, and the boundary is
+  DERIVED rather than asserted**: the exposure stops at the SLICE. Every
+  library call into either slicer — there are four, in `solvers.escalate`,
+  `affine.refine_propagation`, `verdict._bar_scope` and
+  `slice_unknown_obligations` itself — supplies every channel it supplies
+  from the query it is judging, and the ONE argument any library path
+  forwards from its own caller is `slice_unknown_obligations`' own `env`,
+  passed through to `slice_obligation`, which is the declared channel
+  itself. Reaching a VERDICT from a slice means hand-emitting, hand-solving
+  and hand-building an `Escalation`, and a hand-built record is outside the
+  trust model this library states.
+  `test_propagation_identity.py::test_NO_library_path_FORWARDS_a_slicer_argument_it_did_not_derive`
+  computes that boundary off the live source — every call site, every
+  channel, each argument resolved back through the enclosing function's
+  local assignments — so a NEW path taking any of the four from its caller
+  reddens it. The version of that test that shipped at `4bc502b` read
+  `inspect.getsource` of TWO named suppliers and substring-matched
+  `"interval_env(closed)"`: it was short by one supplier
+  (`verdict._bar_scope`), it said nothing about the other three channels,
+  and a new path would not have reddened it at all, because it only ever
+  looked at the two functions it already knew about.
 
   **THE COST, MEASURED ON REAL WORK.** The identity is one
   `ClosedJaxpr.content_hash()` per `propagate()`. Both verdict assemblers
