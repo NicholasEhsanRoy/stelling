@@ -472,10 +472,64 @@ measured on a B7-free tree unless it says otherwise.
   no notes, no spawns and no stamps — exempts the gate entirely and
   reaches the same false VERIFIED with no solver record at all. The
   identity belongs on the `Propagation`, checked wherever a propagation is
-  consumed against a query; that is cross-module work and is scheduled as
-  its own change. Until then this is a **disclosed residue, not a closed
-  one** — see [SOUNDNESS.md](SOUNDNESS.md) and
-  `tests/test_verified_bar.py::test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`.
+  consumed against a query; that is cross-module work and was scheduled as
+  its own change. **It landed in B11 below, and this residue is closed** —
+  see [SOUNDNESS.md](SOUNDNESS.md) and
+  `tests/test_verified_bar.py::test_a_mispaired_PROPAGATION_can_no_longer_mint_a_false_VERIFIED`.
+
+**Batch B11 — the propagation identity** (`fix/B11-propagation-identity`):
+
+- **SOUNDNESS FIX — a `Propagation` from one query could be stamped as a
+  verdict about another, minting a false VERIFIED (and a false REFUTED) on
+  the released `v0.1.0` and on every 0.2.0 revision up to `207faca`.** Audit
+  0.2.0 B6 re-audit UNSOUND-3, disclosed by B6 and closed here. See
+  [SOUNDNESS.md](SOUNDNESS.md) for the affected versions, the screen, and
+  what to re-run.
+
+  `MispairedEscalationError` bound the ESCALATION to the query. Nothing
+  bound the PROPAGATION, because `Propagation` carried no query identity —
+  and the discharges do not have to come from an escalation: an obligation
+  the interval leg or the affine refinement decides outright arrives already
+  `discharged` on the propagation and is reported by INDEX, with no solver
+  record anywhere. Two queries traced from one factory carry byte-identical
+  `source_info` at identical positions, so every structural check passes.
+
+  **`stelling.propagate.Propagation` now carries `query_sha256`** — a
+  REQUIRED field with no default, written at `propagate`'s single
+  construction site — and `propagate.unpaired_propagation` is the one
+  comparison read by all five sites that consume a propagation against a
+  query: `verdict.make_verdict`, `solvers.make_solver_verdict`,
+  `solvers.escalate`, `affine.refine_propagation` and
+  `obligation.slice_unknown_obligations`. Each fails closed in its own
+  vocabulary and none of them raises — the two assemblers return UNKNOWN
+  with no obligations and the reason quoted
+  (`verdict.unpaired_propagation_verdict`), the other three decline. The
+  escalation gate still raises, and the propagation gate is ordered after it
+  so an assembly wrong on both legs keeps raising.
+
+  **API.** `Propagation` gains a required field, so a hand-built one now
+  needs `query_sha256=`; `propagate()` fills it in. `propagate.__all__`
+  gains `query_identity` and `unpaired_propagation`;
+  `verdict.__all__` gains `unpaired_propagation_verdict`. No change to
+  `check()`, `check_contract()`, `Verdict` or `Stamp`.
+
+  **Cost**, measured on real queries rather than a microbenchmark: one
+  `content_hash()` per `propagate()`. Median of n=200 `check()` calls after
+  warm-up: **1.548 → 1.766 ms (+14%)** on the README example and
+  **2.683 → 3.017 ms (+12%)** on `contracts.conditioning_2x2_field`; **no
+  measurable change** on a solver-bound query (146.5 → 141.2 ms, n=15, bands
+  overlapping). Both verdict assemblers and `escalate` reuse the hash they
+  already took for the stamp, so the gates themselves add none — see
+  [SOUNDNESS.md](SOUNDNESS.md) for the table and the attribution.
+
+  **What is NOT closed, by name**: the `env` argument of
+  `obligation.slice_obligation` / `slice_unknown_obligations` is a plain
+  mapping with no identity. A foreign `env` defeats the div-by-zero straddle
+  guard and produces a slice where the honest pairing declines — measured in
+  `tests/test_propagation_identity.py::test_the_env_channel_is_NOT_bound_and_here_is_what_that_costs`,
+  which also reads off the live source that neither library consumer takes
+  an `env` from its caller, so the exposure stops at the slice and reaches
+  no verdict.
 
 **Batch B7 — the `pow`-row bar and gauge batch** (`fix/B7-bar-gauge`, landed on
 `main` at `198a2b5`; audit 0.2.0 M10, S4). Every figure in these eleven entries
@@ -1396,18 +1450,20 @@ was measured on a B6-free tree unless it says otherwise.
            of type bytes: a declaration records its extents in a tuple or
            a list, ...
   _declared_shape call sites reached, in order:
-      obligation.py:3358 in slice     <- the element budget
-                                      <- obligation.py:3524, the
+      obligation.py:3360 in slice     <- the element budget
+                                      <- obligation.py:3526, the
                                          slice-input reader, is never
                                          reached
   ```
 
   *(Both line numbers are the MERGED tree's. B6 published them as 3293 and
   3459, read on a tree without B7; B7's own `obligation.py` edits sit above
-  both call sites and shifted each by 65. The exhibit's own driver
+  both call sites and shifted each by 65; B11's two-line import addition
+  shifted each by a further 2, to 3360 and 3526. The exhibit's own driver
   `test_the_R1c_disclosure_EXHIBITS_its_pre_emption` reads the budget's line
-  off the source and requires this block to quote it, so it RED-ed on the
-  merge until these digits were repinned — which is the exhibit working, and
+  off the source and requires this block to quote it, so it RED-ed on each
+  of those merges until these digits were repinned — which is the exhibit
+  working, and
   the reason it quotes a line rather than describing one.)*
 
   One refusal, produced by the earlier reader, on the same input, before

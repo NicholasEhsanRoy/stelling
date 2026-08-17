@@ -38,6 +38,8 @@ that names the actual cause.
 """
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 jax = pytest.importorskip("jax")
@@ -259,11 +261,13 @@ def test_an_obligation_whose_association_cannot_be_trusted_still_declines():
 
     THE CLAIM THIS TEST MAKES GOOD IS NARROWER THAN "STRICTLY STRONGER",
     and that wording is gone deliberately (audit 0.2.0 B6). See
-    `test_two_queries_from_ONE_FACTORY_share_source_info_and_slice_through`
+    `test_two_queries_from_ONE_FACTORY_are_separated_by_the_query_IDENTITY`
     below for the measured boundary: the mapping is FINER than the count —
     it answers per obligation what the count answered per query — and on
     the wrong-query attack it catches strictly more than the count did, but
-    not all of it.
+    not all of it. What catches the rest is the propagation's own query
+    identity, not a stronger structural check; that is B11 and it is the
+    outer of the two mechanisms this test now drives.
     """
     a = trace(both_top_level)
     b = trace(two_other_asserts)
@@ -285,7 +289,29 @@ def test_an_obligation_whose_association_cannot_be_trusted_still_declines():
         "not demonstrate the gap the carried association closes"
     )
 
-    items = slice_unknown_obligations(b, p_a, interval_env(b))
+    # THE QUERY-IDENTITY GATE FIRES FIRST NOW (audit 0.2.0 B6 re-audit
+    # UNSOUND-3, closed in B11): `p_a` records query A's content hash and is
+    # being handed query B, so the mispairing is refused before any
+    # per-obligation association is looked at. That is the outer of two
+    # independent mechanisms and it is asserted on its own terms.
+    outer = slice_unknown_obligations(b, p_a, interval_env(b))
+    assert outer, "no unknown obligations; the fixture measures nothing"
+    assert all(isinstance(i, DeclinedObligation) for i in outer), [
+        type(i).__name__ for i in outer
+    ]
+    assert all(i.reason.startswith("unpaired propagation:") for i in outer), [
+        i.reason for i in outer
+    ]
+
+    # ... AND THE ASSOCIATION CHECK IS STILL THE INNER ONE, measured with the
+    # identity satisfied by hand so that this test keeps driving the guard it
+    # was written for. Neither mechanism is doing the other's work: the
+    # identity keys on the whole query's content hash, the association on one
+    # obligation's recorded position and `source_info`, and an obligation
+    # from a sub-jaxpr or from hand-built IR reaches the second with the
+    # first honestly satisfied.
+    laundered = dataclasses.replace(p_a, query_sha256=b.content_hash())
+    items = slice_unknown_obligations(b, laundered, interval_env(b))
     assert items, "no unknown obligations; the fixture measures nothing"
     assert all(isinstance(i, DeclinedObligation) for i in items), [
         type(i).__name__ for i in items
@@ -307,34 +333,41 @@ def _same_line_factory(lo, hi):
 
 
 @need_both
-def test_two_queries_from_ONE_FACTORY_share_source_info_and_slice_through():
-    """THE BOUNDARY OF THE ASSOCIATION CHECK, measured — audit 0.2.0 B6.
+def test_two_queries_from_ONE_FACTORY_are_separated_by_the_query_IDENTITY():
+    """THE BOUNDARY OF THE ASSOCIATION CHECK, AND THE MECHANISM THAT NOW
+    CLOSES IT — audit 0.2.0 B6, closed in B11.
 
-    The commit that introduced the per-obligation mapping called it
-    "strictly stronger than the count". It is not, and this is the
-    counterexample. Two queries traced from the same factory carry
-    byte-identical `source_info` on their asserts, at the same top-level
-    position, one obligation each — so ALL THREE guards pass and
-    `slice_unknown_obligations` slices obligation 0 of query A out of query
-    B, exactly as the count check would have. Measured:
+    The commit that introduced the per-obligation mapping called it "strictly
+    stronger than the count". It is not, and this is the counterexample: two
+    queries traced from the same factory carry byte-identical `source_info`
+    on their asserts, at the same top-level position, one obligation each —
+    so all three association guards pass. Measured on `dee8bc2` and on
+    `207faca`, `slice_unknown_obligations` sliced obligation 0 of query A out
+    of query B:
 
         source_info identical across the two queries: True
         -> SLICED index=0, inputs bounded (0.0, 1.0)   <- B's declaration,
                                                           not A's
 
-    WHERE CONTAINMENT ACTUALLY IS, and it is the same defence that
-    protected the count check: `make_solver_verdict` refuses to stamp an
-    escalation whose recorded query hash is not the hash of the query being
-    stamped. Asserted below so that nobody reads the association check as
-    the thing standing between a user and a wrong-query verdict.
+    **THAT BOUNDARY IS UNCHANGED AND IS ASSERTED BELOW.** Structure cannot
+    separate two queries that differ only in a declared bound, and no amount
+    of strengthening the association check would make it able to. What
+    changed is that the propagation now SAYS which query it is about
+    (`Propagation.query_sha256`), and this function checks it — so the
+    mispairing is refused by identity where structure is blind.
 
-    Left as a boundary rather than closed here on purpose. The hazard is a
-    CALLER-PAIRING error and it reaches all three arguments alike —
-    `closed`, `propagation`, and `env`, the last of which is a plain dict
-    with no identity to check at all. A hash check on `propagation` inside
-    this one function would close one of the three channels while reading
-    as though it closed the question, which is the "check in one place the
-    other does not consult" shape this whole batch is about.
+    The previous version of this docstring said the repair was "left as a
+    boundary rather than closed here on purpose", because "the hazard reaches
+    all three arguments alike — `closed`, `propagation`, and `env`, the last
+    of which is a plain dict with no identity to check at all", and a hash on
+    `propagation` alone "would close one of the three channels while reading
+    as though it closed the question". The first half was right and the
+    second half is now answered by saying which channels are closed rather
+    than by leaving all three open: `propagation` is bound here and at the
+    four other sites that consume one against a query
+    (`tests/test_propagation_identity.py`), and `env` is NOT bound — with
+    what that costs measured, by name, in
+    `test_propagation_identity.py::test_the_env_channel_is_NOT_bound_and_here_is_what_that_costs`.
     """
     from stelling.ir import ClosedJaxpr  # noqa: F401  (documented door)
     from stelling.obligation import ObligationSlice
@@ -365,14 +398,27 @@ def test_two_queries_from_ONE_FACTORY_share_source_info_and_slice_through():
     p_a = propagate(a)
     assert [o.status for o in p_a.obligations] == ["unknown"]
 
-    # ALL THREE GUARDS PASS and the wrong-query slice comes out
-    (item,) = slice_unknown_obligations(b, p_a, interval_env(b))
+    # THE IDENTITY REFUSES IT
+    (declined,) = slice_unknown_obligations(b, p_a, interval_env(b))
+    assert isinstance(declined, DeclinedObligation), declined
+    assert declined.reason.startswith("unpaired propagation:"), declined.reason
+    assert a.content_hash() in declined.reason
+    assert b.content_hash() in declined.reason
+
+    # ... AND THE ASSOCIATION CHECK STILL CANNOT, which is why the identity
+    # was needed. With the propagation's hash forged to B's — the one edit
+    # that removes the identity and changes nothing structural — all three
+    # association guards pass and the wrong-query slice comes straight out,
+    # bounded by B's declaration and answering A's obligation.
+    laundered = dataclasses.replace(p_a, query_sha256=b.content_hash())
+    (item,) = slice_unknown_obligations(b, laundered, interval_env(b))
     assert isinstance(item, ObligationSlice), getattr(item, "reason", item)
     assert [(i.lo, i.hi) for i in item.inputs] == [(0.0, 1.0), (0.0, 1.0)], (
         "the slice did not come out of query B after all"
     )
 
-    # containment, one layer up, on the query CONTENT HASH
+    # containment one layer up is unchanged: the escalation leg still refuses
+    # on the query CONTENT HASH, and it refuses here for its own reason
     esc = escalate(b, p_a, SolverConfig(timeout_ms=20_000))
     versions = dict(
         stelling_version="test",

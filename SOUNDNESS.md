@@ -1013,6 +1013,11 @@ verdicts:
   the other query's obligations reported under this query's hash. It is a live
   test, not a comment:
   `tests/test_verified_bar.py::test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`.
+  **[CLOSED 2026-08-16, B11 — see the entry of that date: `Propagation`
+  carries its own `query_sha256` and five sites check it; that test is now
+  `::test_the_two_pairing_gates_bind_the_ESCALATION_AND_the_propagation`.
+  The zero-line-delta constraint on `stelling.propagate` quoted above was a
+  per-pass scoping decision and does not bind later passes.]**
   The bar and the gate are anti-correlated and both stay: the gate keys on the
   whole query's content hash, the bar on one slice's fingerprint and script,
   and the bar's own mispairing regressions now satisfy the gate by hand
@@ -1118,6 +1123,8 @@ verdicts:
   the other query's obligations reported under this query's hash, and is a
   live test rather than a comment
   (`test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`).
+  **[CLOSED 2026-08-16, B11 — see the entry of that date; that test is now
+  `::test_the_two_pairing_gates_bind_the_ESCALATION_AND_the_propagation`.]**
   **Four more, same pass, none of them verdict-moving through `check()`:**
   **(1)** the "a record cannot certify itself" pin saw ONE SPELLING. Six
   channels each turned the bar's UNKNOWN into VERIFIED with the full suite
@@ -9853,9 +9860,11 @@ in place and marked.*
   not the hash of the query being stamped — and also when that hash cannot
   be established at all.
 
-  **AND THAT GATE BINDS ONE OF THE THREE ARGUMENTS, SO IT IS NOT
-  CONTAINMENT FOR THIS — audit 0.2.0 B6 RE-AUDIT, UNSOUND-3, DISCLOSED AND
-  NOT CLOSED.** The gate is real and unconditional on the leg it covers
+  **AND THAT GATE BOUND ONE OF THE THREE ARGUMENTS, SO IT WAS NOT
+  CONTAINMENT FOR THIS — audit 0.2.0 B6 RE-AUDIT, UNSOUND-3. DISCLOSED
+  HERE, CLOSED IN B11: see the 2026-08-16 entry below, which carries the
+  affected-versions and what-to-re-run sections. The paragraphs that follow
+  are kept in the past tense as the B6 record of what was open.** The gate is real and unconditional on the leg it covers
   (13 drives refused, including one with an unhashable query, with an
   injected-defect control proving the harness reads the live gate). The
   leg it covers is the ESCALATION. It does not cover the PROPAGATION,
@@ -9881,26 +9890,37 @@ in place and marked.*
 
   So the sentence in `Escalation.query_sha256`'s docstring that an exempt
   pairing "returns UNKNOWN off the propagation alone" was **false, and is
-  struck**. The repair is an identity on the `Propagation` itself, checked
+  struck**. The repair was an identity on the `Propagation` itself, checked
   wherever a propagation is consumed against a query — cross-module work,
   scheduled as its own change and deliberately not attempted here. What
-  this batch did is stop the tree claiming a containment it does not have:
+  this batch did is stop the tree claiming a containment it did not have:
   `CHANGELOG.md`, `solvers.Escalation`'s docstring and
-  `tests/test_verified_bar.py` now say which leg is bound, which is not,
-  and that `carries_work=False` exempts the gate entirely.
-  `test_verified_bar.py::test_a_mispaired_PROPAGATION_mints_a_false_VERIFIED`
-  holds the live measurement in both forms, so closing it later is a test
-  going red rather than an archaeology exercise.
+  `tests/test_verified_bar.py` were made to say which leg was bound, which
+  was not, and that `carries_work=False` exempted the gate entirely, and
+  `test_verified_bar.py` held the live measurement in both forms so that
+  closing it later would be a test going red rather than an archaeology
+  exercise. **It went red in B11, and the 2026-08-16 entry below is the
+  account of the mechanism that closed it**; that test is now
+  `::test_a_mispaired_PROPAGATION_can_no_longer_mint_a_false_VERIFIED` and
+  carries a non-vacuity control that forges the identity and gets the false
+  VERIFIED straight back.
 
-  **Deliberately not closed inside `slice_unknown_obligations`.** The
-  hazard is a caller-PAIRING error and it reaches all three arguments
+  **Deliberately not closed inside `slice_unknown_obligations` — in B6.**
+  The hazard is a caller-PAIRING error and it reaches all three arguments
   alike: `closed`, `propagation`, and `env` — the last a plain dict with no
-  identity to check. A query-hash check on `propagation` alone would close
-  one of three channels while reading as though it closed the question,
-  which is the "check in one place the other does not consult" shape this
-  whole batch is about. The boundary and the containment are both pinned in
-  `test_nested_assert_escalation.py::test_two_queries_from_ONE_FACTORY_share_source_info_and_slice_through`
-  so that a later reader meets the measurement rather than the overclaim.
+  identity to check. A query-hash check on `propagation` alone, inside that
+  one function, would have closed one of three channels while reading as
+  though it closed the question, which is the "check in one place the other
+  does not consult" shape that batch was about. **B11 answered that by
+  saying which channels are closed rather than by leaving all three open**:
+  `propagation` is bound at all five consumption sites, `closed` is the
+  reference every one of them checks against, and `env` is NOT bound, with
+  what that costs measured by name in the 2026-08-16 entry. The boundary is
+  pinned in
+  `test_nested_assert_escalation.py::test_two_queries_from_ONE_FACTORY_are_separated_by_the_query_IDENTITY`,
+  which still asserts that STRUCTURE cannot separate two one-factory
+  queries — that has not changed and cannot be changed — and that the
+  identity can.
 
 - **2026-08-15 (B6, same batch): solver escalation stopped throwing away
   the whole query because ONE `assert_` was written inside a `jit`. UNKNOWN
@@ -10142,14 +10162,266 @@ in place and marked.*
   was written for (all four stray-index behaviours end at the whole-query
   bar) is still asserted, and the loop over all four indices is untouched.
 
+- **2026-08-16 (B11): FALSE VERIFIED *and* FALSE REFUTED — a `Propagation`
+  from one query could be stamped as a verdict about ANOTHER, because
+  nothing anywhere compared the two. PRESENT IN THE RELEASED `v0.1.0`, and
+  reachable through the ordinary public assemblers with no solver, no
+  serialization and no hand-built record.** Audit 0.2.0 B6 re-audit,
+  UNSOUND-3 — disclosed by the B6 batch, which correctly refused to
+  half-close it, and closed here.
+
+  **THE MECHANISM.** `stelling.verdict.make_verdict` and
+  `stelling.solvers.make_solver_verdict` take three things: the query
+  (`closed`), the interval/affine judgement (`propagation`) and the solver
+  outcomes (`escalation`). `MispairedEscalationError` bound `closed` to
+  `escalation` — by the query content hash `escalate` records — and that
+  gate is real and unconditional on its leg. It never bound `propagation`,
+  and `Propagation` carried no query identity for it to bind.
+
+  Two facts make that reachable rather than theoretical:
+
+  * **`escalate` hashes the `closed` IT was handed**, so an assembly of
+    (query B, propagation of A, escalation of B) presents the escalation
+    gate with a genuinely matching pair. The gate passes honestly.
+  * **The discharges do not have to come from the escalation.** An
+    obligation the interval leg or the affine refinement decides outright
+    arrives already `discharged` ON THE PROPAGATION, is reported by INDEX,
+    and needs no solver record at all — in which case `carries_work` is
+    False and the escalation gate is not consulted.
+
+  And one fact makes it survive every structural check: two queries traced
+  from **one factory** — a parametrized harness built by a helper, the
+  ordinary way to write several related queries — carry byte-identical
+  `source_info` on their asserts at identical top-level positions. That is
+  exactly what `obligation.slice_unknown_obligations`' per-obligation
+  association check verifies, so it passes, and the slices come out of the
+  query while the statuses come from the stranger.
+
+  `stelling.affine.refine_propagation` is public, sits below every gate,
+  and WRITES decided statuses into that unbound argument — so the same
+  outcome is reachable with no solver anywhere in the chain, through
+  `make_verdict`.
+
+  **MEASURED, ON THE RELEASED TAG AND ON `main`.** CPython 3.12.3 /
+  jax 0.11.0 / z3 + cvc5 wheels / Linux x86_64, `JAX_ENABLE_X64=1`, driven
+  identically on a `git clone --shared` of the **`v0.1.0` tag**
+  (`e67688e`) and of **`main` (`207faca`)** — byte-identical query hashes
+  on both trees, so these are the same queries:
+
+  ```
+  factory: c -> assert(c + c <= 1e9), assert(c*c - c >= 9900)
+    A = [100, 101]   67f1a40dc56f      B = [1e9, 2e9]   0d8221f90ec0
+    honest(B) = REFUTED           carries_work = True
+    make_solver_verdict(B, p_A, escalate(B, p_A)) -> VERIFIED   stamp names B
+
+  factory: c -> assert(c + c <= 1e9)                  [interval-decided]
+    A = [0, 1]       9c0d61745e11      B = [1e9, 2e9]   a1668561d9d0
+    honest(B) = REFUTED           carries_work = False   (gate not consulted)
+    make_solver_verdict(B, p_A, escalate(B, p_A)) -> VERIFIED   stamp names B
+
+  factory: shift -> assert(c - c + shift >= 0.5), c in [0, 1]   [affine]
+    A = shift 1.0    975a1f0cc092      B = shift 0.0    f9cd81c55f45
+    refine_propagation(A, p_B) -> ['discharged'];  make_verdict(B, ·) -> VERIFIED
+                                                   honest(B) = REFUTED
+    refine_propagation(B, p_A) -> ['violated-over-set']; make_verdict(A, ·) -> REFUTED
+                                                   honest(A) = VERIFIED
+  ```
+
+  **Why those verdicts are false, in arithmetic that involves no verifier.**
+  For `B = [1e9, 2e9]`, `c + c` is `[2e9, 4e9]` in exact rationals and
+  `2000000000.0` in concrete jax at `c = 1e9`; `2e9 <= 1e9` is false at
+  every point of the declared set, so B's claim does not hold anywhere and
+  its honest verdict is REFUTED. For the affine pair, `c - c` is
+  identically `0` in ℝ and measured `[0.0, 0.0]` in concrete jax, so
+  `c - c + 0.0 >= 0.5` is false everywhere and `c - c + 1.0 >= 0.5` is true
+  everywhere; the mispairing swaps the two answers.
+
+  **WHICH STELLING VERSIONS ARE AFFECTED.** `v0.1.0` (the only release) and
+  every 0.2.0 development revision up to and including `207faca`. Fixed on
+  `fix/B11-propagation-identity`.
+
+  **WHICH PRIOR VERDICTS ARE RETROACTIVELY INVALID, and how to recognise
+  one.** A verdict is in scope **only if the propagation it was assembled
+  from was not the one `propagate()` produced from the query it is stamped
+  against.** That cannot happen through `stelling.preconditions.check`,
+  `stelling.contracts.check_contract` or
+  `stelling.inductive.check_inductive_step`: the first two go through
+  `preconditions._pipeline`, which propagates the query it is about to judge
+  and hands the same pair to one `_finish` (and the widened re-check
+  propagates the widened query before judging it); the third calls `check`. **Every verdict produced through the documented front
+  door is therefore untouched**, and that reachability claim is driven
+  rather than argued
+  (`tests/test_propagation_identity.py::test_the_library_driver_pairs_by_construction`
+  and `test_verified_bar.py::test_the_public_path_cannot_mispair_and_the_gate_never_fires_on_it`).
+
+  A verdict IS in scope if it was assembled by calling `make_verdict` or
+  `make_solver_verdict` directly — the usual reasons being a **cached or
+  reused propagation**, a loop over a family of queries built from one
+  factory, or a driver that keeps `closed` and `propagation` in separate
+  variables. **The screen is mechanical on this build**: re-run the query
+  through the same assembler on a tree carrying this fix. A verdict whose
+  propagation was a stranger now comes back `UNKNOWN` with
+  `obligations == ()` and a single note beginning `unpaired propagation:`
+  naming both query hashes; a verdict whose propagation was honest comes
+  back byte-identical. That second half is measured, not assumed: eleven
+  `check()` / `check_contract()` cases — VERIFIED, REFUTED and UNKNOWN, at
+  interval, affine-refined, solver-escalated, ieee, constrained-assume and
+  widened depths — were rendered in full (status, every stamp field, every
+  note, every obligation detail) on `207faca` and on this branch and
+  compared: **byte-identical on all 164 lines**, once the tree path in the
+  `source_info` frames and the solver's own reported millisecond timings are
+  normalised. **Do not screen by eye on the stamp**: the stamp
+  named the query it was assembled against, correctly, in every affected
+  case — the stamp was never the thing that was wrong.
+
+  **WHAT TO RE-RUN TO RE-ESTABLISH TRUST.** Any verdict NOT produced by
+  `check()`, `check_contract()` or `check_inductive_step()`. Re-run it on
+  this build and compare the status; there is no cheaper screen, because the
+  defect is a property of the ARGUMENTS an assembler was called with and
+  nothing in the verdict records them. Verdicts produced by those three need
+  no re-run, and the byte-identity measurement above is what makes re-running
+  them a no-op rather than a risk.
+
+  **THE REPAIR, and which channels it closes.** `Propagation` gains a
+  `query_sha256`, a REQUIRED field (no default) written at `propagate`'s
+  single construction site, and `propagate.unpaired_propagation` is the one
+  comparison every consumer makes. Five sites consume a propagation against
+  a query and all five check it:
+
+  | site | fails closed as |
+  |---|---|
+  | `verdict.make_verdict` | UNKNOWN, `obligations=()`, reason quoted |
+  | `solvers.make_solver_verdict` | the same |
+  | `solvers.escalate` | an escalation with no records and the reason as its note |
+  | `affine.refine_propagation` | every unknown obligation declined, statuses untouched |
+  | `obligation.slice_unknown_obligations` | a `DeclinedObligation` per obligation |
+
+  None of them raises, and three of them MAY not: both library callers
+  iterate `slice_unknown_obligations` in a `for` header outside their own
+  per-obligation nets (audit 0.2.0 B6/M17′), so a raise there costs every
+  obligation's verdict rather than one. The sibling
+  `MispairedEscalationError` still raises, and the propagation gate is
+  ordered AFTER it in `make_solver_verdict` so that an assembly wrong on
+  both legs keeps raising rather than degrading.
+
+  **THAT ORDERING WAS MEASURED, NOT PREFERRED.** The counterfactual was
+  built — the propagation gate lifted to just above the escalation query
+  gate — and driven:
+
+  ```
+  gate LAST  (shipped): r2_containment 13 drives -> 9 refusals / 4 proceeds
+  gate FIRST           : r2_containment 13 drives -> 2 refusals / 11 proceeds
+  ```
+
+  Seven of the escalation gate's own refusals become UNKNOWNs under the
+  other order, including every unhashable / absent / wrong-type
+  `query_sha256` row, and four `tests/test_verified_bar.py` rows go red.
+  Those fixtures pair a stranger propagation WITH a mispaired escalation, so
+  a degrading gate in front swallows the refusal they exist to measure — the
+  same weakening as removing them. The order costs nothing in return: the
+  only executable reads of `propagation` above the gate are
+  `propagation.semantics` (twice) and `propagation.coverage.constrained`,
+  each inside a refusal condition, so a foreign propagation can cause a
+  wrong refusal or a missed one and cannot mint through any of them.
+
+  An absent identity is refused exactly as a wrong one is: `""` on either
+  leg is an absence, not a match — the same rule the escalation leg
+  learned at `e35de13`. That is what makes the field's lack of a default
+  load-bearing rather than decorative.
+
+  **THE SITE LIST WAS DERIVED TWICE, BY TWO METHODS, BECAUSE AN INHERITED
+  ONE WAS WRONG.** An earlier attempt at this repair recorded six sites:
+  `escalate`, `refine_propagation`, `make_verdict`, and the `inductive`,
+  `vacuity` and `reachability` paths. Three of those six consume no
+  propagation at all — `stelling/inductive.py`, `stelling/vacuity.py` and
+  `stelling/reachability.py` contain no reference to the type — and two
+  real sites were missing (`slice_unknown_obligations` and
+  `make_solver_verdict`, the latter being where the false VERIFIED was
+  measured). The list above is (1) an AST pass over every module-level
+  function in `stelling/` taking both a query and a propagation, and (2) a
+  RUNTIME pass over the whole 3798-test suite with `Propagation.
+  __getattribute__` instrumented, recording every frame that read a field
+  and whether that frame also held a `ClosedJaxpr`. The two agree; the
+  runtime pass additionally found `verdict._bar_scope`, which is private
+  and called only from `make_solver_verdict` downstream of its gate. The
+  AST derivation is re-run as a test
+  (`test_propagation_identity.py::test_every_consumption_site_checks_the_pairing`),
+  so a new site that skips the check fails at the moment it is written.
+
+  **WHICH CHANNEL IS NOT CLOSED, said plainly.** The `env` argument of
+  `obligation.slice_obligation` / `slice_unknown_obligations` is a plain
+  mapping with no identity, and B11 did not give it one. Measured cost, on
+  this build: the div-by-zero straddle guard reads the divisor's box out of
+  `env` rather than out of the query's declarations, so an `env` taken from
+  a query whose divisor excludes zero lets a slice be EMITTED for a query
+  whose divisor straddles it, where the honest pairing declines —
+
+  ```
+  slice_unknown_obligations(hazard, p_hazard, interval_env(hazard))
+      -> DeclinedObligation "'div': divisor may be zero over the declared box"
+  slice_unknown_obligations(hazard, p_hazard, interval_env(safe))
+      -> ObligationSlice        (the guard's premise is a lie)
+  ```
+
+  **It is a disclosure and not a live false verdict, and the boundary is
+  exact**: the exposure stops at the SLICE. Both library consumers derive
+  the environment from their own `closed` (`solvers.escalate` and
+  `affine.refine_propagation` each call `interval_env(closed)`), so no
+  library path can supply a foreign one; reaching a VERDICT from a slice
+  means hand-emitting, hand-solving and hand-building an `Escalation`, and
+  a hand-built record is outside the trust model this library states.
+  `test_propagation_identity.py::test_the_env_channel_is_NOT_bound_and_here_is_what_that_costs`
+  holds that measurement AND reads the two `interval_env(closed)` call
+  sites off the live source, so the day a library path starts taking an
+  `env` from its caller, that test goes red and the answer is an identity
+  on the environment rather than a wider disclosure.
+
+  **THE COST, MEASURED ON REAL WORK.** The identity is one
+  `ClosedJaxpr.content_hash()` per `propagate()`. Both verdict assemblers
+  and `escalate` reuse the hash they already took for the stamp, so the
+  gates themselves add nothing —
+  `test_verified_bar.py::test_the_pairing_gates_cost_no_additional_hash`
+  asserts that by attributed call-site counting rather than by timing. What
+  the stamp costs, same environment, median of repeated runs:
+
+  | query | one `content_hash()` | one `propagate()` | `check()` on `207faca` | `check()` here | hashes/`check()` |
+  |---|---|---|---|---|---|
+  | README worked example (6 eqns) | 0.077 ms | 0.343 ms | 1.548 ms | 1.766 ms | 4 → 6 |
+  | `contracts.conditioning_2x2_field` (18 eqns) | 0.126 ms | 0.943 ms | 2.683 ms | 3.017 ms | 4 → 6 |
+  | solver-bound `c*c - c >= 9900` on `(4,)` | 0.037 ms | 0.173 ms | 146.464 ms | 141.235 ms | 6 → 10 |
+
+  `check()` columns are medians of n=200 (n=15 for the solver row) after
+  five warm-up calls, both trees in the same process shape and the same
+  session.
+
+  So, plainly: **+0.22 ms (+14%) and +0.33 ms (+12%) on the two no-solver
+  queries, and NO MEASURABLE CHANGE on the solver-bound one** — that row's
+  p10/p90 bands (142.9–151.6 before, 138.0–147.0 after) overlap and its
+  medians differ by less than one solver invocation's jitter, which is what
+  a 0.037 ms hash against a 140 ms call should look like. Relative to the
+  walk it is stamped onto, one hash is 13–22% of one `propagate()`; relative
+  to a whole no-solver `check()` it is 4–5%.
+
+  The extra hashes are one per `propagate()` call, and a `check()` makes
+  more than one: the original walk, the vacuity re-check's widened walk,
+  and — on the solver path — the two that `verdict._bar_scope` triggers by
+  RE-PROPAGATING the query to read its relational assumes, once per
+  assembled verdict. That re-propagation inside verdict assembly is a far
+  larger pre-existing cost than anything this batch adds (a whole interval
+  walk against a hash) and is reported, not touched, here.
+
 **Releases reached by an entry in this log.** `v0.1.0`, the only release,
-is reached by **three** entries, all of them audit 0.2.0 findings and all
+is reached by **four** entries, all of them audit 0.2.0 findings and all
 reproduced at the tag: the 2026-08-15 `exp`/`pow` libm-bracket entry (S11)
 through `propagate(closed, semantics="ieee")`; the 2026-08-15 undescended-
-`assume` entry (S13), through the ordinary `check()` path in real mode; and
-the 2026-08-15 B6 `dot_general` entry (S12), through `from_dict`. Every
-other entry is 0.2.0 development only, and **no release has yet shipped any
-fix in this log**. This line read *"(no releases yet)"* until 2026-08-15, a
+`assume` entry (S13), through the ordinary `check()` path in real mode; the
+2026-08-15 B6 `dot_general` entry (S12), through `from_dict`; and the
+2026-08-16 B11 mispaired-`Propagation` entry (UNSOUND-3), through
+`make_verdict` / `make_solver_verdict` called directly — the only one of
+the four that needs neither `semantics="ieee"`, nor a serialized query, nor
+an `assume`, and the only one reachable with no solver at all. Every other
+entry is 0.2.0 development only, and **no release has yet shipped any fix
+in this log**. This line read *"(no releases yet)"* until 2026-08-15, a
 few lines below the reproduction that contradicts it; it then named S11
 alone while the S13 entry above it said *"the second finding of that audit
 to reach a shipped version"* — the same failure, one count shorter.

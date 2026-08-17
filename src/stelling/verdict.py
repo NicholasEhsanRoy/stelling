@@ -43,6 +43,8 @@ from stelling.propagate import (
     Propagation,
     _query_float_formats,
     conditional_on_precondition,
+    query_identity,
+    unpaired_propagation,
 )
 from stelling.reachability import defined_vars, reaches_output
 
@@ -58,6 +60,7 @@ __all__ = [
     "make_verdict",
     "solver_absent",
     "top_despite_coverage_note",
+    "unpaired_propagation_verdict",
 ]
 
 ARITHMETIC_MODE_INTERVAL = "interval/f64/outward-1ulp (stelling.interval)"
@@ -1739,6 +1742,103 @@ def _query_has_non_f64_float(closed) -> bool:
     return False
 
 
+# The query_content_hash of a verdict about a query whose hash cannot be
+# taken. Reachable ONLY through `unpaired_propagation_verdict` below, and only
+# on the leg where the query itself is unhashable: an empty identity is a
+# refusal on its own (`propagate.unpaired_propagation` — two absences are not
+# a match), so every assembly that gets past a pairing check has a real hash
+# to stamp, in this module and in `stelling.solvers` alike.
+#
+# It is deliberately not a hash-shaped string. `stelling.reproduce.
+# _require_same_program` compares this field against a fresh trace's
+# `content_hash()`; this value matches nothing, so a reproducer built from
+# such a verdict refuses rather than claiming the programs agree. It is also
+# non-empty, which `Stamp.__post_init__` requires of every string field — the
+# alternative, letting the empty hash reach the stamp, is exactly the shape
+# that made the escalation gate's own emptiness hole invisible until
+# `e35de13`.
+UNHASHABLE_QUERY = "<unhashable: ClosedJaxpr.content_hash() raised>"
+
+# What every propagation-derived stamp field says when the propagation was
+# not this query's. Not "unknown" and not an empty string: the fields below
+# are DERIVED from the propagation (semantics, coverage, transfer tiers,
+# assumptions, the ⊤-despite-coverage reading), and the whole finding is that
+# this propagation's records are about another program. Copying them into a
+# stamp that names THIS query is the misattribution, not a lesser version of
+# it, so none of them is carried.
+NOT_REACHED_UNPAIRED = "not reached: the propagation is not this query's"
+
+
+def unpaired_propagation_verdict(
+    query_sha256: str,
+    reason: str,
+    *,
+    stelling_version: str,
+    jax_version: str,
+    precision_config: str,
+    device_class: str,
+) -> Verdict:
+    """THE FAIL-CLOSED VERDICT for a propagation that cannot be shown to
+    belong to the query being judged (audit 0.2.0 B6 re-audit UNSOUND-3,
+    closed in B11).
+
+    UNKNOWN, with NO obligations and the refusal quoted — the three
+    properties together are the whole of it:
+
+    * **UNKNOWN**, because nothing about this query has been judged. Not
+      REFUTED (that is a claim about the program), and not DECLINED (that
+      status means the query could not be TRANSCRIBED and carries no stamp
+      at all; this query transcribed fine and hashes fine — see
+      :class:`Verdict`'s docstring).
+    * **No obligations.** Returning the propagation's obligations with the
+      status downgraded would still report ANOTHER query's obligation
+      records under this query's name, which is the misattribution itself.
+      The shape is the one :func:`stelling.preconditions.check` already
+      uses for its trace-gate refusal: UNKNOWN, ``obligations=()``, the
+      reason as the single note.
+    * **Quoted, not summarised.** ``reason`` is
+      :func:`stelling.propagate.unpaired_propagation`'s own sentence,
+      which names both hashes; a caller who has just lost a VERIFIED needs
+      to know which query the propagation it passed was actually about.
+
+    It does not raise, and the choice is not a stylistic one. Three of the
+    five sites that consume a propagation against a query MAY NOT raise
+    (they are iterated inside a ``for`` header by callers whose
+    per-obligation nets sit within it — audit 0.2.0 B6/M17′), so a repair
+    that raised at the two assemblers and degraded at the other three
+    would be two behaviours for one fact. The sibling
+    :exc:`stelling.solvers.MispairedEscalationError` DOES raise, and the
+    asymmetry is deliberate and narrow: that gate fires on a contradiction
+    between two things the caller RECORDED, and its own comment gives the
+    reason it refuses rather than degrading — an UNKNOWN there would carry
+    the generic undecided-cause note and blame the propagation. This one
+    carries a note that names the cause exactly, so that objection does not
+    apply to it.
+    """
+    stamp = Stamp(
+        stelling_version=stelling_version,
+        jax_version=jax_version,
+        query_content_hash=query_sha256 or UNHASHABLE_QUERY,
+        arithmetic_mode=NOT_REACHED_UNPAIRED,
+        semantics=NOT_REACHED_UNPAIRED,
+        precision_config=precision_config,
+        device_class=device_class,
+        solver=solver_absent(
+            "no solver invoked: the supplied propagation is not this query's, "
+            "so there was nothing to escalate FROM"
+        ),
+        nonvacuity=NOT_REACHED_UNPAIRED,
+        transfer_tiers=(),
+        transfer_provenance=(),
+        assumptions=(),
+        coverage=NOT_REACHED_UNPAIRED,
+        top_despite_coverage=None,
+    )
+    return Verdict(
+        status="UNKNOWN", obligations=(), stamp=stamp, notes=(reason,)
+    )
+
+
 def make_verdict(
     closed,
     propagation: Propagation,
@@ -1758,7 +1858,37 @@ def make_verdict(
     names the layers that actually judged, via the report's own
     derivation — the absence line must not claim "interval arithmetic
     alone" when the refinement decided anything.
+
+    **THE PROPAGATION PAIRING GATE, and it is the FIRST thing this
+    function does.** A ``propagation`` that cannot be shown to be about
+    ``closed`` degrades to the UNKNOWN of
+    :func:`unpaired_propagation_verdict` with the reason quoted, before
+    any status is read off it. This is the no-solver half of audit 0.2.0
+    B6 re-audit UNSOUND-3: an obligation the interval leg DISCHARGED on
+    another query arrives here already discharged, and every line below
+    this one would read it as a judgement about ``closed``. Measured on
+    `207faca`: two queries traced from one factory whose affine refinement
+    discharges on A and refutes on B, stamped through this function,
+    returned VERIFIED where the honest verdict is REFUTED and REFUTED
+    where the honest verdict is VERIFIED, with no exception anywhere.
     """
+    # taken ONCE for the whole function: the stamp's `query_content_hash`
+    # below is this same value, so the gate costs no additional hash —
+    # and it is `query_identity` rather than `closed.content_hash()`
+    # because the gate must be able to REFUSE an unhashable query rather
+    # than raise on it.
+    query_sha256 = query_identity(closed)
+    unpaired = unpaired_propagation(propagation, query_sha256)
+    if unpaired is not None:
+        return unpaired_propagation_verdict(
+            query_sha256,
+            unpaired,
+            stelling_version=stelling_version,
+            jax_version=jax_version,
+            precision_config=precision_config,
+            device_class=device_class,
+        )
+
     if propagation.any_violated:
         status = "REFUTED"
     elif propagation.all_discharged:
@@ -1843,7 +1973,11 @@ def make_verdict(
     stamp = Stamp(
         stelling_version=stelling_version,
         jax_version=jax_version,
-        query_content_hash=closed.content_hash(),
+        # the SAME value the pairing gate at the top of this function
+        # compared against, not a second hash of the same query: the gate
+        # has already established it non-empty, so `Stamp.__post_init__`'s
+        # emptiness check cannot be what refuses an unhashable query here
+        query_content_hash=query_sha256,
         arithmetic_mode=arithmetic_mode,
         semantics=semantics,
         precision_config=precision_config,

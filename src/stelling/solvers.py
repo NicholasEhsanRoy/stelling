@@ -90,7 +90,9 @@ from stelling.propagate import (
     _query_float_formats,
     interval_env,
     ledger_covers,
+    query_identity,
     unaccounted_assumes,
+    unpaired_propagation,
 )
 from stelling.smt import Script, emit
 from stelling.verdict import (
@@ -104,6 +106,7 @@ from stelling.verdict import (
     Verdict,
     Witness,
     solver_absent,
+    unpaired_propagation_verdict,
 )
 
 __all__ = [
@@ -805,41 +808,56 @@ class Escalation:
     later, which is loud but is not this gate. The gate now refuses an
     empty hash on either leg.
 
-    **WHICH LEG THIS GATE BINDS, AND WHICH IT DOES NOT.** It binds the
-    ESCALATION to the ``closed`` it is stamped against, and nothing else.
-    It does NOT bind the ``propagation``: :class:`stelling.propagate.
-    Propagation` carries no query identity to check against, so an
-    assembly of (query B, propagation of A, escalation of B) passes every
-    gate here — ``escalate`` hashes the ``closed`` it was handed, so the
-    pair really does match — while B's obligations are REPORTED WITH A's
-    STATUSES. Measured on this tree, on ``main`` and on the released
-    0.1.0, on two queries traced from one factory (identical
-    ``source_info``, so the per-obligation association check passes too):
-    the assembly returns **VERIFIED** where B's honest verdict is
-    **REFUTED**, with no exception anywhere.
+    **WHICH LEG THIS GATE BINDS, AND WHICH ONE ITS SIBLING BINDS.** This
+    gate binds the ESCALATION to the ``closed`` it is stamped against, and
+    nothing else. It does NOT bind the ``propagation``, and until B11
+    NOTHING DID: :class:`stelling.propagate.Propagation` carried no query
+    identity, so an assembly of (query B, propagation of A, escalation of
+    B) passed every gate here — ``escalate`` hashes the ``closed`` it was
+    handed, so the pair really does match — while B's obligations were
+    REPORTED WITH A's STATUSES. Measured on ``main`` (`dee8bc2`,
+    `207faca`) and on the released 0.1.0, on two queries traced from one
+    factory (identical ``source_info``, so the per-obligation association
+    check passes too): the assembly returned **VERIFIED** where B's honest
+    verdict is **REFUTED**, with no exception anywhere.
     :func:`stelling.affine.refine_propagation` is public, sits below this
-    gate, and writes its refined statuses into that same unbound
-    argument, so it reaches the identical outcome.
+    gate, and writes its refined statuses into that same argument, so it
+    reached the identical outcome through
+    :func:`stelling.verdict.make_verdict`, with no solver involved at all.
 
     ``carries_work`` is a real exemption and not a formality: an
     escalation with no records, no notes, no spawns and no stamps bypasses
     this gate entirely. The sentence that used to stand here — that such a
-    pairing "returns UNKNOWN off the propagation alone" — is FALSE, and
+    pairing "returns UNKNOWN off the propagation alone" — was FALSE, and
     was measured false in the same run: on an obligation the interval leg
     decides outright, ``escalate`` returns an empty escalation, the gate
-    is exempted, and the mispaired propagation ALONE mints VERIFIED on a
+    is exempted, and the mispaired propagation ALONE minted VERIFIED on a
     query whose honest verdict is REFUTED. An exempt escalation
     contributes nothing an assembly could misattribute; the PROPAGATION
-    contributes everything, and it is the leg no identity is checked on.
+    contributes everything, and it was the leg no identity was checked on.
 
-    The repair is an identity on the ``Propagation``, checked wherever a
-    propagation is consumed against a query — cross-module work, scheduled
-    as its own change. Until it lands this is a **disclosed residue and
-    not a closed one**, and ``tests/test_verified_bar.py::
-    test_a_mispaired_PROPAGATION_mints_a_false_VERIFIED`` holds the live
-    measurement of both arms — with ``::test_the_pairing_gate_binds_the_
-    ESCALATION_and_not_the_propagation`` beside it for the covered
-    direction — so that closing it is a test going red."""
+    **THAT RESIDUE IS CLOSED — audit 0.2.0 B6 re-audit UNSOUND-3, B11.**
+    :class:`stelling.propagate.Propagation` now carries a
+    ``query_sha256`` of its own, stamped by :func:`stelling.propagate.
+    propagate` at its single construction site and checked at every one of
+    the five sites that consume a propagation against a query
+    (:func:`make_solver_verdict`, :func:`escalate`,
+    :func:`stelling.verdict.make_verdict`,
+    :func:`stelling.affine.refine_propagation`,
+    :func:`stelling.obligation.slice_unknown_obligations`). The two gates
+    are ANTI-CORRELATED and both are needed: this one is exempted exactly
+    when the escalation carries no work, which is exactly the case where
+    the propagation carries everything.
+
+    They also fail differently, and deliberately: this gate RAISES, the
+    propagation gate returns the UNKNOWN of :func:`stelling.verdict.
+    unpaired_propagation_verdict` with the reason quoted — see that
+    function's docstring for why, and :func:`make_solver_verdict` for why
+    it is ordered after this one. ``tests/test_propagation_identity.py``
+    holds one row per site, and ``tests/test_verified_bar.py::
+    test_a_mispaired_PROPAGATION_can_no_longer_mint_a_false_VERIFIED``
+    holds both ``carries_work`` arms with the non-vacuity control that
+    forges the identity and gets the false VERIFIED straight back."""
 
     records: tuple[ObligationEscalation, ...]
     notes: tuple[str, ...] = ()
@@ -2481,11 +2499,19 @@ def _query_sha256(closed) -> str:
     measured on `e35de13`, that assembly reached
     :class:`stelling.verdict.Stamp` and was refused there
     ("stamp field 'query_content_hash' is empty") rather than at the
-    gate. Two absences are not a match, and the gate now says so."""
-    try:
-        return str(closed.content_hash())
-    except Exception:  # noqa: BLE001 — an unhashable query is refused, not excused
-        return ""
+    gate. Two absences are not a match, and the gate now says so.
+
+    ONE DERIVATION FOR BOTH LEGS. The body is now
+    :func:`stelling.propagate.query_identity`, which is also what
+    :func:`stelling.propagate.propagate` stamps on the ``Propagation`` and
+    what :func:`stelling.propagate.unpaired_propagation` compares against.
+    The escalation leg and the propagation leg must agree about what "the
+    same query" means — including about the ``""`` an unhashable query
+    produces — or a caller can satisfy one gate and fail the other for a
+    reason that is about the hashing and not about the pairing. This name
+    is kept as the escalation leg's spelling of it because the paragraphs
+    above are the escalation gate's own history."""
+    return query_identity(closed)
 
 
 def escalate(
@@ -2512,6 +2538,15 @@ def escalate(
     Inert assumes (``coverage.constrained == 0``) escalate exactly as
     before — a drop over-approximates, so emission over the declared box
     remains faithful to the propagated semantics.
+
+    A propagation that cannot be shown to be about ``closed`` declines
+    escalation wholly, with NO records and
+    :func:`stelling.propagate.unpaired_propagation`'s sentence as the note
+    (audit 0.2.0 B6 re-audit UNSOUND-3): this function selects obligations
+    off the propagation and slices them out of ``closed``, so a stranger's
+    obligation numbering would be filed against this query's slices. See
+    the gate itself for why it emits no per-obligation records where the
+    other whole-run refusals do.
     """
     # WHICH QUERY THIS ESCALATION IS ABOUT, recorded once, at the top, and
     # attached to every return below — including the ones that do no work.
@@ -2520,6 +2555,48 @@ def escalate(
     # `tests/test_verified_bar.py::test_every_escalate_return_site_records_the_query`
     # asserts every path out of this function carries it.
     query_sha256 = _query_sha256(closed)
+    # -- THE PROPAGATION PAIRING GATE, before the obligation list is read.
+    # Every line below this one treats `propagation.obligations` as a list of
+    # judgements about `closed`: it selects the `unknown` ones, slices them
+    # out of THIS query by their recorded top-level positions, and returns a
+    # record per obligation INDEX. On a propagation of another query that
+    # produces solver answers about this query's slices filed under another
+    # query's obligation numbering — and, because two queries traced from one
+    # factory carry identical `source_info` at identical positions, the
+    # per-obligation association check in `slice_unknown_obligations` passes
+    # and nothing downstream notices.
+    #
+    # NO RECORDS, AND THAT IS NOT THE SAME SHAPE AS "NOTHING TO ESCALATE".
+    # The other whole-run refusals here (ieee, constrained-assume, no backend)
+    # emit one UNKNOWN record per unknown obligation, because those
+    # obligations are this query's and each is owed an outcome. These are not:
+    # there is no obligation of `closed` that this call has anything to say
+    # about, and minting a record per FOREIGN obligation index would put the
+    # other query's numbering into an escalation stamped with this query's
+    # hash. The note carries the reason, and `make_solver_verdict` refuses the
+    # same pairing again on its own leg (`unpaired_propagation_verdict`), so a
+    # caller who ignores the note still cannot reach a verdict.
+    #
+    # This function MAY raise (`SolverDisagreement`, `EmissionInfidelityError`)
+    # and still does not raise here: the pairing is the caller's argument
+    # shape, not a disagreement between backends, and the whole repair
+    # degrades with the reason quoted at every one of its five sites.
+    unpaired = unpaired_propagation(propagation, query_sha256)
+    if unpaired is not None:
+        return Escalation(
+            records=(),
+            notes=(f"escalation declined: {unpaired}",),
+            # the semantics OF THE PROPAGATION HANDED IN, which is exactly
+            # what this field means ("which semantics the propagation this
+            # escalation was produced from ran under") and is read the same
+            # way at every other return site. Not a default: stamping "real"
+            # on a refusal produced from an ieee propagation would make
+            # `make_solver_verdict`'s symmetric semantics gate raise a
+            # semantics-mix message about a pairing whose actual defect is
+            # the query, which is a true refusal for a false reason.
+            semantics=propagation.semantics,
+            query_sha256=query_sha256,
+        )
     unknown = [o for o in propagation.obligations if o.status == "unknown"]
     if not unknown:
         return Escalation(
@@ -2911,27 +2988,37 @@ def make_solver_verdict(
 ) -> Verdict:
     """Assemble a verdict from interval propagation plus solver escalation.
 
-    **PRECONDITION — the caller's, and it is now checked for two of the
-    three arguments.** ``escalation`` must be the object :func:`escalate`
+    **PRECONDITION — the caller's, and it is now checked for all three
+    arguments.** ``escalation`` must be the object :func:`escalate`
     returned for THIS ``closed`` and ``propagation``, unmodified. The
     gates below refuse several specific mispairings — divergent ledger
     provenance, a semantics mix in either direction, an ieee or
     constrained-assume propagation paired with an escalation carrying
-    solver work, and **an escalation produced on a DIFFERENT query** —
-    and they are the mispairings that arise from assembling a verdict out
-    of the wrong RUN.
+    solver work, **an escalation produced on a DIFFERENT query**, and **a
+    propagation produced on a DIFFERENT query** — and they are the
+    mispairings that arise from assembling a verdict out of the wrong RUN.
 
-    **WHAT THE QUERY PAIRING GATE DOES AND DOES NOT BIND.** It binds
+    **WHAT EACH PAIRING GATE BINDS.** The query pairing gate binds
     ``closed`` to ``escalation``, by the query content hash
-    :func:`escalate` recorded, and that is the leg the discharges travel
-    on: an ``OB_DISCHARGED`` record from another run discharges an
-    obligation here by INDEX alone, which is how a mispaired assembly
-    minted VERIFIED on a query whose honest verdict is REFUTED. It does
-    NOT bind ``propagation``, which carries no query hash. The residue is
-    an assembly of (this query, ANOTHER query's propagation, this query's
-    escalation): the obligations reported are the other query's, the
-    stamp names this one, and it is measured rather than argued in
-    `tests/test_verified_bar.py::test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`.
+    :func:`escalate` recorded, and that is the leg the SOLVER discharges
+    travel on: an ``OB_DISCHARGED`` record from another run discharges an
+    obligation here by INDEX alone. The propagation pairing gate binds
+    ``closed`` to ``propagation``, by the hash
+    :func:`stelling.propagate.propagate` stamps, and that is the leg the
+    INTERVAL and AFFINE discharges travel on — an obligation decided
+    without a solver arrives already ``discharged`` and needs no record at
+    all, which is why binding the escalation alone left a live false
+    VERIFIED on `main` and on the released 0.1.0 (audit 0.2.0 B6 re-audit
+    UNSOUND-3). The two are anti-correlated: the escalation gate is
+    exempted when the escalation carries no work, which is exactly the
+    case where the propagation carries everything.
+
+    They fail differently and deliberately: the escalation gates RAISE
+    :exc:`MispairedEscalationError`, the propagation gate returns the
+    UNKNOWN of :func:`stelling.verdict.unpaired_propagation_verdict` with
+    the reason quoted. That function's docstring gives the reason; the
+    ordering — propagation gate last — keeps an assembly that is wrong on
+    BOTH legs raising rather than degrading.
 
     None of the gates, and nothing else here, verifies that the
     records were produced by this library at all. A caller who
@@ -3266,6 +3353,63 @@ def make_solver_verdict(
             f"witness may violate the stamped precondition); refusing to "
             f"emit. Assemble the verdict from the propagation the "
             f"escalation was actually produced from."
+        )
+
+    # -- THE PROPAGATION PAIRING GATE — the THIRD argument, and the leg every
+    # gate above leaves open (audit 0.2.0 B6 re-audit UNSOUND-3, closed in
+    # B11). The query pairing gate above binds `closed` to `escalation`;
+    # `escalate` hashes the `closed` IT was handed, so an assembly of (query
+    # B, propagation of A, escalation of B) presents that gate with a
+    # genuinely matching pair while the propagation is a stranger — and with
+    # `carries_work=False` the gate is not consulted at all. The discharges
+    # then ride in ON THE PROPAGATION: an obligation the interval or affine
+    # leg decided on A arrives here already `discharged`/`violated-over-set`
+    # and is reported by INDEX. Measured on `207faca`, both `carries_work`
+    # arms: VERIFIED on a query whose honest verdict is REFUTED, and REFUTED
+    # on one whose honest verdict is VERIFIED, with no exception anywhere.
+    #
+    # IT DEGRADES WHERE ITS SIBLINGS RAISE, and the asymmetry is the point
+    # rather than an inconsistency: see `stelling.verdict.
+    # unpaired_propagation_verdict`, which spells out why (three of the five
+    # propagation-consuming sites MAY NOT raise, and a note that names the
+    # cause exactly does not carry the misattribution an UNKNOWN with the
+    # generic undecided-cause note would).
+    #
+    # AND IT SITS AFTER THEM, NOT BEFORE — MEASURED, NOT PREFERRED. An
+    # assembly whose escalation is ALSO mispaired must keep RAISING, and the
+    # counterfactual was built and driven rather than argued: with this gate
+    # lifted to just above the escalation query gate, the B6 re-audit's
+    # 13-drive containment reproducer goes from 9 refusals / 4 proceeds to
+    # **2 refusals / 11 proceeds** — seven of the escalation gate's own
+    # refusals become UNKNOWNs, including every unhashable/absent/wrong-type
+    # `query_sha256` row — and four `tests/test_verified_bar.py` rows go red
+    # (`::test_the_pairing_gate_refuses_the_mispairing_the_bar_only_narrows`,
+    # `::test_the_pairing_gate_closes_the_SCATTER_FREE_row`, and both
+    # parameters of `::test_the_pairing_gate_refuses_an_EMPTY_hash_and_not_
+    # only_a_DIFFERENT_one`). Those fixtures pair a stranger propagation
+    # WITH a mispaired escalation, so a degrading gate in front swallows the
+    # refusal they exist to measure. That is the same weakening as removing
+    # them, in a costume. A raise is also the louder of the two, and an
+    # assembly wrong on two legs has earned the louder one.
+    #
+    # THE COST OF THAT ORDER IS EXACTLY ZERO, and it is checked rather than
+    # assumed: the only executable reads of `propagation` above this line are
+    # `propagation.semantics` (twice) and `propagation.coverage.constrained`,
+    # each inside a REFUSAL condition. A foreign propagation can therefore
+    # cause a wrong refusal or a missed one, and a missed one lands here —
+    # it cannot mint through them, because none of them assembles anything.
+    #
+    # `query_hash` is the one taken for the escalation gate above and stamped
+    # below: this gate costs no additional hash of the query.
+    unpaired = unpaired_propagation(propagation, query_hash)
+    if unpaired is not None:
+        return unpaired_propagation_verdict(
+            query_hash,
+            unpaired,
+            stelling_version=stelling_version,
+            jax_version=jax_version,
+            precision_config=precision_config,
+            device_class=device_class,
         )
 
     # THE BAR'S DOMAIN IS READ BEFORE ANY OTHER PASS OVER `records`, AND THAT

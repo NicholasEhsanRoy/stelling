@@ -86,6 +86,8 @@ from stelling.propagate import (
     TRANSFERS,
     Propagation,
     RelationalAssume,
+    query_identity,
+    unpaired_propagation,
 )
 
 __all__ = [
@@ -3916,6 +3918,35 @@ def slice_unknown_obligations(
     per-obligation net, not to restore the sentence.
     """
     unknown = [o for o in propagation.obligations if o.status == "unknown"]
+    # -- THE PROPAGATION PAIRING GATE (audit 0.2.0 B6 re-audit UNSOUND-3).
+    # The association check below is STRUCTURAL — a recorded top-level
+    # position that names a `stelling_assert`, carrying the same
+    # `source_info`, claimed by exactly one obligation. Two queries traced
+    # from ONE factory satisfy all three by construction: same file, same
+    # line, same positions, different declared boxes. That is not a gap in
+    # the structural check, it is the limit of what structure can decide,
+    # and it is why the propagation has to say WHICH QUERY it is about.
+    #
+    # DECLINES PER OBLIGATION rather than raising, because this function may
+    # not raise: both library callers iterate it in a `for` HEADER, outside
+    # their own per-obligation nets (see the docstring's M17′ paragraph), so
+    # a raise here costs every obligation's verdict rather than one.
+    #
+    # It is the THIRD place the same fact is checked on the way to a
+    # verdict — `escalate` and `refine_propagation` both refuse before they
+    # get here — and it is not redundant: this function is public, is in
+    # `__all__`, and a caller who drives it directly gets slices whose
+    # obligation indices are another query's.
+    unpaired = unpaired_propagation(propagation, query_identity(closed))
+    if unpaired is not None:
+        return tuple(
+            DeclinedObligation(
+                index=_safely(lambda: o.index, -1),
+                reason=unpaired,
+                source_info=_safely(lambda: o.source_info, ()),
+            )
+            for o in unknown
+        )
     eqns = closed.jaxpr.eqns
     # position in the top-level eqns -> ordinal among top-level asserts,
     # which is the index `slice_obligation` selects by

@@ -95,6 +95,8 @@ from stelling.propagate import (
     Propagation,
     TRANSFERS,
     interval_env,
+    query_identity,
+    unpaired_propagation,
 )
 
 __all__ = [
@@ -1043,7 +1045,55 @@ def refine_propagation(
     any assume declines wholly (the refinement reads the declared boxes
     and would ignore the precondition — the solver escalation's refusal
     shape, mirrored).
+
+    **And refuses to judge a propagation that is not this query's** —
+    audit 0.2.0 B6 re-audit UNSOUND-3. This function is a large part of
+    why that repair had to be cross-module rather than a gate in
+    :mod:`stelling.solvers`: it is public, it sits BELOW
+    :func:`stelling.solvers.make_solver_verdict`'s gates, and it WRITES
+    decided statuses into the propagation it returns: the slices come
+    from ``closed`` and the statuses land on ``propagation``, so a
+    mispaired call discharges a stranger's obligation with this query's
+    arithmetic. Measured on `207faca` with two queries from one factory
+    (``c - c + shift >= 0.5`` at ``shift`` 1.0 and 0.0):
+    ``refine_propagation(A, p_B)`` returned ``['discharged']``, the
+    escalation it produced carried no work at all, and the assembly minted
+    VERIFIED on B whose honest verdict is REFUTED — through
+    :func:`stelling.verdict.make_verdict` as well, which invokes no solver.
     """
+    # -- THE PROPAGATION PAIRING GATE, before the obligation list is read
+    # and before the `not unknown` early return: a propagation with nothing
+    # left `unknown` is returned UNCHANGED by that return, and a stranger
+    # handed back unchanged reads exactly like a refinement that had
+    # nothing to do. That arm is not hypothetical — it is the one the
+    # measurement above went through, because `p_B`'s single obligation had
+    # already been decided by the time it was mispaired forward.
+    unpaired = unpaired_propagation(propagation, query_identity(closed))
+    if unpaired is not None:
+        stranger_unknown = [
+            o for o in propagation.obligations if o.status == "unknown"
+        ]
+        refined, report = _decline_all(propagation, stranger_unknown, unpaired)
+        # THE RETURNED PROPAGATION IS STILL THE STRANGER, and deliberately:
+        # `_decline_all` goes through `dataclasses.replace`, which carries
+        # `query_sha256` through untouched. Re-stamping it with `closed`'s
+        # identity here would LAUNDER it — the verdict assemblers would then
+        # see a propagation that says it is this query's, and this
+        # function's own refusal would have manufactured the pairing the
+        # whole repair exists to check.
+        return (
+            dataclasses.replace(
+                refined,
+                # one whole-run note, ALWAYS. `_decline_all` writes a
+                # note per unknown obligation, and a stranger may have none
+                # left — in which case it writes nothing and returns a
+                # report byte-identical to the `empty` one below, so the
+                # refusal would leave no trace anywhere at all
+                notes=refined.notes
+                + (f"affine refinement declined wholly: {unpaired}",),
+            ),
+            report,
+        )
     unknown = [o for o in propagation.obligations if o.status == "unknown"]
     empty = RefinementReport(
         domain="affine",
