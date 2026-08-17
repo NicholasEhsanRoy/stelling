@@ -543,9 +543,31 @@ class IntervalArray:
 # declaration is made from this side, by the module that owns the type.
 #
 # WHAT THIS CLASS OWES IN RETURN, since `ir` CARRIES it rather than
-# canonicalizing it: single-valuedness. It is frozen, and its
-# `__post_init__` above reads `shape`, `los` and `his` at construction, so
-# a later read of any of the three is the same read.
+# canonicalizing it: single-valuedness. It has it — and NOT for the reason
+# this comment used to give, which was that `__post_init__` "reads
+# `shape`, `los` and `his` at construction, so a later read of any of the
+# three is the same read" (audit 0.2.0 B6 audit 8). READING A FIELD
+# INSTALLS NOTHING. `__post_init__` above validates and returns; every
+# later reader goes back to the attribute, and were that attribute a
+# descriptor it would be free to answer differently — which is the whole
+# of the finding `ir._canonicalise` exists for, and it is why the sibling
+# guards in `ir` INSTALL what they read instead of merely checking it.
+#
+# What actually makes a later read the same read here is narrower and
+# checkable: the three fields are ORDINARY INSTANCE ATTRIBUTES of a frozen
+# dataclass — no `property`, no descriptor, no `__getattr__`, so a read is
+# a `__dict__` lookup — and frozen-ness stops any later rebinding of one.
+# `ir` carries the EXACT registered type and nothing else: a subclass that
+# made `los` a property is refused by `ir._canonical` as `_NotCanonical`
+# (measured, audit 0.2.0 B6 audit 8), so this claim cannot be inherited
+# out from under itself.
+#
+# `ir._register_stored_type` checks the frozen half and says in its own
+# docstring that it does NOT check the descriptor half; that gap is a
+# measurement in `tests/test_canonicalization_routes.py`, not a promise.
+# If a field of this class ever becomes a property or a cached descriptor,
+# this paragraph is what stops being true, and the registration below is
+# what has to go with it.
 #
 # The edge is one-way and adds no dependency: `stelling.ir` is the only
 # package module this file imports, and `ir` itself imports nothing

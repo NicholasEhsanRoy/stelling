@@ -1106,6 +1106,108 @@ SPDX-License-Identifier: Apache-2.0
   reader at. This is the same label-versus-substance slip the fixup two
   paragraphs above corrected for `obligation.h2` → `h1`.*
 
+- **A SHAPE IS JUDGED BY THE SAME RULE WHEREVER IT APPEARS, AND THE ONE
+  PLACE IT WAS NOT WAS REACHABLE FROM A JSON FILE** (audit 0.2.0 B6
+  audit 8; reaches `main` at `198a2b5` and `dff95fc` identically).
+  `ir._load_extents` guarded the per-extent `operator.index` and not
+  `for d in shape`, and `ir._decode` read `tuple(obj["shape"])` in FRONT
+  of it — a second reader of the document's shape standing before the one
+  that owns the question. From pure JSON, through `ClosedJaxpr.from_dict`,
+  with no Python object in the document:
+
+  ```
+  aval shape 2      raw TypeError: 'int' object is not iterable
+  aval shape null   raw TypeError: 'NoneType' object is not iterable
+  aval shape 1.5    raw TypeError: 'float' object is not iterable
+  aval shape true   raw TypeError: 'bool' object is not iterable
+  aval shape {}     ACCEPTED, and the aval records shape ()
+  aval shape ""     ACCEPTED, and the aval records shape ()
+  ```
+
+  The last two are the ones that matter: they are not malformed extents a
+  caller can be told about, they are a document silently given a
+  different array than it wrote, after which the slicer, the propagator's
+  element counts and the emission all model a scalar the document never
+  described. The raw `TypeError`s are the catchability finding this batch
+  already carries — `TranscriptionError` SUBCLASSES `TypeError`, so
+  `except TranscriptionError` catches none of them — and unlike the three
+  routes disclosed in [SOUNDNESS.md](SOUNDNESS.md) and driven by
+  `tests/test_canonicalization_routes.py`, this one needs **no attacker
+  Python at all**.
+
+  **The rule applied is the one this module already states**, not a new
+  one: `_SHAPE_PARAM_CONTAINERS`, which has judged a declaration's `shape`
+  PARAM since audit 4 for a reason that is about the aval's shape word for
+  word — *reading any other container as a shape models an array the
+  document never described* (`tuple(b"34")` is `(51, 52)`; `tuple({})` is
+  `()`). Both are asked by `_held_in_a_shape_param_container` now, so the
+  two cannot be hardened apart. The per-extent rule stays deliberately
+  wide: an extent may still be any object with a working `__index__`.
+  Nothing that arrives through a document or a trace changes hands —
+  `_decode` builds a `list` from JSON, `_jax_compat.any_array` normalises
+  with `tuple(int(d) for d in shape)`, and a jax or numpy `.shape` is a
+  `tuple`.
+
+  **Measured before and after**, pure-JSON `from_dict` partition over the
+  nine shape positions of a real document x 12 JSON values = **108 cells**
+  (2026-08-17, python 3.12.3, `git clone --shared` trees):
+
+  ```
+                        ACCEPTED   TranscriptionError   raw TypeError
+  main (198a2b5)            14             58                 36
+  dff95fc                   14             58                 36
+  ac2dcb1                   14             58                 36
+  this commit                8            100                  0
+  ```
+
+  The 6 accepts that went away are `{}` and `""` at the three aval-shape
+  positions that reach a live aval. The 8 that remain are `[]` and
+  `[1, 2]` at those same three, plus `true` at the two shape-ELEMENT
+  positions — `operator.index(True)` is `1`, so a `true` extent is stored
+  as the `int` `1`, which is pre-existing and is not this finding.
+  Pinned by `tests/test_shape_param_rule.py::test_an_AVAL_shape_is_held_
+  to_the_same_container_rule_as_the_param` and its two siblings, all three
+  red at `ac2dcb1`.
+
+- **THE RECORD'S OWN CLAIMS, RE-READ AGAINST THE CODE** (audit 0.2.0 B6
+  audit 8). No behaviour change; the entries above and below are corrected
+  where measurement contradicted them, and every figure that moved is now
+  either computed by a control or labelled as a dated off-tree
+  measurement. In one place, so that none of them is a silent edit:
+
+  * the per-face bypass counts (7/9 and 1/9, not "every face" and "the
+    other eight") — above;
+  * `9 x 3 x 3 = 81`, three bypass SPELLINGS and not "each of the two
+    bypasses" — above;
+  * "every row refused is refused" has an exception, and the `dtype: null`
+    document is the one exception to "byte-identical `content_hash()`" —
+    above;
+  * MRO forgery is possible for 16 of the 21 stored types, not for `bool`
+    alone, and buys nothing because every base the door dispatches
+    `issubclass` against is one CPython refuses to forge — `ir.py`,
+    computed by
+    `tests/test_canonicalization_routes.py::test_MRO_FORGERY_is_possible_
+    for_most_stored_types_and_buys_NOTHING`;
+  * `_register_stored_type`'s frozen check establishes no-rebinding, not
+    single-valuedness — `ir.py` and `interval.py`, pinned by
+    `tests/test_canonicalization_routes.py::test_the_FROZEN_check_does_
+    not_establish_SINGLE_VALUEDNESS`;
+  * *"only an `object.__setattr__` past the frozen dataclass reaches it"*
+    named one route where there are three — `SOUNDNESS.md`, and the
+    enumeration is now held to the tests that drive it;
+  * the `487 ns` scan cost is a distribution over scan position
+    (170–489 ns across the 13 `ir` dataclasses in one process), and the
+    "141-equation traced query" matched no query in this repo — the
+    corpus's largest is `mime_fvm.py::h_f3` at 112 equations and 1204 `ir`
+    objects.
+
+  And `tests/test_ir_message_totality.py`'s MODULE docstring carried a
+  second, unparsed copy of the figure table that the controls beside it
+  had already outgrown. It carries no figures at all now, and
+  `test_this_MODULE_docstring_states_no_figure_a_control_does_not_parse`
+  is what keeps it that way — red against the docstring as it stood at
+  `ac2dcb1`.
+
 - **UNSOUND — THE DOOR'S OWN DISPATCH WAS BUILT FROM THE TWO MOST
   OVERRIDABLE TESTS IN PYTHON, SO IT COULD BE WALKED PAST; IT DECIDES BY
   IDENTITY NOW** (audit 0.2.0 B6 audit 7, **S14**; reaches `main` and the
@@ -1129,10 +1231,19 @@ SPDX-License-Identifier: Apache-2.0
   IDENTITY, and an arbitrary two-faced object is stored in an `ir` field
   untouched. **Each bypass sufficed alone**, and they are recorded
   separately because a repair that closed only their conjunction would
-  leave both open: the metaclass alone stores the liar for every one of
-  the nine faces the door names; the `__class__` property alone stores it
-  for `bool`, the single face whose arm is an identity read, and for the
-  other eight reaches a real accessor and raw-crashes. Driven together:
+  leave both open. Per face, re-measured at `dff95fc` (2026-08-17, python
+  3.12.3, `git clone --shared`) after this paragraph said "every one of
+  the nine faces" and "the other eight": the metaclass alone stores the
+  liar on **7 of the 9** faces — `tuple` and `list` refuse cleanly,
+  because at `dff95fc` their exact arms are `t is tuple` / `t is list`
+  (identity, which no metaclass moves), the frozenset a metaclass *can*
+  answer held only the seven scalar faces, and the remaining
+  `isinstance(obj, tuple)` arm reads the object's `__class__`, which this
+  spelling does not override — and the
+  `__class__` property alone stores it on **1 of the 9** (`bool`, the
+  single face whose arm is an identity read), raw-crashes on **7**, and
+  refuses cleanly on `NoneType`, which has no read arm to crash in. "The
+  other eight raw-crashed" is **seven**. Driven together:
 
   ```
   query   x = any(shape=(2,), lo=1, hi=2)
@@ -1173,14 +1284,20 @@ SPDX-License-Identifier: Apache-2.0
   the door turns that into a `TranscriptionError` instead of letting a raw
   `TypeError` — which `TranscriptionError` SUBCLASSES, so `except
   TranscriptionError` does **not** catch it — out of a public constructor.
-  Driving a liar of each of the nine faces, under each of the two
-  bypasses, into a plain param value and into both declaration params (81
-  combinations) gave **19 raw `TypeError`s at six distinct statements** on
-  `dff95fc` and **none** on `main`, which has no door to raise them: that
-  half is a regression of this batch and not a defect of the release. The
-  message-totality sweep reaches none of the six, because every leaf it
-  injects is a real SUBCLASS and none of these objects is a subclass of
-  anything. All 81 are `TranscriptionError` now.
+  Driving a liar of each of the nine faces, in each of the **three
+  spellings** of the two bypasses — metaclass alone, `__class__` alone,
+  both together — into a plain param value and into both declaration
+  params (`9 x 3 x 3 = 81` combinations) gave **19 raw `TypeError`s at six
+  distinct statements** on `dff95fc` and **none** on `main`, which has no
+  door to raise them: that half is a regression of this batch and not a
+  defect of the release. The arithmetic is written out because *"each of
+  the two bypasses"* over 81 rows is a sentence that does not multiply —
+  the mechanisms are two and the spellings driven are three (audit 0.2.0
+  B6 audit 8). The message-totality sweep reaches none of the six, because
+  every leaf it injects is a real SUBCLASS and none of these objects is a
+  subclass of anything. All 81 are `TranscriptionError` now — re-measured
+  2026-08-17: `dff95fc` 81 driven / 29 stored / 19 raw at 6 statements,
+  this commit 81 / 0 / 0.
 
   **THE SAME MEMBERSHIP WAS THE HEADLINE TEST'S ORACLE**, which is the
   campaign's signature pattern arriving inside the test written to prove
@@ -1193,8 +1310,8 @@ SPDX-License-Identifier: Apache-2.0
   ```
 
   The oracle asks identity now, the door asks `id()`, and the test's
-  population gained a liar per face per bypass — 27 rows, computed from
-  the door's own declaration of what it stores.
+  population gained a liar per face per bypass SPELLING — `9 x 3 = 27`
+  rows, computed from the door's own declaration of what it stores.
 
   **THE `dtype` PARAM'S TYPE WAS UNCHECKED, a seventh member of the
   read-pair class inside the guard that closed the fourth.**
@@ -1236,11 +1353,41 @@ SPDX-License-Identifier: Apache-2.0
   commit, over four documents (traced simple, traced rich, and each
   reloaded through `from_dict`); `to_dict()` round-trips stably on all
   three. The accept/refuse partition over the hand-built population is
-  **unchanged from `dff95fc`** — every row that was accepted is accepted
-  and every row refused is refused — with two narrowings of hand-built IR
-  added here: a `stelling_any` `dtype` param that is not a `str` (when the
-  outvar aval has a dtype), and a value that lies about its type, which
-  was previously stored and is now refused.
+  **unchanged from `dff95fc`** except in the ways named here, and the
+  exceptions are named because the sentence that stood here — *"every row
+  that was accepted is accepted and every row refused is refused"* — has
+  three (audit 0.2.0 B6 audit 8; all re-measured 2026-08-17 on
+  `git clone --shared` trees):
+
+  * **narrowed:** a `stelling_any` `dtype` param that is not a `str`, when
+    the outvar aval has a dtype.
+  * **narrowed:** a value that lies about its type, previously stored and
+    now refused.
+  * **and one row went the other way.** A `bytes` SUBCLASS with a
+    `__class__` property returning `str` was a raw `TypeError` at
+    `dff95fc` (`descriptor '__str__' requires a 'str' object`) and is
+    **accepted here and stored as an exact `bytes`** — which is right: it
+    really is a `bytes` carrying `b'abc'`, the door reads
+    `bytes.__getitem__` and stores the payload it finds. Accepted on
+    `main` too, but there it stays the subclass. "Every row refused is
+    refused" was the false half of the sentence, not the fix.
+
+  **The `dtype: null` document is the one exception to "byte-identical
+  `content_hash()`", and it is an exception because this commit produces
+  no hash for it at all.** `_validate_decl_eqn`'s gate was
+  `params.get("dtype") is not None`, so `.get` used `None` as its own
+  sentinel and could not tell an ABSENT `dtype` param from one present and
+  `null`; it is `"dtype" in params` now, which is a branch-SELECTION
+  change and not only a type check. A hand-built document carrying
+  `["dtype", null]` under a `float64` outvar aval was ACCEPTED at
+  `dff95fc` and on `main` at `198a2b5` (both hashing to `64a0ce8d…`) and
+  is a `TranscriptionError` here. The refusal is right —
+  `propagate._ieee_any` would have read it as `str(None) == "None"`, a
+  string naming no ieee format, so the declaration would have taken the
+  no-float-format arm and got no subnormal band, the same silent misread
+  `b'float64'` produces — but it is a compatibility change and the
+  enumeration beside the code (`b'float64'`, `0`, `('float64',)`) did not
+  contain it.
 
   **Cost, measured on this tree** (jax 0.11.0, python 3.12.3,
   `/home/nick/venvs/stelling-jax`, best of 9, three `git clone --shared`
@@ -1252,20 +1399,63 @@ SPDX-License-Identifier: Apache-2.0
                               dee8bc2   dff95fc   this commit
   250k ir.Var                  0.153 s   0.227 s   0.178 s
   250k ir.JaxprEqn             0.430 s   1.249 s   1.014 s
-  868-object traced query:
+  traced query, 868 ir objects:
     from_dict(to_dict())       1.300 ms  2.043 ms  2.344 ms
     propagate()                2.196 ms  2.120 ms  2.291 ms
   ```
 
   250,000 `ir` objects is not a query; the traced query above builds 868,
-  and `propagate()` on it is within noise of `main`. The membership
-  spelling was chosen on that measurement rather than on taste: an
-  exact-leaf hit costs 13.5 ns as the `frozenset` lookup that was there,
-  180 ns as `any(t is k for k in ...)`, and 32.4 ns as one `id()` and one
-  `dict` lookup; an `ir`-dataclass hit costs 33.1 ns, 487 ns and 31.9 ns
-  the same three ways — because the `id()` index merges the three arms
-  into one lookup, and a linear scan is linear in a set this module
-  COMPUTES.
+  and `propagate()` on it is within noise of `main`.
+
+  **THE QUERY THAT ROW NAMES DOES NOT EXIST — audit 0.2.0 B6 audit 8.**
+  It was described in `ir.py` as *"a 141-equation traced query builds 868
+  `ir` objects"*, and nothing in this repo traces to 141 equations or to
+  868 objects. Swept 2026-08-17 over every zero-argument harness in
+  `corpus/supply`: the largest is `mime_fvm.py::h_f3` at **112 equations
+  and 1204 `ir` objects**, and the objects-per-equation ratio across the
+  corpus runs **5.36 to 10.83** — a band the invented 6.16 sits inside,
+  which is how it survived being read. The `ir.py` comment now names the
+  measured query; the timing row above is left as the dated off-tree
+  measurement it is, labelled by the object count it was actually taken
+  on rather than by an equation count nobody can reproduce.
+
+  **The membership microbenchmark is OFF-TREE and no control computes
+  it**, because a microbenchmark asserted in a suite is a promise about
+  someone else's machine. Re-measured 2026-08-17 (python 3.12.3,
+  `/home/nick/venvs/stelling-jax`, 200k iterations per cell, three fresh
+  processes, 20-type set):
+
+  ```
+  t in <frozenset>              23-39 ns    FORGEABLE (runs the metaclass)
+  id(t) + one dict lookup       51-61 ns    unforgeable, constant
+  any(t is k for k in ...)     168-508 ns   unforgeable, by SCAN POSITION
+  ```
+
+  The choice is between the two unforgeable spellings, and among those the
+  index is the constant-time one; the `frozenset` is the cheapest and is
+  the one that had to go, for S14 and not for cost. Two things this entry
+  said about those figures do not survive re-measurement (audit 0.2.0 B6
+  audit 8):
+
+  * **`487 ns` is a DISTRIBUTION quoted as a constant.** It is the cost of
+    the scan reaching that type, so it is linear in where the hit lands in
+    the set's iteration order, and that order comes from the type objects'
+    addresses: `ir.Jaxpr` sat at scan position 19 of 20 in one process
+    (508 ns) and at position 6 in the next (297 ns). `487` was a
+    last-position reading quoted as a typical one, inside an argument
+    whose whole subject is that a scan cost depends on position.
+  * **The exact-leaf / `ir`-dataclass split does not reproduce.** This
+    entry gave them different `frozenset` costs (13.5 ns against
+    33.1 ns); both are one hash lookup on a type object and measure the
+    same here within noise. The absolute numbers above are roughly twice
+    this entry's on every row, so they are this machine's on this date and
+    the RATIOS are what the argument rests on.
+
+  What bounds the real cost is not any of those per-call figures but the
+  traced-query rows of the table above, which are a whole document through
+  a whole pass. Those rows are themselves a dated off-tree measurement and
+  are left as measured; the object count in their label was not
+  re-derived here.
 
   The reproducer is `tests/test_aval_lie_both_faces.py::test_a_value_that_
   LIES_about_its_TYPE_can_no_longer_mint_a_FALSE_VERIFIED`, held beside

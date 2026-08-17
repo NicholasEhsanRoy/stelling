@@ -14,41 +14,57 @@ PASSING path too, so a well-formed document whose extent merely has a
 
 **WHY THIS IS A SWEEP AND NOT A LIST.** The previous pass fixed two such
 sites and wrote, in a comment, *"EVERY QUOTE HERE IS GUARDED"*. That
-sentence was false 44 lines below itself, and the audit that found it
-named four more sites. Driving the class rather than reading it, the
-record's figure is **10 distinct quote sites**: four the audit named and
-six it had not.
-
-**THE FIGURES, AND WHICH MEASUREMENT EACH BELONGS TO** — audit 0.2.0 B6
-audit 5, F2, where this file carried four numbers for two measurements.
-They are computed by
-`test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES` and
+sentence was false further down the same function, and the audit that
+found it named four more sites. Driving the class rather than reading it
+found more again: four the audit named and six it had not. Both of those
+are counted from `_NAMED_SITES`' own group tags by
 `test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures`,
-and the unit is the MESSAGE EXPRESSION — one `_load_check(...)` spans
-several source lines and can interpolate on more than one, so a per-LINE
-count is a different and larger number, and it is the one that got
-written down as if it were this one:
+which is the only reason they are written here in words.
 
-    this tree, as shipped              95 swept / 0 escapes / 20 skipped
-    guards neutered                     1 escape  /  1 line  / 1 message
-    guards neutered, and the door's
-      LEAF READS neutered too          26 escapes /  8 lines / 8 messages
-    `30d4b04`, guards absent           28 escapes / 10 lines / 8 messages
-    message-expression union           10 = those 8 + the 2 the sweep masks
+**THIS DOCSTRING STATES NO FIGURES, AND THAT IS THE FIX** — audit 0.2.0
+B6 audit 8. It carried a table of its own, a union total, a
+before-and-after delta, and two ratios derived from them, and it said
+those figures were "computed by" the two controls named below. They were
+not: `_docstring_figures()` parses the docstring of ONE test, and by the
+time this was read every number here disagreed with what the controls
+measure. That is the tenth instance of this batch's recurring class — in
+the module docstring of the file the ninth was found in, in a file whose
+whole subject is that a table in prose is an honour-system copy of a
+dict.
+
+The repair is not to retype the digits. Every figure this file states
+lives beside the control that measures it: the `_SHIPPED`, `_NEUTERED`
+and `_NEUTERED_NO_CANON` dicts and `_QUOTE_SITE_UNION`, the table in
+`test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES`' docstring
+that `_docstring_figures()` parses and compares to them row by row, and
+the decomposition in
+`test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures`,
+which computes its total from both drivers. THIS docstring carries none,
+and `test_this_MODULE_docstring_states_no_figure_a_control_does_not_parse`
+is what keeps it that way. Where a number is wanted, read it off the
+control that computes it.
+
+The UNIT matters, since three are in play and none of them is a count of
+the others. The MESSAGE EXPRESSION is this file's headline: one
+`_load_check(...)` spans several source lines and can interpolate on more
+than one, so a per-LINE count is larger, and a per-QUOTE count —
+individual interpolations, which is what `CHANGELOG.md` decomposes — is
+larger again.
 
 **THERE ARE NOW TWO DEFENCES AND EACH IS MEASURED WITH THE OTHER
 REMOVED** — audit 0.2.0 B6 audit 6. `ir`'s canonicalization door replaces
 a leaf that is a SUBCLASS of a stored type with an exact twin, read
 through the base type's own accessor — which is exactly what the hostile
 leaves this sweep injects are, so their `__repr__` no longer survives into
-the document. 25 of the 26 ESCAPES therefore do not happen, and they are
-not GUARDED — they are not reached: 7 of the 8 message expressions are
-never composed with a hostile object at all. (Escapes and message
-expressions are different units and this sentence states both, which is
-the discipline the rest of this file is about.) A positive control that
-only neutered the guards would therefore be pushing on a door already
-shut, and would go on reporting green if every `_safe_repr` in the module
-were deleted. So
+the document. Almost every ESCAPE therefore does not happen, and those
+are not GUARDED — they are not reached: with the door shipped, a hostile
+object is never composed into most of the message expressions at all.
+(How many, in each of the two units, is a figure; both are computed by
+`test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES` from
+`_NEUTERED` and `_NEUTERED_NO_CANON`, which is why neither is written
+here.) A positive control that only neutered the guards would therefore
+be pushing on a door already shut, and would go on reporting green if
+every `_safe_repr` in the module were deleted. So
 `_neutered_sweep(canonicalization=False)` removes the second defence too,
 and that is the measurement the guard figures belong to.
 
@@ -59,21 +75,24 @@ generic door is held back from it and `_validate_decl_eqn`'s quotes see
 the object as handed in. That is one site, it is guarded, and it is why
 the guards are still load-bearing.
 
-The guards-neutered figures also moved by exactly one escape and one
-LINE against `f729d70` (27/9/8 -> 26/8/8), and the difference is
-attributable: `_validate_decl_eqn`'s `dtype` message interpolated the
-param on one line and the outvar aval's dtype on the next, and the param
-half is now canonicalized inside that function (audit 6's `dtype`
-finding), so one of that message expression's two lines no longer escapes.
-The MESSAGE count is unchanged at 8, which is the unit the record quotes.
+Every movement in the guards-neutered figures since `f729d70` is
+attributable, and the attribution is recorded beside the numbers rather
+than here — see
+`test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES`, whose
+docstring carries the table, the labels that say which control each row
+belongs to, and the reason each row last moved.
 
-**AND "TEN" IS SAID TWICE IN TWO UNITS.** `CHANGELOG.md` also decomposes
-the finding as four sites the audit named and six it had not; that counts
-QUOTES — individual interpolations — where the figure above counts MESSAGE
-EXPRESSIONS. They agree at ten by different routes (the duplicate-key
-refusal is two quotes in one message; two audit-4 quotes no longer escape
-at all), and neither is derived from the other, so the test asserts only
-the computed one.
+**AND THE TWO "TENS" WERE NEVER ONE NUMBER.** `CHANGELOG.md` also
+decomposes the finding as four sites the audit named and six it had not;
+that counts QUOTES — individual interpolations — where this file's
+headline counts MESSAGE EXPRESSIONS. The duplicate-key refusal is two
+quotes in one message expression, and two audit-4 quotes no longer escape
+at all, so the two units reached the same total on the tree audit 4
+measured by different routes and no longer do. The quote decomposition is
+a fixed historical statement about what audit 4 named; the union is
+computed by the control that owns it, and only the computed one is
+asserted. Writing an identity across two units is the defect this file
+exists for.
 
 Two of the six the audit had not named fire on the PASSING path, on
 documents with nothing wrong with them:
@@ -530,6 +549,65 @@ def _docstring_figures() -> dict[str, dict[str, int]]:
             }
     assert len(out) == 3, f"the figure table has {len(out)} rows about this tree"
     return out
+
+
+# A FIGURE IS A NUMBER BESIDE A UNIT THIS FILE COUNTS IN. The module
+# docstring is allowed prose, commit hashes and audit references; it is
+# not allowed to state one of these, because nothing parses it — audit
+# 0.2.0 B6 audit 8.
+_UNIT_WORD = (
+    r"escapes?|lines?|messages?|quote sites?|swept|skipped|"
+    r"message expressions?|distinct quote sites?"
+)
+_FIGURE_IN_PROSE = re.compile(
+    # "26 escapes", "8 lines", "union 10 = …" style triples, and "27/9/8"
+    rf"(?:\b\d+\s+(?:{_UNIT_WORD})\b)|(?:\b\d+\s*/\s*\d+\s*/\s*\d+\b)",
+    re.I,
+)
+
+
+def test_this_MODULE_docstring_states_no_figure_a_control_does_not_parse():
+    """THE TENTH INSTANCE, HELD SHUT STRUCTURALLY — audit 0.2.0 B6 audit 8.
+
+    This module's docstring carried its own copy of the figure table, a
+    union total, a delta between two commits, and ratios derived from
+    them. It said the figures were "computed by" the two controls in this
+    file — and `_docstring_figures()` parses only
+    :func:`test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES`'s
+    docstring, so the module copy was parsed by nothing and had drifted to
+    a set of numbers no configuration in this file produces.
+
+    RETYPING THE DIGITS IS NOT THE REPAIR, because it was retyping the
+    digits that put them there. A figure this module docstring states is
+    a copy by construction: the table lives in the control's docstring
+    where the parser can reach it, and here there is a pointer.
+
+    So this asserts a PROPERTY of the docstring rather than its contents:
+    no number followed by one of the units this file counts in, and no
+    `a/b/c` triple. It fails on the docstring as it stood at `ac2dcb1`,
+    which is the point of writing it as a check rather than as an edit.
+
+    Deliberately NOT applied to the two controls' own docstrings: one of
+    them is where the table is supposed to be, and the other decomposes
+    its union in prose that a reader needs. Both are parsed or computed.
+    """
+    doc = __doc__ or ""
+    assert doc, "this module has no docstring"
+    hits = [m.group(0) for m in _FIGURE_IN_PROSE.finditer(doc)]
+    assert not hits, (
+        f"this module's docstring states {len(hits)} figure(s) that no "
+        f"control parses: {hits}. The table belongs in "
+        f"`test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES`'s "
+        f"docstring, which `_docstring_figures()` reads back and compares "
+        f"to the dicts the sweep measures; a second copy here is an "
+        f"honour-system copy and it has already drifted once."
+    )
+    # and the detector is not vacuous: it must fire on the text it was
+    # written to catch
+    for planted in ("26 escapes /  8 lines / 8 messages",
+                    "27/9/8 -> 26/8/8",
+                    "10 distinct quote sites"):
+        assert _FIGURE_IN_PROSE.search(planted), planted
 
 
 def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():

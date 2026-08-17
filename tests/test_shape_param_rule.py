@@ -750,3 +750,138 @@ def test_the_named_rows_read_the_way_the_record_says(param, expect):
     record against one line each."""
     assert _door(param) == expect
     assert _emission(param) == expect
+
+
+# ---------------------------------------------------------------------------
+# THE SAME RULE, ON THE SHAPE THAT WAS NOT HELD TO IT
+# ---------------------------------------------------------------------------
+#
+# Everything above is about a declaration's `shape` PARAM. An `Aval`'s and
+# an `Array`'s own `shape` reached `ir._load_extents`, whose per-extent
+# read was guarded and whose ITERATION was not — audit 0.2.0 B6 audit 8.
+
+_JSON_SHAPES = [0, -1, 3.5, True, False, None, "", "xx", [], [1, 2], {},
+                {"a": 1}]
+
+
+def _aval_document(shape):
+    """A pure-JSON document whose only oddity is one aval `shape`.
+
+    Built by hand rather than by mutating `to_dict()` output, so that the
+    value under test is the one this function names and nothing else has
+    been touched.
+    """
+    aval = {"k": "aval", "kind": "ShapedArray", "shape": shape,
+            "dtype": "float64", "weak_type": False}
+    return {"k": "closed",
+            "jaxpr": {"k": "jaxpr", "constvars": [], "invars": [],
+                      "outvars": [{"k": "var", "id": 0, "aval": aval}],
+                      "eqns": [], "effects": []},
+            "consts": []}
+
+
+def test_an_AVAL_shape_is_held_to_the_same_container_rule_as_the_param():
+    """`ir._load_extents` guarded the per-extent read and not `for d in
+    shape` — audit 0.2.0 B6 audit 8, and it is DOCUMENT-REACHABLE.
+
+    The three routes recorded in `tests/test_canonicalization_routes.py`
+    all need attacker Python. This one needed a JSON file: `_decode` read
+    `tuple(obj["shape"])` in FRONT of the guard that owns the question, so
+    a `shape` of `2` or `null` came out of `from_dict` as a raw
+    `TypeError` — which `except ir.TranscriptionError` does not catch,
+    because `TranscriptionError` SUBCLASSES `TypeError` — and a `shape` of
+    `{}` came out ACCEPTED as the scalar shape `()`, because a dict
+    iterates to nothing.
+
+    The last of those is the one that matters: it is not a malformed
+    extent a caller can be told about, it is a document silently given a
+    different array than it wrote, after which every later reader — the
+    slicer, the propagator's element counts, the emission — models a
+    scalar the document never described.
+
+    The rule applied is the one this file is about, unchanged: a shape is
+    recorded in `ir._SHAPE_PARAM_CONTAINERS`. It is asked by the same
+    predicate, so the aval shape and the declaration's `shape` param
+    cannot be hardened apart.
+    """
+    for shape in _JSON_SHAPES:
+        doc = _aval_document(shape)
+        if ir._held_in_a_shape_param_container(shape):
+            back = ir.ClosedJaxpr.from_dict(doc)
+            got = back.jaxpr.outvars[0].aval.shape
+            assert type(got) is tuple
+            assert got == tuple(shape), (shape, got)
+        else:
+            with pytest.raises(ir.TranscriptionError) as exc:
+                ir.ClosedJaxpr.from_dict(doc)
+            assert "a shape is recorded in" in str(exc.value), str(exc.value)
+            # and the container type it refused is NAMED, not summarised
+            # as a bad extent (the split `_validate_decl_eqn` makes)
+            assert type(shape).__name__ in str(exc.value), str(exc.value)
+
+
+def test_the_json_shape_partition_leaves_NOTHING_outside_the_declared_surface():
+    """The whole `_JSON_SHAPES` partition, as a partition.
+
+    `TranscriptionError` is the declared surface for a malformed document;
+    a raw `TypeError` is not, and an ACCEPT of a value that is not a shape
+    is worse than either. Measured at `ac2dcb1`, `dff95fc` and `main`
+    (`198a2b5`) over a nine-position pure-JSON partition: 108 cells, of
+    which 36 were raw `TypeError`s and 6 were silent accepts. Here the
+    only accepts are the containers, and there are no raw escapes.
+    """
+    accepted, refused = [], []
+    for shape in _JSON_SHAPES:
+        try:
+            ir.ClosedJaxpr.from_dict(_aval_document(shape))
+        except ir.TranscriptionError:
+            refused.append(shape)
+        except Exception as exc:                          # noqa: BLE001
+            raise AssertionError(
+                f"aval shape {shape!r} left `from_dict` as a raw "
+                f"{type(exc).__name__}: {exc}"
+            ) from None
+        else:
+            accepted.append(shape)
+
+    assert [s for s in accepted
+            if not ir._held_in_a_shape_param_container(s)] == [], accepted
+    assert all(ir._held_in_a_shape_param_container(s) for s in accepted)
+    assert {} in refused and "" in refused, (
+        "an empty dict and an empty string iterate to nothing and were "
+        "both accepted as the scalar shape `()` before audit 8"
+    )
+    assert len(accepted) == 2, accepted        # `[]` and `[1, 2]`
+
+
+def test_an_ARRAY_shape_and_a_shape_that_will_not_ITERATE_are_refused_too():
+    """The other two arms of the same repair, at the construction door.
+
+    A `list` SUBCLASS whose `__iter__` raises satisfies the container test
+    — `issubclass` is a claim about the TYPE and not about the object —
+    so the iteration is guarded separately and refused for being
+    UNREADABLE rather than for its type.
+    """
+    class Unreadable(list):
+        def __iter__(self):
+            raise RuntimeError("boom")
+
+    for build in (
+        lambda s: ir.Aval(kind="ShapedArray", shape=s, dtype="float64"),
+        lambda s: ir.Array(dtype="<f8", shape=s, data=b"\x00" * 8),
+    ):
+        with pytest.raises(ir.TranscriptionError) as exc:
+            build(2)
+        assert "a shape is recorded in" in str(exc.value)
+
+        with pytest.raises(ir.TranscriptionError) as exc:
+            build(Unreadable([1]))
+        assert "iteration RAISES" in str(exc.value), str(exc.value)
+
+    # and a well-formed one still installs plain `int` extents, from
+    # either container
+    for shape in ((2, 3), [2, 3]):
+        aval = ir.Aval(kind="ShapedArray", shape=shape, dtype="float64")
+        assert aval.shape == (2, 3)
+        assert type(aval.shape) is tuple
+        assert all(type(d) is int for d in aval.shape)

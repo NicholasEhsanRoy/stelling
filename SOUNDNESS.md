@@ -8839,11 +8839,29 @@ verdicts:
   of metaclass, or two lines of `__class__` property, put an arbitrary
   two-faced object into an `ir` field untouched. **Each bypass sufficed
   alone**, and they are recorded separately because a repair that closed
-  only their conjunction would leave both open: the metaclass alone
-  stored the liar for every one of the nine faces the door names, and the
-  `__class__` property alone stored it for `bool` — the single face whose
-  arm was an IDENTITY read — while for the other eight it reached a real
-  accessor and raw-crashed. The same document shape as the two above,
+  only their conjunction would leave both open. The per-face counts,
+  re-measured on a `git clone --shared` tree at `dff95fc` (2026-08-17,
+  python 3.12.3) after the version below said *"every one of the nine
+  faces"* and *"the other eight"* — audit 0.2.0 B6 audit 8:
+
+  * **the metaclass alone** stored the liar on **7 of the 9** faces.
+    `tuple` and `list` refused cleanly at all three positions, and the
+    reason is which ARM would have to admit them: at `dff95fc` the exact
+    arms for those two were `t is tuple` and `t is list` — identity, which
+    no metaclass can move — while the frozenset it *can* answer,
+    `_CANONICAL_EXACT`, held only the seven scalar faces and neither
+    container. The remaining arm, `isinstance(obj, tuple)`, reads the
+    OBJECT's `__class__`, which a metaclass-only liar does not override —
+    which is why the `__class__` spelling reached it and raw-crashed
+    where this one refused.
+  * **the `__class__` property alone** stored it on **1 of the 9** —
+    `bool`, the single face whose arm was an IDENTITY read — raw-crashed
+    on **7**, and refused cleanly on `NoneType`, which has no read arm to
+    crash in. "The other eight raw-crashed" is **seven**.
+
+  Both halves of that still hold: neither bypass is subsumed by the
+  other, so a repair aimed at their conjunction would have left both.
+  The same document shape as the two above,
   with both bypasses on the ceiling of the asserted predicate and every
   object built through a public `stelling.ir` dataclass, reached
   **`discharged`** on two obligations that cannot both hold —
@@ -8876,11 +8894,18 @@ verdicts:
   `TranscriptionError` SUBCLASSES, so `except TranscriptionError` does
   not catch it — out of a public constructor. That half is a regression
   of `dff95fc` rather than a defect of the release: driving a liar of
-  each of the nine faces, under each of the two bypasses, into a plain
-  param value and into both declaration params — 81 combinations — gave
+  each of the nine faces, in each of the **three spellings** of the two
+  bypasses — metaclass alone, `__class__` alone, and both together — into
+  a plain param value and into both declaration params gave
   **19 raw `TypeError`s at six distinct statements** on `dff95fc` and
   **none** on `main`, which has no door to raise them. All 81 are
-  `TranscriptionError` now.
+  `TranscriptionError` now. The arithmetic is `9 x 3 x 3 = 81`, written
+  out because *"each of the two bypasses"* over 81 combinations is a
+  sentence that does not multiply — the two mechanisms are two, the
+  spellings driven are three, and the third spelling is the one that
+  catches a repair aimed only at the conjunction (audit 0.2.0 B6 audit 8).
+  Re-measured 2026-08-17 on `git clone --shared` trees: `dff95fc`
+  81 driven / 29 stored / 19 raw at 6 statements; this commit 81 / 0 / 0.
 
   **It does not make those params CORRECT** — per-primitive shape
   inference is still scoped out in
@@ -8919,11 +8944,58 @@ verdicts:
   object is not iterable` out of the public `propagate()` while the
   emission face declines — the S12″ two-faces shape once more, on the
   transfer side. It is left because it is `stelling.propagate` and the
-  other face, and because the constructible route to it is now shut: only
-  an `object.__setattr__` past the frozen dataclass reaches it. Pinned as
-  a live expectation in
+  other face, and because no DOCUMENT reaches it: `ir._validate_decl_eqn`
+  refuses a non-sequence `shape` param at construction, and
+  `ClosedJaxpr.from_dict` returns an exact `ClosedJaxpr`. Pinned as a live
+  expectation in
   `test_aval_lie_both_faces.py::test_the_transfer_face_still_raises_raw_on_
   an_uniterable_shape_param`, so the report cannot rot into folklore.
+
+  **AND "THE CONSTRUCTIBLE ROUTE IS SHUT" WAS THE WRONG SENTENCE — audit
+  0.2.0 B6 audit 8.** This said *"only an `object.__setattr__` past the
+  frozen dataclass reaches it"*, which is a claim about the whole door and
+  not only about this residue, and it is false. **Three routes reach a
+  stored or carried value with no `object.__setattr__` by the caller at
+  all**, and the repair is not a longer sentence: each is DRIVEN, one test
+  apiece, in `tests/test_canonicalization_routes.py`, and
+  `test_the_DISCLOSURES_name_exactly_these_routes` reads this paragraph
+  back against the list those tests drive, so the enumeration and the
+  measurement cannot part company.
+
+  * **the root is never canonicalized.** `ir._canonicalise` runs on an
+    object's FIELDS; nothing runs `ir._canonical` on the object a caller
+    hands `propagate`, `escalate` or `make_solver_verdict`. A
+    `ClosedJaxpr` SUBCLASS whose `jaxpr` is a `property` is read by its
+    own `__post_init__` and answers freely thereafter — `propagate`
+    discharges the one-element document while `content_hash`, `escalate`
+    and the verdict all read the two-element one, and the query-pairing
+    gate passes because both of its legs are reads of the same property.
+    Driven end to end by the audit's reproducer it reports **VERIFIED**
+    for `sum(x) <= 39/10` over `[1,2]^2`, whose true maximum is 4; exact
+    `Fraction` arithmetic and a concrete `jnp.sum` both falsify it. The
+    in-suite pin holds the MECHANISM rather than the verdict, so that it
+    needs no solver: `propagate` and `content_hash` are shown reading two
+    different documents from one object.
+  * **the install is not guaranteed to install.** `_canonicalise` installs
+    the canonical twin with `object.__setattr__`, which resolves the field
+    NAME — and a name that resolves to a class-level DATA DESCRIPTOR goes
+    to that descriptor's setter rather than to the instance `__dict__`. A
+    `JaxprEqn` subclass whose `params` is a property keeps a `list` in a
+    param value, which is exactly the type the door exists to rewrite.
+  * **`__class__` assignment.** `s.__class__ = ir.Var` makes `type(s)` be
+    `ir.Var` genuinely, by the object header — no metaclass and no
+    property, so there is nothing left for the door to ask — and the
+    `id()`-keyed index arm therefore carries the object unchanged, with
+    `Var.__post_init__` never having run on it.
+
+  **All three are pre-existing**, measured identically on `dff95fc` and on
+  `main` at `198a2b5`, so none is a regression of this batch. **All three
+  need attacker Python** — a subclass definition or a `__class__`
+  assignment inside the caller's own process — and none is reachable from
+  a document, which is what keeps them a disclosure rather than a block.
+  What was wrong was naming `object.__setattr__` as the only way past a
+  door whose gaps are the root it never visits, an install a descriptor
+  can swallow, and a type assignment there is no lie in.
 
   **AND THE DISCLOSURE UNDERSTATED ITSELF — audit 0.2.0 B6 audit 3, Q6.**
   "The transfer face raises where the emission declines" reads like a

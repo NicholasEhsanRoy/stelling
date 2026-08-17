@@ -905,9 +905,23 @@ def test_the_transfer_face_still_raises_raw_on_an_uniterable_shape_param():
     `propagate()` — the S12" family again, on the transfer face, while the
     emission face (above) declines. It is out of this batch's scope
     (`stelling.propagate`, and a different face from the one under repair),
-    and the constructible route to it is now shut: `ir._validate_decl_eqn`
-    refuses a non-sequence `shape` param at construction, so only an
-    `object.__setattr__` past the frozen dataclass reaches it.
+    and no DOCUMENT reaches it: `ir._validate_decl_eqn` refuses a
+    non-sequence `shape` param at construction, and
+    `ClosedJaxpr.from_dict` returns an exact `ClosedJaxpr`.
+
+    **THE ROUTE CLAIM USED TO BE WIDER THAN THAT, AND WAS FALSE** — audit
+    0.2.0 B6 audit 8. It read *"only an `object.__setattr__` past the
+    frozen dataclass reaches it"*, which is a claim about the door rather
+    than about this residue. Three routes reach a stored or carried value
+    with no `object.__setattr__` by the caller: the root of a query is
+    never canonicalized, the door's install can be swallowed by a
+    class-level data descriptor, and `__class__` assignment makes
+    `type(obj)` genuinely a stored type. Each is driven in
+    `tests/test_canonicalization_routes.py`, and all three are
+    pre-existing on `main`. What holds HERE is the narrower sentence
+    above: a document cannot get an uniterable `shape` param past
+    `__post_init__`, which is why this test installs one with
+    `object.__setattr__` itself.
 
     **AND IT IS NOT CATCHABLE THROUGH THE DOCUMENTED HANDLERS** — audit
     0.2.0 B6 audit 3, Q6, which is what makes this a residue worth
@@ -1949,19 +1963,39 @@ def test_a_value_that_LIES_about_its_TYPE_can_no_longer_mint_a_FALSE_VERIFIED():
         f"door is supposed to refuse it on its TYPE"
     )
 
-    # 4. EACH BYPASS ALONE, over every face the door names. Measured on
-    #    `dff95fc`: the metaclass alone stored the liar for every face,
-    #    and the `__class__` property alone stored it for `bool` — the one
-    #    face whose read was the identity — while for the other eight it
-    #    reached a real accessor and raw-crashed. So a repair that closed
-    #    only the pair would leave both halves open, and one that closed
-    #    only the entry test would leave the identity read open.
+    # 4. EACH BYPASS ALONE, over every face the door names — and the
+    #    per-face counts, re-measured on a `git clone --shared` tree at
+    #    `dff95fc` (2026-08-17, python 3.12.3), because the version of
+    #    this comment that said "every face" and "the other eight" did not
+    #    survive being checked (audit 0.2.0 B6 audit 8):
+    #
+    #      metaclass alone   STORED on 7 of the 9 faces. `tuple` and
+    #                        `list` refused cleanly at all three
+    #                        positions: their exact arms were `t is tuple`
+    #                        / `t is list` (identity, which no metaclass
+    #                        moves), the frozenset a metaclass CAN answer
+    #                        held only the seven scalar faces, and the
+    #                        `isinstance(obj, tuple)` arm reads the
+    #                        OBJECT's `__class__`, which this spelling
+    #                        does not override.
+    #      __class__ alone   STORED on 1 of the 9 (`bool`, the one face
+    #                        whose read was the identity); raw-crashed on
+    #                        7; and refused cleanly on `NoneType`, which
+    #                        has no read arm to crash in. So "the other
+    #                        eight raw-crashed" is SEVEN.
+    #
+    #    A repair that closed only the pair would leave both halves open,
+    #    and one that closed only the entry test would leave the identity
+    #    read open — which is why all THREE spellings are driven below.
     #    The refusal must also be CATCHABLE as what this module raises:
     #    `TranscriptionError` SUBCLASSES `TypeError`, so a raw `TypeError`
     #    out of a public constructor is not merely untidy — `except
     #    ir.TranscriptionError` does not catch it, which is what
     #    `descriptor '__getitem__' requires a 'tuple' object` did at six
-    #    distinct statements over these 81 combinations.
+    #    distinct statements over these 81 combinations. And 81 is
+    #    `9 faces x 3 SPELLINGS x 3 positions`: the two bypass MECHANISMS
+    #    are driven separately and together, so "each of the two bypasses"
+    #    over 81 rows was a sentence that did not multiply.
     def _param_value(o):
         return ir.JaxprEqn(primitive="add", invars=(), outvars=(),
                            params=(("thing", o),))

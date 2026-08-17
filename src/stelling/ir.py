@@ -725,17 +725,31 @@ def _decode(obj: object) -> object:
         return complex(obj["re"], obj["im"])
     if k == "tuple":
         return tuple(_decode(x) for x in obj["items"])
+    # THE `shape` IS HANDED OVER RAW, and that is the repair rather than
+    # an omission — audit 0.2.0 B6 audit 8. Both of these read
+    # ``tuple(obj["shape"])``, which is a SECOND reader of the document's
+    # shape standing in FRONT of the one that owns the question: it ran
+    # before any `__post_init__`, so `2` and `null` came out of
+    # `from_dict` as a raw ``TypeError: 'int' object is not iterable``
+    # (which `except TranscriptionError` does not catch, because
+    # `TranscriptionError` SUBCLASSES `TypeError`), and `{}` came out
+    # ACCEPTED as the scalar shape `()` because a dict iterates to
+    # nothing. `_load_extents` now judges the container, the iteration and
+    # each extent, and `Aval.__post_init__` / `Array.__post_init__`
+    # install what it read — so a `list` from JSON still becomes a stored
+    # `tuple`, by the reader that checked it instead of by one that did
+    # not.
     if k == "aval":
         return Aval(
             kind=obj["kind"],
-            shape=tuple(obj["shape"]),
+            shape=obj["shape"],
             dtype=obj["dtype"],
             weak_type=obj["weak_type"],
         )
     if k == "array":
         return Array(
             dtype=obj["dtype"],
-            shape=tuple(obj["shape"]),
+            shape=obj["shape"],
             data=base64.b64decode(obj["data"]),
         )
     if k == "var":
@@ -992,9 +1006,86 @@ def _load_extents(shape) -> tuple[str | None, tuple[int, ...]]:
 
     NOT ONLY `TypeError`: `operator.index` raises whatever `__index__`
     raises, and a `ValueError` or `OverflowError` from an extent left
-    `Aval(...)` and `JaxprEqn(...)` raw (audit 0.2.0 B6 audit 3, F2)."""
+    `Aval(...)` and `JaxprEqn(...)` raw (audit 0.2.0 B6 audit 3, F2).
+
+    **AND THE ITERATION ITSELF WAS UNGUARDED, WHICH IS THE SAME FINDING
+    ONE LEVEL OUT** — audit 0.2.0 B6 audit 8. The per-extent `try`
+    described above covered `operator.index(d)` and not the `for d in
+    shape` that produced `d`, so a `shape` that is not a
+    sequence at all left the same public constructors raw, and — worse —
+    a `shape` that iterates to NOTHING was accepted as the scalar shape
+    `()`. Measured AT `ac2dcb1`, and identically on `dff95fc` and on
+    `main` at `198a2b5`, from PURE JSON through `ClosedJaxpr.from_dict`
+    with no Python object anywhere in the document — all five rows are
+    `TranscriptionError` on this tree:
+
+        aval shape 2       raw `TypeError: 'int' object is not iterable`
+        aval shape null    raw `TypeError: 'NoneType' object ...`
+        aval shape 1.5     raw `TypeError: 'float' object ...`
+        aval shape true    raw `TypeError: 'bool' object ...`
+        aval shape {}      ACCEPTED, and the aval records shape ()
+
+    That last row is the one that matters: `{}` is not a malformed extent
+    the caller can be told about, it is a document that got a DIFFERENT
+    array than it wrote, silently, and every later reader — the slicer,
+    the propagator's element counts, the emission — then models a scalar
+    where the document said nothing of the kind. The others are the
+    catchability finding this module already carries: `TranscriptionError`
+    SUBCLASSES `TypeError`, so `except TranscriptionError` does not catch
+    a raw `TypeError`, and unlike the three routes recorded in
+    `tests/test_canonicalization_routes.py` this one needs no attacker
+    Python — a JSON file reaches it.
+
+    **THE RULE IS THE ONE THIS MODULE ALREADY STATES, applied to the one
+    shape it was not applied to.** :func:`_validate_decl_eqn` has judged a
+    declaration's `shape` PARAM by :data:`_SHAPE_PARAM_CONTAINERS` since
+    audit 4, for a reason that is about the aval's shape word for word —
+    *reading any other container as a shape models an array the document
+    never described* (`tuple(b"34")` is `(51, 52)`; `tuple({})` is `()`).
+    An aval and an array shape are now asked the same question by the
+    same predicate, so the two cannot be hardened apart, and the reading
+    is `issubclass(type(obj), ...)` for the reason
+    :func:`_held_in_a_shape_param_container` gives.
+
+    WHAT THAT NARROWING COSTS, stated rather than assumed: every route
+    that is not hand-built IR already arrives in one of those two
+    containers — `_decode` builds a `list` from JSON, `_jax_compat.
+    any_array` normalises with `tuple(int(d) for d in shape)`, and a jax
+    or numpy `.shape` is a `tuple` — so nothing that reaches this function
+    through a document or a trace changes hands. It is the PER-EXTENT rule
+    that stays deliberately wide: an extent may still be any object with a
+    working `__index__` (a numpy integer, one of the suite's
+    `_TwoFacedExtent`s), because that is a claim about the extent and this
+    is a claim about the container."""
+    # THE CONTAINER, THEN THE ITERATION, THEN THE EXTENTS — three
+    # different facts about the document, refused separately because a
+    # single sentence for all three tells a reader holding `{}` that it
+    # has a "non-integer shape extent", which it does not have and is not
+    # why it was refused (the split `_validate_decl_eqn` makes, and for
+    # the same reason).
+    if not _held_in_a_shape_param_container(shape):
+        return (
+            f"a shape {_safe_repr(shape)} of type {_safe_type_name(shape)}: "
+            f"a shape is recorded in {_SHAPE_PARAM_RULE}, and reading any "
+            f"other container as one would model an array the document "
+            f"never described (`tuple(b\"34\")` is `(51, 52)`, `tuple({{}})` "
+            f"is `()`)",
+            (),
+        )
+    try:
+        items = tuple(shape)
+    except Exception:  # noqa: BLE001 — unreadable IS the finding
+        # `issubclass` is a claim about the TYPE and not about the object:
+        # a `list` SUBCLASS whose `__iter__` raises satisfies the test
+        # above, and letting that out of a public constructor raw is the
+        # class this function is closing.
+        return (
+            f"a shape in {_SHAPE_PARAM_RULE} whose iteration RAISES, so its "
+            f"extents cannot be read at all",
+            (),
+        )
     out = []
-    for d in shape:
+    for d in items:
         try:
             k = _operator.index(d)
         except Exception:  # noqa: BLE001 — unreadable IS the finding
@@ -1144,10 +1235,36 @@ def _load_check(cond: bool, where: str, what: str) -> None:
 # any object at all. And even with the entry test fixed, ``bool`` shares
 # ``int``'s instance layout, so a REAL ``int`` subclass whose metaclass
 # overrides ``mro()`` to return ``[cls, bool, int, object]`` is created
-# without complaint and satisfies ``issubclass(cls, bool)`` — measured,
-# and ``bool`` is the only type this module stores for which it is
-# possible, because it is the only one that shares another's instance
-# layout (CPython's own check refuses the forgery for every other).
+# without complaint and satisfies ``issubclass(cls, bool)`` — measured.
+#
+# THE SCOPE OF THAT SENTENCE IS THE ARMS THAT READ ``issubclass``, AND IT
+# WAS WRITTEN AS IF IT WERE EVERY TYPE THIS MODULE STORES — audit 0.2.0 B6
+# audit 8, which is this module's own recurring defect one more time. It
+# said *"``bool`` is the only type this module stores for which it is
+# possible"*. Measured on this tree (python 3.12.3, 21 stored types):
+# **16 of the 21 can have an MRO entry forged for them** — the 13 `ir`
+# dataclasses, `NoneType` and `IntervalArray`, whose solid base is
+# ``object`` so a plain heap class adds no conflicting layout, plus
+# ``bool`` from a real ``int`` subclass. What CPython's layout check
+# refuses is the 5 that carry their own instance layout: ``int``,
+# ``float``, ``complex``, ``str`` and ``bytes``.
+#
+# It is nonetheless not a hole, and the reason is the door's shape rather
+# than CPython's: FORGING AN MRO MOVES ONLY ``issubclass``, and every base
+# this module dispatches ``issubclass`` against is one CPython refuses to
+# forge — the five :data:`_CANONICAL_READS` bases above, and ``tuple`` and
+# ``list`` from :data:`_SHAPE_PARAM_CONTAINERS`, which carry their own
+# instance layouts too. Membership in what this module STORES is decided
+# by ``id(type(obj))`` against
+# :data:`_STORED_AS_IS`, which is identity against the real type object
+# and which a forged MRO does not touch. Measured: a forged claimer of
+# each of the 13 `ir` dataclasses, of `NoneType` and of `IntervalArray`,
+# instantiated with ``object.__new__`` so the base's ``__post_init__``
+# never runs, was refused by :func:`_canonical` — 15 of 15,
+# ``_NotCanonical`` every time. :func:`_read_or_refuse`'s own docstring
+# has always stated the claim in this scope; this paragraph did not, and
+# `tests/test_canonicalization_routes.py` now computes both halves.
+#
 # Under the identity read that object was STORED; under ``int.__index__``
 # it is stored as the exact ``int`` it actually carries. An identity read
 # is the one read that cannot detect having been applied to the wrong
@@ -1270,16 +1387,51 @@ def _register_stored_type(cls: type) -> type:
     what this check is and is not). Returns ``cls`` so it can be used as a
     decorator.
 
-    THE ONE PROPERTY THE DELEGATION RESTS ON IS CHECKED, not assumed —
-    the same discipline :data:`_CANONICAL_IR_TYPES` applies to this
-    module's own dataclasses, and for the same reason. "The registering
-    module owns its single-valuedness" is a claim that a later read of a
-    field cannot differ from an earlier one, and for `IntervalArray` that
-    is true because it is a FROZEN dataclass: its fields are settled in
-    its own ``__post_init__`` and cannot be reassigned afterwards. A
-    mutable class, or a plain class with a property for a field, has no
-    such invariant, and carrying one would be exactly the hole the door
-    exists to close — reached by an import rather than by a document.
+    WHAT THE CHECK BELOW ESTABLISHES, AND WHAT IT DOES NOT — audit 0.2.0
+    B6 audit 8, which read the previous wording against the code and found
+    it claiming the conclusion from a premise that does not carry it. It
+    said the frozen test made single-valuedness *"true because it is a
+    FROZEN dataclass"*, and that *"a plain class with a property for a
+    field ... would be exactly the hole the door exists to close"* — while
+    this function ACCEPTS precisely that class.
+
+    ESTABLISHED: ``cls`` is a frozen dataclass, so ``setattr`` on an
+    instance raises and no later assignment can REBIND a field. That is a
+    floor and it is worth having; it is not the property the delegation
+    needs.
+
+    NOT ESTABLISHED: single-valuedness. Frozen-ness stops rebinding, not
+    TWO-FACEDNESS, and the two are different because a field name can
+    resolve to a class-level DESCRIPTOR that was never an instance
+    attribute at all. Measured on this tree: a frozen dataclass that
+    DECLARES a field and gives that same name a ``property`` in its class
+    body — `dataclasses.fields` lists the field — passes every test below,
+    and
+    :func:`_canonical` then carries it while it answers ``(1.0, 1.0)``
+    on one read and ``(99.0, 99.0)`` on the next. There is no test here
+    that would catch that, and this docstring no longer says there is.
+
+    WHAT BOUNDS IT INSTEAD, all three measured rather than argued:
+
+    * NO DOCUMENT REACHES THIS ARM. `_encode` refuses a registered value
+      (``stelling.ir cannot encode IntervalArray``, so `to_dict` and
+      `content_hash` both raise) and `_decode` has no tag for one
+      (``unknown tag 'interval'``). A registered value can only come from
+      a caller who built it in this process.
+    * A SUBCLASS OF A REGISTERED TYPE IS REFUSED, not carried: membership
+      is ``id(type(obj))`` against :data:`_STORED_AS_IS`, which is the
+      registered type itself, so the property-backed variant has to be
+      the type someone REGISTERED — it cannot be smuggled in under an
+      existing registration. Measured: an `IntervalArray` subclass with a
+      ``los`` property is refused as ``_NotCanonical``.
+    * AND THIS FUNCTION IS NOT A SECURITY BOUNDARY, for the reason the
+      comment above it gives: code that can call it can equally rebind
+      :func:`_canonical`. It exists so a future IN-TREE registrant states
+      its claim deliberately, and the claim it must state is
+      single-valuedness — which this check does not verify for it.
+
+    `tests/test_canonicalization_routes.py` pins the accepted
+    property-backed field, so the gap is a measurement and not a sentence.
 
     Raises a plain `TypeError` and not a `TranscriptionError`: nothing
     here is a malformed document, and a caller catching document errors
@@ -1327,17 +1479,59 @@ def _register_stored_type(cls: type) -> type:
 # address may only be reused after the object at it is freed, and holding
 # the reference is what makes that impossible.
 #
-# WHY NOT ``any(t is k for k in ...)``, which is equally unforgeable:
-# measured on this tree (python 3.12.3), an exact-leaf hit costs 13.5 ns
-# as the `frozenset` lookup that was here, 180 ns as ``any()`` and 32.4 ns
-# as one ``id()`` and one lookup; an `ir`-dataclass hit costs 33.1 ns,
-# 487 ns and 31.9 ns the same three ways. ``_canonical`` is the hottest
-# line in this module — a 141-equation traced query builds 868 `ir`
-# objects, and every field of every one of them comes through here — and a
-# scan is linear in a set this module COMPUTES, so a dataclass added later
-# lengthens every call. The dict is O(1) in that set, merges what were
-# three lookups into one, and is the only spelling of the three that
-# leaves the traced and deserialized routes where they were.
+# WHY NOT ``any(t is k for k in ...)``, which is equally unforgeable.
+#
+# EVERY FIGURE BELOW IS AN OFF-TREE MEASUREMENT, dated and attributed, and
+# no control computes any of it: a microbenchmark asserted in a suite is a
+# promise about someone else's machine. Measured 2026-08-17, python
+# 3.12.3, `/home/nick/venvs/stelling-jax`, 200k iterations per cell, three
+# fresh processes, over a 20-type set:
+#
+#   ``t in <frozenset>``            23-39 ns    FORGEABLE (the metaclass)
+#   ``id(t)`` + one dict lookup     51-61 ns    unforgeable, constant
+#   ``any(t is k for k in ...)``   168-508 ns   unforgeable, by POSITION
+#
+# THE CHOICE IS BETWEEN THE TWO UNFORGEABLE SPELLINGS, and among those the
+# index is the constant-time one. The `frozenset` is the cheapest and is
+# the one that had to go, because ``t in <set>`` runs the METACLASS — that
+# is S14, not a performance argument, and this comment should not be read
+# as one.
+#
+# AND THE ``any()`` FIGURE IS A DISTRIBUTION, NOT A CONSTANT — audit 0.2.0
+# B6 audit 8. This comment quoted ``487 ns`` for an `ir`-dataclass hit as
+# though it were one number. It is the cost of the scan REACHING that
+# type, so it is linear in where the hit lands in the set's iteration
+# order — and that order comes from the type objects' addresses, which
+# move between processes: measured, ``ir.Jaxpr`` sat at scan position 19
+# of 20 in one process (508 ns) and at position 6 in the next (297 ns).
+# ``487`` was a last-position reading quoted as a typical one, in a
+# comment whose whole subject is that a scan cost depends on position.
+#
+# THE ROW SPLIT THAT COMMENT DREW DOES NOT REPRODUCE EITHER. It gave an
+# exact-leaf hit and an `ir`-dataclass hit different `frozenset` costs
+# (13.5 ns against 33.1 ns). Both are one hash lookup on a type object and
+# they measure the same here within noise; what actually separates two
+# readings of any row is scan position, which only the ``any()`` spelling
+# has. The absolute numbers above are roughly twice that comment's on
+# every row, so they are this machine's on this date and the RATIOS are
+# what the argument rests on.
+#
+# ``_canonical`` is the hottest line in this module — every field of every
+# `ir` object comes through it, and the largest traced query in this
+# repo's own corpus builds **1204 `ir` objects from 112 equations**
+# (measured 2026-08-17 over every zero-argument harness in
+# `corpus/supply`; the objects-per-equation ratio across that corpus runs
+# 5.36 to 10.83, and `CHANGELOG.md` names the harness — this file may not,
+# under ARCHITECTURE.md Rule 2). That replaces *"a 141-equation traced
+# query builds 868 `ir` objects"*, which named no query and matched none:
+# nothing in this repo traces to 141 equations or to 868 objects, and a
+# figure a reader cannot go and re-measure is the thing this batch keeps
+# finding. A scan
+# is linear in a set this module COMPUTES, so a dataclass added later
+# lengthens every call; the dict is O(1) in that set and merges what were
+# three lookups into one. What bounds the real cost is not any per-call
+# figure here but the whole-document rows of the cost table in
+# `CHANGELOG.md`, which are themselves a dated off-tree measurement.
 _STORED_AS_IS: dict[int, type] = {}
 
 
@@ -1397,8 +1591,15 @@ def _read_or_refuse(read, obj: object) -> object:
     'Liar'`` escaping a public constructor as a raw `TypeError`, which
     `TranscriptionError` SUBCLASSES, so ``except TranscriptionError`` does
     not catch it. Measured on `dff95fc` by driving a liar of each of the
-    nine faces this door names, under each of the two bypasses, into a
-    plain param value and into both declaration params — 81 combinations —
+    nine faces this door names, in each of the THREE SPELLINGS of the two
+    bypasses — metaclass alone, ``__class__`` alone, and both together —
+    into a plain param value and into both declaration params:
+    ``9 x 3 x 3 = 81`` combinations, and the arithmetic is written out
+    because *"each of the two bypasses"* over 81 combinations is a
+    sentence that does not multiply (audit 0.2.0 B6 audit 8; the two
+    mechanisms are two, the spellings driven are three, and a repair that
+    closed only the conjunction is exactly what the third spelling exists
+    to catch). That drive gave
     **19 raw `TypeError`s at SIX distinct statements**: the ``complex``
     and ``bytes`` reads, the shared ``read(obj)`` call, the ``tuple`` and
     ``list`` container arms, and :func:`_validate_decl_eqn`'s
@@ -2113,6 +2314,35 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
         # two self-descriptions must agree"* held only when the param
         # happened to be a `str`, which is a condition no document has to
         # meet.
+        #
+        # AND A FOURTH SPELLING, WHICH THIS GUARD'S OWN CONDITION MOVED —
+        # audit 0.2.0 B6 audit 8. The line above was
+        # ``if params.get("dtype") is not None``, so `.get` was using
+        # ``None`` as its OWN sentinel and could not tell a `dtype` param
+        # that is ABSENT from one that is present and ``null``. Changing it
+        # to ``"dtype" in params`` is therefore a BRANCH-SELECTION change
+        # and not only a type check, and the enumeration in the paragraph
+        # above — ``b'float64'``, ``0``, ``('float64',)`` — does not
+        # contain the document it moved. Measured, on a hand-built document whose
+        # declaration carries ``["dtype", null]`` under a ``float64``
+        # outvar aval:
+        #
+        #     dff95fc, main (198a2b5)   ACCEPTED; content_hash 64a0ce8d…
+        #     this commit               TranscriptionError
+        #
+        # THE REFUSAL IS RIGHT: an absent `dtype` param is a declaration
+        # that does not describe its dtype twice, which hand-built IR is
+        # allowed to be; a `dtype` param that IS present and ``null`` is a
+        # second self-description that contradicts the aval, and
+        # `propagate._ieee_any` would have consumed it as
+        # ``str(None) == "None"`` — a string naming no ieee format, so the
+        # declaration takes the no-float-format arm and gets no subnormal
+        # band, which is the same silent misread `b'float64'` produces.
+        #
+        # It is also the ONE document for which this batch's
+        # "byte-identical `content_hash()` across three trees" claim cannot
+        # hold, and `CHANGELOG.md` says so where it makes that claim: this
+        # commit produces no hash for it at all.
         #
         # THE FIX IS TO CONSTRAIN THE TYPE, not to widen the comparison. A
         # `dtype` param is a NAME — the same fact `_canonical_param_keys`
