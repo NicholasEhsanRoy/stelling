@@ -827,9 +827,24 @@ def test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation():
     What is left open, exactly: an assembly of (query A, propagation of query
     B, escalation of query A). The obligations come from B, the discharges
     from A by index. Measured below — it assembles, and the gate does not stop
-    it. What is NOT left open is the shape that actually mints a false
-    VERIFIED out of a cached escalation, because the discharges have to come
-    from somewhere and the gate refuses them.
+    it.
+
+    **AND IT MINTS A FALSE VERIFIED. The sentence that used to stand here —
+    "what is NOT left open is the shape that actually mints a false VERIFIED
+    out of a cached escalation, because the discharges have to come from
+    somewhere and the gate refuses them" — is FALSE, and is measured false by
+    `test_a_mispaired_PROPAGATION_mints_a_false_VERIFIED` below** (audit 0.2.0
+    B6 re-audit, UNSOUND-3). The discharges do not have to come from an
+    escalation: an obligation the interval leg decides outright arrives
+    already `discharged` ON THE PROPAGATION, and the propagation is the
+    argument no identity is checked on. `escalate` hashes the `closed` IT was
+    handed, so the gate sees a genuinely matching (query, escalation) pair
+    and passes; with `carries_work=False` it is not consulted at all. Both
+    forms reach VERIFIED on a query whose honest verdict is REFUTED, on this
+    tree, on `main`, and on the released 0.1.0.
+
+    So what the gate binds is exactly one leg, and this test's name is the
+    finding rather than a caveat on it.
 
     Kept as a live measurement rather than a comment so that closing it later
     is a test that goes red, not an archaeology exercise. IF THIS TEST FAILS
@@ -870,6 +885,105 @@ def test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation():
     ], (
         "the reported obligations are no longer the mispaired propagation's, "
         "so the misattribution this test measures is not happening"
+    )
+
+
+def _one_factory_two_boxes(lo, hi):
+    """ONE factory, TWO asserts, so every query it builds carries identical
+    `source_info` at identical top-level positions — which is what makes the
+    per-obligation association check pass and puts the whole weight on the
+    query-hash pairing."""
+    def h():
+        c = any_array((2,), "float64", (lo, hi))
+        return (assert_(c + c <= 1e9), assert_(c * c - c >= 9900.0))
+    return h
+
+
+def _one_factory_interval_decided(lo, hi):
+    """The same, but a claim the INTERVAL leg decides outright, so `escalate`
+    returns an escalation with `carries_work=False` and the gate is not
+    consulted at all."""
+    def h():
+        c = any_array((2,), "float64", (lo, hi))
+        return assert_(c + c <= 1e9)
+    return h
+
+
+@pytest.mark.parametrize(
+    "factory,a_box,b_box,carries_work",
+    [
+        (_one_factory_two_boxes, (100.0, 101.0), (1e9, 2e9), True),
+        (_one_factory_interval_decided, (0.0, 1.0), (1e9, 2e9), False),
+    ],
+    ids=["carries-work", "exempt"],
+)
+def test_a_mispaired_PROPAGATION_mints_a_false_VERIFIED(
+    factory, a_box, b_box, carries_work
+):
+    """AUDIT 0.2.0 B6 RE-AUDIT, UNSOUND-3 — DISCLOSURE, NOT CONTAINMENT.
+
+    `MispairedEscalationError` is real and unconditional on the leg it
+    covers, and the test above measures the residue it leaves. What that
+    test USED TO SAY, and what `solvers.Escalation`'s docstring used to say
+    beside it, is that the residue cannot mint a false VERIFIED "because the
+    discharges have to come from somewhere and the gate refuses them".
+    Measured here, it can, twice over:
+
+    * `carries-work` — `escalate(B, p_A)` hashes the `closed` IT was handed,
+      so `query_sha256 == B.content_hash()` and the pairing gate sees a
+      genuinely matching pair. Nothing in the assembly ever compares
+      `p_A` with `B`.
+    * `exempt` — with an obligation the interval leg decides outright, the
+      escalation carries no records, no notes, no spawns and no stamps,
+      `carries_work` is False, and the gate is bypassed entirely. The
+      discharge rides in ON THE PROPAGATION, with no solver record anywhere.
+
+    Both reach VERIFIED on a query whose honest verdict is REFUTED, on this
+    tree, on `main` (`dee8bc2`) and on the released `v0.1.0`.
+
+    THE FIX IS NOT HERE. The identity belongs on the `Propagation` and must
+    be checked wherever a propagation is consumed against a query, which is
+    cross-module work scheduled as its own change. This test's job is to
+    stop the tree CLAIMING containment it does not have, and to go red the
+    day it gets it: **if this test fails because the assembly no longer
+    VERIFIES, the residue has been closed** — say so in `SOUNDNESS.md`, in
+    `CHANGELOG.md` and in `Escalation`'s docstring, all three of which
+    currently disclose it, and rewrite this around the mechanism that
+    closed it."""
+    from stelling.propagate import propagate
+    from stelling.solvers import SolverConfig, escalate, make_solver_verdict
+
+    cfg = SolverConfig(timeout_ms=20000)
+    a = trace(factory(*a_box))
+    b = trace(factory(*b_box))
+    assert a.content_hash() != b.content_hash(), "the fixture is not two queries"
+
+    p_a, p_b = propagate(a), propagate(b)
+    honest = make_solver_verdict(b, p_b, escalate(b, p_b, cfg), **VERSIONS)
+    assert honest.status == "REFUTED", (
+        f"B's honest verdict is {honest.status}, not REFUTED; the fixture no "
+        f"longer measures a FALSE verified"
+    )
+
+    esc = escalate(b, p_a, cfg)
+    assert bool(
+        esc.records or esc.notes or esc.ledger.spawns or esc.ledger.stamps
+    ) is carries_work, (
+        "this case no longer exercises the carries_work arm it names"
+    )
+    assert esc.query_sha256 == b.content_hash() or not carries_work, (
+        "the escalation does not name B, so the gate would refuse it and "
+        "this case would be measuring the covered direction instead"
+    )
+
+    v = make_solver_verdict(b, p_a, esc, **VERSIONS)
+    assert v.status == "VERIFIED", (
+        f"{v.status}: the mispaired-propagation assembly no longer mints a "
+        f"false VERIFIED — see this test's docstring before changing the line"
+    )
+    assert v.stamp.query_content_hash == b.content_hash(), (
+        "the stamp names a query other than the one it was assembled "
+        "against, which would be a different defect from this one"
     )
 
 
@@ -1401,12 +1515,16 @@ def test_what_a_stray_index_ACTUALLY_DOES_all_four_of_them():
     enumerate what a stray index does. The enumeration has been wrong twice —
     first "a stray index does not slice" (one behaviour, and the wrong one),
     then a list of three presented as the whole space. There is a fourth: an
-    index past the START of the list raises `IndexError` out of
-    `slice_obligation` rather than declining, and reaches the whole-query set
-    through `_bar_scope`'s outer `except` instead of through a `fallback`
-    call. No soundness difference — it is named because "three behaviours"
-    was being read as closed and was not, and this test is what makes the
-    enumeration a measurement.
+    index past the START of the list.
+
+    That fourth one used to RAISE `IndexError` out of `slice_obligation` and
+    reach the whole-query set through `_bar_scope`'s outer `except` instead
+    of through a `fallback` call. Audit 0.2.0 S12's second half made
+    `slice_obligation`'s range test two-sided, so it now DECLINES like `99`
+    does — same destination, through the decline channel, and no longer a
+    raw exception out of a function documented never to raise on a legal
+    query. The pinned behaviour changed here deliberately, and this is the
+    test that says so.
 
     NOT PRESENTED AS EXHAUSTIVE EITHER. What is asserted is that each listed
     behaviour is the one claimed, and that every one of them ends at the
@@ -1428,9 +1546,10 @@ def test_what_a_stray_index_ACTUALLY_DOES_all_four_of_them():
     assert not isinstance(slice_obligation(closed, -1, env), DeclinedObligation)
     # 3. an index matching no assert equation DECLINES
     assert isinstance(slice_obligation(closed, 99, env), DeclinedObligation)
-    # 4. and one past the start RAISES rather than declining
-    with pytest.raises(IndexError):
-        slice_obligation(closed, -3, env)
+    # 4. and one past the start DECLINES TOO — it used to raise IndexError
+    past = slice_obligation(closed, -3, env)
+    assert isinstance(past, DeclinedObligation)
+    assert "no matching top-level stelling_assert equation" in past.reason
 
     for index in (1, -1, 99, -3):
         barred, why = V._bar_scope(closed, {index: ()})

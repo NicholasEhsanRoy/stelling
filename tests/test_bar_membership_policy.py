@@ -96,7 +96,7 @@ THE COST, MEASURED. Environment: jax 0.11.0, python 3.12.3,
 2026-08-16, re-measured on the tree that ships this file.
 
 * **The repository's own suite** — the population of queries this project
-  actually verifies, 3501 passed / 10 skipped with x64 and 3502 / 9 without.
+  actually verifies, 3798 passed / 10 skipped with x64 and 3799 / 9 without.
   With `pow` added to the set: **21 RED, of which 9 are pre-existing tests**,
   every one of those nine a `pow`-bearing VERIFIED becoming UNKNOWN (8 in
   `tests/test_0_2_0_regression.py`, 1 in `tests/test_pow_audit_findings.py`).
@@ -110,6 +110,17 @@ THE COST, MEASURED. Environment: jax 0.11.0, python 3.12.3,
   full: 9 + 2 + 10. With `is_finite` added instead: **2 RED, both of them this
   file's detectors, and 0 pre-existing tests** — the suite is otherwise fully
   green.
+
+  *THE BASELINE IS THE MERGED TREE'S AND THE COST IS NOT. This bullet read
+  "3501 passed / 10 skipped with x64 and 3502 / 9 without" — B7's tree,
+  before B6 merged — and the baseline is repinned on the merge (parents
+  `198a2b5` and `dd95333`). The COST
+  figures were RE-MEASURED there, not carried: `+pow` is still 21 red and
+  still 9 + 2 + 10, the same named tests, and `+is_finite` is still 2 red
+  and 0 pre-existing. B6 added 297 tests and not one of them puts `pow` or
+  `is_finite` on a solver-decided slice, so the cost is unmoved while the
+  population it is a cost against grew by 8.5%. Both flips were driven on
+  clean clones of the merge with only `VERIFIED_BARRED_PRIMITIVES` edited.*
 * **Two purpose-built harnesses in this file** (`_pow_harness`,
   `_is_finite_harness`) that put the row on a solver-decided slice. A wider
   dated measurement, taken off-tree and NOT reproducible from this checkout —

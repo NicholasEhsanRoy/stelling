@@ -103,6 +103,7 @@ import sys
 from fractions import Fraction  # stdlib; the exact-endpoint route's arithmetic
 import operator
 from dataclasses import dataclass
+from typing import NamedTuple
 
 _INF = math.inf
 _FMAX = sys.float_info.max  # largest finite double: the outward-saturation endpoint
@@ -533,6 +534,72 @@ class IntervalArray:
         return self.shape == ()
 
 
+# `ir.ClosedJaxpr.consts` may hold one of these IN PLACE OF A VALUE — "a
+# const already handed over as a box, provenance unknown", the form
+# `propagate._Propagator.run` binds directly and `SOUNDNESS.md` records
+# with its own test. `ir`'s canonicalization door stores only types it is
+# closed over (audit 0.2.0 B6 audit 6) and cannot name this one, because
+# it may not import anything outside the standard library — so the
+# declaration is made from this side, by the module that owns the type.
+#
+# WHAT THIS CLASS OWES IN RETURN, since `ir` CARRIES it rather than
+# canonicalizing it: single-valuedness. It has it — and NOT for the reason
+# this comment used to give, which was that `__post_init__` "reads
+# `shape`, `los` and `his` at construction, so a later read of any of the
+# three is the same read" (audit 0.2.0 B6 audit 8). READING A FIELD
+# INSTALLS NOTHING. `__post_init__` above validates and returns; every
+# later reader goes back to the attribute, and were that attribute a
+# descriptor it would be free to answer differently — which is the whole
+# of the finding `ir._canonicalise` exists for, and it is why the sibling
+# guards in `ir` INSTALL what they read instead of merely checking it.
+#
+# What actually makes a later read the same read here is narrower and
+# checkable: the three fields are ORDINARY INSTANCE ATTRIBUTES of a frozen
+# dataclass — no `property`, no descriptor, no `__getattr__`, so a read is
+# a `__dict__` lookup — and frozen-ness stops any later rebinding of one.
+# `ir` carries the EXACT registered type and nothing else: a subclass that
+# made `los` a property is refused by `ir._canonical` as `_NotCanonical`
+# (measured, audit 0.2.0 B6 audit 8), so this claim cannot be inherited
+# out from under itself.
+#
+# `ir._register_stored_type` checks the frozen half and says in its own
+# docstring that it does NOT check the descriptor half; that gap is a
+# measurement in `tests/test_canonicalization_routes.py`, not a promise.
+# If a field of this class ever becomes a property or a cached descriptor,
+# this paragraph is what stops being true, and the registration below is
+# what has to go with it.
+#
+# The edge is one-way and adds no dependency: `stelling.ir` is the only
+# package module this file imports, and `ir` itself imports nothing
+# outside the standard library, so the zero-dependency posture is
+# unchanged and there is no cycle.
+from stelling import ir as _ir  # noqa: E402  (below the class it registers)
+
+_ir._register_stored_type(IntervalArray)
+
+
+def _safe_repr(obj) -> str:
+    """``repr(obj)``, or a visible placeholder when the object refuses.
+
+    For quoting an object a guard has ALREADY DECIDED TO REFUSE, and for
+    nothing else. A guard that turns a malformed value into a quotable
+    :class:`IntervalError` must not raise while quoting it: the object it
+    is describing is by construction misbehaving, and a ``__repr__`` that
+    refuses converts the refusal into exactly the raw escape the guard
+    exists to prevent (audit 0.2.0 B6 audit 3, F3 — measured, a
+    ``RuntimeError`` out of :func:`check_shape` and out of
+    :func:`dot_general_geometry`). The placeholder is visible so a reader
+    sees that something could not be read rather than a plausible value.
+    (``stelling.obligation._safely`` is the same helper for the same
+    reason; this module deliberately imports nothing from the rest of the
+    library, so it carries its own four lines rather than acquiring a
+    dependency for them.)"""
+    try:
+        return repr(obj)
+    except Exception:  # noqa: BLE001 — the message's own totality
+        return "<unreadable>"
+
+
 def check_shape(shape) -> None:
     """Refuse shapes no jax program can carry, through the decline channel.
 
@@ -547,18 +614,30 @@ def check_shape(shape) -> None:
     dropped-addends UNSOUND). Zero extents are LEGAL (jax constructs
     zero-size arrays; do not over-guard). Every box construction routes
     through here (:class:`IntervalArray.__post_init__`), plus the
-    pre-construction sites that compute element products first."""
+    pre-construction sites that compute element products first.
+
+    **THE REFUSAL IS TOTAL IN BOTH DIRECTIONS** — audit 0.2.0 B6 audit 3,
+    F2 and F3. ``operator.index`` raises whatever ``__index__`` raises,
+    and this handler caught only ``TypeError``, so a ``ValueError`` or an
+    ``OverflowError`` from an extent left this function raw and left
+    ``propagate()`` raw with it — the S12″ two-faces split again, since
+    the emission face declined on the same object. An extent that will not
+    answer ``__index__`` is a non-integer extent whatever it raises saying
+    so. And the message that says so quotes both the shape and the extent
+    through :func:`_safe_repr`, because an object that refuses one dunder
+    may refuse ``__repr__`` too."""
     for d in shape:
         try:
             k = operator.index(d)
-        except TypeError:
+        except Exception:  # noqa: BLE001 — unreadable IS the finding
             raise IntervalError(
-                f"shape {tuple(shape)!r} has a non-integer extent {d!r} "
-                f"(malformed IR: from_dict does not coerce shape entries)"
+                f"shape {_safe_repr(shape)} has a non-integer extent "
+                f"{_safe_repr(d)} (malformed IR: from_dict does not coerce "
+                f"shape entries)"
             ) from None
         if k < 0:
             raise IntervalError(
-                f"shape {tuple(shape)} has a negative extent: no jax "
+                f"shape {_safe_repr(shape)} has a negative extent: no jax "
                 f"program constructs such a value (measured: jax rejects "
                 f"negative dims in every concrete context)"
             )
@@ -1398,6 +1477,221 @@ def reduce_sum(a: IntervalArray, axes: tuple[int, ...]) -> IntervalArray:
     return IntervalArray(shape=out_shape, los=tuple(los), his=tuple(his))
 
 
+class DotGeneralGeometry(NamedTuple):
+    """The index geometry of one well-formed ``dot_general``."""
+
+    lc: tuple[int, ...]          # lhs contracting dims, in jax's order
+    rc: tuple[int, ...]          # rhs contracting dims, paired with ``lc``
+    lb: tuple[int, ...]          # lhs batch dims
+    rb: tuple[int, ...]          # rhs batch dims, paired with ``lb``
+    # lhs / rhs dims that are neither batch nor contracted
+    lfree: tuple[int, ...]
+    rfree: tuple[int, ...]
+    out_shape: tuple[int, ...]   # batch dims, then lhs free, then rhs free
+    contracted_extents: tuple[int, ...]  # the AGREED extent of each contraction
+
+
+def dot_general_geometry(
+    lhs_shape, rhs_shape, dimension_numbers
+) -> DotGeneralGeometry:
+    """THE definition of a well-formed ``dot_general``, and the index
+    geometry that follows from it — **one definition, driven by both
+    faces**.
+
+    Called by :func:`dot_general` (the interval transfer, hence the whole
+    propagation leg) and by
+    :func:`stelling.obligation._dot_general_plan` (the SMT emission and
+    the exact-rational replay). Every well-formedness predicate this row
+    has lives here and nowhere else.
+
+    **WHAT THAT DOES AND DOES NOT BUY — corrected, audit 0.2.0 S12′.**
+    The sentence above used to continue "…so the two faces cannot hold
+    different opinions about whether an equation is admissible", and that
+    was FALSE AS WRITTEN. **The oracle is shared; its ARGUMENTS are not.**
+    :func:`dot_general` asks about the shapes of the PROPAGATED BOXES
+    (``a.shape``, ``b.shape``); ``_dot_general_plan`` asks this same
+    function about the shapes recorded on the equation's INVAR AVALS.
+    Where those disagree — which ``ir.ClosedJaxpr.from_dict`` accepts,
+    ``ir.py`` having scoped per-primitive shape inference out of
+    ``_validate_loaded`` in writing — the two faces reach different
+    answers again, and still in the asserting direction. Measured on
+    ``4d793cf``: the transfer AGREED the contraction had four terms and
+    printed the box ``[4, 8]``, the emission planned two, and the verdict
+    read VERIFIED at 100% coverage on a claim whose truth is ``8 <= 4.5``.
+
+    What this function guarantees is the narrower and true thing:
+    **given the same shapes, the two faces reach the same admissibility
+    answer, for the same stated reason.** That they are GIVEN the same
+    shapes is a separate property enforced separately, by
+    :meth:`stelling.obligation._Slicer._one_shape_per_value` — whose
+    docstring carries the two witnesses it uses and where each is blind.
+
+    **This function exists because they did.** Audit 0.2.0 S12: the
+    contracted-extent agreement check was written inline in
+    :func:`dot_general` and the emission re-derived the same geometry
+    independently, iterating the LHS contraction extents alone. On
+    ``lhs=(2,) @ rhs=(4,)`` the transfer RAISED and the emission returned a
+    two-term combination — silently DROPPING two addends, the class this
+    codebase's own comments name as the unsound one — and because the
+    transfer's refusal lands the obligation at ⊤ → ``unknown``, the
+    truncating plan is exactly what solver escalation then runs. Over the
+    truncated reading ``Σ`` lay in ``[2, 4]`` and ``<= 4.5`` was
+    unsat-on-negation (VERIFIED); over the true four-term reading it lay in
+    ``[4, 8]`` and the threshold is violated. On ``lhs=(4,) @ rhs=(2,)`` the
+    same loop indexed off the end of the constant operand and raised a raw
+    ``IndexError`` out of a slicer that catches only ``_Decline``.
+
+    A check in one face that the other does not consult is the SHAPE of
+    that defect, not its repair — which is why this is a shared oracle and
+    not a second copy of the predicate in the emission. It is the same
+    discipline :func:`stelling.obligation._route_structural` already
+    follows for the structural rows (the interval function *is* the
+    routing) and that :func:`stelling.propagate._dot_general_row_form`
+    follows for this row's *params and dtypes*; the two are complementary
+    and disjoint — that oracle never sees a shape, this one never sees a
+    param.
+
+    Raises :class:`IntervalError` on any malformation — and that promise
+    was false in exactly one line until audit 0.2.0 B6 (a non-integer dim
+    passed the range test and then indexed a tuple with a float, raising a
+    raw ``TypeError`` past both consumers' ``except IntervalError``), then
+    false again in the same line for a different reason until B6's
+    re-audit (the guard CALLED ``operator.index`` and discarded the
+    result, so an object that is indexable but unhashable still reached
+    ``set(dims)`` raw). The dims are now put through ``operator.index``
+    and **bound to what it returns**, the same way :func:`check_shape`
+    handles extents, so everything downstream — including the returned
+    geometry — holds plain ``int``s. The emission face quotes the
+    ``IntervalError`` as a decline.
+    """
+    check_shape(lhs_shape)
+    check_shape(rhs_shape)
+    lhs_shape = tuple(lhs_shape)
+    rhs_shape = tuple(rhs_shape)
+    try:
+        (lc, rc), (lb, rb) = dimension_numbers
+        lc, rc, lb, rb = tuple(lc), tuple(rc), tuple(lb), tuple(rb)
+    except (TypeError, ValueError):
+        raise IntervalError(
+            "dot_general dimension_numbers not in jax's "
+            f"((lhs_contract, rhs_contract), (lhs_batch, rhs_batch)) form: "
+            f"{dimension_numbers!r}"
+        ) from None
+    # THE DIMS ARE INDICES, so they must be INTEGRAL before anything indexes
+    # with them — the same predicate, spelled the same way, that
+    # :func:`check_shape` above already applies to extents.
+    #
+    # This line is audit 0.2.0 B6/S12″ and the finding was the DOCSTRING, not
+    # only the code. A float dim passes the range test below (`0 <= 0.0 < 1`
+    # is True) and then reaches `lhs_shape[i]`, where python raises a raw
+    # `TypeError: tuple indices must be integers or slices, not float`. Both
+    # consumers catch `IntervalError` and nothing else — `propagate._t_dot_
+    # general` and `propagate.eqn` on the transfer side, `obligation.
+    # _dot_general_plan` on the emission side — so the promise three
+    # paragraphs up ("Raises IntervalError on any malformation") was false in
+    # exactly one line, and it was false in the direction that matters: a raw
+    # crash out of the public `propagate()` on a document `from_dict`
+    # accepts, and, on the emission side, a decline quoted as an "internal
+    # error" while the transfer face crashed instead. Two faces, two
+    # behaviours, from one malformation — which is the S12 shape again.
+    #
+    # AND THE RESULT IS BOUND, not discarded — audit 0.2.0 B6 re-audit R4.
+    # The first spelling of this guard CALLED `operator.index(d)` and threw
+    # the answer away, so the dims were validated and never NORMALISED and
+    # everything below still ran on the raw objects: `set(dims)` hashes
+    # them, `0 <= d < len(shape)` orders them, `shape[i]` indexes with them.
+    # Three protocols, one unvalidated object — and a 0-d `np.array(0)`
+    # satisfies `__index__` while being UNHASHABLE, so it passed the guard
+    # and then raised a raw `TypeError: unhashable type` out of the public
+    # `propagate()` while the emission face declined: the same two-faces
+    # split S12″ was, recurring one type level up because the fix had
+    # checked a predicate instead of producing a value. `check_shape` above
+    # is the model and always was: it binds `k = operator.index(d)` and
+    # tests `k`. Binding here means every consumer below — and the
+    # `DotGeneralGeometry` this returns, which the emission and the replay
+    # both read — sees plain `int`s that no protocol can surprise.
+    #
+    # AND IT CATCHES WHATEVER `__index__` RAISES, quoting the dimension
+    # through `_safe_repr` — audit 0.2.0 B6 audit 3, F2 and F3. Catching
+    # only `TypeError` left a `ValueError` from a hostile `__index__`, and
+    # a `RuntimeError` from a hostile `__repr__` in the handler itself,
+    # raw out of the public `propagate()`: the same split one more level
+    # in, from the same cause, that a guard was written as an enumeration
+    # of the exception types the author happened to expect.
+    def _indices(name: str, dims) -> tuple[int, ...]:
+        out = []
+        for d in dims:
+            try:
+                out.append(operator.index(d))
+            except Exception:  # noqa: BLE001 — unreadable IS the finding
+                raise IntervalError(
+                    f"dot_general {name} dimension {_safe_repr(d)} is not "
+                    f"an integer (malformed IR: from_dict does not coerce "
+                    f"dimension_numbers entries)"
+                ) from None
+        return tuple(out)
+
+    lc = _indices("lhs", lc)
+    lb = _indices("lhs", lb)
+    rc = _indices("rhs", rc)
+    rb = _indices("rhs", rb)
+    for name, dims, shape in (
+        ("lhs", lc + lb, lhs_shape), ("rhs", rc + rb, rhs_shape)
+    ):
+        if len(set(dims)) != len(dims):
+            raise IntervalError(
+                f"dot_general {name} names a dimension twice: {dims}"
+            )
+        for d in dims:
+            if not 0 <= d < len(shape):
+                raise IntervalError(
+                    f"dot_general {name} dimension {d} out of range for "
+                    f"shape {shape}"
+                )
+    if len(lc) != len(rc) or len(lb) != len(rb):
+        raise IntervalError(
+            "dot_general contracting/batch dimension lists must pair up: "
+            f"{dimension_numbers}"
+        )
+    for i, j in zip(lc, rc):
+        if lhs_shape[i] != rhs_shape[j]:
+            raise IntervalError(
+                f"dot_general contracted dims disagree: lhs[{i}]="
+                f"{lhs_shape[i]} vs rhs[{j}]={rhs_shape[j]}"
+            )
+    for i, j in zip(lb, rb):
+        if lhs_shape[i] != rhs_shape[j]:
+            raise IntervalError(
+                f"dot_general batch dims disagree: lhs[{i}]={lhs_shape[i]} vs "
+                f"rhs[{j}]={rhs_shape[j]}"
+            )
+    lfree = tuple(
+        i for i in range(len(lhs_shape)) if i not in lb and i not in lc
+    )
+    rfree = tuple(
+        j for j in range(len(rhs_shape)) if j not in rb and j not in rc
+    )
+    out_shape = (
+        tuple(lhs_shape[i] for i in lb)
+        + tuple(lhs_shape[i] for i in lfree)
+        + tuple(rhs_shape[j] for j in rfree)
+    )
+    check_shape(out_shape)
+    return DotGeneralGeometry(
+        lc=lc,
+        rc=rc,
+        lb=lb,
+        rb=rb,
+        lfree=lfree,
+        rfree=rfree,
+        out_shape=out_shape,
+        # the extents are read from the LHS only because they have just been
+        # checked EQUAL to the RHS's; that check is why reading one side is
+        # not the S12 truncation
+        contracted_extents=tuple(lhs_shape[i] for i in lc),
+    )
+
+
 def dot_general(
     a: IntervalArray,
     b: IntervalArray,
@@ -1450,48 +1744,16 @@ def dot_general(
     An EMPTY contraction (no contracted axes) is the outer product: the
     contracted index range is the single empty tuple, so each output element
     is one product and no accumulation happens.
-    """
-    (lc, rc), (lb, rb) = dimension_numbers
-    lc, rc, lb, rb = tuple(lc), tuple(rc), tuple(lb), tuple(rb)
-    for name, dims, arr in (("lhs", lc + lb, a), ("rhs", rc + rb, b)):
-        if len(set(dims)) != len(dims):
-            raise IntervalError(
-                f"dot_general {name} names a dimension twice: {dims}"
-            )
-        for d in dims:
-            if not 0 <= d < len(arr.shape):
-                raise IntervalError(
-                    f"dot_general {name} dimension {d} out of range for "
-                    f"shape {arr.shape}"
-                )
-    if len(lc) != len(rc) or len(lb) != len(rb):
-        raise IntervalError(
-            "dot_general contracting/batch dimension lists must pair up: "
-            f"{dimension_numbers}"
-        )
-    for i, j in zip(lc, rc):
-        if a.shape[i] != b.shape[j]:
-            raise IntervalError(
-                f"dot_general contracted dims disagree: lhs[{i}]="
-                f"{a.shape[i]} vs rhs[{j}]={b.shape[j]}"
-            )
-    for i, j in zip(lb, rb):
-        if a.shape[i] != b.shape[j]:
-            raise IntervalError(
-                f"dot_general batch dims disagree: lhs[{i}]={a.shape[i]} vs "
-                f"rhs[{j}]={b.shape[j]}"
-            )
 
-    lfree = tuple(i for i in range(len(a.shape)) if i not in lb and i not in lc)
-    rfree = tuple(j for j in range(len(b.shape)) if j not in rb and j not in rc)
-    batch_shape = tuple(a.shape[i] for i in lb)
-    out_shape = (
-        batch_shape
-        + tuple(a.shape[i] for i in lfree)
-        + tuple(b.shape[j] for j in rfree)
-    )
-    check_shape(out_shape)
-    contracted_ranges = [range(a.shape[i]) for i in lc]
+    Well-formedness and the index geometry come from
+    :func:`dot_general_geometry`, the oracle the SMT emission drives too —
+    read its docstring for why this function no longer owns those
+    predicates (audit 0.2.0 S12).
+    """
+    geom = dot_general_geometry(a.shape, b.shape, dimension_numbers)
+    lc, rc, lb, rb = geom.lc, geom.rc, geom.lb, geom.rb
+    lfree, rfree, out_shape = geom.lfree, geom.rfree, geom.out_shape
+    contracted_ranges = [range(n) for n in geom.contracted_extents]
 
     los: list[float] = []
     his: list[float] = []

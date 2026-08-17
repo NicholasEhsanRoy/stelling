@@ -611,6 +611,21 @@ def test_the_bar_re_derives_the_slice_that_was_actually_emitted(
     unpinned here. What makes the omission safe is measured, not assumed —
     `relational_assumes` moves `sl.assumes`/`sl.assumes_skipped` and never `sl.eqns`.
 
+    **"BY CONSTRUCTION" STOPPED BEING TRUE QUIETLY AT THE B6/B7 MERGE, WHICH
+    IS THE THING THE PARAGRAPH ABOVE SAYS ABOUT ITSELF.** There are THREE
+    further arguments now, not two: B6's M17′ added `assert_position`, and
+    `slice_unknown_obligations` passes it — the ordinal among top-level
+    asserts, read off `propagate.ObligationReport.top_level_eqn_pos` —
+    while `verdict._bar_scope` cannot, because it holds no propagation. So
+    the bar's re-derivation is the same slice `escalate` emitted only for a
+    query whose asserts are ALL top-level; from the first `assert_` written
+    inside a sub-jaxpr onward the two select different asserts. The
+    direction is safe (neither recorded hash reproduces, so the bar widens
+    to the whole query) and it costs precision, not soundness. This module
+    holds no nested-assert fixture, so that axis is unpinned here too; the
+    measurement is in `verdict._bar_scope`'s block comment and in
+    SOUNDNESS.md's B7 M10 entry.
+
     "By construction" is exactly the kind of claim that stops being true
     quietly, so it is measured here on every slice shape, under a synthetic
     barred set that reaches into a sub-jaxpr as well as the real one.

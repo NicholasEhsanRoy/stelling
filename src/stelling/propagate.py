@@ -601,6 +601,30 @@ class ObligationReport:
     # Used by the reaches-output reachability conjunct to determine whether
     # the violated variable flows to a function output.
     operand_var_ids: tuple[int, ...] = ()
+    # WHERE THIS OBLIGATION'S ASSERT LIVES, recorded by the walk that saw it:
+    # the position of the `stelling_assert` equation in the TOP-LEVEL
+    # `jaxpr.eqns`, or None when the obligation was recorded from inside a
+    # sub-jaxpr (a transparent call body, a `cond` branch, or an undescended
+    # `scan`/`while_loop` body via `_record_unexamined`).
+    #
+    # THE ASSOCIATION IS CARRIED, NOT INFERRED — audit 0.2.0 M17. Solver
+    # escalation slices a top-level `stelling_assert`, so it needs to know
+    # which one an obligation came from. It used to infer that by COUNTING:
+    # if the number of top-level asserts equalled the number of obligations,
+    # index k meant assert k; otherwise nothing could be mapped and EVERY
+    # unknown obligation declined escalation — so one `assert_` written
+    # inside a `jax.jit` helper silently cost solver escalation for every
+    # other obligation in the query.
+    #
+    # The count check was SOUND (this walk records exactly one obligation per
+    # top-level assert — the malformed-shape screen above EXEMPTS asserts so
+    # that it still does — so equal totals really do mean index k is assert
+    # k). It was simply the wrong SHAPE of instrument: a per-obligation
+    # question answered with a whole-query number. The walk knows the answer
+    # exactly, per obligation, at the moment it records one; this field is
+    # that answer, and `stelling.obligation.slice_unknown_obligations`
+    # VERIFIES it against the IR rather than trusting it.
+    top_level_eqn_pos: int | None = None
 
 
 @dataclass(frozen=True)
@@ -9892,6 +9916,16 @@ class _Propagator:
                     operand_var_ids=tuple(
                         a.id for a in eqn.invars if isinstance(a, ir.Var)
                     ),
+                    # `_scope_path` is () in the query's own scope and
+                    # nowhere else — every descent (transparent call, cond
+                    # branch) extends it and restores it — so this is the
+                    # exact test for "this assert is a top-level equation",
+                    # and `pos` is its index in that scope's `eqns`. An
+                    # obligation from any inner scope records None and is
+                    # declined individually downstream (M17).
+                    top_level_eqn_pos=(
+                        pos if self._scope_path == () else None
+                    ),
                 )
             )
         if eqn.primitive == "stelling_nonvacuity":
@@ -10595,7 +10629,22 @@ def _assume_equation_ids(jaxpr) -> frozenset:
 def _declared_element_count(jaxpr) -> int:
     """Total elements across every ``stelling_any`` declaration in the
     query — the size the user declared, which is what the certificate
-    search's cap is stated in."""
+    search's cap is stated in.
+
+    **THIS READS THE OUTVAR AVAL; THE EMISSION PATH READS THE ``shape``
+    PARAM.** The two disagree on a declaration that describes itself
+    twice — an absent ``shape`` param reads as ``()`` there and as the
+    aval's own count here — so this function is the library's SECOND
+    reader of a declaration's element count, and
+    ``obligation._Slicer._declared_shape``'s docstring used to claim it
+    was the only one (audit 0.2.0 B6 audit 3, F4). Reading the aval here
+    is sound, and it is not an exception to that rule: the count gates
+    only the CAP in :func:`_region_witness` — whether the non-emptiness
+    search RUNS — whose direction is toward REFUTED, and the search
+    re-derives its witness by re-running the honest propagator, so no
+    verdict is derived from this number. Should that ever stop being
+    true, this must move to the param.
+    """
     total = 0
     stack = [jaxpr]
     while stack:

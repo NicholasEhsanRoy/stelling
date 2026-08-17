@@ -660,20 +660,55 @@ def _approx(exact: str) -> str:
 # wording, it is the script's AXIOM LINES, and omitting it made the
 # re-emission fail to match an honest record on every assume-carrying query —
 # fixed, in `_bar_scope`, with the argument now re-derived from `closed`.
-# `top_primitives` is now the only argument this call still does not pass, and
-# it reaches a DECLINE's wording and never admission, so it cannot move either
-# hash: a slice that is produced is byte-identical without it, and a slice that
-# declines widens here regardless of how its reason is worded.
+# `top_primitives` reaches a DECLINE's wording and never admission, so it
+# cannot move either hash: a slice that is produced is byte-identical without
+# it, and a slice that declines widens here regardless of how its reason is
+# worded. THAT SENTENCE ONCE ENDED "is now the ONLY argument this call still
+# does not pass", and the B6/B7 merge made the word "only" false the same day
+# it was written: B6 added a THIRD keyword, `assert_position`, which this call
+# also does not pass and which — unlike `top_primitives` — is admission and
+# does move both hashes. It has its own paragraph below, because it is a
+# residue and not a dismissal. The lesson the enumeration keeps re-teaching is
+# in the heading: a count of the arguments a call omits is a fact about the
+# signature on the day it was read.
 #
-# WHAT THE OBLIGATION INDEX IS, ON THIS TREE. Both calls map obligation `k`
-# onto the k-th top-level `stelling_assert` — `slice_obligation` takes an
-# INDEX and derives the assert from `closed`, and `slice_unknown_obligations`
-# hands it `o.index` after refusing the whole query when the obligation count
-# and the top-level assert count disagree. So a query holding an obligation
-# recorded from inside a sub-jaxpr declines at ESCALATION, nothing is
-# solver-decided, the bar's domain is empty and there is no VERIFIED to
-# withhold — measured on this tree. There is no recorded assert POSITION for
-# this re-derivation to be short of.
+# WHAT THE OBLIGATION INDEX IS, AND IT IS A DISCLOSED RESIDUE AGAIN AS OF THE
+# B6/B7 MERGE (2026-08-16). This comment used to read: "Both calls map
+# obligation `k` onto the k-th top-level `stelling_assert` … so a query holding
+# an obligation recorded from inside a sub-jaxpr declines at ESCALATION,
+# nothing is solver-decided, the bar's domain is empty and there is no VERIFIED
+# to withhold … There is no recorded assert POSITION for this re-derivation to
+# be short of." Both halves were true of B7's tree and are FALSE of this one.
+#
+# B6's M17′ fix deleted the whole-query count check and gave the propagation a
+# recorded position — `propagate.ObligationReport.top_level_eqn_pos` — which
+# `slice_unknown_obligations` now checks per obligation and passes through
+# `slice_obligation(..., assert_position=)`. So:
+#
+#   * a nested `assert_` no longer costs its siblings their escalation; they
+#     are solver-decided and the bar's domain is NOT empty; and
+#   * the escalation selects the assert by its ORDINAL among top-level
+#     asserts, while this function — handed `closed` and `decided` and no
+#     propagation — still has only the obligation INDEX. The two coincide
+#     exactly when every obligation is a top-level assert, and diverge from
+#     the first nested one onward.
+#
+# MEASURED on the merged tree: obligation #0 an `assert_` inside a `@jax.jit`
+# helper, #1 a `scatter`-bearing top-level assert at ordinal 0, #2 a top-level
+# assert at ordinal 1, both of the latter solver-discharged. Domain `[1, 2]`.
+# This walk re-slices #1 as position 1 (the wrong assert) and #2 as position 2
+# (out of range, declining), `_evidence_is_about` recognises neither record,
+# and the bar falls back to the whole-query set. THAT IS THE SAFE DIRECTION and
+# it is the only claim made here: a divergence WIDENS. It cannot narrow
+# wrongly, because narrowing requires the re-derived slice to reproduce BOTH
+# the recorded `slice_sha256` and `smt2_sha256`, and two asserts whose slices
+# agree on the fingerprint have the same barred set. So this costs PRECISION —
+# a VERIFIED withheld that the evidence would support — and never soundness.
+# Closing it means handing this walk the association, which cannot be read off
+# `closed` alone and must not be read off an argument the query pairing gate
+# does not bind; that is cross-module work and is scheduled as its own change.
+# See SOUNDNESS.md's B7 M10 entry, where the superseded argument is left
+# standing beside this correction.
 #
 # THE MEMBERSHIP IS EXACT-NAME, SO `scatter-add` IS NOT UNDER THIS BAR, AND
 # THAT IS DELIBERATE. `scatter-add` is a separate primitive with separate
@@ -1343,14 +1378,19 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
       "obligation #99 has no matching top-level stelling_assert equation" —
       and that is the case the sentence was true of;
     * a negative index PAST the start (`-3` on the bar's two-obligation
-      fixture, and anything below it) raises `IndexError` out of
-      `slice_obligation` rather than declining, and is caught by this
-      function's outer `except` — the same whole-query set by a different
-      door. It is named because "three behaviours" was being read as a closed
-      enumeration and it was not one; the list above is the four that have
-      been MEASURED, and it is not claimed to be closed either.
+      fixture, and anything below it) DECLINES, with the same "no matching
+      top-level stelling_assert equation" sentence the `99` case gets. It
+      used to raise `IndexError` out of `slice_obligation` and reach the
+      whole-query set through this function's outer `except` instead — a
+      different door to the same place, and no soundness difference, but a
+      raw exception out of a function documented never to raise on a legal
+      query. Audit 0.2.0 S12's second half closed that class; the range test
+      in `slice_obligation` is two-sided now. It is named because "three
+      behaviours" was being read as a closed enumeration and it was not one;
+      the list above is the four that have been MEASURED, and it is not
+      claimed to be closed either.
 
-    All four end at the whole-query set, and the first three by the evidence
+    All four end at the whole-query set, and the first two by the evidence
     check rather than by the slicer: none of them carries an invocation whose
     script AND slice fingerprint both re-emit from the obligation it names. An
     EMPTY domain is the one case that silences the bar, and it is empty
@@ -1676,6 +1716,7 @@ def _apply_reachability_conjunct(
                     ),
                     source_info=ob.source_info,
                     operand_var_ids=ob.operand_var_ids,
+                    top_level_eqn_pos=ob.top_level_eqn_pos,
                 )
             )
     obligations = tuple(downgraded)

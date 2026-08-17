@@ -31,7 +31,7 @@ how the two faces drifted apart once already.
 |---|---|---|---|
 | `scatter` | **yes** | **yes** | `tests/test_scatter_gauge_jax.py` already drove both — `emission-agreement` runs the pipeline through `escalate`, `interval-soundness` and `point-box-exactness` drive the transfer. Now also `param_gauge.py` (both gates) and `scatter_containment.py` |
 | `scatter-add` | **yes** | **yes** | as above |
-| `dot_general` | **no** | **yes** | `param_gauge_dot.py` drives `TRANSFERS`/`interval_env` only; `tests/test_dot_general_interval.py` is containment |
+| `dot_general` | **partly** | **yes** | `param_gauge_dot.py` drives `TRANSFERS`/`interval_env` only and `tests/test_dot_general_interval.py` is containment, so the parameter-space gauge is still transfer-only. What is now driven from BOTH faces is the SHAPE half: `tests/test_dot_general_both_faces.py` runs six well-formed and nine malformed forms through the transfer and through `_dot_general_plan` and asserts they AGREE, and pins that each face obtains its geometry from `interval.dot_general_geometry` rather than deriving its own (audit 0.2.0 S12, where they did not) |
 | `convert_element_type` | **no** | **yes** | `param_gauge_convert.py` drives `interval_env` only |
 | `pow` | **yes** | **partly** | `tests/test_pow_row_gauge_jax.py` drives both from one battery, whose size, survivor count and asymmetry count are MEASURED under *The `pow` row's gauge* below rather than restated here — a digit typed in this cell is the class of thing this page got wrong. Emission: both exponent branches through `check`/`escalate` to a replayed witness, eager AND with the `pow` fused inside a `jit`, at a MEASURED exponent arity and with the per-element emission asserted INVARIANT to the array shape over a printed range of element counts. Transfer: `interval-containment-eager-and-jit` drives `interval_env` against the values jax computes on this target — but only over STRICTLY POSITIVE base boxes, which is the whole domain of `interval.pow_`'s corner rule, so the transfer column is **partly** and not **yes**. See the paragraphs below for what else it does not reach |
 | `square` | **yes** | **yes** | `tests/test_square_row_gauge_jax.py` drives both from one battery — the emission gates run the pipeline through `check`/`escalate` to a replayed witness, eagerly AND with the `square` fused inside a `jit`; `interval-containment-eager-and-jit` drives `interval_env` against the values jax computes on this target. Its transfer-face mutation is CAUGHT by the containment gate and ADMITTED by every emission gate, so the two faces are visibly independent rather than assumed to be |
@@ -64,6 +64,17 @@ reading **partly** for the reason the table gives. That figure is this run's
 (`len(obligation._SUPPORTED)`, printed by the gauge's own registry census);
 `docs/supported-primitives.md` is generated from the live registries and is
 the count to read rather than this sentence.
+
+**As of the B6/B7 merge (2026-08-16) the emission set is still 36 and
+`dot_general`'s emission column reads `partly`.** `len(obligation._SUPPORTED)`
+is **36** on the merged tree, measured there — B6 added no emission row, so
+the sentence above survives its own arithmetic. What B6 did move is the
+`dot_general` row: its *parameter-space* gauge is still transfer-only, and it
+is the SHAPE half that is now driven from both faces (audit 0.2.0 S12,
+`tests/test_dot_general_both_faces.py`). So the table now names **five** rows
+carrying an emission-face gauge of any kind, of which four read **yes**. The
+two dated sentences above were each measured on a tree that did not contain
+the other batch, and neither is restated here.
 
 **As of the index-bounds round (2026-08-09) the registry is 48 and the
 emission set is unchanged** — `dynamic_slice` and `dynamic_update_slice` are
@@ -736,6 +747,13 @@ shape of program most likely to meet this bound.
 - **`dot_general`'s emission face is the largest ungauged surface**, because it
   is the only hand-built emission row besides the scatter pair and it carries a
   shared oracle whose retained checks are not exercised from the emission side.
+  Written before audit 0.2.0 S12, and S12 is what it was predicting: the row's
+  SHAPE rules lived only in the transfer, the emission re-derived the same
+  geometry by hand, and on disagreeing contracted extents one face raised while
+  the other emitted a truncated sum. The shape half is now a shared oracle with
+  a both-faces differential test (see the table); the *parameter-space* gauge —
+  `preferred_element_type`, `precision`, dtypes — is still transfer-only, so
+  this bullet stands, narrowed to that.
 
 ## Reading a survivor count correctly
 
@@ -757,16 +775,23 @@ int16 at n=32769). Reverting returned both counts to zero.
 The work is ordered by what is unrecoverable if wrong, not by what is missing:
 
 1. **`dot_general`'s emission face.** It is in the emission set, it is
-   hand-built, and no instrument drives it.
+   hand-built, and no *parameter-space* instrument drives it. Its shape rules
+   were the first thing to go wrong here (audit 0.2.0 S12) and are now shared
+   with the transfer and differentially tested; nothing in that repair says
+   anything about the params, which is what this item is now about.
 2. **The emission rows with no gauge at all.** Mostly thin arithmetic plans,
    but "mostly" is an assumption this table exists to stop making — and `pow`
    is the row that showed why. It looked like a two-line product expansion; it
    is also an auxiliary-variable encoding stating three separable claims, one
    of which (a fresh constant per element) can be broken WELL-FORMEDLY and
    silently discharge a false obligation. The count of ungauged rows is
-   `len(obligation._SUPPORTED)` minus the four in the table above; it is not
-   written here as a digit, because the digit that used to be here (31) went
-   stale twice.
+   `len(obligation._SUPPORTED)` minus the rows the table above names as
+   carrying an emission-face gauge of any kind — **five** on this tree, the
+   four reading **yes** plus `dot_general`, whose **partly** arrived with B6
+   and covers its SHAPE half only. It is not written here as a digit, because
+   the digit that used to be here (31) went stale twice, and because the
+   subtrahend itself moved at the B6/B7 merge: this item read "minus the four"
+   while B6's `dot_general` row was landing in the table above it.
 3. **Nothing about the transfer face is urgent** — it is the better-covered of
    the two, by containment, and a transfer error yields a box that excludes an
    executed value rather than a false `VERIFIED`.

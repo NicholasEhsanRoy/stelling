@@ -35,20 +35,33 @@ term); the exact n-ary ``reduce_sum``; and static-index ``scatter-add``
 operand element and its statically-known contributing update elements —
 duplicate indices contribute once each). Everything else — over-budget slices,
 transcendentals, unknown primitives, possibly-zero divisor elements,
-non-float input declarations, obligations that cannot be mapped
-one-to-one onto top-level asserts — **declines**, with the primitive and
+non-float input declarations, and obligations whose ``stelling_assert`` is
+not a top-level equation of the query (one written inside a ``jax.jit``
+helper, a ``cond`` branch, or an undescended ``scan``/``while_loop`` body)
+— **declines**, with the primitive and
 form (and, for the budget, the count and the budget) quoted, and the
-obligation stays UNKNOWN. Declines never raise; :exc:`ReplayError` is
+obligation stays UNKNOWN. **Every one of those declines is ONE
+obligation's**, including the last: an unmappable assert costs its own
+escalation and never its siblings' (audit 0.2.0 M17, where a single nested
+``assert_`` declined escalation for every obligation in the query).
+Declines never raise; :exc:`ReplayError` is
 raised only by the replay evaluator, whose caller treats it as an
 emission-infidelity signal — except for its :exc:`ReplayDeclined`
 subclass, which says the replay itself cannot evaluate the point exactly
 and degrades the witness to UNKNOWN instead of accusing the emission.
 
 The index bookkeeping (element pairing, structural routing, reduction
-grouping) is computed by ONE set of helpers, driven through the very
-:mod:`stelling.interval` functions the propagation transfers use, and is
-shared by slice validation, the SMT emission, and the replay — three
-consumers, one routing, so they cannot disagree with each other.
+grouping, and the ``dot_general`` contraction geometry) is computed by ONE
+set of helpers, driven through the very :mod:`stelling.interval` functions
+the propagation transfers use, and is shared by slice validation, the SMT
+emission, and the replay — three consumers, one routing, so they cannot
+disagree with each other. The ``dot_general`` row joined that discipline
+late and the gap was a soundness defect while it lasted: it re-derived its
+geometry from the LHS alone, so an equation whose contracted extents
+disagreed made :func:`stelling.interval.dot_general` RAISE while this
+module emitted a silently TRUNCATED sum (audit 0.2.0 S12). It now asks
+:func:`stelling.interval.dot_general_geometry`, which is that transfer's
+own well-formedness.
 
 Zero-dep: this module imports only the standard library and stelling's
 own jax-free modules.
@@ -581,28 +594,243 @@ class _Decline(Exception):
         self.reason = reason
 
 
-def _shape_problem(shape) -> str | None:
-    """The uninhabited/malformed-shape problem of a static shape, or None.
+def _extents(shape) -> tuple[str | None, tuple[int, ...]]:
+    """A static shape's extents NORMALISED to plain ``int``, paired with
+    the uninhabited/malformed-shape problem that stopped the
+    normalisation — ``(None, extents)`` when there is none.
+
     Two measured predicates (fix re-attacks R1/N1/N2): every extent must
     be INTEGRAL (from_dict does not coerce shape entries — a string
     extent made `d < 0` raise raw, and `1 * "x"` is silent garbage in a
     size product) and NONNEGATIVE (jax rejects negative extents in every
-    concrete context: the type is uninhabited). Zero extents are legal."""
+    concrete context: the type is uninhabited). Zero extents are legal.
+
+    **IT RETURNS A VALUE AND NOT ONLY A VERDICT, AND THAT IS WHY IT
+    EXISTS** — audit 0.2.0 B6 audit 3, F1. Its first spelling was
+    :func:`_shape_problem` alone: it bound ``k = _op_index(d)``, tested
+    ``k``, and DISCARDED it, so :meth:`_Slicer._declared_shape` re-read
+    every extent with a second ``_op_index(d)`` and returned THAT — two
+    reads per extent, and the returned one was the unvalidated one. An
+    object whose ``__index__`` answers ``4`` and then ``-1`` was validated
+    at ``4`` and emitted as ``(-1,)``, where ``_size`` takes a NEGATIVE
+    contribution to the element budget and ``range(-1)`` mints no symbols
+    at all. A guard that tests a value nobody keeps has not guarded the
+    value the emission uses. This is the identical defect this same batch
+    fixed one module over in
+    :func:`stelling.interval.dot_general_geometry`'s ``_indices``, and the
+    repair is the identical one: read once, and hand the caller what was
+    read.
+
+    **NOT ONLY** ``TypeError`` — audit 0.2.0 B6 audit 3, F2.
+    ``operator.index`` raises whatever ``__index__`` raises, so a
+    ``ValueError`` or an ``OverflowError`` from a hostile extent escaped
+    this predicate raw and reached the caller as *"internal error"*
+    through :func:`slice_obligation`'s net. An extent that will not answer
+    ``__index__`` is a non-integer extent whatever it raises saying so,
+    and the extent is quoted through :func:`_safely` because an object
+    that refuses ``__index__`` may refuse ``__repr__`` too.
+    """
+    out: list[int] = []
     for d in shape:
         try:
             k = _op_index(d)
-        except TypeError:
-            return f"a non-integer extent {d!r} (malformed IR)"
+        except Exception:  # noqa: BLE001 — unreadable IS the finding
+            return (
+                f"a non-integer extent "
+                f"{_safely(lambda: repr(d), '<unreadable>')} (malformed IR)",
+                (),
+            )
         if k < 0:
             return (
-                "a negative extent (no jax program constructs such a value)"
+                "a negative extent (no jax program constructs such a value)",
+                (),
             )
-    return None
+        out.append(k)
+    return None, tuple(out)
 
 
-def _size(shape: tuple[int, ...]) -> int:
+def _shape_problem(shape) -> str | None:
+    """:func:`_extents`' problem alone, for the readers that only need the
+    VERDICT — an aval's shape they are about to compare, not a param they
+    are about to mint terms from.
+
+    WHAT THIS DOES NOT SAY, because the sentence that used to stand here
+    said it and it was not true of the code below (audit 0.2.0 B6 audit 4,
+    F3): *"every reader that needs the COUNT calls `_extents` and binds
+    what it returns"*. The four readers this docstring was written for did
+    not, and neither did the others: a census of :func:`_size`'s call
+    sites at ``30d4b04`` finds **14 whose argument is a shape read
+    straight off an `ir.Aval` or an `ir.Array` at the call site** — the
+    divisor probe, the term-count pass, four in the element budget, two
+    on the replay path, and more at one remove through a local. Listing
+    them is the same defect one level up, so the repair is not a list of
+    call sites. It is :func:`_size`: an element count is now the product
+    of extents read through the SAME ``__index__`` a guard validates with,
+    so no caller anywhere can obtain a count from a third protocol.
+
+    What remains true only of the named readers, and is therefore said
+    here rather than globally: :func:`_decode_scalar`,
+    :func:`_decode_elements`, :meth:`_Slicer.slice`'s root and its
+    constvar pass BIND what :func:`_extents` returned and count that, so
+    they read each shape ONCE. Every other :func:`_size` caller reads a
+    second time. That second read is safe against a third protocol and is
+    NOT safe against an object that answers ``__index__`` differently
+    between reads.
+
+    **WHAT CONTAINS THAT IS THE CONSTRUCTOR, AND THIS USED TO SAY THE
+    HASH** — audit 0.2.0 B6 audit 5, F1. The sentence here was *"what
+    contains that is ``ClosedJaxpr.content_hash()``, which cannot encode
+    such a param"*, and it was true of ``__index__`` for a reason it did
+    not give and false one protocol over.
+
+    For ``__index__``: an ``int`` SUBCLASS cannot answer differently
+    between reads at all, because ``operator.index`` short-circuits on a
+    real ``int`` and never calls ``__index__`` (measured: zero calls, the
+    stored value returned) — so the guard, ``ir._encode`` and
+    ``json.dumps`` all read the same number. A two-faced ``__index__``
+    therefore needs a NON-``int`` class, and ``ir._encode`` refuses to
+    encode one at all. The containment was `_encode`'s TYPE closure, not
+    an inability to encode a drifting answer.
+
+    One protocol over, the claim is simply false. ``ir._encode`` iterates
+    a ``shape`` param ONCE and encodes what that read returned, so a
+    ``tuple`` SUBCLASS whose ``__iter__`` answered ``(4,)`` once and
+    ``()`` afterwards hashed cleanly at ``321209d`` — measured at every
+    flip point — and the same trick one element narrower minted a VERIFIED
+    on a claim exact arithmetic falsifies.
+
+    The containment is that ``ir.Aval``, ``ir.Array`` and a declaration's
+    ``shape`` param now CARRY the extents their own ``__post_init__``
+    validated, as plain ``int`` in a plain ``tuple``. A shape this
+    function or :func:`_size` reads off one of those objects is
+    single-valued before it arrives, whatever protocol is asked of it, and
+    a shape read off anything else is not covered by that and is listed in
+    :func:`_size`. See :meth:`_Slicer._declared_shape`, where the same
+    correction is recorded.
+
+    **AND THE CONTAINMENT IS WIDER THAN THOSE THREE NOW** — audit 0.2.0 B6
+    audit 6. Naming three objects was a list, and the objects the list did
+    not name — the param KEY that said which param the shape was, the
+    ``dtype`` beside it, and every param with no rule at all — were the
+    next three findings. `ir`'s canonicalization door stores EVERY
+    document-supplied value as an exact instance of a type that module is
+    closed over, so single-valuedness is a property of anything read off
+    an `ir` dataclass rather than of the three fields someone remembered.
+    This paragraph keeps naming the three because they are the ones this
+    function reads; it no longer implies they are the ones that are
+    covered.
+
+    **AND THAT SENTENCE RESTS ON THE DOOR'S DISPATCH, WHICH WAS ITSELF
+    OVERRIDABLE WHEN IT WAS WRITTEN** — audit 0.2.0 B6 audit 7. "Anything
+    read off an `ir` dataclass" was true of everything the door had
+    CANONICALIZED and said nothing about what it had merely waved
+    through, and it waved through anything with three lines of metaclass
+    or two lines of `__class__` property, including an `ir.Var` subclass
+    whose `id` is a fresh call on every read. The door decides by
+    identity and by
+    ``issubclass`` against the base now, and refuses what it cannot read;
+    the sentence above is what that buys, and it is worth restating that
+    it is a claim about the DOOR and not about this function — a value
+    installed past a frozen dataclass with ``object.__setattr__`` is
+    outside it, which is the technique this suite's own tests use to
+    measure this function with the door out of the way."""
+    return _extents(shape)[0]
+
+
+def _size(shape) -> int:
+    """The element count of ``shape``, read through ``__index__``.
+
+    **NOT ``for d in shape: n *= d`` OVER THE RAW OBJECTS — audit 0.2.0 B6
+    audit 4, F3.** That spelling reached ``__mul__``/``__rmul__``, a THIRD
+    protocol beside the ``__index__`` every guard in this module validates
+    with and the ``__eq__`` the shape comparisons use, so an extent could
+    be validated at 2, compared equal to 2, and counted as 1 — measured:
+    ``operator.index(d) == 2`` and ``_shape_problem((d,)) is None`` while
+    ``_size((d,)) == 1``. The audit named FOUR readers that took the
+    predicate face of :func:`_extents` and then counted with a raw second
+    read, and could not drive any of them to a false verdict: the constvar
+    route is closed earlier by the ``ir`` door and the
+    :func:`_decode_elements` route by the byte-length check. **That
+    containment was accidental**, and the four were not the count either —
+    at ``30d4b04`` fourteen call sites handed this function a shape read
+    straight off an ``ir.Aval`` or an ``ir.Array``, some with no
+    validation in front of them at all. Fixing the sites someone
+    enumerated is the defect one level up; fixing the function makes a
+    count and the guard that validated it come from one protocol whatever
+    the caller did first.
+
+    A malformed extent is a DECLINE and not a number: an element count
+    that cannot be read is not zero, not one, and not the caller's
+    problem to notice. Netted to a `DeclinedObligation` everywhere the
+    slicer drives it.
+
+    **WHERE IT IS NOT NETTED — THREE SITES, and this paragraph named two**
+    (audit 0.2.0 B6 audit 5, F5). Making a total function partial gives
+    every caller a channel to answer for, so the census is here rather
+    than in whichever caller someone remembered:
+
+    * :func:`_root_elements` — CORRECT and unchanged. Its per-equation
+      ``_size`` and routing calls are inside a ``try`` that converts
+      :exc:`_Decline` to :exc:`ReplayError`, which is the replay path's
+      own channel. Its input-size loop runs BEFORE that ``try`` and is
+      the one place the old argument was right about: ``inp.shape`` is a
+      :attr:`SliceInput.shape`, which IS an :func:`_extents` result and
+      not a re-read of anything.
+    * :func:`violating_elements` — its ``_size(sl.root.aval.shape)`` runs
+      after :func:`_root_elements` returns, outside any net, and would
+      reach :mod:`stelling.solvers`' generic handler as *"escalation
+      attempted; internal error"*.
+    * :func:`_index_box` — ``range(_size(shape))``, reached from
+      :func:`_pair_elementwise` and :func:`_route_structural`. The
+      DECLINE is new at ``321209d``: at ``30d4b04`` ``_size`` was a raw
+      product, so the same shape came out of this helper as a bare
+      ``TypeError: unsupported operand type(s) for *=`` — measured, and
+      the reason the change is a narrowing of the escape and not the
+      creation of one. Both routing helpers are driven AGAIN by
+      :func:`stelling.smt.emit`, after :func:`slice_obligation` has
+      returned, and `smt.py` nets no :exc:`_Decline` at all — so a
+      decline there does not become a :class:`DeclinedObligation`; it
+      lands in :mod:`stelling.solvers`' generic handler as *"escalation
+      attempted; internal error"*. :mod:`stelling.affine` drives the same
+      two helpers and DOES net them (three sites), which is how the
+      asymmetry between the two consumers is visible at all.
+
+      DRIVEN, not deduced: sweeping the read at which a hostile extent
+      starts refusing, over one declaration query, ``321209d`` produced
+      *"escalation attempted; internal error: `_Decline`"* from this
+      helper at two points in the sweep and a `ReplayError` at a third.
+      After audit 5's F1 the SAME sweep produces no decline at any point,
+      because :meth:`ir.Aval.__post_init__` freezes the extent at the read
+      it validated and this helper's argument is a :func:`_shape_of` of
+      that. The site is recorded rather than deleted because that
+      containment is about where the shape COMES FROM, not about this
+      helper.
+
+    **AND THE ARGUMENT FOR WHY IT CANNOT FIRE WAS TWO ARGUMENTS.** This
+    paragraph said the replay shapes *"come from an `ObligationSlice`
+    whose extents `_Slicer._validate` and `_Slicer._declared_shape`
+    already normalised"*. That is true of :attr:`SliceInput.shape`, which
+    IS an :func:`_extents` result. It was never true of
+    ``sl.root.aval.shape`` or of ``_shape_of(eqn.outvars[0])``: those were
+    fresh reads of a raw ``ir.Aval`` field, and normalising a DIFFERENT
+    object earlier does not make a later read of this one safe. Since
+    audit 5's F1 the containment there is real rather than incidental, and
+    it is a different mechanism with a different name:
+    :meth:`ir.Aval.__post_init__` INSTALLS the extents it validated, so
+    ``aval.shape`` is a plain ``tuple`` of plain ``int`` and every re-read
+    of it — here, in :func:`_shape_of`, in :func:`_index_box` — returns
+    the same ints. What is NOT covered by that is a shape reaching these
+    callers from somewhere other than an ``ir.Aval``, an ``ir.Array`` or
+    an :func:`_extents` result; the three sites above are recorded so that
+    such a caller has somewhere to be checked against rather than being
+    discovered by an *"internal error"* in a verdict."""
+    problem, extents = _extents(shape)
+    if problem is not None:
+        raise _Decline(
+            f"a shape with {problem} has no element count (malformed IR)"
+        )
     n = 1
-    for d in shape:
+    for d in extents:
         n *= d
     return n
 
@@ -612,9 +840,19 @@ def _decode_scalar(val):
     decline. (The emission's single-element decoder; array constants go
     through :func:`_decode_elements`.)"""
     if isinstance(val, ir.Array):
-        if _size(val.shape) != 1:
+        # ONE READ: `_extents` validates and hands back what it validated,
+        # and the count below is that (audit 0.2.0 B6 audit 4, F3 — this
+        # reader had no validation at all and counted the raw objects)
+        problem, extents = _extents(val.shape)
+        if problem is not None:
             raise _Decline(
-                f"array-shaped constant of shape {val.shape} where a single "
+                f"array-shaped constant of shape "
+                f"{_safely(lambda: repr(tuple(val.shape)), '<unreadable>')} "
+                f"has {problem}"
+            )
+        if _size(extents) != 1:
+            raise _Decline(
+                f"array-shaped constant of shape {extents} where a single "
                 f"value is required"
             )
         fmt = _SCALAR_STRUCT_FMT.get(val.dtype)
@@ -634,15 +872,22 @@ def _decode_elements(val) -> tuple:
     element in flat C-order, or decline. A scalar decodes to a 1-tuple; a
     static-shape :class:`stelling.ir.Array` decodes every element."""
     if isinstance(val, ir.Array):
-        problem = _shape_problem(val.shape)
+        # ONE READ, and the count below is bound from it — audit 0.2.0 B6
+        # audit 4, F3. This called `_shape_problem(val.shape)` and then
+        # `_size(val.shape)`: the extents it validated and the extents it
+        # counted were two different reads of the same self-describing
+        # objects.
+        problem, extents = _extents(val.shape)
         if problem is not None:
             # fix-re-attack R1/N2: a negative or non-integer element
             # count would reach struct.unpack as a malformed format and
             # raise struct.error raw — decline quoted instead
             raise _Decline(
-                f"array-shaped constant of shape {val.shape} has {problem}"
+                f"array-shaped constant of shape "
+                f"{_safely(lambda: repr(tuple(val.shape)), '<unreadable>')} "
+                f"has {problem}"
             )
-        n = _size(val.shape)
+        n = _size(extents)
         fmt = _SCALAR_STRUCT_FMT.get(val.dtype)
         if fmt is None:
             raise _Decline(f"constant with undecodable dtype {val.dtype!r}")
@@ -653,7 +898,7 @@ def _decode_elements(val) -> tuple:
             # assume") — truncated, oversized, and empty payloads under a
             # positive shape raised raw struct.error before this
             raise _Decline(
-                f"array-shaped constant of shape {val.shape} dtype "
+                f"array-shaped constant of shape {extents} dtype "
                 f"{val.dtype!r} carries {len(val.data)} byte(s), expected "
                 f"{expect} — truncated or oversized payload (malformed IR)"
             )
@@ -1087,7 +1332,19 @@ def _group_reduce_sum(eqn: ir.JaxprEqn) -> list[list[int]]:
     over static ``axes`` — the exact n-ary sum's addend sets. Shape and
     axis validation mirror :func:`stelling.interval.reduce_sum` (whose
     identity for an empty group is exactly 0, matching measured jax:
-    ``jnp.sum`` of a size-0 array is 0.0)."""
+    ``jnp.sum`` of a size-0 array is 0.0).
+
+    ``in_shape`` COMES FROM THE RECORDED AVAL, and that is load-bearing:
+    audit 0.2.0 S12′ is this line and its ``dot_general`` twin. The
+    interval transfer sums the operand's propagated BOX, whose element
+    count is the real one; this function sums ``_size(in_shape)`` addends,
+    whose count is whatever the IR claims. Shrink only the aval and the
+    two legs sum different arrays — the transfer reporting ``[4, 8]`` while
+    the emission proves a claim about a two-element sum. The agreement is
+    enforced once for every primitive at
+    :meth:`_Slicer._one_shape_per_value`, which runs before this function
+    is reached; nothing about it is specific to ``reduce_sum``, which is
+    exactly why it is not written here."""
     params = eqn.params_dict()
     in_shape = _shape_of(eqn.invars[0])
     out_shape = _shape_of(eqn.outvars[0])
@@ -1138,11 +1395,48 @@ def _dot_general_plan(eqns, consts, eqn: ir.JaxprEqn):
     the obligation leaves linear arithmetic entirely. That is a scope
     decision, not a capability gap, and the decline names it.
 
-    Admissibility is decided by
-    :func:`stelling.propagate._dot_general_row_form`, the SAME oracle the
-    interval transfer drives — built shared from the start rather than
-    extracted later, which is how the scatter row acquired a gate the
-    transfer had and the emission did not.
+    Admissibility is decided by TWO shared oracles, complementary and
+    disjoint — and by ONE cross-check that is neither, named after them:
+
+    * :func:`stelling.propagate._dot_general_row_form` — the PARAMS and
+      DTYPES. Built shared from the start rather than extracted later,
+      which is how the scatter row acquired a gate the transfer had and the
+      emission did not. It never sees a shape.
+    * :func:`stelling.interval.dot_general_geometry` — the SHAPES: dim
+      ranges, duplicate dims, list pairing, batch- and contracted-EXTENT
+      agreement, and the derived ``out_shape`` and contraction ranges. It
+      never sees a param.
+
+    * :meth:`_Slicer._one_shape_per_value` — WHICH SHAPES the oracle above
+      is handed. Not an oracle: it is a cross-check, it runs over every
+      equation of the slice rather than this row, and it runs before this
+      function is called at all. It is listed here because without it the
+      two bullets above do not compose into what they look like they say.
+
+    THE SECOND ONE IS AUDIT 0.2.0 S12 AND IT WAS LEARNED THE HARD WAY. The
+    extent-agreement check used to live inline in
+    :func:`stelling.interval.dot_general` while this function re-derived the
+    geometry from the LHS alone, so on ``lhs=(2,) @ rhs=(4,)`` the transfer
+    RAISED and this face returned a two-term combination — two of the
+    constant operand's four addends DROPPED, no decline — and on
+    ``lhs=(4,) @ rhs=(2,)`` it indexed off the end of the constant operand
+    and raised a raw ``IndexError`` out of a slicer that catches only
+    ``_Decline``. The two faces disagreed about whether the equation was
+    well-formed and the disagreement resolved in the ASSERTING direction.
+    Neither face owns a shape predicate now; both ask the oracle.
+
+    THE THIRD ONE IS AUDIT 0.2.0 S12′, AND IT IS WHY "both ask the oracle"
+    was not enough. The oracle is shared and its ARGUMENTS are not: the
+    transfer asks about ``a.shape``/``b.shape``, the shapes of the boxes
+    that actually flowed in, and this function asks about
+    ``_shape_of(eqn.invars[i])``, the shapes the IR claims. Edit only those
+    avals — ``from_dict`` accepts it — and the transfer computes the true
+    four-term box while this function plans two, with no refusal on either
+    side to notice. Measured on ``4d793cf``: VERIFIED at 100% coverage on a
+    claim whose truth is ``8 <= 4.5``, plus a REFUTED whose witness the
+    verdict called "confirmed by independent exact-rational replay" —
+    honest about the arithmetic, false about the plan, since replay
+    re-derives this same plan.
 
     TWO CHECKS THIS FACE MAKES THAT THE TRANSFER DOES NOT, each with its
     reason, per the shared-oracle discipline:
@@ -1199,14 +1493,31 @@ def _dot_general_plan(eqns, consts, eqn: ir.JaxprEqn):
     else:
         const_side, const_vals, sym_operand = 0, lhs_vals, 1
 
-    (lc, rc), (lb, rb) = dn
-    lfree = tuple(i for i in range(len(lhs_shape)) if i not in lb and i not in lc)
-    rfree = tuple(j for j in range(len(rhs_shape)) if j not in rb and j not in rc)
-    out_shape = (
-        tuple(lhs_shape[i] for i in lb)
-        + tuple(lhs_shape[i] for i in lfree)
-        + tuple(rhs_shape[j] for j in rfree)
-    )
+    try:
+        geom = iv.dot_general_geometry(lhs_shape, rhs_shape, dn)
+    except iv.IntervalError as e:
+        # The SHAPE oracle's refusal, quoted — the propagation face raises
+        # the identical sentence from the identical function.
+        #
+        # WHAT THAT ESTABLISHES, CORRECTED (audit 0.2.0 S12′). This comment
+        # used to end "...so an equation one face refuses cannot be planned
+        # by the other (S12)", and that was false as written: the oracle is
+        # shared and its ARGUMENTS are not. The transfer asks it about the
+        # propagated BOXES; the line above asks it about the recorded AVALS.
+        # A query whose avals lie about their operands' extents still splits
+        # the two faces, in the asserting direction, and `reduce_sum`
+        # carries the identical defect through `_group_reduce_sum` — a
+        # class, not this row.
+        #
+        # The true statement is: GIVEN THE SAME SHAPES, an equation one face
+        # refuses cannot be planned by the other. That the two faces ARE
+        # given the same shapes is enforced separately, by
+        # `_Slicer._one_shape_per_value`, which runs over every equation of
+        # the slice before any plan here is built.
+        raise _Decline(f"'dot_general' declined: {e}") from e
+    lc, rc, lb, rb = geom.lc, geom.rc, geom.lb, geom.rb
+    lfree, rfree, out_shape = geom.lfree, geom.rfree, geom.out_shape
+    contracted_ranges = [range(n) for n in geom.contracted_extents]
     if out_shape != _shape_of(eqn.outvars[0]):
         raise _Decline(
             f"'dot_general' output shape {_shape_of(eqn.outvars[0])} "
@@ -1226,7 +1537,10 @@ def _dot_general_plan(eqns, consts, eqn: ir.JaxprEqn):
         lcf = out_coord[nb:nb + nl]
         rcf = out_coord[nb + nl:]
         terms: list[tuple[Fraction, int]] = []
-        for c in itertools.product(*[range(lhs_shape[i]) for i in lc]):
+        # THE ORACLE'S extents, not the LHS's. Reading `lhs_shape[i]` here is
+        # exactly S12: on a shorter LHS it truncates the sum and on a shorter
+        # RHS it indexes off the constant operand.
+        for c in itertools.product(*contracted_ranges):
             ac = [0] * len(lhs_shape)
             bc = [0] * len(rhs_shape)
             for d, v in zip(lb, bcoord):
@@ -1882,10 +2196,13 @@ class _Slicer:
         custom_jvp_call, custom_vjp_call, remat2 — the same set the
         propagation descends), binding inner invars to the call's operand
         atoms and the call's outvars to the inner results, recursively.
-        Obligations/asserts remain top-level-only exactly as before — the
-        assert-count mapping in :func:`slice_unknown_obligations` is
-        untouched, and an inner ``stelling_assert`` still declines the
-        whole mapping there. A wrapper that resists sound inlining (no
+        Obligations/asserts remain top-level-only: an inner
+        ``stelling_assert`` is inlined here as an equation like any other,
+        but nothing SLICES it — :func:`slice_unknown_obligations` declines
+        the obligation it produced. What audit 0.2.0 M17 changed is that
+        the decline is now that ONE obligation's, quoted, instead of every
+        unknown obligation in the query; an inner assert did not become
+        sliceable. A wrapper that resists sound inlining (no
         sub-jaxpr, arity mismatch, const mismatch) is left in place as an
         opaque equation, which the validator declines with the form
         quoted."""
@@ -1965,6 +2282,378 @@ class _Slicer:
     # element budget in :meth:`slice` — a single choke point cannot
     # disagree with itself, and the seven scattered scalar-only gates it
     # replaced could.
+
+    def _declared_shape(self, decl: ir.JaxprEqn, vid: int) -> tuple[int, ...]:
+        """THE SHAPE A ``stelling_any`` BINDS ITS VALUE AT: its ``shape``
+        PARAM, normalised, or a decline when that param cannot be read.
+
+        ONE RULE FOR THE EMISSION PATH, and that is the point of it (audit
+        0.2.0 B6 re-audit, UNSOUND-1). A declaration describes itself TWICE
+        — a ``shape`` param and an outvar aval — and :meth:`slice` mints
+        one SMT constant per element of the **param** (``x{k}_{i}`` over
+        ``_size(shape)``), never per element of the aval. So the param is
+        the quantity every reader on that path must also read; a reader
+        that reaches for the aval instead is comparing a quantity nothing
+        emits. The three sites in the emission path that need a
+        declaration's element count — the budget, :meth:`_binding_shape`
+        and the input-term construction — all call this method, so none
+        can implement a different rule from the others.
+
+        **THIS IS NOT A SINGLE READ, and the docstring said it was —
+        audit 0.2.0 B6 audit 3, F4.** Each call re-reads the param, and an
+        object that answers differently between calls does make the check
+        and the emission differ. A ``list`` SUBCLASS — which
+        ``isinstance(raw, (tuple, list))`` admits — whose ``__iter__``
+        yields ``(4,)`` for three reads and ``()`` after was checked at
+        ``(4,)`` and minted ONE input for a four-element reference;
+        :meth:`slice` alone reads it three times. That is still true of
+        this METHOD, and it is why the containment is not here.
+
+        **AND THE CONTAINMENT NAMED HERE WAS THE WRONG ONE — audit 0.2.0
+        B6 audit 5, F1.** This paragraph said *"what catches that is
+        :meth:`ir.ClosedJaxpr.content_hash`, which cannot encode a param
+        that answers differently between iterations: it RAISES"*. It does
+        not. ``ir._encode`` iterates a ``shape`` param ONCE and encodes
+        whatever that read returned, so a drifting param hashes cleanly
+        and stably. The ``list`` the sentence was measured on raised for
+        an unrelated reason — ``_encode`` has no ``list`` arm at all, so
+        an honest, undrifting ``shape=[4]`` raises the identical
+        ``TypeError`` — and the ``tuple`` half of
+        :data:`ir._SHAPE_PARAM_CONTAINERS`, which the sentence also
+        covered, was never contained by anything. Driven with the aval at
+        ``(2,)`` and the param answering ``(2,)`` once and ``(1,)``
+        afterwards, that was a VERIFIED on a false claim.
+
+        What catches it is :meth:`ir.JaxprEqn.__post_init__`: the door
+        validates one read of the param against the outvar aval and
+        INSTALLS it, so the equation this method is handed carries a plain
+        ``tuple`` of plain ``int`` and there is no second answer to get.
+
+        **AND "ONLY AN ``object.__setattr__`` REACHES IT" WAS FALSE WHEN
+        IT WAS WRITTEN** — audit 0.2.0 B6 audit 6. That install compared
+        ``k == "shape"`` against a document-supplied KEY, so a ``str``
+        subclass answering that one comparison False left the raw param in
+        place with no ``object.__setattr__`` anywhere: every object in the
+        document that did it was built through a public `stelling.ir`
+        dataclass, and the query reached ``discharged``. A sentence naming
+        ONE route past a guard is a claim about every other route, and
+        that one had not been driven.
+
+        What is true now is a property of the stored VALUE rather than a
+        survey of routes: `ir`'s canonicalization door replaces every
+        document-supplied value with an exact instance of a type that
+        module stores — before anything compares, hashes or iterates it —
+        so a param this method can be lied to by is one that is not what
+        :meth:`ir.JaxprEqn.__post_init__` stored. ``object.__setattr__``
+        past the frozen dataclass is one route to that; it is the
+        technique this batch's own tests use to measure the emission face
+        with the door out of the way, and the boundary `SOUNDNESS.md`
+        records for this method's sibling disclosures. It is named here
+        as AN example and no longer as the enumeration. Naming the
+        containment where it actually is matters, because "cannot drift
+        apart" invites the next reader to stop looking, and naming it in
+        the wrong place invites the same thing with a citation attached.
+
+        **AND THE ENUMERATION CAME BACK IN THE SENTENCE THAT RETIRED IT**
+        — audit 0.2.0 B6 audit 7, which is the second time this paragraph
+        has made this mistake in the same shape. It read *"either no
+        `ir.JaxprEqn` was built at all, or something wrote over what it
+        stored afterwards"*: two routes, offered as the complete list, one
+        paragraph after the paragraph above says a list of routes is a
+        claim about every route not on it. There was a third and it was
+        the door's own dispatch — ``type(obj) in <a frozenset>`` runs the
+        METACLASS and ``isinstance(obj, base)`` reads the object's
+        ``__class__``, so a document could be built ENTIRELY through
+        public `ir` constructors, with nothing written over afterwards,
+        and still carry a value the door had never canonicalized. That
+        document reached ``discharged`` on a claim exact arithmetic
+        falsifies. The dispatch is identity and ``issubclass`` against the
+        base now, and what is stated here is again a property of the
+        stored value and not a survey of routes.
+
+        **AND IT IS NOT THE LIBRARY'S ONLY READER of a declaration's
+        element count.** :func:`stelling.propagate._declared_element_count`
+        reads the outvar AVAL — the other quantity — for the
+        certificate-search cap. That is sound, and it is not an exception
+        to the rule above: the cap only gates WHETHER the region search
+        runs, its direction is toward REFUTED, and the search re-derives
+        its witness by re-running the honest propagator, so no verdict is
+        derived from the miscount. It is named here because a global claim
+        of sole readership that a `grep` refutes is worse than no claim.
+        The narrower statement in ``SOUNDNESS.md`` — that the budget, the
+        input-term construction and :meth:`_binding_shape` all read this —
+        is the true one.
+
+        FAILING CLOSED IS THE POINT OF THE VALIDATION HERE, AND IT DOES NOT
+        REST ON ``ir.py``. That door was closed in the same commit, but
+        this method may not depend on it: ``ir.ClosedJaxpr`` is a public
+        dataclass, ``SOUNDNESS.md`` names hand-built IR as in scope, and
+        the door still blesses — deliberately — a declaration with NO
+        ``shape`` param at all, which reads as ``()`` here and is
+        precisely the form that minted one scalar symbol for a
+        four-element declaration on ``96ab47a``. A param this method
+        cannot read is neither an internal error nor a pass: it is a value
+        whose element count nothing can agree on, and the slice declines.
+
+        WHAT IS ACCEPTED IS STATED POSITIVELY, AND IT IS STATED IN ONE
+        PLACE: :data:`ir._SHAPE_PARAM_CONTAINERS`, which is the object the
+        branch below asks and the object :func:`ir._validate_decl_eqn`
+        asks. This docstring deliberately does not restate the list —
+        audit 0.2.0 B6 audit 4, F1, where the door's docstring described a
+        rule the door had stopped implementing two commits earlier. The
+        reason for a positive rule is the one :func:`_frames` gives about
+        ``str`` — ``tuple(b"34")`` is ``(51, 52)``, a pair of perfectly
+        plausible extents the declaration never said — but the rule may
+        not be spelled as the list of containers that hazard was first
+        noticed in. It was, and ``memoryview`` and ``array.array`` walked
+        past it with the identical reading (audit 0.2.0 B6 audit 3).
+        Stated the other way round, the character sequences fall out of
+        the rule instead of being named by it, and so does whichever
+        sequence type is noticed next.
+        """
+        raw = decl.params_dict().get("shape", ())
+        # A POSITIVE TEST, not a list of refused containers — audit 0.2.0
+        # B6 audit 3, the optional item. This branch used to read
+        # `isinstance(raw, (str, bytes, bytearray))`, and `memoryview` and
+        # `array.array` walked past it: `tuple(memoryview(b"34"))` is
+        # `(51, 52)`, the same pair of perfectly plausible extents the
+        # `bytes` arm exists to refuse, and the door accepted it. Adding
+        # two more names to that tuple is "the container type I happened
+        # to enumerate", which is the reasoning `ir._validate_param_value`
+        # is annotated as condemning.
+        #
+        # THE RULE LIVES IN ONE PLACE AND THIS ASKS IT — audit 0.2.0 B6
+        # audit 4, F1. `ir._SHAPE_PARAM_CONTAINERS` is the same object
+        # `ir._validate_decl_eqn` refuses on, so the load door and this
+        # emission face cannot come to hold different rules by one of them
+        # being edited, and `tests/test_shape_param_rule.py` measures both
+        # partitions against that object over a population it computes.
+        #
+        # AND THE SAME READING OF IT — audit 0.2.0 B6 audit 7. Sharing the
+        # LIST left each face to spell the test, and both spelled it
+        # `isinstance`, which reads the OBJECT's own `__class__` and so
+        # takes a two-line property's word for what it is. Hardening one
+        # face alone would have re-opened by the reading the gap the
+        # paragraph above closed by the list, so the reading is a function
+        # in `ir` and both faces call it.
+        if not ir._held_in_a_shape_param_container(raw):
+            # quoted through `_safely` for the reason the branch below
+            # already was: a `str` SUBCLASS can carry a `__repr__` that
+            # raises, and an unguarded `{raw!r}` here turned this clean
+            # decline into "internal error: RuntimeError: repr refuses"
+            # (audit 0.2.0 B6 audit 3, F3). A refusal message about an
+            # object already known to be malformed may not itself raise.
+            raise _Decline(
+                f"input declaration of variable {vid} has a shape param "
+                f"{_safely(lambda: repr(raw), '<unreadable>')} of type "
+                f"{_safely(lambda: type(raw).__name__, '<unreadable>')}: a "
+                f"declaration records its extents in {ir._SHAPE_PARAM_RULE}, "
+                f"and reading any other container as one would model an "
+                f"array the declaration never described "
+                f"(`tuple(b\"34\")` is `(51, 52)`) (malformed IR)"
+            )
+        try:
+            shape = tuple(raw)
+        except Exception:  # noqa: BLE001 — unreadable IS the finding
+            # `isinstance` is a claim about the TYPE and not the object:
+            # a `list` SUBCLASS whose `__iter__` raises satisfies the test
+            # above, which is the same R5 finding `_frames` carries.
+            raise _Decline(
+                f"input declaration of variable {vid} has a shape param "
+                f"{_safely(lambda: repr(raw), '<unreadable>')} that is "
+                f"{ir._SHAPE_PARAM_RULE} whose iteration RAISES, so it is "
+                f"not a readable sequence of extents and the number of "
+                f"elements the emission would mint for it cannot be read "
+                f"(malformed IR)"
+            ) from None
+        # BOUND to what the guard read, not re-read after it — audit 0.2.0
+        # B6 audit 3, F1. The first spelling called `_shape_problem(shape)`,
+        # which validated each extent and threw the answer away, and then
+        # returned `tuple(_op_index(d) for d in shape)`: a SECOND read, and
+        # the one the emission got. `_extents` reads once and hands back
+        # what it tested.
+        problem, extents = _extents(shape)
+        if problem is not None:
+            raise _Decline(
+                f"input declaration of shape "
+                f"{_safely(lambda: repr(shape), '<unreadable>')} has "
+                f"{problem}"
+            )
+        return extents
+
+    def _binding_shape(self, atom: ir.Var) -> tuple[int, ...] | None:
+        """The shape the value ACTUALLY HAS, read at the site that binds
+        ``atom``, or ``None`` when this slicer has no binding for it.
+
+        The binding sites of the flattened namespace, and there are only
+        these two: a constvar (top-level or carried in by a transparent
+        descent — :attr:`const_avals`) and the equation that produces the
+        value (:attr:`producers`, which includes ``stelling_any``
+        declarations). Alias bindings are not a third: :meth:`_rewrite`
+        has already resolved them away by the time this is asked, and
+        :meth:`_resolve` ends only on a produced var, a constvar or a
+        literal.
+
+        **A DECLARATION IS BOUND BY ITS PARAM, NOT BY ITS OUTVAR AVAL, and
+        that distinction is audit 0.2.0 B6's re-audit finding UNSOUND-1.**
+        For every other producer the outvar aval IS the record of the
+        binding — nothing downstream reads a competing one. A
+        ``stelling_any`` is the single exception, because :meth:`slice`
+        builds its ``SliceInput`` terms from the declaration's ``shape``
+        PARAM and never from that outvar's aval. Reading the aval here
+        made this method answer with a quantity the emission does not
+        use, and for exactly that one binding class the check then
+        compared the wrong pair: a declaration whose param says four
+        elements and whose aval says two minted four symbols, summed the
+        two the lying reference asked for, and returned ``discharged`` on
+        a claim whose truth is ``8 <= 4.5`` — measured on ``96ab47a``,
+        inside a ``jit`` body where the box witness is blind by
+        construction and no reference disagreed with any other. The phrase
+        this method's docstring always used was "the shape the value
+        actually has"; it now returns it.
+        """
+        val = self.const_avals.get(atom.id)
+        if val is not None:
+            return tuple(val.shape)
+        producer = self.producers.get(atom.id)
+        if producer is None:
+            return None
+        if producer.primitive == "stelling_any":
+            return self._declared_shape(producer, atom.id)
+        for ov in producer.outvars:
+            if isinstance(ov, ir.Var) and ov.id == atom.id:
+                return tuple(ov.aval.shape)
+        return None
+
+    def _one_shape_per_value(self, eqn: ir.JaxprEqn) -> None:
+        """A value has ONE shape, and both legs must be modelling it.
+
+        AUDIT 0.2.0 S12′ — THE CLASS, NOT THE ROW. S12's repair gave
+        ``dot_general`` a shared shape oracle
+        (:func:`stelling.interval.dot_general_geometry`) that both the
+        interval transfer and the SMT emission drive, and stated that "the
+        two faces cannot hold different opinions about whether an equation
+        is admissible". That was false as written, because **the oracle is
+        shared and its ARGUMENTS are not**:
+        :func:`stelling.interval.dot_general` asks it about the shapes of
+        the PROPAGATED BOXES (``a.shape``, ``b.shape``) and
+        :func:`_dot_general_plan` asks the same function about the shapes
+        recorded on the equation's INVAR AVALS. Move the lie off the
+        declaration and onto those avals — which ``ir.ClosedJaxpr.
+        from_dict`` accepts, per ``ir.py``'s own scoping of per-primitive
+        shape inference out of ``_validate_loaded`` — and the two faces
+        disagree again, in the asserting direction. Measured on ``4d793cf``:
+        the interval leg AGREED the contraction has four terms and printed
+        the box ``[4, 8]``, the emission planned two, and ``Σ <= 4.5``
+        came back VERIFIED on a claim whose truth is ``8 <= 4.5``. The
+        same lie on a ``reduce_sum`` invar does the same thing, and both
+        rows also mint a false REFUTED whose witness the verdict calls
+        "confirmed by independent exact-rational replay" — true about the
+        arithmetic, false about the plan, because replay re-derives the
+        SAME truncated plan.
+
+        So the repair is not a third shape rule for ``dot_general``. It is
+        this: **no equation may be modelled at a shape that disagrees with
+        the shape the value actually has**, checked once here for every
+        primitive at once — ``dot_general``, ``reduce_sum``, ``scatter``,
+        and every emission row not yet written.
+
+        TWO WITNESSES TO "actually has", and they are complementary because
+        each is blind exactly where the other sees:
+
+        1. **The binding site** (:meth:`_binding_shape`). A variable is
+           bound once and referred to many times; every reference must
+           agree with the binding. Needs no propagation at all, so it
+           reaches EVERY scope the descent flattened — including an
+           equation inside a ``jit`` body, whose operands carry ids this
+           slicer minted and no interval environment has ever seen.
+           Measured: the ``jit``-nested form of both reproducers is a live
+           false VERIFIED on ``4d793cf`` and is closed by this leg alone.
+           Blind to a lie applied CONSISTENTLY at the binding and at every
+           reference.
+
+        2. **The propagated box** (:attr:`env`). The interval leg computed
+           a shape for this value independently, from the values flowing
+           in rather than from what the IR says about them, so it is the
+           one witness a consistent lie cannot forge. This is the
+           inter-leg agreement the S12 commit claimed and did not have.
+           Blind OUTSIDE the top level: :func:`stelling.propagate.
+           interval_env` returns the top-level environment, and the
+           propagator runs every transparent call body in an ISOLATED env
+           that it discards on the way out — so an inner id has no box,
+           by construction and not by oversight. That blindness is why
+           this leg is the SECOND witness here and not the only one.
+
+           **AND IT IS DEFENCE IN DEPTH — stated plainly, rather than left
+           to read as load-bearing.** Witness 1 answered first in all six
+           measured reproducers, and over the whole test suite this leg
+           examined 23,072 boxed atoms and disagreed with none. **No IR
+           document has been constructed on which it is the only thing
+           that sees the lie.** The consistently-applied lie it exists for
+           has, so far, no live route: a ``stelling_any`` whose ``shape``
+           param contradicts its outvar aval is refused by
+           :class:`stelling.ir.JaxprEqn`'s own construction check, a
+           constvar whose aval contradicts its value by :meth:`slice`'s
+           pass 2, and a computed outvar whose aval contradicts its
+           operands by that row's own shape rule
+           (:func:`_route_structural`, :func:`_pair_elementwise`,
+           :func:`_group_reduce_sum`, :func:`_dot_general_plan`). It is
+           kept because it IS the inter-leg property, stated where it can
+           be checked rather than asserted in a docstring — which is the
+           mistake S12 made — and because ``env`` is a caller-supplied
+           argument of :func:`slice_obligation`, which is how
+           ``tests/test_aval_lie_both_faces.py`` drives it.
+
+        A ``Var`` this slicer cannot bind at all declines rather than
+        passing: an unbindable operand is precisely the case where neither
+        witness can see, and a check that goes quiet where it cannot see
+        is the shape of the defect it is here to close. Pass 1 of
+        :meth:`slice` has already resolved every operand to a producer, a
+        constvar or a literal, so this arm is unreachable from a slice
+        that got this far — it is a backstop, and it fails closed.
+
+        Literals are not checked here and need no check: a literal carries
+        its value, and :meth:`slice`'s pass 2 decodes every one of them
+        (``_decode_elements`` / ``_numeric_fraction``) while
+        :func:`_shape_problem` above has already screened both its aval
+        shape and its array shape.
+        """
+        for atom in eqn.invars:
+            if not isinstance(atom, ir.Var):
+                continue
+            here = tuple(atom.aval.shape)
+            bound = self._binding_shape(atom)
+            if bound is None:
+                raise _Decline(
+                    f"{eqn.primitive!r} operand {atom.id} has no binding in "
+                    f"the flattened computation, so the shape "
+                    f"{here} it is referred to at cannot be checked "
+                    f"against the shape it was bound at"
+                )
+            if bound != here:
+                raise _Decline(
+                    f"{eqn.primitive!r} refers to variable {atom.id} at "
+                    f"shape {here} but it is BOUND at shape {bound}: a "
+                    f"value has one shape, and an emission that read the "
+                    f"reference would model a different array than the one "
+                    f"the query computes (malformed IR)"
+                )
+        for atom in (*eqn.invars, *eqn.outvars):
+            if not isinstance(atom, ir.Var):
+                continue
+            box = self.env.get(atom.id)
+            if box is None:
+                continue  # no top-level box: witness 1 above is what stands
+            here = tuple(atom.aval.shape)
+            if tuple(box.shape) != here:
+                raise _Decline(
+                    f"{eqn.primitive!r} refers to variable {atom.id} at "
+                    f"shape {here} but interval propagation computed a box "
+                    f"of shape {tuple(box.shape)} for it: the two legs are "
+                    f"modelling different arrays, and the emission may not "
+                    f"answer an obligation the propagation left open by "
+                    f"reading a program the propagation never saw"
+                )
 
     def _validate(self, eqn: ir.JaxprEqn) -> None:
         prim = eqn.primitive
@@ -2052,6 +2741,14 @@ class _Slicer:
                 head + fact + "; the coverage line records how the "
                 "interval leg treated it on this run"
             )
+        # THE ONE-SHAPE-PER-VALUE CROSS-CHECK, before any per-primitive form
+        # rule and before any plan is built (audit 0.2.0 S12′). It sits after
+        # the two declines above only so that an unsupported or un-inlinable
+        # primitive keeps naming THAT as its reason — both of those decline
+        # the equation either way, so nothing reaches a plan through the
+        # gap. See :meth:`_one_shape_per_value` for what each of its two
+        # witnesses covers and where each is blind.
+        self._one_shape_per_value(eqn)
         params = eqn.params_dict()
         if prim in _BOOL_OPS:
             dtypes = [a.aval.dtype for a in eqn.invars]
@@ -2565,17 +3262,21 @@ class _Slicer:
         if self.poisoned is not None:
             raise _Decline(self.poisoned)
         root = self._resolve(assert_eqn.invars[0])
-        root_size = _size(root.aval.shape)
+        # ONE READ, AND THE COUNT IS TAKEN AFTER THE VERDICT — audit 0.2.0
+        # B6 audit 4, F3. `root_size` was computed here from the raw
+        # objects, BEFORE `_shape_problem` had said anything about them.
+        root_problem, root_extents = _extents(root.aval.shape)
         if not _is_bool_dtype(root.aval):
             raise _Decline(
                 f"assert operand has dtype {root.aval.dtype!r}, expected bool"
             )
-        root_problem = _shape_problem(root.aval.shape)
         if root_problem is not None:
             raise _Decline(
-                f"assert operand has shape {tuple(root.aval.shape)} with "
-                f"{root_problem}"
+                f"assert operand has shape "
+                f"{_safely(lambda: repr(tuple(root.aval.shape)), '<unreadable>')} "
+                f"with {root_problem}"
             )
+        root_size = _size(root_extents)
         if root_size == 0:
             # zero elements: the universal claim is vacuously true, and
             # interval propagation already discharges it (matching measured
@@ -2583,7 +3284,7 @@ class _Slicer:
             # reaches escalation through the normal path — a direct ask
             # declines rather than mints a vacuous proof obligation.
             raise _Decline(
-                f"assert operand has shape {tuple(root.aval.shape)} with "
+                f"assert operand has shape {root_extents} with "
                 f"zero elements: the empty universal claim is vacuously "
                 f"true and is decided by interval propagation, not by "
                 f"emission"
@@ -2648,16 +3349,14 @@ class _Slicer:
         # cannot see). One gate, both quantities, both quoted.
         element_terms = 0
         for vid in inputs:
-            decl_shape = tuple(
-                self.producers[vid].params_dict().get("shape", ())
+            # through _declared_shape, which is THE reader of a
+            # declaration's element count — see its docstring: the budget,
+            # the input-term construction below and _binding_shape must
+            # all count the same elements the emission mints, and one
+            # function is how that stops being a coincidence
+            element_terms += _size(
+                self._declared_shape(self.producers[vid], vid)
             )
-            problem = _shape_problem(decl_shape)
-            if problem is not None:
-                raise _Decline(
-                    f"input declaration of shape {decl_shape!r} has "
-                    f"{problem}"
-                )
-            element_terms += _size(tuple(int(d) for d in decl_shape))
         for _, eqn in seen_eqns.values():
             prim = eqn.primitive
             if prim in _STRUCTURAL or prim in _IDENTITY_HARNESS:
@@ -2721,8 +3420,14 @@ class _Slicer:
         used_consts: dict[int, object] = {}
         for cid in const_ids:
             c_aval = self.const_avals.get(cid)
+            c_extents: tuple[int, ...] | None = None
             if c_aval is not None:
-                problem = _shape_problem(c_aval.shape)
+                # ONE READ — audit 0.2.0 B6 audit 4, F3. This screened the
+                # shape with `_shape_problem` and then counted it TWICE
+                # more with `_size(c_aval.shape)`, three reads of the same
+                # self-describing objects where the guard had validated
+                # only the first.
+                problem, c_extents = _extents(c_aval.shape)
                 if problem is not None:
                     # P1(b): the slicer rebuilds values independently of
                     # the propagation, so it must refuse the refused
@@ -2730,14 +3435,15 @@ class _Slicer:
                     # a lying consumer reference never shows it
                     raise _Decline(
                         f"constvar {cid} has aval shape "
-                        f"{tuple(c_aval.shape)} with {problem}"
+                        f"{_safely(lambda: repr(tuple(c_aval.shape)), '<unreadable>')} "
+                        f"with {problem}"
                     )
             vals = _decode_elements(self.consts[cid])
-            if c_aval is not None and len(vals) != _size(c_aval.shape):
+            if c_extents is not None and len(vals) != _size(c_extents):
                 raise _Decline(
                     f"constvar {cid} decodes to {len(vals)} element(s) "
-                    f"but its aval shape {tuple(c_aval.shape)} holds "
-                    f"{_size(c_aval.shape)} (aval/value mismatch, "
+                    f"but its aval shape {c_extents} holds "
+                    f"{_size(c_extents)} (aval/value mismatch, "
                     f"malformed IR)"
                 )
             for v in vals:
@@ -2790,18 +3496,32 @@ class _Slicer:
                     f"input declaration with bounds ({lo!r}, {hi!r}) has "
                     f"no emission (empty or NaN-bounded set)"
                 )
-            shape = tuple(int(d) for d in params.get("shape", ()))
-            if any(d < 0 for d in shape):
-                # an empty declared set (fix-re-attack R1): no array of a
-                # negative-extent shape exists, so there is nothing to
-                # declare and any universal claim over it is vacuous —
-                # the public API refuses this at declaration; from_dict
-                # queries decline here, quoted
-                raise _Decline(
-                    f"input declaration of shape {shape} has a negative "
-                    f"extent: no jax program constructs such an array, so "
-                    f"the declared set is empty"
-                )
+            # THE SAME READER the budget above and _binding_shape use, so
+            # the shape this mints terms from is by construction the shape
+            # the cross-check compared every reference against. An empty
+            # declared set (a negative extent — fix-re-attack R1) declines
+            # inside it, through `_extents`: no array of such a shape
+            # exists, so there is nothing to declare and any universal
+            # claim over it is vacuous.
+            #
+            # AND THIS CALL IS UNREACHABLE AS A GUARD, RECORDED RATHER THAN
+            # CLAIMED — audit 0.2.0 B6 audit 3, F5. Reverting it alone to
+            # its own independent read reds NOTHING in the suite, because
+            # the budget loop above has already called `_declared_shape`
+            # over the same vids and declined for the same reasons. The
+            # batch's "each change has a test that reds when reverted
+            # alone" was therefore false here, and `docs/norms.md` forbids
+            # exactly the move of asserting coverage by construction.
+            #
+            # It is KEPT, and not deleted, because it is not a guard: it is
+            # a VALUE read, and the value it must produce is the one the
+            # budget counted and the one `_binding_shape` compared every
+            # reference against. An independent read here — which is what
+            # the code did before — is UNSOUND-1 itself, a second reader of
+            # a declaration's element count implementing its own rule. That
+            # no test can tell the two apart today is a fact about today's
+            # readers agreeing, not a reason to let them diverge again.
+            shape = self._declared_shape(self.producers[vid], vid)
             k = self.any_order[vid]
             if shape == ():
                 slice_inputs.append(
@@ -2919,11 +3639,25 @@ def slice_obligation(
     index: int,
     env: Mapping[int, iv.IntervalArray],
     *,
+    assert_position: int | None = None,
     top_primitives: frozenset[str] | None = None,
     relational_assumes: tuple[RelationalAssume, ...] = (),
 ) -> ObligationSlice | DeclinedObligation:
     """Extract the slice for obligation ``index`` (top-level assert order),
     or decline with the reason quoted. Never raises on legal queries.
+
+    ``assert_position`` separates the two things ``index`` used to be at
+    once: WHICH top-level ``stelling_assert`` to slice, and WHICH
+    obligation number to report. They coincide exactly when every
+    obligation is a top-level assert, and they stop coinciding the moment
+    one ``assert_`` is written inside a ``jax.jit`` helper — audit 0.2.0
+    M17. Callers that know the association (:func:`slice_unknown_
+    obligations`, which reads it off
+    :attr:`stelling.propagate.ObligationReport.top_level_eqn_pos`) pass it;
+    a caller that does not leaves it ``None`` and gets the old
+    ``index``-is-the-position reading, which is right for a query whose
+    asserts are all top-level and is the only thing an uninformed caller
+    can honestly assume.
 
     ``top_primitives`` (message wording only, never admission): the
     primitives the interval RUN recorded as fallen-to-⊤, from
@@ -2938,11 +3672,38 @@ def slice_obligation(
     what :func:`stelling.verdict._bar_scope`'s re-derivation used to be short
     of, and why it failed to recognise an HONEST record on every
     assume-carrying query (audit 0.2.0 M10). It re-derives the tuple from its
-    own ``closed`` and passes it here now, so the two slices agree — this
-    paragraph is why the argument exists, not a live disclosure."""
+    own ``closed`` and passes it here now, so the two slices agree ON THEIR
+    AXIOMS — this paragraph is why the argument exists, not a live
+    disclosure.
+
+    **THEY DO NOT ALWAYS AGREE ON WHICH ASSERT THEY ARE ABOUT, and that IS a
+    live disclosure as of the B6/B7 merge.** The sentence above was written
+    on a tree where ``index`` and ``assert_position`` could not diverge,
+    because a query with a nested ``assert_`` was refused WHOLLY at
+    escalation. It is not that tree. ``_bar_scope`` is exactly the
+    "uninformed caller" the ``assert_position`` paragraph above describes —
+    it holds ``closed`` and a decided-index set and no propagation, so it
+    cannot read ``top_level_eqn_pos`` — and from the first nested
+    ``assert_`` onward its index-is-the-position reading names a different
+    assert than :func:`slice_unknown_obligations` sliced. That direction is
+    safe (the re-derived slice reproduces neither recorded hash, so the bar
+    WIDENS) and it costs precision, not soundness. See
+    :func:`stelling.verdict._bar_scope`'s block comment for the
+    measurement."""
     jaxpr = closed.jaxpr
     asserts = [e for e in jaxpr.eqns if e.primitive == "stelling_assert"]
-    if index >= len(asserts):
+    position = index if assert_position is None else assert_position
+    # THE RANGE TEST IS TWO-SIDED, and the lower side is new. A negative
+    # index WITHIN range has always been Python indexing from the end and
+    # stays that way (it is measured in
+    # `test_what_a_stray_index_ACTUALLY_DOES_all_four_of_them`); one PAST the
+    # start used to raise a raw `IndexError` out of a function whose contract
+    # is the second line of this docstring, and reached the whole-query bar
+    # through `stelling.verdict._bar_scope`'s outer `except` rather than
+    # through the decline channel. An out-of-range index is not an internal
+    # error and should not be reported as one, so it is named here rather
+    # than left to the net below.
+    if not -len(asserts) <= position < len(asserts):
         return DeclinedObligation(
             index=index,
             reason=(
@@ -2950,7 +3711,7 @@ def slice_obligation(
                 f"stelling_assert equation"
             ),
         )
-    assert_eqn = asserts[index]
+    assert_eqn = asserts[position]
     try:
         return _Slicer(
             closed, env, top_primitives, relational_assumes
@@ -2959,6 +3720,116 @@ def slice_obligation(
         return DeclinedObligation(
             index=index, reason=d.reason, source_info=assert_eqn.source_info
         )
+    except ir.TranscriptionError as t:
+        # A MALFORMED DOCUMENT IS NOT A STELLING DEFECT, and the sentence
+        # must not say it is. The slicer REBUILDS equations as it inlines a
+        # transparent call body (:meth:`_Slicer._renumber_eqn`), so
+        # `ir.JaxprEqn.__post_init__`'s own construction checks run again
+        # over the descended scope — and a document that only reaches the
+        # library through a public dataclass can fail one there. Routed to
+        # the decline channel with the transcription refusal quoted: the
+        # obligation stays UNKNOWN either way, but a reader is told the IR
+        # is malformed rather than that the tool broke (which is what the
+        # generic net below would have said, in the M17′ wording that audit
+        # already named as misleading).
+        return DeclinedObligation(
+            index=index,
+            reason=(
+                f"the obligation's computation could not be re-transcribed "
+                f"for slicing: {t}"
+            ),
+            source_info=assert_eqn.source_info,
+        )
+    except Exception as e:  # noqa: BLE001 — guard rule: degrade, quoted
+        # THIS FUNCTION'S CONTRACT IS THE SECOND LINE OF ITS DOCSTRING and
+        # it was breakable. Audit 0.2.0 S12's other half: a `dot_general`
+        # whose operands' contracted extents disagreed indexed off the end
+        # of the constant operand and raised a raw `IndexError` here — an
+        # exception class NO caller handles. `escalate` iterates
+        # `slice_unknown_obligations` in the FOR HEADER, outside its own
+        # per-obligation `except Exception` net, so the crash escaped the
+        # whole call and a batch caller lost every other obligation's
+        # verdict with it.
+        #
+        # The extent defect itself is fixed at its root (the shared shape
+        # oracle `_dot_general_plan` now drives), so this net catches
+        # NOTHING that is currently constructable — which is the point. It
+        # is the same posture, in the same words, that `stelling.solvers.
+        # escalate` already takes around `_dispatch_obligation`: mid-analysis
+        # a bug degrades to UNKNOWN, QUOTED, never silently and never as a
+        # crash. Quoted is what keeps it from being a swallow: the sentence
+        # names the exception class and its message, rides into the
+        # obligation's `detail`, and says INTERNAL ERROR in those words, so
+        # a reader sees a stelling defect rather than an undecided
+        # obligation.
+        return DeclinedObligation(
+            index=index,
+            reason=(
+                f"slice attempted; internal error: {type(e).__name__}: {e}"
+            ),
+            source_info=assert_eqn.source_info,
+        )
+
+
+def _safely(read, fallback):
+    """``read()``, or ``fallback`` when reading raises.
+
+    For composing a message ABOUT AN OBJECT ALREADY KNOWN TO BE
+    MISBEHAVING, and for nothing else — the inside of an exception
+    handler, and the refusal a guard raises once it has decided to refuse.
+    Neither may itself be able to raise: a handler that re-raises costs
+    every sibling's verdict exactly as the original raise would have, and
+    a decline whose message raises is not a decline at all but the raw
+    escape the guard existed to prevent (audit 0.2.0 B6 audit 3, F3). The
+    same swallow anywhere on a DECIDING path would hide a defect instead
+    of quoting one, so the fallbacks are visible placeholders: a reader
+    sees that something could not be read, rather than a plausible value.
+    """
+    try:
+        return read()
+    except Exception:  # noqa: BLE001 — the handler's own totality
+        return fallback
+
+
+def _frames(v) -> tuple | None:
+    """``v`` read as a tuple of source frames, or ``None`` when it is not
+    one — TOTAL, and that is the whole point of it.
+
+    :attr:`stelling.ir.JaxprEqn.source_info` and
+    :attr:`stelling.propagate.ObligationReport.source_info` are both
+    declared ``tuple[str, ...]`` and ``from_dict`` builds them that way, so
+    on every query that comes through the documented door this is
+    ``tuple`` in and ``tuple`` out. ``ir.ClosedJaxpr`` is a public
+    dataclass, though, and ``SOUNDNESS.md`` names hand-built IR as in
+    scope: the association check in :func:`slice_unknown_obligations` used
+    to write ``tuple(eqn.source_info)`` directly and raised ``TypeError``
+    on an ``int`` there (audit 0.2.0 B6/M17′).
+
+    A ``list`` is accepted because the check it serves is about the FRAMES,
+    not about which sequence type holds them, and the old ``tuple(...)``
+    normalization accepted one. Anything else — an ``int``, a bare ``str``
+    (whose ``tuple()`` is a tuple of CHARACTERS, so coercing it would
+    compare the wrong thing rather than raise) — is not a frame list, and
+    the caller reads ``None`` as "this association cannot be checked",
+    which is a decline. Not raising is the structural guarantee; the net
+    around the caller's body is the backstop for the lines this helper does
+    not cover.
+
+    **AND THE ``list`` ARM IS NETTED, because ``isinstance`` is a claim
+    about the type and not about the object** — audit 0.2.0 B6 re-audit R5.
+    A ``list`` SUBCLASS whose ``__iter__`` raises satisfies the
+    ``isinstance`` test and then raises inside ``tuple(v)``, so "TOTAL" was
+    a docstring assertion this function did not keep. It keeps it now: a
+    value that will not iterate is not a frame list either, and reads as
+    ``None`` by exactly the same reasoning as an ``int`` does."""
+    if isinstance(v, tuple):
+        return v
+    if isinstance(v, list):
+        try:
+            return tuple(v)
+        except Exception:  # noqa: BLE001 — totality is the contract here
+            return None
+    return None
 
 
 def slice_unknown_obligations(
@@ -2968,46 +3839,228 @@ def slice_unknown_obligations(
 ) -> tuple[ObligationSlice | DeclinedObligation, ...]:
     """Slices (or quoted declines) for exactly the obligations interval
     propagation left ``unknown``. Discharged and violated obligations are
-    already decided and are not re-decided."""
+    already decided and are not re-decided.
+
+    **THE ASSOCIATION IS PER-OBLIGATION, AND IT IS CHECKED RATHER THAN
+    GUESSED** — audit 0.2.0 M17. Escalation slices a top-level
+    ``stelling_assert``; an obligation recorded from inside a sub-jaxpr has
+    no such equation and must decline. This used to be decided by COUNTING:
+    when ``len(asserts) != len(propagation.obligations)`` nothing could be
+    mapped and EVERY unknown obligation declined. One ``assert_`` written
+    inside a ``jax.jit`` helper therefore cost solver escalation for every
+    other obligation in the query, and the resulting UNKNOWN was widely
+    misread as the per-obligation element budget (which is genuinely
+    per-obligation and was never the cause).
+
+    **The count check was SOUND, and stating that precisely is what says
+    where the defect actually is.** Every top-level ``stelling_assert``
+    records exactly one obligation (the walk visits every top-level
+    equation, and the malformed-shape screen explicitly EXEMPTS asserts
+    from declining so that they are still recorded), so
+    ``len(obligations) >= len(asserts)`` always, with equality exactly when
+    no obligation came from a sub-jaxpr — and under equality index ``k``
+    really is assert ``k``. Nothing was ever mis-sliced. The defect is
+    purely that the instrument answers a PER-OBLIGATION question with a
+    WHOLE-QUERY number: the unmappable obligation is one of them, and its
+    siblings are ordinary top-level equations with ordinary slices that
+    were being thrown away with it.
+
+    So the walk records where it saw each assert
+    (:attr:`stelling.propagate.ObligationReport.top_level_eqn_pos`) and
+    this function VERIFIES that record against the IR it was handed —
+    the position must name a top-level ``stelling_assert``, it must carry
+    the same ``source_info`` the obligation carries, and no two obligations
+    may claim it. An obligation failing any of those, or carrying no
+    position at all, declines individually with the reason quoted. The
+    safety property is unchanged and stated the same way: **an obligation
+    whose association cannot be trusted still declines** — what changed is
+    that its siblings no longer decline with it.
+
+    **AND IT MAY NOT RAISE — audit 0.2.0 B6/M17′.** Both callers
+    (:func:`stelling.solvers.escalate`, :func:`stelling.affine.
+    refine_propagation`) iterate this function IN THE ``for`` HEADER,
+    outside their own per-obligation ``except Exception`` net, so anything
+    raised here escapes the whole call and a batch caller loses every
+    obligation's verdict — not only the offending one. That is precisely
+    the whole-query-for-a-per-obligation-question failure M17 was about,
+    and the M17 fix itself opened a fresh instance of it: the association
+    check below called ``tuple(...)`` on a ``source_info`` it had not
+    established was iterable, and on hand-built IR carrying a non-tuple
+    there (``ir.ClosedJaxpr`` is a public dataclass; ``from_dict``
+    coerces only at its own door) ``escalate`` raised ``TypeError: 'int'
+    object is not iterable`` where ``dee8bc2`` returned
+    ``[(0, 'violated-witness')]``.
+
+    So the per-obligation body is netted, and netted PER OBLIGATION rather
+    than around the whole function: a net around the whole function would
+    answer the per-obligation question with a whole-query outcome again.
+
+    **THE PREAMBLE IS OUTSIDE THE NET, AND THE REASON IS SHADOWING, NOT
+    TOTALITY** — audit 0.2.0 B6 re-audit R6. The claim that used to stand
+    here, that the preamble "cannot raise on any object", is false: it
+    iterates ``closed.jaxpr.eqns`` and ``propagation.obligations``, reads
+    ``e.primitive`` and ``o.top_level_eqn_pos``, and hashes the latter into
+    ``claimants`` — eight sites, any of which a hostile object can make
+    raise. What is true is that **none of them is the FIRST raise** on such
+    an object. ``escalate`` and ``refine_propagation`` both build their
+    interval environment (``propagate.interval_env(closed)``) and their own
+    list comprehensions over ``propagation.obligations`` before they call
+    this function at all, so an ``obligations`` that will not iterate, or a
+    ``jaxpr`` that will not yield equations, has already raised in the
+    caller — where it is the caller's own crash and not a lost batch of
+    verdicts. The residual is named rather than denied: an object that
+    survives those earlier reads and raises only on ``.primitive``, on
+    ``.top_level_eqn_pos``, or on ``hash()`` of what the latter returns,
+    raises here and takes the whole call with it. Nothing constructs one
+    today, and if one is ever built the fix is to move the preamble into a
+    per-obligation net, not to restore the sentence.
+    """
     unknown = [o for o in propagation.obligations if o.status == "unknown"]
-    asserts = [
-        e for e in closed.jaxpr.eqns if e.primitive == "stelling_assert"
-    ]
-    if len(asserts) != len(propagation.obligations):
-        # obligations were recorded from inside sub-jaxprs (transparent
-        # wrappers / cond branches): index-based mapping onto top-level
-        # asserts would be a guess, so every unknown obligation declines.
-        # The call descent inlines sub-jaxpr COMPUTATION only; obligations
-        # remain top-level-only, exactly as before.
-        return tuple(
-            DeclinedObligation(
-                index=o.index,
-                reason=(
-                    f"{len(propagation.obligations)} obligation(s) but "
-                    f"{len(asserts)} top-level stelling_assert equation(s): "
-                    f"asserts nested in sub-jaxprs cannot be mapped to "
-                    f"slices"
-                ),
-                source_info=o.source_info,
+    eqns = closed.jaxpr.eqns
+    # position in the top-level eqns -> ordinal among top-level asserts,
+    # which is the index `slice_obligation` selects by
+    ordinal_of_pos: dict[int, int] = {}
+    for pos, e in enumerate(eqns):
+        if e.primitive == "stelling_assert":
+            ordinal_of_pos[pos] = len(ordinal_of_pos)
+    claimants: dict[int, int] = {}
+    for o in propagation.obligations:
+        if o.top_level_eqn_pos is not None:
+            claimants[o.top_level_eqn_pos] = (
+                claimants.get(o.top_level_eqn_pos, 0) + 1
             )
-            for o in unknown
-        )
     # the run record rides along for message wording (audit R2/R3): the
     # unsupported-primitive decline describes what the interval leg did
     # on THIS run from the coverage instrument's own record
     tops = frozenset(
         name for name, _ in propagation.coverage.unknown_primitives
     )
-    return tuple(
-        slice_obligation(
+
+    def _decide(o) -> ObligationSlice | DeclinedObligation:
+        pos = o.top_level_eqn_pos
+        if pos is None:
+            return DeclinedObligation(
+                index=o.index,
+                reason=(
+                    "the assert this obligation was recorded from is not a "
+                    "top-level equation of the query (it sits inside a "
+                    "sub-jaxpr — a transparent call body, a cond branch, or "
+                    "an undescended scan/while body), and escalation slices "
+                    "top-level asserts only"
+                ),
+                source_info=o.source_info,
+            )
+        if pos not in ordinal_of_pos:
+            return DeclinedObligation(
+                index=o.index,
+                reason=(
+                    f"the recorded top-level position {pos} of this "
+                    f"obligation's assert does not name a stelling_assert "
+                    f"equation in the query handed to escalation: the "
+                    f"propagation and the query disagree, so no slice can be "
+                    f"attributed to it"
+                ),
+                source_info=o.source_info,
+            )
+        # READ ONCE. The count and the sentence that quotes it must be the
+        # SAME read: `claimants.get(pos, 0)` followed by `claimants[pos]`
+        # disagreed whenever the key was absent, and the absent case is
+        # reachable — `claimants` was built from a first read of every
+        # obligation's `top_level_eqn_pos` and `pos` here is a SECOND read
+        # of the same attribute, so an obligation whose attribute does not
+        # answer the same way twice lands on `0 != 1` and then raises
+        # `KeyError`, which the net below turns the intended sentence into
+        # "internal error: KeyError: 3" (audit 0.2.0 B6 re-audit).
+        n_claimants = claimants.get(pos, 0)
+        if n_claimants != 1:
+            return DeclinedObligation(
+                index=o.index,
+                reason=(
+                    f"{n_claimants} obligations claim top-level assert "
+                    f"position {pos}: the association is not one-to-one, so "
+                    f"none of them may be sliced by it"
+                ),
+                source_info=o.source_info,
+            )
+        eqn_frames = _frames(eqns[pos].source_info)
+        obl_frames = _frames(o.source_info)
+        if eqn_frames is None or obl_frames is None:
+            # NOT the same finding as a disagreement, and saying so is the
+            # difference between a reader who can act and one who reads
+            # "traced at 7 but records 7" and concludes the tool is broken.
+            # Nothing was compared here: one of the two sides is not a list
+            # of frames at all, so the association is UNCHECKABLE rather
+            # than checked-and-refuted.
+            side = "the query's assert" if eqn_frames is None else (
+                "this obligation"
+            )
+            bad = eqns[pos].source_info if eqn_frames is None else o.source_info
+            return DeclinedObligation(
+                index=o.index,
+                reason=(
+                    f"the source_info of {side} at top-level position {pos} "
+                    f"is {bad!r}, which is not a list of source frames: the "
+                    f"association between the propagation's record and the "
+                    f"query cannot be CHECKED at all, so no slice may be "
+                    f"attributed to it"
+                ),
+                source_info=o.source_info,
+            )
+        if eqn_frames != obl_frames:
+            return DeclinedObligation(
+                index=o.index,
+                reason=(
+                    f"the assert at top-level position {pos} was traced at "
+                    f"{eqn_frames!r} but this obligation records "
+                    f"{obl_frames!r}: the propagation and the query "
+                    f"disagree, so no slice can be attributed to it"
+                ),
+                source_info=o.source_info,
+            )
+        return slice_obligation(
             closed,
             o.index,
             env,
+            assert_position=ordinal_of_pos[pos],
             top_primitives=tops,
             relational_assumes=propagation.relational_assumes,
         )
-        for o in unknown
-    )
+
+    def one(o) -> ObligationSlice | DeclinedObligation:
+        # THE NET, per obligation. See this function's docstring: both
+        # callers iterate it in the `for` HEADER, so a raise here is not one
+        # obligation's problem but every obligation's. `slice_obligation`
+        # carries the same posture around `_Slicer.slice`; this one covers
+        # everything OUTSIDE that call — the association checks above, which
+        # is where B6/M17′ actually escaped from.
+        #
+        # AND THE HANDLER IS ITSELF NETTED — audit 0.2.0 B6 re-audit R7. A
+        # net that re-raises while composing its own message is not a net.
+        # Three of the four reads in the block below can raise on a hostile
+        # object: `str(e)` runs the exception's own `__str__`,
+        # `getattr(o, "index", -1)` returns the default only for
+        # `AttributeError` and propagates anything else a property raises,
+        # and `getattr(o, "source_info", ())` likewise. Each is therefore
+        # taken through `_safely`, which substitutes a quoted placeholder
+        # rather than a second traceback: the point of this net is that ONE
+        # obligation's malformation costs one obligation's verdict, and an
+        # escape from the handler costs every sibling's exactly as the
+        # original raise would have.
+        try:
+            return _decide(o)
+        except Exception as e:  # noqa: BLE001 — guard rule: degrade, quoted
+            return DeclinedObligation(
+                index=_safely(lambda: o.index, -1),
+                reason=(
+                    f"associating this obligation with a top-level assert "
+                    f"attempted; internal error: "
+                    f"{_safely(lambda: type(e).__name__, '<unreadable>')}: "
+                    f"{_safely(lambda: str(e), '<unreadable message>')}"
+                ),
+                source_info=_safely(lambda: o.source_info, ()),
+            )
+
+    return tuple(one(o) for o in unknown)
 
 
 # -- exact-rational replay ----------------------------------------------------

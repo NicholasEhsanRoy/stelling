@@ -867,11 +867,32 @@ def test_slice_params_contradicting_the_aval_decline_with_the_form_quoted():
     assert "'slice'" in e.value.reason
     assert "outside the operand's extent" in e.value.reason
     # and params consistent with the OPERAND but not the OUTPUT aval also
-    # decline (the routing's shape must match the recorded aval exactly)
+    # decline (the routing's shape must match the recorded aval exactly).
+    #
+    # THE OPERAND IS NOW BOUND AT (3,) IN THE SLICER THIS RUNS AGAINST, and
+    # that is a fixture repair, not a scope change (audit 0.2.0 S12′). It
+    # used to hand the shape-(1,) slicer an operand `var(1, aval((3,)))` — a
+    # reference disagreeing with its own binding, which is an instance of
+    # the very class `_Slicer._one_shape_per_value` now refuses one step
+    # BEFORE the routing. That decline is right, and it is not the rule this
+    # test is named for, so the operand is given a slicer that really does
+    # bind it at (3,) and the case reaches the routing again. The OUTPUT var
+    # is deliberately one the query does not bind: the cross-check's
+    # propagated-box leg reads outvars too, so a bound outvar would likewise
+    # answer first.
+    q3 = single_element_slice_query(
+        shape=(3,),
+        params=[
+            ("start_indices", (0,)),
+            ("limit_indices", (3,)),
+            ("strides", None),
+        ],
+    )
+    slicer3 = _Slicer(q3, interval_env(q3))
     bad2 = eqn(
         "slice",
         [var(1, aval((3,)))],
-        var(2, aval((1,))),  # aval claims one element; params select two
+        var(99, aval((1,))),  # aval claims one element; params select two
         [
             ("start_indices", (0,)),
             ("limit_indices", (2,)),
@@ -879,7 +900,7 @@ def test_slice_params_contradicting_the_aval_decline_with_the_form_quoted():
         ],
     )
     with pytest.raises(_Decline) as e2:
-        slicer._validate(bad2)
+        slicer3._validate(bad2)
     assert "contradicts the recorded aval shape" in e2.value.reason
 
 

@@ -29,6 +29,7 @@ Hand-built IR (no jax) covering the array-emission build's contracts:
 
 from __future__ import annotations
 
+import array as _arraymod
 import hashlib
 import struct
 from fractions import Fraction
@@ -1861,6 +1862,134 @@ def test_type_level_declaration_param_aval_disagreement_is_unconstructable():
         )
 
 
+def test_the_declaration_check_compares_BOTH_holders_and_refuses_the_rest():
+    """AUDIT 0.2.0 B6 RE-AUDIT, UNSOUND-1 — the check above used to run only
+    `if isinstance(shape, tuple)`, so a `list` shape param SKIPPED it
+    entirely and the exact disagreement the test above forbids was
+    constructible one bracket away. `_validate_param_value` recursed into
+    tuples and not lists either, so nothing else read it. A validator that
+    silently passes a param class it cannot read is not a validator for that
+    class; BOTH holders are now compared, and every other container type is
+    refused.
+
+    RENAMED at audit 0.2.0 B6 audit 4, F1. It read
+    `..._reads_the_EXTENTS_not_the_param_type`, which was true of
+    `d6b6d0b` — where the check really did read any sequence of extents —
+    and false from `30d4b04`, where it became a check on the param's
+    CONTAINER TYPE and nothing else. TWO `CHANGELOG.md` attribution rows
+    quote the old name, and they quote it for two different reasons: `R7`
+    is driven against a clone at `d6b6d0b`, where the old name is the one
+    in the tree; `OPT` is driven on `30d4b04`, where it is also the one in
+    the tree. Both now carry a rename annotation, and
+    `test_an_attribution_row_may_not_quote_a_test_that_does_not_exist`
+    holds that they do (audit 0.2.0 B6 audit 5, F4 — the annotation was on
+    `OPT` alone and named `d6b6d0b`, which is the tree `OPT`'s mutation
+    reproduces rather than the one it runs on). The rule this test holds
+    is `ir._SHAPE_PARAM_CONTAINERS`, swept over a computed population in
+    `tests/test_shape_param_rule.py`.
+
+    Note what is NOT refused here, and deliberately: a declaration with no
+    `shape` param at all. Hand-built IR legitimately omits params (see
+    `ir._validate_required_params`), so absence stays blessed — and the
+    slicer's own `_one_shape_per_value` is what stands behind it, which is
+    exactly why this door is not the defect's soundness boundary. See
+    `tests/test_aval_lie_both_faces.py` for the slicer half."""
+    for holder in (list, tuple):
+        with pytest.raises(
+            ir.TranscriptionError, match="contradicts the outvar aval"
+        ):
+            ir.JaxprEqn(
+                primitive="stelling_any",
+                invars=(),
+                outvars=(var(0, aval((3,))),),
+                params=(("shape", holder([2])), ("dtype", "float64"),
+                        ("lo", 0.0), ("hi", 1.0)),
+            )
+        # ... and AGREEING extents in the same holder are still accepted
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((3,))),),
+            params=(("shape", holder([3])), ("dtype", "float64"),
+                    ("lo", 0.0), ("hi", 1.0)),
+        )
+    # a param held in any OTHER container is REFUSED, not skipped: two
+    # self-descriptions cannot be reconciled if one of them is not the
+    # thing a declaration records its extents in. `str`/`bytes` are
+    # sequences and are not shapes — `tuple("34")` is a tuple of
+    # CHARACTERS, so coercing one would compare something the declaration
+    # never said. `memoryview` and `array.array` join them not by being
+    # enumerated but by falling outside the POSITIVE rule
+    # (`ir._SHAPE_PARAM_CONTAINERS`) that replaced the enumeration — audit
+    # 0.2.0 B6 audit 3. Both read as `(52, 52)` through `tuple(...)`, the
+    # identical misread as `b"44"`, and the door ACCEPTED the memoryview
+    # form before this. The refusal now names the TYPE it refused, because
+    # "is not a sequence of extents" over `np.array([4])` was a sentence
+    # about something else (audit 0.2.0 B6 audit 4, F1).
+    for bad in (3, None, "34", b"34", memoryview(b"\x03"),
+                _arraymod.array("b", b"\x03")):
+        with pytest.raises(
+            ir.TranscriptionError, match="records its extents in"
+        ):
+            ir.JaxprEqn(
+                primitive="stelling_any",
+                invars=(),
+                outvars=(var(0, aval((3,))),),
+                params=(("shape", bad), ("dtype", "float64"),
+                        ("lo", 0.0), ("hi", 1.0)),
+            )
+    # absence stays legal, and is the form the slicer must cover alone
+    ir.JaxprEqn(
+        primitive="stelling_any",
+        invars=(),
+        outvars=(var(0, aval((3,))),),
+        params=(("dtype", "float64"), ("lo", 0.0), ("hi", 1.0)),
+    )
+
+
+def test_the_load_walk_recurses_into_LIST_params_as_well_as_tuples():
+    """AUDIT 0.2.0 B6 RE-AUDIT, UNSOUND-1, the second half of the door.
+
+    `ir._validate_param_value` dispatched on `ClosedJaxpr`, `Jaxpr`,
+    `Array`, `tuple` and `NamedTupleParam`. A `list` matched none of them,
+    so anything a list param held reached the rest of the library
+    unvalidated — which is the same omission, in the same function family,
+    that let a `list` `shape` param past `_validate_decl_eqn`.
+
+    Driven directly rather than through `from_dict`, and that is the honest
+    scope: `_decode` never builds a bare list, so no serialized document
+    reaches this arm today. It is closed because "the container type I
+    happened to enumerate" is not a reason for a validator to stop looking,
+    and the payload below is one only this walk can catch — a missing
+    required param is a LOAD-path refusal that `JaxprEqn.__post_init__`
+    deliberately does not make."""
+    inner = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(),
+            invars=(var(0, aval((3,))),),
+            outvars=(var(1, aval(())),),
+            eqns=(
+                ir.JaxprEqn(
+                    primitive="reduce_sum",
+                    invars=(var(0, aval((3,))),),
+                    outvars=(var(1, aval(())),),
+                    params=(),  # `axes` is a param jax supplies on every one
+                ),
+            ),
+        ),
+        consts=(),
+    )
+    # constructible: hand-built IR may omit params
+    with pytest.raises(ir.TranscriptionError, match="missing param"):
+        ir._validate_param_value(inner, "eqn.params['direct']")
+    with pytest.raises(ir.TranscriptionError, match="missing param"):
+        ir._validate_param_value((inner,), "eqn.params['in a tuple']")
+    with pytest.raises(ir.TranscriptionError, match="missing param"):
+        ir._validate_param_value([inner], "eqn.params['in a list']")
+    with pytest.raises(ir.TranscriptionError, match="missing param"):
+        ir._validate_param_value([[inner]], "eqn.params['nested']")
+
+
 def test_type_level_const_pairing_disagreement_is_unconstructable():
     # the P1 constvar: a scalar const under a non-scalar constvar aval
     j = ir.Jaxpr(
@@ -1891,3 +2020,186 @@ def test_the_door_still_refuses_malformed_dicts():
         ir.ClosedJaxpr.from_dict(corrupted)
     # the uncorrupted dict still loads, hash byte-identical
     assert ir.ClosedJaxpr.from_dict(d).content_hash() == q.content_hash()
+
+
+# -- audit 0.2.0 B6 audit 3, F1 / F2 / F3: the door's own totality ----------
+
+
+class _IndexRaises:
+    def __init__(self, exc):
+        self._exc = exc
+
+    def __index__(self):
+        raise self._exc
+
+    def __repr__(self):
+        return f"_IndexRaises({type(self._exc).__name__})"
+
+
+class _IndexOK_ReprRaises:
+    """A PERFECTLY WELL-FORMED extent whose `__repr__` refuses."""
+
+    def __init__(self, k):
+        self._k = k
+
+    def __index__(self):
+        return self._k
+
+    def __repr__(self):
+        raise RuntimeError("repr refuses")
+
+
+class _TwoFacedExtent:
+    """`__index__` answers `first` once and `then` on every later call."""
+
+    def __init__(self, first, then):
+        self._answers = [first, then]
+        self.reads = 0
+
+    def __index__(self):
+        self.reads += 1
+        return self._answers[0] if self.reads == 1 else self._answers[1]
+
+    def __repr__(self):
+        return f"_TwoFacedExtent(reads={self.reads})"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [ValueError("index says no"), OverflowError("too big"),
+     RuntimeError("some other refusal")],
+    ids=["ValueError", "OverflowError", "RuntimeError"],
+)
+def test_the_door_refuses_whatever___index___raises(exc):
+    """AUDIT 0.2.0 B6 AUDIT 3, F2 — `_load_extent_problem` caught only
+    `TypeError`, and `operator.index` raises whatever `__index__` raises.
+
+    So a `ValueError` or an `OverflowError` from one extent came out of
+    `ir.Aval(...)` and `ir.JaxprEqn(...)` RAW — out of a public constructor,
+    which `_validate_decl_eqn`'s own docstring names as "the very class this
+    function is closing". The exception type an extent chooses is not a fact
+    about whether the document is malformed."""
+    with pytest.raises(ir.TranscriptionError, match="non-integer shape"):
+        ir.Aval(kind="ShapedArray", shape=(_IndexRaises(exc),), dtype="f8")
+    with pytest.raises(ir.TranscriptionError, match="non-integer shape"):
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((3,))),),
+            params=(("shape", (_IndexRaises(exc),)), ("dtype", "float64"),
+                    ("lo", 0.0), ("hi", 1.0)),
+        )
+
+
+def test_a_hostile___repr___cannot_raise_out_of_the_public_constructor():
+    """AUDIT 0.2.0 B6 AUDIT 3, F3 — and the sharpest form of it, because
+    THE DOCUMENT HERE IS WELL FORMED.
+
+    `_load_check`'s message is an ARGUMENT, so it is composed on the passing
+    path as well as the failing one. `_validate_decl_eqn` interpolated
+    `{shape!r}` into it unguarded, so a declaration whose extent answers
+    `__index__` with 4 — matching an outvar aval of `(4,)`, nothing at all
+    wrong with it — raised `RuntimeError: repr refuses` out of
+    `ir.JaxprEqn(...)`. A refusal that has not been decided on may not
+    crash, and one that has may not crash either: both quotes go through
+    `_safe_repr`."""
+    ok = ir.JaxprEqn(
+        primitive="stelling_any",
+        invars=(),
+        outvars=(var(0, aval((4,))),),
+        params=(("shape", (_IndexOK_ReprRaises(4),)), ("dtype", "float64"),
+                ("lo", 0.0), ("hi", 1.0)),
+    )
+    assert ok.primitive == "stelling_any"
+    # and a genuinely contradictory one still refuses, with the placeholder
+    # visible rather than a plausible value
+    with pytest.raises(ir.TranscriptionError) as ei:
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((4,))),),
+            params=(("shape", _ReprRaisesNotASequence()), ("dtype", "f8"),
+                    ("lo", 0.0), ("hi", 1.0)),
+        )
+    assert "records its extents in" in str(ei.value)
+    assert "<unreadable>" in str(ei.value), str(ei.value)
+
+
+class _ReprRaisesNotASequence:
+    def __iter__(self):
+        raise RuntimeError("will not iterate")
+
+    def __repr__(self):
+        raise RuntimeError("repr refuses")
+
+
+def test_the_door_compares_the_extents_it_VALIDATED_not_a_second_read():
+    """AUDIT 0.2.0 B6 AUDIT 3, F1, in `ir.py` — the same defect the slicer
+    carried, in the function that is supposed to be the door in front of it.
+
+    `_load_extent_problem` bound `k = operator.index(d)`, tested `k` and
+    DISCARDED it. `_validate_decl_eqn` then compared the RAW param objects
+    against the aval with `==`, and `_validate_array_value` re-read them
+    with `int(d)` for its byte-length product — so what the door validated
+    and what the door used were two different reads of one self-describing
+    object. Two reads of an object that answers differently each time is
+    the whole of this finding's mechanism.
+
+    Bound, the comparison is `int`-to-`int` and no `__eq__`, `__int__` or
+    later `__index__` can move it: an extent that says 4 to the guard is
+    compared as 4, and a later -1 cannot be smuggled past."""
+    d = _TwoFacedExtent(4, -1)
+    with pytest.raises(ir.TranscriptionError) as ei:
+        ir.JaxprEqn(
+            primitive="stelling_any",
+            invars=(),
+            outvars=(var(0, aval((2,))),),
+            params=(("shape", (d,)), ("dtype", "float64"),
+                    ("lo", 0.0), ("hi", 1.0)),
+        )
+    # the extents the door quotes are the ones it read, not a later answer
+    assert "shape param (4,) contradicts the outvar aval shape (2,)" in str(
+        ei.value
+    ), str(ei.value)
+    assert d.reads == 1, (
+        f"the door read the extent {d.reads} times; one read is the fix"
+    )
+    # the agreeing case is accepted on that same single read
+    d2 = _TwoFacedExtent(2, -1)
+    ir.JaxprEqn(
+        primitive="stelling_any",
+        invars=(),
+        outvars=(var(0, aval((2,))),),
+        params=(("shape", (d2,)), ("dtype", "float64"),
+                ("lo", 0.0), ("hi", 1.0)),
+    )
+    assert d2.reads == 1
+
+
+def test_the_byte_length_product_uses_the_extents_the_guard_validated():
+    """The other half of F1 in `ir.py`: `_validate_array_value` validated
+    `arr.shape` with `operator.index` and then computed its expected byte
+    length with a SECOND, different conversion (`int(d)`). A two-faced
+    extent was therefore length-checked against a number nobody validated.
+
+    AND WHAT THE GUARD VALIDATED IS NOW WHAT THE DATACLASS CARRIES — audit
+    0.2.0 B6 audit 5, F1. The assertion below used to read
+    ``a.shape == (d,)`` under the comment *"the dataclass still records
+    what it was given"*, and that WAS the residue: `_encode`, `to_numpy`
+    and every downstream reader then re-read the two-faced object and got
+    7 where the length check had got 2. One read, and the value read is
+    the value stored."""
+    d = _TwoFacedExtent(2, 7)
+    a = ir.Array(dtype="<f8", shape=(d,), data=b"\x00" * 16)
+    assert a.shape == (2,), a.shape
+    assert all(type(k) is int for k in a.shape), a.shape
+    # ... and the SERIALIZATION is that same value. This encoded `[7]` for a
+    # 16-byte array the door had length-checked at two elements.
+    assert ir._encode(a, False)["shape"] == [2]
+    assert d.reads == 1, (
+        f"the length check read the extent {d.reads} times; one read is the "
+        f"fix — the second read was `int(d)` and could disagree"
+    )
+    # a genuine length lie is still refused, quoting the validated extents
+    with pytest.raises(ir.TranscriptionError, match=r"expected 16"):
+        ir.Array(dtype="<f8", shape=(_TwoFacedExtent(2, 7),), data=b"\x00" * 8)
