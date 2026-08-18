@@ -205,6 +205,38 @@ SPDX-License-Identifier: Apache-2.0
 
 ### Soundness fixes
 
+**Batch B13 — the instruments that read as enforcing something**
+(`fix/B13-instrument-reach`). Branched from `3482822`. Nothing here is on
+the analysis, transfer or emission path; the one user-visible change is a
+refusal message, and it is here because the message was WRONG.
+
+- **A verdict replayed on a different jax now says so.**
+  `reproduce.write_reproducer` re-traces the subject and refuses when the
+  stored `query_content_hash` disagrees. It reported that disagreement as
+  *"this verdict is not about this subject's program"* — sending the reader
+  to look for a program difference — when the actual cause could be that
+  the jax version moved under an unchanged program. A jax bump can change a
+  query hash without changing a verdict (jax 0.11.1 gave `reduce_max` and
+  `reduce_min` an `out_sharding` param, measured), so this is reachable by
+  doing nothing but upgrading jax. The refusal now ENUMERATES every
+  difference the stamp can witness — jax version and precision config, both
+  at once when both differ — instead of branching to the first one it
+  finds. The direction is unchanged: every path still refuses, and a
+  verdict that should replay still replays across a jax bump.
+
+  `SOUNDNESS.md`'s entry for the query-identity break said there was
+  nothing to fix in stelling and named no consumer. There is one, and it is
+  this. Both sentences are withdrawn there.
+
+- **The const-fold tripwire's "this release has never been read" carve-out
+  no longer waves through real jax releases.** `is_release` treated a
+  release as a bare `X.Y.Z`; jax has shipped `0.9.0.1` (and `0.0`, `0.1`).
+  A four-component or post-release whose const-fold rule had moved landed
+  in the never-read state and the suite stayed green against an unread
+  rule. It now implements PEP 440's *final release*. Internal — no lane
+  and no user-facing behaviour keys on it — but it is a coverage hole in
+  the instrument that watches for jax moving underneath the tool.
+
 **Batch B12 — the from_dict document-schema batch**
 (`fix/B12-from-dict-structure`; audit 0.2.0 S15, S16). Branched from
 `a4e4056`. Every figure below was measured on that tree and on this one,
