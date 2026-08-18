@@ -205,17 +205,344 @@ SPDX-License-Identifier: Apache-2.0
 
 ### Soundness fixes
 
+**Batch B12 — the from_dict document-schema batch**
+(`fix/B12-from-dict-structure`; audit 0.2.0 S15, S16). Branched from
+`a4e4056`. Every figure below was measured on that tree and on this one,
+in `/home/nick/venvs/stelling-jax` (jax 0.11.0, python 3.12.3), 2026-08-18.
+
+- **`ClosedJaxpr.from_dict` now judges the TYPE the code declares at every
+  position it stores a document value at** (audit 0.2.0 **S15** and
+  **S16**; both reach the released **0.1.0** through `from_dict` and are
+  reproduced at the tag — see [SOUNDNESS.md](SOUNDNESS.md)). `ir._encode`
+  is a total function from IR to JSON with one arm per stored type, so the
+  JSON type at every position of a document is what that function writes
+  there; `_decode` judged almost none of it. Two false VERIFIEDs came out
+  of that, both from pure JSON with no attacker Python:
+
+  * **S15** — `<eqn>.primitive` had no type rule. `null`, `true`, `0`,
+    `-1`, `1.5`, `[]` and `[0]` all loaded, were silently reclassified as
+    an unknown primitive, and the `stelling_assert` the equation carried
+    DISAPPEARED: a REFUTED two-obligation query returned VERIFIED with
+    one. `_REQUIRED_PARAMS`' own comment says *"the primitive name is the
+    semantic authority"*, and `_validate_loaded` type-checked it nowhere.
+  * **S16** — `stelling_any`'s `lo`/`hi` had no type rule and no emptiness
+    rule. A declaration of `(inf, inf)` — the empty real set
+    `harness.any_array` refuses at the trace face in as many words —
+    returned VERIFIED with 100% coverage; `"0.5"` and `true` loaded and
+    moved the declared box; `""`, `"xx"`, `null` and `()` each raw-crashed
+    out of the public `propagate()`; and `vacuity.widen` compared the two
+    bounds RAW where every analysis reads `float(...)`, so
+    `lo:"1.0"`/`hi:1.0` was a point by the reading that decides the
+    verdict and not a point by the reading that decides whether to widen.
+
+  **ONE RULE AT TWO DOORS**, because a document position is one of exactly
+  two kinds. A DATACLASS FIELD's declared type is its own annotation, read
+  with `typing.get_type_hints` and never listed. A SEQUENCE the reader must
+  ITERATE in order to recurse has no field to carry an annotation — the
+  container is a fact about the ENCODING, gone by the time a field exists —
+  so it is judged by `_canonical_shell`, the container reader the module
+  already had for the `params` sequence alone, asked now at every sequence
+  position. Three leaves the reader consumes itself (`<array>.data`,
+  `<complex>.re`/`.im`) have a type gate at the reader; the document's KEY
+  SET is judged from the same field list. `lo`/`hi` are
+  `_validate_decl_eqn`'s, beside the `shape` and `dtype` it already owned,
+  and the value it validates is INSTALLED — which is what makes `vacuity`'s
+  raw `!=` and `propagate`'s `float()` one read of one value.
+
+  **THE PARTITION, before and after**, over the B12 census sweep of 5 base
+  documents x every structural position x 12 values = **20,424 cells**:
+
+  | | `a4e4056` | this commit |
+  |---|---|---|
+  | refused, `TranscriptionError` | 3,396 | **13,134** |
+  | refused, the reader's 3 declared `ValueError` arms | 4,701 | 4,717 |
+  | **RAW escapes** (uncatchable by either) | **4,879** | **0** |
+  | accepted, faithful round trip | 5,488 | 2,489 |
+  | accepted, declared canonicalization | 38 | 38 |
+  | **accepted, SILENT** (re-encodes as something else) | **1,917** | **41** |
+  | accepted OUT OF SCHEMA | 4,628 | **36** |
+
+  The 41 silent accepts left are `<eqn>.source_info` and
+  `<jaxpr>.debug_info` DELETED — metadata outside `content_hash`, whose
+  absence is the form `to_dict(include_metadata=False)` writes. The 36
+  out-of-schema accepts left are the two DECLARED canonicalizations:
+  `<aval>.shape[*]: true` storing as `1` (30 cells, the "shape extents"
+  entry) and `<complex>.re`/`.im` integer parts storing as `float` (6
+  cells, the "complex parts" entry, ADDED here rather than repaired).
+
+  **THE HASH.** Over the accepted population, metadata-free serializations
+  reached by more than one distinct document fall from **117 to 6**, and
+  the documents involved from **1,401 to 229**. Every one of the six is
+  now explained by a written commitment: five are a base together with its
+  own metadata mutants (the "hash scope" entry), two of those five also
+  holding an `<aval>.shape[*]: true` and one a `<complex>.re: true`; the
+  sixth is three DIFFERENT bases whose top-level `eqns` have all been
+  emptied, which are then the same program and correctly share a hash.
+  Checked mechanically rather than read: no residual class contains two
+  documents differing at a position no `CANONICALIZATIONS` entry names.
+
+  **NOTHING LEGITIMATE IS REFUSED, measured.** The census's population of
+  **170 legitimate documents** — every zero-argument harness in the
+  property corpus, the tag probes and five hand-built bases, covering all
+  15 tags — **all 170 still round-trip exactly with `content_hash`
+  preserved**, and the population statistics are identical to the
+  baseline's (4,563 shapes, every container a `list` and every extent an
+  `int`; 0 IR-side shape violations; the same tag histogram).
+
+  **TWO CANONICALIZATIONS WERE WRITTEN DOWN RATHER THAN REPAIRED**, each
+  with the witness `ir.CANONICALIZATIONS` requires: **"complex parts"** (an
+  `int` or `bool` at `<complex>.re`/`.im` is stored as the `float`
+  `complex(re, im)` carries) and **"array payload spelling"** (two base64
+  spellings denoting one byte string are one document — base64's trailing
+  bits are not part of the value, and neither `validate=True` nor
+  `binascii`'s `strict_mode=True` treats them as part of it).
+
+  **BEYOND THE CENSUS**, which swept single-position mutations only and
+  said it expected a two-position sweep to find more. Two were driven.
+  Every ordered pair of the two positions each PAIRING invariant compares,
+  x 12 values at each (6 pairs x 144 x 2 bases = **1,728 cells**):
+  `a4e4056` gives 366 raw escapes and 96 crashes inside `propagate()`
+  after an accepted load; this commit gives **0 and 0**. And the full
+  two-position product over the smallest base — every ordered pair of its
+  130 positions x 6 values at each, **583,792 documents driven** —
+  produces **164,366 raw escapes on `a4e4056` and 0 here**. Var-id
+  ALIASING was driven too, a mutation the census's fixed value set cannot
+  produce because it needs two ids to MEET: 56 documents, no false verdict
+  on either tree — the two that turn a REFUTED base into VERIFIED re-point
+  the second assertion's INPUT at a value carrying the first assertion's
+  predicate (at that predicate itself in one, at the first assertion's own
+  output in the other), so the document then asserts one TRUE predicate
+  twice and VERIFIED is true of it as loaded. Both avals agree, so
+  `_one_shape_per_value` has nothing to catch and is not being evaded.
+
+  **THE RESIDUAL CLASS.** This rule judges the TYPE at every position and
+  never the VALUE: `ir.py` scopes per-primitive shape inference out of the
+  load door in writing, and a document whose primitive is a plausible but
+  wrong NAME, or whose extents are integers that lie, is still admitted
+  and is still the slicer's problem. **And the residue includes an
+  UNCATCHABLE CRASH OUT OF A PUBLIC ENTRY POINT, which is a robustness
+  regression against `SOUNDNESS.md`'s degrade-don't-crash posture and not
+  only a precision one**: an ARITY the type rule cannot see — a well-typed
+  but SHORT `<eqn>.invars` for a known primitive — loads, and then
+  `propagate()` raises a bare `TypeError` (`gt() missing 1 required
+  positional argument`, out of `propagate.TRANSFERS`' `"gt"` entry,
+  `lambda eqn, p, ins: [iv.gt(*ins)]`) or `IndexError` (`list index out of
+  range`, out of its `"stelling_assert"` entry, `[ins[0]]`), which `except
+  TranscriptionError` does not catch. Six comparison witnesses
+  (`gt`/`lt`/`ge`/`le`/`eq`/`ne`) for the first and `stelling_assert` for
+  the second. **Cited by SYMBOL and not by line on purpose**: the first
+  spelling of this sentence quoted two `propagate.py` line numbers, and
+  both were pointing at unrelated code on `main` before this batch landed
+  — `tests/test_prose_hygiene.py` only catches a citation past the END of
+  a file, so a line that still exists and has become something else is
+  exactly the claim nothing checks. Pre-existing and identical on
+  `a4e4056`; this batch narrows the population that reaches it and closes
+  none of it.
+  `from_dict` also has two refusal
+  SHAPES — `TranscriptionError` for everything this batch adds, and the
+  reader's three older `ValueError` arms — and unifying them is a change
+  to a public error surface that two tests pin, so it is reported and not
+  made here.
+
+  **THE ONE NARROWING OUTSIDE DOCUMENTS** is hand-built IR, where the rule
+  is loud: `ir.JaxprEqn(source_info=7)` and an integer `lo`/`hi` are no
+  longer constructible. The two slicer-totality tests that needed the
+  first install it with `object.__setattr__` now, the way
+  `tests/test_aval_lie_both_faces.py` installs a declaration lie, so the
+  slicer is still measured with the door not in front of it; the test
+  helper that built declarations with integer bounds records `float(lo)`,
+  which is what `any_array` would have recorded anyway. The EMPTINESS
+  refusal is on the LOAD path only, so the suite can go on building
+  `(inf, inf)` and `(nan, hi)` declarations through the constructor — the
+  two faces are asking about different things, and
+  `_validate_decl_nonempty`'s docstring says which. **How much capability
+  that protects is now MEASURED there and not named**: moving the rule to
+  `JaxprEqn.__post_init__` turns **11 pre-existing tests red across four
+  files** — 7 in `tests/test_ieee_semantics.py`, 2 in
+  `tests/test_transfers.py`, 1 in
+  `tests/test_ieee_zero_divisor_and_mul_exact.py` and 1 in
+  `tests/test_undecided_detail.py`, which is where the `(nan, hi)`
+  declaration actually is. This paragraph and that docstring both credited
+  the whole of it to the ieee file alone.
+
+  **Suite**: 3798/10 and 3799/9 at `a4e4056`, this batch's base; **3869
+  passed / 10 skipped** with `JAX_ENABLE_X64=1` and **3870 / 9** without
+  at the branch tip. **ON THE MERGE INTO `main`, which brings B11 with
+  it: 3905 / 10 and 3906 / 9**, against `main`'s own **3834 / 10** and
+  **3835 / 9** at `5f7168d`. Both pairs measured for this merge — the
+  merged ones on the merged tree, `main`'s on a `git clone --shared` tree
+  at `5f7168d` — because this batch's counts were taken on a tree without
+  B11 and `main`'s on one without B12, and neither is a count of the tree
+  that ships. The delta is exactly the 71 node ids of the new
+  `tests/test_document_schema.py` — in both cells and against both bases,
+  so the two batches are additive to the unit (3798 + B11's 36 + this
+  batch's 71 = 3905); the skip sets are byte-identical to `main`'s in
+  both environments and still differ from each other by exactly
+  `test_tripwire_arm.py:643`. No pre-existing test changed status, in
+  either batch's direction. **Each rule was reverted ALONE** and
+  the new file re-run, so the coverage is attributed rather than assumed:
+
+  **BOTH UNITS ARE GIVEN, because the file has 30 test FUNCTIONS and 71
+  NODE IDS and a table in one unit beside a sentence in the other cannot
+  be reconciled by a reader who is not told** — which is what this table
+  did until B12's own review, in a batch whose subject is writing one
+  identity across two faces.
+
+  | reverted alone | test functions red | node ids red |
+  |---|---|---|
+  | the field-annotation rule (`_matches_spec` to "everything matches") | 7 | 13 |
+  | the `lo`/`hi` TYPE rule and its install | 4 | 22 |
+  | the `lo`/`hi` EMPTINESS refusal | 2 | 7 |
+  | the sequence-container rule (`_doc_sequence` back to `tuple(v)`) | 3 | 3 |
+  | the document-KEY rule | 4 | 4 |
+  | the `<array>.data` / `<complex>` leaf gates | 2 | 2 |
+
+  **THE ROWS DO NOT PARTITION AND ARE NOT MEANT TO**: they sum to 22
+  functions / 51 node ids over a UNION of 15 / 44, because several
+  functions are red under more than one revert; the control with nothing
+  reverted is 0 / 0. **Every figure in the table, the sum, the union and
+  the control were re-derived on the MERGED tree**, with the merged file,
+  and every one is unchanged. *"Reverted alone" means BEHAVIOURALLY: the
+  rule stops firing and its `_load_check` / `_doc_refuse` call stays where
+  it is.* Deleting the body instead also deletes the call, which the
+  load-only enumeration reads off the AST — that variant is +1 function
+  and +1 node id on the three decoder rows, and it is the enumeration
+  correctly reporting a rule that left the call graph rather than a rule
+  that stopped refusing. On `a4e4056` itself the whole file is **55 of 71
+  node ids red, which is 23 of 30 functions** — a figure the rows cannot
+  be summed to, and not only because they overlap: 8 of those 23 are red
+  under NO single revert, being the ones that read the new API's own
+  correspondence (`_spec_of` over every field, `_doc_keys` against
+  `_encode`'s own output, the load-only rules off the call graph) or the
+  corrected sentences, none of which exist at `a4e4056` to read. Of the
+  16 node ids green there, 11 assert that a legitimate document still
+  loads, 3 are checks `a4e4056` already satisfies for other reasons, and
+  2 pin `_encode`'s straight-through behaviour at its non-recursing
+  slots, which is identical on both trees and is the point of them.
+
+  **The message-totality control gained a THIRD knob**, and that is a
+  finding rather than a maintenance chore. The field-annotation rule sits
+  IN FRONT OF most of the quote sites `tests/test_ir_message_totality.py`
+  measures, so with it shipped a hostile leaf is refused at its one message
+  expression and six deeper ones are never composed: the door-removed row's
+  per-message figure FELL from 9 to 5 while its escape count rose from 27
+  to 87. That is the exact silent shrinkage that file's own docstring warns
+  a one-knob control would suffer, arriving through a fix. `_neutered_sweep`
+  takes `schema=False` now, the union the record quotes is taken over
+  CONFIGURATIONS rather than over the deepest one, and the headline
+  quote-site figure is **13** (was 11): 11 the sweep reaches in one
+  configuration or the other, plus the 2 only the driven rows reach.
+
+  **SIX SENTENCES THIS BATCH SHIPPED WERE READ AGAINST THE CODE BESIDE
+  THEM AND CORRECTED**, five of them added by this batch (item 2 also
+  correcting a pre-existing copy of the same claim) and the first one
+  falsified by it without being touched. They are listed because the
+  pattern — a repair whose own prose overstates it — is the one this
+  campaign has caught over and over, repeatedly inside the fix meant to
+  close the previous instance.
+  1. *"`to_dict` / `from_dict` must round-trip losslessly"* was
+     unconditional and is not true: `_validate_required_params` and
+     `_validate_decl_nonempty` run on the LOAD path only, so their subjects
+     are CONSTRUCTIBLE AND NOT RELOADABLE. The params-less form was already
+     so at `a4e4056`; **this batch widened the class by two — `(inf, inf)`
+     and `(nan, hi)` — which are exactly the declarations
+     `_validate_decl_nonempty`'s own docstring promises stay
+     constructible**. Fails closed, mints no verdict, leaves `content_hash`
+     alone. The bound is now stated at both paragraphs and pinned by
+     `tests/test_document_schema.py`, which enumerates the load-only rules
+     from `ir.py`'s call graph so a third cannot arrive silently.
+     **THE CALL GRAPH IS NOW THE WHOLE LOAD PATH.** That closure was seeded
+     from `_validate_loaded` alone, so it never saw `_decode` — and five of
+     `ir.py`'s own refusals live there. Seeded from both, driven with a
+     synthetic third rule added seven ways: direct and via-helper were
+     already red; decoder-side was GREEN and is now red; and the three
+     edges an `ast.Call` walk cannot follow — a module-level alias, a
+     dispatch table, a lambda — are red on a third assertion, that EVERY
+     refusal in `ir.py` is reached by some closure. The seventh, a rule on
+     the load path *and* a constructor, stays green, correctly.
+     The decoder-side refusals are enumerated in their own bucket: they
+     judge a DOCUMENT, never an object a constructor built, so they do not
+     widen this bound.
+  2. The field rule's widest exception was licensed with *"no document can
+     reach one: `_decode` has no tag for it **and `_encode` refuses to
+     encode one**"*. The second half is false: `_encode` refuses a
+     registered value only in the arms where it RECURSES, and at **18
+     measured positions** — `<eqn>.primitive`, `<aval>.kind`/`.dtype`/
+     `.weak_type`, `<var>.id` and the rest, enumerated in `ir.py` — it
+     writes the object straight through and `to_dict()` does not raise.
+     The conclusion survives on `_decode` alone. **THERE WERE THREE
+     PARAGRAPHS AND NOT TWO**, and this line said two: the third is the
+     comment introducing `ir._LIBRARY_STORED_TYPES` — the first thing a
+     would-be registrant reads, and above BOTH of the pair the first pass
+     corrected (`_register_stored_type`'s docstring and the door narrative
+     below `_encode`) — and it carried an extra clause that is more
+     strongly false, *"outside `content_hash` and `to_dict` entirely"*.
+     All three now rest the conclusion on `_decode`. TWO EARLIER LOG
+     ENTRIES carry the original wording — this file's own *"THE DOOR'S OWN
+     DISPATCH WAS BUILT FROM THE TWO MOST OVERRIDABLE TESTS IN PYTHON"*
+     entry (audit 0.2.0 B6 audit 7, S14) and the 2026-08-15 B6 entry in
+     `SOUNDNESS.md` — and both are marked in place
+     rather than rewritten, the way this project has marked a rotted claim
+     before (`SOUNDNESS.md`, the `Script.stamp_options` parenthesis: *"the
+     wording is left standing because a log that edits itself is not
+     one"*).
+     **AND `content_hash` DOES NOT RAISE AT ALL 18** — it raises at 14 and
+     answers at 4: `<eqn>.source_info[*]` and the three `<dbg>` slots,
+     which are exactly the metadata `to_dict(include_metadata=False)`
+     omits, so the hash is a correct function of a scope that deliberately
+     excludes them. No soundness consequence; the two sentences that said
+     *"`content_hash` does still raise"* unqualified are scoped.
+     `tests/test_document_schema.py` drives all 18 and checks its own
+     position set against `_encode`'s AST, so a slot added to the encoding
+     later cannot go undriven and the enumeration cannot quietly grow. (A
+     hand-written enumeration was wrong on its first attempt, in this same
+     review — which is why it is now checked against the AST.) **THAT AST
+     CHECK COMPARED BARE KEY NAMES**, so it delivered less than this line
+     claimed: a new `<aval>.cls` slot was undriven and green, while a new
+     `<aval>.zzz` was red. It now compares the full `<tag>.key`, in both
+     directions, and it reads the two positions whose VALUE recurses and
+     whose KEY does not — `<eqn>.params` and `<ntuple>.fields`, which its
+     `"_encode(" not in unparse(v)` test dropped, leaving them hand-listed
+     on both sides of the comparison, driven but never derived. **The pin
+     is a SHAPE and no longer two literal strings**: it finds every
+     paragraph of `ir.py` that argues the WRITING side excludes a
+     registered value, and requires each to scope the claim. The literal
+     pin missed the third copy because that copy says *"such a type"*
+     where the two it was written for say *"it"* — a pin that lists
+     spellings is the defect it is pinning, one level up.
+  3. The revert table above was in test FUNCTIONS and the sentence beside
+     it in NODE IDS. Both units are given now.
+  4. `_doc_keys`' heading said *"THE LAST OF THE READER'S RAW ESCAPES"*.
+     Scoped to the census sweep it measured: a
+     `{"k":"tuple","items":[…]}` chain deeper than the interpreter's
+     limit is still a raw `RecursionError` from pure JSON, on this tree
+     and on `a4e4056` alike.
+  5. The residual-class paragraph named a plausible-but-wrong primitive
+     NAME and lying extents, but not the uncatchable crash out of
+     `propagate()` that a short-but-well-typed `<eqn>.invars` still
+     produces. Named now, in both logs.
+  6. The scope argument for keeping the emptiness rule off the constructor
+     credited the whole protected capability to
+     `tests/test_ieee_semantics.py`, in `ir.py` and in both logs. Moving
+     the rule to `JaxprEqn.__post_init__` in fact turns 11 pre-existing
+     tests red across FOUR files, and the `(nan, hi)` form the sentence
+     named is built in `tests/test_undecided_detail.py`. The capability is
+     now pinned in one test that constructs a witness for each of the two
+     refusals in each direction, so the argument no longer rests on
+     filenames.
+
 *The next two blocks are two independent soundness batches that branched from
 the same commit (`dee8bc2`), were developed in parallel, and were merged into
 `main` on 2026-08-16. **B7** landed on `main` first, at `198a2b5`; **B6** merged
-on top of it, so B6 is the newer arrival and this newest-first section leads
-with it. Neither batch's figures were measured on a tree containing the other.
+on top of it, so B6 is the newer arrival of the two and leads them here.
+Neither batch's figures were measured on a tree containing the other.
 Where a figure survived the merge unchanged it is left as it was read; where the
 merge moved it, the entry says so and carries the merged-tree value. B6's later
 audit rounds continue in a second block at the END of this section, where B6
 placed them.*
 
-*The merged tree is **3798 passed / 10 skipped** with `JAX_ENABLE_X64=1` and
+*The merged tree — `a4e4056`, which is also B12's base above, not this
+commit — is **3798 passed / 10 skipped** with `JAX_ENABLE_X64=1` and
 **3799 / 9** without it, as CI runs — zero failures in both, skip sets
 unchanged and still differing by exactly `test_tripwire_arm.py:643`. The two
 batches are additive to the unit: the shared base `dee8bc2` is 3453/3454, B6
@@ -1845,6 +2172,13 @@ was measured on a B6-free tree unless it says otherwise.
   it can equally rebind `_canonical`. The boundary the door defends is a
   DOCUMENT, and no document reaches this arm — `_decode` has no tag for a
   registered type and `_encode` refuses to encode one.
+  *(THE `_encode` HALF OF THAT REASON IS FALSE, and the wording is left
+  standing because a log that edits itself is not one. `_encode` refuses a
+  registered value only in the arms where it RECURSES; at eighteen
+  measured slots it writes the object straight through and `to_dict()`
+  raises nothing. The conclusion — no document reaches this arm — holds on
+  `_decode` alone. Corrected at the code in the B12 entry above, where it
+  is measured.)*
 
   **ONE RULE, ONE READING.** `ir._SHAPE_PARAM_CONTAINERS` was shared by
   the load door and `obligation._Slicer._declared_shape` so the two faces
@@ -2462,9 +2796,17 @@ was measured on a B6-free tree unless it says otherwise.
 
   **THOSE ARE `dff95fc`'S FIGURES AND THE TREE HAS MOVED** — audit 0.2.0
   B6 audit 7 gave `_validate_decl_eqn`'s `dtype` param a refusal for its
-  TYPE, which is a message expression the sweep reaches, so the
-  door-removed row is `27 escapes / 9 lines / 9 messages` and the union is
-  `11 = those 9 + the 2`. The shipped row and the guards-neutered row are
+  TYPE, which is a message expression the sweep reaches, so at the end of
+  B6 the
+  door-removed row was `27 escapes / 9 lines / 9 messages` and the union
+  was `11 = those 9 + the 2`. **AND IT MOVED AGAIN AT B12**, which is why
+  those two are now written in the past tense: the field-annotation rule
+  is a THIRD defence standing in front of six of these sites, the
+  door-removed row reads `87 / 5 / 5` with it shipped and `29 / 10 / 10`
+  with it neutered as well, and the union — taken over CONFIGURATIONS now,
+  precisely so a defence in front of a guard cannot make the guard look
+  unnecessary — is `13 = 11 + the 2`. See the B12 block at the head of
+  this section. The shipped row and the guards-neutered row are
   unchanged at `95/0/20` and `1/1/1`. Both are COMPUTED by the two tests
   named below, which now also read the table in their own docstring back
   out and compare it — a table beside a dict was an honour-system copy of

@@ -63,10 +63,20 @@ stop relitigating it.
 (:func:`ClosedJaxpr.from_dict` — the negative/malformed-shape audit arc
 R1/N1/P1 shared one root: ``from_dict`` admitted IR whose avals lie, and
 each in-pipeline fix narrowed the exploit by one lie while the class
-stayed open). Loaded IR is checked for: shape entries integral and
+stayed open). Loaded IR is checked for: **the type the code declares at every position
+it stores a document value at** — a dataclass field's own annotation,
+read with :func:`typing.get_type_hints` rather than listed, and the
+container :func:`_encode` writes at every sequence position the reader
+has to iterate (see the document-schema narrative below ``_encode``);
+shape entries integral and
 nonnegative everywhere (avals, ``stelling_any`` shape params,
 :class:`Array` value shapes); ``stelling_any`` outvar avals consistent
-with their own shape/dtype params; :class:`Array` payload lengths equal
+with their own shape/dtype params, and its ``lo``/``hi`` a binary64 pair
+declaring a NON-EMPTY set (the refusal ``harness.any_array`` makes at the
+trace face, made here too — this one on the LOAD path only, because a
+document claims to be a query that came through that face while
+``ir.JaxprEqn`` is the constructor underneath it);
+:class:`Array` payload lengths equal
 to ``product(shape) x itemsize`` (for dtypes whose itemsize the ``.str``
 code names); and aval-vs-value shape consistency for literals and
 consts. Violations raise :class:`TranscriptionError` at LOAD — the same
@@ -156,6 +166,32 @@ CANONICALIZATIONS: tuple[tuple[str, str], ...] = (
         "replaced by the exact twin, a `list` is stored as a `tuple`, and "
         "a type with no exact form to store is refused. See the "
         "canonicalization door.",
+    ),
+    (
+        "complex parts",
+        "A `complex` value's `re`/`im` are recorded as binary64 and read as "
+        "ONE number — `complex(re, im)` — so an `int` (a `bool` included) "
+        "at either position is stored as the `float` that number carries. "
+        "`{'k':'complex','re':1,'im':0}` and the same document spelled "
+        "`1.0`/`0.0` are therefore ONE document with ONE hash. No encoder "
+        "produces the integer spelling (`_encode` writes `obj.real` and "
+        "`obj.imag`, which are `float` whatever a complex was built from); "
+        "the load face admits it because the number it denotes is the same "
+        "one, and it is WRITTEN DOWN rather than refused for that reason. "
+        "Audit 0.2.0 B12.",
+    ),
+    (
+        "array payload spelling",
+        "An `Array`'s `data` is recorded as base64 TEXT and stored as the "
+        "BYTES it denotes, so two base64 spellings that denote one byte "
+        "string are one document with one hash — base64's trailing bits are "
+        "not part of the value it encodes, and neither python's "
+        "`validate=True` nor `binascii`'s `strict_mode=True` treats them as "
+        "part of it (measured: `'AB=='` and `'AC=='` both decode to "
+        "`b'\\x00'`). `_encode` re-emits the canonical spelling. This is a "
+        "property of the encoding rather than a choice this module made, "
+        "and it is recorded because a canonicalization with no entry is the "
+        "one thing no test here can catch. Audit 0.2.0 B12.",
     ),
 )
 
@@ -600,9 +636,54 @@ class ClosedJaxpr:
 
 # --- serialization ---------------------------------------------------------
 #
-# Tagged, recursive, and closed over exactly the types above. ``to_dict`` /
-# ``from_dict`` must round-trip losslessly: that is tested, and the content
+# Tagged, recursive, and closed over exactly the types above. The content
 # hash is defined over this encoding.
+#
+# ``to_dict`` / ``from_dict`` ROUND-TRIP LOSSLESSLY OVER THE OBJECTS THE
+# LOAD DOOR ACCEPTS — which is not every object ``to_dict`` will encode,
+# and this paragraph said it was until B12's own review. What is true, and
+# is what the hash and every persisted verdict rest on:
+#
+#   * Every `ClosedJaxpr` `from_dict` RETURNS re-encodes and reloads to
+#     itself with its `content_hash` preserved. That is not a corpus
+#     result: the load rules are functions of the LOADED object, so
+#     accepting a document is accepting its re-encoding.
+#   * So does every query the TRACE FACE produces — measured, over the B12
+#     census's 170-document legitimate population (every zero-argument
+#     harness in the property corpus, the tag probes and the hand-built
+#     bases, covering all 15 tags): 170 of 170 exact, hash preserved.
+#
+# WHAT IS NOT COVERED, and is each rule's stated scope arriving at the
+# other face rather than a hole: TWO REFUSALS RUN ON THE LOAD PATH ONLY,
+# so their subjects are CONSTRUCTIBLE AND NOT RELOADABLE.
+# :func:`_validate_required_params` refuses a `JaxprEqn` missing a param
+# jax supplies on every traced instance of its primitive, and hand-built
+# IR legitimately omits params. :func:`_validate_decl_nonempty` refuses a
+# `stelling_any` declaring an EMPTY set — ``(inf, inf)``, ``(nan, hi)``,
+# ``lo > hi`` — which the suite builds THROUGH THE CONSTRUCTOR on purpose,
+# over operands no `any_array` will produce; moving that rule to the
+# constructor turns 11 pre-existing tests red across four files, measured
+# and broken down in its own docstring. Both encode without complaint and
+# are then refused by `from_dict`. Nothing is silent about it: the refusal
+# is a `TranscriptionError`, it mints no verdict, and `content_hash` is
+# computed from `to_dict` alone and is unaffected.
+#
+# `tests/test_document_schema.py` pins both halves and ENUMERATES the
+# load-only rules from this file's own call graph rather than from this
+# list, so a third one cannot arrive without that test going red and
+# naming this paragraph. **WHAT "THE CALL GRAPH" MEANS THERE, because the
+# first version of that instrument meant half of it:** the closure is
+# seeded from `_decode` AND :func:`_validate_loaded`, which is the whole
+# of `ClosedJaxpr.from_dict`. It was seeded from `_validate_loaded` alone
+# until B12's own re-review, and a rule added to the DECODER was therefore
+# invisible to it — five of this module's refusals live there. The
+# decoder-side refusals are enumerated in their own bucket and do not
+# widen this bound, because a `_doc_*` rule judges a DOCUMENT and never an
+# object a constructor built. A rule the graph reaches from neither side —
+# through an alias, a dispatch table or a lambda, which an `ast.Call` walk
+# cannot follow — is caught by that test's THIRD assertion instead of
+# being missed, and that one does not name this paragraph: it says the
+# edge cannot be followed, which is a different thing to fix.
 #
 # WHY THE `isinstance` CHAINS BELOW ARE NOT THE ONES THE DOOR REPLACED,
 # and the sweep's verdict on them, so the next reader does not have to
@@ -619,7 +700,11 @@ class ClosedJaxpr:
 # `_decode` is the other direction and its input is whatever a caller
 # hands `from_dict`. A leaf that lies about its type is returned unchanged
 # from `_decode`'s scalar arm and then REFUSED by the door when a
-# dataclass constructor receives it — measured. What is NOT covered, and is recorded
+# dataclass constructor receives it — for a value whose TYPE has no exact
+# form to store, which is the question that door asks. **It is not the
+# question "is this the type the encoding writes here", and that one was
+# asked nowhere at all** — see the document-schema narrative below
+# :func:`_encode`. What is NOT covered, and is recorded
 # rather than repaired because it is a different surface with a different
 # contract (this reader raises `ValueError`, not `TranscriptionError`, and
 # its input is JSON): the READS OF THE MAPPING ITSELF. ``isinstance(obj,
@@ -713,6 +798,345 @@ def _encode(obj: object, meta: bool) -> object:
     raise TypeError(f"stelling.ir cannot encode {_safe_type_name(obj)}")
 
 
+# --- the document's own shape, judged where the reader reads it -------------
+#
+# ONE RULE, TWO DOORS, AND THE SECOND DOOR IS WHERE THE ANNOTATIONS ALREADY
+# ARE — audit 0.2.0 B12, S15 and S16's third and fourth items.
+#
+# :func:`_encode` above is a total function from IR to JSON with one arm per
+# stored type, so the JSON type at every position of a document is not a
+# convention anybody has to remember: it is what that function writes there.
+# **Nothing asked.** Measured on `main` at `a4e4056`, from pure JSON through
+# `ClosedJaxpr.from_dict`, no attacker Python anywhere in the document:
+#
+#     <eqn>.primitive  null / true / 0 / -1 / 1.5 / [] / [0]
+#         all ACCEPTED, silently reclassified as an unknown primitive, and
+#         the `stelling_assert` the equation carried DISAPPEARS — a REFUTED
+#         two-obligation query returns VERIFIED with one obligation. That
+#         is S15.
+#     <tuple>.items  {}      ACCEPTED as the empty geometry ()
+#     <tuple>.items  "xx"    ACCEPTED as ('x', 'x')
+#     <tuple>.items  {"k":…} ACCEPTED as the dict's KEYS
+#     <var>.id null, <aval>.weak_type "xx", <aval>.dtype 1.5, <dbg>.func 0
+#         all ACCEPTED and round-tripped faithfully
+#
+# THE RULE IS THAT A DOCUMENT VALUE IS STORED ONLY WHERE ITS TYPE IS THE
+# TYPE THE CODE DECLARES FOR ITS POSITION, and a position is one of exactly
+# two kinds:
+#
+#   * a DATACLASS FIELD, whose declared type is its own annotation. That is
+#     :func:`_spec_of`, applied by :func:`_canonicalise` to every field
+#     of every dataclass in this module. The annotations are READ, from
+#     ``typing.get_type_hints``, never listed — so a field added later is
+#     covered without anyone remembering this comment, which is the whole
+#     difference between this and a schema table that drifts.
+#   * a SEQUENCE THIS READER MUST ITERATE in order to recurse, whose
+#     declared type is the container `_encode` writes. That one cannot be an
+#     annotation, because it is a fact about the ENCODING and not about the
+#     stored value: `_decode` turns the document's `list` into the field's
+#     `tuple`, so by the time a field exists the container is gone. It is
+#     :func:`_doc_sequence`, which is :func:`_canonical_shell` — the
+#     container reader this module already had, for the ``params`` sequence
+#     alone — asked at every other sequence position instead of at one.
+#
+# WHAT THIS READER THEREFORE STILL HANDS OVER RAW, each because something
+# else owns it and asks a STRONGER question:
+#
+#   * the two ``shape`` positions — :func:`_load_extents` reads every extent
+#     through ``__index__`` and installs a plain `int`, which no type test
+#     is as strong as (audit 0.2.0 B6 audit 8 put them here deliberately);
+#   * the sequences with nothing to recurse into — ``effects``,
+#     ``source_info``, ``arg_names``, ``result_paths``. This reader used to
+#     call ``tuple()`` on them, which is the same second-reader mistake the
+#     shapes had: ``tuple("xx")`` is ``('x','x')`` and ``tuple({})`` is
+#     ``()``. Handing them over whole lets the ONE door judge the container
+#     and the elements together, from the field's own ``tuple[str, ...]``;
+#   * every scalar, judged the same way at the same door.
+#
+# AND THE THREE LEAVES THIS READER CONSUMES ITSELF, which have no field to
+# be judged at because the field holds something else by then:
+# ``<array>.data`` (base64 text here, `bytes` in the field) and
+# ``<complex>.re``/``.im`` (two numbers here, one `complex` in the field).
+# Those three are the only leaf positions with a type gate in this
+# function, and :data:`CANONICALIZATIONS` records what each admits.
+#
+# WHY THE REFUSALS HERE ARE `TranscriptionError` WHEN THE THREE THIS READER
+# ALREADY HAD ARE `ValueError`, stated rather than left to be noticed. The
+# module's declared exception for "a document this module refuses" is
+# `TranscriptionError`, every other refusal in the load pass raises it, and
+# the residual class the B12 census measured names CATCHABILITY as its
+# sharp half — 4,879 raw escapes of which ``except TranscriptionError``
+# caught none. A new refusal that is not catchable through the declared
+# type would be adding to that pile. The three older arms (unknown tag, a
+# non-dict where a tagged object belongs, a document that is not a
+# `ClosedJaxpr`) are a documented surface with tests pinned on their type
+# and are left alone; so `from_dict` has two refusal shapes, which is
+# reported in `SOUNDNESS.md` and not repaired here.
+
+
+# THE CONTAINERS A DOCUMENT SEQUENCE MAY BE READ FROM, NAMED ONCE so a
+# refusal can quote the rule instead of restating it. This is the pair
+# :func:`_canonical_shell` accepts, and it is not a second implementation
+# of that function: `tests/test_document_schema.py` COMPUTES the set that
+# function actually accepts, over a population of container types it builds
+# rather than lists, and requires it to be exactly this pair — so the name
+# and the behaviour cannot drift apart in silence.
+#
+# `_encode` WRITES ONLY ONE OF THEM. A JSON document carries a `list` at
+# every sequence position and never a `tuple`, so the pair is wider than
+# the encoding by exactly the container a caller gets when they build the
+# mapping in python by hand instead of loading it — the same route, and
+# the same reason, :data:`_SHAPE_PARAM_CONTAINERS` is that pair for.
+_DOC_SEQUENCE_CONTAINERS: tuple[type, ...] = (tuple, list)
+
+# The rule as a sentence, DERIVED from the tuple above — the discipline
+# :data:`_SHAPE_PARAM_RULE` and :data:`_CANONICAL_RULE` carry.
+_DOC_SEQUENCE_RULE = " or ".join(
+    f"a {t.__name__}" for t in _DOC_SEQUENCE_CONTAINERS
+)
+
+# The one sentence both complex-part gates quote, so the two positions
+# cannot come to name different families.
+_DOC_COMPLEX_PART_RULE = (
+    "a complex value's real and imaginary parts are recorded as binary64, "
+    "and this reader combines the two into one `complex` before any field "
+    "exists to judge either"
+)
+
+
+def _doc_refuse(where: str, what: str) -> None:
+    """:func:`_load_check`'s sibling for the DESERIALIZATION READER.
+
+    `_load_check`'s message says *"refused at construction"* and points at
+    ``__post_init__``, which is true of every other refusal in this pass
+    and false of this one: nothing has been constructed yet, and ``where``
+    names a position in the DOCUMENT rather than a field of a dataclass.
+    Same exception type for the reason the narrative above gives.
+    """
+    raise TranscriptionError(
+        f"malformed IR serialization: {where}: {what} — refused by "
+        f"`ClosedJaxpr.from_dict`'s reader, before any IR object exists, so "
+        f"this position is named as the document spells it and not as a "
+        f"dataclass field (see the module docstring)"
+    )
+
+
+def _doc_sequence(v: object, where: str) -> tuple:
+    """A document SEQUENCE position, as an EXACT tuple whose ITEMS are
+    untouched — or refused, naming the position and the type it found.
+
+    :func:`_canonical_shell` is the reader, unchanged and not copied: an
+    exact ``tuple`` comes back as it stands, an exact ``list`` as the
+    ``tuple`` of the same items, and a SUBCLASS of either is read through
+    the base's own accessor — so a `list` subclass whose ``__iter__`` lies
+    cannot hand this function a different sequence than the one it is
+    holding. What this function adds is the POSITION, which that one has no
+    way to know.
+    """
+    try:
+        return _canonical_shell(v)
+    except _NotCanonical as exc:
+        _doc_refuse(
+            where,
+            f"value {_safe_repr(exc.obj)} is of type "
+            f"{_safe_type_name(exc.obj)}, and this position is a SEQUENCE: "
+            f"`_encode` writes a JSON list here and this reader takes "
+            f"{_DOC_SEQUENCE_RULE}, and reading any "
+            f"other container as one models something the document never "
+            f"said (`tuple(\"xx\")` is `('x','x')`, `tuple({{}})` is `()` — "
+            f"a geometry, an argument list or an equation list that came "
+            f"out of thin air)",
+        )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _doc_leaf(v: object, types: tuple[type, ...], where: str, why: str) -> object:
+    """A document LEAF this reader consumes ITSELF, judged by type.
+
+    ``issubclass(type(v), types)`` and not ``isinstance``, for the reason
+    :func:`_held_in_a_shape_param_container` gives: ``isinstance`` reads the
+    OBJECT's ``__class__``, which a two-line property answers. A subclass is
+    admitted rather than refused because the consumer below reads it ONCE
+    (``complex(...)`` and ``base64.b64decode`` each take one read) and
+    stores an exact value — the same bargain the canonicalization door
+    makes.
+    """
+    if not issubclass(type(v), types):
+        _doc_refuse(
+            where,
+            f"value {_safe_repr(v)} is of type {_safe_type_name(v)}, and "
+            f"this position carries "
+            + " or ".join(t.__name__ for t in types)
+            + f": {why}",
+        )
+    return v
+
+
+def _doc_complex(obj: dict, where: str) -> complex:
+    """``{"k": "complex", "re": …, "im": …}`` as one `complex`, or refused.
+
+    The construction is guarded as well as its inputs: ``complex(10**400,
+    0.0)`` raises `OverflowError` for a document whose parts are both of an
+    accepted type, and letting that out of `from_dict` raw is the same
+    catchability finding this module already carries.
+    """
+    re = _doc_leaf(obj["re"], (int, float), f"{where}.re", _DOC_COMPLEX_PART_RULE)
+    im = _doc_leaf(obj["im"], (int, float), f"{where}.im", _DOC_COMPLEX_PART_RULE)
+    try:
+        return complex(re, im)
+    except Exception:  # noqa: BLE001 — unreadable IS the finding
+        _doc_refuse(
+            where,
+            f"parts {_safe_repr(re)} and {_safe_repr(im)} are of an accepted "
+            f"type but are not a binary64 pair, so there is no complex "
+            f"number for this position to denote",
+        )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _doc_payload(v: object, where: str) -> bytes:
+    """``<array>.data`` — the base64 TEXT `_encode` writes — as bytes.
+
+    ``validate=True`` deliberately. The default SILENTLY DISCARDS every
+    character outside the base64 alphabet, so a document saying
+    ``"AAAA!!AAAAAAA="`` for an eight-byte array got the eight bytes of
+    ``"AAAAAAAAAAA="`` instead — a payload it did not write, of exactly the
+    right length, so the byte-length
+    check in :func:`_validate_array_value` PASSED on it —
+    the same *"reading it as something else models an array the document
+    never described"* argument the shape rule makes, one position over. No
+    encoder is affected: ``base64.b64encode`` emits nothing but the
+    alphabet and its padding.
+    """
+    text = _doc_leaf(
+        v, (str,), where, "an Array's payload is recorded as base64 text"
+    )
+    try:
+        return base64.b64decode(text, validate=True)
+    except Exception:  # noqa: BLE001 — undecodable IS the finding
+        _doc_refuse(
+            where,
+            f"value {_safe_repr(v)} is not decodable base64, so the array "
+            f"has no payload for its shape and dtype to describe",
+        )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+_CANONICAL_FIELDS: dict[type, tuple[str, ...]] = {}
+
+
+def _field_names(cls: type) -> tuple[str, ...]:
+    """The declared field names of an `ir` dataclass, cached per class.
+
+    ONE READER FOR EVERY RULE THAT IS PER-FIELD — :func:`_canonicalise`
+    (which field to canonicalize, and which spec to judge it against, since
+    the spec table it builds is keyed by exactly these names) and
+    :func:`_required_doc_keys` (which key the document must carry, for
+    :func:`_doc_keys`) — so a field added to one of these dataclasses later
+    is covered by all of them at once, which is a property none would have
+    if any kept its own list.
+    """
+    names = _CANONICAL_FIELDS.get(cls)
+    if names is None:
+        names = _CANONICAL_FIELDS[cls] = tuple(
+            f.name for f in _dataclasses.fields(cls)
+        )
+    return names
+
+
+def _required_doc_keys(cls: type, optional: tuple[str, ...]) -> tuple[str, ...]:
+    """:func:`_field_names` minus the fields ``to_dict(include_metadata=
+    False)`` omits — which are exactly the two the hash-scope commitment in
+    :data:`CANONICALIZATIONS` excludes."""
+    return tuple(n for n in _field_names(cls) if n not in optional)
+
+
+def _doc_keys(obj: dict, tag: str, required: tuple[str, ...],
+              optional: tuple[str, ...] = ()) -> None:
+    """The KEYS a tagged object carries: exactly the ones `_encode` writes.
+
+    THE LAST OF THE READER'S RAW ESCAPES OVER THE B12 CENSUS SWEEP —
+    audit 0.2.0 B12, and the scope is part of the claim. Every one of
+    this reader's ``obj["…"]`` reads was unguarded, so DELETING any required
+    key from a document produced a raw `KeyError` out of `from_dict`: 880 of
+    the 20,424 cells of that sweep, and the only exception type
+    left in that column once the schema rules above are in place. A
+    `KeyError` is loud and cannot mint a verdict, so this is the robustness
+    half of the finding rather than the soundness half — but
+    ``except TranscriptionError`` catches none of it, which is what the
+    census names as the sharp edge of the residual class.
+
+    THE SWEEP IS SINGLE-POSITION AND FINITE-VALUED, AND ONE RAW ESCAPE
+    LIVES OUTSIDE IT, unfixed by this rule and untouched by this batch:
+    `_decode` recurses, so a ``{"k":"tuple","items":[…]}`` chain deep
+    enough exhausts the interpreter stack and `from_dict` raises a bare
+    `RecursionError`. It is reachable from PURE JSON — ``json.loads`` and
+    ``json.dumps`` both accept the chain — and measured identically on
+    `a4e4056` and here: depth 400 accepted and round-tripping, depth 900
+    and 2000 a raw `RecursionError`, at the interpreter default limit of
+    1000. Pre-existing, orthogonal to the key rule, and reported rather
+    than repaired here because bounding a recursive reader's DEPTH is a
+    different question with its own limit to choose.
+
+    AND THE OTHER DIRECTION, which the census's single-position sweep could
+    not reach because it only ever REPLACED a value that was already there:
+    an UNKNOWN key was silently dropped. ``{"k":"var","id":0,"aval":…,
+    "primitive":"stelling_assert"}`` loaded, re-encoded WITHOUT the extra
+    key, and hashed as though the document had never said it — a document
+    getting a different program than it wrote, which is the same sentence
+    the container rule above is about.
+
+    ``required`` IS THE DATACLASS'S OWN FIELD LIST, not a table: `_encode`
+    writes ``"k"`` plus one key per field for all thirteen tagged
+    dataclasses, and `tests/test_document_schema.py` COMPUTES that
+    correspondence from `_encode`'s own output rather than trusting this
+    sentence. ``optional`` is the two metadata fields
+    ``to_dict(include_metadata=False)`` omits, which is the same list
+    :data:`CANONICALIZATIONS`' hash-scope entry names.
+    """
+    have = set(obj)
+    missing = sorted(k for k in required if k not in have)
+    if missing:
+        _doc_refuse(
+            f"<{tag}>",
+            f"the document is missing key(s) {missing} that `_encode` writes "
+            f"on every {tag!r}: a tagged object without them is not a "
+            f"serialization of one, and this reader has no value to put "
+            f"there — before this check it raised a bare `KeyError` from "
+            f"the middle of the read, which `except TranscriptionError` "
+            f"does not catch",
+        )
+    extra = sorted(have - {"k"} - set(required) - set(optional))
+    if extra:
+        _doc_refuse(
+            f"<{tag}>",
+            f"the document carries key(s) {extra} that `_encode` never "
+            f"writes on a {tag!r}: this reader would drop them, so the "
+            f"document would round-trip to something it does not say and "
+            f"hash as though it had never said it",
+        )
+
+
+def _doc_pair_entry(entry: object, where: str) -> tuple:
+    """One ``[key, value]`` entry of a ``params`` / ``fields`` sequence.
+
+    **The CONTAINER is this reader's question and the PAIR-NESS is not**,
+    which is the difference between a rule stated once and a rule stated
+    twice. `for key, value in <entry>` unpacks a 2-character `str` into a
+    key and a value the document never wrote, so the container has to be
+    judged here, before the unpack; but whether there are exactly two of
+    them, and whether the key is a name, is asked by
+    :func:`_canonical_param_keys` and by ``NamedTupleParam``'s own field
+    annotation — both of which are reachable without this reader and must
+    therefore ask anyway. So an entry of the wrong LENGTH is returned as it
+    stands, with its value undecoded, for whichever of those two refuses it.
+    """
+    items = _doc_sequence(entry, where)
+    if len(items) != 2:
+        return items
+    return (items[0], _decode(items[1]))
+
+
 def _decode(obj: object) -> object:
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
@@ -722,9 +1146,15 @@ def _decode(obj: object) -> object:
         )
     k = obj.get("k")
     if k == "complex":
-        return complex(obj["re"], obj["im"])
+        # the two tags with no dataclass behind them name their keys here;
+        # the thirteen that have one read the field list off the class
+        _doc_keys(obj, "complex", ("re", "im"))
+        return _doc_complex(obj, "<complex>")
     if k == "tuple":
-        return tuple(_decode(x) for x in obj["items"])
+        _doc_keys(obj, "tuple", ("items",))
+        return tuple(
+            _decode(x) for x in _doc_sequence(obj["items"], "<tuple>.items")
+        )
     # THE `shape` IS HANDED OVER RAW, and that is the repair rather than
     # an omission — audit 0.2.0 B6 audit 8. Both of these read
     # ``tuple(obj["shape"])``, which is a SECOND reader of the document's
@@ -740,6 +1170,7 @@ def _decode(obj: object) -> object:
     # `tuple`, by the reader that checked it instead of by one that did
     # not.
     if k == "aval":
+        _doc_keys(obj, "aval", _field_names(Aval))
         return Aval(
             kind=obj["kind"],
             shape=obj["shape"],
@@ -747,57 +1178,108 @@ def _decode(obj: object) -> object:
             weak_type=obj["weak_type"],
         )
     if k == "array":
+        _doc_keys(obj, "array", _field_names(Array))
         return Array(
             dtype=obj["dtype"],
             shape=obj["shape"],
-            data=base64.b64decode(obj["data"]),
+            data=_doc_payload(obj["data"], "<array>.data"),
         )
     if k == "var":
+        _doc_keys(obj, "var", _field_names(Var))
         return Var(id=obj["id"], aval=_decode(obj["aval"]))
     if k == "lit":
+        _doc_keys(obj, "lit", _field_names(Literal))
         return Literal(val=_decode(obj["val"]), aval=_decode(obj["aval"]))
     if k == "enum":
+        _doc_keys(obj, "enum", _field_names(EnumParam))
         return EnumParam(cls=obj["cls"], member=obj["member"])
     if k == "sentinel":
+        _doc_keys(obj, "sentinel", _field_names(SentinelParam))
         return SentinelParam(cls=obj["cls"])
     if k == "opaque":
+        _doc_keys(obj, "opaque", _field_names(OpaqueParam))
         return OpaqueParam(cls=obj["cls"])
     if k == "treedef":
+        _doc_keys(obj, "treedef", _field_names(TreeDefParam))
         return TreeDefParam(text=obj["text"])
     if k == "ntuple":
+        _doc_keys(obj, "ntuple", _field_names(NamedTupleParam))
         return NamedTupleParam(
             cls=obj["cls"],
-            fields=tuple((name, _decode(v)) for name, v in obj["fields"]),
+            fields=tuple(
+                _doc_pair_entry(e, f"<ntuple>.fields[{i}]")
+                for i, e in enumerate(
+                    _doc_sequence(obj["fields"], "<ntuple>.fields")
+                )
+            ),
         )
     if k == "eqn":
+        # ``effects`` and ``source_info`` GO OVER WHOLE: they hold no tagged
+        # object, so this reader has nothing to recurse into and no reason to
+        # be the one that judges their container — `JaxprEqn`'s own
+        # ``tuple[str, ...]`` annotation judges the container and every
+        # element at one door. `tuple(obj["effects"])` here was the second
+        # reader: it read `"ab"` as two effects and `{}` as none.
+        _doc_keys(obj, "eqn", _required_doc_keys(JaxprEqn, ("source_info",)),
+                  ("source_info",))
         return JaxprEqn(
             primitive=obj["primitive"],
-            invars=tuple(_decode(a) for a in obj["invars"]),
-            outvars=tuple(_decode(v) for v in obj["outvars"]),
-            params=tuple((key, _decode(v)) for key, v in obj["params"]),
-            effects=tuple(obj["effects"]),
-            source_info=tuple(obj.get("source_info", ())),
+            invars=tuple(
+                _decode(a) for a in _doc_sequence(obj["invars"], "<eqn>.invars")
+            ),
+            outvars=tuple(
+                _decode(v) for v in _doc_sequence(obj["outvars"], "<eqn>.outvars")
+            ),
+            params=tuple(
+                _doc_pair_entry(e, f"<eqn>.params[{i}]")
+                for i, e in enumerate(_doc_sequence(obj["params"], "<eqn>.params"))
+            ),
+            effects=obj["effects"],
+            source_info=obj.get("source_info", ()),
         )
     if k == "dbg":
+        _doc_keys(obj, "dbg", _field_names(DebugInfo))
         return DebugInfo(
             func=obj["func"],
-            arg_names=tuple(obj["arg_names"]),
-            result_paths=tuple(obj["result_paths"]),
+            arg_names=obj["arg_names"],
+            result_paths=obj["result_paths"],
         )
     if k == "jaxpr":
+        # ``is not None`` AND NOT A TRUTH TEST — audit 0.2.0 B12. `_encode`
+        # writes `null` when and only when there is no `DebugInfo`, so
+        # ``if dbg`` asked the document a question the encoding does not
+        # answer: `0`, `""`, `[]`, `false` and `{}` were each read as "no
+        # debug info", which is a document silently getting a different
+        # answer than it wrote rather than a refusal it can be told about. A
+        # `DebugInfo` is never falsy (it defines no `__bool__` and no
+        # `__len__`), so no legitimate document moves.
+        _doc_keys(obj, "jaxpr", _required_doc_keys(Jaxpr, ("debug_info",)),
+                  ("debug_info",))
         dbg = obj.get("debug_info")
         return Jaxpr(
-            constvars=tuple(_decode(v) for v in obj["constvars"]),
-            invars=tuple(_decode(v) for v in obj["invars"]),
-            outvars=tuple(_decode(a) for a in obj["outvars"]),
-            eqns=tuple(_decode(e) for e in obj["eqns"]),
-            effects=tuple(obj["effects"]),
-            debug_info=_decode(dbg) if dbg else None,
+            constvars=tuple(
+                _decode(v)
+                for v in _doc_sequence(obj["constvars"], "<jaxpr>.constvars")
+            ),
+            invars=tuple(
+                _decode(v) for v in _doc_sequence(obj["invars"], "<jaxpr>.invars")
+            ),
+            outvars=tuple(
+                _decode(a) for a in _doc_sequence(obj["outvars"], "<jaxpr>.outvars")
+            ),
+            eqns=tuple(
+                _decode(e) for e in _doc_sequence(obj["eqns"], "<jaxpr>.eqns")
+            ),
+            effects=obj["effects"],
+            debug_info=_decode(dbg) if dbg is not None else None,
         )
     if k == "closed":
+        _doc_keys(obj, "closed", _field_names(ClosedJaxpr))
         return ClosedJaxpr(
             jaxpr=_decode(obj["jaxpr"]),
-            consts=tuple(_decode(c) for c in obj["consts"]),
+            consts=tuple(
+                _decode(c) for c in _doc_sequence(obj["consts"], "<closed>.consts")
+            ),
         )
     raise ValueError(f"malformed IR serialization: unknown tag {_safe_repr(k)}")
 
@@ -917,18 +1399,33 @@ def _safe_repr(obj) -> str:
     recorded two units as one — audit 0.2.0 B6 audit 5, F2. A
     `_load_check` message spans several lines and can interpolate on more
     than one, so a per-LINE count is larger than a per-MESSAGE count, and
-    a per-QUOTE count (the ten above) is larger again. The three
+    a per-QUOTE count (the ten above) is larger again. The four
     measurements, each computed by `tests/test_ir_message_totality.py`
     rather than trusted from this paragraph:
 
         this tree, as shipped              95 swept / 0 escapes / 20 skipped
         guards neutered, door shipped       1 escape  /  1 line  / 1 message
         guards neutered, and the door's
-          LEAF READS neutered too          27 escapes /  9 lines / 9 messages
+          LEAF READS neutered too          87 escapes /  5 lines / 5 messages
+        ... and the FIELD-ANNOTATION rule
+          neutered as well                 29 escapes / 10 lines / 10 messages
         `30d4b04`, guards absent           28 escapes / 10 lines / 8 messages
 
-    The sweep's 9 message expressions plus the 2 the canonical document
-    masks comes to 11, which is the union that test computes. The ten
+    THE THIRD ROW IS NO LONGER THE DEEPEST MEASUREMENT, and the fourth is
+    why it was added — audit 0.2.0 B12. :func:`_canonicalise` refuses a
+    field whose value is not of the type the field DECLARES, and that
+    refusal stands IN FRONT OF six of the quote sites below it: with it
+    shipped a hostile leaf is refused at its one message expression and
+    the six deeper ones are never composed, so the third row's per-MESSAGE
+    figure FELL from 9 to 5 while its escape COUNT rose from 27 to 87.
+    Neither movement is a weakening and neither is visible in one row,
+    which is the silent shrinkage the two-knob control was built to avoid,
+    arriving through a fix.
+
+    The union the record quotes is therefore taken over CONFIGURATIONS and
+    not over the deepest one: the 11 message expressions the sweep reaches
+    in one configuration or the other, plus the 2 the canonical document
+    masks, comes to 13, which is the union that test computes. The ten
     QUOTES above is a different unit and a fixed statement about the tree
     audit 4 measured; the two agreed at ten on that tree and no longer do,
     and re-typing the second number to keep the coincidence alive would be
@@ -940,11 +1437,15 @@ def _safe_repr(obj) -> str:
     DOOR REMOVED TOO** — audit 0.2.0 B6 audit 6. Every hostile leaf that
     sweep injects is a SUBCLASS of a stored type, and the door replaces
     one with an exact twin before any message quotes it, so with the door
-    shipped 26 of the 27 escapes do not happen. A control that neutered
+    shipped all but one of the deepest row's escapes do not happen. A
+    control that neutered
     only the guards measured 1 escape and would have gone on passing with
     every call to this function deleted, so it neuters the door's leaf
     reads as well and reports each measurement with the other out of the
-    way.
+    way. **AND THE FIELD-ANNOTATION RULE IS A THIRD DEFENCE with the same
+    property** (audit 0.2.0 B12), so there is a third knob and a fourth
+    row; see the table above for what each removes and why the union is
+    taken over configurations.
 
     **AND "1" IS NOT A COUNT OF THE SITES THIS FUNCTION IS LOAD-BEARING
     AT** — audit 0.2.0 B6 audit 7, which is how the paragraph above was
@@ -952,10 +1453,17 @@ def _safe_repr(obj) -> str:
     unreachable"*. Unreachable TO THE LEAF THAT SWEEP INJECTS, which is a
     subclass, and only that. A leaf that BYPASSES the door — the metaclass
     and `__class__` liars audit 7 built, before the door was fixed to
-    refuse them — reaches every one of those 27 sites carrying whatever
+    refuse them — reaches every one of the sites the DEEPEST row above
+    counts, carrying whatever
     `__repr__` it likes, and the guards are then the only thing between it
     and a raw crash out of a public constructor. So this function is
-    load-bearing at all 27, not at 1. What "1" measures is the residue of
+    load-bearing at all of them, not at 1. **THE FIGURE IS NAMED BY ITS
+    ROW AND NOT TYPED HERE** — audit 0.2.0 B12, because it was typed here
+    as `27`, which was the third row's escape count when this paragraph
+    was written and is the FOURTH row's now that a third defence exists.
+    A digit in prose that nothing recomputes is this file's own recurring
+    defect, and a digit that silently means a different row is that defect
+    with the sentence still reading true. What "1" measures is the residue of
     ONE sweep against ONE defence, and the site it names is real and
     worth naming: the hostile extent inside a declaration's `shape` param,
     which `_validate_decl_eqn` reads as handed in because it has its own
@@ -1274,6 +1782,8 @@ def _load_check(cond: bool, where: str, what: str) -> None:
 # about EXACT types and reads nothing.
 
 import dataclasses as _dataclasses  # noqa: E402  (stdlib; kept local to the pass)
+import types as _types  # noqa: E402  (stdlib; for `X | Y` annotations)
+import typing as _typing  # noqa: E402  (stdlib; reads the field annotations)
 
 
 class _NotCanonical(Exception):
@@ -1360,10 +1870,29 @@ _CANONICAL_RULE = (
 # WHAT REGISTRATION DELEGATES, stated so it is not mistaken for a hole: a
 # registered type is CARRIED, not canonicalized — the registering module
 # owns its single-valuedness (`IntervalArray` is a frozen dataclass whose
-# own `__post_init__` validates it). No DOCUMENT can reach this arm:
-# `_decode` has no tag for such a type and `_encode` refuses to encode
-# one, so a registered value can only come from a caller who built it,
-# and it is outside `content_hash` and `to_dict` entirely.
+# own `__post_init__` validates it). NO DOCUMENT CAN REACH THIS ARM, and
+# the whole reason is `_decode`: it has no tag for such a type, so no JSON
+# document produces one and a registered value can only come from a caller
+# who built it in this process.
+#
+# **NOT `_encode`, AND NOT `to_dict` OR `content_hash` EITHER — this
+# paragraph named all three, and it is the third copy of that claim in
+# this file: the two below were corrected first, and this one — the one a
+# would-be registrant reads before either of them — was found only by
+# B12's re-review of its own fix.** `_encode` refuses a registered value
+# only in the arms where it RECURSES: a `ClosedJaxpr` whose ``consts``
+# hold one does raise ``stelling.ir cannot encode IntervalArray``, and
+# that is the arm the sentence was generalising from. At the EIGHTEEN
+# slots it writes STRAIGHT THROUGH, ``to_dict()`` returns a dict with the
+# `IntervalArray` sitting in it and raises nothing — so a registered value
+# is not outside `to_dict` at all. `content_hash` raises at fourteen of
+# those eighteen (from ``json.dumps``, not from this module) and ANSWERS
+# at the other four: ``<eqn>.source_info[*]`` and the three ``<dbg>``
+# slots, which are exactly the metadata ``to_dict(include_metadata=False)``
+# drops — so the hash is a correct function of a scope that deliberately
+# excludes them, and not a refusal. All measured by driving every
+# position; see the door narrative below :func:`_encode` for the
+# enumeration and `tests/test_document_schema.py` for the driver.
 #
 # AND WHAT REGISTRATION IS *NOT* A DEFENCE AGAINST — audit 0.2.0 B6 audit
 # 7. :func:`_register_stored_type` is module-level and importable, so any
@@ -1413,11 +1942,31 @@ def _register_stored_type(cls: type) -> type:
 
     WHAT BOUNDS IT INSTEAD, all three measured rather than argued:
 
-    * NO DOCUMENT REACHES THIS ARM. `_encode` refuses a registered value
-      (``stelling.ir cannot encode IntervalArray``, so `to_dict` and
-      `content_hash` both raise) and `_decode` has no tag for one
-      (``unknown tag 'interval'``). A registered value can only come from
-      a caller who built it in this process.
+    * NO DOCUMENT REACHES THIS ARM, and the whole reason is `_decode`: it
+      has no tag for a registered type (``unknown tag 'interval'``), so no
+      JSON document can produce one and a registered value can only come
+      from a caller who built it in this process. **NOT `_encode`, which
+      this paragraph also named until B12's own review.** `_encode`
+      refuses a registered value (``stelling.ir cannot encode
+      IntervalArray``) only in the arms where it RECURSES — a `ClosedJaxpr`
+      whose ``consts`` hold one does raise out of `to_dict`, correctly.
+      At the slots it writes STRAIGHT THROUGH, ``to_dict()`` returns a
+      dict with the `IntervalArray` sitting in it and raises nothing:
+      **18 such positions, measured, not read off this list** — see the
+      door narrative below :func:`_encode` for the enumeration and for
+      the same correction at the other site. `content_hash` raises on such
+      an object at FOURTEEN of the eighteen — from `json.dumps` rather
+      than from this module, which is loud but is not this file refusing
+      anything — and ANSWERS at the other four: ``<eqn>.source_info[*]``,
+      ``<dbg>.func``, ``<dbg>.arg_names[*]``, ``<dbg>.result_paths[*]``.
+      Those four are exactly the metadata
+      ``to_dict(include_metadata=False)`` omits, and `content_hash` is
+      defined over that reduced document, so the hash it returns is a
+      correct function of a scope that deliberately excludes them. No
+      soundness consequence, and stated because *"`content_hash` does
+      still raise"* — unqualified, as this sentence read until B12's own
+      re-review — is false at four of the eighteen positions the
+      paragraph is about.
     * A SUBCLASS OF A REGISTERED TYPE IS REFUSED, not carried: membership
       is ``id(type(obj))`` against :data:`_STORED_AS_IS`, which is the
       registered type itself, so the property-backed variant has to be
@@ -1698,10 +2247,15 @@ def _canonical_items(items: tuple) -> tuple:
 def _canonical_shell(v: object) -> tuple:
     """An EXACT tuple of ``v``'s items, with the items left alone.
 
-    For the two places that need the CONTAINER canonical before its
-    contents are: the ``params`` sequence and each ``(key, value)`` entry
-    in it, whose keys must be settled before the sort and whose values
-    must not be, because :func:`_validate_decl_eqn` owns two of them.
+    For the places that need the CONTAINER settled before its contents
+    are: the ``params`` sequence and each ``(key, value)`` entry in it,
+    whose keys must be settled before the sort and whose values must not
+    be, because :func:`_validate_decl_eqn` owns two of them — and, since
+    audit 0.2.0 B12, EVERY sequence position of a document, through
+    :func:`_doc_sequence`, which is this function plus the position it is
+    being read at. :data:`_DOC_SEQUENCE_CONTAINERS` names the pair this
+    accepts so a refusal can quote it; `tests/test_document_schema.py`
+    computes the pair from this function rather than trusting that name.
     """
     t = type(v)
     if t is tuple:
@@ -1737,23 +2291,232 @@ def _refuse_uncanonical(exc: _NotCanonical, where: str) -> None:
     )
 
 
-_CANONICAL_FIELDS: dict[type, tuple[str, ...]] = {}
+# --- the field's own declared type ------------------------------------------
+#
+# THE SECOND HALF OF THE ONE RULE, AND THE HALF THAT NEEDED NOTHING WRITTEN
+# — audit 0.2.0 B12. The canonicalization door above asks *"is there an
+# exact form to store this value as"*, which is a question about
+# SINGLE-VALUEDNESS and is answered YES for every exact built-in. It is not
+# the question *"is this the type this position holds"*, and nothing asked
+# that one: `Var(id=None)`, `Aval(weak_type="xx")`, `Aval(dtype=1.5)`,
+# `DebugInfo(func=0)` and — the one that mints a false VERIFIED —
+# `JaxprEqn(primitive=None)` were all stored, and round-tripped faithfully,
+# on `main` at `a4e4056`.
+#
+# THE DECLARED TYPE IS THE FIELD'S ANNOTATION, WHICH IS ALREADY IN THIS
+# FILE. `primitive: str`, `id: int`, `weak_type: bool`, `dtype: str | None`,
+# `eqns: tuple[JaxprEqn, ...]`, `fields: tuple[tuple[str, object], ...]` —
+# every one of them a statement nobody has to write twice, because
+# :func:`typing.get_type_hints` reads them off the class. A field added to
+# one of these dataclasses later is judged by its own annotation with
+# nothing added here, which is the same property :func:`_canonicalise`
+# already has and the reason neither is a table.
+#
+# WHY THE TEST IS EXACT (``type(v) is t``) AND NOT ``isinstance``. Every
+# value that reaches it has been through :func:`_canonical` on the line
+# before, so it is an exact built-in, an exact tuple, one of this module's
+# own frozen dataclasses, or a registered library type — an `isinstance`
+# would therefore admit exactly the same values while reading the OBJECT's
+# ``__class__``, which is one of the two bypasses audit 7 measured, so it
+# would be strictly worse for nothing. And it would be wrong at one
+# position for a reason that has nothing to do with liars: `bool` IS an
+# `int` subclass, so ``isinstance(True, int)`` is True and `<var>.id: true`
+# — a document no encoder writes — would pass. (The mirror case does not
+# arise: ``isinstance(1, bool)`` is already False, so `<aval>.weak_type: 1`
+# is refused either way.)
+#
+# AND THE MEMBERSHIP IS BY IDENTITY, never ``in`` and never ``==``, for the
+# reason :data:`_STORED_AS_IS` gives: ``type(v) in <a tuple of types>`` runs
+# the METACLASS, which is S14.
+#
+# WHAT THE ANNOTATION CANNOT SAY, and it is one thing: the registered
+# library type a `ClosedJaxpr.consts` entry may hold in place of a value
+# (`interval.IntervalArray` — see :data:`_LIBRARY_STORED_TYPES`). This
+# module may not import the module that defines it, so `consts`' annotation
+# cannot name it and does not. A registered type is therefore accepted at
+# ANY field, uniformly, because registration IS the declaration that this
+# module carries the value without judging it — and because no document can
+# reach one: `_decode` has NO TAG for it, so no JSON document produces one
+# and the only way one arrives is a caller who built it and put it there.
+# Scoping the exception to `consts` would be the enumeration this whole
+# door replaces, and would be a narrower claim than the truth.
+#
+# THE ARGUMENT RESTS ON `_decode` ALONE, and it used to rest on `_encode`
+# as well — *"`_encode` refuses to encode one"* — which is false at the
+# positions this exception is widest at. B12's own review, on B12's tree.
+# `_encode` refuses a registered value only in the arms where it RECURSES:
+# a `ClosedJaxpr` whose ``consts`` hold one raises ``stelling.ir cannot
+# encode IntervalArray``, correctly. At a slot it writes STRAIGHT THROUGH
+# with no type test, ``to_dict()`` does NOT raise — it returns a dict with
+# the `IntervalArray` sitting in the slot. **EIGHTEEN POSITIONS, MEASURED
+# BY DRIVING EVERY ONE OF THEM**, because an enumeration written by hand
+# was wrong the first time this paragraph tried it:
+#
+#     <aval>.kind  <aval>.dtype  <aval>.weak_type  <var>.id
+#     <enum>.cls  <enum>.member  <sentinel>.cls  <opaque>.cls
+#     <treedef>.text  <ntuple>.cls  <ntuple>.fields KEY
+#     <eqn>.primitive  <eqn>.effects[*]  <eqn>.source_info[*]
+#     <dbg>.func  <dbg>.arg_names[*]  <dbg>.result_paths[*]
+#     <jaxpr>.effects[*]
+#
+# The non-recursing slots NOT in that list never get that far, because a
+# registered value at them is refused AT CONSTRUCTION: `<aval>.shape[*]`
+# and `<array>.shape[*]` by the extent rule (`_load_extents` wants
+# ``__index__``), `<eqn>.params` KEYS by `_canonical_param_keys` — all
+# three a `TranscriptionError` — and `<array>.dtype` / `<array>.data` by
+# `Array.__post_init__`'s own ``len()`` reads, which raise a plain
+# `TypeError`. `<complex>.re`/`.im` are read off a `complex` object, so
+# nothing else can be there at all.
+#
+# (`content_hash` raises on such an object at FOURTEEN of the eighteen —
+# from `json.dumps`, which is loud and is not this module deciding
+# anything — and ANSWERS at the four the hash does not cover:
+# `<eqn>.source_info[*]` and the three `<dbg>` slots are exactly what
+# ``to_dict(include_metadata=False)`` omits, and `content_hash` is defined
+# over that reduced document. A correct hash of a scope that excludes
+# them, not a refusal; this line said *"does still raise"* unqualified
+# until B12's own re-review.) The conclusion
+# is unharmed because it never needed the `_encode` half: a document is
+# JSON, JSON reaches this module through `_decode`, and `_decode` has no
+# tag. `tests/test_document_schema.py` pins that half, drives all
+# eighteen positions above, and checks its own position set against
+# `_encode`'s AST — so neither the argument nor the enumeration is a
+# sentence anybody has to re-derive. **THAT AST CHECK COMPARES THE FULL
+# ``<tag>.key``, and it used to compare the bare key name**: a slot added
+# to the encoding under a key name already driven at another tag was
+# invisible to it, measured at `e3fe0fb` — a new ``<aval>.cls`` passed
+# while a new ``<aval>.zzz`` failed. It also read a dict value as a
+# recursion whenever the text ``_encode(`` appeared anywhere in it, which
+# dropped the two positions where the VALUE recurses and the KEY does not
+# (`<eqn>.params`, `<ntuple>.fields`) — so those two stood in the hand-
+# written list on BOTH sides of the comparison, driven but never derived,
+# which is the one thing the check exists to prevent. Both corrected in
+# B12's own re-review; the classification is structural now, and
+# conservative, so an encoding shape it does not recognise lands in the
+# population rather than out of it.
+#
+# THE FIELDS WITH A STRONGER RULE OF THEIR OWN ARE SKIPPED, exactly as they
+# already were: an `Aval`'s and an `Array`'s ``shape`` (`_load_extents`
+# reads each extent through ``__index__`` and installs a plain `int`, which
+# is strictly more than ``tuple[int, ...]`` asks) and a `JaxprEqn`'s
+# ``params`` (`_canonical_param_keys` owns the entries and the keys,
+# `_validate_decl_eqn` owns two of the values). Each of those rules
+# nonetheless PRODUCES what the annotation states, and that is measured
+# rather than asserted: `tests/test_document_schema.py` walks a real traced
+# query and checks every field of every object against its own spec, the
+# skipped ones included.
+_FIELD_SPECS: dict[type, dict[str, tuple]] = {}
+
+
+def _spec_of(ann: object) -> tuple:
+    """A field annotation as the shape :func:`_matches_spec` reads.
+
+    Four shapes, which is every shape the annotations in this module use:
+    ``("any",)`` for ``object``; ``("exact", (types…))`` for a type or a
+    union of types; ``("seq", spec)`` for ``tuple[X, ...]``; and
+    ``("pair", (spec, …))`` for a fixed-length ``tuple[A, B]``. An
+    annotation of any other shape raises, loudly and at first construction,
+    rather than being silently treated as unconstrained — a field this
+    function cannot read is a field nothing would be checking.
+    """
+    if ann is object:
+        return ("any",)
+    origin = _typing.get_origin(ann)
+    if origin is tuple:
+        args = _typing.get_args(ann)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return ("seq", _spec_of(args[0]))
+        return ("pair", tuple(_spec_of(a) for a in args))
+    if origin is _types.UnionType or origin is _typing.Union:
+        members: list[type] = []
+        for a in _typing.get_args(ann):
+            sub = _spec_of(a)
+            if sub[0] != "exact":
+                raise TypeError(
+                    f"stelling.ir: the field annotation {ann!r} is a union "
+                    f"with a non-type member {a!r}; _spec_of reads unions of "
+                    f"types only"
+                )
+            members.extend(sub[1])
+        return ("exact", tuple(members))
+    if isinstance(ann, type):
+        return ("exact", (ann,))
+    raise TypeError(
+        f"stelling.ir: the field annotation {ann!r} is of a shape _spec_of "
+        f"does not read, so nothing would be checking that field"
+    )
+
+
+def _spec_rule(spec: tuple) -> str:
+    """A spec as a sentence, DERIVED from the spec — so a refusal can never
+    name a different type from the one it applied. The discipline
+    :data:`_CANONICAL_RULE` and :data:`_SHAPE_PARAM_RULE` carry."""
+    kind = spec[0]
+    if kind == "any":
+        return "any stored value"
+    if kind == "exact":
+        return " or ".join(
+            "None" if t is type(None) else t.__name__ for t in spec[1]
+        )
+    if kind == "seq":
+        return f"a tuple of ({_spec_rule(spec[1])})"
+    return "a tuple of (" + ", ".join(_spec_rule(s) for s in spec[1]) + ")"
+
+
+def _matches_spec(spec: tuple, v: object) -> bool:
+    """Is ``v`` of the type :func:`_spec_of` read off the field?
+
+    Membership is ``type(v) is t`` — identity against the real type object,
+    which no metaclass and no ``__class__`` property takes part in (S14).
+    The only value accepted against a spec it does not match is a
+    :data:`_LIBRARY_STORED_TYPES` registration, for the reason the
+    narrative above gives, and that arm is reached only after the
+    annotation has already said no.
+    """
+    kind = spec[0]
+    if kind == "any":
+        return True
+    t = type(v)
+    if kind == "exact":
+        if any(t is s for s in spec[1]):
+            return True
+    elif t is tuple:
+        if kind == "seq":
+            inner = spec[1]
+            return all(_matches_spec(inner, x) for x in v)
+        return len(v) == len(spec[1]) and all(
+            _matches_spec(s, x) for s, x in zip(spec[1], v)
+        )
+    return any(t is r for r in _LIBRARY_STORED_TYPES)
 
 
 def _canonicalise(obj, where: str, *, skip: tuple[str, ...] = ()) -> None:
-    """Replace every field of an IR dataclass with its exact-typed twin.
+    """Replace every field of an IR dataclass with its exact-typed twin,
+    and refuse a field whose value is not of the type the field DECLARES.
 
-    The field names come from :func:`dataclasses.fields`, cached per
-    class: a field added to one of these dataclasses later is canonicalized
+    The field names come from :func:`dataclasses.fields` and their declared
+    types from :func:`typing.get_type_hints`, both cached per class: a field
+    added to one of these dataclasses later is canonicalized AND judged
     without anyone having to add it here, which is the difference between
-    this and a repair per member.
+    this and a repair per member (audit 0.2.0 B12 for the second half; see
+    the narrative above it).
+
+    The hints are resolved LAZILY, at first construction of each class,
+    and that is a choice about where the code lives rather than a
+    necessity: every annotation in this module names something defined
+    ABOVE it, so a pass at the foot of the module beside
+    :data:`_CANONICAL_IR_TYPES` would resolve them too. Doing it here keeps
+    the field list and the spec table in one place and costs one dict
+    lookup per construction; it is safe because nothing in this module
+    constructs IR at import, so the namespace is complete by the time any
+    of this runs.
     """
     cls = type(obj)
-    names = _CANONICAL_FIELDS.get(cls)
-    if names is None:
-        names = _CANONICAL_FIELDS[cls] = tuple(
-            f.name for f in _dataclasses.fields(cls)
-        )
+    names = _field_names(cls)
+    specs = _FIELD_SPECS.get(cls)
+    if specs is None:
+        hints = _typing.get_type_hints(cls)
+        specs = _FIELD_SPECS[cls] = {n: _spec_of(hints[n]) for n in names}
     for name in names:
         if name in skip:
             continue
@@ -1763,6 +2526,24 @@ def _canonicalise(obj, where: str, *, skip: tuple[str, ...] = ()) -> None:
         except _NotCanonical as exc:
             exc.path.append(f".{name}")
             _refuse_uncanonical(exc, where)
+        spec = specs[name]
+        if not _matches_spec(spec, c):
+            # COMPOSED ONLY ON THE FAILING PATH, for the reason
+            # `_canonical_param_keys` gives: a `_load_check` message is an
+            # ARGUMENT, `repr()` of a document-supplied value is a READ of
+            # it, and the passing path of this door is exactly one read per
+            # value.
+            _load_check(
+                False,
+                f"{where}.{name}",
+                f"value {_safe_repr(c)} is of type {_safe_type_name(c)}, and "
+                f"this field is declared {_spec_rule(spec)}: that "
+                f"declaration is what every reader of this IR relies on, and "
+                f"this position is document-supplied, so a value of any "
+                f"other type is not a fact about the program the document "
+                f"describes — it is a different program, silently "
+                f"substituted",
+            )
         if c is not v:
             object.__setattr__(obj, name, c)
 
@@ -2021,6 +2802,7 @@ def _validate_jaxpr(jaxpr: Jaxpr, where: str) -> None:
             _validate_param_value(v, f"{w}.params[{_safe_repr(name)}]")
         _validate_required_params(eqn, w)
         _validate_decl_eqn(eqn, w)
+        _validate_decl_nonempty(eqn, w)
 
 
 # The param keys jax supplies on EVERY equation for these primitives, measured
@@ -2125,6 +2907,189 @@ def _validate_required_params(eqn: "JaxprEqn", where: str) -> None:
     )
 
 
+# binary64's own infinity. Exact, and compared by ``==`` rather than by
+# ``is`` — two `float("inf")`s are equal and need not be one object.
+_INFINITY = float("inf")
+
+
+def _validate_decl_bounds(params: dict, where: str) -> dict[str, object]:
+    """A ``stelling_any`` declaration's ``lo``/``hi``: the TYPE, and the
+    exact ``float`` each was read as, RETURNED to be installed.
+
+    EVERY CONSTRUCTION PATH, exactly like the ``shape`` and ``dtype`` rules
+    beside it and for the same reason — the install is what makes the value
+    a later reader gets the value this function judged, and a rule that ran
+    only on the load path could not install anything.
+
+    Split out of :func:`_validate_decl_eqn` rather than inlined because it
+    is the only part of that function that does not depend on the outvar
+    aval, and the difference is load-bearing — see the comment at the call.
+
+    THE SET being non-empty is a different question with a different scope
+    and lives in :func:`_validate_decl_nonempty`, on the load path only.
+    """
+    out: dict[str, object] = {}
+    for name in ("lo", "hi"):
+        if name not in params:
+            continue
+        raw = params[name]
+        # CANONICALIZED FIRST, then a TYPE test on what the door produced —
+        # exactly as the `dtype` param is, and for the same reason: this
+        # function runs BEFORE `_canonical_param_values`, so `raw` is still
+        # the object the document handed over, and an `isinstance` here
+        # would take that object's word for it.
+        try:
+            v = _canonical(raw)
+        except _NotCanonical as exc:
+            exc.path.append(f".params[{name!r}]")
+            _refuse_uncanonical(exc, where)
+        if type(v) is not float:
+            # composed only on the failing path (see `_canonical_param_keys`)
+            _load_check(
+                False,
+                where,
+                f"stelling_any {name} param {_safe_repr(raw)} is of type "
+                f"{_safe_type_name(raw)}, and a declared bound is recorded as "
+                f"binary64: `harness.any_array` stores the binary64 image of "
+                f"whatever spelling the caller wrote, so `float` is the type "
+                f"`to_dict` writes here — and every reader of this param "
+                f"(`propagate`'s four declaration transfers, "
+                f"`obligation`'s slicer, `vacuity.widen`) either calls "
+                f"`float()` on it or compares it raw, so a param of any other "
+                f"type is not a bound this function can judge, it is two "
+                f"readers about to disagree",
+            )
+        out[name] = v
+    return out
+
+
+def _validate_decl_nonempty(eqn: "JaxprEqn", where: str) -> None:
+    """A LOADED ``stelling_any`` must declare a NON-EMPTY set.
+
+    THE REFUSAL :func:`stelling._jax_compat.any_array` ALREADY MAKES, made
+    at the deserialization door too — audit 0.2.0 B12, S16. An empty
+    declared set verifies every universal claim over it vacuously, which is
+    audit-gate finding 3 and the reason the trace face refuses it; measured
+    on `main` at `a4e4056`, a persisted query whose declaration was edited
+    to `lo:inf, hi:inf` returned **VERIFIED with 100% coverage** where the
+    honest verdict is UNKNOWN.
+
+    ``lo <= hi`` COVERS NaN BY CONSTRUCTION, which is stated because it
+    looks like an omission: ``nan <= x`` is False for every ``x``, so a NaN
+    endpoint fails the same comparison an inverted pair fails, and both are
+    the same fact — the declaration describes no value at all. `any_array`
+    spells it ``not lo <= hi`` for the same reason and says so.
+
+    **LOAD PATH ONLY, DELIBERATELY, AND NOT FOR THE REASON
+    :func:`_validate_required_params` GIVES.** That one is load-only because
+    hand-built IR legitimately omits params. This one is load-only because
+    the two faces are asking about different things. `any_array` is the
+    DECLARATION API — the sentence a user writes — and a document claims to
+    be a persisted traced query, so it may not carry a declaration that API
+    would have refused. `ir.JaxprEqn` is the constructor underneath both,
+    and the suite builds infinite and NaN declarations through it on
+    purpose, over operands no `any_array` will produce. Refusing those at
+    construction would delete a tested capability to close a document
+    surface, which is a wider change than the defect asks for.
+
+    **HOW MUCH CAPABILITY, MEASURED RATHER THAN NAMED**, because the first
+    spelling of this paragraph named one file and the count is four.
+    Calling this function from `JaxprEqn.__post_init__` instead — the
+    whole of the change — turns **11 pre-existing tests red across four
+    files**: 7 in `tests/test_ieee_semantics.py`, whose ``(inf, inf)``
+    declarations drive the maybe-NaN flag through `ne`/`eq`/`pow`/`min`/
+    `max`; 2 in `tests/test_transfers.py`, the non-finite
+    `scatter`/`gather` index declines; 1 in
+    `tests/test_ieee_zero_divisor_and_mul_exact.py`; and 1 in
+    `tests/test_undecided_detail.py::test_declined_declaration_side_points_at_the_declaration`,
+    **which is where the ``(nan, hi)`` declaration actually lives**
+    (``any_eqn(x, nan, 4.0)``), and not in the ieee file this paragraph
+    used to credit it to. That citation is on ONE line, past 79 columns,
+    because `tests/test_prose_hygiene.py` reads a `path::name` reference a
+    line at a time: wrapped mid-token, as this one was until B12's own
+    re-review, the pairing the sentence asserts is pinned by nothing.
+    The capability itself is pinned in one place —
+    `tests/test_document_schema.py::test_the_emptiness_rule_is_the_LOAD_doors_and_not_the_constructors`
+    constructs a witness for each of the two refusals in each direction —
+    so the argument rests on a test in this repository rather than on a
+    list of other files' names.
+
+    **AND THAT MAKES THOSE OBJECTS CONSTRUCTIBLE AND NOT RELOADABLE**,
+    which is the price of the choice and is stated HERE because this is
+    where a reader will look for it. ``ClosedJaxpr.from_dict(cj.to_dict())``
+    raises `TranscriptionError` for every declaration this function
+    refuses: `to_dict` encodes it without complaint, and the document it
+    writes is one `from_dict` will not take back. The same has always been
+    true of :func:`_validate_required_params`' subject — a params-less
+    equation — and those two are the whole of the exception, enumerated
+    from this file's call graph by `tests/test_document_schema.py` rather
+    than from this sentence — over the WHOLE load path, `_decode` and
+    :func:`_validate_loaded` both, which is a correction B12 made to its
+    own instrument after seeding it from the validator alone. It is not a
+    soundness hole: the refusal is loud, mints no verdict, and leaves
+    `content_hash` — a function of `to_dict` alone — untouched. It is a
+    bound on what "round-trips" means, the serialization comment above
+    :func:`_encode` claimed there was none, and the batch that added this
+    rule widened the bound by two classes without noticing. Both are
+    corrected there.
+
+    It also leaves something unsettled that this function is not the place
+    to settle, recorded so the next reader does not mistake it for an
+    oversight: `any_array`'s ``(inf, inf)`` refusal is argued from the
+    stamped ℝ semantics, under which an infinite endpoint means unbounded —
+    and stelling has a registered ``semantics="ieee"`` dial under which
+    ``[inf, inf]`` is the perfectly ordinary point ``{+inf}``. The dial is
+    chosen at check time and is not recorded in the IR, so neither face can
+    read it. This function matches the trace face because a document is a
+    persisted product of that face; whether that face should itself be
+    dial-aware is a question about `_jax_compat.any_array` and is reported
+    rather than answered here.
+
+    WHAT THE TRACE FACE ALSO REFUSES AND THIS ONE CANNOT: a bound that
+    binary64 cannot hold without NARROWING the declared set. That judgment
+    needs the dtype's own value grid and the caller's exact value, and
+    neither exists here — a document carries the recorded binary64 and
+    nothing else, so the narrowing has already happened or has not. That is
+    a bound on what this function claims, not a hole it leaves open: the
+    stored endpoints ARE the set the analyses reason about, and the two
+    refusals below are the whole of what makes that set non-empty.
+    """
+    if eqn.primitive != "stelling_any":
+        return
+    params = dict(eqn.params)
+    if "lo" not in params or "hi" not in params:
+        return
+    lo, hi = params["lo"], params["hi"]
+    # BOTH MESSAGES ARE COMPOSED ONLY ON THE FAILING PATH, for the reason
+    # `_canonical_param_keys` gives: a `_load_check` message is an ARGUMENT
+    # and `repr()` of a stored value is a READ of it, so composing one on
+    # every load of every declaration would put two reads on a path whose
+    # whole property is that it has one. The quotes are guarded even so —
+    # both endpoints are exact `float` by `_validate_decl_bounds`, which ran
+    # in this equation's own `__post_init__`, but this pass does not rest on
+    # another guard having run and that includes its own.
+    if not lo <= hi:
+        _load_check(
+            False,
+            where,
+            f"stelling_any bounds ({_safe_repr(lo)}, {_safe_repr(hi)}) "
+            f"declare an EMPTY set, which verifies every universal claim "
+            f"over it vacuously and refutes every existential one — the "
+            f"refusal `harness.any_array` makes at declaration time, made "
+            f"here because a document claims to be a query that came "
+            f"through it",
+        )
+    if lo == hi and (lo == _INFINITY or lo == -_INFINITY):
+        _load_check(
+            False,
+            where,
+            f"stelling_any bounds ({_safe_repr(lo)}, {_safe_repr(hi)}) "
+            f"declare an empty REAL set: under the stamped ℝ semantics "
+            f"an infinite endpoint means unbounded, so an infinite point "
+            f"has no members (the same refusal `harness.any_array` makes)",
+        )
+
+
 def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
     """A stelling_any declaration's aval must agree with its OWN
     params — two self-descriptions of one declared set. Called from
@@ -2132,10 +3097,11 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
     from_dict walk (kept for its load-path error context).
 
     **RETURNS THE PARAMS IT VALIDATED, NORMALISED, KEYED BY NAME** — the
-    ``shape`` param's extents as plain ``int`` in a plain ``tuple`` and
-    the ``dtype`` param as an exact ``str`` — and an EMPTY dict when the
-    equation carries neither to validate (a form this function
-    deliberately still blesses; see the last paragraph).
+    ``shape`` param's extents as plain ``int`` in a plain ``tuple``, the
+    ``dtype`` param as an exact ``str``, and ``lo``/``hi`` as exact
+    ``float`` — and an EMPTY dict when the equation carries none of them to
+    validate (a form this function deliberately still blesses; see the last
+    paragraph).
     :meth:`JaxprEqn.__post_init__` writes each back into ``params``, which
     is what makes the value every later reader sees the value this
     function compared. Audit 0.2.0 B6 audit 5, F1: reading once and
@@ -2197,6 +3163,49 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
     over ``np.array([4])``, which is a sequence of extents and was refused
     for a different reason.
 
+    **``lo`` AND ``hi`` ARE THE DECLARED SET ITSELF, AND THEY HAD NO RULE AT
+    ALL** — audit 0.2.0 B12, S16. Three things were missing and they are one
+    finding: a TYPE (the IR records a bound as binary64, and `"0.5"`,
+    `true`, `1` and `null` were all admitted, at ten reader sites that each
+    do ``float(params["lo"])`` with no gate in front of them, of which
+    ``""``, ``"xx"``, ``null`` and ``()`` each reached a RAW crash out of
+    the public `propagate()`); the INSTALL
+    (the guard read one object and every reader re-read another — and two of
+    those readers DISAGREED about one value, `vacuity.widen` deciding *"is
+    this a POINT declaration?"* with ``params["lo"] != params["hi"]`` on the
+    raw objects while every analysis reads ``float(...)``, so `lo:"1.0"` /
+    `hi:1.0` is a point by the reading every analysis makes and not a point
+    by the reading `widen` makes, and was widened by the mode whose whole
+    contract is that a point declaration is held still); and the EMPTINESS
+    refusal
+    :func:`stelling._jax_compat.any_array` already makes on the trace face,
+    which is :func:`_validate_decl_nonempty` and is load-path only for the
+    reason written there.
+
+    The type is ``float`` and not "a number", because this face reads the
+    ENCODING and not a caller's spelling: `any_array` records
+    ``binary64_image(...)``, which is a python `float` for every accepted
+    spelling, so `float` is exactly what `to_dict` writes at these two
+    positions. The wide spelling family lives at the trace face, where a
+    caller writes python — see :mod:`stelling._bound_spelling`, whose whole
+    subject is that judging a bound by its TYPE while its VALUE goes through
+    ``float()`` is how this layer's three earlier escapes happened. Here
+    there is no exact value to preserve: the document's `float` IS the
+    binary64 the parent recorded, so the two clauses `any_array` needs for a
+    finite value whose image is infinite have nothing to say at this face
+    and are not restated.
+
+    THAT NARROWING IS CONFINED TO HAND-BUILT IR, exactly as the ``shape``
+    and ``dtype`` rules above are, and there it is loud: no traced query and
+    no `to_dict` output carries anything but a `float` here — measured over
+    the whole accepted spelling family (python `int`/`bool`/`float`, numpy
+    integer/floating/`longdouble`, `Decimal`, `Fraction`, the signed zeros
+    and the infinities), every one of which `any_array` records as a python
+    `float`. What it costs
+    is that a hand-written `JaxprEqn` must spell an integer bound `4.0`
+    rather than `4`, which is what `any_array` would have recorded for it
+    anyway.
+
     **This door is not the soundness boundary and closing it does not make
     one.** `ir.py` scopes per-primitive shape inference out of the load
     validation in writing, and `stelling.obligation._Slicer.
@@ -2206,10 +3215,24 @@ def _validate_decl_eqn(eqn: "JaxprEqn", where: str) -> dict[str, object]:
     IR legitimately omits params; see `_validate_required_params`). What
     this closes is the constructor's own claim to have compared the two
     self-descriptions when it had not."""
-    if eqn.primitive != "stelling_any" or not eqn.outvars:
+    if eqn.primitive != "stelling_any":
         return {}
     params = dict(eqn.params)
     normalised: dict[str, object] = {}
+    # THE BOUNDS FIRST, AND WITHOUT AN OUTVAR IN THE CONDITION. `shape` and
+    # `dtype` are the declaration's second self-description OF ITS OUTVAR
+    # AVAL, so there is nothing to compare them against when there is no
+    # outvar; `lo`/`hi` are the declared SET, which an equation carries
+    # whether or not anything is bound to it. The guard used to read
+    # ``primitive != "stelling_any" or not eqn.outvars``, which would have
+    # left these two unjudged on an outvar-less declaration — a form
+    # `_validate_required_params` does not forbid.
+    normalised.update(_validate_decl_bounds(params, where))
+    if not eqn.outvars:
+        return normalised
+    # (the SET those two bounds describe is judged on the load path, by
+    # `_validate_decl_nonempty` — see that function for why the two
+    # questions have different scopes)
     # the declaration's aval must agree with its OWN params —
     # the P1 arc's lies all started at a declaration whose two
     # self-descriptions disagreed

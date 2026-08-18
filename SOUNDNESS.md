@@ -9111,6 +9111,16 @@ in place and marked.*
   `ir._encode` refuses to encode one — so it is a caller's object, and
   `interval.py` states in return that it is frozen and validated at
   construction.
+  *(THE `ir._encode` HALF IS FALSE, and this sentence is left standing
+  because a log that edits itself is not one. `_encode` refuses a
+  registered value only where it RECURSES — a `consts` entry holding one
+  does raise, which is the arm this sentence generalised from. At the
+  eighteen slots it writes STRAIGHT THROUGH, `to_dict()` returns a dict
+  with the object in it and raises nothing. "No document route reaches it"
+  survives on `ir._decode` alone, which is the half that was always
+  carrying it. Measured and corrected AT THE CODE — three paragraphs of
+  `ir.py`, pinned by shape in `tests/test_document_schema.py` — and
+  written up in `CHANGELOG.md`'s B12 entry, not in this file's.)*
 
   But the
   door is **not** where this class is contained, and two things say so.
@@ -10703,18 +10713,322 @@ in place and marked.*
   larger pre-existing cost than anything this batch adds (a whole interval
   walk against a hash) and is reported, not touched, here.
 
+- **2026-08-18 (B12): FALSE VERIFIED — `<eqn>.primitive` had no type rule,
+  and a value that cannot be a primitive NAME deleted the obligation the
+  equation carried.** Audit 0.2.0 **S15**. Document-reachable: pure JSON
+  through `ir.ClosedJaxpr.from_dict`, no attacker Python anywhere in the
+  document.
+
+  **THE CONSTRUCTION.** `a = any_array((2,), float64, (1.0, 2.0));
+  assert_(a > 0); assert_(a < 0)`. The second assertion is FALSE at every
+  point of the declared box — concrete jax at three points and exact
+  `Fraction` at `1`, `3/2` and `2` agree — and the query is REFUTED with
+  two obligations, `['discharged', 'violated-over-set']`. Editing the
+  persisted document's `jaxpr.eqns[4].primitive` from `"stelling_assert"`
+  to any of **`null`, `true`, `0`, `-1`, `1.5`, `[]`, `[0]`** loaded
+  without complaint, silently reclassified the equation as an unknown
+  primitive, and returned **VERIFIED with one obligation**. Measured on
+  `main` at `a4e4056` in `/home/nick/venvs/stelling-jax` (jax 0.11.0,
+  python 3.12.3, x64): 7 of the census's 10 non-name values ACCEPTED, of
+  which `[]` and `[0]` were also SILENT ACCEPTS — the document said `[]`
+  and the IR stored `()`, which re-encodes as `{"k":"tuple","items":[]}`.
+
+  **RE-MEASURED ON A `git clone --shared` TREE AT THE RELEASED `v0.1.0`
+  TAG** (`e67688e`), same environment and same day: **5 of the 10 accepted
+  and produced the identical false VERIFIED** — `null`, `true`, `0`, `-1`,
+  `1.5`. The other two of the seven, `[]` and `[0]`, raise
+  `TypeError: unhashable type: 'list'` at the tag and are ACCEPTED on
+  `main`, because B6's canonicalization door stores a `list` as a `tuple`
+  and a tuple is hashable. So this position's accept set GREW between the
+  release and `main` — B6 closed a raw escape at a position that had no
+  type rule, and made two more documents loadable. That is not a criticism
+  of B6's repair, which is right; it is why the count differs between the
+  two trees and why both are given.
+
+  The only tell in the verdict is a coverage line reading
+  `5 eqns: 4 known (80%); 1 ⊤ across 1 primitives (None ×1)` — a name no
+  primitive can have, which nothing refused.
+
+  **WHY IT IS A FALSE VERIFIED AND NOT A DIFFERENT QUERY.** An unknown
+  primitive NAME going to ⊤ is correct and stays: `primitive: "xx"`
+  describes a program with one obligation and one opaque operation, and
+  VERIFIED-with-80%-coverage is true of THAT program. `null`, `1.5` and
+  `()` are not names. There is no program they describe, so the document
+  was not read as what it said — it was read as a different program, and
+  the difference was exactly one obligation.
+
+  **THE MECHANISM, and it is one sentence about the whole reader rather
+  than about this position.** `ir._encode` is a total function from IR to
+  JSON with one arm per stored type, so the JSON type at every position of
+  a document is not a convention anybody has to remember: it is what
+  `_encode` writes there. **`_decode` judged almost none of it.** The
+  `primitive` position had a rule in prose — `_REQUIRED_PARAMS`' own
+  comment says *"the primitive name is the semantic authority"* — and
+  `_validate_loaded` type-checked it nowhere. The same absence covered
+  every other scalar position (`<var>.id: null`, `<aval>.weak_type: "xx"`,
+  `<aval>.dtype: 1.5`, `<dbg>.func: 0` all loaded and round-tripped
+  faithfully) and every sequence position (`<tuple>.items: {}` was read as
+  the empty geometry `()`, `"xx"` as `('x','x')`, and a tagged object as
+  its dict KEYS — `_decode`'s tuple arm was VERBATIM the reader
+  `_load_extents` replaced in B6 audit 8, one level short: that repair
+  judged the container of a SHAPE, and every geometry param is spelled
+  `{"k":"tuple","items":[…]}`).
+
+  **THE REPAIR IS ONE RULE AT TWO DOORS**, because a document position is
+  one of exactly two kinds. A DATACLASS FIELD's declared type is its own
+  annotation, read with `typing.get_type_hints` and never listed, so a
+  field added later is judged without anyone editing anything
+  (`ir._canonicalise` + `ir._spec_of`). A SEQUENCE the reader must ITERATE
+  in order to recurse has no field to carry an annotation — the container
+  is a fact about the ENCODING, and `_decode` turns the document's `list`
+  into the field's `tuple` before any field exists — so it is judged by
+  `ir._doc_sequence`, which is `_canonical_shell`, the container reader
+  this module already had for the `params` sequence alone, asked at every
+  other sequence position instead of at one. Three leaves the reader
+  CONSUMES itself (`<array>.data`, `<complex>.re`/`.im`) have a type gate
+  at the reader for the same reason. The document's KEY SET is judged the
+  same way, from the same field list.
+
+  **WHAT THE RULE COSTS, measured rather than argued.** The B12 census's
+  population of 170 legitimate documents — every zero-argument harness in
+  the property corpus, the tag probes, and five hand-built bases, covering
+  all 15 tags — **all 170 still round-trip exactly with `content_hash`
+  preserved**, and the population statistics are identical to the
+  baseline's (4,563 shapes, every container a `list` and every extent an
+  `int`; 0 IR-side shape violations; the same tag histogram). Nothing
+  legitimate is refused. The one narrowing outside documents is hand-built
+  IR: `ir.JaxprEqn(source_info=7)` is no longer constructible, and the two
+  slicer-totality tests that needed that subject now install it with
+  `object.__setattr__`, the way `tests/test_aval_lie_both_faces.py`
+  installs a declaration lie, so the slicer is still measured with the
+  door not in front of it.
+
+  **WHICH STELLING VERSIONS ARE AFFECTED.** `from_dict` has no caller in
+  `src/` or `tools/` — only tests — so the realistic consumer is a user
+  who persists `to_dict()` and reloads it. Every version that has
+  `ClosedJaxpr.from_dict` is affected, **the released `v0.1.0` included
+  and reproduced at the tag** (see the re-measurement above): none of the
+  schema rules existed before this commit.
+  The exposure is a document that has been EDITED or CORRUPTED between
+  `to_dict()` and `from_dict()`; a document this library wrote and nothing
+  touched carries only types the encoder writes and is unaffected in
+  either direction.
+
+  **WHAT TO RE-RUN.** Reload every persisted query you hold and check that
+  `from_dict` still accepts it — it will, unless the file was edited. Then
+  screen for the signature: a verdict whose coverage line names a primitive
+  that is not an identifier (`(None ×1)`, `(() ×1)`, `(1.5 ×1)`, `( ×1)`),
+  or a VERIFIED whose obligation count is lower than the harness's
+  `assert_` count. Both are visible in the stamp without re-running
+  anything. A query traced in-process and checked without a `to_dict()` /
+  `from_dict()` round trip cannot be affected: nothing on that path ever
+  builds an equation from a document.
+
+  **THE RESIDUAL CLASS, and it is not empty.** `ir.py` scopes
+  per-primitive shape inference out of the load validation in writing, and
+  this rule does not add any: it judges the TYPE at every position, never
+  the VALUE. A document whose `<eqn>.primitive` is a plausible but wrong
+  NAME, whose extents are integers that lie, or whose params describe a
+  geometry the operands do not have, is still admitted and is still the
+  slicer's and the transfers' problem — `obligation._Slicer.
+  _one_shape_per_value` is what stands between a lying document and a
+  verdict, and B6's entry above says so. **And the residue is not only a
+  precision one: it still contains an UNCATCHABLE CRASH OUT OF A PUBLIC
+  ENTRY POINT**, which this log's degrade-don't-crash posture is against
+  wherever it is reachable. An ARITY is not a type, so a well-typed but
+  SHORT `<eqn>.invars` for a known primitive loads and then raises a bare
+  `TypeError` (`gt() missing 1 required positional argument`, out of
+  `propagate.TRANSFERS`' `"gt"` entry, `lambda eqn, p, ins:
+  [iv.gt(*ins)]`) or `IndexError` (`list index out of range`, out of its
+  `"stelling_assert"` entry, `[ins[0]]`) out of `propagate()` — neither
+  catchable by `except TranscriptionError`. Seven witnesses driven from a
+  JSON document: `gt`, `lt`, `ge`, `le`, `eq`, `ne` for the first and
+  `stelling_assert` for the second, each accepted by `from_dict` and then
+  crashing. **THE CITATION IS A SYMBOL BECAUSE THE LINE NUMBERS THIS
+  SENTENCE FIRST CARRIED HAD ALREADY GONE STALE** — the two transfers moved
+  under an unrelated merge while this entry sat on a branch, and
+  `tests/test_prose_hygiene.py` only refuses a citation PAST THE END of a
+  file, so a line number that still exists and has become something else
+  is precisely the claim nothing checks. Pre-existing and measured
+  identical on `a4e4056`; the type rule narrows the population that
+  reaches it and closes none of it. Closing it means a per-primitive ARITY
+  check on the load path, which is the per-primitive inference this door
+  scopes out in writing, so it is reported here rather than added.
+
+- **2026-08-18 (B12): FALSE VERIFIED — a persisted `stelling_any` could
+  declare an EMPTY set, which verifies every universal claim over it
+  vacuously; and its `lo`/`hi` had no type rule, at ten reader sites that
+  each call `float()` on them and one that does not.** Audit 0.2.0
+  **S16**. Document-reachable, same conditions as S15.
+
+  **THE CONSTRUCTION.** `a = any_array((2,), float64, (-1.0, 1.0));
+  assert_(a > 0)`, honestly UNKNOWN. Editing the persisted document's
+  declaration to `lo: inf, hi: inf` returned **VERIFIED with
+  `3 eqns: 3 known (100%)` coverage** on `main` at `a4e4056` — a definite
+  verdict over a set with no members, which is audit-gate finding 3
+  reached through a door that finding never looked at.
+  `harness.any_array` refuses that declaration at the trace face in as
+  many words (*"an infinite point has no members under ℝ semantics;
+  refusing at declaration time"*), and so does it refuse `lo > hi` and a
+  NaN endpoint; `from_dict` refused none of the three.
+  **RE-MEASURED ON A `git clone --shared` TREE AT THE RELEASED `v0.1.0`
+  TAG** (`e67688e`), same environment: identical — `lo: inf, hi: inf`
+  returns VERIFIED with 100% coverage there too, and `lo: -inf, hi: -inf`
+  returns REFUTED, which is the same vacuity with the other sign.
+
+  **AND THE TYPE, WHICH IS THE SAME FINDING ONE STEP EARLIER.** Ten sites
+  read a declared bound as `float(params["lo"])` with no gate in front of
+  them — FIVE FUNCTIONS, each reading `hi` the same way on the next line,
+  and cited by symbol for the reason given above: the `"stelling_any"`
+  entry of `propagate.TRANSFERS` and `propagate._ieee_any` (both
+  `float(_req(…, "lo", "stelling_any"))`), `propagate._Propagator._pinned`
+  and `propagate._Propagator.eqn` (both `float(params["lo"])`), and
+  `obligation._Slicer.slice` (`float(params.get("lo", math.nan))`). This
+  sentence carried eight `propagate.py` line numbers and two
+  `obligation.py` ones when it was written, and all ten were pointing at
+  unrelated code on `main` before this batch landed. Measured on `main` at
+  `a4e4056`, from pure JSON: `lo: true` loaded and the declared box became
+  `(1.0, 1.0)`;
+  `lo: "0.5"` loaded and the box became `(0.5, 1.0)`; and `""`, `"xx"`,
+  `null` and `{"k":"tuple","items":[]}` each loaded and then **raw-crashed
+  out of the public `propagate()`** with a `ValueError` or a `TypeError` —
+  the FRAGILE-by-convention posture this file records is degrade-not-crash
+  where reachable, and this was reachable from a JSON file.
+
+  **AND TWO READERS DISAGREED ABOUT ONE VALUE.** `vacuity.widen` decides
+  *"is this a POINT declaration?"* with `params["lo"] != params["hi"]` on
+  the RAW objects, while every analysis reads `float(...)`. A document
+  carrying `lo: "1.0"`, `hi: 1.0` is a point by the reading that decides
+  the verdict and is NOT a point by the reading that decides whether to
+  widen, so `widen(mode="inputs-only")` — whose contract is that a point
+  declaration is a stated constant and is held still — widened it, and
+  `vacuity.unwidened` then found nothing to report. That is a false
+  QUALIFICATION rather than a false verdict, and it is the defect
+  `vacuity.py`'s own docstring says must not happen.
+
+  **THE REPAIR, and it is the *"a guard must install the value it
+  validated"* lesson B6 took three rounds to reach.**
+  `ir._validate_decl_eqn` already owned this equation's two other
+  self-descriptions; it owns these now. `_validate_decl_bounds` runs on
+  EVERY construction path, canonicalizes each bound once, refuses anything
+  whose type is not `float`, and RETURNS what it read so that
+  `JaxprEqn.__post_init__` installs it — which is what makes `vacuity`'s
+  raw `!=` and `propagate`'s `float()` one read of one value rather than
+  two reads of an object free to answer differently. The type is `float`
+  and not "a number" because this face reads the ENCODING: `any_array`
+  records `_bound_spelling.binary64_image(...)`, which is a python `float`
+  for every accepted spelling, so `float` is exactly what `to_dict`
+  writes. The wide spelling family stays at the trace face, where a caller
+  writes python.
+
+  **THE EMPTINESS REFUSAL IS ON THE LOAD PATH ONLY, deliberately, and the
+  reason is not the one `_validate_required_params` gives.** That one is
+  load-only because hand-built IR legitimately omits params. This one is
+  load-only because the two faces ask about different things: `any_array`
+  is the DECLARATION API and a document claims to be a persisted product
+  of it, while `ir.JaxprEqn` is the constructor underneath both and the
+  suite builds `(inf, inf)` and `(nan, hi)` declarations through it on
+  purpose, over operands no `any_array` will produce. Refusing those at
+  construction would delete a tested capability in order to close a
+  document surface — **11 pre-existing tests across four files, measured
+  by moving the rule to `JaxprEqn.__post_init__`**: 7 in
+  `tests/test_ieee_semantics.py`, 2 in `tests/test_transfers.py`, 1 in
+  `tests/test_ieee_zero_divisor_and_mul_exact.py`, and 1 in
+  `tests/test_undecided_detail.py`, which is where the `(nan, hi)`
+  declaration actually lives. This paragraph credited all of it to the
+  ieee file until the batch's own review re-ran the experiment.
+
+  **AND SOMETHING THIS ENTRY DOES NOT SETTLE, recorded so it is not
+  mistaken for an oversight.** `any_array`'s `(inf, inf)` refusal is
+  argued from the stamped ℝ semantics, under which an infinite endpoint
+  means *unbounded* — and stelling has a registered `semantics="ieee"`
+  dial under which `[inf, inf]` is the ordinary point `{+inf}`. The dial
+  is chosen at check time and is not recorded in the IR, so neither face
+  can read it. The load face matches the trace face because a document is
+  that face's persisted product; whether that face should itself be
+  dial-aware is a question about `_jax_compat.any_array` and is **reported
+  here, not answered**.
+
+  **WHICH STELLING VERSIONS ARE AFFECTED.** As S15: every version with
+  `ClosedJaxpr.from_dict`, **`v0.1.0` included and reproduced at the
+  tag**, and only through a document
+  that was edited or corrupted between `to_dict()` and `from_dict()`.
+  `from_dict` has no caller in `src/` or `tools/`, only tests, so the
+  realistic consumer is a user who persists and reloads. A traced,
+  in-process query cannot reach either half: `any_array` has refused the
+  empty box since the audit-gate fix, and it records a `float`.
+
+  **WHAT TO RE-RUN, and the honest part is that a stored verdict is not
+  enough.** Re-load each persisted query: any `stelling_any` whose
+  `lo`/`hi` are inverted, NaN, an infinite point, or of a type the
+  encoder does not write now refuses at the door, so a file that still
+  loads never carried one, and that is the screen with teeth. A stored
+  VERDICT is a much weaker screen, because measured on `a4e4056` the
+  affected documents mostly leave no mark on it: `lo: inf, hi: inf`
+  returns VERIFIED with **100% coverage and no ⊤ at all**, and so do
+  `lo: true`, `lo: 1` and `lo: "0.5"`. The only verdict-visible signature
+  is a `stelling_any` in the ⊤ list (`1 ⊤ across 1 primitives
+  (stelling_any ×1)`), and that is what the INVERTED and NaN boxes
+  produced — not the infinite point and not a wrong-typed bound that
+  `float()` could read. So: any VERIFIED or REFUTED obtained by loading a
+  document that was not written by `to_dict()` and left untouched should
+  be re-derived from the harness, whatever its stamp says.
+
+  **THE RESIDUAL CLASS.** The load face cannot make the trace face's other
+  refusal — a bound binary64 cannot hold without NARROWING the declared
+  set — because that judgment needs the caller's exact value and the
+  dtype's value grid, and a document carries only the recorded binary64.
+  That is a bound on the claim, not a hole: the stored endpoints ARE the
+  set the analyses reason about, and the two refusals above are the whole
+  of what makes that set non-empty.
+
 **Releases reached by an entry in this log.** `v0.1.0`, the only release,
-is reached by **four** entries, all of them audit 0.2.0 findings and all
+is reached by **six** entries, all of them audit 0.2.0 findings and all
 reproduced at the tag: the 2026-08-15 `exp`/`pow` libm-bracket entry (S11)
 through `propagate(closed, semantics="ieee")`; the 2026-08-15 undescended-
-`assume` entry (S13), through the ordinary `check()` path in real mode; the
-2026-08-15 B6 `dot_general` entry (S12), through `from_dict`; and the
+`assume` entry (S13), through the ordinary `check()` path in real mode;
+the 2026-08-15 B6 `dot_general` entry (S12), through `from_dict`; the
 2026-08-16 B11 mispaired-`Propagation` entry (UNSOUND-3), through
-`make_verdict` / `make_solver_verdict` called directly — the only one of
-the four that needs neither `semantics="ieee"`, nor a serialized query, nor
-an `assume`, and the only one reachable with no solver at all. Every other
-entry is 0.2.0 development only, and **no release has yet shipped any fix
-in this log**. This line read *"(no releases yet)"* until 2026-08-15, a
+`make_verdict` / `make_solver_verdict` called directly; and the two
+2026-08-18 B12 entries (S15, S16), both through `from_dict` and both
+re-measured on a `git clone --shared` tree at the tag on the day they were
+written. UNSOUND-3 is the only one of the six that needs neither
+`semantics="ieee"`, nor a serialized query, nor an `assume`.
+
+**AT LEAST THREE OF THE SIX NEED NO SOLVER AT ALL — UNSOUND-3, S15 AND
+S16 — and this sentence claimed UNSOUND-3 was the only one.** It was true
+of the four entries `main` had; it is not true of the six the B12 merge
+makes. Corrected by MEASUREMENT at the tag rather than by reasoning from
+the entries — and stated as "at least three" because what was measured is
+that S15 and S16 join UNSOUND-3, not that the remaining three do not.
+S11, S13 and S12 are not re-measured here and this sentence claims
+nothing about them.
+
+On a `git clone --shared` tree at `e67688e`, through `propagate` and
+`verdict.make_verdict` with no solver anywhere in the chain: `assert_(a > 0); assert_(a < 0)` over the declared `(1.0, 2.0)`
+is REFUTED with `['discharged', 'violated-over-set']`, and the same
+document with `jaxpr.eqns[4].primitive` set to `null`, `true`, `0`, `-1`
+or `1.5` returns **VERIFIED** — five of the seven, the other two (`[]`,
+`[0]`) raising `TypeError: unhashable type: 'list'` at the tag, which is
+the split the S15 entry above already records. And `assert_(a > 0)` over
+`(-1.0, 1.0)`, honestly UNKNOWN there, returns **VERIFIED** with
+`lo: inf, hi: inf` and **REFUTED** with `lo: -inf, hi: -inf` on that same
+solverless route. The clause that survives is the first one: UNSOUND-3 is
+the entry that needs no serialized query either.
+
+Every other entry is 0.2.0 development only, and **no release has yet
+shipped any fix in this log**. This line read *"(no releases yet)"* until
+2026-08-15, a
 few lines below the reproduction that contradicts it; it then named S11
 alone while the S13 entry above it said *"the second finding of that audit
-to reach a shipped version"* — the same failure, one count shorter.
+to reach a shipped version"* — the same failure, one count shorter. It said
+**three** until 2026-08-18, when two entries reaching the tag were added
+directly above it, which is the same failure once more and is why the
+count is stated as a number the two paragraphs must be diffed against.
+**AND IT SAID FOUR AND FIVE AT THE SAME MOMENT** — four on `main` after
+B11 landed, five on B12's branch, each correct about its own tree and
+both wrong about the merged one. That is the same failure a fourth time,
+arriving by a route the first three did not use: not a claim that rotted
+in place, but two claims that were each true where they were written. The
+merge re-derived the list rather than taking either side's digit, and the
+no-solver clause above is what re-deriving it turned up.

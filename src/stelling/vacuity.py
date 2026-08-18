@@ -80,6 +80,18 @@ def declaration_bounds(closed) -> list:
     def walk(jaxpr):
         for eqn in jaxpr.eqns:
             if eqn.primitive == "stelling_any":
+                # THE BOUNDS ARE TAKEN RAW HERE AND COMPARED RAW BELOW, and
+                # that is sound because of what stores them rather than
+                # because of anything this module does — audit 0.2.0 B12,
+                # S16. `ir._validate_decl_bounds` refuses a `lo`/`hi` that
+                # is not a `float` and INSTALLS the exact `float` it read,
+                # in every `JaxprEqn.__post_init__`, so this module's `!=`
+                # and the `float(...)` every analysis applies are one read
+                # of one value. Before that install they were two: a
+                # document carrying `lo:"1.0"`, `hi:1.0` was a POINT by
+                # `float()` and not a point by the `!=` in `widen` below,
+                # so `mode="inputs-only"` widened a declaration whose whole
+                # contract is that a point is held still.
                 p = dict(eqn.params)
                 out.append((eqn.outvars[0].id, p["lo"], p["hi"]))
             for sub in sub_jaxprs(eqn):
@@ -177,6 +189,12 @@ def widen(closed: ir.ClosedJaxpr, *, mode: str) -> ir.ClosedJaxpr:
     for eqn in j.eqns:
         if eqn.primitive == "stelling_any":
             params = dict(eqn.params)
+            # the RAW `!=` — see `declaration_bounds` for why it is the same
+            # read every analysis makes, and for what it was before it was
+            # (audit 0.2.0 B12, S16). A NaN endpoint, which `!=` would call
+            # a non-point and `float()` would too, cannot reach here from a
+            # document at all: `ir._validate_decl_nonempty` refuses it at
+            # the load door as the empty set it declares.
             if mode == "all" or params["lo"] != params["hi"]:
                 params["lo"], params["hi"] = -_INF, _INF
                 eqn = ir.JaxprEqn(

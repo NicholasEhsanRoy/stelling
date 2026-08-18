@@ -44,11 +44,20 @@ def lit(v, a=F64):
 
 
 def any_eqn(out, lo, hi, dtype="float64", shape=()):
+    # THE BOUNDS ARE RECORDED AS `float`, because that is what the thing this
+    # helper stands in for records: `harness.any_array` stores
+    # `_bound_spelling.binary64_image(...)` of whatever the caller wrote, and
+    # that is a python `float` for every accepted spelling — so no traced
+    # query and no `to_dict` output carries an `int` here. `ir` refuses one
+    # since audit 0.2.0 B12 (S16), and callers below that write an integer
+    # bound for an integer dtype are writing a spelling the declaration API
+    # would have converted for them.
     return ir.JaxprEqn(
         primitive="stelling_any",
         invars=(),
         outvars=(out,),
-        params=(("shape", shape), ("dtype", dtype), ("lo", lo), ("hi", hi)),
+        params=(("shape", shape), ("dtype", dtype),
+                ("lo", float(lo)), ("hi", float(hi))),
     )
 
 
@@ -56,6 +65,35 @@ def eqn(prim, ins, out, params=()):
     return ir.JaxprEqn(
         primitive=prim, invars=tuple(ins), outvars=(out,), params=tuple(params)
     )
+
+
+def _with_source_info(e, source_info):
+    """A copy of ``e`` carrying ``source_info`` EXACTLY as given — installed
+    past `__post_init__` when the door would refuse it.
+
+    `ir.JaxprEqn.source_info` is declared ``tuple[str, ...]`` and
+    `ir._canonicalise` has enforced that since audit 0.2.0 B12, so the
+    subjects the totality tests below need — an `int` where the frames go —
+    are not constructible through the public constructor any more. They are
+    installed the way `tests/test_aval_lie_both_faces.py` installs a
+    declaration lie: with `object.__setattr__`, so that `obligation._frames`
+    is measured with the door NOT standing in front of it. The value that
+    the door DOES accept (a `list` subclass, canonicalized to a frame
+    tuple) goes through the constructor normally, so this helper does not
+    hide which of the two is which."""
+    try:
+        return ir.JaxprEqn(
+            primitive=e.primitive, invars=e.invars, outvars=e.outvars,
+            params=e.params, effects=e.effects, source_info=source_info,
+        )
+    except ir.TranscriptionError:
+        pass
+    bare = ir.JaxprEqn(
+        primitive=e.primitive, invars=e.invars, outvars=e.outvars,
+        params=e.params, effects=e.effects,
+    )
+    object.__setattr__(bare, "source_info", source_info)
+    return bare
 
 
 def close(eqns, outvars):
@@ -646,17 +684,22 @@ def test_a_non_tuple_source_info_declines_instead_of_raising():
     not that the two disagreed. "traced at 7 but records 7" is what the
     disagreement sentence would print here, and it reads as the tool
     contradicting itself.
+
+    **THE `int` IS INSTALLED PAST `__post_init__` NOW** — audit 0.2.0 B12.
+    `ir._canonicalise` refuses a field whose value is not of the type the
+    field's own annotation declares, and `source_info` is declared
+    `tuple[str, ...]`, so an equation can no longer be CONSTRUCTED carrying
+    an `int` there. That is a strictly better place for the refusal and it
+    is not a substitute for `_frames`' totality, for the reason
+    `test_the_slicer_closes_the_declaration_lie_ON_ITS_OWN` gives about the
+    declaration door: `_frames` also reads `ObligationReport.source_info`,
+    which is not an `ir` field and goes through no door at all. So the
+    subject is installed with `object.__setattr__` and the slicer is
+    measured with the door not standing in front of it.
     """
     q = square_query()
     eqns = tuple(
-        ir.JaxprEqn(
-            primitive=e.primitive,
-            invars=e.invars,
-            outvars=e.outvars,
-            params=e.params,
-            effects=e.effects,
-            source_info=7,  # an int, not a tuple of frames
-        )
+        _with_source_info(e, 7)  # an int, not a tuple of frames
         if e.primitive == "stelling_assert"
         else e
         for e in q.jaxpr.eqns
@@ -723,11 +766,7 @@ def test_frames_is_total_on_a_list_that_will_not_iterate():
 
     def _rebuild(source_info):
         eqns = tuple(
-            ir.JaxprEqn(
-                primitive=e.primitive, invars=e.invars, outvars=e.outvars,
-                params=e.params, effects=e.effects,
-                source_info=source_info,
-            )
+            _with_source_info(e, source_info)
             if e.primitive == "stelling_assert" else e
             for e in q.jaxpr.eqns
         )
