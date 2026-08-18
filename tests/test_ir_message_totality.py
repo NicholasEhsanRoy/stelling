@@ -33,13 +33,15 @@ whole subject is that a table in prose is an honour-system copy of a
 dict.
 
 The repair is not to retype the digits. Every figure this file states
-lives beside the control that measures it: the `_SHIPPED`, `_NEUTERED`
-and `_NEUTERED_NO_CANON` dicts and `_QUOTE_SITE_UNION`, the table in
+lives beside the control that measures it: the `_SHIPPED`, `_NEUTERED`,
+`_NEUTERED_NO_CANON` and `_NEUTERED_NO_CANON_NO_SCHEMA` dicts,
+`_SWEEP_MESSAGE_UNION` and `_QUOTE_SITE_UNION`, the table in
 `test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES`' docstring
 that `_docstring_figures()` parses and compares to them row by row, and
 the decomposition in
 `test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures`,
-which computes its total from both drivers. THIS docstring carries none,
+which computes its total from both drivers in both configurations of the
+field-annotation rule. THIS docstring carries none,
 and `test_this_MODULE_docstring_states_no_figure_a_control_does_not_parse`
 is what keeps it that way. Where a number is wanted, read it off the
 control that computes it.
@@ -51,22 +53,36 @@ than one, so a per-LINE count is larger, and a per-QUOTE count —
 individual interpolations, which is what `CHANGELOG.md` decomposes — is
 larger again.
 
-**THERE ARE NOW TWO DEFENCES AND EACH IS MEASURED WITH THE OTHER
-REMOVED** — audit 0.2.0 B6 audit 6. `ir`'s canonicalization door replaces
-a leaf that is a SUBCLASS of a stored type with an exact twin, read
+**THERE ARE NOW THREE DEFENCES AND EACH IS MEASURED WITH THE OTHERS
+REMOVED** — audit 0.2.0 B6 audit 6 for the second, audit 0.2.0 B12 for
+the third. `ir`'s canonicalization door replaces a leaf that is a SUBCLASS
+of a stored type with an exact twin, read
 through the base type's own accessor — which is exactly what the hostile
 leaves this sweep injects are, so their `__repr__` no longer survives into
 the document. Almost every ESCAPE therefore does not happen, and those
 are not GUARDED — they are not reached: with the door shipped, a hostile
 object is never composed into most of the message expressions at all.
-(How many, in each of the two units, is a figure; both are computed by
+(How many, in each of the units, is a figure; all are computed by
 `test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES` from
-`_NEUTERED` and `_NEUTERED_NO_CANON`, which is why neither is written
+`_NEUTERED`, `_NEUTERED_NO_CANON` and `_NEUTERED_NO_CANON_NO_SCHEMA`,
+which is why none is written
 here.) A positive control that only neutered the guards would therefore
 be pushing on a door already shut, and would go on reporting green if
 every `_safe_repr` in the module were deleted. So
 `_neutered_sweep(canonicalization=False)` removes the second defence too,
 and that is the measurement the guard figures belong to.
+
+The THIRD defence is `ir`'s field-annotation rule, and it arrived making
+exactly the shape of hole this paragraph warns about. `_canonicalise` now
+refuses a field whose value is not of the type the field DECLARES, which
+is SHALLOWER than most of the quote sites below it: a hostile leaf is
+refused at that one message expression and never reaches the six this
+control still reaches once the rule is removed, so the two-knob control's
+headline figure fell — the same silent shrinkage the paragraph
+above says a one-knob control would suffer. The knob is therefore
+`schema=False` as well, and the union the record quotes is taken over
+every configuration rather than over the deepest one, so a defence added
+in front of a guard cannot make the guard look unnecessary.
 
 The one escape that survives canonicalization is the hostile `int` inside
 a declaration's `shape` PARAM tuple: the declaration door owns that param
@@ -387,10 +403,19 @@ def _sweep() -> tuple[list[_Escape], list[str], int]:
     return escapes, swept, skipped
 
 
-def _neutered_sweep(*, canonicalization: bool = True):
+def _neutered_sweep(*, canonicalization: bool = True, schema: bool = True):
     """The same sweep with the three guarded reads replaced by the
     unguarded ones they stand in for. Restores the module on the way out
     whatever happens.
+
+    ``schema=False`` removes the THIRD defence — audit 0.2.0 B12.
+    `ir._canonicalise` refuses a field whose value is not of the type the
+    field's own annotation declares, and that refusal sits IN FRONT OF most
+    of the sites this sweep measures: with it shipped, a hostile leaf is
+    refused there and the six deeper message expressions are never composed
+    at all. Neutering it to "everything matches" leaves the tree the guards
+    and the canonicalization door alone stood on, which is the tree the
+    per-site figures are about.
 
     ``canonicalization=False`` ALSO removes the second defence — audit
     0.2.0 B6 audit 6. `ir`'s canonicalization door replaces a leaf that is
@@ -414,6 +439,7 @@ def _neutered_sweep(*, canonicalization: bool = True):
     """
     saved = (ir._safe_repr, ir._safe_type_name, ir._safe_str)
     saved_reads = ir._CANONICAL_READS
+    saved_matches = ir._matches_spec
     try:
         ir._safe_repr = repr
         ir._safe_type_name = lambda o: type(o).__name__
@@ -422,10 +448,13 @@ def _neutered_sweep(*, canonicalization: bool = True):
             ir._CANONICAL_READS = tuple(
                 (base, lambda v: v) for base, _ in saved_reads
             )
+        if not schema:
+            ir._matches_spec = lambda spec, v: True
         return _sweep()
     finally:
         ir._safe_repr, ir._safe_type_name, ir._safe_str = saved
         ir._CANONICAL_READS = saved_reads
+        ir._matches_spec = saved_matches
 
 
 def test_no_message_in_the_ir_validation_pass_can_raise():
@@ -516,13 +545,35 @@ _SHIPPED = {"swept": 95, "escapes": 0, "skipped": 20}
 # the reach of one sweep against one defence, not the reach of the
 # guards; the row below is the one that measures the guards.
 _NEUTERED = {"escapes": 1, "lines": 1, "messages": 1}
-# guards neutered AND canonicalization removed: the tree the guards alone
-# stood on, and the measurement the record's per-site figures belong to
-_NEUTERED_NO_CANON = {"escapes": 27, "lines": 9, "messages": 9}
-# the union of the two drivers, in MESSAGE EXPRESSIONS — the record's
-# headline quote-site figure, decomposed and asserted by
-# `test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures`
-_QUOTE_SITE_UNION = 11
+# guards neutered AND canonicalization removed, field-annotation rule
+# SHIPPED. This row is the one audit 0.2.0 B12 moved, and the movement is
+# the reason that batch added a third knob rather than retyping it: the
+# annotation rule refuses a hostile leaf at ONE message expression that
+# stands in front of six others, so the escape COUNT rose (many more
+# leaf/position pairs now reach a refusal, and with `_safe_repr` neutered
+# each of them raises there) while the per-MESSAGE figure fell from 9 to 5.
+# A control that reported only this row would say the guards cover five
+# sites, and would go on saying it as the annotation rule grew.
+_NEUTERED_NO_CANON = {"escapes": 87, "lines": 5, "messages": 5}
+# and with the annotation rule removed as well: the tree the guards alone
+# stood on, and the measurement the record's per-site figures belong to.
+# One message expression more than the 9 this row read before B12 —
+# `_validate_decl_eqn`'s `lo`/`hi` refusal for their TYPE, which is that
+# batch's S16 and quotes the raw param.
+_NEUTERED_NO_CANON_NO_SCHEMA = {"escapes": 29, "lines": 10, "messages": 10}
+# the SWEEP's own contribution to the union below: the message expressions
+# the canonical sweep reaches in EITHER configuration of the annotation
+# rule. Not the sum of the two rows above and not either of them — the two
+# sets overlap in four sites (audit 0.2.0 B12).
+_SWEEP_MESSAGE_UNION = 11
+# the union of EVERY driver and EVERY configuration, in MESSAGE
+# EXPRESSIONS — the record's headline quote-site figure, decomposed and
+# asserted by
+# `test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures`.
+# Taken over configurations rather than over the deepest one, because a
+# defence added in FRONT of a guard would otherwise make the guard look
+# unnecessary (audit 0.2.0 B12).
+_QUOTE_SITE_UNION = 13
 
 
 _FIGURE_ROW = re.compile(
@@ -547,7 +598,7 @@ def _docstring_figures() -> dict[str, dict[str, int]]:
             out[m.group("label").strip()] = {
                 k: int(m.group(k)) for k in ("escapes", "lines", "messages")
             }
-    assert len(out) == 3, f"the figure table has {len(out)} rows about this tree"
+    assert len(out) == 4, f"the figure table has {len(out)} rows about this tree"
     return out
 
 
@@ -621,10 +672,11 @@ def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():
     one the record quotes, and it is the one that is stable across the two
     measurements the record was conflating:
 
-        historical: 30d4b04, guards absent, no door  28 / 10 / 8
-        this tree, guards neutered, door removed     27 /  9 / 9
-        this tree, guards neutered, door shipped      1 /  1 / 1
-        this tree, as shipped                         0 /  0 / 0
+        historical: 30d4b04, guards absent, no door  28 / 10 /  8
+        this tree, guards neutered, door and rule removed  29 / 10 / 10
+        this tree, guards neutered, door removed     87 /  5 /  5
+        this tree, guards neutered, door shipped      1 /  1 /  1
+        this tree, as shipped                         0 /  0 /  0
 
     Those are different documents' worth of arithmetic and the record
     quoted them as one. The `30d4b04` row is a historical measurement of a
@@ -647,6 +699,16 @@ def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():
     audit 0.2.0 B6 audit 7: `_validate_decl_eqn` refuses a `dtype` param
     whose TYPE is not `str` in its own sentence rather than skipping the
     agreement check, and that sentence quotes the raw param.
+
+    **AND A FOURTH ROW, BECAUSE A THIRD DEFENCE ARRIVED IN FRONT OF THE
+    GUARDS** — audit 0.2.0 B12. `ir._canonicalise`'s field-annotation rule
+    refuses a hostile leaf at one message expression that stands in front of
+    six others, so the door-removed row's per-MESSAGE figure fell from 9 to
+    5 while its escape COUNT rose from 27 to 87. Neither movement is a
+    weakening and both are invisible in a single row, which is why the row
+    with the rule removed as well is the one the per-site figures belong to
+    — and why the union below is taken over configurations rather than over
+    the deepest one.
     """
     escapes, swept, skipped = _sweep()
     assert (len(swept), len(escapes), skipped) == (
@@ -674,6 +736,10 @@ def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():
         (_measure(), _NEUTERED, "guards neutered"),
         (_measure(canonicalization=False), _NEUTERED_NO_CANON,
          "guards neutered AND canonicalization removed"),
+        (_measure(canonicalization=False, schema=False),
+         _NEUTERED_NO_CANON_NO_SCHEMA,
+         "guards neutered AND canonicalization AND the annotation rule "
+         "removed"),
     ):
         assert measured == record, (
             f"the positive control ({which}) now measures {measured} and "
@@ -690,6 +756,8 @@ def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():
     # so the two counts have met. Equality is a fact about this tree, not
     # an invariant, which is why it is stated as the bound it really is.
     assert _NEUTERED_NO_CANON["lines"] >= _NEUTERED_NO_CANON["messages"]
+    assert (_NEUTERED_NO_CANON_NO_SCHEMA["lines"]
+            >= _NEUTERED_NO_CANON_NO_SCHEMA["messages"])
 
     # AND THE TABLE IN THE DOCSTRING ABOVE IS READ BACK OUT AND COMPARED —
     # audit 0.2.0 B6 audit 7, where it stated three numbers no control in
@@ -698,6 +766,8 @@ def test_the_recorded_FIGURES_are_the_ones_the_sweep_MEASURES():
     # its own inventory and the same repair applies here.
     stated = _docstring_figures()
     assert stated == {
+        "this tree, guards neutered, door and rule removed":
+            _NEUTERED_NO_CANON_NO_SCHEMA,
         "this tree, guards neutered, door removed": _NEUTERED_NO_CANON,
         "this tree, guards neutered, door shipped": _NEUTERED,
         "this tree, as shipped": {"escapes": 0, "lines": 0, "messages": 0},
@@ -841,7 +911,7 @@ def test_the_named_sites_one_line_each(label, build):
 
 
 def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
-    """ELEVEN, AND IT IS COMPUTED — audit 0.2.0 B6 audit 5, F2.
+    """THIRTEEN, AND IT IS COMPUTED — audit 0.2.0 B6 audit 5, F2.
 
     The record's headline figure is the number of DISTINCT MESSAGE
     EXPRESSIONS in `ir.py` at which a hostile leaf produces a RAW escape
@@ -850,16 +920,28 @@ def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
     written as "9 ... of which the audit had named three" three lines
     under a heading that said the audit had named FOUR:
 
-        the canonical sweep         9 message expressions
+        the canonical sweep        11 message expressions
         the driven rows above     + 2 the sweep cannot reach
-                                  = 11
+                                  = 13
 
     The figure is `_QUOTE_SITE_UNION` and the two addends are computed
     here; it was 10 until audit 0.2.0 B6 audit 7 gave
-    `_validate_decl_eqn`'s `dtype` param a refusal for its TYPE, which is
-    a ninth message expression the sweep reaches.
+    `_validate_decl_eqn`'s `dtype` param a refusal for its TYPE, and 11
+    until audit 0.2.0 B12 gave its `lo`/`hi` params one and added the
+    field-annotation rule's own refusal.
 
-    Both halves are driven with `ir`'s canonicalization door removed, for
+    **AND THE UNION IS OVER CONFIGURATIONS, NOT OVER THE DEEPEST ONE** —
+    audit 0.2.0 B12, and this is the correction that batch made rather than
+    a widening. Each defence in front of a guard HIDES the guards behind
+    it: with the field-annotation rule shipped, a hostile leaf is refused
+    at that rule's own message and six deeper expressions are never
+    composed; with it removed, that message is never composed instead. A
+    union taken in one configuration therefore under-counts by whichever
+    defence happened to be first, which is the same mistake as measuring
+    the guards with the canonicalization door shut. Both sweep
+    configurations and both row configurations are unioned below.
+
+    Every half is driven with `ir`'s canonicalization door removed, for
     the reason the module docstring gives: this is a count of the sites
     the GUARDS cover, and with the door in place a hostile leaf does not
     reach most of them (audit 0.2.0 B6 audit 6).
@@ -894,33 +976,51 @@ def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
     # sites the guards happen to be in front of today, which is a
     # different and much smaller thing, and would shrink silently the next
     # time the door widened.
-    sweep_sites = {e.message
-                   for e in _neutered_sweep(canonicalization=False)[0]}
-    assert len(sweep_sites) == _NEUTERED_NO_CANON["messages"], sorted(sweep_sites)
+    with_rule = {e.message
+                 for e in _neutered_sweep(canonicalization=False)[0]}
+    without_rule = {
+        e.message
+        for e in _neutered_sweep(canonicalization=False, schema=False)[0]
+    }
+    assert len(with_rule) == _NEUTERED_NO_CANON["messages"], sorted(with_rule)
+    assert len(without_rule) == _NEUTERED_NO_CANON_NO_SCHEMA["messages"], (
+        sorted(without_rule)
+    )
+    sweep_sites = with_rule | without_rule
 
     row_sites: set[int] = set()
     refused_cleanly = 0
     saved = (ir._safe_repr, ir._safe_type_name, ir._safe_str)
     saved_reads = ir._CANONICAL_READS
+    saved_matches = ir._matches_spec
     try:
         ir._safe_repr = repr
         ir._safe_type_name = lambda o: type(o).__name__
         ir._safe_str = str
         ir._CANONICAL_READS = tuple((b, lambda v: v) for b, _ in saved_reads)
-        for _group, label, build in _NAMED_SITES:
-            try:
-                build(_hostiles())
-            except ir.TranscriptionError:
-                refused_cleanly += 1
-            except Exception as exc:  # noqa: BLE001 — this is the measurement
-                site = _message_of(_escaping_line(exc), stmts)
-                assert site is not None, label
-                row_sites.add(site)
+        # the rows are driven in BOTH configurations too, for the reason the
+        # docstring gives: with the annotation rule shipped a row is refused
+        # at that rule's message, and with it removed at the row's own
+        for rule in (True, False):
+            ir._matches_spec = (
+                saved_matches if rule else (lambda spec, v: True)
+            )
+            for _group, label, build in _NAMED_SITES:
+                try:
+                    build(_hostiles())
+                except ir.TranscriptionError:
+                    refused_cleanly += 1
+                except Exception as exc:  # noqa: BLE001 — the measurement
+                    site = _message_of(_escaping_line(exc), stmts)
+                    assert site is not None, label
+                    row_sites.add(site)
     finally:
         ir._safe_repr, ir._safe_type_name, ir._safe_str = saved
         ir._CANONICAL_READS = saved_reads
+        ir._matches_spec = saved_matches
     assert (ir._safe_repr, ir._safe_type_name, ir._safe_str) == saved
     assert ir._CANONICAL_READS is saved_reads
+    assert ir._matches_spec is saved_matches
 
     assert len(sweep_sites | row_sites) == _QUOTE_SITE_UNION, (
         f"the record says {_QUOTE_SITE_UNION} distinct quote sites and the "
@@ -931,7 +1031,7 @@ def test_the_QUOTE_SITE_COUNT_the_record_quotes_is_the_union_it_measures():
     )
     # and the addends the docstring decomposes it into, so the arithmetic
     # is the tree's and not an author's
-    assert len(sweep_sites) == _NEUTERED_NO_CANON["messages"]
+    assert len(sweep_sites) == _SWEEP_MESSAGE_UNION, sorted(sweep_sites)
     assert len(row_sites - sweep_sites) == 2, sorted(row_sites - sweep_sites)
 
     # the grouping the record uses, counted from the rows themselves

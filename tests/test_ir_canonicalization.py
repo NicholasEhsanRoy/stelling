@@ -47,6 +47,8 @@ extents is a different claim this file does not make.
 from __future__ import annotations
 
 import array as _arraymod
+import base64
+import binascii
 import dataclasses
 import pathlib
 import re
@@ -1138,12 +1140,69 @@ def _witness_alpha_renaming():
         jax.config.update("jax_enable_x64", old)
 
 
+def _one_param_document(key, value):
+    """The smallest document that carries one param value, for the two
+    witnesses below whose collapse happens in the READER and not in a
+    constructor."""
+    return {
+        "k": "closed",
+        "jaxpr": {
+            "k": "jaxpr", "constvars": [], "invars": [], "outvars": [],
+            "eqns": [{"k": "eqn", "primitive": "add", "invars": [],
+                      "outvars": [], "params": [[key, value]],
+                      "effects": []}],
+            "effects": [],
+        },
+        "consts": [],
+    }
+
+
+def _witness_complex_parts():
+    """AUDIT 0.2.0 B12. `<complex>.re`/`.im` are read as ONE number, so a
+    part's integer spelling and its `float` spelling are one document.
+
+    Driven through `from_dict`, because the collapse is the READER's: a
+    python `complex` has `float` parts already, and it is the two JSON
+    spellings that differ."""
+    def build(re, im):
+        return ir.ClosedJaxpr.from_dict(
+            _one_param_document("c", {"k": "complex", "re": re, "im": im})
+        )
+    a, b = build(1, 0), build(1.0, 0.0)
+    assert a.to_dict() == b.to_dict(), (a.to_dict(), b.to_dict())
+    return a.content_hash(), b.content_hash()
+
+
+def _witness_array_payload_spelling():
+    """AUDIT 0.2.0 B12. An `Array`'s `data` is base64 TEXT stored as the
+    BYTES it denotes, so two spellings of one byte string are one document:
+    base64's trailing bits are not part of the value it encodes, and neither
+    `validate=True` nor `binascii`'s `strict_mode=True` treats them as part
+    of it."""
+    assert base64.b64decode("AB==", validate=True) == b"\x00"
+    assert base64.b64decode("AC==", validate=True) == b"\x00"
+    assert binascii.a2b_base64("AC==", strict_mode=True) == b"\x00"
+
+    def build(text):
+        return ir.ClosedJaxpr.from_dict(
+            _one_param_document(
+                "a", {"k": "array", "dtype": "|u1", "shape": [1],
+                      "data": text}
+            )
+        )
+    a, b = build("AB=="), build("AC==")
+    assert a.to_dict() == b.to_dict(), (a.to_dict(), b.to_dict())
+    return a.content_hash(), b.content_hash()
+
+
 _WITNESSES = {
     "alpha-renaming": _witness_alpha_renaming,
     "param and effect order": _witness_order,
     "hash scope": _witness_hash_scope,
     "shape extents": _witness_extents,
     "stored value types": _witness_value_types,
+    "complex parts": _witness_complex_parts,
+    "array payload spelling": _witness_array_payload_spelling,
 }
 
 
