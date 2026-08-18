@@ -12,9 +12,23 @@ is the same call `pytest_configure` makes, so a canary that goes green is a
 statement about the code that ships rather than about a re-implementation of
 it that drifted. Everything else here is printing.
 
-Exit codes: 0 armed; 1 with `--require` and not armed. Without `--require` it
-reports and exits 0, which is the shape a human wants when running it by hand
-to see what a given jax does.
+EXIT CODES, ALL OF THEM — because this paragraph used to name two of them
+while the script had three. It said *"0 armed; 1 with `--require` and not
+armed; without `--require` it reports and exits 0"*, and the live-control
+check below returned 1 with no regard for `--require` at all. There are now
+four ways out and every one of them is here:
+
+  1  `--require` was passed and the tripwire could not arm.
+  1  the tripwire armed and its LIVE CONTROL DID NOT FIRE, `--require` or
+     not: `arm()` says the hook is attached and the control says nothing
+     reached it, so every figure below it is unverified.
+  1  the rule hash CONTRADICTS the row recorded for this exact release,
+     `--require` or not. See `_hash_row` for why that one is fatal and
+     "this release has never been read" is not.
+  0  anything else. That includes NOT ARMED without `--require` — the shape
+     a human wants when running this by hand to see what a given jax does —
+     and a release with NO ROW in the version -> hash map, which is loud on
+     stdout and in the step summary and still exits 0.
 """
 
 from __future__ import annotations
@@ -22,6 +36,60 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+
+
+def _hash_row(status) -> tuple[str, bool]:
+    """``(what to print beside the sha1, is this fatal)``.
+
+    THE MAP APPLIES HERE TOO, and it has three states, not two. This script
+    used to compare against one constant and print `CHANGED from …` for
+    anything that was not it — which, once the constant became
+    `_KNOWN_HASHES` keyed on the running release, would have called a
+    release nobody has ever read "changed".
+
+    The three, and the exit code each gets:
+
+    * **the row matches** — quiet, exit 0. Nothing to say.
+    * **no row for this release** — LOUD, exit 0. Nobody has read the rule
+      on this jax yet. It is the state a jax NIGHTLY is in by construction —
+      a dev build can never be given a row — and it is the state the
+      `control` leg enters the day jax ships a release, since that leg
+      installs `.[jax]` and therefore resolves to whatever is newest. Paging
+      on it would redden this workflow on every jax release and every night
+      it runs against a nightly, which is how an alarm stops being read.
+      `PLAN-tripwire.md` §5 is about arming and does not decide this; the
+      canary's own Property 3 — infrastructure must not page — is the closer
+      analogy, and this is the same shape: a true statement that no one can
+      act on tonight. The remedy is a human reading the rule and adding a
+      row, which a red build does not speed up.
+    * **the row exists and disagrees** — LOUD, exit 1, `--require` or not.
+      This is the one that cannot be explained by upstream moving: a
+      released wheel is immutable, so the row is wrong, or the environment
+      is not the jax it claims. Either makes every other line here
+      unverified, which is exactly the standing the live-control check
+      already exits 1 for.
+    """
+    state = status.hash_state
+    if state == "as-tested":
+        return "as tested", False
+    if state == "never-read":
+        return (
+            f"jax {status.jax_version or '?'} HAS NEVER BEEN READ — no row "
+            "in _adapter_jax._KNOWN_HASHES records a rule for this release. "
+            "Read the rule, diff it against the nearest row, and add an "
+            "entry naming what changed. Not a failure: this is what a "
+            "nightly, and any jax released since the last row was written, "
+            "looks like",
+            False,
+        )
+    if state == "changed":
+        return (
+            f"CONTRADICTS the row for jax {status.jax_version or '?'}, which "
+            f"records {status.known_hash} — read the rule before trusting "
+            "anything on this page",
+            True,
+        )
+    return "not read", False  # `unreadable`: the source could not be read at all
 
 
 def main() -> int:
@@ -72,9 +140,7 @@ def main() -> int:
 
     disarmed = _tripwire.disarm()
 
-    hash_note = "as tested"
-    if status.rule_hash and status.rule_hash != adapter._KNOWN_HASH:
-        hash_note = f"CHANGED from {adapter._KNOWN_HASH} — read the rule before trusting"
+    hash_note, hash_fatal = _hash_row(status)
 
     rows = [
         ("status", status.code),
@@ -100,9 +166,14 @@ def main() -> int:
             for name, value in rows:
                 handle.write(f"| {name} | {value} |\n")
             handle.write(
-                "\nThe rule sha1 is RECORDED and never gated on: a cosmetic "
-                "edit upstream must not disable the tool. It is here so a red "
-                "run is diagnosable from this page without re-running it.\n"
+                "\nARMING is never gated on the rule sha1: a cosmetic edit "
+                "upstream must not disable the tool, and it does not — the "
+                "tool armed or did not arm above without consulting the row. "
+                "THIS SCRIPT'S EXIT CODE is a different question and does "
+                "read it: a release contradicting its own recorded row exits "
+                "1, and a release with no row at all exits 0 and says so. "
+                "The sha1 is here so a red run is diagnosable from this page "
+                "without re-running it.\n"
             )
 
     if args.require and not status.armed:
@@ -120,6 +191,23 @@ def main() -> int:
             "\ncanary: the tripwire armed and its live control did not fire. "
             "`arm()` says the hook is attached; the control says nothing "
             "reached it. Treat the armed status as unverified.",
+            file=sys.stderr,
+        )
+        return 1
+    # LAST, deliberately. The two checks above are about whether the
+    # instrument works at all, which is this job's headline; a contradicted
+    # hash row is about whether its report can be believed, which is only a
+    # question once it produced one. Both exit 1, so the order changes only
+    # which sentence a reader sees first, and "it could not arm" is the one
+    # that should be first.
+    if hash_fatal:
+        print(
+            f"\ncanary: {hash_note}\n"
+            "A released wheel does not change, so this is not upstream moving "
+            "under us: either the row in `_adapter_jax._KNOWN_HASHES` is "
+            "wrong for this release, or this environment is not running the "
+            "jax it reports. Read the rule, and fix whichever of the two it "
+            "is, before believing anything else on this page.",
             file=sys.stderr,
         )
         return 1

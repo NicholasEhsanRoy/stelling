@@ -68,16 +68,73 @@ def test_it_arms_and_says_what_it_attached_to(armed):
 
 def test_the_rule_hash_is_recorded_and_not_gated_on(armed):
     """§5. A cosmetic edit upstream must not disable the tool, and a changed
-    hash must still be visible — which is what makes the canary diagnosable."""
+    hash must still be visible — which is what makes the canary diagnosable.
+
+    TWO FAILURE MODES THAT USED TO BE ONE. Against a single ``_KNOWN_HASH``
+    constant, "jax 0.11.1 shipped and nobody has read its rule" and "0.11.0
+    is reporting a rule that is not 0.11.0's" produced the same red line and
+    the same remedy-shaped-like-a-typo: paste the observed hash in. They are
+    different findings with different remedies, so they are different
+    assertions, keyed on the exact release — 0.11.0 and 0.11.1 are one series
+    carrying two different rule sources, which is why series is the wrong key
+    here even though it is the right key for ``TESTED_JAX_SERIES``.
+    """
     status, _ = armed
     assert status.rule_hash and len(status.rule_hash) == 12
-    assert status.known_hash == adapter._KNOWN_HASH
-    # the pin, on the series that have a lane
-    assert status.rule_hash == adapter._KNOWN_HASH, (
-        f"the const-fold rule's source changed: {status.rule_hash} != "
-        f"{adapter._KNOWN_HASH}. Nothing is gated on this — the tool armed "
-        "anyway — but it is the signal the nightly canary exists to raise."
+    assert status.known_hash == adapter._KNOWN_HASHES.get(status.jax_version)
+
+    if not adapter.is_release(status.jax_version):
+        # A NIGHTLY OR AN RC, which is what the `nightly` job of
+        # `.github/workflows/nightly-jax-canary.yml` runs this file
+        # against — it installs jax from the nightly index. It cannot
+        # have a row — the version names a tree that will never be published
+        # under that name again — so demanding one would redden that lane
+        # every night for a fact nobody can act on, and an alarm that is red
+        # every night is not read. The third state is asserted instead, so
+        # this stays a measurement rather than an exemption.
+        assert status.hash_state == "never-read", (
+            f"jax {status.jax_version} is not a release, so no row can name "
+            f"it, yet the map reports {status.hash_state!r}."
+        )
+        return
+
+    expected = adapter._KNOWN_HASHES.get(status.jax_version)
+    assert expected is not None, (
+        f"jax {status.jax_version} has never been READ on this release. Read "
+        "it, diff it against the nearest entry, and add a row naming what "
+        "changed — do not copy the observed hash in. The tool ARMED anyway "
+        "and nothing is gated on this; what is missing is the human step "
+        f"that makes {status.rule_hash} mean something."
     )
+    assert status.rule_hash == expected, (
+        f"jax {status.jax_version} is recorded as carrying rule {expected} "
+        f"and is reporting {status.rule_hash}: the same release is reporting "
+        "a different rule. A released wheel does not change, so this is not "
+        "upstream moving under us — either the row is wrong for this release "
+        "or this environment is not running the jax it reports."
+    )
+
+
+def test_every_key_of_the_hash_map_is_a_release():
+    """A row for a nightly would be a row nothing can ever match again.
+
+    `_KNOWN_HASHES` is keyed on the exact release, and `is_release` is the
+    definition of what a key IS — so a key that is not one silently turns
+    the map into a set with extra steps: it can never be looked up (the
+    version string it names is a build, not a release), and it makes the
+    map's own "missing means never read" reading unreliable for the reader
+    who finds it there.
+    """
+    strays = [k for k in adapter._KNOWN_HASHES if not adapter.is_release(k)]
+    assert not strays, (
+        f"_KNOWN_HASHES is keyed on releases and these are not: {strays}. A "
+        "dev build or an rc names a tree that is never published under that "
+        "name again, so a row for one can never be matched — read the rule "
+        "on the RELEASE and key it there."
+    )
+    # and the definition is not vacuous here: the map is non-empty and its
+    # keys really do go through the predicate the test names
+    assert adapter._KNOWN_HASHES and not adapter.is_release("0.11.2.dev20260817")
 
 
 def test_arming_twice_does_not_double_wrap(armed):

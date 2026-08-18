@@ -76,6 +76,17 @@ _OPTIONAL: dict[str, _Optional] = {
 # caller's program. There WAS a sound rule; the oracle misread the container.
 # The direction is safe — VERIFIED → UNKNOWN, never the reverse — so this was
 # capability loss, not unsoundness. What it cost was a true reason.
+#
+# SERIES IS THE RIGHT KEY HERE AND THE WRONG KEY NEXT DOOR, and the two are
+# not in tension. This tuple answers "which series has a CI lane", and no
+# lane names a release: `test-jax-0-10` pins the SERIES (`jax>=0.10,<0.11`)
+# and `test-jax` floats entirely, so both resolve to a release nobody wrote
+# down. A series is exactly what this tuple can claim.
+# `_tripwire._adapter_jax._KNOWN_HASHES` answers
+# "which rule source did we read on which release", and is keyed on the exact
+# release because 0.11.0 and 0.11.1 are one series carrying two different
+# rule sources. Do not merge them into one table; they are different facts
+# and 0.11.1 is the proof.
 TESTED_JAX_SERIES = ("0.10", "0.11")
 
 

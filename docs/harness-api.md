@@ -742,6 +742,15 @@ equations : ['stelling_any', 'reduce_sum', 'gt', 'stelling_assert']
 query hash: 52336382a4d6677b35371cfd40267eb8c36e144c6d16c18bbe25b18a4b4372ef
 ```
 
+**That hash was measured on jax 0.11.0 and re-measured unchanged on jax
+0.11.1**, and the version belongs beside it: a query hash is a function of
+the jax that traced the harness, because it hashes the equations' params and
+jax owns those. The same jax pair moves the hash of a harness using
+`jnp.max` or `jnp.min`, where 0.11.1 added an `out_sharding` param that
+0.11.0 does not emit — [SOUNDNESS.md](../SOUNDNESS.md) records that break.
+`reduce_sum` already carried `out_sharding` on both, which is why this
+block is stable across the pair rather than lucky.
+
 ## Running a harness
 
 `stelling.preconditions.check(harness, *, vacuity_mode, solver_timeout_ms=None, refine=None, strict=False)`

@@ -143,8 +143,77 @@ def harness_blackjax():
     )
 
 
+# `import jax_md`, with the one failure it has today ATTRIBUTED.
+#
+# MEASURED 2026-08-18: `jax_md` imports `flax.nnx`, and flax 0.12.8's
+# `flax.nnx` does not import on jax 0.11.1 — `flax/nnx/variablelib.py` builds
+# `class AbstractVariable(..., hjx.MutableHiType)` and jax 0.11.1 removed
+# `jax.experimental.hijax.MutableHiType` (and `AvalMutableQDD`). The same flax
+# imports fine on jax 0.11.0 with an otherwise identical package set, so this
+# is a flax-versus-jax incompatibility and neither jax_md's nor stelling's.
+#
+# WHY IT IS WORTH A FUNCTION. Without this, the census prints
+# `[fail] jax-md AttributeError: module 'jax.experimental.hijax' has no
+# attribute 'MutableHiType'` — a message naming only JAX modules, for a
+# failure that is flax's, in a script whose whole output is an attribution
+# table. The harness still fails and is still recorded as a finding: this
+# changes what the finding SAYS, not whether it is one.
+#
+# NOTHING IN stelling's CI IS AFFECTED and nothing here is pinned or skipped
+# on account of it. Measured: no CI lane imports `flax.nnx`. The only lane
+# that installs flax at all is `acceptance-reproducer` (jaxfluids pulls it),
+# and `import jaxfluids` reaches `flax.linen` and 37 other flax modules but
+# nothing under `flax.nnx` — that lane's 20-test selection passes on jax
+# 0.11.1. `jax_md` is IMPORTED nowhere in `tests/` and nowhere in
+# `.github/workflows/` (it is *named* in two test docstrings); the only two
+# import sites in the tree are this file and `interrogate_census.py`'s
+# `_sqrt_defence_probe`, both in `corpus/`, which is driven by hand. That
+# probe already catches and prints its own failure inside a section about
+# jax-md, so it is left as it is; this file is the one the treadmill's
+# measurements are taken from, which is why the attribution lives here.
+#
+# REMOVE THIS WHEN flax ships a release whose `flax.nnx` imports on the jax
+# in use — the check is literally `python -c "import flax.nnx"` — at which
+# point this function collapses back to a plain `import jax_md` and
+# `design/maintenance-treadmill.md`'s Bump 2 row gets a closing line.
+def _import_jax_md():
+    try:
+        import jax_md
+    except Exception as exc:
+        raise RuntimeError(_jax_md_import_reason(exc)) from exc
+    return jax_md
+
+
+def _jax_md_import_reason(exc: Exception) -> str:
+    """Why `import jax_md` failed, naming flax when flax is the reason.
+
+    The cause is established by IMPORTING `flax.nnx` here rather than by
+    matching on the exception's text: a message this script does not control
+    is not evidence, and `jax_md` has other ways to fail (a missing
+    `e3nn_jax`, measured on this machine) that must not be reported as the
+    flax one.
+    """
+    import jax
+
+    try:
+        import flax.nnx  # noqa: F401
+    except Exception as flax_exc:  # noqa: BLE001
+        import flax
+
+        return (
+            f"jax_md could not be imported because flax {flax.__version__}'s "
+            f"`flax.nnx` does not import on jax {jax.__version__}: "
+            f"{type(flax_exc).__name__}: {flax_exc}. jax_md imports "
+            "`flax.nnx`, so it inherits this. It is flax's incompatibility "
+            "with jax, not jax_md's and not stelling's, and nothing in "
+            "stelling is pinned or skipped for it. Re-run this census on a "
+            "flax whose `flax.nnx` imports."
+        )
+    return f"jax_md could not be imported: {type(exc).__name__}: {exc}"
+
+
 def harness_jax_md():
-    import jax_md
+    jax_md = _import_jax_md()
 
     displacement, shift = jax_md.space.periodic(10.0)
     energy_fn = jax_md.energy.soft_sphere_pair(displacement)
@@ -162,7 +231,7 @@ def harness_jax_md_neighbor():
     # the neighbor-list path — the indexing-heavy core of real MD runs,
     # and the value model's canonical suspect. Traced separately so a
     # failure here doesn't lose the pair-energy census.
-    import jax_md
+    jax_md = _import_jax_md()
 
     displacement, shift = jax_md.space.periodic(10.0)
     neighbor_fn, energy_fn = jax_md.energy.soft_sphere_neighbor_list(displacement, 10.0)

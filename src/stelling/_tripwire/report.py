@@ -146,7 +146,28 @@ def render_status(status) -> list[str]:
             "is the runtime narrowing tripwire, and nothing else."
         )
     if status.rule_hash:
-        known = " (as tested)" if status.rule_hash == status.known_hash else " (CHANGED upstream)"
+        # THREE STATES, not two. This read `== status.known_hash else
+        # "CHANGED upstream"`, which was right while `known_hash` was one
+        # constant and became wrong the day it became a lookup keyed on the
+        # running release: a release with NO row now yields `None`, and
+        # calling that "CHANGED upstream" would assert a comparison nobody
+        # has made. `Status.hash_state` is the one place the case lives.
+        state = status.hash_state
+        if state == "as-tested":
+            known = " (as tested)"
+        elif state == "changed":
+            known = (
+                f" (CHANGED: jax {status.jax_version or '?'} is recorded as "
+                f"{status.known_hash})"
+            )
+        else:
+            # ``never-read``. ``unreadable`` is unreachable here: it means
+            # ``rule_hash`` is falsey, and the ``if`` above already excluded
+            # that — this branch is not a catch-all standing in for it.
+            known = (
+                f" (jax {status.jax_version or '?'} has NEVER BEEN READ: no "
+                "row records a rule for this release)"
+            )
         lines.append(
             f"    rule: {status.rule_name or '?'} sha1 {status.rule_hash}{known}"
         )

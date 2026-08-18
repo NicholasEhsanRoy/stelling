@@ -617,7 +617,16 @@ def test_normalisation_is_narrow():
     assert normalise("produced by: z3 5.0.0 (wheel-bindings)") == [
         "produced by: z3 <version> (wheel-bindings)"
     ]
-    # everything that carries a claim survives untouched
+    # everything that carries a claim survives untouched.
+    #
+    # THE TWO HASHES BELOW ARE SAMPLE TEXT, NOT MEASUREMENTS — which is
+    # worth writing down now that a jax release has been shown to move a
+    # query hash (jax 0.11.1, `reduce_max`/`reduce_min`; see SOUNDNESS.md).
+    # What is asserted here is that `normalise` returns them UNTOUCHED, and
+    # that holds for any 64 hex digits. They happen to be `quickstart.md`'s,
+    # so a reader will think they are pinned to it: they are not, and
+    # re-recording them for a new jax would measure nothing. The real pins
+    # live in `docs/quickstart.md` and `docs/harness-api.md`.
     for line in (
         "== VERIFIED",
         "nonvacuity: UNCHECKED — no membership conditions declared",

@@ -503,6 +503,34 @@ jobs:
   # either series. jaxfluids also needs pyyaml at import — its `input_manager`
   # does `import yaml` — which arrives as one of those dependencies.)
   #
+  # ── flax IS INSTALLED HERE AND IS BROKEN ON jax 0.11.1, AND THIS LANE IS
+  #    STILL NOT PINNED. Read this before pinning it. ────────────────────────
+  # flax 0.12.8's `flax.nnx` does not import on jax 0.11.1 —
+  # `jax.experimental.hijax.MutableHiType` and `AvalMutableQDD` were removed
+  # upstream, and `flax/nnx/variablelib.py` subclasses the first at module
+  # scope. So a flax traceback in this job's log is a real possibility and the
+  # reflex is to pin `jax==0.11.0` here.
+  #
+  # DO NOT, on this evidence. Measured 2026-08-18 in an isolated venv holding
+  # this job's package set at jax 0.11.1 / jaxlib 0.11.1 / flax 0.12.8 /
+  # jaxfluids 0.2.1 / maddening 0.3.1 (CPython 3.12.3): `import jaxfluids`
+  # succeeds and loads 38 flax modules, `flax.linen` among them and NONE of
+  # them under `flax.nnx`; the exact selection this job runs below passes
+  # 20/20; and flax 0.12.8 declares `jax>=0.10.0`, so it exerts no downward
+  # pressure on jax either. No lane in this file imports `flax.nnx`. The only
+  # things in the repository that reach it are `corpus/run_census.py` and
+  # `corpus/interrogate_census.py`, both through `jax_md` and both driven by
+  # hand rather than by any workflow — see the attributed guard at
+  # `run_census.py`'s `jax_md` import, and Bump 2 in
+  # `design/maintenance-treadmill.md`.
+  #
+  # WHAT WOULD MAKE A PIN NECESSARY: jaxfluids (or optax, or chex) reaching
+  # `flax.nnx` on an upgrade, which shows up here as an import error naming
+  # `flax/nnx/`. Pin THIS job then, with the flax and jax versions in the
+  # comment, and lift it when flax ships a `flax.nnx` that imports. Do not
+  # pin `test-jax` for it: that lane floats on purpose, and floating is what
+  # surfaced 0.11.1 within a working day.
+  #
   # ── maddening: on PyPI, but its jax pin makes --no-deps MANDATORY ────────
   # `maddening==0.3.1` declares `jax<0.6,>=0.4`. A plain `uv pip install
   # maddening==0.3.1` in this job DOWNGRADES jax and exits 0 — measured with
