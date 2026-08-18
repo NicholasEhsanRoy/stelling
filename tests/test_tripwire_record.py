@@ -781,98 +781,128 @@ def test_the_canary_control_verdict_fails_closed_in_every_broken_state():
     contain that substring, so the canary printed the exception, reported
     ``status: armed`` and exited 0 even under ``--require``.
 
-    That is the monitoring anti-pattern the whole file exists to avoid. An
-    instrument whose own state is broken must page the operator, and it must
-    say WHICH broken state it is in: ``did-not-fire`` means the probe ran and
-    the hook was dead, ``raised`` means the probe did not run. Different
-    findings, different remedies, so they are different sentences.
+    THIS TEST PINS THE SENTENCES, NOT THE EXIT CODES. The exit codes are
+    driven against `main()` itself in ``tests/test_tripwire_arm.py`` — an
+    audit showed that a verdict function tested in isolation, plus an
+    assertion about the shape of its call site, pinned nothing at all:
+    three mutations restoring the defect passed both. Read the two files
+    together or neither means much.
     """
     canary = _canary()
 
-    note, fatal = canary._control_verdict("fired", "1 finding over 1 narrowing(s)")
-    assert note is None and fatal is False
-    note, fatal = canary._control_verdict("not-run", "not run")
-    assert note is None and fatal is False, (
-        "not-arming is `--require`'s question and is answered before this "
-        "one is asked; this must not double-page for it"
-    )
+    for clean in ("fired", "not-run"):
+        note, fatal = canary._control_verdict(clean, "rendered")
+        assert note is None and fatal is False, (
+            f"state {clean!r} is not a finding and must not page"
+        )
 
     dead, dead_fatal = canary._control_verdict("did-not-fire", "0 finding")
-    assert dead_fatal is True and "did not fire" in dead
-
-    rendered = "raised RuntimeError: the probe exploded"
-    raised, raised_fatal = canary._control_verdict("raised", rendered)
-    assert raised_fatal is True, (
-        "a raised control exits 0 again — the state in which the probe never "
-        "ran is reporting success"
+    raised, raised_fatal = canary._control_verdict(
+        "raised", "raised RuntimeError: the probe exploded"
     )
-    assert "RAISED" in raised and rendered in raised
-
-    # THE TWO FATAL STATES MUST NOT READ AS EACH OTHER: the remedy differs.
-    # Asserted on the OPENING CLAIM, not on absence of the other's words —
-    # the raised sentence deliberately NAMES `did not fire` in order to say
-    # it is not that, and a test forbidding the mention would forbid the
-    # distinction it is here to protect.
-    assert dead.startswith("the tripwire armed and its live control did not fire")
-    assert raised.startswith("the tripwire armed and its live control RAISED")
-
-    # and the reason the predecessor missed it, pinned so it cannot come back
-    # by way of a reworded message: the rendered line for a raised control
-    # does not contain the substring the old check tested for.
-    assert "DID NOT FIRE" not in rendered
-
-    # AN UNKNOWN STATE IS FATAL. A state this decision was never taught means
-    # the caller grew an outcome nobody wired up, and an instrument that
-    # cannot say what happened has not said that nothing happened.
+    moved, moved_fatal = canary._control_verdict(
+        "unrenderable", "1 finding(s), and rendering them raised AttributeError: x"
+    )
     unknown, unknown_fatal = canary._control_verdict("wedged", "?")
-    assert unknown_fatal is True and "does not recognise" in unknown
+
+    assert dead_fatal and raised_fatal and moved_fatal and unknown_fatal, (
+        "a broken instrument reported success again"
+    )
+
+    # THE FOUR FATAL STATES MUST NOT READ AS EACH OTHER: the remedies differ.
+    # `did-not-fire` sends a reader to a dead hook, `raised` to an
+    # environment where the probe could not run, `unrenderable` to THIS
+    # repository's recorder, and the last to this script. Asserted on the
+    # OPENING CLAIM rather than on absence of the others' words — the
+    # `raised` sentence deliberately NAMES `did not fire` in order to say it
+    # is not that, and a test forbidding the mention would forbid the
+    # distinction it exists to protect.
+    openings = {
+        dead[:60], raised[:60], moved[:60], unknown[:60],
+    }
+    assert len(openings) == 4, f"two fatal states open the same way: {openings}"
+    assert dead.startswith("the tripwire armed and its live control did not fire")
+    assert raised.startswith(
+        "the tripwire armed and its LIVE CONTROL DID NOT COMPLETE"
+    )
+    assert moved.startswith("the tripwire armed, its live control RAN")
+    assert "does not recognise" in unknown
+
+    # `unrenderable` must NOT send anyone upstream: the probe completed and
+    # what moved is this repository's own recorder.
+    assert "not upstream" in moved
+
+    # the operator must not read "RAISED -- raised RuntimeError", which is
+    # exactly what the first version of this sentence produced: it opened
+    # with the word and then embedded a row that already began with it. The
+    # opening is a different phrase now, so the row can be quoted whole.
+    assert "RAISED -- raised" not in raised
+
+    # and the reason the predecessor missed the state entirely, pinned so it
+    # cannot come back by way of a reworded message
+    assert "DID NOT FIRE" not in "raised RuntimeError: the probe exploded"
 
 
 def test_the_canary_records_a_control_state_rather_than_reparsing_its_message():
-    """The decision reads a recorded state, not the printed line.
+    """Every state ``main`` can record is one the decision has an answer for.
 
-    Driven rather than read: every state the caller can record is one this
-    decision has an answer for, so the two cannot drift apart silently. If a
-    new state is added to ``main`` without teaching ``_control_verdict``, the
-    unknown-state arm fires and the canary pages — which is the fail-closed
-    direction, and is asserted above.
+    READ FROM THE AST, not from a regex over the source text. The first
+    version of this test harvested string literals with
+    ``re.findall`` line by line, and an audit broke it in one move: assign
+    the state from a module constant rather than a literal
+    (``control_state = _WEDGED``) and the regex sees nothing, the expected
+    set still matches, and the test passes while a fifth state exists that
+    the decision was never taught. Walking the tree instead makes the
+    non-literal itself the failure, which is the property the docstring
+    claims.
+
+    This test deliberately does NOT assert the spelling of the call site's
+    local variables. It used to, and a pure rename — behaviour identical,
+    exit codes identical — turned it red. Behaviour is pinned where
+    behaviour belongs: against ``main()`` in ``tests/test_tripwire_arm.py``.
     """
-    import re
+    import ast
 
-    canary = _canary()
     source = (
         _pathlib_for_canary() / ".github" / "scripts" / "tripwire_canary.py"
     ).read_text(encoding="utf-8")
 
-    # every string literal on a line that ASSIGNS the state, so a state
-    # reached through a ternary is counted too — the first version of this
-    # test used a single-assignment regex and silently missed `did-not-fire`,
-    # which is set by `"fired" if found else "did-not-fire"`.
-    recorded = {
-        lit
-        for line in source.splitlines()
-        if "control_state = " in line
-        for lit in re.findall(r'"([a-z-]+)"', line)
-    }
-    assert recorded == {"not-run", "fired", "did-not-fire", "raised"}, (
+    recorded, nonliteral = set(), []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(tgt, ast.Name) and tgt.id == "control_state"
+            for tgt in node.targets
+        ):
+            continue
+        value = node.value
+        branches = (
+            [value.body, value.orelse] if isinstance(value, ast.IfExp) else [value]
+        )
+        for branch in branches:
+            if isinstance(branch, ast.Constant) and isinstance(branch.value, str):
+                recorded.add(branch.value)
+            else:
+                nonliteral.append(ast.dump(branch)[:100])
+
+    assert not nonliteral, (
+        f"`control_state` is assigned something that is not a string literal "
+        f"({nonliteral}), so this test can no longer enumerate the states and "
+        "the decision function cannot be checked for exhaustiveness. Assign a "
+        "literal, or teach this test to follow the indirection."
+    )
+    assert recorded == {"not-run", "fired", "did-not-fire", "raised", "unrenderable"}, (
         f"the states `main` can record moved to {sorted(recorded)}; teach "
         "`_control_verdict` about the new one and pin it here"
     )
     for state in recorded:
-        note, fatal = canary._control_verdict(state, "rendered")
+        note, fatal = canary_verdict = _canary()._control_verdict(state, "rendered")
         assert isinstance(fatal, bool)
         assert (note is None) == (not fatal), (
-            f"state {state!r} returned a note and a fatality that disagree"
+            f"state {state!r} returned a note and a fatality that disagree: "
+            f"{canary_verdict!r}"
         )
-
-    # THE EXIT READS THE VERDICT, not the rendered line. Pinned positively:
-    # the first version of this assertion was the negative form — that the
-    # predecessor's `"DID NOT FIRE" in control` no longer appears in the file
-    # — and it failed against the docstring that DOCUMENTS the defect. A
-    # source grep cannot tell code from the prose explaining it, and this
-    # repository requires the prose, so the structure is pinned instead.
-    assert "if control_fatal:" in source
-    assert "control_note, control_fatal = _control_verdict(" in source
 
 
 def _pathlib_for_canary():

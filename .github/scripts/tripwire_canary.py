@@ -16,19 +16,28 @@ EXIT CODES, ALL OF THEM — because this paragraph used to name two of them
 while the script had three. It said *"0 armed; 1 with `--require` and not
 armed; without `--require` it reports and exits 0"*, and the live-control
 check below returned 1 with no regard for `--require` at all. There are now
-five ways out and every one of them is here:
+REASONS, not `return` statements -- the code has four of the latter and
+one of them covers four of the former, and counting the wrong noun is how
+this paragraph was wrong the first two times. SIX reasons to exit 1, and
+every one of them is here:
 
   1  `--require` was passed and the tripwire could not arm.
   1  the tripwire armed and its LIVE CONTROL DID NOT FIRE, `--require` or
      not: `arm()` says the hook is attached and the control says nothing
      reached it, so every figure below it is unverified.
   1  the tripwire armed and its LIVE CONTROL RAISED, `--require` or not.
-     A control that could not COMPLETE is not a control that passed: the
-     instrument's own state is broken, so nothing below it is verified.
-     This used to exit 0 -- the check above tested for the substring
+     A control that could not COMPLETE is not a control that passed. This
+     used to exit 0 -- the check above tested for the substring
      "DID NOT FIRE", which a raised control does not contain, so the one
      state in which the probe never ran was the one state that reported
      success. A broken instrument must page.
+  1  the tripwire armed, the control RAN, and this script could not
+     RENDER what it saw. Split out from the row above because `raised` is
+     documented to mean the probe did not run, and a single `try` around
+     both made that false.
+  1  the live control reported a state this script has no answer for.
+     Defensive, unreachable today, and fatal on purpose: an instrument
+     that cannot say what happened has not said that nothing happened.
   1  the rule hash CONTRADICTS the row recorded for this exact release,
      `--require` or not. See `_hash_row` for why that one is fatal and
      "this release has never been read" is not.
@@ -48,7 +57,7 @@ import sys
 def _control_verdict(state: str, rendered: str) -> tuple[str | None, bool]:
     """``(the sentence to print on stderr, is this fatal)`` for the live control.
 
-    FOUR OUTCOMES, NOT TWO, AND THEY ARE KEYED ON A STATE. The predecessor
+    FIVE OUTCOMES, NOT TWO, AND THEY ARE KEYED ON A STATE. The predecessor
     asked ``"DID NOT FIRE" in control`` -- a substring test against a line
     built for a human to read -- which is the same shape of instrument this
     repository keeps having to withdraw: the rendered message is not the
@@ -58,7 +67,7 @@ def _control_verdict(state: str, rendered: str) -> tuple[str | None, bool]:
     ``fired``
         the probe ran and the hook saw it. The only clean state.
     ``did-not-fire``
-        the probe RAN and the hook saw nothing. ``arm()` says the hook is
+        the probe RAN and the hook saw nothing. ``arm()`` says the hook is
         attached; the control says nothing reached it. Fatal.
     ``raised``
         the probe did NOT run. Different finding, different remedy, so it
@@ -66,6 +75,13 @@ def _control_verdict(state: str, rendered: str) -> tuple[str | None, bool]:
         `did-not-fire` means a dead hook, `raised` means an environment in
         which the probe could not execute at all. Fatal, and it did not use
         to be -- see the exit-code list at the top of this file.
+    ``unrenderable``
+        the probe RAN and this script could not say what it saw -- the
+        recorder's own shape moved under the line that formats it. Fatal,
+        and deliberately NOT folded into ``raised``: the probe completing
+        is a fact worth keeping, and an operator sent to look for a broken
+        jax when the defect is in this repository's own recorder has been
+        sent to the wrong place.
     ``not-run``
         the tripwire did not arm, so there was nothing to control. Not
         fatal HERE; whether not-arming is fatal is ``--require``'s question
@@ -87,14 +103,27 @@ def _control_verdict(state: str, rendered: str) -> tuple[str | None, bool]:
         )
     if state == "raised":
         return (
-            f"the tripwire armed and its live control RAISED -- {rendered}. "
-            "A control that could not COMPLETE is not a control that "
-            "passed: the probe never ran, so nothing on this page is "
-            "verified. This is a DIFFERENT finding from `did not fire`, "
-            "which means the probe ran and the hook was dead. Read the "
-            "exception, then compare the two legs: if the pinned `control` "
-            "job is GREEN, the nightly's jax broke the probe and this is "
-            "upstream; if it is RED TOO, it is this repository.",
+            f"the tripwire armed and its LIVE CONTROL DID NOT COMPLETE -- "
+            f"{rendered}. A control that could not run is not a control "
+            "that passed: the rows above come from `arm()` and stand, but "
+            "nothing about whether the hook is ALIVE has been established. "
+            "This is a DIFFERENT finding from `did not fire`, which means "
+            "the probe ran and the hook was dead. Read the exception, then "
+            "compare the two legs -- but note the `control` job installs "
+            "`.[jax]` and therefore resolves to the NEWEST RELEASED jax, "
+            "not a pinned one: if `control` is GREEN this is the nightly's "
+            "jax and upstream, and if it is RED TOO that is either a "
+            "released-jax regression or this repository, which the jax "
+            "versions on the two pages tell apart.",
+            True,
+        )
+    if state == "unrenderable":
+        return (
+            f"the tripwire armed, its live control RAN, and this script "
+            f"could not report what it saw -- {rendered}. The probe "
+            "completing is not in doubt; what moved is the shape of the "
+            "recorder this script formats. That is a defect HERE and not "
+            "upstream, so do not go reading jax's changelog for it.",
             True,
         )
     return (
@@ -184,6 +213,15 @@ def main() -> int:
     # `_probe.over` and `_jax_compat` rather than an `import jax`: the shipped
     # probe is the program whose narrowing is already known, and this script
     # keeps the same jax boundary the package does.
+    # TWO `try` BLOCKS, NOT ONE, AND THE SPLIT IS LOAD-BEARING. `raised` is
+    # documented to mean THE PROBE DID NOT RUN. A single block spanning the
+    # probe AND the rendering of the human line made that false: a control
+    # that ran, fired, and produced a finding was reported as `raised` if the
+    # f-string below tripped over a recorder field that had moved -- the
+    # state was assigned and then silently overwritten by the handler, and
+    # the message then told the operator the probe never ran. The state
+    # machine has to stop lying about itself before its states mean anything,
+    # so the probe's failure and the report's failure are different states.
     control_state = "not-run"
     control = "not run"
     if status.armed:
@@ -194,20 +232,32 @@ def main() -> int:
 
             _jax.make_jaxpr(_probe.over)(_jnp.zeros((7,), _jnp.int8))
             found = recorder.sorted_findings()
-            control_state = "fired" if found else "did-not-fire"
-            control = (
-                f"{len(found)} finding over {recorder.int_narrowings} "
-                f"narrowing(s)"
-                + (
-                    f"; {found[0].written} -> {found[0].became} "
-                    f"({found[0].to_dtype})"
-                    if found
-                    else " -- THE CONTROL DID NOT FIRE"
-                )
-            )
+            narrowings = recorder.int_narrowings
         except Exception as exc:  # noqa: BLE001
             control_state = "raised"
             control = f"raised {type(exc).__name__}: {exc}"
+        else:
+            control_state = "fired" if found else "did-not-fire"
+            try:
+                control = (
+                    f"{len(found)} finding over {narrowings} narrowing(s)"
+                    + (
+                        f"; {found[0].written} -> {found[0].became} "
+                        f"({found[0].to_dtype})"
+                        if found
+                        else " -- THE CONTROL DID NOT FIRE"
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                # The probe RAN -- that much is established above and is not
+                # withdrawn here. What moved is the recorder's own shape, so
+                # this page cannot say what the control saw. Fatal, because a
+                # report nobody can read is not a report.
+                control_state = "unrenderable"
+                control = (
+                    f"{len(found)} finding(s), and rendering them raised "
+                    f"{type(exc).__name__}: {exc}"
+                )
 
     disarmed = _tripwire.disarm()
 

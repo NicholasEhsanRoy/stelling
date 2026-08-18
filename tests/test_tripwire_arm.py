@@ -18,6 +18,10 @@ in the report, and the tests below are what makes that label a measurement.
 
 from __future__ import annotations
 
+import os
+import pathlib
+import sys
+
 import pytest
 
 jax = pytest.importorskip("jax")
@@ -986,3 +990,184 @@ def test_hoisting_the_constant_really_does_raise(armed):
             ctor(256, jnp.int8)
     # in range, so it is the VALUE being rejected and not the spelling
     assert int(jnp.array(127, jnp.int8)) == 127
+
+
+def _canary_module():
+    """`.github/scripts/tripwire_canary.py`, imported by path.
+
+    Imported rather than re-implemented for the reason the script itself
+    calls the shipped ``arm()``: a test that re-states the decision measures
+    the re-statement.
+    """
+    import importlib.util
+    import pathlib
+
+    path = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / ".github" / "scripts" / "tripwire_canary.py"
+    )
+    spec = importlib.util.spec_from_file_location("_canary_e2e", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _force_control(monkeypatch, mode):
+    """Make the live control take ``mode``, leaving ``arm()`` itself real.
+
+    THE GATE IS THE POINT. ``arm()``'s own ``selfcheck()`` traces the SAME
+    probe the control does, so a probe broken from the start breaks arming
+    and the run never reaches the control at all — which is a different
+    finding, tested elsewhere. The probe therefore has to work during
+    arming and fail after it, which is what the flag below arranges.
+    """
+    from stelling import _tripwire as tw
+    from stelling._tripwire import _probe
+
+    armed = {"yes": False}
+    real_over = _probe.over
+
+    def gated(*args, **kwargs):
+        if armed["yes"] and mode == "raised":
+            raise RuntimeError("FORCED: the probe could not execute")
+        return real_over(*args, **kwargs)
+
+    monkeypatch.setattr(_probe, "over", gated)
+
+    real_arm = tw.arm
+
+    def arm_then_break():
+        status, recorder = real_arm()
+        armed["yes"] = True
+        if mode == "did-not-fire":
+            monkeypatch.setattr(recorder, "sorted_findings", lambda: [])
+        elif mode == "unrenderable":
+            class _Moved:
+                def __getattr__(self, name):
+                    raise AttributeError(f"finding field {name!r} moved")
+
+            monkeypatch.setattr(recorder, "sorted_findings", lambda: [_Moved()])
+        return status, recorder
+
+    monkeypatch.setattr(tw, "arm", arm_then_break)
+
+
+@pytest.mark.parametrize("require", [False, True])
+@pytest.mark.parametrize(
+    "mode, expected",
+    [("did-not-fire", 1), ("raised", 1), ("unrenderable", 1)],
+)
+def test_the_canary_exit_code_is_the_thing_that_is_pinned(
+    monkeypatch, capsys, mode, expected, require
+):
+    """`main()` is DRIVEN, and its return value is the exit code.
+
+    THE REASON THIS TEST EXISTS. The verdict function was already unit
+    tested and the file already asserted the shape of the call site, and
+    an audit showed that combination pinned nothing: three separate
+    mutations that fully restore the defect this batch closed — returning
+    0 after computing the verdict, clearing the fatality on the next line,
+    hardcoding the state to `fired` at the call site — all passed every
+    test in the suite. Meanwhile a pure refactor that INLINED the verdict
+    function, changing no behaviour at all, went red. Behaviour destroyed
+    passed, behaviour preserved failed: exactly backwards for an
+    instrument whose whole subject is an exit code.
+
+    So the assertion is on the number `main()` returns, for every state the
+    control can reach, with and without `--require` — because `--require`
+    is not supposed to matter here and a test that only ever passes it
+    would not notice if it started to.
+    """
+    canary = _canary_module()
+    _force_control(monkeypatch, mode)
+    monkeypatch.setattr(
+        sys, "argv", ["tripwire_canary.py"] + (["--require"] if require else [])
+    )
+
+    # ONCE. `main()` arms, and calling it a second time to build an assertion
+    # message would arm again inside a run that has already disarmed —
+    # measuring the second call, not the first. (Written this way after doing
+    # exactly that.)
+    code = canary.main()
+    assert code == expected, (
+        f"a live control in state {mode!r} exited {code!r} and the contract "
+        f"is {expected!r} (--require={require})"
+    )
+
+    out = capsys.readouterr()
+    if expected:
+        assert "canary:" in out.err, "a fatal state printed no sentence"
+    # the run must leave the interpreter as it found it, or the next test
+    # in this module inherits a patched jax
+    assert not _tripwire.is_armed()
+
+
+@pytest.mark.parametrize(
+    "shimmed, expected", [(True, 1), (False, 0)], ids=["control-raises", "clean"]
+)
+def test_the_canary_script_wires_its_exit_code_to_the_process(
+    tmp_path, shimmed, expected
+):
+    """`main()`'s return really does become the process's exit status.
+
+    The parametrised test above pins what `main()` RETURNS; this pins that
+    the return reaches the shell, which is the only thing a CI job reads.
+
+    THE CLEAN CASE IS ONLY DRIVABLE HERE, and the reason is the one this
+    file already documents for `_probe_seq`: jax's trace cache is
+    process-wide, so by the time the tests above run, shape `(7,)` — which
+    the canary hardcodes — may already have been traced, and the const-fold
+    site is then reached zero times and a perfectly live hook reports `0
+    finding`. A fresh interpreter is the only place `fired` means what it
+    says. (Found by asserting it in-process first and watching a healthy
+    canary exit 1.)
+    """
+    import subprocess
+
+    shim = tmp_path / "sitecustomize.py"
+    shim.write_text("" if not shimmed else 
+        "import stelling._tripwire as tw\n"
+        "import stelling._tripwire._probe as p\n"
+        "_real_over, _armed = p.over, {'yes': False}\n"
+        "def _gated(*a, **k):\n"
+        "    if _armed['yes']:\n"
+        "        raise RuntimeError('FORCED: the probe could not execute')\n"
+        "    return _real_over(*a, **k)\n"
+        "p.over = _gated\n"
+        "_real_arm = tw.arm\n"
+        "def _arm():\n"
+        "    s, r = _real_arm()\n"
+        "    _armed['yes'] = True\n"
+        "    return s, r\n"
+        "tw.arm = _arm\n",
+        encoding="utf-8",
+    )
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    script = root / ".github" / "scripts" / "tripwire_canary.py"
+    env = dict(os.environ)
+    # the child must import the SAME stelling this test is running against,
+    # not whatever an editable install elsewhere points at
+    env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), *sys.path])
+    env["JAX_PLATFORMS"] = "cpu"
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--require"],
+        env=env, capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == expected, (
+        f"the script exited {result.returncode}, contract {expected} "
+        f"(shimmed={shimmed})\n--- stdout ---\n{result.stdout}\n"
+        f"--- stderr ---\n{result.stderr}"
+    )
+    assert "status: armed" in result.stdout, (
+        "the control was supposed to fail AFTER arming; if arming itself "
+        "broke, this test is measuring the wrong thing"
+    )
+    if shimmed:
+        assert "DID NOT COMPLETE" in result.stderr
+    else:
+        assert "canary:" not in result.stderr
+        assert "THE CONTROL DID NOT FIRE" not in result.stdout, (
+            "a fresh interpreter traced the probe and the hook saw nothing"
+        )
