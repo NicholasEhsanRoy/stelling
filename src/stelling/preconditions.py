@@ -105,7 +105,8 @@ def scalar_nonzero(dtype, envelope):
 
 
 def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
-          refine=None, solver=None, strict=False, libm_budget=None):
+          refine=None, solver=None, strict=False, libm_budget=None,
+          falsify=None):
     """Run a precondition harness end-to-end and return the stamped
     :class:`stelling.verdict.Verdict` — with the vacuity check built in:
     **this entry point cannot return an unchecked VERIFIED.**
@@ -171,6 +172,29 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     stelling cannot catch. Passing it under ``semantics="real"`` raises —
     it has no meaning there.
 
+    ``falsify``: ``None`` (default — the probe never runs,
+    :mod:`stelling.falsify` is never imported, and every existing path is
+    byte-identical) or ``"sample"`` to try, after a VERIFIED, to FALSIFY
+    it by executing the real program at concrete points inside the
+    declared set. **UNRELEASED AND UNAUDITED**; it is here to be
+    measured, not to be relied on, and it exists because this library is
+    asymmetric about its two answers: a REFUTED's witness is replayed
+    through the real program, and a VERIFIED — a universal claim with no
+    witness — has had nothing downstream at all.
+
+    Two properties of it are not negotiable and are enforced rather than
+    described. First, **it can only refute**: finding nothing adds no
+    confidence, and the note it appends says so in its own sentence, so
+    no reader can take a probed VERIFIED for a better VERIFIED. Second,
+    when it does find a violation it **raises**
+    :class:`stelling.falsify.VerifiedFalsified` rather than returning any
+    status, because a violated discharge is a defect in *stelling*, not a
+    finding about the caller's program, and none of VERIFIED/REFUTED/
+    UNKNOWN can say that. The module's docstring carries the argument,
+    the two dispositions that were rejected, the list of what the probe
+    is allowed to import and why that set is the independent one, and —
+    measured, not assumed — the class of defect it cannot reach.
+
     Version, precision, and solver stamps are filled from the live
     environment; the precision entry records the *actual*
     ``jax_enable_x64`` state at trace time, not an assumption.
@@ -198,6 +222,7 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
             refine=refine,
             solver=solver,
             libm_budget=libm_budget,
+            falsify=falsify,
         )
     except ir.TranscriptionError as e:
         # stelling could not READ the query. That is a capability gap, not a
@@ -218,7 +243,7 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
 
 
 def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
-              refine=None, solver=None, libm_budget=None):
+              refine=None, solver=None, libm_budget=None, falsify=None):
     """The one pipeline behind :func:`check` — trace, propagate, optional
     affine refinement (``refine="affine"``, never on by default), optional
     solver escalation, stamped verdict assembly, and the VERIFIED widen
@@ -272,6 +297,17 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     if refine not in (None, "affine"):
         raise ValueError(
             f"refine must be None or 'affine', got {refine!r}"
+        )
+    # the falsification dial, validated eagerly for the reason every other
+    # dial here is: it only DOES anything on a VERIFIED, so a typo'd value
+    # would ride green through every UNKNOWN path until the day a VERIFIED
+    # happened.  The accepted values live in `stelling.falsify.FALSIFY_MODES`
+    # and are spelled out here rather than imported, because importing the
+    # probe module imports jax, and this validation must happen in every
+    # environment -- including the ones where `falsify` is left off.
+    if falsify not in (None, "sample"):
+        raise ValueError(
+            f"falsify must be None or 'sample', got {falsify!r}"
         )
     if solver is not None and solver not in ("z3", "cvc5"):
         raise ValueError(
@@ -395,6 +431,51 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     if v.status != "VERIFIED":
         # widening cannot rescue an UNKNOWN/REFUTED; nothing to check
         return v, cj
+
+    # THE FALSIFICATION PROBE, and it is DEFAULT-OFF: with `falsify=None`
+    # -- every documented call today -- neither the import nor the branch
+    # below happens, and the verdict returned is byte-identical to the one
+    # this line was inserted above.  `tests/test_falsify_default_path.py`
+    # measures that rather than asserting it.
+    #
+    # It sits HERE, on the VERIFIED path and beside the widen re-check,
+    # because this is where a VERIFIED first exists on the one pipeline
+    # both front doors take, and because it answers the question the widen
+    # re-check does not: widen asks whether the envelope was load-bearing,
+    # this asks whether the discharge is TRUE of the program.
+    #
+    # It may RAISE, and that is the design (`stelling.falsify`'s docstring
+    # carries the argument and the two dispositions rejected).  A firing
+    # means the analysis discharged something the program violates at a
+    # point the analysis admitted: a defect in stelling, not a finding
+    # about the caller's program, and there is no verdict status that says
+    # so.  Nothing is caught here -- letting it past this frame is the
+    # whole point.
+    #
+    # WHAT THE NOTE MAY SAY IS CONSTRAINED. `stamp_line` is a sentence
+    # about work done and carries its own disclaimer, because a VERIFIED
+    # that grew a line a reader could take as "probed, therefore better"
+    # would be a verdict that reads above its evidence -- and a probe that
+    # can only refute produces no evidence at all when it finds nothing.
+    # THE STATUSES COME FROM THE VERDICT, NOT FROM THE PROPAGATION, and
+    # the difference is the probe's whole reach on the solver path.
+    # `propagate` leaves an obligation "unknown" and escalation upgrades it
+    # to "discharged" in `make_solver_verdict`; measured, `x**2 <= 150` over
+    # [0, 10] is propagation-unknown and solver-discharged. Passing the
+    # propagation's view made the probe decline with "no obligation was
+    # discharged" on exactly the VERIFIEDs a solver decided -- which is
+    # where `VERIFIED_BARRED_PRIMITIVES` lives and where an emission defect
+    # that MISSED a violation would be. The claim under attack is the one
+    # the verdict makes, so it is the one the probe is handed.
+    if falsify is not None:
+        from stelling.falsify import probe as _probe
+
+        _report = _probe(
+            harness,
+            statuses=[o.status for o in v.obligations],
+            semantics=semantics,
+        )
+        v = dataclasses.replace(v, notes=v.notes + (_report.stamp_line(),))
 
     # THE ONE RULE (audit finding 4 + the depth defect, unified): the
     # load-bearing note may be emitted ONLY IF widen actually moved EVERY
