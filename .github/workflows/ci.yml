@@ -499,9 +499,25 @@ jobs:
   # Installed WITH its dependencies, on purpose: jaxfluids pulls flax and optax,
   # both of which depend on jax and could therefore move it. That is exactly
   # what the before/after guard below is for, and `--no-deps` here would hide
-  # the hazard rather than measure it. (Measured: they do not move it, on
-  # either series. jaxfluids also needs pyyaml at import — its `input_manager`
-  # does `import yaml` — which arrives as one of those dependencies.)
+  # the hazard rather than measure it. jaxfluids also needs pyyaml at import —
+  # its `input_manager` does `import yaml` — which arrives as one of those
+  # dependencies.
+  #
+  # THEY DID MOVE IT, and the parenthetical that used to close this paragraph
+  # — "(Measured: they do not move it, on either series.)" — is withdrawn.
+  # flax 0.12.9, uploaded 2026-08-18T21:44:27Z, raised its floor to
+  # `jax>=0.11.1`; jaxfluids requires flax unbounded; so the 0.10 entry's
+  # install of jaxfluids dragged jax and jaxlib 0.10.2 -> 0.11.1 and the
+  # guard below fired. The 20:27 run that day resolved flax 0.12.8 and was
+  # green, the 22:41 run resolved 0.12.9 and was red, and NOTHING IN THIS
+  # REPOSITORY CHANGED BETWEEN THEM. That measurement was true when it was
+  # taken and expired without anyone touching the file, which is the failure
+  # mode a dependency-set claim has by construction.
+  #
+  # The remedy is `UV_CONSTRAINT` at job level, not `--no-deps`: it bounds
+  # the ENVIRONMENT rather than one command, it hides nothing, and if no
+  # compatible dependency set exists it fails loudly at install instead of
+  # being caught a step later.
   #
   # ── flax IS INSTALLED HERE AND IS BROKEN ON jax 0.11.1, AND THIS LANE IS
   #    STILL NOT PINNED. Read this before pinning it. ────────────────────────
@@ -517,7 +533,10 @@ jobs:
   # succeeds and loads 38 flax modules, `flax.linen` among them and NONE of
   # them under `flax.nnx`; the exact selection this job runs below passes
   # 20/20; and flax 0.12.8 declares `jax>=0.10.0`, so it exerts no downward
-  # pressure on jax either. No lane in this file imports `flax.nnx`. The only
+  # pressure on jax either. (0.12.8 SPECIFICALLY: 0.12.9 declares
+  # `jax>=0.11.1`, which is UPWARD pressure and is why this job now carries a
+  # constraints file. A claim about flax's requirement is a claim about one
+  # release of it.) No lane in this file imports `flax.nnx`. The only
   # things in the repository that reach it are `corpus/run_census.py` and
   # `corpus/interrogate_census.py`, both through `jax_md` and both driven by
   # hand rather than by any workflow — see the attributed guard at
@@ -586,10 +605,21 @@ jobs:
             extras: solvers,jax
             pin: ""
             expect: ""
+            constraints: .github/constraints/none.txt
           - series: "0.10"
             extras: solvers
             pin: "jax>=0.10,<0.11"
             expect: "0.10"
+            constraints: .github/constraints/jax-0-10.txt
+    # AT JOB LEVEL, NOT ON THE INSTALL STEPS, AND THAT IS THE FIX. The pin in
+    # `matrix.pin` is a requirement on ONE command; this is a property of the
+    # whole job, so a step added later cannot forget it. That distinction is
+    # exactly what failed on 2026-08-18: the first install correctly produced
+    # 0.10.2, and the NEXT one moved it. Both entries set it -- the floating
+    # one to an empty file -- so there is no conditional to get wrong. See
+    # `.github/constraints/*.txt`.
+    env:
+      UV_CONSTRAINT: ${{ matrix.constraints }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -684,7 +714,7 @@ jobs:
             echo "| maddening | ${mdn} (--no-deps) |"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "${before}" != "${after}" ]; then
-            echo "::error title=an acceptance library moved jax or jaxlib::jaxfluids/maddening resolved '${before}' -> '${after}' (jax jaxlib). The most likely cause by far is that --no-deps was dropped from the maddening install, which downgrades jax to 0.5.3 and exits 0; the other is that flax or optax moved it. Either way this job would be measuring the reproducer acceptance against a DIFFERENT build from every other lane. jaxlib counts as much as jax: it is the XLA build, and these tests compare executed float64 values to the library's own recomputation by exact equality."
+            echo "::error title=an acceptance library moved jax or jaxlib::jaxfluids/maddening resolved '${before}' -> '${after}' (jax jaxlib). CHECK THE CONSTRAINTS FILE FIRST: UV_CONSTRAINT should name .github/constraints/ for this entry, and if the move is UPWARD a transitive dependency raised its floor past it — that is what flax 0.12.9 did on 2026-08-18, and this message used to rank it second. A DOWNWARD move to 0.5.3 is the other one, and means --no-deps was dropped from the maddening install. Either way this job would be measuring the reproducer acceptance against a DIFFERENT build from every other lane. jaxlib counts as much as jax: it is the XLA build, and these tests compare executed float64 values to the library's own recomputation by exact equality."
             exit 1
           fi
       - run: uv pip list

@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+#
+# uv CONSTRAINTS for the pinned 0.10 entry of `acceptance-reproducer`.
+#
+# WHY A CONSTRAINT AND NOT A REQUIREMENT. The lane already passes
+# `jax>=0.10,<0.11` to its FIRST install. That is a requirement on one
+# command, not a property of the environment, so every later install is free
+# to move jax again -- and on 2026-08-18 one did. A constraint applies to
+# every resolution in the job without adding a package, which is the thing
+# the lane actually means: THIS ENVIRONMENT IS THE 0.10 SERIES.
+#
+# WHY NOT `--no-deps` ON jaxfluids. The block above the lane argues against
+# it and the argument still holds: `--no-deps` would HIDE the hazard rather
+# than measure it, and jaxfluids genuinely needs flax, optax and pyyaml at
+# import. A constraint hides nothing -- if no compatible dependency set
+# exists it fails LOUDLY at install time, which is strictly better than the
+# before/after guard catching it one step later.
+#
+# THE INCIDENT THIS CLOSES. flax 0.12.9 was uploaded 2026-08-18T21:44:27Z
+# and raised its floor to `jax>=0.11.1`. jaxfluids requires flax unbounded,
+# so installing jaxfluids into this job's 0.10.2 environment dragged jax and
+# jaxlib to 0.11.1. The run at 20:27 that day resolved flax 0.12.8 and was
+# green; the run at 22:41 resolved 0.12.9 and was red. Nothing in this
+# repository changed between them. Under this constraint the resolver picks
+# flax 0.12.8 instead -- measured locally, jax and jaxlib untouched.
+#
+# jaxlib IS LISTED SEPARATELY AND ON PURPOSE: it is the XLA build, and these
+# tests compare executed float64 values against the library's own
+# recomputation by exact equality. A jax held at 0.10 beside a jaxlib that
+# moved would be a different instrument wearing the same name.
+jax<0.11
+jaxlib<0.11

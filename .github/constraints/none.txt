@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Nicholas Ehsan Roy
+# SPDX-License-Identifier: Apache-2.0
+#
+# NO CONSTRAINTS, and this file exists so that saying so needs no `if`.
+#
+# The floating entry of `acceptance-reproducer` is supposed to take whatever
+# the resolver gives it -- that is the whole point of a floating lane, and it
+# is how the 0.11.1 breakage surfaced on the next push after jax shipped it.
+#
+# The alternative was a conditional `UV_CONSTRAINT` set only for the pinned
+# entry. An empty file is better: `UV_CONSTRAINT` is then ALWAYS a valid path
+# on every entry, so there is no branch to get wrong and no way for a future
+# matrix row to inherit "unset" and mean it by accident. The lane already
+# carries two comments about `${PIN:-}` and `${EXPECT:-}` explaining how an
+# unset-vs-empty distinction bit it before; this avoids a third.
