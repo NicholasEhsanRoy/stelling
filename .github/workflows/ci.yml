@@ -1076,11 +1076,24 @@ jobs:
   # _get_local_constants`, cached under `.hypothesis/constants/`).
   # `tests/test_sqrt_row.py` contributes nothing itself -- test files are
   # excluded -- but importing it pulls in `src/stelling/obligation.py`, which
-  # is full of them. Pool size at the FIRST generated input:
+  # is full of them. Pool size when the constants are first drawn, with the
+  # ORDERING as the content and the absolute figures explicitly not:
   #
-  #     oracle alone                            2  -> XFAIL
-  #     oracle + `import stelling.obligation`  274 -> XPASS(strict)
-  #     whole `tests/` collected, -k oracle    633 -> XFAIL
+  #     oracle alone                           small  -> XFAIL
+  #     oracle + `import stelling.obligation`  middle -> XPASS(strict)
+  #     whole `tests/` collected, -k oracle    large  -> XFAIL
+  #
+  # THE INTEGERS ARE INSTRUMENT-DEPENDENT AND ARE NOT RECORDED HERE, which
+  # is a correction: this block first carried the triple 2 / 274 / 633, and
+  # a second measurement taken independently got 58 / 312 / 650 for the same
+  # three sessions. Neither is wrong. The pool is reached through a
+  # `cached_property` computed only when `_maybe_draw_constant` first wins a
+  # `p=0.05` roll, so "at the first generated input" is not a well-defined
+  # instant, and any plugin the instrument itself loads adds modules of its
+  # own. The ordering, the direction and the inference reproduced exactly in
+  # both. Recording a number two careful measurements disagree about would
+  # be the kind of figure this repository keeps having to withdraw -- see
+  # `obligation.py`'s sweep, which says the same of its seconds.
   #
   # so a BIGGER pool is not a better search, which is exactly why whole-tree
   # collection does not flip it and one module does -- and why the old
