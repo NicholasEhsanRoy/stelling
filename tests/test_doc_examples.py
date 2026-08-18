@@ -83,20 +83,36 @@ hashes, refusal text — is compared byte for byte, and
 :func:`test_normalisation_is_narrow` pins that the normaliser touches
 nothing else.
 
-**One further neutralisation, and it is NOT in the normaliser.** A verdict
-stamps the jax version that produced it, and a query content hash is a
-function of that version (measured: jax 0.11 replaced ``jit``'s boolean
-``inline`` param with an ``Inline`` enum, and that one param is the entire
-difference between the 0.10.2 and 0.11.0 renders of
-``docs/quickstart.md``'s block). A doc therefore cannot be a byte-exact
-transcript of two jax series at once. So :func:`test_doc_example` compares
-a transcript byte for byte — hash included — when the running jax is the
-jax the doc names, and neutralises exactly two lines, the stamp and the
-``query <hash>``, when it is not. Every other line stays compared, so an
-off-series lane still measures that the verdict is otherwise identical.
-The limit that buys: **on a series other than the one a doc names, that
-doc's query hash is not verified here.** It is verified on the lane whose
-series the doc names, which is the reason a doc names one.
+**Two further neutralisations, and they are NOT in the normaliser and NOT
+one condition.** A verdict stamps the jax version that produced it, and a
+query content hash is a function of that version (measured: jax 0.11
+replaced ``jit``'s boolean ``inline`` param with an ``Inline`` enum, and
+that one param is the entire difference between the 0.10.2 and 0.11.0
+renders of ``docs/quickstart.md``'s block). A doc therefore cannot be a
+byte-exact transcript of two jax series at once. So
+:func:`test_doc_example` neutralises
+
+* **the stamp line** whenever the running jax differs from the doc's AT
+  ALL, exact version to exact version, because that line prints the
+  running version and there is nothing there to compare; and
+* **the** ``query <hash>`` **line** only when the running jax's SERIES
+  differs from the doc's — so within the series a doc names, its hash is
+  compared byte for byte, including across a patch release.
+
+Every other line stays compared, so an off-series lane still measures
+that the verdict is otherwise identical. The limit that buys: **on a
+series other than the one a doc names, that doc's query hash is not
+verified here** — and that limit is now DECLARED rather than inferred, in
+``EXPECTED_HASH_COVERAGE``, whose right-hand side
+:func:`test_every_documented_query_hash_is_compared_on_some_lane`
+recomputes from the same predicate the comparison uses and which fails on
+any hash checked by no lane at all.
+
+**Those were one condition until 3482822, and the conflation cost the
+whole coverage of one hash.** The single condition was the exact-version
+one, so the day ``test-jax`` floated past the version the doc stamps,
+nothing compared that hash anywhere. See the block comment above
+``_STAMP_JAX`` for the mutation that measures it.
 
 Blocks that opt into a solver (they pass ``solver_timeout_ms``) are
 skipped when no backend is installed, since their output is about an
@@ -350,8 +366,67 @@ def normalise(text: str) -> list[str]:
 # behind it. `test_every_documented_stamp_names_a_tested_series` is the
 # fence, and it is deliberately NOT inside the off-series branch: a block
 # that skips (no solver installed) must not take its stamp with it.
+# TWO FACTS, TWO CONDITIONS, AND THEY WERE ONE — which is how a documented
+# hash's coverage went to zero without anybody deciding it should.
+#
+# `off_series` was computed as `doc_jax != run_jax`, an EXACT-VERSION test,
+# and it gated BOTH neutralisations. But the two lines are different facts
+# with different conditions:
+#
+#   * THE STAMP LINE prints the RUNNING jax version. It differs the moment
+#     the exact version differs, for any reason, and there is nothing to
+#     compare — `jax 0.11.0` against `jax 0.11.1` is the example literally
+#     doing its job. Exact version is the right condition for it.
+#   * THE QUERY HASH is a function of the traced equations' params. It moves
+#     when jax moves those params, which is a per-release fact but NOT the
+#     same fact as "the version string differs".
+#
+# Conflating them means: the day `test-jax` floats past the version a doc
+# stamps, the hash stops being compared on every lane at once. That is not
+# hypothetical. Measured at 3482822, `docs/quickstart.md`'s `query <sha>`
+# overwritten with `d`x64 in a scratch tree, running the whole of
+# `tests/test_doc_examples.py`:
+#
+#     jax 0.10.2  40 passed          jax 0.11.0  1 failed, 39 passed
+#     jax 0.11.1  40 passed
+#
+# and FIVE ci.yml jobs run a bare whole-tree `pytest` and therefore run this
+# module -- counted rather than assumed, because an earlier draft of this
+# comment named three: `test-no-jax` (this module skips: no jax),
+# `test-jax` (floats -> jax 0.11.1 today), `test-jax-0-10` (pins the SERIES
+# -> 0.10.2), `acceptance-any-pytree` (`.[solvers,jax]`, floats -> 0.11.1)
+# and `acceptance-reproducer` (a matrix over the two SERIES). Not one of
+# them resolves 0.11.0, so the hash was checked on NO lane. The same mutation to `docs/harness-api.md`'s
+# `query hash:` line — whose fence carries no stamp, so nothing was ever
+# neutralised for it — failed on all three.
+#
+# THE HASH'S CONDITION IS THE SERIES, and that is a choice with an argument
+# rather than a convenience. A doc can only be a byte-exact transcript of one
+# jax, so SOME escape is needed or the 0.10 lane is permanently red on a page
+# that names 0.11. Keying the escape on the series makes the escape as narrow
+# as the doc's own claim: within the series the doc names, the hash is
+# compared byte for byte, so a patch release that moves it — which happens;
+# `SOUNDNESS.md`'s 2026-08-18 entry is a patch release moving a query hash —
+# turns that lane red and the remedy is to re-record the block. Across series
+# it is neutralised, and THAT gap is not left as an absence: it is declared
+# in `EXPECTED_HASH_COVERAGE` and measured by
+# `test_every_documented_query_hash_is_compared_on_some_lane`.
+#
+# Measured, and it is why the tight condition is green today rather than red:
+# `docs/quickstart.md`'s block traces to the SAME hash on jax 0.11.0 and jax
+# 0.11.1 (it differs on 0.10.2, which is the `Inline` param above), and
+# `docs/harness-api.md`'s `reduce_sum` hash is identical on all three.
 _STAMP_JAX = re.compile(r"^(stelling \S+ \| jax )(\S+)$")
 _QUERY_HASH = re.compile(r"^query [0-9a-f]{64}$")
+
+#: Every shape in which a doc PUBLISHES a query content hash: the verdict
+#: render's `query <sha>` line and `ClosedJaxpr.content_hash()` printed by
+#: hand as `query hash: <sha>`. Wider than :data:`_QUERY_HASH` on purpose —
+#: that one is the neutralisation TARGET (only a verdict render carries a
+#: stamp, so only it can ever be off-series), this one is the INVENTORY
+#: DOMAIN, and an inventory that could not see the second shape would have
+#: declared coverage for half the hashes in the docs.
+_DOCUMENTED_QUERY_HASH = re.compile(r"^query(?: hash:)? [0-9a-f]{64}$")
 
 
 def claimed_jax_version(lines: list[str]) -> str | None:
@@ -363,15 +438,50 @@ def claimed_jax_version(lines: list[str]) -> str | None:
     return None
 
 
+def _series_of(version: str) -> str:
+    """``0.11.1`` -> ``0.11``. The unit `TESTED_JAX_SERIES` is keyed on."""
+    return ".".join(version.split(".")[:2])
+
+
+def hash_is_compared(doc_jax: str | None, running_jax: str) -> bool:
+    """Whether a doc's query hash is compared byte for byte on ``running_jax``.
+
+    ONE FUNCTION, TWO CALLERS, deliberately: :func:`test_doc_example` uses it
+    to decide, and
+    :func:`test_every_documented_query_hash_is_compared_on_some_lane` uses it
+    to MEASURE the declared inventory. A second copy of this rule is a second
+    place for the inventory to be a claim about something other than what
+    runs.
+
+    A block with no stamp (``doc_jax is None``) names no series, so nothing
+    licenses an escape and it is compared everywhere.
+    """
+    if doc_jax is None:
+        return True
+    return _series_of(doc_jax) == _series_of(running_jax)
+
+
+def neutralise_stamp_line(lines: list[str]) -> list[str]:
+    """Blank the jax version in the stamp, and nothing else."""
+    return [_STAMP_JAX.sub(r"\1<version>", line) for line in lines]
+
+
+def neutralise_query_hash(lines: list[str]) -> list[str]:
+    """Blank a verdict's ``query <sha>`` line, and nothing else."""
+    return [
+        "query <hash: series-dependent>" if _QUERY_HASH.match(line) else line
+        for line in lines
+    ]
+
+
 def neutralise_series_stamp(lines: list[str]) -> list[str]:
-    """Blank the two lines a jax series change is allowed to move."""
-    out = []
-    for line in lines:
-        line = _STAMP_JAX.sub(r"\1<version>", line)
-        if _QUERY_HASH.match(line):
-            line = "query <hash: series-dependent>"
-        out.append(line)
-    return out
+    """Both of the above. Kept as one name because "the two lines a jax
+    series change is allowed to move" is still a meaningful set — it is the
+    UNION the old single condition applied, and the tests below pin that the
+    union touches exactly those two lines and no others. What changed is
+    that :func:`test_doc_example` now applies the halves under their own
+    conditions rather than this composition under one."""
+    return neutralise_query_hash(neutralise_stamp_line(lines))
 
 
 def run_block(source: str, tmp_path: pathlib.Path) -> subprocess.CompletedProcess:
@@ -492,24 +602,33 @@ def test_doc_example(path, block, tmp_path):
         return
     want, got = normalise(block.claimed), normalise(r.stdout)
     doc_jax, run_jax = claimed_jax_version(want), claimed_jax_version(got)
-    off_series = (
-        want != got
-        and doc_jax is not None
-        and run_jax is not None
-        and doc_jax != run_jax
-    )
+    # TWO FACTS, TWO CONDITIONS — see the block comment above _STAMP_JAX.
+    known = doc_jax is not None and run_jax is not None
+    off_version = known and doc_jax != run_jax
+    off_series = off_version and not hash_is_compared(doc_jax, run_jax)
+    if off_version:
+        # the stamp prints the RUNNING jax; a different jax at all makes
+        # this line differ with nothing to compare
+        want, got = neutralise_stamp_line(want), neutralise_stamp_line(got)
     if off_series:
-        # not this doc's series: its stamp and its query hash are the two
-        # lines the series is allowed to move (see the note above). Every
-        # other line is still compared byte for byte.
-        want, got = neutralise_series_stamp(want), neutralise_series_stamp(got)
+        # and only a different SERIES licenses dropping the hash
+        want, got = neutralise_query_hash(want), neutralise_query_hash(got)
     assert want == got, (
         f"{path.name}:{block.line} — printed output does not match the doc"
         + (
             f"\n(running jax {run_jax}, doc recorded on jax {doc_jax}: the "
-            f"stamp and query-hash lines were neutralised, so this failure "
-            f"is in the SERIES-INDEPENDENT part of the verdict)"
-            if off_series
+            f"stamp line was neutralised"
+            + (
+                " and so was the query hash, since the SERIES differs, so "
+                "this failure is in the series-independent part of the "
+                "verdict"
+                if off_series
+                else ", but the QUERY HASH WAS COMPARED — this is the same "
+                "series as the doc, so a hash difference here is a real "
+                "one: either the tree moved it or the doc needs re-recording"
+            )
+            + ")"
+            if off_version
             else ""
         )
         + "\n"
@@ -712,6 +831,147 @@ def test_every_documented_stamp_names_a_tested_series():
         f"a tested series (TESTED_JAX_SERIES = {TESTED_JAX_SERIES}):\n  "
         + "\n  ".join(offenders)
     )
+
+
+#: WHICH LANE CHECKS WHICH DOCUMENTED QUERY HASH. Keys are
+#: ``<doc file>#<n>``, ``n`` counting the hash lines in that file in document
+#: order; values are the entries of ``TESTED_JAX_SERIES`` on which
+#: :func:`test_doc_example` compares that hash BYTE FOR BYTE. An empty tuple
+#: means the hash is checked nowhere, and is a failure.
+#:
+#: THE RIGHT-HAND SIDE IS MEASURED, NEVER TYPED FROM HOPE — recomputed by
+#: :func:`test_every_documented_query_hash_is_compared_on_some_lane` from the
+#: same :func:`hash_is_compared` that decides the real comparison. This is
+#: `tests/test_skip_inventory.py`'s idiom and it is here for the same reason:
+#: this coverage went silently to zero once already (see the block comment
+#: above ``_STAMP_JAX``) and an absence cannot be reviewed. A declaration can.
+#:
+#: WHY THE TWO ENTRIES DIFFER, which is the thing to read before changing one:
+#:
+#: * ``quickstart.md#0`` sits in a verdict render that stamps ``jax 0.11.0``,
+#:   so its hash is compared on the 0.11 lane and neutralised on the 0.10
+#:   one — a doc cannot be a byte-exact transcript of two series at once.
+#: * ``harness-api.md#0`` is a hand-printed ``content_hash()`` in a fence
+#:   that carries NO stamp, so no series escape applies to it anywhere and it
+#:   is compared on every lane.
+EXPECTED_HASH_COVERAGE = {
+    "harness-api.md#0": ("0.10", "0.11"),
+    "quickstart.md#0": ("0.11",),
+}
+
+
+def _documented_query_hashes():
+    """Every query content hash the docs publish, and whether it is compared.
+
+    Scans the RAW text — an illustrative fence, a run-only block or a fence
+    attached to nothing still shows a reader a hash — and then asks whether
+    that exact line is part of some COMPARED block's claimed output. A 64-hex
+    line is unique enough for that to be a sound membership test, and it
+    keeps this function from re-implementing :func:`collect`'s pairing, which
+    would be a second place for the two to disagree.
+
+    Yields ``(key, file name, line number, doc's jax version or None,
+    compared)``.
+    """
+    for path in _doc_files():
+        text = path.read_text(encoding="utf-8")
+        compared: dict[str, str | None] = {}
+        for block in collect(text)[0]:
+            if block.claimed is None:
+                continue
+            lines = normalise(block.claimed)
+            stamp = claimed_jax_version(lines)
+            for line in lines:
+                if _DOCUMENTED_QUERY_HASH.match(line.strip()):
+                    compared[line.strip()] = stamp
+        n = 0
+        for lineno, raw in enumerate(text.splitlines(), start=1):
+            line = raw.strip()
+            if not _DOCUMENTED_QUERY_HASH.match(line):
+                continue
+            yield (
+                f"{path.name}#{n}",
+                path.name,
+                lineno,
+                compared.get(line),
+                line in compared,
+            )
+            n += 1
+
+
+def test_every_documented_query_hash_is_compared_on_some_lane():
+    """A documented hash checked on no lane is a named fact, not an absence.
+
+    THE HOLE THIS CLOSES, and it opened silently. The off-series escape used
+    to be keyed on the EXACT jax version, so the day `test-jax` floated past
+    the version `docs/quickstart.md` stamps, that page's query hash was
+    neutralised on every lane at once. Driven at 3482822 by overwriting it
+    with `d`x64 in a scratch tree: 40 passed on jax 0.10.2, 40 passed on jax
+    0.11.1, 1 failed on jax 0.11.0 — and no CI lane runs 0.11.0. The hash was
+    verified nowhere and nothing said so.
+
+    `test_every_documented_stamp_names_a_tested_series` is the fence for a
+    doc naming a series NO lane runs. This is the fence for the other half:
+    the escape's condition widening until it covers every lane there is. That
+    one reads the doc's stamp; this one reads what the comparison actually
+    does, through the same predicate the comparison uses.
+    """
+    measured = {}
+    where = {}
+    for key, name, lineno, doc_jax, compared in _documented_query_hashes():
+        where[key] = f"{name}:{lineno}"
+        measured[key] = (
+            tuple(
+                s
+                for s in TESTED_JAX_SERIES
+                if hash_is_compared(doc_jax, f"{s}.0")
+            )
+            if compared
+            else ()
+        )
+
+    unchecked = {k: where[k] for k, v in measured.items() if not v}
+    assert not unchecked, (
+        "a documented query content hash is compared on NO tested jax lane, "
+        "so nothing in CI would notice it going stale — either re-record the "
+        "block on a series that has a lane, or put the hash in a fence that "
+        f"is compared: {unchecked}"
+    )
+    assert measured == EXPECTED_HASH_COVERAGE, (
+        "the documented-hash coverage moved.\n"
+        f"  declared {EXPECTED_HASH_COVERAGE}\n"
+        f"  measured {measured}\n"
+        f"  where    {where}\n"
+        "Update EXPECTED_HASH_COVERAGE *and* say in its comment why the new "
+        "coverage is the coverage that block should have. This dict is a "
+        "claim about which lane is obliged to check which hash; it is not a "
+        "number to be bumped until the suite goes green."
+    )
+
+
+def test_the_hash_coverage_predicate_is_not_vacuous():
+    """The inventory above is only worth having if its predicate discriminates.
+
+    Without this, `hash_is_compared` returning True for everything would
+    declare full coverage for every hash and this file would once again be
+    measuring nothing.
+    """
+    # the domain is non-empty: an empty inventory proves nothing
+    assert EXPECTED_HASH_COVERAGE
+    # same series: compared, including across a PATCH release, which is the
+    # narrowing that makes a moved hash inside a series go red
+    assert hash_is_compared("0.11.0", "0.11.0")
+    assert hash_is_compared("0.11.0", "0.11.1")
+    # different series: not compared
+    assert not hash_is_compared("0.11.0", "0.10.2")
+    assert not hash_is_compared("0.10.2", "0.11.1")
+    # no stamp at all: nothing licenses an escape
+    assert hash_is_compared(None, "0.10.2")
+    # and the wider inventory regex really is wider than the neutraliser's
+    assert _DOCUMENTED_QUERY_HASH.match("query hash: " + "0" * 64)
+    assert not _QUERY_HASH.match("query hash: " + "0" * 64)
+    assert _DOCUMENTED_QUERY_HASH.match("query " + "0" * 64)
+    assert _QUERY_HASH.match("query " + "0" * 64)
 
 
 def test_the_stamp_fence_rejects_an_untested_series():

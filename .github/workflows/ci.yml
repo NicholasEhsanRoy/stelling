@@ -529,7 +529,11 @@ jobs:
   # `flax/nnx/`. Pin THIS job then, with the flax and jax versions in the
   # comment, and lift it when flax ships a `flax.nnx` that imports. Do not
   # pin `test-jax` for it: that lane floats on purpose, and floating is what
-  # surfaced 0.11.1 within a working day.
+  # surfaced 0.11.1 on the next push after it shipped. (This read "within a
+  # working day". It was true of that one event, and it is not a property of
+  # any trigger -- `on:` at the top of this file has no `schedule:`, so what
+  # a floating lane guarantees is "on the next push or PR", not a deadline.
+  # `_tripwire/_adapter_jax._KNOWN_HASHES` carries the same correction.)
   #
   # ── maddening: on PyPI, but its jax pin makes --no-deps MANDATORY ────────
   # `maddening==0.3.1` declares `jax<0.6,>=0.4`. A plain `uv pip install
@@ -1013,6 +1017,91 @@ jobs:
   #
   # THE DECISION, AND THE ARGUMENT, because it is not obvious.
   #
+  # WHAT THIS JOB ACTUALLY DOES ON `main` TODAY, MEASURED, and FIRST because
+  # everything after it is an argument about a decision rather than a report
+  # of a state. The next paragraph is about a TEST; a reader wants to know
+  # about the JOB. And "the property lane is red on main" has been said out
+  # loud about this repository and is not true. Re-driven at 3482822 in a venv
+  # built the way the steps below build one — `pip install -e ".[jax]" pytest
+  # hypothesis`, so NO solver wheels and jax floating, which resolved to jax
+  # 0.11.1 with hypothesis 6.165.10 — running exactly the command the `the
+  # property suite` step runs:
+  #
+  #     python -m pytest -q -ra tests/property
+  #       -> 41 passed, 1 skipped, 1 xfailed, pytest exit 0
+  #
+  # and both greps of the step below, run verbatim on that log with the SGR
+  # escapes stripped: zero XPASS matches, `^XFAIL ` count exactly 1. The job
+  # is GREEN, by the mechanism it was designed to be green by. The same
+  # command in a venv that DOES have z3 and cvc5 gives the same three
+  # numbers.
+  #
+  # AND THE DEFECT IS STILL BEING FOUND, which is the half a green tick
+  # cannot say on its own: an XFAIL here means the test body RAISED
+  # `WrongVerifiedFromWrap`, i.e. the property searched and found a wrong
+  # VERIFIED. In the same tree `tests/test_soundness_wrap_reproducer.py`
+  # passes 17/17, so the defect is live from both directions.
+  #
+  # A CLAIM THAT SPLIT IN TWO WHEN IT WAS CHECKED. The half about WHOLE-TREE
+  # collection is right and is recorded here so nobody spends the afternoon
+  # again; the half about a single module is WRONG, and the correction below
+  # is the more useful fact of the two. Nine configurations at 3482822,
+  # every one of them XFAIL: the
+  # oracle module alone; the whole `tests/` tree collected with `-k`
+  # selecting only the oracle, so every module-scope import in the suite
+  # runs and one test executes — 7 s, and the cheap instrument for this
+  # question; the same with and without solver wheels; with
+  # `JAX_ENABLE_X64=1` and unset; under
+  # `-n 4`; under `STELLING_PROPERTY_PROFILE=dev`; and the whole tree RUN end
+  # to end on jax 0.11.0 with solvers (3910 passed, 13 skipped, 1 xfailed,
+  # exit 0 -- the same run the figure further down this block cites, and the
+  # jax is named here because the venv described above is a DIFFERENT one,
+  # solver-free and floating to 0.11.1).
+  #
+  # BUT THE INFERENCE THAT USED TO CLOSE THIS PARAGRAPH -- "if collecting
+  # every module at once does not flip it, no single module does" -- IS
+  # FALSE. This oracle CAN XPASS, deterministically, and whether it does is
+  # decided by WHICH local modules the session imported, not by how many.
+  # Co-collecting one ordinary module flips it, even fully deselected, at
+  # 3482822 and after:
+  #
+  #     python -m pytest -q \
+  #       tests/property/test_oracle.py::test_a_verified_is_true_at_every_admitted_point \
+  #       tests/test_sqrt_row.py --deselect tests/test_sqrt_row.py
+  #       -> 1 failed, 15 deselected     [XPASS(strict)]
+  #
+  # THE MECHANISM, measured rather than guessed. hypothesis mixes a pool of
+  # integer constants harvested from every LOCAL non-test module in
+  # `sys.modules` into generation (`hypothesis.internal.conjecture.providers.
+  # _get_local_constants`, cached under `.hypothesis/constants/`).
+  # `tests/test_sqrt_row.py` contributes nothing itself -- test files are
+  # excluded -- but importing it pulls in `src/stelling/obligation.py`, which
+  # is full of them. Pool size at the FIRST generated input:
+  #
+  #     oracle alone                            2  -> XFAIL
+  #     oracle + `import stelling.obligation`  274 -> XPASS(strict)
+  #     whole `tests/` collected, -k oracle    633 -> XFAIL
+  #
+  # so a BIGGER pool is not a better search, which is exactly why whole-tree
+  # collection does not flip it and one module does -- and why the old
+  # inference read backwards. Control: freezing the pool to empty makes both
+  # sessions XFAIL and the flip disappears. It is NOT the example database:
+  # `ci` forces `derandomize=True` so `database=None`, and deleting
+  # `.hypothesis/` changes neither outcome.
+  #
+  # WHAT IT DOES NOT MEAN: stelling's behaviour does not change and the
+  # defect is not masked. `tests/test_soundness_wrap_reproducer.py` passes
+  # 17/17 in BOTH sessions. This is an artifact of which examples the search
+  # draws, and nothing more.
+  #
+  # WHY IT MATTERS ANYWAY, and this is the trap. The guard below tells
+  # whoever meets an XPASS "if the wrap remedy landed, delete the marker".
+  # IT HAS NOT LANDED. Deleting a strict marker on a live defect is how a
+  # detector goes quiet, so an XPASS seen in some other session is a
+  # statement about that session's import set and NOT evidence the defect is
+  # gone. Check `tests/test_soundness_wrap_reproducer.py` before believing
+  # any XPASS here.
+  #
   # `tests/property/test_oracle.py::test_a_verified_is_true_at_every_admitted_point`
   # FAILS on `main` today. It finds the open integer-literal wrap defect
   # (HANDOFF6 §71, §74) — a family of VERIFIEDs over predicates that are false
@@ -1089,8 +1178,13 @@ jobs:
   #   "the completeness pin is WITHDRAWN, not passed: this session reported
   #    1 test(s) as xfailed."
   #
-  # Measured on the whole tree with hypothesis installed: 2470 passed,
-  # 13 skipped, 1 xfailed, exit 0, and that pin among the skips. It is
+  # Measured on the whole tree with hypothesis installed: 3910 passed,
+  # 13 skipped, 1 xfailed, exit 0, and that pin among the skips. Re-driven
+  # at 3482822, jax 0.11.0, hypothesis 6.165.10, CPython 3.12.3,
+  # `JAX_ENABLE_X64` unset; it read `2470 passed` until then. THE xfail
+  # SENSE DID NOT INVERT and this figure is not evidence that it did: the
+  # run reported `1 xfailed` and zero xpasses, exactly as when the figure
+  # was written. What went stale is the size of the suite. It
   # self-disclosed and it is the pin's own rule (disclosed => withdrawn, never
   # failed, the same cut `N deselected` gets) — but nothing on this branch said
   # it out loud, and "a repo-wide completeness pin is off" is not something a

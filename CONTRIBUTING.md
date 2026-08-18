@@ -30,8 +30,11 @@ the whole mechanism cannot reach.
 > property is `xfail`-marked against an open defect (the integer-literal wrap),
 > and `tests/test_skip_inventory.py::test_no_session_skip_is_undisclosed`
 > withdraws its claim — by skipping, and saying so — on any session that
-> reported an xfail. Measured on the whole tree: `2470 passed, 13 skipped,
-> 1 xfailed`, exit 0, that pin among the skips. Nothing is hidden from you: the
+> reported an xfail. Measured on the whole tree: `3910 passed, 13 skipped,
+> 1 xfailed`, exit 0, that pin among the skips — re-driven at `3482822` on
+> jax 0.11.0 with hypothesis 6.165.10, CPython 3.12.3, `JAX_ENABLE_X64`
+> unset. It read `2470 passed` until then; the skip and xfail counts have
+> not moved, only the size of the suite. Nothing is hidden from you: the
 > pin's *other* half, which checks every skip the session did see, still runs.
 > But "this suite's skip set is complete" is not being asserted in your local
 > run. It **is** asserted in CI, which does not install `hypothesis` — so the

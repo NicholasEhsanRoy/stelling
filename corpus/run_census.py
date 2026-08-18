@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime
 import importlib.metadata
+import os
 import traceback
 from pathlib import Path
 
@@ -184,32 +185,117 @@ def _import_jax_md():
     return jax_md
 
 
-def _jax_md_import_reason(exc: Exception) -> str:
-    """Why `import jax_md` failed, naming flax when flax is the reason.
+#: The path fragment that marks a traceback frame as `flax.nnx`'s own.
+#: `os.sep`-joined rather than spelled `"flax/nnx/"` so this reads the same on
+#: a platform whose separator is not `/`.
+_FLAX_NNX_FRAME = os.path.join("flax", "nnx") + os.sep
 
-    The cause is established by IMPORTING `flax.nnx` here rather than by
+
+def _raised_inside_flax_nnx(exc: BaseException | None) -> bool:
+    """Whether ``exc`` was raised while `flax.nnx` was being executed.
+
+    THIS IS THE CAUSATION HALF, and without it the caller below is a
+    CONJUNCTION dressed as a cause. Walks the exception's own traceback and
+    those of everything it chains to (`__cause__` for `raise ... from`,
+    `__context__` for an exception raised while handling another), with a
+    seen-set because those links can form a cycle.
+
+    Measured on jax 0.11.1 with flax 0.12.8, both directions: `import jax_md`
+    dying inside `flax.nnx` gives a traceback of 8 frames, 5 of them under
+    `flax/nnx/`; `import jax_md` with jax_md absent gives a traceback with
+    none, in the same interpreter, with `flax.nnx` just as broken.
+    """
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        for frame in traceback.extract_tb(exc.__traceback__):
+            if _FLAX_NNX_FRAME in frame.filename:
+                return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+def _jax_md_import_reason(exc: Exception) -> str:
+    """Why `import jax_md` failed, naming flax only when flax is the reason.
+
+    TWO FACTS, AND THE FUNCTION NEEDS BOTH. "flax.nnx is broken here" is a
+    fact about the ENVIRONMENT; "this import died inside flax.nnx" is a fact
+    about THIS FAILURE. Only the second is a cause.
+
+    The environment fact is established by IMPORTING `flax.nnx` rather than by
     matching on the exception's text: a message this script does not control
-    is not evidence, and `jax_md` has other ways to fail (a missing
-    `e3nn_jax`, measured on this machine) that must not be reported as the
-    flax one.
+    is not evidence. The causal fact is established from the failing import's
+    own traceback — see :func:`_raised_inside_flax_nnx` — because `jax_md` has
+    other ways to fail (a missing `e3nn_jax`; jax_md not installed at all)
+    that must not be reported as the flax one.
+
+    THIS FUNCTION USED TO DISCARD ``exc`` ENTIRELY ON THE FLAX BRANCH, which
+    made it a conjunction test presented as a causal one: it discriminated
+    correctly only in the case where its message was never used. Driven, in a
+    venv with jax 0.11.1 and flax 0.12.8 (whose `flax.nnx` does not import
+    there) and jax_md NOT INSTALLED, it reported
+
+        jax_md could not be imported because flax 0.12.8's `flax.nnx` does
+        not import on jax 0.11.1 … jax_md imports `flax.nnx`, so it inherits
+        this.
+
+    — an attribution to a package that was not present, in a script whose
+    entire output is an attribution table. The true cause was
+    `ModuleNotFoundError: No module named 'jax_md'`.
     """
     import jax
 
+    through_flax = _raised_inside_flax_nnx(exc)
+
+    flax_note = ""
     try:
         import flax.nnx  # noqa: F401
     except Exception as flax_exc:  # noqa: BLE001
-        import flax
+        # `import flax` UNDER ITS OWN GUARD: in an environment with neither
+        # jax_md nor flax the line above raises ModuleNotFoundError for
+        # `flax`, and an unguarded `import flax` here would then raise it
+        # again out of the function whose whole job is to return a sentence.
+        # An attribution helper that raises attributes nothing.
+        try:
+            flax_version = __import__("flax").__version__
+        except Exception:  # noqa: BLE001
+            flax_version = None  # flax itself is absent, not merely broken
 
-        return (
-            f"jax_md could not be imported because flax {flax.__version__}'s "
-            f"`flax.nnx` does not import on jax {jax.__version__}: "
-            f"{type(flax_exc).__name__}: {flax_exc}. jax_md imports "
-            "`flax.nnx`, so it inherits this. It is flax's incompatibility "
-            "with jax, not jax_md's and not stelling's, and nothing in "
-            "stelling is pinned or skipped for it. Re-run this census on a "
-            "flax whose `flax.nnx` imports."
+        if through_flax and flax_version is not None:
+            return (
+                f"jax_md could not be imported because flax "
+                f"{flax_version}'s `flax.nnx` does not import on jax "
+                f"{jax.__version__}: {type(flax_exc).__name__}: {flax_exc}. "
+                "jax_md imports `flax.nnx`, so it inherits this — and this "
+                "import really did die inside a `flax/nnx/` frame, which is "
+                "what makes that a cause here and not just a coincidence. It "
+                "is flax's incompatibility with jax, not jax_md's and not "
+                "stelling's, and nothing in stelling is pinned or skipped for "
+                "it. Re-run this census on a flax whose `flax.nnx` imports."
+            )
+        # SAY WHICH OF THE TWO IT IS. `import flax.nnx` failing because flax
+        # is not installed at all is a different environment fact from
+        # flax.nnx being broken on this jax, and calling the first one
+        # "broken" is the kind of small false sentence this function exists
+        # to stop producing.
+        flax_note = (
+            " (and `flax` is not installed here either, so it is not the "
+            "reason)"
+            if flax_version is None
+            else (
+                f" (`flax.nnx` is ALSO broken in this environment — flax "
+                f"{flax_version} on jax {jax.__version__}: "
+                f"{type(flax_exc).__name__}: {flax_exc} — but no frame of "
+                "the traceback above is under `flax/nnx/`, so that is a true "
+                "fact about the environment and not the reason THIS import "
+                "failed)"
+            )
         )
-    return f"jax_md could not be imported: {type(exc).__name__}: {exc}"
+
+    return (
+        f"jax_md could not be imported: {type(exc).__name__}: {exc}"
+        f"{flax_note}"
+    )
 
 
 def harness_jax_md():

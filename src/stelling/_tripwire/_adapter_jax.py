@@ -110,10 +110,33 @@ _TESTED = _optional.TESTED_JAX_SERIES
 #:
 #: THE COST OF "MISSING IS A FAILURE", STATED SO IT IS NOT A SURPRISE: the
 #: day jax ships any release with no row here, the floating ``test-jax``
-#: lane goes red — within a working day, which is the point — and so does
-#: ``test-jax-0-10`` if a 0.10.3 ever ships, since that lane pins the SERIES
-#: and resolves to the newest 0.10.x. The remedy in both cases is the same
-#: and is deliberately manual: read the rule, diff it, add a row.
+#: lane goes red, and so does ``test-jax-0-10`` if a 0.10.3 ever ships,
+#: since that lane pins the SERIES and resolves to the newest 0.10.x. The
+#: remedy in both cases is the same and is deliberately manual: read the
+#: rule, diff it, add a row.
+#:
+#: HOW SOON THAT RED ARRIVES IS DECIDED BY TRIGGERS, AND THIS USED TO SAY
+#: "within a working day", WHICH NO TRIGGER DELIVERS. Read off the two
+#: workflows:
+#:
+#: * ``ci.yml`` — which is the only file that runs ``test-jax`` — has
+#:   ``on: push: branches: [main]`` and ``on: pull_request``, and NO
+#:   ``schedule:``. So the red arrives on the next push to ``main`` or the
+#:   next pull-request event, whenever that is. On a quiet week it is a
+#:   quiet week; there is no clock behind it.
+#: * ``nightly-jax-canary.yml`` DOES have a clock (``cron: "17 4 * * *"``),
+#:   and it does not go red on this. Driven, with the version reported as a
+#:   release that has no row: the canary prints the loud
+#:   ``HAS NEVER BEEN READ`` line to stdout and to the step summary and
+#:   **exits 0** — by design, argued in ``_hash_row``. Its ``control`` leg
+#:   installs ``-e ".[jax]"`` and so is the leg that meets a new release
+#:   first; its ``nightly`` leg installs a dev build, which is not a release
+#:   (:func:`is_release`), so the row check there is carved out by
+#:   construction.
+#:
+#: So: a daily job SEES a rowless release within a day and says so without
+#: failing; the failing signal is event-triggered. Both are true and they
+#: are different sentences.
 #:
 #: KEYED ON THE EXACT RELEASE, NOT THE SERIES, and this incident is the
 #: argument: 0.11.0 and 0.11.1 are one series carrying two different rule
@@ -172,11 +195,63 @@ TRACE_ENTRY_NAMES = record.DEFAULT_TRACE_ENTRY_NAMES
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
 
 #: A RELEASE, and therefore something :data:`_KNOWN_HASHES` can have a row
-#: for: a bare ``X.Y.Z`` and nothing else. ``0.11.2.dev20260817``,
-#: ``0.12.0rc1`` and ``0.11.1+cuda`` all fail it on purpose — see
-#: :func:`is_release`. ``\Z`` and not ``$``, because ``$`` also matches
-#: before a trailing newline and "and nothing else" would then not be true.
-_RELEASE_RE = re.compile(r"^\d+\.\d+\.\d+\Z")
+#: for. This is PEP 440's **final release** — see :func:`is_release` for what
+#: that MEANS and why the meaning is the definition.
+#:
+#: IT USED TO BE ``^\d+\.\d+\.\d+\Z`` — a bare ``X.Y.Z`` — AND THAT WAS
+#: MEASURABLY TOO NARROW. jax has shipped a release that is not bare
+#: ``X.Y.Z``: ``0.9.0.1``, uploaded 2026-02-05, two files, not yanked, read
+#: off PyPI's JSON API (192 of jax's 195 versions are bare ``X.Y.Z``; the
+#: other three are ``0.0``, ``0.1`` and ``0.9.0.1``). Under the old pattern
+#: such a release is not a release, so it lands in ``never-read`` and the
+#: assertion in ``tests/test_tripwire_arm.py`` that demands a row for it is
+#: skipped. Driven, on real jax 0.11.1 (whose rule really has moved) with the
+#: version string reported as ``0.11.1.1``: the tree AS MERGED at ``3482822``
+#: PASSED, and ``fb646b4`` — the pre-merge tree, a single ``_KNOWN_HASH``
+#: constant and no shape carve-out at all — FAILED. That is coverage the
+#: 0.11.1 merge lost, not coverage it never had. With the pattern below it
+#: fails again, which is the point.
+#:
+#: THE GRAMMAR, clause by clause, and every clause is PEP 440's own — written
+#: out rather than delegated to ``packaging`` because stelling's core is
+#: zero-dependency and may not import it:
+#:
+#: * ``v?`` — the leading ``v`` PEP 440 tolerates.
+#: * ``(?:[0-9]+!)?`` — the epoch. **ACCEPTED, deliberately, and here is the
+#:   argument.** An epoch does not make a version mutable or unpublishable:
+#:   ``1!0.12.0`` on PyPI is exactly as immutable as ``0.12.0``, and
+#:   ``importlib.metadata`` reports the string verbatim, so a row keyed on it
+#:   can be looked up forever — which is the whole test. The direction of the
+#:   error decides the tie: accepting a shape jax never ships costs nothing
+#:   (there is no such release to be red about), while rejecting a shape jax
+#:   does ship costs exactly the silence this pattern was just widened to
+#:   remove. Measured: zero of jax's 195 PyPI versions carry an epoch, so
+#:   this clause is inert today and is here for its direction.
+#: * ``[0-9]+(?:\.[0-9]+)*`` — the release segment, at ANY number of
+#:   components. This is the clause the bare-``X.Y.Z`` pattern did not have.
+#: * the post-release group — ``.postN`` and PEP 440's other spellings
+#:   (``rev``/``r``, ``-``/``_``/``.`` separators) plus the implicit ``-N``
+#:   form. A post-release is a final release: it names a published, immutable
+#:   wheel, so a row can name it.
+#:
+#: AND NOTHING ELSE, because the pattern is anchored at both ends: a
+#: pre-release (``0.12.0rc1``), a dev release (``0.11.2.dev20260817``) and a
+#: local version (``0.11.1+cuda``) all fail it, which is the point —
+#: :func:`is_release` says why. ``\Z`` and not ``$``, because ``$`` also
+#: matches before a trailing newline and "and nothing else" would then not be
+#: true.
+_FINAL_RELEASE_RE = re.compile(
+    r"""^
+    v?                              # PEP 440 tolerates a leading 'v'
+    (?:[0-9]+!)?                    # epoch
+    [0-9]+(?:\.[0-9]+)*             # release segment, ANY number of parts
+    (?:                             # optional post-release, and only that
+        -[0-9]+                     #   implicit post: 1.0-1
+      | [-_.]?(?:post|rev|r)[-_.]?[0-9]*
+    )?
+    \Z""",
+    re.VERBOSE,
+)
 
 # Module state. One process arms once; ``install`` refuses to double-wrap and
 # ``restore`` refuses to clobber someone else's patch.
@@ -202,20 +277,55 @@ def _parse_version(text: str) -> tuple[int, int, int] | None:
 
 
 def is_release(text: str | None) -> bool:
-    """Whether a jax version string names a RELEASE — a bare ``X.Y.Z``.
+    """Whether a jax version string names an IMMUTABLE PUBLISHED VERSION —
+    PEP 440's **final release**.
 
-    THIS IS WHAT A KEY OF :data:`_KNOWN_HASHES` IS, which is the only reason
-    the distinction exists. A dev build, a release candidate or a local
-    version cannot be given a row: the string names a tree that will never be
-    published under that name again, so writing it down would record a fact
-    nobody can look up. Those builds land in the ``never-read`` state, and
-    that is what is asserted of them — rather than that they have a row.
+    THE MEANING IS THE DEFINITION, and the definition is not "three
+    components". A key of :data:`_KNOWN_HASHES` is a string a future reader
+    must be able to look up and get the same wheel: that is what makes the
+    row a record rather than a note. PEP 440 already names that class — a
+    release segment, an optional epoch, an optional post-release — and this
+    predicate is that class and nothing more.
+
+    WHAT IS EXCLUDED, AND WHY EACH ONE:
+
+    ``0.11.2.dev20260817`` (dev release)
+        names a tree that is rebuilt under the same name, so a hash written
+        down against it is a hash of something else tomorrow. This is what
+        the ``nightly`` job of ``.github/workflows/nightly-jax-canary.yml``
+        installs.
+    ``0.12.0rc1`` (pre-release)
+        is a candidate, superseded by the release it is a candidate for; the
+        rule this tool records is a fact about the release, and pinning the
+        candidate would pin a reading nobody will repeat.
+    ``0.11.1+cuda`` (local version)
+        is a local build of a public release. PEP 440 says local versions are
+        not published to an index, so the string identifies nothing anyone
+        else can fetch.
+
+    All three land in the ``never-read`` state, and that is what
+    ``tests/test_tripwire_arm.py`` asserts of them — rather than that they
+    have a row, which would redden a nightly lane for a fact nobody can act
+    on.
+
+    WHAT IS NOT EXCLUDED — and this is the correction. ``0.9.0.1`` is a jax
+    release (2026-02-05, on PyPI, not yanked) and a bare-``X.Y.Z`` predicate
+    called it a non-release, which sent a real published wheel into the
+    never-read carve-out and silenced the row check for it. Component COUNT
+    was never the question; immutability is. A published wheel is immutable
+    whatever its component count, and a nightly is not whatever its component
+    count. See :data:`_FINAL_RELEASE_RE` for the grammar, the measurement and
+    the epoch decision.
 
     It says nothing about whether such a jax is supported —
     :func:`version_check` and :func:`selfcheck` do not consult it, and the
-    tool arms on nightlies exactly as before.
+    tool arms on nightlies exactly as before. It is also a DIFFERENT question
+    from the one :func:`_parse_version` answers: that one reads three leading
+    integers to compare against :data:`_FLOOR` and is deliberately lenient
+    about everything after them, because an unparseable version means probe
+    anyway. This one decides whether a row may name the string at all.
     """
-    return bool(_RELEASE_RE.match(text or ""))
+    return bool(_FINAL_RELEASE_RE.match(text or ""))
 
 
 def jax_version() -> str | None:

@@ -710,6 +710,73 @@ def test_a_precision_mismatch_gets_its_own_cause(tmp_path):
         jax.config.update("jax_enable_x64", old)
 
 
+def test_a_jax_VERSION_mismatch_gets_its_own_cause(tmp_path):
+    """The program is identical and the precision is identical; only the jax
+    that traced it moved.
+
+    THE CAUSE THIS COVERS IS MEASURED AND NOT HYPOTHETICAL. jax 0.11.1 added
+    an `out_sharding` param to `reduce_max`/`reduce_min`, so a harness
+    containing a max or min reduction traces to a different content hash on
+    0.11.0 and 0.11.1 with no source line changing — `SOUNDNESS.md`'s
+    2026-08-18 entry, whose own text names "a CI job that re-traces and
+    diffs" as the consumer that breaks. `_require_same_program` IS that
+    consumer, and before the clause this test pins it answered "this verdict
+    is not about this subject's program", which sends a reader to look for a
+    program difference that is not there.
+
+    DRIVEN ACROSS TWO REAL INTERPRETERS BEFORE IT WAS WRITTEN DOWN — a
+    verdict produced on jax 0.11.0 and re-emitted on jax 0.11.1, both at
+    x64 on — and reproduced HERE by moving the stamp instead, because this
+    suite has one interpreter. What the in-process form checks is the clause
+    and its wording; what the two-interpreter run checked is that a real jax
+    bump reaches it.
+    """
+    jax = pytest.importorskip("jax")
+    pytest.importorskip("z3")
+    old = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        import dataclasses
+
+        from stelling.preconditions import check
+
+        subject = _nonlinear_subject()
+        v = check(
+            subject.harness, vacuity_mode="inputs-only", solver_timeout_ms=30_000
+        )
+        # the same verdict, stamped by a jax this environment is not running
+        # and carrying that jax's (different) query hash
+        moved = dataclasses.replace(
+            v,
+            stamp=dataclasses.replace(
+                v.stamp,
+                jax_version="0.0.0-not-this-one",
+                query_content_hash="f" * 64,
+            ),
+        )
+        with pytest.raises(ReproducerError, match="jax VERSION MOVED") as exc:
+            R.write_reproducer(moved, subject, str(tmp_path))
+        text = str(exc.value)
+        assert "0.0.0-not-this-one" in text, text
+        assert jax.__version__ in text, text
+        # and it must NOT blame the program, which is the misdiagnosis
+        assert "not about this subject's program" not in text, text
+
+        # the control, and it is the half that makes this a measurement: with
+        # the stamp's jax version left alone and only the hash moved, the
+        # refusal DOES blame the program, because then nothing else differs
+        hash_only = dataclasses.replace(
+            v, stamp=dataclasses.replace(v.stamp, query_content_hash="f" * 64)
+        )
+        with pytest.raises(
+            ReproducerError, match="not about this subject"
+        ) as plain:
+            R.write_reproducer(hash_only, subject, str(tmp_path))
+        assert "jax VERSION MOVED" not in str(plain.value)
+    finally:
+        jax.config.update("jax_enable_x64", old)
+
+
 def _leaky_target(a, b):
     """Defined in THIS module, which imports stelling at module scope — the
     leak shape the emitted file's run-time check must disclose."""
