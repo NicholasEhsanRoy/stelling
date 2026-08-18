@@ -125,6 +125,26 @@ in the slice layer (the HeatNode flagship, 18/20 elements), select_n
 joins, strict roots. Those three are the item's remaining content,
 each now carrying a measured evidence line.
 
+**7. Non-dyadic `pow` exponents** — admit an exponent whose exact
+binary64 rational exceeds the degree cap, by substituting a nearby
+simple rational DELIBERATELY and carrying the substitution error as an
+outward-rounded relative band (`design/nondyadic-pow.md`).
+*Tractability:* medium — the band is one multiplicative term and the
+algebraic encoding already exists; the cost is the odd-denominator
+emission arm (which `rational_pow_problem` fails closed on today) and a
+mutation battery that can actually discriminate the term.
+*Evidence:* measured 2026-08-18 — `gamma = 7/5` (air) and `gamma = 5/3`
+(monatomic), the two standard adiabatic indices in compressible flow,
+are both DECLINED, and JAXFLUIDS is in `corpus/`. The loss is narrower
+than it looks and was measured as such: interval propagation handles
+every exponent, so the lost class is exactly the RELATIONAL properties
+(`x**e <= x` declines for 1/3, 0.1, 0.7 and verifies for 0.5).
+*Rank rationale:* below the items above because it ADDS a discharge
+route rather than checking one, and its whole safety argument is one
+factor away from re-minting audit 0.2.0 S1. Sequenced after the
+falsification probe deliberately: the probe is the downstream check for
+this exact class, and building the route first inverts the dependency.
+
 ## Irreducible — named so the ceiling is honest
 
 - **`¬harmless`** — whether a violated precondition changes the result
