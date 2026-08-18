@@ -278,6 +278,13 @@ def test_an_ALWAYS_EQUAL_str_SUBCLASS_PAIRS_and_that_is_the_eighth_shape():
     query's true hash, which pairs by the honest rule. What it falsifies is
     only the unqualified reading of "two different strings are refused";
     `unpaired_propagation`'s docstring carries the qualification.
+
+    **AND IT IS PRE-EXISTING, MEASURED RATHER THAN ASSUMED** (audit 0.2.0 B11
+    re-audit, fix 5). This row is a DISCLOSURE, so it must not be readable as
+    a defect the batch that wrote it introduced: run against `4bc502b`'s
+    source — the commit that added the identity field, before this batch — it
+    PASSES. Nothing about the comparison changed here; only its description
+    did.
     """
     from stelling.propagate import unpaired_propagation
 
@@ -651,12 +658,23 @@ def test_EVERY_site_fails_CLOSED_on_EVERY_hostile_propagation_shape():
     )
     from stelling.propagate import Propagation, interval_env, propagate
     from stelling.solvers import (
+        Escalation,
         MispairedEscalationError,
         SolverConfig,
         escalate,
         make_solver_verdict,
     )
     from stelling.verdict import make_verdict
+
+    class AlwaysEqualStr(str):
+        def __eq__(self, other):
+            return True
+
+        def __ne__(self, other):
+            return False
+
+        def __hash__(self):
+            return 0
 
     class RaisingRepr(str):
         def __repr__(self):
@@ -778,6 +796,76 @@ def test_EVERY_site_fails_CLOSED_on_EVERY_hostile_propagation_shape():
     )
     assert len(shapes) * len(sites) == 35
 
+    # -- AND EIGHT SHAPES AGAINST A HOSTILE ESCALATION (audit 0.2.0 B11
+    # re-audit, fix 2). `make_solver_verdict` takes THREE arguments and the
+    # thirty-five above vary one. Its escalation gates decide by COMPARING
+    # the two records, so the escalation is the other operand — and the
+    # operand on the LEFT of `escalation.semantics != prop_semantics`, which
+    # is the side Python asks first. Two escalations get past all three
+    # gates on their own account, whatever the propagation answered:
+    #
+    #   * an ALWAYS-EQUAL `str` semantics, which answers the pairing gate
+    #     `False` whatever the propagation said, and needs no private import;
+    #   * a completely EMPTY escalation, which that gate EXEMPTS by design.
+    #
+    # Eight propagation shapes (the seven above plus `attribute read raises`
+    # aimed at `semantics` rather than at `query_sha256`) x two escalations =
+    # SIXTEEN more cells, same rule: `MispairedEscalationError` or a degraded
+    # verdict, never a raw escape. Measured on `bd50171`, exactly two of the
+    # sixteen raised `RuntimeError` out of `make_solver_verdict`, both on that
+    # eighth shape — which is why it is driven here rather than only above.
+    esc_always_equal = dataclasses.replace(esc, semantics=AlwaysEqualStr("real"))
+    esc_empty = Escalation(records=(), notes=(), semantics="real")
+    assert (esc_always_equal.semantics != honest.semantics) is False
+    assert not (
+        esc_empty.records
+        or esc_empty.notes
+        or esc_empty.ledger.spawns
+        or esc_empty.ledger.stamps
+    )
+
+    class SemBoom:
+        """`attribute read raises`, aimed at the field the gates COMPARE."""
+
+        def __init__(self, base):
+            object.__setattr__(self, "_b", base)
+
+        def __getattr__(self, name):
+            if name == "semantics":
+                raise RuntimeError("attr boom")
+            return getattr(object.__getattribute__(self, "_b"), name)
+
+    esc_shapes = {
+        "always-equal str semantics": esc_always_equal,
+        "EMPTY escalation": esc_empty,
+    }
+    prop_shapes = dict(shapes, **{"semantics read raises": lambda: SemBoom(honest)})
+    raw2, open2 = [], []
+    for elabel, escalation in esc_shapes.items():
+        for label, build in prop_shapes.items():
+            try:
+                got = make_solver_verdict(q, build(), escalation, **VERSIONS)
+            except MispairedEscalationError:
+                continue
+            except Exception as e:  # noqa: BLE001
+                raw2.append(f"{label} x {elabel}: {type(e).__name__}: {e}")
+                continue
+            ok = safely(lambda: got.status, None) == "UNKNOWN" and safely(
+                lambda: got.notes[0], ""
+            ).startswith("unpaired propagation:")
+            if not ok:
+                open2.append(f"{label} x {elabel}: {got!r}"[:200])
+
+    assert not raw2, (
+        "a hostile ESCALATION let a refusal raise a RAW exception:\n  "
+        + "\n  ".join(raw2)
+    )
+    assert not open2, (
+        "a hostile (propagation, escalation) pair was not refused:\n  "
+        + "\n  ".join(open2)
+    )
+    assert len(prop_shapes) * len(esc_shapes) == 16
+
 
 def test_the_reads_ABOVE_make_solver_verdicts_gate_refuse_rather_than_raise():
     """A GATE CANNOT GUARD A READ THAT HAPPENS ABOVE IT.
@@ -846,14 +934,298 @@ def test_the_reads_ABOVE_make_solver_verdicts_gate_refuse_rather_than_raise():
         make_solver_verdict(q, SemanticsRaises(honest), esc, **VERSIONS)
     assert "semantics='<unreadable>'" in str(exc2.value), str(exc2.value)
 
-    # ... and the sentinel cannot be spelled from outside: it is equal to
-    # nothing a caller can supply, including the text it renders as
+    # ... and what the sentinel's own design does and does not buy. The
+    # comment that stood here said it "cannot be spelled from outside" —
+    # three lines under an `import` of it. What is true is narrower: it is
+    # not a value any SUCCESSFUL read produces, it renders as a sentence,
+    # and it is TRUTHY, which is the one place its own object identity
+    # carries a gate. Every other consult of it tests `is`.
     assert _UNREADABLE_PROPAGATION_FIELD != "<unreadable>"
     assert "<unreadable>" != _UNREADABLE_PROPAGATION_FIELD
     assert str(_UNREADABLE_PROPAGATION_FIELD) == "<unreadable>"
     assert bool(_UNREADABLE_PROPAGATION_FIELD) is True, (
         "an unreadable count must be TRUTHY, or the constrained gate's "
         "condition reads it as `constrained nothing` and proceeds"
+    )
+
+    class AlwaysEqualStr(str):
+        def __eq__(self, other):
+            return True
+
+        def __ne__(self, other):
+            return False
+
+        def __hash__(self):
+            return 0
+
+    # the comparison the sentinel is on the RIGHT of is not its to decide
+    assert (AlwaysEqualStr("real") != _UNREADABLE_PROPAGATION_FIELD) is False, (
+        "`_Unreadable` now defines an `__ne__`/`__eq__` that wins against a "
+        "left operand with a total one — which Python does not allow, so if "
+        "this passes the docstring's account of the dispatch is wrong"
+    )
+    # ... and handing the sentinel in from outside buys a REFUSAL, which is
+    # the direction an unreadable field already goes
+    with pytest.raises(MispairedEscalationError) as exc3:
+        make_solver_verdict(
+            q,
+            dataclasses.replace(
+                honest, semantics=_UNREADABLE_PROPAGATION_FIELD
+            ),
+            esc,
+            **VERSIONS,
+        )
+    # (the pairing gate gets there first, because the escalation's honest
+    # `"real"` is genuinely `!=` the sentinel — which is the same refusal an
+    # unreadable read produces, and is the point: the spelling buys nothing)
+    assert "semantics='<unreadable>'" in str(exc3.value), str(exc3.value)
+
+
+def test_a_SENTINEL_is_recognised_by_is_and_never_by_a_COMPARISON():
+    """THE THREE GATES DECIDE BY COMPARING, AND A COMPARISON IS THE OTHER
+    OPERAND'S TO ANSWER — audit 0.2.0 B11 re-audit, fix 2.
+
+    `_Unreadable` defines no `__eq__` so that every comparison falls through
+    to identity. That protects its OWN side of a comparison and nothing else:
+    `a != b` asks `type(a).__ne__` first, and a left operand with a total
+    `__ne__` never consults the right one at all. Two pairs therefore walked
+    past all three of `make_solver_verdict`'s escalation gates on `bd50171`
+    and left the function through a RAW `RuntimeError` — the one shape
+    `test_EVERY_site_fails_CLOSED_on_EVERY_hostile_propagation_shape`
+    forbids:
+
+    * an ALWAYS-EQUAL `str` on the ESCALATION side, needing no private
+      import and no unreadable-field knowledge, against a propagation whose
+      `semantics` raises: the pairing gate is answered by the escalation, the
+      ieee gate's `== "ieee"` reads a sentinel as NOT ieee (the non-refusing
+      direction), and the constrained gate is about a different field;
+    * a completely EMPTY escalation — the nothing-to-escalate shape, which
+      the pairing gate exempts BY DESIGN — against a propagation whose
+      `semantics` or whose `coverage` raises.
+
+    Both are closed by an `is` test below all three gates, so each of them
+    keeps its own narrower message: this test asserts the two specific
+    messages are still the ones a work-carrying escalation gets.
+    """
+    from stelling.propagate import propagate
+    from stelling.solvers import (
+        Escalation,
+        MispairedEscalationError,
+        SolverConfig,
+        escalate,
+        make_solver_verdict,
+    )
+
+    class AlwaysEqualStr(str):
+        def __eq__(self, other):
+            return True
+
+        def __ne__(self, other):
+            return False
+
+        def __hash__(self):
+            return 0
+
+    def raising(base, field):
+        class Raises:
+            def __init__(self):
+                object.__setattr__(self, "_b", base)
+
+            def __getattr__(self, name):
+                if name == field:
+                    raise RuntimeError(f"{field} boom")
+                return getattr(object.__getattribute__(self, "_b"), name)
+
+        return Raises()
+
+    q = trace(_two_asserts(100.0, 101.0))
+    honest = propagate(q)
+    esc = escalate(q, honest, SolverConfig(**CFG_KW))
+    assert esc.ledger.spawns > 0, "the escalation carries no solver work"
+
+    # the escalation-side shape: no private import, real solver work
+    esc_always_equal = dataclasses.replace(
+        esc, semantics=AlwaysEqualStr("real")
+    )
+    assert (esc_always_equal.semantics != honest.semantics) is False, (
+        "the escalation's own `__ne__` no longer decides the pairing gate's "
+        "comparison, so this row measures nothing"
+    )
+    # the honest control: an always-equal escalation semantics alone is a
+    # pairing, not a refusal, exactly as on the propagation side
+    assert make_solver_verdict(
+        q, honest, esc_always_equal, **VERSIONS
+    ).status in ("VERIFIED", "REFUTED", "UNKNOWN")
+
+    empty = Escalation(records=(), notes=(), semantics="real")
+    assert not (
+        empty.records or empty.notes or empty.ledger.spawns or empty.ledger.stamps
+    ), "the empty escalation is no longer the shape the pairing gate exempts"
+
+    for label, prop, escalation in (
+        ("semantics raises x always-equal escalation",
+         raising(honest, "semantics"), esc_always_equal),
+        ("semantics raises x EMPTY escalation",
+         raising(honest, "semantics"), empty),
+        ("coverage raises x EMPTY escalation",
+         raising(honest, "coverage"), empty),
+    ):
+        with pytest.raises(MispairedEscalationError) as exc:
+            make_solver_verdict(q, prop, escalation, **VERSIONS)
+        assert "cannot be asked about itself" in str(exc.value), (
+            f"{label}: {exc.value}"
+        )
+
+    # and the two narrower gates keep their own words, which is why the `is`
+    # test sits BELOW them rather than above
+    with pytest.raises(MispairedEscalationError) as exc_c:
+        make_solver_verdict(q, raising(honest, "coverage"), esc, **VERSIONS)
+    assert "cannot be asked how many assume(s) it constrained" in str(exc_c.value)
+    with pytest.raises(MispairedEscalationError) as exc_s:
+        make_solver_verdict(q, raising(honest, "semantics"), esc, **VERSIONS)
+    assert "semantics='<unreadable>'" in str(exc_s.value), str(exc_s.value)
+
+
+def test_the_ieee_GATE_and_the_STAMP_read_ONE_ANSWER_and_not_two():
+    """ONE DECISION PER VALUE — audit 0.2.0 B11 re-audit, fix 1.
+
+    `make_solver_verdict` asks its propagation `semantics == "ieee"` in two
+    anti-correlated places: the ieee mispairing gate, which REFUSES an
+    escalation carrying solver work under that answer, and the stamp, which
+    WRITES `ieee` under it. On `bd50171` the second was a fresh, unbound
+    `propagation.semantics`, below the pairing gate and below every refusal.
+
+    **BINDING THE ATTRIBUTE IS NOT ENOUGH AND THAT IS WHY THIS TEST DRIVES A
+    COMPARISON.** The two-facedness that matters here does not live in the
+    attribute — `dataclasses.replace` stores one object and every read
+    returns it — it lives in that object's own `__eq__`. A `str` subclass
+    whose `__eq__` answers `"ieee"` differently on successive asks defeats a
+    bind and is stopped only by asking ONCE and sharing the answer. Measured
+    on `bd50171` **with the fixture below and no other** — obligation 1 of
+    `_two_asserts(100.0, 101.0)`, discharged "unsat per cvc5 (wheel) and z3
+    (wheel)" over QF_NRA: **VERIFIED, `stamp.semantics = "ieee (IEEE-754
+    binary64)"`, on a genuine cvc5+z3 unsat over ℝ**, with the comparison
+    asked exactly twice. Both assertions below fail there, and the first one
+    names the mechanism rather than the symptom.
+
+    **THE ATTACK CLASS IS OUT OF SCOPE AND THIS TEST DOES NOT REOPEN IT.**
+    Reaching it needs actively malicious Python in the caller's own process,
+    ruled out of scope by the principal on 2026-08-18 by exactly that test.
+    What is pinned is the narrower thing the code can honestly claim: the
+    gate and the stamp read ONE answer, so they cannot disagree about it.
+    """
+    from stelling.propagate import propagate
+    from stelling.solvers import SolverConfig, escalate, make_solver_verdict
+
+    asks: list[object] = []
+
+    class Flip(str):
+        """Answers `"ieee"` False on the first ask and True on every later
+        one — so a gate that asks before the stamp does gets `real` and the
+        stamp gets `ieee`."""
+
+        def __eq__(self, other):
+            asks.append(other)
+            if other == "ieee":
+                return sum(1 for a in asks if a == "ieee") >= 2
+            return str.__eq__(self, other)
+
+        def __ne__(self, other):
+            got = self.__eq__(other)
+            return got if got is NotImplemented else not got
+
+        def __hash__(self):
+            return str.__hash__(self)
+
+    q = trace(_two_asserts(100.0, 101.0))
+    honest = propagate(q)
+    assert honest.semantics == "real"
+    esc = escalate(q, honest, SolverConfig(**CFG_KW))
+    assert esc.ledger.spawns > 0, "the escalation carries no solver work"
+
+    truth = make_solver_verdict(q, honest, esc, **VERSIONS)
+    assert truth.stamp.semantics.startswith("real"), truth.stamp.semantics
+
+    asks.clear()
+    got = make_solver_verdict(
+        q, dataclasses.replace(honest, semantics=Flip("real")), esc, **VERSIONS
+    )
+    ieee_asks = [a for a in asks if a == "ieee"]
+    assert len(ieee_asks) == 1, (
+        f"the propagation's `semantics` was asked `== 'ieee'` "
+        f"{len(ieee_asks)} times ({asks!r}). Two anti-correlated consults of "
+        f"one quantity is the defect: the ieee gate refuses under that "
+        f"answer and the stamp writes it, so a value free to answer them "
+        f"differently mints an ieee stamp over a real solver result"
+    )
+    assert got.stamp.semantics == truth.stamp.semantics, (
+        f"the stamp says {got.stamp.semantics[:40]!r} where the gate that "
+        f"anti-correlates with it was told {'ieee' if ieee_asks else 'real'}"
+    )
+
+
+def test_the_reads_ABOVE_make_solver_verdicts_gate_are_the_ONLY_reads():
+    """THE SENTENCE AT THE PAIRING GATE, COUNTED OFF THE SOURCE.
+
+    That gate's own comment justifies sitting BELOW the escalation gates by
+    naming every executable read of `propagation` above it and showing each
+    is inside a refusal condition. It said "`propagation.semantics` (twice)"
+    **and was already wrong when it was written**: `bd50171` is the commit
+    that introduced `_propagation_read` and bound `semantics` ONCE above the
+    gate, and it left the count describing the code it had just replaced.
+    Measured on `bd50171` by this test's own rule, the reads above the gate
+    were `['coverage', 'semantics']` — one each — while `semantics` was read
+    TWICE BELOW it, which that sentence did not mention at all. A count in
+    prose beside code that moves is a count that has to be computed, so this
+    computes it.
+
+    The rule: inside `make_solver_verdict`, every `propagation.<member>`
+    ABOVE the `unpaired_propagation(...)` call is one of the two the
+    `_propagation_read` docstring accounts for, and each appears exactly
+    once. Below the gate the propagation is the checked object and may be
+    read freely — except for `semantics`, whose two consults are the stamp
+    and the gate it anti-correlates with, and which must not reappear.
+    """
+    import ast
+    import inspect
+
+    from stelling import solvers
+
+    src = inspect.getsource(solvers.make_solver_verdict)
+    tree = ast.parse(src)
+    (fn,) = [
+        n
+        for n in tree.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    gate = [
+        n
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Call) and _callee_name(n.func) == "unpaired_propagation"
+    ]
+    assert len(gate) == 1, f"{len(gate)} pairing-gate calls, expected 1"
+    gate_line = gate[0].lineno
+
+    above, below = [], []
+    for n in ast.walk(fn):
+        if (
+            isinstance(n, ast.Attribute)
+            and isinstance(n.value, ast.Name)
+            and n.value.id == "propagation"
+        ):
+            (above if n.lineno < gate_line else below).append(n.attr)
+
+    assert sorted(above) == ["coverage", "semantics"], (
+        f"the reads of `propagation` above the pairing gate are {sorted(above)}"
+        f" — the gate's own comment names exactly `semantics` (once) and "
+        f"`coverage.constrained` (once) and rests its zero-cost argument on "
+        f"that list. A new read needs the comment updated and needs to be "
+        f"shown to fail closed"
+    )
+    assert "semantics" not in below, (
+        "`propagation.semantics` is read again BELOW the pairing gate. The "
+        "stamp derives from that value and the ieee gate refuses on it, so "
+        "the two must read one answer — see `prop_is_ieee`"
     )
 
 
@@ -896,15 +1268,29 @@ def test_the_reads_ABOVE_make_solver_verdicts_gate_refuse_rather_than_raise():
 #
 # * THE STRUCTURAL RULE WAS CHOSEN OVER THE BEHAVIOURAL ONE, and the reason is
 #   that the behavioural one does not cover this batch's own sites. "Every
-#   function that can return a `Verdict` or an `ObligationSlice`" misses
-#   `escalate` (it returns an `Escalation`) and `refine_propagation` (it returns
-#   a `Propagation` and a `RefinementReport`) — two of the five, including the
-#   one that WRITES decided statuses. Widening it to "returns a `Verdict`, an
-#   `ObligationSlice`, an `Escalation` or a `Propagation`" is an enumeration of
-#   return types, which a new site dodges by returning a new type, and it has to
-#   read those types off return ANNOTATIONS, which are optional — the same
-#   optional-declaration weakness that made name-keying necessary in the first
-#   place. Reading the propagation's fields is what the misattribution IS: a
+#   function that can return a `Verdict` or an `ObligationSlice`", read off
+#   return ANNOTATIONS — which is the only way a static rule can read it —
+#   misses THREE of the five, and the three are counted here rather than
+#   estimated:
+#
+#       verdict.make_verdict                -> Verdict                    SEEN
+#       solvers.make_solver_verdict         -> Verdict                    SEEN
+#       solvers.escalate                    -> Escalation                 MISSED
+#       affine.refine_propagation           -> tuple[Propagation,
+#                                                RefinementReport]        MISSED
+#       obligation.slice_unknown_obligations-> tuple[ObligationSlice |
+#                                                DeclinedObligation, ...] MISSED
+#
+#   — including the one that WRITES decided statuses, and including the one
+#   whose slices the rule is NAMED after: `slice_unknown_obligations` returns
+#   a TUPLE of them, so the annotation the rule would read does not say
+#   `ObligationSlice` at its head at all. Widening it to "returns a `Verdict`,
+#   an `ObligationSlice`, an `Escalation` or a `Propagation`" is an
+#   enumeration of return types, which a new site dodges by returning a new
+#   type, and it still has to read those types off return ANNOTATIONS, which
+#   are optional — the same optional-declaration weakness that made
+#   name-keying necessary in the first place. Reading the propagation's fields
+#   is what the misattribution IS: a
 #   mispaired assembly reports one query's obligation statuses under another
 #   query's name, and it has to read them to do that. So the rule keys on the
 #   read.
@@ -917,19 +1303,51 @@ def test_the_reads_ABOVE_make_solver_verdicts_gate_refuse_rather_than_raise():
 #   whose propagation is shown to reach nothing but a checked site
 #   (`test_a_PASS_THROUGH_holds_no_judgement_and_its_propagation_is_CLOSED`).
 #
-# * THE RESIDUAL, NAMED. The derivation reads direct `param.member` accesses and
-#   direct calls, so it does not see a propagation reached through a local
-#   alias, a `getattr` with a computed name, `*args`/`**kwargs`, or a parameter
-#   that a caller OUTSIDE the library supplies with no annotation to say what it
-#   is. The last of those is closed a second way rather than disclosed:
-#   `test_a_PUBLIC_function_that_reads_a_propagation_must_ANNOTATE_it` fails on
-#   any public library function that reads a `Propagation` member name off an
-#   unannotated parameter, so the shape can be written but not shipped.
+# * THE RESIDUAL, NAMED — AND THE LIST THAT STOOD HERE WAS WRONG IN BOTH
+#   DIRECTIONS (audit 0.2.0 B11 re-audit, fix 3). It said the derivation "does
+#   not see a propagation reached through a local alias, a `getattr` with a
+#   computed name, `*args`/`**kwargs`, or a parameter that a caller OUTSIDE the
+#   library supplies with no annotation". Each of the first three is DRIVEN by
+#   `test_the_QUERY_half_is_derived_over_BARE_PARAMETERS_only`, and the first
+#   two are in fact CAUGHT: a function that holds an annotated propagation and
+#   a query and reads neither in the shape the derivation follows is classified
+#   a PASS-THROUGH, and `test_a_PASS_THROUGH_holds_no_judgement_and_its_
+#   propagation_is_CLOSED` pins the pass-through set at exactly
+#   `preconditions._finish` and requires its propagation to reach a carrying
+#   parameter. An alias or a computed `getattr` reddens there, one line later
+#   than a site would, but it reddens. So does a private helper reached from an
+#   ungated public function: the helper itself becomes the unchecked site.
+#   `*args` genuinely is invisible, and belongs with the residue below rather
+#   than with the two shapes it was listed beside.
+#
+#   The LAST of the four is real and is closed a second way rather than
+#   disclosed: `test_a_PUBLIC_function_that_reads_a_propagation_must_ANNOTATE_
+#   it` fails on any public library function that reads a `Propagation` member
+#   name off an unannotated parameter, so the shape can be written but not
+#   shipped.
+#
+# * AND THE RESIDUE THAT IS NOT ON THE PROPAGATION HALF AT ALL. A function is a
+#   SITE only when it holds a query, and a query is derived over BARE PARAMETER
+#   NAMES: the seed is a parameter, the closure moves along `ast.Name` call
+#   arguments, and a member read is credited only when it is `param.member`. So
+#   a function that reads an annotated `Propagation` while its query arrives as
+#   anything but a bare parameter of its own is not a site, is not a
+#   pass-through, and is not an unannotated public read — it is invisible to
+#   all FIVE oracle tests at once, with the propagation correctly annotated
+#   throughout. `test_the_QUERY_half_is_derived_over_BARE_PARAMETERS_only`
+#   drives the shapes; NONE EXISTS IN THE LIBRARY TODAY, and the census that
+#   says so is `test_EVERY_Propagation_annotated_parameter_is_ACCOUNTED_for`.
+#   It is named rather than closed: closing it statically means following
+#   values through containers, attributes and module state, which is a
+#   points-to analysis and not a test.
 #
 # * AND THE ONE PLACE IT IS DELIBERATELY IMPRECISE: a call is resolved by the
 #   callee's SIMPLE NAME, so two library functions sharing a name are treated
 #   as one. That can only ADD carriers, never remove them, which is the safe
-#   direction for a rule whose failure mode is missing a site.
+#   direction FOR THIS RULE, whose failure mode is missing a site. **That
+#   disclosure is about THIS rule and does not transfer** — see
+#   `test_NO_library_path_FORWARDS_a_slicer_argument_it_did_not_derive`, where
+#   the same simple-name resolution runs in the UNSAFE direction.
 
 
 def _own_body_nodes(node):
@@ -1426,6 +1844,233 @@ def test_a_PUBLIC_function_that_reads_a_propagation_must_ANNOTATE_it():
     assert hits == {("injected_summary.py", "summarise", "propagation")}, hits
 
 
+# Each shape holds a correctly annotated `Propagation`, reads its judgements,
+# and pairs nothing — and differs from the injections above only in HOW ITS
+# QUERY ARRIVES. `# unpaired_propagation(...)` appears in none of them.
+_QUERY_HIDDEN = {
+    "inside a container": '''
+from stelling.propagate import Propagation, query_identity
+def judge_bundle(bundle, propagation: Propagation):
+    """The query is element 0 of a tuple the caller passes."""
+    return (query_identity(bundle[0]), propagation.obligations)
+''',
+    "on a context object": '''
+from stelling.propagate import Propagation, query_identity
+def judge_ctx(ctx, propagation: Propagation):
+    """The query is an attribute of a context object."""
+    return (query_identity(ctx.closed), propagation.obligations)
+''',
+    "as a dict value": '''
+from stelling.propagate import Propagation, query_identity
+def judge_dict(request, propagation: Propagation):
+    """The query is a dict value."""
+    return (query_identity(request["closed"]), propagation.obligations)
+''',
+    "from module state": '''
+from stelling.propagate import Propagation, query_identity
+REGISTRY = {}
+def judge_registered(key, propagation: Propagation):
+    """The query comes from module state; no parameter carries it."""
+    q = REGISTRY[key]
+    return (query_identity(q), propagation.obligations)
+''',
+    "through *args": '''
+from stelling.propagate import Propagation, query_identity
+def judge_star(*args, propagation: Propagation):
+    """The query arrives packed into `*args`."""
+    return (query_identity(args[0]), propagation.obligations)
+''',
+    "on `self`": '''
+from stelling.propagate import Propagation, query_identity
+class Judge:
+    """The query and the propagation are fields; the read is on `self`."""
+    def __init__(self, closed, propagation: Propagation):
+        self.closed = closed
+        self.propagation = propagation
+    def judge(self):
+        return (query_identity(self.closed), self.propagation.obligations)
+''',
+    "annotated under an alias": '''
+from stelling.propagate import Propagation as P, query_identity
+def judge_alias(closed, propagation: P):
+    """The query is a bare parameter; the PROPAGATION's annotation is an
+    import alias, which the substring rule does not spell."""
+    return (query_identity(closed), propagation.obligations)
+''',
+}
+
+# ... and the control: the SAME body with the query taken from a parameter the
+# closure can follow. `decode` hands `spec` to `ClosedJaxpr.from_dict`, whose
+# parameter the derivation carries, so the backwards closure reaches `spec`
+# and the site is SEEN. "The query comes from a call" is therefore not the
+# residue by itself — what hides a site is that NO parameter carries the query.
+_QUERY_VIA_A_FOLLOWED_CALL = '''
+from stelling.propagate import Propagation, query_identity
+def judge_decoded(spec, propagation: Propagation):
+    q = decode(spec)
+    return (query_identity(q), propagation.obligations)
+def decode(spec):
+    from stelling import ir
+    return ir.ClosedJaxpr.from_dict(spec)
+'''
+
+
+def test_the_QUERY_half_is_derived_over_BARE_PARAMETERS_only():
+    """THE SECOND RESIDUE, AND IT IS ON THE QUERY HALF — audit 0.2.0 B11
+    re-audit, fix 3.
+
+    `SOUNDNESS.md` said "**the one** residue a static rule cannot see". There
+    are two. The first is the disclosed one: a propagation supplied by a
+    caller outside the library with no annotation, which
+    `test_a_PUBLIC_function_that_reads_a_propagation_must_ANNOTATE_it` forbids
+    rather than discloses. The second is the mirror of it on the other
+    argument, and nothing forbids it.
+
+    A function is a SITE only when the derivation carries a QUERY for it, and
+    the query half is seeded and closed over BARE PARAMETER NAMES: the seed is
+    a parameter annotated `ClosedJaxpr` or one off which a query-only member
+    is read as `param.member`, and the closure walks call arguments that are
+    `ast.Name`s naming parameters. So a function whose query arrives as
+    anything else holds no query as far as the derivation is concerned — and
+    a function with no query is neither a site, nor a pass-through, nor an
+    unannotated public read. **It is invisible to all FIVE oracle tests at
+    once, with its propagation correctly annotated the whole way** —
+    `test_every_consumption_site_checks_the_pairing` (not in `sites`),
+    `test_the_oracle_REDDENS_when_a_gate_is_deleted` and
+    `test_a_NEW_site_with_an_unannotated_query_is_SEEN` (not in `unchecked`),
+    `test_a_PASS_THROUGH_holds_no_judgement_and_its_propagation_is_CLOSED`
+    (not a pass-through either, for want of a query) and
+    `test_a_PUBLIC_function_that_reads_a_propagation_must_ANNOTATE_it` (its
+    propagation IS annotated). The three derivation sets those five read are
+    the three this test checks.
+
+    Seven shapes are driven. **NONE OF THEM EXISTS IN THE LIBRARY** — see
+    `test_EVERY_Propagation_annotated_parameter_is_ACCOUNTED_for` — which is
+    why this is a disclosure and not a repair. Closing it statically means
+    following values through containers, attributes and module state, which
+    is a points-to analysis and not a test; the honest move is to name it.
+
+    THE CONTROL MATTERS AS MUCH AS THE SHAPES. "The query comes from a call"
+    is NOT by itself a residue: when the call's arguments trace back to a
+    parameter, the closure runs BACKWARDS through the callee and the site is
+    seen. The last row drives exactly that and asserts it is CAUGHT, so this
+    test cannot be read as claiming more than it measures.
+    """
+    base = _library_sources()
+    invisible, seen = [], []
+    for label, src in _QUERY_HIDDEN.items():
+        sources = dict(base)
+        sources["injected_hidden.py"] = src
+        d = _Derivation(sources)
+        touched = (
+            {(f.file, f.name) for f in d.sites}
+            | {(f.file, f.name) for f in d.pass_throughs}
+            | {(f.file, f.name) for f, _, _ in d.unannotated_public}
+        )
+        (seen if any(n[0] == "injected_hidden.py" for n in touched) else invisible).append(
+            label
+        )
+
+    assert sorted(invisible) == sorted(_QUERY_HIDDEN), (
+        f"these shapes are now VISIBLE to the derivation: {sorted(seen)}. That "
+        f"is a strictly better oracle and the disclosure above must be "
+        f"narrowed to match — this test is the disclosure, so it says so "
+        f"rather than passing quietly"
+    )
+
+    # ... and every one of them would be an unchecked SITE if it were seen,
+    # which is what makes the residue worth naming rather than a curiosity
+    sources = dict(base)
+    sources["injected_hidden.py"] = _QUERY_VIA_A_FOLLOWED_CALL
+    d = _Derivation(sources)
+    unchecked = {(f.file, f.name) for f in d.sites if not f.calls_the_gate}
+    assert unchecked == {("injected_hidden.py", "judge_decoded")}, (
+        f"the control shape is no longer caught: {sorted(unchecked)}. A query "
+        f"reached through a call whose ARGUMENT traces back to a parameter is "
+        f"inside the closure, and the residue above is about the query "
+        f"reaching a body with no parameter carrying it at all"
+    )
+
+
+def test_EVERY_Propagation_annotated_parameter_is_ACCOUNTED_for():
+    """THE CENSUS THAT MAKES THE RESIDUE ABOVE A DISCLOSURE AND NOT A HOLE.
+
+    The residue is invisible to the derivation, so the derivation cannot be
+    the thing that says the library is free of it. This counts the library's
+    `Propagation`-annotated parameters directly off the source — a rule the
+    residue does NOT defeat, because hiding a query does not hide the
+    propagation's own annotation — and requires every function holding one to
+    be one of the accounted-for shapes.
+
+    Two functions hold an annotated propagation and are NOT sites, and each
+    is accounted for by what it does with it:
+
+    * `affine._decline_all` — private, builds a wholly-declined report from a
+      propagation it never pairs, and is reached only from
+      `refine_propagation` AFTER that function's own gate;
+    * `verdict.top_despite_coverage_note` — takes a propagation and no query
+      at all, so there is no pairing to check.
+
+    `preconditions._finish` holds one without annotating it and is the
+    pass-through the derivation accounts for separately.
+
+    IT RESOLVES IMPORT ALIASES, WHERE THE DERIVATION DOES NOT. The site rule
+    recognises the annotation by the substring `Propagation`, so
+    `from stelling.propagate import Propagation as P` followed by `p: P` is
+    invisible to it — one of the seven shapes driven next door. A census that
+    shared that blindness could not be the thing that says the shape is
+    absent, so this one reads each module's `ImportFrom` and counts the local
+    names `Propagation` was bound to as well.
+    """
+    import ast
+    import pathlib
+
+    import stelling
+
+    root = pathlib.Path(stelling.__file__).parent
+    holders = set()
+    for path in sorted(root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        names = {"Propagation"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                names |= {
+                    a.asname or a.name
+                    for a in node.names
+                    if a.name == "Propagation"
+                }
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            args = node.args
+            for a in (*args.posonlyargs, *args.args, *args.kwonlyargs):
+                if a.annotation is None:
+                    continue
+                mentioned = {
+                    x.id for x in ast.walk(a.annotation) if isinstance(x, ast.Name)
+                } | {
+                    x.value
+                    for x in ast.walk(a.annotation)
+                    if isinstance(x, ast.Constant) and isinstance(x.value, str)
+                }
+                if mentioned & names:
+                    holders.add((path.name, node.name))
+
+    accounted = THE_FIVE_SITES | {
+        ("affine.py", "_decline_all"),
+        ("verdict.py", "top_despite_coverage_note"),
+    }
+    assert holders == accounted, (
+        f"the set of library functions taking a `Propagation`-ANNOTATED "
+        f"parameter has changed: {sorted(holders)}. A new one is either a "
+        f"site (and needs a gate and a row in `THE_FIVE_SITES`) or needs "
+        f"saying here why it holds a propagation and pairs nothing — the "
+        f"derivation cannot answer that question for a function whose query "
+        f"does not arrive as a bare parameter, which is the residue "
+        f"`test_the_QUERY_half_is_derived_over_BARE_PARAMETERS_only` drives"
+    )
+
+
 def test_the_library_driver_pairs_by_construction():
     """`preconditions._pipeline` is the one internal driver — `check()` and
     `contracts.check_contract()` are both it — and it is correct by
@@ -1666,6 +2311,22 @@ def test_NO_library_path_FORWARDS_a_slicer_argument_it_did_not_derive():
     derived from the query being judged. The library is allowed exactly one
     forward — `slice_unknown_obligations` handing its own `env` parameter
     through to `slice_obligation`, which is the declared channel itself.
+
+    **AND THE SIMPLE-NAME RESOLUTION RUNS THE UNSAFE DIRECTION HERE** — audit
+    0.2.0 B11 re-audit, fix 5. A call is recognised by `_callee_name`, the
+    callee's SIMPLE NAME, exactly as in the site derivation above. There the
+    imprecision "can only ADD carriers, never remove them, which is the safe
+    direction"; **that disclosure is about that rule and does not transfer to
+    this one.** This rule ENUMERATES calls into the slicers, so a call it
+    cannot name is a call it does not see — `fn = slice_obligation` followed
+    by `fn(closed, index, env)` has `_callee_name` `"fn"`, contributes no row
+    to `calls`, and forwards nothing this test can find. Missing one here
+    loses a forward instead of gaining a spurious carrier, and the count
+    below stays green while the boundary has moved. The last block drives
+    exactly that pair — the direct call seen, the aliased one not — so the
+    limit is measured rather than argued. It is disclosed rather than closed
+    for the reason the whole channel is: the answer to an unbound argument is
+    an identity on the argument, not a wider static rule.
     """
     import ast
 
@@ -1755,4 +2416,30 @@ def test_NO_library_path_FORWARDS_a_slicer_argument_it_did_not_derive():
     assert len(calls) == 4, (
         f"the set of library calls into the slicers has changed: {calls} — "
         f"each new one needs its four channels accounted for"
+    )
+
+    # -- the limit of the enumeration, driven (audit 0.2.0 B11 re-audit,
+    # fix 5). Two calls with identical semantics; only one has a name this
+    # rule can resolve, and the count above is what a missed one would not
+    # move.
+    probe = ast.parse(
+        "def direct(closed, index, env):\n"
+        "    return slice_obligation(closed, index, env)\n"
+        "def aliased(closed, index, env):\n"
+        "    fn = slice_obligation\n"
+        "    return fn(closed, index, env)\n"
+    )
+    resolved = [
+        n.func.id if isinstance(n.func, ast.Name) else _callee_name(n.func)
+        for n in ast.walk(probe)
+        if isinstance(n, ast.Call)
+    ]
+    assert [r for r in resolved if r in slicers] == ["slice_obligation"], (
+        f"both probe calls now resolve: {resolved}. If the resolution has "
+        f"been widened beyond the callee's simple name, the disclosure above "
+        f"is no longer this rule's limit and must be rewritten"
+    )
+    assert "fn" in resolved, (
+        "the aliased call is no longer resolved to `fn`, so this probe is no "
+        "longer measuring the shape the disclosure names"
     )

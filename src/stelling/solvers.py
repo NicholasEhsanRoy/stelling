@@ -2978,14 +2978,48 @@ def _unaccounted_solver_runs(escalation, ledger_stamps) -> int:
 class _Unreadable:
     """What a propagation field reads back as when reading it RAISED.
 
-    A SENTINEL OBJECT AND NOT THE STRING ``"<unreadable>"``, so that no
-    value any caller can supply is equal to it. A string sentinel is a value
-    a hand-built `Escalation` or `Propagation` can also carry, and the gates
-    below decide by comparing the two — `escalation.semantics !=
-    prop_semantics` would then read "they match" for a pair that agreed on
-    the placeholder. Identity cannot be spelled from outside, and every
-    comparison here falls through to identity because this class defines no
-    ``__eq__``.
+    A SENTINEL OBJECT AND NOT THE STRING ``"<unreadable>"``. A string
+    sentinel is a value a hand-built `Escalation` or `Propagation` can also
+    CARRY, so a pair that both wrote the placeholder would agree on it, and
+    `escalation.semantics != prop_semantics` would read "they match".
+    An object with no string value cannot be written into a record by
+    accident, and no read of an ordinary propagation produces it.
+
+    **WHAT THIS CLASS DOES NOT BUY, said plainly** (audit 0.2.0 B11
+    re-audit, fix 2). Two sentences stood here — *"no value any caller can
+    supply is equal to it"* and *"identity cannot be spelled from outside"* —
+    and both were false.
+
+    * ``_UNREADABLE_PROPAGATION_FIELD`` is a module attribute like any other:
+      ``from stelling.solvers import _UNREADABLE_PROPAGATION_FIELD`` spells
+      it, and `tests/test_propagation_identity.py` does exactly that. What
+      is true is that spelling it buys an attacker a REFUSAL and nothing
+      else: a propagation that hands this object back as its ``semantics`` or
+      its ``coverage.constrained`` is refused by :func:`make_solver_verdict`
+      — by the ``is`` gate there, or by a narrower gate that reached the same
+      conclusion first — which is the direction an unreadable field already
+      goes.
+    * Defining no ``__eq__`` protects this object's OWN side of a comparison
+      and nothing more. ``a != b`` asks ``type(a).__ne__`` first and only
+      falls through to ``type(b)`` — and thence to identity — when the left
+      side returns ``NotImplemented``. (Python gives the RIGHT operand
+      priority when its type is a proper SUBCLASS of the left's; this class
+      is a subclass of nothing, so that door is shut too.) When this sentinel
+      is the right operand, a left operand with a total ``__ne__`` decides
+      the comparison alone, and there is nothing this class could define to
+      override that:
+      an always-equal ``str`` on the escalation side answers
+      ``escalation.semantics != prop_semantics`` before the sentinel is
+      consulted at all. Adding an ``__eq__`` here would not change that, and
+      the design stays as it is for the reason above rather than for a
+      protection it never had.
+
+    **SO EVERY CONSULT OF A VALUE THAT MAY BE THIS ONE TESTS ``is``.**
+    Comparison is the caller's to answer; identity is not. The truthiness of
+    this object is load-bearing in one place besides — the constrained gate
+    reads it as "some assumes may have been constrained", which is the
+    refusing direction — and that is a property of the OBJECT, not of a
+    comparison, which is why it holds.
 
     It renders as ``<unreadable>`` so a refusal that quotes it reads as a
     sentence rather than as an object address, which would also make the
@@ -3004,9 +3038,16 @@ _UNREADABLE_PROPAGATION_FIELD = _Unreadable()
 
 
 def _propagation_read(read, fallback=_UNREADABLE_PROPAGATION_FIELD):
-    """``read()``, or ``fallback`` when reading raises — for the reads
-    :func:`make_solver_verdict` makes of its ``propagation`` argument ABOVE
-    the propagation pairing gate, and for nothing else.
+    """``read()``, or ``fallback`` when reading raises — for the two reads
+    :func:`make_solver_verdict` makes of its ``propagation`` argument and the
+    one DECISION it derives from them, and for nothing else. All three happen
+    above the propagation pairing gate; the LOCALS they bind are consulted
+    both above it and below it, which is fix 1 of the 0.2.0 B11 re-audit and
+    is spelled out at the bind itself. The third call wraps a COMPARISON
+    rather than an attribute read, and it belongs here for the same reason
+    the other two do: a caller-supplied ``__eq__`` can raise exactly where a
+    caller-supplied ``__getattr__`` can, and a gate may not raise on its own
+    question.
 
     **A GATE CANNOT GUARD A READ THAT HAPPENS ABOVE IT** — audit 0.2.0 B11
     audit. Three of this assembler's escalation-mispairing conditions ask the
@@ -3029,16 +3070,62 @@ def _propagation_read(read, fallback=_UNREADABLE_PROPAGATION_FIELD):
     turns seven of `r2_containment`'s nine refusals into UNKNOWNs (see that
     gate's own comment) — so the fix is that they fail CLOSED, not that they
     move: a quantity that cannot be read cannot be shown to be the harmless
-    value, and every condition that consults one below treats an unreadable
-    answer as the refusing one.
+    value.
 
-    ONE READ PER VALUE. Each of these quantities used to be read afresh
-    wherever it was consulted — ``semantics`` at three places (two conditions
-    and the message that quotes it), ``coverage.constrained`` at two (a
-    condition and its message) — so a two-faced object could be refused for a
-    number other than the one the condition actually tested (audit 0.2.0 B6,
-    "one shape per value"). The caller reads once into a local and every use
-    reads the local.
+    **AND "EVERY CONDITION TREATS AN UNREADABLE ANSWER AS THE REFUSING ONE"
+    WAS NOT TRUE OF ALL OF THEM** (audit 0.2.0 B11 re-audit, fix 2). Only one
+    of the three refused a sentinel on its own: the constrained gate, because
+    ``_Unreadable`` is TRUTHY and that gate's condition is a truth test. The
+    other two decide by COMPARING, and a comparison cannot recognise a
+    sentinel — ``prop_semantics == "ieee"`` answers False for it, which is the
+    NON-refusing direction, and ``escalation.semantics != prop_semantics``
+    dispatches to the escalation's own ``__ne__`` first. What makes the
+    unreadable case fail closed is an explicit ``is`` test below all three,
+    added with this note; the truthiness arm of the constrained gate stays
+    exactly as it was, and keeps its narrower message.
+
+    ONE READ PER VALUE, AND ONE DECISION PER VALUE. Each of these quantities
+    used to be read afresh wherever it was consulted — ``semantics`` at three
+    places (two conditions and the message that quotes it),
+    ``coverage.constrained`` at two (a condition and its message) — so a
+    two-faced object could be refused for a number other than the one the
+    condition actually tested (audit 0.2.0 B6, "one shape per value"). The
+    caller reads once into a local and every use reads the local, including
+    the two uses BELOW the pairing gate that were still reading
+    ``propagation.semantics`` afresh at `bd50171`, one of them the stamp's own
+    derivation.
+
+    **A BIND IS NOT ENOUGH FOR ``semantics``, AND SAYING SO IS THE POINT.**
+    That value is not merely read twice, it is COMPARED twice — the ieee gate
+    asks ``== "ieee"`` and the stamp asks it again — and the two
+    anti-correlate: the gate REFUSES solver work under ``"ieee"`` and the
+    stamp WRITES ``"ieee"``. A value can be single-faced in the attribute that
+    holds it and two-faced in its own ``__eq__``, and then binding the
+    attribute changes nothing: the same object is handed to both comparisons
+    and answers them differently. Measured on `bd50171` with a ``str``
+    subclass whose ``__eq__`` flips —
+    ``dataclasses.replace(propagate(q), semantics=Flip("real"))`` — VERIFIED
+    on a real cvc5+z3 unsat over ℝ, stamped ``ieee (IEEE-754 binary64)``. So
+    the caller binds the ANSWER, ``prop_is_ieee``, not just the value.
+
+    **WHAT THAT DOES AND DOES NOT CLOSE.** It closes both consults of
+    ``semantics`` in THIS function, which is where the stamp is written. It is
+    not a claim about the class of attack: reaching it at all needs a ``str``
+    subclass with a stateful ``__eq__`` — actively malicious Python running in
+    the caller's own process, the class the principal ruled OUT OF SCOPE BY
+    DECISION, 2026-08-18, by exactly that test ("It can be addressed with
+    proper CI security on projects that need it. It requires actively
+    malicious python to actually happen"), and the shape is pre-existing —
+    counted off the source and driven: `make_solver_verdict` reads
+    ``propagation.semantics`` FIVE times with THREE ``== "ieee"`` comparisons
+    on `v0.1.0` and on `main` at `a4e4056`, and three reads with three
+    comparisons at `bd50171`; the same `Flip` assembly reaches VERIFIED with
+    an ``ieee`` stamp on `a4e4056`. It is ONE read and ONE comparison here.
+    Nothing here reopens that decision. What is
+    repaired is narrower and is worth its one line anyway: this function no
+    longer asks one question twice, so the sentence above is true of the code
+    beside it, and a reader is not left to discover that the stamp and the
+    gate it anti-correlates with were reading the propagation separately.
     """
     try:
         return read()
@@ -3351,11 +3438,30 @@ def make_solver_verdict(
     # derived from the propagation's own semantics below.
     #
     # `prop_semantics` and `prop_constrained` are the propagation's own two
-    # quantities these three gates consult, read ONCE EACH and through
+    # quantities this function consults, read ONCE EACH and through
     # `_propagation_read` — see that function for why a plain attribute read
     # here is a read the pairing gate below cannot guard.
+    #
+    # `prop_is_ieee` IS THE THIRD, AND IT IS A DECISION RATHER THAN A READ.
+    # `semantics` is not merely read twice, it is COMPARED twice — once by the
+    # ieee gate below and once by the stamp that says which arithmetic the
+    # verdict is about — and a value may be two-faced in its `__eq__` without
+    # being two-faced in the attribute that holds it. Binding the attribute
+    # once does not help there: `dataclasses.replace(propagate(q),
+    # semantics=Flip("real"))`, where `Flip` is a `str` subclass whose
+    # `__eq__` answers `"ieee"` differently on successive asks, hands the SAME
+    # object to both comparisons. Measured on `bd50171`, that assembly reached
+    # `VERIFIED` with `stamp.semantics` reading `ieee (IEEE-754 binary64)` on
+    # a genuine cvc5+z3 unsat over ℝ, with the comparison asked exactly twice.
+    # So the quantity every consult below shares is the ANSWER, taken once:
+    # ONE DECISION PER VALUE, which is what ONE READ PER VALUE was reaching
+    # for. `bool(...)` inside the read so that a `__eq__` returning a
+    # non-boolean cannot make one consult truthy and another falsy either, and
+    # so that a `__eq__` or a `__bool__` that RAISES lands on the sentinel and
+    # is refused below rather than escaping raw.
     prop_semantics = _propagation_read(lambda: propagation.semantics)
     prop_constrained = _propagation_read(lambda: propagation.coverage.constrained)
+    prop_is_ieee = _propagation_read(lambda: bool(prop_semantics == "ieee"))
     if (
         escalation.records
         or escalation.notes
@@ -3382,12 +3488,30 @@ def make_solver_verdict(
     # WORK the escalation carries, so a forged/buggy semantics field
     # cannot smuggle ℝ solver outcomes under an ieee stamp).
     #
-    # An UNREADABLE `semantics` does not need a third arm here: the gate above
-    # is exempt only on a completely empty escalation, and every escalation
-    # this gate's own second clause admits is one that gate saw work in — so
-    # an unreadable `semantics` that reaches this line has already been
-    # refused above.
-    if prop_semantics == "ieee" and (
+    # AN UNREADABLE `semantics` IS NOT REFUSED HERE, AND THIS GATE IS NOT
+    # WHERE IT COULD BE. The argument that stood here said a third arm was
+    # unnecessary because the semantics-pairing gate above is exempt only on a
+    # completely empty escalation, so anything reaching this line had already
+    # been refused. Both halves are false, and both were driven on `bd50171`:
+    #
+    #   * the gate above decides by `escalation.semantics != prop_semantics`,
+    #     which dispatches to the LEFT operand's `__ne__` FIRST — so an
+    #     escalation whose `semantics` is an always-equal `str` subclass
+    #     answers it `False` whatever the propagation said, and no amount of
+    #     work in that escalation makes it refuse. The propagation-side twin
+    #     of that shape is what `test_an_ALWAYS_EQUAL_str_SUBCLASS_PAIRS_and_
+    #     that_is_the_eighth_shape` already pins on `query_sha256`;
+    #   * and the empty-escalation exemption is real, so an unreadable
+    #     `semantics` paired with a completely empty escalation reaches this
+    #     line untouched even with no hostile escalation at all.
+    #
+    # This gate could not close either, because `prop_is_ieee` derives from
+    # `prop_semantics == "ieee"`, and an unreadable `semantics` is a sentinel
+    # that compares equal to nothing: the answer is False, which is the
+    # NON-refusing direction. A sentinel cannot be recognised by comparing it.
+    # The arm that refuses it is the `is`-test gate below, which sits under
+    # all three of these so that each keeps its own narrower message.
+    if prop_is_ieee and (
         escalation.ledger.spawns
         or ledger_stamps
         or any(
@@ -3455,6 +3579,91 @@ def make_solver_verdict(
             f"escalation was actually produced from."
         )
 
+    # -- the unreadable-quantity gate: A SENTINEL IS RECOGNISED BY `is`, NEVER
+    # BY `==` (audit 0.2.0 B11 re-audit, fix 2). The three gates above all
+    # decide by COMPARING, and a comparison is not something this module gets
+    # to decide the outcome of: `a != b` and `a == b` dispatch to the LEFT
+    # operand's `__ne__`/`__eq__` first (unless the right operand's type is a
+    # proper SUBCLASS of the left's, which `_Unreadable` never is), and only
+    # fall through to the right one — and thence to identity — when the left
+    # returns `NotImplemented`.
+    # So `_Unreadable` defining no `__eq__` protects its own side and nothing
+    # else. TWO SHAPES get past all three — an always-equal `str` on the
+    # ESCALATION side, which answers gate 1's comparison itself; and a
+    # completely EMPTY escalation, which gate 1 EXEMPTS by design — and in
+    # both, gate 2 is quiet because a sentinel is not `"ieee"` and gate 3 is
+    # quiet unless it is `coverage` that broke. Three cells, driven:
+    #
+    #                                          bd50171   fix 1 only   shipped
+    #   semantics raises x always-equal esc    RAW       VERIFIED     REFUSED
+    #   semantics raises x EMPTY esc           RAW       UNKNOWN      REFUSED
+    #   coverage  raises x EMPTY esc           RAW       RAW          REFUSED
+    #
+    # (RAW = `RuntimeError` out of `make_solver_verdict`; the two `fix 1 only`
+    # verdicts are stamped `semantics: real (ℝ)`.)
+    #
+    # A raw `AttributeError`/`RuntimeError` out of a refusal is the caller's
+    # crash rather than the library's answer — the one shape
+    # `test_EVERY_site_fails_CLOSED_on_EVERY_hostile_propagation_shape`
+    # forbids outright. It is a crash and not a mint, and `bd50171` crashed
+    # too; what makes closing it load-bearing is `prop_is_ieee` above, which
+    # by construction cannot raise where the unbound re-read did. **THE
+    # ONE-LINE BIND AND THIS GATE ARE ONE REPAIR, NOT TWO, AND THE
+    # COUNTERFACTUAL IS THE MIDDLE COLUMN ABOVE, DRIVEN RATHER THAN ARGUED.**
+    # With fix 1 applied and this gate deleted, the two `semantics` rows stop
+    # crashing and PROCEED — a stamped claim about which arithmetic judged a
+    # propagation that could not be asked. Fix 1 alone turns a crash into a
+    # mint; it may not ship without this gate.
+    #
+    # IT SITS BELOW THE THREE, NOT ABOVE THEM, and that is measured rather
+    # than tidy: each of them refuses a narrower thing in words this one
+    # cannot say. An unreadable `coverage.constrained` meeting a work-carrying
+    # escalation is the constrained gate's own refusal and its message names
+    # the quantity ("cannot be asked how many assume(s) it constrained"); an
+    # unreadable `semantics` meeting an honestly-recorded escalation is the
+    # pairing gate's, and its message quotes `semantics='<unreadable>'`. This
+    # is the catch-all for the pairs all three declined, so it can only ADD
+    # refusals to what shipped, never re-route one.
+    #
+    # AND IT RAISES, where the propagation pairing gate below DEGRADES. That
+    # gate degrades for a reason that does not reach here: three of the five
+    # propagation-consuming sites may not raise, so all five share one refusal
+    # shape, and its note says `unpaired propagation:` — a sentence about
+    # WHICH QUERY the object is about. An unreadable field is not evidence
+    # about that at all; the object may be this query's own propagation and
+    # merely unreadable, and an UNKNOWN naming the wrong cause is the
+    # misattribution this batch exists to stop. Raising also keeps this
+    # function's own band consistent: every gate above it raises, and the
+    # sibling arm for the very same sentinel — `prop_constrained` truthy in
+    # the constrained gate — already raises. No honest `Propagation` has an
+    # unreadable field, so the loud direction costs an honest caller nothing.
+    if (
+        prop_semantics is _UNREADABLE_PROPAGATION_FIELD
+        or prop_constrained is _UNREADABLE_PROPAGATION_FIELD
+        or prop_is_ieee is _UNREADABLE_PROPAGATION_FIELD
+    ):
+        unreadable = ", ".join(
+            name
+            for name, value in (
+                ("semantics", prop_semantics),
+                ("coverage.constrained", prop_constrained),
+                ("semantics == 'ieee'", prop_is_ieee),
+            )
+            if value is _UNREADABLE_PROPAGATION_FIELD
+        )
+        raise MispairedEscalationError(
+            f"mispaired escalation: the propagation being stamped cannot be "
+            f"asked about itself — reading {unreadable} raised. The stamp "
+            f"records which arithmetic this verdict is about from exactly "
+            f"that quantity, and the escalation gates above decide by "
+            f"COMPARING it, where an escalation that answers every "
+            f"comparison the same way makes the comparison agree regardless. "
+            f"A quantity that cannot be read cannot be shown to be the "
+            f"harmless one, and cannot be stamped; refusing to emit. Assemble "
+            f"the verdict from the propagation the escalation was actually "
+            f"produced from."
+        )
+
     # -- THE PROPAGATION PAIRING GATE — the THIRD argument, and the leg every
     # gate above leaves open (audit 0.2.0 B6 re-audit UNSOUND-3, closed in
     # B11). The query pairing gate above binds `closed` to `escalation`;
@@ -3494,10 +3703,25 @@ def make_solver_verdict(
     #
     # THE COST OF THAT ORDER IS EXACTLY ZERO, and it is checked rather than
     # assumed: the only executable reads of `propagation` above this line are
-    # `propagation.semantics` (twice) and `propagation.coverage.constrained`,
-    # each inside a REFUSAL condition. A foreign propagation can therefore
-    # cause a wrong refusal or a missed one, and a missed one lands here —
-    # it cannot mint through them, because none of them assembles anything.
+    # `propagation.semantics` (ONCE) and `propagation.coverage.constrained`
+    # (once), and each of those reads only BINDS a local. Every condition
+    # above this line is a REFUSAL condition over those locals, and none of
+    # them assembles anything — so a foreign propagation can cause a wrong
+    # refusal or a missed one, a missed one lands here, and it cannot mint
+    # through any of them. (`prop_is_ieee`, derived from the first, is also
+    # consulted BELOW this line, by the stamp — that is fix 1, and it is
+    # below this gate, so a stranger propagation has already been diverted
+    # before the stamp sees the answer.)
+    # `test_the_reads_ABOVE_make_solver_verdicts_gate_are_the_ONLY_reads`
+    # counts them off the source rather than leaving this sentence to a
+    # reader, AND THE REASON IS THAT THIS SENTENCE HAD ALREADY GONE STALE IN
+    # THE COMMIT THAT WROTE IT. It read "(twice)" at `bd50171`, describing the
+    # pre-`_propagation_read` code where both gates read the attribute
+    # themselves; that same commit bound it ONCE here and left the count
+    # alone. Measured on `bd50171` by the test above: reads above this line
+    # were `['coverage', 'semantics']` — one each — while `semantics` was
+    # read TWICE BELOW, which the sentence did not mention at all. A count in
+    # prose beside code that moves is a count that has to be computed.
     #
     # `query_hash` is the one taken for the escalation gate above and stamped
     # below: this gate costs no additional hash of the query.
@@ -3722,7 +3946,9 @@ def make_solver_verdict(
         solver = ledger_stamps
     else:
         if not any(o.status == "unknown" for o in propagation.obligations):
-            if propagation.semantics == "ieee":
+            # `prop_is_ieee`, not a second `propagation.semantics == "ieee"`:
+            # one decision per value, taken above the gates (see there)
+            if prop_is_ieee:
                 # the ieee wording names the arithmetic that actually
                 # judged it (native binary64, no outward rounding) — the
                 # real-mode sentence below stays byte-identical
@@ -3753,7 +3979,14 @@ def make_solver_verdict(
     # that ran (the honest ieee pairing — a refusal-shaped escalation —
     # still emits, and its stamp must say ieee, not ℝ; the 0·∞ = 0
     # convention line must not ride in it)
-    if propagation.semantics == "ieee":
+    #
+    # THE SAME ANSWER THE IEEE GATE WAS GIVEN, and that is the whole of fix 1:
+    # this line and that gate are the two consults of one quantity, and they
+    # anti-correlate — the gate refuses solver work under `"ieee"`, this line
+    # stamps `"ieee"` — so a value free to answer them differently converts a
+    # refusal into an ieee-stamped VERIFIED over ℝ. `prop_is_ieee` is asked of
+    # the propagation once, above the gates, and both consults read it.
+    if prop_is_ieee:
         semantics = SEMANTICS_IEEE
         arithmetic_mode = ARITHMETIC_MODE_INTERVAL_IEEE
         # format-parametric, for the reason `verdict.make_verdict` gives

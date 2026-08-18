@@ -9168,6 +9168,22 @@ in place and marked.*
     reader records it as a decision that was taken rather than reopening it
     as an oversight that was missed. Anything that makes it reachable from a
     DOCUMENT would be a new finding and is not covered by this decision.
+
+    **AND THE READBACK THAT KEEPS THAT STATUS HONEST WAS SATISFIED BY
+    ITSELF** (audit 0.2.0 B11 re-audit).
+    `test_the_ROOT_route_is_recorded_as_a_DECISION_not_as_an_OPEN_item` reads
+    this marker out of two files, and the `SOUNDNESS.md` leg is load-bearing.
+    The other leg read the marker out of the test file that DEFINES it as a
+    module constant, so it was answered by that definition, and its
+    reasoning-phrase leg by the readback test's own docstring; the third
+    assertion looked for the driven test by grepping its `def` line, which a
+    body of `pass` satisfies. Measured on `bd50171`: deleting the whole
+    nineteen-line STATUS block from the driven test left the file **14
+    passed**, and replacing that test's body with `pass` left it **14
+    passed** — the route stops being measured and nothing reddens. Both legs
+    now read the DRIVEN TEST'S OWN DOCSTRING, parsed out of the file, and the
+    third counts that test's assertions. Both mutations now redden (**1
+    failed, 13 passed**, each).
   * **the install is not guaranteed to install.** `_canonicalise` installs
     the canonical twin with `object.__setattr__`, which resolves the field
     NAME — and a name that resolves to a class-level DATA DESCRIPTOR goes
@@ -10332,9 +10348,22 @@ in place and marked.*
   a degrading gate in front swallows the refusal they exist to measure — the
   same weakening as removing them. The order costs nothing in return: the
   only executable reads of `propagation` above the gate are
-  `propagation.semantics` (twice) and `propagation.coverage.constrained`,
-  each inside a refusal condition, so a foreign propagation can cause a
-  wrong refusal or a missed one and cannot mint through any of them.
+  `propagation.semantics` (ONCE) and `propagation.coverage.constrained`
+  (once), each of them only BINDING a local; every condition above the gate
+  is a refusal condition over those locals and none of them assembles
+  anything, so a foreign propagation can cause a wrong refusal or a missed
+  one and cannot mint through any of them. (The `semantics` answer is also
+  consulted BELOW the gate, by the stamp — see the re-audit's fix 1 — which
+  is below the gate, so a stranger propagation has already been diverted.)
+  That sentence read "(twice)" **and had already gone stale in the commit
+  that wrote it**: `bd50171` introduced `solvers._propagation_read`, bound
+  `semantics` ONCE above the gate, and left the count describing the code it
+  had just replaced. Measured on `bd50171`, the reads above the gate were
+  `['coverage', 'semantics']` — one each — while `semantics` was read TWICE
+  BELOW it, which the sentence did not mention at all. It is now counted off
+  the source by
+  `test_propagation_identity.py::test_the_reads_ABOVE_make_solver_verdicts_gate_are_the_ONLY_reads`
+  rather than left to a reader.
 
   **A GATE CANNOT GUARD A READ ABOVE IT, AND THOSE READS WERE PLAIN**
   (audit 0.2.0 B11 audit). The paragraph above is a soundness argument and
@@ -10355,6 +10384,68 @@ in place and marked.*
   assumes it constrained cannot be shown to have constrained none. The
   refusal is the gate's own `MispairedEscalationError`, so the ordering is
   untouched and the readable-case messages are byte-identical.
+
+  **AND "AN UNREADABLE ONE REFUSES" WAS TRUE OF ONE GATE OF THE THREE**
+  (audit 0.2.0 B11 re-audit). Only the constrained gate refused a sentinel on
+  its own, and it did so because `_Unreadable` is TRUTHY and that gate's
+  condition is a truth test — a property of the object, which is why it held.
+  The other two decide by COMPARING, and **a comparison is not something the
+  sentinel gets to answer**: `a != b` asks the LEFT operand's `__ne__` first
+  and reaches the right one, and thence identity, only on `NotImplemented`.
+  So `_Unreadable` defining no `__eq__` protected its own side and nothing
+  else. Two mechanisms — three driven cells — walked past all three gates and
+  left `make_solver_verdict` through a raw `RuntimeError`, the one shape the
+  35-cell matrix forbids: an ALWAYS-EQUAL `str` on the ESCALATION side
+  (needing no private import) against a propagation whose `semantics` raises,
+  and a completely EMPTY escalation — the shape the pairing gate exempts by
+  design — against a propagation whose `semantics`, or whose `coverage`,
+  raises. The repair is an
+  `is` test, placed BELOW all three so each keeps its own narrower message.
+  **THAT GATE AND THE FIX BELOW ARE ONE REPAIR, AND THE COUNTERFACTUAL WAS
+  DRIVEN.** With the bind applied and this gate deleted, the two
+  `semantics`-unreadable rows stop crashing and PROCEED — VERIFIED and
+  UNKNOWN, both stamped `semantics: real (ℝ)` — because the answer they now
+  share is a `bool` that cannot raise where the unbound re-read did. A crash
+  became a mint; the bind may not ship without the gate.
+  It raises for the reason its siblings do: the propagation pairing gate
+  degrades because three of the five sites may not raise and all five share
+  one refusal shape, whose note says *unpaired propagation* — a sentence
+  about WHICH QUERY the object is about, which an unreadable field is no
+  evidence for. Two sentences on `_Unreadable` are struck with it: it is
+  importable (this batch's own test imports it, three lines above a comment
+  saying it could not be spelled from outside), and no value it could define
+  makes it win a comparison it is on the right of. What spelling it buys an
+  attacker is a REFUSAL. **Sixteen further cells are driven** — eight
+  propagation shapes × two hostile escalations — and two of the sixteen
+  raised on `bd50171`.
+
+  **ONE READ PER VALUE WAS NOT ENOUGH FOR `semantics`, BECAUSE THE DEFECT IS
+  A SECOND COMPARISON AND NOT A SECOND READ** (audit 0.2.0 B11 re-audit).
+  `make_solver_verdict` bound `semantics` once for its gates and then read
+  `propagation.semantics` afresh TWICE below the pairing gate, one of them
+  the stamp's own derivation — so the sentence "the caller reads once into a
+  local and every use reads the local" was false of the two uses that
+  mattered most. Binding them is a one-liner and is taken, but it does not
+  close the attack: the two consults are `== "ieee"`, they ANTI-CORRELATE
+  (the gate REFUSES solver work under that answer, the stamp WRITES it), and
+  a value can be single-faced in the attribute holding it and two-faced in
+  its own `__eq__`. Driven on `bd50171`:
+  `dataclasses.replace(propagate(q), semantics=Flip("real"))`, where `Flip`
+  is a `str` subclass answering `"ieee"` False then True, reached
+  **VERIFIED with `stamp.semantics = "ieee (IEEE-754 binary64)"` on a genuine
+  cvc5+z3 unsat over ℝ**, the comparison asked exactly twice. So the answer
+  is taken once and shared: ONE DECISION PER VALUE. **The attack CLASS is not
+  what this closes.** Reaching it needs a `str` subclass with a stateful
+  `__eq__` — actively malicious Python in the caller's own process, the class
+  the principal ruled **OUT OF SCOPE BY DECISION, 2026-08-18** by exactly
+  that test. It is pre-existing, counted and driven rather than assumed:
+  `make_solver_verdict` reads `propagation.semantics` **five** times with
+  **three** `== "ieee"` comparisons on `v0.1.0` and on `main` at `a4e4056`,
+  and three reads with three comparisons at `bd50171`; the same `Flip`
+  assembly reaches VERIFIED with an `ieee` stamp on `a4e4056`. Here it is
+  **one read and one comparison**. Nothing reopens that decision. What is
+  repaired is that this function no longer asks one question twice, so the
+  sentence claiming it is true of the code beside it.
 
   The same class was live at two of the three sites that MAY NOT raise, and
   is closed the same way. `obligation.slice_unknown_obligations` read
@@ -10455,12 +10546,49 @@ in place and marked.*
   the narrowing is checked rather than asserted**: `preconditions._finish`
   holds both and reads neither, and every call it makes with the propagation
   is shown to land on a parameter the derivation also carries as a
-  propagation, so the object cannot reach a read nobody looked at. The one
-  residue a static rule cannot see — a propagation supplied by a caller
-  OUTSIDE the library, with no annotation to say what it is — is forbidden
-  rather than disclosed: a public library function that reads a name
-  `Propagation` answers to, off an unannotated parameter, fails
-  `test_a_PUBLIC_function_that_reads_a_propagation_must_ANNOTATE_it`.
+  propagation, so the object cannot reach a read nobody looked at.
+
+  **THE RESIDUES A STATIC RULE CANNOT SEE — THERE ARE TWO, AND THIS
+  PARAGRAPH SAID "THE ONE"** (audit 0.2.0 B11 re-audit). One is on each
+  argument, and only the first is closed:
+
+  * **On the PROPAGATION half:** a propagation supplied by a caller OUTSIDE
+    the library, with no annotation to say what it is. That one is forbidden
+    rather than disclosed — a public library function that reads a name
+    `Propagation` answers to, off an unannotated parameter, fails
+    `test_a_PUBLIC_function_that_reads_a_propagation_must_ANNOTATE_it`.
+  * **On the QUERY half, and nothing forbids it:** a function that reads a
+    correctly annotated `Propagation` while its QUERY arrives as anything but
+    a bare parameter of its own. The query half is seeded and closed over
+    bare parameter names — the seed is a parameter, the closure walks
+    `ast.Name` call arguments, a member read counts only as `param.member` —
+    so such a function holds no query as far as the derivation is concerned,
+    and a function with no query is neither a site, nor a pass-through, nor
+    an unannotated public read. **It is invisible to all FIVE oracle tests at
+    once**, because the three derivation sets they read — sites, pass-throughs
+    and unannotated public reads — are all empty for it. Seven shapes are driven in
+    `test_the_QUERY_half_is_derived_over_BARE_PARAMETERS_only`: the query
+    inside a container, on a context object, as a dict value, from module
+    state, through `*args`, on `self`, and — the propagation-side twin of the
+    same blindness — the propagation annotated under an import ALIAS, which
+    the substring rule does not spell. **None of them exists in the library
+    today**, and the census that says so is
+    `test_EVERY_Propagation_annotated_parameter_is_ACCOUNTED_for`, which
+    counts every `Propagation`-annotated parameter off the source: the five
+    sites, plus `affine._decline_all` and `verdict.top_despite_coverage_note`
+    (which hold one and pair nothing, each for a stated reason), plus
+    `preconditions._finish`, which holds one without annotating it and is the
+    accounted-for pass-through. Closing this statically means following
+    values through containers, attributes and module state — a points-to
+    analysis, not a test — so it is NAMED rather than attempted.
+
+  A related sentence in that same comment was WRONG IN THE OTHER DIRECTION
+  and is corrected beside it: the local alias and the computed-`getattr`
+  shapes it listed as residues are in fact CAUGHT, one line later than a site
+  would be, by the pass-through rule; so is a private helper reached from an
+  ungated public function, which becomes the unchecked site itself. Only
+  `*args` of that list was genuinely invisible, and it now sits with the
+  residue above.
 
   Every one of those mutations is re-run as a test, because an oracle nobody
   has driven backwards is an oracle nobody has tested — which is the defect

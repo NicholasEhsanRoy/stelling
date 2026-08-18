@@ -1459,9 +1459,16 @@ def _bar_scope(closed, decided) -> tuple[tuple[str, ...], str]:
         # that the object says it is about this query — and says nothing about
         # its CONTENT. A hand-built `Propagation` carrying this query's true
         # `query_sha256` passes every gate in the library and may carry any
-        # `relational_assumes` at all; `stelling.solvers.Escalation`'s
-        # docstring states that trust model for its own sibling ("a hand-built
-        # record can hold any value"). So reading the axioms off the argument
+        # `relational_assumes` at all — BY ANALOGY WITH, NOT ON THE AUTHORITY
+        # OF, `stelling.solvers.Escalation`'s docstring (audit 0.2.0 B11
+        # re-audit, fix 5). The sentence "a hand-built record can hold any
+        # value" is there verbatim, but it is said about `Escalation`'s OWN
+        # fields — `query_sha256`, `semantics`, the invocation stamps' hashes
+        # — and says nothing about `Propagation` and nothing about
+        # `relational_assumes`. The model carries because the two records are
+        # frozen dataclasses a caller can construct directly, which is a fact
+        # about this library's data types rather than a claim that docstring
+        # makes. So reading the axioms off the argument
         # would still put a CALLER-CONTROLLED quantity into exactly the
         # decision `barred_on_slice` was deleted for, which is what this walk
         # exists to avoid. Any residue still fails CLOSED, as the paragraph

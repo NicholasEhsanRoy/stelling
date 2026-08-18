@@ -620,7 +620,11 @@ def test_the_DISCLOSURES_name_exactly_these_routes():
 
 
 # the marker that says a route's status is a DECISION rather than an
-# oversight. Same string in both places, so neither can drift.
+# oversight. The same string in both places that carry the status —
+# `SOUNDNESS.md` and the driven test's own docstring — so neither can drift.
+# It is a constant HERE and read from THERE: a readback that reads the file
+# it is written in is answered by its own definition, which is what this
+# constant's readback used to do (see that test).
 _DECIDED = "OUT OF SCOPE BY DECISION, 2026-08-18"
 
 
@@ -638,12 +642,47 @@ def test_the_ROOT_route_is_recorded_as_a_DECISION_not_as_an_OPEN_item():
     meets the row below, reads it as an oversight, and reopens work that was
     deliberately declined. So both places that carry the status are read here
     against the same string, and the route's own driven test is required to
-    still exist. **Removing the test is not how this route gets closed**; it
-    is still true of the tree, and only its status changed.
+    still MEASURE something. **Removing the test is not how this route gets
+    closed**; it is still true of the tree, and only its status changed.
+
+    **THE READBACK USED TO BE SATISFIED BY ITSELF, TWICE OVER** — audit 0.2.0
+    B11 re-audit, fix 4, and it is the readback that keeps the principal's
+    ruling honest, so a self-satisfying one is worse than none. It read the
+    marker out of `Path(__file__)` — the file three lines above defines
+    `_DECIDED` as a module constant, so `_DECIDED in here` was answered by
+    its own definition, and `"actively malicious python" in here` by THIS
+    docstring. And it looked for the driven test by grepping its `def` line,
+    which a body of `pass` still satisfies. Measured on `bd50171`: deleting
+    the whole nineteen-line STATUS block from that test's docstring left this
+    file `14 passed`, and replacing that test's entire body with `pass` left
+    it `14 passed` — the route stops being measured and nothing reddens,
+    which is the exact failure this test says it prevents.
+
+    So both legs now read the DRIVEN TEST'S OWN DOCSTRING, parsed out of the
+    file rather than grepped from it. That region defines no constant this
+    test uses and contains none of this test's own words, so neither leg can
+    answer itself; and the third assertion counts the driven test's
+    ASSERTIONS instead of its name.
     """
+    import ast
+
     soundness = (_REPO / "SOUNDNESS.md").read_text(encoding="utf-8")
-    here = Path(__file__).read_text(encoding="utf-8")
-    for label, text in (("SOUNDNESS.md", soundness), ("this file", here)):
+    source = Path(__file__).read_text(encoding="utf-8")
+    driven = "test_the_ROOT_of_a_query_is_never_canonicalized"
+    nodes = [
+        n
+        for n in ast.parse(source).body
+        if isinstance(n, ast.FunctionDef) and n.name == driven
+    ]
+    assert nodes, (
+        f"the root route's driven test `{driven}` is gone. Out of scope is a "
+        f"statement about what will be FIXED, never about what will be "
+        f"MEASURED"
+    )
+    (node,) = nodes
+    status = ast.get_docstring(node) or ""
+
+    for label, text in (("SOUNDNESS.md", soundness), (f"{driven}'s docstring", status)):
         assert _DECIDED in text, (
             f"{label} no longer records the root route's status as a "
             f"decision taken on a date. If the decision has been REVERSED, "
@@ -651,13 +690,28 @@ def test_the_ROOT_route_is_recorded_as_a_DECISION_not_as_an_OPEN_item():
             f"put it back — an undated 'we are not doing this' is what a "
             f"later reader reopens as an oversight."
         )
-    assert (
-        "actively malicious python" in soundness
-        and "actively malicious python" in here
-    ), "the reasoning the decision rests on is no longer recorded beside it"
-    assert "def test_the_ROOT_of_a_query_is_never_canonicalized" in here, (
-        "the root route's driven test is gone. Out of scope is a statement "
-        "about what will be FIXED, never about what will be MEASURED"
+        assert "actively malicious python" in text, (
+            f"{label} no longer records the reasoning the decision rests on "
+            f"beside the status it justifies"
+        )
+
+    # ... and the route is still MEASURED, not merely still named. A `def`
+    # line survives a body of `pass`; an assertion count does not.
+    asserts = [
+        n
+        for n in ast.walk(node)
+        if isinstance(n, ast.Assert)
+        or (
+            isinstance(n, ast.withitem)
+            and isinstance(n.context_expr, ast.Call)
+            and getattr(n.context_expr.func, "attr", None) == "raises"
+        )
+    ]
+    assert len(asserts) >= 2, (
+        f"`{driven}` makes {len(asserts)} assertion(s). The decision to leave "
+        f"this route open is worth nothing if the route stops being measured, "
+        f"and a test that asserts nothing has stopped measuring it while "
+        f"still satisfying every check that looks for its name"
     )
 
 
