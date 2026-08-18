@@ -9104,6 +9104,16 @@ in place and marked.*
   `ir._encode` refuses to encode one — so it is a caller's object, and
   `interval.py` states in return that it is frozen and validated at
   construction.
+  *(THE `ir._encode` HALF IS FALSE, and this sentence is left standing
+  because a log that edits itself is not one. `_encode` refuses a
+  registered value only where it RECURSES — a `consts` entry holding one
+  does raise, which is the arm this sentence generalised from. At the
+  eighteen slots it writes STRAIGHT THROUGH, `to_dict()` returns a dict
+  with the object in it and raises nothing. "No document route reaches it"
+  survives on `ir._decode` alone, which is the half that was always
+  carrying it. Measured and corrected AT THE CODE — three paragraphs of
+  `ir.py`, pinned by shape in `tests/test_document_schema.py` — and
+  written up in `CHANGELOG.md`'s B12 entry, not in this file's.)*
 
   But the
   door is **not** where this class is contained, and two things say so.
@@ -10275,14 +10285,23 @@ in place and marked.*
   ENTRY POINT**, which this log's degrade-don't-crash posture is against
   wherever it is reachable. An ARITY is not a type, so a well-typed but
   SHORT `<eqn>.invars` for a known primitive loads and then raises a bare
-  `TypeError` (`gt() missing 1 required positional argument`,
-  `propagate.py:3827`) or `IndexError` (`list index out of range`,
-  `propagate.py:3941`) out of `propagate()` — neither catchable by
-  `except TranscriptionError`. Pre-existing and measured identical on
-  `a4e4056`; the type rule narrows the population that reaches it and
-  closes none of it. Closing it means a per-primitive ARITY check on the
-  load path, which is the per-primitive inference this door scopes out in
-  writing, so it is reported here rather than added.
+  `TypeError` (`gt() missing 1 required positional argument`, out of
+  `propagate.TRANSFERS`' `"gt"` entry, `lambda eqn, p, ins:
+  [iv.gt(*ins)]`) or `IndexError` (`list index out of range`, out of its
+  `"stelling_assert"` entry, `[ins[0]]`) out of `propagate()` — neither
+  catchable by `except TranscriptionError`. Seven witnesses driven from a
+  JSON document: `gt`, `lt`, `ge`, `le`, `eq`, `ne` for the first and
+  `stelling_assert` for the second, each accepted by `from_dict` and then
+  crashing. **THE CITATION IS A SYMBOL BECAUSE THE LINE NUMBERS THIS
+  SENTENCE FIRST CARRIED HAD ALREADY GONE STALE** — the two transfers moved
+  under an unrelated merge while this entry sat on a branch, and
+  `tests/test_prose_hygiene.py` only refuses a citation PAST THE END of a
+  file, so a line number that still exists and has become something else
+  is precisely the claim nothing checks. Pre-existing and measured
+  identical on `a4e4056`; the type rule narrows the population that
+  reaches it and closes none of it. Closing it means a per-primitive ARITY
+  check on the load path, which is the per-primitive inference this door
+  scopes out in writing, so it is reported here rather than added.
 
 - **2026-08-18 (B12): FALSE VERIFIED — a persisted `stelling_any` could
   declare an EMPTY set, which verifies every universal claim over it
@@ -10307,9 +10326,17 @@ in place and marked.*
 
   **AND THE TYPE, WHICH IS THE SAME FINDING ONE STEP EARLIER.** Ten sites
   read a declared bound as `float(params["lo"])` with no gate in front of
-  them (`propagate.py:3935/3936/5976/5977/7968/7969/10030/10031`,
-  `obligation.py:3492/3493`). Measured on `main` at `a4e4056`, from pure
-  JSON: `lo: true` loaded and the declared box became `(1.0, 1.0)`;
+  them — FIVE FUNCTIONS, each reading `hi` the same way on the next line,
+  and cited by symbol for the reason given above: the `"stelling_any"`
+  entry of `propagate.TRANSFERS` and `propagate._ieee_any` (both
+  `float(_req(…, "lo", "stelling_any"))`), `propagate._Propagator._pinned`
+  and `propagate._Propagator.eqn` (both `float(params["lo"])`), and
+  `obligation._Slicer.slice` (`float(params.get("lo", math.nan))`). This
+  sentence carried eight `propagate.py` line numbers and two
+  `obligation.py` ones when it was written, and all ten were pointing at
+  unrelated code on `main` before this batch landed. Measured on `main` at
+  `a4e4056`, from pure JSON: `lo: true` loaded and the declared box became
+  `(1.0, 1.0)`;
   `lo: "0.5"` loaded and the box became `(0.5, 1.0)`; and `""`, `"xx"`,
   `null` and `{"k":"tuple","items":[]}` each loaded and then **raw-crashed
   out of the public `propagate()`** with a `ValueError` or a `TypeError` —

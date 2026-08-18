@@ -325,10 +325,19 @@ in `/home/nick/venvs/stelling-jax` (jax 0.11.0, python 3.12.3), 2026-08-18.
   only a precision one**: an ARITY the type rule cannot see — a well-typed
   but SHORT `<eqn>.invars` for a known primitive — loads, and then
   `propagate()` raises a bare `TypeError` (`gt() missing 1 required
-  positional argument`, `propagate.py:3827`) or `IndexError` (`list index
-  out of range`, `propagate.py:3941`), which `except TranscriptionError`
-  does not catch. Pre-existing and identical on `a4e4056`; this batch
-  narrows the population that reaches it and closes none of it.
+  positional argument`, out of `propagate.TRANSFERS`' `"gt"` entry,
+  `lambda eqn, p, ins: [iv.gt(*ins)]`) or `IndexError` (`list index out of
+  range`, out of its `"stelling_assert"` entry, `[ins[0]]`), which `except
+  TranscriptionError` does not catch. Six comparison witnesses
+  (`gt`/`lt`/`ge`/`le`/`eq`/`ne`) for the first and `stelling_assert` for
+  the second. **Cited by SYMBOL and not by line on purpose**: the first
+  spelling of this sentence quoted two `propagate.py` line numbers, and
+  both were pointing at unrelated code on `main` before this batch landed
+  — `tests/test_prose_hygiene.py` only catches a citation past the END of
+  a file, so a line that still exists and has become something else is
+  exactly the claim nothing checks. Pre-existing and identical on
+  `a4e4056`; this batch narrows the population that reaches it and closes
+  none of it.
   `from_dict` also has two refusal
   SHAPES — `TranscriptionError` for everything this batch adds, and the
   reader's three older `ValueError` arms — and unifying them is a change
@@ -425,6 +434,18 @@ in `/home/nick/venvs/stelling-jax` (jax 0.11.0, python 3.12.3), 2026-08-18.
      alone. The bound is now stated at both paragraphs and pinned by
      `tests/test_document_schema.py`, which enumerates the load-only rules
      from `ir.py`'s call graph so a third cannot arrive silently.
+     **THE CALL GRAPH IS NOW THE WHOLE LOAD PATH.** That closure was seeded
+     from `_validate_loaded` alone, so it never saw `_decode` — and five of
+     `ir.py`'s own refusals live there. Seeded from both, driven with a
+     synthetic third rule added seven ways: direct and via-helper were
+     already red; decoder-side was GREEN and is now red; and the three
+     edges an `ast.Call` walk cannot follow — a module-level alias, a
+     dispatch table, a lambda — are red on a third assertion, that EVERY
+     refusal in `ir.py` is reached by some closure. The seventh, a rule on
+     the load path *and* a constructor, stays green, correctly.
+     The decoder-side refusals are enumerated in their own bucket: they
+     judge a DOCUMENT, never an object a constructor built, so they do not
+     widen this bound.
   2. The field rule's widest exception was licensed with *"no document can
      reach one: `_decode` has no tag for it **and `_encode` refuses to
      encode one**"*. The second half is false: `_encode` refuses a
@@ -432,12 +453,46 @@ in `/home/nick/venvs/stelling-jax` (jax 0.11.0, python 3.12.3), 2026-08-18.
      measured positions** — `<eqn>.primitive`, `<aval>.kind`/`.dtype`/
      `.weak_type`, `<var>.id` and the rest, enumerated in `ir.py` — it
      writes the object straight through and `to_dict()` does not raise.
-     The conclusion survives on `_decode` alone; both paragraphs now rest
-     it there. `tests/test_document_schema.py` drives all 18 and checks
-     its own position set against `_encode`'s AST, so a slot added to the
-     encoding later cannot go undriven and the enumeration cannot quietly
-     grow. (A hand-written enumeration was wrong on its first attempt, in
-     this same review — which is why it is now checked against the AST.)
+     The conclusion survives on `_decode` alone. **THERE WERE THREE
+     PARAGRAPHS AND NOT TWO**, and this line said two: the third is the
+     comment introducing `ir._LIBRARY_STORED_TYPES` — the first thing a
+     would-be registrant reads, and above BOTH of the pair the first pass
+     corrected (`_register_stored_type`'s docstring and the door narrative
+     below `_encode`) — and it carried an extra clause that is more
+     strongly false, *"outside `content_hash` and `to_dict` entirely"*.
+     All three now rest the conclusion on `_decode`. TWO EARLIER LOG
+     ENTRIES carry the original wording — this file's own *"THE DOOR'S OWN
+     DISPATCH WAS BUILT FROM THE TWO MOST OVERRIDABLE TESTS IN PYTHON"*
+     entry (audit 0.2.0 B6 audit 7, S14) and the 2026-08-15 B6 entry in
+     `SOUNDNESS.md` — and both are marked in place
+     rather than rewritten, the way this project has marked a rotted claim
+     before (`SOUNDNESS.md`, the `Script.stamp_options` parenthesis: *"the
+     wording is left standing because a log that edits itself is not
+     one"*).
+     **AND `content_hash` DOES NOT RAISE AT ALL 18** — it raises at 14 and
+     answers at 4: `<eqn>.source_info[*]` and the three `<dbg>` slots,
+     which are exactly the metadata `to_dict(include_metadata=False)`
+     omits, so the hash is a correct function of a scope that deliberately
+     excludes them. No soundness consequence; the two sentences that said
+     *"`content_hash` does still raise"* unqualified are scoped.
+     `tests/test_document_schema.py` drives all 18 and checks its own
+     position set against `_encode`'s AST, so a slot added to the encoding
+     later cannot go undriven and the enumeration cannot quietly grow. (A
+     hand-written enumeration was wrong on its first attempt, in this same
+     review — which is why it is now checked against the AST.) **THAT AST
+     CHECK COMPARED BARE KEY NAMES**, so it delivered less than this line
+     claimed: a new `<aval>.cls` slot was undriven and green, while a new
+     `<aval>.zzz` was red. It now compares the full `<tag>.key`, in both
+     directions, and it reads the two positions whose VALUE recurses and
+     whose KEY does not — `<eqn>.params` and `<ntuple>.fields`, which its
+     `"_encode(" not in unparse(v)` test dropped, leaving them hand-listed
+     on both sides of the comparison, driven but never derived. **The pin
+     is a SHAPE and no longer two literal strings**: it finds every
+     paragraph of `ir.py` that argues the WRITING side excludes a
+     registered value, and requires each to scope the claim. The literal
+     pin missed the third copy because that copy says *"such a type"*
+     where the two it was written for say *"it"* — a pin that lists
+     spellings is the defect it is pinning, one level up.
   3. The revert table above was in test FUNCTIONS and the sentence beside
      it in NODE IDS. Both units are given now.
   4. `_doc_keys`' heading said *"THE LAST OF THE READER'S RAW ESCAPES"*.
@@ -1994,6 +2049,13 @@ was measured on a B6-free tree unless it says otherwise.
   it can equally rebind `_canonical`. The boundary the door defends is a
   DOCUMENT, and no document reaches this arm — `_decode` has no tag for a
   registered type and `_encode` refuses to encode one.
+  *(THE `_encode` HALF OF THAT REASON IS FALSE, and the wording is left
+  standing because a log that edits itself is not one. `_encode` refuses a
+  registered value only in the arms where it RECURSES; at eighteen
+  measured slots it writes the object straight through and `to_dict()`
+  raises nothing. The conclusion — no document reaches this arm — holds on
+  `_decode` alone. Corrected at the code in the B12 entry above, where it
+  is measured.)*
 
   **ONE RULE, ONE READING.** `ir._SHAPE_PARAM_CONTAINERS` was shared by
   the load door and `obligation._Slicer._declared_shape` so the two faces

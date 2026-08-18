@@ -671,7 +671,19 @@ class ClosedJaxpr:
 # `tests/test_document_schema.py` pins both halves and ENUMERATES the
 # load-only rules from this file's own call graph rather than from this
 # list, so a third one cannot arrive without that test going red and
-# naming this paragraph.
+# naming this paragraph. **WHAT "THE CALL GRAPH" MEANS THERE, because the
+# first version of that instrument meant half of it:** the closure is
+# seeded from `_decode` AND :func:`_validate_loaded`, which is the whole
+# of `ClosedJaxpr.from_dict`. It was seeded from `_validate_loaded` alone
+# until B12's own re-review, and a rule added to the DECODER was therefore
+# invisible to it — five of this module's refusals live there. The
+# decoder-side refusals are enumerated in their own bucket and do not
+# widen this bound, because a `_doc_*` rule judges a DOCUMENT and never an
+# object a constructor built. A rule the graph reaches from neither side —
+# through an alias, a dispatch table or a lambda, which an `ast.Call` walk
+# cannot follow — is caught by that test's THIRD assertion instead of
+# being missed, and that one does not name this paragraph: it says the
+# edge cannot be followed, which is a different thing to fix.
 #
 # WHY THE `isinstance` CHAINS BELOW ARE NOT THE ONES THE DOOR REPLACED,
 # and the sweep's verdict on them, so the next reader does not have to
@@ -1858,10 +1870,29 @@ _CANONICAL_RULE = (
 # WHAT REGISTRATION DELEGATES, stated so it is not mistaken for a hole: a
 # registered type is CARRIED, not canonicalized — the registering module
 # owns its single-valuedness (`IntervalArray` is a frozen dataclass whose
-# own `__post_init__` validates it). No DOCUMENT can reach this arm:
-# `_decode` has no tag for such a type and `_encode` refuses to encode
-# one, so a registered value can only come from a caller who built it,
-# and it is outside `content_hash` and `to_dict` entirely.
+# own `__post_init__` validates it). NO DOCUMENT CAN REACH THIS ARM, and
+# the whole reason is `_decode`: it has no tag for such a type, so no JSON
+# document produces one and a registered value can only come from a caller
+# who built it in this process.
+#
+# **NOT `_encode`, AND NOT `to_dict` OR `content_hash` EITHER — this
+# paragraph named all three, and it is the third copy of that claim in
+# this file: the two below were corrected first, and this one — the one a
+# would-be registrant reads before either of them — was found only by
+# B12's re-review of its own fix.** `_encode` refuses a registered value
+# only in the arms where it RECURSES: a `ClosedJaxpr` whose ``consts``
+# hold one does raise ``stelling.ir cannot encode IntervalArray``, and
+# that is the arm the sentence was generalising from. At the EIGHTEEN
+# slots it writes STRAIGHT THROUGH, ``to_dict()`` returns a dict with the
+# `IntervalArray` sitting in it and raises nothing — so a registered value
+# is not outside `to_dict` at all. `content_hash` raises at fourteen of
+# those eighteen (from ``json.dumps``, not from this module) and ANSWERS
+# at the other four: ``<eqn>.source_info[*]`` and the three ``<dbg>``
+# slots, which are exactly the metadata ``to_dict(include_metadata=False)``
+# drops — so the hash is a correct function of a scope that deliberately
+# excludes them, and not a refusal. All measured by driving every
+# position; see the door narrative below :func:`_encode` for the
+# enumeration and `tests/test_document_schema.py` for the driver.
 #
 # AND WHAT REGISTRATION IS *NOT* A DEFENCE AGAINST — audit 0.2.0 B6 audit
 # 7. :func:`_register_stored_type` is module-level and importable, so any
@@ -1923,9 +1954,19 @@ def _register_stored_type(cls: type) -> type:
       dict with the `IntervalArray` sitting in it and raises nothing:
       **18 such positions, measured, not read off this list** — see the
       door narrative below :func:`_encode` for the enumeration and for
-      the same correction at the other site. `content_hash` does still
-      raise on such an object, from `json.dumps` rather than from this
-      module, which is loud but is not this file refusing anything.
+      the same correction at the other site. `content_hash` raises on such
+      an object at FOURTEEN of the eighteen — from `json.dumps` rather
+      than from this module, which is loud but is not this file refusing
+      anything — and ANSWERS at the other four: ``<eqn>.source_info[*]``,
+      ``<dbg>.func``, ``<dbg>.arg_names[*]``, ``<dbg>.result_paths[*]``.
+      Those four are exactly the metadata
+      ``to_dict(include_metadata=False)`` omits, and `content_hash` is
+      defined over that reduced document, so the hash it returns is a
+      correct function of a scope that deliberately excludes them. No
+      soundness consequence, and stated because *"`content_hash` does
+      still raise"* — unqualified, as this sentence read until B12's own
+      re-review — is false at four of the eighteen positions the
+      paragraph is about.
     * A SUBCLASS OF A REGISTERED TYPE IS REFUSED, not carried: membership
       is ``id(type(obj))`` against :data:`_STORED_AS_IS`, which is the
       registered type itself, so the property-backed variant has to be
@@ -2327,14 +2368,32 @@ def _refuse_uncanonical(exc: _NotCanonical, where: str) -> None:
 # `TypeError`. `<complex>.re`/`.im` are read off a `complex` object, so
 # nothing else can be there at all.
 #
-# (`content_hash` DOES still raise on such an object — from `json.dumps`,
-# which is loud and is not this module deciding anything.) The conclusion
+# (`content_hash` raises on such an object at FOURTEEN of the eighteen —
+# from `json.dumps`, which is loud and is not this module deciding
+# anything — and ANSWERS at the four the hash does not cover:
+# `<eqn>.source_info[*]` and the three `<dbg>` slots are exactly what
+# ``to_dict(include_metadata=False)`` omits, and `content_hash` is defined
+# over that reduced document. A correct hash of a scope that excludes
+# them, not a refusal; this line said *"does still raise"* unqualified
+# until B12's own re-review.) The conclusion
 # is unharmed because it never needed the `_encode` half: a document is
 # JSON, JSON reaches this module through `_decode`, and `_decode` has no
 # tag. `tests/test_document_schema.py` pins that half, drives all
 # eighteen positions above, and checks its own position set against
 # `_encode`'s AST — so neither the argument nor the enumeration is a
-# sentence anybody has to re-derive.
+# sentence anybody has to re-derive. **THAT AST CHECK COMPARES THE FULL
+# ``<tag>.key``, and it used to compare the bare key name**: a slot added
+# to the encoding under a key name already driven at another tag was
+# invisible to it, measured at `e3fe0fb` — a new ``<aval>.cls`` passed
+# while a new ``<aval>.zzz`` failed. It also read a dict value as a
+# recursion whenever the text ``_encode(`` appeared anywhere in it, which
+# dropped the two positions where the VALUE recurses and the KEY does not
+# (`<eqn>.params`, `<ntuple>.fields`) — so those two stood in the hand-
+# written list on BOTH sides of the comparison, driven but never derived,
+# which is the one thing the check exists to prevent. Both corrected in
+# B12's own re-review; the classification is structural now, and
+# conservative, so an encoding shape it does not recognise lands in the
+# population rather than out of it.
 #
 # THE FIELDS WITH A STRONGER RULE OF THEIR OWN ARE SKIPPED, exactly as they
 # already were: an `Aval`'s and an `Array`'s ``shape`` (`_load_extents`
@@ -2942,10 +3001,14 @@ def _validate_decl_nonempty(eqn: "JaxprEqn", where: str) -> None:
     `max`; 2 in `tests/test_transfers.py`, the non-finite
     `scatter`/`gather` index declines; 1 in
     `tests/test_ieee_zero_divisor_and_mul_exact.py`; and 1 in
-    `tests/test_undecided_detail.py` — ``test_declined_declaration_side_
-    points_at_the_declaration``, **which is where the ``(nan, hi)``
-    declaration actually lives**, and not in the ieee file this paragraph
-    used to credit it to. The capability itself is pinned in one place —
+    `tests/test_undecided_detail.py::test_declined_declaration_side_points_at_the_declaration`,
+    **which is where the ``(nan, hi)`` declaration actually lives**
+    (``any_eqn(x, nan, 4.0)``), and not in the ieee file this paragraph
+    used to credit it to. That citation is on ONE line, past 79 columns,
+    because `tests/test_prose_hygiene.py` reads a `path::name` reference a
+    line at a time: wrapped mid-token, as this one was until B12's own
+    re-review, the pairing the sentence asserts is pinned by nothing.
+    The capability itself is pinned in one place —
     `tests/test_document_schema.py::test_the_emptiness_rule_is_the_LOAD_doors_and_not_the_constructors`
     constructs a witness for each of the two refusals in each direction —
     so the argument rests on a test in this repository rather than on a
@@ -2960,12 +3023,15 @@ def _validate_decl_nonempty(eqn: "JaxprEqn", where: str) -> None:
     true of :func:`_validate_required_params`' subject — a params-less
     equation — and those two are the whole of the exception, enumerated
     from this file's call graph by `tests/test_document_schema.py` rather
-    than from this sentence. It is not a soundness hole: the refusal is
-    loud, mints no verdict, and leaves `content_hash` — a function of
-    `to_dict` alone — untouched. It is a bound on what "round-trips"
-    means, the serialization comment above :func:`_encode` claimed there
-    was none, and the batch that added this rule widened the bound by two
-    classes without noticing. Both are corrected there.
+    than from this sentence — over the WHOLE load path, `_decode` and
+    :func:`_validate_loaded` both, which is a correction B12 made to its
+    own instrument after seeding it from the validator alone. It is not a
+    soundness hole: the refusal is loud, mints no verdict, and leaves
+    `content_hash` — a function of `to_dict` alone — untouched. It is a
+    bound on what "round-trips" means, the serialization comment above
+    :func:`_encode` claimed there was none, and the batch that added this
+    rule widened the bound by two classes without noticing. Both are
+    corrected there.
 
     It also leaves something unsettled that this function is not the place
     to settle, recorded so the next reader does not mistake it for an

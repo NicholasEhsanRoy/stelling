@@ -43,6 +43,7 @@ import copy
 import dataclasses
 import json
 import pathlib
+import re
 import sys
 
 import pytest
@@ -652,13 +653,53 @@ _IR_SRC = " ".join(_IR_PATH.read_text(encoding="utf-8").split())
 
 
 def _load_only_rules():
-    """The refusals reachable from `ir._validate_loaded` and from NO
-    ``__post_init__``, read off `ir.py`'s own call graph.
+    """The refusals reachable from the LOAD PATH and from NO
+    ``__post_init__``, read off `ir.py`'s own call graph, partitioned by
+    which half of the load path reaches them; plus the refusals reached by
+    NEITHER, which is this instrument telling on itself.
 
     COMPUTED, not listed — the whole point. A third load-path-only rule
-    added later lands here without anyone editing this file, and the
-    assertion below then names the two paragraphs that have to be
-    rewritten before it can ship."""
+    added later lands in one of these buckets without anyone editing this
+    file: in either of the first two the assertion below names the
+    paragraphs that have to be rewritten before it can ship; in the third
+    it says only that no closure reaches the rule, which is a different
+    thing to fix and is said differently.
+
+    **THE SEED IS THE WHOLE LOAD PATH, AND IT USED TO BE HALF OF IT.**
+    `ClosedJaxpr.from_dict` is `_decode` and then `_validate_loaded`; this
+    closure seeded from ``["_validate_loaded"]`` alone, so THE DECODER WAS
+    NEVER IN ITS DOMAIN — and five of `ir.py`'s own refusals live there
+    (`_doc_complex`, `_doc_keys`, `_doc_leaf`, `_doc_payload`,
+    `_doc_sequence`). Driven on this tree, a synthetic third rule added
+    seven ways:
+
+        A_direct           called from `_validate_loaded`        RED
+        B_helper           called from a helper it reaches       RED
+        E_decoder_side     called from `_decode`                 RED
+        C_alias            reached through a module-level alias  RED*
+        D_dispatch_table   reached through a dict of functions   RED*
+        G_lambda_indirect  reached through a module-level lambda RED*
+        F_both_paths       on the load path AND a constructor    green
+
+    ``*`` = red on the THIRD return value and not on the enumeration,
+    which is what that return value is for. F is green because it is
+    CORRECT: a rule a constructor also runs creates no
+    constructible-and-not-reloadable subject. E was GREEN before the seed
+    was widened, and is why it was widened.
+
+    **WHAT THE CALL GRAPH CANNOT SEE, AND HOW THAT IS CAUGHT ANYWAY.**
+    The edges here are `ast.Call` targets that are a `Name` or an
+    `Attribute`, matched by SHORT name. A function reached through a
+    module-level alias, through a dispatch table, or through a lambda is
+    therefore reached by no edge at all — C, D and G above. Widening the
+    edge relation would over-approximate ``from_ctor`` as well, which is
+    the direction that makes this instrument MISS things, so it is not
+    widened. Instead the third return value is every refusal in `ir.py`
+    reached by NEITHER the load path NOR a constructor: a rule that is in
+    no closure is either dead code or an edge this reader cannot follow,
+    and both have to be accounted for by hand before they can ship. It is
+    empty on this tree, and each of C, D and G puts the synthetic rule
+    into it."""
     tree = ast.parse(_IR_PATH.read_text(encoding="utf-8"))
     calls = collections.defaultdict(set)
     by_short = collections.defaultdict(set)
@@ -696,37 +737,74 @@ def _load_only_rules():
 
     post_inits = [q for q in calls if q.endswith("__post_init__")]
     assert post_inits, "no __post_init__ found; this instrument is broken"
-    from_ctor = closure([c for q in post_inits for c in calls[q]])
-    from_load = closure(["_validate_loaded"])
+    # seeded with `__post_init__` ITSELF and not only its callees, so a
+    # constructor that refuses in its own body is a constructor path
+    from_ctor = closure(["__post_init__"])
+    from_decode = closure(["_decode"])
+    from_validate = closure(["_validate_loaded"])
     refusing = {
         n for n, qs in by_short.items()
         if any("_load_check" in calls[q] or "_doc_refuse" in calls[q]
                for q in qs)
     }
-    return (from_load - from_ctor) & refusing
+    assert refusing, "no refusal found; this instrument is broken"
+    post_decode = (from_validate - from_ctor) & refusing
+    decoder_side = (from_decode - from_validate - from_ctor) & refusing
+    unreached = refusing - (from_decode | from_validate | from_ctor)
+    return decoder_side, post_decode, unreached
 
 
 def test_the_LOAD_ONLY_rules_are_exactly_the_two_the_module_NAMES():
     """The bound on the round-trip claim, enumerated from the call graph.
 
-    A rule that runs on the load path and on no construction path has a
-    subject that is CONSTRUCTIBLE AND NOT RELOADABLE — `to_dict` writes it
-    and `from_dict` will not take it back. There are exactly two, and the
-    paragraph that states the bound has to name both."""
-    rules = _load_only_rules()
-    assert rules == {
+    A POST-DECODE rule that runs on the load path and on no construction
+    path has a subject that is CONSTRUCTIBLE AND NOT RELOADABLE —
+    `to_dict` writes it and `from_dict` will not take it back. There are
+    exactly two, and the paragraph that states the bound has to name both.
+
+    THE DECODER-SIDE REFUSALS ARE ASSERTED APART RATHER THAN SUMMED IN,
+    and the reason is what their subject is. `_doc_*` judges whether a
+    value IS A DOCUMENT — the shape `_encode` writes — before any IR
+    object exists, so it can only fire on something handed to `from_dict`
+    and never on an object a constructor built. It therefore does not
+    widen the round-trip bound, which is a bound on OBJECTS. The widest
+    document `_encode` will write is one with a registered value sitting
+    in a straight-through slot, and `from_dict` takes that back — driven
+    below, in
+    `test_a_registered_type_is_kept_out_by_DECODE_and_not_by_encode`.
+    They are enumerated all the same, so that a sixth decoder refusal
+    cannot arrive without this test naming it."""
+    decoder_side, post_decode, unreached = _load_only_rules()
+    assert post_decode == {
         "_validate_required_params", "_validate_decl_nonempty"
     }, (
-        "the set of load-path-only refusals changed, so the round-trip "
-        "claim's bound changed: rewrite the serialization comment above "
-        "`ir._encode` and the LOAD PATH ONLY paragraph in "
+        "the set of post-decode load-path-only refusals changed, so the "
+        "round-trip claim's bound changed: rewrite the serialization "
+        "comment above `ir._encode` and the LOAD PATH ONLY paragraph in "
         "`ir._validate_decl_nonempty`, then update this test"
+    )
+    assert decoder_side == {
+        "_doc_complex", "_doc_keys", "_doc_leaf", "_doc_payload",
+        "_doc_sequence",
+    }, (
+        "the set of decoder-side load-only refusals changed. These judge "
+        "the DOCUMENT and not a constructed object, so they do not widen "
+        "the round-trip bound — but say so deliberately for the new one "
+        "rather than letting it land in a set nobody reads"
+    )
+    assert unreached == set(), (
+        f"`ir.py` defines refusal(s) {sorted(unreached)} that this "
+        f"module's call graph reaches from NEITHER the load path nor any "
+        f"constructor. Either they are dead, or they are reached by an "
+        f"edge an `ast.Call` walk cannot follow — a module-level alias, a "
+        f"dispatch table, a lambda — and a rule reached by such an edge "
+        f"is invisible to the enumeration above. Name the edge, or seed it"
     )
     head = "TWO REFUSALS RUN ON THE LOAD PATH ONLY"
     tail = "pins both halves and ENUMERATES"
     assert head in _IR_SRC and tail in _IR_SRC
     paragraph = _IR_SRC[_IR_SRC.index(head):_IR_SRC.index(tail)]
-    for name in rules:
+    for name in post_decode:
         assert name in paragraph, (
             f"the serialization comment states the round-trip bound "
             f"without naming {name}, which is one of the two rules that "
@@ -865,25 +943,122 @@ def test_the_two_LOAD_ONLY_rules_write_documents_from_dict_REFUSES():
 # The field rule accepts a `_LIBRARY_STORED_TYPES` registration at ANY
 # field, which is the door's widest exception. `ir.py` licensed it with
 # TWO reasons — *"`_decode` has no tag for it and `_encode` refuses to
-# encode one"* — and only the first is true. B12's own review.
+# encode one"* — and only the first is true. B12's own review, at THREE
+# sites: two found by that review and the third — the comment above
+# `_LIBRARY_STORED_TYPES`, above both of them and worded differently —
+# only by the re-review of its own fix.
+
+
+# The claim, as a SHAPE rather than as two spellings. The first version of
+# the pin below asserted the absence of two exact strings — and the third
+# copy of the same claim, in the comment above `_LIBRARY_STORED_TYPES` and
+# earlier in the file than either of them, said "such a type" where those
+# said "it" and sailed straight through. A pin that lists literal strings is the
+# defect it is pinning, one level up.
+_REGISTERED_VALUE = re.compile(
+    r"registered|registration|IntervalArray|_LIBRARY_STORED_TYPES"
+    r"|_STORED_AS_IS"
+)
+# the WRITING side, all of it — the claim was false about `_encode` and
+# false again about `to_dict` and `content_hash`, so keying the rule on
+# one function name would leave the other two spellings open
+_WRITING_SIDE = re.compile(
+    r"`_encode`|`to_dict`|to_dict\(\)|`content_hash`|content_hash\(\)"
+    r"|encoder",
+    re.I,
+)
+_EXCLUDES = re.compile(
+    r"refus\w*|declin\w*|cannot encode|will not encode|does not encode"
+    r"|never encodes|never reaches|outside|both raise",
+    re.I,
+)
+# The qualification every TRUE form of the claim carries, because the truth
+# is quantitative: `_encode` refuses only where it RECURSES, it writes
+# through at EIGHTEEN slots, `content_hash` raises at FOURTEEN of them, and
+# the other four are what `include_metadata=False` drops. An unqualified
+# form is the false one however it is worded.
+_QUALIFIED = re.compile(
+    r"recurs\w*|eighteen|fourteen|straight through|include_metadata", re.I
+)
+# The three tokens have to land in the same breath, not merely in the same
+# paragraph: `ir.py` has paragraphs that mention a registered type and,
+# four sentences later, a document no encoder writes — a true and unrelated
+# sentence that a paragraph-wide conjunction flags.
+_CLAIM_WINDOW = 180
+
+
+def _ir_paragraphs():
+    """`ir.py` as (first line number, one-line text) paragraphs.
+
+    A paragraph ends at a blank line, at a bare ``#``, or at a docstring
+    delimiter — which is how this file already separates one argument from
+    the next, so the unit the rule below judges is the unit a reader
+    reads."""
+    out, cur, start = [], [], 1
+    for i, line in enumerate(
+        _IR_PATH.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        s = line.strip()
+        if s in ("", "#", '"""'):
+            if cur:
+                out.append((start, " ".join(cur)))
+            cur, start = [], i + 1
+        else:
+            if not cur:
+                start = i
+            cur.append(s)
+    if cur:
+        out.append((start, " ".join(cur)))
+    return out
 
 
 def test_the_registered_type_exception_rests_on_DECODE_in_writing_too():
-    """Both paragraphs that license the exception, pinned as text.
+    """Every paragraph that licenses the exception, judged by SHAPE.
 
-    The half that is false has to be gone from both — the door narrative
-    below `_encode` and `_register_stored_type`'s own docstring, which is
-    where a would-be registrant reads what registration costs."""
-    for false_half in (
-        "`_decode` has no tag for it and `_encode` refuses to encode one",
-        "so `to_dict` and `content_hash` both raise",
-    ):
-        assert false_half not in _IR_SRC, (
-            "ir.py licenses the registered-type exception with `_encode` "
-            "again; `_encode` refuses one only where it RECURSES"
-        )
-    assert "THE ARGUMENT RESTS ON `_decode` ALONE" in _IR_SRC
-    assert "NOT `_encode`, which this paragraph also named" in _IR_SRC
+    The rule, and it is a rule and not a list: where `ir.py` names a
+    REGISTERED VALUE within `_CLAIM_WINDOW` characters of the WRITING side
+    (`_encode`, `to_dict`, `content_hash`, "the encoder") and an exclusion
+    verb, it is claiming the writing side keeps a registered value out —
+    and every TRUE form of that claim is scoped, because the truth is
+    quantitative: only where `_encode` RECURSES, eighteen straight-through
+    slots, fourteen of eighteen for `content_hash`, and the four that
+    `include_metadata=False` drops. An unscoped form is the false one, in
+    whatever words it is written.
+
+    Three copies of it shipped. Two were corrected by the pass that found
+    it; the third — the comment introducing `_LIBRARY_STORED_TYPES`, which
+    is the first thing a would-be registrant reads — was found by B12's
+    own re-review, and it carried an extra clause (*"outside
+    `content_hash` and `to_dict` entirely"*) that is more strongly false
+    than the one the pass was looking for."""
+    claiming = []
+    for n, para in _ir_paragraphs():
+        for m in _REGISTERED_VALUE.finditer(para):
+            window = para[max(0, m.start() - _CLAIM_WINDOW):
+                          m.end() + _CLAIM_WINDOW]
+            if _WRITING_SIDE.search(window) and _EXCLUDES.search(window):
+                claiming.append((n, para))
+                break
+    # ...and the rule looked at something: a regex that stopped matching
+    # and a file with no such paragraph give the same empty list
+    assert len(claiming) >= 3, (
+        f"only {len(claiming)} paragraph(s) of ir.py argue that the writing "
+        f"side excludes a registered value; this rule has stopped matching "
+        f"how they are written"
+    )
+    unqualified = [n for n, p in claiming if not _QUALIFIED.search(p)]
+    assert not unqualified, (
+        "ir.py line(s) "
+        + ", ".join(str(n) for n in unqualified)
+        + " license the registered-type exception off the WRITING side "
+        "without scoping the claim. `_encode` refuses a registered value "
+        "only in the arms where it RECURSES; at the EIGHTEEN slots it "
+        "writes straight through, `to_dict()` returns a dict with the "
+        "object in it and raises nothing, and `content_hash` raises at "
+        "FOURTEEN of those eighteen and answers at the four that "
+        "`include_metadata=False` drops. The argument rests on `_decode` "
+        "alone"
+    )
 
 
 def test_a_registered_type_is_kept_out_by_DECODE_and_not_by_encode():
@@ -938,6 +1113,10 @@ def test_a_registered_type_is_kept_out_by_DECODE_and_not_by_encode():
         consts=(),
     ).to_dict()
     assert prim["jaxpr"]["eqns"][0]["primitive"] is iv
+    # ...and NO decoder-side rule refuses that document: `from_dict` takes
+    # the widest thing `_encode` writes straight back, which is why the
+    # `_doc_*` refusals do not widen the round-trip bound
+    assert ir.ClosedJaxpr.from_dict(prim).to_dict() == prim
 
     built = {}
     for label, mk in _REGISTERED_AT.items():
@@ -1015,6 +1194,98 @@ _REGISTERED_AT = {
 }
 
 
+def _slot_writes_through(node):
+    """Does any part of this expression reach the document un-`_encode`d?
+
+    Structural, so that a slot `_encode` writes PARTLY through is seen.
+    ``[[key, _encode(v, meta)] for key, v in obj.params]`` recurses on the
+    value and writes the KEY straight through; a substring test for
+    ``"_encode("`` over the whole expression calls that a recursion and
+    drops it, which is how `<eqn>.params` and `<ntuple>.fields` — the two
+    KEY positions — used to be hand-listed instead of read.
+
+    Conservative by construction: anything this does not recognise counts
+    as written through, so a new encoding shape lands in the population
+    rather than out of it."""
+    if isinstance(node, ast.Constant):
+        return False
+    if isinstance(node, ast.Call):
+        f = node.func
+        return not (isinstance(f, ast.Name) and f.id == "_encode")
+    if isinstance(node, ast.IfExp):          # the TEST is not written
+        return (_slot_writes_through(node.body)
+                or _slot_writes_through(node.orelse))
+    if isinstance(node, (ast.ListComp, ast.GeneratorExp, ast.SetComp)):
+        return _slot_writes_through(node.elt)
+    if isinstance(node, ast.DictComp):
+        return (_slot_writes_through(node.key)
+                or _slot_writes_through(node.value))
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return any(_slot_writes_through(e) for e in node.elts)
+    if isinstance(node, ast.Dict):
+        return any(_slot_writes_through(e)
+                   for e in [*node.keys, *node.values] if e is not None)
+    return True                               # Name, Attribute, anything else
+
+
+def _encode_write_through_positions():
+    """Every ``<tag>.key`` `_encode` writes without recursing, from its AST.
+
+    The TAG is carried, and that is the fix. The previous comparison
+    reduced a position to its bare key name (``w.split(".")[-1]``), so a
+    slot whose key name was already driven under a DIFFERENT tag was
+    invisible: driven at `e3fe0fb`, a new ``<aval>.cls`` slot passed
+    (``cls`` is driven at ``<enum>``/``<sentinel>``/``<opaque>``/
+    ``<ntuple>``) while a new ``<aval>.zzz`` failed. Same defect one level
+    up as the pin above it: a check that compares names rather than the
+    thing the name is part of.
+
+    The tag of a ``d[key] = …`` write is the tag of the dict literal ``d``
+    was bound to, tracked in source order — ``<eqn>.source_info`` reached
+    this set as a bare ``"source_info"`` with no tag before that."""
+    enc = next(
+        n for n in ast.walk(ast.parse(_IR_PATH.read_text(encoding="utf-8")))
+        if isinstance(n, ast.FunctionDef) and n.name == "_encode"
+    )
+    out, tag_of_var = set(), {}
+
+    def tag_of(dct):
+        return next(
+            (v.value for k, v in zip(dct.keys, dct.values)
+             if isinstance(k, ast.Constant) and k.value == "k"
+             and isinstance(v, ast.Constant)),
+            None,
+        )
+
+    def take(dct):
+        for k, v in zip(dct.keys, dct.values):
+            if isinstance(k, ast.Constant) and k.value != "k" \
+                    and _slot_writes_through(v):
+                out.add("<%s>.%s" % (tag_of(dct), k.value))
+
+    def walk(stmts):
+        for st in stmts:
+            if isinstance(st, ast.Return) and isinstance(st.value, ast.Dict):
+                take(st.value)
+            elif isinstance(st, ast.Assign) \
+                    and isinstance(st.value, ast.Dict) \
+                    and isinstance(st.targets[0], ast.Name):
+                tag_of_var[st.targets[0].id] = tag_of(st.value)
+                take(st.value)
+            elif isinstance(st, ast.Assign) \
+                    and isinstance(st.targets[0], ast.Subscript) \
+                    and isinstance(st.targets[0].value, ast.Name) \
+                    and _slot_writes_through(st.value):
+                out.add("<%s>.%s" % (
+                    tag_of_var.get(st.targets[0].value.id),
+                    ast.literal_eval(st.targets[0].slice)))
+            for field in ("body", "orelse", "finalbody"):
+                walk(getattr(st, field, None) or [])
+
+    walk(enc.body)
+    return out
+
+
 def test_the_non_recursing_slots_are_read_off_encodes_own_AST():
     """The population the test above judges is COMPUTED, like every other
     population in this file.
@@ -1022,35 +1293,31 @@ def test_the_non_recursing_slots_are_read_off_encodes_own_AST():
     `_REGISTERED_AT` has to be exactly the set of positions `_encode`
     writes without a recursive call — otherwise a slot added to the
     encoding later would be driven nowhere and `ir.py`'s enumeration
-    would be a list nothing checks."""
-    enc = next(
-        n for n in ast.walk(ast.parse(
-            _IR_PATH.read_text(encoding="utf-8")))
-        if isinstance(n, ast.FunctionDef) and n.name == "_encode"
-    )
-    written = set()
-    for node in ast.walk(enc):
-        if isinstance(node, ast.Dict):
-            tag = next(
-                (v.value for k, v in zip(node.keys, node.values)
-                 if isinstance(k, ast.Constant) and k.value == "k"
-                 and isinstance(v, ast.Constant)),
-                None,
-            )
-            for k, v in zip(node.keys, node.values):
-                if isinstance(k, ast.Constant) and k.value != "k" \
-                        and "_encode(" not in ast.unparse(v):
-                    written.add("<%s>.%s" % (tag, k.value))
-        elif isinstance(node, ast.Assign) \
-                and isinstance(node.targets[0], ast.Subscript) \
-                and "_encode(" not in ast.unparse(node.value):
-            written.add(ast.literal_eval(node.targets[0].slice))
+    would be a list nothing checks.
 
-    def base(label):
-        return label.split(" ")[0].replace("[*]", "").split(".")[-1]
+    COMPARED BY FULL ``<tag>.key`` AND IN BOTH DIRECTIONS. By bare key
+    name — as this read until B12's own re-review — a new ``<aval>.cls``
+    slot was undriven and green; it is now red, as is a new ``<aval>.zzz``,
+    and as is a position DROPPED from `_REGISTERED_AT`. A new slot that
+    RECURSES stays green, which is correct: it is not a straight-through
+    position."""
+    written = _encode_write_through_positions()
 
-    driven = {base(k) for k in _REGISTERED_AT}
+    def position(label):
+        return label.split(" ")[0].replace("[*]", "")
+
+    driven = {position(k) for k in _REGISTERED_AT}
     # `<complex>.re`/`.im` are read off a `complex`, so no other object
     # can occupy them; everything else `_encode` writes through is driven.
-    missing = {w for w in written if w.split(".")[-1] not in driven}
-    assert missing <= {"<complex>.re", "<complex>.im"}, missing
+    assert written - driven <= {"<complex>.re", "<complex>.im"}, (
+        f"`_encode` writes {sorted(written - driven)} straight through and "
+        f"`_REGISTERED_AT` drives it nowhere"
+    )
+    assert not driven - written, (
+        f"`_REGISTERED_AT` drives {sorted(driven - written)}, which "
+        f"`_encode` no longer writes through: the enumeration in `ir.py` "
+        f"names a position that is gone"
+    )
+    # the two KEY positions this set used to miss entirely, because their
+    # values recurse and their keys do not
+    assert {"<eqn>.params", "<ntuple>.fields"} <= written
