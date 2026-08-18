@@ -118,9 +118,17 @@ on each release and the two sets are identical.
   that moved this file's unit from series to release.
 - **No verdict moves.** Both primitives are absent from `TRANSFERS` and
   from `IEEE_TRANSFERS` on both releases, so no transfer reads the param.
-  Driven end to end: `assert_(jnp.max(a) > 0.0)` over
+  Driven end to end, `JAX_ENABLE_X64=1`: `assert_(jnp.max(a) > 0.0)` over
   `any_array((4,), float64, (0.1, 10.0))` returns UNKNOWN on both, with the
-  same note — `1 equation(s) fell to ⊤ (reduce_max ×1)`.
+  same note — `1 equation(s) fell to ⊤ (reduce_max ×1)`. The cell is named
+  because the NOTE is a fact about the cell and not only about the release:
+  with `JAX_ENABLE_X64` unset the declared `float64` is truncated to
+  `float32`, a `convert_element_type` enters the jaxpr, its transfer
+  declines, and the note reads `2 equation(s) fell to ⊤
+  (convert_element_type ×1, reduce_max ×1)` — on 0.11.0 and 0.11.1 alike.
+  The STATUS is UNKNOWN in all four cells. `SOUNDNESS.md`'s entry carried
+  this sentence without the qualifier and as a claim about both cells,
+  which is the half that was wrong; it is corrected there.
 - **Query identity moves, and silently.** `content_hash` hashes the params,
   so the same harness containing a max/min reduction traces to a different
   hash on the two releases. A stored document keeps its hash and still

@@ -11024,13 +11024,36 @@ in place and marked.*
 
   **What does NOT change: any verdict.** `reduce_max` and `reduce_min` are
   absent from `TRANSFERS` and from `IEEE_TRANSFERS` on both releases, so no
-  transfer reads the param. Driven end to end on both, in both
-  `JAX_ENABLE_X64` cells: `assert_(jnp.max(a) > 0.0)` and
-  `assert_(jnp.min(a) > 0.0)` over the same declaration each return UNKNOWN
-  on both releases with the same note — `1 equation(s) fell to ⊤
-  (reduce_max ×1)` and `(reduce_min ×1)`. The whole suite was run on both
+  transfer reads the param. Driven end to end, all four cells (jax 0.11.0
+  and 0.11.1 × `JAX_ENABLE_X64` set to 1 and unset):
+  `assert_(jnp.max(a) > 0.0)` and `assert_(jnp.min(a) > 0.0)` over
+  `any_array((4,), "float64", (0.1, 10.0))` return **UNKNOWN in all four**.
+  The RELEASE changes neither the status nor the note: within a cell, 0.11.0
+  and 0.11.1 print the same thing. That is the claim this paragraph is for
+  and it holds.
+
+  **THE CELL DOES CHANGE THE NOTE, AND THIS ENTRY SAID IT DID NOT** — it
+  quoted one note and attributed it to "both `JAX_ENABLE_X64` cells". The
+  two cells print different notes:
+
+  | `JAX_ENABLE_X64` | note, on 0.11.0 and on 0.11.1 alike |
+  |---|---|
+  | `1` | `1 equation(s) fell to ⊤ (reduce_max ×1)` |
+  | unset | `2 equation(s) fell to ⊤ (convert_element_type ×1, reduce_max ×1)`, preceded by a `'convert_element_type' declined this form` note |
+
+  and the same with `reduce_min` for the `jnp.min` form. The extra ⊤ is
+  not the bump: without x64 the declared `float64` is truncated to
+  `float32`, jax emits the `convert_element_type` for it, and that
+  transfer declines a lossy conversion. So the sentence that survives is
+  the one about verdicts — UNKNOWN everywhere, unmoved by the release —
+  and the quoted note belongs to the `JAX_ENABLE_X64=1` cell alone.
+
+  The whole suite was run on both
   releases in both cells and exactly one test's status differs between
-  them, and it is the tripwire's rule-hash pin, not a verdict.
+  them, and it is the tripwire's rule-hash pin, not a verdict. (That
+  sentence is the earlier measurement's, carried forward and not
+  re-derived here; what was re-driven for this correction is the four
+  verdict cells above.)
 
   **What is affected: identity, and it fails SILENTLY in one direction.**
   A document written on 0.11.0 loads on 0.11.1 and keeps its stored hash —
@@ -11045,14 +11068,43 @@ in place and marked.*
   miss re-checks); wrong for anything that treats a mismatch as evidence
   that the source changed.
 
+  **AND stelling SHIPS ONE OF THOSE CONSUMERS.**
+  `reproduce._require_same_program` re-traces the subject's own harness and
+  compares its `content_hash()` against `verdict.stamp.query_content_hash`
+  before emitting a reproducer — which is the "re-traces and diffs" shape
+  named two sentences up, in shipped code rather than in a hypothetical CI
+  job. Driven across two real interpreters: one importable target, one
+  `Subject`, `jax_enable_x64` on both sides, a REFUTED verdict produced on
+  jax 0.11.0 and re-emitted on jax 0.11.1 — `write_reproducer` refused, and
+  the refusal read *"this verdict is not about this subject's program"*
+  about a program that had not changed. The control, the same verdict
+  emitted on the jax that stamped it, wrote the file.
+
+  **THE DIRECTION IS A REFUSAL, NEVER A WRONG VERIFIED, and this entry
+  should not be read as more than that.** No verdict moves, nothing is
+  emitted that should not have been, and the check was correct to refuse:
+  the two hashes really do differ. What was wrong was the reason it gave,
+  which named the two causes it could see — a program difference, and an
+  x64 mismatch — and not the one operating, even though the stamp carries
+  the jax version and the code therefore had the fact and did not use it.
+  It now enumerates every difference the stamp can witness, and says that
+  it cannot tell whether that is all that differs.
+
   **Which stelling versions.** All of them: the hash has always been a
   function of the traced params, and the stamp section above already
   requires every verdict to carry "jax version used to trace the harness"
-  — this is what that field is for. Nothing
-  in stelling changed here and there is nothing to fix in stelling — the
-  cause is upstream's `out_sharding` rollout, jax's own release.
+  — this is what that field is for. Nothing in stelling changed here and
+  the cause is upstream's `out_sharding` rollout, jax's own release. This
+  paragraph read *"there is nothing to fix in stelling"*, and that was
+  wrong by one thing: the refusal above was reporting the wrong cause,
+  which is a fix in stelling, and it is the only one. No analysis,
+  transfer, verdict or emission moves.
 
-  **What to re-run.** Nothing, for a verdict. If you keep a hash → verdict
+  **What to re-run.** Nothing, for a verdict — that clause is measured and
+  it stands. But **a reproducer is not a verdict**: emitting one from a
+  verdict stamped on a different jax REFUSES, for any harness containing a
+  max or min reduction, and the remedy is to emit on the stamped jax or to
+  re-run the check on the jax you now run. If you keep a hash → verdict
   map across a jax upgrade, re-derive the keys on the jax you now run, for
   any harness containing a max or min REDUCTION. All six spellings were
   measured on both releases and all six move, to the same pair of hashes:
@@ -11062,8 +11114,11 @@ in place and marked.*
   and both were measured unchanged.
 
   **NOT A SOUNDNESS EVENT, and it is not counted as one below.** No
-  verdict flips, nothing is retroactively invalid, and no release is
-  reached by a fix here, because there is no fix here. It is in this log
+  verdict flips and nothing is retroactively invalid. **THERE IS ONE FIX
+  HERE, and this paragraph said there was none** — the refusal message in
+  `reproduce._require_same_program`, above. No release is reached by it:
+  it is 0.2.0 development, `v0.1.0` predates it, and a refusal message is
+  not a verdict. It is in this log
   because the failure is silent and the policy above forbids true things
   going unsaid, not because the policy's soundness-event definition
   covers it.
@@ -11104,12 +11159,16 @@ the entry that needs no serialized query either.
 
 Every other entry that is a FIX is 0.2.0 development only, and **no
 release has yet shipped any fix in this log**. The 2026-08-18
-query-identity entry is not a fix and is not counted in either number: it
-records a jax release moving a query hash with no verdict moving and
-nothing in stelling to change, so it is scoped to every stelling version
-and reaches no release by construction. It says so in its own last
-paragraph, and this clause exists so the count above cannot be read as
-having overlooked it. This line read *"(no releases yet)"* until
+query-identity entry is not counted in either number, and the reason is
+NOT the one this clause used to give. It said the entry records "no
+verdict moving and nothing in stelling to change"; the entry now carries
+one thing to change — the refusal message in
+`reproduce._require_same_program` — so the second half of that reason is
+gone. What survives is the half that decides the count: the fix is 0.2.0
+development, `v0.1.0` predates it, and no verdict moves, so the entry
+reaches no release. The entry's own last paragraph says the same, and
+this clause exists so the count above cannot be read as having overlooked
+it. This line read *"(no releases yet)"* until
 2026-08-15, a
 few lines below the reproduction that contradicts it; it then named S11
 alone while the S13 entry above it said *"the second finding of that audit

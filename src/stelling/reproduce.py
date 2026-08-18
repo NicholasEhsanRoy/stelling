@@ -763,45 +763,94 @@ def _require_same_program(verdict, subject: Subject, trace, x64: bool) -> None:
     verdict stamps. THE SUBJECT IS ALWAYS RE-TRACED — there is no
     parameter, public or private, that supplies the hash instead.
 
-    The precision mismatch gets its own sentence because it is a true and
-    different cause: the same program traced under a different
-    ``jax_enable_x64`` is a different query (its declared dtypes differ),
-    and "this verdict is not about this subject's program" sends a reader
-    to look for a program difference that is not there.
+    THE FUNCTION'S JOB IS NOT TO DIAGNOSE, IT IS TO NOT MISDIAGNOSE. A hash
+    mismatch has several possible causes and this check has one hash on each
+    side; what it can do honestly is name every difference it can SEE in the
+    stamp, and say plainly that it cannot tell whether that is all that
+    differs. So it enumerates rather than branching: the stamp carries three
+    facts about the run that produced the verdict — the query hash, the
+    precision config, and the jax version — and every one of them that
+    disagrees with the running environment goes into the refusal.
 
-    IT DOES NOT CLAIM THE PROGRAMS ARE THE SAME. This check cannot tell a
-    precision difference from a program difference — it has one hash on
-    each side and a config flag — and its predecessor said "The program is
-    the same" anyway, which for an unrelated subject over an unrelated
-    envelope is a misdiagnosis of exactly the kind the other branch's
-    wording exists to prevent. It names the difference it CAN see and the
-    one action that distinguishes the two.
+    THE jax VERSION CLAUSE IS THE ONE THAT WAS MISSING, and its absence was
+    exactly the misdiagnosis this docstring exists to prevent. A query
+    content hash is a function of the traced equations' PARAMS, and jax owns
+    those, so one unchanged program traces to two hashes across a jax
+    release: ``SOUNDNESS.md``'s 2026-08-18 entry records ``reduce_max`` and
+    ``reduce_min`` gaining an ``out_sharding`` param in jax 0.11.1, and that
+    entry names "a CI job that re-traces and diffs" as the shape that breaks.
+    THIS FUNCTION IS THAT SHAPE. Driven end to end: one importable target,
+    one ``Subject``, ``jax_enable_x64`` True on both sides, a verdict
+    produced on real jax 0.11.0 and re-emitted on real jax 0.11.1 — the
+    refusal read "this verdict is not about this subject's program", sending
+    a reader to look for a program difference in a program that had not
+    changed, while ``verdict.stamp.jax_version`` sat two attributes away
+    carrying the answer.
+
+    THE DIRECTION IS CONSERVATIVE AND STAYS THAT WAY. Every path here
+    REFUSES; none of them emits. What was wrong was the reason given for a
+    correct refusal, and what is added is a reason, not a permission.
+
+    IT STILL DOES NOT CLAIM THE PROGRAMS ARE THE SAME. Its predecessor said
+    "The program is the same" when the precision differed, which for an
+    unrelated subject over an unrelated envelope is a misdiagnosis of exactly
+    the kind the enumeration exists to prevent.
     """
     stamped = verdict.stamp.query_content_hash
     traced = trace(subject.harness).content_hash()
     if traced == stamped:
         return
+
+    # Every difference the STAMP can witness, in the order a reader should
+    # act on them: the cheap local knob first, then the environment.
+    seen = []
     stamped_x64 = verdict.stamp.precision_config
-    if stamped_x64 != f"jax_enable_x64={x64}":
-        raise ReproducerError(
-            f"this verdict was produced under {stamped_x64} and the "
-            f"emission is running under jax_enable_x64={x64}, and the "
-            f"subject's harness traces to {traced} against the stamped "
-            f"{stamped}. A different jax_enable_x64 alone is enough to "
-            f"make ONE program trace to two queries, because it changes "
-            f"the declared dtypes — so the precision setting explains a "
-            f"hash mismatch on its own. THIS CHECK CANNOT TELL WHETHER "
-            f"THAT IS ALL THAT DIFFERS: it has one hash on each side. Set "
-            f"jax.config.update('jax_enable_x64', {stamped_x64.split('=')[1]}) "
-            f"and emit again — if the hashes agree then, it was the "
-            f"precision; if they still differ, this verdict is about a "
-            f"different program"
+    running_x64 = f"jax_enable_x64={x64}"
+    if stamped_x64 != running_x64:
+        seen.append(
+            f"THE PRECISION SETTING MOVED — stamped {stamped_x64}, running "
+            f"{running_x64}. A different jax_enable_x64 alone is enough to "
+            f"make ONE program trace to two queries, because it changes the "
+            f"declared dtypes, so the precision setting explains a hash "
+            f"mismatch on its own. Set "
+            f"jax.config.update('jax_enable_x64', "
+            f"{stamped_x64.split('=')[-1]}) and emit again"
         )
+    stamped_jax = verdict.stamp.jax_version
+    running_jax = _jax_version()
+    if stamped_jax != running_jax:
+        seen.append(
+            f"THE jax VERSION MOVED — stamped jax {stamped_jax}, running jax "
+            f"{running_jax}. A query content hash is a function of the traced "
+            f"equations' params and jax owns those, so one UNCHANGED program "
+            f"traces to two hashes across a jax release; SOUNDNESS.md's "
+            f"2026-08-18 entry records the measured case (reduce_max and "
+            f"reduce_min gained out_sharding in 0.11.1). Emit on jax "
+            f"{stamped_jax}, or re-run the check on jax {running_jax} and "
+            f"emit from the verdict that produces"
+        )
+
+    if seen:
+        raise ReproducerError(
+            f"the verdict stamps query {stamped} and the subject's harness "
+            f"traces to {traced}, and the stamp disagrees with this "
+            f"environment in "
+            f"{'1 way' if len(seen) == 1 else f'{len(seen)} ways'} that can "
+            f"move a hash without any program changing: "
+            + "; ".join(seen)
+            + ". THIS CHECK CANNOT TELL WHETHER THAT IS ALL THAT DIFFERS: it "
+            "has one hash on each side. If the hashes agree once the "
+            "difference above is removed, that was the cause; if they still "
+            "differ, this verdict is about a different program"
+        )
+
     raise ReproducerError(
         f"this verdict is not about this subject's program: the verdict "
         f"stamps query {stamped}, and the subject's harness traces to "
-        f"{traced}. Emitting anyway would produce a file that executes one "
-        f"program and quotes another program's verdict"
+        f"{traced}. The stamp's jax version and precision config both match "
+        f"this environment, so neither of those explains it. Emitting anyway "
+        f"would produce a file that executes one program and quotes another "
+        f"program's verdict"
     )
 
 
