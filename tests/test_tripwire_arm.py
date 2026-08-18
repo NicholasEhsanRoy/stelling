@@ -137,6 +137,86 @@ def test_every_key_of_the_hash_map_is_a_release():
     assert adapter._KNOWN_HASHES and not adapter.is_release("0.11.2.dev20260817")
 
 
+#: Version strings :func:`is_release` MUST accept, each with the reason it is
+#: a final release. The first entry is the one this table exists for.
+_MUST_BE_RELEASES = {
+    # THE MEASURED REGRESSION. jax really shipped this: 0.9.0.1, uploaded
+    # 2026-02-05, wheel + sdist, not yanked, read off PyPI's JSON API. A
+    # bare-`X.Y.Z` predicate called it a non-release, which silenced the row
+    # check for a published wheel.
+    "0.9.0.1": "a four-component release segment; jax shipped exactly this",
+    "0.11.0": "the plain three-component case, still a release",
+    "0.0": "two components; jax's first two uploads are 0.0 and 0.1",
+    "0.12": "two components, the shape a future jax could ship",
+    "0.11.1.post1": "a post-release is a final release",
+    "0.11.1-1": "PEP 440's implicit post-release spelling",
+    "1!0.12.0": "an epoch does not make a version mutable — see _adapter_jax",
+}
+
+#: Version strings :func:`is_release` MUST reject, each with the reason no row
+#: can ever name it. Rejecting these is what keeps the nightly lane green for
+#: a fact nobody can act on; accepting one would redden it every night.
+_MUST_NOT_BE_RELEASES = {
+    "0.11.2.dev20260817": "a dev build: the same name is rebuilt tomorrow",
+    "0.12.0rc1": "a release candidate is superseded by its release",
+    "0.12.0a1": "an alpha, same reason",
+    "0.12.0b2": "a beta, same reason",
+    "0.11.1+cuda": "a local version is never published to an index",
+    "0.11.1.dev0+g1234": "dev and local at once",
+    "0.11.1\n": "a trailing newline: `\\Z` and not `$` is why this fails",
+    "": "no version at all",
+    "abc": "not a version",
+}
+
+
+def test_the_release_predicate_is_pinned_in_BOTH_directions():
+    """`is_release` is a MEANING, and both halves of it are load-bearing.
+
+    THE WIDENING THIS PINS. The predicate used to be `^\\d+\\.\\d+\\.\\d+\\Z` —
+    a bare `X.Y.Z`. jax shipped `0.9.0.1`, so a real published wheel was not
+    a release by that definition, took the never-read carve-out above, and
+    the row check that is this file's whole point never ran for it. Driven
+    on real jax 0.11.1 — whose const-fold rule really has moved — with the
+    version reported as `0.11.1.1`: the tree as merged at `3482822` PASSED,
+    and `fb646b4`, which had no shape carve-out at all, FAILED. With the
+    widened predicate it fails again. So the widening is not cosmetic and
+    neither direction of it may drift.
+
+    THE NARROWING IS EQUALLY LOAD-BEARING and is why this test has a second
+    table. Accepting a dev build would demand a row for a name that is
+    rebuilt nightly — the `nightly` job of `nightly-jax-canary.yml` runs
+    this file against exactly that — and an alarm that is red every night is
+    not read.
+    """
+    wrongly_rejected = {
+        v: why for v, why in _MUST_BE_RELEASES.items()
+        if not adapter.is_release(v)
+    }
+    assert not wrongly_rejected, (
+        "these name immutable published versions, so a row CAN name them and "
+        "`_KNOWN_HASHES` must be required to have one — `is_release` says "
+        f"otherwise: {wrongly_rejected}"
+    )
+    wrongly_accepted = {
+        v: why for v, why in _MUST_NOT_BE_RELEASES.items()
+        if adapter.is_release(v)
+    }
+    assert not wrongly_accepted, (
+        "these name a tree that is mutable or never published under that "
+        "name again, so a row for one could never be matched and demanding "
+        f"one reddens a lane for nothing — `is_release` accepts: "
+        f"{wrongly_accepted}"
+    )
+    # THE ANTI-DODGE CONTROL, the same idiom as the test above: a predicate
+    # that returned True for everything would pass the first assertion and a
+    # predicate that returned False for everything would pass the second, so
+    # the tables have to be non-empty and the predicate has to disagree
+    # across them. It does, by construction of the two assertions, and this
+    # line is what makes "by construction" a measurement.
+    assert _MUST_BE_RELEASES and _MUST_NOT_BE_RELEASES
+    assert not set(_MUST_BE_RELEASES) & set(_MUST_NOT_BE_RELEASES)
+
+
 def test_arming_twice_does_not_double_wrap(armed):
     """A second wrapper would double every count in the denominator."""
     _, rec = armed

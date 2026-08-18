@@ -136,8 +136,12 @@ the completeness pin is WITHDRAWN, not passed: this session reported
 1 test(s) as xfailed.
 ```
 
-Measured on the whole tree with hypothesis installed: `2470 passed, 13 skipped,
-1 xfailed`, exit 0, that pin among the skips. It is the pin's own rule
+Measured on the whole tree with hypothesis installed: `3910 passed, 13 skipped,
+1 xfailed`, exit 0, that pin among the skips — re-driven at `3482822` on jax
+0.11.0 with hypothesis 6.165.10, CPython 3.12.3, `JAX_ENABLE_X64` unset. It
+read `2470 passed` until then; the skip and xfail counts have not moved, only
+the size of the suite, which is why the sentence around them still holds. It
+is the pin's own rule
 (disclosed ⇒ withdrawn, never failed — the same cut `N deselected` gets), and
 it is not a defect in the pin. It is a consequence of this suite that nobody
 wrote down, and it is written down here, in `CONTRIBUTING.md` and in the
