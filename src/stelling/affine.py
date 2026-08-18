@@ -88,6 +88,8 @@ from stelling.obligation import (
     _group_reduce_sum,
     _pair_elementwise,
     _route_structural,
+    _safely,
+    _unknown_reports_safely,
     slice_unknown_obligations,
 )
 from stelling.propagate import (
@@ -95,6 +97,8 @@ from stelling.propagate import (
     Propagation,
     TRANSFERS,
     interval_env,
+    query_identity,
+    unpaired_propagation,
 )
 
 __all__ = [
@@ -953,6 +957,25 @@ class RefinementReport:
     declined: tuple[tuple[int, str], ...]
     undecided: tuple[int, ...]
     ops_used: tuple[str, ...]
+    # THE RUN REFUSED AS A WHOLE, in the words of whatever refused it, or
+    # ``""`` when the refinement looked at obligations one at a time. The
+    # three whole-run refusals — a propagation that is not this query's,
+    # ``semantics="ieee"``, a constrained assume — all set it.
+    #
+    # IT IS HERE BECAUSE THE OTHER CHANNEL IS THE CALLER'S OBJECT (audit
+    # 0.2.0 B11 audit, fix 2). :func:`refine_propagation` records a whole-run
+    # refusal as an appended note on the propagation it hands back, and it
+    # hands back the object it was GIVEN — so on a propagation that will not
+    # take a note (not a dataclass, or a ``notes`` that will not concatenate)
+    # the refusal had nowhere to go, and the comment claiming "one whole-run
+    # note, ALWAYS" was true only of well-formed objects. A refusal has to
+    # land on something this module builds itself, and this report is that
+    # object. This FIELD in particular is the refusing function's own reason
+    # string and nothing read off the argument, so no shape the argument
+    # takes can empty it. The per-obligation ``declined`` entries carry the
+    # same sentence when there ARE unknown obligations; this field is what
+    # remains true when there are none.
+    declined_wholly: str = ""
 
     @property
     def decided(self) -> int:
@@ -963,6 +986,15 @@ class RefinementReport:
         # cases ("0 obligation(s) attempted") must read naturally — the
         # counts carry the truth about what actually happened
         ops = ", ".join(self.ops_used) if self.ops_used else "none"
+        # `declined_wholly` is DELIBERATELY NOT IN THIS LINE, so that every
+        # stamp this library has ever written stays byte-identical. It would
+        # buy nothing anywhere it could be read: on the two arms that reach a
+        # stamp (`semantics="ieee"`, a constrained assume) the same sentence
+        # is already on every `declined` entry and on the propagation's own
+        # notes, and the arm it exists FOR — an unpaired propagation — never
+        # reaches a stamp at all, because both assemblers refuse that
+        # propagation on their own gates before they stamp anything. The
+        # field is the machine-readable record a caller reads off the report.
         return (
             f"affine refinement enabled (domain={self.domain} over the "
             f"declared boxes; registry of {len(AFFINE_SUPPORTED)} "
@@ -1006,26 +1038,76 @@ class RefinementReport:
         return reason
 
 
+def _with_notes(propagation, extra: tuple[str, ...]):
+    """``propagation`` with ``extra`` appended to its ``notes``, or the object
+    ITSELF when it will not take them.
+
+    **NO REFUSAL IN THIS MODULE MAY GO THROUGH A BARE
+    ``dataclasses.replace``** — audit 0.2.0 B11 audit, fix 2. Every decline
+    path did, and ``dataclasses.replace`` is a ``TypeError`` on anything that
+    is not a dataclass INSTANCE, so :func:`refine_propagation`'s refusal
+    raised on precisely the objects it exists to refuse: an object delegating
+    ``__getattr__`` to a real :class:`stelling.propagate.Propagation` but
+    raising on ``query_sha256`` produced ``TypeError: replace() should be
+    called on dataclass instances`` where the other four propagation-consuming
+    sites degraded on the same object. This function is the whole of the
+    difference: the reads are netted, and an object that will not be rebuilt
+    is handed back as it came.
+
+    **THE OBJECT IS UN-LAUNDERED ON EITHER ARM**, which is the property the
+    repair rests on. ``dataclasses.replace`` carries ``query_sha256`` through
+    untouched and the fallback carries the object itself, so neither arm can
+    stamp a stranger with the judged query's identity — see
+    :func:`refine_propagation`'s own comment on why that matters.
+
+    ``notes`` is concatenated, never coerced: a ``notes`` that is a ``list``
+    makes ``list + tuple`` raise, which lands in the net and returns the
+    object unchanged, rather than silently rewriting a field's type on an
+    object nobody validated.
+
+    The refusal does not depend on this succeeding. The
+    :class:`RefinementReport` beside it is built from this module's own
+    literals and carries the reason in
+    :attr:`RefinementReport.declined_wholly` whatever the propagation's
+    shape, so an object that cannot hold a note does not swallow the
+    refusal — it only fails to repeat it.
+    """
+    try:
+        return dataclasses.replace(
+            propagation, notes=propagation.notes + extra
+        )
+    except Exception:  # noqa: BLE001 — a refusal may not itself raise
+        return propagation
+
+
 def _decline_all(
     propagation: Propagation, unknown: list[ObligationReport], reason: str
 ) -> tuple[Propagation, RefinementReport]:
+    """Every obligation in ``unknown`` declined for one whole-run ``reason``.
+
+    The indices are read through :func:`stelling.obligation._safely` for the
+    same reason the notes go through :func:`_with_notes`: this is a refusal
+    path, the object it describes has already been judged unfit by whichever
+    gate sent it here, and a refusal whose own message raises is not a
+    refusal (audit 0.2.0 B6 re-audit R7). ``-1`` is the visible placeholder
+    an unreadable index leaves behind, the same one
+    :func:`stelling.obligation.slice_unknown_obligations` uses.
+    """
+    indices = tuple(_safely(lambda o=o: o.index, -1) for o in unknown)
     notes = tuple(
-        f"assert #{o.index}: affine refinement declined: {reason}"
-        for o in unknown
+        f"assert #{i}: affine refinement declined: {reason}" for i in indices
     )
     report = RefinementReport(
         domain="affine",
-        attempted=tuple(o.index for o in unknown),
+        attempted=indices,
         discharged=(),
         violated=(),
-        declined=tuple((o.index, reason) for o in unknown),
+        declined=tuple((i, reason) for i in indices),
         undecided=(),
         ops_used=(),
+        declined_wholly=reason,
     )
-    return (
-        dataclasses.replace(propagation, notes=propagation.notes + notes),
-        report,
-    )
+    return _with_notes(propagation, notes), report
 
 
 def refine_propagation(
@@ -1043,7 +1125,65 @@ def refine_propagation(
     any assume declines wholly (the refinement reads the declared boxes
     and would ignore the precondition — the solver escalation's refusal
     shape, mirrored).
+
+    **And refuses to judge a propagation that is not this query's** —
+    audit 0.2.0 B6 re-audit UNSOUND-3. This function is a large part of
+    why that repair had to be cross-module rather than a gate in
+    :mod:`stelling.solvers`: it is public, it sits BELOW
+    :func:`stelling.solvers.make_solver_verdict`'s gates, and it WRITES
+    decided statuses into the propagation it returns: the slices come
+    from ``closed`` and the statuses land on ``propagation``, so a
+    mispaired call discharges a stranger's obligation with this query's
+    arithmetic. Measured on `207faca` with two queries from one factory
+    (``c - c + shift >= 0.5`` at ``shift`` 1.0 and 0.0):
+    ``refine_propagation(A, p_B)`` returned ``['discharged']``, the
+    escalation it produced carried no work at all, and the assembly minted
+    VERIFIED on B whose honest verdict is REFUTED — through
+    :func:`stelling.verdict.make_verdict` as well, which invokes no solver.
     """
+    # -- THE PROPAGATION PAIRING GATE, before the obligation list is read
+    # and before the `not unknown` early return: a propagation with nothing
+    # left `unknown` is returned UNCHANGED by that return, and a stranger
+    # handed back unchanged reads exactly like a refinement that had
+    # nothing to do. That arm is not hypothetical — it is the one the
+    # measurement above went through, because `p_B`'s single obligation had
+    # already been decided by the time it was mispaired forward.
+    unpaired = unpaired_propagation(propagation, query_identity(closed))
+    if unpaired is not None:
+        # READ TOTALLY, because this is the refusal path and the object on it
+        # has just been declined (audit 0.2.0 B11 audit, fix 2). A plain
+        # comprehension over `propagation.obligations` stood here, and it
+        # raised `AttributeError` on a `Propagation` built by `__new__` with
+        # no fields — a raise out of the refusal, at the site that WRITES
+        # statuses. `None` (the object could not be asked) declines nothing
+        # per obligation; the whole-run record below is what carries the
+        # refusal in that case, and it is what carries it anyway when a
+        # stranger has no `unknown` obligation left.
+        stranger_unknown = _unknown_reports_safely(propagation) or []
+        refined, report = _decline_all(propagation, stranger_unknown, unpaired)
+        # THE RETURNED PROPAGATION IS STILL THE STRANGER, and deliberately:
+        # `_with_notes` rebuilds it with `dataclasses.replace`, which carries
+        # `query_sha256` through untouched, or hands the object straight back
+        # when it will not be rebuilt. Re-stamping it with `closed`'s identity
+        # here would LAUNDER it — the verdict assemblers would then see a
+        # propagation that says it is this query's, and this function's own
+        # refusal would have manufactured the pairing the whole repair exists
+        # to check.
+        #
+        # The whole-run note is one MORE place the refusal is recorded, not
+        # the only one. `_decline_all` writes a note per unknown obligation
+        # and a stranger may have none left, and neither note lands at all on
+        # an object that will not take one — so the sentence that stood here
+        # ("one whole-run note, ALWAYS") was true only of well-formed
+        # propagations. What is always true is `report.declined_wholly`, which
+        # this module builds out of its own literals.
+        return (
+            _with_notes(
+                refined,
+                (f"affine refinement declined wholly: {unpaired}",),
+            ),
+            report,
+        )
     unknown = [o for o in propagation.obligations if o.status == "unknown"]
     empty = RefinementReport(
         domain="affine",

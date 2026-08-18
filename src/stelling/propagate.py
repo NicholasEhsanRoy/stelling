@@ -7,6 +7,16 @@ The autodidax pattern: walk the equations of a transcribed query in order,
 mapping each primitive through a transfer function over
 :class:`stelling.interval.IntervalArray`. Consumes the IR, never jaxprs.
 
+It also OWNS THE QUERY IDENTITY that binds a :class:`Propagation` to the
+query it is about — :func:`query_identity`, the field
+:attr:`Propagation.query_sha256` it writes, and :func:`unpaired_propagation`,
+the one comparison every consumer of a propagation makes. That is not a
+widening of the scope claim below (it decides nothing about any program); it
+is here because the identity belongs on the object that carries the
+judgements, and because one derivation read by five call sites cannot drift
+the way five copies can. See :func:`unpaired_propagation` for what each site
+does with the answer.
+
 Scope, held deliberately (design/e2a-registration.md): no widening, no
 fixpoints, no cond/scan descent, no solver. The transfer registry contains
 exactly the primitives the target census returned
@@ -210,7 +220,9 @@ __all__ = [
     "UnsatisfiableAssumptionError",
     "interval_env",
     "propagate",
+    "query_identity",
     "resolve_libm_budget",
+    "unpaired_propagation",
 ]
 
 TIER_EXACT = "exact"
@@ -635,6 +647,37 @@ class Propagation:
     transfers_used: tuple[tuple[str, str], ...]  # (primitive, tier), sorted
     assumptions: tuple[str, ...]
     notes: tuple[str, ...]
+    # WHICH QUERY THIS PROPAGATION IS ABOUT — audit 0.2.0 B6 re-audit
+    # UNSOUND-3, closed in B11. :meth:`stelling.ir.ClosedJaxpr.content_hash`
+    # of the ``closed`` :func:`propagate` walked, or ``""`` when that hash
+    # could not be taken (see :func:`query_identity`).
+    #
+    # WHY IT IS HERE AND NOT AT THE CONSUMER. Until this field existed the
+    # `Propagation` carried no query identity at all, and every function
+    # that consumes one against a query therefore had nothing to check. The
+    # measured consequence was a live false VERIFIED on `main` and on the
+    # released 0.1.0: two queries traced from ONE factory carry identical
+    # `source_info` at identical top-level positions, so the per-obligation
+    # association check in
+    # :func:`stelling.obligation.slice_unknown_obligations` passes, and an
+    # assembly of (query B, propagation of A) reports B's obligations with
+    # A's statuses. `stelling.solvers.MispairedEscalationError` bound the
+    # ESCALATION leg and only that leg — `escalate` hashes the `closed` IT
+    # was handed, so the (query, escalation) pair genuinely matches while
+    # the propagation is a stranger, and with `carries_work=False` the
+    # escalation gate is not consulted at all.
+    #
+    # NO DEFAULT, deliberately, and the reason is the sibling field's own
+    # history: `stelling.solvers.Escalation.query_sha256` defaults to `""`,
+    # which makes a return site that forgot it a SILENT hole and costs a
+    # whole test (`test_every_escalate_return_site_records_the_query`) to
+    # pin. A `Propagation` has exactly ONE construction site in this
+    # library, so a required field makes that class of hole unconstructible
+    # rather than merely tested for. A caller who hand-builds one must say
+    # which query it is about; `""` is still a legal value and still means
+    # "not recorded", and every consumer REFUSES it rather than pairing it
+    # with anything (two absences are not a match).
+    query_sha256: str
     # which arithmetic the obligations were judged about ("real" | "ieee");
     # the verdict assemblers stamp from this field, never from a guess
     semantics: str = "real"
@@ -752,6 +795,177 @@ class Propagation:
     @property
     def dropped_constraints(self) -> int:
         return self.coverage.inert
+
+
+# -- query identity -----------------------------------------------------------
+#
+# ONE DERIVATION, READ BY EVERY SITE THAT PAIRS A PROPAGATION WITH A QUERY.
+# `Propagation.query_sha256` is written here (at `propagate`'s single
+# construction site) and compared here (at `unpaired_propagation`), so the two
+# halves cannot drift apart the way a hash copied at one site and recomputed at
+# another can. `stelling.solvers._query_sha256` — the escalation leg's
+# derivation, which predates this one — delegates to `query_identity` for the
+# same reason: the escalation gate and the propagation gate must agree about
+# what "the same query" means, or a caller can satisfy one and not the other.
+
+
+def query_identity(closed) -> str:
+    """:meth:`stelling.ir.ClosedJaxpr.content_hash` of ``closed``, or ``""``
+    if it cannot be taken.
+
+    NEVER RAISES, and the empty string is not a pass — it is the value
+    :func:`unpaired_propagation` REFUSES on either leg. An unhashable
+    ``closed`` and a propagation that recorded nothing both produce ``""``,
+    and an equality test would pass them: two absences are not a match.
+    That exact hole was live in the escalation leg until `e35de13` and is
+    not being rebuilt here.
+    """
+    try:
+        return str(closed.content_hash())
+    except Exception:  # noqa: BLE001 — an unhashable query is refused, not excused
+        return ""
+
+
+# The one refusal that composes no message at all, for the object on which
+# even composing one raises. A module-level literal: returning it cannot
+# fail, which is the whole property :func:`unpaired_propagation` needs.
+UNREADABLE_PROPAGATION_IDENTITY = (
+    "unpaired propagation: the supplied propagation could not be examined "
+    "at all — reading its query identity, and then describing what was "
+    "read, both raised. It cannot be shown to be about the query being "
+    "judged, and an identity that cannot be read is not a match. Judge the "
+    "query with the propagation `propagate()` produced from it."
+)
+
+
+def unpaired_propagation(propagation, query_sha256: str) -> str | None:
+    """``None`` when ``propagation`` is PROVABLY about the query whose
+    identity is ``query_sha256``; otherwise the sentence saying why it
+    cannot be shown to be.
+
+    ``query_sha256`` is the caller's own :func:`query_identity` of the
+    ``closed`` it is judging — passed in rather than recomputed here
+    because three of the five consumption sites already hold it (the two
+    verdict assemblers stamp it, and :func:`stelling.solvers.escalate`
+    records it on the :class:`stelling.solvers.Escalation`), and a second
+    hash of the same query would be pure cost.
+
+    THE PROPERTY IS "BOTH OF THEM SAID SO", NOT EQUALITY. A non-string, an
+    empty string on either leg, or two different strings are all refusals,
+    and each gets its own sentence: a reader who has just lost a VERIFIED
+    needs to know whether the propagation named another query or named
+    none.
+
+    **AND "TWO DIFFERENT STRINGS" MEANS "TWO STRINGS THAT SAY THEY DIFFER"**
+    — audit 0.2.0 B11 audit, fix 6. That last test is ``!=``, which
+    dispatches to the recorded value's own ``__ne__``, so a ``str`` SUBCLASS
+    whose comparison always answers equal satisfies the ``isinstance`` test
+    and the emptiness test honestly and then decides the third itself: it
+    PAIRS, with any query. Its two neighbours do not — an always-equal object
+    of any OTHER type fails ``isinstance``, and an EMPTY always-equal
+    subclass fails ``not recorded``, because a plain subclass inherits
+    ``str.__len__`` — so the exposure is exactly non-empty ``str``
+    subclasses, and it is driven AS A PAIRING in
+    ``tests/test_propagation_identity.py::test_an_ALWAYS_EQUAL_str_SUBCLASS*``.
+    It is disclosed rather than closed because it buys nothing: defining such
+    a class is attacker Python in the caller's own process, and a caller who
+    can do that can equally pass the query's true hash, which pairs by the
+    honest rule.
+
+    IT DOES NOT DECIDE WHAT HAPPENS NEXT. Each site fails closed in its own
+    vocabulary — a verdict assembler returns UNKNOWN carrying this
+    sentence, :func:`stelling.affine.refine_propagation` declines every
+    unknown obligation with it, :func:`stelling.obligation.
+    slice_unknown_obligations` returns a
+    :class:`stelling.obligation.DeclinedObligation` per obligation quoting
+    it — because three of the five sites MAY NOT RAISE (they are iterated
+    in a ``for`` header by callers whose per-obligation nets sit inside it;
+    see `slice_unknown_obligations`' docstring, audit 0.2.0 B6/M17′) and a
+    fix that raised at two of them and degraded at three would be two
+    behaviours for one fact.
+
+    **AND THIS FUNCTION MAY NOT RAISE EITHER — the same lesson, one layer
+    in** (audit 0.2.0 B6 re-audit R7: *"a net that re-raises while composing
+    its own message is not a net"*). It is handed whatever the caller passed
+    as a propagation, and both reads it makes of that object can raise on a
+    hostile one: ``query_sha256`` may be a property that raises something
+    other than ``AttributeError``, and the value it returns may have a
+    ``__repr__`` that raises. So the read is netted, and the value is
+    quoted only when its EXACT type is a builtin scalar — anything else is
+    described by type name. A refusal whose message raises is not a
+    refusal; it is the raw escape the gate exists to prevent, at the one
+    site (:func:`stelling.obligation.slice_unknown_obligations`) where it
+    would cost every obligation's verdict rather than one.
+
+    The two netted reads below are the ones with a NAMED hostile shape. The
+    outer net is for the ones there is no point enumerating — ``repr`` of a
+    builtin subclass is excluded by an exact type test, but
+    ``type(x).__name__`` goes through a metaclass, and the list of ways a
+    Python object can refuse to be described is not closed. Any escape at
+    all becomes :data:`UNREADABLE_PROPAGATION_IDENTITY`, which is a literal
+    and so cannot fail; an escape on the HONEST path becomes a refusal too,
+    which is the direction to fail in.
+    """
+    try:
+        return _unpaired_reason(propagation, query_sha256)
+    except Exception:  # noqa: BLE001 — a refusal may not itself raise
+        return UNREADABLE_PROPAGATION_IDENTITY
+
+
+def _unpaired_reason(propagation, query_sha256: str) -> str | None:
+    """The body of :func:`unpaired_propagation`, netted by it."""
+    try:
+        recorded = getattr(propagation, "query_sha256", None)
+    except Exception as e:  # noqa: BLE001 — a refusal may not itself raise
+        return (
+            f"unpaired propagation: reading the supplied propagation's "
+            f"`query_sha256` raised "
+            f"{type(e).__name__}, so it cannot be shown to be about the "
+            f"query being judged ({query_sha256 or '<unhashable>'}) — an "
+            f"identity that cannot be read is not a match. Judge the query "
+            f"with the propagation `propagate()` produced from it."
+        )
+    if not isinstance(recorded, str) or not recorded:
+        # EXACT type, not `isinstance`: an `int`/`str` SUBCLASS may carry a
+        # `__repr__` that raises, and this string is a refusal's message
+        shown = (
+            repr(recorded)
+            if type(recorded) in (str, bytes, int, float, bool, type(None))
+            else f"<{type(recorded).__name__}>"
+        )
+        return (
+            f"unpaired propagation: the supplied propagation records no "
+            f"query identity ({shown}), so it cannot be shown to be "
+            f"about the query being judged ({query_sha256 or '<unhashable>'}) "
+            f"— an absent identity is not a match, it is an absence, and a "
+            f"propagation of another query reports THAT query's obligation "
+            f"statuses under this query's name (a stale cached propagation, "
+            f"or one built before this field existed, has exactly this "
+            f"shape). Judge the query with the propagation `propagate()` "
+            f"produced from it."
+        )
+    if not query_sha256:
+        return (
+            f"unpaired propagation: the supplied propagation is about the "
+            f"query {recorded}, but the query being judged cannot be hashed "
+            f"at all (ClosedJaxpr.content_hash() raised), so the two cannot "
+            f"be shown to be the same query — refusing to pair them. Judge "
+            f"the query with the propagation `propagate()` produced from it."
+        )
+    if recorded != query_sha256:
+        return (
+            f"unpaired propagation: the supplied propagation was produced by "
+            f"propagate() on the query {recorded}, but the query being judged "
+            f"hashes to {query_sha256} — the two are not the same query, so "
+            f"this propagation's obligation statuses are judgements about a "
+            f"program other than the one being judged. An obligation the "
+            f"interval leg DISCHARGED on the other query arrives already "
+            f"discharged here and is reported by INDEX alone, so a mispaired "
+            f"assembly can mint VERIFIED on a query whose honest verdict is "
+            f"REFUTED. Judge the query with the propagation `propagate()` "
+            f"produced from it."
+        )
+    return None
 
 
 # -- literals and consts ------------------------------------------------------
@@ -11249,6 +11463,13 @@ def propagate(
         transfers_used=tuple(sorted(p.used.items())),
         assumptions=tuple(sorted(assumptions)),
         notes=tuple(p.notes),
+        # WHICH QUERY THIS PROPAGATION IS ABOUT — the walk's own `closed`,
+        # taken here and nowhere else. `query_identity` never raises, so a
+        # query this walk could analyse but `content_hash()` cannot encode
+        # still yields a `Propagation` (as it did before this field), and
+        # the "" it carries is refused at every consumption site rather
+        # than pairing with anything.
+        query_sha256=query_identity(closed),
         semantics=semantics,
         assume_dropped=p.assume_dropped,
         narrowing_uncertified=p.narrowing_uncertified,

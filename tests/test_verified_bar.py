@@ -78,10 +78,13 @@ refuses a mismatch). See
 ``test_the_pairing_gate_closes_the_SCATTER_FREE_row`` — the row that
 settles which statement is true —
 ``test_the_pairing_gate_refuses_the_mispairing_the_bar_only_narrows``, and
-``test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation`` for
-the residue. The bar's own mispairing tests satisfy the gate by hand
-(``_past_the_pairing_gate``) so that neither mechanism can hide the other's
-failure.
+``test_the_two_pairing_gates_bind_the_ESCALATION_AND_the_propagation``, which
+was the residue and is now the second gate: `Propagation` carries its own
+``query_sha256`` since B11 (audit 0.2.0 B6 re-audit UNSOUND-3), so a stranger
+propagation degrades to UNKNOWN instead of minting. The bar's own mispairing
+tests satisfy BOTH gates by hand (``_past_the_pairing_gate`` and
+``_past_the_propagation_gate``) so that no one of the three mechanisms can
+hide another's failure.
 """
 from __future__ import annotations
 
@@ -334,6 +337,40 @@ def _past_the_pairing_gate(esc, closed):
     return dataclasses.replace(esc, query_sha256=closed.content_hash())
 
 
+def _past_the_propagation_gate(prop, closed):
+    """The mispaired PROPAGATION with its recorded query hash OVERWRITTEN to
+    the query it is about to be stamped against — the second pairing gate,
+    deliberately satisfied by hand, for exactly the reason its sibling above
+    is.
+
+    THERE ARE TWO GATES NOW, AND EVERY BAR MISPAIRING TEST HAS TO GET PAST
+    BOTH. `stelling.propagate.Propagation` gained a `query_sha256` in B11
+    (audit 0.2.0 B6 re-audit UNSOUND-3) and `make_solver_verdict` refuses a
+    propagation that is not the stamped query's — so a mispaired assembly
+    now degrades to UNKNOWN before the bar is consulted at all, which is
+    could-not-fail shape #7 again: a fixture that never reaches the guard's
+    condition. Measured: with only the escalation's hash bypassed, every
+    fixture below returned UNKNOWN with `obligations=()` and the
+    unpaired-propagation note — and the gate returns before
+    `verdict._bar_scope` is called at all, so none of them was reaching the
+    bar to be measured by.
+
+    Bypassing it here changes no fixture's OUTCOME: each of these tests keeps
+    the assertions it carried on `207faca`, unedited, and passes them. That
+    keeps the bar measured as the third, anti-correlated mechanism it is:
+    the escalation gate keys on the escalation's recorded hash, the
+    propagation gate on the propagation's, and the bar on the decided
+    slice's fingerprint and script. None derives from another.
+
+    That the propagation gate itself fires on these same shapes WITHOUT this
+    bypass is `tests/test_propagation_identity.py`, one row per consumption
+    site.
+    """
+    import dataclasses
+
+    return dataclasses.replace(prop, query_sha256=closed.content_hash())
+
+
 def test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query():
     """THE MISPAIRING THE WHOLE-QUERY BAR WAS IMMUNE TO, and the reason the
     scope is derived rather than recorded.
@@ -367,8 +404,8 @@ def test_a_scatter_free_escalation_cannot_clear_a_scatter_BEARING_query():
         "VERIFIED"
     ), "the correctly-paired assembly does not VERIFY; the fixture is wrong"
 
-    v = make_solver_verdict(dirty, prop, _past_the_pairing_gate(esc, dirty),
-                            **VERSIONS)
+    v = make_solver_verdict(dirty, _past_the_propagation_gate(prop, dirty),
+                            _past_the_pairing_gate(esc, dirty), **VERSIONS)
     assert v.status == "UNKNOWN", (
         f"{v.status}: an escalation carrying no scatter cleared the bar on a "
         f"query that does — the bar's scope is being read off the escalation "
@@ -526,7 +563,8 @@ def test_a_mispaired_query_that_still_SLICES_cannot_clear_the_bar(
         "UNKNOWN"
     ), "the correctly-paired assembly does not bar; the fixture is wrong"
 
-    v = make_solver_verdict(el_closed, on_prop,
+    v = make_solver_verdict(el_closed,
+                            _past_the_propagation_gate(on_prop, el_closed),
                             _past_the_pairing_gate(on_esc, el_closed),
                             **VERSIONS)
     assert [o.status for o in v.obligations] == ["discharged"] * len(
@@ -610,7 +648,8 @@ def test_the_collision_could_mint_a_VERIFIED_on_a_REFUTED_query():
         "already separates them and this test is not measuring the collision"
     )
 
-    v = make_solver_verdict(el_closed, on_prop,
+    v = make_solver_verdict(el_closed,
+                            _past_the_propagation_gate(on_prop, el_closed),
                             _past_the_pairing_gate(on_esc, el_closed),
                             **VERSIONS)
     assert [o.status for o in v.obligations] == ["discharged"] * len(
@@ -752,11 +791,23 @@ def test_the_pairing_gate_refuses_the_mispairing_the_bar_only_narrows():
     # this gate exists to refuse. So the refusal above is the gate firing, not
     # some unrelated guard, and not a blanket refusal of mispaired shapes.
     forged = dataclasses.replace(on_esc, query_sha256=el_closed.content_hash())
-    v = make_solver_verdict(el_closed, on_prop, forged, **VERSIONS)
+    v = make_solver_verdict(
+        el_closed, _past_the_propagation_gate(on_prop, el_closed), forged,
+        **VERSIONS)
     assert v.status == "VERIFIED", (
-        f"{v.status}: with the pairing hash forged to match, the assembly no "
-        f"longer reaches the false VERIFIED — so the refusal above is not "
+        f"{v.status}: with BOTH pairing hashes forged to match, the assembly "
+        f"no longer reaches the false VERIFIED — so the refusal above is not "
         f"this gate and this test is measuring something else"
+    )
+    # ... AND THE PROPAGATION GATE IS INDEPENDENTLY LOAD-BEARING HERE: forge
+    # only the escalation's hash and the assembly still refuses, on the other
+    # leg. Neither gate is redundant on this fixture, which is what makes
+    # forging both above a bypass rather than a weakening.
+    only_esc = make_solver_verdict(el_closed, on_prop, forged, **VERSIONS)
+    assert only_esc.status == "UNKNOWN" and only_esc.obligations == (), (
+        f"{only_esc.status}: with the ESCALATION hash forged and the "
+        f"propagation left a stranger, the assembly reached a verdict about "
+        f"this query's obligations anyway"
     )
 
 
@@ -805,52 +856,54 @@ def test_the_pairing_gate_closes_the_SCATTER_FREE_row():
     # and the same non-vacuity control: forge the hash and the false VERIFIED
     # comes right back, so the gate is the only thing standing here
     forged = dataclasses.replace(on_esc, query_sha256=el_closed.content_hash())
-    v = make_solver_verdict(el_closed, on_prop, forged, **VERSIONS)
+    v = make_solver_verdict(
+        el_closed, _past_the_propagation_gate(on_prop, el_closed), forged,
+        **VERSIONS)
     assert v.status == "VERIFIED" and not any(
         "VERIFIED withheld" in n for n in v.notes
     ), (
-        f"{v.status}: with the pairing hash forged the assembly did not mint "
-        f"the false VERIFIED, so this row is being closed by something other "
-        f"than the pairing gate"
+        f"{v.status}: with BOTH pairing hashes forged the assembly did not "
+        f"mint the false VERIFIED, so this row is being closed by something "
+        f"other than the pairing gates"
+    )
+    # ... and, as above, the propagation gate alone also refuses this shape
+    only_esc = make_solver_verdict(el_closed, on_prop, forged, **VERSIONS)
+    assert only_esc.status == "UNKNOWN" and only_esc.obligations == (), (
+        f"{only_esc.status}: with the ESCALATION hash forged and the "
+        f"propagation left a stranger, the assembly reached a verdict about "
+        f"this query's obligations anyway"
     )
 
 
-def test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation():
-    """THE RESIDUE, STATED AND MEASURED rather than left for the next audit.
+def test_the_two_pairing_gates_bind_the_ESCALATION_AND_the_propagation():
+    """THE RESIDUE THIS TEST USED TO DISCLOSE IS CLOSED, and this is the
+    measurement of the mechanism that closed it (audit 0.2.0 B6 re-audit
+    UNSOUND-3, B11).
 
-    The gate binds two of `make_solver_verdict`'s three arguments: `closed`
-    and `escalation`. It does NOT bind `propagation`, and the reason is
-    mechanical — `Propagation` is defined in `stelling.propagate`, which this
-    repair was required to leave at zero line delta, so there is no field on
-    it to record the query in.
+    **What it said before.** The gate bound two of `make_solver_verdict`'s
+    three arguments — `closed` and `escalation` — and NOT `propagation`, "and
+    the reason is mechanical: `Propagation` is defined in
+    `stelling.propagate`, which this repair was required to leave at zero
+    line delta, so there is no field on it to record the query in." That
+    scoping constraint was a per-batch one and it no longer binds:
+    `Propagation` now carries a `query_sha256`, stamped at `propagate`'s
+    single construction site, and every site that consumes a propagation
+    against a query checks it (`tests/test_propagation_identity.py`, one row
+    per site).
 
-    What is left open, exactly: an assembly of (query A, propagation of query
-    B, escalation of query A). The obligations come from B, the discharges
-    from A by index. Measured below — it assembles, and the gate does not stop
-    it.
+    **What is measured here.** The assembly of (query A, propagation of query
+    B, escalation of query A) — the exact residue — now returns UNKNOWN with
+    no obligations and the unpaired-propagation reason, where it returned
+    VERIFIED on `207faca` and on the released `v0.1.0`.
 
-    **AND IT MINTS A FALSE VERIFIED. The sentence that used to stand here —
-    "what is NOT left open is the shape that actually mints a false VERIFIED
-    out of a cached escalation, because the discharges have to come from
-    somewhere and the gate refuses them" — is FALSE, and is measured false by
-    `test_a_mispaired_PROPAGATION_mints_a_false_VERIFIED` below** (audit 0.2.0
-    B6 re-audit, UNSOUND-3). The discharges do not have to come from an
-    escalation: an obligation the interval leg decides outright arrives
-    already `discharged` ON THE PROPAGATION, and the propagation is the
-    argument no identity is checked on. `escalate` hashes the `closed` IT was
-    handed, so the gate sees a genuinely matching (query, escalation) pair
-    and passes; with `carries_work=False` it is not consulted at all. Both
-    forms reach VERIFIED on a query whose honest verdict is REFUTED, on this
-    tree, on `main`, and on the released 0.1.0.
+    **And the two gates are INDEPENDENT, which is the part a single status
+    assertion cannot show.** Each is driven with the other satisfied by hand:
+    the escalation mispairing still RAISES with the propagation paired
+    honestly, and the propagation mispairing still degrades with the
+    escalation's hash forged to match. Neither is doing the other's work.
+    """
+    import dataclasses
 
-    So what the gate binds is exactly one leg, and this test's name is the
-    finding rather than a caveat on it.
-
-    Kept as a live measurement rather than a comment so that closing it later
-    is a test that goes red, not an archaeology exercise. IF THIS TEST FAILS
-    because the assembly no longer returns VERIFIED, the residue has been
-    closed: say so in `SOUNDNESS.md` and rewrite this around the mechanism
-    that closed it, exactly as its predecessor instructed."""
     from stelling.solvers import MispairedEscalationError, make_solver_verdict
 
     true_closed, true_prop, true_esc = _stamped(_scatter_free_TRUE_two_obligations)
@@ -862,30 +915,45 @@ def test_the_pairing_gate_binds_the_ESCALATION_and_not_the_propagation():
         false_closed, false_prop, false_esc, **VERSIONS
     ).status == "REFUTED", "the false query is not false; the fixture is wrong"
 
-    # THE COVERED DIRECTION: the escalation is the thing that discharges, and
-    # it cannot travel to another query.
+    # LEG 1 — the escalation. Driven with the PROPAGATION paired honestly, so
+    # the raise cannot be the propagation gate's doing.
     with pytest.raises(MispairedEscalationError):
         make_solver_verdict(false_closed, false_prop, true_esc, **VERSIONS)
 
-    # THE RESIDUE, MEASURED: the propagation can. Obligations come from the
-    # FALSE query, the discharges from the TRUE query's escalation by index,
-    # and the stamp names the TRUE query — a verdict reporting the false
-    # query's obligations as discharged under the true query's hash.
-    v = make_solver_verdict(true_closed, false_prop, true_esc, **VERSIONS)
-    assert v.status == "VERIFIED", (
-        f"{v.status}: the mixed-propagation assembly no longer VERIFIES — "
-        f"see this docstring's last paragraph before changing this line"
+    # LEG 2 — the propagation. Driven with the ESCALATION's hash forged to
+    # match, so the refusal cannot be the escalation gate's doing.
+    forged = dataclasses.replace(
+        true_esc, query_sha256=true_closed.content_hash())
+    v = make_solver_verdict(true_closed, false_prop, forged, **VERSIONS)
+    assert v.status == "UNKNOWN", (
+        f"{v.status}: the mixed-propagation assembly still reaches a definite "
+        f"verdict — this is the residue UNSOUND-3 was about, reopened"
+    )
+    assert v.obligations == (), (
+        "the mispaired propagation's obligations are still reported under "
+        "this query's name, which is the misattribution the status alone "
+        "does not rule out"
     )
     assert v.stamp.query_content_hash == true_closed.content_hash(), (
         "the stamp does not name the query it was assembled against, which "
-        "would be a different defect from the one this test discloses"
+        "would be a different defect from the one this test measures"
     )
-    assert [o.source_info for o in v.obligations] == [
+    assert v.notes and v.notes[0].startswith("unpaired propagation:")
+
+    # NON-VACUITY: with the propagation's identity ALSO forged, the old
+    # misattribution comes straight back — so what closed the row above is
+    # this gate and not some unrelated guard.
+    v2 = make_solver_verdict(
+        true_closed, _past_the_propagation_gate(false_prop, true_closed),
+        forged, **VERSIONS)
+    assert v2.status == "VERIFIED", (
+        f"{v2.status}: with both identities forged the assembly no longer "
+        f"reaches the misattribution, so this row is being closed by "
+        f"something other than the pairing gates"
+    )
+    assert [o.source_info for o in v2.obligations] == [
         o.source_info for o in false_prop.obligations
-    ], (
-        "the reported obligations are no longer the mispaired propagation's, "
-        "so the misattribution this test measures is not happening"
-    )
+    ], "the forged assembly does not report the stranger's obligations"
 
 
 def _one_factory_two_boxes(lo, hi):
@@ -917,39 +985,36 @@ def _one_factory_interval_decided(lo, hi):
     ],
     ids=["carries-work", "exempt"],
 )
-def test_a_mispaired_PROPAGATION_mints_a_false_VERIFIED(
+def test_a_mispaired_PROPAGATION_can_no_longer_mint_a_false_VERIFIED(
     factory, a_box, b_box, carries_work
 ):
-    """AUDIT 0.2.0 B6 RE-AUDIT, UNSOUND-3 — DISCLOSURE, NOT CONTAINMENT.
+    """AUDIT 0.2.0 B6 RE-AUDIT, UNSOUND-3 — CLOSED IN B11, and this is the
+    row that used to hold the live false VERIFIED.
 
-    `MispairedEscalationError` is real and unconditional on the leg it
-    covers, and the test above measures the residue it leaves. What that
-    test USED TO SAY, and what `solvers.Escalation`'s docstring used to say
-    beside it, is that the residue cannot mint a false VERIFIED "because the
-    discharges have to come from somewhere and the gate refuses them".
-    Measured here, it can, twice over:
+    What it measured, in both arms, on `main` (`dee8bc2`, `207faca`) and on
+    the released `v0.1.0`:
 
     * `carries-work` — `escalate(B, p_A)` hashes the `closed` IT was handed,
-      so `query_sha256 == B.content_hash()` and the pairing gate sees a
-      genuinely matching pair. Nothing in the assembly ever compares
-      `p_A` with `B`.
-    * `exempt` — with an obligation the interval leg decides outright, the
-      escalation carries no records, no notes, no spawns and no stamps,
-      `carries_work` is False, and the gate is bypassed entirely. The
-      discharge rides in ON THE PROPAGATION, with no solver record anywhere.
+      so `query_sha256 == B.content_hash()` and the escalation pairing gate
+      saw a genuinely matching pair. Nothing in the assembly compared `p_A`
+      with `B`.
+    * `exempt` — with an obligation the interval leg decides outright the
+      escalation carried no records, no notes, no spawns and no stamps,
+      `carries_work` was False, and the escalation gate was bypassed
+      entirely. The discharge rode in ON THE PROPAGATION, with no solver
+      record anywhere.
 
-    Both reach VERIFIED on a query whose honest verdict is REFUTED, on this
-    tree, on `main` (`dee8bc2`) and on the released `v0.1.0`.
+    Both reached VERIFIED on a query whose honest verdict is REFUTED.
 
-    THE FIX IS NOT HERE. The identity belongs on the `Propagation` and must
-    be checked wherever a propagation is consumed against a query, which is
-    cross-module work scheduled as its own change. This test's job is to
-    stop the tree CLAIMING containment it does not have, and to go red the
-    day it gets it: **if this test fails because the assembly no longer
-    VERIFIES, the residue has been closed** — say so in `SOUNDNESS.md`, in
-    `CHANGELOG.md` and in `Escalation`'s docstring, all three of which
-    currently disclose it, and rewrite this around the mechanism that
-    closed it."""
+    **THE FIX IS NOW HERE** — `Propagation.query_sha256`, stamped by
+    `propagate` and checked at every site that consumes a propagation against
+    a query. Both arms return UNKNOWN with no obligations, and the
+    non-vacuity control below forges the identity to show that this gate is
+    what closed them. `SOUNDNESS.md`, `CHANGELOG.md` and
+    `solvers.Escalation`'s docstring — the three places that disclosed the
+    residue — now record it closed, and `tests/test_propagation_identity.py`
+    holds one row per consumption site.
+    """
     from stelling.propagate import propagate
     from stelling.solvers import SolverConfig, escalate, make_solver_verdict
 
@@ -965,25 +1030,42 @@ def test_a_mispaired_PROPAGATION_mints_a_false_VERIFIED(
         f"longer measures a FALSE verified"
     )
 
-    esc = escalate(b, p_a, cfg)
+    # the arm this case names, read off A's OWN escalation: `escalate(B, p_A)`
+    # now declines with a note, so it can no longer report which arm it is.
+    # What decides whether the ESCALATION gate is consulted at all is whether
+    # the propagation being mispaired forward has anything left to escalate.
+    own = escalate(a, p_a, cfg)
     assert bool(
-        esc.records or esc.notes or esc.ledger.spawns or esc.ledger.stamps
+        own.records or own.notes or own.ledger.spawns or own.ledger.stamps
     ) is carries_work, (
         "this case no longer exercises the carries_work arm it names"
     )
-    assert esc.query_sha256 == b.content_hash() or not carries_work, (
-        "the escalation does not name B, so the gate would refuse it and "
-        "this case would be measuring the covered direction instead"
-    )
 
-    v = make_solver_verdict(b, p_a, esc, **VERSIONS)
-    assert v.status == "VERIFIED", (
-        f"{v.status}: the mispaired-propagation assembly no longer mints a "
-        f"false VERIFIED — see this test's docstring before changing the line"
+    esc = escalate(b, p_a, cfg)
+    assert esc.query_sha256 == b.content_hash(), (
+        "the escalation does not name B, so the ESCALATION gate would refuse "
+        "it and this case would be measuring the covered direction instead"
     )
+    v = make_solver_verdict(b, p_a, esc, **VERSIONS)
+    assert v.status == "UNKNOWN", (
+        f"{v.status}: the mispaired-propagation assembly minted again — see "
+        f"this test's docstring before changing the line"
+    )
+    assert v.obligations == () and v.notes[0].startswith("unpaired propagation:")
     assert v.stamp.query_content_hash == b.content_hash(), (
         "the stamp names a query other than the one it was assembled "
         "against, which would be a different defect from this one"
+    )
+
+    # NON-VACUITY: forge the propagation's identity and the false VERIFIED
+    # comes straight back, so this gate is what closed the row above.
+    laundered = _past_the_propagation_gate(p_a, b)
+    back = make_solver_verdict(b, laundered, escalate(b, laundered, cfg),
+                               **VERSIONS)
+    assert back.status == "VERIFIED", (
+        f"{back.status}: with the propagation's identity forged the assembly "
+        f"no longer mints, so this row is being closed by something other "
+        f"than the propagation pairing gate"
     )
 
 
@@ -1103,16 +1185,29 @@ def test_the_pairing_gate_refuses_an_EMPTY_hash_and_not_only_a_DIFFERENT_one(
     assert "StampError" not in type(exc.value).__name__
 
 
-def test_the_pairing_gate_costs_no_additional_hash():
-    """THE COST, AS A MECHANISM RATHER THAN AS A TIMING. `make_solver_verdict`
-    already took `closed.content_hash()` for the stamp; the gate compares that
-    same value, so binding the escalation to the query adds ZERO hashes to
-    assembly. Counted, not timed — a timing would be a flaky way to assert a
-    structural property, and the structural property is the claim.
+def test_the_pairing_gates_cost_no_additional_hash():
+    """THE COST, AS A MECHANISM RATHER THAN AS A TIMING, AND ATTRIBUTED BY
+    CALL SITE. `make_solver_verdict` already took `closed.content_hash()` for
+    the stamp; BOTH pairing gates — the escalation's and the propagation's —
+    compare that same value, so binding either argument to the query adds
+    ZERO hashes to the assembly's own frame. Counted, not timed: a timing
+    would be a flaky way to assert a structural property, and the structural
+    property is the claim.
 
-    `escalate` pays one hash, once per escalation, which is measured in
-    `SOUNDNESS.md` against the solver work it sits beside.
+    **ATTRIBUTED, because a bare count stopped being able to say which claim
+    it was making.** `verdict._bar_scope` calls `propagate(closed)` — a whole
+    re-propagation, to read the query's relational assumes — and since B11
+    `propagate` takes one hash to stamp `Propagation.query_sha256`. So a
+    bar-scoped assembly takes two hashes, one from each frame, and the claim
+    this test exists for is about the first. Both are asserted by name: the
+    assembly's own frame takes exactly one, and every other hash in the call
+    is attributed to `propagate`'s stamping site.
+
+    The hash `propagate` pays is measured against the walk it is stamped onto
+    in `SOUNDNESS.md`; so is the one `escalate` pays, once per escalation.
     """
+    import traceback
+
     from stelling import ir
     from stelling.solvers import make_solver_verdict
 
@@ -1122,7 +1217,10 @@ def test_the_pairing_gate_costs_no_additional_hash():
     real = ir.ClosedJaxpr.content_hash
 
     def counted(self):
-        calls.append(id(self))
+        calls.append([
+            (f.name, f.filename.rsplit("/", 1)[-1])
+            for f in traceback.extract_stack()[:-1]
+        ][-3:])
         return real(self)
 
     ir.ClosedJaxpr.content_hash = counted
@@ -1132,10 +1230,18 @@ def test_the_pairing_gate_costs_no_additional_hash():
         ir.ClosedJaxpr.content_hash = real
 
     assert v.stamp.query_content_hash == real(closed)
-    assert len(calls) == 1, (
-        f"assembly took {len(calls)} content_hash() call(s); the gate and the "
-        f"stamp must share one. Taking it twice is a real cost on every "
-        f"verdict and the two could drift"
+    own = [c for c in calls
+           if any(n == "make_solver_verdict" for n, _ in c)
+           and not any(n == "propagate" for n, _ in c)]
+    assert len(own) == 1, (
+        f"the assembly's own frame took {len(own)} content_hash() call(s); "
+        f"the two gates and the stamp must share one. Taking it more than "
+        f"once is a real cost on every verdict and the values could drift"
+    )
+    stamping = [c for c in calls if any(n == "propagate" for n, _ in c)]
+    assert len(own) + len(stamping) == len(calls), (
+        f"a content_hash() in this assembly is attributable neither to "
+        f"`make_solver_verdict` nor to `propagate`'s identity stamp: {calls}"
     )
 
 
@@ -2073,7 +2179,9 @@ def test_nothing_in_the_assembly_reads_a_field_it_is_not_allowed_to():
     el_closed = trace(_scatter_ELSEWHERE_same_shape)
     mispaired = _watched_escalation(
         _past_the_pairing_gate(esc, el_closed), log)
-    v2 = make_solver_verdict(el_closed, prop, mispaired, **VERSIONS)
+    v2 = make_solver_verdict(
+        el_closed, _past_the_propagation_gate(prop, el_closed), mispaired,
+        **VERSIONS)
     assert v2.status == "UNKNOWN", v2.status
 
     extra = log - _ALLOWED_READS
