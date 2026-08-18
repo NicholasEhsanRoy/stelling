@@ -1042,10 +1042,11 @@ jobs:
   # VERIFIED. In the same tree `tests/test_soundness_wrap_reproducer.py`
   # passes 17/17, so the defect is live from both directions.
   #
-  # A CLAIM THAT WAS CHECKED AND NOT OBSERVED, recorded so nobody spends the
-  # afternoon again: that this oracle XPASSes when the whole `tests/` tree is
-  # collected, flipped at import time by a module-scope import elsewhere in
-  # the suite. Nine configurations at 3482822, every one of them XFAIL: the
+  # A CLAIM THAT SPLIT IN TWO WHEN IT WAS CHECKED. The half about WHOLE-TREE
+  # collection is right and is recorded here so nobody spends the afternoon
+  # again; the half about a single module is WRONG, and the correction below
+  # is the more useful fact of the two. Nine configurations at 3482822,
+  # every one of them XFAIL: the
   # oracle module alone; the whole `tests/` tree collected with `-k`
   # selecting only the oracle, so every module-scope import in the suite
   # runs and one test executes — 7 s, and the cheap instrument for this
@@ -1055,8 +1056,51 @@ jobs:
   # to end on jax 0.11.0 with solvers (3910 passed, 13 skipped, 1 xfailed,
   # exit 0 -- the same run the figure further down this block cites, and the
   # jax is named here because the venv described above is a DIFFERENT one,
-  # solver-free and floating to 0.11.1). If collecting every module at once
-  # does not flip it, no single module does.
+  # solver-free and floating to 0.11.1).
+  #
+  # BUT THE INFERENCE THAT USED TO CLOSE THIS PARAGRAPH -- "if collecting
+  # every module at once does not flip it, no single module does" -- IS
+  # FALSE. This oracle CAN XPASS, deterministically, and whether it does is
+  # decided by WHICH local modules the session imported, not by how many.
+  # Co-collecting one ordinary module flips it, even fully deselected, at
+  # 3482822 and after:
+  #
+  #     python -m pytest -q \
+  #       tests/property/test_oracle.py::test_a_verified_is_true_at_every_admitted_point \
+  #       tests/test_sqrt_row.py --deselect tests/test_sqrt_row.py
+  #       -> 1 failed, 15 deselected     [XPASS(strict)]
+  #
+  # THE MECHANISM, measured rather than guessed. hypothesis mixes a pool of
+  # integer constants harvested from every LOCAL non-test module in
+  # `sys.modules` into generation (`hypothesis.internal.conjecture.providers.
+  # _get_local_constants`, cached under `.hypothesis/constants/`).
+  # `tests/test_sqrt_row.py` contributes nothing itself -- test files are
+  # excluded -- but importing it pulls in `src/stelling/obligation.py`, which
+  # is full of them. Pool size at the FIRST generated input:
+  #
+  #     oracle alone                            2  -> XFAIL
+  #     oracle + `import stelling.obligation`  274 -> XPASS(strict)
+  #     whole `tests/` collected, -k oracle    633 -> XFAIL
+  #
+  # so a BIGGER pool is not a better search, which is exactly why whole-tree
+  # collection does not flip it and one module does -- and why the old
+  # inference read backwards. Control: freezing the pool to empty makes both
+  # sessions XFAIL and the flip disappears. It is NOT the example database:
+  # `ci` forces `derandomize=True` so `database=None`, and deleting
+  # `.hypothesis/` changes neither outcome.
+  #
+  # WHAT IT DOES NOT MEAN: stelling's behaviour does not change and the
+  # defect is not masked. `tests/test_soundness_wrap_reproducer.py` passes
+  # 17/17 in BOTH sessions. This is an artifact of which examples the search
+  # draws, and nothing more.
+  #
+  # WHY IT MATTERS ANYWAY, and this is the trap. The guard below tells
+  # whoever meets an XPASS "if the wrap remedy landed, delete the marker".
+  # IT HAS NOT LANDED. Deleting a strict marker on a live defect is how a
+  # detector goes quiet, so an XPASS seen in some other session is a
+  # statement about that session's import set and NOT evidence the defect is
+  # gone. Check `tests/test_soundness_wrap_reproducer.py` before believing
+  # any XPASS here.
   #
   # `tests/property/test_oracle.py::test_a_verified_is_true_at_every_admitted_point`
   # FAILS on `main` today. It finds the open integer-literal wrap defect
