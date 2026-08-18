@@ -636,9 +636,42 @@ class ClosedJaxpr:
 
 # --- serialization ---------------------------------------------------------
 #
-# Tagged, recursive, and closed over exactly the types above. ``to_dict`` /
-# ``from_dict`` must round-trip losslessly: that is tested, and the content
+# Tagged, recursive, and closed over exactly the types above. The content
 # hash is defined over this encoding.
+#
+# ``to_dict`` / ``from_dict`` ROUND-TRIP LOSSLESSLY OVER THE OBJECTS THE
+# LOAD DOOR ACCEPTS — which is not every object ``to_dict`` will encode,
+# and this paragraph said it was until B12's own review. What is true, and
+# is what the hash and every persisted verdict rest on:
+#
+#   * Every `ClosedJaxpr` `from_dict` RETURNS re-encodes and reloads to
+#     itself with its `content_hash` preserved. That is not a corpus
+#     result: the load rules are functions of the LOADED object, so
+#     accepting a document is accepting its re-encoding.
+#   * So does every query the TRACE FACE produces — measured, over the B12
+#     census's 170-document legitimate population (every zero-argument
+#     harness in the property corpus, the tag probes and the hand-built
+#     bases, covering all 15 tags): 170 of 170 exact, hash preserved.
+#
+# WHAT IS NOT COVERED, and is each rule's stated scope arriving at the
+# other face rather than a hole: TWO REFUSALS RUN ON THE LOAD PATH ONLY,
+# so their subjects are CONSTRUCTIBLE AND NOT RELOADABLE.
+# :func:`_validate_required_params` refuses a `JaxprEqn` missing a param
+# jax supplies on every traced instance of its primitive, and hand-built
+# IR legitimately omits params. :func:`_validate_decl_nonempty` refuses a
+# `stelling_any` declaring an EMPTY set — ``(inf, inf)``, ``(nan, hi)``,
+# ``lo > hi`` — which the suite builds THROUGH THE CONSTRUCTOR on purpose,
+# over operands no `any_array` will produce; moving that rule to the
+# constructor turns 11 pre-existing tests red across four files, measured
+# and broken down in its own docstring. Both encode without complaint and
+# are then refused by `from_dict`. Nothing is silent about it: the refusal
+# is a `TranscriptionError`, it mints no verdict, and `content_hash` is
+# computed from `to_dict` alone and is unaffected.
+#
+# `tests/test_document_schema.py` pins both halves and ENUMERATES the
+# load-only rules from this file's own call graph rather than from this
+# list, so a third one cannot arrive without that test going red and
+# naming this paragraph.
 #
 # WHY THE `isinstance` CHAINS BELOW ARE NOT THE ONES THE DOOR REPLACED,
 # and the sweep's verdict on them, so the next reader does not have to
@@ -1010,15 +1043,28 @@ def _doc_keys(obj: dict, tag: str, required: tuple[str, ...],
               optional: tuple[str, ...] = ()) -> None:
     """The KEYS a tagged object carries: exactly the ones `_encode` writes.
 
-    THE LAST OF THE READER'S RAW ESCAPES — audit 0.2.0 B12. Every one of
+    THE LAST OF THE READER'S RAW ESCAPES OVER THE B12 CENSUS SWEEP —
+    audit 0.2.0 B12, and the scope is part of the claim. Every one of
     this reader's ``obj["…"]`` reads was unguarded, so DELETING any required
     key from a document produced a raw `KeyError` out of `from_dict`: 880 of
-    the 20,424 cells of the B12 census sweep, and the only exception type
+    the 20,424 cells of that sweep, and the only exception type
     left in that column once the schema rules above are in place. A
     `KeyError` is loud and cannot mint a verdict, so this is the robustness
     half of the finding rather than the soundness half — but
     ``except TranscriptionError`` catches none of it, which is what the
     census names as the sharp edge of the residual class.
+
+    THE SWEEP IS SINGLE-POSITION AND FINITE-VALUED, AND ONE RAW ESCAPE
+    LIVES OUTSIDE IT, unfixed by this rule and untouched by this batch:
+    `_decode` recurses, so a ``{"k":"tuple","items":[…]}`` chain deep
+    enough exhausts the interpreter stack and `from_dict` raises a bare
+    `RecursionError`. It is reachable from PURE JSON — ``json.loads`` and
+    ``json.dumps`` both accept the chain — and measured identically on
+    `a4e4056` and here: depth 400 accepted and round-tripping, depth 900
+    and 2000 a raw `RecursionError`, at the interpreter default limit of
+    1000. Pre-existing, orthogonal to the key rule, and reported rather
+    than repaired here because bounding a recursive reader's DEPTH is a
+    different question with its own limit to choose.
 
     AND THE OTHER DIRECTION, which the census's single-position sweep could
     not reach because it only ever REPLACED a value that was already there:
@@ -1865,11 +1911,21 @@ def _register_stored_type(cls: type) -> type:
 
     WHAT BOUNDS IT INSTEAD, all three measured rather than argued:
 
-    * NO DOCUMENT REACHES THIS ARM. `_encode` refuses a registered value
-      (``stelling.ir cannot encode IntervalArray``, so `to_dict` and
-      `content_hash` both raise) and `_decode` has no tag for one
-      (``unknown tag 'interval'``). A registered value can only come from
-      a caller who built it in this process.
+    * NO DOCUMENT REACHES THIS ARM, and the whole reason is `_decode`: it
+      has no tag for a registered type (``unknown tag 'interval'``), so no
+      JSON document can produce one and a registered value can only come
+      from a caller who built it in this process. **NOT `_encode`, which
+      this paragraph also named until B12's own review.** `_encode`
+      refuses a registered value (``stelling.ir cannot encode
+      IntervalArray``) only in the arms where it RECURSES — a `ClosedJaxpr`
+      whose ``consts`` hold one does raise out of `to_dict`, correctly.
+      At the slots it writes STRAIGHT THROUGH, ``to_dict()`` returns a
+      dict with the `IntervalArray` sitting in it and raises nothing:
+      **18 such positions, measured, not read off this list** — see the
+      door narrative below :func:`_encode` for the enumeration and for
+      the same correction at the other site. `content_hash` does still
+      raise on such an object, from `json.dumps` rather than from this
+      module, which is loud but is not this file refusing anything.
     * A SUBCLASS OF A REGISTERED TYPE IS REFUSED, not carried: membership
       is ``id(type(obj))`` against :data:`_STORED_AS_IS`, which is the
       registered type itself, so the property-backed variant has to be
@@ -2239,10 +2295,46 @@ def _refuse_uncanonical(exc: _NotCanonical, where: str) -> None:
 # cannot name it and does not. A registered type is therefore accepted at
 # ANY field, uniformly, because registration IS the declaration that this
 # module carries the value without judging it — and because no document can
-# reach one: `_decode` has no tag for it and `_encode` refuses to encode
-# one, so the only way one arrives is a caller who built it and put it
-# there. Scoping the exception to `consts` would be the enumeration this
-# whole door replaces, and would be a narrower claim than the truth.
+# reach one: `_decode` has NO TAG for it, so no JSON document produces one
+# and the only way one arrives is a caller who built it and put it there.
+# Scoping the exception to `consts` would be the enumeration this whole
+# door replaces, and would be a narrower claim than the truth.
+#
+# THE ARGUMENT RESTS ON `_decode` ALONE, and it used to rest on `_encode`
+# as well — *"`_encode` refuses to encode one"* — which is false at the
+# positions this exception is widest at. B12's own review, on B12's tree.
+# `_encode` refuses a registered value only in the arms where it RECURSES:
+# a `ClosedJaxpr` whose ``consts`` hold one raises ``stelling.ir cannot
+# encode IntervalArray``, correctly. At a slot it writes STRAIGHT THROUGH
+# with no type test, ``to_dict()`` does NOT raise — it returns a dict with
+# the `IntervalArray` sitting in the slot. **EIGHTEEN POSITIONS, MEASURED
+# BY DRIVING EVERY ONE OF THEM**, because an enumeration written by hand
+# was wrong the first time this paragraph tried it:
+#
+#     <aval>.kind  <aval>.dtype  <aval>.weak_type  <var>.id
+#     <enum>.cls  <enum>.member  <sentinel>.cls  <opaque>.cls
+#     <treedef>.text  <ntuple>.cls  <ntuple>.fields KEY
+#     <eqn>.primitive  <eqn>.effects[*]  <eqn>.source_info[*]
+#     <dbg>.func  <dbg>.arg_names[*]  <dbg>.result_paths[*]
+#     <jaxpr>.effects[*]
+#
+# The non-recursing slots NOT in that list never get that far, because a
+# registered value at them is refused AT CONSTRUCTION: `<aval>.shape[*]`
+# and `<array>.shape[*]` by the extent rule (`_load_extents` wants
+# ``__index__``), `<eqn>.params` KEYS by `_canonical_param_keys` — all
+# three a `TranscriptionError` — and `<array>.dtype` / `<array>.data` by
+# `Array.__post_init__`'s own ``len()`` reads, which raise a plain
+# `TypeError`. `<complex>.re`/`.im` are read off a `complex` object, so
+# nothing else can be there at all.
+#
+# (`content_hash` DOES still raise on such an object — from `json.dumps`,
+# which is loud and is not this module deciding anything.) The conclusion
+# is unharmed because it never needed the `_encode` half: a document is
+# JSON, JSON reaches this module through `_decode`, and `_decode` has no
+# tag. `tests/test_document_schema.py` pins that half, drives all
+# eighteen positions above, and checks its own position set against
+# `_encode`'s AST — so neither the argument nor the enumeration is a
+# sentence anybody has to re-derive.
 #
 # THE FIELDS WITH A STRONGER RULE OF THEIR OWN ARE SKIPPED, exactly as they
 # already were: an `Aval`'s and an `Array`'s ``shape`` (`_load_extents`
@@ -2836,11 +2928,44 @@ def _validate_decl_nonempty(eqn: "JaxprEqn", where: str) -> None:
     DECLARATION API — the sentence a user writes — and a document claims to
     be a persisted traced query, so it may not carry a declaration that API
     would have refused. `ir.JaxprEqn` is the constructor underneath both,
-    and `tests/test_ieee_semantics.py` builds ``(inf, inf)`` and ``(nan,
-    hi)`` declarations through it on purpose, to drive the ieee transfers
-    over an operand no `any_array` will produce. Refusing those at
+    and the suite builds infinite and NaN declarations through it on
+    purpose, over operands no `any_array` will produce. Refusing those at
     construction would delete a tested capability to close a document
     surface, which is a wider change than the defect asks for.
+
+    **HOW MUCH CAPABILITY, MEASURED RATHER THAN NAMED**, because the first
+    spelling of this paragraph named one file and the count is four.
+    Calling this function from `JaxprEqn.__post_init__` instead — the
+    whole of the change — turns **11 pre-existing tests red across four
+    files**: 7 in `tests/test_ieee_semantics.py`, whose ``(inf, inf)``
+    declarations drive the maybe-NaN flag through `ne`/`eq`/`pow`/`min`/
+    `max`; 2 in `tests/test_transfers.py`, the non-finite
+    `scatter`/`gather` index declines; 1 in
+    `tests/test_ieee_zero_divisor_and_mul_exact.py`; and 1 in
+    `tests/test_undecided_detail.py` — ``test_declined_declaration_side_
+    points_at_the_declaration``, **which is where the ``(nan, hi)``
+    declaration actually lives**, and not in the ieee file this paragraph
+    used to credit it to. The capability itself is pinned in one place —
+    `tests/test_document_schema.py::test_the_emptiness_rule_is_the_LOAD_doors_and_not_the_constructors`
+    constructs a witness for each of the two refusals in each direction —
+    so the argument rests on a test in this repository rather than on a
+    list of other files' names.
+
+    **AND THAT MAKES THOSE OBJECTS CONSTRUCTIBLE AND NOT RELOADABLE**,
+    which is the price of the choice and is stated HERE because this is
+    where a reader will look for it. ``ClosedJaxpr.from_dict(cj.to_dict())``
+    raises `TranscriptionError` for every declaration this function
+    refuses: `to_dict` encodes it without complaint, and the document it
+    writes is one `from_dict` will not take back. The same has always been
+    true of :func:`_validate_required_params`' subject — a params-less
+    equation — and those two are the whole of the exception, enumerated
+    from this file's call graph by `tests/test_document_schema.py` rather
+    than from this sentence. It is not a soundness hole: the refusal is
+    loud, mints no verdict, and leaves `content_hash` — a function of
+    `to_dict` alone — untouched. It is a bound on what "round-trips"
+    means, the serialization comment above :func:`_encode` claimed there
+    was none, and the batch that added this rule widened the bound by two
+    classes without noticing. Both are corrected there.
 
     It also leaves something unsettled that this function is not the place
     to settle, recorded so the next reader does not mistake it for an

@@ -10270,7 +10270,19 @@ in place and marked.*
   geometry the operands do not have, is still admitted and is still the
   slicer's and the transfers' problem — `obligation._Slicer.
   _one_shape_per_value` is what stands between a lying document and a
-  verdict, and B6's entry above says so.
+  verdict, and B6's entry above says so. **And the residue is not only a
+  precision one: it still contains an UNCATCHABLE CRASH OUT OF A PUBLIC
+  ENTRY POINT**, which this log's degrade-don't-crash posture is against
+  wherever it is reachable. An ARITY is not a type, so a well-typed but
+  SHORT `<eqn>.invars` for a known primitive loads and then raises a bare
+  `TypeError` (`gt() missing 1 required positional argument`,
+  `propagate.py:3827`) or `IndexError` (`list index out of range`,
+  `propagate.py:3941`) out of `propagate()` — neither catchable by
+  `except TranscriptionError`. Pre-existing and measured identical on
+  `a4e4056`; the type rule narrows the population that reaches it and
+  closes none of it. Closing it means a per-primitive ARITY check on the
+  load path, which is the per-primitive inference this door scopes out in
+  writing, so it is reported here rather than added.
 
 - **2026-08-18 (B12): FALSE VERIFIED — a persisted `stelling_any` could
   declare an EMPTY set, which verifies every universal claim over it
@@ -10335,11 +10347,17 @@ in place and marked.*
   load-only because hand-built IR legitimately omits params. This one is
   load-only because the two faces ask about different things: `any_array`
   is the DECLARATION API and a document claims to be a persisted product
-  of it, while `ir.JaxprEqn` is the constructor underneath both and
-  `tests/test_ieee_semantics.py` builds `(inf, inf)` and `(nan, hi)`
-  declarations through it on purpose, to drive the ieee transfers over an
-  operand no `any_array` will produce. Refusing those at construction
-  would delete a tested capability in order to close a document surface.
+  of it, while `ir.JaxprEqn` is the constructor underneath both and the
+  suite builds `(inf, inf)` and `(nan, hi)` declarations through it on
+  purpose, over operands no `any_array` will produce. Refusing those at
+  construction would delete a tested capability in order to close a
+  document surface — **11 pre-existing tests across four files, measured
+  by moving the rule to `JaxprEqn.__post_init__`**: 7 in
+  `tests/test_ieee_semantics.py`, 2 in `tests/test_transfers.py`, 1 in
+  `tests/test_ieee_zero_divisor_and_mul_exact.py`, and 1 in
+  `tests/test_undecided_detail.py`, which is where the `(nan, hi)`
+  declaration actually lives. This paragraph credited all of it to the
+  ieee file until the batch's own review re-ran the experiment.
 
   **AND SOMETHING THIS ENTRY DOES NOT SETTLE, recorded so it is not
   mistaken for an oversight.** `any_array`'s `(inf, inf)` refusal is

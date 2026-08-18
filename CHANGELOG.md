@@ -319,7 +319,17 @@ in `/home/nick/venvs/stelling-jax` (jax 0.11.0, python 3.12.3), 2026-08-18.
   never the VALUE: `ir.py` scopes per-primitive shape inference out of the
   load door in writing, and a document whose primitive is a plausible but
   wrong NAME, or whose extents are integers that lie, is still admitted
-  and is still the slicer's problem. `from_dict` also has two refusal
+  and is still the slicer's problem. **And the residue includes an
+  UNCATCHABLE CRASH OUT OF A PUBLIC ENTRY POINT, which is a robustness
+  regression against `SOUNDNESS.md`'s degrade-don't-crash posture and not
+  only a precision one**: an ARITY the type rule cannot see — a well-typed
+  but SHORT `<eqn>.invars` for a known primitive — loads, and then
+  `propagate()` raises a bare `TypeError` (`gt() missing 1 required
+  positional argument`, `propagate.py:3827`) or `IndexError` (`list index
+  out of range`, `propagate.py:3941`), which `except TranscriptionError`
+  does not catch. Pre-existing and identical on `a4e4056`; this batch
+  narrows the population that reaches it and closes none of it.
+  `from_dict` also has two refusal
   SHAPES — `TranscriptionError` for everything this batch adds, and the
   reader's three older `ValueError` arms — and unifying them is a change
   to a public error surface that two tests pin, so it is reported and not
@@ -333,30 +343,56 @@ in `/home/nick/venvs/stelling-jax` (jax 0.11.0, python 3.12.3), 2026-08-18.
   slicer is still measured with the door not in front of it; the test
   helper that built declarations with integer bounds records `float(lo)`,
   which is what `any_array` would have recorded anyway. The EMPTINESS
-  refusal is on the LOAD path only, so `tests/test_ieee_semantics.py` can
-  go on building `(inf, inf)` and `(nan, hi)` declarations to drive the
-  ieee transfers — the two faces are asking about different things, and
-  `_validate_decl_nonempty`'s docstring says which.
+  refusal is on the LOAD path only, so the suite can go on building
+  `(inf, inf)` and `(nan, hi)` declarations through the constructor — the
+  two faces are asking about different things, and
+  `_validate_decl_nonempty`'s docstring says which. **How much capability
+  that protects is now MEASURED there and not named**: moving the rule to
+  `JaxprEqn.__post_init__` turns **11 pre-existing tests red across four
+  files** — 7 in `tests/test_ieee_semantics.py`, 2 in
+  `tests/test_transfers.py`, 1 in
+  `tests/test_ieee_zero_divisor_and_mul_exact.py` and 1 in
+  `tests/test_undecided_detail.py`, which is where the `(nan, hi)`
+  declaration actually is. This paragraph and that docstring both credited
+  the whole of it to the ieee file alone.
 
-  **Suite**: 3798/10 and 3799/9 at `a4e4056`; **3861 passed / 10 skipped**
-  with `JAX_ENABLE_X64=1` and **3862 / 9** without on this commit. The
-  delta is exactly the 63 tests of the new
+  **Suite**: 3798/10 and 3799/9 at `a4e4056`; **3869 passed / 10 skipped**
+  with `JAX_ENABLE_X64=1` and **3870 / 9** without on this commit. The
+  delta is exactly the 71 node ids of the new
   `tests/test_document_schema.py`; the skip sets are unchanged in both
   environments and still differ by exactly `test_tripwire_arm.py:643`. No
   pre-existing test changed status. **Each rule was reverted ALONE** and
   the new file re-run, so the coverage is attributed rather than assumed:
 
-  | reverted alone | tests red |
-  |---|---|
-  | the field-annotation rule (`_matches_spec` to "everything matches") | 6 |
-  | the `lo`/`hi` TYPE rule and its install | 3 |
-  | the `lo`/`hi` EMPTINESS refusal | 1 |
-  | the sequence-container rule (`_doc_sequence` back to `tuple(v)`) | 2 |
-  | the document-KEY rule | 3 |
-  | the `<array>.data` / `<complex>` leaf gates | 2 |
+  **BOTH UNITS ARE GIVEN, because the file has 30 test FUNCTIONS and 71
+  NODE IDS and a table in one unit beside a sentence in the other cannot
+  be reconciled by a reader who is not told** — which is what this table
+  did until B12's own review, in a batch whose subject is writing one
+  identity across two faces.
 
-  On `a4e4056` itself the whole file is **49 of 63 red**; the 14 that pass
-  there are the ones asserting that a legitimate document still loads.
+  | reverted alone | test functions red | node ids red |
+  |---|---|---|
+  | the field-annotation rule (`_matches_spec` to "everything matches") | 7 | 13 |
+  | the `lo`/`hi` TYPE rule and its install | 4 | 22 |
+  | the `lo`/`hi` EMPTINESS refusal | 2 | 7 |
+  | the sequence-container rule (`_doc_sequence` back to `tuple(v)`) | 3 | 3 |
+  | the document-KEY rule | 4 | 4 |
+  | the `<array>.data` / `<complex>` leaf gates | 2 | 2 |
+
+  **THE ROWS DO NOT PARTITION AND ARE NOT MEANT TO**: they sum to 22
+  functions / 51 node ids over a UNION of 15 / 44, because several
+  functions are red under more than one revert; the control with nothing
+  reverted is 0 / 0. On `a4e4056` itself the whole file is **55 of 71
+  node ids red, which is 23 of 30 functions** — a figure the rows cannot
+  be summed to, and not only because they overlap: 8 of those 23 are red
+  under NO single revert, being the ones that read the new API's own
+  correspondence (`_spec_of` over every field, `_doc_keys` against
+  `_encode`'s own output, the load-only rules off the call graph) or the
+  corrected sentences, none of which exist at `a4e4056` to read. Of the
+  16 node ids green there, 11 assert that a legitimate document still
+  loads, 3 are checks `a4e4056` already satisfies for other reasons, and
+  2 pin `_encode`'s straight-through behaviour at its non-recursing
+  slots, which is identical on both trees and is the point of them.
 
   **The message-totality control gained a THIRD knob**, and that is a
   finding rather than a maintenance chore. The field-annotation rule sits
@@ -370,6 +406,58 @@ in `/home/nick/venvs/stelling-jax` (jax 0.11.0, python 3.12.3), 2026-08-18.
   CONFIGURATIONS rather than over the deepest one, and the headline
   quote-site figure is **13** (was 11): 11 the sweep reaches in one
   configuration or the other, plus the 2 only the driven rows reach.
+
+  **SIX SENTENCES THIS BATCH SHIPPED WERE READ AGAINST THE CODE BESIDE
+  THEM AND CORRECTED**, five of them added by this batch (item 2 also
+  correcting a pre-existing copy of the same claim) and the first one
+  falsified by it without being touched. They are listed because the
+  pattern — a repair whose own prose overstates it — is the one this
+  campaign has caught over and over, repeatedly inside the fix meant to
+  close the previous instance.
+  1. *"`to_dict` / `from_dict` must round-trip losslessly"* was
+     unconditional and is not true: `_validate_required_params` and
+     `_validate_decl_nonempty` run on the LOAD path only, so their subjects
+     are CONSTRUCTIBLE AND NOT RELOADABLE. The params-less form was already
+     so at `a4e4056`; **this batch widened the class by two — `(inf, inf)`
+     and `(nan, hi)` — which are exactly the declarations
+     `_validate_decl_nonempty`'s own docstring promises stay
+     constructible**. Fails closed, mints no verdict, leaves `content_hash`
+     alone. The bound is now stated at both paragraphs and pinned by
+     `tests/test_document_schema.py`, which enumerates the load-only rules
+     from `ir.py`'s call graph so a third cannot arrive silently.
+  2. The field rule's widest exception was licensed with *"no document can
+     reach one: `_decode` has no tag for it **and `_encode` refuses to
+     encode one**"*. The second half is false: `_encode` refuses a
+     registered value only in the arms where it RECURSES, and at **18
+     measured positions** — `<eqn>.primitive`, `<aval>.kind`/`.dtype`/
+     `.weak_type`, `<var>.id` and the rest, enumerated in `ir.py` — it
+     writes the object straight through and `to_dict()` does not raise.
+     The conclusion survives on `_decode` alone; both paragraphs now rest
+     it there. `tests/test_document_schema.py` drives all 18 and checks
+     its own position set against `_encode`'s AST, so a slot added to the
+     encoding later cannot go undriven and the enumeration cannot quietly
+     grow. (A hand-written enumeration was wrong on its first attempt, in
+     this same review — which is why it is now checked against the AST.)
+  3. The revert table above was in test FUNCTIONS and the sentence beside
+     it in NODE IDS. Both units are given now.
+  4. `_doc_keys`' heading said *"THE LAST OF THE READER'S RAW ESCAPES"*.
+     Scoped to the census sweep it measured: a
+     `{"k":"tuple","items":[…]}` chain deeper than the interpreter's
+     limit is still a raw `RecursionError` from pure JSON, on this tree
+     and on `a4e4056` alike.
+  5. The residual-class paragraph named a plausible-but-wrong primitive
+     NAME and lying extents, but not the uncatchable crash out of
+     `propagate()` that a short-but-well-typed `<eqn>.invars` still
+     produces. Named now, in both logs.
+  6. The scope argument for keeping the emptiness rule off the constructor
+     credited the whole protected capability to
+     `tests/test_ieee_semantics.py`, in `ir.py` and in both logs. Moving
+     the rule to `JaxprEqn.__post_init__` in fact turns 11 pre-existing
+     tests red across FOUR files, and the `(nan, hi)` form the sentence
+     named is built in `tests/test_undecided_detail.py`. The capability is
+     now pinned in one test that constructs a witness for each of the two
+     refusals in each direction, so the argument no longer rests on
+     filenames.
 
 *The next two blocks are two independent soundness batches that branched from
 the same commit (`dee8bc2`), were developed in parallel, and were merged into

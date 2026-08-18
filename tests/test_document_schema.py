@@ -36,10 +36,14 @@ the one rule this one generalises.
 from __future__ import annotations
 
 import array as _arraymod
+import ast
 import base64
+import collections
 import copy
 import dataclasses
 import json
+import pathlib
+import sys
 
 import pytest
 
@@ -242,21 +246,36 @@ def test_a_NON_empty_declared_set_still_loads(lo, hi):
 
 
 def test_the_emptiness_rule_is_the_LOAD_doors_and_not_the_constructors():
-    """SCOPE, DRIVEN. `ir.JaxprEqn` is the constructor underneath both
-    faces and `tests/test_ieee_semantics.py` builds `(inf, inf)` and
-    `(nan, hi)` declarations through it on purpose, to drive the ieee
-    transfers over an operand no `any_array` will produce. The document
-    surface is where the vacuous verdict was reachable, so that is where
-    the refusal is — the same split `_validate_required_params` makes, for
-    a different reason, which its own docstring states."""
-    eqn = ir.JaxprEqn(
-        primitive="stelling_any", invars=(),
-        outvars=(ir.Var(id=0, aval=ir.Aval(kind="ShapedArray", shape=(),
-                                           dtype="float64")),),
-        params=(("dtype", "float64"), ("hi", float("inf")),
-                ("lo", float("inf")), ("shape", ())),
-    )
-    assert dict(eqn.params)["lo"] == float("inf")
+    """SCOPE, DRIVEN, AND THE CAPABILITY PINNED IN ONE PLACE.
+
+    `ir.JaxprEqn` is the constructor underneath both faces, and the suite
+    builds empty and NaN declarations through it on purpose, over operands
+    no `any_array` will produce. The document surface is where the vacuous
+    verdict was reachable, so that is where the refusal is — the same
+    split `_validate_required_params` makes, for a different reason, which
+    its own docstring states.
+
+    **A WITNESS FOR EACH OF THE TWO REFUSALS, IN EACH DIRECTION, IS
+    CONSTRUCTED HERE**, so the argument for the split does not rest on a
+    list of other files' names. It did: `ir.py` and both logs credited the
+    whole capability to `tests/test_ieee_semantics.py`, and moving this
+    rule to `JaxprEqn.__post_init__` in fact turns 11 pre-existing tests
+    red across FOUR files — the `(nan, hi)` form among them living in
+    `tests/test_undecided_detail.py`, not in the file named. B12's own
+    review."""
+    for lo, hi in ((float("inf"), float("inf")),
+                   (float("-inf"), float("-inf")),
+                   (float("nan"), 4.0),
+                   (2.0, 1.0)):
+        eqn = ir.JaxprEqn(
+            primitive="stelling_any", invars=(),
+            outvars=(ir.Var(id=0, aval=ir.Aval(kind="ShapedArray", shape=(),
+                                               dtype="float64")),),
+            params=(("dtype", "float64"), ("hi", hi),
+                    ("lo", lo), ("shape", ())),
+        )
+        got = dict(eqn.params)["lo"]
+        assert got == lo or (got != got and lo != lo)
     # ... and the TYPE rule is the constructor's, on every path
     with pytest.raises(ir.TranscriptionError):
         ir.JaxprEqn(
@@ -612,3 +631,426 @@ def test_from_dict_raises_only_its_two_DECLARED_shapes():
                 raw.append((path, value, type(exc).__name__, str(exc)[:60]))
     assert n > 1000, n
     assert not raw, raw[:10]
+
+
+# ------------------------------------- what "round-trips" actually means
+#
+# B12's OWN REVIEW, on B12's tree. The serialization comment above
+# `ir._encode` said ``to_dict`` / ``from_dict`` *"must round-trip
+# losslessly"*, full stop. That was already false at `a4e4056` for a
+# params-less equation, and this batch widened it by two classes — the
+# `(inf, inf)` and `(nan, hi)` declarations `_validate_decl_nonempty`'s own
+# docstring says must stay CONSTRUCTIBLE, which it made non-RELOADABLE
+# without saying so. The comment now states the bound; these tests are what
+# stop it going stale, which is the failure mode this whole campaign is
+# about.
+
+_IR_PATH = pathlib.Path(ir.__file__)
+# whitespace-normalised, so a phrase this file pins is matched however
+# `ir.py` happens to have wrapped it
+_IR_SRC = " ".join(_IR_PATH.read_text(encoding="utf-8").split())
+
+
+def _load_only_rules():
+    """The refusals reachable from `ir._validate_loaded` and from NO
+    ``__post_init__``, read off `ir.py`'s own call graph.
+
+    COMPUTED, not listed — the whole point. A third load-path-only rule
+    added later lands here without anyone editing this file, and the
+    assertion below then names the two paragraphs that have to be
+    rewritten before it can ship."""
+    tree = ast.parse(_IR_PATH.read_text(encoding="utf-8"))
+    calls = collections.defaultdict(set)
+    by_short = collections.defaultdict(set)
+
+    def visit(node, prefix=""):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef):
+                q = prefix + child.name
+                by_short[child.name].add(q)
+                for n in ast.walk(child):
+                    if isinstance(n, ast.Call):
+                        f = n.func
+                        if isinstance(f, ast.Name):
+                            calls[q].add(f.id)
+                        elif isinstance(f, ast.Attribute):
+                            calls[q].add(f.attr)
+                visit(child, q + ".")
+            elif isinstance(child, ast.ClassDef):
+                visit(child, child.name + ".")
+            else:
+                visit(child, prefix)
+
+    visit(tree)
+
+    def closure(seeds):
+        seen, stack = set(), list(seeds)
+        while stack:
+            n = stack.pop()
+            if n in seen:
+                continue
+            seen.add(n)
+            for q in by_short.get(n, ()):
+                stack.extend(calls[q])
+        return seen
+
+    post_inits = [q for q in calls if q.endswith("__post_init__")]
+    assert post_inits, "no __post_init__ found; this instrument is broken"
+    from_ctor = closure([c for q in post_inits for c in calls[q]])
+    from_load = closure(["_validate_loaded"])
+    refusing = {
+        n for n, qs in by_short.items()
+        if any("_load_check" in calls[q] or "_doc_refuse" in calls[q]
+               for q in qs)
+    }
+    return (from_load - from_ctor) & refusing
+
+
+def test_the_LOAD_ONLY_rules_are_exactly_the_two_the_module_NAMES():
+    """The bound on the round-trip claim, enumerated from the call graph.
+
+    A rule that runs on the load path and on no construction path has a
+    subject that is CONSTRUCTIBLE AND NOT RELOADABLE — `to_dict` writes it
+    and `from_dict` will not take it back. There are exactly two, and the
+    paragraph that states the bound has to name both."""
+    rules = _load_only_rules()
+    assert rules == {
+        "_validate_required_params", "_validate_decl_nonempty"
+    }, (
+        "the set of load-path-only refusals changed, so the round-trip "
+        "claim's bound changed: rewrite the serialization comment above "
+        "`ir._encode` and the LOAD PATH ONLY paragraph in "
+        "`ir._validate_decl_nonempty`, then update this test"
+    )
+    head = "TWO REFUSALS RUN ON THE LOAD PATH ONLY"
+    tail = "pins both halves and ENUMERATES"
+    assert head in _IR_SRC and tail in _IR_SRC
+    paragraph = _IR_SRC[_IR_SRC.index(head):_IR_SRC.index(tail)]
+    for name in rules:
+        assert name in paragraph, (
+            f"the serialization comment states the round-trip bound "
+            f"without naming {name}, which is one of the two rules that "
+            f"creates it"
+        )
+
+
+def test_the_serialization_comment_states_the_BOUND_it_used_to_deny():
+    """The sentence, pinned against the code beside it.
+
+    `tests/test_bar_membership_policy.py` pins claims this way for the
+    same reason: a prose statement nothing reads is a statement that goes
+    stale, and this one did."""
+    assert "must round-trip losslessly" not in _IR_SRC, (
+        "the unconditional round-trip claim is back in ir.py; it is false "
+        "for a params-less equation and for an empty declared set"
+    )
+    assert _IR_SRC.count("CONSTRUCTIBLE AND NOT RELOADABLE") == 2, (
+        "the bound is stated at the serialization comment and again in "
+        "`_validate_decl_nonempty`'s LOAD PATH ONLY paragraph, which is "
+        "where a reader looks for it"
+    )
+
+
+def test_the_doc_keys_heading_is_SCOPED_to_the_sweep_it_measured():
+    """`_doc_keys` closed the last raw escape OVER THE B12 CENSUS SWEEP,
+    which is single-position and finite-valued. It is not the last one
+    `from_dict` has: `_decode` recurses, and a deep enough
+    ``{"k":"tuple","items":[…]}`` chain — reachable from pure JSON, since
+    ``json.loads``/``json.dumps`` both accept it — raises a bare
+    `RecursionError` on this tree and on `a4e4056` alike. Driven here so
+    the heading's scope is a measurement and not a hedge."""
+    assert "THE LAST OF THE READER'S RAW ESCAPES OVER THE B12 CENSUS SWEEP" \
+        in _IR_SRC, "`ir._doc_keys`' heading dropped its scope"
+
+    def nest(depth):
+        d = {"k": "tuple", "items": []}
+        for _ in range(depth):
+            d = {"k": "tuple", "items": [d]}
+        return d
+
+    shallow = json.loads(json.dumps(nest(200)))
+    assert isinstance(ir._decode(shallow), tuple)
+    deep = json.loads(json.dumps(nest(4 * sys.getrecursionlimit())))
+    with pytest.raises(RecursionError):
+        ir._decode(deep)
+
+
+def test_every_document_from_dict_ACCEPTS_reloads_with_its_hash():
+    """The positive half, which is the half that carries the hash.
+
+    Not a corpus result: the load rules are functions of the LOADED
+    object, so accepting a document is accepting its re-encoding. Driven
+    over the base and over every accepted single-position mutation of it,
+    so the population is the schema's rather than one hand-picked
+    document."""
+    values = [None, True, 0, -1, 1.5, "", "xx", [], [0], {},
+              {"k": "tuple", "items": []}, _ABSENT]
+
+    def positions(o, path=()):
+        yield path
+        if isinstance(o, dict):
+            for k in list(o):
+                yield from positions(o[k], path + (k,))
+        elif isinstance(o, list):
+            for i, v in enumerate(o):
+                yield from positions(v, path + (i,))
+
+    n = 0
+    for path in positions(_doc()):
+        for value in ([None] if not path else values):
+            mut = _doc()
+            if path:
+                _set(mut, [str(c) for c in path], value)
+            try:
+                q = ir.ClosedJaxpr.from_dict(mut)
+            except (ir.TranscriptionError, ValueError):
+                continue
+            again = ir.ClosedJaxpr.from_dict(q.to_dict())
+            assert again.to_dict() == q.to_dict(), path
+            assert again.content_hash() == q.content_hash(), path
+            n += 1
+    assert n > 100, n
+
+
+def test_the_two_LOAD_ONLY_rules_write_documents_from_dict_REFUSES():
+    """The negative half, one witness per rule, each ENCODED and then
+    handed back.
+
+    `_validate_required_params`' subject was non-reloadable at `a4e4056`
+    already; `_validate_decl_nonempty`'s became non-reloadable HERE, and
+    it is exactly the object that function's docstring promises stays
+    constructible. Both refusals are `TranscriptionError` — loud, minting
+    no verdict — and `content_hash` is a function of `to_dict` alone, so
+    it still answers on both."""
+    f64 = ir.Aval(kind="ShapedArray", shape=(2,), dtype="float64",
+                  weak_type=False)
+
+    def decl(params):
+        v = ir.Var(id=1, aval=f64)
+        eqn = ir.JaxprEqn(primitive="stelling_any", invars=(),
+                          outvars=(v,), params=params)
+        return ir.ClosedJaxpr(
+            jaxpr=ir.Jaxpr(constvars=(), invars=(), outvars=(v,),
+                           eqns=(eqn,)),
+            consts=(),
+        )
+
+    full = (("dtype", "float64"), ("shape", (2,)))
+    witnesses = {
+        # _validate_required_params: hand-built IR legitimately omits params
+        "_validate_required_params": decl(()),
+        # _validate_decl_nonempty: one witness per refusal, both of them
+        # forms the suite builds through the constructor on purpose
+        "_validate_decl_nonempty (inf, inf)":
+            decl(full + (("hi", float("inf")), ("lo", float("inf")))),
+        "_validate_decl_nonempty (nan, hi)":
+            decl(full + (("hi", 1.0), ("lo", float("nan")))),
+    }
+    for label, q in witnesses.items():
+        d = q.to_dict()                      # encodes without complaint
+        assert isinstance(d, dict), label
+        assert q.content_hash(), label       # and the hash is unaffected
+        with pytest.raises(ir.TranscriptionError):
+            ir.ClosedJaxpr.from_dict(d)
+
+    # and the honest declaration beside them reloads exactly
+    ok = decl(full + (("hi", 2.0), ("lo", 1.0)))
+    back = ir.ClosedJaxpr.from_dict(ok.to_dict())
+    assert back.to_dict() == ok.to_dict()
+    assert back.content_hash() == ok.content_hash()
+
+
+# ------------------------------------ the registered type, and which door
+#
+# The field rule accepts a `_LIBRARY_STORED_TYPES` registration at ANY
+# field, which is the door's widest exception. `ir.py` licensed it with
+# TWO reasons — *"`_decode` has no tag for it and `_encode` refuses to
+# encode one"* — and only the first is true. B12's own review.
+
+
+def test_the_registered_type_exception_rests_on_DECODE_in_writing_too():
+    """Both paragraphs that license the exception, pinned as text.
+
+    The half that is false has to be gone from both — the door narrative
+    below `_encode` and `_register_stored_type`'s own docstring, which is
+    where a would-be registrant reads what registration costs."""
+    for false_half in (
+        "`_decode` has no tag for it and `_encode` refuses to encode one",
+        "so `to_dict` and `content_hash` both raise",
+    ):
+        assert false_half not in _IR_SRC, (
+            "ir.py licenses the registered-type exception with `_encode` "
+            "again; `_encode` refuses one only where it RECURSES"
+        )
+    assert "THE ARGUMENT RESTS ON `_decode` ALONE" in _IR_SRC
+    assert "NOT `_encode`, which this paragraph also named" in _IR_SRC
+
+
+def test_a_registered_type_is_kept_out_by_DECODE_and_not_by_encode():
+    """The surviving half, and the half that does not survive.
+
+    `_decode` has no tag for a registered type, so no JSON document
+    produces one — that is the whole argument and it holds. `_encode`
+    refuses one only where it RECURSES: at a slot it writes straight
+    through, `to_dict()` returns a dict with the object sitting in it and
+    raises nothing. Pinned as BEHAVIOUR so the corrected comment cannot
+    drift back."""
+    from stelling.interval import IntervalArray
+
+    assert any(t is IntervalArray for t in ir._LIBRARY_STORED_TYPES)
+
+    # (a) the surviving half: no tag, at any spelling a document might use
+    for tag in ("interval", "IntervalArray", "intervalarray"):
+        with pytest.raises(ValueError, match="unknown tag"):
+            ir._decode({"k": tag})
+
+    iv = IntervalArray(shape=(1,), los=(0.0,), his=(1.0,))
+    f64 = ir.Aval(kind="ShapedArray", shape=(2,), dtype="float64",
+                  weak_type=False)
+
+    # (b) where `_encode` RECURSES it does refuse — the arm the comment
+    #     was generalising from
+    cv = ir.Var(id=2, aval=f64)
+    v = ir.Var(id=1, aval=f64)
+    eqn = ir.JaxprEqn(primitive="gt", invars=(v, v), outvars=(v,), params=())
+    with pytest.raises(TypeError, match="cannot encode IntervalArray"):
+        ir.ClosedJaxpr(
+            jaxpr=ir.Jaxpr(constvars=(cv,), invars=(), outvars=(v,),
+                           eqns=(eqn,)),
+            consts=(iv,),
+        ).to_dict()
+
+    # (c) and where it does NOT recurse it writes the object through, at
+    #     every one of the eighteen positions ir.py enumerates
+    through = ir._encode(
+        ir.Aval(kind=iv, shape=(2,), dtype="float64", weak_type=False), True
+    )
+    assert through["kind"] is iv, (
+        "`_encode` now judges a non-recursing slot; if that is deliberate "
+        "the registered-type paragraphs in ir.py may claim it again"
+    )
+    prim = ir.ClosedJaxpr(
+        jaxpr=ir.Jaxpr(
+            constvars=(), invars=(), outvars=(v,),
+            eqns=(ir.JaxprEqn(primitive=iv, invars=(v,), outvars=(v,),
+                              params=()),),
+        ),
+        consts=(),
+    ).to_dict()
+    assert prim["jaxpr"]["eqns"][0]["primitive"] is iv
+
+    built = {}
+    for label, mk in _REGISTERED_AT.items():
+        try:
+            obj = mk(iv, f64, v)
+        except (ir.TranscriptionError, TypeError):
+            continue
+        try:
+            ir._encode(obj, True)
+        except TypeError:
+            continue
+        built[label] = True
+    assert set(built) == set(_WRITES_THROUGH), (
+        "the set of positions `_encode` writes a registered value through "
+        "changed; ir.py's registered-type paragraphs enumerate it"
+    )
+
+
+# The eighteen, as `ir.py` states them. Kept as data beside the driver
+# above rather than inline, so the comparison the test makes is the one a
+# reader of `ir.py` can do by eye.
+_WRITES_THROUGH = (
+    "<aval>.kind", "<aval>.dtype", "<aval>.weak_type", "<var>.id",
+    "<enum>.cls", "<enum>.member", "<sentinel>.cls", "<opaque>.cls",
+    "<treedef>.text", "<ntuple>.cls", "<ntuple>.fields KEY",
+    "<eqn>.primitive", "<eqn>.effects[*]", "<eqn>.source_info[*]",
+    "<dbg>.func", "<dbg>.arg_names[*]", "<dbg>.result_paths[*]",
+    "<jaxpr>.effects[*]",
+)
+
+# Every position `_encode` writes WITHOUT a recursive call, including the
+# five another rule already owns and refuses at construction — they are
+# driven too, so "refused there" and "written through" are both
+# measurements and the list above cannot quietly grow.
+_REGISTERED_AT = {
+    "<aval>.kind": lambda iv, f64, v: ir.Aval(kind=iv, shape=(2,),
+                                              dtype="f8", weak_type=False),
+    "<aval>.dtype": lambda iv, f64, v: ir.Aval(kind="S", shape=(2,),
+                                               dtype=iv, weak_type=False),
+    "<aval>.shape[*]": lambda iv, f64, v: ir.Aval(kind="S", shape=(iv,),
+                                                  dtype="f8", weak_type=False),
+    "<aval>.weak_type": lambda iv, f64, v: ir.Aval(kind="S", shape=(2,),
+                                                   dtype="f8", weak_type=iv),
+    "<array>.dtype": lambda iv, f64, v: ir.Array(dtype=iv, shape=(1,),
+                                                 data=b"\x00" * 8),
+    "<array>.shape[*]": lambda iv, f64, v: ir.Array(dtype="<f8", shape=(iv,),
+                                                    data=b"\x00" * 8),
+    "<array>.data": lambda iv, f64, v: ir.Array(dtype="<f8", shape=(1,),
+                                                data=iv),
+    "<var>.id": lambda iv, f64, v: ir.Var(id=iv, aval=f64),
+    "<enum>.cls": lambda iv, f64, v: ir.EnumParam(cls=iv, member="m"),
+    "<enum>.member": lambda iv, f64, v: ir.EnumParam(cls="C", member=iv),
+    "<sentinel>.cls": lambda iv, f64, v: ir.SentinelParam(cls=iv),
+    "<opaque>.cls": lambda iv, f64, v: ir.OpaqueParam(cls=iv),
+    "<treedef>.text": lambda iv, f64, v: ir.TreeDefParam(text=iv),
+    "<ntuple>.cls": lambda iv, f64, v: ir.NamedTupleParam(cls=iv, fields=()),
+    "<ntuple>.fields KEY": lambda iv, f64, v: ir.NamedTupleParam(
+        cls="C", fields=((iv, 1),)),
+    "<eqn>.primitive": lambda iv, f64, v: ir.JaxprEqn(
+        primitive=iv, invars=(v,), outvars=(v,)),
+    "<eqn>.params KEY": lambda iv, f64, v: ir.JaxprEqn(
+        primitive="gt", invars=(v, v), outvars=(v,), params=((iv, 1),)),
+    "<eqn>.effects[*]": lambda iv, f64, v: ir.JaxprEqn(
+        primitive="gt", invars=(v, v), outvars=(v,), effects=(iv,)),
+    "<eqn>.source_info[*]": lambda iv, f64, v: ir.JaxprEqn(
+        primitive="gt", invars=(v, v), outvars=(v,), source_info=(iv,)),
+    "<dbg>.func": lambda iv, f64, v: ir.DebugInfo(func=iv, arg_names=(),
+                                                  result_paths=()),
+    "<dbg>.arg_names[*]": lambda iv, f64, v: ir.DebugInfo(
+        func="f", arg_names=(iv,), result_paths=()),
+    "<dbg>.result_paths[*]": lambda iv, f64, v: ir.DebugInfo(
+        func="f", arg_names=(), result_paths=(iv,)),
+    "<jaxpr>.effects[*]": lambda iv, f64, v: ir.Jaxpr(
+        constvars=(), invars=(), outvars=(v,), eqns=(), effects=(iv,)),
+}
+
+
+def test_the_non_recursing_slots_are_read_off_encodes_own_AST():
+    """The population the test above judges is COMPUTED, like every other
+    population in this file.
+
+    `_REGISTERED_AT` has to be exactly the set of positions `_encode`
+    writes without a recursive call — otherwise a slot added to the
+    encoding later would be driven nowhere and `ir.py`'s enumeration
+    would be a list nothing checks."""
+    enc = next(
+        n for n in ast.walk(ast.parse(
+            _IR_PATH.read_text(encoding="utf-8")))
+        if isinstance(n, ast.FunctionDef) and n.name == "_encode"
+    )
+    written = set()
+    for node in ast.walk(enc):
+        if isinstance(node, ast.Dict):
+            tag = next(
+                (v.value for k, v in zip(node.keys, node.values)
+                 if isinstance(k, ast.Constant) and k.value == "k"
+                 and isinstance(v, ast.Constant)),
+                None,
+            )
+            for k, v in zip(node.keys, node.values):
+                if isinstance(k, ast.Constant) and k.value != "k" \
+                        and "_encode(" not in ast.unparse(v):
+                    written.add("<%s>.%s" % (tag, k.value))
+        elif isinstance(node, ast.Assign) \
+                and isinstance(node.targets[0], ast.Subscript) \
+                and "_encode(" not in ast.unparse(node.value):
+            written.add(ast.literal_eval(node.targets[0].slice))
+
+    def base(label):
+        return label.split(" ")[0].replace("[*]", "").split(".")[-1]
+
+    driven = {base(k) for k in _REGISTERED_AT}
+    # `<complex>.re`/`.im` are read off a `complex`, so no other object
+    # can occupy them; everything else `_encode` writes through is driven.
+    missing = {w for w in written if w.split(".")[-1] not in driven}
+    assert missing <= {"<complex>.re", "<complex>.im"}, missing
