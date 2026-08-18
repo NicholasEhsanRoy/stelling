@@ -16,12 +16,19 @@ EXIT CODES, ALL OF THEM — because this paragraph used to name two of them
 while the script had three. It said *"0 armed; 1 with `--require` and not
 armed; without `--require` it reports and exits 0"*, and the live-control
 check below returned 1 with no regard for `--require` at all. There are now
-four ways out and every one of them is here:
+five ways out and every one of them is here:
 
   1  `--require` was passed and the tripwire could not arm.
   1  the tripwire armed and its LIVE CONTROL DID NOT FIRE, `--require` or
      not: `arm()` says the hook is attached and the control says nothing
      reached it, so every figure below it is unverified.
+  1  the tripwire armed and its LIVE CONTROL RAISED, `--require` or not.
+     A control that could not COMPLETE is not a control that passed: the
+     instrument's own state is broken, so nothing below it is verified.
+     This used to exit 0 -- the check above tested for the substring
+     "DID NOT FIRE", which a raised control does not contain, so the one
+     state in which the probe never ran was the one state that reported
+     success. A broken instrument must page.
   1  the rule hash CONTRADICTS the row recorded for this exact release,
      `--require` or not. See `_hash_row` for why that one is fatal and
      "this release has never been read" is not.
@@ -36,6 +43,67 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+
+
+def _control_verdict(state: str, rendered: str) -> tuple[str | None, bool]:
+    """``(the sentence to print on stderr, is this fatal)`` for the live control.
+
+    FOUR OUTCOMES, NOT TWO, AND THEY ARE KEYED ON A STATE. The predecessor
+    asked ``"DID NOT FIRE" in control`` -- a substring test against a line
+    built for a human to read -- which is the same shape of instrument this
+    repository keeps having to withdraw: the rendered message is not the
+    decision, and re-parsing it makes the decision depend on wording. The
+    caller records what happened; this reads the record.
+
+    ``fired``
+        the probe ran and the hook saw it. The only clean state.
+    ``did-not-fire``
+        the probe RAN and the hook saw nothing. ``arm()` says the hook is
+        attached; the control says nothing reached it. Fatal.
+    ``raised``
+        the probe did NOT run. Different finding, different remedy, so it
+        gets its own sentence rather than being folded into the one above:
+        `did-not-fire` means a dead hook, `raised` means an environment in
+        which the probe could not execute at all. Fatal, and it did not use
+        to be -- see the exit-code list at the top of this file.
+    ``not-run``
+        the tripwire did not arm, so there was nothing to control. Not
+        fatal HERE; whether not-arming is fatal is ``--require``'s question
+        and is answered before this one is asked.
+
+    THE UNKNOWN STATE IS FATAL, deliberately. A state this function does not
+    recognise means the caller grew an outcome nobody taught this decision
+    about, and the whole point of the change that added this function is
+    that an instrument whose own state is broken must page rather than pass.
+    """
+    if state == "fired" or state == "not-run":
+        return None, False
+    if state == "did-not-fire":
+        return (
+            "the tripwire armed and its live control did not fire. `arm()` "
+            "says the hook is attached; the control says nothing reached "
+            "it. Treat the armed status as unverified.",
+            True,
+        )
+    if state == "raised":
+        return (
+            f"the tripwire armed and its live control RAISED -- {rendered}. "
+            "A control that could not COMPLETE is not a control that "
+            "passed: the probe never ran, so nothing on this page is "
+            "verified. This is a DIFFERENT finding from `did not fire`, "
+            "which means the probe ran and the hook was dead. Read the "
+            "exception, then compare the two legs: if the pinned `control` "
+            "job is GREEN, the nightly's jax broke the probe and this is "
+            "upstream; if it is RED TOO, it is this repository.",
+            True,
+        )
+    return (
+        f"the live control reported a state this script does not recognise "
+        f"({state!r}). That is a bug in this script, not a measurement, and "
+        "it pages rather than passing because an instrument that cannot say "
+        "what happened has not said that nothing happened.",
+        True,
+    )
 
 
 def _hash_row(status) -> tuple[str, bool]:
@@ -116,6 +184,7 @@ def main() -> int:
     # `_probe.over` and `_jax_compat` rather than an `import jax`: the shipped
     # probe is the program whose narrowing is already known, and this script
     # keeps the same jax boundary the package does.
+    control_state = "not-run"
     control = "not run"
     if status.armed:
         try:
@@ -125,6 +194,7 @@ def main() -> int:
 
             _jax.make_jaxpr(_probe.over)(_jnp.zeros((7,), _jnp.int8))
             found = recorder.sorted_findings()
+            control_state = "fired" if found else "did-not-fire"
             control = (
                 f"{len(found)} finding over {recorder.int_narrowings} "
                 f"narrowing(s)"
@@ -136,11 +206,13 @@ def main() -> int:
                 )
             )
         except Exception as exc:  # noqa: BLE001
+            control_state = "raised"
             control = f"raised {type(exc).__name__}: {exc}"
 
     disarmed = _tripwire.disarm()
 
     hash_note, hash_fatal = _hash_row(status)
+    control_note, control_fatal = _control_verdict(control_state, control)
 
     rows = [
         ("status", status.code),
@@ -186,13 +258,8 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    if status.armed and "DID NOT FIRE" in control:
-        print(
-            "\ncanary: the tripwire armed and its live control did not fire. "
-            "`arm()` says the hook is attached; the control says nothing "
-            "reached it. Treat the armed status as unverified.",
-            file=sys.stderr,
-        )
+    if control_fatal:
+        print(f"\ncanary: {control_note}", file=sys.stderr)
         return 1
     # LAST, deliberately. The two checks above are about whether the
     # instrument works at all, which is this job's headline; a contradicted
