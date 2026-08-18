@@ -124,12 +124,47 @@ class Status:
     jax_version: str | None = None
     rule_name: str | None = None
     rule_hash: str | None = None
+    #: The hash recorded for :attr:`jax_version` in
+    #: ``_adapter_jax._KNOWN_HASHES``, or ``None`` when that release has no
+    #: row — i.e. when nobody has ever read the rule on this jax. ``None``
+    #: here is a THIRD state, not a synonym for "changed"; see
+    #: :attr:`hash_state`.
     known_hash: str | None = None
     registry_size: int | None = None
 
     @property
     def armed(self) -> bool:
         return self.code == "armed"
+
+    @property
+    def hash_state(self) -> str:
+        """What the recorded rule hash says, in one word.
+
+        ``unreadable``
+            the installed rule's source could not be read, so there is
+            nothing to compare. Nothing is claimed either way.
+        ``never-read``
+            :attr:`jax_version` has no row in the version -> hash map. Not
+            "changed": nobody has ever read the rule on this release, so the
+            tool has no opinion about it yet. A nightly build lands here by
+            construction.
+        ``as-tested``
+            the running rule hashes to what this release's row records.
+        ``changed``
+            it does not. The SAME release is reporting a different rule
+            source than the one written down for it.
+
+        One definition, three readers — :func:`report.render_status`,
+        ``.github/scripts/tripwire_canary.py`` and
+        ``tests/test_tripwire_arm.py`` — because three copies of a
+        four-way case is three chances to disagree about what ``None``
+        means. **Nothing here gates arming**: `arm()` never calls it.
+        """
+        if not self.rule_hash:
+            return "unreadable"
+        if self.known_hash is None:
+            return "never-read"
+        return "as-tested" if self.rule_hash == self.known_hash else "changed"
 
     @property
     def meaning(self) -> str:
@@ -190,7 +225,7 @@ def arm(recorder=None):
             jax_version=_safe(adapter.jax_version),
             rule_name=_safe(adapter.rule_name),
             rule_hash=_safe(adapter.rule_hash),
-            known_hash=adapter._KNOWN_HASH,
+            known_hash=_safe(adapter.known_hash),
             registry_size=_safe(adapter.registry_size),
         )
 

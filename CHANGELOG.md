@@ -3020,6 +3020,21 @@ was measured on a B6-free tree unless it says otherwise.
 
 ### Known limitations (0.2.0)
 
+- **A query's content hash is a function of the jax that traced it, and jax
+  0.11.1 moved it for max/min reductions.** jax 0.11.1 added an
+  `out_sharding` param to the `reduce_max` and `reduce_min` primitives, so a
+  harness containing `jnp.max`, `jnp.min`, `.max()`, `.min()`, `jnp.amax` or
+  `jnp.amin` traces to a **different** `query <hash>` on 0.11.1 than on
+  0.11.0. **No verdict changes** — both primitives are unmodelled on both
+  releases and fall to ⊤ on both — and a stored document keeps its stored
+  hash and still loads. What breaks is re-derivation: trace the same source
+  on the new jax, compare against a hash stored under the old one, and the
+  two differ with nothing raising. If you key anything on that equality (a
+  verdict cache, an "already checked?" lookup), re-derive the keys after a
+  jax upgrade. Elementwise `jnp.maximum`/`jnp.minimum` are unaffected;
+  `jnp.sum` is unaffected. The cause is upstream's `out_sharding` rollout;
+  see the 2026-08-18 entry in [SOUNDNESS.md](SOUNDNESS.md).
+
 - **An `assert_` inside a sub-jaxpr does not reach the solver.** Solver
   escalation slices top-level `stelling_assert` equations; an `assert_`
   written inside a `jax.jit` helper, a `cond` branch or a `scan`/

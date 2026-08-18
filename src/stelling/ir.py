@@ -2813,14 +2813,46 @@ def _validate_jaxpr(jaxpr: Jaxpr, where: str) -> None:
 #
 # RE-DRIVEN ON THE OTHER TESTED SERIES 2026-08-07, because a required-key
 # table measured on one series is a load-path refusal aimed at the other.
-# 21 forms on jax 0.10.2 reached 18 of the 19 entries (all but
-# `stelling_any`, which is stelling's own and never jax-traced): every
-# required key present, and the key set constant per primitive, exactly as
-# on 0.11.0. This table is series-stable so far — which is a measurement
-# and not a guarantee, so re-drive it per series rather than assuming the
-# result travels. `scan` is the standing counterexample to assuming: its
-# key set is disjoint across these two series (`num_consts`/`num_carry`
-# vs `ft_in`/`ft_out`), and it is not in this table.
+# 21 forms on jax 0.10.2 reached 18 of the 19 entries this table then had
+# (all but `stelling_any`, which is stelling's own and never jax-traced):
+# every required key present, and the key set constant per primitive,
+# exactly as on 0.11.0. `scan` is the standing counterexample to assuming
+# a result travels: its key set is disjoint across those two series
+# (`num_consts`/`num_carry` vs `ft_in`/`ft_out`), and it is not in this
+# table.
+#
+# "THIS TABLE IS SERIES-STABLE SO FAR" — WITHDRAWN, 2026-08-18, BY A
+# COUNTEREXAMPLE INSIDE A SERIES. That sentence stood here and told a reader
+# to "re-drive it per series", and jax 0.11.1 falsified the unit: 70 forms
+# re-driven on 0.11.0 and on 0.11.1 (this machine, CPython 3.12.3, x64
+# enabled) each reached 60 distinct primitives and all 20 entries of the
+# table below, with every required key present and every primitive's key set
+# constant across the 70 forms on both — and with EXACTLY TWO primitives
+# disagreeing between the two releases:
+#
+#     reduce_max   0.11.0: {axes}   0.11.1: {axes, out_sharding}
+#     reduce_min   0.11.0: {axes}   0.11.1: {axes, out_sharding}
+#
+# 0.11.0 and 0.11.1 are one series. So: RE-DRIVE THIS TABLE PER RELEASE, not
+# per series. A series is not the unit at which jax's param sets hold still,
+# and this comment claimed it was.
+#
+# WHY THE TWO MOVERS GET NO ROW, which is the load-bearing half. A row here
+# is a REFUSAL AIMED AT A STORED DOCUMENT, and a document is loaded by a
+# different jax from the one that traced it — that is the whole reason
+# documents exist. `reduce_max: {axes, out_sharding}` would therefore refuse
+# an honest `jnp.max` query traced on jax 0.11.0 — measured, on a document
+# this repository's own `to_dict` wrote, refused on both releases with the
+# row present and loading on both without it. A key may only be required
+# once it is present on every release a document could have come from, and
+# `out_sharding` on these two arrived in 0.11.1: how far back upstream it
+# exists was not measured, only that 0.11.0 does not emit it.
+# `reduce_sum` may carry it because the 2026-08-07 re-drive
+# above found every required key of every row it reached present on 0.10.2,
+# it was measured on 0.11.0 when the row was written, and the re-drive
+# above measures it present on 0.11.1. Absence from this table means
+# "unconstrained", which is the true statement for a key that some supported
+# releases supply and others do not.
 #
 # WHY THIS EXISTS, and it is the opposite of the defect it closes. Readers were
 # taught to test key PRESENCE rather than `.get()`, because a key present with

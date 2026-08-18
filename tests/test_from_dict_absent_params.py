@@ -140,6 +140,42 @@ def test_a_traced_equation_carries_every_required_param():
     assert seen >= 3, "fixture should exercise several constrained primitives"
 
 
+def test_a_param_only_the_NEWEST_release_supplies_gets_no_row():
+    """The other side of the refusal, and jax 0.11.1 is why it is a test.
+
+    A row in `_REQUIRED_PARAMS` is a refusal aimed at a STORED document, and
+    a document is loaded by a different jax from the one that traced it —
+    that is the whole reason documents exist. So a key may only be required
+    once EVERY release a document could have come from supplies it.
+
+    jax 0.11.1 added `out_sharding` to `reduce_max` and `reduce_min`, which
+    0.11.0 does not emit. Re-driving the census on both releases makes the
+    diff visible and the obvious next move is to add the rows. Measured, that
+    move refuses an honest `jnp.max` document traced on 0.11.0 — on BOTH
+    releases, because the refusal reads the document and not the running jax.
+    This test is the fence against making it: it fails the day someone adds
+    a row for either primitive, and says why in the message.
+
+    It is not a claim that the two are unmodelled or unimportant. It is a
+    claim about WHEN a key becomes requirable, and the answer is "when no
+    supported release omits it", not "when the newest release supplies it".
+    """
+    for name in ("reduce_max", "reduce_min"):
+        assert name not in ir._REQUIRED_PARAMS, (
+            f"`{name}` gained a row in _REQUIRED_PARAMS. jax 0.11.1 added "
+            f"`out_sharding` to it and jax 0.11.0 does not emit it, so a row "
+            f"here refuses every `{name}` document written on 0.11.0 or "
+            "earlier — measured: TranscriptionError at load, on both "
+            "releases. Requiring a key is only sound once no supported "
+            "release omits it. See the comment above _REQUIRED_PARAMS in "
+            "src/stelling/ir.py and the 2026-08-18 entry in SOUNDNESS.md."
+        )
+    # and the control: the table is not simply empty, and `reduce_sum` — the
+    # reduction whose `out_sharding` IS present on every release read so far —
+    # does carry it, so the distinction above is being drawn and not dodged.
+    assert ir._REQUIRED_PARAMS["reduce_sum"] == frozenset({"axes", "out_sharding"})
+
+
 def test_scatter_add_transfer_still_admits_the_traced_form():
     """A positive control: the refusal must not have made the row unreachable."""
     def build(x, v):

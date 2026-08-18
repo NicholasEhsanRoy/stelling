@@ -87,13 +87,81 @@ _FLOOR = (0, 4, 8)
 #: The series with a CI lane, from the one place that fact is kept.
 _TESTED = _optional.TESTED_JAX_SERIES
 
-#: sha1[:12] of the rule's source. Byte-identical on 0.10.2 and 0.11.0,
-#: independently re-derived twice. RECORDED, NOT GATED ON: a cosmetic edit
-#: upstream must not disable the tool, but a changed hash in the status line
-#: is what makes the nightly canary diagnosable without re-running it.
-_KNOWN_HASH = "c808b3001114"
+#: sha1[:12] of the rule's source, keyed on the EXACT jax release it was read
+#: on. RECORDED, NOT GATED ON: :func:`version_check` and :func:`selfcheck`
+#: never consult this table, so a cosmetic edit upstream cannot disable the
+#: tool — the tool arms against whatever the map says. What the map buys is
+#: that a changed hash in the status line, in the canary and in the test is
+#: attributable to a release, without re-running anything.
+#:
+#: A MAP AND NOT A SET, and this is the whole value of the design.
+#:
+#: * A set of known-good hashes GOES GREEN ON A REVERT. If jax 0.12 restored
+#:   0.11.0's spelling, a set would say "known" and mean nothing — the rule
+#:   had just changed under the tool twice.
+#: * A set cannot say WHICH release carries which rule, which is the first
+#:   question anyone asks when the canary fires.
+#: * A set cannot express "this release has never been read". A RELEASE
+#:   missing from this map is a FAILURE in ``tests/test_tripwire_arm.py``
+#:   and a loud line in the canary, and it has to be: the remedy is that
+#:   somebody reads the rule and writes down what moved. (A nightly or an
+#:   rc is *not* a release, cannot be given a row, and is asserted to be in
+#:   the never-read state instead — :func:`is_release`.)
+#:
+#: THE COST OF "MISSING IS A FAILURE", STATED SO IT IS NOT A SURPRISE: the
+#: day jax ships any release with no row here, the floating ``test-jax``
+#: lane goes red — within a working day, which is the point — and so does
+#: ``test-jax-0-10`` if a 0.10.3 ever ships, since that lane pins the SERIES
+#: and resolves to the newest 0.10.x. The remedy in both cases is the same
+#: and is deliberately manual: read the rule, diff it, add a row.
+#:
+#: KEYED ON THE EXACT RELEASE, NOT THE SERIES, and this incident is the
+#: argument: 0.11.0 and 0.11.1 are one series carrying two different rule
+#: sources. ``_optional.TESTED_JAX_SERIES`` stays keyed on the series
+#: because it is a claim about which series has a CI lane, which is a
+#: different fact — see :data:`_TESTED` above.
+#:
+#: EVERY ROW NAMES WHAT MOVED. Adding a row by copying an observed hash in
+#: defeats the instrument; the entry is a record that someone diffed the
+#: rule against the nearest row and can say what changed.
+#:
+#: 0.5.1 HAS NO ROW, deliberately, even though :data:`_FLOOR`'s comment
+#: above records a hash for it (``f5f2d0057376``) and :data:`_KNOWN_RULE`
+#: records its name. A row here is not a note — it is a PIN the suite
+#: enforces, and no lane can run 0.5.1: ``pyproject.toml`` floors stelling
+#: at ``jax>=0.10``, so a 0.5.1 row would be a pin nothing ever checks,
+#: which is the shape of claim this repository keeps having to withdraw.
+#: The disclosure belongs where it already is, in the floor's comment. A
+#: 0.5.1 environment reports ``never-read``, which is the true statement
+#: about a release this table has no enforced reading of.
+_KNOWN_HASHES: dict[str, str] = {
+    # 0.10.2 and 0.11.0 are byte-identical here, independently re-derived
+    # twice. 0.10.2's hash is a prior measurement carried forward: there is
+    # no 0.10.2 interpreter in this repository's CI, only the 0.10 series
+    # lane, which resolves to whatever 0.10.x is newest.
+    "0.10.2": "c808b3001114",
+    "0.11.0": "c808b3001114",
+    # jax 803de7b08 (2026-08-11), released in 0.11.1, changed the rule's
+    # scalar test by one line:
+    #     -      and not np.shape(c)
+    #     +      and not out_aval.shape
+    # Read and measured before this row was written. It is
+    # semantics-preserving FOR THIS TOOL: the two spellings differ only when
+    # ``np.shape(t.get_const()) != t.aval.shape``, and over a
+    # ``DynamicJaxprTrace`` that cannot happen — ``_new_const`` binds value
+    # and aval together, and all three registered fold rules preserve the
+    # pairing. Measured in the qualification that preceded this row at
+    # 122,672 const-fold invocations per version with zero disagreements,
+    # over a combination table byte-identical across the two versions —
+    # carried forward here, not re-derived. What WAS re-derived for this
+    # row: both hashes, the one-line diff above, and that the rule's NAME
+    # did not move.
+    "0.11.1": "522706b62a10",
+}
 
-#: The rule's name on 0.5.1, 0.10.2 and 0.11.0. Also recorded, not gated on.
+#: The rule's name on 0.5.1, 0.10.2, 0.11.0 and 0.11.1. Also recorded, not
+#: gated on. Unlike the source hash this has not moved on any release read so
+#: far, which is why it is one string and not a map.
 _KNOWN_RULE = "_convert_elt_type_folding_rule"
 
 #: Frames that open a new traced region. See :func:`record.attribute` for the
@@ -102,6 +170,13 @@ _KNOWN_RULE = "_convert_elt_type_folding_rule"
 TRACE_ENTRY_NAMES = record.DEFAULT_TRACE_ENTRY_NAMES
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
+
+#: A RELEASE, and therefore something :data:`_KNOWN_HASHES` can have a row
+#: for: a bare ``X.Y.Z`` and nothing else. ``0.11.2.dev20260817``,
+#: ``0.12.0rc1`` and ``0.11.1+cuda`` all fail it on purpose — see
+#: :func:`is_release`. ``\Z`` and not ``$``, because ``$`` also matches
+#: before a trailing newline and "and nothing else" would then not be true.
+_RELEASE_RE = re.compile(r"^\d+\.\d+\.\d+\Z")
 
 # Module state. One process arms once; ``install`` refuses to double-wrap and
 # ``restore`` refuses to clobber someone else's patch.
@@ -124,6 +199,23 @@ def _parse_version(text: str) -> tuple[int, int, int] | None:
     if match is None:
         return None
     return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def is_release(text: str | None) -> bool:
+    """Whether a jax version string names a RELEASE — a bare ``X.Y.Z``.
+
+    THIS IS WHAT A KEY OF :data:`_KNOWN_HASHES` IS, which is the only reason
+    the distinction exists. A dev build, a release candidate or a local
+    version cannot be given a row: the string names a tree that will never be
+    published under that name again, so writing it down would record a fact
+    nobody can look up. Those builds land in the ``never-read`` state, and
+    that is what is asserted of them — rather than that they have a row.
+
+    It says nothing about whether such a jax is supported —
+    :func:`version_check` and :func:`selfcheck` do not consult it, and the
+    tool arms on nightlies exactly as before.
+    """
+    return bool(_RELEASE_RE.match(text or ""))
 
 
 def jax_version() -> str | None:
@@ -237,6 +329,20 @@ def rule_name() -> str | None:
         return getattr(rule, "__name__", None)
     except Exception:  # noqa: BLE001
         return None
+
+
+def known_hash() -> str | None:
+    """The hash :data:`_KNOWN_HASHES` records for the RUNNING release, or
+    ``None`` — which means *this jax has never been read*, not "the rule is
+    fine".
+
+    Looked up on the exact version string, so a nightly
+    (``0.11.2.dev20260817``) is a miss by construction: a dev build is not a
+    release and cannot be given a row. :func:`report.render_status` and the
+    canary both distinguish that miss from a mismatch; nothing gates arming
+    on either.
+    """
+    return _KNOWN_HASHES.get(jax_version() or "")
 
 
 def version_check() -> tuple[str, str]:

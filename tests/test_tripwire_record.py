@@ -311,7 +311,8 @@ def test_merging_two_workers_sums_counts_rather_than_duplicating_findings():
 # --- the report is a witness ------------------------------------------------
 
 
-def _Status(code="armed", detail="", rule_hash=None, known_hash=None):
+def _Status(code="armed", detail="", rule_hash=None, known_hash=None,
+            jax_version=None):
     """THE SHIPPED ``Status``, not a stand-in.
 
     It was a hand-written stub whose ``explanation`` returned ``detail``, and
@@ -328,6 +329,7 @@ def _Status(code="armed", detail="", rule_hash=None, known_hash=None):
         detail=detail,
         rule_hash=rule_hash,
         known_hash=known_hash,
+        jax_version=jax_version,
         rule_name="_convert_elt_type_folding_rule",
     )
 
@@ -616,11 +618,94 @@ def test_the_primary_channel_carries_all_THREE_thirds_for_every_code():
 
 def test_a_changed_rule_hash_is_visible_in_the_status_line():
     """§5: record it, never gate on it — but a canary that cannot see the
-    change is a canary that reports nothing."""
+    change is a canary that reports nothing.
+
+    THREE STATES, because `known_hash` is a lookup keyed on the running
+    release and therefore has a third answer: no row at all. This test drove
+    two, and the renderer's `== known_hash else "CHANGED upstream"` would
+    have reported the third — a release nobody has read — as a change nobody
+    measured, in the one line a canary reader believes.
+    """
     same = _rendered(record.Recorder(), _Status(rule_hash="abc", known_hash="abc"))
-    moved = _rendered(record.Recorder(), _Status(rule_hash="def", known_hash="abc"))
+    moved = _rendered(
+        record.Recorder(),
+        _Status(rule_hash="def", known_hash="abc", jax_version="0.11.0"),
+    )
+    unread = _rendered(
+        record.Recorder(),
+        _Status(rule_hash="def", known_hash=None, jax_version="0.99.0"),
+    )
     assert "sha1 abc (as tested)" in same
-    assert "sha1 def (CHANGED upstream)" in moved
+    assert "sha1 def (CHANGED: jax 0.11.0 is recorded as abc)" in moved
+    assert "sha1 def (jax 0.99.0 has NEVER BEEN READ" in unread
+    # the two loud states must not read as each other
+    assert "NEVER BEEN READ" not in moved and "CHANGED" not in unread
+
+
+def _canary():
+    """`.github/scripts/tripwire_canary.py`, imported by path.
+
+    By path because it is a CI script and not a package module — and imported
+    at all, rather than re-implemented here, for the same reason the script
+    itself calls the shipped ``arm()``: a test that re-states the decision
+    measures the re-statement. Its module scope imports only ``argparse``,
+    ``os`` and ``sys``, so this stays runnable in the zero-dep lane, which is
+    the lane this file promises.
+    """
+    import importlib.util
+    import pathlib as _pathlib
+
+    path = (
+        _pathlib.Path(__file__).resolve().parent.parent
+        / ".github" / "scripts" / "tripwire_canary.py"
+    )
+    spec = importlib.util.spec_from_file_location("_tripwire_canary", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_canary_reads_the_version_to_hash_map_in_three_states():
+    """§5 decides ARMING and not this script's exit code, so the exit code is
+    decided here and the argument is in ``_hash_row``'s docstring.
+
+    The state that must NOT be fatal is the one that looks most alarming:
+    a release with no row. It is what a jax NIGHTLY is in by construction —
+    the nightly workflow runs this script against one — and what the
+    `control` leg enters the day jax ships a release, since that leg installs
+    ``.[jax]`` and resolves to whatever is newest. A canary that pages on it
+    is red every night, and an alarm that is red every night is not read.
+
+    The state that must be fatal is the one that cannot be explained by
+    upstream: a RELEASE contradicting its own row. Wheels are immutable, so
+    either the row is wrong or the environment is not the jax it claims, and
+    both make the rest of the page unverified.
+    """
+    canary = _canary()
+
+    matched = _Status(rule_hash="abc", known_hash="abc", jax_version="0.11.0")
+    unread = _Status(rule_hash="abc", known_hash=None, jax_version="0.99.0")
+    moved = _Status(rule_hash="abc", known_hash="xyz", jax_version="0.11.0")
+    unreadable = _Status(rule_hash=None, known_hash="abc", jax_version="0.11.0")
+
+    note, fatal = canary._hash_row(matched)
+    assert (note, fatal) == ("as tested", False)
+
+    note, fatal = canary._hash_row(unread)
+    assert fatal is False, "a release with no row must not page the nightly"
+    assert "NEVER BEEN READ" in note and "0.99.0" in note
+    assert "nightly" in note, "the note must say why this is not a failure"
+
+    note, fatal = canary._hash_row(moved)
+    assert fatal is True, "a release contradicting its own row is fatal"
+    assert "CONTRADICTS" in note and "xyz" in note and "0.11.0" in note
+
+    note, fatal = canary._hash_row(unreadable)
+    assert fatal is False, "an unreadable rule source claims nothing either way"
+
+    # and the two loud states are not each other's words
+    assert "CONTRADICTS" not in canary._hash_row(unread)[0]
+    assert "NEVER BEEN READ" not in canary._hash_row(moved)[0]
 
 
 def test_every_failure_code_is_explained_and_documented():

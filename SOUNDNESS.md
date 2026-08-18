@@ -10982,6 +10982,92 @@ in place and marked.*
   set the analyses reason about, and the two refusals above are the whole
   of what makes that set non-empty.
 
+- **2026-08-18: QUERY IDENTITY BREAKS ACROSS jax 0.11.0 -> 0.11.1 for
+  `jnp.max` and `jnp.min`. NO VERDICT CHANGES.** Logged here because the
+  stamp section above is where the scope of the `query <hash>` is argued —
+  it already says the hash is "half-right by construction" and names which
+  half — and this is another way the half it does not cover bites.
+
+  **What moved.** jax 0.11.1 added an `out_sharding` param to the
+  `reduce_max` and `reduce_min` primitives. The param travels in the
+  jaxpr, `ClosedJaxpr.content_hash()` hashes the params, so the same
+  harness traces to a different content hash on the two releases.
+
+  **NO HASH LITERAL IS PINNED HERE, on purpose** —
+  `tests/test_ir_canonicalization.py::test_the_record_does_not_pin_a_hash_LITERAL_in_prose`
+  forbids one in this file, for the reason that a hash in prose is a figure
+  no reader can recompute and no test holds. That reason is exactly right
+  for an entry whose whole subject is a hash that depends on the reader's
+  jax. **Recompute it instead** — it is the only form of this fact that
+  cannot go stale:
+
+  ```
+  import jax; jax.config.update("jax_enable_x64", True)
+  import jax.numpy as jnp
+  from stelling.harness import any_array, assert_, trace
+
+  def h():
+      return assert_(jnp.max(any_array((4,), jnp.float64, (0.1, 10.0))) > 0.0)
+
+  print(jax.__version__, trace(h).content_hash())
+  ```
+
+  Run it on jax 0.11.0 and on 0.11.1 and the two hashes differ; swap
+  `jnp.max` for `jnp.sum` and they do not. The measured pairs, for the
+  record, are in `design/maintenance-treadmill.md`'s Bump 2 row, which is
+  an evidence artifact rather than this log.
+
+  A 70-form param census re-driven on both releases reached 60 distinct
+  primitives and found **exactly these two** disagreeing;
+  `reduce_sum` already carried `out_sharding` on both, which is why it
+  does not move.
+
+  **What does NOT change: any verdict.** `reduce_max` and `reduce_min` are
+  absent from `TRANSFERS` and from `IEEE_TRANSFERS` on both releases, so no
+  transfer reads the param. Driven end to end on both, in both
+  `JAX_ENABLE_X64` cells: `assert_(jnp.max(a) > 0.0)` and
+  `assert_(jnp.min(a) > 0.0)` over the same declaration each return UNKNOWN
+  on both releases with the same note — `1 equation(s) fell to ⊤
+  (reduce_max ×1)` and `(reduce_min ×1)`. The whole suite was run on both
+  releases in both cells and exactly one test's status differs between
+  them, and it is the tripwire's rule-hash pin, not a verdict.
+
+  **What is affected: identity, and it fails SILENTLY in one direction.**
+  A document written on 0.11.0 loads on 0.11.1 and keeps its stored hash —
+  `content_hash` hashes what the document says, not what a fresh trace
+  would say — so persisted queries, `Verdict.stamp.query_content_hash`,
+  and the ledger pairing all stay self-consistent. What breaks is
+  **re-derivation**: trace the same source on 0.11.1 and compare the hash
+  to one stored on 0.11.0 and they will differ, with nothing raising.
+  Anything keyed on that equality — a verdict cache, a "has this query
+  already been checked" lookup, a CI job that re-traces and diffs — gets a
+  miss and reads it as a different program. Conservative for a cache (a
+  miss re-checks); wrong for anything that treats a mismatch as evidence
+  that the source changed.
+
+  **Which stelling versions.** All of them: the hash has always been a
+  function of the traced params, and the stamp section above already
+  requires every verdict to carry "jax version used to trace the harness"
+  — this is what that field is for. Nothing
+  in stelling changed here and there is nothing to fix in stelling — the
+  cause is upstream's `out_sharding` rollout, jax's own release.
+
+  **What to re-run.** Nothing, for a verdict. If you keep a hash → verdict
+  map across a jax upgrade, re-derive the keys on the jax you now run, for
+  any harness containing a max or min REDUCTION. All six spellings were
+  measured on both releases and all six move, to the same pair of hashes:
+  `jnp.max`, `.max()` and `jnp.amax` lower to `reduce_max`; `jnp.min`,
+  `.min()` and `jnp.amin` to `reduce_min`. The ELEMENTWISE `jnp.maximum`
+  and `jnp.minimum` are the `max` and `min` primitives, not the reductions,
+  and both were measured unchanged.
+
+  **NOT A SOUNDNESS EVENT, and it is not counted as one below.** No
+  verdict flips, nothing is retroactively invalid, and no release is
+  reached by a fix here, because there is no fix here. It is in this log
+  because the failure is silent and the policy above forbids true things
+  going unsaid, not because the policy's soundness-event definition
+  covers it.
+
 **Releases reached by an entry in this log.** `v0.1.0`, the only release,
 is reached by **six** entries, all of them audit 0.2.0 findings and all
 reproduced at the tag: the 2026-08-15 `exp`/`pow` libm-bracket entry (S11)
@@ -11016,8 +11102,14 @@ the split the S15 entry above already records. And `assert_(a > 0)` over
 solverless route. The clause that survives is the first one: UNSOUND-3 is
 the entry that needs no serialized query either.
 
-Every other entry is 0.2.0 development only, and **no release has yet
-shipped any fix in this log**. This line read *"(no releases yet)"* until
+Every other entry that is a FIX is 0.2.0 development only, and **no
+release has yet shipped any fix in this log**. The 2026-08-18
+query-identity entry is not a fix and is not counted in either number: it
+records a jax release moving a query hash with no verdict moving and
+nothing in stelling to change, so it is scoped to every stelling version
+and reaches no release by construction. It says so in its own last
+paragraph, and this clause exists so the count above cannot be read as
+having overlooked it. This line read *"(no releases yet)"* until
 2026-08-15, a
 few lines below the reproduction that contradicts it; it then named S11
 alone while the S13 entry above it said *"the second finding of that audit

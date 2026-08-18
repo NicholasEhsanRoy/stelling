@@ -1007,6 +1007,18 @@ def test_array_constant_decodes_per_element_in_emission_and_replay():
 # sha256 of the exact scripts the PRE-ARRAY emission produced for two
 # scalar obligations, computed at the pre-build HEAD and pinned: the array
 # build must not change a single byte of any scalar emission.
+#
+# NO JAX VERSION IS STATED BESIDE THESE, and that is the claim, not an
+# omission. The other 64-hex pins in this tree — `docs/quickstart.md` and
+# `docs/harness-api.md` — are `content_hash`es of TRACED queries, so each is
+# a function of the jax that traced it: jax 0.11.1 moves that hash for any
+# harness with a `jnp.max`/`jnp.min` reduction, by adding `out_sharding` to
+# `reduce_max`/`reduce_min` (see `SOUNDNESS.md`), and both of those two
+# happen not to contain one. These two pins are hashes of emitted SMT TEXT
+# built from HAND-WRITTEN `ir` equations: the test below constructs every
+# `eqn` itself and this file imports no jax at all, so no jax release can
+# move them. Confirmed on jax 0.11.0 and 0.11.1 (CPython 3.12.3, x64 on and
+# off): identical, as they must be.
 PIN_Z3_SQUARE = (
     "61ffd0a0f0f381879f15e928b52689faf0907043230149e17daa488929c9a5e5"
 )
