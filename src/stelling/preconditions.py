@@ -121,10 +121,21 @@ def check(harness, *, vacuity_mode, semantics="real", solver_timeout_ms=None,
     this call also runs the trace gate, which refuses to judge a jaxpr that
     does not represent the program as written — and refuses, separately and
     in different words, when it could not watch the whole trace. Making the
-    watch complete costs one ``jax.clear_caches()`` per call, which is
-    process-global and drops the caller's own compiled functions;
+    watch complete against jax's caches costs one ``jax.clear_caches()``
+    per call, which is process-global and drops the caller's own compiled
+    functions;
     ``docs/overflow-tripwire.md`` prices it. Nothing of this happens when
     the tripwire is not armed, which is the default.
+
+    The gate watches a FINITE set of routes by which a constant can be
+    narrowed, and its silence is worth exactly that set: routes such as
+    ``jnp.full(shape, N, dt)`` destroy the constant before the watched site
+    and are VERIFIED with zero fires. The eviction closes the warm-cache
+    route against jax's own caches in a single-threaded process, and no
+    further — a memo jax does not own, or a competing thread, is outside
+    it. Both lists are enumerated, with their measurements, in
+    ``stelling._tripwire.report.UNCOVERED`` and in
+    ``tests/test_tripwire_gate_coverage.py::GATE_COVERAGE``.
 
     ``vacuity_mode`` is **required** (no default — the two registered
     procedures answer different questions, and a silently-picked mode
@@ -241,9 +252,12 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     nothing when part of the trace was replayed from a cache or the
     instrument stopped watching, and reporting that as "0 narrowings
     detected" — or, as B14 left it, as "1 narrowing detected" — describes a
-    measurement nobody made. Observation is made complete by EVICTING jax's
-    trace caches, not by detecting incompleteness; the comment at the gate
-    carries the measurement that decides between those.
+    measurement nobody made. Observation is made complete — with respect to
+    JAX's caches, in a single-threaded process, which is the whole of what
+    is claimed — by EVICTING those caches rather than by detecting
+    incompleteness; the comment at the gate carries the measurement that
+    decides between those, and ``_tripwire.report.UNCOVERED`` carries what
+    the two qualifiers leave outside.
 
     Returns ``(verdict, closed)``: exactly the verdict :func:`check`
     returns (behavior-identical extraction — check() is this helper with
@@ -328,8 +342,17 @@ def _pipeline(harness, *, vacuity_mode, semantics="real", solver_timeout_ms,
     # than a preference: `jax.jit(f, inline=True)` replays a warm body and
     # leaves NO nested jaxpr behind to detect the replay by, and jax publishes
     # no per-jit trace counter on a public surface. Emptying the cache first
-    # makes the observation complete by construction. The third state is for
-    # when even that could not be done — see `unobserved` below.
+    # makes the observation complete WITH RESPECT TO JAX'S CACHES, IN A
+    # SINGLE-THREADED PROCESS. It empties jax's caches and no others, so a
+    # constant narrowed into a memo jax does not own (`jaxpr_as_fun` over a
+    # saved jaxpr, a user `lru_cache`, `jax.closure_convert`) is still
+    # unobserved; and jax's cache is process-global while this counter is
+    # per-thread, so a competing thread can re-warm a body inside the
+    # eviction-to-trace window — measured 0/400 wrong VERIFIED
+    # single-threaded and 247/400 with four competing threads, against
+    # 399/400 before the eviction existed. Both are disclosed with their
+    # numbers in `report.UNCOVERED`. The third state is for when even the
+    # eviction could not be done — see `unobserved` below.
     armed = _fires_count() is not None
     unobserved = None
     if armed:

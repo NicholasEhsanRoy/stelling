@@ -138,10 +138,24 @@ full stamp naming its assumptions, precision, and what it dropped.
 
 When the tripwire is armed and a narrowing fires during a harness trace, the
 verifier refuses to propagate or judge the jaxpr — the verdict is **UNKNOWN**
-with a note naming the narrowings. A VERIFIED verdict, with the tripwire armed,
-is a statement that the trace is faithful to what was written AND that the
-property holds over the declared set. The two checks compose: detection gates
-proof.
+with a note naming the narrowings. It refuses separately, and in different
+words, when it could not watch the whole trace: "no narrowing was seen" and
+"no narrowing occurred" are different claims and only the second licenses a
+VERIFIED.
+
+So a VERIFIED verdict, with the tripwire armed, is a statement that the
+property holds over the declared set AND that no narrowing was seen on any
+route the tripwire watches. The two checks compose: detection gates proof.
+**The watched set is finite, and the qualifier is the whole of the honest
+claim.** A whole bucket of construction routes is `unwatched` —
+`jnp.full(shape, N, dt)`, `jnp.full_like`, `lax.full`, `lax.full_like`,
+`lax.convert_element_type(N, dt)`, `np.asarray(N).astype(dt)`, and anything
+built on `full` such as `jnp.stack` or `lax.select` — because numpy narrows
+the value before any jax primitive runs, so the rule is handed something
+already in range. Those programs get a VERIFIED about a constant that no
+longer exists. The full inventory, one bucket per route and measured rather
+than typed, is `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE`; the
+user-facing version is `docs/overflow-tripwire.md`.
 
 The gate is hardened against the edge cases adversarial audit surfaced:
 - **jax.make_jaxpr's identity cache** (a repeated trace returns the cached
@@ -169,18 +183,27 @@ pressure-relief valve. The scaling factor — a unit-conversion constant — is
 40,000 (counts-to-millibar on a 16-bit ADC):
 
 ```python
-def pressure_mb(raw_adc):
+def pressure_mb(raw_adc):        # raw_adc: int16[...]
     # Convert 16-bit ADC counts to millibar
-    return raw_adc + jnp.int16(40000)
+    return raw_adc + 40000
 ```
+
+The constant is written as a bare Python `int` against an `int16` array, which
+is the form that wraps *silently*. **`jnp.int16(40000)` is not that form**: jax
+validates the literal against the dtype and raises `OverflowError` before
+anything is traced, so it is `loud` in
+`tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` and there is nothing for
+a tripwire to catch. The contrast is jax's own and is worth knowing: the same
+value through `jnp.full(shape, 40000, jnp.int16)` neither raises nor fires.
 
 The safety property being verified: **"reported pressure stays below the
 relief-valve trigger (200 mbar)"** — a plausibility check ensuring the sensor
 path doesn't report values that would suppress a necessary venting action.
 
-**What actually happens:** `40000` wraps to `-25536` on int16. The jaxpr
-contains `add a -25536:i16[]`. For raw ADC readings in `[0, 100]`, the traced
-program produces `[-25536, -25436]` — all far below 200.
+**What actually happens:** `40000` wraps to `-25536` on int16. The jaxpr is
+`{ lambda ; a:i16[2]. let b:i16[2] = add a -25536:i16[] in (b,) }`. For raw ADC
+readings in `[0, 100]`, the traced program produces `[-25536, -25436]` — all
+far below 200. (Measured on jax 0.11.0, x64 on, at this branch.)
 
 **Without the gate:** the verifier propagates the jaxpr, finds all values below
 200, returns **VERIFIED**. The CI pipeline sees green. The controller deploys.
@@ -258,8 +281,9 @@ Stelling is to JAX what [Kani](https://github.com/model-checking/kani) is to
 Rust: assertion-based verification of ordinary programs. Not neural-network
 robustness (alpha-beta-CROWN lineage), not runtime instrumentation (checkify),
 not type-level checking (jaxtyping). It proves stated properties of traced
-computations, and the tripwire is the guardrail that ensures the trace it proves
-against is faithful to what was written.
+computations, and the tripwire is the guardrail on the trace it proves against
+— on an enumerated, finite and measured set of routes by which a constant can
+be narrowed, not on all of them.
 
 ---
 

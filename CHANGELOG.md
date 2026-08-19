@@ -219,9 +219,32 @@ it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.
   harness with a jitted helper, checked four times, gave `UNKNOWN,
   VERIFIED, VERIFIED, VERIFIED`; two DIFFERENT harnesses sharing one jitted
   helper gave `UNKNOWN` and then a **wrong VERIFIED** — about a program
-  whose written 40000 had already been destroyed to -25536. `check()` now
-  empties jax's trace caches before the trace it gates, so a verdict's
-  observation is complete by construction.
+  whose written 40000 had already been destroyed to -25536. `check()` and
+  `check_contract()` now empty jax's trace caches before the trace they
+  gate, so a verdict's observation is complete **with respect to jax's
+  caches, in a single-threaded process**.
+
+  **That qualifier is the claim, and both halves of it were measured.**
+  `jax.clear_caches()` empties JAX's caches and nothing else, so a constant
+  narrowed into a memo jax does not own survives it: measured on jax 0.11.0,
+  `jax.extend.core.jaxpr_as_fun` over a saved jaxpr, a user
+  `functools.lru_cache` holding an eagerly narrowed value, and
+  `jax.closure_convert` — a **public jax API** that traces at setup and
+  hoists the narrowed constant — each return VERIFIED with `fires=0` on a
+  program whose executed values are `[-25536, -25436]` where the source says
+  `[40000, 40100]`. And jax's trace cache is process-global while the gate's
+  fire counter is per-thread, so the eviction-to-trace window is not atomic:
+  over 400 gated checks of one harness whose narrowing sits in a shared
+  jitted helper, wrong VERIFIEDs were **0/400 single-threaded** and
+  **247/400 (61.8%) with four threads calling that helper while the gate
+  traced**. The rate scales with the width of the window — how much the
+  harness traces before it reaches the shared helper — so it is a range: with
+  the same four threads, 1/100 when the helper is traced first, 52/100 after
+  50 preceding primitives, 247/400 after 100, 100/100 after 200. Against
+  399/400 single-threaded at `a759809`, the eviction is a large improvement
+  and not a guarantee. stelling makes no
+  thread-safety claim anywhere; run gated checks on one thread. Both sets
+  are disclosed, with these numbers, in `report.UNCOVERED`.
 
   It is an eviction and not a detector because a detector was measured and
   does not work: `jax.jit(f, inline=True)` replays a warm body and leaves NO
@@ -244,14 +267,18 @@ it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.
   as a LOWER BOUND.
 
 - **User-visible cost, and it is real.** While the tripwire is armed —
-  opt-in, and nothing changes without it — every `check()` calls
-  `jax.clear_caches()`, which is process-global and drops the caller's own
-  compiled functions. Measured on jax 0.11.0: the call is 58 µs empty and
-  1.4–3.5 ms populated; a caller then pays one re-trace-and-compile per
-  jitted function it re-uses (18 ms trivial, 45 ms for a 32-step `scan`,
-  330 ms for a 200-primitive chain). Across this repository's suite and
-  `corpus/` — 1475 armed gated traces — it was not measurable above the
-  noise (522.0 s → 519.7 s). Priced in `docs/overflow-tripwire.md`.
+  opt-in, and nothing changes without it — every `check()` and
+  `check_contract()` calls `jax.clear_caches()`, which is process-global and
+  drops the caller's own compiled functions. **The call scales with how many
+  jitted functions are live**, so a single "populated" figure is not a
+  measurement: on jax 0.11.0 (median of 12) it is 0.049 ms empty, 1.4 ms
+  with one live jit, 8.3 ms with ten and **41.8 ms (39.6–48.3) with fifty**.
+  A caller then pays one re-trace-and-compile per jitted function it re-uses
+  (18 ms trivial, 45 ms for a 32-step `scan`, 330 ms for a 200-primitive
+  chain). Across this repository's suite and `corpus/` — 1475 armed gated
+  traces — it was not measurable above the noise (522.0 s → 519.7 s), which
+  is a fact about this suite holding few jits live across a `check()` and
+  not a general one. Priced in `docs/overflow-tripwire.md`.
 
 - **What the fix cost in verdicts: nothing.** Measured across the suite and
   `corpus/` at `a759809`: 1475 armed gated traces, of which 88 were NOT
@@ -261,17 +288,61 @@ it** (`fix/B15-trace-gate-observation`). Branched from `a759809`.
 
 - **The tripwire's coverage claim is now an asserted inventory.**
   `tests/test_tripwire_gate_coverage.py::GATE_COVERAGE` declares a bucket
-  for each of 31 constant-construction routes — `watched`, `unwatched`,
-  `loud` (jax raises), `deferred` (the constant reaches the jaxpr and the
-  convert transfer declines it) — and the suite MEASURES every route by
-  driving it through `check()` twice, comparing, and failing on a route
-  whose two calls disagree. Driving it once was the shape that made this
-  defect invisible. `report.UNCOVERED` and `docs/overflow-tripwire.md` gain
-  the doors the sweep found unnamed (`lax.full`, anything built on `full`
-  such as `jnp.stack`, and values numpy narrows before jax sees them), and
-  the warm-trace-cache row now records that the door is closed for a
-  *verdict* and still open for the *session report*, which has no single
-  moment that owns the whole program.
+  for each of 32 constant-construction routes — 17 `watched`, 7
+  `unwatched`, 3 `loud` (jax raises), 5 `deferred` (the constant reaches the
+  jaxpr and the convert transfer declines it) — and the suite MEASURES every
+  route by driving it through `check()` twice, comparing, and failing on a
+  route whose two calls disagree. Driving it once was the shape that made
+  this defect invisible. `report.UNCOVERED` and `docs/overflow-tripwire.md`
+  gain the doors the sweep found unnamed (`lax.full`, `lax.full_like`,
+  anything built on `full` such as `jnp.stack`, and values numpy narrows
+  before jax sees them), and the warm-trace-cache row now records that the
+  door is closed for a *verdict* and still open for the *session report*,
+  which has no single moment that owns the whole program.
+
+  The second call is a **regression detector for the eviction, not an
+  independent control**: with the eviction in place both calls trace cold
+  and always agree, so the `unstable:` bucket is unreachable — and against
+  `a759809`'s `src` it reports exactly the regression it is for
+  (`'@jax.jit helper': declared 'watched', measured
+  'unstable:watched->unwatched'`). Its docstring says that now instead of
+  implying a control.
+
+- **Three disclosures that this batch narrowed, corrected where they were
+  made.** Each is the same defect the batch exists to close, one layer down.
+
+  - The claim the README retracted — *"a VERIFIED with the tripwire armed is
+    a statement that the trace is faithful to what was written"* — was still
+    standing verbatim in `design/d4-wrap-disclosure.md` (twice) and in the
+    STRONGER form on the user-facing `docs/quickstart.md` (*"means both: the
+    trace is faithful AND the property holds"*), plus in
+    `tests/test_tripwire_gate.py`'s own docstrings, where the test that
+    asserts the invariant drives ONE route (`x + N`, `watched`). All four
+    now carry the qualifier the watched set requires.
+  - `report.UNCOVERED` used to disclose *"anything traced BEFORE the
+    tripwire was armed"*; the eviction rewrite replaced it with a narrower
+    warm-cache bullet plus a completeness claim over the difference. It is
+    **restored**, with the three constructs that live in that difference
+    measured beside it.
+  - `GATE_COVERAGE`'s comment said an added `unwatched` route "needs a line
+    in `report.UNCOVERED` in the same commit, which the second test
+    enforces". That test walked a six-entry dict literal typed beside the
+    inventory rather than the inventory itself: measured twice, an added
+    `unwatched` row passed all seven tests undisclosed. It iterates
+    `GATE_COVERAGE` now, and `lax.full_like(x, N)` — a 32nd route found by
+    the same sweep, `unwatched`, VERIFIED, `fires=0` — is in the inventory
+    and named in the report.
+
+- **`design/d4-wrap-disclosure.md`'s flagship worked example did not run.**
+  It wrote the narrowing as `raw_adc + jnp.int16(40000)`, and
+  `jnp.int16(40000)` raises `OverflowError` on jax 0.11.0 — so the example
+  never traced, never produced the `add a -25536:i16[]` jaxpr it asserts,
+  and never produced the refusal it quotes; this batch's own
+  `GATE_COVERAGE` classifies `jnp.int16(N)` as `loud`, so the branch shipped
+  an inventory contradicting its own narrative. The example is now
+  `raw_adc + 40000` on an `int16` array, which is `watched` and does produce
+  both, and the `loud`/silent contrast with `jnp.full` is stated where the
+  reader meets it.
 
 **Batch B13 — the instruments that read as enforcing something**
 (`fix/B13-instrument-reach`). Branched from `3482822`. Nothing here is on

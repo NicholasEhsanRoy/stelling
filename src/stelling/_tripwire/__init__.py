@@ -328,7 +328,15 @@ def evict_trace_caches() -> str:
     ``@jax.jit`` helper some earlier trace already warmed is replayed from
     cache: the fold rule never runs over its body, and the gate's zero means
     "I saw nothing" rather than "there was nothing". Emptying the cache makes
-    the observation complete by construction.
+    the observation complete WITH RESPECT TO JAX'S CACHES, IN A
+    SINGLE-THREADED PROCESS. Both qualifiers are measured, not defensive:
+    this empties jax's caches and no others, so a constant narrowed into a
+    memo jax does not own (``jaxpr_as_fun`` over a saved jaxpr, a user
+    ``functools.lru_cache``, ``jax.closure_convert``) is still unobserved;
+    and jax's cache is process-global while the gate's counter is
+    per-thread, so a competing thread can re-warm a body inside the
+    eviction-to-trace window. ``report.UNCOVERED`` carries both with their
+    numbers.
 
     A code other than ``evicted`` is not a warning to be logged and dropped:
     it means the next trace's observation may be PARTIAL, and the gate's

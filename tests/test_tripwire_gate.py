@@ -2,11 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """The tripwire-to-verifier gate: a VERIFIED with the tripwire armed implies
-zero narrowings fired during that trace.
+zero narrowings FIRED during that trace.
 
 This is the soundness property the gate exists to maintain. A false VERIFIED
 means the verifier certified a jaxpr that does not represent the program as
 written — the exact failure mode that produced this feature.
+
+READ "FIRED", NOT "OCCURRED". A narrowing fires only on a route the tripwire
+watches, and the watched set is finite: the routes in
+``tests/test_tripwire_gate_coverage.py::GATE_COVERAGE``'s ``unwatched``
+bucket destroy the constant where the rule cannot see it, and those programs
+get a VERIFIED with zero fires. Nothing in this file tests them, which is
+what that file is for.
 """
 
 from __future__ import annotations
@@ -34,12 +41,21 @@ def _arm_and_disarm():
 
 
 def test_verified_with_tripwire_armed_implies_no_narrowing():
-    """The central invariant: VERIFIED + armed tripwire = faithful trace.
+    """The central invariant, at the scope the sample establishes it.
 
     If the verifier returns VERIFIED while the tripwire is armed, then no
-    narrowing occurred during that trace. This test generates arbitrary
-    harnesses (some with narrowings, some without) and asserts that VERIFIED
-    never appears alongside a narrowing.
+    narrowing was SEEN during that trace. This generates harnesses (some
+    with narrowings, some without) and asserts that VERIFIED never appears
+    alongside a narrowing.
+
+    THE SAMPLE IS ONE ROUTE: every harness below writes its constant as
+    ``x + value``, which is ``watched``. So this establishes the invariant
+    for the watched set and says nothing about the rest of it — a harness
+    building the same constant with ``jnp.full`` narrows it before the rule
+    is reached, fires zero times, and is VERIFIED. Calling that "= faithful
+    trace", as this docstring did, asserted over the gap. The enumerated
+    version of what is and is not watched is
+    ``tests/test_tripwire_gate_coverage.py::GATE_COVERAGE``.
     """
     hypothesis = pytest.importorskip("hypothesis", reason="needs hypothesis")
     from hypothesis import given, settings, assume
@@ -189,6 +205,26 @@ def test_gate_inactive_when_tripwire_not_armed():
 # body, and the gate's zero means "I observed no narrowing" and not "no
 # narrowing occurred". Every test below is measured on the fix; the numbers in
 # the docstrings are what MAIN produced before it.
+#
+# WHAT THEY DISCRIMINATE, counted rather than rounded up. Ten tests below are
+# new on this branch. Driven against `a759809`'s `src` (this file, that
+# source, one command) SEVEN go red -- two on the wrong verdict itself, five
+# on the absence of `evict_trace_caches` or of the third state's wording --
+# and THREE pass on both trees BY DESIGN:
+#
+#   * `..._still_certifies_a_clean_program_after_all_of_that` is the
+#     cost-side control. It exists to fail if this batch made the gate refuse
+#     a clean program, so a version of it that went red on main would be
+#     measuring the wrong thing.
+#   * `..._does_not_reach_a_memo_that_is_not_jaxs` and
+#     `..._counter_is_per_thread_while_jaxs_cache_is_not` are DISCLOSURE
+#     tests: they hold down two facts that are true on both trees and that
+#     bound what the eviction claims. A disclosure test that went red on main
+#     would be describing the fix instead of its limits.
+#
+# "All the new gate tests fail on main" is the tempting sentence and it is
+# false. Seven do; the other three are not evidence of the fix and are not
+# meant to be.
 # ---------------------------------------------------------------------------
 
 #: The narrowing lives inside a `@jax.jit` helper, so it is the helper's trace
@@ -469,3 +505,136 @@ def test_the_gate_still_certifies_a_clean_program_after_all_of_that():
     assert [check(clean, vacuity_mode="inputs-only").status for _ in range(3)] == [
         "VERIFIED", "VERIFIED", "VERIFIED",
     ]
+
+
+def test_the_eviction_does_not_reach_a_memo_that_is_not_jaxs():
+    """The eviction's scope, driven rather than described.
+
+    ``jax.clear_caches()`` empties JAX's caches and nothing else, so a
+    constant narrowed into a memo jax does not own is replayed straight past
+    it. Three constructs, each of which narrows 40000 to -25536 at SETUP time
+    and then hands the gated trace the finished article:
+
+    * ``jax.extend.core.jaxpr_as_fun(saved_jaxpr)`` — the -25536 is already
+      inside the saved jaxpr;
+    * a user ``functools.lru_cache`` filled once with an eagerly narrowed
+      value — a memo in the caller's own process, invisible to jax;
+    * ``jax.closure_convert`` — **a public jax API**, which traces at setup
+      and hoists the narrowed constant into the consts it returns.
+
+    All three: VERIFIED, zero fires, and the program jax actually executes
+    returns ``[-25536, -25436]`` where the source says ``[40000, 40100]``.
+    This is a DISCLOSURE test, not a regression: it holds the three named in
+    ``report.UNCOVERED`` to being really unwatched, so that closing one goes
+    red here and gets the disclosure edited rather than left standing.
+    """
+    import functools
+
+    from jax import lax
+
+    over, dt, bound = 40000, jnp.int16, 200
+
+    def by_jaxpr_as_fun():
+        saved = jax.make_jaxpr(lambda z: z + over)(jnp.zeros((2,), dt))
+        f = jax.extend.core.jaxpr_as_fun(saved)
+        return lambda x: f(x)[0]
+
+    def by_user_memo():
+        @functools.lru_cache(maxsize=None)
+        def k():
+            # `z + over` under jit is a WATCHED route; the memo means it is
+            # traced exactly once, ever, and the eviction never gets it back.
+            return jax.jit(lambda z: z + over)(jnp.zeros((2,), dt))
+
+        k()
+        return lambda x: x + k()
+
+    def by_closure_convert():
+        c = lax.full((2,), over, dt)
+        conv, consts = jax.closure_convert(lambda z: z + c, jnp.zeros((2,), dt))
+        return lambda x: conv(x, *consts)
+
+    x = jnp.array([0, 100], dt)
+    for name, build in (
+        ("jaxpr_as_fun", by_jaxpr_as_fun),
+        ("lru_cache", by_user_memo),
+        ("closure_convert", by_closure_convert),
+    ):
+        body = build()
+
+        def harness():
+            a = any_array((2,), dt, (0, 100))
+            assert_(body(a) < bound)
+
+        before = _tripwire.fires_count()
+        verdict = check(harness, vacuity_mode="inputs-only")
+        fired = _tripwire.fires_count() - before
+        executed = jax.jit(body)(x)
+
+        assert (verdict.status, fired) == ("VERIFIED", 0), (
+            f"{name}: the eviction now reaches this construct "
+            f"({verdict.status}, {fired} fires) — good, and "
+            f"report.UNCOVERED still says it does not"
+        )
+        assert int(executed.max()) < over, (
+            f"{name}: 40000 survived execution, so this construct does not "
+            f"destroy the constant and does not belong in the disclosure"
+        )
+
+
+def test_the_gates_counter_is_per_thread_while_jaxs_cache_is_not():
+    """Why the eviction is single-threaded-complete and no more.
+
+    The mechanism, without racing anything: a narrowing driven on ANOTHER
+    thread is counted on that thread's stack, so a gate open on this one sees
+    zero. jax's trace cache, meanwhile, is process-global — one shared table
+    the other thread both reads and fills. A gate that evicts, and is then
+    overtaken inside its own eviction-to-trace window, therefore certifies:
+    measured out-of-suite over 400 gated checks of a harness whose narrowing
+    sits in a shared jitted helper, 0/400 wrong VERIFIED single-threaded
+    against 247/400 with four competing threads (399/400 before the eviction
+    existed). That race is not asserted here — a test of a race is a flaky
+    test — but the two facts it is made of are.
+    """
+    import threading
+
+    from stelling._tripwire import _pop_gate, _push_gate
+
+    x = jnp.zeros((2,), jnp.int16)
+    #: ONE jitted callable, shared across both threads: jax's trace cache is
+    #: keyed on it, so it is the object through which the two threads share
+    #: state at all.
+    helper = jax.jit(lambda z: z + 40000)
+
+    def narrow_on_another_thread():
+        jax.make_jaxpr(lambda z: helper(z))(x)
+
+    jax.clear_caches()
+    _push_gate()
+    try:
+        t = threading.Thread(target=narrow_on_another_thread)
+        t.start()
+        t.join()
+    finally:
+        counted_here = _pop_gate()
+
+    assert counted_here == 0, (
+        "a narrowing on another thread was counted on this thread's gate — "
+        "the per-thread counter this docstring rests on is no longer "
+        "per-thread, so re-derive the thread disclosure in report.UNCOVERED"
+    )
+
+    # ...and the trace cache the other thread just filled is THIS thread's
+    # too, which is the other half: shared state, unshared counter. A fresh
+    # closure here, exactly as the gate uses, and the body is still not
+    # re-traced.
+    _push_gate()
+    try:
+        jax.make_jaxpr(lambda z: helper(z))(x)
+    finally:
+        after_warm = _pop_gate()
+    assert after_warm == 0, (
+        "jax's trace cache is no longer process-global (a body another "
+        "thread traced was re-traced here), which would make the "
+        "eviction-to-trace window safe — re-derive the thread disclosure"
+    )

@@ -124,6 +124,7 @@ ROUTES = {
     "jnp.full(shape, N, dt)": lambda x: x + jnp.full(x.shape, OVER, DTYPE),
     "jnp.full_like(x, N)": lambda x: x + jnp.full_like(x, OVER),
     "lax.full(shape, N, dt)": lambda x: x + lax.full(x.shape, OVER, DTYPE),
+    "lax.full_like(x, N)": lambda x: x + lax.full_like(x, OVER),
     "lax.convert_element_type(N, dt)": lambda x: x
     + lax.convert_element_type(OVER, DTYPE),
     "np.asarray(N).astype(dt)": lambda x: x + np.array(OVER).astype(np.int16),
@@ -147,7 +148,12 @@ ROUTES = {
 #: this tool can see and must be argued in this comment, not merely made
 #: green: `unwatched` -> `watched` is a hole closing (say what closed it);
 #: `watched` -> `unwatched` is a hole OPENING and needs a line in
-#: `report.UNCOVERED` in the same commit, which the second test enforces.
+#: `report.UNCOVERED` in the same commit, which
+#: `test_every_unwatched_route_is_named_in_the_reports_coverage_claim`
+#: enforces BY ITERATING THIS DICT. It used to walk a copy of this set typed
+#: beside it, so an added `unwatched` row passed all seven tests undisclosed
+#: (measured, twice); a pointer to an enforcement is worth what the
+#: enforcement iterates.
 GATE_COVERAGE = {
     "x + N": "watched",
     "N + x": "watched",
@@ -171,10 +177,16 @@ GATE_COVERAGE = {
     "@jax.jit helper": "watched",
     "@jax.jit(inline=True) helper": "watched",
     # numpy narrows the value before any jax primitive runs, so the const-fold
-    # rule is handed something already in range. All six are one mechanism.
+    # rule is handed something already in range. Every route in this group is
+    # one mechanism. `lax.full_like` was measured and added after the rest:
+    # unwatched, VERIFIED, 0 fires, jaxpr `broadcast_in_dim -25536`. The prose
+    # in `report.UNCOVERED` covered it under "anything else built on `full`"
+    # the whole time, which is why the disclosure was adequate and the
+    # inventory was not.
     "jnp.full(shape, N, dt)": "unwatched",
     "jnp.full_like(x, N)": "unwatched",
     "lax.full(shape, N, dt)": "unwatched",
+    "lax.full_like(x, N)": "unwatched",
     "lax.convert_element_type(N, dt)": "unwatched",
     "np.asarray(N).astype(dt)": "unwatched",
     "jnp.stack([x, jnp.full(N)])": "unwatched",
@@ -237,6 +249,17 @@ def _measure(name):
 
     So the answer is the SECOND call's, and a route whose two calls disagree
     gets its own bucket rather than being averaged into silence.
+
+    WHAT THE SECOND CALL IS, EXACTLY: a REGRESSION DETECTOR FOR THE EVICTION,
+    and not an independent control on the bucket. On this tree ``check()``
+    clears jax's trace caches itself, so both calls trace cold and therefore
+    always agree — the ``unstable:`` bucket is unreachable while the eviction
+    is in place, and a reading of "the two calls agreed, so the bucket is
+    real" would be reading a tautology. What it does detect is the eviction
+    going away: driven against ``a759809``'s ``src`` it reports
+    ``'@jax.jit helper': declared 'watched', measured
+    'unstable:watched->unwatched'`` for both jit routes. That is worth having;
+    it is just not the thing a control would be.
     """
     body = ROUTES[name]
     first, _ = _bucket_once(body)
@@ -316,23 +339,56 @@ def test_every_deferred_route_is_caught_by_the_transfer_instead():
         )
 
 
+#: Routes whose key here and spelling in ``report.UNCOVERED`` differ. ONLY
+#: spelling belongs in this table: the test below requires a line in
+#: ``report.UNCOVERED`` for EVERY ``unwatched`` route in ``GATE_COVERAGE``,
+#: and a route with no entry here must be named under its own key. Adding a
+#: route to this table instead of to the report would be the same evasion in
+#: a new place, so it is held to routes that exist and is read against
+#: ``GATE_COVERAGE`` below.
+UNCOVERED_SPELLING = {
+    "jnp.stack([x, jnp.full(N)])": "jnp.stack([x, jnp.full(shape, N, dt)])",
+}
+
+
 def test_every_unwatched_route_is_named_in_the_reports_coverage_claim():
     """Prose and measurement cannot drift while this holds.
 
     The report is what a user reads to answer "what does it not see". A door
     measured here and unnamed there is a door the reader is not told about.
+
+    THIS ITERATES ``GATE_COVERAGE``, NOT A LIST TYPED BESIDE IT. It used to
+    walk a six-entry dict literal, so ``GATE_COVERAGE``'s comment — "a route
+    moving into `unwatched` ... needs a line in `report.UNCOVERED` in the
+    same commit, which the second test enforces" — described an enforcement
+    nobody performed. Measured: adding ``lax.full_like(x, N)`` as a seventh
+    ``unwatched`` row, named nowhere in ``report.UNCOVERED``, passed all
+    seven tests in this file. A hardcoded copy of a set cannot police the
+    set.
     """
     text = " ".join(report.UNCOVERED)
-    for name, phrase in {
-        "jnp.full(shape, N, dt)": "jnp.full(shape, N, dt)",
-        "jnp.full_like(x, N)": "jnp.full_like(x, N)",
-        "lax.full(shape, N, dt)": "lax.full(shape, N, dt)",
-        "lax.convert_element_type(N, dt)": "lax.convert_element_type(N, dt)",
-        "np.asarray(N).astype(dt)": "np.asarray(N).astype(dt)",
-        "jnp.stack([x, jnp.full(N)])": "jnp.stack([x, jnp.full(shape, N, dt)])",
-    }.items():
-        assert GATE_COVERAGE[name] == "unwatched", name
-        assert phrase in text, f"report.UNCOVERED does not name {phrase}"
+    unwatched = [k for k, v in GATE_COVERAGE.items() if v == "unwatched"]
+    assert unwatched, "the inventory declares no holes, so this is vacuous"
+    missing = [
+        (name, UNCOVERED_SPELLING.get(name, name))
+        for name in unwatched
+        if UNCOVERED_SPELLING.get(name, name) not in text
+    ]
+    assert not missing, (
+        "an `unwatched` route the report does not name — a hole the reader "
+        "is not told about:\n"
+        + "".join(f"  {n!r}: report.UNCOVERED has no {p!r}\n" for n, p in missing)
+        + "Add the route to `report.UNCOVERED` in this commit. Add it to "
+        "UNCOVERED_SPELLING only if the report already names it in different "
+        "words."
+    )
+    stale = set(UNCOVERED_SPELLING) - {
+        k for k, v in GATE_COVERAGE.items() if v == "unwatched"
+    }
+    assert not stale, (
+        f"UNCOVERED_SPELLING carries routes that are no longer `unwatched` "
+        f"({sorted(stale)}), so it is excusing something that is not there"
+    )
     assert "GATE_COVERAGE" in text, (
         "the report does not point at this inventory, so a reader who wants "
         "the enumerated version has no way to find it"
@@ -340,19 +396,48 @@ def test_every_unwatched_route_is_named_in_the_reports_coverage_claim():
 
 
 def test_the_warm_trace_cache_door_is_recorded_as_closed_for_the_GATE_only():
-    """B15's door, and the exact half of it that is still open.
+    """B15's door, and the three ways it is still open.
 
-    `check()` empties jax's trace caches, so a verdict's observation is
-    complete. The SESSION report has no such moment — it watches whatever the
-    suite happens to trace — so a user's jitted function first traced in an
-    earlier test is still never re-traced and still never reported. Saying
-    only the first half would be the same over-claim in a new place.
+    `check()` evicts jax's trace caches, so a verdict's observation is
+    complete — with respect to JAX's caches, on ONE thread, and no further.
+    Three things sit outside that, each measured, and each of them is a place
+    where "closed" would be the same over-claim in a new spelling:
+
+    * the SESSION report has no such moment — it watches whatever the suite
+      happens to trace, so a user's jitted function first traced in an
+      earlier test is still never re-traced and never reported;
+    * a value narrowed into a memo JAX DOES NOT OWN survives the eviction:
+      `jax.extend.core.jaxpr_as_fun` over a saved jaxpr, a user
+      `functools.lru_cache`, and `jax.closure_convert` (a public jax API)
+      each return VERIFIED with 0 fires on a program whose 40000 is already
+      -25536;
+    * jax's cache is PROCESS-GLOBAL and the gate's counter is per-thread, so
+      the eviction-to-trace window is not atomic: 0/400 wrong VERIFIED
+      single-threaded against 247/400 with four competing threads.
+
+    This asserts all four so that dropping any one of them goes red.
     """
     text = " ".join(report.UNCOVERED)
     assert "WARM TRACE CACHE" in text
     assert "inline=True" in text
-    assert "preconditions.check()" in text and "empties" in text
+    assert "`preconditions.check()`" in text and "jax.clear_caches()" in text
+    assert "SINGLE-THREADED PROCESS" in text, (
+        "the completeness claim is unqualified again; a process-global cache "
+        "and a per-thread counter do not make one"
+    )
     assert "session report" in text.lower()
+    for phrase in (
+        "jax.extend.core.jaxpr_as_fun(saved)",
+        "functools.lru_cache",
+        "jax.closure_convert",
+    ):
+        assert phrase in text, (
+            f"{phrase} is a construct the eviction does not reach and it is "
+            f"no longer disclosed"
+        )
+    assert "ANOTHER THREAD" in text and "247/400" in text, (
+        "the thread-safety disclosure and its measurement are gone"
+    )
 
 
 def test_the_report_does_not_still_say_clear_caches_is_never_called():
@@ -377,6 +462,11 @@ def test_the_report_does_not_still_say_clear_caches_is_never_called():
     assert "`preconditions.check()` DOES call it" in text, (
         "the report claims caches are never cleared, which the trace gate "
         "has made false for any session that calls check()"
+    )
+    assert "`contracts.check_contract()`" in text, (
+        "check_contract() reaches the same `_pipeline` and evicts the same "
+        "caches, so a disclosure that names only check() is narrower than "
+        "the behaviour it describes"
     )
 
 

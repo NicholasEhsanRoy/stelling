@@ -573,7 +573,7 @@ def _gate_fire_stack() -> list[int]:
 
 
 def evict_trace_caches() -> str:
-    """Empty jax's trace caches so the NEXT trace observes the whole program.
+    """Empty jax's trace caches so the NEXT trace re-traces what they hold.
 
     ``evicted``
         the caches are gone; every jit body the next trace enters will be
@@ -598,16 +598,32 @@ def evict_trace_caches() -> str:
     public but clears rather than reports and cannot be enumerated;
     ``jax.explain_cache_misses`` logs MISSES, and the state that matters here
     is a HIT). Emptying the cache makes the observation complete by
-    construction instead, and needs no detector to be right.
+    construction instead -- within the bounds of the next paragraph -- and
+    needs no detector to be right.
+
+    WHAT "COMPLETE" DOES NOT COVER, because the word invites more than it
+    earns. This empties JAX'S caches: a value narrowed into a memo jax does
+    not own survives it, and three constructs measured on jax 0.11.0 return
+    VERIFIED with 0 fires through it -- ``jax.extend.core.jaxpr_as_fun`` over
+    a saved jaxpr, a user ``functools.lru_cache`` holding an eagerly narrowed
+    value, and ``jax.closure_convert``, a public jax API that traces at setup
+    and hoists the narrowed constant. And jax's cache is PROCESS-GLOBAL while
+    the gate's fire counter is per-thread, so the window between this call
+    and the trace it protects is not atomic: measured 0/400 wrong VERIFIED
+    single-threaded and 247/400 with four threads re-warming the same jitted
+    helper (399/400 before this existed). Single-threaded, against jax's own
+    caches, it is complete; outside that it is an improvement.
 
     WHAT IT COSTS, because it is a process-global side effect and the caller
     is entitled to know. ``jax.clear_caches()`` also drops the CALLER's
-    compiled functions: measured on jax 0.11.0, the call itself is 58us on an
-    empty cache and 1.4-3.5ms on a populated one, but the next call to a
-    jitted function the caller still wanted pays its whole trace-and-compile
-    again -- 18ms for a trivial one, 330ms for a 200-primitive chain. This
-    runs only when the tripwire is ARMED, which is opt-in, and
-    ``docs/overflow-tripwire.md`` prices it there.
+    compiled functions. The call itself SCALES WITH HOW MANY JITTED
+    FUNCTIONS ARE LIVE, so "populated" is not a number: measured on jax
+    0.11.0 (median of 12), 0.049ms empty, 1.4ms with one live jit, 8.3ms
+    with ten, and 41.8ms (39.6-48.3) with fifty. On top of that the next
+    call to a jitted function the caller still wanted pays its whole
+    trace-and-compile again -- 18ms for a trivial one, 330ms for a
+    200-primitive chain. This runs only when the tripwire is ARMED, which is
+    opt-in, and ``docs/overflow-tripwire.md`` prices it there.
 
     Nothing jax-shaped leaves this function: it returns a string.
     """
