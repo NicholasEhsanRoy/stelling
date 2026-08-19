@@ -155,9 +155,11 @@ SPDX-License-Identifier: Apache-2.0
   Under `semantics="real"` a violation is admitted **only** by an exact
   test: exact **rational replay of the same traced jaxpr** at the same
   point (stdlib `fractions`; the probe imports no analysis module), or —
-  where every declaration is integral — exact integer arithmetic, which
-  keeps its own branch because rational arithmetic does not wrap and
-  routing it through the replay would suppress the runtime-wrap catch.
+  where the *program* is integral throughout, meaning every operand and
+  result dtype in the jaxpr at every depth and not merely the declared
+  ones — exact integer arithmetic, which keeps its own branch because
+  rational arithmetic does not wrap and routing it through the replay
+  would suppress the runtime-wrap catch.
   **Everything else declines**, under `no-exact-reading-of-this-program`,
   with the reason the exact reading was unavailable counted by primitive
   in `ProbeReport.abstentions` and repeated in the stamp line. There is no
@@ -169,15 +171,21 @@ SPDX-License-Identifier: Apache-2.0
   A program with one step the replay cannot read cannot be fired on,
   however false its obligation is — irrational steps (`exp`, `log`,
   trigonometry, a fractional `pow`, a non-square `sqrt`) inherently, and
-  `scatter`, `dot_general`, `sort`, `cumsum` and `rem` because this
-  module's tables have no reading for them yet. Three of the six live
+  `dot_general`, `sort`, `cumsum`, `stack`, `rem`, `scatter` and
+  `scatter-add` because this module's tables have no reading for them
+  yet. Three of the six live
   fixtures in `tests/test_falsify_probe.py` are `scatter` and now decline;
   they are listed there with the primitive that costs each one.
 
   Blind spots, disclosed rather than discovered: the probe cannot see the
   `jnp.full((), 256, jnp.int8)` narrowing (there is no executable form of
-  that program, traced or eager, in which `256` survives), and it
-  declines `bfloat16` and the `float8_*` formats outright.
+  that program, traced or eager, in which `256` survives), it declines
+  `bfloat16` and the `float8_*` formats outright, and its 5-second
+  wall-clock backstop is thin enough — the deterministic element and
+  width budgets already permit about 4.75 seconds — that **whether it
+  fires on a given program can depend on the machine**. That bound can
+  only decline, never admit, so what varies with the hardware is reach
+  and never soundness.
 
 - **Reachability conjunct**: a backward walk from the jaxpr's outputs
   identifies variables that flow to an output. Violated obligations on

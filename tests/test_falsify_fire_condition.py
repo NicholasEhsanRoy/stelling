@@ -318,6 +318,261 @@ def test_the_integer_branch_is_not_a_rational_replay():
     assert found.adjudication == "exact-integer-arithmetic", found.adjudication
 
 
+def int_declared_but_rounding():
+    """``int16`` in, ``float32`` arithmetic, and it ROUNDS.
+
+    ``(2**24 + y) - 2**24`` is ``y`` over ℝ and over ℚ, so ``y <= 3`` is
+    TRUE on the declared box ``{0, 1, 2, 3}`` and a ``VERIFIED`` is right.
+    float32's spacing at ``2**24`` is 2, so ``2**24 + 3`` ties up to
+    ``2**24 + 4`` and the program computes ``4.0`` at ``x = 3``.
+    """
+
+    def harness():
+        x = any_array((), "int16", (0, 3))
+        y = x.astype("float32")
+        b = jnp.float32(2 ** 24)
+        return assert_((b + y) - b <= jnp.float32(3.0))
+
+    return harness
+
+
+def _rounds_in_float32(a):
+    """``int -> float32 -> int``, rounding in the middle, ints at both ends."""
+    y = a.astype("float32")
+    b = jnp.float32(2 ** 24)
+    return ((b + y) - b).astype("int32")
+
+
+def int_declared_but_rounding_out_of_sight():
+    """The same rounding, hidden inside a ``jax.checkpoint`` body.
+
+    EVERY dtype the OUTER jaxpr mentions is integral — ``int32`` in,
+    ``int32`` out of the ``remat2`` equation, ``bool`` into the assert —
+    and every declaration is ``int32``. Only the call body is float, so a
+    predicate that reads the declarations calls this program integral, so
+    does one that reads the top-level equations, and only one that
+    RECURSES gets it right. Driven: with the recursion removed from
+    ``_integral_program`` and nothing else changed, this FIRES on both
+    supported jax series, adjudicated ``exact-integer-arithmetic``.
+    """
+
+    def harness():
+        x = any_array((), "int32", (0, 3))
+        return assert_(jax.checkpoint(_rounds_in_float32)(x) <= 3)
+
+    return harness
+
+
+@pytest.mark.parametrize(
+    "name,harness",
+    [
+        ("in plain sight", int_declared_but_rounding()),
+        ("inside a checkpoint body", int_declared_but_rounding_out_of_sight()),
+    ],
+)
+def test_an_int_declared_program_that_ROUNDS_is_not_integer_arithmetic(
+    name, harness
+):
+    """THE THIRD APPEARANCE OF ONE MISTAKE, and the shape of the repair.
+
+    The integer branch admits a firing under the sentence *"exact integer
+    arithmetic: no rounding involved"*, and its predicate was::
+
+        all(np.dtype(d.dtype).kind in "iub" for d in census.declarations)
+
+    which is a test on the DECLARATIONS licensing a claim about the
+    PROGRAM. An int-declared program that converts to float and rounds
+    passes it, and the fixtures above are four lines of it: a correct
+    ``VERIFIED`` called *"stelling is UNSOUND at this query"* through the
+    public API, no mutation, no solver, on jax 0.10.2 and 0.11.0 alike.
+
+    **That is the ulp proxy's mistake for the third time in this module.**
+    First ulp-stability of the input stood in for *"this violation is not
+    a rounding artefact"*; then a fall-back to that same proxy stood in
+    for an exact adjudication; then this. The class, not the instance, is
+    what has to be fixed each time: **a predicate that licenses an
+    exactness claim must be computed from the object the claim is about.**
+    So the predicate is read off every operand and result dtype in the
+    jaxpr, at every depth — which is what the second fixture pins, because
+    nothing above the ``remat2`` equation there is anything but an
+    integer.
+
+    Declining is not the whole of the requirement either. The violation
+    must be declined BY BEING READ: the exact replay evaluates this
+    program at the same point over ℚ, finds the obligation TRUE, and
+    counts it a ``float-rounding-artefact``. A decline for want of a
+    reading would hide the same false alarm behind a reach gap.
+    """
+    import stelling.falsify as F
+
+    census = F._census(harness)
+    assert all(
+        np.dtype(d.dtype).kind in "iub" for d in census.declarations
+    ), (
+        f"{name}: every declaration here is integral, and the whole point "
+        f"of the fixture is that this is not evidence about the program's "
+        f"arithmetic. If it stops being true the test measures nothing."
+    )
+    assert not census.integral, (
+        f"{name}: `_integral_program` called this program integral. It "
+        f"converts to float32 and rounds; the sentence the integer branch "
+        f"emits — 'exact integer arithmetic: no rounding involved' — is "
+        f"contradicted by the program beside it."
+    )
+
+    found, report = attack(harness)
+    assert found is None, (
+        f"{name}: a correct VERIFIED was called UNSOUND. "
+        f"{found.render() if found else ''}"
+    )
+    assert report.violations_seen > 0, (
+        f"{name}: no violation was executed, so nothing was adjudicated "
+        f"and this test proves nothing; skips {report.skips}"
+    )
+    assert dict(report.adjudications) == {
+        "exact-replay-holds-over-the-rationals": report.violations_seen
+    }, (
+        f"{name}: the violation must be declined by being READ over ℚ, "
+        f"not by an abstention: {report.adjudications}, "
+        f"abstentions {dict(report.abstentions)}"
+    )
+
+
+def test_the_int_declared_rounding_program_survives_the_public_door():
+    """And it must not raise through :func:`check` either.
+
+    The unit-level test above supplies the status; this drives the real
+    pipeline with the solvers, because that is the path the false alarm
+    was reachable on — ``check(h, vacuity_mode="inputs-only",
+    falsify="sample")``, four lines of harness, raising
+    ``VerifiedFalsified``.
+    """
+    verdict = check(
+        int_declared_but_rounding(),
+        vacuity_mode="inputs-only",
+        semantics="real",
+        solver_timeout_ms=8000,
+        falsify="sample",
+    )
+    assert verdict.status == "VERIFIED", verdict.notes
+
+
+def test_the_integer_admission_IS_A_READING_OF_THE_PROGRAM_at_the_source():
+    """The rule, pinned where a refactor meets it — not just an instance.
+
+    The fixtures above are two programs. What went wrong three times in
+    this module is not a program, it is a habit: something cheap standing
+    in for an exactness claim — ulp-stability of the INPUT for *"not a
+    rounding artefact"*, then a fall-back to that proxy for an exact
+    adjudication, then the DECLARATIONS for *"this program does integer
+    arithmetic"*. Each was defensible-looking, each was correlated with
+    the thing it stood for, and each turned a correct ``VERIFIED`` into
+    *"stelling is UNSOUND"* in a handful of lines.
+
+    So the rule is asserted at the source, in the same posture as
+    :func:`test_the_ulp_proxy_is_gone_from_the_fire_condition_entirely`
+    and for the same reason: a behavioural test names the programs someone
+    thought of, and the next proxy will be a different shape. **The guard
+    on the integer admission must READ THE PROGRAM** — ``census.integral``
+    is computed by ``_integral_program`` over every operand and result
+    dtype in the jaxpr at every depth — and a predicate that consults only
+    the declarations is exactly the defect being repaired.
+    """
+    import ast
+
+    tree = ast.parse(PROBE_SRC.read_text(encoding="utf-8"))
+    confirm = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_confirm"
+    )
+    assign = next(
+        n for n in ast.walk(confirm)
+        if isinstance(n, ast.Assign)
+        and any(
+            isinstance(t, ast.Name) and t.id == "integral" for t in n.targets
+        )
+    )
+    reads = {ast.unparse(n) for n in ast.walk(assign.value)}
+    assert "census.integral" in reads, (
+        f"the integer admission is guarded by {ast.unparse(assign.value)!r}, "
+        f"which does not read the census's reading of the PROGRAM. That "
+        f"branch emits 'exact integer arithmetic: no rounding involved' "
+        f"about the program, so its predicate is computed from the "
+        f"program; anything else is a proxy, and this module has shipped "
+        f"three of those."
+    )
+
+    # and the reading itself must recurse, or a float step one `jit` deep
+    # is invisible to it -- which is the second fixture above
+    prog = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_integral_program"
+    )
+    assert any(
+        isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "_integral_program"
+        for n in ast.walk(prog)
+    ), "`_integral_program` no longer descends into call bodies"
+
+
+def test_the_rematerialisation_primitive_the_live_jax_emits_is_read():
+    """``remat2``, traced live — the branch the OTHER test does not reach.
+
+    ``_CALL_PRIMITIVES``'s comment claimed for a batch that a live check
+    traced ``jnp.where`` *and* ``jax.checkpoint``. It traced ``jnp.where``
+    only, and no falsify test named ``jax.checkpoint`` or ``remat2``
+    outside a docstring — which is the same defect as a name list nothing
+    checks, one level up, on the one name that is load-bearing.
+
+    LOAD-BEARING FOR WHAT, MEASURED. ``_call_jaxpr_of`` accepts a BARE
+    ``Jaxpr`` as well as a ``ClosedJaxpr``, and that widening changes
+    exactly one thing on the two supported series: on jax 0.10.2 ``jit``
+    carries a real ``ClosedJaxpr`` while ``remat2`` carries a bare
+    ``Jaxpr`` with no ``.jaxpr``/``.consts`` at all, so the old
+    ``hasattr`` test refused ``remat2`` there and nothing else. (On 0.11.0
+    ``Jaxpr`` itself answers ``.jaxpr`` with itself and ``.consts`` with
+    ``[]``, so the old test matched both.) At ``99abdb0``, with
+    ``_CALL_PRIMITIVES`` corrected and ``_call_jaxpr_of`` left as it was,
+    the harness below FIRES on jax 0.10.2 under ``ulp-proxy-refutes`` —
+    the Kahan false alarm, one more route.
+    """
+    import stelling.falsify as F
+
+    def kahan_through_checkpoint():
+        y = any_array((), "float64", (0.0, 2.0))
+        z = jax.checkpoint(lambda a: (1e16 + a) - 1e16)(y)
+        return assert_(z <= y)
+
+    traced = jax.make_jaxpr(kahan_through_checkpoint)()
+    names = {e.primitive.name for e in traced.jaxpr.eqns}
+    call_names = names - {"stelling_any", "stelling_assert", "le"}
+    assert call_names, f"no call primitive in {names}"
+    assert call_names <= set(F._CALL_PRIMITIVES), (
+        f"the live jax lowers `jax.checkpoint` through {sorted(call_names)}, "
+        f"which `_CALL_PRIMITIVES` does not name: {F._CALL_PRIMITIVES}"
+    )
+
+    # and the body really is handed over, in whichever shape this series
+    # wraps it in -- the bare-`Jaxpr` branch of `_call_jaxpr_of` exists
+    # for exactly this equation on jax 0.10.2
+    eqn = next(e for e in traced.jaxpr.eqns if e.primitive.name in call_names)
+    body, consts = F._call_jaxpr_of(eqn)
+    assert body.eqns, f"an empty body for {eqn.primitive.name!r}"
+    assert len(consts) == len(body.constvars), (body, consts)
+
+    found, report = attack(kahan_through_checkpoint)
+    assert found is None, f"the Kahan false alarm is back: {found.render()}"
+    assert report.violations_seen > 0, report.skips
+    assert dict(report.adjudications) == {
+        "exact-replay-holds-over-the-rationals": report.violations_seen
+    }, (
+        f"the `jax.checkpoint` route declined, but not by being READ: "
+        f"{report.adjudications}. Declining is safe; being read is what "
+        f"the bare-`Jaxpr` branch buys, and this pins it."
+    )
+
+
 def test_an_unreplayable_primitive_DECLINES_and_names_what_it_could_not_read():
     """``exp`` is irrational at every rational but 0, so the replay abstains.
 
@@ -639,10 +894,23 @@ def test_the_wall_clock_backstop_is_a_backstop_and_not_the_operative_bound():
     The direction is safe -- a slow machine DECLINES where a fast one
     fires, never the reverse, because only an exact refutation may admit
     -- but a bound that routinely decided things would make this
-    instrument's results irreproducible. It is calibrated to sit above the
+    instrument's results irreproducible. It is calibrated against the
     deterministic pair: at most ``REPLAY_ELEMENT_BUDGET`` values, each at
     most ``REPLAY_BIT_BUDGET`` bits wide, and one ``Fraction`` multiply at
     4,096 bits is about 19 microseconds here.
+
+    **AND "CALIBRATED ABOVE" IS AS MUCH AS THIS TEST ESTABLISHES, WHICH IS
+    LESS THAN IT SOUNDS.** The pair permits about 4.75 seconds against a
+    5.0-second clock, so the assertion below passes on a margin of 5%, and
+    ordinary programs land inside the clock rather than far below it: a
+    ``(35000,)`` float64 declaration squared six times replays in 1.55 s
+    on the machine this was written on, so a machine three times slower
+    declines it. The honest statement, which is in this module's docstring
+    and in the constant's comment rather than only here, is that **whether
+    this probe FIRES on a given program can depend on the machine**. What
+    the safe direction buys is that only its REACH varies: nothing the
+    clock does can admit a firing, so slow hardware costs refutations and
+    never invents them.
     """
     import stelling.falsify as F
 

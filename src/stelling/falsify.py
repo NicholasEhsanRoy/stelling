@@ -131,8 +131,17 @@ that is FALSE at a declared point:
 Reach on ordinary code did not collapse; it roughly halved, and the half
 that survives is the half that was ever a proof. The 14 are itemised
 because they are the work list, not the verdict: ``dot_general``,
-``sort``, ``cumsum``, ``stack``, ``scatter`` and ``scatter-add`` all HAVE
-exact rational readings and are simply not in this file's tables.
+``sort``, ``cumsum``, ``stack``, ``rem``, ``scatter`` and ``scatter-add``
+all HAVE exact rational readings and are simply not in this file's
+tables. That is THE list, spelled the same way in the three places this
+module carries it — here, under WHAT DECIDES NOW below, and in the
+CHANGELOG entry for this feature. It used to be three different lists,
+each missing something another had: ``stack`` was in one of them, and
+``stack`` is a live measured abstention (``'stack' has no exact rational
+reading``, on both supported jax series, through ``jnp.stack``, which
+lowers to a ``stack`` PRIMITIVE rather than to ``concatenate``). ``rem``
+is the one name here this corpus run happened not to reach; it abstains
+under the same message when a program contains it.
 
 So on this corpus the false-alarm count is zero and the instrument
 demonstrably fires — which is the pair of facts a default-off flag has to
@@ -483,12 +492,36 @@ floats diverge most.
 
 * **``ieee`` semantics: nothing decides.** The executed float IS the
   subject of the claim and the violation stands as it is.
-* **every declaration integral: exact integer arithmetic decides.** No
-  rounding is involved and the violation stands. This branch MUST NOT
+* **the PROGRAM integral throughout: exact integer arithmetic decides.**
+  No rounding is involved and the violation stands. This branch MUST NOT
   become a rational replay — see the blind-spot note above: ℚ does not
   wrap, and replaying an ``int8`` program in ℚ would report values it
   never computed and would then declare a genuine runtime wrap an
   artefact.
+
+  **THE WORD "PROGRAM" IS THIS BATCH'S REPAIR AND IT IS THE THIRD TIME
+  THIS MODULE MADE ONE MISTAKE.** The predicate read the DECLARATIONS —
+  a fact about the query's signature, standing in for a claim about its
+  arithmetic — so an ``int16`` declaration cast to ``float32`` satisfied
+  it, and four lines through the public API turned a correct ``VERIFIED``
+  into *"stelling is UNSOUND at this query"* on both supported jax
+  series, under a parenthetical reading *"exact integer arithmetic: no
+  rounding involved"*::
+
+      x = any_array((), "int16", (0, 3))
+      y = x.astype("float32")        # int16 -> float32 is whitelisted
+      b = jnp.float32(2**24)         # ulp(2**24) is 2 in float32
+      assert_((b + y) - b <= 3.0)    # over ℝ this is ``y <= 3``: TRUE
+
+  First ulp-stability of the input stood in for *"not a rounding
+  artefact"*; then a fall-back to that same proxy stood in for an exact
+  adjudication; then this. The rule the three share, and the one to reach
+  for if there is ever a fourth: **a predicate that licenses an exactness
+  claim is computed from the object the claim is about.** Here that is
+  every operand and every result dtype in the jaxpr, at every depth,
+  ``and``-ed with the declaration test — which is a second, different
+  fact, because the point handed to the executed run is built out of the
+  DECLARED dtypes. See :func:`_integral_program`.
 * **otherwise: EXACT-RATIONAL REPLAY of the same traced jaxpr at the same
   point** (:func:`_replay`). Every finite float is a rational and
   ``Fraction(float)`` is exact, so the program can be re-evaluated over ℚ
@@ -524,8 +557,9 @@ API, with no mutation and in four lines::
        ... admitted by the 'ulp-proxy-refutes' test ...
 
 and again with ``y + (y ** 0.5) * 0.0`` on the right-hand side, and it
-would have again through ``exp``, ``sort``, ``cumsum``, ``rem``, a
-non-square ``sqrt``, ``scatter`` or ``dot_general`` — every matmul.
+would have again through ``exp``, ``sort``, ``cumsum``, ``stack``,
+``rem``, a non-square ``sqrt``, ``scatter`` or ``dot_general`` — every
+matmul.
 **Every primitive the replay abstained on was a route back to the test the
 replay had been added to replace**, and over this repository's own corpus
 89 of 169 firings (53%) were still admitted by the proxy, 34 of them by
@@ -541,9 +575,9 @@ only ever have turned a decline into a decline. ``_step`` survives because
 the ``ulp`` SAMPLING strategy uses it to choose points, which is a
 different job and cannot admit anything.
 
-**WHAT THAT COSTS, MEASURED, BECAUSE IT IS NOT FREE.** A program with one
-step the replay cannot read is a program this probe cannot fire on,
-however false the obligation is. Two separate things produce that, and
+**WHAT THAT COSTS, MEASURED, BECAUSE IT IS NOT FREE.** A program the
+replay cannot read THROUGH is a program this probe cannot fire on,
+however false the obligation is. Three separate things produce that, and
 they are not the same finding:
 
 * **Steps with no exact rational reading at all** — ``exp``, ``log``,
@@ -551,13 +585,29 @@ they are not the same finding:
   inherent. An exactness-only fire condition will never reach them, and
   the honest form of that is a decline that names the primitive.
 * **Steps that HAVE an exact reading and are simply not in this file's
-  tables** — ``scatter``, ``scatter-add``, ``dot_general``, ``sort``,
-  ``cumsum``, ``rem``. These are a table, not a limit, and the cost is
-  concrete: three of the six live fixtures in
+  tables** — ``dot_general``, ``sort``, ``cumsum``, ``stack``, ``rem``,
+  ``scatter`` and ``scatter-add``. These are a table, not a limit, and
+  the cost is concrete: three of the six live fixtures in
   ``tests/test_falsify_probe.py`` were ``scatter`` and now decline. They
   are listed there under ``DECLINED_FOR_WANT_OF_AN_EXACT_READING`` with
   the primitive that costs each one, and adding a reading turns the test
   red so the recovery announces itself.
+* **Programs the replay COULD read but is not given the time to.** The
+  wall-clock backstop is not the generous margin its constant's comment
+  used to claim: the deterministic pair already permits about 4.75
+  seconds of ``Fraction`` arithmetic against a 5.0-second clock, and a
+  ``(35000,)`` float64 declaration squared six times replays in 1.55 s on
+  the machine this was measured on. **So whether this probe fires on a
+  given program can depend on the machine it runs on**, and that is
+  stated here rather than left to be inferred from a constant. What
+  varies is REACH and never soundness — the clock can only ABSTAIN and
+  only an exact test may admit, so a slow machine declines what a fast
+  one refutes and never the reverse — and a decline the clock produced
+  names itself in ``ProbeReport.abstentions``. The deterministic bounds
+  are pushed in front of it where they can be: the rational-width budget
+  binds as each element is produced rather than after the equation that
+  trips it is complete (``(30000,)`` squared seven times: 3.10 s then
+  declined, now 1.37 s then declined).
 
 The second list is where this instrument's reach is bought back, and
 nothing in it is bought by relaxing the first paragraph of this section.
@@ -1165,6 +1215,11 @@ class _Census:
     margins: dict = field(default_factory=dict)
     exponents: tuple[int, ...] = ()  # k of every integer_pow / pow in the program
     replay_cost: int = 0  # element-visits one exact-rational replay would do
+    # every dtype in the PROGRAM -- operand and result, at every depth --
+    # is an integer or a boolean one.  Defaulted to False because every
+    # use of it licenses an exactness claim: a `_Census` built without
+    # reading a jaxpr must not be able to license one by omission.
+    integral: bool = False
 
 
 def _census(harness) -> _Census:
@@ -1271,6 +1326,7 @@ def _read(closed) -> _Census:
         margins=margins,
         exponents=tuple(sorted(exponents)),
         replay_cost=_replay_cost(jaxpr),
+        integral=_integral_program(jaxpr),
     )
 
 
@@ -1283,6 +1339,78 @@ def _sub_jaxprs(eqn):
             if isinstance(inner, jex_core.Jaxpr):
                 out.append(inner)
     return out
+
+
+def _integral_atom(atom) -> bool:
+    """Is this operand's or result's dtype an integer or a boolean one?
+
+    A dtype that cannot be read or cannot be classified answers NO, which
+    is the fail-safe direction here: the only caller uses this to license
+    *"no rounding involved"*, and an unclassifiable dtype is not evidence
+    for that sentence.  Saying no costs the integer branch and hands the
+    point to the exact-rational replay, which declines what it cannot read.
+    """
+    dtype = getattr(getattr(atom, "aval", None), "dtype", None)
+    if dtype is None:
+        return False
+    try:
+        return np.dtype(dtype).kind in "iub"
+    except (TypeError, ValueError):
+        return False
+
+
+def _integral_program(jaxpr) -> bool:
+    """Does this PROGRAM compute in integers only, operand and result?
+
+    **THIS PREDICATE IS READ OFF THE PROGRAM BECAUSE THE SENTENCE IT
+    LICENSES IS ABOUT THE PROGRAM.**  :func:`_confirm` admits a firing on
+    it under *"exact integer arithmetic: no rounding involved"*, and it
+    used to be read off the DECLARATIONS instead -- which is a fact about
+    the query's signature and no evidence at all about its arithmetic.  An
+    int-declared program that converts to float and rounds satisfied it,
+    and four lines through the public API then turned a CORRECT
+    ``VERIFIED`` into *"stelling is UNSOUND at this query"*, with no
+    mutation, no solver, on both supported jax series::
+
+        x = any_array((), "int16", (0, 3))
+        y = x.astype("float32")        # int16 -> float32 is whitelisted
+        b = jnp.float32(2**24)         # ulp(2**24) is 2 in float32
+        assert_((b + y) - b <= 3.0)    # over R this is `y <= 3`: TRUE
+
+    Over ℚ the left-hand side IS ``y`` and ``y`` is at most 3, so the
+    ``VERIFIED`` is right.  In float32 at ``x = 3`` the sum ties up to
+    ``2**24 + 4`` and the program computes ``4.0``, so the probe fired --
+    under a parenthetical the program beside it contradicted.
+
+    **AND THAT WAS THE THIRD APPEARANCE OF ONE MISTAKE IN THIS MODULE:
+    something cheap standing in for an exactness claim.**  First
+    ulp-stability of the INPUT standing in for *"this violation is not a
+    rounding artefact"*; then a fall-back to that same proxy standing in
+    for an exact adjudication; then this.  Each time the cost was a
+    correct ``VERIFIED`` called ``UNSOUND`` through the public API in a
+    handful of lines.  The general form of the repair is the one applied
+    here: **a predicate that licenses an exactness claim must be computed
+    from the object the claim is about**, not from something correlated
+    with it.
+
+    Every operand and every result of every equation is inspected, and
+    call bodies and structured-primitive branches are recursed into, so a
+    float step is visible wherever a user put it -- inside a ``jit``
+    helper, a ``jax.checkpoint``, a ``cond`` arm.  The jaxpr's own
+    constvars and invars are read too, so a float constant that reaches
+    nothing still answers no.
+    """
+    for atom in (*jaxpr.constvars, *jaxpr.invars):
+        if not _integral_atom(atom):
+            return False
+    for eqn in jaxpr.eqns:
+        for atom in (*eqn.invars, *eqn.outvars):
+            if not _integral_atom(atom):
+                return False
+        for sub in _sub_jaxprs(eqn):
+            if not _integral_program(sub):
+                return False
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -2119,12 +2247,36 @@ class _Unreplayable(Exception):
 # `REPLAY_SECONDS_BUDGET` is a BACKSTOP and not the bound: it exists for the
 # shape the first two cannot see -- many equations, each individually cheap.
 # It is checked inside the element loops as well as between equations, so a
-# single very wide equation cannot run past it either.  It is deliberately
-# generous, because a wall clock makes a firing depend on the machine, and
-# THAT direction is safe (a slow machine declines where a fast one fires,
-# never the reverse) but is still nondeterminism nobody wants routinely.  A
-# decline it produces is named separately, so a report shows when the
-# non-deterministic bound was the one that bound.
+# single very wide equation cannot run past it either.
+#
+# **IT IS THINNER THAN THE WORD "GENEROUS", SO WHETHER THIS INSTRUMENT
+# FIRES ON A GIVEN PROGRAM CAN DEPEND ON THE MACHINE.  THAT IS WRITTEN
+# DOWN HERE RATHER THAN LEFT TO BE INFERRED.**  The deterministic pair
+# permits 250,000 values at 4,096 bits, and at ~19us a multiply that is
+# 4.75 seconds against a 5.0-second clock -- no margin worth the word.
+# And ordinary shapes land well inside it: a `(35000,)` float64
+# declaration squared six times replays in 1.55 s on the machine this was
+# written on, a third of the backstop, so a machine three times slower
+# declines the same program.
+#
+# WHAT VARIES WITH THE MACHINE IS REACH, NEVER SOUNDNESS.  Only an exact
+# test may admit a firing and the clock can only ABSTAIN, so a slow
+# machine declines where a fast one fires and never the reverse: slow
+# hardware buys fewer firings, not wrong ones.  A decline the clock
+# produced says so in its own words (`ran past its 5.0s wall-clock
+# backstop`) in `ProbeReport.abstentions` and in the stamp line, so a
+# report that was decided by the non-deterministic bound shows it.
+#
+# The deterministic bounds are pushed IN FRONT of it wherever they can be,
+# which is the repair actually available here: `guard.width` is checked as
+# each element is produced rather than once the equation that trips it is
+# complete, so a program the width budget will refuse no longer pays for
+# the whole equation first.  Measured, `(30000,)` squared seven times:
+# 3.10 s then declined, now 1.37 s then declined, same reason and same
+# answer.  That does not make the clock deterministic -- nothing short of
+# a deterministic work counter would, and that is a numeric-policy change
+# rather than a repair -- it shrinks the window in which the clock, rather
+# than the program, is what decided.
 REPLAY_ELEMENT_BUDGET = 250_000
 REPLAY_BIT_BUDGET = 4_096
 REPLAY_SECONDS_BUDGET = 5.0
@@ -2213,11 +2365,22 @@ def _replay_cost(jaxpr) -> int:
 # The historical spellings stay because a name that is not a primitive on
 # this jax simply never matches, and losing them would be the same failure
 # in the other direction on an older series.  What keeps the tuple honest
-# is not the list, it is
-# `tests/test_falsify_fire_condition.py::test_the_call_primitive_the_live_jax_emits_is_replayed`,
-# which traces `jnp.where` and `jax.checkpoint` through the LIVE jax and
-# asserts the primitive it finds is one of these.  A name list with no such
-# test is how this got shipped.
+# is not the list, it is two tests in
+# `tests/test_falsify_fire_condition.py` that trace the LIVE jax and
+# assert the primitive they find is one of these:
+# `test_the_call_primitive_the_live_jax_emits_is_replayed` for `jnp.where`
+# and `test_the_rematerialisation_primitive_the_live_jax_emits_is_read`
+# for `jax.checkpoint`.  A name list with no such test is how this got
+# shipped.
+#
+# **AND THIS COMMENT CLAIMED THE `jax.checkpoint` HALF FOR A BATCH BEFORE
+# IT EXISTED.**  It said one test traced both; that test traced
+# `jnp.where` only, and no falsify test named `jax.checkpoint` or
+# `remat2` anywhere outside a docstring -- so `remat2`, the one name
+# `_call_jaxpr_of` below is load-bearing for, was exactly as unchecked as
+# `pjit` had been.  Prose asserting that a live check exists is the same
+# defect as a name list nothing checks, moved one level up, and it is
+# recorded here because this is the level a reader audits from.
 _CALL_PRIMITIVES = (
     "jit",
     "pjit",
@@ -2234,12 +2397,41 @@ def _call_jaxpr_of(eqn):
     """The nested jaxpr a call primitive carries, and the consts to run it.
 
     TWO SHAPES REACH HERE AND BOTH ARE LIVE.  A `ClosedJaxpr` carries its
-    own constants (`.jaxpr` and `.consts`); `jit` and `remat2` on jax
-    0.10.2 and 0.11.x carry a BARE `Jaxpr` instead, whose constvars -- if
-    it had any -- have nothing here to bind them to.  Requiring the closed
-    form was the second half of the same defect as the tuple above: even
-    spelled correctly, `jit` would have abstained.  A bare jaxpr that does
-    carry constvars is refused rather than guessed at.
+    own constants (`.jaxpr` and `.consts`); a BARE `Jaxpr` carries no
+    constants, so its constvars -- if it had any -- have nothing here to
+    bind them to, and one that does carry constvars is refused rather than
+    guessed at.
+
+    **WHICH SHAPE COMES FROM WHERE IS MEASURED, BECAUSE THE FIRST ACCOUNT
+    OF THIS FUNCTION WAS WRONG.**  It said requiring the closed form had
+    been "the second half of the same defect as the tuple above" and that
+    "even spelled correctly, `jit` would have abstained".  Neither holds
+    on either series this package supports.  Traced live:
+
+    * jax 0.10.2 -- `jit` carries a real `ClosedJaxpr`; `remat2` carries a
+      bare `Jaxpr` with no `.jaxpr`/`.consts` at all.
+    * jax 0.11.x -- both carry a bare `Jaxpr`, but `Jaxpr` there has a
+      `.jaxpr` property returning ITSELF and a `.consts` property
+      returning `[]`, so the old `hasattr(sub, "jaxpr") and hasattr(sub,
+      "consts")` test matched anyway.
+
+    So the old test admitted `jit` on both series, and taking `99abdb0`
+    and correcting ONLY `_CALL_PRIMITIVES` makes the `jnp.where` route
+    read exactly and decline on 0.10.2 and 0.11.0 alike.  The widening
+    here is real work and it is load-bearing for exactly one thing:
+    **`remat2` on jax 0.10.2.**  Driven there too, with the Kahan shape
+    behind a rematerialisation boundary::
+
+        y = any_array((), "float64", (0.0, 2.0))
+        z = jax.checkpoint(lambda a: (1e16 + a) - 1e16)(y)
+        assert_(z <= y)        # true over R; the VERIFIED is correct
+
+    At `99abdb0` with the tuple corrected and this function left
+    unwidened, that program FIRES on jax 0.10.2 -- admitted by
+    `ulp-proxy-refutes`, the false alarm one more route -- and reads
+    exactly on 0.11.0.  Here it reads exactly on both, 46 violations
+    declined `float-rounding-artefact` with no abstention.  The live check
+    is `test_the_rematerialisation_primitive_the_live_jax_emits_is_read`.
     """
     for key in ("jaxpr", "call_jaxpr"):
         sub = eqn.params.get(key)
@@ -2257,6 +2449,38 @@ def _call_jaxpr_of(eqn):
     raise _Unreplayable(f"{eqn.primitive.name!r} carries no jaxpr to replay")
 
 
+# --------------------------------------------------------------------------
+# THE NAME TABLES, AND WHICH DIRECTION EACH ONE FAILS IN
+# --------------------------------------------------------------------------
+#
+# `_EXACT_BINARY`, `_EXACT_UNARY`, `_COMPARISONS`, `_BOOLEAN`, `_MOVEMENT`
+# and `_REDUCTIONS` below, `_CALL_PRIMITIVES` above and `_MARGIN_RELATIONS`
+# near the top of the file are all hardcoded jax primitive names, and a
+# reader should know what each kind of mistake in one costs.
+#
+# **A NAME THAT MATCHES NOTHING COSTS REACH, SILENTLY.**  It never fires
+# its branch, the replay reaches the final `raise`, and an abstention
+# DECLINES -- so a jax rename, or a name that was never a primitive on any
+# series, subtracts from what this instrument can prove and takes nothing
+# from what it may claim.  Silently is the operative word: the only
+# evidence is a decline count, which reads like a program the replay could
+# not have read anyway.  That is why the tables are pinned against a LIVE
+# trace rather than trusted -- `_CALL_PRIMITIVES` shipped with four names,
+# not one of which was a primitive on either supported series, and the
+# replay then decided 6% of violations while the weaker test decided the
+# rest.  `_MOVEMENT` shipped with `expand_dims`, which is a `lax`
+# FUNCTION and not a primitive: `jnp.expand_dims`, `lax.expand_dims` and
+# `a[None]` all lower to `broadcast_in_dim` on 0.10.2 and 0.11.0 alike,
+# so the entry had never matched anything and it is gone.
+#
+# **A NAME THAT MATCHES WITH THE WRONG READING INVENTS A REFUTATION**, and
+# that is the direction with teeth, because this module's output is
+# "stelling is UNSOUND at this query".  Two guards exist for exactly that
+# and neither is optional: `_boolean_only`, for the four names jax spells
+# both bitwise-integer and boolean arithmetic with, and `_movement`'s
+# refusal to substitute zeros for an operand a primitive reads BY VALUE.
+# Extending these tables is therefore not symmetric with trimming them.
+#
 # The elementwise primitives whose meaning over R is a closed-form
 # rational function of rational arguments.  Anything absent abstains, and
 # that is the safe direction: abstaining loses a refutation, admitting a
@@ -2317,7 +2541,6 @@ _MOVEMENT = {
     "reshape": (0,),
     "transpose": (0,),
     "squeeze": (0,),
-    "expand_dims": (0,),
     "rev": (0,),
     "slice": (0,),
     "concatenate": None,  # every operand is data; filled in at use
@@ -2374,7 +2597,18 @@ _TICK_STRIDE = 1024
 
 
 def _ew(fn, *args, guard=None):
-    """Apply ``fn`` elementwise over broadcast object arrays."""
+    """Apply ``fn`` elementwise over broadcast object arrays.
+
+    THE WIDTH BOUND IS CHECKED AS EACH ELEMENT IS PRODUCED, not once the
+    equation is complete.  Both give the same answer; only one of them
+    gives it before paying for the answer.  A `(30000,)` declaration
+    squared seven times is refused by the width budget, and used to
+    compute all 30,000 elements of the squaring that trips it first.  That
+    matters beyond the seconds: the wall-clock backstop is the one bound
+    here that is not deterministic, so every second of work a
+    deterministic bound could have refused earlier is a second in which
+    the machine, rather than the program, might decide.
+    """
     b = np.broadcast_arrays(*args)
     flat = [x.reshape(-1) for x in b]
     n = flat[0].size
@@ -2382,7 +2616,10 @@ def _ew(fn, *args, guard=None):
     for i in range(n):
         if guard is not None and i and i % _TICK_STRIDE == 0:
             guard.tick()
-        out[i] = fn(*(f[i] for f in flat))
+        v = fn(*(f[i] for f in flat))
+        if guard is not None:
+            guard.width(v)
+        out[i] = v
     return out.reshape(b[0].shape)
 
 
@@ -2494,7 +2731,10 @@ def _reduce(fn, a, axes, guard=None):
         vals = list(rows[i])
         if not vals:
             raise _Unreplayable("a reduction over an empty axis")
-        out[i] = fn(vals)
+        v = fn(vals)
+        if guard is not None:
+            guard.width(v)  # per row, for the reason `_ew` gives
+        out[i] = v
     return out.reshape(kept)
 
 
@@ -2758,8 +2998,8 @@ def _confirm(census, statuses, point, k, semantics):
         -> FALSIFICATION PROBE FIRED, admitted by 'ulp-proxy-refutes'
 
     and again with ``y + (y ** 0.5) * 0.0`` on the right, and it would
-    have again through ``exp``, ``sort``, ``cumsum``, ``rem``, a
-    non-square ``sqrt``, ``scatter`` or ``dot_general`` -- i.e. through
+    have again through ``exp``, ``sort``, ``cumsum``, ``stack``, ``rem``,
+    a non-square ``sqrt``, ``scatter`` or ``dot_general`` -- i.e. through
     every matmul -- because EVERY primitive the replay abstains on was a
     route back to the test the replay was added to replace.  An instrument
     is not made safe by putting a correct adjudicator in front of an
@@ -2777,13 +3017,24 @@ def _confirm(census, statuses, point, k, semantics):
 
     * **``ieee`` semantics.** The executed float IS the subject of the
       claim, so the violation stands exactly as executed.
-    * **all-integral declarations.** The arithmetic is exact as executed
+    * **an all-integral PROGRAM.** The arithmetic is exact as executed
       and no rounding is involved.  This branch MUST NOT become a rational
       replay: rational arithmetic does not wrap, so replaying an ``int8``
       program would report values it never computed and would declare a
       genuine runtime wrap a rounding artefact.  Measured: with
       ``propagate._int_guarded`` removed the probe catches an ``int8``
       runtime wrap, and it catches it through this branch.
+
+      **THE PREDICATE IS READ OFF THE PROGRAM AND IT USED TO BE READ OFF
+      THE DECLARATIONS**, which is the same defect as the Kahan false
+      alarm and the fall-back that followed it -- something cheap standing
+      in for an exactness claim -- for the third time in this module.  An
+      ``int16`` declaration cast to ``float32`` rounds, and four lines
+      through the public API called a correct ``VERIFIED`` ``UNSOUND``
+      under a parenthetical saying no rounding was involved.  The rule the
+      three instances share, and the one to apply to a fourth: **a
+      predicate that licenses an exactness claim is computed from the
+      object the claim is about.**  See :func:`_integral_program`.
     * **exact-rational replay** of the same traced jaxpr at the same point
       (:func:`_replay`), for everything else.  False over ℚ as well as in
       floats: the analysis discharged something false about ℝ and the
@@ -2803,7 +3054,14 @@ def _confirm(census, statuses, point, k, semantics):
     )
     if semantics == "ieee":
         return detail, None, "ieee-executed-float", None
-    integral = all(
+    # BOTH CONJUNCTS, AND THEY ARE DIFFERENT FACTS.  `census.integral` is
+    # read off the PROGRAM -- every operand and result dtype at every
+    # depth (:func:`_integral_program`) -- and is what licenses the
+    # sentence below.  The declaration test guards the other side: the
+    # POINT handed to the executed run is built out of `Declaration.dtype`
+    # by `_window`/`_clean`, so a declaration that is not integral is an
+    # integral value entering the program by a float door.
+    integral = census.integral and all(
         np.dtype(d.dtype).kind in "iub" for d in census.declarations
     )
     if integral:

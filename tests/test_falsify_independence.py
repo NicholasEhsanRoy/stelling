@@ -237,12 +237,31 @@ def test_the_probe_loads_no_analysis_module_that_TRACING_does_not():
     so a failure says WHEN the reach happened, and both windows are
     asserted empty.
 
-    What neither catches is a reach the probe makes through an object
-    handed to it by someone else, since then no frame of the probe's own
-    ever touches the module. Nothing hands the probe such an object today
-    -- its inputs are a callable, a sequence of strings and four scalars
-    -- and that is a fact about the signature rather than a claim about
-    this test.
+    **WHAT NEITHER CATCHES, BOTH OF THEM, BECAUSE ONE NAMED BLIND SPOT
+    READS AS AN INVENTORY OF ALL OF THEM.**
+
+    *A reach through an object handed to the probe by someone else*, since
+    then no frame of the probe's own ever touches the module. Nothing
+    hands the probe such an object today -- its inputs are a callable, a
+    sequence of strings and four scalars -- and that is a fact about the
+    signature rather than a claim about this test.
+
+    *A reach that reads the analysis's SOURCE off the filesystem.* Both
+    halves watch MODULE OBJECTS: the first for a new entry in
+    ``sys.modules``, the second for an attribute fetched off a module
+    already in it. Neither watches the disk, and ``propagate.py`` sits
+    next to ``falsify.py`` on it. Driven: a helper in ``falsify.py`` that
+    ``open()``s ``propagate.py``, regexes ``_EXACT_CONVERSIONS`` out of
+    the text and is called from inside ``probe()`` recovers all 25
+    whitelisted conversion pairs -- 50 dtype names -- on a real probe
+    call, and all six tests in this file stay green: no import, no
+    ``sys.modules`` entry, no attribute on a module object, nothing for
+    either half to see. This one is developer discipline rather than a
+    user-facing hazard -- it takes a deliberate edit to this repository's
+    own source and no caller input reaches it -- and closing it would
+    mean watching file reads, which is a different instrument. The
+    docstring that stood here named the first of these two and not the
+    second.
     """
     script = textwrap.dedent(
         '''
