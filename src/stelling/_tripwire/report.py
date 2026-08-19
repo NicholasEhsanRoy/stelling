@@ -114,8 +114,8 @@ UNCOVERED = (
     "jax's trace caches before the trace it watches, so a verdict's "
     "observation is complete by construction (B15). This session report has "
     "no such moment -- it watches whatever your suite happens to trace -- so "
-    "the door stays open for the findings below and is closed only for the "
-    "verdicts.",
+    "the door stays open for this report's findings and is closed only "
+    "for the verdicts.",
 )
 
 
@@ -513,7 +513,12 @@ def render(status, rec: record.Recorder, notes: tuple[str, ...] = ()) -> list[st
     lines.append(
         "  - arm order: the tripwire arms at pytest_configure. A function "
         "your conftest traced before that is cached and never re-traced, so "
-        "it is invisible here. `jax.clear_caches()` is NOT called -- that "
-        "would change your suite's timing and behaviour to flatter a report."
+        "it is invisible here. THIS REPORT never calls `jax.clear_caches()` "
+        "-- it would change your suite's timing and behaviour to flatter a "
+        "report. `preconditions.check()` DOES call it, once per gated trace, "
+        "because a VERDICT has to be able to say it watched the whole "
+        "program and a report does not (B15); so if your suite calls "
+        "check(), its caches are being emptied and the sentence above about "
+        "arm order does not describe what check() sees."
     )
     return lines

@@ -355,6 +355,31 @@ def test_the_warm_trace_cache_door_is_recorded_as_closed_for_the_GATE_only():
     assert "session report" in text.lower()
 
 
+def test_the_report_does_not_still_say_clear_caches_is_never_called():
+    """A disclosure that B15 made false, held down where it was made false.
+
+    The session report's arm-order line read *"`jax.clear_caches()` is NOT
+    called -- that would change your suite's timing and behaviour to flatter
+    a report"*. It is still true of the report and it stopped being true of
+    the session the moment the gate started calling it, and a reader who
+    budgets their suite's runtime off that sentence would be budgeting off a
+    claim about a different program. The line now says which of the two it
+    is talking about, and this asserts BOTH halves so that deleting either
+    one goes red.
+    """
+    from stelling._tripwire import record, report
+
+    text = " ".join(report.render(_tripwire.Status("armed"), record.Recorder()))
+    assert "arm order" in text
+    assert "THIS REPORT never calls `jax.clear_caches()`" in text, (
+        "the report no longer says that IT does not clear caches"
+    )
+    assert "`preconditions.check()` DOES call it" in text, (
+        "the report claims caches are never cleared, which the trace gate "
+        "has made false for any session that calls check()"
+    )
+
+
 def test_the_inventory_discriminates():
     """Four buckets, each non-empty, and the predicate that sorts them is not
     a constant function."""
