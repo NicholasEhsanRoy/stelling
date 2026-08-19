@@ -40,8 +40,12 @@ EXIT CODES, ALL OF THEM. This paragraph has been wrong three times — once
 naming two of three, once counting ``return`` statements instead of reasons,
 once claiming completeness while two exits went unnamed — so it is now
 checked: ``tests/test_tripwire_record.py`` parses the codes out of the list
-below and asserts that the set matches the set a driven ``main()`` can
-actually produce, in both directions.
+below, parses the reason literals out of THIS FILE, and asserts the two sets
+are equal in both directions. THE SECOND SET USED TO BE THE CODES A TABLE OF
+DRIVEN RUNS EXPECTED, which is a weaker thing than it reads as: a reason
+appended under a condition no row of that table drives is a code the table
+never names, so the list below could go on being silent about it. The codes
+those runs really printed are still read, now as a control on the parse.
 
   2  argparse rejected the command line (a mistyped ``--require``, say).
      argparse's own exit, not this script's, and it is in this list because
@@ -63,10 +67,16 @@ actually produce, in both directions.
      above because ``raised`` is documented to mean the probe did not run and
      ``did-not-fire`` to mean it ran and the hook was dead; folding a
      rendering fault into either makes one of those false.
-  1  `control:unknown-state` — the control reported a state this script has
-     no answer for. Unreachable without editing this repository, and fatal on
-     purpose: an instrument that cannot say what happened has not said that
-     nothing happened.
+  1  `control:unknown-state` — one of the control's TWO AXES reported a state
+     this script has no answer for, and BOTH sites emit this one code: a
+     `control state` outside ``CONTROL_STATES``, or a `control report`
+     outside ``RENDER_STATES``. One code because the remedy is one remedy and
+     it is in this file; the sentence names which axis it read and what it
+     read there, so a page that carries this code still says which. Two
+     emission sites and one documented is how this list was wrong the third
+     time. Unreachable without editing this repository, and fatal on purpose:
+     an instrument that cannot say what happened has not said that nothing
+     happened.
   1  `hash:contradicted` — the rule hash CONTRADICTS the row recorded for
      this exact release, ``--require`` or not. See `_hash_row`.
   1  `hash:unknown-state` — ``Status.hash_state`` reported a fourth thing.

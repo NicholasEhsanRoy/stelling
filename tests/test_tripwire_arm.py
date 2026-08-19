@@ -222,7 +222,17 @@ def test_the_release_predicate_is_pinned_in_BOTH_directions():
 
 
 def test_arming_twice_does_not_double_wrap(armed):
-    """A second wrapper would double every count in the denominator."""
+    """A second wrapper sees every invocation the first does.
+
+    THE COUNT IT DOUBLES DEPENDS ON WHOSE RECORDER, and this is the row where
+    there is one: ``arm(rec)`` hands the same recorder to both wrappers, so
+    ``rec.fires`` would count each fire twice. The orphaned-probe case in
+    ``_adapter_jax.restore``'s docstring is the other row -- two recorders,
+    the older of them dead -- where the recorder counts do NOT double and the
+    module-level gate counter does. Neither is evidence for the other, and
+    the first account of this branch's pollution defect stated the recorder
+    half of it wrongly.
+    """
     _, rec = armed
     again, rec_again = _tripwire.arm(rec)
     assert again.armed
@@ -255,38 +265,57 @@ def test_undoing_a_detach_after_disarming_leaves_JAXS_rule_live(disarmed):
     jax's const-fold registry for the rest of the interpreter's life. Every
     later ``arm()`` read that wrapper as jax's rule: ``rule_name`` became
     ``stelling_const_fold_probe``, ``hash_state`` became ``changed`` against
-    a jax whose rule had not moved, and the next wrapper wrapped the wrapper.
+    a jax whose rule had not moved, and the next wrapper wrapped the wrapper
+    -- a live registry two stelling wrappers deep. THE RECORDER FIGURES WERE
+    NOT AFFECTED, which the first telling of this got wrong: the orphan holds
+    the dead recorder and writes into that, so the counts a report prints are
+    the same on a polluted process as on a clean one. The doubled number is
+    the GATE's, shared by both wrappers and printed by
+    ``preconditions.check()`` as ``trace unfaithful: N integer narrowing(s)``
+    -- 2 where it should be 1. ``_adapter_jax.restore`` carries the
+    measurement.
 
     THIS IS MEASURED THROUGH THE STATUS THE TOOL PUBLISHES, not through the
     registry -- rule 2 bans naming the private module here, and the status is
     what ``report.render_status`` and the canary read anyway. A run before and
     a run after must say the same things about jax's rule, because nothing
     that happened in between was about jax's rule.
+
+    BOTH DETACH MODES, because the defect is not about either of them. What
+    ``restore()`` fixes up is a saved entry that IS the wrapper being
+    retired, and ``detach`` saves whatever the registry held whichever mode
+    it was asked for: under an armed tripwire that is our wrapper in both.
+    Driving only ``bypass`` leaves the fix free to be narrowed to the shape
+    that route produces -- the registry still holding the original -- and the
+    ``entry`` route, where the registry holds NOTHING at the moment
+    ``restore`` runs, then re-orphans the probe with every test still green.
     """
     before, _ = _tripwire.arm()
     assert before.armed and _tripwire.disarm() == "restored"
 
-    status, _ = _tripwire.arm()
-    assert status.armed
-    assert adapter.detach("bypass") == "detached"
-    assert _tripwire.disarm() == "foreign-patch"
-    assert adapter.reattach() == "reattached"
-    _tripwire.disarm()
-
-    after, _ = _tripwire.arm()
-    try:
-        assert (after.rule_name, after.rule_hash, after.hash_state) == (
-            before.rule_name, before.rule_hash, before.hash_state
-        ), (
-            "undoing the detach left something other than jax's rule in the "
-            f"registry: the tool now reports {after.rule_name!r} / "
-            f"{after.rule_hash} / {after.hash_state!r} where it reported "
-            f"{before.rule_name!r} / {before.rule_hash} / "
-            f"{before.hash_state!r} before any of this ran"
-        )
-        assert after.rule_name == adapter._KNOWN_RULE
-    finally:
+    for mode in ("bypass", "entry"):
+        status, _ = _tripwire.arm()
+        assert status.armed
+        assert adapter.detach(mode) == "detached"
+        assert _tripwire.disarm() == "foreign-patch"
+        assert adapter.reattach() == "reattached"
         _tripwire.disarm()
+
+        after, _ = _tripwire.arm()
+        try:
+            assert (after.rule_name, after.rule_hash, after.hash_state) == (
+                before.rule_name, before.rule_hash, before.hash_state
+            ), (
+                f"undoing a detach({mode!r}) left something other than jax's "
+                f"rule in the registry: the tool now reports "
+                f"{after.rule_name!r} / {after.rule_hash} / "
+                f"{after.hash_state!r} where it reported {before.rule_name!r} "
+                f"/ {before.rule_hash} / {before.hash_state!r} before any of "
+                "this ran"
+            )
+            assert after.rule_name == adapter._KNOWN_RULE
+        finally:
+            _tripwire.disarm()
 
 
 def test_disarming_twice_is_quiet(disarmed):

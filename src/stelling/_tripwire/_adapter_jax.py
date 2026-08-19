@@ -663,7 +663,13 @@ def install(recorder: record.Recorder) -> str:
     """Wrap the rule. Returns a status code; never raises, never leaks a jax object.
 
     ``already-armed`` if this process already installed one — arming twice must
-    not double-wrap, and a double wrapper would double every count.
+    not double-wrap. A second wrapper over the first sees every invocation the
+    first does, so the gate counter, which is module state and belongs to no
+    recorder, counts each fire twice whoever owns the wrappers; a RECORDER
+    counts twice only when both wrappers were handed the same one, which is
+    what a re-arm would do and is not what the orphaned probe in
+    :func:`restore` produced. Both cases are measured in
+    ``tests/test_tripwire_arm.py``.
     """
     code = locate()
     if code != "located":
@@ -708,6 +714,23 @@ def restore() -> str:
     ``disarm()`` -> ``reattach()`` is exactly the sequence the §4 foreign-patch
     test drives, and it left every later ``arm()`` in the process reporting
     ``hash_state == "changed"`` against a jax whose rule had not moved.
+
+    WHAT THE SECOND WRAPPER COSTS, MEASURED, because the first account of this
+    said it doubled the counts and it does not. The wrap is real: with an
+    orphan left behind, the live registry entry is stelling's wrapper around
+    stelling's wrapper around jax's rule -- depth 2, measured. But each
+    wrapper closes over the recorder it was installed WITH, so the orphan
+    writes into a dead one: on jax 0.11.0 the live recorder reported the same
+    ``int_narrowings``, ``fires`` and finding count on a polluted process as
+    on a clean one, and ``selfcheck()`` passed either way. What doubles is the
+    GATE counter, which is thread-local module state no recorder owns and
+    which both wrappers increment: ``_pop_gate()`` returns 2 where it should
+    return 1, and that is the N in ``preconditions.check()``'s ``trace
+    unfaithful: N integer narrowing(s)``. Measured clean 1 / polluted 2 before
+    this fix, 1 / 1 after. The refusal does not turn on the magnitude -- a
+    wrapper that fired twice fired at least once -- so what the doubling
+    corrupted is a number an operator reads, beside a ``rule_name`` and a
+    ``hash_state`` that describe stelling's own probe as jax's rule.
 
     ``restore`` is the operation that invalidates the saved entry, so it is
     the operation that must correct it: once the wrapper is gone, the value

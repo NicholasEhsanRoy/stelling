@@ -1304,9 +1304,21 @@ def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
     exits, once counting ``return`` statements instead of reasons, and once
     claiming to be complete while two exits went unnamed. Prose that
     describes an exit code is the first thing an operator reads and the last
-    thing anyone checks, so it is checked here against what the script can
-    actually be driven to do.
+    thing anyone checks, so it is checked here against the script.
+
+    AGAINST THE SCRIPT, AND NOT AGAINST ``_CANARY_TABLE``. This test used to
+    build the produced set out of the table's expected reasons, which made it
+    blind in the one direction that matters: a reason ``main()`` appends
+    under a condition no row drives is a code no row names, so the set never
+    grew and the list above could stay silent about it. A code added to the
+    script with the table left alone was invisible here — and "the set a
+    driven ``main()`` can actually produce" was then true only under an
+    unstated assumption that the table is complete over the script. The
+    source is parsed instead: every reason in that file is the literal pair
+    ``("<code>", "<sentence>")``, which is the shape ``reasons`` is built
+    from and the shape ``_control_reasons`` and ``_hash_row`` return.
     """
+    import ast
     import re
 
     source = (
@@ -1315,27 +1327,46 @@ def test_the_canarys_documented_exit_codes_are_exactly_the_ones_it_produces():
     listed = source.split("EXIT CODES, ALL OF THEM", 1)[1].split('"""', 1)[0]
     documented = set(re.findall(r"^  1  `([a-z:-]+)`", listed, re.M))
 
-    produced = set()
-    for _, kw, _, reasons, _, _ in _CANARY_TABLE:
-        produced.update(reasons)
-    # the two the table cannot reach, driven directly above
-    canary = _canary()
-    produced.update(c for c, _ in canary._control_reasons("wedged", "not-run", "x"))
+    def _is_a_sentence(node):
+        """Whether this tuple element is a string the script composed."""
+        if isinstance(node, ast.Constant):
+            return isinstance(node.value, str)
+        if isinstance(node, ast.JoinedStr):
+            return True
+        if isinstance(node, ast.BinOp):
+            return _is_a_sentence(node.left) or _is_a_sentence(node.right)
+        return False
 
-    from stelling._tripwire import Status
-
-    class _FifthState(Status):
-        @property
-        def hash_state(self):
-            return "wedged"
-
-    produced.add(canary._hash_row(_FifthState(code="armed"))[1][0])
+    produced = {
+        node.elts[0].value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Tuple)
+        and len(node.elts) == 2
+        and isinstance(node.elts[0], ast.Constant)
+        and isinstance(node.elts[0].value, str)
+        and re.fullmatch(r"[a-z][a-z-]*(:[a-z-]+)?", node.elts[0].value)
+        and _is_a_sentence(node.elts[1])
+    }
 
     assert documented == produced, (
         f"the exit-code list documents {sorted(documented)} and the script "
-        f"can be driven to produce {sorted(produced)}. Undocumented: "
-        f"{sorted(produced - documented)}. Documented but unproducible: "
+        f"carries reasons for {sorted(produced)}. Undocumented: "
+        f"{sorted(produced - documented)}. Documented but not in the script: "
         f"{sorted(documented - produced)}."
+    )
+
+    # AND THE PARSE IS ITSELF CONTROLLED. A reader of the set above is owed
+    # evidence that it is not an artifact of the shape this test happens to
+    # match: every code a real driven run printed must be in it. That is the
+    # table, and the two codes no input can drive, which their own tests
+    # above call directly.
+    driven = {code for _, _, _, reasons, _, _ in _CANARY_TABLE for code in reasons}
+    driven |= {"control:unknown-state", "hash:unknown-state"}
+    assert driven <= produced, (
+        f"runs of this script printed {sorted(driven - produced)}, which the "
+        "parse above did not find in its source: the reasons are no longer "
+        "the literal pairs this test reads, so the set it checks the "
+        "documentation against is not the script's"
     )
     assert "  2  " in listed, (
         "the list no longer names argparse's exit 2, which a reader meets by "
@@ -1362,6 +1393,17 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
     exact claim has been wrong in five places across three commits, and
     because a reader who believes it goes looking for a jax regression that
     the run cannot have distinguished.
+
+    AND THAT THE LEGS STILL RUN THE ALARM AT ALL, which is a different kind
+    of claim and the one this test was missing. Two mutations were green
+    across this whole repository -- which is not a large claim, because this
+    file is the ONLY test that reads that workflow at all: the `nightly` leg
+    running the canary WITHOUT `--require`, and the `nightly` leg with the
+    canary step deleted.
+    Guidance about what two legs establish is worth nothing on a leg that
+    measures nothing, so each job is checked for running
+    `tripwire_canary.py --require`, and the file for the `needs:` the
+    `control` job's comment says is deliberately absent.
     """
     import re
 
@@ -1383,6 +1425,49 @@ def test_the_canary_and_the_workflow_agree_about_the_two_legs():
     )
     assert "us-python.pkg.dev" in workflow, (
         "the `nightly` leg no longer installs from a nightly index"
+    )
+
+    # EACH LEG RUNS THE ALARM, AND RUNS IT WITH `--require`. Two mutations
+    # survived every test in this repository: dropping `--require` from the
+    # `nightly` leg, and deleting the `tripwire_canary.py` step from that leg
+    # altogether. Both leave a workflow whose two jobs still install two
+    # different jaxes and still describe themselves correctly, and neither
+    # leaves anything that can go red -- the alarm can be removed from the
+    # only workflow that runs it without a single test noticing. The guidance
+    # is a claim about what the two legs MEASURE, and a leg that does not arm
+    # the tripwire measures nothing to compare.
+    starts = [
+        (m.start(), m.group(1))
+        for m in re.finditer(r"\n  ([a-z-]+):\n    name: ", workflow)
+    ]
+    bounds = [pos for pos, _ in starts] + [len(workflow)]
+    for index, (_, job) in enumerate(starts):
+        block = workflow[bounds[index]:bounds[index + 1]]
+        # ON A `run:` LINE, not anywhere in the block: this file is YAML and
+        # a `#` turns the step into prose that still contains every word
+        # below. Commenting the step out is the same mutation as deleting it.
+        runs = re.findall(r"^\s*run:[^\n]*tripwire_canary\.py[^\n]*", block, re.M)
+        assert runs, (
+            f"the `{job}` leg does not RUN `.github/scripts/"
+            "tripwire_canary.py` -- deleted, or commented out, or moved to a "
+            "line that is not a `run:`. Nothing on that leg can then fail for "
+            "any of the reasons the canary exists to name"
+        )
+        assert all("--require" in line for line in runs), (
+            f"the `{job}` leg runs the canary WITHOUT `--require`, so a "
+            "tripwire that cannot arm against that leg's jax exits 0 and the "
+            "leg goes green with the alarm switched off -- `auto` is right "
+            f"for a user's suite and wrong for the canary: {runs}"
+        )
+
+    # AND NEITHER LEG WAITS FOR THE OTHER. The comment over the `control` job
+    # says the two run concurrently and argues that sequencing them would be
+    # worse, because a `needs:` makes GitHub skip the dependent leg. That
+    # comment claimed the opposite ordering for one commit with no `needs:`
+    # in the file to make it true, which is why the fact is measured here.
+    assert not re.search(r"^\s*needs:", workflow, re.M), (
+        "a job now `needs:` another and the `control` job's comment says the "
+        "two legs run concurrently; one of the two has to change"
     )
 
     # THE MEASUREMENT: does either leg constrain the jax version?
